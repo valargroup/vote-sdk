@@ -1141,7 +1141,7 @@ impl OutputView for OutputInfo {
 }
 
 /// Generators for property testing.
-#[cfg(all(feature = "circuit", any(test, feature = "test-dependencies")))]
+#[cfg(all(feature = "circuit", feature = "test-dependencies"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-dependencies")))]
 pub mod testing {
     use alloc::vec::Vec;
