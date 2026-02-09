@@ -1,36 +1,40 @@
 //! The Delegation circuit implementation.
 //!
-//! Proves nullifier integrity for a single note: given private witness data
-//! `(nk, rho_old, psi_old, cm_old)`, derives `nf_old` in-circuit and constrains
-//! it to match the public input.
+//! Proves nullifier integrity and spend authority for a single note:
+//! - Given private witness data `(nk, rho_old, psi_old, cm_old)`, derives
+//!   `nf_old` in-circuit and constrains it to match the public input.
+//! - Given private witness data `(ak, alpha)`, derives `rk = [alpha] * SpendAuthG + ak`
+//!   and constrains it to match the public input. This links the ZKP to the
+//!   keystone signature verified out-of-circuit.
 //!
 //! Follows the 1-circuit-per-note pattern from the vote module. For multiple
 //! notes, the builder layer creates multiple independent proofs.
 
-use group::Curve;
+use group::{Curve, GroupEncoding};
 use halo2_proofs::{
     circuit::{floor_planner, Layouter, Value},
     plonk::{self, Advice, Column, Instance as InstanceColumn},
 };
-use pasta_curves::{pallas, vesta};
+use pasta_curves::{arithmetic::CurveAffine, pallas, vesta};
 
 use crate::{
     circuit::gadget::{
         add_chip::{AddChip, AddConfig},
         assign_free_advice, derive_nullifier,
     },
-    constants::{OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains},
-    keys::FullViewingKey,
+    constants::{OrchardCommitDomains, OrchardFixedBases, OrchardFixedBasesFull, OrchardHashDomains},
+    keys::{FullViewingKey, SpendValidatingKey},
     note::{
         commitment::NoteCommitment,
         nullifier::Nullifier,
         Note,
     },
+    primitives::redpallas::{SpendAuth, VerificationKey},
 };
 use halo2_gadgets::{
     ecc::{
         chip::{EccChip, EccConfig},
-        Point,
+        FixedPoint, NonIdentityPoint, Point, ScalarFixed,
     },
     poseidon::{primitives as poseidon, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig},
     sinsemilla::chip::{SinsemillaChip, SinsemillaConfig},
@@ -39,6 +43,10 @@ use halo2_gadgets::{
 
 /// Public input offset for the derived nullifier.
 const NF_OLD: usize = 0;
+/// Public input offset for rk (x-coordinate).
+const RK_X: usize = 1;
+/// Public input offset for rk (y-coordinate).
+const RK_Y: usize = 2;
 
 /// Size of the delegation circuit.
 /// 4096 rows
@@ -51,7 +59,7 @@ const K: u32 = 12;
 /// Configuration for the Delegation circuit.
 #[derive(Clone, Debug)]
 pub struct Config {
-    // The instace column (public inputs)
+    // The instance column (public inputs)
     primary: Column<InstanceColumn>,
     // 10 advice columns for private witness data.
     // This is the scratch space where the prover places intermediate values during computation.
@@ -94,19 +102,22 @@ impl Config {
 
 /// The Delegation circuit.
 ///
-/// Proves nullifier integrity for a single note: the prover knows
-/// `(nk, rho, psi, cm)` such that `nf_old = DeriveNullifier(nk, rho, psi, cm)`.
+/// Proves nullifier integrity for a single note and spend authority:
+/// - The prover knows `(nk, rho, psi, cm)` such that `nf_old = DeriveNullifier(nk, rho, psi, cm)`.
+/// - The prover knows `(ak, alpha)` such that `rk = [alpha] * SpendAuthG + ak`.
 #[derive(Clone, Debug, Default)]
 pub struct Circuit {
     nk: Value<pallas::Base>,
     rho_old: Value<pallas::Base>,
     psi_old: Value<pallas::Base>,
     cm_old: Value<NoteCommitment>,
+    ak: Value<SpendValidatingKey>,
+    alpha: Value<pallas::Scalar>,
 }
 
 impl Circuit {
-    /// Constructs a `Circuit` from a note and its full viewing key.
-    pub fn from_note_unchecked(fvk: &FullViewingKey, note: &Note) -> Self {
+    /// Constructs a `Circuit` from a note, its full viewing key, and the spend auth randomizer.
+    pub fn from_note_unchecked(fvk: &FullViewingKey, note: &Note, alpha: pallas::Scalar) -> Self {
         let rho_old = note.rho();
         let psi_old = note.rseed().psi(&rho_old);
         Circuit {
@@ -114,6 +125,8 @@ impl Circuit {
             rho_old: Value::known(rho_old.0),
             psi_old: Value::known(psi_old),
             cm_old: Value::known(note.commitment()),
+            ak: Value::known(fvk.clone().into()),
+            alpha: Value::known(alpha),
         }
     }
 }
@@ -285,7 +298,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             layouter.namespace(|| "nf_old = DeriveNullifier_nk(rho_old, psi_old, cm_old)"),
             config.poseidon_chip(),
             config.add_chip(),
-            ecc_chip,
+            ecc_chip.clone(),
             rho_old,
             &psi_old,
             &cm_old,
@@ -294,8 +307,49 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 
         // Constrain nf_old to equal the public input.
         // Enforce that the nullifier computed inside the circuit matches the nullifier provided
-        // as a public input from outside the circuit (supplied at NF_OlD of the public input)
+        // as a public input from outside the circuit (supplied at NF_OLD of the public input)
         layouter.constrain_instance(nf_old.inner().cell(), config.primary, NF_OLD)?;
+
+        // Spend authority
+        // Proves that the public rk is a valid rerandomization of the prover's ak.
+        // The out-of-circuit verifier checks that the keystone signature is valid under rk,
+        // so this links the ZKP to the signature without revealing ak.
+        {
+            // Witness ak_P (spend validating key) as a non-identity curve point.
+            // If ak_P were allowed to be the identity point (zero of the curve group), it would be a degenerate
+            // key with no cryptographic strength - any signature would trivially verify against it.
+            // By constraining, we ensure that the delegated spend authority is backed by a real meaningful
+            // public key.
+            let ak_P: Value<pallas::Point> = self.ak.as_ref().map(|ak| ak.into());
+            let ak_P = NonIdentityPoint::new(
+                ecc_chip.clone(),
+                layouter.namespace(|| "witness ak_P"),
+                ak_P.map(|ak_P| ak_P.to_affine()),
+            )?;
+
+            // Witness alpha (spend auth randomizer) as a full-width fixed scalar.
+            let alpha = ScalarFixed::new(
+                ecc_chip.clone(),
+                layouter.namespace(|| "alpha"),
+                self.alpha,
+            )?;
+
+            // alpha_commitment = [alpha] SpendAuthG
+            let (alpha_commitment, _) = {
+                // SpendAuthG is a fixed generator point on the Pallas elliptic curve, used
+                // specifically for spend authorization in the Orchard protocol.
+                let spend_auth_g = OrchardFixedBasesFull::SpendAuthG;
+                let spend_auth_g = FixedPoint::from_inner(ecc_chip, spend_auth_g);
+                spend_auth_g.mul(layouter.namespace(|| "[alpha] SpendAuthG"), alpha)?
+            };
+
+            // rk = [alpha] SpendAuthG + ak_P
+            let rk = alpha_commitment.add(layouter.namespace(|| "rk"), &ak_P)?;
+
+            // Constrain rk to equal the public inputs (x and y coordinates).
+            layouter.constrain_instance(rk.inner().x().cell(), config.primary, RK_X)?;
+            layouter.constrain_instance(rk.inner().y().cell(), config.primary, RK_Y)?;
+        }
 
         Ok(())
     }
@@ -306,17 +360,25 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 pub struct Instance {
     /// The derived nullifier (temporary public input; will be replaced by gov_null).
     pub nf_old: Nullifier,
+    /// The randomized spend validating key, used for signature verification out-of-circuit.
+    pub rk: VerificationKey<SpendAuth>,
 }
 
 impl Instance {
     /// Constructs an [`Instance`] from its constituent parts.
-    pub fn from_parts(nf_old: Nullifier) -> Self {
-        Instance { nf_old }
+    pub fn from_parts(nf_old: Nullifier, rk: VerificationKey<SpendAuth>) -> Self {
+        Instance { nf_old, rk }
     }
 
     /// Returns the public inputs as a vector of field elements for halo2.
     pub fn to_halo2_instance(&self) -> Vec<vesta::Scalar> {
-        vec![self.nf_old.0]
+        let rk = pallas::Point::from_bytes(&self.rk.clone().into())
+            .unwrap()
+            .to_affine()
+            .coordinates()
+            .unwrap();
+
+        vec![self.nf_old.0, *rk.x(), *rk.y()]
     }
 }
 
@@ -324,28 +386,32 @@ impl Instance {
 mod tests {
     use super::*;
     use crate::{
-        keys::{FullViewingKey, SpendingKey},
+        keys::{FullViewingKey, SpendValidatingKey, SpendingKey},
         note::Note,
     };
+    use ff::Field;
     use halo2_proofs::dev::MockProver;
     use rand::rngs::OsRng;
 
-    /// Helper: create a dummy note and its corresponding circuit + expected nullifier.
-    fn make_test_note() -> (Circuit, Nullifier) {
+    /// Helper: create a dummy note and its corresponding circuit + expected public inputs.
+    fn make_test_note() -> (Circuit, Nullifier, VerificationKey<SpendAuth>) {
         let mut rng = OsRng;
         let (_sk, fvk, note) = Note::dummy(&mut rng, None);
 
         let nf = note.nullifier(&fvk);
-        let circuit = Circuit::from_note_unchecked(&fvk, &note);
+        let ak: SpendValidatingKey = fvk.clone().into();
+        let alpha = pallas::Scalar::random(&mut rng);
+        let rk = ak.randomize(&alpha);
+        let circuit = Circuit::from_note_unchecked(&fvk, &note, alpha);
 
-        (circuit, nf)
+        (circuit, nf, rk)
     }
 
     #[test]
     fn nullifier_integrity_happy_path() {
-        let (circuit, nf) = make_test_note();
+        let (circuit, nf, rk) = make_test_note();
 
-        let instance = Instance::from_parts(nf);
+        let instance = Instance::from_parts(nf, rk);
         let public_inputs = instance.to_halo2_instance();
 
         let prover = MockProver::run(
@@ -364,14 +430,19 @@ mod tests {
 
         // Create note with one key
         let (_sk1, fvk1, note) = Note::dummy(&mut rng, None);
-        let circuit = Circuit::from_note_unchecked(&fvk1, &note);
+        let alpha = pallas::Scalar::random(&mut rng);
+        let circuit = Circuit::from_note_unchecked(&fvk1, &note, alpha);
+
+        // Derive the correct rk from fvk1 (so spend authority passes)
+        let ak1: SpendValidatingKey = fvk1.clone().into();
+        let rk = ak1.randomize(&alpha);
 
         // But derive the expected nullifier with a different key
         let sk2 = SpendingKey::random(&mut rng);
         let fvk2: FullViewingKey = (&sk2).into();
         let wrong_nf = note.nullifier(&fvk2);
 
-        let instance = Instance::from_parts(wrong_nf);
+        let instance = Instance::from_parts(wrong_nf, rk);
         let public_inputs = instance.to_halo2_instance();
 
         let prover = MockProver::run(
@@ -388,9 +459,9 @@ mod tests {
     #[test]
     fn nullifier_integrity_dummy_note() {
         // A dummy note (value = 0) should work identically.
-        let (circuit, nf) = make_test_note();
+        let (circuit, nf, rk) = make_test_note();
 
-        let instance = Instance::from_parts(nf);
+        let instance = Instance::from_parts(nf, rk);
         let public_inputs = instance.to_halo2_instance();
 
         let prover = MockProver::run(
@@ -401,5 +472,35 @@ mod tests {
         .unwrap();
 
         assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[test]
+    fn spend_authority_wrong_rk() {
+        let mut rng = OsRng;
+        let (_sk, fvk, note) = Note::dummy(&mut rng, None);
+
+        let nf = note.nullifier(&fvk);
+        let ak: SpendValidatingKey = fvk.clone().into();
+
+        // Build the circuit with one alpha
+        let alpha_circuit = pallas::Scalar::random(&mut rng);
+        let circuit = Circuit::from_note_unchecked(&fvk, &note, alpha_circuit);
+
+        // But compute rk with a different alpha
+        let alpha_wrong = pallas::Scalar::random(&mut rng);
+        let wrong_rk = ak.randomize(&alpha_wrong);
+
+        let instance = Instance::from_parts(nf, wrong_rk);
+        let public_inputs = instance.to_halo2_instance();
+
+        let prover = MockProver::run(
+            K,
+            &circuit,
+            vec![public_inputs],
+        )
+        .unwrap();
+
+        // The proof should fail: the derived rk won't match the public input.
+        assert!(prover.verify().is_err());
     }
 }

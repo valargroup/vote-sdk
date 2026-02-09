@@ -4,25 +4,25 @@ overview: Scaffold the delegation ZKP circuit module and implement nullifier int
 todos:
   - id: feature-gate
     content: Add `delegation` feature flag to `Cargo.toml` and `#[cfg(feature = "delegation")] pub mod delegation;` to `src/lib.rs`
-    status: pending
+    status: completed
   - id: scaffold-module
     content: Create `src/delegation/mod.rs` — module root with `pub mod circuit`
-    status: pending
+    status: completed
   - id: circuit-config
     content: Implement `Config` and `configure()` in `src/delegation/circuit.rs` — set up EccChip, PoseidonChip, AddChip, LookupRangeCheck, instance column, and the lookup table
-    status: pending
+    status: completed
   - id: circuit-struct
     content: Implement `Circuit` struct with single-note witness fields (nk, rho_old, psi_old, cm_old) and `from_action_context` constructor, plus Default impl
-    status: pending
+    status: completed
   - id: circuit-synthesize
     content: Implement `synthesize()` — witness the note's components, call `derive_nullifier` gadget, constrain derived nf_old to public input
-    status: pending
+    status: completed
   - id: instance-struct
     content: Implement `Instance` struct with `to_halo2_instance()` returning the single nf_old as public input, plus the `Statement` trait impl
-    status: pending
+    status: completed
   - id: tests
     content: "Write MockProver tests: happy path (correct witness), wrong-key (bad nk), and dummy note (random valid witness)"
-    status: pending
+    status: completed
 isProject: false
 ---
 

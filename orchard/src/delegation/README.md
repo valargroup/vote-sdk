@@ -2,10 +2,16 @@
 
 ## Inputs
 
-- **nk** - nullifier key
-- **ρ** ("rho"): The nullifier of the note that was spent to create this note
-- **ψ** ("psi"): A pseudorandom field element derived from the note's random seed `rseed` and its nullifier domain separator rho
-- **cm**: The note commitment, witnessed as an ECC point
+- Nullifier Integrity
+   * **nf_old** (public): a unique, deterministic identifier derived from a note's secret components that publicly marks the note as spent.
+   * **nk** (private): - nullifier key
+   * **ρ** "rho" (private): The nullifier of the note that was spent to create this note
+   * **ψ** ("psi") (private): A pseudorandom field element derived from the note's random seed `rseed` and its nullifier domain separator rho
+   * **cm** (private): The note commitment, witnessed as an ECC point
+- Spend Authority
+   * **rk** (public): the randomized public key for spend authorization. Derived per-transaction, publicly exposed, unlinkable, pairsed with `rsk` - the private key
+   * **ak** (private): spend authorization validating key (the long-lived public key for spend authorization)
+   * **alpha** (public): is a fresh random scalar used to rerandomize the spend authorization key for each transaction. 
 
 
 ## Nullifier Integrity
@@ -53,6 +59,23 @@ DeriveNullifier_nk(ρ, ψ, cm) = ExtractP(
 - **Why not expose nf_old publicly?**
    * In standard Orchard, the nullifier is published to prevent double-spending. In this delegation circuit, nf_old is not directly exposed as a public input. Instead, it is checked against the exclusion interval and a domain nullifier is published instead. The standard nullifier stays hidden.
 
+## Spend Authority
+
+Purpose: proves spending authority while preserving unlinkability. Links to the Keystone spend-auth signature out-of-circuit.
+- Only the holder of `ask` can produce `rsk = ask + alpha` and sign under `rk`, proving they are authorized to spend the note.
+- `alpha` is fresh randomness each time, the published `rk` reveals nothing about `ak` - different spends from the same wallet cannot be correlated by observers.
+
+```
+rk = SpendAuthSig.RandomizePublic(alpha, ak) 
+```
+i.e. rk = ak + [alpha] * G
+
+Where:
+- `ak` - the authorizing key, the long-lived public key for spend authorization.
+- `alpha` - the fresh randomness published each time. If rk were the same across transactions, an observer could link them to the same spender.
+- `G` - the fixed base generator point on the Pallas curve dedicated to the spend authorization.
+
+Spend Authority: i.e. `rk = ak + [alpha] * G` — the public `rk` is a valid rerandomization of `ak`. Links to the Keystone signature verified out-of-circuit.
 
 ## TODO
 
