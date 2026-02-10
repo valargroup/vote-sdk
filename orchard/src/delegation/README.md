@@ -5,6 +5,7 @@
 - Public
    * **nf_signed**: a unique, deterministic identifier derived from a note's secret components that publicly marks the note as spent.
    * **rk**: the randomized public key for spend authorization. Derived per-transaction, publicly exposed, unlinkable, paired with `rsk` - the private key
+   * **cmx_new**: the extracted note commitment (`ExtractP(cm_new)`) of the output note. A Pallas base field element (x-coordinate of the output note's commitment point). Published so the verifier knows which output note was created and can include it in the vote chain's commitment tree.
    * **gov_comm**: the governance commitment — a Pallas base field element identifying the governance context (e.g., a particular DAO or proposal framework). Scopes the delegation proof to a specific governance domain, preventing cross-governance replay.
    * **vote_round_id**: the vote round identifier — a Pallas base field element identifying the specific voting round or epoch. Prevents cross-round replay: a keystone signature for round N cannot be reused in round N+1.
 
@@ -19,6 +20,10 @@
    * **rcm_signed**: the note commitment trapdoor (randomness). A scalar derived from `rseed` and `rho` that blinds the commitment.
    * **g_d_signed**: the diversified generator from the note recipient's address
    * **pk_d_signed**: the diversified transmission key from the note recipient's address
+   * **g_d_new**: the diversified generator from the output note recipient's address. Free witness — not checked against `ivk` (see condition 7).
+   * **pk_d_new**: the diversified transmission key from the output note recipient's address. Free witness — not checked against `ivk` (see condition 7).
+   * **psi_new**: pseudorandom field element for the output note, derived from `rseed_new` and `rho_new`.
+   * **rcm_new**: the output note commitment trapdoor (randomness), derived from `rseed_new` and `rho_new`.
    * **cmx_1, cmx_2, cmx_3, cmx_4**: the extracted note commitments (`ExtractP(cm_i)`) of the four notes being delegated. Each is a Pallas base field element (x-coordinate of the commitment point). Hashed together with `gov_comm` and `vote_round_id` to produce `rho_signed` in condition 3. Currently free witnesses; a future condition (condition 10) will derive them in-circuit.
 
 ## 1. Signed Note Commitment Integrity
@@ -165,6 +170,47 @@ Where:
 **Constructions:**
 - `CommitIvkChip` — handles decomposition and canonicity checking for the CommitIvk Sinsemilla commitment.
 - `SinsemillaChip` — the same instance used for lookup tables is reused for CommitIvk.
+
+## 6. New Note Commitment Integrity
+
+Purpose: prove the output note's commitment is correctly constructed, with its `rho` chained from the signed note's nullifier. This creates a cryptographic link between spending the signed note and creating the output note.
+
+```
+ExtractP(NoteCommit_rcm_new(repr(g_d_new), repr(pk_d_new), 0, rho_new, psi_new)) ∈ {cmx_new, ⊥}
+where rho_new = nf_signed mod q_P
+```
+
+Where:
+- **rcm_new**: the output note commitment trapdoor, a scalar derived from `rseed_new` and `rho_new`. Blinds the commitment.
+- **repr(g_d_new)**: the diversified base point from the output note recipient's address.
+- **repr(pk_d_new)**: the diversified transmission key from the output note recipient's address.
+- **0**: the note value is hardcoded to zero (same as the signed note).
+- **rho_new**: set to `nf_signed` — the nullifier derived in condition 2. This is enforced in-circuit by reusing the same cell: `rho_new = nf_signed.inner().clone()`. Since `nf_signed` is already a Pallas base field element (output of `ExtractP`), it is already reduced mod `q_P`, so `mod q_P` is a no-op.
+- **psi_new**: pseudorandom field element derived from `rseed_new` and `rho_new`.
+- **cmx_new**: the public input. `ExtractP` extracts the x-coordinate of the commitment point. The verifier uses this to include the output note in the vote chain's commitment tree.
+
+**Chain from condition 2**: The `nf_signed` cell computed in condition 2 (nullifier integrity) is reused directly as `rho_new`. Since that cell is also constrained to the `NF_SIGNED` public input, the chain is: `nf_signed` (public) = `DeriveNullifier(nk, rho_signed, psi_signed, cm_signed)` = `rho_new` (input to output NoteCommit).
+
+**The ⊥ case**: Occurs when the commitment point is the identity (cryptographically negligible). Handled identically to the Orchard spec — the `NoteCommit` gadget uses incomplete addition which naturally produces ⊥ for degenerate inputs.
+
+**Constructions:**
+- `SinsemillaChip` (second instance) — a separate Sinsemilla configuration using `advices[5..]` for the output note's NoteCommit, avoiding gate conflicts with the signed note's Sinsemilla instance.
+- `NoteCommitChip` (second instance) — configured with the second Sinsemilla config for decomposition/canonicity checking.
+
+## FAQ
+
+- "**Why is cm_signed witnessed as a Point but ak_P as a NonIdentityPoint?"** — ak_P being identity would be a degenerate key (any signature verifies). cm_signed being identity is cryptographically negligible and caught by the equality constraint with the recomputed commitment anyway.
+- "What if the same proof is submitted twice?" — The nullifier nf_signed is a public input. The consuming protocol must track spent nullifiers. The circuit itself is stateless.
+- **Why are `psi` and `rcm` witnessed, not derived in-circuit?**
+
+  Both `psi` and `rcm` are derived from `rseed` using Blake2b out-of-circuit, and are then provided to the circuit as private inputs. While this means that a malicious prover could theoretically supply arbitrary values for `psi` or `rcm`, the circuit enforces integrity via its constraints:
+
+  - `psi` is an input to both the nullifier and the note commitment, which are themselves constrained to match public inputs and to be consistent with each other.
+  - `rcm` is an input to the note commitment, which must be equal to the witnessed `cm_signed`.
+
+  **If either `psi` or `rcm` is incorrect, the recomputed commitment will not match, and the proof will fail.**
+- **Why two Sinsemilla chips?** — Each `SinsemillaChip::configure` call creates its own selectors and gates. Two independent NoteCommit operations (signed note and output note) need separate chip configurations to avoid gate conflicts. The first Sinsemilla uses `advices[..5]` and the second uses `advices[5..]`, following the same pattern as the Orchard action circuit and vote circuit.
+- **"Why Sinsemilla and not Pedersen?"** — Sinsemilla uses the Pallas endomorphism for 2x speedup and is purpose-built for Halo2 lookup arguments. The NoteCommit gadget from upstream Orchard uses it.
 
 ## TODO
 
