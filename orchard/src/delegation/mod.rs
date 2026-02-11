@@ -5,5 +5,6 @@
 //! creates multiple independent proofs and binds them externally.
 
 pub mod circuit;
+pub mod per_note_circuit;
 
 pub use circuit::{Circuit, Instance};
