@@ -8,7 +8,7 @@
 //
 // It requires the Rust static library to be built first:
 //
-//	cargo build --release --manifest-path circuits/Cargo.toml
+//	cargo build --release --manifest-path sdk/circuits/Cargo.toml
 //
 // The library provides real ZKP verification on the Pallas curve using
 // the zcash/halo2 proof system. Currently exposes a toy circuit verifier;

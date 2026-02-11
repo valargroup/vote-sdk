@@ -9,7 +9,7 @@
 //
 // It requires the Rust static library to be built first:
 //
-//	cargo build --release --manifest-path circuits/Cargo.toml
+//	cargo build --release --manifest-path sdk/circuits/Cargo.toml
 package redpallas
 
 /*
