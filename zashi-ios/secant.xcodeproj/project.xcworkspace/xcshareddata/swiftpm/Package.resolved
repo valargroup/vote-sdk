@@ -469,30 +469,12 @@
       }
     },
     {
-      "identity" : "zcash-light-client-ffi",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Electric-Coin-Company/zcash-light-client-ffi",
-      "state" : {
-        "revision" : "d108087abc62c5576efc8e49971e932180cf05d4",
-        "version" : "0.19.1"
-      }
-    },
-    {
       "identity" : "zcash-swift-payment-uri",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/pacu/zcash-swift-payment-uri",
       "state" : {
         "revision" : "798053ba8a2d80560b5e3f4899a8b35ac0c348bb",
         "version" : "1.0.1"
-      }
-    },
-    {
-      "identity" : "zcash-swift-wallet-sdk",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Electric-Coin-Company/zcash-swift-wallet-sdk",
-      "state" : {
-        "revision" : "14d9641aa0028516dfadf227dbfd50ec9b580f76",
-        "version" : "2.4.3"
       }
     }
   ],

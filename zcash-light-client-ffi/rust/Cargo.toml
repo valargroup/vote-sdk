@@ -86,3 +86,19 @@ crate-type = ["staticlib"]
 
 [profile.release]
 lto = true
+
+[patch.crates-io]
+zcash_address = { path = "../../librustzcash/components/zcash_address" }
+zcash_client_backend = { path = "../../librustzcash/zcash_client_backend" }
+zcash_client_sqlite = { path = "../../librustzcash/zcash_client_sqlite" }
+zcash_keys = { path = "../../librustzcash/zcash_keys" }
+zcash_primitives = { path = "../../librustzcash/zcash_primitives" }
+zcash_proofs = { path = "../../librustzcash/zcash_proofs" }
+zcash_protocol = { path = "../../librustzcash/components/zcash_protocol" }
+zcash_transparent = { path = "../../librustzcash/zcash_transparent" }
+pczt = { path = "../../librustzcash/pczt" }
+zip321 = { path = "../../librustzcash/components/zip321" }
+zcash_encoding = { path = "../../librustzcash/components/zcash_encoding" }
+
+# Keep this crate as a standalone workspace (prevent parent workspace from claiming it)
+[workspace]

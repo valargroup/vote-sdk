@@ -23,6 +23,31 @@ install:
 release: clean xcframework
 .PHONY: release
 
+# Dev build: only aarch64 device + aarch64 simulator (2 targets instead of 5)
+dev: clean
+	sh -c "RUSTUP_TOOLCHAIN=stable cargo build --manifest-path rust/Cargo.toml --target aarch64-apple-ios --release"
+	sh -c "RUSTUP_TOOLCHAIN=stable cargo build --manifest-path rust/Cargo.toml --target aarch64-apple-ios-sim --release"
+	# ios-device framework
+	mkdir -p products/ios-device/frameworks/libzcashlc.framework/Modules
+	cp rust/target/aarch64-apple-ios/release/libzcashlc.a products/ios-device/frameworks/libzcashlc.framework/libzcashlc
+	cp -R rust/target/Headers products/ios-device/frameworks/libzcashlc.framework/
+	cp support/module.modulemap products/ios-device/frameworks/libzcashlc.framework/Modules
+	cp support/platform-Info.plist products/ios-device/frameworks/libzcashlc.framework/Info.plist
+	# ios-simulator framework (arm64 only)
+	mkdir -p products/ios-simulator/frameworks/libzcashlc.framework/Modules
+	cp rust/target/aarch64-apple-ios-sim/release/libzcashlc.a products/ios-simulator/frameworks/libzcashlc.framework/libzcashlc
+	cp -R rust/target/Headers products/ios-simulator/frameworks/libzcashlc.framework/
+	cp support/module.modulemap products/ios-simulator/frameworks/libzcashlc.framework/Modules
+	cp support/platform-Info.plist products/ios-simulator/frameworks/libzcashlc.framework/Info.plist
+	# xcframework
+	mkdir -p products/libzcashlc.xcframework
+	cp -R products/ios-device/frameworks products/libzcashlc.xcframework/ios-arm64
+	cp -R products/ios-simulator/frameworks products/libzcashlc.xcframework/ios-arm64_x86_64-simulator
+	cp support/Info.plist products/libzcashlc.xcframework
+	mkdir -p releases/XCFramework/
+	rsync -avr --exclude='*.DS_Store' products/libzcashlc.xcframework releases/XCFramework/
+.PHONY: dev
+
 clean:
 	rm -rf products
 	rm -rf rust/target
