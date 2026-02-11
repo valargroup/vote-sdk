@@ -1,0 +1,1013 @@
+{
+    "releases": [
+        {
+            "version": "2.4.12",
+            "date": "28-01-2026",
+            "timestamp": 1769605663,
+            "sections": [
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "To address user issues caused by selecting wrong swap assets, we improved the Swap and CrossPay UI by explicitly displaying the token and chain selected.",
+                        "We optimized the list of assets to help avoid the most frequent user errors."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed several issues with ZIP321 QR code parsing.",
+                        "We fixed handling of unsuccessful transactions."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4.11",
+            "date": "18-12-2025",
+            "timestamp": 1766045724,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We updated icons for new Swap/Pay assets and chains."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "We introduced a new Pending state for transaction flows which replaced our Error states.",
+                        "We made icon and copy updates.",
+                        "We improved our error handling.",
+                        "We moved Currency Conversion from Advanced Settings to More options."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We added ZEC on other chains into the Swap/Pay flows.",
+                        "We improved our error handling UI/UX.",
+                        "We improved Sapling parameters download experience."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4.10",
+            "date": "16-12-2025",
+            "timestamp": 1765883822,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We updated icons for new Swap/Pay assets and chains."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "We introduced a new Pending state for transaction flows which replaced our Error states.",
+                        "We made icon and copy updates.",
+                        "We improved our error handling.",
+                        "We moved Currency Conversion from Advanced Settings to More options."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We added ZEC on other chains into the Swap/Pay flows.",
+                        "We improved our error handling UI/UX.",
+                        "We improved Sapling parameters download experience."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4.9",
+            "date": "03-12-2025",
+            "timestamp": 1764790914,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We added error handling improvements for the most frequent Zashi errors to help you understand and troubleshoot.",
+                        "We added an option to allow you to turn on Tor IP protection in the Restore flow."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "We added a Swap button leading directly to swaps.",
+                        "We improved Currency Conversion performance.",
+                        "We moved Pay with Flexa feature to More options.",
+                        "We removed Coinbase Onramp integration."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We caught and fixed a number of user-reported issues.",
+                        "We implemented a feature to allow you to fetch transaction data."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4.8",
+            "date": "11-17-2025",
+            "timestamp": 1763124135,
+            "sections": [
+                {
+                    "title": "Changed",
+                    "bulletpoints": [
+                        "We updated Swap and Pay features to use shielded addresses instead of transparent ones. Shields up!"
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4.7",
+            "date": "11-05-2025",
+            "timestamp": 1762348565,
+            "sections": [
+                {
+                    "title": "Changed",
+                    "bulletpoints": [
+                        "We added a new server to the Zashi server list.",
+                        "We increased the swap deadline to prevent early refunds."
+                    ]
+                },
+                {
+                    "title": "Fixed",
+                    "bulletpoints": [
+                        "We made a whole bunch of bug fixes, refactoring and UX/UI improvements.",
+                        "We implemented a mechanism for discovering failed TEX transaction funds."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4.5",
+            "date": "10-23-2025",
+            "timestamp": 1761209533,
+            "sections": [
+                {
+                    "title": "Fixed",
+                    "bulletpoints": [
+                        "We fixed a balance and shielding issue impacting some user's wallets."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4.4",
+            "date": "10-20-2025",
+            "timestamp": 1760967886,
+            "sections": [
+                {
+                    "title": "Changed",
+                    "bulletpoints": [
+                        "We implemented auto-updating of swap/payment statuses, no need to click into them to see them changed.",
+                        "We removed Keystone logo from QR code, nobody needs to know you got one.",
+                        "We improved Reset Zashi flow to allow you to keep a metadata backup."
+                    ]
+                },
+                {
+                    "title": "Fixed",
+                    "bulletpoints": [
+                        "We fixed an issue with a forever pending incoming transaction.",
+                        "We also did a few more bug fixes."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4.3",
+            "date": "10-11-2025",
+            "timestamp": 1760172160,
+            "sections": [
+                {
+                    "title": "2.4.3: Fixed",
+                    "bulletpoints": [
+                        "Bug fixes",
+                        "UI/UX updates"
+                    ]
+                },
+                {
+                    "title": "2.4.x: Swap to ZEC feature that you have been waiting for! Supported by Near Intents.",
+                    "bulletpoints": [
+                        "Use Zashi to swap any supported cryptocurrency to Zcash.",
+                        "Deposit funds using any of your favorite wallets.",
+                        "Receive ZEC in Zashi and shield it.",
+                        "See incoming transactions faster with mempool detection.",
+                        "Get your change confirmed faster with 3 confirmations.",
+                        "We removed lwd servers from the server list because they will stop being supported soon."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4.2",
+            "date": "10-08-2025",
+            "timestamp": 1759916882,
+            "sections": [
+                {
+                    "title": "2.4.2: Changed",
+                    "bulletpoints": [
+                        "We removed lwd servers from the server list because they will stop being supported soon."
+                    ]
+                },
+                {
+                    "title": "2.4.1: Swap to ZEC feature that you have been waiting for! Supported by Near Intents.",
+                    "bulletpoints": [
+                        "Use Zashi to swap any supported cryptocurrency to Zcash.",
+                        "Deposit funds using any of your favorite wallets.",
+                        "Receive ZEC in Zashi and shield it.",
+                        "See incoming transactions faster with mempool detection.",
+                        "Get your change confirmed faster with 3 confirmations."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4.1",
+            "date": "10-02-2025",
+            "timestamp": 1759411813,
+            "sections": [
+                {
+                    "title": "Swap to ZEC feature that you have been waiting for! Supported by Near Intents.",
+                    "bulletpoints": [
+                        "Use Zashi to swap any supported cryptocurrency to Zcash.",
+                        "Deposit funds using any of your favorite wallets.",
+                        "Receive ZEC in Zashi and shield it.",
+                        "See incoming transactions faster with mempool detection.",
+                        "Get your change confirmed faster with 3 confirmations."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.4",
+            "date": "10-01-2025",
+            "timestamp": 1759312704,
+            "sections": [
+                {
+                    "title": "Swap to ZEC feature that you have been waiting for! Supported by Near Intents.",
+                    "bulletpoints": [
+                        "Use Zashi to swap any supported cryptocurrency to Zcash.",
+                        "Deposit funds using any of your favorite wallets.",
+                        "Receive ZEC in Zashi and shield it.",
+                        "See incoming transactions faster with mempool detection.",
+                        "Get your change confirmed faster with 3 confirmations."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.3",
+            "date": "09-13-2025",
+            "timestamp": 1757746910,
+            "sections": [
+                {
+                    "title": "CrossPay with Near Intents",
+                    "bulletpoints": [
+                        "Use shielded ZEC to make cross-chain payments with Zashi and Near Intents.",
+                        "Accessible via the new Pay button on the home screen."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.2.1",
+            "date": "09-03-2025",
+            "timestamp": 1756889046,
+            "sections": [
+                {
+                    "title": "2.2.1: Bug Fix Release",
+                    "bulletpoints": [
+                        "We fixed an issue with a transparent received transaction wrongly marked as failed."
+                    ]
+                },
+                {
+                    "title": "2.2: Swap ZEC with Zashi",
+                    "bulletpoints": [
+                        "Swap shielded ZEC to any supported cryptocurrency with the Near Intents integration.",
+                        "Zashi is a ZEC-only wallet, so you’ll need a valid wallet address for the asset you’re swapping to."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.2",
+            "date": "08-28-2025",
+            "timestamp": 1756377767,
+            "sections": [
+                {
+                    "title": "Swap ZEC with Zashi",
+                    "bulletpoints": [
+                        "Swap shielded ZEC to any supported cryptocurrency with the Near Intents integration.",
+                        "Zashi is a ZEC-only wallet, so you’ll need a valid wallet address for the asset you’re swapping to."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.1",
+            "date": "08-05-2025",
+            "timestamp": 1754387043,
+            "sections": [
+                {
+                    "title": "Zashi just expanded its Tor network integration, releasing yet another quiet game changer for the privacy-conscious Zcash users. With the latest Beta update, Zashi’s built-in Tor client can now be used to:",
+                    "bulletpoints": [
+                        "Submit ZEC transactions",
+                        "Fetch transaction data",
+                        "Connect to third-party APIs (e.g. NEAR, soon!)",
+                        "Fetch ZEC-USD exchange rates",
+                        "If Tor is available in your region, we strongly recommend enabling it in Advanced Settings for an extra layer of protection."
+                    ]
+                },
+                {
+                    "title": "Other Updates:",
+                    "bulletpoints": [
+                        "We added address explainers to the Receive screen."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.0.4",
+            "date": "06-16-2025",
+            "timestamp": 1750070962,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We added Show/Hide balances feature on the Send screen."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "We updated our Send and Receive icons.",
+                        "We updated copy on the Receive screen.",
+                        "We updated the animation on the Sending screen."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed the issue with fetching USD conversion rate and made it more reliable."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.0.3",
+            "date": "05-19-2025",
+            "timestamp": 1747652167,
+            "sections": [
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "Zashi no longer includes transparent receivers in Unified Addresses (Zcash addresses that start with the letter \"u\"). The Receive screen now displays a rotating, shielded-only UA.- * Zashi will generate a new Zcash Shielded Address each time you open the Receive screen. Generating unique addresses is commonly used for privacy and security reasons.",
+                        "All transactions sent to your different rotating Shielded Addresses will remain part of one wallet balance under the same seed phrase.",
+                        "While we recommend using a new address every time, each unique address can be reused.",
+                        "Both transparent and shielded ZEC can be sent to Zashi's Shielded Addresses. It will be received and stored as shielded ZEC.",
+                        "Wallets and exchanges that don’t support sending funds to shielded receivers will not accept this address format. They will require transparent addresses.",
+                        "If users need a transparent address (starts with the letter \"t\"), it is still available and displayed separately on the Receive screen.",
+                        "Users must update the app to activate this change.",
+                        "If you're sharing a Unified Address from an earlier version of Zashi and didn't intend to reveal the linked transparent address, we recommend replacing it with a freshly generated address from the updated app."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.0.2",
+            "date": "05-08-2025",
+            "timestamp": 1746692913,
+            "sections": [
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "When entering amount in USD in the Send or Request ZEC flow, we floor the Zatoshi amount automatically to the nearest 5000 Zatoshi to prevent creating unspendable dust notes in your wallet.",
+                        "We updated the privacy policy to be displayed in an in-app browser for better user experience.",
+                        "We updated primary & secondary button position to follow UX best practices.",
+                        "We updated Receive screen design to better align with the app navigation change.",
+                        "After receiving your feedback, we updated the Send and Receive screen icons across the app. How do you like them now? Let us know!",
+                        "We improved copy in a few places.",
+                        "We also made a few other UI tweaks."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed the home buttons sizing across devices.",
+                        "We fixed the padding on the Address Book screen.",
+                        "We fixed an issue with word suggestions during Restore flow.",
+                        "We also fixed an issue with the Spendable bottom sheet getting auto-closed in certain edge cases."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.0.1",
+            "date": "04-25-2029",
+            "timestamp": 1745926301,
+            "sections": [
+                {
+                    "title": "Zashi 2.0.1 Bug Fix Update",
+                    "bulletpoints": [
+                        "We fixed an issue when occasionally after Resetting Zashi the SDK initialization fails.",
+                        "We also fixed and updated a copy in a few places."
+                    ]
+                },
+                {
+                    "title": "Zashi 2.0",
+                    "bulletpoints": [
+                        "Zashi 2.0 is here, and it is packed with UI and UX improvements!",
+                        "Redesigned Home Screen and streamlined app navigation.",
+                        "Brand new Wallet Status Widget which helps you navigate Zashi with ease and get more info upon tap.",
+                        "Available Balance and Balances tab have been redesigned into a new Spendable component on the Send screen. Get more information upon tap, or shield your transparent funds.",
+                        "Restoring has never been easier with the redesigned UI/UX. We added a new feature that helps you estimate Wallet Birthday Height and recovery phrase BIP 39 library hints for the secret recovery phrase entry.",
+                        "Create Wallet with one tap! New Wallet Backup flow has been moved to whenever your wallet receives its first funds."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "2.0",
+            "date": "04-25-2025",
+            "timestamp": 1745594869,
+            "sections": [
+                {
+                    "title": "",
+                    "bulletpoints": [
+                        "Zashi 2.0 is here, and it is packed with UI and UX improvements!",
+                        "Redesigned Home Screen and streamlined app navigation.",
+                        "Brand new Wallet Status Widget which helps you navigate Zashi with ease and get more info upon tap.",
+                        "Available Balance and Balances tab have been redesigned into a new Spendable component on the Send screen. Get more information upon tap, or shield your transparent funds.",
+                        "Restoring has never been easier with the redesigned UI/UX. We added a new feature that helps you estimate Wallet Birthday Height and recovery phrase BIP 39 library hints for the secret recovery phrase entry.",
+                        "Create Wallet with one tap! New Wallet Backup flow has been moved to whenever your wallet receives its first funds."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.5.3",
+            "date": "04-14-2025",
+            "timestamp": 1744615242,
+            "sections": [
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed an issue with transaction flow getting stuck on the sending screen in case of failed biometric check."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.5.2",
+            "date": "04-09-2025",
+            "timestamp": 1744196215,
+            "sections": [
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "Crash reporting has been updated to rely on Apple services only, allowing users to opt-in/out in their device settings.",
+                        "Firebase Crashlytics integration has been completely removed."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.5.1",
+            "date": "04-03-2025",
+            "timestamp": 1743687047,
+            "sections": [
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "1.5 Bug Fix release!",
+                        "We fixed a migration issue impacting some users on 1.5 app version.",
+                        "We fixed an icon for Keystone transparent address.",
+                        "We also fixed an issue when the Home Screen would get stuck loading after tapping on the currently selected wallet."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.5",
+            "date": "03-27-2025",
+            "timestamp": 1742891140,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "Transparent Funds Rescue - Zashi can now help you recover funds from fully transparent wallets like Ledger. We recommend importing your transparent hardware wallet recovery phrase into a Keystone hardware wallet and then pairing it with Zashi using the Keystone integration."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed a long-standing note commitment tree issue that affected a small number of users. Zashi is now able to allow stuck funds to be spent."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.4",
+            "date": "03-03-2025",
+            "timestamp": 1741028813,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "Export your last year's transaction history with a new Export Tax File feature.",
+                        "Add private Notes to your transactions to help you remember payment details.",
+                        "Mark transactions as favorite with a new Bookmark feature.",
+                        "Use new Transaction Filters to filter for Received, Sent, Memos, Notes, and Bookmarked transactions."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "Discover completely redesigned Transaction History which is not just prettier but also much more functional!",
+                        "Access Keystone from the Integrations screen, too.",
+                        "Enjoy improved Keystone signing experience."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "No more failures of Keystone Send, we fixed the issue with missing Sapling parameters!"
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.3.3",
+            "date": "02-07-2025",
+            "timestamp": 1738929599,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We added a new feature for signing a transaction with a Keystone device, which allows you to enlarge the QR code upon tap."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "We implemented automatic screen brightness increase for Keystone QR code scanning.",
+                        "We updated the Keystone SDK to version 0.8.6 which includes another QR code scanning improvement.",
+                        "We also optimized and improved the Keystone logic for older and slower devices."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We added a few fixes to handle cases when Reset of Zashi fails to complete."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.3.2",
+            "date": "01-09-2025",
+            "timestamp": 1736420570,
+            "sections": [
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "Appearance colors when dark/light mode changes.",
+                        "Info text truncation removed on a balance tab.",
+                        "What's New data is no longer corrupted.",
+                        "Balances tab's duplicated status bar removed.",
+                        "Reset Zashi clears out accounts so cached addresses and previously selected accounts are no longer valid.",
+                        "Selected account is not listed in the Address Book among accounts.",
+                        "Send Feedback screen is now scrollable so a Send button can be reached on a smaller screens.",
+                        "Report button on a failed screen fallbacks to share a message when a native mail client is not set up.",
+                        "Migration to a new device with backed up database allows a user to set a wallet birthday height."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.3.1",
+            "date": "12-23-2024",
+            "timestamp": 1734964156,
+            "sections": [
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "Error 'dataMismatch' for Keystone transactions."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.3",
+            "date": "12-16-2024",
+            "timestamp": 1734351641,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "Zashi + Keystone Hardware Wallet integration is live!",
+                        "Connect your Keystone wallet with Zashi.",
+                        "Sign a transaction with your Keystone wallet.",
+                        "Secure your shielded ZEC!"
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.2.4",
+            "date": "11-25-2024",
+            "timestamp": 1732369942,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "It is finally here! Flexa integration at your service!",
+                        "Pay with Flexa at supported merchants in the US, Canada, and El Salvador.",
+                        "It's waiting for you in Zashi Settings."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.2.3",
+            "date": "11-18-2024",
+            "timestamp": 1731922524,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "Hola! We taught Zashi to speak Spanish!",
+                        "We adopted SDK release 2.2.7 with initial implementation of note management. This should speed up sending one transaction after another.",
+                        "We implemented encryption and remote storage for Address Book!",
+                        "We added device authentication on app launch.",
+                        "We also added an animated progress screen and new success and failure screens. Zashi is fun again!"
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "We made Settings and status screens pretty, and improved security of the Recovery Phrase screen.",
+                        "We also improved Send Feedback feature, let us know how you like Zashi!"
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed the behaviour of the shield icon in Transaction History.",
+                        "We fixed the flashlight functionality freezing the app.",
+                        "We also fixed the issue with Rescan button not working."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.2.2",
+            "date": "10-22-2024",
+            "timestamp": 1729608639,
+            "sections": [
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "We have adopted SDK release 2.2.5 which includes an important fix for a note commitment tree related bug which was affecting some Zashi users for a while now."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed a UX issue in the Request ZEC payer experience. After sending a transaction, we will now correctly route you back to the Account screen.",
+                        "We also fixed an Address Book and Request ZEC interference issue."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.2.1",
+            "date": "10-08-2024",
+            "timestamp": 1728388760,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "Tired of copy pasting addresses? We’ve added an Address Book feature for you!",
+                        "Introducing the “Request ZEC” feature: easily create a payment request and share it as a QR code!"
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "The Receive tab got some love—we redesigned it based on your feedback and reported challenges.",
+                        "We tweaked the Send form to align with our new design system.",
+                        "We updated the transaction history to simplify your experience.",
+                        "And that’s not all—the Scan UI has been redesigned, too.",
+                        "We also made many other minor UI/UX tweaks and fixes along the way. Enjoy!"
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.2",
+            "date": "09-17-2024",
+            "timestamp": 1725970426,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We added an experimental feature which allows you to buy ZEC with Coinbase Onramp integration, you can find it in the Advanced Settings.",
+                        "No need to keep guessing which server performs best. We added a dynamic server switch, which identifies the best performing servers for you."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "We updated our Settings UI."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.1.5",
+            "date": "08-22-2024",
+            "timestamp": 1724347857,
+            "sections": [
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We adopted the latest Zcash SDK version 2.2.1 with migration fixes."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.1.4",
+            "date": "08-22-2024",
+            "timestamp": 1724327999,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We added ZEC/USD currency conversion to Zashi which doesn't compromise your IP address.",
+                        "You can now view your balances, and type in the transaction amount in both USD and ZEC."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "We adopted the latest Zcash SDK version 2.2.0, which brings ZIP 320 TEX addresses support, fetching ZEC/USD exchange rate over Tor, and support for restoring the full history from transparent-only wallets."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.1.3",
+            "date": "07-10-2024",
+            "timestamp": 1720612799,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We added an experimental feature which allows you to buy ZEC with Coinbase Pay integration. Find it in Advanced Settings.",
+                        "We improved UX for unsent transactions. The SDK now checks whether there are any unsent transactions, and it attempts to resubmit such transactions every 5 minutes."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed UI for unread transactions with memos, they are properly marked with a yellow icon again.",
+                        "Sometimes, the memo was missing in the transaction history, and sometimes it disappeared when the transaction state changed. We fixed both cases!"
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.1.2",
+            "date": "06-13-2024",
+            "timestamp": 1718279999,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We added a screen with syncing tips for successful Restore.",
+                        "We added a logic which prevents iPhone from sleeping while restoring and plugged-in.", 
+                        "We made Zashi smarter. When it experiences connection issues or server performance issues, it displays a modal routing you to switch a server.",
+                        "We also added a Disconnected label for such situations, so you know what's happening."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We optimized Zashi's startup pipeline and significantly improved performance. Zashi now features faster cold and warm starts, and the transaction history is populated almost instantly.",
+                        "Transaction messages are now checked for duplicity and removed if duplicates are found."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.1.1",
+            "date": "05-22-2024",
+            "timestamp": 1716379199,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "Expanded transaction now supports displaying multiple memos.",
+                        "We improved security - user authentication is now required for Deleting Zashi, Exporting Private Data, and for confirmation of Send.",
+                        "Tapping on the error message label in the sync progress widget shows an alert view with the details of the error to help troubleshooting.",
+                        "What's New aka Changelog is now accessible from Settings -> About."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "Sometimes, Zashi crashed when the shield button was tapped because of an unhandled error. We fixed the crash and we now handle the error with insufficient funds."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.1 (6)",
+            "date": "05-09-2024",
+            "timestamp": 1715255999,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "Highly requested ^[dark mode](style: 'bold') functionality added. Turn it on by switching into dark mode in your device settings. Enjoy!",
+                        "Scan QR code from an image stored in your photo library.",
+                        "Security feature added - ^[hide your balances](style: 'bold') and transaction history with an eye icon on the Account and Balances tabs."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "The copy on the confirmation button of the secret recovery phrase screen has been modified.",
+                        "We also improved UI on the Receive screen - you can now switch between the unified and transparent address."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "Balances are refreshed right after the send or shielding transaction are processed."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.0.6 (4)",
+            "date": "04-30-2024",
+            "timestamp": 1714478399,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We added autoscroll, so you can quickly realize which server is currently selected."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "We have updated our server list with zec.rocks servers and Ywallet servers.",
+                        "Custom server option has been moved up to improve accessibility."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed a bug issue with displaying the recovery seed phrase twice after creating a new wallet."
+                    ]
+                },
+                {
+                    "title": "Removed:",
+                    "bulletpoints": [
+                        "Lighwalletd servers have been removed from the server options since they are scheduled to phase out at the end of May. If you face issues, go may to Advanced settings, and choose a different server."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.0.5 (4)",
+            "date": "04-19-2024",
+            "timestamp": 1713527999,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We added a button to the scan QR UI which will lead a user to their device settings if their camera is disabled for Zashi.",
+                        "A new security tweak hides Zashi content once you send the app to the background, so you don't accidentally expose anything you don't want to.",
+                        "We auto-focused the wallet birthday height field to improve UX during Restore.",
+                        "We also made the Restore label persistent until the wallet is fully synced."
+                    ]
+                },
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "Migration of DB ensures that the default Unified Address for existing wallets now contains an Orchard receiver.",
+                        "We updated the experience to display a message when the user doesn't have enough free space (1GB) to operate Zashi. We show the amount of free space available and provide a link to Zashi Settings where the user can obtain their recovery phrase if needed.",
+                        "The syncing label UI has been unified.",
+                        "The input field for the secret recovery phrase now shows the expected format in the placeholder. We hope you love the example!",
+                        "We also removed a redundant copy from the expanded transparent transaction view."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We did some general cleanup and fixed some bugs.",
+                        "The Delete Zashi function now resets local in-memory values."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.0.4 (2)",
+            "date": "03-31-2024",
+            "timestamp": 1711886399,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "Transparent balance got added up to the Total Balance, gone are those nasty zeros.",
+                        "You asked, and we did it! We added a Tap to Copy button for memo.",
+                        "We also added an animation to the Tap to Copy transaction ID button, so now you will know that it works."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed the issue causing errors during the syncing process. Orchard subtree roots are now fetched alongside Sapling subtree roots.",
+                        "We also improved behavior of the shielding box tooltip."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.0.3 (1)",
+            "date": "03-27-2024",
+            "timestamp": 1711540780,
+            "sections": [
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "We added a Delete Wallet function but we hope you'll never use it."
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "We fixed an error in the shielding functionality, feel free to test it out.",
+                        "We also fixed a bug in note selection when sending to a transparent recipient."
+                    ]
+                }
+            ]
+        },
+        {
+            "version": "1.0.1 (3)",
+            "date": "03-27-2024",
+            "timestamp": 1711540799,
+            "sections": [
+                {
+                    "title": "Changed:",
+                    "bulletpoints": [
+                        "Advanced Settings were added, for advanced users. You know who you are.",
+                        "The design and behavior for scanning QR codes was updated because it was pretty clunky before.",
+                        "Available balance now shows a spinner when processing spendable balance — to let you know it's working!"
+                    ]
+                },
+                {
+                    "title": "Added:",
+                    "bulletpoints": [
+                        "Orchard support was added. Orchard is the latest, most secure Zcash shielded pool.",
+                        "The Choose a Server feature is now available in Settings, and it includes pre-defined servers and custom server setup. You won't need to use this feature often, but just in case.",
+                        "Zashi's device-migration process was improved to retain full history, relieve user anxiety, and avoid the necessity of full rescan.",
+                        "The Proposal API was integrated with error handling for multi-transaction proposals.",
+                        "Account tab UI tweaks were implemented for user wallets with an empty state, no transaction history. This is nothing to be ashamed of — everyone starts here!"
+                    ]
+                },
+                {
+                    "title": "Fixed:",
+                    "bulletpoints": [
+                        "Extra padding was removed in the keyboard UI.",
+                        "The Restore mode label was missing when Zashi was deleted and reinstalled. Scary, but all good now.",
+                        "The padding in Zashi's syncing bar was tweaked in the Restore mode.",
+                        "The Exit button on the backup phrase screen when no words are stored in the keychain has been updated.",
+                        "Failed transactions no longer appear at the top of the transaction history. Now they are slated in with the other transactions at around the time they failed.",
+                        "The synchronization progress bar starts at the expected percentage now. We think Zashi users will like this much better than the previous, broken experience.",
+                        "The iPhone SE recovery phrase screen is not trailing words anymore.",
+                        "All security audit issues have been resolved."
+                    ]
+                },
+                {
+                    "title": "Removed:",
+                    "bulletpoints": [
+                        "Pull to refresh the transaction history."
+                    ]
+                }
+            ]
+        }
+    ]
+}
