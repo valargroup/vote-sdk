@@ -1,14 +1,16 @@
 syntax = "proto3";
 package zvote.v1;
 
+import "cosmos/msg/v1/msg.proto";
+
 option go_package = "github.com/z-cale/zally/x/vote/types";
 
 // Msg defines the vote module's Msg service.
-// NOTE: This service is NOT annotated with cosmos.msg.v1.service because vote
-// transactions use ZKP + RedPallas authentication instead of standard Cosmos
-// signatures. In Phase 5, transaction submission bypasses the Cosmos Tx envelope
-// entirely; the Msg service is defined here for gRPC registration only.
+// NOTE: Vote transactions use ZKP + RedPallas authentication instead of standard
+// Cosmos signatures. In Phase 5, transaction submission bypasses the Cosmos Tx
+// envelope entirely; the Msg service is defined here for gRPC registration only.
 service Msg {
+  option (cosmos.msg.v1.service) = true;
   rpc SetupVoteRound(MsgSetupVoteRound) returns (MsgSetupVoteRoundResponse);
   rpc RegisterDelegation(MsgRegisterDelegation) returns (MsgRegisterDelegationResponse);
   rpc CreateVoteCommitment(MsgCreateVoteCommitment) returns (MsgCreateVoteCommitmentResponse);

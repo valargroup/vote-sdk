@@ -7,6 +7,7 @@
 package types
 
 import (
+	_ "github.com/cosmos/cosmos-sdk/types/msgservice"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -566,7 +567,7 @@ var File_zvote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\n" +
-	"\x11zvote/v1/tx.proto\x12\bzvote.v1\"\x97\x02\n" +
+	"\x11zvote/v1/tx.proto\x12\bzvote.v1\x1a\x17cosmos/msg/v1/msg.proto\"\x97\x02\n" +
 	"\x11MsgSetupVoteRound\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -608,12 +609,12 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\x05proof\x18\x05 \x01(\fR\x05proof\x12\"\n" +
 	"\rvote_round_id\x18\x06 \x01(\fR\vvoteRoundId\x12>\n" +
 	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\"\x1c\n" +
-	"\x1aMsgRevealVoteShareResponse2\xf6\x02\n" +
+	"\x1aMsgRevealVoteShareResponse2\xfd\x02\n" +
 	"\x03Msg\x12R\n" +
 	"\x0eSetupVoteRound\x12\x1b.zvote.v1.MsgSetupVoteRound\x1a#.zvote.v1.MsgSetupVoteRoundResponse\x12^\n" +
 	"\x12RegisterDelegation\x12\x1f.zvote.v1.MsgRegisterDelegation\x1a'.zvote.v1.MsgRegisterDelegationResponse\x12d\n" +
 	"\x14CreateVoteCommitment\x12!.zvote.v1.MsgCreateVoteCommitment\x1a).zvote.v1.MsgCreateVoteCommitmentResponse\x12U\n" +
-	"\x0fRevealVoteShare\x12\x1c.zvote.v1.MsgRevealVoteShare\x1a$.zvote.v1.MsgRevealVoteShareResponseB&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
+	"\x0fRevealVoteShare\x12\x1c.zvote.v1.MsgRevealVoteShare\x1a$.zvote.v1.MsgRevealVoteShareResponse\x1a\x05\x80\xe7\xb0*\x01B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
 var (
 	file_zvote_v1_tx_proto_rawDescOnce sync.Once

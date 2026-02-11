@@ -13,7 +13,7 @@ todos:
     status: done
   - id: validation-pipeline
     content: "Phase 3: Build validation pipeline (validate.go) + mock crypto interfaces (RedPallas, ZKP) + nullifier uniqueness check"
-    status: pending
+    status: done
   - id: msg-handlers
     content: "Phase 4: Implement keeper logic for all 4 message types (setup round, register delegation, vote commitment, reveal share)"
     status: pending

@@ -30,10 +30,9 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // Msg defines the vote module's Msg service.
-// NOTE: This service is NOT annotated with cosmos.msg.v1.service because vote
-// transactions use ZKP + RedPallas authentication instead of standard Cosmos
-// signatures. In Phase 5, transaction submission bypasses the Cosmos Tx envelope
-// entirely; the Msg service is defined here for gRPC registration only.
+// NOTE: Vote transactions use ZKP + RedPallas authentication instead of standard
+// Cosmos signatures. In Phase 5, transaction submission bypasses the Cosmos Tx
+// envelope entirely; the Msg service is defined here for gRPC registration only.
 type MsgClient interface {
 	SetupVoteRound(ctx context.Context, in *MsgSetupVoteRound, opts ...grpc.CallOption) (*MsgSetupVoteRoundResponse, error)
 	RegisterDelegation(ctx context.Context, in *MsgRegisterDelegation, opts ...grpc.CallOption) (*MsgRegisterDelegationResponse, error)
@@ -94,10 +93,9 @@ func (c *msgClient) RevealVoteShare(ctx context.Context, in *MsgRevealVoteShare,
 // for forward compatibility.
 //
 // Msg defines the vote module's Msg service.
-// NOTE: This service is NOT annotated with cosmos.msg.v1.service because vote
-// transactions use ZKP + RedPallas authentication instead of standard Cosmos
-// signatures. In Phase 5, transaction submission bypasses the Cosmos Tx envelope
-// entirely; the Msg service is defined here for gRPC registration only.
+// NOTE: Vote transactions use ZKP + RedPallas authentication instead of standard
+// Cosmos signatures. In Phase 5, transaction submission bypasses the Cosmos Tx
+// envelope entirely; the Msg service is defined here for gRPC registration only.
 type MsgServer interface {
 	SetupVoteRound(context.Context, *MsgSetupVoteRound) (*MsgSetupVoteRoundResponse, error)
 	RegisterDelegation(context.Context, *MsgRegisterDelegation) (*MsgRegisterDelegationResponse, error)

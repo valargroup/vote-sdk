@@ -2,9 +2,11 @@ package keeper
 
 import (
 	"context"
+	"fmt"
 
 	"cosmossdk.io/core/store"
 	"cosmossdk.io/log"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/z-cale/zally/x/vote/types"
@@ -188,6 +190,47 @@ func (k Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, de
 	bz := make([]byte, 8)
 	putUint64BE(bz, newAmount)
 	return kvStore.Set(types.TallyKey(roundID, proposalID, decision), bz)
+}
+
+// ---------------------------------------------------------------------------
+// Validation helpers (used by the ante validation pipeline, Phase 3)
+// ---------------------------------------------------------------------------
+
+// ValidateRoundActive checks that a vote round exists and has not expired.
+// It reads the VoteRound from the KV store and compares its VoteEndTime against
+// the current block time.
+func (k Keeper) ValidateRoundActive(ctx context.Context, roundID []byte) error {
+	kvStore := k.OpenKVStore(ctx)
+	round, err := k.GetVoteRound(kvStore, roundID)
+	if err != nil {
+		return err // wraps ErrRoundNotFound if missing
+	}
+
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	blockTime := uint64(sdkCtx.BlockTime().Unix())
+
+	if blockTime >= round.VoteEndTime {
+		return fmt.Errorf("%w: vote_end_time %d <= block_time %d", types.ErrRoundNotActive, round.VoteEndTime, blockTime)
+	}
+
+	return nil
+}
+
+// CheckNullifiersUnique verifies that none of the provided nullifiers have
+// already been recorded in the KV store. This runs on every check including
+// RecheckTx, because nullifiers may have been consumed by the newly committed block.
+func (k Keeper) CheckNullifiersUnique(ctx context.Context, nullifiers [][]byte) error {
+	kvStore := k.OpenKVStore(ctx)
+	for _, nf := range nullifiers {
+		has, err := k.HasNullifier(kvStore, nf)
+		if err != nil {
+			return err
+		}
+		if has {
+			return fmt.Errorf("%w: %x", types.ErrDuplicateNullifier, nf)
+		}
+	}
+	return nil
 }
 
 // putUint64BE writes a uint64 in big-endian byte order.
