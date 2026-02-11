@@ -1,0 +1,21 @@
+[package]
+name = "zally-circuits"
+version = "0.1.0"
+edition = "2021"
+description = "Halo2 ZKP circuits and FFI verification for the Zally vote chain"
+
+[lib]
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+halo2_proofs = { version = "0.3", features = ["batch"] }
+pasta_curves = "0.5"
+group = "0.13"
+rand_core = { version = "0.6", features = ["getrandom"] }
+reddsa = { version = "0.5", default-features = false }
+
+[dev-dependencies]
+rand_core = { version = "0.6", features = ["getrandom"] }
+rand = "0.8"
+reddsa = { version = "0.5", features = ["std"] }
+blake2b_simd = "1"

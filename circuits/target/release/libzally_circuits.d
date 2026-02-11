@@ -1,0 +1,1 @@
+/Users/roman/projects/zally/circuits/target/release/libzally_circuits.rlib: /Users/roman/projects/zally/circuits/src/ffi.rs /Users/roman/projects/zally/circuits/src/lib.rs /Users/roman/projects/zally/circuits/src/redpallas.rs /Users/roman/projects/zally/circuits/src/toy.rs

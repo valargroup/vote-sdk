@@ -1,0 +1,42 @@
+syntax = "proto3";
+package zvote.v1;
+
+option go_package = "github.com/z-cale/zally/x/vote/types";
+
+// VoteRound represents a voting session created by MsgSetupVoteRound.
+message VoteRound {
+  bytes  vote_round_id       = 1;
+  uint64 snapshot_height     = 2;
+  bytes  snapshot_blockhash  = 3;
+  bytes  proposals_hash      = 4;
+  uint64 vote_end_time       = 5;
+  bytes  nullifier_imt_root  = 6;
+  bytes  nc_root             = 7;
+  string creator             = 8;
+}
+
+// CommitmentTreeState holds the current state of the append-only commitment tree.
+message CommitmentTreeState {
+  uint64 next_index = 1; // Next leaf index to write
+  bytes  root       = 2; // Current Merkle root (empty until EndBlocker computes it)
+  uint64 height     = 3; // Block height at which this root was last computed
+}
+
+// GenesisState defines the vote module's genesis state.
+message GenesisState {
+  repeated VoteRound          rounds          = 1;
+  CommitmentTreeState         tree_state      = 2;
+  repeated CommitmentLeaf     commitment_leaves = 3;
+  repeated NullifierEntry     nullifiers      = 4;
+}
+
+// CommitmentLeaf is an entry in the append-only commitment tree.
+message CommitmentLeaf {
+  uint64 index = 1;
+  bytes  value = 2;
+}
+
+// NullifierEntry is a recorded nullifier.
+message NullifierEntry {
+  bytes nullifier = 1;
+}

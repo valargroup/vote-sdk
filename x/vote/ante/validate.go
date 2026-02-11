@@ -1,0 +1,170 @@
+// Package ante implements the validation pipeline for vote module transactions.
+//
+// This pipeline runs inside the custom ABCI handlers (CheckTx/FinalizeBlock),
+// NOT the standard Cosmos SDK AnteDecorator chain. Since vote transactions
+// bypass the Cosmos SDK Tx envelope entirely (see Phase 5), validation is a
+// direct function call rather than composable decorators.
+//
+// Validation order:
+//  1. Basic field validation (stateless)
+//  2. Vote round existence and liveness check (stateful, KV read)
+//  3. Nullifier uniqueness check (stateful, KV read) — runs even on RecheckTx
+//  4. RedPallas signature verification — skipped on RecheckTx
+//  5. ZKP verification — skipped on RecheckTx
+package ante
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/z-cale/zally/crypto/redpallas"
+	"github.com/z-cale/zally/crypto/zkp"
+	"github.com/z-cale/zally/x/vote/keeper"
+	"github.com/z-cale/zally/x/vote/types"
+)
+
+// ValidateOpts configures the validation pipeline.
+type ValidateOpts struct {
+	// IsRecheck is true when running RecheckTx (mempool re-validation after
+	// a new block commit). When true, expensive signature and ZKP checks are
+	// skipped — only nullifier uniqueness is re-verified since nullifiers may
+	// have been consumed by the newly committed block.
+	IsRecheck bool
+
+	// SigVerifier is the RedPallas signature verifier.
+	// Use redpallas.NewMockVerifier() during development.
+	SigVerifier redpallas.Verifier
+
+	// ZKPVerifier is the zero-knowledge proof verifier.
+	// Use zkp.NewMockVerifier() during development.
+	ZKPVerifier zkp.Verifier
+}
+
+// DefaultOpts returns ValidateOpts with mock verifiers for development/testing.
+func DefaultOpts() ValidateOpts {
+	return ValidateOpts{
+		SigVerifier: redpallas.NewMockVerifier(),
+		ZKPVerifier: zkp.NewMockVerifier(),
+	}
+}
+
+// ValidateVoteTx runs the full validation pipeline for a vote module transaction.
+//
+// The pipeline is designed to be called from:
+//   - CheckTx: full validation (basic + round + nullifiers + sig + ZKP)
+//   - RecheckTx: lightweight re-validation (basic + round + nullifiers only)
+//   - FinalizeBlock: full validation before keeper execution
+//
+// MsgSetupVoteRound is special: it has no round ID, no nullifiers, no signature,
+// and no ZKP, so only basic field validation runs.
+func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, opts ValidateOpts) error {
+	// 1. Basic field validation (stateless).
+	if err := msg.ValidateBasic(); err != nil {
+		return fmt.Errorf("basic validation failed: %w", err)
+	}
+
+	// 2. Vote round exists and is active.
+	// MsgSetupVoteRound returns nil for GetVoteRoundId() since the round
+	// doesn't exist yet — skip the check in that case.
+	if roundID := msg.GetVoteRoundId(); roundID != nil {
+		if err := k.ValidateRoundActive(ctx, roundID); err != nil {
+			return err
+		}
+	}
+
+	// 3. Nullifier uniqueness (ALWAYS runs, even on RecheckTx).
+	// Nullifiers may have been consumed by the block that was just committed,
+	// so we must re-check every time.
+	if nullifiers := msg.GetNullifiers(); len(nullifiers) > 0 {
+		if err := k.CheckNullifiersUnique(ctx, nullifiers); err != nil {
+			return err
+		}
+	}
+
+	// 4. Skip expensive cryptographic checks on RecheckTx.
+	if opts.IsRecheck {
+		return nil
+	}
+
+	// 5. Per-message-type signature and ZKP verification.
+	return verifyProofs(msg, opts)
+}
+
+// verifyProofs dispatches to the appropriate signature and ZKP verifier
+// based on the concrete message type.
+func verifyProofs(msg types.VoteMessage, opts ValidateOpts) error {
+	switch m := msg.(type) {
+	case *types.MsgSetupVoteRound:
+		// No cryptographic verification needed for round setup.
+		return nil
+
+	case *types.MsgRegisterDelegation:
+		return verifyDelegation(m, opts)
+
+	case *types.MsgCreateVoteCommitment:
+		return verifyVoteCommitment(m, opts)
+
+	case *types.MsgRevealVoteShare:
+		return verifyVoteShare(m, opts)
+
+	default:
+		return fmt.Errorf("unknown vote message type: %T", msg)
+	}
+}
+
+// verifyDelegation verifies both the RedPallas signature and ZKP #1 for
+// a MsgRegisterDelegation.
+func verifyDelegation(msg *types.MsgRegisterDelegation, opts ValidateOpts) error {
+	// RedPallas signature verification.
+	// The sighash is provided by the client as msg.Sighash.
+	if err := opts.SigVerifier.Verify(msg.Rk, msg.Sighash, msg.SpendAuthSig); err != nil {
+		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
+	}
+
+	// ZKP #1: delegation proof.
+	if err := opts.ZKPVerifier.VerifyDelegation(msg.Proof, zkp.DelegationInputs{
+		Rk:                  msg.Rk,
+		SignedNoteNullifier: msg.SignedNoteNullifier,
+		CmxNew:              msg.CmxNew,
+		EncMemo:             msg.EncMemo,
+		GovComm:             msg.GovComm,
+		GovNullifiers:       msg.GovNullifiers,
+		VoteRoundId:         msg.VoteRoundId,
+	}); err != nil {
+		return fmt.Errorf("%w: delegation: %v", types.ErrInvalidProof, err)
+	}
+
+	return nil
+}
+
+// verifyVoteCommitment verifies ZKP #2 for a MsgCreateVoteCommitment.
+func verifyVoteCommitment(msg *types.MsgCreateVoteCommitment, opts ValidateOpts) error {
+	if err := opts.ZKPVerifier.VerifyVoteCommitment(msg.Proof, zkp.VoteCommitmentInputs{
+		VanNullifier:         msg.VanNullifier,
+		VoteAuthorityNoteNew: msg.VoteAuthorityNoteNew,
+		VoteCommitment:       msg.VoteCommitment,
+		ProposalId:           msg.ProposalId,
+		VoteRoundId:          msg.VoteRoundId,
+		AnchorHeight:         msg.VoteCommTreeAnchorHeight,
+	}); err != nil {
+		return fmt.Errorf("%w: vote commitment: %v", types.ErrInvalidProof, err)
+	}
+
+	return nil
+}
+
+// verifyVoteShare verifies ZKP #3 for a MsgRevealVoteShare.
+func verifyVoteShare(msg *types.MsgRevealVoteShare, opts ValidateOpts) error {
+	if err := opts.ZKPVerifier.VerifyVoteShare(msg.Proof, zkp.VoteShareInputs{
+		ShareNullifier: msg.ShareNullifier,
+		VoteAmount:     msg.VoteAmount,
+		ProposalId:     msg.ProposalId,
+		VoteDecision:   msg.VoteDecision,
+		VoteRoundId:    msg.VoteRoundId,
+		AnchorHeight:   msg.VoteCommTreeAnchorHeight,
+	}); err != nil {
+		return fmt.Errorf("%w: vote share: %v", types.ErrInvalidProof, err)
+	}
+
+	return nil
+}

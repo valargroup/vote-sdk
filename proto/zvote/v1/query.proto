@@ -1,0 +1,53 @@
+syntax = "proto3";
+package zvote.v1;
+
+import "zvote/v1/types.proto";
+
+option go_package = "github.com/z-cale/zally/x/vote/types";
+
+// Query defines the vote module's gRPC query service.
+service Query {
+  // CommitmentTreeAtHeight returns the commitment tree root at a specific anchor height.
+  rpc CommitmentTreeAtHeight(QueryCommitmentTreeRequest) returns (QueryCommitmentTreeResponse);
+
+  // LatestCommitmentTree returns the latest commitment tree state.
+  rpc LatestCommitmentTree(QueryLatestTreeRequest) returns (QueryLatestTreeResponse);
+
+  // VoteRound returns information about a specific vote round.
+  rpc VoteRound(QueryVoteRoundRequest) returns (QueryVoteRoundResponse);
+
+  // ProposalTally returns the accumulated tally for a proposal within a vote round.
+  rpc ProposalTally(QueryProposalTallyRequest) returns (QueryProposalTallyResponse);
+}
+
+message QueryCommitmentTreeRequest {
+  uint64 height = 1;
+}
+
+message QueryCommitmentTreeResponse {
+  CommitmentTreeState tree = 1;
+}
+
+message QueryLatestTreeRequest {}
+
+message QueryLatestTreeResponse {
+  CommitmentTreeState tree = 1;
+}
+
+message QueryVoteRoundRequest {
+  bytes vote_round_id = 1;
+}
+
+message QueryVoteRoundResponse {
+  VoteRound round = 1;
+}
+
+message QueryProposalTallyRequest {
+  bytes  vote_round_id = 1;
+  uint32 proposal_id   = 2;
+}
+
+message QueryProposalTallyResponse {
+  // Mapping from vote_decision to accumulated vote amount.
+  map<uint32, uint64> tally = 1;
+}

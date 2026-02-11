@@ -1,0 +1,19 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/z-cale/zally/app"
+	"github.com/z-cale/zally/cmd/zallyd/cmd"
+
+	svrcmd "github.com/cosmos/cosmos-sdk/server/cmd"
+)
+
+func main() {
+	rootCmd := cmd.NewRootCmd()
+	if err := svrcmd.Execute(rootCmd, "ZALLY", app.DefaultNodeHome); err != nil {
+		fmt.Fprintln(rootCmd.OutOrStderr(), err)
+		os.Exit(1)
+	}
+}

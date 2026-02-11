@@ -1,0 +1,147 @@
+package types
+
+import "fmt"
+
+// ValidateBasic performs stateless validation for MsgSetupVoteRound.
+func (msg *MsgSetupVoteRound) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if msg.SnapshotHeight == 0 {
+		return fmt.Errorf("%w: snapshot_height cannot be zero", ErrInvalidField)
+	}
+	if len(msg.SnapshotBlockhash) == 0 {
+		return fmt.Errorf("%w: snapshot_blockhash cannot be empty", ErrInvalidField)
+	}
+	if len(msg.ProposalsHash) == 0 {
+		return fmt.Errorf("%w: proposals_hash cannot be empty", ErrInvalidField)
+	}
+	if msg.VoteEndTime == 0 {
+		return fmt.Errorf("%w: vote_end_time cannot be zero", ErrInvalidField)
+	}
+	if len(msg.NullifierImtRoot) == 0 {
+		return fmt.Errorf("%w: nullifier_imt_root cannot be empty", ErrInvalidField)
+	}
+	if len(msg.NcRoot) == 0 {
+		return fmt.Errorf("%w: nc_root cannot be empty", ErrInvalidField)
+	}
+	return nil
+}
+
+// ValidateBasic performs stateless validation for MsgRegisterDelegation.
+func (msg *MsgRegisterDelegation) ValidateBasic() error {
+	if len(msg.Rk) != 32 {
+		return fmt.Errorf("%w: rk must be 32 bytes, got %d", ErrInvalidField, len(msg.Rk))
+	}
+	if len(msg.SpendAuthSig) == 0 {
+		return fmt.Errorf("%w: spend_auth_sig cannot be empty", ErrInvalidField)
+	}
+	if len(msg.SignedNoteNullifier) == 0 {
+		return fmt.Errorf("%w: signed_note_nullifier cannot be empty", ErrInvalidField)
+	}
+	if len(msg.CmxNew) == 0 {
+		return fmt.Errorf("%w: cmx_new cannot be empty", ErrInvalidField)
+	}
+	if len(msg.GovComm) == 0 {
+		return fmt.Errorf("%w: gov_comm cannot be empty", ErrInvalidField)
+	}
+	if len(msg.GovNullifiers) == 0 {
+		return fmt.Errorf("%w: gov_nullifiers cannot be empty", ErrInvalidField)
+	}
+	if len(msg.GovNullifiers) > 4 {
+		return fmt.Errorf("%w: gov_nullifiers cannot exceed 4, got %d", ErrInvalidField, len(msg.GovNullifiers))
+	}
+	for i, n := range msg.GovNullifiers {
+		if len(n) == 0 {
+			return fmt.Errorf("%w: gov_nullifiers[%d] cannot be empty", ErrInvalidField, i)
+		}
+	}
+	if len(msg.Proof) == 0 {
+		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
+	}
+	if len(msg.VoteRoundId) == 0 {
+		return fmt.Errorf("%w: vote_round_id cannot be empty", ErrInvalidField)
+	}
+	if len(msg.Sighash) != 32 {
+		return fmt.Errorf("%w: sighash must be 32 bytes, got %d", ErrInvalidField, len(msg.Sighash))
+	}
+	return nil
+}
+
+// ValidateBasic performs stateless validation for MsgCreateVoteCommitment.
+func (msg *MsgCreateVoteCommitment) ValidateBasic() error {
+	if len(msg.VanNullifier) == 0 {
+		return fmt.Errorf("%w: van_nullifier cannot be empty", ErrInvalidField)
+	}
+	if len(msg.VoteAuthorityNoteNew) == 0 {
+		return fmt.Errorf("%w: vote_authority_note_new cannot be empty", ErrInvalidField)
+	}
+	if len(msg.VoteCommitment) == 0 {
+		return fmt.Errorf("%w: vote_commitment cannot be empty", ErrInvalidField)
+	}
+	if len(msg.Proof) == 0 {
+		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
+	}
+	if len(msg.VoteRoundId) == 0 {
+		return fmt.Errorf("%w: vote_round_id cannot be empty", ErrInvalidField)
+	}
+	if msg.VoteCommTreeAnchorHeight == 0 {
+		return fmt.Errorf("%w: vote_comm_tree_anchor_height cannot be zero", ErrInvalidField)
+	}
+	return nil
+}
+
+// ValidateBasic performs stateless validation for MsgRevealVoteShare.
+func (msg *MsgRevealVoteShare) ValidateBasic() error {
+	if len(msg.ShareNullifier) == 0 {
+		return fmt.Errorf("%w: share_nullifier cannot be empty", ErrInvalidField)
+	}
+	if msg.VoteAmount == 0 {
+		return fmt.Errorf("%w: vote_amount cannot be zero", ErrInvalidField)
+	}
+	if len(msg.Proof) == 0 {
+		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
+	}
+	if len(msg.VoteRoundId) == 0 {
+		return fmt.Errorf("%w: vote_round_id cannot be empty", ErrInvalidField)
+	}
+	if msg.VoteCommTreeAnchorHeight == 0 {
+		return fmt.Errorf("%w: vote_comm_tree_anchor_height cannot be zero", ErrInvalidField)
+	}
+	return nil
+}
+
+// VoteMessage is an interface that all vote module messages implement,
+// used by the validation pipeline.
+type VoteMessage interface {
+	ValidateBasic() error
+	GetVoteRoundId() []byte
+	GetNullifiers() [][]byte
+}
+
+// --- VoteMessage interface implementations ---
+
+// GetNullifiers returns the nullifiers from a MsgRegisterDelegation.
+func (msg *MsgRegisterDelegation) GetNullifiers() [][]byte {
+	return msg.GovNullifiers
+}
+
+// GetNullifiers returns the nullifiers from a MsgCreateVoteCommitment.
+func (msg *MsgCreateVoteCommitment) GetNullifiers() [][]byte {
+	return [][]byte{msg.VanNullifier}
+}
+
+// GetNullifiers returns the nullifiers from a MsgRevealVoteShare.
+func (msg *MsgRevealVoteShare) GetNullifiers() [][]byte {
+	return [][]byte{msg.ShareNullifier}
+}
+
+// GetNullifiers returns nil for MsgSetupVoteRound (no nullifiers involved).
+func (msg *MsgSetupVoteRound) GetNullifiers() [][]byte {
+	return nil
+}
+
+// GetVoteRoundId returns nil for MsgSetupVoteRound (round doesn't exist yet).
+func (msg *MsgSetupVoteRound) GetVoteRoundId() []byte {
+	return nil
+}
