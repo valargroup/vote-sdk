@@ -6,8 +6,7 @@ public struct Voting {
     @ObservableState
     public struct State: Equatable {
         public enum Screen: Equatable {
-            case landing
-            case keystoneSigning
+            case delegationSigning
             case proposalList
             case proposalDetail(id: String)
             case voteReview
@@ -15,13 +14,13 @@ public struct Voting {
             case complete
         }
 
-        public var screenStack: [Screen] = [.landing]
+        public var screenStack: [Screen] = [.delegationSigning]
         public var votingRound: VotingRound
         public var votes: [String: VoteChoice] = [:]
         public var votingWeight: UInt64
         public var isKeystoneUser: Bool
 
-        // Which proposal the bottom bar targets (radio selection on list)
+        // Which proposal the bottom bar targets
         public var selectedProposalId: String?
 
         // ZKP #1 (delegation) — runs in background
@@ -31,7 +30,7 @@ public struct Voting {
         public var submissionStatus: SubmissionStatus = .idle
 
         public var currentScreen: Screen {
-            screenStack.last ?? .landing
+            screenStack.last ?? .proposalList
         }
 
         public var votingWeightZECString: String {
@@ -98,12 +97,9 @@ public struct Voting {
         case dismissFlow
         case goBack
 
-        // Landing
-        case beginVotingTapped
-
-        // Keystone signing
-        case keystoneApproved
-        case keystoneRejected
+        // Delegation signing
+        case delegationApproved
+        case delegationRejected
 
         // Background ZKP delegation
         case startDelegationProof
@@ -112,12 +108,13 @@ public struct Voting {
         case delegationProofFailed(String)
 
         // Proposal list
-        case proposalTapped(String)       // open detail
+        case proposalTapped(String)
         case bottomBarNext
         case bottomBarPrevious
 
         // Proposal detail
         case castVote(proposalId: String, choice: VoteChoice)
+        case advanceAfterVote(nextId: String?)
         case backToList
         case nextProposalDetail
         case previousProposalDetail
@@ -152,27 +149,14 @@ public struct Voting {
                 }
                 return .none
 
-            // MARK: - Landing
+            // MARK: - Delegation Signing
 
-            case .beginVotingTapped:
-                if state.isKeystoneUser {
-                    state.screenStack.append(.keystoneSigning)
-                } else {
-                    state.screenStack.append(.proposalList)
-                    return .send(.startDelegationProof)
-                }
-                return .none
-
-            // MARK: - Keystone Signing
-
-            case .keystoneApproved:
-                state.screenStack.removeLast()
-                state.screenStack.append(.proposalList)
+            case .delegationApproved:
+                state.screenStack = [.proposalList]
                 return .send(.startDelegationProof)
 
-            case .keystoneRejected:
-                state.screenStack.removeLast()
-                return .none
+            case .delegationRejected:
+                return .send(.dismissFlow)
 
             // MARK: - Background ZKP Delegation
 
@@ -229,23 +213,31 @@ public struct Voting {
                 state.votes[proposalId] = choice
 
                 if case .proposalDetail = state.currentScreen {
-                    // Detail view: auto-advance to next unvoted
-                    if let nextId = nextUnvotedId(after: proposalId, in: state) {
-                        state.selectedProposalId = nextId
-                        state.screenStack.removeLast()
-                        state.screenStack.append(.proposalDetail(id: nextId))
-                    } else {
-                        // All voted, go back to list
-                        state.selectedProposalId = nil
-                        state.screenStack.removeLast()
+                    // Detail view: delay before advancing so user sees their vote land
+                    let nextId = nextUnvotedId(after: proposalId, in: state)
+                    return .run { send in
+                        try await Task.sleep(for: .milliseconds(600))
+                        await send(.advanceAfterVote(nextId: nextId))
                     }
                 } else {
                     // List view: auto-advance bottom bar to next unvoted
                     if let nextId = nextUnvotedId(after: proposalId, in: state) {
                         state.selectedProposalId = nextId
                     } else {
-                        // All voted — clear selection to show review
                         state.selectedProposalId = nil
+                    }
+                }
+                return .none
+
+            case .advanceAfterVote(let nextId):
+                if case .proposalDetail = state.currentScreen {
+                    if let nextId {
+                        state.selectedProposalId = nextId
+                        state.screenStack.removeLast()
+                        state.screenStack.append(.proposalDetail(id: nextId))
+                    } else {
+                        state.selectedProposalId = nil
+                        state.screenStack.removeLast()
                     }
                 }
                 return .none

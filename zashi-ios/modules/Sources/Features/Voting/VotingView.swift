@@ -11,7 +11,7 @@ public struct VotingView: View {
     public var body: some View {
         WithPerceptionTracking {
             screenView(for: store.currentScreen)
-                .animation(.easeInOut(duration: 0.25), value: store.selectedProposal?.id)
+                .animation(.easeInOut(duration: 0.3), value: store.selectedProposal?.id)
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
@@ -20,17 +20,15 @@ public struct VotingView: View {
     @ViewBuilder
     private func screenView(for screen: Voting.State.Screen) -> some View {
         switch screen {
-        case .landing:
-            VotingLandingView(store: store)
-        case .keystoneSigning:
-            KeystoneSigningView(store: store)
+        case .delegationSigning:
+            DelegationSigningView(store: store)
         case .proposalList:
             ProposalListView(store: store)
         case .proposalDetail:
             if let proposal = store.selectedProposal {
                 ProposalDetailView(store: store, proposal: proposal)
                     .id(proposal.id)
-                    .transition(.opacity)
+                    .transition(.push(from: .trailing))
             }
         case .voteReview:
             VoteReviewView(store: store)

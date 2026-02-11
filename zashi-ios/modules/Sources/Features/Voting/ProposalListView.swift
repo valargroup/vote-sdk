@@ -14,34 +14,112 @@ struct ProposalListView: View {
     var body: some View {
         WithPerceptionTracking {
             VStack(spacing: 0) {
-                zkpBanner()
-                progressHeader()
                 proposalScrollView()
                 bottomBar()
             }
-            .navigationTitle(store.votingRound.title)
+            .navigationTitle("Governance")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
-                        store.send(.goBack)
+                        store.send(.dismissFlow)
                     } label: {
-                        Image(systemName: "chevron.left")
+                        Image(systemName: "xmark")
                     }
                 }
             }
         }
     }
 
-    // MARK: - Header
+    // MARK: - Scroll View
+
+    @ViewBuilder
+    private func proposalScrollView() -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 12) {
+                    roundInfoCard()
+                    zkpBanner()
+                    progressHeader()
+
+                    ForEach(store.votingRound.proposals) { proposal in
+                        proposalCard(proposal)
+                            .id(proposal.id)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
+            }
+            .onChange(of: store.activeProposalId) { newId in
+                if let newId {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(newId, anchor: .center)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Round Info Header
+
+    @ViewBuilder
+    private func roundInfoCard() -> some View {
+        VStack(spacing: 12) {
+            // Title row
+            HStack(alignment: .top) {
+                Text(store.votingRound.title)
+                    .zFont(.semiBold, size: 18, style: Design.Text.primary)
+                Spacer()
+                Text("\(store.votingRound.daysRemaining)d left")
+                    .zFont(.medium, size: 13, style: Design.Text.secondary)
+            }
+
+            // Detail grid
+            HStack(spacing: 0) {
+                detailPill(
+                    label: "Snapshot",
+                    value: "#\(store.votingRound.snapshotHeight.formatted())"
+                )
+                Spacer()
+                detailPill(
+                    label: "Ends",
+                    value: store.votingRound.votingEnd.formatted(date: .abbreviated, time: .omitted)
+                )
+                Spacer()
+                detailPill(
+                    label: "Weight",
+                    value: "\(store.votingWeightZECString) ZEC"
+                )
+            }
+        }
+        .padding(16)
+        .background(Design.Surfaces.bgPrimary.color(colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Design.Surfaces.strokeSecondary.color(colorScheme), lineWidth: 1)
+        )
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private func detailPill(label: String, value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Design.Text.primary.color(colorScheme))
+        }
+    }
+
+    // MARK: - Status
 
     @ViewBuilder
     private func zkpBanner() -> some View {
         if store.delegationProofStatus != .notStarted && store.delegationProofStatus != .complete {
             ZKPStatusBanner(proofStatus: store.delegationProofStatus)
-                .padding(.horizontal, 24)
-                .padding(.top, 8)
-                .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -64,34 +142,6 @@ struct ProposalListView: View {
                 }
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 16)
-        .padding(.bottom, 8)
-    }
-
-    // MARK: - Scroll View
-
-    @ViewBuilder
-    private func proposalScrollView() -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(store.votingRound.proposals) { proposal in
-                        proposalCard(proposal)
-                            .id(proposal.id)
-                    }
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 24)
-            }
-            .onChange(of: store.activeProposalId) { newId in
-                if let newId {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        proxy.scrollTo(newId, anchor: .center)
-                    }
-                }
-            }
-        }
     }
 
     // MARK: - Bottom Bar
@@ -106,90 +156,105 @@ struct ProposalListView: View {
         VStack(spacing: 0) {
             Divider()
 
-            if store.allVoted && store.selectedProposalId == nil {
-                // All voted, no explicit selection — show review
-                VStack(spacing: 8) {
-                    Text("All proposals voted!")
-                        .zFont(.medium, size: 13, style: Design.Text.secondary)
-
-                    ZashiButton(
-                        "Review & Submit",
-                        type: store.canSubmitVotes ? .primary : .quaternary
-                    ) {
-                        store.send(.reviewVotesTapped)
-                    }
-                    .disabled(!store.canSubmitVotes)
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
+            if store.allVoted {
+                reviewBar()
             } else if let proposal = activeProposal {
-                let vote = store.votes[proposal.id]
-                let hasPrev = (activeIndex ?? 0) > 0
-                let hasNext = (activeIndex ?? 0) < store.totalProposals - 1
-
-                VStack(spacing: 10) {
-                    // Title row with prev/next navigation
-                    HStack(spacing: 0) {
-                        Button {
-                            selectionFeedback.selectionChanged()
-                            store.send(.bottomBarPrevious)
-                        } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 14, weight: .semibold))
-                                .frame(minWidth: 44, minHeight: 44)
-                        }
-                        .disabled(!hasPrev)
-                        .opacity(hasPrev ? 1 : 0.3)
-                        .accessibilityLabel("Previous proposal")
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            if let zip = proposal.zipNumber {
-                                Text(zip)
-                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text(proposal.title)
-                                .zFont(.medium, size: 13, style: Design.Text.primary)
-                                .lineLimit(1)
-                        }
-
-                        Spacer()
-
-                        if let vote {
-                            VoteChip(choice: vote)
-                        }
-
-                        Button {
-                            selectionFeedback.selectionChanged()
-                            store.send(.bottomBarNext)
-                        } label: {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .frame(minWidth: 44, minHeight: 44)
-                        }
-                        .disabled(!hasNext)
-                        .opacity(hasNext ? 1 : 0.3)
-                        .accessibilityLabel("Next proposal")
-                    }
-
-                    // Vote buttons
-                    HStack(spacing: 8) {
-                        bottomVoteButton("Support", color: .green, icon: "hand.thumbsup", isSelected: vote == .support) {
-                            store.send(.castVote(proposalId: proposal.id, choice: .support))
-                        }
-                        bottomVoteButton("Oppose", color: .red, icon: "hand.thumbsdown", isSelected: vote == .oppose) {
-                            store.send(.castVote(proposalId: proposal.id, choice: .oppose))
-                        }
-                        bottomVoteButton("Skip", color: .gray, icon: "forward", isSelected: vote == .skip) {
-                            store.send(.castVote(proposalId: proposal.id, choice: .skip))
-                        }
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
+                voteBar(proposal: proposal, vote: store.votes[proposal.id], activeIndex: activeIndex)
             }
         }
         .background(Design.Surfaces.bgPrimary.color(colorScheme))
+    }
+
+    @ViewBuilder
+    private func reviewBar() -> some View {
+        VStack(spacing: 8) {
+            Text("All proposals voted!")
+                .zFont(.medium, size: 13, style: Design.Text.secondary)
+
+            ZashiButton(
+                "Review & Submit",
+                type: store.canSubmitVotes ? .primary : .quaternary
+            ) {
+                store.send(.reviewVotesTapped)
+            }
+            .disabled(!store.canSubmitVotes)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private func voteBar(proposal: Proposal, vote: VoteChoice?, activeIndex: Int?) -> some View {
+        let hasPrev = (activeIndex ?? 0) > 0
+        let hasNext = (activeIndex ?? 0) < store.totalProposals - 1
+
+        VStack(spacing: 10) {
+            voteBarTitle(proposal: proposal, vote: vote, hasPrev: hasPrev, hasNext: hasNext)
+            voteBarButtons(proposal: proposal, vote: vote)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private func voteBarTitle(proposal: Proposal, vote: VoteChoice?, hasPrev: Bool, hasNext: Bool) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                selectionFeedback.selectionChanged()
+                store.send(.bottomBarPrevious)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .disabled(!hasPrev)
+            .opacity(hasPrev ? 1 : 0.3)
+            .accessibilityLabel("Previous proposal")
+
+            VStack(alignment: .leading, spacing: 2) {
+                if let zip = proposal.zipNumber {
+                    Text(zip)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Text(proposal.title)
+                    .zFont(.medium, size: 13, style: Design.Text.primary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            if let vote {
+                VoteChip(choice: vote)
+            }
+
+            Button {
+                selectionFeedback.selectionChanged()
+                store.send(.bottomBarNext)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .disabled(!hasNext)
+            .opacity(hasNext ? 1 : 0.3)
+            .accessibilityLabel("Next proposal")
+        }
+    }
+
+    @ViewBuilder
+    private func voteBarButtons(proposal: Proposal, vote: VoteChoice?) -> some View {
+        HStack(spacing: 8) {
+            bottomVoteButton("Support", color: .green, icon: "hand.thumbsup", isSelected: vote == .support) {
+                store.send(.castVote(proposalId: proposal.id, choice: .support))
+            }
+            bottomVoteButton("Oppose", color: .red, icon: "hand.thumbsdown", isSelected: vote == .oppose) {
+                store.send(.castVote(proposalId: proposal.id, choice: .oppose))
+            }
+            bottomVoteButton("Skip", color: .gray, icon: "forward", isSelected: vote == .skip) {
+                store.send(.castVote(proposalId: proposal.id, choice: .skip))
+            }
+        }
     }
 
     // MARK: - Card
