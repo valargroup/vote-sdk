@@ -1,6 +1,7 @@
 package elgamal
 
 import (
+	"fmt"
 	"io"
 	"math/big"
 
@@ -32,22 +33,60 @@ func KeyGen(rng io.Reader) (*SecretKey, *PublicKey) {
 }
 
 // Encrypt encrypts a value v under pk with fresh randomness from rng.
+// Returns an error if the public key is invalid or randomness generation fails.
 //
 //	Enc(v, r) = (r*G, v*G + r*pk)
-func Encrypt(pk *PublicKey, v uint64, rng io.Reader) *Ciphertext {
-	r := new(curvey.ScalarPallas).Random(rng)
-	return EncryptWithRandomness(pk, v, r)
+func Encrypt(pk *PublicKey, v uint64, rng io.Reader) (*Ciphertext, error) {
+	if err := validatePublicKey(pk); err != nil {
+		return nil, fmt.Errorf("elgamal: Encrypt: %w", err)
+	}
+	if rng == nil {
+		return nil, fmt.Errorf("elgamal: Encrypt: rng must not be nil")
+	}
+	// curvey's Random() silently returns nil on reader failure, so we
+	// read the seed ourselves and check for errors before hashing.
+	var seed [64]byte
+	if _, err := io.ReadFull(rng, seed[:]); err != nil {
+		return nil, fmt.Errorf("elgamal: Encrypt: failed to read randomness: %w", err)
+	}
+	r := new(curvey.ScalarPallas).Hash(seed[:])
+	return encryptCore(pk, v, r), nil
 }
 
 // EncryptWithRandomness encrypts with explicit randomness r.
+// Returns an error if the public key is invalid.
 // This is useful for ZKP witness reproduction where the prover needs to
 // re-derive the ciphertext from a known randomness value.
-func EncryptWithRandomness(pk *PublicKey, v uint64, r curvey.Scalar) *Ciphertext {
+func EncryptWithRandomness(pk *PublicKey, v uint64, r curvey.Scalar) (*Ciphertext, error) {
+	if err := validatePublicKey(pk); err != nil {
+		return nil, fmt.Errorf("elgamal: EncryptWithRandomness: %w", err)
+	}
+	return encryptCore(pk, v, r), nil
+}
+
+// encryptCore performs the actual encryption after all validation has passed.
+func encryptCore(pk *PublicKey, v uint64, r curvey.Scalar) *Ciphertext {
 	G := new(curvey.PointPallas).Generator()
 	vScalar := scalarFromUint64(v)
-	C1 := G.Mul(r)                          // r * G
+	C1 := G.Mul(r)                            // r * G
 	C2 := G.Mul(vScalar).Add(pk.Point.Mul(r)) // v*G + r*pk
 	return &Ciphertext{C1: C1, C2: C2}
+}
+
+// validatePublicKey checks that a public key is non-nil, on the Pallas curve,
+// and not the identity point. An identity public key would cause every
+// ciphertext to leak the plaintext as C2 = v*G (the r*pk term vanishes).
+func validatePublicKey(pk *PublicKey) error {
+	if pk == nil || pk.Point == nil {
+		return fmt.Errorf("public key must not be nil")
+	}
+	if pk.Point.IsIdentity() {
+		return fmt.Errorf("public key must not be the identity point")
+	}
+	if !pk.Point.IsOnCurve() {
+		return fmt.Errorf("public key is not on the Pallas curve")
+	}
+	return nil
 }
 
 // DecryptToPoint decrypts a ciphertext to the embedded value point v*G.
@@ -70,18 +109,28 @@ func HomomorphicAdd(a, b *Ciphertext) *Ciphertext {
 	}
 }
 
-// EncryptZero returns an encryption of zero using the identity point for both
-// components. This serves as the additive identity for HomomorphicAdd and is
-// used to initialize on-chain tally accumulators.
+// EncryptZero returns an encryption of zero using independent identity points
+// for each component. This serves as the additive identity for HomomorphicAdd
+// and is used to initialize on-chain tally accumulators.
+//
+// Note: this is NOT a semantically secure encryption of zero — it is the
+// deterministic ciphertext (O, O). Use Encrypt(pk, 0, rng) when IND-CPA
+// security is required (e.g., when intermediate tally states are observable).
 func EncryptZero() *Ciphertext {
-	id := new(curvey.PointPallas).Identity()
-	return &Ciphertext{C1: id, C2: id}
+	return &Ciphertext{
+		C1: new(curvey.PointPallas).Identity(),
+		C2: new(curvey.PointPallas).Identity(),
+	}
 }
 
 // scalarFromUint64 converts a uint64 value to a Pallas scalar.
 // Uses big.Int to safely handle the full uint64 range without truncation.
+// Panics if the conversion fails.
 func scalarFromUint64(v uint64) curvey.Scalar {
 	bi := new(big.Int).SetUint64(v)
-	s, _ := new(curvey.ScalarPallas).SetBigInt(bi)
+	s, err := new(curvey.ScalarPallas).SetBigInt(bi)
+	if err != nil {
+		panic("elgamal: scalarFromUint64: failed to convert uint64 to Pallas scalar: " + err.Error())
+	}
 	return s
 }

@@ -13,6 +13,14 @@ func vG(v uint64) curvey.Point {
 	return new(curvey.PointPallas).Generator().Mul(scalarFromUint64(v))
 }
 
+// mustEncrypt is a test helper that calls Encrypt and fails the test on error.
+func mustEncrypt(t *testing.T, pk *PublicKey, v uint64) *Ciphertext {
+	t.Helper()
+	ct, err := Encrypt(pk, v, rand.Reader)
+	require.NoError(t, err)
+	return ct
+}
+
 // TestKeyGen verifies that key generation produces valid, non-degenerate keys.
 func TestKeyGen(t *testing.T) {
 	sk, pk := KeyGen(rand.Reader)
@@ -33,7 +41,7 @@ func TestDecryptRoundTrip(t *testing.T) {
 
 	values := []uint64{0, 1, 2, 7, 42, 100, 255, 1000, 65535, 1 << 20, 1 << 24}
 	for _, v := range values {
-		ct := Encrypt(pk, v, rand.Reader)
+		ct := mustEncrypt(t, pk, v)
 		got := DecryptToPoint(sk, ct)
 		expected := vG(v)
 		require.True(t, got.Equal(expected), "decrypt(encrypt(%d)) should equal %d*G", v, v)
@@ -43,7 +51,7 @@ func TestDecryptRoundTrip(t *testing.T) {
 // TestDecryptZero verifies that encrypting 0 decrypts to the identity point.
 func TestDecryptZero(t *testing.T) {
 	sk, pk := KeyGen(rand.Reader)
-	ct := Encrypt(pk, 0, rand.Reader)
+	ct := mustEncrypt(t, pk, 0)
 	got := DecryptToPoint(sk, ct)
 	require.True(t, got.IsIdentity(), "decrypt(encrypt(0)) should be identity")
 }
@@ -53,8 +61,10 @@ func TestEncryptWithRandomness(t *testing.T) {
 	sk, pk := KeyGen(rand.Reader)
 	r := new(curvey.ScalarPallas).Random(rand.Reader)
 
-	ct1 := EncryptWithRandomness(pk, 42, r)
-	ct2 := EncryptWithRandomness(pk, 42, r)
+	ct1, err := EncryptWithRandomness(pk, 42, r)
+	require.NoError(t, err)
+	ct2, err := EncryptWithRandomness(pk, 42, r)
+	require.NoError(t, err)
 
 	// Same randomness, same value → identical ciphertext
 	require.True(t, ct1.C1.Equal(ct2.C1), "C1 should be identical with same randomness")
@@ -85,8 +95,8 @@ func TestHomomorphicAdd(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		ctA := Encrypt(pk, tc.a, rand.Reader)
-		ctB := Encrypt(pk, tc.b, rand.Reader)
+		ctA := mustEncrypt(t, pk, tc.a)
+		ctB := mustEncrypt(t, pk, tc.b)
 		ctSum := HomomorphicAdd(ctA, ctB)
 
 		got := DecryptToPoint(sk, ctSum)
@@ -104,7 +114,7 @@ func TestHomomorphicAddMultiple(t *testing.T) {
 	acc := EncryptZero()
 	var total uint64
 	for _, v := range shares {
-		ct := Encrypt(pk, v, rand.Reader)
+		ct := mustEncrypt(t, pk, v)
 		acc = HomomorphicAdd(acc, ct)
 		total += v
 	}
@@ -119,8 +129,8 @@ func TestHomomorphicAddMultiple(t *testing.T) {
 func TestHomomorphicAddCommutative(t *testing.T) {
 	sk, pk := KeyGen(rand.Reader)
 
-	ctA := Encrypt(pk, 17, rand.Reader)
-	ctB := Encrypt(pk, 29, rand.Reader)
+	ctA := mustEncrypt(t, pk, 17)
+	ctB := mustEncrypt(t, pk, 29)
 
 	sumAB := HomomorphicAdd(ctA, ctB)
 	sumBA := HomomorphicAdd(ctB, ctA)
@@ -137,9 +147,9 @@ func TestHomomorphicAddCommutative(t *testing.T) {
 func TestHomomorphicAddAssociative(t *testing.T) {
 	sk, pk := KeyGen(rand.Reader)
 
-	ctA := Encrypt(pk, 11, rand.Reader)
-	ctB := Encrypt(pk, 22, rand.Reader)
-	ctC := Encrypt(pk, 33, rand.Reader)
+	ctA := mustEncrypt(t, pk, 11)
+	ctB := mustEncrypt(t, pk, 22)
+	ctC := mustEncrypt(t, pk, 33)
 
 	// (a + b) + c
 	left := HomomorphicAdd(HomomorphicAdd(ctA, ctB), ctC)
@@ -159,7 +169,7 @@ func TestHomomorphicAddIdentity(t *testing.T) {
 	sk, pk := KeyGen(rand.Reader)
 
 	for _, v := range []uint64{0, 1, 42, 1000, 1 << 24} {
-		ct := Encrypt(pk, v, rand.Reader)
+		ct := mustEncrypt(t, pk, v)
 		zero := EncryptZero()
 
 		sum := HomomorphicAdd(ct, zero)
@@ -183,8 +193,8 @@ func TestEncryptZeroDecryptsToIdentity(t *testing.T) {
 func TestEncryptProducesDifferentCiphertexts(t *testing.T) {
 	_, pk := KeyGen(rand.Reader)
 
-	ct1 := Encrypt(pk, 42, rand.Reader)
-	ct2 := Encrypt(pk, 42, rand.Reader)
+	ct1 := mustEncrypt(t, pk, 42)
+	ct2 := mustEncrypt(t, pk, 42)
 
 	// With overwhelming probability, different randomness → different ciphertext
 	require.False(t, ct1.C1.Equal(ct2.C1), "two encryptions of same value should have different C1")
@@ -197,7 +207,7 @@ func TestDifferentKeysCannotDecrypt(t *testing.T) {
 	sk1, pk1 := KeyGen(rand.Reader)
 	sk2, _ := KeyGen(rand.Reader)
 
-	ct := Encrypt(pk1, 42, rand.Reader)
+	ct := mustEncrypt(t, pk1, 42)
 
 	// Decrypt with wrong key
 	wrong := DecryptToPoint(sk2, ct)
@@ -214,7 +224,7 @@ func TestLargeValueEncryptDecrypt(t *testing.T) {
 
 	// 2^24 - 1 = max per-share value per ZKP #2 spec
 	maxShare := uint64((1 << 24) - 1)
-	ct := Encrypt(pk, maxShare, rand.Reader)
+	ct := mustEncrypt(t, pk, maxShare)
 	got := DecryptToPoint(sk, ct)
 	require.True(t, got.Equal(vG(maxShare)),
 		"should handle max share value 2^24-1")
@@ -223,10 +233,73 @@ func TestLargeValueEncryptDecrypt(t *testing.T) {
 	acc := EncryptZero()
 	n := 10
 	for i := 0; i < n; i++ {
-		acc = HomomorphicAdd(acc, Encrypt(pk, maxShare, rand.Reader))
+		acc = HomomorphicAdd(acc, mustEncrypt(t, pk, maxShare))
 	}
 	aggGot := DecryptToPoint(sk, acc)
 	aggExpected := vG(maxShare * uint64(n))
 	require.True(t, aggGot.Equal(aggExpected),
 		"should handle aggregated large values")
+}
+
+// TestEncryptNilReaderReturnsError verifies that Encrypt returns an error
+// when given a nil reader instead of silently producing a corrupted ciphertext.
+func TestEncryptNilReaderReturnsError(t *testing.T) {
+	_, pk := KeyGen(rand.Reader)
+	ct, err := Encrypt(pk, 42, nil)
+	require.Error(t, err, "nil reader should return an error")
+	require.Nil(t, ct, "ciphertext should be nil on error")
+}
+
+// TestEncryptZeroDistinctPointers verifies that EncryptZero returns a
+// ciphertext whose C1 and C2 are distinct point objects (no aliasing).
+func TestEncryptZeroDistinctPointers(t *testing.T) {
+	ct := EncryptZero()
+
+	// Both should be identity
+	require.True(t, ct.C1.IsIdentity(), "C1 should be identity")
+	require.True(t, ct.C2.IsIdentity(), "C2 should be identity")
+
+	// But they must be distinct objects, not aliased
+	pp1 := ct.C1.(*curvey.PointPallas)
+	pp2 := ct.C2.(*curvey.PointPallas)
+	require.False(t, pp1 == pp2,
+		"C1 and C2 must be distinct pointers (no aliasing)")
+}
+
+// ---------------------------------------------------------------------------
+// Public key validation tests
+// ---------------------------------------------------------------------------
+
+// TestEncryptRejectsIdentityPublicKey verifies that Encrypt returns an error
+// when given pk = identity (point at infinity). With pk = O, every ciphertext
+// leaks the plaintext as C2 = v*G.
+func TestEncryptRejectsIdentityPublicKey(t *testing.T) {
+	badPK := &PublicKey{Point: new(curvey.PointPallas).Identity()}
+	ct, err := Encrypt(badPK, 42, rand.Reader)
+	require.Error(t, err, "identity public key must be rejected")
+	require.Nil(t, ct)
+	require.Contains(t, err.Error(), "identity point")
+}
+
+// TestEncryptWithRandomnessRejectsIdentityPublicKey verifies the same
+// validation applies to the explicit-randomness variant.
+func TestEncryptWithRandomnessRejectsIdentityPublicKey(t *testing.T) {
+	badPK := &PublicKey{Point: new(curvey.PointPallas).Identity()}
+	r := new(curvey.ScalarPallas).Random(rand.Reader)
+	ct, err := EncryptWithRandomness(badPK, 42, r)
+	require.Error(t, err, "identity public key must be rejected")
+	require.Nil(t, ct)
+	require.Contains(t, err.Error(), "identity point")
+}
+
+// TestEncryptRejectsNilPublicKey verifies that Encrypt returns an error
+// for nil public key inputs instead of panicking.
+func TestEncryptRejectsNilPublicKey(t *testing.T) {
+	ct, err := Encrypt(nil, 42, rand.Reader)
+	require.Error(t, err, "nil public key must be rejected")
+	require.Nil(t, ct)
+
+	ct, err = Encrypt(&PublicKey{Point: nil}, 42, rand.Reader)
+	require.Error(t, err, "nil point in public key must be rejected")
+	require.Nil(t, ct)
 }

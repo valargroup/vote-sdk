@@ -124,7 +124,7 @@ func TestBSGSWithEncryptDecrypt(t *testing.T) {
 
 	values := []uint64{0, 1, 42, 100, 1000, 65535}
 	for _, v := range values {
-		ct := Encrypt(pk, v, rand.Reader)
+		ct := mustEncrypt(t, pk, v)
 		vGot := DecryptToPoint(sk, ct)
 		plaintext, err := table.Solve(vGot)
 		require.NoError(t, err, "should recover v=%d after encrypt+decrypt", v)
@@ -141,7 +141,7 @@ func TestBSGSWithHomomorphicSum(t *testing.T) {
 	shares := []uint64{64, 32, 2, 1} // total = 99
 	acc := EncryptZero()
 	for _, v := range shares {
-		acc = HomomorphicAdd(acc, Encrypt(pk, v, rand.Reader))
+		acc = HomomorphicAdd(acc, mustEncrypt(t, pk, v))
 	}
 
 	vGot := DecryptToPoint(sk, acc)
