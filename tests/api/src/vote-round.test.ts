@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   BASE_URL,
   makeCreateVotingSessionPayload,
+  getElGamalFixtures,
   postJSON,
   getJSON,
   toHex,
@@ -15,9 +16,17 @@ import {
   BLOCK_WAIT_MS,
 } from "./helpers.js";
 
+const fixtures = getElGamalFixtures();
+if (!fixtures) {
+  throw new Error(
+    "ElGamal fixtures not found. Run: go test -run TestGenerateElGamalFixtures ./crypto/elgamal/",
+  );
+}
+const EA_PK = new Uint8Array(Buffer.from(fixtures.ea_pk, "base64"));
+
 describe("Vote Round", () => {
   it("should set up a vote round and return tx_hash with code 0", async () => {
-    const { body } = makeCreateVotingSessionPayload();
+    const { body } = makeCreateVotingSessionPayload(EA_PK);
     const { status, json } = await postJSON("/zally/v1/create-voting-session", body);
 
     expect(status).toBe(200);
@@ -29,7 +38,7 @@ describe("Vote Round", () => {
 
   it("should query the round after creation", async () => {
     // Use a single payload for both submit and query so the round ID matches.
-    const { body, roundId } = makeCreateVotingSessionPayload();
+    const { body, roundId } = makeCreateVotingSessionPayload(EA_PK);
     const roundIdHex = toHex(roundId);
 
     // Submit the round

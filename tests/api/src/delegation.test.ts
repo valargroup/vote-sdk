@@ -19,12 +19,21 @@ import { describe, it, expect, beforeAll } from "vitest";
 import {
   makeCreateVotingSessionPayload,
   makeDelegateVotePayload,
+  getElGamalFixtures,
   postJSON,
   sleep,
   BLOCK_WAIT_MS,
   repeatByte,
   toBase64,
 } from "./helpers.js";
+
+const fixtures = getElGamalFixtures();
+if (!fixtures) {
+  throw new Error(
+    "ElGamal fixtures not found. Run: go test -run TestGenerateElGamalFixtures ./crypto/elgamal/",
+  );
+}
+const EA_PK = new Uint8Array(Buffer.from(fixtures.ea_pk, "base64"));
 
 describe("Delegation", () => {
   // Each test group sets up its own round to avoid cross-test interference.
@@ -33,7 +42,7 @@ describe("Delegation", () => {
     let roundId: Uint8Array;
 
     beforeAll(async () => {
-      const { body, roundId: rid } = makeCreateVotingSessionPayload();
+      const { body, roundId: rid } = makeCreateVotingSessionPayload(EA_PK);
       roundId = rid;
 
       const res = await postJSON("/zally/v1/create-voting-session", body);
@@ -80,7 +89,7 @@ describe("Delegation", () => {
 
     beforeAll(async () => {
       // Create a fresh round for this test group
-      const { body, roundId: rid } = makeCreateVotingSessionPayload();
+      const { body, roundId: rid } = makeCreateVotingSessionPayload(EA_PK);
       roundId = rid;
 
       const res = await postJSON("/zally/v1/create-voting-session", body);
@@ -120,7 +129,7 @@ describe("Delegation", () => {
 
   describe("validation errors", () => {
     it("should reject delegation with missing rk field", async () => {
-      const { body, roundId } = makeCreateVotingSessionPayload();
+      const { body, roundId } = makeCreateVotingSessionPayload(EA_PK);
       await postJSON("/zally/v1/create-voting-session", body);
       await sleep(BLOCK_WAIT_MS);
 
@@ -139,7 +148,7 @@ describe("Delegation", () => {
     });
 
     it("should reject delegation with empty proof", async () => {
-      const { body, roundId } = makeCreateVotingSessionPayload();
+      const { body, roundId } = makeCreateVotingSessionPayload(EA_PK);
       await postJSON("/zally/v1/create-voting-session", body);
       await sleep(BLOCK_WAIT_MS);
 
