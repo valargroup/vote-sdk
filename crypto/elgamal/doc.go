@@ -2,8 +2,7 @@
 // over the Pallas curve using the mikelodder7/curvey library.
 //
 // It provides keypair generation, encryption/decryption, homomorphic
-// ciphertext addition, baby-step giant-step discrete log recovery,
-// and Chaum-Pedersen DLEQ proofs for correct decryption.
+// ciphertext addition, baby-step giant-step discrete log recovery.
 //
 // # For concise explanations of the topics, see
 // - https://www.akhtariev.ca/notes/elgamal
