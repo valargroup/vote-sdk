@@ -151,19 +151,34 @@ export function deriveRoundId(fields: SetupRoundFields): Uint8Array {
 let roundCounter = Math.floor(Date.now() / 1000) % 1_000_000;
 
 /**
+ * Build a valid MsgSubmitTally JSON body.
+ *
+ * @param roundId - The vote_round_id (raw bytes) to target.
+ * @param creator - The session creator (must match the original creator).
+ */
+export function makeSubmitTallyPayload(roundId: Uint8Array, creator = "zvote1admin") {
+  return {
+    vote_round_id: toBase64(roundId),
+    creator,
+  };
+}
+
+/**
  * Build a valid MsgCreateVotingSession JSON body.
  * Returns both the JSON-ready object (with base64 byte fields) and the raw
  * fields needed for deriveRoundId.
  *
  * Each call produces a unique round ID by incrementing snapshot_height.
+ *
+ * @param opts.expiresInSec - Override vote_end_time offset (default: 3600 = 1 hour).
  */
-export function makeCreateVotingSessionPayload() {
+export function makeCreateVotingSessionPayload(opts?: { expiresInSec?: number }) {
   const snapshotBlockhash = repeatByte(0xaa, 32);
   const proposalsHash = repeatByte(0xbb, 32);
   const nullifierImtRoot = repeatByte(0xcc, 32);
   const ncRoot = repeatByte(0xdd, 32);
   const snapshotHeight = 1000 + roundCounter++;
-  const voteEndTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+  const voteEndTime = Math.floor(Date.now() / 1000) + (opts?.expiresInSec ?? 3600);
 
   const fields: SetupRoundFields = {
     snapshot_height: snapshotHeight,

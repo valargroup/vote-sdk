@@ -13,8 +13,9 @@ func TestIsVoteTag(t *testing.T) {
 	require.True(t, IsVoteTag(TagDelegateVote))
 	require.True(t, IsVoteTag(TagCastVote))
 	require.True(t, IsVoteTag(TagRevealShare))
+	require.True(t, IsVoteTag(TagSubmitTally))
 	require.False(t, IsVoteTag(0x00))
-	require.False(t, IsVoteTag(0x05))
+	require.False(t, IsVoteTag(0x06))
 	require.False(t, IsVoteTag(0x0a)) // Typical Cosmos Tx first byte
 	require.False(t, IsVoteTag(0xff))
 }
@@ -123,6 +124,26 @@ func TestEncodeDecodeRevealShare(t *testing.T) {
 	require.Equal(t, msg.VoteDecision, decodedMsg.VoteDecision)
 }
 
+func TestEncodeDecodeSubmitTally(t *testing.T) {
+	msg := &types.MsgSubmitTally{
+		VoteRoundId: []byte("roundid12345678901234567890123456"),
+		Creator:     "zvote1admin",
+	}
+
+	raw, err := EncodeVoteTx(msg)
+	require.NoError(t, err)
+	require.Equal(t, TagSubmitTally, raw[0])
+
+	tag, decoded, err := DecodeVoteTx(raw)
+	require.NoError(t, err)
+	require.Equal(t, TagSubmitTally, tag)
+
+	decodedMsg, ok := decoded.(*types.MsgSubmitTally)
+	require.True(t, ok)
+	require.Equal(t, msg.VoteRoundId, decodedMsg.VoteRoundId)
+	require.Equal(t, msg.Creator, decodedMsg.Creator)
+}
+
 func TestDecodeVoteTx_TooShort(t *testing.T) {
 	_, _, err := DecodeVoteTx(nil)
 	require.Error(t, err)
@@ -138,7 +159,7 @@ func TestDecodeVoteTx_InvalidTag(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid vote tx tag")
 
-	_, _, err = DecodeVoteTx([]byte{0x05, 0x00})
+	_, _, err = DecodeVoteTx([]byte{0x06, 0x00})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid vote tx tag")
 }
@@ -153,6 +174,7 @@ func TestTagForMessage(t *testing.T) {
 		{&types.MsgDelegateVote{}, TagDelegateVote, "DelegateVote"},
 		{&types.MsgCastVote{}, TagCastVote, "CastVote"},
 		{&types.MsgRevealShare{}, TagRevealShare, "RevealShare"},
+		{&types.MsgSubmitTally{}, TagSubmitTally, "SubmitTally"},
 	}
 
 	for _, tt := range tests {

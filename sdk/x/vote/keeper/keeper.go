@@ -369,6 +369,26 @@ func (k Keeper) ValidateRoundForShares(ctx context.Context, roundID []byte) erro
 	}
 }
 
+// ValidateRoundForTally checks that a vote round exists, is in TALLYING state,
+// and that the provided creator matches the session creator.
+func (k Keeper) ValidateRoundForTally(ctx context.Context, roundID []byte, creator string) error {
+	kvStore := k.OpenKVStore(ctx)
+	round, err := k.GetVoteRound(kvStore, roundID)
+	if err != nil {
+		return err // wraps ErrRoundNotFound if missing
+	}
+
+	if round.Status != types.SessionStatus_SESSION_STATUS_TALLYING {
+		return fmt.Errorf("%w: status is %s", types.ErrRoundNotTallying, round.Status)
+	}
+
+	if round.Creator != creator {
+		return fmt.Errorf("%w: creator mismatch: expected %s, got %s", types.ErrInvalidField, round.Creator, creator)
+	}
+
+	return nil
+}
+
 // ValidateRoundActive checks that a vote round exists and has not expired.
 // Deprecated: Use ValidateRoundForVoting or ValidateRoundForShares instead.
 // Kept as a thin wrapper to minimize churn in existing callers.

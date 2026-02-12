@@ -50,6 +50,7 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.HandleFunc("/zally/v1/delegate-vote", h.handleDelegateVote).Methods("POST")
 	router.HandleFunc("/zally/v1/cast-vote", h.handleCastVote).Methods("POST")
 	router.HandleFunc("/zally/v1/reveal-share", h.handleRevealShare).Methods("POST")
+	router.HandleFunc("/zally/v1/submit-tally", h.handleSubmitTally).Methods("POST")
 }
 
 // --- Tx submission handlers ---
@@ -80,6 +81,14 @@ func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
 	msg := &types.MsgRevealShare{}
+	if !h.decodeAndValidate(w, r, msg) {
+		return
+	}
+	h.broadcastVoteTx(w, msg)
+}
+
+func (h *Handler) handleSubmitTally(w http.ResponseWriter, r *http.Request) {
+	msg := &types.MsgSubmitTally{}
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}

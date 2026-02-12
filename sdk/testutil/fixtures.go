@@ -121,6 +121,14 @@ func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *
 	}
 }
 
+// ValidSubmitTally returns a MsgSubmitTally for the given round ID and creator.
+func ValidSubmitTally(roundID []byte, creator string) *types.MsgSubmitTally {
+	return &types.MsgSubmitTally{
+		VoteRoundId: roundID,
+		Creator:     creator,
+	}
+}
+
 // MakeNullifier creates a deterministic 32-byte nullifier from a seed byte.
 func MakeNullifier(seed byte) []byte {
 	return bytes.Repeat([]byte{seed}, 32)

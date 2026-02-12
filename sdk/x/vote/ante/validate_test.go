@@ -842,6 +842,123 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 }
 
 // ---------------------------------------------------------------------------
+// Tests: MsgSubmitTally
+// ---------------------------------------------------------------------------
+
+func newValidMsgSubmitTally() *types.MsgSubmitTally {
+	return &types.MsgSubmitTally{
+		VoteRoundId: testRoundID,
+		Creator:     "zvote1testcreator",
+	}
+}
+
+func (s *ValidateTestSuite) TestValidateVoteTx_SubmitTally() {
+	tests := []struct {
+		name        string
+		msg         func() types.VoteMessage
+		opts        ante.ValidateOpts
+		setup       func()
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name:  "valid submit tally with tallying round",
+			msg:   func() types.VoteMessage { return newValidMsgSubmitTally() },
+			opts:  mockOpts(),
+			setup: func() { s.setupTallyingRound() },
+		},
+		// --- ValidateBasic failures ---
+		{
+			name: "invalid: empty vote_round_id",
+			msg: func() types.VoteMessage {
+				m := newValidMsgSubmitTally()
+				m.VoteRoundId = nil
+				return m
+			},
+			opts:        mockOpts(),
+			expectErr:   true,
+			errContains: "vote_round_id",
+		},
+		{
+			name: "invalid: empty creator",
+			msg: func() types.VoteMessage {
+				m := newValidMsgSubmitTally()
+				m.Creator = ""
+				return m
+			},
+			opts:        mockOpts(),
+			expectErr:   true,
+			errContains: "creator",
+		},
+		// --- Round state failures ---
+		{
+			name:        "round not found",
+			msg:         func() types.VoteMessage { return newValidMsgSubmitTally() },
+			opts:        mockOpts(),
+			setup:       func() { /* no round */ },
+			expectErr:   true,
+			errContains: "vote round not found",
+		},
+		{
+			name:        "active round rejected (must be TALLYING)",
+			msg:         func() types.VoteMessage { return newValidMsgSubmitTally() },
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "not in tallying state",
+		},
+		{
+			name: "finalized round rejected",
+			msg:  func() types.VoteMessage { return newValidMsgSubmitTally() },
+			opts: mockOpts(),
+			setup: func() {
+				s.setupRoundWithStatus(testRoundID, expiredEndTime, types.SessionStatus_SESSION_STATUS_FINALIZED)
+			},
+			expectErr:   true,
+			errContains: "not in tallying state",
+		},
+		// --- Creator mismatch ---
+		{
+			name: "creator mismatch rejected",
+			msg: func() types.VoteMessage {
+				m := newValidMsgSubmitTally()
+				m.Creator = "zvote1imposter"
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupTallyingRound() },
+			expectErr:   true,
+			errContains: "creator mismatch",
+		},
+		// --- RecheckTx behavior ---
+		{
+			name:  "recheck: passes with tallying round and correct creator",
+			msg:   func() types.VoteMessage { return newValidMsgSubmitTally() },
+			opts:  recheckOpts(),
+			setup: func() { s.setupTallyingRound() },
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			if tc.setup != nil {
+				tc.setup()
+			}
+			err := ante.ValidateVoteTx(s.ctx, tc.msg(), s.keeper, tc.opts)
+			if tc.expectErr {
+				s.Require().Error(err)
+				if tc.errContains != "" {
+					s.Require().Contains(err.Error(), tc.errContains)
+				}
+			} else {
+				s.Require().NoError(err)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Tests: Validation ordering
 // ---------------------------------------------------------------------------
 

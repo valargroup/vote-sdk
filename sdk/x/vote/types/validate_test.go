@@ -169,3 +169,56 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Tests: MsgSubmitTally.ValidateBasic
+// ---------------------------------------------------------------------------
+
+func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
+	tests := []struct {
+		name        string
+		msg         *types.MsgSubmitTally
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name: "valid: all fields correct",
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
+				Creator:     "zvote1admin",
+			},
+		},
+		{
+			name: "invalid: empty vote_round_id",
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: nil,
+				Creator:     "zvote1admin",
+			},
+			expectErr:   true,
+			errContains: "vote_round_id",
+		},
+		{
+			name: "invalid: empty creator",
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
+				Creator:     "",
+			},
+			expectErr:   true,
+			errContains: "creator",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			err := tc.msg.ValidateBasic()
+			if tc.expectErr {
+				s.Require().Error(err)
+				if tc.errContains != "" {
+					s.Require().Contains(err.Error(), tc.errContains)
+				}
+			} else {
+				s.Require().NoError(err)
+			}
+		})
+	}
+}

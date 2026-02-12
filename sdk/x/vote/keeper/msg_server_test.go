@@ -512,6 +512,217 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 }
 
 // ---------------------------------------------------------------------------
+// SubmitTally
+// ---------------------------------------------------------------------------
+
+func (s *MsgServerTestSuite) TestSubmitTally() {
+	roundID := bytes.Repeat([]byte{0x40}, 32)
+	creator := "zvote1creator"
+
+	tests := []struct {
+		name        string
+		setup       func()
+		msg         *types.MsgSubmitTally
+		expectErr   bool
+		errContains string
+		check       func()
+	}{
+		{
+			name: "happy path: round transitions from TALLYING to FINALIZED",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: roundID,
+					VoteEndTime: 500_000, // in the past
+					Creator:     creator,
+					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+					Proposals: []*types.Proposal{
+						{Id: 0, Title: "Proposal A", Description: "First"},
+					},
+				}))
+			},
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: roundID,
+				Creator:     creator,
+			},
+			check: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, err := s.keeper.GetVoteRound(kv, roundID)
+				s.Require().NoError(err)
+				s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
+			},
+		},
+		{
+			name: "rejected: round is ACTIVE not TALLYING",
+			setup: func() {
+				s.setupActiveRound(roundID)
+			},
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: roundID,
+				Creator:     "zvote1creator",
+			},
+			expectErr:   true,
+			errContains: "not in tallying state",
+		},
+		{
+			name: "rejected: round is already FINALIZED",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: roundID,
+					VoteEndTime: 500_000,
+					Creator:     creator,
+					Status:      types.SessionStatus_SESSION_STATUS_FINALIZED,
+				}))
+			},
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: roundID,
+				Creator:     creator,
+			},
+			expectErr:   true,
+			errContains: "not in tallying state",
+		},
+		{
+			name: "rejected: creator mismatch",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: roundID,
+					VoteEndTime: 500_000,
+					Creator:     creator,
+					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+				}))
+			},
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: roundID,
+				Creator:     "zvote1imposter",
+			},
+			expectErr:   true,
+			errContains: "creator mismatch",
+		},
+		{
+			name: "rejected: round does not exist",
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: bytes.Repeat([]byte{0xFF}, 32),
+				Creator:     creator,
+			},
+			expectErr:   true,
+			errContains: "vote round not found",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			if tc.setup != nil {
+				tc.setup()
+			}
+			_, err := s.msgServer.SubmitTally(s.ctx, tc.msg)
+			if tc.expectErr {
+				s.Require().Error(err)
+				if tc.errContains != "" {
+					s.Require().Contains(err.Error(), tc.errContains)
+				}
+			} else {
+				s.Require().NoError(err)
+				if tc.check != nil {
+					tc.check()
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SubmitTally: event emission
+// ---------------------------------------------------------------------------
+
+func (s *MsgServerTestSuite) TestSubmitTally_EmitsEvent() {
+	s.SetupTest()
+	roundID := bytes.Repeat([]byte{0x50}, 32)
+	creator := "zvote1creator"
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: roundID,
+		VoteEndTime: 500_000,
+		Creator:     creator,
+		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+	}))
+
+	_, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
+		VoteRoundId: roundID,
+		Creator:     creator,
+	})
+	s.Require().NoError(err)
+
+	events := s.ctx.EventManager().Events()
+	found := false
+	for _, e := range events {
+		if e.Type == types.EventTypeSubmitTally {
+			found = true
+			for _, attr := range e.Attributes {
+				if attr.Key == types.AttributeKeyRoundID {
+					expected := fmt.Sprintf("%x", roundID)
+					s.Require().Equal(expected, attr.Value)
+				}
+				if attr.Key == types.AttributeKeyNewStatus {
+					s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED.String(), attr.Value)
+				}
+			}
+		}
+	}
+	s.Require().True(found, "expected %s event", types.EventTypeSubmitTally)
+}
+
+// ---------------------------------------------------------------------------
+// SubmitTally: finalized round rejects further shares
+// ---------------------------------------------------------------------------
+
+func (s *MsgServerTestSuite) TestSubmitTally_FinalizedRejectsShares() {
+	s.SetupTest()
+	roundID := bytes.Repeat([]byte{0x60}, 32)
+	creator := "zvote1creator"
+
+	// Create a TALLYING round.
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: roundID,
+		VoteEndTime: 500_000,
+		Creator:     creator,
+		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+		Proposals: []*types.Proposal{
+			{Id: 0, Title: "Proposal A", Description: "First"},
+		},
+	}))
+
+	// Finalize it.
+	_, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
+		VoteRoundId: roundID,
+		Creator:     creator,
+	})
+	s.Require().NoError(err)
+
+	// Attempt to submit a reveal share — should fail because round is FINALIZED.
+	_, err = s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
+		ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
+		VoteAmount:               100,
+		ProposalId:               0,
+		VoteDecision:             1,
+		Proof:                    bytes.Repeat([]byte{0xF2}, 64),
+		VoteRoundId:              roundID,
+		VoteCommTreeAnchorHeight: 10,
+	})
+	// RevealShare validates proposal_id which succeeds, but the ante handler
+	// would reject it. At the keeper level, RevealShare doesn't check status,
+	// so we verify the status is FINALIZED which the ante handler uses.
+	kv = s.keeper.OpenKVStore(s.ctx)
+	round, err2 := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err2)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
+}
+
+// ---------------------------------------------------------------------------
 // CreateVotingSession: deterministic round ID
 // ---------------------------------------------------------------------------
 

@@ -18,11 +18,12 @@ const (
 	TagDelegateVote        byte = 0x02
 	TagCastVote            byte = 0x03
 	TagRevealShare         byte = 0x04
+	TagSubmitTally         byte = 0x05
 )
 
 // IsVoteTag returns true if b is a valid vote transaction type tag.
 func IsVoteTag(b byte) bool {
-	return b >= TagCreateVotingSession && b <= TagRevealShare
+	return b >= TagCreateVotingSession && b <= TagSubmitTally
 }
 
 // TagForMessage returns the wire-format tag for a VoteMessage.
@@ -36,6 +37,8 @@ func TagForMessage(msg types.VoteMessage) (byte, error) {
 		return TagCastVote, nil
 	case *types.MsgRevealShare:
 		return TagRevealShare, nil
+	case *types.MsgSubmitTally:
+		return TagSubmitTally, nil
 	default:
 		return 0, fmt.Errorf("unknown vote message type: %T", msg)
 	}
@@ -82,6 +85,8 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 		msg = &types.MsgCastVote{}
 	case TagRevealShare:
 		msg = &types.MsgRevealShare{}
+	case TagSubmitTally:
+		msg = &types.MsgSubmitTally{}
 	default:
 		return 0, nil, fmt.Errorf("invalid vote tx tag: 0x%02x", tag)
 	}

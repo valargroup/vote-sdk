@@ -611,6 +611,96 @@ func (*MsgRevealShareResponse) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{7}
 }
 
+// MsgSubmitTally finalizes a voting session, transitioning it from TALLYING to FINALIZED.
+// Only the session creator (election authority) may submit this message.
+type MsgSubmitTally struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VoteRoundId   []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
+	Creator       string                 `protobuf:"bytes,2,opt,name=creator,proto3" json:"creator,omitempty"` // Must match the session creator
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgSubmitTally) Reset() {
+	*x = MsgSubmitTally{}
+	mi := &file_zvote_v1_tx_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgSubmitTally) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgSubmitTally) ProtoMessage() {}
+
+func (x *MsgSubmitTally) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_tx_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgSubmitTally.ProtoReflect.Descriptor instead.
+func (*MsgSubmitTally) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *MsgSubmitTally) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
+}
+
+func (x *MsgSubmitTally) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+type MsgSubmitTallyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgSubmitTallyResponse) Reset() {
+	*x = MsgSubmitTallyResponse{}
+	mi := &file_zvote_v1_tx_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgSubmitTallyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgSubmitTallyResponse) ProtoMessage() {}
+
+func (x *MsgSubmitTallyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_tx_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgSubmitTallyResponse.ProtoReflect.Descriptor instead.
+func (*MsgSubmitTallyResponse) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{9}
+}
+
 var File_zvote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_tx_proto_rawDesc = "" +
@@ -665,12 +755,17 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\x05proof\x18\x05 \x01(\fR\x05proof\x12\"\n" +
 	"\rvote_round_id\x18\x06 \x01(\fR\vvoteRoundId\x12>\n" +
 	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\"\x18\n" +
-	"\x16MsgRevealShareResponse2\xca\x02\n" +
+	"\x16MsgRevealShareResponse\"N\n" +
+	"\x0eMsgSubmitTally\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12\x18\n" +
+	"\acreator\x18\x02 \x01(\tR\acreator\"\x18\n" +
+	"\x16MsgSubmitTallyResponse2\x95\x03\n" +
 	"\x03Msg\x12a\n" +
 	"\x13CreateVotingSession\x12 .zvote.v1.MsgCreateVotingSession\x1a(.zvote.v1.MsgCreateVotingSessionResponse\x12L\n" +
 	"\fDelegateVote\x12\x19.zvote.v1.MsgDelegateVote\x1a!.zvote.v1.MsgDelegateVoteResponse\x12@\n" +
 	"\bCastVote\x12\x15.zvote.v1.MsgCastVote\x1a\x1d.zvote.v1.MsgCastVoteResponse\x12I\n" +
-	"\vRevealShare\x12\x18.zvote.v1.MsgRevealShare\x1a .zvote.v1.MsgRevealShareResponse\x1a\x05\x80\xe7\xb0*\x01B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
+	"\vRevealShare\x12\x18.zvote.v1.MsgRevealShare\x1a .zvote.v1.MsgRevealShareResponse\x12I\n" +
+	"\vSubmitTally\x12\x18.zvote.v1.MsgSubmitTally\x1a .zvote.v1.MsgSubmitTallyResponse\x1a\x05\x80\xe7\xb0*\x01B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
 var (
 	file_zvote_v1_tx_proto_rawDescOnce sync.Once
@@ -684,7 +779,7 @@ func file_zvote_v1_tx_proto_rawDescGZIP() []byte {
 	return file_zvote_v1_tx_proto_rawDescData
 }
 
-var file_zvote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_zvote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_zvote_v1_tx_proto_goTypes = []any{
 	(*MsgCreateVotingSession)(nil),         // 0: zvote.v1.MsgCreateVotingSession
 	(*MsgCreateVotingSessionResponse)(nil), // 1: zvote.v1.MsgCreateVotingSessionResponse
@@ -694,23 +789,27 @@ var file_zvote_v1_tx_proto_goTypes = []any{
 	(*MsgCastVoteResponse)(nil),            // 5: zvote.v1.MsgCastVoteResponse
 	(*MsgRevealShare)(nil),                 // 6: zvote.v1.MsgRevealShare
 	(*MsgRevealShareResponse)(nil),         // 7: zvote.v1.MsgRevealShareResponse
-	(*Proposal)(nil),                       // 8: zvote.v1.Proposal
+	(*MsgSubmitTally)(nil),                 // 8: zvote.v1.MsgSubmitTally
+	(*MsgSubmitTallyResponse)(nil),         // 9: zvote.v1.MsgSubmitTallyResponse
+	(*Proposal)(nil),                       // 10: zvote.v1.Proposal
 }
 var file_zvote_v1_tx_proto_depIdxs = []int32{
-	8, // 0: zvote.v1.MsgCreateVotingSession.proposals:type_name -> zvote.v1.Proposal
-	0, // 1: zvote.v1.Msg.CreateVotingSession:input_type -> zvote.v1.MsgCreateVotingSession
-	2, // 2: zvote.v1.Msg.DelegateVote:input_type -> zvote.v1.MsgDelegateVote
-	4, // 3: zvote.v1.Msg.CastVote:input_type -> zvote.v1.MsgCastVote
-	6, // 4: zvote.v1.Msg.RevealShare:input_type -> zvote.v1.MsgRevealShare
-	1, // 5: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
-	3, // 6: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
-	5, // 7: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
-	7, // 8: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
-	5, // [5:9] is the sub-list for method output_type
-	1, // [1:5] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	10, // 0: zvote.v1.MsgCreateVotingSession.proposals:type_name -> zvote.v1.Proposal
+	0,  // 1: zvote.v1.Msg.CreateVotingSession:input_type -> zvote.v1.MsgCreateVotingSession
+	2,  // 2: zvote.v1.Msg.DelegateVote:input_type -> zvote.v1.MsgDelegateVote
+	4,  // 3: zvote.v1.Msg.CastVote:input_type -> zvote.v1.MsgCastVote
+	6,  // 4: zvote.v1.Msg.RevealShare:input_type -> zvote.v1.MsgRevealShare
+	8,  // 5: zvote.v1.Msg.SubmitTally:input_type -> zvote.v1.MsgSubmitTally
+	1,  // 6: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
+	3,  // 7: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
+	5,  // 8: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
+	7,  // 9: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
+	9,  // 10: zvote.v1.Msg.SubmitTally:output_type -> zvote.v1.MsgSubmitTallyResponse
+	6,  // [6:11] is the sub-list for method output_type
+	1,  // [1:6] is the sub-list for method input_type
+	1,  // [1:1] is the sub-list for extension type_name
+	1,  // [1:1] is the sub-list for extension extendee
+	0,  // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_zvote_v1_tx_proto_init() }
@@ -725,7 +824,7 @@ func file_zvote_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_tx_proto_rawDesc), len(file_zvote_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

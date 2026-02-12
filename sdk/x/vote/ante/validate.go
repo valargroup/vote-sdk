@@ -67,13 +67,21 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper,
 	// MsgCreateVotingSession returns nil for GetVoteRoundId() since the round
 	// doesn't exist yet — skip the check in that case.
 	if roundID := msg.GetVoteRoundId(); roundID != nil {
-		if msg.AcceptsTallyingRound() {
-			if err := k.ValidateRoundForShares(ctx, roundID); err != nil {
+		switch m := msg.(type) {
+		case *types.MsgSubmitTally:
+			// MsgSubmitTally requires strictly TALLYING status + creator match.
+			if err := k.ValidateRoundForTally(ctx, roundID, m.Creator); err != nil {
 				return err
 			}
-		} else {
-			if err := k.ValidateRoundForVoting(ctx, roundID); err != nil {
-				return err
+		default:
+			if msg.AcceptsTallyingRound() {
+				if err := k.ValidateRoundForShares(ctx, roundID); err != nil {
+					return err
+				}
+			} else {
+				if err := k.ValidateRoundForVoting(ctx, roundID); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -112,6 +120,11 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, o
 
 	case *types.MsgRevealShare:
 		return verifyRevealShare(m, opts)
+
+	case *types.MsgSubmitTally:
+		// No cryptographic verification needed for tally submission.
+		// Authorization is checked via creator match in step 2.
+		return nil
 
 	default:
 		return fmt.Errorf("unknown vote message type: %T", msg)
