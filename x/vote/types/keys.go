@@ -11,10 +11,22 @@ const (
 	RouterKey = ModuleName
 )
 
+// NullifierType distinguishes the three independent nullifier sets per voting round.
+type NullifierType byte
+
+const (
+	// NullifierTypeGov identifies governance nullifiers recorded by MsgDelegateVote.
+	NullifierTypeGov NullifierType = 0x00
+	// NullifierTypeVoteAuthorityNote identifies vote-authority-note nullifiers recorded by MsgCastVote.
+	NullifierTypeVoteAuthorityNote NullifierType = 0x01
+	// NullifierTypeShare identifies share nullifiers recorded by MsgRevealShare.
+	NullifierTypeShare NullifierType = 0x02
+)
+
 // KV store key prefixes for the vote module.
 var (
-	// NullifierPrefix stores spent nullifiers: 0x01 || nullifier_bytes -> []byte{1}
-	// Used for gov nullifiers, VAN nullifiers, and share nullifiers (single namespace).
+	// NullifierPrefix stores spent nullifiers, scoped by type and round:
+	//   0x01 || type_byte || round_id (32 bytes) || nullifier_bytes -> []byte{1}
 	NullifierPrefix = []byte{0x01}
 
 	// CommitmentLeafPrefix stores append-only commitment tree entries: 0x02 || big-endian uint64 index -> commitment_bytes
@@ -33,9 +45,26 @@ var (
 	TreeStateKey = []byte{0x06}
 )
 
-// NullifierKey returns the store key for a nullifier.
-func NullifierKey(nullifier []byte) []byte {
-	return append(NullifierPrefix, nullifier...)
+// NullifierKey returns the store key for a nullifier scoped by type and round.
+// Format: 0x01 || type_byte || round_id || nullifier_bytes
+func NullifierKey(nfType NullifierType, roundID, nullifier []byte) []byte {
+	key := make([]byte, 0, len(NullifierPrefix)+1+len(roundID)+len(nullifier))
+	key = append(key, NullifierPrefix...)
+	key = append(key, byte(nfType))
+	key = append(key, roundID...)
+	key = append(key, nullifier...)
+	return key
+}
+
+// NullifierPrefixForRound returns the KV prefix for all nullifiers of a given
+// type within a specific round. Useful for prefix iteration (e.g., genesis export).
+// Format: 0x01 || type_byte || round_id
+func NullifierPrefixForRound(nfType NullifierType, roundID []byte) []byte {
+	key := make([]byte, 0, len(NullifierPrefix)+1+len(roundID))
+	key = append(key, NullifierPrefix...)
+	key = append(key, byte(nfType))
+	key = append(key, roundID...)
+	return key
 }
 
 // CommitmentLeafKey returns the store key for a commitment tree leaf at a given index.
