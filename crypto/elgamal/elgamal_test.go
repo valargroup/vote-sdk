@@ -1,0 +1,232 @@
+package elgamal
+
+import (
+	"crypto/rand"
+	"testing"
+
+	"github.com/mikelodder7/curvey"
+	"github.com/stretchr/testify/require"
+)
+
+// vG computes v * G on the Pallas curve, used as the expected decryption result.
+func vG(v uint64) curvey.Point {
+	return new(curvey.PointPallas).Generator().Mul(scalarFromUint64(v))
+}
+
+// TestKeyGen verifies that key generation produces valid, non-degenerate keys.
+func TestKeyGen(t *testing.T) {
+	sk, pk := KeyGen(rand.Reader)
+
+	require.False(t, sk.Scalar.IsZero(), "secret key should not be zero")
+	require.False(t, pk.Point.IsIdentity(), "public key should not be identity")
+	require.True(t, pk.Point.IsOnCurve(), "public key should be on curve")
+
+	// pk == sk * G
+	G := new(curvey.PointPallas).Generator()
+	expected := G.Mul(sk.Scalar)
+	require.True(t, pk.Point.Equal(expected), "pk should equal sk*G")
+}
+
+// TestDecryptRoundTrip verifies DecryptToPoint(Encrypt(v)) == v*G for various values.
+func TestDecryptRoundTrip(t *testing.T) {
+	sk, pk := KeyGen(rand.Reader)
+
+	values := []uint64{0, 1, 2, 7, 42, 100, 255, 1000, 65535, 1 << 20, 1 << 24}
+	for _, v := range values {
+		ct := Encrypt(pk, v, rand.Reader)
+		got := DecryptToPoint(sk, ct)
+		expected := vG(v)
+		require.True(t, got.Equal(expected), "decrypt(encrypt(%d)) should equal %d*G", v, v)
+	}
+}
+
+// TestDecryptZero verifies that encrypting 0 decrypts to the identity point.
+func TestDecryptZero(t *testing.T) {
+	sk, pk := KeyGen(rand.Reader)
+	ct := Encrypt(pk, 0, rand.Reader)
+	got := DecryptToPoint(sk, ct)
+	require.True(t, got.IsIdentity(), "decrypt(encrypt(0)) should be identity")
+}
+
+// TestEncryptWithRandomness verifies deterministic encryption with known randomness.
+func TestEncryptWithRandomness(t *testing.T) {
+	sk, pk := KeyGen(rand.Reader)
+	r := new(curvey.ScalarPallas).Random(rand.Reader)
+
+	ct1 := EncryptWithRandomness(pk, 42, r)
+	ct2 := EncryptWithRandomness(pk, 42, r)
+
+	// Same randomness, same value → identical ciphertext
+	require.True(t, ct1.C1.Equal(ct2.C1), "C1 should be identical with same randomness")
+	require.True(t, ct1.C2.Equal(ct2.C2), "C2 should be identical with same randomness")
+
+	// Decryption still works
+	got := DecryptToPoint(sk, ct1)
+	require.True(t, got.Equal(vG(42)))
+}
+
+// TestHomomorphicAdd verifies the core homomorphic property:
+// Decrypt(Enc(a) + Enc(b)) == (a+b)*G
+func TestHomomorphicAdd(t *testing.T) {
+	sk, pk := KeyGen(rand.Reader)
+
+	testCases := []struct {
+		a, b uint64
+	}{
+		{0, 0},
+		{1, 1},
+		{3, 5},
+		{42, 58},
+		{100, 200},
+		{1 << 16, 1 << 16},
+		{999, 1},
+		{0, 100},
+		{100, 0},
+	}
+
+	for _, tc := range testCases {
+		ctA := Encrypt(pk, tc.a, rand.Reader)
+		ctB := Encrypt(pk, tc.b, rand.Reader)
+		ctSum := HomomorphicAdd(ctA, ctB)
+
+		got := DecryptToPoint(sk, ctSum)
+		expected := vG(tc.a + tc.b)
+		require.True(t, got.Equal(expected),
+			"decrypt(enc(%d) + enc(%d)) should equal %d*G", tc.a, tc.b, tc.a+tc.b)
+	}
+}
+
+// TestHomomorphicAddMultiple verifies homomorphic accumulation across many ciphertexts.
+func TestHomomorphicAddMultiple(t *testing.T) {
+	sk, pk := KeyGen(rand.Reader)
+
+	shares := []uint64{10, 20, 30, 40, 50}
+	acc := EncryptZero()
+	var total uint64
+	for _, v := range shares {
+		ct := Encrypt(pk, v, rand.Reader)
+		acc = HomomorphicAdd(acc, ct)
+		total += v
+	}
+
+	got := DecryptToPoint(sk, acc)
+	expected := vG(total) // 150
+	require.True(t, got.Equal(expected),
+		"accumulated sum should decrypt to %d*G", total)
+}
+
+// TestHomomorphicAddCommutative verifies Enc(a)+Enc(b) decrypts the same as Enc(b)+Enc(a).
+func TestHomomorphicAddCommutative(t *testing.T) {
+	sk, pk := KeyGen(rand.Reader)
+
+	ctA := Encrypt(pk, 17, rand.Reader)
+	ctB := Encrypt(pk, 29, rand.Reader)
+
+	sumAB := HomomorphicAdd(ctA, ctB)
+	sumBA := HomomorphicAdd(ctB, ctA)
+
+	gotAB := DecryptToPoint(sk, sumAB)
+	gotBA := DecryptToPoint(sk, sumBA)
+
+	expected := vG(46)
+	require.True(t, gotAB.Equal(expected), "a+b should decrypt correctly")
+	require.True(t, gotBA.Equal(expected), "b+a should decrypt correctly")
+}
+
+// TestHomomorphicAddAssociative verifies (a+b)+c decrypts the same as a+(b+c).
+func TestHomomorphicAddAssociative(t *testing.T) {
+	sk, pk := KeyGen(rand.Reader)
+
+	ctA := Encrypt(pk, 11, rand.Reader)
+	ctB := Encrypt(pk, 22, rand.Reader)
+	ctC := Encrypt(pk, 33, rand.Reader)
+
+	// (a + b) + c
+	left := HomomorphicAdd(HomomorphicAdd(ctA, ctB), ctC)
+	// a + (b + c)
+	right := HomomorphicAdd(ctA, HomomorphicAdd(ctB, ctC))
+
+	gotLeft := DecryptToPoint(sk, left)
+	gotRight := DecryptToPoint(sk, right)
+	expected := vG(66)
+
+	require.True(t, gotLeft.Equal(expected), "(a+b)+c should decrypt to 66*G")
+	require.True(t, gotRight.Equal(expected), "a+(b+c) should decrypt to 66*G")
+}
+
+// TestHomomorphicAddIdentity verifies Enc(v) + EncryptZero() decrypts to v*G.
+func TestHomomorphicAddIdentity(t *testing.T) {
+	sk, pk := KeyGen(rand.Reader)
+
+	for _, v := range []uint64{0, 1, 42, 1000, 1 << 24} {
+		ct := Encrypt(pk, v, rand.Reader)
+		zero := EncryptZero()
+
+		sum := HomomorphicAdd(ct, zero)
+		got := DecryptToPoint(sk, sum)
+		expected := vG(v)
+		require.True(t, got.Equal(expected),
+			"enc(%d) + enc(0) should decrypt to %d*G", v, v)
+	}
+}
+
+// TestEncryptZeroDecryptsToIdentity verifies that EncryptZero() decrypts to the identity point.
+func TestEncryptZeroDecryptsToIdentity(t *testing.T) {
+	sk, _ := KeyGen(rand.Reader)
+	ct := EncryptZero()
+	got := DecryptToPoint(sk, ct)
+	require.True(t, got.IsIdentity(), "EncryptZero should decrypt to identity")
+}
+
+// TestEncryptProducesDifferentCiphertexts verifies that encrypting the same value
+// twice with different randomness produces different ciphertexts (semantic security).
+func TestEncryptProducesDifferentCiphertexts(t *testing.T) {
+	_, pk := KeyGen(rand.Reader)
+
+	ct1 := Encrypt(pk, 42, rand.Reader)
+	ct2 := Encrypt(pk, 42, rand.Reader)
+
+	// With overwhelming probability, different randomness → different ciphertext
+	require.False(t, ct1.C1.Equal(ct2.C1), "two encryptions of same value should have different C1")
+	require.False(t, ct1.C2.Equal(ct2.C2), "two encryptions of same value should have different C2")
+}
+
+// TestDifferentKeysCannotDecrypt verifies that a ciphertext encrypted under one
+// key pair cannot be correctly decrypted by a different secret key.
+func TestDifferentKeysCannotDecrypt(t *testing.T) {
+	sk1, pk1 := KeyGen(rand.Reader)
+	sk2, _ := KeyGen(rand.Reader)
+
+	ct := Encrypt(pk1, 42, rand.Reader)
+
+	// Decrypt with wrong key
+	wrong := DecryptToPoint(sk2, ct)
+	correct := DecryptToPoint(sk1, ct)
+
+	require.True(t, correct.Equal(vG(42)), "correct key should decrypt properly")
+	require.False(t, wrong.Equal(vG(42)), "wrong key should not decrypt properly")
+}
+
+// TestLargeValueEncryptDecrypt verifies encryption works for values near the
+// upper bound that BSGS will later need to recover.
+func TestLargeValueEncryptDecrypt(t *testing.T) {
+	sk, pk := KeyGen(rand.Reader)
+
+	// 2^24 - 1 = max per-share value per ZKP #2 spec
+	maxShare := uint64((1 << 24) - 1)
+	ct := Encrypt(pk, maxShare, rand.Reader)
+	got := DecryptToPoint(sk, ct)
+	require.True(t, got.Equal(vG(maxShare)),
+		"should handle max share value 2^24-1")
+
+	// Aggregate: several max shares summed
+	acc := EncryptZero()
+	n := 10
+	for i := 0; i < n; i++ {
+		acc = HomomorphicAdd(acc, Encrypt(pk, maxShare, rand.Reader))
+	}
+	aggGot := DecryptToPoint(sk, acc)
+	aggExpected := vG(maxShare * uint64(n))
+	require.True(t, aggGot.Equal(aggExpected),
+		"should handle aggregated large values")
+}
