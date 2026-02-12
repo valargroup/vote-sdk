@@ -5,7 +5,7 @@ use anyhow::Result;
 use ff::PrimeField as _;
 use incrementalmerkletree::{Altitude, Hashable as _};
 use orchard::tree::MerkleHashOrchard;
-use orchard::vote::{calculate_merkle_paths, OrchardHash};
+use orchard::vote::OrchardHash;
 use pasta_curves::Fp;
 use rusqlite::Connection;
 
@@ -77,7 +77,8 @@ pub fn list_nf_ranges(connection: &Connection) -> Result<Vec<Range>> {
 pub fn compute_nf_root(connection: &Connection) -> Result<OrchardHash> {
     let ranges = list_nf_ranges(connection)?;
     let leaves = commit_ranges(&ranges);
-    let (root, _) = calculate_merkle_paths(0, &[], &leaves);
+    let empty = precompute_empty_hashes();
+    let (root, _) = build_levels(&leaves, &empty);
     Ok(OrchardHash(root.to_repr()))
 }
 
@@ -111,6 +112,77 @@ pub fn commit_ranges(ranges: &[Range]) -> Vec<Fp> {
             MerkleHashOrchard::combine(Altitude::from(0), &left, &right).inner()
         })
         .collect()
+}
+
+/// Hash two child nodes at the given tree level using the Sinsemilla-based
+/// combine from the Orchard Merkle tree.
+fn combine(level: u8, left: Fp, right: Fp) -> Fp {
+    let l = MerkleHashOrchard::from_base(left);
+    let r = MerkleHashOrchard::from_base(right);
+    MerkleHashOrchard::combine(Altitude::from(level), &l, &r).inner()
+}
+
+/// Pre-compute the empty subtree hash at each tree level.
+///
+/// `empty[0]` is the sentinel empty leaf value `Fp::from(2)`.
+/// `empty[i]` is the hash of a fully-empty subtree of height `i`, computed as
+/// `combine(level = i-1, empty[i-1], empty[i-1])`.
+///
+/// These are used during tree construction and proof generation to represent
+/// the hash of any subtree that contains no populated leaves, avoiding the
+/// need to recompute them on every call.
+pub fn precompute_empty_hashes() -> [Fp; TREE_DEPTH] {
+    let mut empty = [Fp::default(); TREE_DEPTH];
+    empty[0] = Fp::from(2u64);
+    for i in 1..TREE_DEPTH {
+        empty[i] = combine((i - 1) as u8, empty[i - 1], empty[i - 1]);
+    }
+    empty
+}
+
+/// Build the Merkle tree bottom-up, retaining all intermediate levels.
+///
+/// Returns `(root, levels)` where `levels[i]` contains the node hashes at
+/// tree level `i` (level 0 = padded leaf hashes). Each level is padded to
+/// even length using the pre-computed empty hash for that level so that
+/// pair-wise hashing produces the next level cleanly.
+///
+/// This is the tree's own construction — it uses [`TREE_DEPTH`] levels
+/// (not the orchard fork's hardcoded 32) and retains every intermediate
+/// layer so that Merkle auth paths can be extracted in O([`TREE_DEPTH`])
+/// via simple sibling lookups.
+fn build_levels(leaves: &[Fp], empty: &[Fp; TREE_DEPTH]) -> (Fp, Vec<Vec<Fp>>) {
+    let mut levels: Vec<Vec<Fp>> = Vec::with_capacity(TREE_DEPTH);
+
+    // Level 0 = leaf commitments, padded to even length.
+    let mut layer = leaves.to_vec();
+    if layer.is_empty() {
+        layer.push(empty[0]);
+    }
+    if layer.len() & 1 == 1 {
+        layer.push(empty[0]);
+    }
+    levels.push(layer);
+
+    // Hash pairs at each level to produce the next.
+    for i in 0..TREE_DEPTH - 1 {
+        let prev = &levels[i];
+        let pairs = prev.len() / 2;
+        let mut next = Vec::with_capacity(pairs + 1);
+        for j in 0..pairs {
+            next.push(combine(i as u8, prev[j * 2], prev[j * 2 + 1]));
+        }
+        if next.len() & 1 == 1 {
+            next.push(empty[i + 1]);
+        }
+        levels.push(next);
+    }
+
+    // The final level has exactly two nodes; hash them to get the root.
+    let top = &levels[TREE_DEPTH - 1];
+    let root = combine((TREE_DEPTH - 1) as u8, top[0], top[1]);
+
+    (root, levels)
 }
 
 /// Find the gap-range index that contains `value`.
@@ -167,9 +239,17 @@ pub fn load_tree(path: &Path) -> Result<Vec<Range>> {
 /// Merkle leaf. The resulting fixed-depth tree supports exclusion proofs:
 /// given a value, [`prove`](NullifierTree::prove) produces proof data
 /// showing the value is not a nullifier.
+///
+/// All intermediate hash levels are pre-computed and retained so that
+/// generating a Merkle authentication path is O([`TREE_DEPTH`]) — a simple
+/// sibling lookup at each level — instead of rebuilding the entire tree.
 pub struct NullifierTree {
     ranges: Vec<Range>,
-    leaves: Vec<Fp>,
+    /// `levels[i]` holds the node hashes at tree level `i`.
+    /// Level 0 contains the leaf commitments (padded to even length).
+    levels: Vec<Vec<Fp>>,
+    /// Pre-computed empty subtree hashes for each level.
+    empty_hashes: [Fp; TREE_DEPTH],
     root: Fp,
 }
 
@@ -215,8 +295,9 @@ impl NullifierTree {
     /// Build a tree from pre-computed gap ranges.
     fn from_ranges(ranges: Vec<Range>) -> Self {
         let leaves = commit_ranges(&ranges);
-        let (root, _) = calculate_merkle_paths(0, &[], &leaves);
-        Self { ranges, leaves, root }
+        let empty_hashes = precompute_empty_hashes();
+        let (root, levels) = build_levels(&leaves, &empty_hashes);
+        Self { ranges, levels, empty_hashes, root }
     }
 
     /// The Merkle root of the tree.
@@ -244,19 +325,40 @@ impl NullifierTree {
         self.ranges.is_empty()
     }
 
+    /// The leaf commitment hashes (level 0 of the tree).
+    ///
+    /// Returns only the populated leaves, excluding any padding element
+    /// that was added for even-length pairing.
+    pub fn leaves(&self) -> &[Fp] {
+        &self.levels[0][..self.ranges.len()]
+    }
+
     /// Generate an exclusion proof for `value`.
     ///
     /// Returns `Some(proof)` if `value` falls within a gap range (i.e., is
     /// not a nullifier), or `None` if `value` is an existing nullifier.
+    ///
+    /// This is O([`TREE_DEPTH`]) — it walks the pre-computed levels collecting
+    /// sibling hashes rather than rebuilding the entire tree.
     pub fn prove(&self, value: Fp) -> Option<ExclusionProof> {
         let idx = find_range_for_value(&self.ranges, value)?;
-        let (_, paths) = calculate_merkle_paths(0, &[idx as u32], &self.leaves);
-        let p = &paths[0];
+        let mut auth_path = Vec::with_capacity(TREE_DEPTH);
+        let mut pos = idx;
+        for level in 0..TREE_DEPTH {
+            let sibling = pos ^ 1;
+            let hash = if sibling < self.levels[level].len() {
+                self.levels[level][sibling]
+            } else {
+                self.empty_hashes[level]
+            };
+            auth_path.push(hash);
+            pos >>= 1;
+        }
         Some(ExclusionProof {
             range: self.ranges[idx],
             position: idx as u32,
-            leaf: p.value,
-            auth_path: p.path.to_vec(),
+            leaf: self.levels[0][idx],
+            auth_path,
         })
     }
 
@@ -305,6 +407,7 @@ impl ExclusionProof {
 mod tests {
     use super::*;
     use orchard::note::ExtractedNoteCommitment;
+    use orchard::vote::calculate_merkle_paths;
 
     /// Helper: make an Fp from a u64.
     fn fp(v: u64) -> Fp {
@@ -467,19 +570,78 @@ mod tests {
     #[test]
     fn test_proof_cross_verified_with_orchard() {
         let tree = NullifierTree::build(four_nullifiers());
-
-        // Also verify using orchard's MerklePath API for cross-validation
         let leaves = commit_ranges(tree.ranges());
-        let (root, paths) = calculate_merkle_paths(0, &[1], &leaves);
+
+        // The orchard fork uses depth 32 while we use TREE_DEPTH (29).
+        // Both should be internally consistent, but produce different roots.
+
+        // Verify the orchard fork's paths are self-consistent at depth 32.
+        let (orchard_root, paths) = calculate_merkle_paths(0, &[1], &leaves);
         let path = &paths[0];
         let mp = path.to_orchard_merkle_tree();
         let anchor = mp.root(
             ExtractedNoteCommitment::from_bytes(&path.value.to_repr()).unwrap(),
         );
-        assert_eq!(root.to_repr(), anchor.to_bytes());
+        assert_eq!(orchard_root.to_repr(), anchor.to_bytes());
 
-        // Our own verify should agree
+        // Leaf values must agree between both implementations.
+        assert_eq!(path.value, tree.leaves()[1]);
+
+        // Our own prove + verify is self-consistent at depth 29.
         let proof = tree.prove(fp(15)).unwrap();
         assert!(proof.verify(fp(15), tree.root_fp()));
+    }
+
+    #[test]
+    fn test_precompute_empty_hashes_chain() {
+        let empty = precompute_empty_hashes();
+
+        // Level 0 is the sentinel empty leaf.
+        assert_eq!(empty[0], Fp::from(2u64));
+
+        // Each subsequent level is the self-hash of the level below.
+        for i in 1..TREE_DEPTH {
+            let expected = combine((i - 1) as u8, empty[i - 1], empty[i - 1]);
+            assert_eq!(
+                empty[i], expected,
+                "empty hash mismatch at level {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_levels_consistency() {
+        let tree = NullifierTree::build(four_nullifiers());
+
+        // Verify that each level is correctly derived from the level below.
+        for i in 0..TREE_DEPTH - 1 {
+            let prev = &tree.levels[i];
+            let next = &tree.levels[i + 1];
+            let pairs = prev.len() / 2;
+            for j in 0..pairs {
+                let expected = combine(i as u8, prev[j * 2], prev[j * 2 + 1]);
+                assert_eq!(
+                    next[j], expected,
+                    "level {} node {} does not match hash of level {} children",
+                    i + 1, j, i
+                );
+            }
+        }
+
+        // Root should be the hash of the top-level pair.
+        let top = &tree.levels[TREE_DEPTH - 1];
+        let expected_root = combine((TREE_DEPTH - 1) as u8, top[0], top[1]);
+        assert_eq!(tree.root_fp(), expected_root);
+    }
+
+    #[test]
+    fn test_leaves_accessor() {
+        let tree = NullifierTree::build(four_nullifiers());
+        let leaves = tree.leaves();
+        assert_eq!(leaves.len(), 5); // 4 nullifiers → 5 ranges
+        // Verify leaves match commit_ranges output.
+        let expected = commit_ranges(tree.ranges());
+        assert_eq!(leaves, expected.as_slice());
     }
 }
