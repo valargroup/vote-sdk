@@ -37,8 +37,7 @@ extension VotingCryptoClient: DependencyKey {
                     snapshotHeight: roundState.snapshotHeight,
                     hotkeyAddress: roundState.hotkeyAddress,
                     delegatedWeight: roundState.delegatedWeight,
-                    proofGenerated: roundState.proofGenerated,
-                    votesCast: roundState.votesCast
+                    proofGenerated: roundState.proofGenerated
                 ),
                 votes: ffiVotes.map { $0.toModel() }
             )
@@ -75,8 +74,7 @@ extension VotingCryptoClient: DependencyKey {
                     snapshotHeight: state.snapshotHeight,
                     hotkeyAddress: state.hotkeyAddress,
                     delegatedWeight: state.delegatedWeight,
-                    proofGenerated: state.proofGenerated,
-                    votesCast: state.votesCast
+                    proofGenerated: state.proofGenerated
                 )
             },
             getVotes: { roundId in
@@ -248,7 +246,7 @@ extension VotingCryptoClient: DependencyKey {
                     vanNullifier: commitment.vanNullifier,
                     voteAuthorityNoteNew: commitment.voteAuthorityNoteNew,
                     voteCommitment: commitment.voteCommitment,
-                    proposalId: String(commitment.proposalId),
+                    proposalId: commitment.proposalId,
                     proof: commitment.proof
                 )
                 let ffiPayloads = try db.buildSharePayloads(
@@ -345,7 +343,7 @@ private extension ZcashVotingFFI.RoundPhase {
 private extension ZcashVotingFFI.VoteRecord {
     func toModel() -> VotingModels.VoteRecord {
         VotingModels.VoteRecord(
-            proposalId: UInt32(proposalId) ?? 0,
+            proposalId: proposalId,
             choice: VoteChoice.fromFFI(choice),
             submitted: submitted
         )

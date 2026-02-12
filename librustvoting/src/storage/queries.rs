@@ -90,17 +90,9 @@ pub fn get_round_state(conn: &Connection, round_id: &str) -> Result<RoundState, 
             named_params! { ":round_id": round_id },
             |row| row.get::<_, i64>(0).map(|c| c > 0),
         )
-        .unwrap_or(false);
-
-    let votes_cast: Vec<String> = conn
-        .prepare("SELECT proposal_id FROM votes WHERE round_id = :round_id")
-        .and_then(|mut stmt| {
-            stmt.query_map(named_params! { ":round_id": round_id }, |row| {
-                row.get::<_, i64>(0).map(|id| id.to_string())
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+        .map_err(|e| VotingError::Internal {
+            message: format!("failed to query proof status: {}", e),
+        })?;
 
     Ok(RoundState {
         round_id: round_id.to_string(),
@@ -109,7 +101,6 @@ pub fn get_round_state(conn: &Connection, round_id: &str) -> Result<RoundState, 
         hotkey_address: None,
         delegated_weight: None,
         proof_generated,
-        votes_cast,
     })
 }
 
@@ -271,7 +262,7 @@ pub fn get_votes(conn: &Connection, round_id: &str) -> Result<Vec<VoteRecord>, V
     let votes = stmt
         .query_map(named_params! { ":round_id": round_id }, |row| {
             Ok(VoteRecord {
-                proposal_id: row.get::<_, i64>(0)?.to_string(),
+                proposal_id: row.get::<_, i64>(0)? as u32,
                 choice: row.get::<_, i64>(1)? as u32,
                 submitted: row.get::<_, i64>(2)? != 0,
             })

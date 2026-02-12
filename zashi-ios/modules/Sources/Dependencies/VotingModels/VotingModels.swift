@@ -102,7 +102,6 @@ public struct RoundStateInfo: Equatable, Sendable {
     public let hotkeyAddress: String?
     public let delegatedWeight: UInt64?
     public let proofGenerated: Bool
-    public let votesCast: [String]
 
     public init(
         roundId: String,
@@ -110,8 +109,7 @@ public struct RoundStateInfo: Equatable, Sendable {
         snapshotHeight: UInt64,
         hotkeyAddress: String?,
         delegatedWeight: UInt64?,
-        proofGenerated: Bool,
-        votesCast: [String]
+        proofGenerated: Bool
     ) {
         self.roundId = roundId
         self.phase = phase
@@ -119,7 +117,6 @@ public struct RoundStateInfo: Equatable, Sendable {
         self.hotkeyAddress = hotkeyAddress
         self.delegatedWeight = delegatedWeight
         self.proofGenerated = proofGenerated
-        self.votesCast = votesCast
     }
 }
 
@@ -173,8 +170,7 @@ public struct VotingDbState: Equatable, Sendable {
             snapshotHeight: 0,
             hotkeyAddress: nil,
             delegatedWeight: nil,
-            proofGenerated: false,
-            votesCast: []
+            proofGenerated: false
         ),
         votes: []
     )

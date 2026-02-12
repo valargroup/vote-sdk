@@ -131,7 +131,7 @@ impl VotingDb {
         progress: &dyn ProofProgressReporter,
     ) -> Result<VoteCommitmentBundle, VotingError> {
         let bundle = crate::zkp2::build_vote_commitment(
-            &proposal_id.to_string(),
+            proposal_id,
             choice,
             enc_shares,
             van_witness,
@@ -302,10 +302,7 @@ mod tests {
             "test-round-1", 0, 0, &enc_shares, &van_witness, &reporter,
         ).unwrap();
         assert_eq!(bundle.van_nullifier.len(), 32);
-        assert_eq!(bundle.proposal_id, "0");
-
-        let state = db.get_round_state("test-round-1").unwrap();
-        assert_eq!(state.votes_cast.len(), 1);
+        assert_eq!(bundle.proposal_id, 0);
 
         db.mark_vote_submitted("test-round-1", 0).unwrap();
     }

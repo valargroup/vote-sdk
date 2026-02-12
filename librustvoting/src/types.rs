@@ -60,7 +60,7 @@ pub struct VoteCommitmentBundle {
     pub van_nullifier: Vec<u8>,
     pub vote_authority_note_new: Vec<u8>,
     pub vote_commitment: Vec<u8>,
-    pub proposal_id: String,
+    pub proposal_id: u32,
     pub proof: Vec<u8>,
 }
 
@@ -68,7 +68,7 @@ pub struct VoteCommitmentBundle {
 #[derive(Clone, Debug)]
 pub struct SharePayload {
     pub shares_hash: Vec<u8>,
-    pub proposal_id: String,
+    pub proposal_id: u32,
     pub vote_decision: u32,
     pub enc_share: EncryptedShare,
     pub tree_position: u64,

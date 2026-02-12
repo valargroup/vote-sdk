@@ -14,7 +14,7 @@ pub fn build_share_payloads(
     for share in enc_shares {
         payloads.push(SharePayload {
             shares_hash: vec![0xDD; 32],
-            proposal_id: commitment.proposal_id.clone(),
+            proposal_id: commitment.proposal_id,
             vote_decision: 0,
             enc_share: share.clone(),
             tree_position: 0,
@@ -50,7 +50,7 @@ mod tests {
             van_nullifier: vec![0xAA; 32],
             vote_authority_note_new: vec![0xBB; 32],
             vote_commitment: vec![0xCC; 32],
-            proposal_id: "prop-1".to_string(),
+            proposal_id: 1,
             proof: vec![0xAB; 256],
         }
     }
@@ -59,7 +59,7 @@ mod tests {
     fn test_build_share_payloads_stub() {
         let result = build_share_payloads(&mock_enc_shares(), &mock_commitment()).unwrap();
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].proposal_id, "prop-1");
+        assert_eq!(result[0].proposal_id, 1);
         assert_eq!(result[0].enc_share.share_index, 0);
         assert_eq!(result[1].enc_share.share_index, 1);
     }

@@ -77,7 +77,6 @@ pub struct RoundState {
     pub hotkey_address: Option<String>,
     pub delegated_weight: Option<u64>,
     pub proof_generated: bool,
-    pub votes_cast: Vec<String>,
 }
 
 impl From<voting::storage::RoundState> for RoundState {
@@ -89,7 +88,6 @@ impl From<voting::storage::RoundState> for RoundState {
             hotkey_address: s.hotkey_address,
             delegated_weight: s.delegated_weight,
             proof_generated: s.proof_generated,
-            votes_cast: s.votes_cast,
         }
     }
 }
@@ -115,7 +113,7 @@ impl From<voting::storage::RoundSummary> for RoundSummary {
 
 #[derive(Clone, uniffi::Record)]
 pub struct VoteRecord {
-    pub proposal_id: String,
+    pub proposal_id: u32,
     pub choice: u32,
     pub submitted: bool,
 }
@@ -176,14 +174,14 @@ pub struct VoteCommitmentBundle {
     pub van_nullifier: Vec<u8>,
     pub vote_authority_note_new: Vec<u8>,
     pub vote_commitment: Vec<u8>,
-    pub proposal_id: String,
+    pub proposal_id: u32,
     pub proof: Vec<u8>,
 }
 
 #[derive(Clone, uniffi::Record)]
 pub struct SharePayload {
     pub shares_hash: Vec<u8>,
-    pub proposal_id: String,
+    pub proposal_id: u32,
     pub vote_decision: u32,
     pub enc_share: EncryptedShare,
     pub tree_position: u64,
@@ -522,14 +520,14 @@ pub fn generate_delegation_proof(witness: Vec<u8>) -> Result<ProofResult, Voting
 
 #[uniffi::export]
 pub fn build_vote_commitment(
-    proposal_id: String,
+    proposal_id: u32,
     choice: u32,
     enc_shares: Vec<EncryptedShare>,
     van_witness: Vec<u8>,
 ) -> Result<VoteCommitmentBundle, VotingError> {
     let core_shares: Vec<voting::EncryptedShare> = enc_shares.into_iter().map(Into::into).collect();
     let reporter = voting::NoopProgressReporter;
-    Ok(voting::zkp2::build_vote_commitment(&proposal_id, choice, &core_shares, &van_witness, &reporter)?.into())
+    Ok(voting::zkp2::build_vote_commitment(proposal_id, choice, &core_shares, &van_witness, &reporter)?.into())
 }
 
 #[uniffi::export]

@@ -43,13 +43,12 @@ pub struct RoundState {
     pub hotkey_address: Option<String>,
     pub delegated_weight: Option<u64>,
     pub proof_generated: bool,
-    pub votes_cast: Vec<String>,
 }
 
 /// A vote record from the votes table.
 #[derive(Clone, Debug)]
 pub struct VoteRecord {
-    pub proposal_id: String,
+    pub proposal_id: u32,
     pub choice: u32,
     pub submitted: bool,
 }
@@ -138,7 +137,6 @@ mod tests {
         assert_eq!(state.phase, RoundPhase::Initialized);
         assert_eq!(state.snapshot_height, 1000);
         assert!(!state.proof_generated);
-        assert!(state.votes_cast.is_empty());
 
         let rounds = queries::list_rounds(&conn).unwrap();
         assert_eq!(rounds.len(), 1);
@@ -195,9 +193,6 @@ mod tests {
         queries::store_vote(&conn, "test-round-1", 0, 0, &commitment).unwrap();
         queries::store_vote(&conn, "test-round-1", 1, 1, &commitment).unwrap();
 
-        let state = queries::get_round_state(&conn, "test-round-1").unwrap();
-        assert_eq!(state.votes_cast.len(), 2);
-
         queries::mark_vote_submitted(&conn, "test-round-1", 0).unwrap();
     }
 
@@ -218,10 +213,10 @@ mod tests {
 
         let votes = queries::get_votes(&conn, "test-round-1").unwrap();
         assert_eq!(votes.len(), 2);
-        assert_eq!(votes[0].proposal_id, "0");
+        assert_eq!(votes[0].proposal_id, 0);
         assert_eq!(votes[0].choice, 0);
         assert!(!votes[0].submitted);
-        assert_eq!(votes[1].proposal_id, "1");
+        assert_eq!(votes[1].proposal_id, 1);
         assert_eq!(votes[1].choice, 2);
 
         // Mark first vote submitted and verify
