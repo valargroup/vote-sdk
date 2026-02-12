@@ -9,14 +9,10 @@ struct ProposalListView: View {
 
     let store: StoreOf<Voting>
 
-    private let selectionFeedback = UISelectionFeedbackGenerator()
-    private let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-
     var body: some View {
         WithPerceptionTracking {
             VStack(spacing: 0) {
                 proposalScrollView()
-                bottomBar()
             }
             .navigationTitle("Governance")
             .navigationBarTitleDisplayMode(.inline)
@@ -142,123 +138,10 @@ struct ProposalListView: View {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .font(.system(size: 12))
-                    Text("Delegation ready")
+                    Text("Ready to vote")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.green)
                 }
-            }
-        }
-    }
-
-    // MARK: - Bottom Bar
-
-    @ViewBuilder
-    private func bottomBar() -> some View {
-        let activeProposal = store.activeProposalId
-            .flatMap { id in store.votingRound.proposals.first { $0.id == id } }
-        let activeIndex = store.activeProposalId
-            .flatMap { id in store.votingRound.proposals.firstIndex { $0.id == id } }
-
-        VStack(spacing: 0) {
-            Divider()
-
-            if store.allVoted {
-                reviewBar()
-            } else if let proposal = activeProposal {
-                voteBar(proposal: proposal, vote: store.votes[proposal.id], activeIndex: activeIndex)
-            }
-        }
-        .background(Design.Surfaces.bgPrimary.color(colorScheme))
-    }
-
-    @ViewBuilder
-    private func reviewBar() -> some View {
-        VStack(spacing: 8) {
-            Text("All proposals voted!")
-                .zFont(.medium, size: 13, style: Design.Text.secondary)
-
-            ZashiButton(
-                "Review & Submit",
-                type: store.canSubmitVotes ? .primary : .quaternary
-            ) {
-                store.send(.reviewVotesTapped)
-            }
-            .disabled(!store.canSubmitVotes)
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
-    }
-
-    @ViewBuilder
-    private func voteBar(proposal: Proposal, vote: VoteChoice?, activeIndex: Int?) -> some View {
-        let hasPrev = (activeIndex ?? 0) > 0
-        let hasNext = (activeIndex ?? 0) < store.totalProposals - 1
-
-        VStack(spacing: 10) {
-            voteBarTitle(proposal: proposal, vote: vote, hasPrev: hasPrev, hasNext: hasNext)
-            voteBarButtons(proposal: proposal, vote: vote)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-    }
-
-    @ViewBuilder
-    private func voteBarTitle(proposal: Proposal, vote: VoteChoice?, hasPrev: Bool, hasNext: Bool) -> some View {
-        HStack(spacing: 0) {
-            Button {
-                selectionFeedback.selectionChanged()
-                store.send(.bottomBarPrevious)
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .disabled(!hasPrev)
-            .opacity(hasPrev ? 1 : 0.3)
-            .accessibilityLabel("Previous proposal")
-
-            VStack(alignment: .leading, spacing: 2) {
-                if let zip = proposal.zipNumber {
-                    Text(zip)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-                Text(proposal.title)
-                    .zFont(.medium, size: 13, style: Design.Text.primary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            if let vote {
-                VoteChip(choice: vote)
-            }
-
-            Button {
-                selectionFeedback.selectionChanged()
-                store.send(.bottomBarNext)
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .disabled(!hasNext)
-            .opacity(hasNext ? 1 : 0.3)
-            .accessibilityLabel("Next proposal")
-        }
-    }
-
-    @ViewBuilder
-    private func voteBarButtons(proposal: Proposal, vote: VoteChoice?) -> some View {
-        HStack(spacing: 8) {
-            bottomVoteButton("Support", color: .green, icon: "hand.thumbsup", isSelected: vote == .support) {
-                store.send(.castVote(proposalId: proposal.id, choice: .support))
-            }
-            bottomVoteButton("Oppose", color: .red, icon: "hand.thumbsdown", isSelected: vote == .oppose) {
-                store.send(.castVote(proposalId: proposal.id, choice: .oppose))
-            }
-            bottomVoteButton("Skip", color: .gray, icon: "forward", isSelected: vote == .skip) {
-                store.send(.castVote(proposalId: proposal.id, choice: .skip))
             }
         }
     }
@@ -320,33 +203,7 @@ struct ProposalListView: View {
         }
     }
 
-    // MARK: - Components
-
-    @ViewBuilder
-    private func bottomVoteButton(
-        _ title: String,
-        color: Color,
-        icon: String,
-        isSelected: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button {
-            impactFeedback.impactOccurred()
-            action()
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 12))
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-            }
-            .foregroundStyle(isSelected ? .white : color)
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 44)
-            .background(isSelected ? color : color.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-    }
+    // MARK: - Helpers
 
     private func voteColor(_ vote: VoteChoice?) -> Color {
         guard let vote else { return .clear }

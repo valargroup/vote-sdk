@@ -24,7 +24,7 @@ struct DelegationSigningView: View {
                     .padding(.bottom, 24)
             }
         }
-        .screenTitle("Confirm Delegation")
+        .screenTitle("Authorize Voting")
         .zashiBack {
             store.send(.delegationRejected)
         }
@@ -36,36 +36,31 @@ struct DelegationSigningView: View {
     @ViewBuilder
     private func transactionSummary() -> some View {
         VStack(spacing: 0) {
-            // Amount summary (centered, like SendConfirmation)
+            // Voting weight summary (centered)
             VStack(spacing: 0) {
-                Text("Amount")
+                Text("Voting Weight")
                     .zFont(size: 14, style: Design.Text.primary)
                     .padding(.bottom, 2)
 
-                Text("0.00 ZEC")
+                Text("\(store.votingWeightZECString) ZEC")
                     .zFont(.semiBold, size: 28, style: Design.Text.primary)
 
-                Text("Shielded delegation")
+                Text("Authorize a hotkey to vote on your behalf")
                     .zFont(.medium, size: 14, style: Design.Text.tertiary)
+                    .multilineTextAlignment(.center)
                     .padding(.top, 6)
             }
             .padding(.top, 40)
             .padding(.bottom, 20)
 
-            // Sending to
-            detailSection(label: "Delegating to") {
+            // Hotkey address
+            detailSection(label: "Voting hotkey") {
                 Text(MockVotingService.hotkeyAddress)
                     .zFont(addressFont: true, size: 12, style: Design.Text.primary)
             }
 
             // Round
             detailRow(label: "Round", value: store.votingRound.title)
-
-            // Voting weight
-            detailRow(label: "Voting weight", value: "\(store.votingWeightZECString) ZEC")
-
-            // Fee
-            detailRow(label: "Fee", value: "0.0001 ZEC")
 
             // Memo
             memoSection()
@@ -113,7 +108,7 @@ struct DelegationSigningView: View {
                 .zFont(.medium, size: 14, style: Design.Text.tertiary)
 
             HStack {
-                Text("Delegating \(store.votingWeightZECString) ZEC voting power for \(store.votingRound.title)")
+                Text("Authorizing \(store.votingWeightZECString) ZEC voting power for \(store.votingRound.title)")
                     .zFont(.medium, size: 14, style: Design.Inputs.Filled.text)
                 Spacer(minLength: 0)
             }
@@ -137,7 +132,7 @@ struct DelegationSigningView: View {
                 store.send(.delegationApproved)
             }
         } else {
-            ZashiButton("Sign & Delegate") {
+            ZashiButton("Authorize Voting") {
                 store.send(.delegationApproved)
             }
         }
@@ -211,7 +206,7 @@ struct DelegationSigningView: View {
                         Text("<internal-address>")
                             .font(.system(size: 11))
                             .foregroundStyle(keystoneCyan)
-                        Text("Memo: Delegating \(store.votingWeightZECString) ZEC voting power")
+                        Text("Memo: Authorizing \(store.votingWeightZECString) ZEC voting power")
                             .font(.system(size: 10))
                             .foregroundStyle(.white.opacity(0.6))
                     }

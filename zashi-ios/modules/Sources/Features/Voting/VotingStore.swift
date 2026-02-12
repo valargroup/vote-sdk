@@ -16,9 +16,12 @@ public struct Voting {
             case delegationSigning
             case proposalList
             case proposalDetail(id: UInt32)
-            case voteReview
-            case voteSubmission
             case complete
+        }
+
+        public struct PendingVote: Equatable {
+            public var proposalId: UInt32
+            public var choice: VoteChoice
         }
 
         public var screenStack: [Screen] = [.delegationSigning]
@@ -27,14 +30,13 @@ public struct Voting {
         public var votingWeight: UInt64
         public var isKeystoneUser: Bool
 
-        // Which proposal the bottom bar targets
         public var selectedProposalId: UInt32?
+
+        // Vote awaiting user confirmation in detail view
+        public var pendingVote: PendingVote?
 
         // ZKP #1 (delegation) — runs in background
         public var delegationProofStatus: ProofStatus = .notStarted
-
-        // Submission
-        public var submissionStatus: SubmissionStatus = .idle
 
         public var currentScreen: Screen {
             screenStack.last ?? .proposalList
@@ -59,10 +61,6 @@ public struct Voting {
 
         public var isDelegationReady: Bool {
             delegationProofStatus == .complete
-        }
-
-        public var canSubmitVotes: Bool {
-            allVoted && isDelegationReady
         }
 
         public var nextUnvotedProposalId: UInt32? {
@@ -116,25 +114,14 @@ public struct Voting {
 
         // Proposal list
         case proposalTapped(UInt32)
-        case bottomBarNext
-        case bottomBarPrevious
 
         // Proposal detail
         case castVote(proposalId: UInt32, choice: VoteChoice)
+        case confirmVote
         case advanceAfterVote(nextId: UInt32?)
         case backToList
         case nextProposalDetail
         case previousProposalDetail
-
-        // Vote review
-        case reviewVotesTapped
-        case editVote(proposalId: UInt32)
-        case submitVotesTapped
-
-        // Vote submission
-        case submissionProgress(Int, Int)
-        case submissionCompleted
-        case submissionFailed(String)
 
         // Complete
         case doneTapped
@@ -199,24 +186,6 @@ public struct Voting {
 
             // MARK: - Proposal List
 
-            case .bottomBarNext:
-                let proposals = state.votingRound.proposals
-                if let currentId = state.activeProposalId,
-                   let idx = proposals.firstIndex(where: { $0.id == currentId }),
-                   idx + 1 < proposals.count {
-                    state.selectedProposalId = proposals[idx + 1].id
-                }
-                return .none
-
-            case .bottomBarPrevious:
-                let proposals = state.votingRound.proposals
-                if let currentId = state.activeProposalId,
-                   let idx = proposals.firstIndex(where: { $0.id == currentId }),
-                   idx > 0 {
-                    state.selectedProposalId = proposals[idx - 1].id
-                }
-                return .none
-
             case .proposalTapped(let id):
                 state.selectedProposalId = id
                 state.screenStack.append(.proposalDetail(id: id))
@@ -225,24 +194,55 @@ public struct Voting {
             // MARK: - Proposal Detail
 
             case .castVote(let proposalId, let choice):
-                state.votes[proposalId] = choice
+                // If already confirmed for this proposal, ignore
+                guard state.votes[proposalId] == nil else { return .none }
+                state.pendingVote = .init(proposalId: proposalId, choice: choice)
+                return .none
 
-                if case .proposalDetail = state.currentScreen {
-                    // Detail view: delay before advancing so user sees their vote land
-                    let nextId = nextUnvotedId(after: proposalId, in: state)
-                    return .run { send in
+            case .confirmVote:
+                guard let pending = state.pendingVote else { return .none }
+                state.votes[pending.proposalId] = pending.choice
+                state.pendingVote = nil
+
+                let proposalId = pending.proposalId
+                let choice = pending.choice
+                let nextId = nextUnvotedId(after: proposalId, in: state)
+
+                return .merge(
+                    // Submit this vote to chain in background
+                    .run { [votingAPI, votingCrypto] _ in
+                        let mockWitness = Data(repeating: 0xDD, count: 64)
+                        let mockShares = [EncryptedShare(
+                            c1: Data(repeating: 0xC1, count: 32),
+                            c2: Data(repeating: 0xC2, count: 32),
+                            shareIndex: 0,
+                            plaintextValue: 1
+                        )]
+                        var proofData = Data()
+                        for try await event in votingCrypto.buildVoteCommitment(proposalId, choice, mockShares, mockWitness) {
+                            if case .completed(let proof) = event {
+                                proofData = proof
+                            }
+                        }
+                        let bundle = VoteCommitmentBundle(
+                            vanNullifier: Data(repeating: 0, count: 32),
+                            voteAuthorityNoteNew: Data(repeating: 0, count: 32),
+                            voteCommitment: Data(repeating: 0, count: 32),
+                            proposalId: proposalId,
+                            proof: proofData,
+                            voteRoundId: Data(repeating: 0, count: 32),
+                            voteCommTreeAnchorHeight: 0
+                        )
+                        _ = try await votingAPI.submitVoteCommitment(bundle)
+                        let payloads = try await votingCrypto.buildSharePayloads([], bundle)
+                        try await votingAPI.delegateShares(payloads)
+                    },
+                    // Advance UI after brief pause
+                    .run { send in
                         try await Task.sleep(for: .milliseconds(600))
                         await send(.advanceAfterVote(nextId: nextId))
                     }
-                } else {
-                    // List view: auto-advance bottom bar to next unvoted
-                    if let nextId = nextUnvotedId(after: proposalId, in: state) {
-                        state.selectedProposalId = nextId
-                    } else {
-                        state.selectedProposalId = nil
-                    }
-                }
-                return .none
+                )
 
             case .advanceAfterVote(let nextId):
                 if case .proposalDetail = state.currentScreen {
@@ -251,19 +251,21 @@ public struct Voting {
                         state.screenStack.removeLast()
                         state.screenStack.append(.proposalDetail(id: nextId))
                     } else {
-                        state.selectedProposalId = nil
-                        state.screenStack.removeLast()
+                        // All proposals voted — go to completion
+                        state.screenStack = [.complete]
                     }
                 }
                 return .none
 
             case .backToList:
+                state.pendingVote = nil
                 if case .proposalDetail = state.currentScreen {
                     state.screenStack.removeLast()
                 }
                 return .none
 
             case .nextProposalDetail:
+                state.pendingVote = nil
                 if let index = state.detailProposalIndex,
                    index + 1 < state.votingRound.proposals.count {
                     let nextId = state.votingRound.proposals[index + 1].id
@@ -274,86 +276,13 @@ public struct Voting {
                 return .none
 
             case .previousProposalDetail:
+                state.pendingVote = nil
                 if let index = state.detailProposalIndex, index > 0 {
                     let prevId = state.votingRound.proposals[index - 1].id
                     state.selectedProposalId = prevId
                     state.screenStack.removeLast()
                     state.screenStack.append(.proposalDetail(id: prevId))
                 }
-                return .none
-
-            // MARK: - Vote Review
-
-            case .reviewVotesTapped:
-                state.screenStack.append(.voteReview)
-                return .none
-
-            case .editVote(let proposalId):
-                state.screenStack.append(.proposalDetail(id: proposalId))
-                return .none
-
-            case .submitVotesTapped:
-                state.screenStack.append(.voteSubmission)
-                state.submissionStatus = .submitting(proposalIndex: 0, total: state.totalProposals)
-                let proposals = state.votingRound.proposals
-                let votes = state.votes
-                let total = state.totalProposals
-                return .run { [votingAPI, votingCrypto] send in
-                    for (index, proposal) in proposals.enumerated() {
-                        await send(.submissionProgress(index, total))
-
-                        guard let choice = votes[proposal.id] else { continue }
-
-                        // Build vote commitment (ZKP #2) — drain stream to completion
-                        let mockWitness = Data(repeating: 0xDD, count: 64)
-                        let mockShares = [EncryptedShare(
-                            c1: Data(repeating: 0xC1, count: 32),
-                            c2: Data(repeating: 0xC2, count: 32),
-                            shareIndex: 0,
-                            plaintextValue: 1
-                        )]
-                        var proofData = Data()
-                        for try await event in votingCrypto.buildVoteCommitment(proposal.id, choice, mockShares, mockWitness) {
-                            if case .completed(let proof) = event {
-                                proofData = proof
-                            }
-                        }
-
-                        // Submit vote commitment to chain
-                        let bundle = VoteCommitmentBundle(
-                            vanNullifier: Data(repeating: 0, count: 32),
-                            voteAuthorityNoteNew: Data(repeating: 0, count: 32),
-                            voteCommitment: Data(repeating: 0, count: 32),
-                            proposalId: proposal.id,
-                            proof: proofData,
-                            voteRoundId: Data(repeating: 0, count: 32),
-                            voteCommTreeAnchorHeight: 0
-                        )
-                        _ = try await votingAPI.submitVoteCommitment(bundle)
-
-                        // Build and delegate shares
-                        let payloads = try await votingCrypto.buildSharePayloads([], bundle)
-                        try await votingAPI.delegateShares(payloads)
-                    }
-                    await send(.submissionCompleted)
-                } catch: { error, send in
-                    await send(.submissionFailed(error.localizedDescription))
-                }
-
-            // MARK: - Vote Submission
-
-            case .submissionProgress(let index, let total):
-                state.submissionStatus = .submitting(proposalIndex: index, total: total)
-                return .none
-
-            case .submissionCompleted:
-                state.submissionStatus = .complete
-                state.screenStack.removeLast()
-                state.screenStack.append(.complete)
-                return .none
-
-            case .submissionFailed(let error):
-                state.submissionStatus = .failed(error)
                 return .none
 
             // MARK: - Complete

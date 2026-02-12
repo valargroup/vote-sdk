@@ -25,8 +25,6 @@ public struct VotingView: View {
         case .delegationSigning: return "delegationSigning"
         case .proposalList: return "proposalList"
         case .proposalDetail(let id): return "detail-\(id)"
-        case .voteReview: return "voteReview"
-        case .voteSubmission: return "voteSubmission"
         case .complete: return "complete"
         }
     }
@@ -44,10 +42,8 @@ public struct VotingView: View {
                     .id(proposal.id)
                     .transition(.push(from: .trailing))
             }
-        case .voteReview:
-            VoteReviewView(store: store)
-        case .voteSubmission, .complete:
-            VoteSubmissionView(store: store)
+        case .complete:
+            VoteCompletionView(store: store)
         }
     }
 }

@@ -43,37 +43,8 @@ struct ProposalDetailView: View {
 
                         Spacer().frame(height: 8)
 
-                        // Vote buttons
-                        VStack(spacing: 12) {
-                            let currentVote = store.votes[proposal.id]
-
-                            voteButton(
-                                title: "Support",
-                                icon: "hand.thumbsup.fill",
-                                color: .green,
-                                isSelected: currentVote == .support
-                            ) {
-                                store.send(.castVote(proposalId: proposal.id, choice: .support))
-                            }
-
-                            voteButton(
-                                title: "Oppose",
-                                icon: "hand.thumbsdown.fill",
-                                color: .red,
-                                isSelected: currentVote == .oppose
-                            ) {
-                                store.send(.castVote(proposalId: proposal.id, choice: .oppose))
-                            }
-
-                            voteButton(
-                                title: "Skip",
-                                icon: "forward.fill",
-                                color: .gray,
-                                isSelected: currentVote == .skip
-                            ) {
-                                store.send(.castVote(proposalId: proposal.id, choice: .skip))
-                            }
-                        }
+                        // Vote section
+                        voteSection()
 
                         Spacer()
                     }
@@ -165,6 +136,95 @@ struct ProposalDetailView: View {
         }
     }
 
+    // MARK: - Vote Section
+
+    @ViewBuilder
+    private func voteSection() -> some View {
+        let confirmedVote = store.votes[proposal.id]
+        let pendingChoice: VoteChoice? = {
+            guard let pending = store.pendingVote,
+                  pending.proposalId == proposal.id else { return nil }
+            return pending.choice
+        }()
+
+        VStack(spacing: 12) {
+            if let confirmed = confirmedVote {
+                confirmedBanner(choice: confirmed)
+            } else {
+                voteButton(
+                    title: "Support",
+                    icon: "hand.thumbsup.fill",
+                    color: .green,
+                    isSelected: pendingChoice == .support
+                ) {
+                    store.send(.castVote(proposalId: proposal.id, choice: .support))
+                }
+
+                voteButton(
+                    title: "Oppose",
+                    icon: "hand.thumbsdown.fill",
+                    color: .red,
+                    isSelected: pendingChoice == .oppose
+                ) {
+                    store.send(.castVote(proposalId: proposal.id, choice: .oppose))
+                }
+
+                if let pending = pendingChoice {
+                    confirmationArea(choice: pending)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func confirmedBanner(choice: VoteChoice) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(voteColor(choice))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Vote recorded")
+                    .zFont(.semiBold, size: 15, style: Design.Text.primary)
+                Text(choice.label)
+                    .zFont(.medium, size: 14, style: Design.Text.secondary)
+            }
+            Spacer()
+            VoteChip(choice: choice)
+        }
+        .padding(16)
+        .background(voteColor(choice).opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(voteColor(choice).opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func confirmationArea(choice: VoteChoice) -> some View {
+        VStack(spacing: 10) {
+            Text("This vote cannot be changed once confirmed.")
+                .zFont(.regular, size: 13, style: Design.Text.secondary)
+                .multilineTextAlignment(.center)
+
+            Button {
+                impactFeedback.impactOccurred()
+                store.send(.confirmVote)
+            } label: {
+                Text("Confirm \(choice.label)")
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .foregroundStyle(.white)
+                    .background(voteColor(choice))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    // MARK: - Components
+
     @ViewBuilder
     private func voteButton(
         title: String,
@@ -195,6 +255,14 @@ struct ProposalDetailView: View {
                 RoundedRectangle(cornerRadius: 14)
                     .stroke(color.opacity(0.3), lineWidth: isSelected ? 0 : 1)
             )
+        }
+    }
+
+    private func voteColor(_ choice: VoteChoice) -> Color {
+        switch choice {
+        case .support: return .green
+        case .oppose: return .red
+        case .skip: return .gray
         }
     }
 }

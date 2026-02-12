@@ -98,13 +98,13 @@ struct ZKPStatusBanner: View {
             case .generating(let progress):
                 ProgressView()
                     .scaleEffect(0.8)
-                Text("Generating delegation proof... \(Int(progress * 100))%")
+                Text("Preparing voting authorization... \(Int(progress * 100))%")
                     .font(.caption)
             case .complete:
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .font(.caption)
-                Text("Delegation ready")
+                Text("Ready to vote")
                     .font(.caption)
             case .failed(let error):
                 Image(systemName: "exclamationmark.triangle.fill")
