@@ -21,6 +21,59 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// SessionStatus represents the lifecycle state of a voting session.
+type SessionStatus int32
+
+const (
+	SessionStatus_SESSION_STATUS_UNSPECIFIED SessionStatus = 0
+	SessionStatus_SESSION_STATUS_ACTIVE      SessionStatus = 1
+	SessionStatus_SESSION_STATUS_TALLYING    SessionStatus = 2
+	SessionStatus_SESSION_STATUS_FINALIZED   SessionStatus = 3
+)
+
+// Enum value maps for SessionStatus.
+var (
+	SessionStatus_name = map[int32]string{
+		0: "SESSION_STATUS_UNSPECIFIED",
+		1: "SESSION_STATUS_ACTIVE",
+		2: "SESSION_STATUS_TALLYING",
+		3: "SESSION_STATUS_FINALIZED",
+	}
+	SessionStatus_value = map[string]int32{
+		"SESSION_STATUS_UNSPECIFIED": 0,
+		"SESSION_STATUS_ACTIVE":      1,
+		"SESSION_STATUS_TALLYING":    2,
+		"SESSION_STATUS_FINALIZED":   3,
+	}
+)
+
+func (x SessionStatus) Enum() *SessionStatus {
+	p := new(SessionStatus)
+	*p = x
+	return p
+}
+
+func (x SessionStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SessionStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_zvote_v1_types_proto_enumTypes[0].Descriptor()
+}
+
+func (SessionStatus) Type() protoreflect.EnumType {
+	return &file_zvote_v1_types_proto_enumTypes[0]
+}
+
+func (x SessionStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SessionStatus.Descriptor instead.
+func (SessionStatus) EnumDescriptor() ([]byte, []int) {
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{0}
+}
+
 // VoteRound represents a voting session created by MsgCreateVotingSession.
 type VoteRound struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
@@ -32,6 +85,7 @@ type VoteRound struct {
 	NullifierImtRoot  []byte                 `protobuf:"bytes,6,opt,name=nullifier_imt_root,json=nullifierImtRoot,proto3" json:"nullifier_imt_root,omitempty"`
 	NcRoot            []byte                 `protobuf:"bytes,7,opt,name=nc_root,json=ncRoot,proto3" json:"nc_root,omitempty"`
 	Creator           string                 `protobuf:"bytes,8,opt,name=creator,proto3" json:"creator,omitempty"`
+	Status            SessionStatus          `protobuf:"varint,9,opt,name=status,proto3,enum=zvote.v1.SessionStatus" json:"status,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -120,6 +174,13 @@ func (x *VoteRound) GetCreator() string {
 		return x.Creator
 	}
 	return ""
+}
+
+func (x *VoteRound) GetStatus() SessionStatus {
+	if x != nil {
+		return x.Status
+	}
+	return SessionStatus_SESSION_STATUS_UNSPECIFIED
 }
 
 // CommitmentTreeState holds the current state of the append-only commitment tree.
@@ -354,7 +415,7 @@ var File_zvote_v1_types_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_types_proto_rawDesc = "" +
 	"\n" +
-	"\x14zvote/v1/types.proto\x12\bzvote.v1\"\xb3\x02\n" +
+	"\x14zvote/v1/types.proto\x12\bzvote.v1\"\xe4\x02\n" +
 	"\tVoteRound\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -363,7 +424,8 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\rvote_end_time\x18\x05 \x01(\x04R\vvoteEndTime\x12,\n" +
 	"\x12nullifier_imt_root\x18\x06 \x01(\fR\x10nullifierImtRoot\x12\x17\n" +
 	"\anc_root\x18\a \x01(\fR\x06ncRoot\x12\x18\n" +
-	"\acreator\x18\b \x01(\tR\acreator\"`\n" +
+	"\acreator\x18\b \x01(\tR\acreator\x12/\n" +
+	"\x06status\x18\t \x01(\x0e2\x17.zvote.v1.SessionStatusR\x06status\"`\n" +
 	"\x13CommitmentTreeState\x12\x1d\n" +
 	"\n" +
 	"next_index\x18\x01 \x01(\x04R\tnextIndex\x12\x12\n" +
@@ -381,7 +443,12 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x05index\x18\x01 \x01(\x04R\x05index\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05value\".\n" +
 	"\x0eNullifierEntry\x12\x1c\n" +
-	"\tnullifier\x18\x01 \x01(\fR\tnullifierB&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
+	"\tnullifier\x18\x01 \x01(\fR\tnullifier*\x85\x01\n" +
+	"\rSessionStatus\x12\x1e\n" +
+	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
+	"\x17SESSION_STATUS_TALLYING\x10\x02\x12\x1c\n" +
+	"\x18SESSION_STATUS_FINALIZED\x10\x03B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
 var (
 	file_zvote_v1_types_proto_rawDescOnce sync.Once
@@ -395,24 +462,27 @@ func file_zvote_v1_types_proto_rawDescGZIP() []byte {
 	return file_zvote_v1_types_proto_rawDescData
 }
 
+var file_zvote_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_zvote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_zvote_v1_types_proto_goTypes = []any{
-	(*VoteRound)(nil),           // 0: zvote.v1.VoteRound
-	(*CommitmentTreeState)(nil), // 1: zvote.v1.CommitmentTreeState
-	(*GenesisState)(nil),        // 2: zvote.v1.GenesisState
-	(*CommitmentLeaf)(nil),      // 3: zvote.v1.CommitmentLeaf
-	(*NullifierEntry)(nil),      // 4: zvote.v1.NullifierEntry
+	(SessionStatus)(0),          // 0: zvote.v1.SessionStatus
+	(*VoteRound)(nil),           // 1: zvote.v1.VoteRound
+	(*CommitmentTreeState)(nil), // 2: zvote.v1.CommitmentTreeState
+	(*GenesisState)(nil),        // 3: zvote.v1.GenesisState
+	(*CommitmentLeaf)(nil),      // 4: zvote.v1.CommitmentLeaf
+	(*NullifierEntry)(nil),      // 5: zvote.v1.NullifierEntry
 }
 var file_zvote_v1_types_proto_depIdxs = []int32{
-	0, // 0: zvote.v1.GenesisState.rounds:type_name -> zvote.v1.VoteRound
-	1, // 1: zvote.v1.GenesisState.tree_state:type_name -> zvote.v1.CommitmentTreeState
-	3, // 2: zvote.v1.GenesisState.commitment_leaves:type_name -> zvote.v1.CommitmentLeaf
-	4, // 3: zvote.v1.GenesisState.nullifiers:type_name -> zvote.v1.NullifierEntry
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	0, // 0: zvote.v1.VoteRound.status:type_name -> zvote.v1.SessionStatus
+	1, // 1: zvote.v1.GenesisState.rounds:type_name -> zvote.v1.VoteRound
+	2, // 2: zvote.v1.GenesisState.tree_state:type_name -> zvote.v1.CommitmentTreeState
+	4, // 3: zvote.v1.GenesisState.commitment_leaves:type_name -> zvote.v1.CommitmentLeaf
+	5, // 4: zvote.v1.GenesisState.nullifiers:type_name -> zvote.v1.NullifierEntry
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_zvote_v1_types_proto_init() }
@@ -425,13 +495,14 @@ func file_zvote_v1_types_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_types_proto_rawDesc), len(file_zvote_v1_types_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_zvote_v1_types_proto_goTypes,
 		DependencyIndexes: file_zvote_v1_types_proto_depIdxs,
+		EnumInfos:         file_zvote_v1_types_proto_enumTypes,
 		MessageInfos:      file_zvote_v1_types_proto_msgTypes,
 	}.Build()
 	File_zvote_v1_types_proto = out.File

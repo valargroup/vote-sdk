@@ -249,17 +249,65 @@ func getUint32BE(b []byte) uint32 {
 }
 
 // ---------------------------------------------------------------------------
+// Round status management
+// ---------------------------------------------------------------------------
+
+// UpdateVoteRoundStatus reads a vote round, sets its status, and writes it back.
+func (k Keeper) UpdateVoteRoundStatus(kvStore store.KVStore, roundID []byte, newStatus types.SessionStatus) error {
+	round, err := k.GetVoteRound(kvStore, roundID)
+	if err != nil {
+		return err
+	}
+	round.Status = newStatus
+	return k.SetVoteRound(kvStore, round)
+}
+
+// IterateActiveRounds iterates over all stored VoteRounds and calls the
+// callback for each round whose status is SESSION_STATUS_ACTIVE.
+// The callback receives a pointer to the round; returning true stops iteration.
+//
+// This performs a full prefix scan of VoteRoundPrefix. This is acceptable
+// because the expected cardinality is a few concurrent rounds at most.
+func (k Keeper) IterateActiveRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
+	prefix := types.VoteRoundPrefix
+	end := types.PrefixEndBytes(prefix)
+
+	iter, err := kvStore.Iterator(prefix, end)
+	if err != nil {
+		return err
+	}
+	defer iter.Close()
+
+	for ; iter.Valid(); iter.Next() {
+		var round types.VoteRound
+		if err := unmarshal(iter.Value(), &round); err != nil {
+			return err
+		}
+		if round.Status == types.SessionStatus_SESSION_STATUS_ACTIVE {
+			if cb(&round) {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Validation helpers (used by the ante validation pipeline, Phase 3)
 // ---------------------------------------------------------------------------
 
-// ValidateRoundActive checks that a vote round exists and has not expired.
-// It reads the VoteRound from the KV store and compares its VoteEndTime against
-// the current block time.
-func (k Keeper) ValidateRoundActive(ctx context.Context, roundID []byte) error {
+// ValidateRoundForVoting checks that a vote round exists, has ACTIVE status,
+// and has not expired (belt-and-suspenders: EndBlocker may not have run yet
+// this block).
+func (k Keeper) ValidateRoundForVoting(ctx context.Context, roundID []byte) error {
 	kvStore := k.OpenKVStore(ctx)
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
 		return err // wraps ErrRoundNotFound if missing
+	}
+
+	if round.Status != types.SessionStatus_SESSION_STATUS_ACTIVE {
+		return fmt.Errorf("%w: status is %s", types.ErrRoundNotActive, round.Status)
 	}
 
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -270,6 +318,44 @@ func (k Keeper) ValidateRoundActive(ctx context.Context, roundID []byte) error {
 	}
 
 	return nil
+}
+
+// ValidateRoundForShares checks that a vote round exists and is in a state
+// that accepts MsgRevealShare. Shares are accepted when the round is ACTIVE
+// (with time check) or TALLYING (unconditionally).
+func (k Keeper) ValidateRoundForShares(ctx context.Context, roundID []byte) error {
+	kvStore := k.OpenKVStore(ctx)
+	round, err := k.GetVoteRound(kvStore, roundID)
+	if err != nil {
+		return err
+	}
+
+	switch round.Status {
+	case types.SessionStatus_SESSION_STATUS_ACTIVE:
+		// Belt-and-suspenders: also check time in case EndBlocker hasn't run yet.
+		sdkCtx := sdk.UnwrapSDKContext(ctx)
+		blockTime := uint64(sdkCtx.BlockTime().Unix())
+		if blockTime >= round.VoteEndTime {
+			// Time has passed but EndBlocker hasn't transitioned yet — still
+			// accept shares (the round will become TALLYING this block).
+			return nil
+		}
+		return nil
+
+	case types.SessionStatus_SESSION_STATUS_TALLYING:
+		// Tallying phase: shares are accepted unconditionally.
+		return nil
+
+	default:
+		return fmt.Errorf("%w: status is %s", types.ErrRoundNotActive, round.Status)
+	}
+}
+
+// ValidateRoundActive checks that a vote round exists and has not expired.
+// Deprecated: Use ValidateRoundForVoting or ValidateRoundForShares instead.
+// Kept as a thin wrapper to minimize churn in existing callers.
+func (k Keeper) ValidateRoundActive(ctx context.Context, roundID []byte) error {
+	return k.ValidateRoundForVoting(ctx, roundID)
 }
 
 // CheckNullifiersUnique verifies that none of the provided nullifiers have

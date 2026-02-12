@@ -1,8 +1,10 @@
 package app_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/crypto/blake2b"
@@ -381,6 +383,157 @@ func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
 	root1Again, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, h1)
 	s.Require().NoError(err)
 	s.Require().Equal(root1, root1Again)
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.9: EndBlocker Status Transition (ACTIVE → TALLYING)
+// ---------------------------------------------------------------------------
+
+func (s *ABCIIntegrationSuite) TestEndBlockerStatusTransition() {
+	// Create a session that expires 10 seconds from now.
+	voteEndTime := s.app.Time.Add(10 * time.Second)
+	setupMsg := &types.MsgCreateVotingSession{
+		Creator:           "zvote1admin",
+		SnapshotHeight:    100,
+		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
+		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
+		VoteEndTime:       uint64(voteEndTime.Unix()),
+		NullifierImtRoot:  bytes.Repeat([]byte{0xCC}, 32),
+		NcRoot:            bytes.Repeat([]byte{0xDD}, 32),
+	}
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
+	s.Require().Equal(uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
+
+	roundID := computeRoundID(setupMsg)
+
+	// Verify round is ACTIVE.
+	ctx := s.queryCtx()
+	kvStore := s.app.VoteKeeper().OpenKVStore(ctx)
+	round, err := s.app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
+
+	// Advance past the VoteEndTime — EndBlocker should transition to TALLYING.
+	s.app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
+
+	ctx = s.queryCtx()
+	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
+	round, err = s.app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status,
+		"round should transition to TALLYING after EndBlocker")
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.10: TALLYING Phase — RevealShare Accepted, DelegateVote Rejected
+// ---------------------------------------------------------------------------
+
+func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
+	// Create a session expiring 60 seconds from now — enough headroom for
+	// several DeliverVoteTx calls (each advances time by 5 seconds).
+	voteEndTime := s.app.Time.Add(60 * time.Second)
+	setupMsg := &types.MsgCreateVotingSession{
+		Creator:           "zvote1admin",
+		SnapshotHeight:    200,
+		SnapshotBlockhash: bytes.Repeat([]byte{0x1A}, 32),
+		ProposalsHash:     bytes.Repeat([]byte{0x1B}, 32),
+		VoteEndTime:       uint64(voteEndTime.Unix()),
+		NullifierImtRoot:  bytes.Repeat([]byte{0x1C}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x1D}, 32),
+	}
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
+	s.Require().Equal(uint32(0), result.Code, "create session should succeed")
+
+	roundID := computeRoundID(setupMsg)
+
+	// Delegate while ACTIVE to populate the tree.
+	delegation := testutil.ValidDelegation(roundID, 0x10)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	s.Require().Equal(uint32(0), result.Code, "delegation during ACTIVE should succeed")
+
+	// Get anchor height for cast vote / reveal share.
+	anchorHeight := uint64(s.app.Height)
+
+	// Cast vote while ACTIVE.
+	castVote := testutil.ValidCastVote(roundID, anchorHeight, 0x30)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
+	s.Require().Equal(uint32(0), result.Code, "cast vote during ACTIVE should succeed")
+
+	// Need updated anchor for reveal (tree grew again).
+	revealAnchor := uint64(s.app.Height)
+
+	// Advance past the VoteEndTime to trigger TALLYING.
+	s.app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
+
+	// Verify round is now TALLYING.
+	ctx := s.queryCtx()
+	kvStore := s.app.VoteKeeper().OpenKVStore(ctx)
+	round, err := s.app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
+
+	// RevealShare should succeed during TALLYING.
+	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
+	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
+
+	// DelegateVote should be rejected during TALLYING.
+	delegation2 := testutil.ValidDelegation(roundID, 0x60)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation2))
+	s.Require().NotEqual(uint32(0), result.Code, "delegation during TALLYING should be rejected")
+	s.Require().Contains(result.Log, "vote round is not active")
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.11: EndBlocker Selective Transition (Only Expired Rounds)
+// ---------------------------------------------------------------------------
+
+func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
+	// Create two sessions: one expiring soon, one in the distant future.
+	soonEnd := s.app.Time.Add(10 * time.Second)
+	lateEnd := s.app.Time.Add(24 * time.Hour)
+
+	soonMsg := &types.MsgCreateVotingSession{
+		Creator:           "zvote1admin",
+		SnapshotHeight:    300,
+		SnapshotBlockhash: bytes.Repeat([]byte{0x2A}, 32),
+		ProposalsHash:     bytes.Repeat([]byte{0x2B}, 32),
+		VoteEndTime:       uint64(soonEnd.Unix()),
+		NullifierImtRoot:  bytes.Repeat([]byte{0x2C}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x2D}, 32),
+	}
+	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(soonMsg))
+	soonRoundID := computeRoundID(soonMsg)
+
+	lateMsg := &types.MsgCreateVotingSession{
+		Creator:           "zvote1admin",
+		SnapshotHeight:    400,
+		SnapshotBlockhash: bytes.Repeat([]byte{0x3A}, 32),
+		ProposalsHash:     bytes.Repeat([]byte{0x3B}, 32),
+		VoteEndTime:       uint64(lateEnd.Unix()),
+		NullifierImtRoot:  bytes.Repeat([]byte{0x3C}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x3D}, 32),
+	}
+	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(lateMsg))
+	lateRoundID := computeRoundID(lateMsg)
+
+	// Advance past soonEnd but before lateEnd.
+	s.app.NextBlockAtTime(soonEnd.Add(1 * time.Second))
+
+	ctx := s.queryCtx()
+	kvStore := s.app.VoteKeeper().OpenKVStore(ctx)
+
+	// Soon-ending round should be TALLYING.
+	soonRound, err := s.app.VoteKeeper().GetVoteRound(kvStore, soonRoundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, soonRound.Status,
+		"expired round should transition to TALLYING")
+
+	// Late-ending round should still be ACTIVE.
+	lateRound, err := s.app.VoteKeeper().GetVoteRound(kvStore, lateRoundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, lateRound.Status,
+		"non-expired round should remain ACTIVE")
 }
 
 // ---------------------------------------------------------------------------

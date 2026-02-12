@@ -192,8 +192,13 @@ func (s *ValidateTestSuite) setupExpiredRound() {
 	s.setupRound(testRoundID, expiredEndTime)
 }
 
-// setupRound stores a VoteRound with the given ID and end time.
+// setupRound stores a VoteRound with the given ID, end time, and ACTIVE status.
 func (s *ValidateTestSuite) setupRound(roundID []byte, endTime uint64) {
+	s.setupRoundWithStatus(roundID, endTime, types.SessionStatus_SESSION_STATUS_ACTIVE)
+}
+
+// setupRoundWithStatus stores a VoteRound with explicit status.
+func (s *ValidateTestSuite) setupRoundWithStatus(roundID []byte, endTime uint64, status types.SessionStatus) {
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 	round := &types.VoteRound{
 		VoteRoundId:       roundID,
@@ -204,9 +209,15 @@ func (s *ValidateTestSuite) setupRound(roundID []byte, endTime uint64) {
 		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
 		Creator:           "zvote1testcreator",
+		Status:            status,
 	}
 	err := s.keeper.SetVoteRound(kvStore, round)
 	s.Require().NoError(err)
+}
+
+// setupTallyingRound stores a VoteRound in TALLYING status with an expired end time.
+func (s *ValidateTestSuite) setupTallyingRound() {
+	s.setupRoundWithStatus(testRoundID, expiredEndTime, types.SessionStatus_SESSION_STATUS_TALLYING)
 }
 
 // recordNullifier marks a nullifier as already spent in the KV store.
@@ -407,6 +418,14 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			expectErr:   true,
 			errContains: "vote round is not active",
 		},
+		{
+			name:        "tallying round rejected for delegation",
+			msg:         func() types.VoteMessage { return newValidMsgDelegateVote() },
+			opts:        mockOpts(),
+			setup:       func() { s.setupTallyingRound() },
+			expectErr:   true,
+			errContains: "vote round is not active",
+		},
 		// --- Nullifier uniqueness failures ---
 		{
 			name: "duplicate gov nullifier (first of two)",
@@ -570,6 +589,14 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 			expectErr:   true,
 			errContains: "vote round is not active",
 		},
+		{
+			name:        "tallying round rejected for cast vote",
+			msg:         func() types.VoteMessage { return newValidMsgCastVote() },
+			opts:        mockOpts(),
+			setup:       func() { s.setupTallyingRound() },
+			expectErr:   true,
+			errContains: "vote round is not active",
+		},
 		// --- Nullifier uniqueness failure ---
 		{
 			name: "duplicate van nullifier",
@@ -696,10 +723,26 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 			errContains: "vote round not found",
 		},
 		{
-			name:        "round expired",
-			msg:         func() types.VoteMessage { return newValidMsgRevealShare() },
-			opts:        mockOpts(),
-			setup:       func() { s.setupExpiredRound() },
+			name: "expired ACTIVE round still accepted for shares (pre-EndBlocker window)",
+			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
+			opts: mockOpts(),
+			setup: func() { s.setupExpiredRound() },
+			// MsgRevealShare uses ValidateRoundForShares, which accepts ACTIVE
+			// rounds even past vote_end_time (shares are always valid until FINALIZED).
+		},
+		{
+			name: "tallying round accepted for shares",
+			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
+			opts: mockOpts(),
+			setup: func() { s.setupTallyingRound() },
+		},
+		{
+			name: "finalized round rejected for shares",
+			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
+			opts: mockOpts(),
+			setup: func() {
+				s.setupRoundWithStatus(testRoundID, expiredEndTime, types.SessionStatus_SESSION_STATUS_FINALIZED)
+			},
 			expectErr:   true,
 			errContains: "vote round is not active",
 		},

@@ -51,13 +51,14 @@ func (s *MsgServerTestSuite) SetupTest() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// setupActiveRound creates a vote round in the store with an end time in the future.
+// setupActiveRound creates a vote round in the store with an end time in the future and ACTIVE status.
 func (s *MsgServerTestSuite) setupActiveRound(roundID []byte) {
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
 		VoteRoundId: roundID,
 		VoteEndTime: 2_000_000,
 		Creator:     "zvote1creator",
+		Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
 	}))
 }
 
@@ -115,18 +116,19 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 		checkResp   func(*types.MsgCreateVotingSessionResponse)
 	}{
 		{
-			name: "happy path: round created and ID returned",
+			name: "happy path: round created with ACTIVE status and ID returned",
 			msg:  msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
 				s.Require().Equal(expectedID, resp.VoteRoundId)
 
-				// Verify round is stored.
+				// Verify round is stored with correct fields.
 				kv := s.keeper.OpenKVStore(s.ctx)
 				round, err := s.keeper.GetVoteRound(kv, expectedID)
 				s.Require().NoError(err)
 				s.Require().Equal(msg.Creator, round.Creator)
 				s.Require().Equal(msg.SnapshotHeight, round.SnapshotHeight)
 				s.Require().Equal(msg.VoteEndTime, round.VoteEndTime)
+				s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
 			},
 		},
 		{

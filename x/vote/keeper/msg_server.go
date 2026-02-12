@@ -54,6 +54,7 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		NullifierImtRoot:  msg.NullifierImtRoot,
 		NcRoot:            msg.NcRoot,
 		Creator:           msg.Creator,
+		Status:            types.SessionStatus_SESSION_STATUS_ACTIVE,
 	}
 
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {

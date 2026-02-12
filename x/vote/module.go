@@ -178,49 +178,75 @@ func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
 }
 
-// EndBlock computes the commitment tree root and stores it keyed by block height.
-// Only writes a new root when the tree has changed (new leaves appended).
+// EndBlock computes the commitment tree root and transitions expired ACTIVE
+// rounds to TALLYING.
 func (am AppModule) EndBlock(goCtx context.Context) error {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := am.keeper.OpenKVStore(ctx)
 
+	// --- 1. Commitment tree root computation ---
 	state, err := am.keeper.GetCommitmentTreeState(kvStore)
 	if err != nil {
 		return err
 	}
 
-	// No leaves — nothing to compute.
-	if state.NextIndex == 0 {
-		return nil
+	if state.NextIndex > 0 {
+		root, err := am.keeper.ComputeTreeRoot(kvStore, state.NextIndex)
+		if err != nil {
+			return err
+		}
+
+		// Only write a new root when the tree has changed (new leaves appended).
+		if !bytes.Equal(root, state.Root) {
+			blockHeight := uint64(ctx.BlockHeight())
+
+			if err := am.keeper.SetCommitmentRootAtHeight(kvStore, blockHeight, root); err != nil {
+				return err
+			}
+
+			state.Root = root
+			state.Height = blockHeight
+			if err := am.keeper.SetCommitmentTreeState(kvStore, state); err != nil {
+				return err
+			}
+
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeCommitmentTreeRoot,
+				sdk.NewAttribute(types.AttributeKeyTreeRoot, fmt.Sprintf("%x", root)),
+				sdk.NewAttribute(types.AttributeKeyBlockHeight, strconv.FormatUint(blockHeight, 10)),
+			))
+		}
 	}
 
-	root, err := am.keeper.ComputeTreeRoot(kvStore, state.NextIndex)
-	if err != nil {
+	// --- 2. Transition expired ACTIVE rounds to TALLYING ---
+	blockTime := uint64(ctx.BlockTime().Unix())
+
+	// Collect round IDs to transition (avoid mutating store during iteration).
+	var expiredRoundIDs [][]byte
+	if err := am.keeper.IterateActiveRounds(kvStore, func(round *types.VoteRound) bool {
+		if blockTime >= round.VoteEndTime {
+			// Copy the round ID since the iterator value may be reused.
+			id := make([]byte, len(round.VoteRoundId))
+			copy(id, round.VoteRoundId)
+			expiredRoundIDs = append(expiredRoundIDs, id)
+		}
+		return false // continue iterating
+	}); err != nil {
 		return err
 	}
 
-	// Skip if root unchanged (no new leaves since last computation).
-	if bytes.Equal(root, state.Root) {
-		return nil
+	for _, roundID := range expiredRoundIDs {
+		if err := am.keeper.UpdateVoteRoundStatus(kvStore, roundID, types.SessionStatus_SESSION_STATUS_TALLYING); err != nil {
+			return err
+		}
+
+		ctx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeRoundStatusChange,
+			sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", roundID)),
+			sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_ACTIVE.String()),
+			sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_TALLYING.String()),
+		))
 	}
-
-	blockHeight := uint64(ctx.BlockHeight())
-
-	if err := am.keeper.SetCommitmentRootAtHeight(kvStore, blockHeight, root); err != nil {
-		return err
-	}
-
-	state.Root = root
-	state.Height = blockHeight
-	if err := am.keeper.SetCommitmentTreeState(kvStore, state); err != nil {
-		return err
-	}
-
-	ctx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeCommitmentTreeRoot,
-		sdk.NewAttribute(types.AttributeKeyTreeRoot, fmt.Sprintf("%x", root)),
-		sdk.NewAttribute(types.AttributeKeyBlockHeight, strconv.FormatUint(blockHeight, 10)),
-	))
 
 	return nil
 }

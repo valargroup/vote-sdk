@@ -117,6 +117,9 @@ type VoteMessage interface {
 	ValidateBasic() error
 	GetVoteRoundId() []byte
 	GetNullifiers() [][]byte
+	// AcceptsTallyingRound returns true if this message type is valid during
+	// the TALLYING phase. Only MsgRevealShare returns true.
+	AcceptsTallyingRound() bool
 }
 
 // --- VoteMessage interface implementations ---
@@ -145,3 +148,17 @@ func (msg *MsgCreateVotingSession) GetNullifiers() [][]byte {
 func (msg *MsgCreateVotingSession) GetVoteRoundId() []byte {
 	return nil
 }
+
+// --- AcceptsTallyingRound implementations ---
+
+// AcceptsTallyingRound returns false — delegation requires ACTIVE status.
+func (msg *MsgDelegateVote) AcceptsTallyingRound() bool { return false }
+
+// AcceptsTallyingRound returns false — casting votes requires ACTIVE status.
+func (msg *MsgCastVote) AcceptsTallyingRound() bool { return false }
+
+// AcceptsTallyingRound returns true — revealing shares is accepted during TALLYING.
+func (msg *MsgRevealShare) AcceptsTallyingRound() bool { return true }
+
+// AcceptsTallyingRound returns false — session creation is unrelated to tallying.
+func (msg *MsgCreateVotingSession) AcceptsTallyingRound() bool { return false }

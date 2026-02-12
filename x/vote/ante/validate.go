@@ -63,12 +63,18 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper,
 		return fmt.Errorf("basic validation failed: %w", err)
 	}
 
-	// 2. Vote round exists and is active.
+	// 2. Vote round existence and status check (message-type-aware).
 	// MsgCreateVotingSession returns nil for GetVoteRoundId() since the round
 	// doesn't exist yet — skip the check in that case.
 	if roundID := msg.GetVoteRoundId(); roundID != nil {
-		if err := k.ValidateRoundActive(ctx, roundID); err != nil {
-			return err
+		if msg.AcceptsTallyingRound() {
+			if err := k.ValidateRoundForShares(ctx, roundID); err != nil {
+				return err
+			}
+		} else {
+			if err := k.ValidateRoundForVoting(ctx, roundID); err != nil {
+				return err
+			}
 		}
 	}
 

@@ -471,10 +471,11 @@ func (s *KeeperTestSuite) TestTally_IndependentTuples() {
 }
 
 // ---------------------------------------------------------------------------
-// Validation helpers (ValidateRoundActive, CheckNullifiersUnique)
+// Validation helpers (ValidateRoundForVoting, ValidateRoundForShares,
+// ValidateRoundActive, CheckNullifiersUnique)
 // ---------------------------------------------------------------------------
 
-func (s *KeeperTestSuite) TestValidateRoundActive() {
+func (s *KeeperTestSuite) TestValidateRoundForVoting() {
 	tests := []struct {
 		name        string
 		setup       func()
@@ -489,6 +490,7 @@ func (s *KeeperTestSuite) TestValidateRoundActive() {
 				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
 					VoteRoundId: testRoundID,
 					VoteEndTime: activeEndTime,
+					Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
 				}))
 			},
 			roundID: testRoundID,
@@ -506,6 +508,7 @@ func (s *KeeperTestSuite) TestValidateRoundActive() {
 				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
 					VoteRoundId: testRoundID,
 					VoteEndTime: expiredEndTime,
+					Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
 				}))
 			},
 			roundID:     testRoundID,
@@ -519,6 +522,35 @@ func (s *KeeperTestSuite) TestValidateRoundActive() {
 				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
 					VoteRoundId: testRoundID,
 					VoteEndTime: uint64(testBlockTime.Unix()), // exactly equal
+					Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+				}))
+			},
+			roundID:     testRoundID,
+			expectErr:   true,
+			errContains: "vote round is not active",
+		},
+		{
+			name: "tallying round rejected for voting",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: testRoundID,
+					VoteEndTime: activeEndTime,
+					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+				}))
+			},
+			roundID:     testRoundID,
+			expectErr:   true,
+			errContains: "vote round is not active",
+		},
+		{
+			name: "finalized round rejected for voting",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: testRoundID,
+					VoteEndTime: activeEndTime,
+					Status:      types.SessionStatus_SESSION_STATUS_FINALIZED,
 				}))
 			},
 			roundID:     testRoundID,
@@ -533,7 +565,7 @@ func (s *KeeperTestSuite) TestValidateRoundActive() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			err := s.keeper.ValidateRoundActive(s.ctx, tc.roundID)
+			err := s.keeper.ValidateRoundForVoting(s.ctx, tc.roundID)
 			if tc.expectErr {
 				s.Require().Error(err)
 				if tc.errContains != "" {
@@ -544,6 +576,177 @@ func (s *KeeperTestSuite) TestValidateRoundActive() {
 			}
 		})
 	}
+}
+
+func (s *KeeperTestSuite) TestValidateRoundForShares() {
+	tests := []struct {
+		name        string
+		setup       func()
+		roundID     []byte
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name: "active round with future end time accepted",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: testRoundID,
+					VoteEndTime: activeEndTime,
+					Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+				}))
+			},
+			roundID: testRoundID,
+		},
+		{
+			name: "active round with expired end time still accepted (pre-EndBlocker transition)",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: testRoundID,
+					VoteEndTime: expiredEndTime,
+					Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+				}))
+			},
+			roundID: testRoundID,
+		},
+		{
+			name: "tallying round accepted",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: testRoundID,
+					VoteEndTime: expiredEndTime,
+					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+				}))
+			},
+			roundID: testRoundID,
+		},
+		{
+			name: "finalized round rejected",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: testRoundID,
+					VoteEndTime: expiredEndTime,
+					Status:      types.SessionStatus_SESSION_STATUS_FINALIZED,
+				}))
+			},
+			roundID:     testRoundID,
+			expectErr:   true,
+			errContains: "vote round is not active",
+		},
+		{
+			name:        "missing round returns ErrRoundNotFound",
+			roundID:     bytes.Repeat([]byte{0xFF}, 32),
+			expectErr:   true,
+			errContains: "vote round not found",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			if tc.setup != nil {
+				tc.setup()
+			}
+			err := s.keeper.ValidateRoundForShares(s.ctx, tc.roundID)
+			if tc.expectErr {
+				s.Require().Error(err)
+				if tc.errContains != "" {
+					s.Require().Contains(err.Error(), tc.errContains)
+				}
+			} else {
+				s.Require().NoError(err)
+			}
+		})
+	}
+}
+
+// TestValidateRoundActive verifies the legacy wrapper delegates to ValidateRoundForVoting.
+func (s *KeeperTestSuite) TestValidateRoundActive() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: testRoundID,
+		VoteEndTime: activeEndTime,
+		Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+	}))
+	s.Require().NoError(s.keeper.ValidateRoundActive(s.ctx, testRoundID))
+}
+
+// ---------------------------------------------------------------------------
+// UpdateVoteRoundStatus
+// ---------------------------------------------------------------------------
+
+func (s *KeeperTestSuite) TestUpdateVoteRoundStatus() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: testRoundID,
+		VoteEndTime: activeEndTime,
+		Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+	}))
+
+	// Transition to TALLYING.
+	s.Require().NoError(s.keeper.UpdateVoteRoundStatus(kv, testRoundID, types.SessionStatus_SESSION_STATUS_TALLYING))
+
+	round, err := s.keeper.GetVoteRound(kv, testRoundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
+
+	// Transition to FINALIZED.
+	s.Require().NoError(s.keeper.UpdateVoteRoundStatus(kv, testRoundID, types.SessionStatus_SESSION_STATUS_FINALIZED))
+
+	round, err = s.keeper.GetVoteRound(kv, testRoundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
+
+	// Missing round returns error.
+	err = s.keeper.UpdateVoteRoundStatus(kv, bytes.Repeat([]byte{0xFF}, 32), types.SessionStatus_SESSION_STATUS_TALLYING)
+	s.Require().ErrorIs(err, types.ErrRoundNotFound)
+}
+
+// ---------------------------------------------------------------------------
+// IterateActiveRounds
+// ---------------------------------------------------------------------------
+
+func (s *KeeperTestSuite) TestIterateActiveRounds() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	id1 := bytes.Repeat([]byte{0x01}, 32)
+	id2 := bytes.Repeat([]byte{0x02}, 32)
+	id3 := bytes.Repeat([]byte{0x03}, 32)
+
+	// Active round.
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: id1, VoteEndTime: activeEndTime, Status: types.SessionStatus_SESSION_STATUS_ACTIVE,
+	}))
+	// Tallying round (should be skipped).
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: id2, VoteEndTime: expiredEndTime, Status: types.SessionStatus_SESSION_STATUS_TALLYING,
+	}))
+	// Another active round.
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: id3, VoteEndTime: activeEndTime, Status: types.SessionStatus_SESSION_STATUS_ACTIVE,
+	}))
+
+	var activeIDs [][]byte
+	err := s.keeper.IterateActiveRounds(kv, func(round *types.VoteRound) bool {
+		id := make([]byte, len(round.VoteRoundId))
+		copy(id, round.VoteRoundId)
+		activeIDs = append(activeIDs, id)
+		return false
+	})
+	s.Require().NoError(err)
+	s.Require().Len(activeIDs, 2, "should yield only ACTIVE rounds")
+
+	// Verify the correct IDs were returned (order follows KV store key ordering).
+	s.Require().True(bytes.Equal(activeIDs[0], id1) || bytes.Equal(activeIDs[0], id3))
+	s.Require().True(bytes.Equal(activeIDs[1], id1) || bytes.Equal(activeIDs[1], id3))
+	s.Require().False(bytes.Equal(activeIDs[0], activeIDs[1]))
 }
 
 func (s *KeeperTestSuite) TestCheckNullifiersUnique() {

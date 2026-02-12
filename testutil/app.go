@@ -135,6 +135,24 @@ func (ta *TestApp) NextBlock() {
 	require.NoError(ta.t, err)
 }
 
+// NextBlockAtTime commits an empty block at a specific time, advancing height by 1.
+// Triggers EndBlocker (commitment tree root computation, round status transitions).
+func (ta *TestApp) NextBlockAtTime(t time.Time) {
+	ta.t.Helper()
+
+	ta.Height++
+	ta.Time = t
+
+	_, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height: ta.Height,
+		Time:   ta.Time,
+	})
+	require.NoError(ta.t, err)
+
+	_, err = ta.Commit()
+	require.NoError(ta.t, err)
+}
+
 // DeliverVoteTx submits a single raw vote tx through FinalizeBlock + Commit
 // and returns the ExecTxResult. The block height and time are advanced.
 func (ta *TestApp) DeliverVoteTx(txBytes []byte) *abci.ExecTxResult {

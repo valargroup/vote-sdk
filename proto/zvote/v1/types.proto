@@ -3,16 +3,25 @@ package zvote.v1;
 
 option go_package = "github.com/z-cale/zally/x/vote/types";
 
+// SessionStatus represents the lifecycle state of a voting session.
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_ACTIVE      = 1;
+  SESSION_STATUS_TALLYING    = 2;
+  SESSION_STATUS_FINALIZED   = 3;
+}
+
 // VoteRound represents a voting session created by MsgCreateVotingSession.
 message VoteRound {
-  bytes  vote_round_id       = 1;
-  uint64 snapshot_height     = 2;
-  bytes  snapshot_blockhash  = 3;
-  bytes  proposals_hash      = 4;
-  uint64 vote_end_time       = 5;
-  bytes  nullifier_imt_root  = 6;
-  bytes  nc_root             = 7;
-  string creator             = 8;
+  bytes         vote_round_id       = 1;
+  uint64        snapshot_height     = 2;
+  bytes         snapshot_blockhash  = 3;
+  bytes         proposals_hash      = 4;
+  uint64        vote_end_time       = 5;
+  bytes         nullifier_imt_root  = 6;
+  bytes         nc_root             = 7;
+  string        creator             = 8;
+  SessionStatus status              = 9;
 }
 
 // CommitmentTreeState holds the current state of the append-only commitment tree.

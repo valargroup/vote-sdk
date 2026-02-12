@@ -14,4 +14,5 @@ var (
 	ErrInvalidField          = errors.Register(ModuleName, 9, "invalid message field")
 	ErrRoundAlreadyExists    = errors.Register(ModuleName, 10, "vote round already exists")
 	ErrCommitmentTreeFull    = errors.Register(ModuleName, 11, "commitment tree is full")
+	ErrRoundNotTallying      = errors.Register(ModuleName, 12, "vote round is not in tallying state")
 )

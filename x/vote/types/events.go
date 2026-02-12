@@ -7,6 +7,7 @@ const (
 	EventTypeCastVote            = "cast_vote"
 	EventTypeRevealShare         = "reveal_share"
 	EventTypeCommitmentTreeRoot  = "commitment_tree_root"
+	EventTypeRoundStatusChange   = "round_status_change"
 )
 
 // Event attribute keys.
@@ -20,4 +21,6 @@ const (
 	AttributeKeyVoteAmount   = "vote_amount"
 	AttributeKeyTreeRoot     = "tree_root"
 	AttributeKeyBlockHeight  = "block_height"
+	AttributeKeyOldStatus    = "old_status"
+	AttributeKeyNewStatus    = "new_status"
 )
