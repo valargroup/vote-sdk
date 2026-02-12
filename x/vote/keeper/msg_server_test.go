@@ -69,7 +69,7 @@ func (s *MsgServerTestSuite) setupRootAtHeight(height uint64) {
 }
 
 // computeExpectedRoundID mirrors the deriveRoundID function for test verification.
-func computeExpectedRoundID(msg *types.MsgSetupVoteRound) []byte {
+func computeExpectedRoundID(msg *types.MsgCreateVotingSession) []byte {
 	h, _ := blake2b.New256(nil)
 	var buf [8]byte
 
@@ -85,9 +85,9 @@ func computeExpectedRoundID(msg *types.MsgSetupVoteRound) []byte {
 	return h.Sum(nil)
 }
 
-// validSetupMsg returns a valid MsgSetupVoteRound for tests.
-func validSetupMsg() *types.MsgSetupVoteRound {
-	return &types.MsgSetupVoteRound{
+// validSetupMsg returns a valid MsgCreateVotingSession for tests.
+func validSetupMsg() *types.MsgCreateVotingSession {
+	return &types.MsgCreateVotingSession{
 		Creator:           "zvote1admin",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
@@ -99,25 +99,25 @@ func validSetupMsg() *types.MsgSetupVoteRound {
 }
 
 // ---------------------------------------------------------------------------
-// SetupVoteRound
+// CreateVotingSession
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestSetupVoteRound() {
+func (s *MsgServerTestSuite) TestCreateVotingSession() {
 	msg := validSetupMsg()
 	expectedID := computeExpectedRoundID(msg)
 
 	tests := []struct {
 		name        string
 		setup       func()
-		msg         *types.MsgSetupVoteRound
+		msg         *types.MsgCreateVotingSession
 		expectErr   bool
 		errContains string
-		checkResp   func(*types.MsgSetupVoteRoundResponse)
+		checkResp   func(*types.MsgCreateVotingSessionResponse)
 	}{
 		{
 			name: "happy path: round created and ID returned",
 			msg:  msg,
-			checkResp: func(resp *types.MsgSetupVoteRoundResponse) {
+			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
 				s.Require().Equal(expectedID, resp.VoteRoundId)
 
 				// Verify round is stored.
@@ -133,7 +133,7 @@ func (s *MsgServerTestSuite) TestSetupVoteRound() {
 			name: "duplicate round rejected",
 			setup: func() {
 				// Create the round first.
-				_, err := s.msgServer.SetupVoteRound(s.ctx, msg)
+				_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 				s.Require().NoError(err)
 			},
 			msg:         msg,
@@ -142,7 +142,7 @@ func (s *MsgServerTestSuite) TestSetupVoteRound() {
 		},
 		{
 			name: "different fields produce different round ID",
-			msg: &types.MsgSetupVoteRound{
+			msg: &types.MsgCreateVotingSession{
 				Creator:           "zvote1admin",
 				SnapshotHeight:    999,
 				SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
@@ -151,7 +151,7 @@ func (s *MsgServerTestSuite) TestSetupVoteRound() {
 				NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 				NcRoot:            bytes.Repeat([]byte{0x04}, 32),
 			},
-			checkResp: func(resp *types.MsgSetupVoteRoundResponse) {
+			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
 				s.Require().NotEqual(expectedID, resp.VoteRoundId)
 				s.Require().Len(resp.VoteRoundId, 32)
 			},
@@ -164,7 +164,7 @@ func (s *MsgServerTestSuite) TestSetupVoteRound() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			resp, err := s.msgServer.SetupVoteRound(s.ctx, tc.msg)
+			resp, err := s.msgServer.CreateVotingSession(s.ctx, tc.msg)
 			if tc.expectErr {
 				s.Require().Error(err)
 				if tc.errContains != "" {
@@ -181,23 +181,23 @@ func (s *MsgServerTestSuite) TestSetupVoteRound() {
 }
 
 // ---------------------------------------------------------------------------
-// RegisterDelegation
+// DelegateVote
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestRegisterDelegation() {
+func (s *MsgServerTestSuite) TestDelegateVote() {
 	roundID := bytes.Repeat([]byte{0x10}, 32)
 
 	tests := []struct {
 		name      string
 		setup     func()
-		msg       *types.MsgRegisterDelegation
+		msg       *types.MsgDelegateVote
 		expectErr bool
 		check     func()
 	}{
 		{
 			name:  "happy path: nullifiers recorded and commitments appended",
 			setup: func() { s.setupActiveRound(roundID) },
-			msg: &types.MsgRegisterDelegation{
+			msg: &types.MsgDelegateVote{
 				Rk:                  bytes.Repeat([]byte{0xA1}, 32),
 				SpendAuthSig:        bytes.Repeat([]byte{0xA2}, 64),
 				SignedNoteNullifier: bytes.Repeat([]byte{0xA3}, 32),
@@ -246,7 +246,7 @@ func (s *MsgServerTestSuite) TestRegisterDelegation() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			_, err := s.msgServer.RegisterDelegation(s.ctx, tc.msg)
+			_, err := s.msgServer.DelegateVote(s.ctx, tc.msg)
 			if tc.expectErr {
 				s.Require().Error(err)
 			} else {
@@ -260,16 +260,16 @@ func (s *MsgServerTestSuite) TestRegisterDelegation() {
 }
 
 // ---------------------------------------------------------------------------
-// CreateVoteCommitment
+// CastVote
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestCreateVoteCommitment() {
+func (s *MsgServerTestSuite) TestCastVote() {
 	roundID := bytes.Repeat([]byte{0x20}, 32)
 
 	tests := []struct {
 		name        string
 		setup       func()
-		msg         *types.MsgCreateVoteCommitment
+		msg         *types.MsgCastVote
 		expectErr   bool
 		errContains string
 		check       func()
@@ -280,7 +280,7 @@ func (s *MsgServerTestSuite) TestCreateVoteCommitment() {
 				s.setupActiveRound(roundID)
 				s.setupRootAtHeight(10)
 			},
-			msg: &types.MsgCreateVoteCommitment{
+			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
 				VoteAuthorityNoteNew:     bytes.Repeat([]byte{0xE2}, 32),
 				VoteCommitment:           bytes.Repeat([]byte{0xE3}, 32),
@@ -307,7 +307,7 @@ func (s *MsgServerTestSuite) TestCreateVoteCommitment() {
 				s.setupActiveRound(roundID)
 				// No root at height 999.
 			},
-			msg: &types.MsgCreateVoteCommitment{
+			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
 				VoteAuthorityNoteNew:     bytes.Repeat([]byte{0xE2}, 32),
 				VoteCommitment:           bytes.Repeat([]byte{0xE3}, 32),
@@ -327,7 +327,7 @@ func (s *MsgServerTestSuite) TestCreateVoteCommitment() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			_, err := s.msgServer.CreateVoteCommitment(s.ctx, tc.msg)
+			_, err := s.msgServer.CastVote(s.ctx, tc.msg)
 			if tc.expectErr {
 				s.Require().Error(err)
 				if tc.errContains != "" {
@@ -344,22 +344,22 @@ func (s *MsgServerTestSuite) TestCreateVoteCommitment() {
 }
 
 // ---------------------------------------------------------------------------
-// RevealVoteShare
+// RevealShare
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestRevealVoteShare() {
+func (s *MsgServerTestSuite) TestRevealShare() {
 	roundID := bytes.Repeat([]byte{0x30}, 32)
 
 	tests := []struct {
 		name  string
 		setup func()
-		msg   *types.MsgRevealVoteShare
+		msg   *types.MsgRevealShare
 		check func()
 	}{
 		{
 			name:  "happy path: nullifier recorded and tally accumulated",
 			setup: func() { s.setupActiveRound(roundID) },
-			msg: &types.MsgRevealVoteShare{
+			msg: &types.MsgRevealShare{
 				ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
 				VoteAmount:               500,
 				ProposalId:               1,
@@ -385,7 +385,7 @@ func (s *MsgServerTestSuite) TestRevealVoteShare() {
 			setup: func() {
 				s.setupActiveRound(roundID)
 				// First reveal.
-				_, err := s.msgServer.RevealVoteShare(s.ctx, &types.MsgRevealVoteShare{
+				_, err := s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
 					ShareNullifier:           bytes.Repeat([]byte{0xF3}, 32),
 					VoteAmount:               300,
 					ProposalId:               1,
@@ -396,7 +396,7 @@ func (s *MsgServerTestSuite) TestRevealVoteShare() {
 				})
 				s.Require().NoError(err)
 			},
-			msg: &types.MsgRevealVoteShare{
+			msg: &types.MsgRevealShare{
 				ShareNullifier:           bytes.Repeat([]byte{0xF5}, 32),
 				VoteAmount:               200,
 				ProposalId:               1,
@@ -420,7 +420,7 @@ func (s *MsgServerTestSuite) TestRevealVoteShare() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			_, err := s.msgServer.RevealVoteShare(s.ctx, tc.msg)
+			_, err := s.msgServer.RevealShare(s.ctx, tc.msg)
 			s.Require().NoError(err)
 			if tc.check != nil {
 				tc.check()
@@ -430,14 +430,14 @@ func (s *MsgServerTestSuite) TestRevealVoteShare() {
 }
 
 // ---------------------------------------------------------------------------
-// SetupVoteRound: deterministic round ID
+// CreateVotingSession: deterministic round ID
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestSetupVoteRound_DeterministicID() {
+func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 	s.SetupTest()
 	msg := validSetupMsg()
 
-	resp1, err := s.msgServer.SetupVoteRound(s.ctx, msg)
+	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().NoError(err)
 
 	// Same inputs must produce same ID.
@@ -450,17 +450,17 @@ func (s *MsgServerTestSuite) TestSetupVoteRound_DeterministicID() {
 // Event emission smoke test
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestSetupVoteRound_EmitsEvent() {
+func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
 	s.SetupTest()
 	msg := validSetupMsg()
 
-	_, err := s.msgServer.SetupVoteRound(s.ctx, msg)
+	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().NoError(err)
 
 	events := s.ctx.EventManager().Events()
 	found := false
 	for _, e := range events {
-		if e.Type == types.EventTypeSetupVoteRound {
+		if e.Type == types.EventTypeCreateVotingSession {
 			found = true
 			// Verify round ID attribute present.
 			for _, attr := range e.Attributes {
@@ -471,5 +471,5 @@ func (s *MsgServerTestSuite) TestSetupVoteRound_EmitsEvent() {
 			}
 		}
 	}
-	s.Require().True(found, "expected %s event", types.EventTypeSetupVoteRound)
+	s.Require().True(found, "expected %s event", types.EventTypeCreateVotingSession)
 }

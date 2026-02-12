@@ -9,18 +9,18 @@ import (
 )
 
 func TestIsVoteTag(t *testing.T) {
-	require.True(t, IsVoteTag(TagSetupVoteRound))
-	require.True(t, IsVoteTag(TagRegisterDelegation))
-	require.True(t, IsVoteTag(TagCreateVoteCommitment))
-	require.True(t, IsVoteTag(TagRevealVoteShare))
+	require.True(t, IsVoteTag(TagCreateVotingSession))
+	require.True(t, IsVoteTag(TagDelegateVote))
+	require.True(t, IsVoteTag(TagCastVote))
+	require.True(t, IsVoteTag(TagRevealShare))
 	require.False(t, IsVoteTag(0x00))
 	require.False(t, IsVoteTag(0x05))
 	require.False(t, IsVoteTag(0x0a)) // Typical Cosmos Tx first byte
 	require.False(t, IsVoteTag(0xff))
 }
 
-func TestEncodeDecodeSetupVoteRound(t *testing.T) {
-	msg := &types.MsgSetupVoteRound{
+func TestEncodeDecodeCreateVotingSession(t *testing.T) {
+	msg := &types.MsgCreateVotingSession{
 		Creator:           "zvote1creator",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: []byte("blockhash123456789012345678901234"),
@@ -32,21 +32,21 @@ func TestEncodeDecodeSetupVoteRound(t *testing.T) {
 
 	raw, err := EncodeVoteTx(msg)
 	require.NoError(t, err)
-	require.Equal(t, TagSetupVoteRound, raw[0])
+	require.Equal(t, TagCreateVotingSession, raw[0])
 
 	tag, decoded, err := DecodeVoteTx(raw)
 	require.NoError(t, err)
-	require.Equal(t, TagSetupVoteRound, tag)
+	require.Equal(t, TagCreateVotingSession, tag)
 
-	decodedMsg, ok := decoded.(*types.MsgSetupVoteRound)
+	decodedMsg, ok := decoded.(*types.MsgCreateVotingSession)
 	require.True(t, ok)
 	require.Equal(t, msg.Creator, decodedMsg.Creator)
 	require.Equal(t, msg.SnapshotHeight, decodedMsg.SnapshotHeight)
 	require.Equal(t, msg.VoteEndTime, decodedMsg.VoteEndTime)
 }
 
-func TestEncodeDecodeRegisterDelegation(t *testing.T) {
-	msg := &types.MsgRegisterDelegation{
+func TestEncodeDecodeDelegateVote(t *testing.T) {
+	msg := &types.MsgDelegateVote{
 		Rk:                  make([]byte, 32),
 		SpendAuthSig:        []byte("sig"),
 		SignedNoteNullifier: []byte("nullifier"),
@@ -60,21 +60,21 @@ func TestEncodeDecodeRegisterDelegation(t *testing.T) {
 
 	raw, err := EncodeVoteTx(msg)
 	require.NoError(t, err)
-	require.Equal(t, TagRegisterDelegation, raw[0])
+	require.Equal(t, TagDelegateVote, raw[0])
 
 	tag, decoded, err := DecodeVoteTx(raw)
 	require.NoError(t, err)
-	require.Equal(t, TagRegisterDelegation, tag)
+	require.Equal(t, TagDelegateVote, tag)
 
-	decodedMsg, ok := decoded.(*types.MsgRegisterDelegation)
+	decodedMsg, ok := decoded.(*types.MsgDelegateVote)
 	require.True(t, ok)
 	require.Equal(t, msg.Rk, decodedMsg.Rk)
 	require.Equal(t, msg.Sighash, decodedMsg.Sighash)
 	require.Equal(t, len(msg.GovNullifiers), len(decodedMsg.GovNullifiers))
 }
 
-func TestEncodeDecodeCreateVoteCommitment(t *testing.T) {
-	msg := &types.MsgCreateVoteCommitment{
+func TestEncodeDecodeCastVote(t *testing.T) {
+	msg := &types.MsgCastVote{
 		VanNullifier:             []byte("van"),
 		VoteAuthorityNoteNew:     []byte("note"),
 		VoteCommitment:           []byte("commitment"),
@@ -86,20 +86,20 @@ func TestEncodeDecodeCreateVoteCommitment(t *testing.T) {
 
 	raw, err := EncodeVoteTx(msg)
 	require.NoError(t, err)
-	require.Equal(t, TagCreateVoteCommitment, raw[0])
+	require.Equal(t, TagCastVote, raw[0])
 
 	tag, decoded, err := DecodeVoteTx(raw)
 	require.NoError(t, err)
-	require.Equal(t, TagCreateVoteCommitment, tag)
+	require.Equal(t, TagCastVote, tag)
 
-	decodedMsg, ok := decoded.(*types.MsgCreateVoteCommitment)
+	decodedMsg, ok := decoded.(*types.MsgCastVote)
 	require.True(t, ok)
 	require.Equal(t, msg.ProposalId, decodedMsg.ProposalId)
 	require.Equal(t, msg.VoteCommTreeAnchorHeight, decodedMsg.VoteCommTreeAnchorHeight)
 }
 
-func TestEncodeDecodeRevealVoteShare(t *testing.T) {
-	msg := &types.MsgRevealVoteShare{
+func TestEncodeDecodeRevealShare(t *testing.T) {
+	msg := &types.MsgRevealShare{
 		ShareNullifier:           []byte("share"),
 		VoteAmount:               1000,
 		ProposalId:               2,
@@ -111,13 +111,13 @@ func TestEncodeDecodeRevealVoteShare(t *testing.T) {
 
 	raw, err := EncodeVoteTx(msg)
 	require.NoError(t, err)
-	require.Equal(t, TagRevealVoteShare, raw[0])
+	require.Equal(t, TagRevealShare, raw[0])
 
 	tag, decoded, err := DecodeVoteTx(raw)
 	require.NoError(t, err)
-	require.Equal(t, TagRevealVoteShare, tag)
+	require.Equal(t, TagRevealShare, tag)
 
-	decodedMsg, ok := decoded.(*types.MsgRevealVoteShare)
+	decodedMsg, ok := decoded.(*types.MsgRevealShare)
 	require.True(t, ok)
 	require.Equal(t, msg.VoteAmount, decodedMsg.VoteAmount)
 	require.Equal(t, msg.VoteDecision, decodedMsg.VoteDecision)
@@ -149,10 +149,10 @@ func TestTagForMessage(t *testing.T) {
 		tag  byte
 		name string
 	}{
-		{&types.MsgSetupVoteRound{}, TagSetupVoteRound, "SetupVoteRound"},
-		{&types.MsgRegisterDelegation{}, TagRegisterDelegation, "RegisterDelegation"},
-		{&types.MsgCreateVoteCommitment{}, TagCreateVoteCommitment, "CreateVoteCommitment"},
-		{&types.MsgRevealVoteShare{}, TagRevealVoteShare, "RevealVoteShare"},
+		{&types.MsgCreateVotingSession{}, TagCreateVotingSession, "CreateVotingSession"},
+		{&types.MsgDelegateVote{}, TagDelegateVote, "DelegateVote"},
+		{&types.MsgCastVote{}, TagCastVote, "CastVote"},
+		{&types.MsgRevealShare{}, TagRevealShare, "RevealShare"},
 	}
 
 	for _, tt := range tests {

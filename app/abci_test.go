@@ -48,12 +48,12 @@ func (s *ABCIIntegrationSuite) queryCtx() sdk.Context {
 // ---------------------------------------------------------------------------
 
 func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
-	// Step 1: Setup vote round.
-	setupMsg := testutil.ValidSetupRoundAt(s.app.Time)
+	// Step 1: Create voting session.
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
 	setupTx := testutil.MustEncodeVoteTx(setupMsg)
 
 	result := s.app.DeliverVoteTx(setupTx)
-	s.Require().Equal(uint32(0), result.Code, "SetupVoteRound should succeed, got: %s", result.Log)
+	s.Require().Equal(uint32(0), result.Code, "CreateVotingSession should succeed, got: %s", result.Log)
 
 	// Derive the round ID and verify it was stored.
 	roundID := computeRoundID(setupMsg)
@@ -65,12 +65,12 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	s.Require().Equal(setupMsg.Creator, round.Creator)
 	s.Require().Equal(setupMsg.SnapshotHeight, round.SnapshotHeight)
 
-	// Step 2: Register delegation.
+	// Step 2: Delegate vote.
 	delegationMsg := testutil.ValidDelegation(roundID, 0x10)
 	delegationTx := testutil.MustEncodeVoteTx(delegationMsg)
 
 	result = s.app.DeliverVoteTx(delegationTx)
-	s.Require().Equal(uint32(0), result.Code, "RegisterDelegation should succeed, got: %s", result.Log)
+	s.Require().Equal(uint32(0), result.Code, "DelegateVote should succeed, got: %s", result.Log)
 
 	// Verify nullifiers recorded.
 	ctx = s.queryCtx()
@@ -97,17 +97,17 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	s.Require().NotNil(root, "EndBlocker should have computed a tree root at height %d", anchorHeight)
 	s.Require().Len(root, 32)
 
-	// Step 4: Create vote commitment using the anchor height from step 3.
-	voteCommitMsg := testutil.ValidVoteCommitment(roundID, anchorHeight, 0x30)
-	voteCommitTx := testutil.MustEncodeVoteTx(voteCommitMsg)
+	// Step 4: Cast vote using the anchor height from step 3.
+	castVoteMsg := testutil.ValidCastVote(roundID, anchorHeight, 0x30)
+	castVoteTx := testutil.MustEncodeVoteTx(castVoteMsg)
 
-	result = s.app.DeliverVoteTx(voteCommitTx)
-	s.Require().Equal(uint32(0), result.Code, "CreateVoteCommitment should succeed, got: %s", result.Log)
+	result = s.app.DeliverVoteTx(castVoteTx)
+	s.Require().Equal(uint32(0), result.Code, "CastVote should succeed, got: %s", result.Log)
 
 	// Verify VAN nullifier recorded.
 	ctx = s.queryCtx()
 	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
-	has, err := s.app.VoteKeeper().HasNullifier(kvStore, voteCommitMsg.VanNullifier)
+	has, err := s.app.VoteKeeper().HasNullifier(kvStore, castVoteMsg.VanNullifier)
 	s.Require().NoError(err)
 	s.Require().True(has, "VAN nullifier should be recorded")
 
@@ -119,12 +119,12 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	// EndBlocker already computed a new root for this block (tree grew).
 	revealAnchor := uint64(s.app.Height)
 
-	// Step 5: Reveal vote share.
+	// Step 5: Reveal share.
 	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
 	revealTx := testutil.MustEncodeVoteTx(revealMsg)
 
 	result = s.app.DeliverVoteTx(revealTx)
-	s.Require().Equal(uint32(0), result.Code, "RevealVoteShare should succeed, got: %s", result.Log)
+	s.Require().Equal(uint32(0), result.Code, "RevealShare should succeed, got: %s", result.Log)
 
 	// Step 6: Verify tally.
 	ctx = s.queryCtx()
@@ -144,8 +144,8 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 // ---------------------------------------------------------------------------
 
 func (s *ABCIIntegrationSuite) TestNullifierDoubleSpend() {
-	// Setup round.
-	setupMsg := testutil.ValidSetupRoundAt(s.app.Time)
+	// Create voting session.
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
 	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
 	roundID := computeRoundID(setupMsg)
 
@@ -166,8 +166,8 @@ func (s *ABCIIntegrationSuite) TestNullifierDoubleSpend() {
 // ---------------------------------------------------------------------------
 
 func (s *ABCIIntegrationSuite) TestCheckTxVsRecheckTx() {
-	// Setup round.
-	setupMsg := testutil.ValidSetupRoundAt(s.app.Time)
+	// Create voting session.
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
 	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
 	roundID := computeRoundID(setupMsg)
 
@@ -193,8 +193,8 @@ func (s *ABCIIntegrationSuite) TestCheckTxVsRecheckTx() {
 // ---------------------------------------------------------------------------
 
 func (s *ABCIIntegrationSuite) TestCommitmentTreeAnchorValidation() {
-	// Setup round and register delegation.
-	setupMsg := testutil.ValidSetupRoundAt(s.app.Time)
+	// Create voting session and delegate vote.
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
 	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
 	roundID := computeRoundID(setupMsg)
 
@@ -204,15 +204,15 @@ func (s *ABCIIntegrationSuite) TestCommitmentTreeAnchorValidation() {
 	// EndBlocker already ran during the delegation's FinalizeBlock.
 	validAnchor := uint64(s.app.Height)
 
-	// Vote commitment with valid anchor should succeed.
-	voteCommit := testutil.ValidVoteCommitment(roundID, validAnchor, 0x40)
-	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(voteCommit))
+	// Cast vote with valid anchor should succeed.
+	castVote := testutil.ValidCastVote(roundID, validAnchor, 0x40)
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
 	s.Require().Equal(uint32(0), result.Code, "valid anchor should succeed, got: %s", result.Log)
 
-	// Vote commitment with non-existent anchor height should fail.
+	// Cast vote with non-existent anchor height should fail.
 	badAnchor := validAnchor + 999
-	badCommit := testutil.ValidVoteCommitment(roundID, badAnchor, 0x60)
-	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badCommit))
+	badCastVote := testutil.ValidCastVote(roundID, badAnchor, 0x60)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badCastVote))
 	s.Require().NotEqual(uint32(0), result.Code, "invalid anchor should fail")
 	s.Require().Contains(result.Log, "invalid commitment tree anchor height")
 }
@@ -222,8 +222,8 @@ func (s *ABCIIntegrationSuite) TestCommitmentTreeAnchorValidation() {
 // ---------------------------------------------------------------------------
 
 func (s *ABCIIntegrationSuite) TestExpiredRoundRejection() {
-	// Setup a round that is already expired relative to block time.
-	expiredMsg := testutil.ExpiredSetupRoundAt(s.app.Time)
+	// Create a session that is already expired relative to block time.
+	expiredMsg := testutil.ExpiredCreateVotingSessionAt(s.app.Time)
 	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(expiredMsg))
 	expiredRoundID := computeRoundID(expiredMsg)
 
@@ -272,7 +272,7 @@ func (s *ABCIIntegrationSuite) TestMalformedTransactions() {
 
 func (s *ABCIIntegrationSuite) TestMalformedEmptyRequiredFields() {
 	// Valid protobuf structure but with empty required fields → ValidateBasic error.
-	msg := &types.MsgRegisterDelegation{
+	msg := &types.MsgDelegateVote{
 		// All fields zero/empty — should fail ValidateBasic.
 	}
 	txBytes := testutil.MustEncodeVoteTx(msg)
@@ -285,8 +285,8 @@ func (s *ABCIIntegrationSuite) TestMalformedEmptyRequiredFields() {
 // ---------------------------------------------------------------------------
 
 func (s *ABCIIntegrationSuite) TestConcurrentSubmissionsInSameBlock() {
-	// Setup round.
-	setupMsg := testutil.ValidSetupRoundAt(s.app.Time)
+	// Create voting session.
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
 	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
 	roundID := computeRoundID(setupMsg)
 
@@ -335,8 +335,8 @@ func (s *ABCIIntegrationSuite) TestConcurrentSubmissionsInSameBlock() {
 // ---------------------------------------------------------------------------
 
 func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
-	// Setup round.
-	setupMsg := testutil.ValidSetupRoundAt(s.app.Time)
+	// Create voting session.
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
 	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
 	roundID := computeRoundID(setupMsg)
 
@@ -391,7 +391,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
 // Blake2b-256(snapshot_height || snapshot_blockhash || proposals_hash ||
 //
 //	vote_end_time || nullifier_imt_root || nc_root)
-func computeRoundID(msg *types.MsgSetupVoteRound) []byte {
+func computeRoundID(msg *types.MsgCreateVotingSession) []byte {
 	h, _ := blake2b.New256(nil)
 	var buf [8]byte
 

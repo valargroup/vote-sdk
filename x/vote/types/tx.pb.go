@@ -22,9 +22,9 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// MsgSetupVoteRound creates a new voting session.
+// MsgCreateVotingSession creates a new voting session.
 // vote_round_id is computed on-chain as Blake2b(snapshot_height, snapshot_blockhash, proposals_hash, vote_end_time, nullifier_imt_root, nc_root).
-type MsgSetupVoteRound struct {
+type MsgCreateVotingSession struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Creator           string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`
 	SnapshotHeight    uint64                 `protobuf:"varint,2,opt,name=snapshot_height,json=snapshotHeight,proto3" json:"snapshot_height,omitempty"`
@@ -37,20 +37,20 @@ type MsgSetupVoteRound struct {
 	sizeCache         protoimpl.SizeCache
 }
 
-func (x *MsgSetupVoteRound) Reset() {
-	*x = MsgSetupVoteRound{}
+func (x *MsgCreateVotingSession) Reset() {
+	*x = MsgCreateVotingSession{}
 	mi := &file_zvote_v1_tx_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MsgSetupVoteRound) String() string {
+func (x *MsgCreateVotingSession) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MsgSetupVoteRound) ProtoMessage() {}
+func (*MsgCreateVotingSession) ProtoMessage() {}
 
-func (x *MsgSetupVoteRound) ProtoReflect() protoreflect.Message {
+func (x *MsgCreateVotingSession) ProtoReflect() protoreflect.Message {
 	mi := &file_zvote_v1_tx_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -62,81 +62,81 @@ func (x *MsgSetupVoteRound) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MsgSetupVoteRound.ProtoReflect.Descriptor instead.
-func (*MsgSetupVoteRound) Descriptor() ([]byte, []int) {
+// Deprecated: Use MsgCreateVotingSession.ProtoReflect.Descriptor instead.
+func (*MsgCreateVotingSession) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *MsgSetupVoteRound) GetCreator() string {
+func (x *MsgCreateVotingSession) GetCreator() string {
 	if x != nil {
 		return x.Creator
 	}
 	return ""
 }
 
-func (x *MsgSetupVoteRound) GetSnapshotHeight() uint64 {
+func (x *MsgCreateVotingSession) GetSnapshotHeight() uint64 {
 	if x != nil {
 		return x.SnapshotHeight
 	}
 	return 0
 }
 
-func (x *MsgSetupVoteRound) GetSnapshotBlockhash() []byte {
+func (x *MsgCreateVotingSession) GetSnapshotBlockhash() []byte {
 	if x != nil {
 		return x.SnapshotBlockhash
 	}
 	return nil
 }
 
-func (x *MsgSetupVoteRound) GetProposalsHash() []byte {
+func (x *MsgCreateVotingSession) GetProposalsHash() []byte {
 	if x != nil {
 		return x.ProposalsHash
 	}
 	return nil
 }
 
-func (x *MsgSetupVoteRound) GetVoteEndTime() uint64 {
+func (x *MsgCreateVotingSession) GetVoteEndTime() uint64 {
 	if x != nil {
 		return x.VoteEndTime
 	}
 	return 0
 }
 
-func (x *MsgSetupVoteRound) GetNullifierImtRoot() []byte {
+func (x *MsgCreateVotingSession) GetNullifierImtRoot() []byte {
 	if x != nil {
 		return x.NullifierImtRoot
 	}
 	return nil
 }
 
-func (x *MsgSetupVoteRound) GetNcRoot() []byte {
+func (x *MsgCreateVotingSession) GetNcRoot() []byte {
 	if x != nil {
 		return x.NcRoot
 	}
 	return nil
 }
 
-type MsgSetupVoteRoundResponse struct {
+type MsgCreateVotingSessionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	VoteRoundId   []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MsgSetupVoteRoundResponse) Reset() {
-	*x = MsgSetupVoteRoundResponse{}
+func (x *MsgCreateVotingSessionResponse) Reset() {
+	*x = MsgCreateVotingSessionResponse{}
 	mi := &file_zvote_v1_tx_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MsgSetupVoteRoundResponse) String() string {
+func (x *MsgCreateVotingSessionResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MsgSetupVoteRoundResponse) ProtoMessage() {}
+func (*MsgCreateVotingSessionResponse) ProtoMessage() {}
 
-func (x *MsgSetupVoteRoundResponse) ProtoReflect() protoreflect.Message {
+func (x *MsgCreateVotingSessionResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_zvote_v1_tx_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -148,20 +148,20 @@ func (x *MsgSetupVoteRoundResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MsgSetupVoteRoundResponse.ProtoReflect.Descriptor instead.
-func (*MsgSetupVoteRoundResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use MsgCreateVotingSessionResponse.ProtoReflect.Descriptor instead.
+func (*MsgCreateVotingSessionResponse) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *MsgSetupVoteRoundResponse) GetVoteRoundId() []byte {
+func (x *MsgCreateVotingSessionResponse) GetVoteRoundId() []byte {
 	if x != nil {
 		return x.VoteRoundId
 	}
 	return nil
 }
 
-// MsgRegisterDelegation corresponds to ZKP #1: delegation registration from keystone-signed action.
-type MsgRegisterDelegation struct {
+// MsgDelegateVote corresponds to ZKP #1: delegation registration from keystone-signed action.
+type MsgDelegateVote struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	Rk                  []byte                 `protobuf:"bytes,1,opt,name=rk,proto3" json:"rk,omitempty"`                                                                // Randomized spend auth key (32 bytes)
 	SpendAuthSig        []byte                 `protobuf:"bytes,2,opt,name=spend_auth_sig,json=spendAuthSig,proto3" json:"spend_auth_sig,omitempty"`                      // RedPallas signature
@@ -177,20 +177,20 @@ type MsgRegisterDelegation struct {
 	sizeCache           protoimpl.SizeCache
 }
 
-func (x *MsgRegisterDelegation) Reset() {
-	*x = MsgRegisterDelegation{}
+func (x *MsgDelegateVote) Reset() {
+	*x = MsgDelegateVote{}
 	mi := &file_zvote_v1_tx_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MsgRegisterDelegation) String() string {
+func (x *MsgDelegateVote) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MsgRegisterDelegation) ProtoMessage() {}
+func (*MsgDelegateVote) ProtoMessage() {}
 
-func (x *MsgRegisterDelegation) ProtoReflect() protoreflect.Message {
+func (x *MsgDelegateVote) ProtoReflect() protoreflect.Message {
 	mi := &file_zvote_v1_tx_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -202,101 +202,101 @@ func (x *MsgRegisterDelegation) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MsgRegisterDelegation.ProtoReflect.Descriptor instead.
-func (*MsgRegisterDelegation) Descriptor() ([]byte, []int) {
+// Deprecated: Use MsgDelegateVote.ProtoReflect.Descriptor instead.
+func (*MsgDelegateVote) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *MsgRegisterDelegation) GetRk() []byte {
+func (x *MsgDelegateVote) GetRk() []byte {
 	if x != nil {
 		return x.Rk
 	}
 	return nil
 }
 
-func (x *MsgRegisterDelegation) GetSpendAuthSig() []byte {
+func (x *MsgDelegateVote) GetSpendAuthSig() []byte {
 	if x != nil {
 		return x.SpendAuthSig
 	}
 	return nil
 }
 
-func (x *MsgRegisterDelegation) GetSignedNoteNullifier() []byte {
+func (x *MsgDelegateVote) GetSignedNoteNullifier() []byte {
 	if x != nil {
 		return x.SignedNoteNullifier
 	}
 	return nil
 }
 
-func (x *MsgRegisterDelegation) GetCmxNew() []byte {
+func (x *MsgDelegateVote) GetCmxNew() []byte {
 	if x != nil {
 		return x.CmxNew
 	}
 	return nil
 }
 
-func (x *MsgRegisterDelegation) GetEncMemo() []byte {
+func (x *MsgDelegateVote) GetEncMemo() []byte {
 	if x != nil {
 		return x.EncMemo
 	}
 	return nil
 }
 
-func (x *MsgRegisterDelegation) GetGovComm() []byte {
+func (x *MsgDelegateVote) GetGovComm() []byte {
 	if x != nil {
 		return x.GovComm
 	}
 	return nil
 }
 
-func (x *MsgRegisterDelegation) GetGovNullifiers() [][]byte {
+func (x *MsgDelegateVote) GetGovNullifiers() [][]byte {
 	if x != nil {
 		return x.GovNullifiers
 	}
 	return nil
 }
 
-func (x *MsgRegisterDelegation) GetProof() []byte {
+func (x *MsgDelegateVote) GetProof() []byte {
 	if x != nil {
 		return x.Proof
 	}
 	return nil
 }
 
-func (x *MsgRegisterDelegation) GetVoteRoundId() []byte {
+func (x *MsgDelegateVote) GetVoteRoundId() []byte {
 	if x != nil {
 		return x.VoteRoundId
 	}
 	return nil
 }
 
-func (x *MsgRegisterDelegation) GetSighash() []byte {
+func (x *MsgDelegateVote) GetSighash() []byte {
 	if x != nil {
 		return x.Sighash
 	}
 	return nil
 }
 
-type MsgRegisterDelegationResponse struct {
+type MsgDelegateVoteResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MsgRegisterDelegationResponse) Reset() {
-	*x = MsgRegisterDelegationResponse{}
+func (x *MsgDelegateVoteResponse) Reset() {
+	*x = MsgDelegateVoteResponse{}
 	mi := &file_zvote_v1_tx_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MsgRegisterDelegationResponse) String() string {
+func (x *MsgDelegateVoteResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MsgRegisterDelegationResponse) ProtoMessage() {}
+func (*MsgDelegateVoteResponse) ProtoMessage() {}
 
-func (x *MsgRegisterDelegationResponse) ProtoReflect() protoreflect.Message {
+func (x *MsgDelegateVoteResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_zvote_v1_tx_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -308,13 +308,13 @@ func (x *MsgRegisterDelegationResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MsgRegisterDelegationResponse.ProtoReflect.Descriptor instead.
-func (*MsgRegisterDelegationResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use MsgDelegateVoteResponse.ProtoReflect.Descriptor instead.
+func (*MsgDelegateVoteResponse) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{3}
 }
 
-// MsgCreateVoteCommitment corresponds to ZKP #2: create a vote commitment.
-type MsgCreateVoteCommitment struct {
+// MsgCastVote corresponds to ZKP #2: create a vote commitment.
+type MsgCastVote struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	VanNullifier             []byte                 `protobuf:"bytes,1,opt,name=van_nullifier,json=vanNullifier,proto3" json:"van_nullifier,omitempty"`
 	VoteAuthorityNoteNew     []byte                 `protobuf:"bytes,2,opt,name=vote_authority_note_new,json=voteAuthorityNoteNew,proto3" json:"vote_authority_note_new,omitempty"`
@@ -327,20 +327,20 @@ type MsgCreateVoteCommitment struct {
 	sizeCache                protoimpl.SizeCache
 }
 
-func (x *MsgCreateVoteCommitment) Reset() {
-	*x = MsgCreateVoteCommitment{}
+func (x *MsgCastVote) Reset() {
+	*x = MsgCastVote{}
 	mi := &file_zvote_v1_tx_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MsgCreateVoteCommitment) String() string {
+func (x *MsgCastVote) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MsgCreateVoteCommitment) ProtoMessage() {}
+func (*MsgCastVote) ProtoMessage() {}
 
-func (x *MsgCreateVoteCommitment) ProtoReflect() protoreflect.Message {
+func (x *MsgCastVote) ProtoReflect() protoreflect.Message {
 	mi := &file_zvote_v1_tx_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -352,80 +352,80 @@ func (x *MsgCreateVoteCommitment) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MsgCreateVoteCommitment.ProtoReflect.Descriptor instead.
-func (*MsgCreateVoteCommitment) Descriptor() ([]byte, []int) {
+// Deprecated: Use MsgCastVote.ProtoReflect.Descriptor instead.
+func (*MsgCastVote) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *MsgCreateVoteCommitment) GetVanNullifier() []byte {
+func (x *MsgCastVote) GetVanNullifier() []byte {
 	if x != nil {
 		return x.VanNullifier
 	}
 	return nil
 }
 
-func (x *MsgCreateVoteCommitment) GetVoteAuthorityNoteNew() []byte {
+func (x *MsgCastVote) GetVoteAuthorityNoteNew() []byte {
 	if x != nil {
 		return x.VoteAuthorityNoteNew
 	}
 	return nil
 }
 
-func (x *MsgCreateVoteCommitment) GetVoteCommitment() []byte {
+func (x *MsgCastVote) GetVoteCommitment() []byte {
 	if x != nil {
 		return x.VoteCommitment
 	}
 	return nil
 }
 
-func (x *MsgCreateVoteCommitment) GetProposalId() uint32 {
+func (x *MsgCastVote) GetProposalId() uint32 {
 	if x != nil {
 		return x.ProposalId
 	}
 	return 0
 }
 
-func (x *MsgCreateVoteCommitment) GetProof() []byte {
+func (x *MsgCastVote) GetProof() []byte {
 	if x != nil {
 		return x.Proof
 	}
 	return nil
 }
 
-func (x *MsgCreateVoteCommitment) GetVoteRoundId() []byte {
+func (x *MsgCastVote) GetVoteRoundId() []byte {
 	if x != nil {
 		return x.VoteRoundId
 	}
 	return nil
 }
 
-func (x *MsgCreateVoteCommitment) GetVoteCommTreeAnchorHeight() uint64 {
+func (x *MsgCastVote) GetVoteCommTreeAnchorHeight() uint64 {
 	if x != nil {
 		return x.VoteCommTreeAnchorHeight
 	}
 	return 0
 }
 
-type MsgCreateVoteCommitmentResponse struct {
+type MsgCastVoteResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MsgCreateVoteCommitmentResponse) Reset() {
-	*x = MsgCreateVoteCommitmentResponse{}
+func (x *MsgCastVoteResponse) Reset() {
+	*x = MsgCastVoteResponse{}
 	mi := &file_zvote_v1_tx_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MsgCreateVoteCommitmentResponse) String() string {
+func (x *MsgCastVoteResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MsgCreateVoteCommitmentResponse) ProtoMessage() {}
+func (*MsgCastVoteResponse) ProtoMessage() {}
 
-func (x *MsgCreateVoteCommitmentResponse) ProtoReflect() protoreflect.Message {
+func (x *MsgCastVoteResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_zvote_v1_tx_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -437,13 +437,13 @@ func (x *MsgCreateVoteCommitmentResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MsgCreateVoteCommitmentResponse.ProtoReflect.Descriptor instead.
-func (*MsgCreateVoteCommitmentResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use MsgCastVoteResponse.ProtoReflect.Descriptor instead.
+func (*MsgCastVoteResponse) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{5}
 }
 
-// MsgRevealVoteShare corresponds to ZKP #3: reveal vote share (server submits).
-type MsgRevealVoteShare struct {
+// MsgRevealShare corresponds to ZKP #3: reveal vote share (server submits).
+type MsgRevealShare struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	ShareNullifier           []byte                 `protobuf:"bytes,1,opt,name=share_nullifier,json=shareNullifier,proto3" json:"share_nullifier,omitempty"`
 	VoteAmount               uint64                 `protobuf:"varint,2,opt,name=vote_amount,json=voteAmount,proto3" json:"vote_amount,omitempty"`
@@ -456,20 +456,20 @@ type MsgRevealVoteShare struct {
 	sizeCache                protoimpl.SizeCache
 }
 
-func (x *MsgRevealVoteShare) Reset() {
-	*x = MsgRevealVoteShare{}
+func (x *MsgRevealShare) Reset() {
+	*x = MsgRevealShare{}
 	mi := &file_zvote_v1_tx_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MsgRevealVoteShare) String() string {
+func (x *MsgRevealShare) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MsgRevealVoteShare) ProtoMessage() {}
+func (*MsgRevealShare) ProtoMessage() {}
 
-func (x *MsgRevealVoteShare) ProtoReflect() protoreflect.Message {
+func (x *MsgRevealShare) ProtoReflect() protoreflect.Message {
 	mi := &file_zvote_v1_tx_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -481,80 +481,80 @@ func (x *MsgRevealVoteShare) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MsgRevealVoteShare.ProtoReflect.Descriptor instead.
-func (*MsgRevealVoteShare) Descriptor() ([]byte, []int) {
+// Deprecated: Use MsgRevealShare.ProtoReflect.Descriptor instead.
+func (*MsgRevealShare) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *MsgRevealVoteShare) GetShareNullifier() []byte {
+func (x *MsgRevealShare) GetShareNullifier() []byte {
 	if x != nil {
 		return x.ShareNullifier
 	}
 	return nil
 }
 
-func (x *MsgRevealVoteShare) GetVoteAmount() uint64 {
+func (x *MsgRevealShare) GetVoteAmount() uint64 {
 	if x != nil {
 		return x.VoteAmount
 	}
 	return 0
 }
 
-func (x *MsgRevealVoteShare) GetProposalId() uint32 {
+func (x *MsgRevealShare) GetProposalId() uint32 {
 	if x != nil {
 		return x.ProposalId
 	}
 	return 0
 }
 
-func (x *MsgRevealVoteShare) GetVoteDecision() uint32 {
+func (x *MsgRevealShare) GetVoteDecision() uint32 {
 	if x != nil {
 		return x.VoteDecision
 	}
 	return 0
 }
 
-func (x *MsgRevealVoteShare) GetProof() []byte {
+func (x *MsgRevealShare) GetProof() []byte {
 	if x != nil {
 		return x.Proof
 	}
 	return nil
 }
 
-func (x *MsgRevealVoteShare) GetVoteRoundId() []byte {
+func (x *MsgRevealShare) GetVoteRoundId() []byte {
 	if x != nil {
 		return x.VoteRoundId
 	}
 	return nil
 }
 
-func (x *MsgRevealVoteShare) GetVoteCommTreeAnchorHeight() uint64 {
+func (x *MsgRevealShare) GetVoteCommTreeAnchorHeight() uint64 {
 	if x != nil {
 		return x.VoteCommTreeAnchorHeight
 	}
 	return 0
 }
 
-type MsgRevealVoteShareResponse struct {
+type MsgRevealShareResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MsgRevealVoteShareResponse) Reset() {
-	*x = MsgRevealVoteShareResponse{}
+func (x *MsgRevealShareResponse) Reset() {
+	*x = MsgRevealShareResponse{}
 	mi := &file_zvote_v1_tx_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MsgRevealVoteShareResponse) String() string {
+func (x *MsgRevealShareResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MsgRevealVoteShareResponse) ProtoMessage() {}
+func (*MsgRevealShareResponse) ProtoMessage() {}
 
-func (x *MsgRevealVoteShareResponse) ProtoReflect() protoreflect.Message {
+func (x *MsgRevealShareResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_zvote_v1_tx_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -566,8 +566,8 @@ func (x *MsgRevealVoteShareResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MsgRevealVoteShareResponse.ProtoReflect.Descriptor instead.
-func (*MsgRevealVoteShareResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use MsgRevealShareResponse.ProtoReflect.Descriptor instead.
+func (*MsgRevealShareResponse) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{7}
 }
 
@@ -575,18 +575,18 @@ var File_zvote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\n" +
-	"\x11zvote/v1/tx.proto\x12\bzvote.v1\x1a\x17cosmos/msg/v1/msg.proto\"\x97\x02\n" +
-	"\x11MsgSetupVoteRound\x12\x18\n" +
+	"\x11zvote/v1/tx.proto\x12\bzvote.v1\x1a\x17cosmos/msg/v1/msg.proto\"\x9c\x02\n" +
+	"\x16MsgCreateVotingSession\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
 	"\x12snapshot_blockhash\x18\x03 \x01(\fR\x11snapshotBlockhash\x12%\n" +
 	"\x0eproposals_hash\x18\x04 \x01(\fR\rproposalsHash\x12\"\n" +
 	"\rvote_end_time\x18\x05 \x01(\x04R\vvoteEndTime\x12,\n" +
 	"\x12nullifier_imt_root\x18\x06 \x01(\fR\x10nullifierImtRoot\x12\x17\n" +
-	"\anc_root\x18\a \x01(\fR\x06ncRoot\"?\n" +
-	"\x19MsgSetupVoteRoundResponse\x12\"\n" +
-	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xcb\x02\n" +
-	"\x15MsgRegisterDelegation\x12\x0e\n" +
+	"\anc_root\x18\a \x01(\fR\x06ncRoot\"D\n" +
+	"\x1eMsgCreateVotingSessionResponse\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xc5\x02\n" +
+	"\x0fMsgDelegateVote\x12\x0e\n" +
 	"\x02rk\x18\x01 \x01(\fR\x02rk\x12$\n" +
 	"\x0espend_auth_sig\x18\x02 \x01(\fR\fspendAuthSig\x122\n" +
 	"\x15signed_note_nullifier\x18\x03 \x01(\fR\x13signedNoteNullifier\x12\x17\n" +
@@ -597,9 +597,9 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\x05proof\x18\b \x01(\fR\x05proof\x12\"\n" +
 	"\rvote_round_id\x18\t \x01(\fR\vvoteRoundId\x12\x18\n" +
 	"\asighash\x18\n" +
-	" \x01(\fR\asighash\"\x1f\n" +
-	"\x1dMsgRegisterDelegationResponse\"\xb9\x02\n" +
-	"\x17MsgCreateVoteCommitment\x12#\n" +
+	" \x01(\fR\asighash\"\x19\n" +
+	"\x17MsgDelegateVoteResponse\"\xad\x02\n" +
+	"\vMsgCastVote\x12#\n" +
 	"\rvan_nullifier\x18\x01 \x01(\fR\fvanNullifier\x125\n" +
 	"\x17vote_authority_note_new\x18\x02 \x01(\fR\x14voteAuthorityNoteNew\x12'\n" +
 	"\x0fvote_commitment\x18\x03 \x01(\fR\x0evoteCommitment\x12\x1f\n" +
@@ -607,9 +607,9 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"proposalId\x12\x14\n" +
 	"\x05proof\x18\x05 \x01(\fR\x05proof\x12\"\n" +
 	"\rvote_round_id\x18\x06 \x01(\fR\vvoteRoundId\x12>\n" +
-	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\"!\n" +
-	"\x1fMsgCreateVoteCommitmentResponse\"\x9e\x02\n" +
-	"\x12MsgRevealVoteShare\x12'\n" +
+	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\"\x15\n" +
+	"\x13MsgCastVoteResponse\"\x9a\x02\n" +
+	"\x0eMsgRevealShare\x12'\n" +
 	"\x0fshare_nullifier\x18\x01 \x01(\fR\x0eshareNullifier\x12\x1f\n" +
 	"\vvote_amount\x18\x02 \x01(\x04R\n" +
 	"voteAmount\x12\x1f\n" +
@@ -618,13 +618,13 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\rvote_decision\x18\x04 \x01(\rR\fvoteDecision\x12\x14\n" +
 	"\x05proof\x18\x05 \x01(\fR\x05proof\x12\"\n" +
 	"\rvote_round_id\x18\x06 \x01(\fR\vvoteRoundId\x12>\n" +
-	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\"\x1c\n" +
-	"\x1aMsgRevealVoteShareResponse2\xfd\x02\n" +
-	"\x03Msg\x12R\n" +
-	"\x0eSetupVoteRound\x12\x1b.zvote.v1.MsgSetupVoteRound\x1a#.zvote.v1.MsgSetupVoteRoundResponse\x12^\n" +
-	"\x12RegisterDelegation\x12\x1f.zvote.v1.MsgRegisterDelegation\x1a'.zvote.v1.MsgRegisterDelegationResponse\x12d\n" +
-	"\x14CreateVoteCommitment\x12!.zvote.v1.MsgCreateVoteCommitment\x1a).zvote.v1.MsgCreateVoteCommitmentResponse\x12U\n" +
-	"\x0fRevealVoteShare\x12\x1c.zvote.v1.MsgRevealVoteShare\x1a$.zvote.v1.MsgRevealVoteShareResponse\x1a\x05\x80\xe7\xb0*\x01B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
+	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\"\x18\n" +
+	"\x16MsgRevealShareResponse2\xca\x02\n" +
+	"\x03Msg\x12a\n" +
+	"\x13CreateVotingSession\x12 .zvote.v1.MsgCreateVotingSession\x1a(.zvote.v1.MsgCreateVotingSessionResponse\x12L\n" +
+	"\fDelegateVote\x12\x19.zvote.v1.MsgDelegateVote\x1a!.zvote.v1.MsgDelegateVoteResponse\x12@\n" +
+	"\bCastVote\x12\x15.zvote.v1.MsgCastVote\x1a\x1d.zvote.v1.MsgCastVoteResponse\x12I\n" +
+	"\vRevealShare\x12\x18.zvote.v1.MsgRevealShare\x1a .zvote.v1.MsgRevealShareResponse\x1a\x05\x80\xe7\xb0*\x01B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
 var (
 	file_zvote_v1_tx_proto_rawDescOnce sync.Once
@@ -640,24 +640,24 @@ func file_zvote_v1_tx_proto_rawDescGZIP() []byte {
 
 var file_zvote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_zvote_v1_tx_proto_goTypes = []any{
-	(*MsgSetupVoteRound)(nil),               // 0: zvote.v1.MsgSetupVoteRound
-	(*MsgSetupVoteRoundResponse)(nil),       // 1: zvote.v1.MsgSetupVoteRoundResponse
-	(*MsgRegisterDelegation)(nil),           // 2: zvote.v1.MsgRegisterDelegation
-	(*MsgRegisterDelegationResponse)(nil),   // 3: zvote.v1.MsgRegisterDelegationResponse
-	(*MsgCreateVoteCommitment)(nil),         // 4: zvote.v1.MsgCreateVoteCommitment
-	(*MsgCreateVoteCommitmentResponse)(nil), // 5: zvote.v1.MsgCreateVoteCommitmentResponse
-	(*MsgRevealVoteShare)(nil),              // 6: zvote.v1.MsgRevealVoteShare
-	(*MsgRevealVoteShareResponse)(nil),      // 7: zvote.v1.MsgRevealVoteShareResponse
+	(*MsgCreateVotingSession)(nil),         // 0: zvote.v1.MsgCreateVotingSession
+	(*MsgCreateVotingSessionResponse)(nil), // 1: zvote.v1.MsgCreateVotingSessionResponse
+	(*MsgDelegateVote)(nil),                // 2: zvote.v1.MsgDelegateVote
+	(*MsgDelegateVoteResponse)(nil),        // 3: zvote.v1.MsgDelegateVoteResponse
+	(*MsgCastVote)(nil),                    // 4: zvote.v1.MsgCastVote
+	(*MsgCastVoteResponse)(nil),            // 5: zvote.v1.MsgCastVoteResponse
+	(*MsgRevealShare)(nil),                 // 6: zvote.v1.MsgRevealShare
+	(*MsgRevealShareResponse)(nil),         // 7: zvote.v1.MsgRevealShareResponse
 }
 var file_zvote_v1_tx_proto_depIdxs = []int32{
-	0, // 0: zvote.v1.Msg.SetupVoteRound:input_type -> zvote.v1.MsgSetupVoteRound
-	2, // 1: zvote.v1.Msg.RegisterDelegation:input_type -> zvote.v1.MsgRegisterDelegation
-	4, // 2: zvote.v1.Msg.CreateVoteCommitment:input_type -> zvote.v1.MsgCreateVoteCommitment
-	6, // 3: zvote.v1.Msg.RevealVoteShare:input_type -> zvote.v1.MsgRevealVoteShare
-	1, // 4: zvote.v1.Msg.SetupVoteRound:output_type -> zvote.v1.MsgSetupVoteRoundResponse
-	3, // 5: zvote.v1.Msg.RegisterDelegation:output_type -> zvote.v1.MsgRegisterDelegationResponse
-	5, // 6: zvote.v1.Msg.CreateVoteCommitment:output_type -> zvote.v1.MsgCreateVoteCommitmentResponse
-	7, // 7: zvote.v1.Msg.RevealVoteShare:output_type -> zvote.v1.MsgRevealVoteShareResponse
+	0, // 0: zvote.v1.Msg.CreateVotingSession:input_type -> zvote.v1.MsgCreateVotingSession
+	2, // 1: zvote.v1.Msg.DelegateVote:input_type -> zvote.v1.MsgDelegateVote
+	4, // 2: zvote.v1.Msg.CastVote:input_type -> zvote.v1.MsgCastVote
+	6, // 3: zvote.v1.Msg.RevealShare:input_type -> zvote.v1.MsgRevealShare
+	1, // 4: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
+	3, // 5: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
+	5, // 6: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
+	7, // 7: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
 	4, // [4:8] is the sub-list for method output_type
 	0, // [0:4] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

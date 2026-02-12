@@ -59,8 +59,8 @@ var (
 	testRoundID = bytes.Repeat([]byte{0x01}, 32)
 )
 
-func newValidMsgSetupVoteRound() *types.MsgSetupVoteRound {
-	return &types.MsgSetupVoteRound{
+func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
+	return &types.MsgCreateVotingSession{
 		Creator:           "zvote1testcreator",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
@@ -71,8 +71,8 @@ func newValidMsgSetupVoteRound() *types.MsgSetupVoteRound {
 	}
 }
 
-func newValidMsgRegisterDelegation() *types.MsgRegisterDelegation {
-	return &types.MsgRegisterDelegation{
+func newValidMsgDelegateVote() *types.MsgDelegateVote {
+	return &types.MsgDelegateVote{
 		Rk:                  bytes.Repeat([]byte{0xAA}, 32),
 		SpendAuthSig:        bytes.Repeat([]byte{0xBB}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
@@ -89,8 +89,8 @@ func newValidMsgRegisterDelegation() *types.MsgRegisterDelegation {
 	}
 }
 
-func newValidMsgCreateVoteCommitment() *types.MsgCreateVoteCommitment {
-	return &types.MsgCreateVoteCommitment{
+func newValidMsgCastVote() *types.MsgCastVote {
+	return &types.MsgCastVote{
 		VanNullifier:             bytes.Repeat([]byte{0x33}, 32),
 		VoteAuthorityNoteNew:     bytes.Repeat([]byte{0x44}, 32),
 		VoteCommitment:           bytes.Repeat([]byte{0x55}, 32),
@@ -101,8 +101,8 @@ func newValidMsgCreateVoteCommitment() *types.MsgCreateVoteCommitment {
 	}
 }
 
-func newValidMsgRevealVoteShare() *types.MsgRevealVoteShare {
-	return &types.MsgRevealVoteShare{
+func newValidMsgRevealShare() *types.MsgRevealShare {
+	return &types.MsgRevealShare{
 		ShareNullifier:           bytes.Repeat([]byte{0x77}, 32),
 		VoteAmount:               1000,
 		ProposalId:               1,
@@ -217,10 +217,10 @@ func (s *ValidateTestSuite) recordNullifier(nullifier []byte) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: MsgSetupVoteRound
+// Tests: MsgCreateVotingSession
 // ---------------------------------------------------------------------------
 
-func (s *ValidateTestSuite) TestValidateVoteTx_SetupRound() {
+func (s *ValidateTestSuite) TestValidateVoteTx_CreateVotingSession() {
 	tests := []struct {
 		name        string
 		msg         func() types.VoteMessage
@@ -230,19 +230,19 @@ func (s *ValidateTestSuite) TestValidateVoteTx_SetupRound() {
 		errContains string
 	}{
 		{
-			name: "valid setup round passes all checks",
-			msg:  func() types.VoteMessage { return newValidMsgSetupVoteRound() },
+			name: "valid create voting session passes all checks",
+			msg:  func() types.VoteMessage { return newValidMsgCreateVotingSession() },
 			opts: mockOpts(),
 		},
 		{
-			name: "valid setup round on recheck also passes (no expensive checks needed)",
-			msg:  func() types.VoteMessage { return newValidMsgSetupVoteRound() },
+			name: "valid create voting session on recheck also passes (no expensive checks needed)",
+			msg:  func() types.VoteMessage { return newValidMsgCreateVotingSession() },
 			opts: recheckOpts(),
 		},
 		{
 			name: "invalid: empty creator",
 			msg: func() types.VoteMessage {
-				m := newValidMsgSetupVoteRound()
+				m := newValidMsgCreateVotingSession()
 				m.Creator = ""
 				return m
 			},
@@ -253,7 +253,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_SetupRound() {
 		{
 			name: "invalid: zero snapshot_height",
 			msg: func() types.VoteMessage {
-				m := newValidMsgSetupVoteRound()
+				m := newValidMsgCreateVotingSession()
 				m.SnapshotHeight = 0
 				return m
 			},
@@ -264,7 +264,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_SetupRound() {
 		{
 			name: "invalid: empty proposals_hash",
 			msg: func() types.VoteMessage {
-				m := newValidMsgSetupVoteRound()
+				m := newValidMsgCreateVotingSession()
 				m.ProposalsHash = nil
 				return m
 			},
@@ -275,7 +275,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_SetupRound() {
 		{
 			name: "invalid: zero vote_end_time",
 			msg: func() types.VoteMessage {
-				m := newValidMsgSetupVoteRound()
+				m := newValidMsgCreateVotingSession()
 				m.VoteEndTime = 0
 				return m
 			},
@@ -305,10 +305,10 @@ func (s *ValidateTestSuite) TestValidateVoteTx_SetupRound() {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: MsgRegisterDelegation
+// Tests: MsgDelegateVote
 // ---------------------------------------------------------------------------
 
-func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
+func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 	tests := []struct {
 		name        string
 		msg         func() types.VoteMessage
@@ -319,7 +319,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 	}{
 		{
 			name:  "valid delegation with active round and mock verifiers",
-			msg:   func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:   func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts:  mockOpts(),
 			setup: func() { s.setupActiveRound() },
 		},
@@ -327,7 +327,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		{
 			name: "invalid: rk wrong length (not 32 bytes)",
 			msg: func() types.VoteMessage {
-				m := newValidMsgRegisterDelegation()
+				m := newValidMsgDelegateVote()
 				m.Rk = bytes.Repeat([]byte{0xAA}, 16) // 16 instead of 32
 				return m
 			},
@@ -339,7 +339,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		{
 			name: "invalid: empty spend_auth_sig",
 			msg: func() types.VoteMessage {
-				m := newValidMsgRegisterDelegation()
+				m := newValidMsgDelegateVote()
 				m.SpendAuthSig = nil
 				return m
 			},
@@ -351,7 +351,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		{
 			name: "invalid: empty gov_nullifiers",
 			msg: func() types.VoteMessage {
-				m := newValidMsgRegisterDelegation()
+				m := newValidMsgDelegateVote()
 				m.GovNullifiers = nil
 				return m
 			},
@@ -363,7 +363,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		{
 			name: "invalid: too many gov_nullifiers (>4)",
 			msg: func() types.VoteMessage {
-				m := newValidMsgRegisterDelegation()
+				m := newValidMsgDelegateVote()
 				m.GovNullifiers = [][]byte{
 					bytes.Repeat([]byte{0x01}, 32),
 					bytes.Repeat([]byte{0x02}, 32),
@@ -381,7 +381,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		{
 			name: "invalid: empty proof",
 			msg: func() types.VoteMessage {
-				m := newValidMsgRegisterDelegation()
+				m := newValidMsgDelegateVote()
 				m.Proof = nil
 				return m
 			},
@@ -393,7 +393,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		// --- Round state failures ---
 		{
 			name:        "round not found",
-			msg:         func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:         func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts:        mockOpts(),
 			setup:       func() { /* no round created */ },
 			expectErr:   true,
@@ -401,7 +401,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		},
 		{
 			name:        "round expired",
-			msg:         func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:         func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts:        mockOpts(),
 			setup:       func() { s.setupExpiredRound() },
 			expectErr:   true,
@@ -410,7 +410,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		// --- Nullifier uniqueness failures ---
 		{
 			name: "duplicate gov nullifier (first of two)",
-			msg:  func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:  func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts: mockOpts(),
 			setup: func() {
 				s.setupActiveRound()
@@ -422,7 +422,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		},
 		{
 			name: "duplicate gov nullifier (second of two)",
-			msg:  func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:  func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts: mockOpts(),
 			setup: func() {
 				s.setupActiveRound()
@@ -435,7 +435,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		// --- Signature verification failure ---
 		{
 			name:        "signature verification fails",
-			msg:         func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:         func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts:        failSigOpts(),
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
@@ -444,7 +444,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		// --- ZKP verification failure ---
 		{
 			name:        "ZKP delegation proof fails",
-			msg:         func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:         func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts:        failZKPOpts(),
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
@@ -453,13 +453,13 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		// --- RecheckTx behavior ---
 		{
 			name:  "recheck: skips sig and ZKP, passes with active round and fresh nullifiers",
-			msg:   func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:   func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts:  recheckOpts(),
 			setup: func() { s.setupActiveRound() },
 		},
 		{
 			name: "recheck: still catches duplicate nullifier",
-			msg:  func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:  func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts: recheckOpts(),
 			setup: func() {
 				s.setupActiveRound()
@@ -470,7 +470,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 		},
 		{
 			name:        "recheck: still catches expired round",
-			msg:         func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:         func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts:        recheckOpts(),
 			setup:       func() { s.setupExpiredRound() },
 			expectErr:   true,
@@ -498,10 +498,10 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RegisterDelegation() {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: MsgCreateVoteCommitment
+// Tests: MsgCastVote
 // ---------------------------------------------------------------------------
 
-func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
+func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 	tests := []struct {
 		name        string
 		msg         func() types.VoteMessage
@@ -511,8 +511,8 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
 		errContains string
 	}{
 		{
-			name:  "valid vote commitment with active round and mock verifiers",
-			msg:   func() types.VoteMessage { return newValidMsgCreateVoteCommitment() },
+			name:  "valid cast vote with active round and mock verifiers",
+			msg:   func() types.VoteMessage { return newValidMsgCastVote() },
 			opts:  mockOpts(),
 			setup: func() { s.setupActiveRound() },
 		},
@@ -520,7 +520,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
 		{
 			name: "invalid: empty van_nullifier",
 			msg: func() types.VoteMessage {
-				m := newValidMsgCreateVoteCommitment()
+				m := newValidMsgCastVote()
 				m.VanNullifier = nil
 				return m
 			},
@@ -532,7 +532,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
 		{
 			name: "invalid: empty vote_commitment",
 			msg: func() types.VoteMessage {
-				m := newValidMsgCreateVoteCommitment()
+				m := newValidMsgCastVote()
 				m.VoteCommitment = nil
 				return m
 			},
@@ -544,7 +544,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
 		{
 			name: "invalid: zero anchor height",
 			msg: func() types.VoteMessage {
-				m := newValidMsgCreateVoteCommitment()
+				m := newValidMsgCastVote()
 				m.VoteCommTreeAnchorHeight = 0
 				return m
 			},
@@ -556,7 +556,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
 		// --- Round state failures ---
 		{
 			name:        "round not found",
-			msg:         func() types.VoteMessage { return newValidMsgCreateVoteCommitment() },
+			msg:         func() types.VoteMessage { return newValidMsgCastVote() },
 			opts:        mockOpts(),
 			setup:       func() { /* no round */ },
 			expectErr:   true,
@@ -564,7 +564,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
 		},
 		{
 			name:        "round expired",
-			msg:         func() types.VoteMessage { return newValidMsgCreateVoteCommitment() },
+			msg:         func() types.VoteMessage { return newValidMsgCastVote() },
 			opts:        mockOpts(),
 			setup:       func() { s.setupExpiredRound() },
 			expectErr:   true,
@@ -573,7 +573,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
 		// --- Nullifier uniqueness failure ---
 		{
 			name: "duplicate van nullifier",
-			msg:  func() types.VoteMessage { return newValidMsgCreateVoteCommitment() },
+			msg:  func() types.VoteMessage { return newValidMsgCastVote() },
 			opts: mockOpts(),
 			setup: func() {
 				s.setupActiveRound()
@@ -584,8 +584,8 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
 		},
 		// --- ZKP verification failure ---
 		{
-			name:        "ZKP vote commitment proof fails",
-			msg:         func() types.VoteMessage { return newValidMsgCreateVoteCommitment() },
+			name:        "ZKP cast vote proof fails",
+			msg:         func() types.VoteMessage { return newValidMsgCastVote() },
 			opts:        failZKPOpts(),
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
@@ -594,13 +594,13 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
 		// --- RecheckTx behavior ---
 		{
 			name:  "recheck: skips ZKP, passes with active round and fresh nullifier",
-			msg:   func() types.VoteMessage { return newValidMsgCreateVoteCommitment() },
+			msg:   func() types.VoteMessage { return newValidMsgCastVote() },
 			opts:  recheckOpts(),
 			setup: func() { s.setupActiveRound() },
 		},
 		{
 			name: "recheck: still catches duplicate van nullifier",
-			msg:  func() types.VoteMessage { return newValidMsgCreateVoteCommitment() },
+			msg:  func() types.VoteMessage { return newValidMsgCastVote() },
 			opts: recheckOpts(),
 			setup: func() {
 				s.setupActiveRound()
@@ -631,10 +631,10 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVoteCommitment() {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: MsgRevealVoteShare
+// Tests: MsgRevealShare
 // ---------------------------------------------------------------------------
 
-func (s *ValidateTestSuite) TestValidateVoteTx_RevealVoteShare() {
+func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 	tests := []struct {
 		name        string
 		msg         func() types.VoteMessage
@@ -644,8 +644,8 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealVoteShare() {
 		errContains string
 	}{
 		{
-			name:  "valid vote share with active round and mock verifiers",
-			msg:   func() types.VoteMessage { return newValidMsgRevealVoteShare() },
+			name:  "valid reveal share with active round and mock verifiers",
+			msg:   func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts:  mockOpts(),
 			setup: func() { s.setupActiveRound() },
 		},
@@ -653,7 +653,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealVoteShare() {
 		{
 			name: "invalid: empty share_nullifier",
 			msg: func() types.VoteMessage {
-				m := newValidMsgRevealVoteShare()
+				m := newValidMsgRevealShare()
 				m.ShareNullifier = nil
 				return m
 			},
@@ -665,7 +665,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealVoteShare() {
 		{
 			name: "invalid: zero vote_amount",
 			msg: func() types.VoteMessage {
-				m := newValidMsgRevealVoteShare()
+				m := newValidMsgRevealShare()
 				m.VoteAmount = 0
 				return m
 			},
@@ -677,7 +677,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealVoteShare() {
 		{
 			name: "invalid: zero anchor height",
 			msg: func() types.VoteMessage {
-				m := newValidMsgRevealVoteShare()
+				m := newValidMsgRevealShare()
 				m.VoteCommTreeAnchorHeight = 0
 				return m
 			},
@@ -689,7 +689,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealVoteShare() {
 		// --- Round state failures ---
 		{
 			name:        "round not found",
-			msg:         func() types.VoteMessage { return newValidMsgRevealVoteShare() },
+			msg:         func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts:        mockOpts(),
 			setup:       func() { /* no round */ },
 			expectErr:   true,
@@ -697,7 +697,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealVoteShare() {
 		},
 		{
 			name:        "round expired",
-			msg:         func() types.VoteMessage { return newValidMsgRevealVoteShare() },
+			msg:         func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts:        mockOpts(),
 			setup:       func() { s.setupExpiredRound() },
 			expectErr:   true,
@@ -706,7 +706,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealVoteShare() {
 		// --- Nullifier uniqueness failure ---
 		{
 			name: "duplicate share nullifier",
-			msg:  func() types.VoteMessage { return newValidMsgRevealVoteShare() },
+			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts: mockOpts(),
 			setup: func() {
 				s.setupActiveRound()
@@ -717,8 +717,8 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealVoteShare() {
 		},
 		// --- ZKP verification failure ---
 		{
-			name:        "ZKP vote share proof fails",
-			msg:         func() types.VoteMessage { return newValidMsgRevealVoteShare() },
+			name:        "ZKP reveal share proof fails",
+			msg:         func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts:        failZKPOpts(),
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
@@ -727,13 +727,13 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealVoteShare() {
 		// --- RecheckTx behavior ---
 		{
 			name:  "recheck: skips ZKP, passes with active round and fresh nullifier",
-			msg:   func() types.VoteMessage { return newValidMsgRevealVoteShare() },
+			msg:   func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts:  recheckOpts(),
 			setup: func() { s.setupActiveRound() },
 		},
 		{
 			name: "recheck: still catches duplicate share nullifier",
-			msg:  func() types.VoteMessage { return newValidMsgRevealVoteShare() },
+			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts: recheckOpts(),
 			setup: func() {
 				s.setupActiveRound()
@@ -781,7 +781,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_ValidationOrder() {
 		{
 			name: "ValidateBasic fires before round check (bad field, no round)",
 			msg: func() types.VoteMessage {
-				m := newValidMsgRegisterDelegation()
+				m := newValidMsgDelegateVote()
 				m.Rk = nil // fails ValidateBasic
 				return m
 			},
@@ -792,7 +792,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_ValidationOrder() {
 		},
 		{
 			name: "round check fires before nullifier check (expired round, duplicate nullifier)",
-			msg:  func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:  func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts: mockOpts(),
 			setup: func() {
 				s.setupExpiredRound()
@@ -803,7 +803,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_ValidationOrder() {
 		},
 		{
 			name: "nullifier check fires before sig check (duplicate nullifier, failing sig)",
-			msg:  func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:  func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts: failSigOpts(),
 			setup: func() {
 				s.setupActiveRound()
@@ -814,7 +814,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_ValidationOrder() {
 		},
 		{
 			name: "sig check fires before ZKP check (failing sig, failing ZKP)",
-			msg:  func() types.VoteMessage { return newValidMsgRegisterDelegation() },
+			msg:  func() types.VoteMessage { return newValidMsgDelegateVote() },
 			opts: ante.ValidateOpts{
 				SigVerifier: errSigVerifier{},
 				ZKPVerifier: errZKPVerifier{},

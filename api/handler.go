@@ -41,45 +41,45 @@ func NewHandler(cfg HandlerConfig) *Handler {
 
 // RegisterTxRoutes registers vote transaction submission endpoints on the router.
 //
-//	POST /zally/v1/setup-round         → MsgSetupVoteRound
-//	POST /zally/v1/submit-delegation   → MsgRegisterDelegation
-//	POST /zally/v1/submit-vote         → MsgCreateVoteCommitment
-//	POST /zally/v1/submit-share        → MsgRevealVoteShare
+//	POST /zally/v1/create-voting-session  → MsgCreateVotingSession
+//	POST /zally/v1/delegate-vote          → MsgDelegateVote
+//	POST /zally/v1/cast-vote              → MsgCastVote
+//	POST /zally/v1/reveal-share           → MsgRevealShare
 func (h *Handler) RegisterTxRoutes(router *mux.Router) {
-	router.HandleFunc("/zally/v1/setup-round", h.handleSetupRound).Methods("POST")
-	router.HandleFunc("/zally/v1/submit-delegation", h.handleSubmitDelegation).Methods("POST")
-	router.HandleFunc("/zally/v1/submit-vote", h.handleSubmitVote).Methods("POST")
-	router.HandleFunc("/zally/v1/submit-share", h.handleSubmitShare).Methods("POST")
+	router.HandleFunc("/zally/v1/create-voting-session", h.handleCreateVotingSession).Methods("POST")
+	router.HandleFunc("/zally/v1/delegate-vote", h.handleDelegateVote).Methods("POST")
+	router.HandleFunc("/zally/v1/cast-vote", h.handleCastVote).Methods("POST")
+	router.HandleFunc("/zally/v1/reveal-share", h.handleRevealShare).Methods("POST")
 }
 
 // --- Tx submission handlers ---
 
-func (h *Handler) handleSetupRound(w http.ResponseWriter, r *http.Request) {
-	msg := &types.MsgSetupVoteRound{}
+func (h *Handler) handleCreateVotingSession(w http.ResponseWriter, r *http.Request) {
+	msg := &types.MsgCreateVotingSession{}
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
 	h.broadcastVoteTx(w, msg)
 }
 
-func (h *Handler) handleSubmitDelegation(w http.ResponseWriter, r *http.Request) {
-	msg := &types.MsgRegisterDelegation{}
+func (h *Handler) handleDelegateVote(w http.ResponseWriter, r *http.Request) {
+	msg := &types.MsgDelegateVote{}
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
 	h.broadcastVoteTx(w, msg)
 }
 
-func (h *Handler) handleSubmitVote(w http.ResponseWriter, r *http.Request) {
-	msg := &types.MsgCreateVoteCommitment{}
+func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
+	msg := &types.MsgCastVote{}
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
 	h.broadcastVoteTx(w, msg)
 }
 
-func (h *Handler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
-	msg := &types.MsgRevealVoteShare{}
+func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
+	msg := &types.MsgRevealShare{}
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}

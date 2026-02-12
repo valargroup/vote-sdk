@@ -19,10 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Msg_SetupVoteRound_FullMethodName       = "/zvote.v1.Msg/SetupVoteRound"
-	Msg_RegisterDelegation_FullMethodName   = "/zvote.v1.Msg/RegisterDelegation"
-	Msg_CreateVoteCommitment_FullMethodName = "/zvote.v1.Msg/CreateVoteCommitment"
-	Msg_RevealVoteShare_FullMethodName      = "/zvote.v1.Msg/RevealVoteShare"
+	Msg_CreateVotingSession_FullMethodName = "/zvote.v1.Msg/CreateVotingSession"
+	Msg_DelegateVote_FullMethodName        = "/zvote.v1.Msg/DelegateVote"
+	Msg_CastVote_FullMethodName            = "/zvote.v1.Msg/CastVote"
+	Msg_RevealShare_FullMethodName         = "/zvote.v1.Msg/RevealShare"
 )
 
 // MsgClient is the client API for Msg service.
@@ -34,10 +34,10 @@ const (
 // Cosmos signatures. In Phase 5, transaction submission bypasses the Cosmos Tx
 // envelope entirely; the Msg service is defined here for gRPC registration only.
 type MsgClient interface {
-	SetupVoteRound(ctx context.Context, in *MsgSetupVoteRound, opts ...grpc.CallOption) (*MsgSetupVoteRoundResponse, error)
-	RegisterDelegation(ctx context.Context, in *MsgRegisterDelegation, opts ...grpc.CallOption) (*MsgRegisterDelegationResponse, error)
-	CreateVoteCommitment(ctx context.Context, in *MsgCreateVoteCommitment, opts ...grpc.CallOption) (*MsgCreateVoteCommitmentResponse, error)
-	RevealVoteShare(ctx context.Context, in *MsgRevealVoteShare, opts ...grpc.CallOption) (*MsgRevealVoteShareResponse, error)
+	CreateVotingSession(ctx context.Context, in *MsgCreateVotingSession, opts ...grpc.CallOption) (*MsgCreateVotingSessionResponse, error)
+	DelegateVote(ctx context.Context, in *MsgDelegateVote, opts ...grpc.CallOption) (*MsgDelegateVoteResponse, error)
+	CastVote(ctx context.Context, in *MsgCastVote, opts ...grpc.CallOption) (*MsgCastVoteResponse, error)
+	RevealShare(ctx context.Context, in *MsgRevealShare, opts ...grpc.CallOption) (*MsgRevealShareResponse, error)
 }
 
 type msgClient struct {
@@ -48,40 +48,40 @@ func NewMsgClient(cc grpc.ClientConnInterface) MsgClient {
 	return &msgClient{cc}
 }
 
-func (c *msgClient) SetupVoteRound(ctx context.Context, in *MsgSetupVoteRound, opts ...grpc.CallOption) (*MsgSetupVoteRoundResponse, error) {
+func (c *msgClient) CreateVotingSession(ctx context.Context, in *MsgCreateVotingSession, opts ...grpc.CallOption) (*MsgCreateVotingSessionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgSetupVoteRoundResponse)
-	err := c.cc.Invoke(ctx, Msg_SetupVoteRound_FullMethodName, in, out, cOpts...)
+	out := new(MsgCreateVotingSessionResponse)
+	err := c.cc.Invoke(ctx, Msg_CreateVotingSession_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *msgClient) RegisterDelegation(ctx context.Context, in *MsgRegisterDelegation, opts ...grpc.CallOption) (*MsgRegisterDelegationResponse, error) {
+func (c *msgClient) DelegateVote(ctx context.Context, in *MsgDelegateVote, opts ...grpc.CallOption) (*MsgDelegateVoteResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgRegisterDelegationResponse)
-	err := c.cc.Invoke(ctx, Msg_RegisterDelegation_FullMethodName, in, out, cOpts...)
+	out := new(MsgDelegateVoteResponse)
+	err := c.cc.Invoke(ctx, Msg_DelegateVote_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *msgClient) CreateVoteCommitment(ctx context.Context, in *MsgCreateVoteCommitment, opts ...grpc.CallOption) (*MsgCreateVoteCommitmentResponse, error) {
+func (c *msgClient) CastVote(ctx context.Context, in *MsgCastVote, opts ...grpc.CallOption) (*MsgCastVoteResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgCreateVoteCommitmentResponse)
-	err := c.cc.Invoke(ctx, Msg_CreateVoteCommitment_FullMethodName, in, out, cOpts...)
+	out := new(MsgCastVoteResponse)
+	err := c.cc.Invoke(ctx, Msg_CastVote_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *msgClient) RevealVoteShare(ctx context.Context, in *MsgRevealVoteShare, opts ...grpc.CallOption) (*MsgRevealVoteShareResponse, error) {
+func (c *msgClient) RevealShare(ctx context.Context, in *MsgRevealShare, opts ...grpc.CallOption) (*MsgRevealShareResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgRevealVoteShareResponse)
-	err := c.cc.Invoke(ctx, Msg_RevealVoteShare_FullMethodName, in, out, cOpts...)
+	out := new(MsgRevealShareResponse)
+	err := c.cc.Invoke(ctx, Msg_RevealShare_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -97,10 +97,10 @@ func (c *msgClient) RevealVoteShare(ctx context.Context, in *MsgRevealVoteShare,
 // Cosmos signatures. In Phase 5, transaction submission bypasses the Cosmos Tx
 // envelope entirely; the Msg service is defined here for gRPC registration only.
 type MsgServer interface {
-	SetupVoteRound(context.Context, *MsgSetupVoteRound) (*MsgSetupVoteRoundResponse, error)
-	RegisterDelegation(context.Context, *MsgRegisterDelegation) (*MsgRegisterDelegationResponse, error)
-	CreateVoteCommitment(context.Context, *MsgCreateVoteCommitment) (*MsgCreateVoteCommitmentResponse, error)
-	RevealVoteShare(context.Context, *MsgRevealVoteShare) (*MsgRevealVoteShareResponse, error)
+	CreateVotingSession(context.Context, *MsgCreateVotingSession) (*MsgCreateVotingSessionResponse, error)
+	DelegateVote(context.Context, *MsgDelegateVote) (*MsgDelegateVoteResponse, error)
+	CastVote(context.Context, *MsgCastVote) (*MsgCastVoteResponse, error)
+	RevealShare(context.Context, *MsgRevealShare) (*MsgRevealShareResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
 
@@ -111,17 +111,17 @@ type MsgServer interface {
 // pointer dereference when methods are called.
 type UnimplementedMsgServer struct{}
 
-func (UnimplementedMsgServer) SetupVoteRound(context.Context, *MsgSetupVoteRound) (*MsgSetupVoteRoundResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetupVoteRound not implemented")
+func (UnimplementedMsgServer) CreateVotingSession(context.Context, *MsgCreateVotingSession) (*MsgCreateVotingSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateVotingSession not implemented")
 }
-func (UnimplementedMsgServer) RegisterDelegation(context.Context, *MsgRegisterDelegation) (*MsgRegisterDelegationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RegisterDelegation not implemented")
+func (UnimplementedMsgServer) DelegateVote(context.Context, *MsgDelegateVote) (*MsgDelegateVoteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DelegateVote not implemented")
 }
-func (UnimplementedMsgServer) CreateVoteCommitment(context.Context, *MsgCreateVoteCommitment) (*MsgCreateVoteCommitmentResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method CreateVoteCommitment not implemented")
+func (UnimplementedMsgServer) CastVote(context.Context, *MsgCastVote) (*MsgCastVoteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CastVote not implemented")
 }
-func (UnimplementedMsgServer) RevealVoteShare(context.Context, *MsgRevealVoteShare) (*MsgRevealVoteShareResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RevealVoteShare not implemented")
+func (UnimplementedMsgServer) RevealShare(context.Context, *MsgRevealShare) (*MsgRevealShareResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevealShare not implemented")
 }
 func (UnimplementedMsgServer) mustEmbedUnimplementedMsgServer() {}
 func (UnimplementedMsgServer) testEmbeddedByValue()             {}
@@ -144,74 +144,74 @@ func RegisterMsgServer(s grpc.ServiceRegistrar, srv MsgServer) {
 	s.RegisterService(&Msg_ServiceDesc, srv)
 }
 
-func _Msg_SetupVoteRound_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgSetupVoteRound)
+func _Msg_CreateVotingSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgCreateVotingSession)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).SetupVoteRound(ctx, in)
+		return srv.(MsgServer).CreateVotingSession(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Msg_SetupVoteRound_FullMethodName,
+		FullMethod: Msg_CreateVotingSession_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).SetupVoteRound(ctx, req.(*MsgSetupVoteRound))
+		return srv.(MsgServer).CreateVotingSession(ctx, req.(*MsgCreateVotingSession))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_RegisterDelegation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgRegisterDelegation)
+func _Msg_DelegateVote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgDelegateVote)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).RegisterDelegation(ctx, in)
+		return srv.(MsgServer).DelegateVote(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Msg_RegisterDelegation_FullMethodName,
+		FullMethod: Msg_DelegateVote_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).RegisterDelegation(ctx, req.(*MsgRegisterDelegation))
+		return srv.(MsgServer).DelegateVote(ctx, req.(*MsgDelegateVote))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_CreateVoteCommitment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgCreateVoteCommitment)
+func _Msg_CastVote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgCastVote)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).CreateVoteCommitment(ctx, in)
+		return srv.(MsgServer).CastVote(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Msg_CreateVoteCommitment_FullMethodName,
+		FullMethod: Msg_CastVote_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).CreateVoteCommitment(ctx, req.(*MsgCreateVoteCommitment))
+		return srv.(MsgServer).CastVote(ctx, req.(*MsgCastVote))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_RevealVoteShare_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgRevealVoteShare)
+func _Msg_RevealShare_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgRevealShare)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).RevealVoteShare(ctx, in)
+		return srv.(MsgServer).RevealShare(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Msg_RevealVoteShare_FullMethodName,
+		FullMethod: Msg_RevealShare_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).RevealVoteShare(ctx, req.(*MsgRevealVoteShare))
+		return srv.(MsgServer).RevealShare(ctx, req.(*MsgRevealShare))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -224,20 +224,20 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*MsgServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "SetupVoteRound",
-			Handler:    _Msg_SetupVoteRound_Handler,
+			MethodName: "CreateVotingSession",
+			Handler:    _Msg_CreateVotingSession_Handler,
 		},
 		{
-			MethodName: "RegisterDelegation",
-			Handler:    _Msg_RegisterDelegation_Handler,
+			MethodName: "DelegateVote",
+			Handler:    _Msg_DelegateVote_Handler,
 		},
 		{
-			MethodName: "CreateVoteCommitment",
-			Handler:    _Msg_CreateVoteCommitment_Handler,
+			MethodName: "CastVote",
+			Handler:    _Msg_CastVote_Handler,
 		},
 		{
-			MethodName: "RevealVoteShare",
-			Handler:    _Msg_RevealVoteShare_Handler,
+			MethodName: "RevealShare",
+			Handler:    _Msg_RevealShare_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -24,11 +24,11 @@ func NewMsgServerImpl(keeper Keeper) types.MsgServer {
 	return &msgServer{k: keeper}
 }
 
-// SetupVoteRound handles MsgSetupVoteRound.
+// CreateVotingSession handles MsgCreateVotingSession.
 // Computes vote_round_id = Blake2b-256(snapshot_height || snapshot_blockhash ||
 // proposals_hash || vote_end_time || nullifier_imt_root || nc_root),
 // stores the VoteRound, and emits an event.
-func (ms msgServer) SetupVoteRound(goCtx context.Context, msg *types.MsgSetupVoteRound) (*types.MsgSetupVoteRoundResponse, error) {
+func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
@@ -61,18 +61,18 @@ func (ms msgServer) SetupVoteRound(goCtx context.Context, msg *types.MsgSetupVot
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeSetupVoteRound,
+		types.EventTypeCreateVotingSession,
 		sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", roundID)),
 		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
 	))
 
-	return &types.MsgSetupVoteRoundResponse{VoteRoundId: roundID}, nil
+	return &types.MsgCreateVotingSessionResponse{VoteRoundId: roundID}, nil
 }
 
-// RegisterDelegation handles MsgRegisterDelegation (ZKP #1).
+// DelegateVote handles MsgDelegateVote (ZKP #1).
 // Records governance nullifiers, appends cmx_new and gov_comm to the
 // commitment tree, and emits an event.
-func (ms msgServer) RegisterDelegation(goCtx context.Context, msg *types.MsgRegisterDelegation) (*types.MsgRegisterDelegationResponse, error) {
+func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVote) (*types.MsgDelegateVoteResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
@@ -94,19 +94,19 @@ func (ms msgServer) RegisterDelegation(goCtx context.Context, msg *types.MsgRegi
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeRegisterDelegation,
+		types.EventTypeDelegateVote,
 		sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", msg.VoteRoundId)),
 		sdk.NewAttribute(types.AttributeKeyLeafIndex, fmt.Sprintf("%d,%d", cmxIdx, govCommIdx)),
 		sdk.NewAttribute(types.AttributeKeyNullifiers, strconv.Itoa(len(msg.GovNullifiers))),
 	))
 
-	return &types.MsgRegisterDelegationResponse{}, nil
+	return &types.MsgDelegateVoteResponse{}, nil
 }
 
-// CreateVoteCommitment handles MsgCreateVoteCommitment (ZKP #2).
+// CastVote handles MsgCastVote (ZKP #2).
 // Validates the anchor height, records the VAN nullifier, appends
 // vote_authority_note_new and vote_commitment to the tree, and emits an event.
-func (ms msgServer) CreateVoteCommitment(goCtx context.Context, msg *types.MsgCreateVoteCommitment) (*types.MsgCreateVoteCommitmentResponse, error) {
+func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*types.MsgCastVoteResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
@@ -135,18 +135,18 @@ func (ms msgServer) CreateVoteCommitment(goCtx context.Context, msg *types.MsgCr
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeCreateVoteCommitment,
+		types.EventTypeCastVote,
 		sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", msg.VoteRoundId)),
 		sdk.NewAttribute(types.AttributeKeyLeafIndex, fmt.Sprintf("%d,%d", vanIdx, vcIdx)),
 	))
 
-	return &types.MsgCreateVoteCommitmentResponse{}, nil
+	return &types.MsgCastVoteResponse{}, nil
 }
 
-// RevealVoteShare handles MsgRevealVoteShare (ZKP #3).
+// RevealShare handles MsgRevealShare (ZKP #3).
 // Records the share nullifier, accumulates the vote amount into the tally,
 // and emits an event.
-func (ms msgServer) RevealVoteShare(goCtx context.Context, msg *types.MsgRevealVoteShare) (*types.MsgRevealVoteShareResponse, error) {
+func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare) (*types.MsgRevealShareResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
@@ -161,14 +161,14 @@ func (ms msgServer) RevealVoteShare(goCtx context.Context, msg *types.MsgRevealV
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeRevealVoteShare,
+		types.EventTypeRevealShare,
 		sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", msg.VoteRoundId)),
 		sdk.NewAttribute(types.AttributeKeyProposalID, strconv.FormatUint(uint64(msg.ProposalId), 10)),
 		sdk.NewAttribute(types.AttributeKeyVoteDecision, strconv.FormatUint(uint64(msg.VoteDecision), 10)),
 		sdk.NewAttribute(types.AttributeKeyVoteAmount, strconv.FormatUint(msg.VoteAmount, 10)),
 	))
 
-	return &types.MsgRevealVoteShareResponse{}, nil
+	return &types.MsgRevealShareResponse{}, nil
 }
 
 // deriveRoundID computes a deterministic vote_round_id from the setup fields.
@@ -177,7 +177,7 @@ func (ms msgServer) RevealVoteShare(goCtx context.Context, msg *types.MsgRevealV
 //	vote_end_time || nullifier_imt_root || nc_root)
 //
 // uint64 fields are encoded as 8 bytes big-endian.
-func deriveRoundID(msg *types.MsgSetupVoteRound) []byte {
+func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
 	h, _ := blake2b.New256(nil) // nil key = unkeyed; never errors
 	var buf [8]byte
 

@@ -43,9 +43,9 @@ func init() {
 		&modulev1.Module{},
 		appmodule.Provide(
 			ProvideModule,
-			ProvideSetupRoundSigner,
-			ProvideDelegationSigner,
-			ProvideVoteCommitmentSigner,
+			ProvideCreateVotingSessionSigner,
+			ProvideDelegateVoteSigner,
+			ProvideCastVoteSigner,
 			ProvideRevealShareSigner,
 		),
 	)
@@ -68,30 +68,30 @@ func init() {
 // standard Cosmos signers.
 func noopSignerFn(proto.Message) ([][]byte, error) { return nil, nil }
 
-func ProvideSetupRoundSigner() signing.CustomGetSigner {
+func ProvideCreateVotingSessionSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgSetupVoteRound"),
+		MsgType: protoreflect.FullName("zvote.v1.MsgCreateVotingSession"),
 		Fn:      noopSignerFn,
 	}
 }
 
-func ProvideDelegationSigner() signing.CustomGetSigner {
+func ProvideDelegateVoteSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgRegisterDelegation"),
+		MsgType: protoreflect.FullName("zvote.v1.MsgDelegateVote"),
 		Fn:      noopSignerFn,
 	}
 }
 
-func ProvideVoteCommitmentSigner() signing.CustomGetSigner {
+func ProvideCastVoteSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgCreateVoteCommitment"),
+		MsgType: protoreflect.FullName("zvote.v1.MsgCastVote"),
 		Fn:      noopSignerFn,
 	}
 }
 
 func ProvideRevealShareSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgRevealVoteShare"),
+		MsgType: protoreflect.FullName("zvote.v1.MsgRevealShare"),
 		Fn:      noopSignerFn,
 	}
 }

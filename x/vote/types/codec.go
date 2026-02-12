@@ -14,9 +14,9 @@ import (
 // different file descriptor registry than what RegisterMsgServiceDesc expects.
 func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	registry.RegisterImplementations((*sdk.Msg)(nil),
-		&MsgSetupVoteRound{},
-		&MsgRegisterDelegation{},
-		&MsgCreateVoteCommitment{},
-		&MsgRevealVoteShare{},
+		&MsgCreateVotingSession{},
+		&MsgDelegateVote{},
+		&MsgCastVote{},
+		&MsgRevealShare{},
 	)
 }

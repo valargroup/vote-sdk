@@ -147,7 +147,7 @@ func (s *QueryServerTestSuite) TestVoteRound_NotFound() {
 
 func (s *QueryServerTestSuite) TestVoteRound_Found() {
 	// Create a vote round via MsgServer.
-	resp, err := s.msgServer.SetupVoteRound(s.ctx, &types.MsgSetupVoteRound{
+	resp, err := s.msgServer.CreateVotingSession(s.ctx, &types.MsgCreateVotingSession{
 		Creator:           "zvote1creator",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),

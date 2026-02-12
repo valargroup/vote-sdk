@@ -2,11 +2,11 @@ package types
 
 // Event types emitted by the vote module.
 const (
-	EventTypeSetupVoteRound       = "setup_vote_round"
-	EventTypeRegisterDelegation   = "register_delegation"
-	EventTypeCreateVoteCommitment = "create_vote_commitment"
-	EventTypeRevealVoteShare      = "reveal_vote_share"
-	EventTypeCommitmentTreeRoot   = "commitment_tree_root"
+	EventTypeCreateVotingSession = "create_voting_session"
+	EventTypeDelegateVote        = "delegate_vote"
+	EventTypeCastVote            = "cast_vote"
+	EventTypeRevealShare         = "reveal_share"
+	EventTypeCommitmentTreeRoot  = "commitment_tree_root"
 )
 
 // Event attribute keys.

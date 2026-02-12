@@ -14,28 +14,28 @@ import (
 // the message type. Tags 0x01–0x04 are reserved for vote transactions;
 // any other first byte is assumed to be a standard Cosmos SDK Tx.
 const (
-	TagSetupVoteRound       byte = 0x01
-	TagRegisterDelegation   byte = 0x02
-	TagCreateVoteCommitment byte = 0x03
-	TagRevealVoteShare      byte = 0x04
+	TagCreateVotingSession byte = 0x01
+	TagDelegateVote        byte = 0x02
+	TagCastVote            byte = 0x03
+	TagRevealShare         byte = 0x04
 )
 
 // IsVoteTag returns true if b is a valid vote transaction type tag.
 func IsVoteTag(b byte) bool {
-	return b >= TagSetupVoteRound && b <= TagRevealVoteShare
+	return b >= TagCreateVotingSession && b <= TagRevealShare
 }
 
 // TagForMessage returns the wire-format tag for a VoteMessage.
 func TagForMessage(msg types.VoteMessage) (byte, error) {
 	switch msg.(type) {
-	case *types.MsgSetupVoteRound:
-		return TagSetupVoteRound, nil
-	case *types.MsgRegisterDelegation:
-		return TagRegisterDelegation, nil
-	case *types.MsgCreateVoteCommitment:
-		return TagCreateVoteCommitment, nil
-	case *types.MsgRevealVoteShare:
-		return TagRevealVoteShare, nil
+	case *types.MsgCreateVotingSession:
+		return TagCreateVotingSession, nil
+	case *types.MsgDelegateVote:
+		return TagDelegateVote, nil
+	case *types.MsgCastVote:
+		return TagCastVote, nil
+	case *types.MsgRevealShare:
+		return TagRevealShare, nil
 	default:
 		return 0, fmt.Errorf("unknown vote message type: %T", msg)
 	}
@@ -74,14 +74,14 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 
 	var msg proto.Message
 	switch tag {
-	case TagSetupVoteRound:
-		msg = &types.MsgSetupVoteRound{}
-	case TagRegisterDelegation:
-		msg = &types.MsgRegisterDelegation{}
-	case TagCreateVoteCommitment:
-		msg = &types.MsgCreateVoteCommitment{}
-	case TagRevealVoteShare:
-		msg = &types.MsgRevealVoteShare{}
+	case TagCreateVotingSession:
+		msg = &types.MsgCreateVotingSession{}
+	case TagDelegateVote:
+		msg = &types.MsgDelegateVote{}
+	case TagCastVote:
+		msg = &types.MsgCastVote{}
+	case TagRevealShare:
+		msg = &types.MsgRevealShare{}
 	default:
 		return 0, nil, fmt.Errorf("invalid vote tx tag: 0x%02x", tag)
 	}
@@ -97,4 +97,3 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 
 	return tag, voteMsg, nil
 }
-

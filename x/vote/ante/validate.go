@@ -55,7 +55,7 @@ func DefaultOpts() ValidateOpts {
 //   - RecheckTx: lightweight re-validation (basic + round + nullifiers only)
 //   - FinalizeBlock: full validation before keeper execution
 //
-// MsgSetupVoteRound is special: it has no round ID, no nullifiers, no signature,
+// MsgCreateVotingSession is special: it has no round ID, no nullifiers, no signature,
 // and no ZKP, so only basic field validation runs.
 func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, opts ValidateOpts) error {
 	// 1. Basic field validation (stateless).
@@ -64,7 +64,7 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper,
 	}
 
 	// 2. Vote round exists and is active.
-	// MsgSetupVoteRound returns nil for GetVoteRoundId() since the round
+	// MsgCreateVotingSession returns nil for GetVoteRoundId() since the round
 	// doesn't exist yet — skip the check in that case.
 	if roundID := msg.GetVoteRoundId(); roundID != nil {
 		if err := k.ValidateRoundActive(ctx, roundID); err != nil {
@@ -94,18 +94,18 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper,
 // based on the concrete message type.
 func verifyProofs(msg types.VoteMessage, opts ValidateOpts) error {
 	switch m := msg.(type) {
-	case *types.MsgSetupVoteRound:
-		// No cryptographic verification needed for round setup.
+	case *types.MsgCreateVotingSession:
+		// No cryptographic verification needed for session setup.
 		return nil
 
-	case *types.MsgRegisterDelegation:
+	case *types.MsgDelegateVote:
 		return verifyDelegation(m, opts)
 
-	case *types.MsgCreateVoteCommitment:
-		return verifyVoteCommitment(m, opts)
+	case *types.MsgCastVote:
+		return verifyCastVote(m, opts)
 
-	case *types.MsgRevealVoteShare:
-		return verifyVoteShare(m, opts)
+	case *types.MsgRevealShare:
+		return verifyRevealShare(m, opts)
 
 	default:
 		return fmt.Errorf("unknown vote message type: %T", msg)
@@ -113,8 +113,8 @@ func verifyProofs(msg types.VoteMessage, opts ValidateOpts) error {
 }
 
 // verifyDelegation verifies both the RedPallas signature and ZKP #1 for
-// a MsgRegisterDelegation.
-func verifyDelegation(msg *types.MsgRegisterDelegation, opts ValidateOpts) error {
+// a MsgDelegateVote.
+func verifyDelegation(msg *types.MsgDelegateVote, opts ValidateOpts) error {
 	// RedPallas signature verification.
 	// The sighash is provided by the client as msg.Sighash.
 	if err := opts.SigVerifier.Verify(msg.Rk, msg.Sighash, msg.SpendAuthSig); err != nil {
@@ -137,8 +137,8 @@ func verifyDelegation(msg *types.MsgRegisterDelegation, opts ValidateOpts) error
 	return nil
 }
 
-// verifyVoteCommitment verifies ZKP #2 for a MsgCreateVoteCommitment.
-func verifyVoteCommitment(msg *types.MsgCreateVoteCommitment, opts ValidateOpts) error {
+// verifyCastVote verifies ZKP #2 for a MsgCastVote.
+func verifyCastVote(msg *types.MsgCastVote, opts ValidateOpts) error {
 	if err := opts.ZKPVerifier.VerifyVoteCommitment(msg.Proof, zkp.VoteCommitmentInputs{
 		VanNullifier:         msg.VanNullifier,
 		VoteAuthorityNoteNew: msg.VoteAuthorityNoteNew,
@@ -153,8 +153,8 @@ func verifyVoteCommitment(msg *types.MsgCreateVoteCommitment, opts ValidateOpts)
 	return nil
 }
 
-// verifyVoteShare verifies ZKP #3 for a MsgRevealVoteShare.
-func verifyVoteShare(msg *types.MsgRevealVoteShare, opts ValidateOpts) error {
+// verifyRevealShare verifies ZKP #3 for a MsgRevealShare.
+func verifyRevealShare(msg *types.MsgRevealShare, opts ValidateOpts) error {
 	if err := opts.ZKPVerifier.VerifyVoteShare(msg.Proof, zkp.VoteShareInputs{
 		ShareNullifier: msg.ShareNullifier,
 		VoteAmount:     msg.VoteAmount,

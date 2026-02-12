@@ -10,10 +10,10 @@ import (
 	"github.com/z-cale/zally/x/vote/types"
 )
 
-// ValidSetupRound returns a MsgSetupVoteRound with all fields populated.
+// ValidCreateVotingSession returns a MsgCreateVotingSession with all fields populated.
 // The VoteEndTime is set 1 hour in the future from the reference time.
-func ValidSetupRound() *types.MsgSetupVoteRound {
-	return &types.MsgSetupVoteRound{
+func ValidCreateVotingSession() *types.MsgCreateVotingSession {
+	return &types.MsgCreateVotingSession{
 		Creator:           "zvote1admin",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
@@ -24,10 +24,10 @@ func ValidSetupRound() *types.MsgSetupVoteRound {
 	}
 }
 
-// ValidSetupRoundAt returns a MsgSetupVoteRound with VoteEndTime set relative
+// ValidCreateVotingSessionAt returns a MsgCreateVotingSession with VoteEndTime set relative
 // to the given reference time. Use this when the block time is deterministic.
-func ValidSetupRoundAt(refTime time.Time) *types.MsgSetupVoteRound {
-	return &types.MsgSetupVoteRound{
+func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession {
+	return &types.MsgCreateVotingSession{
 		Creator:           "zvote1admin",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
@@ -38,10 +38,10 @@ func ValidSetupRoundAt(refTime time.Time) *types.MsgSetupVoteRound {
 	}
 }
 
-// ExpiredSetupRoundAt returns a MsgSetupVoteRound with VoteEndTime in the past
+// ExpiredCreateVotingSessionAt returns a MsgCreateVotingSession with VoteEndTime in the past
 // relative to the given reference time.
-func ExpiredSetupRoundAt(refTime time.Time) *types.MsgSetupVoteRound {
-	return &types.MsgSetupVoteRound{
+func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession {
+	return &types.MsgCreateVotingSession{
 		Creator:           "zvote1admin",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
@@ -52,10 +52,10 @@ func ExpiredSetupRoundAt(refTime time.Time) *types.MsgSetupVoteRound {
 	}
 }
 
-// ValidDelegation returns a MsgRegisterDelegation with mock proof data.
+// ValidDelegation returns a MsgDelegateVote with mock proof data.
 // Each call returns unique gov nullifiers derived from the provided seed.
-func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgRegisterDelegation {
-	return &types.MsgRegisterDelegation{
+func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote {
+	return &types.MsgDelegateVote{
 		Rk:                  bytes.Repeat([]byte{0x01}, 32),
 		SpendAuthSig:        bytes.Repeat([]byte{0x02}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0x03}, 32),
@@ -68,12 +68,13 @@ func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgRegisterDeleg
 		},
 		Proof:       []byte("mock-delegation-proof"),
 		VoteRoundId: roundID,
+		Sighash:     bytes.Repeat([]byte{0x06}, 32),
 	}
 }
 
-// ValidVoteCommitment returns a MsgCreateVoteCommitment with mock data.
-func ValidVoteCommitment(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgCreateVoteCommitment {
-	return &types.MsgCreateVoteCommitment{
+// ValidCastVote returns a MsgCastVote with mock data.
+func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgCastVote {
+	return &types.MsgCastVote{
 		VanNullifier:             MakeNullifier(nullifierSeed),
 		VoteAuthorityNoteNew:     bytes.Repeat([]byte{nullifierSeed + 0xA0}, 32),
 		VoteCommitment:           bytes.Repeat([]byte{nullifierSeed + 0xB0}, 32),
@@ -84,9 +85,9 @@ func ValidVoteCommitment(roundID []byte, anchorHeight uint64, nullifierSeed byte
 	}
 }
 
-// ValidRevealShare returns a MsgRevealVoteShare with mock data.
-func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgRevealVoteShare {
-	return &types.MsgRevealVoteShare{
+// ValidRevealShare returns a MsgRevealShare with mock data.
+func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgRevealShare {
+	return &types.MsgRevealShare{
 		ShareNullifier:           MakeNullifier(nullifierSeed),
 		VoteAmount:               1000,
 		ProposalId:               1,

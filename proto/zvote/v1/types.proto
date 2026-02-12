@@ -3,7 +3,7 @@ package zvote.v1;
 
 option go_package = "github.com/z-cale/zally/x/vote/types";
 
-// VoteRound represents a voting session created by MsgSetupVoteRound.
+// VoteRound represents a voting session created by MsgCreateVotingSession.
 message VoteRound {
   bytes  vote_round_id       = 1;
   uint64 snapshot_height     = 2;

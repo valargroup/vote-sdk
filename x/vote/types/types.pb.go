@@ -21,7 +21,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// VoteRound represents a voting session created by MsgSetupVoteRound.
+// VoteRound represents a voting session created by MsgCreateVotingSession.
 type VoteRound struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	VoteRoundId       []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`

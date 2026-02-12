@@ -45,9 +45,9 @@ func TestRedPallasDelegationValidSig(t *testing.T) {
 	sighash := rpMustReadFixture(t, "valid_sighash.bin")
 	sig := rpMustReadFixture(t, "valid_sig.bin")
 
-	// Build a MsgRegisterDelegation with real RedPallas signature data.
+	// Build a MsgDelegateVote with real RedPallas signature data.
 	// The sighash is now a field on the message itself (sent by the client).
-	msg := &types.MsgRegisterDelegation{
+	msg := &types.MsgDelegateVote{
 		Rk:                  rk,      // 32-byte real verification key
 		SpendAuthSig:        sig,     // 64-byte real signature
 		Sighash:             sighash, // 32-byte sighash the signature covers
@@ -88,7 +88,7 @@ func TestRedPallasDelegationWrongSig(t *testing.T) {
 	sighash := rpMustReadFixture(t, "valid_sighash.bin")
 	wrongSig := rpMustReadFixture(t, "wrong_sig.bin")
 
-	msg := &types.MsgRegisterDelegation{
+	msg := &types.MsgDelegateVote{
 		Rk:                  rk,       // correct verification key
 		SpendAuthSig:        wrongSig, // signature over a different message
 		Sighash:             sighash,  // same sighash — wrong sig should still fail

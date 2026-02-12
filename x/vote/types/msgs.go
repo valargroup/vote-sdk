@@ -2,8 +2,8 @@ package types
 
 import "fmt"
 
-// ValidateBasic performs stateless validation for MsgSetupVoteRound.
-func (msg *MsgSetupVoteRound) ValidateBasic() error {
+// ValidateBasic performs stateless validation for MsgCreateVotingSession.
+func (msg *MsgCreateVotingSession) ValidateBasic() error {
 	if msg.Creator == "" {
 		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
 	}
@@ -28,8 +28,8 @@ func (msg *MsgSetupVoteRound) ValidateBasic() error {
 	return nil
 }
 
-// ValidateBasic performs stateless validation for MsgRegisterDelegation.
-func (msg *MsgRegisterDelegation) ValidateBasic() error {
+// ValidateBasic performs stateless validation for MsgDelegateVote.
+func (msg *MsgDelegateVote) ValidateBasic() error {
 	if len(msg.Rk) != 32 {
 		return fmt.Errorf("%w: rk must be 32 bytes, got %d", ErrInvalidField, len(msg.Rk))
 	}
@@ -68,8 +68,8 @@ func (msg *MsgRegisterDelegation) ValidateBasic() error {
 	return nil
 }
 
-// ValidateBasic performs stateless validation for MsgCreateVoteCommitment.
-func (msg *MsgCreateVoteCommitment) ValidateBasic() error {
+// ValidateBasic performs stateless validation for MsgCastVote.
+func (msg *MsgCastVote) ValidateBasic() error {
 	if len(msg.VanNullifier) == 0 {
 		return fmt.Errorf("%w: van_nullifier cannot be empty", ErrInvalidField)
 	}
@@ -91,8 +91,8 @@ func (msg *MsgCreateVoteCommitment) ValidateBasic() error {
 	return nil
 }
 
-// ValidateBasic performs stateless validation for MsgRevealVoteShare.
-func (msg *MsgRevealVoteShare) ValidateBasic() error {
+// ValidateBasic performs stateless validation for MsgRevealShare.
+func (msg *MsgRevealShare) ValidateBasic() error {
 	if len(msg.ShareNullifier) == 0 {
 		return fmt.Errorf("%w: share_nullifier cannot be empty", ErrInvalidField)
 	}
@@ -121,27 +121,27 @@ type VoteMessage interface {
 
 // --- VoteMessage interface implementations ---
 
-// GetNullifiers returns the nullifiers from a MsgRegisterDelegation.
-func (msg *MsgRegisterDelegation) GetNullifiers() [][]byte {
+// GetNullifiers returns the nullifiers from a MsgDelegateVote.
+func (msg *MsgDelegateVote) GetNullifiers() [][]byte {
 	return msg.GovNullifiers
 }
 
-// GetNullifiers returns the nullifiers from a MsgCreateVoteCommitment.
-func (msg *MsgCreateVoteCommitment) GetNullifiers() [][]byte {
+// GetNullifiers returns the nullifiers from a MsgCastVote.
+func (msg *MsgCastVote) GetNullifiers() [][]byte {
 	return [][]byte{msg.VanNullifier}
 }
 
-// GetNullifiers returns the nullifiers from a MsgRevealVoteShare.
-func (msg *MsgRevealVoteShare) GetNullifiers() [][]byte {
+// GetNullifiers returns the nullifiers from a MsgRevealShare.
+func (msg *MsgRevealShare) GetNullifiers() [][]byte {
 	return [][]byte{msg.ShareNullifier}
 }
 
-// GetNullifiers returns nil for MsgSetupVoteRound (no nullifiers involved).
-func (msg *MsgSetupVoteRound) GetNullifiers() [][]byte {
+// GetNullifiers returns nil for MsgCreateVotingSession (no nullifiers involved).
+func (msg *MsgCreateVotingSession) GetNullifiers() [][]byte {
 	return nil
 }
 
-// GetVoteRoundId returns nil for MsgSetupVoteRound (round doesn't exist yet).
-func (msg *MsgSetupVoteRound) GetVoteRoundId() []byte {
+// GetVoteRoundId returns nil for MsgCreateVotingSession (round doesn't exist yet).
+func (msg *MsgCreateVotingSession) GetVoteRoundId() []byte {
 	return nil
 }

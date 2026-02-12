@@ -11,15 +11,15 @@ option go_package = "github.com/z-cale/zally/x/vote/types";
 // envelope entirely; the Msg service is defined here for gRPC registration only.
 service Msg {
   option (cosmos.msg.v1.service) = true;
-  rpc SetupVoteRound(MsgSetupVoteRound) returns (MsgSetupVoteRoundResponse);
-  rpc RegisterDelegation(MsgRegisterDelegation) returns (MsgRegisterDelegationResponse);
-  rpc CreateVoteCommitment(MsgCreateVoteCommitment) returns (MsgCreateVoteCommitmentResponse);
-  rpc RevealVoteShare(MsgRevealVoteShare) returns (MsgRevealVoteShareResponse);
+  rpc CreateVotingSession(MsgCreateVotingSession) returns (MsgCreateVotingSessionResponse);
+  rpc DelegateVote(MsgDelegateVote) returns (MsgDelegateVoteResponse);
+  rpc CastVote(MsgCastVote) returns (MsgCastVoteResponse);
+  rpc RevealShare(MsgRevealShare) returns (MsgRevealShareResponse);
 }
 
-// MsgSetupVoteRound creates a new voting session.
+// MsgCreateVotingSession creates a new voting session.
 // vote_round_id is computed on-chain as Blake2b(snapshot_height, snapshot_blockhash, proposals_hash, vote_end_time, nullifier_imt_root, nc_root).
-message MsgSetupVoteRound {
+message MsgCreateVotingSession {
   string creator             = 1;
   uint64 snapshot_height     = 2;
   bytes  snapshot_blockhash  = 3;
@@ -29,12 +29,12 @@ message MsgSetupVoteRound {
   bytes  nc_root             = 7;
 }
 
-message MsgSetupVoteRoundResponse {
+message MsgCreateVotingSessionResponse {
   bytes vote_round_id = 1;
 }
 
-// MsgRegisterDelegation corresponds to ZKP #1: delegation registration from keystone-signed action.
-message MsgRegisterDelegation {
+// MsgDelegateVote corresponds to ZKP #1: delegation registration from keystone-signed action.
+message MsgDelegateVote {
   bytes rk                     = 1;  // Randomized spend auth key (32 bytes)
   bytes spend_auth_sig         = 2;  // RedPallas signature
   bytes signed_note_nullifier  = 3;  // Nullifier of the dummy signed note
@@ -47,10 +47,10 @@ message MsgRegisterDelegation {
   bytes sighash                = 10; // Client-provided sighash for RedPallas signature verification (32 bytes)
 }
 
-message MsgRegisterDelegationResponse {}
+message MsgDelegateVoteResponse {}
 
-// MsgCreateVoteCommitment corresponds to ZKP #2: create a vote commitment.
-message MsgCreateVoteCommitment {
+// MsgCastVote corresponds to ZKP #2: create a vote commitment.
+message MsgCastVote {
   bytes  van_nullifier                = 1;
   bytes  vote_authority_note_new      = 2;
   bytes  vote_commitment              = 3;
@@ -60,10 +60,10 @@ message MsgCreateVoteCommitment {
   uint64 vote_comm_tree_anchor_height = 7;
 }
 
-message MsgCreateVoteCommitmentResponse {}
+message MsgCastVoteResponse {}
 
-// MsgRevealVoteShare corresponds to ZKP #3: reveal vote share (server submits).
-message MsgRevealVoteShare {
+// MsgRevealShare corresponds to ZKP #3: reveal vote share (server submits).
+message MsgRevealShare {
   bytes  share_nullifier              = 1;
   uint64 vote_amount                  = 2;
   uint32 proposal_id                  = 3;
@@ -73,4 +73,4 @@ message MsgRevealVoteShare {
   uint64 vote_comm_tree_anchor_height = 7;
 }
 
-message MsgRevealVoteShareResponse {}
+message MsgRevealShareResponse {}

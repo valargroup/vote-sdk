@@ -1,5 +1,5 @@
 /**
- * API tests for delegation submission (MsgRegisterDelegation / ZKP #1).
+ * API tests for delegation submission (MsgDelegateVote / ZKP #1).
  *
  * Prerequisites:
  *   1. Build Rust circuits: make circuits
@@ -17,8 +17,8 @@
 
 import { describe, it, expect, beforeAll } from "vitest";
 import {
-  makeSetupRoundPayload,
-  makeDelegationPayload,
+  makeCreateVotingSessionPayload,
+  makeDelegateVotePayload,
   postJSON,
   sleep,
   BLOCK_WAIT_MS,
@@ -33,10 +33,10 @@ describe("Delegation", () => {
     let roundId: Uint8Array;
 
     beforeAll(async () => {
-      const { body, roundId: rid } = makeSetupRoundPayload();
+      const { body, roundId: rid } = makeCreateVotingSessionPayload();
       roundId = rid;
 
-      const res = await postJSON("/zally/v1/setup-round", body);
+      const res = await postJSON("/zally/v1/create-voting-session", body);
       expect(res.json.code).toBe(0);
 
       // Wait for the round to be committed
@@ -44,9 +44,9 @@ describe("Delegation", () => {
     });
 
     it("should submit a delegation with real RedPallas signature and get code 0", async () => {
-      const delegationBody = makeDelegationPayload(roundId);
+      const delegationBody = makeDelegateVotePayload(roundId);
       const { status, json } = await postJSON(
-        "/zally/v1/submit-delegation",
+        "/zally/v1/delegate-vote",
         delegationBody,
       );
 
@@ -60,10 +60,10 @@ describe("Delegation", () => {
     it("should reject delegation for a non-existent round", async () => {
       // Use a random round ID that hasn't been set up
       const fakeRoundId = repeatByte(0xff, 32);
-      const delegationBody = makeDelegationPayload(fakeRoundId);
+      const delegationBody = makeDelegateVotePayload(fakeRoundId);
 
       const { status, json } = await postJSON(
-        "/zally/v1/submit-delegation",
+        "/zally/v1/delegate-vote",
         delegationBody,
       );
 
@@ -80,10 +80,10 @@ describe("Delegation", () => {
 
     beforeAll(async () => {
       // Create a fresh round for this test group
-      const { body, roundId: rid } = makeSetupRoundPayload();
+      const { body, roundId: rid } = makeCreateVotingSessionPayload();
       roundId = rid;
 
-      const res = await postJSON("/zally/v1/setup-round", body);
+      const res = await postJSON("/zally/v1/create-voting-session", body);
       expect(res.json.code).toBe(0);
 
       await sleep(BLOCK_WAIT_MS);
@@ -91,9 +91,9 @@ describe("Delegation", () => {
 
     it("should reject a second delegation that reuses the same nullifiers", async () => {
       // First delegation -- should succeed
-      const delegation1 = makeDelegationPayload(roundId);
+      const delegation1 = makeDelegateVotePayload(roundId);
       const res1 = await postJSON(
-        "/zally/v1/submit-delegation",
+        "/zally/v1/delegate-vote",
         delegation1,
       );
       expect(res1.json.code, `first delegation rejected: ${res1.json.log}`).toBe(0);
@@ -103,11 +103,11 @@ describe("Delegation", () => {
 
       // Second delegation reuses the SAME gov_nullifiers from the first one.
       // cmx_new is still unique; gov_comm is the same (Halo2 public input).
-      const delegation2 = makeDelegationPayload(roundId);
+      const delegation2 = makeDelegateVotePayload(roundId);
       delegation2.gov_nullifiers = delegation1.gov_nullifiers; // reuse spent nullifiers
 
       const res2 = await postJSON(
-        "/zally/v1/submit-delegation",
+        "/zally/v1/delegate-vote",
         delegation2,
       );
 
@@ -120,16 +120,16 @@ describe("Delegation", () => {
 
   describe("validation errors", () => {
     it("should reject delegation with missing rk field", async () => {
-      const { body, roundId } = makeSetupRoundPayload();
-      await postJSON("/zally/v1/setup-round", body);
+      const { body, roundId } = makeCreateVotingSessionPayload();
+      await postJSON("/zally/v1/create-voting-session", body);
       await sleep(BLOCK_WAIT_MS);
 
       // Build a delegation with rk removed
-      const delegation = makeDelegationPayload(roundId);
+      const delegation = makeDelegateVotePayload(roundId);
       const { rk, ...withoutRk } = delegation;
 
       const { status, json } = await postJSON(
-        "/zally/v1/submit-delegation",
+        "/zally/v1/delegate-vote",
         withoutRk,
       );
 
@@ -139,17 +139,17 @@ describe("Delegation", () => {
     });
 
     it("should reject delegation with empty proof", async () => {
-      const { body, roundId } = makeSetupRoundPayload();
-      await postJSON("/zally/v1/setup-round", body);
+      const { body, roundId } = makeCreateVotingSessionPayload();
+      await postJSON("/zally/v1/create-voting-session", body);
       await sleep(BLOCK_WAIT_MS);
 
       const delegation = {
-        ...makeDelegationPayload(roundId),
+        ...makeDelegateVotePayload(roundId),
         proof: "", // empty base64 = empty bytes
       };
 
       const { status, json } = await postJSON(
-        "/zally/v1/submit-delegation",
+        "/zally/v1/delegate-vote",
         delegation,
       );
 
