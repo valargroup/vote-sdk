@@ -16,7 +16,7 @@ import (
 // Keeper of the vote module store.
 //
 // KV Store Layout:
-//   0x01 || nullifier_bytes         -> []byte{1}         (nullifier set: gov, VAN, share)
+//   0x01 || type || round_id || nf  -> []byte{1}         (nullifier set, scoped by type+round)
 //   0x02 || uint64 index            -> commitment_bytes   (append-only commitment tree)
 //   0x03 || uint64 height           -> root_bytes         (commitment tree roots by height)
 //   0x04 || round_id                -> VoteRound protobuf (vote round data)
@@ -69,14 +69,16 @@ func (k Keeper) Logger() log.Logger {
 	return k.logger
 }
 
-// HasNullifier checks if a nullifier has already been recorded.
-func (k Keeper) HasNullifier(ctx store.KVStore, nullifier []byte) (bool, error) {
-	return ctx.Has(types.NullifierKey(nullifier))
+// HasNullifier checks if a nullifier has already been recorded in the given
+// type-scoped, round-scoped nullifier set.
+func (k Keeper) HasNullifier(ctx store.KVStore, nfType types.NullifierType, roundID, nullifier []byte) (bool, error) {
+	return ctx.Has(types.NullifierKey(nfType, roundID, nullifier))
 }
 
-// SetNullifier records a nullifier as spent.
-func (k Keeper) SetNullifier(ctx store.KVStore, nullifier []byte) error {
-	return ctx.Set(types.NullifierKey(nullifier), []byte{1})
+// SetNullifier records a nullifier as spent in the given type-scoped,
+// round-scoped nullifier set.
+func (k Keeper) SetNullifier(ctx store.KVStore, nfType types.NullifierType, roundID, nullifier []byte) error {
+	return ctx.Set(types.NullifierKey(nfType, roundID, nullifier), []byte{1})
 }
 
 // GetVoteRound retrieves a vote round by its ID.
@@ -273,12 +275,13 @@ func (k Keeper) ValidateRoundActive(ctx context.Context, roundID []byte) error {
 }
 
 // CheckNullifiersUnique verifies that none of the provided nullifiers have
-// already been recorded in the KV store. This runs on every check including
-// RecheckTx, because nullifiers may have been consumed by the newly committed block.
-func (k Keeper) CheckNullifiersUnique(ctx context.Context, nullifiers [][]byte) error {
+// already been recorded in the type-scoped, round-scoped nullifier set.
+// This runs on every check including RecheckTx, because nullifiers may have
+// been consumed by the newly committed block.
+func (k Keeper) CheckNullifiersUnique(ctx context.Context, nfType types.NullifierType, roundID []byte, nullifiers [][]byte) error {
 	kvStore := k.OpenKVStore(ctx)
 	for _, nf := range nullifiers {
-		has, err := k.HasNullifier(kvStore, nf)
+		has, err := k.HasNullifier(kvStore, nfType, roundID, nf)
 		if err != nil {
 			return err
 		}

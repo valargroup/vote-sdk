@@ -75,7 +75,7 @@ func (s *KeeperTestSuite) TestNullifier_SetAndHas() {
 			name: "nullifier present after Set",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetNullifier(kv, nf))
+				s.Require().NoError(s.keeper.SetNullifier(kv, types.NullifierTypeGov, testRoundID, nf))
 			},
 			nullifier: nf,
 			expectHas: true,
@@ -84,7 +84,7 @@ func (s *KeeperTestSuite) TestNullifier_SetAndHas() {
 			name: "different nullifier still absent",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetNullifier(kv, nf))
+				s.Require().NoError(s.keeper.SetNullifier(kv, types.NullifierTypeGov, testRoundID, nf))
 			},
 			nullifier: bytes.Repeat([]byte{0xBB}, 32),
 			expectHas: false,
@@ -98,7 +98,7 @@ func (s *KeeperTestSuite) TestNullifier_SetAndHas() {
 				tc.setup()
 			}
 			kv := s.keeper.OpenKVStore(s.ctx)
-			has, err := s.keeper.HasNullifier(kv, tc.nullifier)
+			has, err := s.keeper.HasNullifier(kv, types.NullifierTypeGov, testRoundID, tc.nullifier)
 			s.Require().NoError(err)
 			s.Require().Equal(tc.expectHas, has)
 		})
@@ -114,20 +114,70 @@ func (s *KeeperTestSuite) TestNullifier_MultipleIndependent() {
 	nf3 := bytes.Repeat([]byte{0x03}, 32)
 
 	// Record nf1 and nf2, leave nf3 unrecorded.
-	s.Require().NoError(s.keeper.SetNullifier(kv, nf1))
-	s.Require().NoError(s.keeper.SetNullifier(kv, nf2))
+	s.Require().NoError(s.keeper.SetNullifier(kv, types.NullifierTypeGov, testRoundID, nf1))
+	s.Require().NoError(s.keeper.SetNullifier(kv, types.NullifierTypeGov, testRoundID, nf2))
 
-	has1, err := s.keeper.HasNullifier(kv, nf1)
+	has1, err := s.keeper.HasNullifier(kv, types.NullifierTypeGov, testRoundID, nf1)
 	s.Require().NoError(err)
 	s.Require().True(has1)
 
-	has2, err := s.keeper.HasNullifier(kv, nf2)
+	has2, err := s.keeper.HasNullifier(kv, types.NullifierTypeGov, testRoundID, nf2)
 	s.Require().NoError(err)
 	s.Require().True(has2)
 
-	has3, err := s.keeper.HasNullifier(kv, nf3)
+	has3, err := s.keeper.HasNullifier(kv, types.NullifierTypeGov, testRoundID, nf3)
 	s.Require().NoError(err)
 	s.Require().False(has3)
+}
+
+// ---------------------------------------------------------------------------
+// Nullifier scoping: cross-type and cross-round isolation
+// ---------------------------------------------------------------------------
+
+func (s *KeeperTestSuite) TestNullifier_CrossTypeIsolation() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	nf := bytes.Repeat([]byte{0xAA}, 32)
+
+	// Record as gov nullifier.
+	s.Require().NoError(s.keeper.SetNullifier(kv, types.NullifierTypeGov, testRoundID, nf))
+
+	// Same bytes should NOT be found in vote-authority-note or share namespace.
+	hasVoteAuthorityNote, err := s.keeper.HasNullifier(kv, types.NullifierTypeVoteAuthorityNote, testRoundID, nf)
+	s.Require().NoError(err)
+	s.Require().False(hasVoteAuthorityNote, "gov nullifier must not collide with vote-authority-note namespace")
+
+	hasShare, err := s.keeper.HasNullifier(kv, types.NullifierTypeShare, testRoundID, nf)
+	s.Require().NoError(err)
+	s.Require().False(hasShare, "gov nullifier must not collide with share namespace")
+
+	// Same bytes SHOULD be found in gov namespace.
+	hasGov, err := s.keeper.HasNullifier(kv, types.NullifierTypeGov, testRoundID, nf)
+	s.Require().NoError(err)
+	s.Require().True(hasGov)
+}
+
+func (s *KeeperTestSuite) TestNullifier_CrossRoundIsolation() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	roundA := bytes.Repeat([]byte{0x0A}, 32)
+	roundB := bytes.Repeat([]byte{0x0B}, 32)
+	nf := bytes.Repeat([]byte{0xAA}, 32)
+
+	// Record in round A.
+	s.Require().NoError(s.keeper.SetNullifier(kv, types.NullifierTypeGov, roundA, nf))
+
+	// Same bytes should NOT be found in round B.
+	hasB, err := s.keeper.HasNullifier(kv, types.NullifierTypeGov, roundB, nf)
+	s.Require().NoError(err)
+	s.Require().False(hasB, "nullifier in round A must not collide with round B")
+
+	// Should still be found in round A.
+	hasA, err := s.keeper.HasNullifier(kv, types.NullifierTypeGov, roundA, nf)
+	s.Require().NoError(err)
+	s.Require().True(hasA)
 }
 
 // ---------------------------------------------------------------------------
@@ -566,7 +616,7 @@ func (s *KeeperTestSuite) TestCheckNullifiersUnique() {
 			name: "first nullifier already spent",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetNullifier(kv, nf1))
+				s.Require().NoError(s.keeper.SetNullifier(kv, types.NullifierTypeGov, testRoundID, nf1))
 			},
 			nullifiers:  [][]byte{nf1, nf2},
 			expectErr:   true,
@@ -576,7 +626,7 @@ func (s *KeeperTestSuite) TestCheckNullifiersUnique() {
 			name: "second nullifier already spent",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetNullifier(kv, nf2))
+				s.Require().NoError(s.keeper.SetNullifier(kv, types.NullifierTypeGov, testRoundID, nf2))
 			},
 			nullifiers:  [][]byte{nf1, nf2},
 			expectErr:   true,
@@ -594,7 +644,7 @@ func (s *KeeperTestSuite) TestCheckNullifiersUnique() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			err := s.keeper.CheckNullifiersUnique(s.ctx, tc.nullifiers)
+			err := s.keeper.CheckNullifiersUnique(s.ctx, types.NullifierTypeGov, testRoundID, tc.nullifiers)
 			if tc.expectErr {
 				s.Require().Error(err)
 				if tc.errContains != "" {

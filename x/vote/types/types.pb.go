@@ -305,10 +305,12 @@ func (x *CommitmentLeaf) GetValue() []byte {
 	return nil
 }
 
-// NullifierEntry is a recorded nullifier.
+// NullifierEntry is a recorded nullifier, scoped by type and round.
 type NullifierEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Nullifier     []byte                 `protobuf:"bytes,1,opt,name=nullifier,proto3" json:"nullifier,omitempty"`
+	NullifierType uint32                 `protobuf:"varint,2,opt,name=nullifier_type,json=nullifierType,proto3" json:"nullifier_type,omitempty"` // 0=gov, 1=vote-authority-note, 2=share (maps to NullifierType)
+	RoundId       []byte                 `protobuf:"bytes,3,opt,name=round_id,json=roundId,proto3" json:"round_id,omitempty"`                    // voting round this nullifier belongs to
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -350,6 +352,20 @@ func (x *NullifierEntry) GetNullifier() []byte {
 	return nil
 }
 
+func (x *NullifierEntry) GetNullifierType() uint32 {
+	if x != nil {
+		return x.NullifierType
+	}
+	return 0
+}
+
+func (x *NullifierEntry) GetRoundId() []byte {
+	if x != nil {
+		return x.RoundId
+	}
+	return nil
+}
+
 var File_zvote_v1_types_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_types_proto_rawDesc = "" +
@@ -379,9 +395,11 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"nullifiers\"<\n" +
 	"\x0eCommitmentLeaf\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x04R\x05index\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value\".\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\"p\n" +
 	"\x0eNullifierEntry\x12\x1c\n" +
-	"\tnullifier\x18\x01 \x01(\fR\tnullifierB&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
+	"\tnullifier\x18\x01 \x01(\fR\tnullifier\x12%\n" +
+	"\x0enullifier_type\x18\x02 \x01(\rR\rnullifierType\x12\x19\n" +
+	"\bround_id\x18\x03 \x01(\fR\aroundIdB&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
 var (
 	file_zvote_v1_types_proto_rawDescOnce sync.Once

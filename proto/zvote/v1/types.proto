@@ -36,7 +36,9 @@ message CommitmentLeaf {
   bytes  value = 2;
 }
 
-// NullifierEntry is a recorded nullifier.
+// NullifierEntry is a recorded nullifier, scoped by type and round.
 message NullifierEntry {
-  bytes nullifier = 1;
+  bytes  nullifier      = 1;
+  uint32 nullifier_type = 2; // 0=gov, 1=vote-authority-note, 2=share (maps to NullifierType)
+  bytes  round_id       = 3; // voting round this nullifier belongs to
 }

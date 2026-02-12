@@ -117,6 +117,7 @@ type VoteMessage interface {
 	ValidateBasic() error
 	GetVoteRoundId() []byte
 	GetNullifiers() [][]byte
+	GetNullifierType() NullifierType
 }
 
 // --- VoteMessage interface implementations ---
@@ -126,9 +127,19 @@ func (msg *MsgDelegateVote) GetNullifiers() [][]byte {
 	return msg.GovNullifiers
 }
 
+// GetNullifierType returns NullifierTypeGov for MsgDelegateVote.
+func (msg *MsgDelegateVote) GetNullifierType() NullifierType {
+	return NullifierTypeGov
+}
+
 // GetNullifiers returns the nullifiers from a MsgCastVote.
 func (msg *MsgCastVote) GetNullifiers() [][]byte {
 	return [][]byte{msg.VanNullifier}
+}
+
+// GetNullifierType returns NullifierTypeVoteAuthorityNote for MsgCastVote.
+func (msg *MsgCastVote) GetNullifierType() NullifierType {
+	return NullifierTypeVoteAuthorityNote
 }
 
 // GetNullifiers returns the nullifiers from a MsgRevealShare.
@@ -136,9 +147,20 @@ func (msg *MsgRevealShare) GetNullifiers() [][]byte {
 	return [][]byte{msg.ShareNullifier}
 }
 
+// GetNullifierType returns NullifierTypeShare for MsgRevealShare.
+func (msg *MsgRevealShare) GetNullifierType() NullifierType {
+	return NullifierTypeShare
+}
+
 // GetNullifiers returns nil for MsgCreateVotingSession (no nullifiers involved).
 func (msg *MsgCreateVotingSession) GetNullifiers() [][]byte {
 	return nil
+}
+
+// GetNullifierType returns 0 for MsgCreateVotingSession (unused; guarded by
+// len(nullifiers) > 0 check in the ante handler).
+func (msg *MsgCreateVotingSession) GetNullifierType() NullifierType {
+	return 0
 }
 
 // GetVoteRoundId returns nil for MsgCreateVotingSession (round doesn't exist yet).

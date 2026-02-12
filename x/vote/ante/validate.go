@@ -74,9 +74,9 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper,
 
 	// 3. Nullifier uniqueness (ALWAYS runs, even on RecheckTx).
 	// Nullifiers may have been consumed by the block that was just committed,
-	// so we must re-check every time.
+	// so we must re-check every time. Nullifiers are scoped by type + round.
 	if nullifiers := msg.GetNullifiers(); len(nullifiers) > 0 {
-		if err := k.CheckNullifiersUnique(ctx, nullifiers); err != nil {
+		if err := k.CheckNullifiersUnique(ctx, msg.GetNullifierType(), msg.GetVoteRoundId(), nullifiers); err != nil {
 			return err
 		}
 	}

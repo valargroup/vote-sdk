@@ -213,12 +213,12 @@ func (s *MsgServerTestSuite) TestDelegateVote() {
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 
-				// Nullifiers recorded.
+				// Gov nullifiers recorded (scoped to gov type + round).
 				for _, nf := range [][]byte{
 					bytes.Repeat([]byte{0xC1}, 32),
 					bytes.Repeat([]byte{0xC2}, 32),
 				} {
-					has, err := s.keeper.HasNullifier(kv, nf)
+					has, err := s.keeper.HasNullifier(kv, types.NullifierTypeGov, roundID, nf)
 					s.Require().NoError(err)
 					s.Require().True(has)
 				}
@@ -292,7 +292,7 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 
-				has, err := s.keeper.HasNullifier(kv, bytes.Repeat([]byte{0xE1}, 32))
+				has, err := s.keeper.HasNullifier(kv, types.NullifierTypeVoteAuthorityNote, roundID, bytes.Repeat([]byte{0xE1}, 32))
 				s.Require().NoError(err)
 				s.Require().True(has)
 
@@ -371,7 +371,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 
-				has, err := s.keeper.HasNullifier(kv, bytes.Repeat([]byte{0xF1}, 32))
+				has, err := s.keeper.HasNullifier(kv, types.NullifierTypeShare, roundID, bytes.Repeat([]byte{0xF1}, 32))
 				s.Require().NoError(err)
 				s.Require().True(has)
 

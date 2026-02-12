@@ -76,9 +76,9 @@ func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVo
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
-	// Record each governance nullifier.
+	// Record each governance nullifier (scoped to gov type + round).
 	for _, nf := range msg.GovNullifiers {
-		if err := ms.k.SetNullifier(kvStore, nf); err != nil {
+		if err := ms.k.SetNullifier(kvStore, types.NullifierTypeGov, msg.VoteRoundId, nf); err != nil {
 			return nil, err
 		}
 	}
@@ -104,7 +104,7 @@ func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVo
 }
 
 // CastVote handles MsgCastVote (ZKP #2).
-// Validates the anchor height, records the VAN nullifier, appends
+// Validates the anchor height, records the vote-authority-note nullifier, appends
 // vote_authority_note_new and vote_commitment to the tree, and emits an event.
 func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*types.MsgCastVoteResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
@@ -119,8 +119,8 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 		return nil, fmt.Errorf("%w: no root at height %d", types.ErrInvalidAnchorHeight, msg.VoteCommTreeAnchorHeight)
 	}
 
-	// Record VAN nullifier.
-	if err := ms.k.SetNullifier(kvStore, msg.VanNullifier); err != nil {
+	// Record vote-authority-note nullifier (scoped to type + round).
+	if err := ms.k.SetNullifier(kvStore, types.NullifierTypeVoteAuthorityNote, msg.VoteRoundId, msg.VanNullifier); err != nil {
 		return nil, err
 	}
 
@@ -150,8 +150,8 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
-	// Record share nullifier.
-	if err := ms.k.SetNullifier(kvStore, msg.ShareNullifier); err != nil {
+	// Record share nullifier (scoped to share type + round).
+	if err := ms.k.SetNullifier(kvStore, types.NullifierTypeShare, msg.VoteRoundId, msg.ShareNullifier); err != nil {
 		return nil, err
 	}
 

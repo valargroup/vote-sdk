@@ -33,9 +33,10 @@ func (k Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState) 
 		}
 	}
 
-	// Restore nullifiers.
+	// Restore nullifiers (scoped by type + round).
 	for _, entry := range genesis.Nullifiers {
-		if err := k.SetNullifier(kvStore, entry.Nullifier); err != nil {
+		nfType := types.NullifierType(entry.NullifierType)
+		if err := k.SetNullifier(kvStore, nfType, entry.RoundId, entry.Nullifier); err != nil {
 			return err
 		}
 	}
@@ -55,5 +56,6 @@ func (k Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, error
 	return &types.GenesisState{
 		TreeState: state,
 		// TODO: Export rounds, leaves, and nullifiers by iterating store prefixes.
+		// Nullifier entries must include NullifierType and RoundId fields.
 	}, nil
 }

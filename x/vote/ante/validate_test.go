@@ -209,10 +209,11 @@ func (s *ValidateTestSuite) setupRound(roundID []byte, endTime uint64) {
 	s.Require().NoError(err)
 }
 
-// recordNullifier marks a nullifier as already spent in the KV store.
-func (s *ValidateTestSuite) recordNullifier(nullifier []byte) {
+// recordNullifier marks a nullifier as already spent in the KV store,
+// using the given type and round scoping.
+func (s *ValidateTestSuite) recordNullifier(nfType types.NullifierType, roundID, nullifier []byte) {
 	kvStore := s.keeper.OpenKVStore(s.ctx)
-	err := s.keeper.SetNullifier(kvStore, nullifier)
+	err := s.keeper.SetNullifier(kvStore, nfType, roundID, nullifier)
 	s.Require().NoError(err)
 }
 
@@ -415,7 +416,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			setup: func() {
 				s.setupActiveRound()
 				// Record the first gov nullifier as already spent.
-				s.recordNullifier(bytes.Repeat([]byte{0x11}, 32))
+				s.recordNullifier(types.NullifierTypeGov, testRoundID, bytes.Repeat([]byte{0x11}, 32))
 			},
 			expectErr:   true,
 			errContains: "nullifier already spent",
@@ -427,7 +428,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			setup: func() {
 				s.setupActiveRound()
 				// Record the second gov nullifier as already spent.
-				s.recordNullifier(bytes.Repeat([]byte{0x12}, 32))
+				s.recordNullifier(types.NullifierTypeGov, testRoundID, bytes.Repeat([]byte{0x12}, 32))
 			},
 			expectErr:   true,
 			errContains: "nullifier already spent",
@@ -463,7 +464,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			opts: recheckOpts(),
 			setup: func() {
 				s.setupActiveRound()
-				s.recordNullifier(bytes.Repeat([]byte{0x11}, 32))
+				s.recordNullifier(types.NullifierTypeGov, testRoundID, bytes.Repeat([]byte{0x11}, 32))
 			},
 			expectErr:   true,
 			errContains: "nullifier already spent",
@@ -577,7 +578,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 			opts: mockOpts(),
 			setup: func() {
 				s.setupActiveRound()
-				s.recordNullifier(bytes.Repeat([]byte{0x33}, 32))
+				s.recordNullifier(types.NullifierTypeVoteAuthorityNote, testRoundID, bytes.Repeat([]byte{0x33}, 32))
 			},
 			expectErr:   true,
 			errContains: "nullifier already spent",
@@ -604,7 +605,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 			opts: recheckOpts(),
 			setup: func() {
 				s.setupActiveRound()
-				s.recordNullifier(bytes.Repeat([]byte{0x33}, 32))
+				s.recordNullifier(types.NullifierTypeVoteAuthorityNote, testRoundID, bytes.Repeat([]byte{0x33}, 32))
 			},
 			expectErr:   true,
 			errContains: "nullifier already spent",
@@ -710,7 +711,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 			opts: mockOpts(),
 			setup: func() {
 				s.setupActiveRound()
-				s.recordNullifier(bytes.Repeat([]byte{0x77}, 32))
+				s.recordNullifier(types.NullifierTypeShare, testRoundID, bytes.Repeat([]byte{0x77}, 32))
 			},
 			expectErr:   true,
 			errContains: "nullifier already spent",
@@ -737,7 +738,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 			opts: recheckOpts(),
 			setup: func() {
 				s.setupActiveRound()
-				s.recordNullifier(bytes.Repeat([]byte{0x77}, 32))
+				s.recordNullifier(types.NullifierTypeShare, testRoundID, bytes.Repeat([]byte{0x77}, 32))
 			},
 			expectErr:   true,
 			errContains: "nullifier already spent",
@@ -796,7 +797,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_ValidationOrder() {
 			opts: mockOpts(),
 			setup: func() {
 				s.setupExpiredRound()
-				s.recordNullifier(bytes.Repeat([]byte{0x11}, 32))
+				s.recordNullifier(types.NullifierTypeGov, testRoundID, bytes.Repeat([]byte{0x11}, 32))
 			},
 			// Should get round-not-active, not duplicate-nullifier.
 			errContains: "vote round is not active",
@@ -807,7 +808,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_ValidationOrder() {
 			opts: failSigOpts(),
 			setup: func() {
 				s.setupActiveRound()
-				s.recordNullifier(bytes.Repeat([]byte{0x11}, 32))
+				s.recordNullifier(types.NullifierTypeGov, testRoundID, bytes.Repeat([]byte{0x11}, 32))
 			},
 			// Should get duplicate-nullifier, not invalid-signature.
 			errContains: "nullifier already spent",

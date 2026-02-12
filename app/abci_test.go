@@ -76,7 +76,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	ctx = s.queryCtx()
 	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
 	for _, nf := range delegationMsg.GovNullifiers {
-		has, err := s.app.VoteKeeper().HasNullifier(kvStore, nf)
+		has, err := s.app.VoteKeeper().HasNullifier(kvStore, types.NullifierTypeGov, roundID, nf)
 		s.Require().NoError(err)
 		s.Require().True(has, "gov nullifier should be recorded after delegation")
 	}
@@ -104,12 +104,12 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	result = s.app.DeliverVoteTx(castVoteTx)
 	s.Require().Equal(uint32(0), result.Code, "CastVote should succeed, got: %s", result.Log)
 
-	// Verify VAN nullifier recorded.
+	// Verify vote-authority-note nullifier recorded.
 	ctx = s.queryCtx()
 	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
-	has, err := s.app.VoteKeeper().HasNullifier(kvStore, castVoteMsg.VanNullifier)
+	has, err := s.app.VoteKeeper().HasNullifier(kvStore, types.NullifierTypeVoteAuthorityNote, roundID, castVoteMsg.VanNullifier)
 	s.Require().NoError(err)
-	s.Require().True(has, "VAN nullifier should be recorded")
+	s.Require().True(has, "vote-authority-note nullifier should be recorded")
 
 	// Tree advanced by 2 more (vote_authority_note_new + vote_commitment).
 	treeState, err = s.app.VoteKeeper().GetCommitmentTreeState(kvStore)
@@ -134,7 +134,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	s.Require().Equal(revealMsg.VoteAmount, tally)
 
 	// Verify share nullifier recorded.
-	has, err = s.app.VoteKeeper().HasNullifier(kvStore, revealMsg.ShareNullifier)
+	has, err = s.app.VoteKeeper().HasNullifier(kvStore, types.NullifierTypeShare, roundID, revealMsg.ShareNullifier)
 	s.Require().NoError(err)
 	s.Require().True(has, "share nullifier should be recorded")
 }
@@ -310,7 +310,7 @@ func (s *ABCIIntegrationSuite) TestConcurrentSubmissionsInSameBlock() {
 	for i := byte(0); i < 5; i++ {
 		seed := byte(0xA0) + i*2
 		nf := testutil.MakeNullifier(seed)
-		has, err := s.app.VoteKeeper().HasNullifier(kvStore, nf)
+		has, err := s.app.VoteKeeper().HasNullifier(kvStore, types.NullifierTypeGov, roundID, nf)
 		s.Require().NoError(err)
 		s.Require().True(has, "nullifier %d should be recorded", i)
 	}
