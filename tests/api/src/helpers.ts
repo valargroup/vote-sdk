@@ -174,6 +174,11 @@ export function makeCreateVotingSessionPayload() {
     nc_root: ncRoot,
   };
 
+  const eaPk = repeatByte(0xee, 32);
+  const vkZkp1 = repeatByte(0xf1, 64);
+  const vkZkp2 = repeatByte(0xf2, 64);
+  const vkZkp3 = repeatByte(0xf3, 64);
+
   const body = {
     creator: "zvote1admin",
     snapshot_height: snapshotHeight,
@@ -182,6 +187,14 @@ export function makeCreateVotingSessionPayload() {
     vote_end_time: voteEndTime,
     nullifier_imt_root: toBase64(nullifierImtRoot),
     nc_root: toBase64(ncRoot),
+    ea_pk: toBase64(eaPk),
+    vk_zkp1: toBase64(vkZkp1),
+    vk_zkp2: toBase64(vkZkp2),
+    vk_zkp3: toBase64(vkZkp3),
+    proposals: [
+      { id: 0, title: "Proposal A", description: "First proposal" },
+      { id: 1, title: "Proposal B", description: "Second proposal" },
+    ],
   };
 
   return { body, fields, roundId: deriveRoundId(fields) };
