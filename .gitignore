@@ -6,3 +6,5 @@ sdk/circuits/target/
 
 # Node
 node_modules/
+
+__debug**
