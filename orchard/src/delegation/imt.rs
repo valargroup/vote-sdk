@@ -1,8 +1,10 @@
 //! IMT (Indexed Merkle Tree) utilities for the delegation proof system.
 //!
 //! Provides out-of-circuit helpers for building and verifying Poseidon-based
-//! Indexed Merkle Tree non-membership proofs. Used by the delegation circuit
-//! and builder.
+//! Indexed Merkle Tree non-membership proofs using the paired-leaf model.
+//! Each leaf pair (nf_start, nf_end) at adjacent even/odd positions defines
+//! an interval; a non-membership proof shows that a nullifier falls within
+//! the interval. Used by the delegation circuit and builder.
 
 use ff::PrimeField;
 use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength};
@@ -40,18 +42,20 @@ pub(crate) fn gov_null_hash(
     poseidon_hash_2(nk, step2)
 }
 
-/// IMT non-membership proof data.
+/// IMT non-membership proof data (paired-leaf model).
+///
+/// In this model, each pair of adjacent leaves at even/odd positions defines
+/// an interval `[nf_start, nf_end]`. The Merkle path starts from the even leaf
+/// (`nf_start`), and the odd sibling (`nf_end`) is `path[0]`.
 #[derive(Clone, Debug)]
 pub struct ImtProofData {
     /// The Merkle root of the IMT.
     pub root: pallas::Base,
-    /// The low nullifier of the bracketing leaf.
-    pub low_nf: pallas::Base,
-    /// The next nullifier of the bracketing leaf (0 for max leaf).
-    pub next_nf: pallas::Base,
-    /// Position of the bracketing leaf in the tree.
+    /// The even-position leaf (start of the bracketing interval).
+    pub nf_start: pallas::Base,
+    /// Position of the even leaf in the tree (must be even).
     pub leaf_pos: u32,
-    /// Sibling hashes along the Merkle path.
+    /// Sibling hashes along the Merkle path. `path[0]` = nf_end (the odd sibling).
     pub path: [pallas::Base; IMT_DEPTH],
 }
 
@@ -75,10 +79,10 @@ use ff::Field;
 
 /// Precomputed empty subtree hashes for the IMT (Poseidon-based).
 ///
-/// `empty[0] = Poseidon(0, 0)`, `empty[i] = Poseidon(empty[i-1], empty[i-1])`.
+/// `empty[0] = 0` (raw leaf value), `empty[i] = Poseidon(empty[i-1], empty[i-1])` for i >= 1.
 #[cfg(test)]
 pub(crate) fn empty_imt_hashes() -> Vec<pallas::Base> {
-    let mut hashes = vec![poseidon_hash_2(pallas::Base::zero(), pallas::Base::zero())];
+    let mut hashes = vec![pallas::Base::zero()];
     for _ in 1..=IMT_DEPTH {
         let prev = *hashes.last().unwrap();
         hashes.push(poseidon_hash_2(prev, prev));
@@ -86,54 +90,56 @@ pub(crate) fn empty_imt_hashes() -> Vec<pallas::Base> {
     hashes
 }
 
-/// IMT provider with evenly-spaced leaves for testing.
+/// IMT provider with evenly-spaced brackets for testing (paired-leaf model).
 ///
-/// Creates 17 leaves at intervals of 2^250, covering the entire Pallas field
-/// (p ~= 16.something x 2^250). Any hash-derived nullifier will have
-/// `diff1 < 2^250`, satisfying the circuit's 250-bit range check.
+/// Creates 17 brackets at intervals of 2^250, covering the entire Pallas field
+/// (p ~= 16.something x 2^250). Each bracket k has nf_start = k*step + 1 and
+/// nf_end = (k+1)*step - 1, placed as paired leaves at even/odd positions in
+/// a 64-leaf subtree. Any hash-derived nullifier will fall within one bracket.
 #[cfg(test)]
 #[derive(Debug)]
 pub struct SpacedLeafImtProvider {
     /// The root of the IMT.
     root: pallas::Base,
-    /// Leaf data: `(low_nf, next_nf)` for each of the 17 leaves at positions 0..16.
+    /// Bracket data: `(nf_start, nf_end)` for each of the 17 brackets.
     leaves: Vec<(pallas::Base, pallas::Base)>,
-    /// Bottom 5 levels of the 32-leaf subtree.
-    /// `subtree_levels[0]` has 32 leaf hashes, `subtree_levels[5]` has 1 subtree root.
+    /// Bottom 6 levels of the 64-leaf subtree.
+    /// `subtree_levels[0]` has 64 raw leaves, `subtree_levels[6]` has 1 subtree root.
     subtree_levels: Vec<Vec<pallas::Base>>,
 }
 
 #[cfg(test)]
 impl SpacedLeafImtProvider {
-    /// Create a new spaced-leaf IMT provider.
+    /// Create a new spaced-leaf IMT provider (paired-leaf model).
     ///
-    /// Builds 17 leaves at positions 0..16 with `low_nf = k * 2^250`:
-    /// - Leaf k (k=0..15): `(k*step, (k+1)*step)`
-    /// - Leaf 16: `(16*step, 0)` — max leaf, covers nf in `(16*step, p)`
+    /// Builds 17 brackets as 34 leaves at positions 0..33 in a 64-leaf subtree:
+    /// - Bracket k (k=0..15): nf_start = k*step+1, nf_end = (k+1)*step-1
+    /// - Bracket 16: nf_start = 16*step+1, nf_end = p-1
     pub fn new() -> Self {
         let step = pallas::Base::from(2u64).pow([250, 0, 0, 0]);
         let empty = empty_imt_hashes();
 
-        // Build 17 leaves.
+        // Build 17 brackets.
         let mut leaves = Vec::with_capacity(17);
         for k in 0u64..17 {
-            let low_nf = step * pallas::Base::from(k);
-            let next_nf = if k < 16 {
-                step * pallas::Base::from(k + 1)
+            let nf_start = step * pallas::Base::from(k) + pallas::Base::one();
+            let nf_end = if k < 16 {
+                step * pallas::Base::from(k + 1) - pallas::Base::one()
             } else {
-                pallas::Base::zero() // max leaf
+                -pallas::Base::one() // p - 1
             };
-            leaves.push((low_nf, next_nf));
+            leaves.push((nf_start, nf_end));
         }
 
-        // Build 32-position subtree (positions 0..31). Positions 17..31 are empty.
-        let mut level0 = vec![empty[0]; 32];
-        for (i, (low, next)) in leaves.iter().enumerate() {
-            level0[i] = poseidon_hash_2(*low, *next);
+        // Build 64-position subtree. Paired leaves: position 2k = nf_start, 2k+1 = nf_end.
+        let mut level0 = vec![empty[0]; 64];
+        for (k, (nf_start, nf_end)) in leaves.iter().enumerate() {
+            level0[2 * k] = *nf_start;
+            level0[2 * k + 1] = *nf_end;
         }
 
         let mut subtree_levels = vec![level0];
-        for _l in 1..=5 {
+        for _l in 1..=6 {
             let prev = subtree_levels.last().unwrap();
             let mut current = Vec::with_capacity(prev.len() / 2);
             for j in 0..(prev.len() / 2) {
@@ -142,9 +148,9 @@ impl SpacedLeafImtProvider {
             subtree_levels.push(current);
         }
 
-        // Compute full root: hash subtree root up through levels 5..31 with empty siblings.
-        let mut root = subtree_levels[5][0];
-        for l in 5..IMT_DEPTH {
+        // Compute full root: hash subtree root up through levels 6..31 with empty siblings.
+        let mut root = subtree_levels[6][0];
+        for l in 6..IMT_DEPTH {
             root = poseidon_hash_2(root, empty[l]);
         }
 
@@ -169,31 +175,30 @@ impl ImtProvider for SpacedLeafImtProvider {
         let k = (repr.as_ref()[31] >> 2) as usize;
         let k = k.min(16); // clamp to valid range
 
-        let (low_nf, next_nf) = self.leaves[k];
-        let leaf_pos = k as u32;
+        let (nf_start, _nf_end) = self.leaves[k];
+        let leaf_pos = (2 * k) as u32; // even position
 
         let empty = empty_imt_hashes();
 
         // Build Merkle path.
         let mut path = [pallas::Base::zero(); IMT_DEPTH];
 
-        // Levels 0..4: siblings from the 32-leaf subtree.
-        let mut idx = k;
-        for l in 0..5 {
+        // Levels 0..5: siblings from the 64-leaf subtree.
+        let mut idx = 2 * k;
+        for l in 0..6 {
             let sibling_idx = idx ^ 1;
             path[l] = self.subtree_levels[l][sibling_idx];
             idx >>= 1;
         }
 
-        // Levels 5..31: empty subtree hashes (all leaves beyond position 31 are empty).
-        for l in 5..IMT_DEPTH {
+        // Levels 6..31: empty subtree hashes (all leaves beyond position 63 are empty).
+        for l in 6..IMT_DEPTH {
             path[l] = empty[l];
         }
 
         ImtProofData {
             root: self.root,
-            low_nf,
-            next_nf,
+            nf_start,
             leaf_pos,
             path,
         }
