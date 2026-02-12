@@ -6,7 +6,7 @@ INGEST_DIR  = nullifier-ingest
 	test test-unit test-integration test-api \
 	fixtures-ts circuits circuits-test fixtures \
 	test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi \
-	ingest ingest-status ingest-test ingest-proof ingest-clean
+	ingest ingest-status ingest-test ingest-proof ingest-clean ingest-serve
 
 install:
 	$(MAKE) -C $(SDK_DIR) install
@@ -87,6 +87,9 @@ ingest-test: ## Run nullifier-tree unit tests
 
 ingest-proof: ## Run exclusion proof verification against ingested data
 	$(MAKE) -C $(INGEST_DIR) test-proof
+
+ingest-serve: ## Start the nullifier exclusion proof query server
+	$(MAKE) -C $(INGEST_DIR) serve
 
 ingest-clean: ## Remove nullifier build artifacts and database
 	$(MAKE) -C $(INGEST_DIR) clean

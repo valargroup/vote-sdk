@@ -4,10 +4,11 @@
 # ── Configuration (override with env vars) ───────────────────────────
 DB_PATH    ?= nullifiers.db
 LWD_URL    ?= https://zec.rocks:443
+PORT       ?= 3000
 
 # ── Targets ──────────────────────────────────────────────────────────
 
-.PHONY: ingest test-proof build test clean status help
+.PHONY: ingest test-proof build test clean status serve help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -23,6 +24,10 @@ ingest: build ## Ingest Orchard nullifiers from chain into SQLite
 test-proof: build ## Run exclusion proof verification against ingested data
 	DB_PATH=$(DB_PATH) \
 		cargo run --release --bin test-non-inclusion
+
+serve: build ## Start the exclusion proof query server
+	DB_PATH=$(DB_PATH) PORT=$(PORT) \
+		cargo run --release --bin query-server
 
 test: ## Run unit tests
 	cargo test

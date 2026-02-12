@@ -6,10 +6,11 @@ TREE_DIR := nullifier-tree
 # ── Configuration (override with env vars) ───────────────────────────
 DB_PATH    ?= nullifiers.db
 LWD_URL    ?= https://zec.rocks:443
+PORT       ?= 3000
 
 # ── Targets ──────────────────────────────────────────────────────────
 
-.PHONY: ingest test-proof build test clean status help
+.PHONY: ingest test-proof build test clean status serve help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -23,6 +24,9 @@ ingest: ## Ingest Orchard nullifiers from chain into SQLite
 
 test-proof: ## Run exclusion proof verification against ingested data
 	$(MAKE) -C $(TREE_DIR) test-proof DB_PATH=$(DB_PATH)
+
+serve: ## Start the exclusion proof query server
+	$(MAKE) -C $(TREE_DIR) serve DB_PATH=$(DB_PATH) PORT=$(PORT)
 
 test: ## Run unit tests
 	$(MAKE) -C $(TREE_DIR) test
