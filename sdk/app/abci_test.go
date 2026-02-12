@@ -602,6 +602,160 @@ func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
 }
 
 // ---------------------------------------------------------------------------
+// 6.2.13: SubmitTally — TALLYING → FINALIZED Lifecycle
+// ---------------------------------------------------------------------------
+
+func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
+	// Create a session expiring 30 seconds from now.
+	voteEndTime := s.app.Time.Add(30 * time.Second)
+	setupMsg := &types.MsgCreateVotingSession{
+		Creator:           "zvote1admin",
+		SnapshotHeight:    500,
+		SnapshotBlockhash: bytes.Repeat([]byte{0x4A}, 32),
+		ProposalsHash:     bytes.Repeat([]byte{0x4B}, 32),
+		VoteEndTime:       uint64(voteEndTime.Unix()),
+		NullifierImtRoot:  bytes.Repeat([]byte{0x4C}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x4D}, 32),
+		EaPk:              bytes.Repeat([]byte{0x4E}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         testutil.SampleProposals(),
+	}
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
+	s.Require().Equal(uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
+
+	roundID := computeRoundID(setupMsg)
+
+	// Delegate while ACTIVE to populate the tree.
+	delegation := testutil.ValidDelegation(roundID, 0x10)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	s.Require().Equal(uint32(0), result.Code, "delegation should succeed")
+
+	anchorHeight := uint64(s.app.Height)
+
+	// Cast vote while ACTIVE.
+	castVote := testutil.ValidCastVote(roundID, anchorHeight, 0x30)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
+	s.Require().Equal(uint32(0), result.Code, "cast vote should succeed")
+
+	revealAnchor := uint64(s.app.Height)
+
+	// Advance past VoteEndTime → triggers TALLYING.
+	s.app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
+
+	// Verify round is TALLYING.
+	ctx := s.queryCtx()
+	kvStore := s.app.VoteKeeper().OpenKVStore(ctx)
+	round, err := s.app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
+
+	// Reveal share during TALLYING.
+	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
+	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
+
+	// Submit tally to finalize.
+	submitTallyMsg := testutil.ValidSubmitTally(roundID, setupMsg.Creator)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(submitTallyMsg))
+	s.Require().Equal(uint32(0), result.Code, "submit tally should succeed, got: %s", result.Log)
+
+	// Verify round is now FINALIZED.
+	ctx = s.queryCtx()
+	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
+	round, err = s.app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
+		"round should be FINALIZED after SubmitTally")
+
+	// Verify tally is preserved.
+	tally, err := s.app.VoteKeeper().GetTally(kvStore, roundID, revealMsg.ProposalId, revealMsg.VoteDecision)
+	s.Require().NoError(err)
+	s.Require().Equal(revealMsg.VoteAmount, tally, "tally should be preserved after finalization")
+
+	// RevealShare should fail after FINALIZED.
+	revealMsg2 := testutil.ValidRevealShare(roundID, revealAnchor, 0x70)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg2))
+	s.Require().NotEqual(uint32(0), result.Code, "reveal share should be rejected after FINALIZED")
+	s.Require().Contains(result.Log, "vote round is not active")
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.14: SubmitTally — Authorization (Creator Mismatch Rejected)
+// ---------------------------------------------------------------------------
+
+func (s *ABCIIntegrationSuite) TestSubmitTallyCreatorMismatch() {
+	// Create a session expiring 10 seconds from now.
+	voteEndTime := s.app.Time.Add(10 * time.Second)
+	setupMsg := &types.MsgCreateVotingSession{
+		Creator:           "zvote1admin",
+		SnapshotHeight:    600,
+		SnapshotBlockhash: bytes.Repeat([]byte{0x5A}, 32),
+		ProposalsHash:     bytes.Repeat([]byte{0x5B}, 32),
+		VoteEndTime:       uint64(voteEndTime.Unix()),
+		NullifierImtRoot:  bytes.Repeat([]byte{0x5C}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x5D}, 32),
+		EaPk:              bytes.Repeat([]byte{0x5E}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         testutil.SampleProposals(),
+	}
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
+	s.Require().Equal(uint32(0), result.Code, "create session should succeed")
+
+	roundID := computeRoundID(setupMsg)
+
+	// Advance past VoteEndTime → TALLYING.
+	s.app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
+
+	// Verify TALLYING.
+	ctx := s.queryCtx()
+	kvStore := s.app.VoteKeeper().OpenKVStore(ctx)
+	round, err := s.app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
+
+	// Submit tally with wrong creator should fail.
+	badTallyMsg := testutil.ValidSubmitTally(roundID, "zvote1imposter")
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badTallyMsg))
+	s.Require().NotEqual(uint32(0), result.Code, "submit tally with wrong creator should fail")
+	s.Require().Contains(result.Log, "creator mismatch")
+
+	// Submit tally with correct creator should succeed.
+	goodTallyMsg := testutil.ValidSubmitTally(roundID, "zvote1admin")
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(goodTallyMsg))
+	s.Require().Equal(uint32(0), result.Code, "submit tally with correct creator should succeed, got: %s", result.Log)
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.15: SubmitTally — Cannot Finalize Active Round
+// ---------------------------------------------------------------------------
+
+func (s *ABCIIntegrationSuite) TestSubmitTallyRejectsActiveRound() {
+	// Create an active session (not expired).
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
+	s.Require().Equal(uint32(0), result.Code, "create session should succeed")
+
+	roundID := computeRoundID(setupMsg)
+
+	// Verify round is ACTIVE.
+	ctx := s.queryCtx()
+	kvStore := s.app.VoteKeeper().OpenKVStore(ctx)
+	round, err := s.app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
+
+	// Submit tally against ACTIVE round should fail.
+	tallyMsg := testutil.ValidSubmitTally(roundID, setupMsg.Creator)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(tallyMsg))
+	s.Require().NotEqual(uint32(0), result.Code, "submit tally against ACTIVE round should fail")
+	s.Require().Contains(result.Log, "not in tallying state")
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

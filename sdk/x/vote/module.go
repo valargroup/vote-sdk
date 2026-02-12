@@ -47,6 +47,7 @@ func init() {
 			ProvideDelegateVoteSigner,
 			ProvideCastVoteSigner,
 			ProvideRevealShareSigner,
+			ProvideSubmitTallySigner,
 		),
 	)
 }
@@ -92,6 +93,13 @@ func ProvideCastVoteSigner() signing.CustomGetSigner {
 func ProvideRevealShareSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgRevealShare"),
+		Fn:      noopSignerFn,
+	}
+}
+
+func ProvideSubmitTallySigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("zvote.v1.MsgSubmitTally"),
 		Fn:      noopSignerFn,
 	}
 }

@@ -23,6 +23,7 @@ const (
 	Msg_DelegateVote_FullMethodName        = "/zvote.v1.Msg/DelegateVote"
 	Msg_CastVote_FullMethodName            = "/zvote.v1.Msg/CastVote"
 	Msg_RevealShare_FullMethodName         = "/zvote.v1.Msg/RevealShare"
+	Msg_SubmitTally_FullMethodName         = "/zvote.v1.Msg/SubmitTally"
 )
 
 // MsgClient is the client API for Msg service.
@@ -38,6 +39,7 @@ type MsgClient interface {
 	DelegateVote(ctx context.Context, in *MsgDelegateVote, opts ...grpc.CallOption) (*MsgDelegateVoteResponse, error)
 	CastVote(ctx context.Context, in *MsgCastVote, opts ...grpc.CallOption) (*MsgCastVoteResponse, error)
 	RevealShare(ctx context.Context, in *MsgRevealShare, opts ...grpc.CallOption) (*MsgRevealShareResponse, error)
+	SubmitTally(ctx context.Context, in *MsgSubmitTally, opts ...grpc.CallOption) (*MsgSubmitTallyResponse, error)
 }
 
 type msgClient struct {
@@ -88,6 +90,16 @@ func (c *msgClient) RevealShare(ctx context.Context, in *MsgRevealShare, opts ..
 	return out, nil
 }
 
+func (c *msgClient) SubmitTally(ctx context.Context, in *MsgSubmitTally, opts ...grpc.CallOption) (*MsgSubmitTallyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgSubmitTallyResponse)
+	err := c.cc.Invoke(ctx, Msg_SubmitTally_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MsgServer is the server API for Msg service.
 // All implementations must embed UnimplementedMsgServer
 // for forward compatibility.
@@ -101,6 +113,7 @@ type MsgServer interface {
 	DelegateVote(context.Context, *MsgDelegateVote) (*MsgDelegateVoteResponse, error)
 	CastVote(context.Context, *MsgCastVote) (*MsgCastVoteResponse, error)
 	RevealShare(context.Context, *MsgRevealShare) (*MsgRevealShareResponse, error)
+	SubmitTally(context.Context, *MsgSubmitTally) (*MsgSubmitTallyResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
 
@@ -122,6 +135,9 @@ func (UnimplementedMsgServer) CastVote(context.Context, *MsgCastVote) (*MsgCastV
 }
 func (UnimplementedMsgServer) RevealShare(context.Context, *MsgRevealShare) (*MsgRevealShareResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RevealShare not implemented")
+}
+func (UnimplementedMsgServer) SubmitTally(context.Context, *MsgSubmitTally) (*MsgSubmitTallyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitTally not implemented")
 }
 func (UnimplementedMsgServer) mustEmbedUnimplementedMsgServer() {}
 func (UnimplementedMsgServer) testEmbeddedByValue()             {}
@@ -216,6 +232,24 @@ func _Msg_RevealShare_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_SubmitTally_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgSubmitTally)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).SubmitTally(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_SubmitTally_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).SubmitTally(ctx, req.(*MsgSubmitTally))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Msg_ServiceDesc is the grpc.ServiceDesc for Msg service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -238,6 +272,10 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevealShare",
 			Handler:    _Msg_RevealShare_Handler,
+		},
+		{
+			MethodName: "SubmitTally",
+			Handler:    _Msg_SubmitTally_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -16,6 +16,7 @@ service Msg {
   rpc DelegateVote(MsgDelegateVote) returns (MsgDelegateVoteResponse);
   rpc CastVote(MsgCastVote) returns (MsgCastVoteResponse);
   rpc RevealShare(MsgRevealShare) returns (MsgRevealShareResponse);
+  rpc SubmitTally(MsgSubmitTally) returns (MsgSubmitTallyResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -80,3 +81,12 @@ message MsgRevealShare {
 }
 
 message MsgRevealShareResponse {}
+
+// MsgSubmitTally finalizes a voting session, transitioning it from TALLYING to FINALIZED.
+// Only the session creator (election authority) may submit this message.
+message MsgSubmitTally {
+  bytes  vote_round_id = 1;
+  string creator       = 2;  // Must match the session creator
+}
+
+message MsgSubmitTallyResponse {}
