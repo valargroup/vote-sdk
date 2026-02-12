@@ -239,6 +239,17 @@ impl From<NoteInfo> for voting::NoteInfo {
     }
 }
 
+impl From<voting::NoteInfo> for NoteInfo {
+    fn from(n: voting::NoteInfo) -> Self {
+        Self {
+            commitment: n.commitment,
+            nullifier: n.nullifier,
+            value: n.value,
+            position: n.position,
+        }
+    }
+}
+
 impl From<VotingRoundParams> for voting::VotingRoundParams {
     fn from(p: VotingRoundParams) -> Self {
         Self {
@@ -397,6 +408,20 @@ impl VotingDatabase {
 
     pub fn clear_round(&self, round_id: String) -> Result<(), VotingError> {
         Ok(self.db.clear_round(&round_id)?)
+    }
+
+    // --- Wallet notes ---
+
+    pub fn get_wallet_notes(
+        &self,
+        wallet_db_path: String,
+        snapshot_height: u64,
+        network_id: u32,
+    ) -> Result<Vec<NoteInfo>, VotingError> {
+        Ok(self.db.get_wallet_notes(&wallet_db_path, snapshot_height, network_id)?
+            .into_iter()
+            .map(Into::into)
+            .collect())
     }
 
     // --- Phase 1: Delegation setup ---
