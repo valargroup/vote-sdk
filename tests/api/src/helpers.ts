@@ -279,6 +279,53 @@ export function makeDelegateVotePayload(roundId: Uint8Array) {
   };
 }
 
+/**
+ * Build a valid MsgCastVote JSON body with mock proof bytes.
+ *
+ * The chain's MockVerifier accepts any proof bytes for ZKP #2 in dev mode.
+ * Each call produces unique nullifiers to avoid collisions.
+ *
+ * @param roundId - The vote_round_id (raw bytes) to target.
+ * @param anchorHeight - The commitment tree anchor height (from GET /commitment-tree/latest).
+ */
+export function makeCastVotePayload(roundId: Uint8Array, anchorHeight: number) {
+  return {
+    van_nullifier: toBase64(makeUniqueNullifier()),
+    vote_authority_note_new: toBase64(makeUniqueNullifier()),
+    vote_commitment: toBase64(makeUniqueNullifier()),
+    proposal_id: 0,
+    proof: toBase64(Buffer.from("mock-cast-vote-proof")),
+    vote_round_id: toBase64(roundId),
+    vote_comm_tree_anchor_height: anchorHeight,
+  };
+}
+
+/**
+ * Build a valid MsgRevealShare JSON body with mock proof bytes.
+ *
+ * The chain's MockVerifier accepts any proof bytes for ZKP #3 in dev mode.
+ * Each call produces unique nullifiers to avoid collisions.
+ *
+ * @param roundId - The vote_round_id (raw bytes) to target.
+ * @param anchorHeight - The commitment tree anchor height (from GET /commitment-tree/latest).
+ * @param opts - Optional overrides for vote_amount, proposal_id, vote_decision.
+ */
+export function makeRevealSharePayload(
+  roundId: Uint8Array,
+  anchorHeight: number,
+  opts?: { voteAmount?: number; proposalId?: number; voteDecision?: number },
+) {
+  return {
+    share_nullifier: toBase64(makeUniqueNullifier()),
+    vote_amount: opts?.voteAmount ?? 1000,
+    proposal_id: opts?.proposalId ?? 0,
+    vote_decision: opts?.voteDecision ?? 1,
+    proof: toBase64(Buffer.from("mock-reveal-share-proof")),
+    vote_round_id: toBase64(roundId),
+    vote_comm_tree_anchor_height: anchorHeight,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
