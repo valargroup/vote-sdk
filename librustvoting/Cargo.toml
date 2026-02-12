@@ -1,0 +1,32 @@
+[package]
+name = "librustvoting"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Curves (same as Orchard/Zcash)
+pasta_curves = "0.5"
+ff = "0.13"
+group = "0.13"
+
+# Randomness
+rand = "0.8"
+
+# Hashing
+blake2b_simd = "1"
+
+# Serialization
+hex = "0.4"
+
+# Error handling
+thiserror = "2"
+
+# Later (when filling in real implementations):
+# halo2_proofs = { ... }
+# halo2_gadgets = { ... }
+# orchard = "0.11"
+# incrementalmerkletree = ...
+# poseidon = ...
+
+# Keep this crate as a standalone workspace
+[workspace]
