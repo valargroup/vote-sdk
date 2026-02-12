@@ -33,6 +33,11 @@ type MsgCreateVotingSession struct {
 	VoteEndTime       uint64                 `protobuf:"varint,5,opt,name=vote_end_time,json=voteEndTime,proto3" json:"vote_end_time,omitempty"`
 	NullifierImtRoot  []byte                 `protobuf:"bytes,6,opt,name=nullifier_imt_root,json=nullifierImtRoot,proto3" json:"nullifier_imt_root,omitempty"`
 	NcRoot            []byte                 `protobuf:"bytes,7,opt,name=nc_root,json=ncRoot,proto3" json:"nc_root,omitempty"`
+	EaPk              []byte                 `protobuf:"bytes,8,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`        // Election authority public key (Pallas, 32 bytes)
+	VkZkp1            []byte                 `protobuf:"bytes,9,opt,name=vk_zkp1,json=vkZkp1,proto3" json:"vk_zkp1,omitempty"`  // Verification key for ZKP #1
+	VkZkp2            []byte                 `protobuf:"bytes,10,opt,name=vk_zkp2,json=vkZkp2,proto3" json:"vk_zkp2,omitempty"` // Verification key for ZKP #2
+	VkZkp3            []byte                 `protobuf:"bytes,11,opt,name=vk_zkp3,json=vkZkp3,proto3" json:"vk_zkp3,omitempty"` // Verification key for ZKP #3
+	Proposals         []*Proposal            `protobuf:"bytes,12,rep,name=proposals,proto3" json:"proposals,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -112,6 +117,41 @@ func (x *MsgCreateVotingSession) GetNullifierImtRoot() []byte {
 func (x *MsgCreateVotingSession) GetNcRoot() []byte {
 	if x != nil {
 		return x.NcRoot
+	}
+	return nil
+}
+
+func (x *MsgCreateVotingSession) GetEaPk() []byte {
+	if x != nil {
+		return x.EaPk
+	}
+	return nil
+}
+
+func (x *MsgCreateVotingSession) GetVkZkp1() []byte {
+	if x != nil {
+		return x.VkZkp1
+	}
+	return nil
+}
+
+func (x *MsgCreateVotingSession) GetVkZkp2() []byte {
+	if x != nil {
+		return x.VkZkp2
+	}
+	return nil
+}
+
+func (x *MsgCreateVotingSession) GetVkZkp3() []byte {
+	if x != nil {
+		return x.VkZkp3
+	}
+	return nil
+}
+
+func (x *MsgCreateVotingSession) GetProposals() []*Proposal {
+	if x != nil {
+		return x.Proposals
 	}
 	return nil
 }
@@ -575,7 +615,7 @@ var File_zvote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\n" +
-	"\x11zvote/v1/tx.proto\x12\bzvote.v1\x1a\x17cosmos/msg/v1/msg.proto\"\x9c\x02\n" +
+	"\x11zvote/v1/tx.proto\x12\bzvote.v1\x1a\x17cosmos/msg/v1/msg.proto\x1a\x14zvote/v1/types.proto\"\xae\x03\n" +
 	"\x16MsgCreateVotingSession\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -583,7 +623,13 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\x0eproposals_hash\x18\x04 \x01(\fR\rproposalsHash\x12\"\n" +
 	"\rvote_end_time\x18\x05 \x01(\x04R\vvoteEndTime\x12,\n" +
 	"\x12nullifier_imt_root\x18\x06 \x01(\fR\x10nullifierImtRoot\x12\x17\n" +
-	"\anc_root\x18\a \x01(\fR\x06ncRoot\"D\n" +
+	"\anc_root\x18\a \x01(\fR\x06ncRoot\x12\x13\n" +
+	"\x05ea_pk\x18\b \x01(\fR\x04eaPk\x12\x17\n" +
+	"\avk_zkp1\x18\t \x01(\fR\x06vkZkp1\x12\x17\n" +
+	"\avk_zkp2\x18\n" +
+	" \x01(\fR\x06vkZkp2\x12\x17\n" +
+	"\avk_zkp3\x18\v \x01(\fR\x06vkZkp3\x120\n" +
+	"\tproposals\x18\f \x03(\v2\x12.zvote.v1.ProposalR\tproposals\"D\n" +
 	"\x1eMsgCreateVotingSessionResponse\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xc5\x02\n" +
 	"\x0fMsgDelegateVote\x12\x0e\n" +
@@ -648,21 +694,23 @@ var file_zvote_v1_tx_proto_goTypes = []any{
 	(*MsgCastVoteResponse)(nil),            // 5: zvote.v1.MsgCastVoteResponse
 	(*MsgRevealShare)(nil),                 // 6: zvote.v1.MsgRevealShare
 	(*MsgRevealShareResponse)(nil),         // 7: zvote.v1.MsgRevealShareResponse
+	(*Proposal)(nil),                       // 8: zvote.v1.Proposal
 }
 var file_zvote_v1_tx_proto_depIdxs = []int32{
-	0, // 0: zvote.v1.Msg.CreateVotingSession:input_type -> zvote.v1.MsgCreateVotingSession
-	2, // 1: zvote.v1.Msg.DelegateVote:input_type -> zvote.v1.MsgDelegateVote
-	4, // 2: zvote.v1.Msg.CastVote:input_type -> zvote.v1.MsgCastVote
-	6, // 3: zvote.v1.Msg.RevealShare:input_type -> zvote.v1.MsgRevealShare
-	1, // 4: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
-	3, // 5: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
-	5, // 6: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
-	7, // 7: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	8, // 0: zvote.v1.MsgCreateVotingSession.proposals:type_name -> zvote.v1.Proposal
+	0, // 1: zvote.v1.Msg.CreateVotingSession:input_type -> zvote.v1.MsgCreateVotingSession
+	2, // 2: zvote.v1.Msg.DelegateVote:input_type -> zvote.v1.MsgDelegateVote
+	4, // 3: zvote.v1.Msg.CastVote:input_type -> zvote.v1.MsgCastVote
+	6, // 4: zvote.v1.Msg.RevealShare:input_type -> zvote.v1.MsgRevealShare
+	1, // 5: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
+	3, // 6: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
+	5, // 7: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
+	7, // 8: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
+	5, // [5:9] is the sub-list for method output_type
+	1, // [1:5] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_zvote_v1_tx_proto_init() }
@@ -670,6 +718,7 @@ func file_zvote_v1_tx_proto_init() {
 	if File_zvote_v1_tx_proto != nil {
 		return
 	}
+	file_zvote_v1_types_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

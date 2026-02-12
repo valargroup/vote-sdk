@@ -251,6 +251,22 @@ func getUint32BE(b []byte) uint32 {
 }
 
 // ---------------------------------------------------------------------------
+// Proposal validation
+// ---------------------------------------------------------------------------
+
+// ValidateProposalId checks that proposalId is a valid index into the round's proposals list.
+func (k Keeper) ValidateProposalId(kvStore store.KVStore, roundID []byte, proposalId uint32) error {
+	round, err := k.GetVoteRound(kvStore, roundID)
+	if err != nil {
+		return err
+	}
+	if int(proposalId) >= len(round.Proposals) {
+		return fmt.Errorf("%w: proposal_id %d >= proposals count %d", types.ErrInvalidProposalID, proposalId, len(round.Proposals))
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Round status management
 // ---------------------------------------------------------------------------
 

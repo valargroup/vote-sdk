@@ -400,6 +400,11 @@ func (s *ABCIIntegrationSuite) TestEndBlockerStatusTransition() {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0xCC}, 32),
 		NcRoot:            bytes.Repeat([]byte{0xDD}, 32),
+		EaPk:              bytes.Repeat([]byte{0xEE}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         testutil.SampleProposals(),
 	}
 	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
 	s.Require().Equal(uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
@@ -440,6 +445,11 @@ func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x1C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x1D}, 32),
+		EaPk:              bytes.Repeat([]byte{0x1E}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         testutil.SampleProposals(),
 	}
 	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
 	s.Require().Equal(uint32(0), result.Code, "create session should succeed")
@@ -501,6 +511,11 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 		VoteEndTime:       uint64(soonEnd.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x2C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x2D}, 32),
+		EaPk:              bytes.Repeat([]byte{0x2E}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         testutil.SampleProposals(),
 	}
 	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(soonMsg))
 	soonRoundID := computeRoundID(soonMsg)
@@ -513,6 +528,11 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 		VoteEndTime:       uint64(lateEnd.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x3C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x3D}, 32),
+		EaPk:              bytes.Repeat([]byte{0x3E}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         testutil.SampleProposals(),
 	}
 	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(lateMsg))
 	lateRoundID := computeRoundID(lateMsg)
@@ -534,6 +554,51 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, lateRound.Status,
 		"non-expired round should remain ACTIVE")
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.12: Proposal ID Validation
+// ---------------------------------------------------------------------------
+
+func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
+	// Create a session with 2 proposals (IDs 0 and 1).
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
+	s.Require().Equal(uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
+
+	roundID := computeRoundID(setupMsg)
+
+	// Delegate to populate the tree.
+	delegation := testutil.ValidDelegation(roundID, 0x10)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	s.Require().Equal(uint32(0), result.Code, "delegation should succeed")
+
+	anchorHeight := uint64(s.app.Height)
+
+	// CastVote with valid proposal_id (0) should succeed.
+	castVote := testutil.ValidCastVote(roundID, anchorHeight, 0x30)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
+	s.Require().Equal(uint32(0), result.Code, "cast vote with valid proposal_id should succeed, got: %s", result.Log)
+
+	// CastVote with invalid proposal_id (5) should fail.
+	badCastVote := testutil.ValidCastVote(roundID, anchorHeight, 0x40)
+	badCastVote.ProposalId = 5
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badCastVote))
+	s.Require().NotEqual(uint32(0), result.Code, "cast vote with invalid proposal_id should fail")
+	s.Require().Contains(result.Log, "invalid proposal ID")
+
+	// RevealShare with valid proposal_id (0) should succeed.
+	revealAnchor := uint64(s.app.Height)
+	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
+	s.Require().Equal(uint32(0), result.Code, "reveal share with valid proposal_id should succeed, got: %s", result.Log)
+
+	// RevealShare with invalid proposal_id (5) should fail.
+	badRevealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x60)
+	badRevealMsg.ProposalId = 5
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badRevealMsg))
+	s.Require().NotEqual(uint32(0), result.Code, "reveal share with invalid proposal_id should fail")
+	s.Require().Contains(result.Log, "invalid proposal ID")
 }
 
 // ---------------------------------------------------------------------------

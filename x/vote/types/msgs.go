@@ -25,6 +25,29 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 	if len(msg.NcRoot) == 0 {
 		return fmt.Errorf("%w: nc_root cannot be empty", ErrInvalidField)
 	}
+	if len(msg.EaPk) != 32 {
+		return fmt.Errorf("%w: ea_pk must be 32 bytes, got %d", ErrInvalidField, len(msg.EaPk))
+	}
+	if len(msg.VkZkp1) == 0 {
+		return fmt.Errorf("%w: vk_zkp1 cannot be empty", ErrInvalidField)
+	}
+	if len(msg.VkZkp2) == 0 {
+		return fmt.Errorf("%w: vk_zkp2 cannot be empty", ErrInvalidField)
+	}
+	if len(msg.VkZkp3) == 0 {
+		return fmt.Errorf("%w: vk_zkp3 cannot be empty", ErrInvalidField)
+	}
+	if len(msg.Proposals) == 0 || len(msg.Proposals) > 16 {
+		return fmt.Errorf("%w: proposals count must be between 1 and 16, got %d", ErrInvalidField, len(msg.Proposals))
+	}
+	for i, p := range msg.Proposals {
+		if p.Title == "" {
+			return fmt.Errorf("%w: proposal %d title cannot be empty", ErrInvalidField, i)
+		}
+		if p.Id != uint32(i) {
+			return fmt.Errorf("%w: proposal id mismatch at index %d: expected %d, got %d", ErrInvalidField, i, i, p.Id)
+		}
+	}
 	return nil
 }
 

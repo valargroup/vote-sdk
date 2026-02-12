@@ -48,6 +48,24 @@ func (errZKPVerifier) VerifyVoteShare(_ []byte, _ zkp.VoteShareInputs) error {
 	return fmt.Errorf("mock: vote share proof verification failed")
 }
 
+// spyZKPVerifier captures the DelegationInputs passed to VerifyDelegation.
+type spyZKPVerifier struct {
+	capturedDelegationInputs *zkp.DelegationInputs
+}
+
+func (s *spyZKPVerifier) VerifyDelegation(_ []byte, inputs zkp.DelegationInputs) error {
+	s.capturedDelegationInputs = &inputs
+	return nil
+}
+
+func (s *spyZKPVerifier) VerifyVoteCommitment(_ []byte, _ zkp.VoteCommitmentInputs) error {
+	return nil
+}
+
+func (s *spyZKPVerifier) VerifyVoteShare(_ []byte, _ zkp.VoteShareInputs) error {
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Test constants and message constructors
 // ---------------------------------------------------------------------------
@@ -68,6 +86,14 @@ func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 		VoteEndTime:       2_000_000,
 		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
+		EaPk:              bytes.Repeat([]byte{0x05}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
+		Proposals: []*types.Proposal{
+			{Id: 0, Title: "Proposal A", Description: "First"},
+			{Id: 1, Title: "Proposal B", Description: "Second"},
+		},
 	}
 }
 
@@ -94,7 +120,7 @@ func newValidMsgCastVote() *types.MsgCastVote {
 		VanNullifier:             bytes.Repeat([]byte{0x33}, 32),
 		VoteAuthorityNoteNew:     bytes.Repeat([]byte{0x44}, 32),
 		VoteCommitment:           bytes.Repeat([]byte{0x55}, 32),
-		ProposalId:               1,
+		ProposalId:               0,
 		Proof:                    bytes.Repeat([]byte{0x66}, 192),
 		VoteRoundId:              testRoundID,
 		VoteCommTreeAnchorHeight: 10,
@@ -105,7 +131,7 @@ func newValidMsgRevealShare() *types.MsgRevealShare {
 	return &types.MsgRevealShare{
 		ShareNullifier:           bytes.Repeat([]byte{0x77}, 32),
 		VoteAmount:               1000,
-		ProposalId:               1,
+		ProposalId:               0,
 		VoteDecision:             1,
 		Proof:                    bytes.Repeat([]byte{0x88}, 192),
 		VoteRoundId:              testRoundID,
@@ -210,6 +236,14 @@ func (s *ValidateTestSuite) setupRoundWithStatus(roundID []byte, endTime uint64,
 		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
 		Creator:           "zvote1testcreator",
 		Status:            status,
+		EaPk:              bytes.Repeat([]byte{0x05}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
+		Proposals: []*types.Proposal{
+			{Id: 0, Title: "Proposal A", Description: "First"},
+			{Id: 1, Title: "Proposal B", Description: "Second"},
+		},
 	}
 	err := s.keeper.SetVoteRound(kvStore, round)
 	s.Require().NoError(err)
@@ -880,4 +914,32 @@ func (s *ValidateTestSuite) TestValidateVoteTx_ValidationOrder() {
 			s.Require().Contains(err.Error(), tc.errContains)
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: ZKP public inputs wiring (spy verifier)
+// ---------------------------------------------------------------------------
+
+// TestVerifyDelegation_SessionDerivedInputs verifies that the ZKP verifier
+// receives nc_root and nullifier_imt_root from the stored session state.
+func (s *ValidateTestSuite) TestVerifyDelegation_SessionDerivedInputs() {
+	s.SetupTest()
+	s.setupActiveRound() // stores round with NcRoot and NullifierImtRoot
+
+	spy := &spyZKPVerifier{}
+	opts := ante.ValidateOpts{
+		SigVerifier: redpallas.NewMockVerifier(),
+		ZKPVerifier: spy,
+	}
+
+	msg := newValidMsgDelegateVote()
+	err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
+	s.Require().NoError(err)
+
+	// Verify the spy captured the inputs.
+	s.Require().NotNil(spy.capturedDelegationInputs, "spy should have captured delegation inputs")
+	s.Require().Equal(bytes.Repeat([]byte{0x04}, 32), spy.capturedDelegationInputs.NcRoot,
+		"NcRoot should match stored round value")
+	s.Require().Equal(bytes.Repeat([]byte{0x03}, 32), spy.capturedDelegationInputs.NullifierImtRoot,
+		"NullifierImtRoot should match stored round value")
 }

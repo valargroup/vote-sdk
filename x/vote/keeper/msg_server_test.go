@@ -55,10 +55,20 @@ func (s *MsgServerTestSuite) SetupTest() {
 func (s *MsgServerTestSuite) setupActiveRound(roundID []byte) {
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
-		VoteRoundId: roundID,
-		VoteEndTime: 2_000_000,
-		Creator:     "zvote1creator",
-		Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+		VoteRoundId:      roundID,
+		VoteEndTime:      2_000_000,
+		Creator:          "zvote1creator",
+		Status:           types.SessionStatus_SESSION_STATUS_ACTIVE,
+		NullifierImtRoot: bytes.Repeat([]byte{0x03}, 32),
+		NcRoot:           bytes.Repeat([]byte{0x04}, 32),
+		EaPk:             bytes.Repeat([]byte{0x05}, 32),
+		VkZkp1:           bytes.Repeat([]byte{0x06}, 64),
+		VkZkp2:           bytes.Repeat([]byte{0x07}, 64),
+		VkZkp3:           bytes.Repeat([]byte{0x08}, 64),
+		Proposals: []*types.Proposal{
+			{Id: 0, Title: "Proposal A", Description: "First"},
+			{Id: 1, Title: "Proposal B", Description: "Second"},
+		},
 	}))
 }
 
@@ -96,6 +106,14 @@ func validSetupMsg() *types.MsgCreateVotingSession {
 		VoteEndTime:       2_000_000,
 		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
+		EaPk:              bytes.Repeat([]byte{0x05}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
+		Proposals: []*types.Proposal{
+			{Id: 0, Title: "Proposal A", Description: "First"},
+			{Id: 1, Title: "Proposal B", Description: "Second"},
+		},
 	}
 }
 
@@ -129,6 +147,18 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				s.Require().Equal(msg.SnapshotHeight, round.SnapshotHeight)
 				s.Require().Equal(msg.VoteEndTime, round.VoteEndTime)
 				s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
+
+				// Verify new session fields are stored.
+				s.Require().Equal(msg.EaPk, round.EaPk)
+				s.Require().Equal(msg.VkZkp1, round.VkZkp1)
+				s.Require().Equal(msg.VkZkp2, round.VkZkp2)
+				s.Require().Equal(msg.VkZkp3, round.VkZkp3)
+				s.Require().Len(round.Proposals, len(msg.Proposals))
+				for i, p := range round.Proposals {
+					s.Require().Equal(msg.Proposals[i].Id, p.Id)
+					s.Require().Equal(msg.Proposals[i].Title, p.Title)
+					s.Require().Equal(msg.Proposals[i].Description, p.Description)
+				}
 			},
 		},
 		{
@@ -152,6 +182,14 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				VoteEndTime:       2_000_000,
 				NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 				NcRoot:            bytes.Repeat([]byte{0x04}, 32),
+				EaPk:              bytes.Repeat([]byte{0x05}, 32),
+				VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
+				VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
+				VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
+				Proposals: []*types.Proposal{
+					{Id: 0, Title: "Proposal A", Description: "First"},
+					{Id: 1, Title: "Proposal B", Description: "Second"},
+				},
 			},
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
 				s.Require().NotEqual(expectedID, resp.VoteRoundId)
@@ -286,7 +324,7 @@ func (s *MsgServerTestSuite) TestCastVote() {
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
 				VoteAuthorityNoteNew:     bytes.Repeat([]byte{0xE2}, 32),
 				VoteCommitment:           bytes.Repeat([]byte{0xE3}, 32),
-				ProposalId:               1,
+				ProposalId:               0,
 				Proof:                    bytes.Repeat([]byte{0xE4}, 64),
 				VoteRoundId:              roundID,
 				VoteCommTreeAnchorHeight: 10,
@@ -313,13 +351,31 @@ func (s *MsgServerTestSuite) TestCastVote() {
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
 				VoteAuthorityNoteNew:     bytes.Repeat([]byte{0xE2}, 32),
 				VoteCommitment:           bytes.Repeat([]byte{0xE3}, 32),
-				ProposalId:               1,
+				ProposalId:               0,
 				Proof:                    bytes.Repeat([]byte{0xE4}, 64),
 				VoteRoundId:              roundID,
 				VoteCommTreeAnchorHeight: 999,
 			},
 			expectErr:   true,
 			errContains: "invalid commitment tree anchor height",
+		},
+		{
+			name: "invalid proposal_id rejected",
+			setup: func() {
+				s.setupActiveRound(roundID) // round has 2 proposals (id 0, 1)
+				s.setupRootAtHeight(10)
+			},
+			msg: &types.MsgCastVote{
+				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
+				VoteAuthorityNoteNew:     bytes.Repeat([]byte{0xE2}, 32),
+				VoteCommitment:           bytes.Repeat([]byte{0xE3}, 32),
+				ProposalId:               5, // out of range
+				Proof:                    bytes.Repeat([]byte{0xE4}, 64),
+				VoteRoundId:              roundID,
+				VoteCommTreeAnchorHeight: 10,
+			},
+			expectErr:   true,
+			errContains: "invalid proposal ID",
 		},
 	}
 
@@ -353,10 +409,12 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 	roundID := bytes.Repeat([]byte{0x30}, 32)
 
 	tests := []struct {
-		name  string
-		setup func()
-		msg   *types.MsgRevealShare
-		check func()
+		name        string
+		setup       func()
+		msg         *types.MsgRevealShare
+		expectErr   bool
+		errContains string
+		check       func()
 	}{
 		{
 			name:  "happy path: nullifier recorded and tally accumulated",
@@ -364,7 +422,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 			msg: &types.MsgRevealShare{
 				ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
 				VoteAmount:               500,
-				ProposalId:               1,
+				ProposalId:               0,
 				VoteDecision:             1,
 				Proof:                    bytes.Repeat([]byte{0xF2}, 64),
 				VoteRoundId:              roundID,
@@ -377,7 +435,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 				s.Require().NoError(err)
 				s.Require().True(has)
 
-				tally, err := s.keeper.GetTally(kv, roundID, 1, 1)
+				tally, err := s.keeper.GetTally(kv, roundID, 0, 1)
 				s.Require().NoError(err)
 				s.Require().Equal(uint64(500), tally)
 			},
@@ -390,7 +448,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 				_, err := s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
 					ShareNullifier:           bytes.Repeat([]byte{0xF3}, 32),
 					VoteAmount:               300,
-					ProposalId:               1,
+					ProposalId:               0,
 					VoteDecision:             1,
 					Proof:                    bytes.Repeat([]byte{0xF4}, 64),
 					VoteRoundId:              roundID,
@@ -401,7 +459,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 			msg: &types.MsgRevealShare{
 				ShareNullifier:           bytes.Repeat([]byte{0xF5}, 32),
 				VoteAmount:               200,
-				ProposalId:               1,
+				ProposalId:               0,
 				VoteDecision:             1,
 				Proof:                    bytes.Repeat([]byte{0xF6}, 64),
 				VoteRoundId:              roundID,
@@ -409,10 +467,25 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 			},
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				tally, err := s.keeper.GetTally(kv, roundID, 1, 1)
+				tally, err := s.keeper.GetTally(kv, roundID, 0, 1)
 				s.Require().NoError(err)
 				s.Require().Equal(uint64(500), tally)
 			},
+		},
+		{
+			name:  "invalid proposal_id rejected",
+			setup: func() { s.setupActiveRound(roundID) },
+			msg: &types.MsgRevealShare{
+				ShareNullifier:           bytes.Repeat([]byte{0xF7}, 32),
+				VoteAmount:               100,
+				ProposalId:               5, // out of range
+				VoteDecision:             1,
+				Proof:                    bytes.Repeat([]byte{0xF8}, 64),
+				VoteRoundId:              roundID,
+				VoteCommTreeAnchorHeight: 10,
+			},
+			expectErr:   true,
+			errContains: "invalid proposal ID",
 		},
 	}
 
@@ -423,9 +496,16 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 				tc.setup()
 			}
 			_, err := s.msgServer.RevealShare(s.ctx, tc.msg)
-			s.Require().NoError(err)
-			if tc.check != nil {
-				tc.check()
+			if tc.expectErr {
+				s.Require().Error(err)
+				if tc.errContains != "" {
+					s.Require().Contains(err.Error(), tc.errContains)
+				}
+			} else {
+				s.Require().NoError(err)
+				if tc.check != nil {
+					tc.check()
+				}
 			}
 		})
 	}

@@ -10,6 +10,14 @@ import (
 	"github.com/z-cale/zally/x/vote/types"
 )
 
+// SampleProposals returns two sample proposals for test fixtures.
+func SampleProposals() []*types.Proposal {
+	return []*types.Proposal{
+		{Id: 0, Title: "Proposal A", Description: "First proposal"},
+		{Id: 1, Title: "Proposal B", Description: "Second proposal"},
+	}
+}
+
 // ValidCreateVotingSession returns a MsgCreateVotingSession with all fields populated.
 // The VoteEndTime is set 1 hour in the future from the reference time.
 func ValidCreateVotingSession() *types.MsgCreateVotingSession {
@@ -21,6 +29,11 @@ func ValidCreateVotingSession() *types.MsgCreateVotingSession {
 		VoteEndTime:       uint64(time.Now().Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0xCC}, 32),
 		NcRoot:            bytes.Repeat([]byte{0xDD}, 32),
+		EaPk:              bytes.Repeat([]byte{0xEE}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         SampleProposals(),
 	}
 }
 
@@ -35,6 +48,11 @@ func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession
 		VoteEndTime:       uint64(refTime.Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0xCC}, 32),
 		NcRoot:            bytes.Repeat([]byte{0xDD}, 32),
+		EaPk:              bytes.Repeat([]byte{0xEE}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         SampleProposals(),
 	}
 }
 
@@ -49,6 +67,11 @@ func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSessi
 		VoteEndTime:       uint64(refTime.Add(-1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0xCC}, 32),
 		NcRoot:            bytes.Repeat([]byte{0xDD}, 32),
+		EaPk:              bytes.Repeat([]byte{0xEE}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         SampleProposals(),
 	}
 }
 
@@ -78,7 +101,7 @@ func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *typ
 		VanNullifier:             MakeNullifier(nullifierSeed),
 		VoteAuthorityNoteNew:     bytes.Repeat([]byte{nullifierSeed + 0xA0}, 32),
 		VoteCommitment:           bytes.Repeat([]byte{nullifierSeed + 0xB0}, 32),
-		ProposalId:               1,
+		ProposalId:               0,
 		Proof:                    []byte("mock-vote-commitment-proof"),
 		VoteRoundId:              roundID,
 		VoteCommTreeAnchorHeight: anchorHeight,
@@ -90,7 +113,7 @@ func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *
 	return &types.MsgRevealShare{
 		ShareNullifier:           MakeNullifier(nullifierSeed),
 		VoteAmount:               1000,
-		ProposalId:               1,
+		ProposalId:               0,
 		VoteDecision:             1, // "yes"
 		Proof:                    []byte("mock-reveal-share-proof"),
 		VoteRoundId:              roundID,

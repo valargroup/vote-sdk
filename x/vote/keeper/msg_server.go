@@ -55,6 +55,11 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		NcRoot:            msg.NcRoot,
 		Creator:           msg.Creator,
 		Status:            types.SessionStatus_SESSION_STATUS_ACTIVE,
+		EaPk:              msg.EaPk,
+		VkZkp1:            msg.VkZkp1,
+		VkZkp2:            msg.VkZkp2,
+		VkZkp3:            msg.VkZkp3,
+		Proposals:         msg.Proposals,
 	}
 
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {
@@ -111,6 +116,11 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
+	// Validate proposal_id against session proposals.
+	if err := ms.k.ValidateProposalId(kvStore, msg.VoteRoundId, msg.ProposalId); err != nil {
+		return nil, err
+	}
+
 	// Validate anchor height references a stored root.
 	root, err := ms.k.GetCommitmentRootAtHeight(kvStore, msg.VoteCommTreeAnchorHeight)
 	if err != nil {
@@ -150,6 +160,11 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare) (*types.MsgRevealShareResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
+
+	// Validate proposal_id against session proposals.
+	if err := ms.k.ValidateProposalId(kvStore, msg.VoteRoundId, msg.ProposalId); err != nil {
+		return nil, err
+	}
 
 	// Record share nullifier (scoped to share type + round).
 	if err := ms.k.SetNullifier(kvStore, types.NullifierTypeShare, msg.VoteRoundId, msg.ShareNullifier); err != nil {

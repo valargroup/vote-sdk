@@ -11,6 +11,13 @@ enum SessionStatus {
   SESSION_STATUS_FINALIZED   = 3;
 }
 
+// Proposal represents a single ballot option within a voting session.
+message Proposal {
+  uint32 id          = 1;
+  string title       = 2;
+  string description = 3;
+}
+
 // VoteRound represents a voting session created by MsgCreateVotingSession.
 message VoteRound {
   bytes         vote_round_id       = 1;
@@ -22,6 +29,11 @@ message VoteRound {
   bytes         nc_root             = 7;
   string        creator             = 8;
   SessionStatus status              = 9;
+  bytes  ea_pk                      = 10; // Election authority public key (Pallas, 32 bytes)
+  bytes  vk_zkp1                    = 11; // Verification key for ZKP #1
+  bytes  vk_zkp2                    = 12; // Verification key for ZKP #2
+  bytes  vk_zkp3                    = 13; // Verification key for ZKP #3
+  repeated Proposal proposals       = 14;
 }
 
 // CommitmentTreeState holds the current state of the append-only commitment tree.

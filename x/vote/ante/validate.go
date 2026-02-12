@@ -93,19 +93,19 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper,
 	}
 
 	// 5. Per-message-type signature and ZKP verification.
-	return verifyProofs(msg, opts)
+	return verifyProofs(ctx, msg, k, opts)
 }
 
 // verifyProofs dispatches to the appropriate signature and ZKP verifier
 // based on the concrete message type.
-func verifyProofs(msg types.VoteMessage, opts ValidateOpts) error {
+func verifyProofs(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, opts ValidateOpts) error {
 	switch m := msg.(type) {
 	case *types.MsgCreateVotingSession:
 		// No cryptographic verification needed for session setup.
 		return nil
 
 	case *types.MsgDelegateVote:
-		return verifyDelegation(m, opts)
+		return verifyDelegation(ctx, m, k, opts)
 
 	case *types.MsgCastVote:
 		return verifyCastVote(m, opts)
@@ -119,12 +119,20 @@ func verifyProofs(msg types.VoteMessage, opts ValidateOpts) error {
 }
 
 // verifyDelegation verifies both the RedPallas signature and ZKP #1 for
-// a MsgDelegateVote.
-func verifyDelegation(msg *types.MsgDelegateVote, opts ValidateOpts) error {
+// a MsgDelegateVote. It looks up the session to pass nc_root and
+// nullifier_imt_root as ZKP public inputs.
+func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k keeper.Keeper, opts ValidateOpts) error {
 	// RedPallas signature verification.
 	// The sighash is provided by the client as msg.Sighash.
 	if err := opts.SigVerifier.Verify(msg.Rk, msg.Sighash, msg.SpendAuthSig); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
+	}
+
+	// Look up the session to get nc_root and nullifier_imt_root for ZKP inputs.
+	kvStore := k.OpenKVStore(ctx)
+	round, err := k.GetVoteRound(kvStore, msg.VoteRoundId)
+	if err != nil {
+		return fmt.Errorf("failed to look up round for ZKP inputs: %w", err)
 	}
 
 	// ZKP #1: delegation proof.
@@ -136,6 +144,8 @@ func verifyDelegation(msg *types.MsgDelegateVote, opts ValidateOpts) error {
 		GovComm:             msg.GovComm,
 		GovNullifiers:       msg.GovNullifiers,
 		VoteRoundId:         msg.VoteRoundId,
+		NcRoot:              round.NcRoot,
+		NullifierImtRoot:    round.NullifierImtRoot,
 	}); err != nil {
 		return fmt.Errorf("%w: delegation: %v", types.ErrInvalidProof, err)
 	}

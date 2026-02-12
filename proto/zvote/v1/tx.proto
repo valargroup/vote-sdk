@@ -2,6 +2,7 @@ syntax = "proto3";
 package zvote.v1;
 
 import "cosmos/msg/v1/msg.proto";
+import "zvote/v1/types.proto";
 
 option go_package = "github.com/z-cale/zally/x/vote/types";
 
@@ -27,6 +28,11 @@ message MsgCreateVotingSession {
   uint64 vote_end_time       = 5;
   bytes  nullifier_imt_root  = 6;
   bytes  nc_root             = 7;
+  bytes  ea_pk               = 8;  // Election authority public key (Pallas, 32 bytes)
+  bytes  vk_zkp1             = 9;  // Verification key for ZKP #1
+  bytes  vk_zkp2             = 10; // Verification key for ZKP #2
+  bytes  vk_zkp3             = 11; // Verification key for ZKP #3
+  repeated Proposal proposals = 12;
 }
 
 message MsgCreateVotingSessionResponse {

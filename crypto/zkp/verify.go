@@ -18,6 +18,8 @@ type DelegationInputs struct {
 	GovComm             []byte   // Governance commitment
 	GovNullifiers       [][]byte // Up to 4 governance nullifiers
 	VoteRoundId         []byte   // The vote round this delegation belongs to
+	NcRoot              []byte   // Note commitment tree root from session state
+	NullifierImtRoot    []byte   // Nullifier IMT root from session state
 }
 
 // VoteCommitmentInputs contains the public inputs for ZKP #2 (vote commitment).
