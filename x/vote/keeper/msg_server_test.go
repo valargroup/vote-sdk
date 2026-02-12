@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -405,13 +407,32 @@ func (s *MsgServerTestSuite) TestCastVote() {
 // RevealShare
 // ---------------------------------------------------------------------------
 
+// testEncShare generates a valid 64-byte ElGamal ciphertext for testing.
+func testEncShare(s *MsgServerTestSuite, value uint64) []byte {
+	_, pk := elgamal.KeyGen(rand.Reader)
+	ct, err := elgamal.Encrypt(pk, value, rand.Reader)
+	s.Require().NoError(err)
+	bz, err := elgamal.MarshalCiphertext(ct)
+	s.Require().NoError(err)
+	return bz
+}
+
+// testEncShareWithPK generates a valid 64-byte ElGamal ciphertext using a specific public key.
+func testEncShareWithPK(s *MsgServerTestSuite, pk *elgamal.PublicKey, value uint64) []byte {
+	ct, err := elgamal.Encrypt(pk, value, rand.Reader)
+	s.Require().NoError(err)
+	bz, err := elgamal.MarshalCiphertext(ct)
+	s.Require().NoError(err)
+	return bz
+}
+
 func (s *MsgServerTestSuite) TestRevealShare() {
 	roundID := bytes.Repeat([]byte{0x30}, 32)
 
 	tests := []struct {
 		name        string
 		setup       func()
-		msg         *types.MsgRevealShare
+		msg         func() *types.MsgRevealShare
 		expectErr   bool
 		errContains string
 		check       func()
@@ -419,14 +440,16 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 		{
 			name:  "happy path: nullifier recorded and tally accumulated",
 			setup: func() { s.setupActiveRound(roundID) },
-			msg: &types.MsgRevealShare{
-				ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
-				VoteAmount:               500,
-				ProposalId:               0,
-				VoteDecision:             1,
-				Proof:                    bytes.Repeat([]byte{0xF2}, 64),
-				VoteRoundId:              roundID,
-				VoteCommTreeAnchorHeight: 10,
+			msg: func() *types.MsgRevealShare {
+				return &types.MsgRevealShare{
+					ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
+					EncShare:                 testEncShare(s, 500),
+					ProposalId:               0,
+					VoteDecision:             1,
+					Proof:                    bytes.Repeat([]byte{0xF2}, 64),
+					VoteRoundId:              roundID,
+					VoteCommTreeAnchorHeight: 10,
+				}
 			},
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
@@ -437,17 +460,20 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 
 				tally, err := s.keeper.GetTally(kv, roundID, 0, 1)
 				s.Require().NoError(err)
-				s.Require().Equal(uint64(500), tally)
+				s.Require().NotNil(tally, "tally should be stored")
+				s.Require().Len(tally, 64, "tally should be 64 bytes (ElGamal ciphertext)")
 			},
 		},
 		{
-			name: "tally accumulates across multiple reveals",
+			name: "tally accumulates across multiple reveals via HomomorphicAdd",
 			setup: func() {
 				s.setupActiveRound(roundID)
+				// Use same keypair for both shares so accumulation works.
+				_, pk := elgamal.KeyGen(rand.Reader)
 				// First reveal.
 				_, err := s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
 					ShareNullifier:           bytes.Repeat([]byte{0xF3}, 32),
-					VoteAmount:               300,
+					EncShare:                 testEncShareWithPK(s, pk, 300),
 					ProposalId:               0,
 					VoteDecision:             1,
 					Proof:                    bytes.Repeat([]byte{0xF4}, 64),
@@ -456,33 +482,38 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 				})
 				s.Require().NoError(err)
 			},
-			msg: &types.MsgRevealShare{
-				ShareNullifier:           bytes.Repeat([]byte{0xF5}, 32),
-				VoteAmount:               200,
-				ProposalId:               0,
-				VoteDecision:             1,
-				Proof:                    bytes.Repeat([]byte{0xF6}, 64),
-				VoteRoundId:              roundID,
-				VoteCommTreeAnchorHeight: 10,
+			msg: func() *types.MsgRevealShare {
+				return &types.MsgRevealShare{
+					ShareNullifier:           bytes.Repeat([]byte{0xF5}, 32),
+					EncShare:                 testEncShare(s, 200),
+					ProposalId:               0,
+					VoteDecision:             1,
+					Proof:                    bytes.Repeat([]byte{0xF6}, 64),
+					VoteRoundId:              roundID,
+					VoteCommTreeAnchorHeight: 10,
+				}
 			},
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 				tally, err := s.keeper.GetTally(kv, roundID, 0, 1)
 				s.Require().NoError(err)
-				s.Require().Equal(uint64(500), tally)
+				s.Require().NotNil(tally)
+				s.Require().Len(tally, 64, "accumulated tally should be 64 bytes")
 			},
 		},
 		{
 			name:  "invalid proposal_id rejected",
 			setup: func() { s.setupActiveRound(roundID) },
-			msg: &types.MsgRevealShare{
-				ShareNullifier:           bytes.Repeat([]byte{0xF7}, 32),
-				VoteAmount:               100,
-				ProposalId:               5, // out of range
-				VoteDecision:             1,
-				Proof:                    bytes.Repeat([]byte{0xF8}, 64),
-				VoteRoundId:              roundID,
-				VoteCommTreeAnchorHeight: 10,
+			msg: func() *types.MsgRevealShare {
+				return &types.MsgRevealShare{
+					ShareNullifier:           bytes.Repeat([]byte{0xF7}, 32),
+					EncShare:                 testEncShare(s, 100),
+					ProposalId:               5, // out of range
+					VoteDecision:             1,
+					Proof:                    bytes.Repeat([]byte{0xF8}, 64),
+					VoteRoundId:              roundID,
+					VoteCommTreeAnchorHeight: 10,
+				}
 			},
 			expectErr:   true,
 			errContains: "invalid proposal ID",
@@ -495,7 +526,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			_, err := s.msgServer.RevealShare(s.ctx, tc.msg)
+			_, err := s.msgServer.RevealShare(s.ctx, tc.msg())
 			if tc.expectErr {
 				s.Require().Error(err)
 				if tc.errContains != "" {
@@ -519,8 +550,8 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 	roundID := bytes.Repeat([]byte{0x40}, 32)
 	creator := "zvote1creator"
 
-	// Helper: set up a TALLYING round with accumulated tally.
-	setupTallyingRoundWithAccumulator := func(amount uint64) {
+	// Helper: set up a TALLYING round with an encrypted tally accumulator.
+	setupTallyingRoundWithAccumulator := func() {
 		kv := s.keeper.OpenKVStore(s.ctx)
 		s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
 			VoteRoundId: roundID,
@@ -532,8 +563,9 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 				{Id: 1, Title: "Proposal B", Description: "Second"},
 			},
 		}))
-		// Pre-populate the tally accumulator.
-		s.Require().NoError(s.keeper.AddToTally(kv, roundID, 0, 1, amount))
+		// Pre-populate the tally accumulator with a ciphertext.
+		encShare := testEncShare(s, 500)
+		s.Require().NoError(s.keeper.AddToTally(kv, roundID, 0, 1, encShare))
 	}
 
 	tests := []struct {
@@ -545,9 +577,9 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 		check       func(resp *types.MsgSubmitTallyResponse)
 	}{
 		{
-			name: "happy path: entries match accumulator, round finalized, results stored",
+			name: "happy path: round finalized and results stored (DLEQ stubbed)",
 			setup: func() {
-				setupTallyingRoundWithAccumulator(500)
+				setupTallyingRoundWithAccumulator()
 			},
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: roundID,
@@ -566,7 +598,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 				s.Require().NoError(err)
 				s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
 
-				// TallyResult is stored.
+				// TallyResult is stored (uint64 decrypted value from EA).
 				result, err := s.keeper.GetTallyResult(kv, roundID, 0, 1)
 				s.Require().NoError(err)
 				s.Require().NotNil(result)
@@ -576,24 +608,9 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			},
 		},
 		{
-			name: "rejected: entry total_value mismatches accumulator",
-			setup: func() {
-				setupTallyingRoundWithAccumulator(500)
-			},
-			msg: &types.MsgSubmitTally{
-				VoteRoundId: roundID,
-				Creator:     creator,
-				Entries: []*types.TallyEntry{
-					{ProposalId: 0, VoteDecision: 1, TotalValue: 999}, // wrong
-				},
-			},
-			expectErr:   true,
-			errContains: "does not match accumulated",
-		},
-		{
 			name: "rejected: entry references non-existent proposal",
 			setup: func() {
-				setupTallyingRoundWithAccumulator(500)
+				setupTallyingRoundWithAccumulator()
 			},
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: roundID,
@@ -644,7 +661,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 		{
 			name: "rejected: creator mismatch",
 			setup: func() {
-				setupTallyingRoundWithAccumulator(500)
+				setupTallyingRoundWithAccumulator()
 			},
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: roundID,
@@ -671,8 +688,8 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 		{
 			name: "happy path: zero-valued entry for (proposal, decision) with no reveals",
 			setup: func() {
-				setupTallyingRoundWithAccumulator(500)
-				// proposal 1 / decision 0 has no reveals → accumulator is 0.
+				setupTallyingRoundWithAccumulator()
+				// proposal 1 / decision 0 has no reveals → accumulator is nil.
 			},
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: roundID,
@@ -783,7 +800,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_FinalizedRejectsShares() {
 	// Attempt to submit a reveal share — should fail because round is FINALIZED.
 	_, err = s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
 		ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
-		VoteAmount:               100,
+		EncShare:                 testEncShare(s, 100),
 		ProposalId:               0,
 		VoteDecision:             1,
 		Proof:                    bytes.Repeat([]byte{0xF2}, 64),

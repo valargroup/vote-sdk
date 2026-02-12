@@ -186,7 +186,7 @@ func verifyCastVote(msg *types.MsgCastVote, opts ValidateOpts) error {
 func verifyRevealShare(msg *types.MsgRevealShare, opts ValidateOpts) error {
 	if err := opts.ZKPVerifier.VerifyVoteShare(msg.Proof, zkp.VoteShareInputs{
 		ShareNullifier: msg.ShareNullifier,
-		VoteAmount:     msg.VoteAmount,
+		EncShare:       msg.EncShare,
 		ProposalId:     msg.ProposalId,
 		VoteDecision:   msg.VoteDecision,
 		VoteRoundId:    msg.VoteRoundId,

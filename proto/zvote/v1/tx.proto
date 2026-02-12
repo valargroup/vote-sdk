@@ -72,7 +72,7 @@ message MsgCastVoteResponse {}
 // MsgRevealShare corresponds to ZKP #3: reveal vote share (server submits).
 message MsgRevealShare {
   bytes  share_nullifier              = 1;
-  uint64 vote_amount                  = 2;
+  bytes  enc_share                    = 2;  // 64 bytes: ElGamal ciphertext (C1 || C2, compressed Pallas points)
   uint32 proposal_id                  = 3;
   uint32 vote_decision                = 4;
   bytes  proof                        = 5;

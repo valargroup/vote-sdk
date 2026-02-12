@@ -171,8 +171,8 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 		return nil, err
 	}
 
-	// Accumulate tally.
-	if err := ms.k.AddToTally(kvStore, msg.VoteRoundId, msg.ProposalId, msg.VoteDecision, msg.VoteAmount); err != nil {
+	// Accumulate encrypted share into tally via HomomorphicAdd.
+	if err := ms.k.AddToTally(kvStore, msg.VoteRoundId, msg.ProposalId, msg.VoteDecision, msg.EncShare); err != nil {
 		return nil, err
 	}
 
@@ -181,7 +181,7 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 		sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", msg.VoteRoundId)),
 		sdk.NewAttribute(types.AttributeKeyProposalID, strconv.FormatUint(uint64(msg.ProposalId), 10)),
 		sdk.NewAttribute(types.AttributeKeyVoteDecision, strconv.FormatUint(uint64(msg.VoteDecision), 10)),
-		sdk.NewAttribute(types.AttributeKeyVoteAmount, strconv.FormatUint(msg.VoteAmount, 10)),
+		sdk.NewAttribute(types.AttributeKeyShareNullifier, fmt.Sprintf("%x", msg.ShareNullifier)),
 	))
 
 	return &types.MsgRevealShareResponse{}, nil
@@ -210,7 +210,7 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 		return nil, fmt.Errorf("%w: creator mismatch: expected %s, got %s", types.ErrInvalidField, round.Creator, msg.Creator)
 	}
 
-	// Validate each entry against the on-chain tally accumulator and store results.
+	// Validate each entry and store finalized tally results.
 	for i, entry := range msg.Entries {
 		// Validate proposal_id is within range.
 		if int(entry.ProposalId) >= len(round.Proposals) {
@@ -218,20 +218,12 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 				types.ErrInvalidProposalID, i, entry.ProposalId, len(round.Proposals))
 		}
 
-		// Read the on-chain accumulated tally for this (proposal, decision).
-		accumulated, err := ms.k.GetTally(kvStore, msg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read accumulator for entry[%d]: %w", i, err)
-		}
+		// TODO(dleq): Verify Chaum-Pedersen DLEQ proof that total_value matches
+		// the encrypted accumulator. For now, trust the EA's claimed value since
+		// MsgSubmitTally is authority-gated (only session creator can submit).
+		// Future: Use elgamal.VerifyDLEQ(entry.DecryptionProof, session.EaPk, accumulatorC1, ...)
 
-		// Plaintext model: verify total_value matches the stored accumulator.
-		// Future: replace with DLEQ proof verification against ciphertext accumulator.
-		if entry.TotalValue != accumulated {
-			return nil, fmt.Errorf("%w: entry[%d] total_value %d does not match accumulated %d for proposal_id=%d vote_decision=%d",
-				types.ErrTallyMismatch, i, entry.TotalValue, accumulated, entry.ProposalId, entry.VoteDecision)
-		}
-
-		// Store the finalized tally result.
+		// Store the finalized tally result (decrypted plaintext from EA).
 		if err := ms.k.SetTallyResult(kvStore, &types.TallyResult{
 			VoteRoundId:  msg.VoteRoundId,
 			ProposalId:   entry.ProposalId,

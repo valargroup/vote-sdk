@@ -100,9 +100,13 @@ func TestEncodeDecodeCastVote(t *testing.T) {
 }
 
 func TestEncodeDecodeRevealShare(t *testing.T) {
+	encShare := make([]byte, 64)
+	for i := range encShare {
+		encShare[i] = 0xAA
+	}
 	msg := &types.MsgRevealShare{
 		ShareNullifier:           []byte("share"),
-		VoteAmount:               1000,
+		EncShare:                 encShare,
 		ProposalId:               2,
 		VoteDecision:             1,
 		Proof:                    []byte("proof"),
@@ -120,7 +124,7 @@ func TestEncodeDecodeRevealShare(t *testing.T) {
 
 	decodedMsg, ok := decoded.(*types.MsgRevealShare)
 	require.True(t, ok)
-	require.Equal(t, msg.VoteAmount, decodedMsg.VoteAmount)
+	require.Equal(t, msg.EncShare, decodedMsg.EncShare)
 	require.Equal(t, msg.VoteDecision, decodedMsg.VoteDecision)
 }
 

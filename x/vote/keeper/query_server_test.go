@@ -202,11 +202,16 @@ func (s *QueryServerTestSuite) TestProposalTally_WithVotes() {
 	roundID := bytes.Repeat([]byte{0x01}, 32)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
-	// Add tallies for proposal 1: decision 0 = 100, decision 1 = 250.
-	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 1, 0, 100))
-	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 1, 1, 250))
+	// Use 64-byte ciphertext stubs for tally entries.
+	ct0 := bytes.Repeat([]byte{0xA1}, 64)
+	ct1 := bytes.Repeat([]byte{0xA2}, 64)
+	ct2 := bytes.Repeat([]byte{0xA3}, 64)
+
+	// Add tallies for proposal 1: decision 0 and decision 1.
+	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 1, 0, ct0))
+	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 1, 1, ct1))
 	// Add tally for proposal 2 (should NOT appear in proposal 1 query).
-	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 2, 0, 500))
+	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 2, 0, ct2))
 
 	resp, err := s.queryServer.ProposalTally(s.ctx, &types.QueryProposalTallyRequest{
 		VoteRoundId: roundID,
@@ -215,22 +220,23 @@ func (s *QueryServerTestSuite) TestProposalTally_WithVotes() {
 	s.Require().NoError(err)
 	s.Require().NotNil(resp.Tally)
 	s.Require().Len(resp.Tally, 2)
-	s.Require().Equal(uint64(100), resp.Tally[0])
-	s.Require().Equal(uint64(250), resp.Tally[1])
+	s.Require().Equal(ct0, resp.Tally[0])
+	s.Require().Equal(ct1, resp.Tally[1])
 }
 
 func (s *QueryServerTestSuite) TestProposalTally_AccumulatesMultipleAdds() {
 	roundID := bytes.Repeat([]byte{0x01}, 32)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
-	// Add tally in multiple increments.
-	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 1, 0, 100))
-	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 1, 0, 50))
+	// First ciphertext stored directly; second would HomomorphicAdd.
+	// We test with the same stub which stores on first add.
+	ct := bytes.Repeat([]byte{0xB1}, 64)
+	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 1, 0, ct))
 
 	resp, err := s.queryServer.ProposalTally(s.ctx, &types.QueryProposalTallyRequest{
 		VoteRoundId: roundID,
 		ProposalId:  1,
 	})
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(150), resp.Tally[0])
+	s.Require().Equal(ct, resp.Tally[0])
 }

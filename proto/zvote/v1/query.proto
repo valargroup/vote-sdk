@@ -51,8 +51,8 @@ message QueryProposalTallyRequest {
 }
 
 message QueryProposalTallyResponse {
-  // Mapping from vote_decision to accumulated vote amount.
-  map<uint32, uint64> tally = 1;
+  // Mapping from vote_decision to serialized ElGamal ciphertext (64 bytes each).
+  map<uint32, bytes> tally = 1;
 }
 
 message QueryTallyResultsRequest {

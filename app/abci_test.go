@@ -133,7 +133,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
 	tally, err := s.app.VoteKeeper().GetTally(kvStore, roundID, revealMsg.ProposalId, revealMsg.VoteDecision)
 	s.Require().NoError(err)
-	s.Require().Equal(revealMsg.VoteAmount, tally)
+	s.Require().Equal(revealMsg.EncShare, tally)
 
 	// Verify share nullifier recorded.
 	has, err = s.app.VoteKeeper().HasNullifier(kvStore, types.NullifierTypeShare, roundID, revealMsg.ShareNullifier)
@@ -672,7 +672,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	// Verify tally accumulator is preserved.
 	tally, err := s.app.VoteKeeper().GetTally(kvStore, roundID, revealMsg.ProposalId, revealMsg.VoteDecision)
 	s.Require().NoError(err)
-	s.Require().Equal(revealMsg.VoteAmount, tally, "tally should be preserved after finalization")
+	s.Require().Equal(revealMsg.EncShare, tally, "tally should be preserved after finalization")
 
 	// Verify finalized tally results are stored and queryable.
 	tallyResults, err := s.app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
@@ -680,7 +680,8 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	s.Require().Len(tallyResults, 1)
 	s.Require().Equal(uint32(0), tallyResults[0].ProposalId)
 	s.Require().Equal(uint32(1), tallyResults[0].VoteDecision)
-	s.Require().Equal(revealMsg.VoteAmount, tallyResults[0].TotalValue)
+	// TotalValue in TallyEntry is the EA-claimed plaintext; no longer compared to the encrypted share.
+	s.Require().NotZero(tallyResults[0].TotalValue)
 
 	// RevealShare should fail after FINALIZED.
 	revealMsg2 := testutil.ValidRevealShare(roundID, revealAnchor, 0x70)

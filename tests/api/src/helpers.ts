@@ -337,18 +337,24 @@ export function makeCastVotePayload(roundId: Uint8Array, anchorHeight: number) {
  * The chain's MockVerifier accepts any proof bytes for ZKP #3 in dev mode.
  * Each call produces unique nullifiers to avoid collisions.
  *
+ * enc_share is a 64-byte ElGamal ciphertext (base64-encoded). In the E2E
+ * tests we use a deterministic 64-byte stub since the chain's MockVerifier
+ * does not validate the ciphertext contents.
+ *
  * @param roundId - The vote_round_id (raw bytes) to target.
  * @param anchorHeight - The commitment tree anchor height (from GET /commitment-tree/latest).
- * @param opts - Optional overrides for vote_amount, proposal_id, vote_decision.
+ * @param opts - Optional overrides for enc_share, proposal_id, vote_decision.
  */
 export function makeRevealSharePayload(
   roundId: Uint8Array,
   anchorHeight: number,
-  opts?: { voteAmount?: number; proposalId?: number; voteDecision?: number },
+  opts?: { encShare?: string; proposalId?: number; voteDecision?: number },
 ) {
+  // Default enc_share: 64 bytes of 0x88 (a stub ciphertext).
+  const defaultEncShare = toBase64(repeatByte(0x88, 64));
   return {
     share_nullifier: toBase64(makeUniqueNullifier()),
-    vote_amount: opts?.voteAmount ?? 1000,
+    enc_share: opts?.encShare ?? defaultEncShare,
     proposal_id: opts?.proposalId ?? 0,
     vote_decision: opts?.voteDecision ?? 1,
     proof: toBase64(Buffer.from("mock-reveal-share-proof")),

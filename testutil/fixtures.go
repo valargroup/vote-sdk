@@ -109,10 +109,15 @@ func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *typ
 }
 
 // ValidRevealShare returns a MsgRevealShare with mock data.
+// EncShare is a deterministic 64-byte stub derived from nullifierSeed.
 func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgRevealShare {
+	encShare := make([]byte, 64)
+	for i := range encShare {
+		encShare[i] = nullifierSeed
+	}
 	return &types.MsgRevealShare{
 		ShareNullifier:           MakeNullifier(nullifierSeed),
-		VoteAmount:               1000,
+		EncShare:                 encShare,
 		ProposalId:               0,
 		VoteDecision:             1, // "yes"
 		Proof:                    []byte("mock-reveal-share-proof"),

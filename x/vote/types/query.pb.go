@@ -331,8 +331,8 @@ func (x *QueryProposalTallyRequest) GetProposalId() uint32 {
 
 type QueryProposalTallyResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Mapping from vote_decision to accumulated vote amount.
-	Tally         map[uint32]uint64 `protobuf:"bytes,1,rep,name=tally,proto3" json:"tally,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	// Mapping from vote_decision to serialized ElGamal ciphertext (64 bytes each).
+	Tally         map[uint32][]byte `protobuf:"bytes,1,rep,name=tally,proto3" json:"tally,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -367,7 +367,7 @@ func (*QueryProposalTallyResponse) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_query_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *QueryProposalTallyResponse) GetTally() map[uint32]uint64 {
+func (x *QueryProposalTallyResponse) GetTally() map[uint32][]byte {
 	if x != nil {
 		return x.Tally
 	}
@@ -487,7 +487,7 @@ const file_zvote_v1_query_proto_rawDesc = "" +
 	"\n" +
 	"TallyEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\">\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x01\">\n" +
 	"\x18QueryTallyResultsRequest\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"L\n" +
 	"\x19QueryTallyResultsResponse\x12/\n" +

@@ -119,8 +119,8 @@ func (msg *MsgRevealShare) ValidateBasic() error {
 	if len(msg.ShareNullifier) == 0 {
 		return fmt.Errorf("%w: share_nullifier cannot be empty", ErrInvalidField)
 	}
-	if msg.VoteAmount == 0 {
-		return fmt.Errorf("%w: vote_amount cannot be zero", ErrInvalidField)
+	if len(msg.EncShare) != 64 {
+		return fmt.Errorf("%w: enc_share must be 64 bytes (ElGamal ciphertext), got %d", ErrInvalidField, len(msg.EncShare))
 	}
 	if len(msg.Proof) == 0 {
 		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)

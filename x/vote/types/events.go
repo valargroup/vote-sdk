@@ -13,16 +13,16 @@ const (
 
 // Event attribute keys.
 const (
-	AttributeKeyRoundID      = "vote_round_id"
-	AttributeKeyCreator      = "creator"
-	AttributeKeyLeafIndex    = "leaf_index"
-	AttributeKeyNullifiers   = "nullifier_count"
-	AttributeKeyProposalID   = "proposal_id"
-	AttributeKeyVoteDecision = "vote_decision"
-	AttributeKeyVoteAmount   = "vote_amount"
-	AttributeKeyTreeRoot     = "tree_root"
-	AttributeKeyBlockHeight  = "block_height"
-	AttributeKeyOldStatus         = "old_status"
-	AttributeKeyNewStatus         = "new_status"
-	AttributeKeyFinalizedEntries  = "finalized_entries"
+	AttributeKeyRoundID          = "vote_round_id"
+	AttributeKeyCreator          = "creator"
+	AttributeKeyLeafIndex        = "leaf_index"
+	AttributeKeyNullifiers       = "nullifier_count"
+	AttributeKeyProposalID       = "proposal_id"
+	AttributeKeyVoteDecision     = "vote_decision"
+	AttributeKeyShareNullifier   = "share_nullifier"
+	AttributeKeyTreeRoot         = "tree_root"
+	AttributeKeyBlockHeight      = "block_height"
+	AttributeKeyOldStatus        = "old_status"
+	AttributeKeyNewStatus        = "new_status"
+	AttributeKeyFinalizedEntries = "finalized_entries"
 )

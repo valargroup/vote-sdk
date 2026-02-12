@@ -35,7 +35,7 @@ type VoteCommitmentInputs struct {
 // VoteShareInputs contains the public inputs for ZKP #3 (reveal vote share).
 type VoteShareInputs struct {
 	ShareNullifier []byte // Share nullifier (prevents double-reveal)
-	VoteAmount     uint64 // Voting weight
+	EncShare       []byte // 64 bytes: ElGamal ciphertext (encrypted vote share)
 	ProposalId     uint32 // Which proposal
 	VoteDecision   uint32 // The vote choice
 	VoteRoundId    []byte // The vote round

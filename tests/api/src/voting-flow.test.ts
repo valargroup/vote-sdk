@@ -170,7 +170,6 @@ describe("E2E Voting Flow", () => {
 
   it("step 5: reveal share succeeds with mock proof", async () => {
     const revealBody = makeRevealSharePayload(roundId, anchorHeight, {
-      voteAmount: 1000,
       proposalId: 0,
       voteDecision: 1,
     });
@@ -191,15 +190,16 @@ describe("E2E Voting Flow", () => {
   // Step 7: Query tally and verify accumulated vote
   // -------------------------------------------------------------------------
 
-  it("step 6: tally reflects the revealed vote", async () => {
+  it("step 6: tally reflects the revealed vote as encrypted ciphertext", async () => {
     const { status, json } = await getJSON(
       `/zally/v1/tally/${roundIdHex}/0`,
     );
 
     expect(status).toBe(200);
     expect(json.tally).toBeTruthy();
-    // Decision 1 should have accumulated 1000 zatoshi for proposal 0.
-    expect(json.tally["1"]).toBe(1000);
+    // Decision 1 should have an accumulated ciphertext (base64 string, 64 bytes).
+    expect(json.tally["1"]).toBeTruthy();
+    expect(typeof json.tally["1"]).toBe("string"); // base64-encoded bytes
   });
 
   // -------------------------------------------------------------------------
@@ -228,7 +228,6 @@ describe("E2E Voting Flow", () => {
 
   it("step 8: duplicate reveal-share nullifier is rejected", async () => {
     const revealBody = makeRevealSharePayload(roundId, anchorHeight, {
-      voteAmount: 500,
       proposalId: 0,
       voteDecision: 1,
     });
@@ -303,7 +302,6 @@ describe("E2E Tallying Lifecycle", () => {
 
     // 6. Reveal share (during ACTIVE phase)
     const revealBody = makeRevealSharePayload(roundId, anchorHeight, {
-      voteAmount: 500,
       proposalId: 0,
       voteDecision: 1,
     });
@@ -334,7 +332,6 @@ describe("E2E Tallying Lifecycle", () => {
 
   it("step 2: reveal share succeeds during TALLYING", async () => {
     const revealBody = makeRevealSharePayload(roundId, anchorHeight, {
-      voteAmount: 250,
       proposalId: 0,
       voteDecision: 1,
     });
@@ -350,13 +347,14 @@ describe("E2E Tallying Lifecycle", () => {
   // Step 3: Tally reflects all accumulated reveals
   // -------------------------------------------------------------------------
 
-  it("step 3: tally reflects accumulated reveals", async () => {
+  it("step 3: tally reflects accumulated reveals as ciphertext", async () => {
     const { status, json } = await getJSON(`/zally/v1/tally/${roundIdHex}/0`);
 
     expect(status).toBe(200);
     expect(json.tally).toBeTruthy();
-    // 500 (beforeAll reveal) + 250 (step 2 reveal) = 750 for decision 1.
-    expect(json.tally["1"]).toBe(750);
+    // Decision 1 should have an accumulated ciphertext (from two reveals).
+    expect(json.tally["1"]).toBeTruthy();
+    expect(typeof json.tally["1"]).toBe("string"); // base64-encoded ciphertext
   });
 
   // -------------------------------------------------------------------------
@@ -469,7 +467,6 @@ describe("E2E Tallying Lifecycle", () => {
 
   it("step 10: reveal share rejected after finalization", async () => {
     const revealBody = makeRevealSharePayload(roundId, anchorHeight, {
-      voteAmount: 100,
       proposalId: 0,
       voteDecision: 1,
     });

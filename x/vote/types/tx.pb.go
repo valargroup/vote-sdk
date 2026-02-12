@@ -486,7 +486,7 @@ func (*MsgCastVoteResponse) Descriptor() ([]byte, []int) {
 type MsgRevealShare struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	ShareNullifier           []byte                 `protobuf:"bytes,1,opt,name=share_nullifier,json=shareNullifier,proto3" json:"share_nullifier,omitempty"`
-	VoteAmount               uint64                 `protobuf:"varint,2,opt,name=vote_amount,json=voteAmount,proto3" json:"vote_amount,omitempty"`
+	EncShare                 []byte                 `protobuf:"bytes,2,opt,name=enc_share,json=encShare,proto3" json:"enc_share,omitempty"` // 64 bytes: ElGamal ciphertext (C1 || C2, compressed Pallas points)
 	ProposalId               uint32                 `protobuf:"varint,3,opt,name=proposal_id,json=proposalId,proto3" json:"proposal_id,omitempty"`
 	VoteDecision             uint32                 `protobuf:"varint,4,opt,name=vote_decision,json=voteDecision,proto3" json:"vote_decision,omitempty"`
 	Proof                    []byte                 `protobuf:"bytes,5,opt,name=proof,proto3" json:"proof,omitempty"`
@@ -533,11 +533,11 @@ func (x *MsgRevealShare) GetShareNullifier() []byte {
 	return nil
 }
 
-func (x *MsgRevealShare) GetVoteAmount() uint64 {
+func (x *MsgRevealShare) GetEncShare() []byte {
 	if x != nil {
-		return x.VoteAmount
+		return x.EncShare
 	}
-	return 0
+	return nil
 }
 
 func (x *MsgRevealShare) GetProposalId() uint32 {
@@ -830,11 +830,10 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\x05proof\x18\x05 \x01(\fR\x05proof\x12\"\n" +
 	"\rvote_round_id\x18\x06 \x01(\fR\vvoteRoundId\x12>\n" +
 	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\"\x15\n" +
-	"\x13MsgCastVoteResponse\"\x9a\x02\n" +
+	"\x13MsgCastVoteResponse\"\x96\x02\n" +
 	"\x0eMsgRevealShare\x12'\n" +
-	"\x0fshare_nullifier\x18\x01 \x01(\fR\x0eshareNullifier\x12\x1f\n" +
-	"\vvote_amount\x18\x02 \x01(\x04R\n" +
-	"voteAmount\x12\x1f\n" +
+	"\x0fshare_nullifier\x18\x01 \x01(\fR\x0eshareNullifier\x12\x1b\n" +
+	"\tenc_share\x18\x02 \x01(\fR\bencShare\x12\x1f\n" +
 	"\vproposal_id\x18\x03 \x01(\rR\n" +
 	"proposalId\x12#\n" +
 	"\rvote_decision\x18\x04 \x01(\rR\fvoteDecision\x12\x14\n" +

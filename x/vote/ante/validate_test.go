@@ -130,7 +130,7 @@ func newValidMsgCastVote() *types.MsgCastVote {
 func newValidMsgRevealShare() *types.MsgRevealShare {
 	return &types.MsgRevealShare{
 		ShareNullifier:           bytes.Repeat([]byte{0x77}, 32),
-		VoteAmount:               1000,
+		EncShare:                 bytes.Repeat([]byte{0x88}, 64),
 		ProposalId:               0,
 		VoteDecision:             1,
 		Proof:                    bytes.Repeat([]byte{0x88}, 192),
@@ -725,16 +725,16 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 			errContains: "share_nullifier",
 		},
 		{
-			name: "invalid: zero vote_amount",
+			name: "invalid: wrong enc_share length",
 			msg: func() types.VoteMessage {
 				m := newValidMsgRevealShare()
-				m.VoteAmount = 0
+				m.EncShare = bytes.Repeat([]byte{0x88}, 32) // 32 instead of 64
 				return m
 			},
 			opts:        mockOpts(),
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
-			errContains: "vote_amount",
+			errContains: "enc_share must be 64 bytes",
 		},
 		{
 			name: "invalid: zero anchor height",

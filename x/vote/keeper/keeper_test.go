@@ -431,55 +431,34 @@ func (s *KeeperTestSuite) TestCommitmentRoot_MultipleHeights() {
 }
 
 // ---------------------------------------------------------------------------
-// Tally accumulator
+// Tally accumulator (ElGamal ciphertext)
 // ---------------------------------------------------------------------------
 
-func (s *KeeperTestSuite) TestTally_DefaultZero() {
+func (s *KeeperTestSuite) TestTally_DefaultNil() {
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
-	amount, err := s.keeper.GetTally(kv, testRoundID, 1, 1)
+	got, err := s.keeper.GetTally(kv, testRoundID, 1, 1)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(0), amount)
+	s.Require().Nil(got, "uninitialized tally should be nil")
 }
 
 func (s *KeeperTestSuite) TestTally_AddAndAccumulate() {
-	tests := []struct {
-		name     string
-		adds     []uint64
-		expected uint64
-	}{
-		{
-			name:     "single add",
-			adds:     []uint64{500},
-			expected: 500,
-		},
-		{
-			name:     "three adds accumulate",
-			adds:     []uint64{100, 250, 150},
-			expected: 500,
-		},
-		{
-			name:     "add zero is no-op",
-			adds:     []uint64{300, 0, 0, 200},
-			expected: 500,
-		},
-	}
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
 
-	for _, tc := range tests {
-		s.Run(tc.name, func() {
-			s.SetupTest()
-			kv := s.keeper.OpenKVStore(s.ctx)
+	// Create a 64-byte ciphertext stub.
+	ct1 := bytes.Repeat([]byte{0x11}, 64)
 
-			for _, a := range tc.adds {
-				s.Require().NoError(s.keeper.AddToTally(kv, testRoundID, 1, 1, a))
-			}
+	// First add: stores directly.
+	s.Require().NoError(s.keeper.AddToTally(kv, testRoundID, 1, 1, ct1))
+	got, err := s.keeper.GetTally(kv, testRoundID, 1, 1)
+	s.Require().NoError(err)
+	s.Require().Equal(ct1, got, "first add should store the ciphertext directly")
 
-			got, err := s.keeper.GetTally(kv, testRoundID, 1, 1)
-			s.Require().NoError(err)
-			s.Require().Equal(tc.expected, got)
-		})
-	}
+	// Note: We can't test real HomomorphicAdd with stub bytes (they won't
+	// deserialize as valid Pallas points). The msg_server_test uses real
+	// ElGamal ciphertexts for HomomorphicAdd integration testing.
 }
 
 func (s *KeeperTestSuite) TestTally_IndependentTuples() {
@@ -489,35 +468,37 @@ func (s *KeeperTestSuite) TestTally_IndependentTuples() {
 	roundA := bytes.Repeat([]byte{0x0A}, 32)
 	roundB := bytes.Repeat([]byte{0x0B}, 32)
 
-	// (roundA, proposal=1, decision=0)
-	s.Require().NoError(s.keeper.AddToTally(kv, roundA, 1, 0, 100))
-	// (roundA, proposal=1, decision=1)
-	s.Require().NoError(s.keeper.AddToTally(kv, roundA, 1, 1, 200))
-	// (roundA, proposal=2, decision=0)
-	s.Require().NoError(s.keeper.AddToTally(kv, roundA, 2, 0, 300))
-	// (roundB, proposal=1, decision=0)
-	s.Require().NoError(s.keeper.AddToTally(kv, roundB, 1, 0, 400))
+	ctA10 := bytes.Repeat([]byte{0xA1}, 64)
+	ctA11 := bytes.Repeat([]byte{0xA2}, 64)
+	ctA20 := bytes.Repeat([]byte{0xA3}, 64)
+	ctB10 := bytes.Repeat([]byte{0xB1}, 64)
+
+	// Store ciphertexts in different (round, proposal, decision) tuples.
+	s.Require().NoError(s.keeper.AddToTally(kv, roundA, 1, 0, ctA10))
+	s.Require().NoError(s.keeper.AddToTally(kv, roundA, 1, 1, ctA11))
+	s.Require().NoError(s.keeper.AddToTally(kv, roundA, 2, 0, ctA20))
+	s.Require().NoError(s.keeper.AddToTally(kv, roundB, 1, 0, ctB10))
 
 	got, err := s.keeper.GetTally(kv, roundA, 1, 0)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(100), got)
+	s.Require().Equal(ctA10, got)
 
 	got, err = s.keeper.GetTally(kv, roundA, 1, 1)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(200), got)
+	s.Require().Equal(ctA11, got)
 
 	got, err = s.keeper.GetTally(kv, roundA, 2, 0)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(300), got)
+	s.Require().Equal(ctA20, got)
 
 	got, err = s.keeper.GetTally(kv, roundB, 1, 0)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(400), got)
+	s.Require().Equal(ctB10, got)
 
-	// Unset tuple returns zero.
+	// Unset tuple returns nil.
 	got, err = s.keeper.GetTally(kv, roundB, 2, 0)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(0), got)
+	s.Require().Nil(got)
 }
 
 // ---------------------------------------------------------------------------

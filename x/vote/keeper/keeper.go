@@ -10,6 +10,7 @@ import (
 	"golang.org/x/crypto/blake2b"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/types"
 )
 
@@ -20,7 +21,7 @@ import (
 //   0x02 || uint64 index            -> commitment_bytes   (append-only commitment tree)
 //   0x03 || uint64 height           -> root_bytes         (commitment tree roots by height)
 //   0x04 || round_id                -> VoteRound protobuf (vote round data)
-//   0x05 || round_id || proposal_id || decision -> uint64 amount (tally accumulator)
+//   0x05 || round_id || proposal_id || decision -> []byte (64 bytes: ElGamal ciphertext)
 //   0x06                            -> CommitmentTreeState protobuf (tree metadata)
 //
 // Uses google.golang.org/protobuf/proto for binary marshal (our types are
@@ -184,38 +185,51 @@ func (k Keeper) SetCommitmentRootAtHeight(kvStore store.KVStore, height uint64, 
 	return kvStore.Set(types.CommitmentRootKey(height), root)
 }
 
-// GetTally returns the accumulated tally for a (round, proposal, decision) tuple.
-func (k Keeper) GetTally(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) (uint64, error) {
+// GetTally returns the accumulated ciphertext tally for a (round, proposal, decision) tuple.
+// Returns nil if no tally exists for this tuple.
+func (k Keeper) GetTally(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) ([]byte, error) {
 	bz, err := kvStore.Get(types.TallyKey(roundID, proposalID, decision))
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	if bz == nil {
-		return 0, nil
-	}
-	if len(bz) != 8 {
-		return 0, types.ErrInvalidField
-	}
-	return getUint64BE(bz), nil
+	return bz, nil // nil means no tally yet
 }
 
-// AddToTally adds amount to the tally for a (round, proposal, decision) tuple.
-func (k Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, decision uint32, amount uint64) error {
-	current, err := k.GetTally(kvStore, roundID, proposalID, decision)
+// AddToTally accumulates an ElGamal ciphertext (encShareBytes, 64 bytes) into
+// the tally for a (round, proposal, decision) tuple using HomomorphicAdd.
+func (k Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, decision uint32, encShareBytes []byte) error {
+	key := types.TallyKey(roundID, proposalID, decision)
+	existing, err := kvStore.Get(key)
 	if err != nil {
 		return err
 	}
-	newAmount := current + amount
 
-	bz := make([]byte, 8)
-	putUint64BE(bz, newAmount)
-	return kvStore.Set(types.TallyKey(roundID, proposalID, decision), bz)
+	if existing == nil {
+		// First share: store directly (identity + X = X).
+		return kvStore.Set(key, encShareBytes)
+	}
+
+	// Deserialize both, HomomorphicAdd, serialize result.
+	acc, err := elgamal.UnmarshalCiphertext(existing)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal accumulator: %w", err)
+	}
+	share, err := elgamal.UnmarshalCiphertext(encShareBytes)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal enc_share: %w", err)
+	}
+	result := elgamal.HomomorphicAdd(acc, share)
+	resultBytes, err := elgamal.MarshalCiphertext(result)
+	if err != nil {
+		return fmt.Errorf("failed to marshal accumulated ciphertext: %w", err)
+	}
+	return kvStore.Set(key, resultBytes)
 }
 
-// GetProposalTally returns all tallied votes for a (round, proposal) pair,
+// GetProposalTally returns all tallied ciphertexts for a (round, proposal) pair,
 // keyed by decision ID. Iterates over the tally prefix
-// 0x05 || round_id || proposal_id to collect all decision → amount entries.
-func (k Keeper) GetProposalTally(kvStore store.KVStore, roundID []byte, proposalID uint32) (map[uint32]uint64, error) {
+// 0x05 || round_id || proposal_id to collect all decision → ciphertext entries.
+func (k Keeper) GetProposalTally(kvStore store.KVStore, roundID []byte, proposalID uint32) (map[uint32][]byte, error) {
 	prefix := types.TallyPrefixForProposal(roundID, proposalID)
 	end := types.PrefixEndBytes(prefix)
 
@@ -225,7 +239,7 @@ func (k Keeper) GetProposalTally(kvStore store.KVStore, roundID []byte, proposal
 	}
 	defer iter.Close()
 
-	tally := make(map[uint32]uint64)
+	tally := make(map[uint32][]byte)
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		val := iter.Value()
@@ -235,11 +249,10 @@ func (k Keeper) GetProposalTally(kvStore store.KVStore, roundID []byte, proposal
 			continue
 		}
 		decision := getUint32BE(key[len(key)-4:])
-		if len(val) != 8 {
-			continue
-		}
-		amount := getUint64BE(val)
-		tally[decision] = amount
+		// Store the raw ciphertext bytes.
+		ct := make([]byte, len(val))
+		copy(ct, val)
+		tally[decision] = ct
 	}
 
 	return tally, nil
