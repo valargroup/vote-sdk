@@ -111,7 +111,8 @@ func TestHomomorphicAddMultiple(t *testing.T) {
 	sk, pk := KeyGen(rand.Reader)
 
 	shares := []uint64{10, 20, 30, 40, 50}
-	acc := EncryptZero()
+	acc, err := EncryptZero(pk, rand.Reader)
+	require.NoError(t, err)
 	var total uint64
 	for _, v := range shares {
 		ct := mustEncrypt(t, pk, v)
@@ -164,13 +165,14 @@ func TestHomomorphicAddAssociative(t *testing.T) {
 	require.True(t, gotRight.Equal(expected), "a+(b+c) should decrypt to 66*G")
 }
 
-// TestHomomorphicAddIdentity verifies Enc(v) + EncryptZero() decrypts to v*G.
+// TestHomomorphicAddIdentity verifies Enc(v) + EncryptZero(pk) decrypts to v*G.
 func TestHomomorphicAddIdentity(t *testing.T) {
 	sk, pk := KeyGen(rand.Reader)
 
 	for _, v := range []uint64{0, 1, 42, 1000, 1 << 24} {
 		ct := mustEncrypt(t, pk, v)
-		zero := EncryptZero()
+		zero, err := EncryptZero(pk, rand.Reader)
+		require.NoError(t, err)
 
 		sum := HomomorphicAdd(ct, zero)
 		got := DecryptToPoint(sk, sum)
@@ -182,8 +184,9 @@ func TestHomomorphicAddIdentity(t *testing.T) {
 
 // TestEncryptZeroDecryptsToIdentity verifies that EncryptZero() decrypts to the identity point.
 func TestEncryptZeroDecryptsToIdentity(t *testing.T) {
-	sk, _ := KeyGen(rand.Reader)
-	ct := EncryptZero()
+	sk, pk := KeyGen(rand.Reader)
+	ct, err := EncryptZero(pk, rand.Reader)
+	require.NoError(t, err)
 	got := DecryptToPoint(sk, ct)
 	require.True(t, got.IsIdentity(), "EncryptZero should decrypt to identity")
 }
@@ -230,7 +233,8 @@ func TestLargeValueEncryptDecrypt(t *testing.T) {
 		"should handle max share value 2^24-1")
 
 	// Aggregate: several max shares summed
-	acc := EncryptZero()
+	acc, err := EncryptZero(pk, rand.Reader)
+	require.NoError(t, err)
 	n := 10
 	for i := 0; i < n; i++ {
 		acc = HomomorphicAdd(acc, mustEncrypt(t, pk, maxShare))
@@ -250,20 +254,50 @@ func TestEncryptNilReaderReturnsError(t *testing.T) {
 	require.Nil(t, ct, "ciphertext should be nil on error")
 }
 
-// TestEncryptZeroDistinctPointers verifies that EncryptZero returns a
-// ciphertext whose C1 and C2 are distinct point objects (no aliasing).
-func TestEncryptZeroDistinctPointers(t *testing.T) {
-	ct := EncryptZero()
+// TestEncryptZeroIsSemanticallySeure verifies that EncryptZero produces
+// randomized ciphertexts (IND-CPA): two encryptions of zero must differ,
+// and C1 must not be the identity point (which would be trivially distinguishable).
+func TestEncryptZeroIsSemanticallySeure(t *testing.T) {
+	_, pk := KeyGen(rand.Reader)
 
-	// Both should be identity
-	require.True(t, ct.C1.IsIdentity(), "C1 should be identity")
-	require.True(t, ct.C2.IsIdentity(), "C2 should be identity")
+	ct1, err := EncryptZero(pk, rand.Reader)
+	require.NoError(t, err)
+	ct2, err := EncryptZero(pk, rand.Reader)
+	require.NoError(t, err)
 
-	// But they must be distinct objects, not aliased
-	pp1 := ct.C1.(*curvey.PointPallas)
-	pp2 := ct.C2.(*curvey.PointPallas)
-	require.False(t, pp1 == pp2,
-		"C1 and C2 must be distinct pointers (no aliasing)")
+	// Fresh randomness means different ciphertexts (with overwhelming probability).
+	require.False(t, ct1.C1.Equal(ct2.C1),
+		"two EncryptZero calls should produce different C1 (semantic security)")
+	require.False(t, ct1.C2.Equal(ct2.C2),
+		"two EncryptZero calls should produce different C2 (semantic security)")
+
+	// C1 = r*G must NOT be identity — that would reveal the plaintext.
+	require.False(t, ct1.C1.IsIdentity(),
+		"C1 must not be identity (would break IND-CPA)")
+}
+
+// ---------------------------------------------------------------------------
+// Randomness validation tests
+// ---------------------------------------------------------------------------
+
+// TestEncryptWithRandomnessRejectsZeroScalar verifies that r = 0 is rejected.
+// With r = 0: C1 = O, C2 = v*G — anyone can recover v via BSGS without the secret key.
+func TestEncryptWithRandomnessRejectsZeroScalar(t *testing.T) {
+	_, pk := KeyGen(rand.Reader)
+	zero := new(curvey.ScalarPallas).Zero()
+	ct, err := EncryptWithRandomness(pk, 42, zero)
+	require.Error(t, err, "zero randomness must be rejected")
+	require.Nil(t, ct)
+	require.Contains(t, err.Error(), "randomness must not be nil or zero")
+}
+
+// TestEncryptWithRandomnessRejectsNilScalar verifies that r = nil is rejected.
+func TestEncryptWithRandomnessRejectsNilScalar(t *testing.T) {
+	_, pk := KeyGen(rand.Reader)
+	ct, err := EncryptWithRandomness(pk, 42, nil)
+	require.Error(t, err, "nil randomness must be rejected")
+	require.Nil(t, ct)
+	require.Contains(t, err.Error(), "randomness must not be nil or zero")
 }
 
 // ---------------------------------------------------------------------------

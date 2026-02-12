@@ -54,12 +54,15 @@ func Encrypt(pk *PublicKey, v uint64, rng io.Reader) (*Ciphertext, error) {
 }
 
 // EncryptWithRandomness encrypts with explicit randomness r.
-// Returns an error if the public key is invalid.
+// Returns an error if the public key is invalid or if r is nil/zero.
 // This is useful for ZKP witness reproduction where the prover needs to
 // re-derive the ciphertext from a known randomness value.
 func EncryptWithRandomness(pk *PublicKey, v uint64, r curvey.Scalar) (*Ciphertext, error) {
 	if err := validatePublicKey(pk); err != nil {
 		return nil, fmt.Errorf("elgamal: EncryptWithRandomness: %w", err)
+	}
+	if r == nil || r.IsZero() {
+		return nil, fmt.Errorf("elgamal: EncryptWithRandomness: randomness must not be nil or zero")
 	}
 	return encryptCore(pk, v, r), nil
 }
@@ -109,18 +112,14 @@ func HomomorphicAdd(a, b *Ciphertext) *Ciphertext {
 	}
 }
 
-// EncryptZero returns an encryption of zero using independent identity points
-// for each component. This serves as the additive identity for HomomorphicAdd
-// and is used to initialize on-chain tally accumulators.
+// EncryptZero returns a semantically secure (IND-CPA) encryption of zero.
+// It uses fresh randomness so the ciphertext is indistinguishable from any
+// other encryption, which is critical when used as an on-chain tally
+// accumulator whose intermediate states are publicly observable.
 //
-// Note: this is NOT a semantically secure encryption of zero — it is the
-// deterministic ciphertext (O, O). Use Encrypt(pk, 0, rng) when IND-CPA
-// security is required (e.g., when intermediate tally states are observable).
-func EncryptZero() *Ciphertext {
-	return &Ciphertext{
-		C1: new(curvey.PointPallas).Identity(),
-		C2: new(curvey.PointPallas).Identity(),
-	}
+//	EncryptZero(pk, rng) = Encrypt(pk, 0, rng) = (r*G, r*pk)
+func EncryptZero(pk *PublicKey, rng io.Reader) (*Ciphertext, error) {
+	return Encrypt(pk, 0, rng)
 }
 
 // scalarFromUint64 converts a uint64 value to a Pallas scalar.

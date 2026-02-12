@@ -139,7 +139,8 @@ func TestBSGSWithHomomorphicSum(t *testing.T) {
 	table := NewBSGSTable(1 << 16)
 
 	shares := []uint64{64, 32, 2, 1} // total = 99
-	acc := EncryptZero()
+	acc, err := EncryptZero(pk, rand.Reader)
+	require.NoError(t, err)
 	for _, v := range shares {
 		acc = HomomorphicAdd(acc, mustEncrypt(t, pk, v))
 	}
