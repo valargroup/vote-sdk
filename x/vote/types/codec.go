@@ -18,5 +18,6 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgDelegateVote{},
 		&MsgCastVote{},
 		&MsgRevealShare{},
+		&MsgSubmitTally{},
 	)
 }

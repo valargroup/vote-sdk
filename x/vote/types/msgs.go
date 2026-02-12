@@ -146,6 +146,17 @@ type VoteMessage interface {
 	AcceptsTallyingRound() bool
 }
 
+// ValidateBasic performs stateless validation for MsgSubmitTally.
+func (msg *MsgSubmitTally) ValidateBasic() error {
+	if len(msg.VoteRoundId) == 0 {
+		return fmt.Errorf("%w: vote_round_id cannot be empty", ErrInvalidField)
+	}
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	return nil
+}
+
 // --- VoteMessage interface implementations ---
 
 // GetNullifiers returns the nullifiers from a MsgDelegateVote.
@@ -207,3 +218,14 @@ func (msg *MsgRevealShare) AcceptsTallyingRound() bool { return true }
 
 // AcceptsTallyingRound returns false — session creation is unrelated to tallying.
 func (msg *MsgCreateVotingSession) AcceptsTallyingRound() bool { return false }
+
+// --- MsgSubmitTally VoteMessage implementations ---
+
+// GetNullifiers returns nil for MsgSubmitTally (no nullifiers involved).
+func (msg *MsgSubmitTally) GetNullifiers() [][]byte { return nil }
+
+// GetNullifierType returns 0 for MsgSubmitTally (unused; no nullifiers).
+func (msg *MsgSubmitTally) GetNullifierType() NullifierType { return 0 }
+
+// AcceptsTallyingRound returns true — submitting a tally requires TALLYING status.
+func (msg *MsgSubmitTally) AcceptsTallyingRound() bool { return true }

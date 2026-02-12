@@ -8,6 +8,7 @@ const (
 	EventTypeRevealShare         = "reveal_share"
 	EventTypeCommitmentTreeRoot  = "commitment_tree_root"
 	EventTypeRoundStatusChange   = "round_status_change"
+	EventTypeSubmitTally         = "submit_tally"
 )
 
 // Event attribute keys.

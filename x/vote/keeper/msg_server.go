@@ -187,6 +187,44 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 	return &types.MsgRevealShareResponse{}, nil
 }
 
+// SubmitTally handles MsgSubmitTally.
+// Validates that the round is in TALLYING state and the creator matches,
+// then transitions the round to FINALIZED and emits an event.
+func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally) (*types.MsgSubmitTallyResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := ms.k.OpenKVStore(ctx)
+
+	// Validate the round exists, is in TALLYING state, and creator matches.
+	round, err := ms.k.GetVoteRound(kvStore, msg.VoteRoundId)
+	if err != nil {
+		return nil, err
+	}
+
+	if round.Status != types.SessionStatus_SESSION_STATUS_TALLYING {
+		return nil, fmt.Errorf("%w: status is %s", types.ErrRoundNotTallying, round.Status)
+	}
+
+	if round.Creator != msg.Creator {
+		return nil, fmt.Errorf("%w: creator mismatch: expected %s, got %s", types.ErrInvalidField, round.Creator, msg.Creator)
+	}
+
+	// Transition to FINALIZED.
+	round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
+	if err := ms.k.SetVoteRound(kvStore, round); err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeSubmitTally,
+		sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", msg.VoteRoundId)),
+		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
+		sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_TALLYING.String()),
+		sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_FINALIZED.String()),
+	))
+
+	return &types.MsgSubmitTallyResponse{}, nil
+}
+
 // deriveRoundID computes a deterministic vote_round_id from the setup fields.
 // Blake2b-256(snapshot_height || snapshot_blockhash || proposals_hash ||
 //
