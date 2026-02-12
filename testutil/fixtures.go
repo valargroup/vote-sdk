@@ -122,10 +122,28 @@ func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *
 }
 
 // ValidSubmitTally returns a MsgSubmitTally for the given round ID and creator.
+// By default it includes a single entry matching the default ValidRevealShare
+// fixture (proposal_id=0, vote_decision=1, total_value=1000).
 func ValidSubmitTally(roundID []byte, creator string) *types.MsgSubmitTally {
 	return &types.MsgSubmitTally{
 		VoteRoundId: roundID,
 		Creator:     creator,
+		Entries: []*types.TallyEntry{
+			{
+				ProposalId:   0,
+				VoteDecision: 1,
+				TotalValue:   1000,
+			},
+		},
+	}
+}
+
+// ValidSubmitTallyWithEntries returns a MsgSubmitTally with custom entries.
+func ValidSubmitTallyWithEntries(roundID []byte, creator string, entries []*types.TallyEntry) *types.MsgSubmitTally {
+	return &types.MsgSubmitTally{
+		VoteRoundId: roundID,
+		Creator:     creator,
+		Entries:     entries,
 	}
 }
 

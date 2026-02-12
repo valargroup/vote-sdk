@@ -43,6 +43,9 @@ var (
 
 	// TreeStateKey stores the current commitment tree state (next_index, etc.): single key
 	TreeStateKey = []byte{0x06}
+
+	// TallyResultPrefix stores finalized tally results: 0x07 || round_id || big-endian uint32 proposal_id || big-endian uint32 decision -> TallyResult (protobuf)
+	TallyResultPrefix = []byte{0x07}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -142,4 +145,25 @@ func putUint64BE(b []byte, v uint64) {
 // appendUint32BE appends a uint32 in big-endian byte order.
 func appendUint32BE(b []byte, v uint32) []byte {
 	return append(b, byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
+}
+
+// TallyResultKey returns the store key for a finalized tally result.
+// Format: 0x07 || round_id || big-endian uint32 proposal_id || big-endian uint32 decision
+func TallyResultKey(roundID []byte, proposalID uint32, decision uint32) []byte {
+	key := make([]byte, 0, len(TallyResultPrefix)+len(roundID)+4+4)
+	key = append(key, TallyResultPrefix...)
+	key = append(key, roundID...)
+	key = appendUint32BE(key, proposalID)
+	key = appendUint32BE(key, decision)
+	return key
+}
+
+// TallyResultPrefixForRound returns the KV prefix for all tally results
+// of a given round. Used for prefix iteration to collect all finalized results.
+// Format: 0x07 || round_id
+func TallyResultPrefixForRound(roundID []byte) []byte {
+	key := make([]byte, 0, len(TallyResultPrefix)+len(roundID))
+	key = append(key, TallyResultPrefix...)
+	key = append(key, roundID...)
+	return key
 }

@@ -105,3 +105,23 @@ func (qs queryServer) ProposalTally(goCtx context.Context, req *types.QueryPropo
 
 	return &types.QueryProposalTallyResponse{Tally: tally}, nil
 }
+
+// TallyResults returns finalized tally results for a vote round (after MsgSubmitTally).
+func (qs queryServer) TallyResults(goCtx context.Context, req *types.QueryTallyResultsRequest) (*types.QueryTallyResultsResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+	if len(req.VoteRoundId) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "vote_round_id is required")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	results, err := qs.k.GetAllTallyResults(kvStore, req.VoteRoundId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get tally results: %v", err)
+	}
+
+	return &types.QueryTallyResultsResponse{Results: results}, nil
+}

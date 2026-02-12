@@ -849,6 +849,9 @@ func newValidMsgSubmitTally() *types.MsgSubmitTally {
 	return &types.MsgSubmitTally{
 		VoteRoundId: testRoundID,
 		Creator:     "zvote1testcreator",
+		Entries: []*types.TallyEntry{
+			{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+		},
 	}
 }
 

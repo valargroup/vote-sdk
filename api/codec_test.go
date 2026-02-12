@@ -128,6 +128,10 @@ func TestEncodeDecodeSubmitTally(t *testing.T) {
 	msg := &types.MsgSubmitTally{
 		VoteRoundId: []byte("roundid12345678901234567890123456"),
 		Creator:     "zvote1admin",
+		Entries: []*types.TallyEntry{
+			{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+			{ProposalId: 1, VoteDecision: 0, TotalValue: 200},
+		},
 	}
 
 	raw, err := EncodeVoteTx(msg)
@@ -142,6 +146,13 @@ func TestEncodeDecodeSubmitTally(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, msg.VoteRoundId, decodedMsg.VoteRoundId)
 	require.Equal(t, msg.Creator, decodedMsg.Creator)
+	require.Len(t, decodedMsg.Entries, 2)
+	require.Equal(t, uint32(0), decodedMsg.Entries[0].ProposalId)
+	require.Equal(t, uint32(1), decodedMsg.Entries[0].VoteDecision)
+	require.Equal(t, uint64(500), decodedMsg.Entries[0].TotalValue)
+	require.Equal(t, uint32(1), decodedMsg.Entries[1].ProposalId)
+	require.Equal(t, uint32(0), decodedMsg.Entries[1].VoteDecision)
+	require.Equal(t, uint64(200), decodedMsg.Entries[1].TotalValue)
 }
 
 func TestDecodeVoteTx_TooShort(t *testing.T) {

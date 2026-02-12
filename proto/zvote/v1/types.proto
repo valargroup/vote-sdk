@@ -63,3 +63,12 @@ message NullifierEntry {
   uint32 nullifier_type = 2; // 0=gov, 1=vote-authority-note, 2=share (maps to NullifierType)
   bytes  round_id       = 3; // voting round this nullifier belongs to
 }
+
+// TallyResult stores a finalized vote total for one (round, proposal, decision) tuple.
+// Written by MsgSubmitTally, read by the TallyResults query.
+message TallyResult {
+  bytes  vote_round_id  = 1;
+  uint32 proposal_id    = 2;
+  uint32 vote_decision  = 3;
+  uint64 total_value    = 4;  // Decrypted aggregate (zatoshi)
+}

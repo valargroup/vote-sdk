@@ -83,10 +83,22 @@ message MsgRevealShare {
 message MsgRevealShareResponse {}
 
 // MsgSubmitTally finalizes a voting session, transitioning it from TALLYING to FINALIZED.
+// The election authority submits decrypted vote totals for each (proposal, decision) pair.
 // Only the session creator (election authority) may submit this message.
 message MsgSubmitTally {
-  bytes  vote_round_id = 1;
-  string creator       = 2;  // Must match the session creator
+  bytes  vote_round_id        = 1;
+  string creator              = 2;  // Must match the session creator
+  repeated TallyEntry entries = 3;  // One per (proposal_id, vote_decision) pair
 }
 
-message MsgSubmitTallyResponse {}
+// TallyEntry contains the decrypted vote total for one (proposal, decision) pair.
+message TallyEntry {
+  uint32 proposal_id      = 1;
+  uint32 vote_decision    = 2;
+  uint64 total_value      = 3;  // Decrypted aggregate (zatoshi)
+  bytes  decryption_proof = 4;  // Chaum-Pedersen DLEQ proof (reserved for future use)
+}
+
+message MsgSubmitTallyResponse {
+  uint32 finalized_entries = 1;  // Number of tally entries stored
+}

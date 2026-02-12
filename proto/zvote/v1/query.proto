@@ -18,6 +18,9 @@ service Query {
 
   // ProposalTally returns the accumulated tally for a proposal within a vote round.
   rpc ProposalTally(QueryProposalTallyRequest) returns (QueryProposalTallyResponse);
+
+  // TallyResults returns finalized tally results for a vote round (after MsgSubmitTally).
+  rpc TallyResults(QueryTallyResultsRequest) returns (QueryTallyResultsResponse);
 }
 
 message QueryCommitmentTreeRequest {
@@ -50,4 +53,12 @@ message QueryProposalTallyRequest {
 message QueryProposalTallyResponse {
   // Mapping from vote_decision to accumulated vote amount.
   map<uint32, uint64> tally = 1;
+}
+
+message QueryTallyResultsRequest {
+  bytes vote_round_id = 1;
+}
+
+message QueryTallyResultsResponse {
+  repeated TallyResult results = 1;
 }

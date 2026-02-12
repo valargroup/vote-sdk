@@ -612,11 +612,13 @@ func (*MsgRevealShareResponse) Descriptor() ([]byte, []int) {
 }
 
 // MsgSubmitTally finalizes a voting session, transitioning it from TALLYING to FINALIZED.
+// The election authority submits decrypted vote totals for each (proposal, decision) pair.
 // Only the session creator (election authority) may submit this message.
 type MsgSubmitTally struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	VoteRoundId   []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
 	Creator       string                 `protobuf:"bytes,2,opt,name=creator,proto3" json:"creator,omitempty"` // Must match the session creator
+	Entries       []*TallyEntry          `protobuf:"bytes,3,rep,name=entries,proto3" json:"entries,omitempty"` // One per (proposal_id, vote_decision) pair
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -665,15 +667,92 @@ func (x *MsgSubmitTally) GetCreator() string {
 	return ""
 }
 
+func (x *MsgSubmitTally) GetEntries() []*TallyEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+// TallyEntry contains the decrypted vote total for one (proposal, decision) pair.
+type TallyEntry struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ProposalId      uint32                 `protobuf:"varint,1,opt,name=proposal_id,json=proposalId,proto3" json:"proposal_id,omitempty"`
+	VoteDecision    uint32                 `protobuf:"varint,2,opt,name=vote_decision,json=voteDecision,proto3" json:"vote_decision,omitempty"`
+	TotalValue      uint64                 `protobuf:"varint,3,opt,name=total_value,json=totalValue,proto3" json:"total_value,omitempty"`               // Decrypted aggregate (zatoshi)
+	DecryptionProof []byte                 `protobuf:"bytes,4,opt,name=decryption_proof,json=decryptionProof,proto3" json:"decryption_proof,omitempty"` // Chaum-Pedersen DLEQ proof (reserved for future use)
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *TallyEntry) Reset() {
+	*x = TallyEntry{}
+	mi := &file_zvote_v1_tx_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TallyEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TallyEntry) ProtoMessage() {}
+
+func (x *TallyEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_tx_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TallyEntry.ProtoReflect.Descriptor instead.
+func (*TallyEntry) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TallyEntry) GetProposalId() uint32 {
+	if x != nil {
+		return x.ProposalId
+	}
+	return 0
+}
+
+func (x *TallyEntry) GetVoteDecision() uint32 {
+	if x != nil {
+		return x.VoteDecision
+	}
+	return 0
+}
+
+func (x *TallyEntry) GetTotalValue() uint64 {
+	if x != nil {
+		return x.TotalValue
+	}
+	return 0
+}
+
+func (x *TallyEntry) GetDecryptionProof() []byte {
+	if x != nil {
+		return x.DecryptionProof
+	}
+	return nil
+}
+
 type MsgSubmitTallyResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	FinalizedEntries uint32                 `protobuf:"varint,1,opt,name=finalized_entries,json=finalizedEntries,proto3" json:"finalized_entries,omitempty"` // Number of tally entries stored
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *MsgSubmitTallyResponse) Reset() {
 	*x = MsgSubmitTallyResponse{}
-	mi := &file_zvote_v1_tx_proto_msgTypes[9]
+	mi := &file_zvote_v1_tx_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -685,7 +764,7 @@ func (x *MsgSubmitTallyResponse) String() string {
 func (*MsgSubmitTallyResponse) ProtoMessage() {}
 
 func (x *MsgSubmitTallyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zvote_v1_tx_proto_msgTypes[9]
+	mi := &file_zvote_v1_tx_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -698,7 +777,14 @@ func (x *MsgSubmitTallyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSubmitTallyResponse.ProtoReflect.Descriptor instead.
 func (*MsgSubmitTallyResponse) Descriptor() ([]byte, []int) {
-	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{9}
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *MsgSubmitTallyResponse) GetFinalizedEntries() uint32 {
+	if x != nil {
+		return x.FinalizedEntries
+	}
+	return 0
 }
 
 var File_zvote_v1_tx_proto protoreflect.FileDescriptor
@@ -755,11 +841,21 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\x05proof\x18\x05 \x01(\fR\x05proof\x12\"\n" +
 	"\rvote_round_id\x18\x06 \x01(\fR\vvoteRoundId\x12>\n" +
 	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\"\x18\n" +
-	"\x16MsgRevealShareResponse\"N\n" +
+	"\x16MsgRevealShareResponse\"~\n" +
 	"\x0eMsgSubmitTally\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12\x18\n" +
-	"\acreator\x18\x02 \x01(\tR\acreator\"\x18\n" +
-	"\x16MsgSubmitTallyResponse2\x95\x03\n" +
+	"\acreator\x18\x02 \x01(\tR\acreator\x12.\n" +
+	"\aentries\x18\x03 \x03(\v2\x14.zvote.v1.TallyEntryR\aentries\"\x9e\x01\n" +
+	"\n" +
+	"TallyEntry\x12\x1f\n" +
+	"\vproposal_id\x18\x01 \x01(\rR\n" +
+	"proposalId\x12#\n" +
+	"\rvote_decision\x18\x02 \x01(\rR\fvoteDecision\x12\x1f\n" +
+	"\vtotal_value\x18\x03 \x01(\x04R\n" +
+	"totalValue\x12)\n" +
+	"\x10decryption_proof\x18\x04 \x01(\fR\x0fdecryptionProof\"E\n" +
+	"\x16MsgSubmitTallyResponse\x12+\n" +
+	"\x11finalized_entries\x18\x01 \x01(\rR\x10finalizedEntries2\x95\x03\n" +
 	"\x03Msg\x12a\n" +
 	"\x13CreateVotingSession\x12 .zvote.v1.MsgCreateVotingSession\x1a(.zvote.v1.MsgCreateVotingSessionResponse\x12L\n" +
 	"\fDelegateVote\x12\x19.zvote.v1.MsgDelegateVote\x1a!.zvote.v1.MsgDelegateVoteResponse\x12@\n" +
@@ -779,7 +875,7 @@ func file_zvote_v1_tx_proto_rawDescGZIP() []byte {
 	return file_zvote_v1_tx_proto_rawDescData
 }
 
-var file_zvote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_zvote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_zvote_v1_tx_proto_goTypes = []any{
 	(*MsgCreateVotingSession)(nil),         // 0: zvote.v1.MsgCreateVotingSession
 	(*MsgCreateVotingSessionResponse)(nil), // 1: zvote.v1.MsgCreateVotingSessionResponse
@@ -790,26 +886,28 @@ var file_zvote_v1_tx_proto_goTypes = []any{
 	(*MsgRevealShare)(nil),                 // 6: zvote.v1.MsgRevealShare
 	(*MsgRevealShareResponse)(nil),         // 7: zvote.v1.MsgRevealShareResponse
 	(*MsgSubmitTally)(nil),                 // 8: zvote.v1.MsgSubmitTally
-	(*MsgSubmitTallyResponse)(nil),         // 9: zvote.v1.MsgSubmitTallyResponse
-	(*Proposal)(nil),                       // 10: zvote.v1.Proposal
+	(*TallyEntry)(nil),                     // 9: zvote.v1.TallyEntry
+	(*MsgSubmitTallyResponse)(nil),         // 10: zvote.v1.MsgSubmitTallyResponse
+	(*Proposal)(nil),                       // 11: zvote.v1.Proposal
 }
 var file_zvote_v1_tx_proto_depIdxs = []int32{
-	10, // 0: zvote.v1.MsgCreateVotingSession.proposals:type_name -> zvote.v1.Proposal
-	0,  // 1: zvote.v1.Msg.CreateVotingSession:input_type -> zvote.v1.MsgCreateVotingSession
-	2,  // 2: zvote.v1.Msg.DelegateVote:input_type -> zvote.v1.MsgDelegateVote
-	4,  // 3: zvote.v1.Msg.CastVote:input_type -> zvote.v1.MsgCastVote
-	6,  // 4: zvote.v1.Msg.RevealShare:input_type -> zvote.v1.MsgRevealShare
-	8,  // 5: zvote.v1.Msg.SubmitTally:input_type -> zvote.v1.MsgSubmitTally
-	1,  // 6: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
-	3,  // 7: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
-	5,  // 8: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
-	7,  // 9: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
-	9,  // 10: zvote.v1.Msg.SubmitTally:output_type -> zvote.v1.MsgSubmitTallyResponse
-	6,  // [6:11] is the sub-list for method output_type
-	1,  // [1:6] is the sub-list for method input_type
-	1,  // [1:1] is the sub-list for extension type_name
-	1,  // [1:1] is the sub-list for extension extendee
-	0,  // [0:1] is the sub-list for field type_name
+	11, // 0: zvote.v1.MsgCreateVotingSession.proposals:type_name -> zvote.v1.Proposal
+	9,  // 1: zvote.v1.MsgSubmitTally.entries:type_name -> zvote.v1.TallyEntry
+	0,  // 2: zvote.v1.Msg.CreateVotingSession:input_type -> zvote.v1.MsgCreateVotingSession
+	2,  // 3: zvote.v1.Msg.DelegateVote:input_type -> zvote.v1.MsgDelegateVote
+	4,  // 4: zvote.v1.Msg.CastVote:input_type -> zvote.v1.MsgCastVote
+	6,  // 5: zvote.v1.Msg.RevealShare:input_type -> zvote.v1.MsgRevealShare
+	8,  // 6: zvote.v1.Msg.SubmitTally:input_type -> zvote.v1.MsgSubmitTally
+	1,  // 7: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
+	3,  // 8: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
+	5,  // 9: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
+	7,  // 10: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
+	10, // 11: zvote.v1.Msg.SubmitTally:output_type -> zvote.v1.MsgSubmitTallyResponse
+	7,  // [7:12] is the sub-list for method output_type
+	2,  // [2:7] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_zvote_v1_tx_proto_init() }
@@ -824,7 +922,7 @@ func file_zvote_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_tx_proto_rawDesc), len(file_zvote_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

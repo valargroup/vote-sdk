@@ -186,6 +186,21 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
 				Creator:     "zvote1admin",
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 1000},
+				},
+			},
+		},
+		{
+			name: "valid: multiple entries",
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
+				Creator:     "zvote1admin",
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 0, TotalValue: 500},
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 1000},
+					{ProposalId: 1, VoteDecision: 1, TotalValue: 200},
+				},
 			},
 		},
 		{
@@ -193,6 +208,9 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: nil,
 				Creator:     "zvote1admin",
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 1000},
+				},
 			},
 			expectErr:   true,
 			errContains: "vote_round_id",
@@ -202,9 +220,35 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
 				Creator:     "",
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 1000},
+				},
 			},
 			expectErr:   true,
 			errContains: "creator",
+		},
+		{
+			name: "invalid: empty entries",
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
+				Creator:     "zvote1admin",
+				Entries:     nil,
+			},
+			expectErr:   true,
+			errContains: "entries cannot be empty",
+		},
+		{
+			name: "invalid: duplicate (proposal_id, vote_decision) pair",
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
+				Creator:     "zvote1admin",
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 600},
+				},
+			},
+			expectErr:   true,
+			errContains: "duplicate entry",
 		},
 	}
 

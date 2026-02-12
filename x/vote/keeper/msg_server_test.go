@@ -519,38 +519,91 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 	roundID := bytes.Repeat([]byte{0x40}, 32)
 	creator := "zvote1creator"
 
+	// Helper: set up a TALLYING round with accumulated tally.
+	setupTallyingRoundWithAccumulator := func(amount uint64) {
+		kv := s.keeper.OpenKVStore(s.ctx)
+		s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+			VoteRoundId: roundID,
+			VoteEndTime: 500_000,
+			Creator:     creator,
+			Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+			Proposals: []*types.Proposal{
+				{Id: 0, Title: "Proposal A", Description: "First"},
+				{Id: 1, Title: "Proposal B", Description: "Second"},
+			},
+		}))
+		// Pre-populate the tally accumulator.
+		s.Require().NoError(s.keeper.AddToTally(kv, roundID, 0, 1, amount))
+	}
+
 	tests := []struct {
 		name        string
 		setup       func()
 		msg         *types.MsgSubmitTally
 		expectErr   bool
 		errContains string
-		check       func()
+		check       func(resp *types.MsgSubmitTallyResponse)
 	}{
 		{
-			name: "happy path: round transitions from TALLYING to FINALIZED",
+			name: "happy path: entries match accumulator, round finalized, results stored",
 			setup: func() {
-				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
-					VoteRoundId: roundID,
-					VoteEndTime: 500_000, // in the past
-					Creator:     creator,
-					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
-					Proposals: []*types.Proposal{
-						{Id: 0, Title: "Proposal A", Description: "First"},
-					},
-				}))
+				setupTallyingRoundWithAccumulator(500)
 			},
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: roundID,
 				Creator:     creator,
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+				},
 			},
-			check: func() {
+			check: func(resp *types.MsgSubmitTallyResponse) {
+				s.Require().Equal(uint32(1), resp.FinalizedEntries)
+
 				kv := s.keeper.OpenKVStore(s.ctx)
+
+				// Round is FINALIZED.
 				round, err := s.keeper.GetVoteRound(kv, roundID)
 				s.Require().NoError(err)
 				s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
+
+				// TallyResult is stored.
+				result, err := s.keeper.GetTallyResult(kv, roundID, 0, 1)
+				s.Require().NoError(err)
+				s.Require().NotNil(result)
+				s.Require().Equal(uint64(500), result.TotalValue)
+				s.Require().Equal(uint32(0), result.ProposalId)
+				s.Require().Equal(uint32(1), result.VoteDecision)
 			},
+		},
+		{
+			name: "rejected: entry total_value mismatches accumulator",
+			setup: func() {
+				setupTallyingRoundWithAccumulator(500)
+			},
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: roundID,
+				Creator:     creator,
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 999}, // wrong
+				},
+			},
+			expectErr:   true,
+			errContains: "does not match accumulated",
+		},
+		{
+			name: "rejected: entry references non-existent proposal",
+			setup: func() {
+				setupTallyingRoundWithAccumulator(500)
+			},
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: roundID,
+				Creator:     creator,
+				Entries: []*types.TallyEntry{
+					{ProposalId: 5, VoteDecision: 1, TotalValue: 500},
+				},
+			},
+			expectErr:   true,
+			errContains: "invalid proposal ID",
 		},
 		{
 			name: "rejected: round is ACTIVE not TALLYING",
@@ -560,6 +613,9 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: roundID,
 				Creator:     "zvote1creator",
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+				},
 			},
 			expectErr:   true,
 			errContains: "not in tallying state",
@@ -578,6 +634,9 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: roundID,
 				Creator:     creator,
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+				},
 			},
 			expectErr:   true,
 			errContains: "not in tallying state",
@@ -585,17 +644,14 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 		{
 			name: "rejected: creator mismatch",
 			setup: func() {
-				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
-					VoteRoundId: roundID,
-					VoteEndTime: 500_000,
-					Creator:     creator,
-					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
-				}))
+				setupTallyingRoundWithAccumulator(500)
 			},
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: roundID,
 				Creator:     "zvote1imposter",
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+				},
 			},
 			expectErr:   true,
 			errContains: "creator mismatch",
@@ -605,9 +661,30 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: bytes.Repeat([]byte{0xFF}, 32),
 				Creator:     creator,
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+				},
 			},
 			expectErr:   true,
 			errContains: "vote round not found",
+		},
+		{
+			name: "happy path: zero-valued entry for (proposal, decision) with no reveals",
+			setup: func() {
+				setupTallyingRoundWithAccumulator(500)
+				// proposal 1 / decision 0 has no reveals → accumulator is 0.
+			},
+			msg: &types.MsgSubmitTally{
+				VoteRoundId: roundID,
+				Creator:     creator,
+				Entries: []*types.TallyEntry{
+					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+					{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
+				},
+			},
+			check: func(resp *types.MsgSubmitTallyResponse) {
+				s.Require().Equal(uint32(2), resp.FinalizedEntries)
+			},
 		},
 	}
 
@@ -617,7 +694,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			_, err := s.msgServer.SubmitTally(s.ctx, tc.msg)
+			resp, err := s.msgServer.SubmitTally(s.ctx, tc.msg)
 			if tc.expectErr {
 				s.Require().Error(err)
 				if tc.errContains != "" {
@@ -626,7 +703,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			} else {
 				s.Require().NoError(err)
 				if tc.check != nil {
-					tc.check()
+					tc.check(resp)
 				}
 			}
 		})

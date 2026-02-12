@@ -23,6 +23,7 @@ const (
 	Query_LatestCommitmentTree_FullMethodName   = "/zvote.v1.Query/LatestCommitmentTree"
 	Query_VoteRound_FullMethodName              = "/zvote.v1.Query/VoteRound"
 	Query_ProposalTally_FullMethodName          = "/zvote.v1.Query/ProposalTally"
+	Query_TallyResults_FullMethodName           = "/zvote.v1.Query/TallyResults"
 )
 
 // QueryClient is the client API for Query service.
@@ -39,6 +40,8 @@ type QueryClient interface {
 	VoteRound(ctx context.Context, in *QueryVoteRoundRequest, opts ...grpc.CallOption) (*QueryVoteRoundResponse, error)
 	// ProposalTally returns the accumulated tally for a proposal within a vote round.
 	ProposalTally(ctx context.Context, in *QueryProposalTallyRequest, opts ...grpc.CallOption) (*QueryProposalTallyResponse, error)
+	// TallyResults returns finalized tally results for a vote round (after MsgSubmitTally).
+	TallyResults(ctx context.Context, in *QueryTallyResultsRequest, opts ...grpc.CallOption) (*QueryTallyResultsResponse, error)
 }
 
 type queryClient struct {
@@ -89,6 +92,16 @@ func (c *queryClient) ProposalTally(ctx context.Context, in *QueryProposalTallyR
 	return out, nil
 }
 
+func (c *queryClient) TallyResults(ctx context.Context, in *QueryTallyResultsRequest, opts ...grpc.CallOption) (*QueryTallyResultsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryTallyResultsResponse)
+	err := c.cc.Invoke(ctx, Query_TallyResults_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
@@ -103,6 +116,8 @@ type QueryServer interface {
 	VoteRound(context.Context, *QueryVoteRoundRequest) (*QueryVoteRoundResponse, error)
 	// ProposalTally returns the accumulated tally for a proposal within a vote round.
 	ProposalTally(context.Context, *QueryProposalTallyRequest) (*QueryProposalTallyResponse, error)
+	// TallyResults returns finalized tally results for a vote round (after MsgSubmitTally).
+	TallyResults(context.Context, *QueryTallyResultsRequest) (*QueryTallyResultsResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -124,6 +139,9 @@ func (UnimplementedQueryServer) VoteRound(context.Context, *QueryVoteRoundReques
 }
 func (UnimplementedQueryServer) ProposalTally(context.Context, *QueryProposalTallyRequest) (*QueryProposalTallyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ProposalTally not implemented")
+}
+func (UnimplementedQueryServer) TallyResults(context.Context, *QueryTallyResultsRequest) (*QueryTallyResultsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TallyResults not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -218,6 +236,24 @@ func _Query_ProposalTally_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_TallyResults_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryTallyResultsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).TallyResults(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_TallyResults_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).TallyResults(ctx, req.(*QueryTallyResultsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -240,6 +276,10 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ProposalTally",
 			Handler:    _Query_ProposalTally_Handler,
+		},
+		{
+			MethodName: "TallyResults",
+			Handler:    _Query_TallyResults_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

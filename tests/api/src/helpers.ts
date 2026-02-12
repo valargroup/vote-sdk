@@ -151,15 +151,31 @@ export function deriveRoundId(fields: SetupRoundFields): Uint8Array {
 let roundCounter = Math.floor(Date.now() / 1000) % 1_000_000;
 
 /**
+ * A single tally entry for MsgSubmitTally.
+ */
+export interface TallyEntryPayload {
+  proposal_id: number;
+  vote_decision: number;
+  total_value: number;
+  decryption_proof?: string; // base64, optional for now
+}
+
+/**
  * Build a valid MsgSubmitTally JSON body.
  *
  * @param roundId - The vote_round_id (raw bytes) to target.
  * @param creator - The session creator (must match the original creator).
+ * @param entries - Tally entries with decrypted totals per (proposal, decision).
  */
-export function makeSubmitTallyPayload(roundId: Uint8Array, creator = "zvote1admin") {
+export function makeSubmitTallyPayload(
+  roundId: Uint8Array,
+  creator = "zvote1admin",
+  entries: TallyEntryPayload[] = [],
+) {
   return {
     vote_round_id: toBase64(roundId),
     creator,
+    entries,
   };
 }
 

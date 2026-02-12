@@ -16,4 +16,5 @@ var (
 	ErrCommitmentTreeFull    = errors.Register(ModuleName, 11, "commitment tree is full")
 	ErrRoundNotTallying      = errors.Register(ModuleName, 12, "vote round is not in tallying state")
 	ErrInvalidProposalID     = errors.Register(ModuleName, 13, "invalid proposal ID")
+	ErrTallyMismatch         = errors.Register(ModuleName, 14, "tally entry does not match on-chain accumulator")
 )

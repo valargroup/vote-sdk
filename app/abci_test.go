@@ -669,10 +669,18 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
 		"round should be FINALIZED after SubmitTally")
 
-	// Verify tally is preserved.
+	// Verify tally accumulator is preserved.
 	tally, err := s.app.VoteKeeper().GetTally(kvStore, roundID, revealMsg.ProposalId, revealMsg.VoteDecision)
 	s.Require().NoError(err)
 	s.Require().Equal(revealMsg.VoteAmount, tally, "tally should be preserved after finalization")
+
+	// Verify finalized tally results are stored and queryable.
+	tallyResults, err := s.app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
+	s.Require().NoError(err)
+	s.Require().Len(tallyResults, 1)
+	s.Require().Equal(uint32(0), tallyResults[0].ProposalId)
+	s.Require().Equal(uint32(1), tallyResults[0].VoteDecision)
+	s.Require().Equal(revealMsg.VoteAmount, tallyResults[0].TotalValue)
 
 	// RevealShare should fail after FINALIZED.
 	revealMsg2 := testutil.ValidRevealShare(roundID, revealAnchor, 0x70)
@@ -718,13 +726,18 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyCreatorMismatch() {
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
 	// Submit tally with wrong creator should fail.
-	badTallyMsg := testutil.ValidSubmitTally(roundID, "zvote1imposter")
+	// Use zero-valued entries since no reveals happened.
+	badTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, "zvote1imposter", []*types.TallyEntry{
+		{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
+	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badTallyMsg))
 	s.Require().NotEqual(uint32(0), result.Code, "submit tally with wrong creator should fail")
 	s.Require().Contains(result.Log, "creator mismatch")
 
-	// Submit tally with correct creator should succeed.
-	goodTallyMsg := testutil.ValidSubmitTally(roundID, "zvote1admin")
+	// Submit tally with correct creator should succeed (zero-valued entries since no reveals).
+	goodTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, "zvote1admin", []*types.TallyEntry{
+		{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
+	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(goodTallyMsg))
 	s.Require().Equal(uint32(0), result.Code, "submit tally with correct creator should succeed, got: %s", result.Log)
 }

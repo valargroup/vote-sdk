@@ -30,6 +30,7 @@ import {
   sleep,
   BLOCK_WAIT_MS,
   toHex,
+  type TallyEntryPayload,
 } from "./helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -390,7 +391,10 @@ describe("E2E Tallying Lifecycle", () => {
   // -------------------------------------------------------------------------
 
   it("step 6: submit tally with wrong creator is rejected", async () => {
-    const tallyBody = makeSubmitTallyPayload(roundId, "zvote1imposter");
+    // Entries are included (required), but creator mismatch triggers first.
+    const tallyBody = makeSubmitTallyPayload(roundId, "zvote1imposter", [
+      { proposal_id: 0, vote_decision: 1, total_value: 750 },
+    ]);
     const { status, json } = await postJSON("/zally/v1/submit-tally", tallyBody);
 
     expect(status).toBe(200);
@@ -403,7 +407,11 @@ describe("E2E Tallying Lifecycle", () => {
   // -------------------------------------------------------------------------
 
   it("step 7: submit tally finalizes the round", async () => {
-    const tallyBody = makeSubmitTallyPayload(roundId, SESSION_CREATOR);
+    // Entries must match the accumulated tally: 500 + 250 = 750 for proposal 0, decision 1.
+    const entries: TallyEntryPayload[] = [
+      { proposal_id: 0, vote_decision: 1, total_value: 750 },
+    ];
+    const tallyBody = makeSubmitTallyPayload(roundId, SESSION_CREATOR, entries);
     const { status, json } = await postJSON("/zally/v1/submit-tally", tallyBody);
 
     expect(status).toBe(200);
@@ -439,6 +447,23 @@ describe("E2E Tallying Lifecycle", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Step 9b: Finalized tally results are queryable via /tally-results
+  // -------------------------------------------------------------------------
+
+  it("step 9b: finalized tally results are queryable", async () => {
+    const { status, json } = await getJSON(`/zally/v1/tally-results/${roundIdHex}`);
+
+    expect(status).toBe(200);
+    expect(json.results).toBeTruthy();
+    expect(json.results).toHaveLength(1);
+    // Go's encoding/json omits zero-valued fields with omitempty, so
+    // proposal_id=0 may be absent (undefined). Use ?? 0 to normalize.
+    expect(json.results[0].proposal_id ?? 0).toBe(0);
+    expect(json.results[0].vote_decision).toBe(1);
+    expect(json.results[0].total_value).toBe(750);
+  });
+
+  // -------------------------------------------------------------------------
   // Step 10: Reveals rejected after FINALIZED
   // -------------------------------------------------------------------------
 
@@ -461,7 +486,9 @@ describe("E2E Tallying Lifecycle", () => {
   // -------------------------------------------------------------------------
 
   it("step 11: submit tally on finalized round is rejected", async () => {
-    const tallyBody = makeSubmitTallyPayload(roundId, SESSION_CREATOR);
+    const tallyBody = makeSubmitTallyPayload(roundId, SESSION_CREATOR, [
+      { proposal_id: 0, vote_decision: 1, total_value: 750 },
+    ]);
     const { status, json } = await postJSON("/zally/v1/submit-tally", tallyBody);
 
     // The chain rejects the tx because the round is FINALIZED, not TALLYING.
@@ -486,7 +513,9 @@ describe("E2E Tallying Lifecycle", () => {
     await sleep(BLOCK_WAIT_MS);
 
     // Try to submit tally on the ACTIVE round — should be rejected.
-    const tallyBody = makeSubmitTallyPayload(activeRoundId, SESSION_CREATOR);
+    const tallyBody = makeSubmitTallyPayload(activeRoundId, SESSION_CREATOR, [
+      { proposal_id: 0, vote_decision: 0, total_value: 0 },
+    ]);
     const { status, json } = await postJSON("/zally/v1/submit-tally", tallyBody);
 
     expect(status).toBe(200);

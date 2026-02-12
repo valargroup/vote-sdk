@@ -154,6 +154,19 @@ func (msg *MsgSubmitTally) ValidateBasic() error {
 	if msg.Creator == "" {
 		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
 	}
+	if len(msg.Entries) == 0 {
+		return fmt.Errorf("%w: entries cannot be empty", ErrInvalidField)
+	}
+	// Check for duplicate (proposal_id, vote_decision) pairs.
+	seen := make(map[[2]uint32]bool, len(msg.Entries))
+	for i, e := range msg.Entries {
+		key := [2]uint32{e.ProposalId, e.VoteDecision}
+		if seen[key] {
+			return fmt.Errorf("%w: duplicate entry at index %d: proposal_id=%d vote_decision=%d",
+				ErrInvalidField, i, e.ProposalId, e.VoteDecision)
+		}
+		seen[key] = true
+	}
 	return nil
 }
 

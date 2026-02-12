@@ -528,6 +528,76 @@ func (x *NullifierEntry) GetRoundId() []byte {
 	return nil
 }
 
+// TallyResult stores a finalized vote total for one (round, proposal, decision) tuple.
+// Written by MsgSubmitTally, read by the TallyResults query.
+type TallyResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VoteRoundId   []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
+	ProposalId    uint32                 `protobuf:"varint,2,opt,name=proposal_id,json=proposalId,proto3" json:"proposal_id,omitempty"`
+	VoteDecision  uint32                 `protobuf:"varint,3,opt,name=vote_decision,json=voteDecision,proto3" json:"vote_decision,omitempty"`
+	TotalValue    uint64                 `protobuf:"varint,4,opt,name=total_value,json=totalValue,proto3" json:"total_value,omitempty"` // Decrypted aggregate (zatoshi)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TallyResult) Reset() {
+	*x = TallyResult{}
+	mi := &file_zvote_v1_types_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TallyResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TallyResult) ProtoMessage() {}
+
+func (x *TallyResult) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_types_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TallyResult.ProtoReflect.Descriptor instead.
+func (*TallyResult) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *TallyResult) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
+}
+
+func (x *TallyResult) GetProposalId() uint32 {
+	if x != nil {
+		return x.ProposalId
+	}
+	return 0
+}
+
+func (x *TallyResult) GetVoteDecision() uint32 {
+	if x != nil {
+		return x.VoteDecision
+	}
+	return 0
+}
+
+func (x *TallyResult) GetTotalValue() uint64 {
+	if x != nil {
+		return x.TotalValue
+	}
+	return 0
+}
+
 var File_zvote_v1_types_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_types_proto_rawDesc = "" +
@@ -572,7 +642,14 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x0eNullifierEntry\x12\x1c\n" +
 	"\tnullifier\x18\x01 \x01(\fR\tnullifier\x12%\n" +
 	"\x0enullifier_type\x18\x02 \x01(\rR\rnullifierType\x12\x19\n" +
-	"\bround_id\x18\x03 \x01(\fR\aroundId*\x85\x01\n" +
+	"\bround_id\x18\x03 \x01(\fR\aroundId\"\x98\x01\n" +
+	"\vTallyResult\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12\x1f\n" +
+	"\vproposal_id\x18\x02 \x01(\rR\n" +
+	"proposalId\x12#\n" +
+	"\rvote_decision\x18\x03 \x01(\rR\fvoteDecision\x12\x1f\n" +
+	"\vtotal_value\x18\x04 \x01(\x04R\n" +
+	"totalValue*\x85\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
@@ -592,7 +669,7 @@ func file_zvote_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_zvote_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_zvote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_zvote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_zvote_v1_types_proto_goTypes = []any{
 	(SessionStatus)(0),          // 0: zvote.v1.SessionStatus
 	(*Proposal)(nil),            // 1: zvote.v1.Proposal
@@ -601,6 +678,7 @@ var file_zvote_v1_types_proto_goTypes = []any{
 	(*GenesisState)(nil),        // 4: zvote.v1.GenesisState
 	(*CommitmentLeaf)(nil),      // 5: zvote.v1.CommitmentLeaf
 	(*NullifierEntry)(nil),      // 6: zvote.v1.NullifierEntry
+	(*TallyResult)(nil),         // 7: zvote.v1.TallyResult
 }
 var file_zvote_v1_types_proto_depIdxs = []int32{
 	0, // 0: zvote.v1.VoteRound.status:type_name -> zvote.v1.SessionStatus
@@ -627,7 +705,7 @@ func file_zvote_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_types_proto_rawDesc), len(file_zvote_v1_types_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

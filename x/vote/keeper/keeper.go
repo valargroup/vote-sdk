@@ -431,3 +431,55 @@ func getUint64BE(b []byte) uint64 {
 	return uint64(b[0])<<56 | uint64(b[1])<<48 | uint64(b[2])<<40 | uint64(b[3])<<32 |
 		uint64(b[4])<<24 | uint64(b[5])<<16 | uint64(b[6])<<8 | uint64(b[7])
 }
+
+// ---------------------------------------------------------------------------
+// Tally result storage (written by MsgSubmitTally, read by TallyResults query)
+// ---------------------------------------------------------------------------
+
+// SetTallyResult stores a finalized tally result for one (round, proposal, decision) tuple.
+func (k Keeper) SetTallyResult(kvStore store.KVStore, result *types.TallyResult) error {
+	bz, err := marshal(result)
+	if err != nil {
+		return err
+	}
+	return kvStore.Set(types.TallyResultKey(result.VoteRoundId, result.ProposalId, result.VoteDecision), bz)
+}
+
+// GetTallyResult retrieves a finalized tally result for one (round, proposal, decision) tuple.
+func (k Keeper) GetTallyResult(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) (*types.TallyResult, error) {
+	bz, err := kvStore.Get(types.TallyResultKey(roundID, proposalID, decision))
+	if err != nil {
+		return nil, err
+	}
+	if bz == nil {
+		return nil, nil
+	}
+	var result types.TallyResult
+	if err := unmarshal(bz, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetAllTallyResults retrieves all finalized tally results for a vote round.
+// Results are returned in key order (proposal_id, then decision).
+func (k Keeper) GetAllTallyResults(kvStore store.KVStore, roundID []byte) ([]*types.TallyResult, error) {
+	prefix := types.TallyResultPrefixForRound(roundID)
+	end := types.PrefixEndBytes(prefix)
+
+	iter, err := kvStore.Iterator(prefix, end)
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	var results []*types.TallyResult
+	for ; iter.Valid(); iter.Next() {
+		var result types.TallyResult
+		if err := unmarshal(iter.Value(), &result); err != nil {
+			return nil, err
+		}
+		results = append(results, &result)
+	}
+	return results, nil
+}

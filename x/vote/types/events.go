@@ -22,6 +22,7 @@ const (
 	AttributeKeyVoteAmount   = "vote_amount"
 	AttributeKeyTreeRoot     = "tree_root"
 	AttributeKeyBlockHeight  = "block_height"
-	AttributeKeyOldStatus    = "old_status"
-	AttributeKeyNewStatus    = "new_status"
+	AttributeKeyOldStatus         = "old_status"
+	AttributeKeyNewStatus         = "new_status"
+	AttributeKeyFinalizedEntries  = "finalized_entries"
 )

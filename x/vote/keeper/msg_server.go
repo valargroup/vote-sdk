@@ -189,7 +189,9 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 
 // SubmitTally handles MsgSubmitTally.
 // Validates that the round is in TALLYING state and the creator matches,
-// then transitions the round to FINALIZED and emits an event.
+// then validates each tally entry against the on-chain accumulator,
+// stores finalized tally results, transitions the round to FINALIZED,
+// and emits an event.
 func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally) (*types.MsgSubmitTallyResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
@@ -208,6 +210,38 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 		return nil, fmt.Errorf("%w: creator mismatch: expected %s, got %s", types.ErrInvalidField, round.Creator, msg.Creator)
 	}
 
+	// Validate each entry against the on-chain tally accumulator and store results.
+	for i, entry := range msg.Entries {
+		// Validate proposal_id is within range.
+		if int(entry.ProposalId) >= len(round.Proposals) {
+			return nil, fmt.Errorf("%w: entry[%d] proposal_id %d >= proposals count %d",
+				types.ErrInvalidProposalID, i, entry.ProposalId, len(round.Proposals))
+		}
+
+		// Read the on-chain accumulated tally for this (proposal, decision).
+		accumulated, err := ms.k.GetTally(kvStore, msg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read accumulator for entry[%d]: %w", i, err)
+		}
+
+		// Plaintext model: verify total_value matches the stored accumulator.
+		// Future: replace with DLEQ proof verification against ciphertext accumulator.
+		if entry.TotalValue != accumulated {
+			return nil, fmt.Errorf("%w: entry[%d] total_value %d does not match accumulated %d for proposal_id=%d vote_decision=%d",
+				types.ErrTallyMismatch, i, entry.TotalValue, accumulated, entry.ProposalId, entry.VoteDecision)
+		}
+
+		// Store the finalized tally result.
+		if err := ms.k.SetTallyResult(kvStore, &types.TallyResult{
+			VoteRoundId:  msg.VoteRoundId,
+			ProposalId:   entry.ProposalId,
+			VoteDecision: entry.VoteDecision,
+			TotalValue:   entry.TotalValue,
+		}); err != nil {
+			return nil, fmt.Errorf("failed to store tally result for entry[%d]: %w", i, err)
+		}
+	}
+
 	// Transition to FINALIZED.
 	round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {
@@ -220,9 +254,12 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
 		sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_TALLYING.String()),
 		sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_FINALIZED.String()),
+		sdk.NewAttribute(types.AttributeKeyFinalizedEntries, strconv.Itoa(len(msg.Entries))),
 	))
 
-	return &types.MsgSubmitTallyResponse{}, nil
+	return &types.MsgSubmitTallyResponse{
+		FinalizedEntries: uint32(len(msg.Entries)),
+	}, nil
 }
 
 // deriveRoundID computes a deterministic vote_round_id from the setup fields.
