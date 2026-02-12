@@ -184,13 +184,23 @@ fn build_levels(leaves: &[Fp], empty: &[Fp; TREE_DEPTH]) -> (Fp, Vec<Vec<Fp>>) {
 ///
 /// Returns `Some(i)` where `ranges[i]` is `[low, high]` (inclusive),
 /// or `None` if the value is an existing nullifier.
+///
+/// Uses binary search (`partition_point`) on the sorted, non-overlapping
+/// ranges for O(log n) lookup instead of a linear scan.
 pub fn find_range_for_value(ranges: &[Range], value: Fp) -> Option<usize> {
-    for (i, [low, high]) in ranges.iter().enumerate() {
-        if value >= *low && value <= *high {
-            return Some(i);
-        }
+    // Find the first range whose `low` is greater than `value`.
+    // All ranges before that index have `low <= value`.
+    let i = ranges.partition_point(|[low, _]| *low <= value);
+    if i == 0 {
+        return None;
     }
-    None
+    let idx = i - 1;
+    let [low, high] = ranges[idx];
+    if value >= low && value <= high {
+        Some(idx)
+    } else {
+        None
+    }
 }
 
 /// Serialize gap ranges to a binary file.
@@ -602,5 +612,116 @@ mod tests {
         // Verify leaves match commit_ranges output.
         let expected = commit_ranges(tree.ranges());
         assert_eq!(leaves, expected.as_slice());
+    }
+
+    #[test]
+    fn test_find_range_empty_ranges() {
+        let ranges: Vec<Range> = vec![];
+        assert_eq!(find_range_for_value(&ranges, fp(0)), None);
+        assert_eq!(find_range_for_value(&ranges, fp(42)), None);
+    }
+
+    #[test]
+    fn test_find_range_single_range() {
+        // Single nullifier at 100 produces two ranges: [0, 99] and [101, MAX]
+        let ranges = build_nf_ranges(vec![fp(100)]);
+        assert_eq!(ranges.len(), 2);
+
+        assert_eq!(find_range_for_value(&ranges, fp(0)), Some(0));
+        assert_eq!(find_range_for_value(&ranges, fp(99)), Some(0));
+        assert_eq!(find_range_for_value(&ranges, fp(100)), None); // nullifier
+        assert_eq!(find_range_for_value(&ranges, fp(101)), Some(1));
+        assert_eq!(find_range_for_value(&ranges, fp(999)), Some(1));
+    }
+
+    #[test]
+    fn test_find_range_exact_boundaries() {
+        let ranges = build_nf_ranges(four_nullifiers());
+        // Exact low boundaries
+        assert_eq!(find_range_for_value(&ranges, fp(0)), Some(0));
+        assert_eq!(find_range_for_value(&ranges, fp(11)), Some(1));
+        assert_eq!(find_range_for_value(&ranges, fp(21)), Some(2));
+        assert_eq!(find_range_for_value(&ranges, fp(31)), Some(3));
+        assert_eq!(find_range_for_value(&ranges, fp(41)), Some(4));
+
+        // Exact high boundaries
+        assert_eq!(find_range_for_value(&ranges, fp(9)), Some(0));
+        assert_eq!(find_range_for_value(&ranges, fp(19)), Some(1));
+        assert_eq!(find_range_for_value(&ranges, fp(29)), Some(2));
+        assert_eq!(find_range_for_value(&ranges, fp(39)), Some(3));
+    }
+
+    #[test]
+    fn test_find_range_consecutive_nullifiers() {
+        // Consecutive nullifiers: 10, 11, 12 produce no gap between them
+        let ranges = build_nf_ranges(vec![fp(10), fp(11), fp(12)]);
+        // [0, 9], [13, MAX]
+        assert_eq!(ranges.len(), 2);
+
+        assert_eq!(find_range_for_value(&ranges, fp(5)), Some(0));
+        assert_eq!(find_range_for_value(&ranges, fp(9)), Some(0));
+        assert_eq!(find_range_for_value(&ranges, fp(10)), None);
+        assert_eq!(find_range_for_value(&ranges, fp(11)), None);
+        assert_eq!(find_range_for_value(&ranges, fp(12)), None);
+        assert_eq!(find_range_for_value(&ranges, fp(13)), Some(1));
+    }
+
+    #[test]
+    fn test_find_range_binary_search_large_set() {
+        // Build a large set of evenly-spaced nullifiers and verify the binary
+        // search returns the same results as a naive linear scan.
+        let nullifiers: Vec<Fp> = (0..10_000u64).map(|i| fp(i * 3 + 1)).collect();
+        let ranges = build_nf_ranges(nullifiers.clone());
+
+        // Verify every nullifier is excluded
+        for nf in &nullifiers {
+            assert!(find_range_for_value(&ranges, *nf).is_none());
+        }
+
+        // Verify mid-gap values are found in the correct range
+        for (i, window) in nullifiers.windows(2).enumerate() {
+            let mid = window[0] + Fp::one(); // one above the nullifier
+            let result = find_range_for_value(&ranges, mid);
+            assert!(
+                result.is_some(),
+                "mid-gap value between nf[{}] and nf[{}] not found",
+                i,
+                i + 1
+            );
+            let idx = result.unwrap();
+            let [low, high] = ranges[idx];
+            assert!(
+                mid >= low && mid <= high,
+                "value not within returned range at index {}",
+                idx
+            );
+        }
+    }
+
+    #[test]
+    fn test_find_range_agrees_with_linear_scan() {
+        // Reference linear implementation for cross-checking
+        fn linear_find(ranges: &[Range], value: Fp) -> Option<usize> {
+            for (i, [low, high]) in ranges.iter().enumerate() {
+                if value >= *low && value <= *high {
+                    return Some(i);
+                }
+            }
+            None
+        }
+
+        let nullifiers: Vec<Fp> = (0..500u64).map(|i| fp(i * 7 + 3)).collect();
+        let ranges = build_nf_ranges(nullifiers);
+
+        // Test a sweep of values including nullifiers, boundaries, and gaps
+        for v in 0..4000u64 {
+            let val = fp(v);
+            assert_eq!(
+                find_range_for_value(&ranges, val),
+                linear_find(&ranges, val),
+                "disagreement at value {}",
+                v
+            );
+        }
     }
 }
