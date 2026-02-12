@@ -1196,6 +1196,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9e591e719385e6ebaeb5ce5d3887f7d5676fceca6411d1925ccc95745f3d6f7"
 
 [[package]]
+name = "nullifier-tree"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dotenv",
+ "ff 0.13.0",
+ "hex",
+ "http",
+ "incrementalmerkletree 0.3.1",
+ "orchard",
+ "pasta_curves",
+ "prost",
+ "r2d2",
+ "r2d2_sqlite",
+ "rusqlite",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2415,6 +2435,7 @@ dependencies = [
  "incrementalmerkletree 0.3.1",
  "lazy_static",
  "log",
+ "nullifier-tree",
  "orchard",
  "pasta_curves",
  "prost",

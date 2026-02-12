@@ -20,8 +20,9 @@ pub mod db;
 pub mod decrypt;
 pub mod download;
 pub mod election;
-pub mod trees;
 pub mod validate;
+
+pub use nullifier_tree;
 
 #[derive(Clone, Debug)]
 pub struct VoteNote {

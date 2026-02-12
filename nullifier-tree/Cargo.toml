@@ -1,0 +1,28 @@
+[package]
+name = "nullifier-tree"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.40"
+hex = "0.4.3"
+orchard = { version = "0.3.0", features = ["vote"] }
+prost = "0.10.3"
+tokio = { version = "1.6", features = ["rt-multi-thread", "tokio-macros"] }
+tonic = { version = "0.7.2", features = ["tls", "tls-roots"] }
+rusqlite = { version = "0.29.0", features = ["bundled"] }
+r2d2_sqlite = "0.22"
+r2d2 = "0.8"
+pasta_curves = "0.5"
+ff = "0.13"
+incrementalmerkletree = "0.3.1"
+http = "0.2.12"
+dotenv = "0.15.0"
+
+[[bin]]
+name = "ingest-nfs"
+path = "src/bin/ingest_nfs.rs"
+
+[[bin]]
+name = "test-non-inclusion"
+path = "src/bin/test_non_inclusion.rs"
