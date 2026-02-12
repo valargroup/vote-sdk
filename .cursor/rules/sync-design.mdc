@@ -24,7 +24,7 @@ Fetch the FigJam board via the Figma MCP:
 - **Tool:** `get_figjam`
 - **fileKey:** `xJmIb490SVXlpUr9y1WrN4`
 - **nodeId:** `0:1`
-- **URL:** https://www.figma.com/board/xJmIb490SVXlpUr9y1WrN4/Wallet-SDK-Operations-to-Cosmos-SDK-Messages?node-id=0-1
+- **URL:** https://www.figma.com/board/CCKJMV6iozvYV8mT6H050a/Wallet-SDK-V2?node-id=0-1&p=f&t=lxxff1UiPJieH173-0
 
 This diagram maps the client/server/chain flow across four sections:
 - **Wallet SDK (Client)** — note identification, keystone signing, ZKP #1 and #2 generation
