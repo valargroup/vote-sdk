@@ -163,6 +163,8 @@ pub struct DelegationAction {
     pub van: Vec<u8>,
     pub gov_comm_rand: Vec<u8>,
     pub dummy_nullifiers: Vec<Vec<u8>>,
+    pub rho_signed: Vec<u8>,
+    pub padded_cmx: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -272,6 +274,8 @@ impl From<voting::DelegationAction> for DelegationAction {
             van: a.van,
             gov_comm_rand: a.gov_comm_rand,
             dummy_nullifiers: a.dummy_nullifiers,
+            rho_signed: a.rho_signed,
+            padded_cmx: a.padded_cmx,
         }
     }
 }
@@ -286,6 +290,8 @@ impl From<DelegationAction> for voting::DelegationAction {
             van: a.van,
             gov_comm_rand: a.gov_comm_rand,
             dummy_nullifiers: a.dummy_nullifiers,
+            rho_signed: a.rho_signed,
+            padded_cmx: a.padded_cmx,
         }
     }
 }

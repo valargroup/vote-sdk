@@ -16,6 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Prefer explicit type annotations for public APIs
 - Use `#[must_use]` on functions returning Results
 - Avoid `unwrap()` in library code, use `expect()` with message or propagate errors
+- Do not delete existing comments unless they are factually wrong or reference removed code. When modifying code near comments, preserve them. When adding new code alongside existing commented code, add comments for the new code at the same level of detail.
 
 ## Debugging
 
@@ -28,6 +29,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 When writing PR descriptions, always describe changes relative to the target branch (e.g., main), not the iterative steps taken during development. The PR description should reflect the actual diff - what code exists in the target branch vs what code exists in the PR branch. Avoid phrases like "renamed X to Y" unless X actually exists in the target branch.
 
 **After pushing to a branch**, always check if there is an open PR for that branch. If so, review whether the PR title and description still accurately reflect the current state of the changes. If the pushed commits have changed the scope or nature of the PR, update the title and/or description accordingly using `gh pr edit`.
+
+## Database Migrations
+
+Do not create new migration files (e.g., `002_*.sql`). This is a pre-production codebase — modify the existing `001_init.sql` directly. Only create separate migrations if explicitly asked.
 
 ## Code Change Guidelines
 

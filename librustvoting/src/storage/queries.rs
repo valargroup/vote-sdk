@@ -152,12 +152,15 @@ pub fn clear_round(conn: &Connection, round_id: &str) -> Result<(), VotingError>
 //   - dummy_nullifiers: random nullifiers generated for padded note slots (§1.3.5).
 //     Each is 32 bytes. Stored so the witness builder can reconstruct padded notes.
 
-/// Persist the blinding factor and dummy nullifiers produced during delegation action construction.
-pub fn store_delegation_secrets(
+/// Persist all delegation action data in a single UPDATE:
+/// blinding factor, dummy nullifiers, constrained rho, and padded note cmx values.
+pub fn store_delegation_data(
     conn: &Connection,
     round_id: &str,
     gov_comm_rand: &[u8],
     dummy_nullifiers: &[Vec<u8>],
+    rho_signed: &[u8],
+    padded_cmx: &[Vec<u8>],
 ) -> Result<(), VotingError> {
     // Serialize dummy nullifiers as a flat byte blob: [nf0 (32 bytes) | nf1 | nf2 | ...].
     // Length 0 means no padding was needed (all 4 notes were real).
@@ -167,17 +170,25 @@ pub fn store_delegation_secrets(
         .flat_map(|n| n.iter().copied())
         .collect();
 
+    // Same flat-blob encoding for padded cmx values.
+    let padded_blob: Vec<u8> = padded_cmx
+        .iter()
+        .flat_map(|c| c.iter().copied())
+        .collect();
+
     let rows = conn
         .execute(
-            "UPDATE rounds SET gov_comm_rand = :rand, dummy_nullifiers = :dummies WHERE round_id = :round_id",
+            "UPDATE rounds SET gov_comm_rand = :rand, dummy_nullifiers = :dummies, rho_signed = :rho, padded_note_data = :padded WHERE round_id = :round_id",
             named_params! {
                 ":rand": gov_comm_rand,
                 ":dummies": dummy_blob,
+                ":rho": rho_signed,
+                ":padded": padded_blob,
                 ":round_id": round_id,
             },
         )
         .map_err(|e| VotingError::Internal {
-            message: format!("failed to store delegation secrets: {}", e),
+            message: format!("failed to store delegation data: {}", e),
         })?;
 
     // If no rows were updated, the round_id doesn't exist in the rounds table.
@@ -216,6 +227,51 @@ pub fn load_dummy_nullifiers(conn: &Connection, round_id: &str) -> Result<Vec<Ve
         })?;
 
     // Split the flat blob back into 32-byte chunks, one per dummy nullifier.
+    if blob.len() % 32 != 0 {
+        return Err(VotingError::Internal {
+            message: format!(
+                "corrupt dummy_nullifiers blob: length {} is not a multiple of 32",
+                blob.len()
+            ),
+        });
+    }
+    Ok(blob.chunks_exact(32).map(|c| c.to_vec()).collect())
+}
+
+// --- Rho & Padded Note Data ---
+
+/// Load rho_signed for a round (32-byte constrained rho).
+pub fn load_rho_signed(conn: &Connection, round_id: &str) -> Result<Vec<u8>, VotingError> {
+    conn.query_row(
+        "SELECT rho_signed FROM rounds WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+        |row| row.get(0),
+    )
+    .map_err(|e| VotingError::InvalidInput {
+        message: format!("no rho_signed for round: {} ({})", round_id, e),
+    })
+}
+
+/// Load padded note cmx data. Returns 0-3 entries of 32 bytes each.
+pub fn load_padded_cmx(conn: &Connection, round_id: &str) -> Result<Vec<Vec<u8>>, VotingError> {
+    let blob: Vec<u8> = conn
+        .query_row(
+            "SELECT padded_note_data FROM rounds WHERE round_id = :round_id",
+            named_params! { ":round_id": round_id },
+            |row| row.get(0),
+        )
+        .map_err(|e| VotingError::InvalidInput {
+            message: format!("no padded_note_data for round: {} ({})", round_id, e),
+        })?;
+
+    if blob.len() % 32 != 0 {
+        return Err(VotingError::Internal {
+            message: format!(
+                "corrupt padded_note_data blob: length {} is not a multiple of 32",
+                blob.len()
+            ),
+        });
+    }
     Ok(blob.chunks_exact(32).map(|c| c.to_vec()).collect())
 }
 

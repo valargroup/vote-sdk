@@ -85,11 +85,13 @@ impl VotingDb {
         let action = crate::action::construct_delegation_action(
             hotkey, notes, &params, nk, g_d_new_x, pk_d_new_x,
         )?;
-        queries::store_delegation_secrets(
+        queries::store_delegation_data(
             &conn,
             round_id,
             &action.gov_comm_rand,
             &action.dummy_nullifiers,
+            &action.rho_signed,
+            &action.padded_cmx,
         )?;
         Ok(action)
     }
@@ -283,12 +285,28 @@ mod tests {
         assert_eq!(action.van.len(), 32);
         assert_eq!(action.gov_comm_rand.len(), 32);
 
+        // rho_signed is 32 bytes, non-zero
+        assert_eq!(action.rho_signed.len(), 32);
+        assert_ne!(action.rho_signed, vec![0u8; 32]);
+
+        // padded_cmx: 3 padded notes (1 real + 3 padded = 4)
+        assert_eq!(action.padded_cmx.len(), 3);
+        for cmx in &action.padded_cmx {
+            assert_eq!(cmx.len(), 32);
+        }
+
         // Verify delegation secrets were persisted
         let conn = db.conn();
         let stored_rand = queries::load_gov_comm_rand(&conn, ROUND_ID).unwrap();
         assert_eq!(stored_rand, action.gov_comm_rand);
         let stored_dummies = queries::load_dummy_nullifiers(&conn, ROUND_ID).unwrap();
         assert_eq!(stored_dummies, action.dummy_nullifiers);
+
+        // Verify rho_signed and padded_cmx round-trip through DB
+        let stored_rho = queries::load_rho_signed(&conn, ROUND_ID).unwrap();
+        assert_eq!(stored_rho, action.rho_signed);
+        let stored_padded = queries::load_padded_cmx(&conn, ROUND_ID).unwrap();
+        assert_eq!(stored_padded, action.padded_cmx);
     }
 
     #[test]
@@ -317,6 +335,8 @@ mod tests {
             van: vec![0x02; 32],
             gov_comm_rand: vec![0x03; 32],
             dummy_nullifiers: vec![],
+            rho_signed: vec![0x04; 32],
+            padded_cmx: vec![],
         };
         let inclusion = vec![vec![0x01; 32]; 4];
         let exclusion = vec![vec![0x02; 32]; 4];

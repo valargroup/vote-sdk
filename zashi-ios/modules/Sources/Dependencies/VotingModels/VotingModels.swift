@@ -205,8 +205,22 @@ public struct DelegationAction: Equatable, Sendable {
     public let govCommRand: Data
     /// Random nullifiers used for padded dummy notes (needed for circuit witness).
     public let dummyNullifiers: [Data]
+    /// Constrained rho for the signed note (32 bytes). Spec §1.3.4.1.
+    public let rhoSigned: Data
+    /// Extracted note commitments (cmx) for padded dummy notes.
+    public let paddedCmx: [Data]
 
-    public init(actionBytes: Data, rk: Data, sighash: Data, govNullifiers: [Data], van: Data, govCommRand: Data, dummyNullifiers: [Data]) {
+    public init(
+        actionBytes: Data,
+        rk: Data,
+        sighash: Data,
+        govNullifiers: [Data],
+        van: Data,
+        govCommRand: Data,
+        dummyNullifiers: [Data],
+        rhoSigned: Data,
+        paddedCmx: [Data]
+    ) {
         self.actionBytes = actionBytes
         self.rk = rk
         self.sighash = sighash
@@ -214,6 +228,8 @@ public struct DelegationAction: Equatable, Sendable {
         self.van = van
         self.govCommRand = govCommRand
         self.dummyNullifiers = dummyNullifiers
+        self.rhoSigned = rhoSigned
+        self.paddedCmx = paddedCmx
     }
 }
 

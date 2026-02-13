@@ -152,7 +152,9 @@ extension VotingCryptoClient: DependencyKey {
                     govNullifiers: result.govNullifiers,
                     van: result.van,
                     govCommRand: result.govCommRand,
-                    dummyNullifiers: result.dummyNullifiers
+                    dummyNullifiers: result.dummyNullifiers,
+                    rhoSigned: result.rhoSigned,
+                    paddedCmx: result.paddedCmx
                 )
             },
             storeTreeState: { roundId, treeState in
@@ -168,7 +170,9 @@ extension VotingCryptoClient: DependencyKey {
                     govNullifiers: action.govNullifiers,
                     van: action.van,
                     govCommRand: action.govCommRand,
-                    dummyNullifiers: action.dummyNullifiers
+                    dummyNullifiers: action.dummyNullifiers,
+                    rhoSigned: action.rhoSigned,
+                    paddedCmx: action.paddedCmx
                 )
                 let witness = try db.buildDelegationWitness(
                     roundId: roundId,

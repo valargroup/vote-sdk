@@ -78,6 +78,8 @@ mod tests {
             van: vec![0x02; 32],
             gov_comm_rand: vec![0x03; 32],
             dummy_nullifiers: vec![],
+            rho_signed: vec![0x04; 32],
+            padded_cmx: vec![],
         }
     }
 

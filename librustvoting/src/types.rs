@@ -51,6 +51,11 @@ pub struct DelegationAction {
     pub gov_comm_rand: Vec<u8>,
     /// Random nullifiers used for padded dummy notes (needed for circuit witness in later steps).
     pub dummy_nullifiers: Vec<Vec<u8>>,
+    /// Constrained rho for the signed note (32 bytes). Spec §1.3.4.1.
+    pub rho_signed: Vec<u8>,
+    /// Extracted note commitments (cmx) for padded dummy notes.
+    /// Needed for ZKP witness construction in later steps.
+    pub padded_cmx: Vec<Vec<u8>>,
 }
 
 /// El Gamal ciphertext of a voting share.

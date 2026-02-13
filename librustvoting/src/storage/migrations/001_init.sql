@@ -8,7 +8,9 @@ CREATE TABLE rounds (
     phase               INTEGER NOT NULL DEFAULT 0,
     created_at          INTEGER NOT NULL,
     gov_comm_rand       BLOB,
-    dummy_nullifiers    BLOB
+    dummy_nullifiers    BLOB,
+    rho_signed          BLOB,
+    padded_note_data    BLOB
 );
 
 CREATE TABLE cached_tree_state (

@@ -830,10 +830,12 @@ public struct DelegationAction {
     public var van: Data
     public var govCommRand: Data
     public var dummyNullifiers: [Data]
+    public var rhoSigned: Data
+    public var paddedCmx: [Data]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(actionBytes: Data, rk: Data, sighash: Data, govNullifiers: [Data], van: Data, govCommRand: Data, dummyNullifiers: [Data]) {
+    public init(actionBytes: Data, rk: Data, sighash: Data, govNullifiers: [Data], van: Data, govCommRand: Data, dummyNullifiers: [Data], rhoSigned: Data, paddedCmx: [Data]) {
         self.actionBytes = actionBytes
         self.rk = rk
         self.sighash = sighash
@@ -841,6 +843,8 @@ public struct DelegationAction {
         self.van = van
         self.govCommRand = govCommRand
         self.dummyNullifiers = dummyNullifiers
+        self.rhoSigned = rhoSigned
+        self.paddedCmx = paddedCmx
     }
 }
 
@@ -872,6 +876,12 @@ extension DelegationAction: Equatable, Hashable {
         if lhs.dummyNullifiers != rhs.dummyNullifiers {
             return false
         }
+        if lhs.rhoSigned != rhs.rhoSigned {
+            return false
+        }
+        if lhs.paddedCmx != rhs.paddedCmx {
+            return false
+        }
         return true
     }
 
@@ -883,6 +893,8 @@ extension DelegationAction: Equatable, Hashable {
         hasher.combine(van)
         hasher.combine(govCommRand)
         hasher.combine(dummyNullifiers)
+        hasher.combine(rhoSigned)
+        hasher.combine(paddedCmx)
     }
 }
 
@@ -901,7 +913,9 @@ public struct FfiConverterTypeDelegationAction: FfiConverterRustBuffer {
                 govNullifiers: FfiConverterSequenceData.read(from: &buf), 
                 van: FfiConverterData.read(from: &buf), 
                 govCommRand: FfiConverterData.read(from: &buf), 
-                dummyNullifiers: FfiConverterSequenceData.read(from: &buf)
+                dummyNullifiers: FfiConverterSequenceData.read(from: &buf),
+                rhoSigned: FfiConverterData.read(from: &buf),
+                paddedCmx: FfiConverterSequenceData.read(from: &buf)
         )
     }
 
@@ -913,6 +927,8 @@ public struct FfiConverterTypeDelegationAction: FfiConverterRustBuffer {
         FfiConverterData.write(value.van, into: &buf)
         FfiConverterData.write(value.govCommRand, into: &buf)
         FfiConverterSequenceData.write(value.dummyNullifiers, into: &buf)
+        FfiConverterData.write(value.rhoSigned, into: &buf)
+        FfiConverterSequenceData.write(value.paddedCmx, into: &buf)
     }
 }
 
