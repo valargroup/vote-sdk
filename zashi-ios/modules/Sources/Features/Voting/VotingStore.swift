@@ -126,10 +126,10 @@ public struct Voting {
         case dismissFlow
         case goBack
 
-        // Wallet notes / voting weight / hotkey
-        case fetchVotingWeight
+        // Initialization (DB, wallet notes, hotkey)
+        case initialize
         case votingWeightLoaded(UInt64, [NoteInfo])
-        case votingWeightFailed(String)
+        case initializeFailed(String)
         case hotkeyLoaded(String)
 
         // DB state stream (single source of truth)
@@ -177,9 +177,9 @@ public struct Voting {
                 }
                 return .none
 
-            // MARK: - Wallet Notes / Voting Weight
+            // MARK: - Initialization
 
-            case .fetchVotingWeight:
+            case .initialize:
                 let snapshotHeight = state.votingRound.snapshotHeight
                 let roundId = state.roundId
                 let network = zcashSDKEnvironment.network
@@ -217,7 +217,7 @@ public struct Voting {
                     }
                 } catch: { error, send in
                     print("[Voting] Failed to load wallet notes: \(error)")
-                    await send(.votingWeightFailed(error.localizedDescription))
+                    await send(.initializeFailed(error.localizedDescription))
                 }
 
             case .votingWeightLoaded(let weight, let notes):
@@ -225,8 +225,8 @@ public struct Voting {
                 state.walletNotes = notes
                 return .none
 
-            case .votingWeightFailed(let error):
-                print("[Voting] Wallet notes error: \(error)")
+            case .initializeFailed(let error):
+                print("[Voting] Initialization error: \(error)")
                 return .none
 
             case .hotkeyLoaded(let address):
@@ -275,7 +275,7 @@ public struct Voting {
                     .cancellable(id: cancelStateStreamId, cancelInFlight: true),
                     // Run delegation proof pipeline
                     .run { [votingCrypto, mnemonic, walletStorage] send in
-                        // DB already opened by fetchVotingWeight
+                        // DB already opened by initialize
 
                         // Clear any previous data for this round, then initialize
                         try? await votingCrypto.clearRound(roundId)
@@ -288,7 +288,7 @@ public struct Voting {
                         )
                         try await votingCrypto.initRound(params, nil)
 
-                        // Reload hotkey from keychain (generated during fetchVotingWeight)
+                        // Reload hotkey from keychain (generated during initialize)
                         let phrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
                         let seed = try mnemonic.toSeed(phrase)
                         let hotkey = try await votingCrypto.generateHotkey(roundId, seed)

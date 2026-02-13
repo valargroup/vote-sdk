@@ -19,7 +19,7 @@ public struct VotingView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .onAppear {
-            store.send(.fetchVotingWeight)
+            store.send(.initialize)
         }
     }
 
