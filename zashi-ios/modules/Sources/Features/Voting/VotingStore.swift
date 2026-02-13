@@ -2,7 +2,11 @@ import Combine
 import Foundation
 import ComposableArchitecture
 import DatabaseFiles
+import Generated
 import MnemonicClient
+import Pasteboard
+import UIComponents
+import Utils
 import VotingAPIClient
 import VotingCryptoClient
 import VotingModels
@@ -13,6 +17,7 @@ import ZcashSDKEnvironment
 public struct Voting {
     @Dependency(\.databaseFiles) var databaseFiles
     @Dependency(\.mnemonic) var mnemonic
+    @Dependency(\.pasteboard) var pasteboard
     @Dependency(\.votingAPI) var votingAPI
     @Dependency(\.votingCrypto) var votingCrypto
     @Dependency(\.walletStorage) var walletStorage
@@ -43,6 +48,8 @@ public struct Voting {
 
         /// Hotkey address derived from keychain mnemonic, shown on delegation signing screen.
         public var hotkeyAddress: String?
+
+        @Shared(.inMemory(.toast)) public var toast: Toast.Edge? = nil
 
         public var selectedProposalId: UInt32?
 
@@ -136,6 +143,7 @@ public struct Voting {
         case votingDbStateChanged(VotingDbState)
 
         // Delegation signing
+        case copyHotkeyAddress
         case delegationApproved
         case delegationRejected
 
@@ -250,6 +258,13 @@ public struct Voting {
                 return .none
 
             // MARK: - Delegation Signing
+
+            case .copyHotkeyAddress:
+                if let address = state.hotkeyAddress {
+                    pasteboard.setString(address.redacted)
+                    state.$toast.withLock { $0 = .top(L10n.General.copiedToTheClipboard) }
+                }
+                return .none
 
             case .delegationApproved:
                 state.screenStack = [.proposalList]

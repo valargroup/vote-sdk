@@ -1119,6 +1119,7 @@ let package = Package(
                 "DatabaseFiles",
                 "Generated",
                 "MnemonicClient",
+                "Pasteboard",
                 "UIComponents",
                 "VotingAPIClient",
                 "VotingCryptoClient",
