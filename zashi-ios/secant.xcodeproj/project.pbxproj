@@ -1662,7 +1662,7 @@
 				CURRENT_PROJECT_VERSION = 9;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_ASSET_PATHS = "\"secant/Preview Content\"";
-				DEVELOPMENT_TEAM = RLPRR8CPQG;
+				DEVELOPMENT_TEAM = LY62Q5TNLP;
 				ENABLE_BITCODE = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -1674,7 +1674,7 @@
 				);
 				MARKETING_VERSION = 1.2;
 				OTHER_SWIFT_FLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "co.electriccoin.secant-mainnet";
+				PRODUCT_BUNDLE_IDENTIFIER = "co.valargroup.secant-mainnet";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG UNREDACTED SECANT_MAINNET";
 				SWIFT_VERSION = 5.0;
@@ -1692,7 +1692,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_ASSET_PATHS = "\"secant/Preview Content\"";
-				DEVELOPMENT_TEAM = RLPRR8CPQG;
+				DEVELOPMENT_TEAM = LY62Q5TNLP;
 				ENABLE_BITCODE = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -1704,7 +1704,7 @@
 				);
 				MARKETING_VERSION = 1.2;
 				OTHER_SWIFT_FLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "co.electriccoin.secant-mainnet";
+				PRODUCT_BUNDLE_IDENTIFIER = "co.valargroup.secant-mainnet";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = SECANT_MAINNET;
 				SWIFT_VERSION = 5.0;
@@ -2100,7 +2100,7 @@
 				);
 				MARKETING_VERSION = 2.4.12;
 				OTHER_SWIFT_FLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "co.electriccoin.secant-mainnet";
+				PRODUCT_BUNDLE_IDENTIFIER = "co.valargroup.secant-mainnet";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG UNREDACTED SECANT_MAINNET";
 				SWIFT_UPCOMING_FEATURE_CONCISE_MAGIC_FILE = NO;
@@ -2140,7 +2140,7 @@
 				);
 				MARKETING_VERSION = 2.4.12;
 				OTHER_SWIFT_FLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "co.electriccoin.secant-mainnet";
+				PRODUCT_BUNDLE_IDENTIFIER = "co.valargroup.secant-mainnet";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = SECANT_MAINNET;
 				SWIFT_UPCOMING_FEATURE_CONCISE_MAGIC_FILE = NO;
@@ -2255,7 +2255,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_ASSET_PATHS = "\"secant/Preview Content\"";
-				DEVELOPMENT_TEAM = RLPRR8CPQG;
+				DEVELOPMENT_TEAM = LY62Q5TNLP;
 				ENABLE_BITCODE = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -2267,7 +2267,7 @@
 				);
 				MARKETING_VERSION = 1.2;
 				OTHER_SWIFT_FLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "co.electriccoin.secant-mainnet";
+				PRODUCT_BUNDLE_IDENTIFIER = "co.valargroup.secant-mainnet";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = SECANT_MAINNET;
 				SWIFT_VERSION = 5.0;
@@ -2341,7 +2341,7 @@
 				);
 				MARKETING_VERSION = 2.4.12;
 				OTHER_SWIFT_FLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "co.electriccoin.secant-mainnet";
+				PRODUCT_BUNDLE_IDENTIFIER = "co.valargroup.secant-mainnet";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "SECANT_MAINNET SECANT_DISTRIB";
 				SWIFT_UPCOMING_FEATURE_CONCISE_MAGIC_FILE = NO;
@@ -2462,7 +2462,7 @@
 				9E4AB2BC2BA1C05100F5D6DB /* Release-AppStore */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = "Release-Testflight";
+			defaultConfigurationName = "Release-AppStore";
 		};
 		0D4E7A0026B364170058B01E /* Build configuration list for PBXProject "secant" */ = {
 			isa = XCConfigurationList;
@@ -2472,7 +2472,7 @@
 				9E4AB2BA2BA1C05100F5D6DB /* Release-AppStore */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = "Release-Testflight";
+			defaultConfigurationName = "Release-AppStore";
 		};
 		0D4E7A2A26B364180058B01E /* Build configuration list for PBXNativeTarget "secant-testnet" */ = {
 			isa = XCConfigurationList;
@@ -2482,7 +2482,7 @@
 				9E4AB2BB2BA1C05100F5D6DB /* Release-AppStore */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = "Release-Testflight";
+			defaultConfigurationName = "Release-AppStore";
 		};
 		0D4E7A2D26B364180058B01E /* Build configuration list for PBXNativeTarget "secantTests" */ = {
 			isa = XCConfigurationList;
@@ -2492,7 +2492,7 @@
 				9E4AB2BD2BA1C05100F5D6DB /* Release-AppStore */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = "Release-Testflight";
+			defaultConfigurationName = "Release-AppStore";
 		};
 		0D4E7A3026B364180058B01E /* Build configuration list for PBXNativeTarget "secantUITests" */ = {
 			isa = XCConfigurationList;
@@ -2502,7 +2502,7 @@
 				9E4AB2BE2BA1C05100F5D6DB /* Release-AppStore */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = "Release-Testflight";
+			defaultConfigurationName = "Release-AppStore";
 		};
 		9E41FFB72CB2814500783CFD /* Build configuration list for PBXNativeTarget "zashi-testnet" */ = {
 			isa = XCConfigurationList;
@@ -2512,7 +2512,7 @@
 				9E41FFBA2CB2814500783CFD /* Release-AppStore */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = "Release-Testflight";
+			defaultConfigurationName = "Release-AppStore";
 		};
 		9E4AB2B42BA1BEE900F5D6DB /* Build configuration list for PBXNativeTarget "secant-distrib" */ = {
 			isa = XCConfigurationList;
@@ -2522,7 +2522,7 @@
 				9E4AB2BF2BA1C05100F5D6DB /* Release-AppStore */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = "Release-Testflight";
+			defaultConfigurationName = "Release-AppStore";
 		};
 		9E5AB47E2C94777800065483 /* Build configuration list for PBXNativeTarget "zashi-internal" */ = {
 			isa = XCConfigurationList;
@@ -2532,7 +2532,7 @@
 				9E5AB4812C94777800065483 /* Release-AppStore */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = "Release-Testflight";
+			defaultConfigurationName = "Release-AppStore";
 		};
 /* End XCConfigurationList section */
 
