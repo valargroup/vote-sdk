@@ -103,6 +103,7 @@ Our vote commitment tree is structurally the same (append-only, fixed-depth Merk
 | Aspect | ZCash mainchain | Vote commitment tree |
 |---|---|---|
 | Hash function | Sinsemilla (Sapling/Orchard) | **Poseidon** (cheaper in-circuit) |
+| Layer tagging | Sinsemilla prepends 10-bit level prefix | **No layer tag** — `Poseidon(left, right)` is the same at every level ([rationale](#no-layer-tagging-in-poseidon-combine)) |
 | Depth | 32 | 32 |
 | Leaf contents | Note commitments only | **Both VANs and VCs** (domain-separated) |
 | Where it lives | ZCash mainnet | **Vote chain** (Cosmos SDK) |
@@ -168,6 +169,33 @@ The existing vote chain already has `GET /zally/v1/commitment-tree/latest` and `
 - **No trial decryption.** All leaves in the vote tree are public (VAN and VC values are public inputs to the chain). The wallet does not need to decrypt anything — it just appends every leaf it sees. Position discovery is trivial: the wallet knows its own VAN index from when it submitted MsgDelegateVote.
 - **Sparse witnesses apply the same way as Zcash.** A wallet only needs a Merkle path for its own VAN (ZKP #2). A helper server only needs paths for the specific VCs it was delegated (ZKP #3). Neither needs paths for every leaf. Both still must receive all leaves (or subtree roots) to keep sibling hashes current, but only the subtrees touching their marked positions need to be materialized — exactly as ShardTree works for Zcash wallets.
 - **Poseidon hash function.** Must match the circuit's Poseidon (P128Pow5T3 over Pallas Fp). This crate uses the same `PoseidonHasher` as `imt-tree`.
+
+### No layer tagging in Poseidon `combine`
+
+Orchard's Sinsemilla hashes internal nodes as `Sinsemilla(level_prefix || left || right)`, where the 10-bit level prefix acts as domain separation across tree depths. This prevents **second-preimage attacks across levels**: without a level tag, a valid internal node at level *k* could be reinterpreted as a leaf (or a node at a different level) to construct a fraudulent Merkle path that still hashes to the correct root.
+
+Our vote commitment tree does **not** include the level in Poseidon:
+
+```rust
+// hash.rs
+fn combine(_level: Level, left: &Self, right: &Self) -> Self {
+    MerkleHashVote(poseidon_hash(left.0, right.0))
+}
+```
+
+This is a deliberate choice. Three properties make the attack infeasible in our setting:
+
+1. **Fixed depth enforced by circuits.** ZKP #2 and ZKP #3 hardcode `TREE_DEPTH = 32` — every Merkle path verified in-circuit has exactly 32 sibling hashes. The verifier rejects paths of any other length, so an attacker cannot present an internal node as a leaf in a "shorter" tree. The level ambiguity only matters if the verifier accepts variable-depth proofs, which ours does not.
+
+2. **Consensus-gated insertion.** Only `MsgDelegateVote` and `MsgCastVote` can append leaves, and both require valid ZKPs verified on-chain. An attacker cannot insert an arbitrary field element as a leaf — they must produce a valid delegation proof (ZKP #1) or vote proof (ZKP #2).
+
+3. **Domain-separated commitments with randomness.** Leaves are `Poseidon(DOMAIN_VAN, hotkey, weight, round, authority, rand)` or `Poseidon(DOMAIN_VC, shares_hash, proposal_id, decision)`. The probability that such a commitment collides with an internal node value `Poseidon(left_child, right_child)` is ~1/2^254 (negligible over the Pallas field).
+
+Property (1) alone is sufficient: even if an attacker could somehow produce a leaf equal to an internal node, the circuit would still require a 32-element path from that leaf to the root. The "reinterpret the tree at a different depth" attack is structurally impossible.
+
+**Trade-off**: Omitting the level tag saves one constraint per hash in the circuit's Merkle path verification (no level field element to allocate or constrain). Over 32 levels that is 32 fewer constraints per ZKP #2 / ZKP #3 proof, with no security cost given the properties above.
+
+**If this changes**: If the protocol ever allows variable-depth proofs or adversarial leaf insertion without a ZKP gate, layer tagging should be revisited. Adding it later would change every tree root, Merkle path, and on-chain anchor — effectively a hard fork.
 
 ## How the tree participates in each message
 
