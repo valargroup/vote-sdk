@@ -103,7 +103,7 @@ pub struct SqliteShardStore<C, H, const SHARD_HEIGHT: u8> {
 impl<C, H, const SHARD_HEIGHT: u8> SqliteShardStore<C, H, SHARD_HEIGHT> {
     const SHARD_ROOT_LEVEL: Level = Level::new(SHARD_HEIGHT);
 
-    pub(crate) fn from_connection(
+    pub fn from_connection(
         conn: C,
         table_prefix: &'static str,
     ) -> Result<Self, rusqlite::Error> {

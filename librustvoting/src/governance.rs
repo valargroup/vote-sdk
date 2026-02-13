@@ -39,7 +39,8 @@ pub fn bytes_to_fp(bytes: &[u8]) -> Result<pallas::Base, VotingError> {
 
 /// Convert a Pallas base field element to 32 bytes.
 fn fp_to_bytes(fp: pallas::Base) -> Vec<u8> {
-    fp.to_repr().as_ref().to_vec()
+    let repr: [u8; 32] = fp.to_repr();
+    repr.to_vec()
 }
 
 /// Derive governance nullifier (per spec §1.3.2, condition 14).
