@@ -298,7 +298,7 @@ mod tests {
     use super::*;
     use crate::{
         constants::MERKLE_DEPTH_ORCHARD,
-        delegation::imt::SpacedLeafImtProvider,
+        delegation::imt::{SpacedLeafImtProvider, IMT_DEPTH},
         keys::{FullViewingKey, Scope, SpendingKey},
         note::{commitment::ExtractedNoteCommitment, Note, Rho},
         tree::{MerkleHashOrchard, MerklePath},
@@ -355,14 +355,18 @@ mod tests {
         let l2_0 = MerkleHashOrchard::combine(Level::from(1), &l1_0, &l1_1);
 
         // Hash up through the remaining levels with empty subtree siblings.
+        // The delegation circuit uses IMT_DEPTH (29) levels for the note commitment
+        // Merkle path, so nc_root must be the level-29 root.
         let mut current = l2_0;
-        for level in 2..MERKLE_DEPTH_ORCHARD {
+        for level in 2..IMT_DEPTH {
             let sibling = MerkleHashOrchard::empty_root(Level::from(level as u8));
             current = MerkleHashOrchard::combine(Level::from(level as u8), &current, &sibling);
         }
         let nc_root = current.inner();
 
         // Build Merkle paths and RealNoteInputs.
+        // MerklePath requires MERKLE_DEPTH_ORCHARD (32) elements, but the
+        // delegation builder only uses the first IMT_DEPTH (29).
         let l1 = [l1_0, l1_1];
         let mut inputs = Vec::with_capacity(n);
         for (i, note) in notes.into_iter().enumerate() {
@@ -371,10 +375,11 @@ mod tests {
             auth_path[0] = leaves[i ^ 1];
             // Level 1: sibling pair hash.
             auth_path[1] = l1[1 - (i >> 1)];
-            // Levels 2+: empty subtree roots.
-            for level in 2..MERKLE_DEPTH_ORCHARD {
+            // Levels 2..IMT_DEPTH-1: empty subtree roots.
+            for level in 2..IMT_DEPTH {
                 auth_path[level] = MerkleHashOrchard::empty_root(Level::from(level as u8));
             }
+            // Levels IMT_DEPTH..MERKLE_DEPTH_ORCHARD: unused by delegation circuit.
             let merkle_path = MerklePath::from_parts(i as u32, auth_path);
 
             let real_nf = note.nullifier(fvk);

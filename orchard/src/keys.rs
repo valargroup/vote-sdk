@@ -54,7 +54,7 @@ impl SpendingKey {
     /// derived according to [ZIP 32].
     ///
     /// [ZIP 32]: https://zips.z.cash/zip-0032
-    pub(crate) fn random(rng: &mut impl RngCore) -> Self {
+    pub fn random(rng: &mut impl RngCore) -> Self {
         loop {
             let mut bytes = [0; 32];
             rng.fill_bytes(&mut bytes);

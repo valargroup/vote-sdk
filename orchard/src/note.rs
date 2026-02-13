@@ -50,7 +50,7 @@ impl Rho {
     /// of the note being spent in the [`Action`] under construction.
     ///
     /// [`Action`]: crate::action::Action
-    pub(crate) fn from_nf_old(nf: Nullifier) -> Self {
+    pub fn from_nf_old(nf: Nullifier) -> Self {
         Rho(nf.0)
     }
 
@@ -186,7 +186,7 @@ impl Note {
     /// Defined in [Zcash Protocol Spec § 4.7.3: Sending Notes (Orchard)][orchardsend].
     ///
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
-    pub(crate) fn new(
+    pub fn new(
         recipient: Address,
         value: NoteValue,
         rho: Rho,
@@ -205,7 +205,7 @@ impl Note {
     /// Defined in [Zcash Protocol Spec § 4.8.3: Dummy Notes (Orchard)][orcharddummynotes].
     ///
     /// [orcharddummynotes]: https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
-    pub(crate) fn dummy(
+    pub fn dummy(
         rng: &mut impl RngCore,
         rho: Option<Rho>,
     ) -> (SpendingKey, FullViewingKey, Self) {

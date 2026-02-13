@@ -6,7 +6,8 @@ INGEST_DIR  = nullifier-ingest
 	test test-unit test-integration test-api \
 	fixtures-ts circuits circuits-test fixtures \
 	test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi \
-	ingest ingest-status ingest-test ingest-proof ingest-clean ingest-serve
+	ingest ingest-status ingest-test ingest-proof ingest-clean ingest-serve \
+	ingest-test-integration
 
 install:
 	$(MAKE) -C $(SDK_DIR) install
@@ -93,3 +94,6 @@ ingest-serve: ## Start the nullifier exclusion proof query server
 
 ingest-clean: ## Remove nullifier build artifacts and database
 	$(MAKE) -C $(INGEST_DIR) clean
+
+ingest-test-integration: ## Run IMT ↔ delegation-circuit ZK integration test
+	$(MAKE) -C $(INGEST_DIR) test-integration
