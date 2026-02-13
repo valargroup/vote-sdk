@@ -7,6 +7,5 @@
         "nullifier-ingest/nullifier-tree/Cargo.toml",
         "nullifier-ingest/service/Cargo.toml",
         "orchard/Cargo.toml"
-    ],
-    "rust-analyzer.cargo.features": ["delegation"]
+    ]
 }
