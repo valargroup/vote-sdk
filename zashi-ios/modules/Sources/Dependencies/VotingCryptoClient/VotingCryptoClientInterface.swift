@@ -33,19 +33,15 @@ public struct VotingCryptoClient {
 
     // --- Crypto operations ---
     public var generateHotkey: @Sendable (_ roundId: String, _ seed: [UInt8]) async throws -> VotingHotkey
-    public var generateDelegationInputs: @Sendable (
+    /// High-level boundary for sign-action generation:
+    /// derives delegation inputs from seeds and constructs a valid delegation action.
+    public var buildDelegationSignAction: @Sendable (
+        _ roundId: String,
+        _ notes: [NoteInfo],
         _ senderSeed: [UInt8],
         _ hotkeySeed: [UInt8],
         _ networkId: UInt32,
         _ accountIndex: UInt32
-    ) async throws -> DelegationInputs
-    public var constructDelegationAction: @Sendable (
-        _ roundId: String,
-        _ notes: [NoteInfo],
-        _ fvkBytes: Data,
-        _ gdNewX: Data,
-        _ pkdNewX: Data,
-        _ hotkeyRawAddress: Data
     ) async throws -> DelegationAction
     public var storeTreeState: @Sendable (_ roundId: String, _ treeState: Data) async throws -> Void
     public var buildDelegationWitness: @Sendable (

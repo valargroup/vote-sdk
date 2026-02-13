@@ -192,32 +192,6 @@ public struct VotingHotkey: Equatable, Sendable {
 
 // MARK: - Delegation
 
-/// Inputs needed to construct a delegation action.
-public struct DelegationInputs: Equatable, Sendable {
-    public let fvkBytes: Data
-    public let gdNewX: Data
-    public let pkdNewX: Data
-    public let hotkeyRawAddress: Data
-    public let hotkeyPublicKey: Data
-    public let hotkeyAddress: String
-
-    public init(
-        fvkBytes: Data,
-        gdNewX: Data,
-        pkdNewX: Data,
-        hotkeyRawAddress: Data,
-        hotkeyPublicKey: Data,
-        hotkeyAddress: String
-    ) {
-        self.fvkBytes = fvkBytes
-        self.gdNewX = gdNewX
-        self.pkdNewX = pkdNewX
-        self.hotkeyRawAddress = hotkeyRawAddress
-        self.hotkeyPublicKey = hotkeyPublicKey
-        self.hotkeyAddress = hotkeyAddress
-    }
-}
-
 /// Intermediate client-side type: the built action before proof generation.
 public struct DelegationAction: Equatable, Sendable {
     public let actionBytes: Data

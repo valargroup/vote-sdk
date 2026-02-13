@@ -129,30 +129,31 @@ extension VotingCryptoClient: DependencyKey {
             generateHotkey: { roundId, seed in
                 let db = try await dbActor.database()
                 let hotkey = try db.generateHotkey(roundId: roundId, seed: Data(seed))
-                return VotingHotkey(
+                return VotingModels.VotingHotkey(
                     secretKey: hotkey.secretKey,
                     publicKey: hotkey.publicKey,
                     address: hotkey.address
                 )
             },
-            generateDelegationInputs: { senderSeed, hotkeySeed, networkId, accountIndex in
-                let inputs = try ZcashVotingFFI.generateDelegationInputs(
+            buildDelegationSignAction: { roundId, notes, senderSeed, hotkeySeed, networkId, accountIndex in
+                let db = try await dbActor.database()
+                let ffiHotkey = try db.generateHotkey(roundId: roundId, seed: Data(hotkeySeed))
+                let hotkey = VotingModels.VotingHotkey(
+                    secretKey: ffiHotkey.secretKey,
+                    publicKey: ffiHotkey.publicKey,
+                    address: ffiHotkey.address
+                )
+                let ffiInputs = try ZcashVotingFFI.generateDelegationInputs(
                     senderSeed: Data(senderSeed),
                     hotkeySeed: Data(hotkeySeed),
                     networkId: networkId,
                     accountIndex: accountIndex
                 )
-                return DelegationInputs(
-                    fvkBytes: inputs.fvkBytes,
-                    gdNewX: inputs.gDNewX,
-                    pkdNewX: inputs.pkDNewX,
-                    hotkeyRawAddress: inputs.hotkeyRawAddress,
-                    hotkeyPublicKey: inputs.hotkeyPublicKey,
-                    hotkeyAddress: inputs.hotkeyAddress
-                )
-            },
-            constructDelegationAction: { roundId, notes, fvkBytes, gdNewX, pkdNewX, hotkeyRawAddress in
-                let db = try await dbActor.database()
+                guard hotkey.publicKey == ffiInputs.hotkeyPublicKey,
+                      hotkey.address == ffiInputs.hotkeyAddress
+                else {
+                    throw VotingCryptoError.hotkeySeedBindingMismatch
+                }
                 let ffiNotes = notes.map {
                     ZcashVotingFFI.NoteInfo(
                         commitment: $0.commitment,
@@ -164,10 +165,10 @@ extension VotingCryptoClient: DependencyKey {
                 let result = try db.constructDelegationAction(
                     roundId: roundId,
                     notes: ffiNotes,
-                    fvkBytes: fvkBytes,
-                    gDNewX: gdNewX,
-                    pkDNewX: pkdNewX,
-                    hotkeyRawAddress: hotkeyRawAddress
+                    fvkBytes: ffiInputs.fvkBytes,
+                    gDNewX: ffiInputs.gDNewX,
+                    pkDNewX: ffiInputs.pkDNewX,
+                    hotkeyRawAddress: ffiInputs.hotkeyRawAddress
                 )
                 return DelegationAction(
                     actionBytes: result.actionBytes,
@@ -367,9 +368,21 @@ private actor DatabaseActor {
 
 // MARK: - Helpers
 
-enum VotingCryptoError: Error {
+enum VotingCryptoError: LocalizedError {
     case proofFailed(String)
     case databaseNotOpen
+    case hotkeySeedBindingMismatch
+
+    var errorDescription: String? {
+        switch self {
+        case .proofFailed(let reason):
+            return "Delegation proof generation failed: \(reason)"
+        case .databaseNotOpen:
+            return "Voting database is not open."
+        case .hotkeySeedBindingMismatch:
+            return "Hotkey derivation mismatch while building delegation sign action."
+        }
+    }
 }
 
 private extension VoteChoice {

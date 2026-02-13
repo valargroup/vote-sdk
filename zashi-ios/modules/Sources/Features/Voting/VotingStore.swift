@@ -15,15 +15,12 @@ import ZcashSDKEnvironment
 
 private enum VotingFlowError: LocalizedError {
     case missingActiveSession
-    case hotkeySeedBindingMismatch
     case missingVoteCommitmentBundle
 
     var errorDescription: String? {
         switch self {
         case .missingActiveSession:
             return "missing active voting session"
-        case .hotkeySeedBindingMismatch:
-            return "hotkey from generateHotkey does not match delegation input hotkey material"
         case .missingVoteCommitmentBundle:
             return "vote commitment build completed without a commitment bundle"
         }
@@ -352,25 +349,13 @@ public struct Voting {
                         let senderSeed = try mnemonic.toSeed(senderPhrase)
                         let hotkeyPhrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
                         let hotkeySeed = try mnemonic.toSeed(hotkeyPhrase)
-                        let hotkey = try await votingCrypto.generateHotkey(roundId, hotkeySeed)
-                        let delegationInputs = try await votingCrypto.generateDelegationInputs(
+                        let action = try await votingCrypto.buildDelegationSignAction(
+                            roundId,
+                            cachedNotes,
                             senderSeed,
                             hotkeySeed,
                             networkId,
                             accountIndex
-                        )
-                        guard hotkey.publicKey == delegationInputs.hotkeyPublicKey,
-                              hotkey.address == delegationInputs.hotkeyAddress
-                        else {
-                            throw VotingFlowError.hotkeySeedBindingMismatch
-                        }
-                        let action = try await votingCrypto.constructDelegationAction(
-                            roundId,
-                            cachedNotes,
-                            delegationInputs.fvkBytes,
-                            delegationInputs.gdNewX,
-                            delegationInputs.pkdNewX,
-                            delegationInputs.hotkeyRawAddress
                         )
                         _ = try await votingCrypto.buildDelegationWitness(
                             roundId, action,
