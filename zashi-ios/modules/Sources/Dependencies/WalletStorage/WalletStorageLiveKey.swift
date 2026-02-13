@@ -39,6 +39,12 @@ extension WalletStorageClient: DependencyKey {
             resetZashi: {
                 try walletStorage.resetZashi()
             },
+            importVotingHotkey: { phrase in
+                try walletStorage.importVotingHotkey(phrase)
+            },
+            exportVotingHotkey: {
+                try walletStorage.exportVotingHotkey()
+            },
             importAddressBookEncryptionKeys: { keys in
                 try walletStorage.importAddressBookEncryptionKeys(keys)
             },

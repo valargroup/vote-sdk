@@ -75,6 +75,9 @@ public struct WalletStorageClient {
     /// There's no fate but what we make for ourselves - Sarah Connor.
     public var resetZashi: () throws -> Void
     
+    public var importVotingHotkey: (String) throws -> Void
+    public var exportVotingHotkey: () throws -> StoredVotingHotkey
+
     public var importAddressBookEncryptionKeys: (AddressBookEncryptionKeys) throws -> Void
     public var exportAddressBookEncryptionKeys: () throws -> AddressBookEncryptionKeys
     
