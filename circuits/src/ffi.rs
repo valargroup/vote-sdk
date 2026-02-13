@@ -3,7 +3,7 @@
 //! All functions use C calling conventions and return i32 status codes:
 //!   0  = success
 //!   -1 = invalid input (null pointer, wrong length, etc.)
-//!   -2 = verification failed (proof/signature is invalid)
+//!   -2 = verification failed (proof/signature is invalid) / position out of range (tree path)
 //!   -3 = internal error (deserialization, etc.)
 
 use pasta_curves::group::ff::PrimeField;
@@ -11,6 +11,7 @@ use halo2_proofs::pasta::Fp;
 
 use crate::toy;
 use crate::redpallas;
+use crate::votetree;
 
 // ---------------------------------------------------------------------------
 // Halo2 toy circuit verification
@@ -136,5 +137,104 @@ pub unsafe extern "C" fn zally_verify_redpallas_sig(
                 -2
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Vote commitment tree — Poseidon Merkle root and path via FFI
+// ---------------------------------------------------------------------------
+
+/// Compute the Poseidon Merkle root of a vote commitment tree built from the
+/// given leaves.
+///
+/// This is a **stateless** call: a fresh tree is constructed from the leaf
+/// array, checkpointed, and the root is returned. This matches the current
+/// Go keeper pattern (read all leaves from KV, compute root).
+///
+/// # Arguments
+/// * `leaves_ptr`  - Pointer to a flat byte array of leaves. Each leaf is
+///                   32 bytes (Pallas Fp, little-endian canonical repr).
+///                   Total size: `leaf_count * 32`.
+/// * `leaf_count`  - Number of leaves.
+/// * `root_out`    - Pointer to a 32-byte output buffer for the root.
+///
+/// # Returns
+/// * `0`  on success (root written to `root_out`).
+/// * `-1` if inputs are invalid (null pointers).
+/// * `-3` if a leaf contains a non-canonical field element encoding.
+///
+/// # Safety
+/// Caller must ensure pointers are valid and buffers are correctly sized.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_root(
+    leaves_ptr: *const u8,
+    leaf_count: usize,
+    root_out: *mut u8,
+) -> i32 {
+    // Validate pointers.
+    if root_out.is_null() {
+        return -1;
+    }
+    if leaf_count > 0 && leaves_ptr.is_null() {
+        return -1;
+    }
+
+    // Build tree and compute root.
+    match votetree::compute_root_from_raw(leaves_ptr, leaf_count) {
+        Ok(root_bytes) => {
+            std::ptr::copy_nonoverlapping(root_bytes.as_ptr(), root_out, 32);
+            0
+        }
+        Err(votetree::FfiError::InvalidInput) => -1,
+        Err(votetree::FfiError::Deserialization) => -3,
+        Err(votetree::FfiError::PositionOutOfRange) => -2, // should not happen for root
+    }
+}
+
+/// Compute the Poseidon Merkle authentication path for a leaf at `position`
+/// in a vote commitment tree built from the given leaves.
+///
+/// The path is serialized as [`MERKLE_PATH_BYTES`] = 1028 bytes:
+/// - Bytes `[0..4)`:    position (`u32` LE)
+/// - Bytes `[4..1028)`: auth path (32 sibling hashes, 32 bytes each, leaf→root)
+///
+/// # Arguments
+/// * `leaves_ptr`  - Pointer to a flat byte array of leaves (each 32 bytes LE Fp).
+/// * `leaf_count`  - Number of leaves.
+/// * `position`    - Leaf index for which to generate the path.
+/// * `path_out`    - Pointer to a 1028-byte output buffer.
+///
+/// # Returns
+/// * `0`  on success (path written to `path_out`).
+/// * `-1` if inputs are invalid (null pointers, zero leaves).
+/// * `-2` if `position` is out of range (>= leaf_count).
+/// * `-3` if a leaf contains a non-canonical field element encoding.
+///
+/// # Safety
+/// Caller must ensure pointers are valid and buffers are correctly sized.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_path(
+    leaves_ptr: *const u8,
+    leaf_count: usize,
+    position: u64,
+    path_out: *mut u8,
+) -> i32 {
+    // Validate pointers.
+    if leaves_ptr.is_null() || path_out.is_null() {
+        return -1;
+    }
+    if leaf_count == 0 {
+        return -1;
+    }
+
+    // Build tree and compute path.
+    match votetree::compute_path_from_raw(leaves_ptr, leaf_count, position) {
+        Ok(path_bytes) => {
+            std::ptr::copy_nonoverlapping(path_bytes.as_ptr(), path_out, path_bytes.len());
+            0
+        }
+        Err(votetree::FfiError::InvalidInput) => -1,
+        Err(votetree::FfiError::PositionOutOfRange) => -2,
+        Err(votetree::FfiError::Deserialization) => -3,
     }
 }

@@ -11,4 +11,5 @@
 
 pub mod toy;
 pub mod redpallas;
+pub mod votetree;
 pub mod ffi;

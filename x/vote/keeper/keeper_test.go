@@ -859,14 +859,14 @@ func (s *KeeperTestSuite) TestComputeTreeRoot() {
 		},
 		{
 			name:      "single leaf produces 32-byte root",
-			leaves:    [][]byte{bytes.Repeat([]byte{0xA1}, 32)},
+			leaves:    [][]byte{bytes.Repeat([]byte{0x01}, 32)},
 			expectLen: 32,
 		},
 		{
 			name: "two leaves produce 32-byte root",
 			leaves: [][]byte{
-				bytes.Repeat([]byte{0xA1}, 32),
-				bytes.Repeat([]byte{0xA2}, 32),
+				bytes.Repeat([]byte{0x01}, 32),
+				bytes.Repeat([]byte{0x02}, 32),
 			},
 			expectLen: 32,
 		},
