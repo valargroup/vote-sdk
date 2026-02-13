@@ -42,7 +42,7 @@ zcash_client_backend = { version = "0.21", features = ["orchard"] }
 zcash_primitives = "0.26"
 incrementalmerkletree = "0.8"
 shardtree = { version = "0.6", features = ["legacy-api"] }
-prost = "0.13"
+prost = "0.14"
 
 [patch.crates-io]
 zcash_keys = { path = "../librustzcash/zcash_keys" }
