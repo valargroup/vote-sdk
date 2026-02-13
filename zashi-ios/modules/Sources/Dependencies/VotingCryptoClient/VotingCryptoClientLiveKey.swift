@@ -141,18 +141,18 @@ extension VotingCryptoClient: DependencyKey {
                     roundId: roundId,
                     hotkey: ffiHotkey,
                     notes: ffiNotes,
-                    nk: [UInt8](nk),
-                    gDNewX: [UInt8](gdNewX),
-                    pkDNewX: [UInt8](pkdNewX)
+                    nk: nk,
+                    gDNewX: gdNewX,
+                    pkDNewX: pkdNewX
                 )
                 return DelegationAction(
                     actionBytes: result.actionBytes,
                     rk: result.rk,
                     sighash: result.sighash,
-                    govNullifiers: result.govNullifiers.map { Data($0) },
-                    van: Data(result.van),
-                    govCommRand: Data(result.govCommRand),
-                    dummyNullifiers: result.dummyNullifiers.map { Data($0) }
+                    govNullifiers: result.govNullifiers,
+                    van: result.van,
+                    govCommRand: result.govCommRand,
+                    dummyNullifiers: result.dummyNullifiers
                 )
             },
             storeTreeState: { roundId, treeState in
@@ -165,10 +165,10 @@ extension VotingCryptoClient: DependencyKey {
                     actionBytes: action.actionBytes,
                     rk: action.rk,
                     sighash: action.sighash,
-                    govNullifiers: action.govNullifiers.map { [UInt8]($0) },
-                    van: [UInt8](action.van),
-                    govCommRand: [UInt8](action.govCommRand),
-                    dummyNullifiers: action.dummyNullifiers.map { [UInt8]($0) }
+                    govNullifiers: action.govNullifiers,
+                    van: action.van,
+                    govCommRand: action.govCommRand,
+                    dummyNullifiers: action.dummyNullifiers
                 )
                 let witness = try db.buildDelegationWitness(
                     roundId: roundId,

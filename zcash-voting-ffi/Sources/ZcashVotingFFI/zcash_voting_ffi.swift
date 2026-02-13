@@ -547,7 +547,7 @@ public protocol VotingDatabaseProtocol: AnyObject, Sendable {
     
     func clearRound(roundId: String) throws 
     
-    func constructDelegationAction(roundId: String, hotkey: VotingHotkey, notes: [NoteInfo]) throws  -> DelegationAction
+    func constructDelegationAction(roundId: String, hotkey: VotingHotkey, notes: [NoteInfo], nk: Data, gDNewX: Data, pkDNewX: Data) throws  -> DelegationAction
     
     func encryptShares(roundId: String, shares: [UInt64]) throws  -> [EncryptedShare]
     
@@ -670,12 +670,15 @@ open func clearRound(roundId: String)throws   {try rustCallWithError(FfiConverte
 }
 }
     
-open func constructDelegationAction(roundId: String, hotkey: VotingHotkey, notes: [NoteInfo])throws  -> DelegationAction  {
+open func constructDelegationAction(roundId: String, hotkey: VotingHotkey, notes: [NoteInfo], nk: Data, gDNewX: Data, pkDNewX: Data)throws  -> DelegationAction  {
     return try  FfiConverterTypeDelegationAction_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_construct_delegation_action(self.uniffiClonePointer(),
         FfiConverterString.lower(roundId),
         FfiConverterTypeVotingHotkey_lower(hotkey),
-        FfiConverterSequenceTypeNoteInfo.lower(notes),$0
+        FfiConverterSequenceTypeNoteInfo.lower(notes),
+        FfiConverterData.lower(nk),
+        FfiConverterData.lower(gDNewX),
+        FfiConverterData.lower(pkDNewX),$0
     )
 })
 }
@@ -823,13 +826,21 @@ public struct DelegationAction {
     public var actionBytes: Data
     public var rk: Data
     public var sighash: Data
+    public var govNullifiers: [Data]
+    public var van: Data
+    public var govCommRand: Data
+    public var dummyNullifiers: [Data]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(actionBytes: Data, rk: Data, sighash: Data) {
+    public init(actionBytes: Data, rk: Data, sighash: Data, govNullifiers: [Data], van: Data, govCommRand: Data, dummyNullifiers: [Data]) {
         self.actionBytes = actionBytes
         self.rk = rk
         self.sighash = sighash
+        self.govNullifiers = govNullifiers
+        self.van = van
+        self.govCommRand = govCommRand
+        self.dummyNullifiers = dummyNullifiers
     }
 }
 
@@ -849,6 +860,18 @@ extension DelegationAction: Equatable, Hashable {
         if lhs.sighash != rhs.sighash {
             return false
         }
+        if lhs.govNullifiers != rhs.govNullifiers {
+            return false
+        }
+        if lhs.van != rhs.van {
+            return false
+        }
+        if lhs.govCommRand != rhs.govCommRand {
+            return false
+        }
+        if lhs.dummyNullifiers != rhs.dummyNullifiers {
+            return false
+        }
         return true
     }
 
@@ -856,6 +879,10 @@ extension DelegationAction: Equatable, Hashable {
         hasher.combine(actionBytes)
         hasher.combine(rk)
         hasher.combine(sighash)
+        hasher.combine(govNullifiers)
+        hasher.combine(van)
+        hasher.combine(govCommRand)
+        hasher.combine(dummyNullifiers)
     }
 }
 
@@ -870,7 +897,11 @@ public struct FfiConverterTypeDelegationAction: FfiConverterRustBuffer {
             try DelegationAction(
                 actionBytes: FfiConverterData.read(from: &buf), 
                 rk: FfiConverterData.read(from: &buf), 
-                sighash: FfiConverterData.read(from: &buf)
+                sighash: FfiConverterData.read(from: &buf), 
+                govNullifiers: FfiConverterSequenceData.read(from: &buf), 
+                van: FfiConverterData.read(from: &buf), 
+                govCommRand: FfiConverterData.read(from: &buf), 
+                dummyNullifiers: FfiConverterSequenceData.read(from: &buf)
         )
     }
 
@@ -878,6 +909,10 @@ public struct FfiConverterTypeDelegationAction: FfiConverterRustBuffer {
         FfiConverterData.write(value.actionBytes, into: &buf)
         FfiConverterData.write(value.rk, into: &buf)
         FfiConverterData.write(value.sighash, into: &buf)
+        FfiConverterSequenceData.write(value.govNullifiers, into: &buf)
+        FfiConverterData.write(value.van, into: &buf)
+        FfiConverterData.write(value.govCommRand, into: &buf)
+        FfiConverterSequenceData.write(value.dummyNullifiers, into: &buf)
     }
 }
 
@@ -2417,12 +2452,15 @@ public func buildVoteCommitment(proposalId: UInt32, choice: UInt32, encShares: [
     )
 })
 }
-public func constructDelegationAction(hotkey: VotingHotkey, notes: [NoteInfo], params: VotingRoundParams)throws  -> DelegationAction  {
+public func constructDelegationAction(hotkey: VotingHotkey, notes: [NoteInfo], params: VotingRoundParams, nk: Data, gDNewX: Data, pkDNewX: Data)throws  -> DelegationAction  {
     return try  FfiConverterTypeDelegationAction_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_func_construct_delegation_action(
         FfiConverterTypeVotingHotkey_lower(hotkey),
         FfiConverterSequenceTypeNoteInfo.lower(notes),
-        FfiConverterTypeVotingRoundParams_lower(params),$0
+        FfiConverterTypeVotingRoundParams_lower(params),
+        FfiConverterData.lower(nk),
+        FfiConverterData.lower(gDNewX),
+        FfiConverterData.lower(pkDNewX),$0
     )
 })
 }
@@ -2494,7 +2532,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zcash_voting_ffi_checksum_func_build_vote_commitment() != 37719) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_func_construct_delegation_action() != 62937) {
+    if (uniffi_zcash_voting_ffi_checksum_func_construct_delegation_action() != 2488) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_func_decompose_weight() != 39624) {
@@ -2527,7 +2565,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_clear_round() != 15915) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_construct_delegation_action() != 28644) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_construct_delegation_action() != 10123) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_encrypt_shares() != 46668) {

@@ -303,7 +303,7 @@ void uniffi_zcash_voting_ffi_fn_method_votingdatabase_clear_round(void*_Nonnull 
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_METHOD_VOTINGDATABASE_CONSTRUCT_DELEGATION_ACTION
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_METHOD_VOTINGDATABASE_CONSTRUCT_DELEGATION_ACTION
-RustBuffer uniffi_zcash_voting_ffi_fn_method_votingdatabase_construct_delegation_action(void*_Nonnull ptr, RustBuffer round_id, RustBuffer hotkey, RustBuffer notes, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_zcash_voting_ffi_fn_method_votingdatabase_construct_delegation_action(void*_Nonnull ptr, RustBuffer round_id, RustBuffer hotkey, RustBuffer notes, RustBuffer nk, RustBuffer g_d_new_x, RustBuffer pk_d_new_x, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_METHOD_VOTINGDATABASE_ENCRYPT_SHARES
@@ -378,7 +378,7 @@ RustBuffer uniffi_zcash_voting_ffi_fn_func_build_vote_commitment(uint32_t propos
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_CONSTRUCT_DELEGATION_ACTION
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_CONSTRUCT_DELEGATION_ACTION
-RustBuffer uniffi_zcash_voting_ffi_fn_func_construct_delegation_action(RustBuffer hotkey, RustBuffer notes, RustBuffer params, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_zcash_voting_ffi_fn_func_construct_delegation_action(RustBuffer hotkey, RustBuffer notes, RustBuffer params, RustBuffer nk, RustBuffer g_d_new_x, RustBuffer pk_d_new_x, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_DECOMPOSE_WEIGHT
