@@ -28,6 +28,7 @@ func TestKeyGen(t *testing.T) {
 	require.False(t, sk.Scalar.IsZero(), "secret key should not be zero")
 	require.False(t, pk.Point.IsIdentity(), "public key should not be identity")
 	require.True(t, pk.Point.IsOnCurve(), "public key should be on curve")
+	requirePallasPoint(t, pk.Point, "pk")
 
 	// pk == sk * G
 	G := new(curvey.PointPallas).Generator()
@@ -42,7 +43,11 @@ func TestDecryptRoundTrip(t *testing.T) {
 	values := []uint64{0, 1, 2, 7, 42, 100, 255, 1000, 65535, 1 << 20, 1 << 24}
 	for _, v := range values {
 		ct := mustEncrypt(t, pk, v)
+		requirePallasPoint(t, ct.C1, "ct.C1")
+		requirePallasPoint(t, ct.C2, "ct.C2")
+
 		got := DecryptToPoint(sk, ct)
+		requirePallasPoint(t, got, "DecryptToPoint result")
 		expected := vG(v)
 		require.True(t, got.Equal(expected), "decrypt(encrypt(%d)) should equal %d*G", v, v)
 	}
@@ -53,6 +58,7 @@ func TestDecryptZero(t *testing.T) {
 	sk, pk := KeyGen(rand.Reader)
 	ct := mustEncrypt(t, pk, 0)
 	got := DecryptToPoint(sk, ct)
+	requirePallasPoint(t, got, "DecryptToPoint(0)")
 	require.True(t, got.IsIdentity(), "decrypt(encrypt(0)) should be identity")
 }
 
@@ -69,9 +75,12 @@ func TestEncryptWithRandomness(t *testing.T) {
 	// Same randomness, same value → identical ciphertext
 	require.True(t, ct1.C1.Equal(ct2.C1), "C1 should be identical with same randomness")
 	require.True(t, ct1.C2.Equal(ct2.C2), "C2 should be identical with same randomness")
+	requirePallasPoint(t, ct1.C1, "ct1.C1")
+	requirePallasPoint(t, ct1.C2, "ct1.C2")
 
 	// Decryption still works
 	got := DecryptToPoint(sk, ct1)
+	requirePallasPoint(t, got, "DecryptToPoint result")
 	require.True(t, got.Equal(vG(42)))
 }
 
@@ -98,8 +107,11 @@ func TestHomomorphicAdd(t *testing.T) {
 		ctA := mustEncrypt(t, pk, tc.a)
 		ctB := mustEncrypt(t, pk, tc.b)
 		ctSum := HomomorphicAdd(ctA, ctB)
+		requirePallasPoint(t, ctSum.C1, "ctSum.C1")
+		requirePallasPoint(t, ctSum.C2, "ctSum.C2")
 
 		got := DecryptToPoint(sk, ctSum)
+		requirePallasPoint(t, got, "DecryptToPoint result")
 		expected := vG(tc.a + tc.b)
 		require.True(t, got.Equal(expected),
 			"decrypt(enc(%d) + enc(%d)) should equal %d*G", tc.a, tc.b, tc.a+tc.b)
@@ -120,7 +132,11 @@ func TestHomomorphicAddMultiple(t *testing.T) {
 		total += v
 	}
 
+	requirePallasPoint(t, acc.C1, "acc.C1")
+	requirePallasPoint(t, acc.C2, "acc.C2")
+
 	got := DecryptToPoint(sk, acc)
+	requirePallasPoint(t, got, "DecryptToPoint result")
 	expected := vG(total) // 150
 	require.True(t, got.Equal(expected),
 		"accumulated sum should decrypt to %d*G", total)
@@ -138,6 +154,8 @@ func TestHomomorphicAddCommutative(t *testing.T) {
 
 	gotAB := DecryptToPoint(sk, sumAB)
 	gotBA := DecryptToPoint(sk, sumBA)
+	requirePallasPoint(t, gotAB, "gotAB")
+	requirePallasPoint(t, gotBA, "gotBA")
 
 	expected := vG(46)
 	require.True(t, gotAB.Equal(expected), "a+b should decrypt correctly")
@@ -159,6 +177,8 @@ func TestHomomorphicAddAssociative(t *testing.T) {
 
 	gotLeft := DecryptToPoint(sk, left)
 	gotRight := DecryptToPoint(sk, right)
+	requirePallasPoint(t, gotLeft, "gotLeft")
+	requirePallasPoint(t, gotRight, "gotRight")
 	expected := vG(66)
 
 	require.True(t, gotLeft.Equal(expected), "(a+b)+c should decrypt to 66*G")
@@ -176,6 +196,7 @@ func TestHomomorphicAddIdentity(t *testing.T) {
 
 		sum := HomomorphicAdd(ct, zero)
 		got := DecryptToPoint(sk, sum)
+		requirePallasPoint(t, got, "DecryptToPoint result")
 		expected := vG(v)
 		require.True(t, got.Equal(expected),
 			"enc(%d) + enc(0) should decrypt to %d*G", v, v)
@@ -187,7 +208,10 @@ func TestEncryptZeroDecryptsToIdentity(t *testing.T) {
 	sk, pk := KeyGen(rand.Reader)
 	ct, err := EncryptZero(pk, rand.Reader)
 	require.NoError(t, err)
+	requirePallasPoint(t, ct.C1, "ct.C1")
+	requirePallasPoint(t, ct.C2, "ct.C2")
 	got := DecryptToPoint(sk, ct)
+	requirePallasPoint(t, got, "DecryptToPoint(EncryptZero)")
 	require.True(t, got.IsIdentity(), "EncryptZero should decrypt to identity")
 }
 
@@ -202,6 +226,8 @@ func TestEncryptProducesDifferentCiphertexts(t *testing.T) {
 	// With overwhelming probability, different randomness → different ciphertext
 	require.False(t, ct1.C1.Equal(ct2.C1), "two encryptions of same value should have different C1")
 	require.False(t, ct1.C2.Equal(ct2.C2), "two encryptions of same value should have different C2")
+	requirePallasPoint(t, ct1.C1, "ct1.C1")
+	requirePallasPoint(t, ct2.C1, "ct2.C1")
 }
 
 // TestDifferentKeysCannotDecrypt verifies that a ciphertext encrypted under one
@@ -215,6 +241,8 @@ func TestDifferentKeysCannotDecrypt(t *testing.T) {
 	// Decrypt with wrong key
 	wrong := DecryptToPoint(sk2, ct)
 	correct := DecryptToPoint(sk1, ct)
+	requirePallasPoint(t, wrong, "wrong-key decrypt")
+	requirePallasPoint(t, correct, "correct-key decrypt")
 
 	require.True(t, correct.Equal(vG(42)), "correct key should decrypt properly")
 	require.False(t, wrong.Equal(vG(42)), "wrong key should not decrypt properly")
@@ -229,6 +257,7 @@ func TestLargeValueEncryptDecrypt(t *testing.T) {
 	maxShare := uint64((1 << 24) - 1)
 	ct := mustEncrypt(t, pk, maxShare)
 	got := DecryptToPoint(sk, ct)
+	requirePallasPoint(t, got, "DecryptToPoint(maxShare)")
 	require.True(t, got.Equal(vG(maxShare)),
 		"should handle max share value 2^24-1")
 
@@ -240,6 +269,7 @@ func TestLargeValueEncryptDecrypt(t *testing.T) {
 		acc = HomomorphicAdd(acc, mustEncrypt(t, pk, maxShare))
 	}
 	aggGot := DecryptToPoint(sk, acc)
+	requirePallasPoint(t, aggGot, "DecryptToPoint(aggregated)")
 	aggExpected := vG(maxShare * uint64(n))
 	require.True(t, aggGot.Equal(aggExpected),
 		"should handle aggregated large values")
@@ -274,6 +304,8 @@ func TestEncryptZeroIsSemanticallySeure(t *testing.T) {
 	// C1 = r*G must NOT be identity — that would reveal the plaintext.
 	require.False(t, ct1.C1.IsIdentity(),
 		"C1 must not be identity (would break IND-CPA)")
+	requirePallasPoint(t, ct1.C1, "ct1.C1")
+	requirePallasPoint(t, ct2.C1, "ct2.C1")
 }
 
 // ---------------------------------------------------------------------------

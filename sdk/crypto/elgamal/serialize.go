@@ -61,6 +61,7 @@ func UnmarshalCiphertext(data []byte) (*Ciphertext, error) {
 // point (point at infinity) serializes to 32 zero bytes but cannot round-trip
 // through FromAffineCompressed (standard for projective-coordinate EC libs),
 // so we detect the all-zeros sentinel and return the identity directly.
+// Any point not on the curve errors.
 func decompressPallasPoint(data []byte) (curvey.Point, error) {
 	// Check for the identity sentinel (all zeros).
 	allZero := true
@@ -76,7 +77,7 @@ func decompressPallasPoint(data []byte) (curvey.Point, error) {
 
 	// Initialize a proper receiver: bare new(curvey.PointPallas) has a nil
 	// inner EllipticPoint4 and will panic on FromAffineCompressed.
-	receiver := new(curvey.PointPallas).Identity().(*curvey.PointPallas)
+	receiver := new(curvey.PointPallas).Identity()
 	return receiver.FromAffineCompressed(data)
 }
 
