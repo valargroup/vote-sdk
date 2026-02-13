@@ -42,6 +42,19 @@ impl VotingDb {
         queries::clear_round(&conn, round_id)
     }
 
+    // --- Wallet notes ---
+
+    /// Query unspent Orchard notes from the Zcash wallet DB at a snapshot height.
+    /// The wallet DB is opened read-only at the given path.
+    pub fn get_wallet_notes(
+        &self,
+        wallet_db_path: &str,
+        snapshot_height: u64,
+        network_id: u32,
+    ) -> Result<Vec<NoteInfo>, VotingError> {
+        crate::wallet_notes::get_wallet_notes_at_snapshot(wallet_db_path, snapshot_height, network_id)
+    }
+
     // --- Phase 1: Delegation setup ---
 
     /// Generate a voting hotkey. Returns the hotkey (SDK needs address for Keystone flow).

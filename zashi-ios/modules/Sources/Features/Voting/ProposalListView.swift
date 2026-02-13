@@ -6,6 +6,7 @@ import VotingModels
 
 struct ProposalListView: View {
     @Environment(\.colorScheme) var colorScheme
+    @State private var showSnapshotHeight = false
 
     let store: StoreOf<Voting>
 
@@ -80,8 +81,20 @@ struct ProposalListView: View {
             HStack(spacing: 0) {
                 detailPill(
                     label: "Snapshot",
-                    value: "#\(store.votingRound.snapshotHeight.formatted())"
+                    value: store.votingRound.snapshotDate.formatted(date: .abbreviated, time: .omitted)
                 )
+                .onTapGesture {
+                    showSnapshotHeight = true
+                }
+                .popover(isPresented: $showSnapshotHeight) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Block #\(store.votingRound.snapshotHeight.formatted())")
+                        Text(store.votingRound.snapshotDate.formatted(date: .abbreviated, time: .standard))
+                    }
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .padding(12)
+                    .presentationCompactAdaptation(.popover)
+                }
                 Spacer()
                 detailPill(
                     label: "Ends",
@@ -89,7 +102,7 @@ struct ProposalListView: View {
                 )
                 Spacer()
                 detailPill(
-                    label: "Weight",
+                    label: "Eligible",
                     value: "\(store.votingWeightZECString) ZEC"
                 )
             }
@@ -151,7 +164,6 @@ struct ProposalListView: View {
     @ViewBuilder
     private func proposalCard(_ proposal: Proposal) -> some View {
         let vote = store.votes[proposal.id]
-        let isActive = store.activeProposalId == proposal.id
 
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
@@ -179,21 +191,15 @@ struct ProposalListView: View {
                 .lineLimit(2)
         }
         .padding(16)
-        .background(
-            isActive
-                ? Design.Surfaces.brandPrimary.color(colorScheme).opacity(0.04)
-                : Design.Surfaces.bgPrimary.color(colorScheme)
-        )
+        .background(Design.Surfaces.bgPrimary.color(colorScheme))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(
-                    isActive
-                        ? Design.Surfaces.brandPrimary.color(colorScheme)
-                        : vote != nil
-                            ? voteColor(vote).opacity(0.3)
-                            : Design.Surfaces.strokeSecondary.color(colorScheme),
-                    lineWidth: isActive ? 2 : 1
+                    vote != nil
+                        ? voteColor(vote).opacity(0.3)
+                        : Design.Surfaces.strokeSecondary.color(colorScheme),
+                    lineWidth: 1
                 )
         )
         .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)

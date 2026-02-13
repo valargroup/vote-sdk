@@ -20,7 +20,7 @@ struct VoteCompletionView: View {
                     Text("Votes Submitted!")
                         .zFont(.semiBold, size: 22, style: Design.Text.primary)
 
-                    Text("Your \(store.votingWeightZECString) ZEC voting weight has been applied to \(store.totalProposals) proposals.")
+                    Text("Your \(store.votingWeightZECString) ZEC in eligible funds has been applied to \(store.totalProposals) proposals.")
                         .zFont(.regular, size: 15, style: Design.Text.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)

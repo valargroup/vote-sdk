@@ -9,5 +9,6 @@ pub mod zkp1;
 pub mod zkp2;
 pub mod vote_commitment;
 pub mod storage;
+pub mod wallet_notes;
 
 pub use types::*;

@@ -24,6 +24,13 @@ public struct VotingCryptoClient {
     public var listRounds: @Sendable () async throws -> [RoundSummaryInfo]
     public var clearRound: @Sendable (_ roundId: String) async throws -> Void
 
+    // --- Wallet notes ---
+    public var getWalletNotes: @Sendable (
+        _ walletDbPath: String,
+        _ snapshotHeight: UInt64,
+        _ networkId: UInt32
+    ) async throws -> [NoteInfo]
+
     // --- Crypto operations ---
     public var generateHotkey: @Sendable (_ roundId: String) async throws -> VotingHotkey
     public var constructDelegationAction: @Sendable (

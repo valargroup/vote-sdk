@@ -29,7 +29,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>None</string>
 			<key>CFBundleURLName</key>
-			<string>co-electriccoin.secant-mainnet</string>
+			<string>co.valargroup.secant-mainnet</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>zcash</string>

@@ -41,8 +41,11 @@ The mobile client is one of several components in the zally repo. This doc cover
 |  ZcashVotingFFI (UniFFI)                                  |  Generated Swift bindings
 +-----------------------------------------------------------+
 |  librustvoting                                            |  Rust
-|    storage (SQLite)  |  crypto (stubs)                    |
+|    storage (SQLite)  |  wallet_notes  |  crypto (stubs)   |
 +-----------------------------------------------------------+
+                            |
+                    Zcash wallet DB (read-only)
+                    (managed by zcash_client_sqlite)
 ```
 
 `VotingCryptoClient` is the main integration surface. It wraps a `VotingDatabase` FFI object and exposes the full round lifecycle as async Swift functions. `VotingAPIClient` handles HTTP calls to the vote chain and helper server (currently mocked).
@@ -83,6 +86,63 @@ VoteReady
 
 Phase transitions happen inside Rust — each operation validates the current phase, does its work, persists results, and advances the phase atomically.
 
+## Wallet Notes (Voting Power from Zcash Wallet)
+
+The voting protocol requires knowing which Orchard notes a user owned and were unspent at a snapshot block height. This data feeds into `constructDelegationAction` (the sighash covers the note commitments) and determines the user's voting weight.
+
+Rather than modifying the Zcash wallet SDK, librustvoting opens the wallet's SQLite DB **read-only** and queries it directly.
+
+### Query
+
+```
+wallet_notes::get_wallet_notes_at_snapshot(wallet_db_path, snapshot_height, network_id)
+    -> Vec<NoteInfo> { commitment (cmx), nullifier, value, position }
+```
+
+The SQL joins `orchard_received_notes` with `transactions` and `accounts`:
+
+- **Received at or before snapshot**: `t_recv.mined_height <= snapshot_height`
+- **Not spent at snapshot**: excludes notes with a spend tx mined at or before snapshot height
+- **Valid scope only**: `recipient_key_scope IN (0, 1)` — External and Internal, skips Ephemeral/Foreign
+- **Has required fields**: `nf IS NOT NULL`, `commitment_tree_position IS NOT NULL`, `ufvk IS NOT NULL`
+
+### cmx Computation
+
+The wallet DB stores note parts but not the note commitment. Each note's cmx is recomputed:
+
+```
+UFVK string (from accounts table)
+    -> UnifiedFullViewingKey::decode(network)
+    -> .orchard() -> FullViewingKey
+    -> .address(diversifier, scope) -> Address
+
+Note::from_parts(address, value, rho, rseed)
+    -> .commitment() -> NoteCommitment
+    -> ExtractedNoteCommitment -> .to_bytes() -> [u8; 32]  (cmx)
+```
+
+This uses `orchard = "0.11"` from crates.io (not the local v0.12 fork) because the types must match what `zcash_keys` uses. The local orchard v0.12 has halo2 breaking changes for the delegation circuit and is a separate concern.
+
+### Data Flow
+
+```
+VotingView.onAppear
+    -> .fetchVotingWeight
+    -> VotingCryptoClient.getWalletNotes(walletDbPath, snapshotHeight, networkId)
+    -> FFI: VotingDatabase.get_wallet_notes()
+    -> Rust: wallet_notes::get_wallet_notes_at_snapshot()
+    -> opens wallet DB read-only, runs query, computes cmx per note
+    -> Vec<NoteInfo> returned to Swift
+    -> sum(note.value) -> votingWeight (displayed on delegation signing screen)
+    -> notes cached in State.walletNotes for use by startDelegationProof
+```
+
+The wallet DB path is resolved at runtime from `DatabaseFilesClient` and `ZcashSDKEnvironment` (TCA dependencies), not passed through State. This avoids coupling the parent coordinator to wallet DB naming conventions. The current prototype snapshot height is **3,235,467** (one block before [tx 0bac2a68ca...](https://mainnet.zcashexplorer.app/transactions/0bac2a68ca6cd7deca65a65322da5b678097e927b2325131d089d47b1d9cbc97) at block 3,235,468).
+
+### Dependencies
+
+librustvoting uses `[patch.crates-io]` to resolve `zcash_keys`, `zcash_protocol`, `zcash_address`, `zcash_encoding`, and `zcash_transparent` from the local librustzcash tree. `orchard` comes from crates.io at v0.11 to match the wallet stack.
+
 ## TCA Dependency Clients
 
 Three dependency clients, each with live/test implementations:
@@ -91,6 +151,7 @@ Three dependency clients, each with live/test implementations:
 
 - Wraps `VotingDatabase` FFI object via a thread-safe `DatabaseActor`
 - `stateStream()` — publishes `VotingDbState` (round info + votes) whenever DB changes
+- `getWalletNotes()` — queries Zcash wallet DB for Orchard notes unspent at snapshot height
 - All crypto operations: hotkey generation, delegation action, witness, proofs, vote commitment, share payloads
 - `StreamProgressReporter` bridges UniFFI progress callbacks into `AsyncThrowingStream<ProofEvent>`
 
@@ -106,20 +167,22 @@ Three dependency clients, each with live/test implementations:
 
 ## What's Real vs Stubbed
 
-| Component                      | Status  | Notes                                   |
-| ------------------------------ | ------- | --------------------------------------- |
-| SQLite storage + phase machine | Real    | Full CRUD, WAL mode, migrations         |
-| Round lifecycle orchestration  | Real    | Phase transitions enforced              |
-| ElGamal share encryption       | Real    | Pallas curve, proper randomness         |
-| Binary weight decomposition    | Real    | 4-share limit enforced                  |
-| Hotkey generation              | Real    | Random Pallas keypair                   |
-| Vote commitment construction   | Stubbed | Returns placeholder hashes              |
-| ZKP #1 (delegation proof)      | Stubbed | Simulates progress, returns dummy proof |
-| ZKP #2 (vote proof)            | Stubbed | Returns placeholder bundle              |
-| Keystone signing               | Stubbed | Auto-approved in prototype              |
-| Vote chain API                 | Mocked  | Returns success responses               |
-| Helper server delegation       | Mocked  | `delegateShares()` is a no-op           |
-| VAN witness / tree sync        | Stubbed | Hardcoded placeholder data              |
+| Component                      | Status  | Notes                                          |
+| ------------------------------ | ------- | ---------------------------------------------- |
+| Wallet notes at snapshot       | Real    | Read-only query of wallet DB, cmx recomputed   |
+| Voting weight from notes       | Real    | Sum of note values displayed in UI             |
+| SQLite storage + phase machine | Real    | Full CRUD, WAL mode, migrations                |
+| Round lifecycle orchestration  | Real    | Phase transitions enforced                     |
+| ElGamal share encryption       | Real    | Pallas curve, proper randomness                |
+| Binary weight decomposition    | Real    | 4-share limit enforced                         |
+| Hotkey generation              | Real    | Random Pallas keypair                          |
+| Vote commitment construction   | Stubbed | Returns placeholder hashes                     |
+| ZKP #1 (delegation proof)      | Stubbed | Simulates progress, returns dummy proof        |
+| ZKP #2 (vote proof)            | Stubbed | Returns placeholder bundle                     |
+| Keystone signing               | Stubbed | Auto-approved in prototype                     |
+| Vote chain API                 | Mocked  | Returns success responses                      |
+| Helper server delegation       | Mocked  | `delegateShares()` is a no-op                  |
+| VAN witness / tree sync        | Stubbed | Hardcoded placeholder data                     |
 
 ## Key Design Decisions
 

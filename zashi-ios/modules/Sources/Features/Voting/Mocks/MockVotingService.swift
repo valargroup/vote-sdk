@@ -2,7 +2,7 @@ import Foundation
 import VotingModels
 
 public enum MockVotingService {
-    public static let votingWeight: UInt64 = 14_250_000_000 // 142.50 ZEC
+    public static let votingWeight: UInt64 = 0 // replaced at runtime from wallet notes
 
     public static let hotkeyAddress = "zs1voting7qk4hs9xd3nfw8yj6m2r0ekrl...a8e2"
 
@@ -10,7 +10,7 @@ public enum MockVotingService {
         id: "nu7-sentiment-0xab3f7c91e2d4",
         title: "NU7 Sentiment Poll",
         description: "Community sentiment polling for proposed NU7 network upgrade features. Your shielded balance is used as voting weight.",
-        snapshotHeight: 2_800_000,
+        snapshotHeight: 3_235_467,
         snapshotDate: Calendar.current.date(byAdding: .day, value: -3, to: Date())!,
         votingStart: Calendar.current.date(byAdding: .day, value: -1, to: Date())!,
         votingEnd: Calendar.current.date(byAdding: .day, value: 5, to: Date())!,

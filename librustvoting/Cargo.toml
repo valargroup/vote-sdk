@@ -27,10 +27,22 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 # Error handling
 thiserror = "2"
 
-# Later (when filling in real implementations):
-# halo2_proofs = { ... }
-# orchard = "0.11"
-# incrementalmerkletree = ...
+# Zcash / Orchard note reconstruction
+# Uses orchard 0.11 to match the wallet stack (zcash_keys, zcash_client_sqlite).
+# The local orchard/ (v0.12) is for the delegation circuit only.
+subtle = "2.6"
+orchard = "0.11"
+zcash_keys = { version = "0.12", features = ["orchard"] }
+zcash_protocol = "0.7"
+nonempty = "0.11"
+zip32 = "0.2"
+
+[patch.crates-io]
+zcash_keys = { path = "../librustzcash/zcash_keys" }
+zcash_protocol = { path = "../librustzcash/components/zcash_protocol" }
+zcash_address = { path = "../librustzcash/components/zcash_address" }
+zcash_encoding = { path = "../librustzcash/components/zcash_encoding" }
+zcash_transparent = { path = "../librustzcash/zcash_transparent" }
 
 # Keep this crate as a standalone workspace
 [workspace]

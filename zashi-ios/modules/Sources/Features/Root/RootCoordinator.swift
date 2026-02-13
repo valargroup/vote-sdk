@@ -146,7 +146,6 @@ extension Root {
                 state.homeState.moreRequest = false
                 state.votingState = .initial
                 state.votingState.isKeystoneUser = state.homeState.isKeystoneAccountActive
-                state.votingState.votingWeight = UInt64(max(0, state.homeState.walletBalancesState.shieldedBalance.amount))
                 state.path = .voting
                 return .none
 

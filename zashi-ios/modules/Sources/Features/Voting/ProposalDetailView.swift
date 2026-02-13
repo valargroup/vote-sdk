@@ -114,17 +114,6 @@ struct ProposalDetailView: View {
                 Spacer()
 
                 Button {
-                    store.send(.backToList)
-                } label: {
-                    Image(systemName: "list.bullet")
-                        .font(.system(size: 16))
-                        .frame(minWidth: 44, minHeight: 44)
-                }
-                .accessibilityLabel("Back to proposal list")
-
-                Spacer()
-
-                Button {
                     store.send(.nextProposalDetail)
                 } label: {
                     HStack(spacing: 4) {

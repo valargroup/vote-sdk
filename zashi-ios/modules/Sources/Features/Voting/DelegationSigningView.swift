@@ -38,7 +38,7 @@ struct DelegationSigningView: View {
         VStack(spacing: 0) {
             // Voting weight summary (centered)
             VStack(spacing: 0) {
-                Text("Voting Weight")
+                Text("Eligible Funds")
                     .zFont(size: 14, style: Design.Text.primary)
                     .padding(.bottom, 2)
 

@@ -18,6 +18,9 @@ public struct VotingView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
+        .onAppear {
+            store.send(.fetchVotingWeight)
+        }
     }
 
     private func screenId(_ screen: Voting.State.Screen) -> String {
