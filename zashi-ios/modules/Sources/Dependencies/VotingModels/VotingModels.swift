@@ -209,6 +209,16 @@ public struct DelegationAction: Equatable, Sendable {
     public let rhoSigned: Data
     /// Extracted note commitments (cmx) for padded dummy notes.
     public let paddedCmx: [Data]
+    /// Signed note nullifier (32 bytes). Public input to ZKP #1.
+    public let nfSigned: Data
+    /// Output note commitment (32 bytes). Public input to ZKP #1.
+    public let cmxNew: Data
+    /// Spend auth randomizer scalar (32 bytes). Needed for Keystone signing.
+    public let alpha: Data
+    /// Signed note rseed (32 bytes). Needed for witness reconstruction.
+    public let rseedSigned: Data
+    /// Output note rseed (32 bytes). Needed for witness reconstruction.
+    public let rseedOutput: Data
 
     public init(
         actionBytes: Data,
@@ -219,7 +229,12 @@ public struct DelegationAction: Equatable, Sendable {
         govCommRand: Data,
         dummyNullifiers: [Data],
         rhoSigned: Data,
-        paddedCmx: [Data]
+        paddedCmx: [Data],
+        nfSigned: Data,
+        cmxNew: Data,
+        alpha: Data,
+        rseedSigned: Data,
+        rseedOutput: Data
     ) {
         self.actionBytes = actionBytes
         self.rk = rk
@@ -230,6 +245,11 @@ public struct DelegationAction: Equatable, Sendable {
         self.dummyNullifiers = dummyNullifiers
         self.rhoSigned = rhoSigned
         self.paddedCmx = paddedCmx
+        self.nfSigned = nfSigned
+        self.cmxNew = cmxNew
+        self.alpha = alpha
+        self.rseedSigned = rseedSigned
+        self.rseedOutput = rseedOutput
     }
 }
 
@@ -400,9 +420,32 @@ public struct NoteInfo: Equatable, Sendable {
     }
 }
 
+// MARK: - Witnesses
+
+public struct WitnessData: Equatable, Sendable {
+    public let noteCommitment: Data
+    public let position: UInt64
+    public let root: Data
+    public let authPath: [Data]
+
+    public init(noteCommitment: Data, position: UInt64, root: Data, authPath: [Data]) {
+        self.noteCommitment = noteCommitment
+        self.position = position
+        self.root = root
+        self.authPath = authPath
+    }
+}
+
 // MARK: - Proof Events
 
 public enum ProofEvent: Equatable, Sendable {
     case progress(Double)
     case completed(Data)
+}
+
+/// Streaming events for vote commitment build (ZKP #2).
+/// Keeps bundle payloads separate from generic proof streams used elsewhere.
+public enum VoteCommitmentBuildEvent: Equatable, Sendable {
+    case progress(Double)
+    case completed(VoteCommitmentBundle)
 }

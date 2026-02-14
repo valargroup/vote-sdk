@@ -28,7 +28,7 @@ fn poseidon_hash_2(a: pallas::Base, b: pallas::Base) -> pallas::Base {
 }
 
 /// Convert a 32-byte slice to a Pallas base field element.
-fn bytes_to_fp(bytes: &[u8]) -> Result<pallas::Base, VotingError> {
+pub fn bytes_to_fp(bytes: &[u8]) -> Result<pallas::Base, VotingError> {
     let arr: [u8; 32] = bytes.try_into().map_err(|_| VotingError::InvalidInput {
         message: format!("expected 32 bytes, got {}", bytes.len()),
     })?;
@@ -39,7 +39,8 @@ fn bytes_to_fp(bytes: &[u8]) -> Result<pallas::Base, VotingError> {
 
 /// Convert a Pallas base field element to 32 bytes.
 fn fp_to_bytes(fp: pallas::Base) -> Vec<u8> {
-    fp.to_repr().as_ref().to_vec()
+    let repr: [u8; 32] = fp.to_repr();
+    repr.to_vec()
 }
 
 /// Derive governance nullifier (per spec §1.3.2, condition 14).
@@ -97,15 +98,14 @@ pub fn construct_van(
     // This binds the VAN to a specific hotkey address (g_d, pk_d), delegated weight,
     // voting round, and full proposal authority. DOMAIN_VAN=0 provides domain
     // separation from Vote Commitments (DOMAIN_VC=1) in the shared commitment tree.
-    let gov_comm_core =
-        poseidon::Hash::<_, P128Pow5T3, ConstantLength<6>, 3, 2>::init().hash([
-            pallas::Base::from(DOMAIN_VAN),
-            g_d,
-            pk_d,
-            v_total,
-            vri,
-            pallas::Base::from(MAX_PROPOSAL_AUTHORITY),
-        ]);
+    let gov_comm_core = poseidon::Hash::<_, P128Pow5T3, ConstantLength<6>, 3, 2>::init().hash([
+        pallas::Base::from(DOMAIN_VAN),
+        g_d,
+        pk_d,
+        v_total,
+        vri,
+        pallas::Base::from(MAX_PROPOSAL_AUTHORITY),
+    ]);
 
     // Step 2: Fold in the blinding factor (ConstantLength<2>).
     // gov_comm_rand hides the VAN preimage so observers can't brute-force
@@ -139,6 +139,39 @@ pub fn compute_rho_binding(
         .hash([c1, c2, c3, c4, gc, vri]);
 
     Ok(fp_to_bytes(rho))
+}
+
+/// Compute the delegation sighash (Blake2b-256, spec §2.4).
+///
+/// Covers the 10 client-controlled fields from MsgDelegateVote:
+/// nf_signed, rk, cmx_new, gov_comm, gov_null_1..4, vote_round_id.
+/// The 16-byte personalization follows BLAKE2b convention.
+pub fn compute_delegation_sighash(
+    nf_signed: &[u8; 32],
+    rk: &[u8; 32],
+    cmx_new: &[u8; 32],
+    gov_comm: &[u8],
+    gov_nullifiers: &[Vec<u8>],
+    vote_round_id: &[u8; 32],
+) -> [u8; 32] {
+    use blake2b_simd::Params;
+    // 16-byte personalization per BLAKE2b convention: "ZcVoteDelegation" (exactly 16 bytes)
+    let mut h = Params::new()
+        .hash_length(32)
+        .personal(b"ZcVoteDelegation")
+        .to_state();
+    h.update(nf_signed);
+    h.update(rk);
+    h.update(cmx_new);
+    h.update(gov_comm);
+    for gn in gov_nullifiers {
+        h.update(gn);
+    }
+    h.update(vote_round_id);
+    let hash = h.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(hash.as_bytes());
+    out
 }
 
 #[cfg(test)]
@@ -180,7 +213,10 @@ mod tests {
         let result1 = derive_gov_nullifier(&nk, &vri, &nf1).unwrap();
         let result2 = derive_gov_nullifier(&nk, &vri, &nf2).unwrap();
 
-        assert_ne!(result1, result2, "different nullifiers must produce different gov nullifiers");
+        assert_ne!(
+            result1, result2,
+            "different nullifiers must produce different gov nullifiers"
+        );
     }
 
     #[test]
@@ -230,7 +266,10 @@ mod tests {
         let result1 = construct_van(&g_d, &pk_d, 1000, &vri, &rcm1).unwrap();
         let result2 = construct_van(&g_d, &pk_d, 1000, &vri, &rcm2).unwrap();
 
-        assert_ne!(result1, result2, "different randomness must produce different VAN");
+        assert_ne!(
+            result1, result2,
+            "different randomness must produce different VAN"
+        );
     }
 
     /// Known-answer test vectors for governance nullifier and VAN.
@@ -245,7 +284,9 @@ mod tests {
         let nf = [0x03u8; 32];
 
         let result = derive_gov_nullifier(&nk, &vri, &nf).unwrap();
-        let expected = hex::decode("6a8038d1868237a643da723a441ace037c03502c7a70369b21d1e31293fc302b").unwrap();
+        let expected =
+            hex::decode("6a8038d1868237a643da723a441ace037c03502c7a70369b21d1e31293fc302b")
+                .unwrap();
         assert_eq!(result, expected, "gov nullifier known-answer mismatch — formula may have diverged from orchard reference");
     }
 
@@ -257,8 +298,13 @@ mod tests {
         let rcm = [0x06u8; 32];
 
         let result = construct_van(&g_d, &pk_d, 1000, &vri, &rcm).unwrap();
-        let expected = hex::decode("4af713fb9de5d4f7b5ba4a28177a62f7963a084ba5e8f1a46a6b034b5fc93717").unwrap();
-        assert_eq!(result, expected, "VAN known-answer mismatch — formula may have diverged from orchard reference");
+        let expected =
+            hex::decode("4af713fb9de5d4f7b5ba4a28177a62f7963a084ba5e8f1a46a6b034b5fc93717")
+                .unwrap();
+        assert_eq!(
+            result, expected,
+            "VAN known-answer mismatch — formula may have diverged from orchard reference"
+        );
     }
 
     #[test]
@@ -326,7 +372,94 @@ mod tests {
         assert_eq!(result.len(), 32);
         assert_ne!(result, vec![0u8; 32], "rho_binding must not be zero");
         // Known-answer: captured from first successful run.
-        let expected = hex::decode("37e1cdff84e15fd576c3d52bf7b33769f29a591969ec964a0e098df031e3d422").unwrap();
-        assert_eq!(result, expected, "rho_binding known-answer mismatch — formula may have diverged");
+        let expected =
+            hex::decode("37e1cdff84e15fd576c3d52bf7b33769f29a591969ec964a0e098df031e3d422")
+                .unwrap();
+        assert_eq!(
+            result, expected,
+            "rho_binding known-answer mismatch — formula may have diverged"
+        );
+    }
+
+    #[test]
+    fn test_compute_delegation_sighash_deterministic() {
+        let nf_signed = [0x01; 32];
+        let rk = [0x02; 32];
+        let cmx_new = [0x03; 32];
+        let gov_comm = vec![0x04; 32];
+        let gov_nullifiers = vec![
+            vec![0x10; 32],
+            vec![0x11; 32],
+            vec![0x12; 32],
+            vec![0x13; 32],
+        ];
+        let vote_round_id = [0x05; 32];
+
+        let h1 = compute_delegation_sighash(
+            &nf_signed,
+            &rk,
+            &cmx_new,
+            &gov_comm,
+            &gov_nullifiers,
+            &vote_round_id,
+        );
+        let h2 = compute_delegation_sighash(
+            &nf_signed,
+            &rk,
+            &cmx_new,
+            &gov_comm,
+            &gov_nullifiers,
+            &vote_round_id,
+        );
+
+        assert_eq!(h1, h2, "delegation sighash must be deterministic");
+        assert_ne!(h1, [0u8; 32], "delegation sighash must not be zero");
+    }
+
+    #[test]
+    fn test_compute_delegation_sighash_changes_with_inputs() {
+        let nf_signed = [0x01; 32];
+        let rk = [0x02; 32];
+        let cmx_new = [0x03; 32];
+        let gov_comm = vec![0x04; 32];
+        let gov_nullifiers = vec![
+            vec![0x10; 32],
+            vec![0x11; 32],
+            vec![0x12; 32],
+            vec![0x13; 32],
+        ];
+        let vote_round_id = [0x05; 32];
+
+        let base = compute_delegation_sighash(
+            &nf_signed,
+            &rk,
+            &cmx_new,
+            &gov_comm,
+            &gov_nullifiers,
+            &vote_round_id,
+        );
+
+        let changed_rk = compute_delegation_sighash(
+            &nf_signed,
+            &[0xAA; 32],
+            &cmx_new,
+            &gov_comm,
+            &gov_nullifiers,
+            &vote_round_id,
+        );
+        let changed_vote_round = compute_delegation_sighash(
+            &nf_signed,
+            &rk,
+            &cmx_new,
+            &gov_comm,
+            &gov_nullifiers,
+            &[0xBB; 32],
+        );
+
+        assert_ne!(base, changed_rk, "changing rk must change sighash");
+        assert_ne!(
+            base, changed_vote_round,
+            "changing vote_round_id must change sighash"
+        );
     }
 }

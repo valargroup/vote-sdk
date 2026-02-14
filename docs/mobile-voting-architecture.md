@@ -73,7 +73,7 @@ A voting round progresses through phases, tracked in the `rounds.phase` column:
 Initialized
     -> generateHotkey()
 HotkeyGenerated
-    -> constructDelegationAction() + Keystone signing
+    -> buildDelegationSignAction() + Keystone signing
 DelegationConstructed
     -> buildDelegationWitness() (inclusion + exclusion proofs)
 WitnessBuilt
@@ -152,6 +152,7 @@ Three dependency clients, each with live/test implementations:
 - Wraps `VotingDatabase` FFI object via a thread-safe `DatabaseActor`
 - `stateStream()` — publishes `VotingDbState` (round info + votes) whenever DB changes
 - `getWalletNotes()` — queries Zcash wallet DB for Orchard notes unspent at snapshot height
+- `buildDelegationSignAction()` — high-level sign-action boundary used by `VotingStore`; wraps input derivation and delegation action construction
 - All crypto operations: hotkey generation, delegation action, witness, proofs, vote commitment, share payloads
 - `StreamProgressReporter` bridges UniFFI progress callbacks into `AsyncThrowingStream<ProofEvent>`
 
@@ -167,22 +168,22 @@ Three dependency clients, each with live/test implementations:
 
 ## What's Real vs Stubbed
 
-| Component                      | Status  | Notes                                          |
-| ------------------------------ | ------- | ---------------------------------------------- |
-| Wallet notes at snapshot       | Real    | Read-only query of wallet DB, cmx recomputed   |
-| Voting weight from notes       | Real    | Sum of note values displayed in UI             |
-| SQLite storage + phase machine | Real    | Full CRUD, WAL mode, migrations                |
-| Round lifecycle orchestration  | Real    | Phase transitions enforced                     |
-| ElGamal share encryption       | Real    | Pallas curve, proper randomness                |
-| Binary weight decomposition    | Real    | 4-share limit enforced                         |
-| Hotkey generation              | Real    | Random Pallas keypair                          |
-| Vote commitment construction   | Stubbed | Returns placeholder hashes                     |
-| ZKP #1 (delegation proof)      | Stubbed | Simulates progress, returns dummy proof        |
-| ZKP #2 (vote proof)            | Stubbed | Returns placeholder bundle                     |
-| Keystone signing               | Stubbed | Auto-approved in prototype                     |
-| Vote chain API                 | Mocked  | Returns success responses                      |
-| Helper server delegation       | Mocked  | `delegateShares()` is a no-op                  |
-| VAN witness / tree sync        | Stubbed | Hardcoded placeholder data                     |
+| Component                      | Status  | Notes                                        |
+| ------------------------------ | ------- | -------------------------------------------- |
+| Wallet notes at snapshot       | Real    | Read-only query of wallet DB, cmx recomputed |
+| Voting weight from notes       | Real    | Sum of note values displayed in UI           |
+| SQLite storage + phase machine | Real    | Full CRUD, WAL mode, migrations              |
+| Round lifecycle orchestration  | Real    | Phase transitions enforced                   |
+| ElGamal share encryption       | Real    | Pallas curve, proper randomness              |
+| Binary weight decomposition    | Real    | 4-share limit enforced                       |
+| Hotkey generation              | Real    | Random Pallas keypair                        |
+| Vote commitment construction   | Stubbed | Returns placeholder hashes                   |
+| ZKP #1 (delegation proof)      | Stubbed | Simulates progress, returns dummy proof      |
+| ZKP #2 (vote proof)            | Stubbed | Returns placeholder bundle                   |
+| Keystone signing               | Stubbed | Auto-approved in prototype                   |
+| Vote chain API                 | Mocked  | Returns success responses                    |
+| Helper server delegation       | Mocked  | `delegateShares()` is a no-op                |
+| VAN witness / tree sync        | Stubbed | Hardcoded placeholder data                   |
 
 ## Key Design Decisions
 

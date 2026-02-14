@@ -309,6 +309,9 @@ extension SDKSynchronizerClient: DependencyKey {
             httpRequestOverTor: { request in
                 try await synchronizer.httpRequestOverTor(for: request)
             },
+            getTreeState: { height in
+                try await synchronizer.getTreeState(height: height)
+            },
             debugDatabaseSql: { query in
                 synchronizer.debugDatabase(sql: query)
             },

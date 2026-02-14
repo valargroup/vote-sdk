@@ -1,11 +1,15 @@
 use rusqlite::{named_params, Connection};
 
-use crate::types::{ProofResult, VotingError, VotingRoundParams};
 use crate::storage::{RoundPhase, RoundState, RoundSummary, VoteRecord};
+use crate::types::{ProofResult, VotingError, VotingRoundParams};
 
 // --- Rounds ---
 
-pub fn insert_round(conn: &Connection, params: &VotingRoundParams, session_json: Option<&str>) -> Result<(), VotingError> {
+pub fn insert_round(
+    conn: &Connection,
+    params: &VotingRoundParams,
+    session_json: Option<&str>,
+) -> Result<(), VotingError> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -32,7 +36,11 @@ pub fn insert_round(conn: &Connection, params: &VotingRoundParams, session_json:
     Ok(())
 }
 
-pub fn update_round_phase(conn: &Connection, round_id: &str, phase: RoundPhase) -> Result<(), VotingError> {
+pub fn update_round_phase(
+    conn: &Connection,
+    round_id: &str,
+    phase: RoundPhase,
+) -> Result<(), VotingError> {
     let rows = conn
         .execute(
             "UPDATE rounds SET phase = :phase WHERE round_id = :round_id",
@@ -54,7 +62,10 @@ pub fn update_round_phase(conn: &Connection, round_id: &str, phase: RoundPhase) 
     Ok(())
 }
 
-pub fn load_round_params(conn: &Connection, round_id: &str) -> Result<VotingRoundParams, VotingError> {
+pub fn load_round_params(
+    conn: &Connection,
+    round_id: &str,
+) -> Result<VotingRoundParams, VotingError> {
     conn.query_row(
         "SELECT round_id, snapshot_height, ea_pk, nc_root, nullifier_imt_root FROM rounds WHERE round_id = :round_id",
         named_params! { ":round_id": round_id },
@@ -132,14 +143,41 @@ pub fn list_rounds(conn: &Connection) -> Result<Vec<RoundSummary>, VotingError> 
 }
 
 pub fn clear_round(conn: &Connection, round_id: &str) -> Result<(), VotingError> {
-    conn.execute("DELETE FROM votes WHERE round_id = :round_id", named_params! { ":round_id": round_id })
-        .map_err(|e| VotingError::Internal { message: format!("failed to clear votes: {}", e) })?;
-    conn.execute("DELETE FROM proofs WHERE round_id = :round_id", named_params! { ":round_id": round_id })
-        .map_err(|e| VotingError::Internal { message: format!("failed to clear proofs: {}", e) })?;
-    conn.execute("DELETE FROM cached_tree_state WHERE round_id = :round_id", named_params! { ":round_id": round_id })
-        .map_err(|e| VotingError::Internal { message: format!("failed to clear cached_tree_state: {}", e) })?;
-    conn.execute("DELETE FROM rounds WHERE round_id = :round_id", named_params! { ":round_id": round_id })
-        .map_err(|e| VotingError::Internal { message: format!("failed to clear round: {}", e) })?;
+    conn.execute(
+        "DELETE FROM votes WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+    )
+    .map_err(|e| VotingError::Internal {
+        message: format!("failed to clear votes: {}", e),
+    })?;
+    conn.execute(
+        "DELETE FROM proofs WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+    )
+    .map_err(|e| VotingError::Internal {
+        message: format!("failed to clear proofs: {}", e),
+    })?;
+    conn.execute(
+        "DELETE FROM witnesses WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+    )
+    .map_err(|e| VotingError::Internal {
+        message: format!("failed to clear witnesses: {}", e),
+    })?;
+    conn.execute(
+        "DELETE FROM cached_tree_state WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+    )
+    .map_err(|e| VotingError::Internal {
+        message: format!("failed to clear cached_tree_state: {}", e),
+    })?;
+    conn.execute(
+        "DELETE FROM rounds WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+    )
+    .map_err(|e| VotingError::Internal {
+        message: format!("failed to clear round: {}", e),
+    })?;
     Ok(())
 }
 
@@ -153,7 +191,8 @@ pub fn clear_round(conn: &Connection, round_id: &str) -> Result<(), VotingError>
 //     Each is 32 bytes. Stored so the witness builder can reconstruct padded notes.
 
 /// Persist all delegation action data in a single UPDATE:
-/// blinding factor, dummy nullifiers, constrained rho, and padded note cmx values.
+/// blinding factor, dummy nullifiers, constrained rho, padded note cmx values,
+/// signed action fields (nf_signed, cmx_new, alpha), and note rseeds.
 pub fn store_delegation_data(
     conn: &Connection,
     round_id: &str,
@@ -161,6 +200,11 @@ pub fn store_delegation_data(
     dummy_nullifiers: &[Vec<u8>],
     rho_signed: &[u8],
     padded_cmx: &[Vec<u8>],
+    nf_signed: &[u8],
+    cmx_new: &[u8],
+    alpha: &[u8],
+    rseed_signed: &[u8],
+    rseed_output: &[u8],
 ) -> Result<(), VotingError> {
     // Serialize dummy nullifiers as a flat byte blob: [nf0 (32 bytes) | nf1 | nf2 | ...].
     // Length 0 means no padding was needed (all 4 notes were real).
@@ -171,19 +215,21 @@ pub fn store_delegation_data(
         .collect();
 
     // Same flat-blob encoding for padded cmx values.
-    let padded_blob: Vec<u8> = padded_cmx
-        .iter()
-        .flat_map(|c| c.iter().copied())
-        .collect();
+    let padded_blob: Vec<u8> = padded_cmx.iter().flat_map(|c| c.iter().copied()).collect();
 
     let rows = conn
         .execute(
-            "UPDATE rounds SET gov_comm_rand = :rand, dummy_nullifiers = :dummies, rho_signed = :rho, padded_note_data = :padded WHERE round_id = :round_id",
+            "UPDATE rounds SET gov_comm_rand = :rand, dummy_nullifiers = :dummies, rho_signed = :rho, padded_note_data = :padded, nf_signed = :nf_signed, cmx_new = :cmx_new, alpha = :alpha, rseed_signed = :rseed_signed, rseed_output = :rseed_output WHERE round_id = :round_id",
             named_params! {
                 ":rand": gov_comm_rand,
                 ":dummies": dummy_blob,
                 ":rho": rho_signed,
                 ":padded": padded_blob,
+                ":nf_signed": nf_signed,
+                ":cmx_new": cmx_new,
+                ":alpha": alpha,
+                ":rseed_signed": rseed_signed,
+                ":rseed_output": rseed_output,
                 ":round_id": round_id,
             },
         )
@@ -201,6 +247,66 @@ pub fn store_delegation_data(
     Ok(())
 }
 
+/// Load nf_signed (signed note nullifier, 32 bytes) for a round.
+pub fn load_nf_signed(conn: &Connection, round_id: &str) -> Result<Vec<u8>, VotingError> {
+    conn.query_row(
+        "SELECT nf_signed FROM rounds WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+        |row| row.get(0),
+    )
+    .map_err(|e| VotingError::InvalidInput {
+        message: format!("no nf_signed for round: {} ({})", round_id, e),
+    })
+}
+
+/// Load cmx_new (output note commitment, 32 bytes) for a round.
+pub fn load_cmx_new(conn: &Connection, round_id: &str) -> Result<Vec<u8>, VotingError> {
+    conn.query_row(
+        "SELECT cmx_new FROM rounds WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+        |row| row.get(0),
+    )
+    .map_err(|e| VotingError::InvalidInput {
+        message: format!("no cmx_new for round: {} ({})", round_id, e),
+    })
+}
+
+/// Load alpha (spend auth randomizer scalar, 32 bytes) for a round.
+pub fn load_alpha(conn: &Connection, round_id: &str) -> Result<Vec<u8>, VotingError> {
+    conn.query_row(
+        "SELECT alpha FROM rounds WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+        |row| row.get(0),
+    )
+    .map_err(|e| VotingError::InvalidInput {
+        message: format!("no alpha for round: {} ({})", round_id, e),
+    })
+}
+
+/// Load signed note rseed (32 bytes) for a round.
+pub fn load_rseed_signed(conn: &Connection, round_id: &str) -> Result<Vec<u8>, VotingError> {
+    conn.query_row(
+        "SELECT rseed_signed FROM rounds WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+        |row| row.get(0),
+    )
+    .map_err(|e| VotingError::InvalidInput {
+        message: format!("no rseed_signed for round: {} ({})", round_id, e),
+    })
+}
+
+/// Load output note rseed (32 bytes) for a round.
+pub fn load_rseed_output(conn: &Connection, round_id: &str) -> Result<Vec<u8>, VotingError> {
+    conn.query_row(
+        "SELECT rseed_output FROM rounds WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+        |row| row.get(0),
+    )
+    .map_err(|e| VotingError::InvalidInput {
+        message: format!("no rseed_output for round: {} ({})", round_id, e),
+    })
+}
+
 /// Load the VAN blinding factor for a round. Needed as a private witness in ZKP #2.
 pub fn load_gov_comm_rand(conn: &Connection, round_id: &str) -> Result<Vec<u8>, VotingError> {
     conn.query_row(
@@ -215,7 +321,10 @@ pub fn load_gov_comm_rand(conn: &Connection, round_id: &str) -> Result<Vec<u8>, 
 
 /// Load dummy nullifiers for padded note slots. Returns 0-3 entries of 32 bytes each.
 /// Deserializes the flat blob back into individual 32-byte nullifiers.
-pub fn load_dummy_nullifiers(conn: &Connection, round_id: &str) -> Result<Vec<Vec<u8>>, VotingError> {
+pub fn load_dummy_nullifiers(
+    conn: &Connection,
+    round_id: &str,
+) -> Result<Vec<Vec<u8>>, VotingError> {
     let blob: Vec<u8> = conn
         .query_row(
             "SELECT dummy_nullifiers FROM rounds WHERE round_id = :round_id",
@@ -277,7 +386,12 @@ pub fn load_padded_cmx(conn: &Connection, round_id: &str) -> Result<Vec<Vec<u8>>
 
 // --- Cached Tree State ---
 
-pub fn store_tree_state(conn: &Connection, round_id: &str, snapshot_height: u64, tree_state: &[u8]) -> Result<(), VotingError> {
+pub fn store_tree_state(
+    conn: &Connection,
+    round_id: &str,
+    snapshot_height: u64,
+    tree_state: &[u8],
+) -> Result<(), VotingError> {
     conn.execute(
         "INSERT OR REPLACE INTO cached_tree_state (round_id, snapshot_height, tree_state)
          VALUES (:round_id, :snapshot_height, :tree_state)",
@@ -302,6 +416,109 @@ pub fn load_tree_state(conn: &Connection, round_id: &str) -> Result<Vec<u8>, Vot
     .map_err(|e| VotingError::InvalidInput {
         message: format!("no cached tree state for round: {} ({})", round_id, e),
     })
+}
+
+// --- Witnesses (Merkle inclusion proofs for Orchard notes) ---
+
+/// Check if witnesses are already cached for a round.
+pub fn has_witnesses(conn: &Connection, round_id: &str) -> Result<bool, VotingError> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM witnesses WHERE round_id = :round_id",
+        named_params! { ":round_id": round_id },
+        |row| row.get::<_, i64>(0).map(|c| c > 0),
+    )
+    .map_err(|e| VotingError::Internal {
+        message: format!("failed to check witnesses: {}", e),
+    })
+}
+
+/// Store witness data for multiple notes in a round.
+/// Each WitnessData's auth_path (Vec<Vec<u8>>) is serialized as a flat 1024-byte blob
+/// (32 levels × 32 bytes each).
+pub fn store_witnesses(
+    conn: &Connection,
+    round_id: &str,
+    witnesses: &[crate::types::WitnessData],
+) -> Result<(), VotingError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    for w in witnesses {
+        // Serialize auth_path as flat blob: 32 × 32 = 1024 bytes
+        let auth_blob: Vec<u8> = w.auth_path.iter().flat_map(|h| h.iter().copied()).collect();
+
+        conn.execute(
+            "INSERT OR REPLACE INTO witnesses (round_id, note_position, note_commitment, root, auth_path, created_at)
+             VALUES (:round_id, :position, :commitment, :root, :auth_path, :created_at)",
+            named_params! {
+                ":round_id": round_id,
+                ":position": w.position as i64,
+                ":commitment": w.note_commitment,
+                ":root": w.root,
+                ":auth_path": auth_blob,
+                ":created_at": now,
+            },
+        )
+        .map_err(|e| VotingError::Internal {
+            message: format!("failed to store witness for position {}: {}", w.position, e),
+        })?;
+    }
+
+    Ok(())
+}
+
+/// Load cached witnesses for a round, ordered by position.
+pub fn load_witnesses(conn: &Connection, round_id: &str) -> Result<Vec<crate::types::WitnessData>, VotingError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT note_position, note_commitment, root, auth_path FROM witnesses
+             WHERE round_id = :round_id ORDER BY note_position",
+        )
+        .map_err(|e| VotingError::Internal {
+            message: format!("failed to prepare load_witnesses: {}", e),
+        })?;
+
+    let witnesses = stmt
+        .query_map(named_params! { ":round_id": round_id }, |row| {
+            let position: i64 = row.get(0)?;
+            let note_commitment: Vec<u8> = row.get(1)?;
+            let root: Vec<u8> = row.get(2)?;
+            let auth_blob: Vec<u8> = row.get(3)?;
+            Ok((position as u64, note_commitment, root, auth_blob))
+        })
+        .map_err(|e| VotingError::Internal {
+            message: format!("failed to load witnesses: {}", e),
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| VotingError::Internal {
+            message: format!("failed to collect witnesses: {}", e),
+        })?;
+
+    witnesses
+        .into_iter()
+        .map(|(position, note_commitment, root, auth_blob)| {
+            // Deserialize auth_path from flat blob back to Vec<Vec<u8>>
+            if auth_blob.len() != 32 * 32 {
+                return Err(VotingError::Internal {
+                    message: format!(
+                        "corrupt auth_path blob for position {}: expected 1024 bytes, got {}",
+                        position,
+                        auth_blob.len()
+                    ),
+                });
+            }
+            let auth_path: Vec<Vec<u8>> = auth_blob.chunks_exact(32).map(|c| c.to_vec()).collect();
+
+            Ok(crate::types::WitnessData {
+                note_commitment,
+                position,
+                root,
+                auth_path,
+            })
+        })
+        .collect()
 }
 
 // --- Proofs ---
@@ -338,7 +555,11 @@ pub fn load_witness(conn: &Connection, round_id: &str) -> Result<Vec<u8>, Voting
     })
 }
 
-pub fn store_proof(conn: &Connection, round_id: &str, proof: &ProofResult) -> Result<(), VotingError> {
+pub fn store_proof(
+    conn: &Connection,
+    round_id: &str,
+    proof: &ProofResult,
+) -> Result<(), VotingError> {
     conn.execute(
         "UPDATE proofs SET proof = :proof, success = :success WHERE round_id = :round_id",
         named_params! {
@@ -410,7 +631,11 @@ pub fn get_votes(conn: &Connection, round_id: &str) -> Result<Vec<VoteRecord>, V
     Ok(votes)
 }
 
-pub fn mark_vote_submitted(conn: &Connection, round_id: &str, proposal_id: u32) -> Result<(), VotingError> {
+pub fn mark_vote_submitted(
+    conn: &Connection,
+    round_id: &str,
+    proposal_id: u32,
+) -> Result<(), VotingError> {
     conn.execute(
         "UPDATE votes SET submitted = 1 WHERE round_id = :round_id AND proposal_id = :proposal_id",
         named_params! {

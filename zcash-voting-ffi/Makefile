@@ -17,7 +17,7 @@ CARGO_MANIFEST = rust/Cargo.toml
 
 # --- Main targets ---
 
-.PHONY: dev release clean bindings install
+.PHONY: dev release clean bindings install sanitize-generated-whitespace
 
 install:
 	rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios x86_64-apple-darwin aarch64-apple-darwin
@@ -72,6 +72,7 @@ dev: clean bindings
 	# Swift bindings
 	mkdir -p Sources/ZcashVotingFFI
 	cp products/bindings/$(LIB_NAME).swift Sources/ZcashVotingFFI/
+	$(MAKE) sanitize-generated-whitespace
 
 # Release build: all platforms
 release: clean bindings
@@ -132,6 +133,7 @@ release: clean bindings
 	# Swift bindings
 	mkdir -p Sources/ZcashVotingFFI
 	cp products/bindings/$(LIB_NAME).swift Sources/ZcashVotingFFI/
+	$(MAKE) sanitize-generated-whitespace
 
 # Generate Swift bindings from a host debug build
 bindings:
@@ -141,6 +143,12 @@ bindings:
 		--library target/debug/lib$(LIB_NAME).dylib \
 		--language swift \
 		--out-dir ../products/bindings
+
+sanitize-generated-whitespace:
+	shopt -s nullglob
+	for file in products/bindings/*.swift products/bindings/*.h Sources/ZcashVotingFFI/*.swift releases/$(FFI_NAME).xcframework/*/$(FFI_NAME).framework/Headers/*.h; do \
+		perl -pi -e 's/[ \t]+$$//' "$$file"; \
+	done
 
 clean:
 	rm -rf products

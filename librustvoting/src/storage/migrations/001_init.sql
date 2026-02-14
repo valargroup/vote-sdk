@@ -10,7 +10,12 @@ CREATE TABLE rounds (
     gov_comm_rand       BLOB,
     dummy_nullifiers    BLOB,
     rho_signed          BLOB,
-    padded_note_data    BLOB
+    padded_note_data    BLOB,
+    nf_signed           BLOB,
+    cmx_new             BLOB,
+    alpha               BLOB,
+    rseed_signed        BLOB,
+    rseed_output        BLOB
 );
 
 CREATE TABLE cached_tree_state (
@@ -25,6 +30,17 @@ CREATE TABLE proofs (
     proof       BLOB,
     success     INTEGER NOT NULL DEFAULT 0,
     created_at  INTEGER NOT NULL
+);
+
+CREATE TABLE witnesses (
+    round_id        TEXT NOT NULL,
+    note_position   INTEGER NOT NULL,
+    note_commitment BLOB NOT NULL,
+    root            BLOB NOT NULL,
+    auth_path       BLOB NOT NULL,
+    created_at      INTEGER NOT NULL,
+    PRIMARY KEY (round_id, note_position),
+    FOREIGN KEY (round_id) REFERENCES rounds(round_id)
 );
 
 CREATE TABLE votes (

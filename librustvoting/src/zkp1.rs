@@ -1,4 +1,6 @@
-use crate::types::{validate_32_bytes, DelegationAction, ProofProgressReporter, ProofResult, VotingError};
+use crate::types::{
+    validate_32_bytes, DelegationAction, ProofProgressReporter, ProofResult, VotingError,
+};
 
 /// Assemble Halo2 witness from action + PIR responses.
 /// STUB: returns mock witness bytes.
@@ -80,6 +82,11 @@ mod tests {
             dummy_nullifiers: vec![],
             rho_signed: vec![0x04; 32],
             padded_cmx: vec![],
+            nf_signed: vec![0x05; 32],
+            cmx_new: vec![0x06; 32],
+            alpha: vec![0x07; 32],
+            rseed_signed: vec![0x08; 32],
+            rseed_output: vec![0x09; 32],
         }
     }
 
@@ -94,7 +101,9 @@ mod tests {
     #[test]
     fn test_generate_delegation_proof_stub() {
         let count = Arc::new(AtomicU32::new(0));
-        let reporter = TestReporter { count: count.clone() };
+        let reporter = TestReporter {
+            count: count.clone(),
+        };
         let witness = vec![0xDD; 512];
         let result = generate_delegation_proof(&witness, &reporter).unwrap();
         assert!(result.success);
@@ -105,7 +114,9 @@ mod tests {
 
     #[test]
     fn test_generate_delegation_proof_empty_witness() {
-        let reporter = TestReporter { count: Arc::new(AtomicU32::new(0)) };
+        let reporter = TestReporter {
+            count: Arc::new(AtomicU32::new(0)),
+        };
         assert!(generate_delegation_proof(&[], &reporter).is_err());
     }
 }

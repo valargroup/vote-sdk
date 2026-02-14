@@ -19,6 +19,19 @@ private final class StreamProgressReporter: ZcashVotingFFI.ProofProgressReporter
     }
 }
 
+/// Bridges UniFFI ProofProgressReporter callback for vote commitment streams.
+private final class VoteCommitmentProgressReporter: ZcashVotingFFI.ProofProgressReporter {
+    let continuation: AsyncThrowingStream<VoteCommitmentBuildEvent, Error>.Continuation
+
+    init(_ continuation: AsyncThrowingStream<VoteCommitmentBuildEvent, Error>.Continuation) {
+        self.continuation = continuation
+    }
+
+    func onProgress(progress: Double) {
+        continuation.yield(.progress(progress))
+    }
+}
+
 // MARK: - Live key
 
 extension VotingCryptoClient: DependencyKey {
@@ -113,22 +126,67 @@ extension VotingCryptoClient: DependencyKey {
                     )
                 }
             },
+            generateNoteWitnesses: { roundId, walletDbPath, notes in
+                let db = try await dbActor.database()
+                let ffiNotes = notes.map {
+                    ZcashVotingFFI.NoteInfo(
+                        commitment: $0.commitment,
+                        nullifier: $0.nullifier,
+                        value: $0.value,
+                        position: $0.position
+                    )
+                }
+                let ffiWitnesses = try db.generateNoteWitnesses(
+                    roundId: roundId,
+                    walletDbPath: walletDbPath,
+                    notes: ffiNotes
+                )
+                return ffiWitnesses.map {
+                    WitnessData(
+                        noteCommitment: $0.noteCommitment,
+                        position: $0.position,
+                        root: $0.root,
+                        authPath: $0.authPath
+                    )
+                }
+            },
+            verifyWitness: { witness in
+                let ffiWitness = ZcashVotingFFI.WitnessData(
+                    noteCommitment: witness.noteCommitment,
+                    position: witness.position,
+                    root: witness.root,
+                    authPath: witness.authPath
+                )
+                return try ZcashVotingFFI.verifyWitness(witness: ffiWitness)
+            },
             generateHotkey: { roundId, seed in
                 let db = try await dbActor.database()
                 let hotkey = try db.generateHotkey(roundId: roundId, seed: Data(seed))
-                return VotingHotkey(
+                return VotingModels.VotingHotkey(
                     secretKey: hotkey.secretKey,
                     publicKey: hotkey.publicKey,
                     address: hotkey.address
                 )
             },
-            constructDelegationAction: { roundId, hotkey, notes, nk, gdNewX, pkdNewX in
+            buildDelegationSignAction: { roundId, notes, senderSeed, hotkeySeed, networkId, accountIndex in
                 let db = try await dbActor.database()
-                let ffiHotkey = ZcashVotingFFI.VotingHotkey(
-                    secretKey: hotkey.secretKey,
-                    publicKey: hotkey.publicKey,
-                    address: hotkey.address
+                let ffiHotkey = try db.generateHotkey(roundId: roundId, seed: Data(hotkeySeed))
+                let hotkey = VotingModels.VotingHotkey(
+                    secretKey: ffiHotkey.secretKey,
+                    publicKey: ffiHotkey.publicKey,
+                    address: ffiHotkey.address
                 )
+                let ffiInputs = try ZcashVotingFFI.generateDelegationInputs(
+                    senderSeed: Data(senderSeed),
+                    hotkeySeed: Data(hotkeySeed),
+                    networkId: networkId,
+                    accountIndex: accountIndex
+                )
+                guard hotkey.publicKey == ffiInputs.hotkeyPublicKey,
+                      hotkey.address == ffiInputs.hotkeyAddress
+                else {
+                    throw VotingCryptoError.hotkeySeedBindingMismatch
+                }
                 let ffiNotes = notes.map {
                     ZcashVotingFFI.NoteInfo(
                         commitment: $0.commitment,
@@ -139,11 +197,11 @@ extension VotingCryptoClient: DependencyKey {
                 }
                 let result = try db.constructDelegationAction(
                     roundId: roundId,
-                    hotkey: ffiHotkey,
                     notes: ffiNotes,
-                    nk: nk,
-                    gDNewX: gdNewX,
-                    pkDNewX: pkdNewX
+                    fvkBytes: ffiInputs.fvkBytes,
+                    gDNewX: ffiInputs.gDNewX,
+                    pkDNewX: ffiInputs.pkDNewX,
+                    hotkeyRawAddress: ffiInputs.hotkeyRawAddress
                 )
                 return DelegationAction(
                     actionBytes: result.actionBytes,
@@ -154,7 +212,12 @@ extension VotingCryptoClient: DependencyKey {
                     govCommRand: result.govCommRand,
                     dummyNullifiers: result.dummyNullifiers,
                     rhoSigned: result.rhoSigned,
-                    paddedCmx: result.paddedCmx
+                    paddedCmx: result.paddedCmx,
+                    nfSigned: result.nfSigned,
+                    cmxNew: result.cmxNew,
+                    alpha: result.alpha,
+                    rseedSigned: result.rseedSigned,
+                    rseedOutput: result.rseedOutput
                 )
             },
             storeTreeState: { roundId, treeState in
@@ -172,7 +235,12 @@ extension VotingCryptoClient: DependencyKey {
                     govCommRand: action.govCommRand,
                     dummyNullifiers: action.dummyNullifiers,
                     rhoSigned: action.rhoSigned,
-                    paddedCmx: action.paddedCmx
+                    paddedCmx: action.paddedCmx,
+                    nfSigned: action.nfSigned,
+                    cmxNew: action.cmxNew,
+                    alpha: action.alpha,
+                    rseedSigned: action.rseedSigned,
+                    rseedOutput: action.rseedOutput
                 )
                 let witness = try db.buildDelegationWitness(
                     roundId: roundId,
@@ -228,7 +296,7 @@ extension VotingCryptoClient: DependencyKey {
                     Task.detached {
                         do {
                             let db = try await dbActor.database()
-                            let reporter = StreamProgressReporter(continuation)
+                            let reporter = VoteCommitmentProgressReporter(continuation)
                             let ffiShares = encShares.map {
                                 ZcashVotingFFI.EncryptedShare(
                                     c1: $0.c1,
@@ -252,10 +320,14 @@ extension VotingCryptoClient: DependencyKey {
                                 voteCommitment: result.voteCommitment,
                                 proposalId: proposalId,
                                 proof: result.proof,
+                                // TODO(gov-steps-phase-3-voting): Source this from canonical
+                                // round metadata once MsgCastVote fields are fully wired.
                                 voteRoundId: Data(repeating: 0, count: 32),
+                                // TODO(gov-steps-phase-3-voting): Replace with vote commitment
+                                // tree anchor height, not a local placeholder.
                                 voteCommTreeAnchorHeight: 0
                             )
-                            continuation.yield(.completed(bundle.proof))
+                            continuation.yield(.completed(bundle))
                             continuation.finish()
                         } catch {
                             continuation.finish(throwing: error)
@@ -329,9 +401,21 @@ private actor DatabaseActor {
 
 // MARK: - Helpers
 
-enum VotingCryptoError: Error {
+enum VotingCryptoError: LocalizedError {
     case proofFailed(String)
     case databaseNotOpen
+    case hotkeySeedBindingMismatch
+
+    var errorDescription: String? {
+        switch self {
+        case .proofFailed(let reason):
+            return "Delegation proof generation failed: \(reason)"
+        case .databaseNotOpen:
+            return "Voting database is not open."
+        case .hotkeySeedBindingMismatch:
+            return "Hotkey derivation mismatch while building delegation sign action."
+        }
+    }
 }
 
 private extension VoteChoice {
@@ -352,8 +436,8 @@ private extension VoteChoice {
     }
 }
 
-private extension Data {
-    var hexString: String {
+public extension Data {
+    public var hexString: String {
         map { String(format: "%02x", $0) }.joined()
     }
 }

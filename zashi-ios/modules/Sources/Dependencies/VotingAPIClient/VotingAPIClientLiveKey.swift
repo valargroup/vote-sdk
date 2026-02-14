@@ -9,10 +9,10 @@ extension VotingAPIClient: DependencyKey {
                 // Stub: return mock session matching the prototype's VotingRound
                 try await Task.sleep(for: .milliseconds(200))
                 return VotingSession(
-                    voteRoundId: Data(repeating: 0xAB, count: 32),
-                    snapshotHeight: 2_800_000,
-                    snapshotBlockhash: Data(repeating: 0xAB, count: 32),
-                    proposalsHash: Data(repeating: 0xCD, count: 32),
+                    voteRoundId: Data(repeating: 0x0A, count: 32),
+                    snapshotHeight: 3_235_467,
+                    snapshotBlockhash: Data(repeating: 0x0B, count: 32),
+                    proposalsHash: Data(repeating: 0x0C, count: 32),
                     voteEndTime: Calendar.current.date(byAdding: .day, value: 5, to: Date())!,
                     eaPK: Data(repeating: 0x01, count: 32),
                     vkZkp1: Data(repeating: 0x02, count: 32),
@@ -39,7 +39,7 @@ extension VotingAPIClient: DependencyKey {
             },
             fetchCommitmentTreeState: { _ in
                 try await Task.sleep(for: .milliseconds(100))
-                return CommitmentTreeState(nextIndex: 1024, root: Data(repeating: 0x33, count: 32), height: 2_800_000)
+                return CommitmentTreeState(nextIndex: 1024, root: Data(repeating: 0x33, count: 32), height: 3_235_467)
             },
             fetchLatestCommitmentTree: {
                 try await Task.sleep(for: .milliseconds(100))

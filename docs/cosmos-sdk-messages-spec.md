@@ -26,18 +26,18 @@
 
 The vote chain is a Cosmos SDK application chain that processes three core transaction types corresponding to the three ZKP circuits in the protocol:
 
-| Message | Phase | Submitter | ZKP | Purpose |
-|---|---|---|---|---|
-| `MsgDelegateVote` | 2 | Wallet (client) | ZKP #1 | Delegate mainchain ZEC notes to a voting hotkey |
-| `MsgCastVote` | 3 | Wallet (client) | ZKP #2 | Cast an encrypted vote on a proposal |
-| `MsgRevealShare` | 5 | Helper server | ZKP #3 | Reveal one encrypted share for tally accumulation |
+| Message           | Phase | Submitter       | ZKP    | Purpose                                           |
+| ----------------- | ----- | --------------- | ------ | ------------------------------------------------- |
+| `MsgDelegateVote` | 2     | Wallet (client) | ZKP #1 | Delegate mainchain ZEC notes to a voting hotkey   |
+| `MsgCastVote`     | 3     | Wallet (client) | ZKP #2 | Cast an encrypted vote on a proposal              |
+| `MsgRevealShare`  | 5     | Helper server   | ZKP #3 | Reveal one encrypted share for tally accumulation |
 
 Plus two administrative messages:
 
-| Message | Phase | Submitter | Purpose |
-|---|---|---|---|
-| `MsgCreateVotingSession` | 0 | Governance authority | Initialize a voting round with parameters |
-| `MsgSubmitTally` | Tally | Election authority | Submit decrypted aggregate with correctness proof |
+| Message                  | Phase | Submitter            | Purpose                                           |
+| ------------------------ | ----- | -------------------- | ------------------------------------------------- |
+| `MsgCreateVotingSession` | 0     | Governance authority | Initialize a voting round with parameters         |
+| `MsgSubmitTally`         | Tally | Election authority   | Submit decrypted aggregate with correctness proof |
 
 ### Protocol Flow (from Figma)
 
@@ -164,11 +164,11 @@ message Proposal {
 
 Three independent nullifier sets per voting round, each stored as a key-value mapping `nullifier → bool` (existence check):
 
-| Set | Key prefix | Populated by | Prevents |
-|---|---|---|---|
-| **Gov nullifier set** | `gov_null/{round_id}/{nullifier}` | `MsgDelegateVote` | Double-delegation of the same note |
-| **VAN nullifier set** | `van_null/{round_id}/{nullifier}` | `MsgCastVote` | Double-vote with the same VAN |
-| **Share nullifier set** | `share_null/{round_id}/{nullifier}` | `MsgRevealShare` | Double-count of the same share |
+| Set                     | Key prefix                          | Populated by      | Prevents                           |
+| ----------------------- | ----------------------------------- | ----------------- | ---------------------------------- |
+| **Gov nullifier set**   | `gov_null/{round_id}/{nullifier}`   | `MsgDelegateVote` | Double-delegation of the same note |
+| **VAN nullifier set**   | `van_null/{round_id}/{nullifier}`   | `MsgCastVote`     | Double-vote with the same VAN      |
+| **Share nullifier set** | `share_null/{round_id}/{nullifier}` | `MsgRevealShare`  | Double-count of the same share     |
 
 ### 3.3 Vote Commitment Tree
 
@@ -188,10 +188,10 @@ vote_tree/{round_id}/node/{level}/{index} → intermediate hash (bytes)
 
 Leaves are inserted in transaction order:
 
-| Inserted by | Leaf contents |
-|---|---|
-| `MsgDelegateVote` | `vote_authority_note` (the VAN commitment, §1.3.3) |
-| `MsgCastVote` | `vote_authority_note_new` AND `vote_commitment` (two leaves per tx) |
+| Inserted by       | Leaf contents                                                       |
+| ----------------- | ------------------------------------------------------------------- |
+| `MsgDelegateVote` | `vote_authority_note` (the VAN commitment, §1.3.3)                  |
+| `MsgCastVote`     | `vote_authority_note_new` AND `vote_commitment` (two leaves per tx) |
 
 ### 3.4 Encrypted Tally Accumulator
 
@@ -318,20 +318,43 @@ message MsgDelegateVoteResponse {
 }
 ```
 
+#### Sign-Action Sighash Contract (Implemented)
+
+Current client implementation uses a custom domain-separated Blake2b-256 sighash for
+`MsgDelegateVote` signing material (not Cosmos tx hash).
+
+- Hash: Blake2b-256
+- Personalization: `ZcVoteDelegation` (16 bytes)
+- Input order:
+  1. `nf_signed`
+  2. `rk`
+  3. `cmx_new`
+  4. `gov_comm`
+  5. `gov_null_1`
+  6. `gov_null_2`
+  7. `gov_null_3`
+  8. `gov_null_4`
+  9. `vote_round_id`
+
+References:
+
+- `librustvoting/src/governance.rs` (`compute_delegation_sighash`)
+- `librustvoting/src/action.rs` (`encode_delegation_action_bytes`, `construct_delegation_action`)
+
 #### Public Inputs to ZKP #1 Verifier
 
 These are extracted from the message and passed to the on-chain Halo2 verifier:
 
-| # | Public Input | Source |
-|---|---|---|
-| 1 | `signed_note_nullifier` | `msg.signed_note_nullifier` |
-| 2 | `rk` | `msg.rk` |
-| 3 | `nc_root` | `session.nc_root` (from chain state) |
-| 4 | `nullifier_imt_root` | `session.nullifier_imt_root` (from chain state) |
-| 5 | `gov_comm` | `msg.gov_comm` |
-| 6–9 | `gov_null_1..4` | `msg.gov_nullifiers[0..3]` |
-| 10 | `vote_round_id` | `msg.voting_round_id` (cross-checked with session) |
-| 11 | `cmx_new` | `msg.cmx_new` |
+| #   | Public Input            | Source                                             |
+| --- | ----------------------- | -------------------------------------------------- |
+| 1   | `signed_note_nullifier` | `msg.signed_note_nullifier`                        |
+| 2   | `rk`                    | `msg.rk`                                           |
+| 3   | `nc_root`               | `session.nc_root` (from chain state)               |
+| 4   | `nullifier_imt_root`    | `session.nullifier_imt_root` (from chain state)    |
+| 5   | `gov_comm`              | `msg.gov_comm`                                     |
+| 6–9 | `gov_null_1..4`         | `msg.gov_nullifiers[0..3]`                         |
+| 10  | `vote_round_id`         | `msg.voting_round_id` (cross-checked with session) |
+| 11  | `cmx_new`               | `msg.cmx_new`                                      |
 
 #### Validation (ordered)
 
@@ -404,14 +427,14 @@ message MsgCastVoteResponse {
 
 #### Public Inputs to ZKP #2 Verifier
 
-| # | Public Input | Source |
-|---|---|---|
-| 1 | `van_nullifier` | `msg.van_nullifier` |
-| 2 | `vote_authority_note_new` | `msg.vote_authority_note_new` |
-| 3 | `vote_commitment` | `msg.vote_commitment` |
-| 4 | `vote_comm_tree_root` | `msg.vote_comm_tree_root` (cross-checked with chain state) |
-| 5 | `proposal_id` | `msg.proposal_id` |
-| 6 | `voting_round_id` | `msg.voting_round_id` |
+| #   | Public Input              | Source                                                     |
+| --- | ------------------------- | ---------------------------------------------------------- |
+| 1   | `van_nullifier`           | `msg.van_nullifier`                                        |
+| 2   | `vote_authority_note_new` | `msg.vote_authority_note_new`                              |
+| 3   | `vote_commitment`         | `msg.vote_commitment`                                      |
+| 4   | `vote_comm_tree_root`     | `msg.vote_comm_tree_root` (cross-checked with chain state) |
+| 5   | `proposal_id`             | `msg.proposal_id`                                          |
+| 6   | `voting_round_id`         | `msg.voting_round_id`                                      |
 
 Note: No signature is needed — the ZKP itself proves knowledge of `vsk` (§3.8: "No external signature is needed — the ZKP proof itself serves as authorization").
 
@@ -486,14 +509,14 @@ message MsgRevealShareResponse {
 
 #### Public Inputs to ZKP #3 Verifier
 
-| # | Public Input | Source |
-|---|---|---|
-| 1 | `share_nullifier` | `msg.share_nullifier` |
-| 2 | `enc_share` | `msg.enc_share` |
-| 3 | `proposal_id` | `msg.proposal_id` |
-| 4 | `vote_decision` | `msg.vote_decision` |
-| 5 | `vote_comm_tree_root` | `msg.vote_comm_tree_root` (cross-checked with chain state) |
-| 6 | `voting_round_id` | `msg.voting_round_id` |
+| #   | Public Input          | Source                                                     |
+| --- | --------------------- | ---------------------------------------------------------- |
+| 1   | `share_nullifier`     | `msg.share_nullifier`                                      |
+| 2   | `enc_share`           | `msg.enc_share`                                            |
+| 3   | `proposal_id`         | `msg.proposal_id`                                          |
+| 4   | `vote_decision`       | `msg.vote_decision`                                        |
+| 5   | `vote_comm_tree_root` | `msg.vote_comm_tree_root` (cross-checked with chain state) |
+| 6   | `voting_round_id`     | `msg.voting_round_id`                                      |
 
 Note: No signature is needed — the ZKP proves the share originated from a valid, registered vote commitment (§5.5).
 
@@ -704,34 +727,34 @@ message TreeRootEntry {
 
 ### Per-Message State Changes
 
-| Message | Gov Null Set | VAN Null Set | Share Null Set | Vote Commitment Tree | Tally Accum |
-|---|---|---|---|---|---|
-| `MsgDelegateVote` | +4 entries | — | — | +1 leaf (VAN) | — |
-| `MsgCastVote` | — | +1 entry | — | +2 leaves (new VAN + VC) | — |
-| `MsgRevealShare` | — | — | +1 entry | — | +(C1,C2) accumulation |
-| `MsgSubmitTally` | — | — | — | — | Results stored |
+| Message           | Gov Null Set | VAN Null Set | Share Null Set | Vote Commitment Tree     | Tally Accum           |
+| ----------------- | ------------ | ------------ | -------------- | ------------------------ | --------------------- |
+| `MsgDelegateVote` | +4 entries   | —            | —              | +1 leaf (VAN)            | —                     |
+| `MsgCastVote`     | —            | +1 entry     | —              | +2 leaves (new VAN + VC) | —                     |
+| `MsgRevealShare`  | —            | —            | +1 entry       | —                        | +(C1,C2) accumulation |
+| `MsgSubmitTally`  | —            | —            | —              | —                        | Results stored        |
 
 ---
 
 ## 7. Error Codes
 
-| Code | Name | Triggered by |
-|---|---|---|
-| 1 | `ErrSessionNotFound` | Round ID does not map to a session |
-| 2 | `ErrSessionNotActive` | Session status is not `ACTIVE` (or `TALLYING` for shares) |
-| 3 | `ErrVotingWindowClosed` | `block_time >= vote_end_time` (+ grace for shares) |
-| 4 | `ErrInvalidProposalId` | `proposal_id >= len(proposals)` |
-| 5 | `ErrDuplicateGovNullifier` | Gov nullifier already in set |
-| 6 | `ErrDuplicateVanNullifier` | VAN nullifier already in set |
-| 7 | `ErrDuplicateShareNullifier` | Share nullifier already in set |
-| 8 | `ErrZkpVerificationFailed` | Halo2 proof did not verify |
-| 9 | `ErrSignatureVerificationFailed` | SpendAuthSig invalid (MsgDelegateVote only) |
-| 10 | `ErrInvalidTreeRoot` | Provided tree root not in historical window |
-| 11 | `ErrInvalidCurvePoint` | Pallas point not on curve |
-| 12 | `ErrTallyDecryptionProofFailed` | Chaum-Pedersen DLEQ proof invalid |
-| 13 | `ErrSessionAlreadyExists` | Duplicate `voting_round_id` |
-| 14 | `ErrUnauthorized` | Submitter not authorized for this action |
-| 15 | `ErrInvalidGovNullifierCount` | `gov_nullifiers` length != 4 |
+| Code | Name                             | Triggered by                                              |
+| ---- | -------------------------------- | --------------------------------------------------------- |
+| 1    | `ErrSessionNotFound`             | Round ID does not map to a session                        |
+| 2    | `ErrSessionNotActive`            | Session status is not `ACTIVE` (or `TALLYING` for shares) |
+| 3    | `ErrVotingWindowClosed`          | `block_time >= vote_end_time` (+ grace for shares)        |
+| 4    | `ErrInvalidProposalId`           | `proposal_id >= len(proposals)`                           |
+| 5    | `ErrDuplicateGovNullifier`       | Gov nullifier already in set                              |
+| 6    | `ErrDuplicateVanNullifier`       | VAN nullifier already in set                              |
+| 7    | `ErrDuplicateShareNullifier`     | Share nullifier already in set                            |
+| 8    | `ErrZkpVerificationFailed`       | Halo2 proof did not verify                                |
+| 9    | `ErrSignatureVerificationFailed` | SpendAuthSig invalid (MsgDelegateVote only)               |
+| 10   | `ErrInvalidTreeRoot`             | Provided tree root not in historical window               |
+| 11   | `ErrInvalidCurvePoint`           | Pallas point not on curve                                 |
+| 12   | `ErrTallyDecryptionProofFailed`  | Chaum-Pedersen DLEQ proof invalid                         |
+| 13   | `ErrSessionAlreadyExists`        | Duplicate `voting_round_id`                               |
+| 14   | `ErrUnauthorized`                | Submitter not authorized for this action                  |
+| 15   | `ErrInvalidGovNullifierCount`    | `gov_nullifiers` length != 4                              |
 
 ---
 

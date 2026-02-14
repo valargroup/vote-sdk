@@ -121,8 +121,10 @@ mod tests {
     fn test_open_in_memory() {
         let db = test_db();
         let conn = db.conn();
-        let version: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(version, 1);
+        let version: u32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
     }
 
     #[test]

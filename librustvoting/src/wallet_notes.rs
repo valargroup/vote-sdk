@@ -26,7 +26,9 @@ pub fn get_wallet_notes_at_snapshot(
         1 => Network::TestNetwork,
         _ => {
             return Err(VotingError::InvalidInput {
-                message: format!("invalid network_id {network_id}, expected 0 (mainnet) or 1 (testnet)"),
+                message: format!(
+                    "invalid network_id {network_id}, expected 0 (mainnet) or 1 (testnet)"
+                ),
             })
         }
     };
@@ -66,20 +68,26 @@ pub fn get_wallet_notes_at_snapshot(
         })?;
 
     let rows = stmt
-        .query_map(
-            &[(":snapshot_height", &(snapshot_height as i64))],
-            |row| {
-                let diversifier: Vec<u8> = row.get(0)?;
-                let value: i64 = row.get(1)?;
-                let rho: Vec<u8> = row.get(2)?;
-                let rseed: Vec<u8> = row.get(3)?;
-                let nf: Vec<u8> = row.get(4)?;
-                let position: i64 = row.get(5)?;
-                let scope_code: i32 = row.get(6)?;
-                let ufvk_str: String = row.get(7)?;
-                Ok((diversifier, value, rho, rseed, nf, position, scope_code, ufvk_str))
-            },
-        )
+        .query_map(&[(":snapshot_height", &(snapshot_height as i64))], |row| {
+            let diversifier: Vec<u8> = row.get(0)?;
+            let value: i64 = row.get(1)?;
+            let rho: Vec<u8> = row.get(2)?;
+            let rseed: Vec<u8> = row.get(3)?;
+            let nf: Vec<u8> = row.get(4)?;
+            let position: i64 = row.get(5)?;
+            let scope_code: i32 = row.get(6)?;
+            let ufvk_str: String = row.get(7)?;
+            Ok((
+                diversifier,
+                value,
+                rho,
+                rseed,
+                nf,
+                position,
+                scope_code,
+                ufvk_str,
+            ))
+        })
         .map_err(|e| VotingError::Internal {
             message: format!("query failed: {e}"),
         })?;
@@ -87,10 +95,18 @@ pub fn get_wallet_notes_at_snapshot(
     let mut notes = Vec::new();
 
     for row_result in rows {
-        let (diversifier_bytes, value, rho_bytes, rseed_bytes, nf_bytes, position, scope_code, ufvk_str) =
-            row_result.map_err(|e| VotingError::Internal {
-                message: format!("row read error: {e}"),
-            })?;
+        let (
+            diversifier_bytes,
+            value,
+            rho_bytes,
+            rseed_bytes,
+            nf_bytes,
+            position,
+            scope_code,
+            ufvk_str,
+        ) = row_result.map_err(|e| VotingError::Internal {
+            message: format!("row read error: {e}"),
+        })?;
 
         let cmx = compute_cmx(
             &ufvk_str,
@@ -125,11 +141,10 @@ fn compute_cmx(
     network: &Network,
 ) -> Result<[u8; 32], VotingError> {
     // Parse UFVK and extract Orchard FVK
-    let ufvk = UnifiedFullViewingKey::decode(network, ufvk_str).map_err(|e| {
-        VotingError::Internal {
+    let ufvk =
+        UnifiedFullViewingKey::decode(network, ufvk_str).map_err(|e| VotingError::Internal {
             message: format!("failed to decode UFVK: {e}"),
-        }
-    })?;
+        })?;
 
     let fvk = ufvk.orchard().ok_or_else(|| VotingError::Internal {
         message: "UFVK has no Orchard component".into(),
@@ -162,22 +177,15 @@ fn compute_cmx(
     let address = fvk.address(diversifier, scope);
 
     // Parse rho (32 bytes)
-    let rho_arr: [u8; 32] = rho_bytes
-        .try_into()
-        .map_err(|_| VotingError::Internal {
-            message: format!("rho must be 32 bytes, got {}", rho_bytes.len()),
-        })?;
-    let rho: Rho = ct_option_to_result(
-        Rho::from_bytes(&rho_arr),
-        "invalid rho bytes",
-    )?;
+    let rho_arr: [u8; 32] = rho_bytes.try_into().map_err(|_| VotingError::Internal {
+        message: format!("rho must be 32 bytes, got {}", rho_bytes.len()),
+    })?;
+    let rho: Rho = ct_option_to_result(Rho::from_bytes(&rho_arr), "invalid rho bytes")?;
 
     // Parse rseed (32 bytes, requires rho)
-    let rseed_arr: [u8; 32] = rseed_bytes
-        .try_into()
-        .map_err(|_| VotingError::Internal {
-            message: format!("rseed must be 32 bytes, got {}", rseed_bytes.len()),
-        })?;
+    let rseed_arr: [u8; 32] = rseed_bytes.try_into().map_err(|_| VotingError::Internal {
+        message: format!("rseed must be 32 bytes, got {}", rseed_bytes.len()),
+    })?;
     let rseed: RandomSeed = ct_option_to_result(
         RandomSeed::from_bytes(rseed_arr, &rho),
         "invalid rseed bytes",

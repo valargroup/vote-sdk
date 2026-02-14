@@ -123,3 +123,48 @@ struct ZKPStatusBanner: View {
     }
 }
 
+// MARK: - Vote Commitment Stub Card
+
+struct VoteCommitmentStubCard: View {
+    let bundle: VoteCommitmentBundle
+    let txHash: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Prototype VC Stub")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text("commitment: \(bundle.voteCommitment.shortHex)")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+
+            Text("van nullifier: \(bundle.vanNullifier.shortHex)")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+
+            if let txHash, !txHash.isEmpty {
+                Text("tx: \(txHash)")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private extension Data {
+    var shortHex: String {
+        let hex = map { String(format: "%02x", $0) }.joined()
+        if hex.count <= 16 {
+            return hex
+        }
+        let prefix = hex.prefix(8)
+        let suffix = hex.suffix(8)
+        return "\(prefix)...\(suffix)"
+    }
+}
+

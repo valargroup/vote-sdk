@@ -25,6 +25,14 @@ struct VoteCompletionView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
 
+                    if let bundle = store.lastVoteCommitmentBundle {
+                        VoteCommitmentStubCard(
+                            bundle: bundle,
+                            txHash: store.lastVoteCommitmentTxHash
+                        )
+                        .padding(.horizontal, 32)
+                    }
+
                     ZashiButton("Done", type: .primary) {
                         store.send(.doneTapped)
                     }

@@ -91,6 +91,8 @@ public struct SDKSynchronizerClient {
     public var isTorSuccessfullyInitialized: () async -> Bool?
     public var httpRequestOverTor: (URLRequest) async throws -> (Data, HTTPURLResponse)
     
+    public var getTreeState: @Sendable (_ height: UInt64) async throws -> Data
+
     public var debugDatabaseSql: (String) -> String = { _ in "" }
     
     public var getSingleUseTransparentAddress: (AccountUUID) async throws -> SingleUseTransparentAddress = { _ in

@@ -2,7 +2,7 @@ use crate::storage::queries;
 use crate::storage::{RoundPhase, RoundState, RoundSummary, VoteRecord, VotingDb};
 use crate::types::{
     DelegationAction, EncryptedShare, NoteInfo, ProofProgressReporter, ProofResult, SharePayload,
-    VoteCommitmentBundle, VotingError, VotingHotkey, VotingRoundParams,
+    VoteCommitmentBundle, VotingError, VotingHotkey, VotingRoundParams, WitnessData,
 };
 
 impl VotingDb {
@@ -52,37 +52,52 @@ impl VotingDb {
         snapshot_height: u64,
         network_id: u32,
     ) -> Result<Vec<NoteInfo>, VotingError> {
-        crate::wallet_notes::get_wallet_notes_at_snapshot(wallet_db_path, snapshot_height, network_id)
+        crate::wallet_notes::get_wallet_notes_at_snapshot(
+            wallet_db_path,
+            snapshot_height,
+            network_id,
+        )
     }
 
     // --- Phase 1: Delegation setup ---
 
     /// Generate a voting hotkey from seed bytes. Returns the hotkey (SDK needs address for Keystone flow).
     /// The seed comes from a BIP39 mnemonic stored in iOS Keychain.
-    pub fn generate_hotkey(&self, _round_id: &str, seed: &[u8]) -> Result<VotingHotkey, VotingError> {
+    pub fn generate_hotkey(
+        &self,
+        _round_id: &str,
+        seed: &[u8],
+    ) -> Result<VotingHotkey, VotingError> {
         crate::hotkey::generate_hotkey(seed)
     }
 
     /// Construct the delegation action for Keystone signing.
-    /// Loads round params from db. Hotkey + notes come from caller (not stored yet).
-    /// Computes real governance nullifiers, VAN, and persists gov_comm_rand.
+    /// Loads round params from db. Notes come from caller (not stored yet).
+    /// Computes real governance nullifiers, VAN, signed note, output note, rk, and sighash.
+    /// Persists delegation data (gov_comm_rand, dummy_nullifiers, rho_signed, etc.) to DB.
     ///
-    /// - `nk`: 32-byte nullifier deriving key
-    /// - `g_d_new_x`: 32-byte x-coordinate of hotkey diversified generator
-    /// - `pk_d_new_x`: 32-byte x-coordinate of hotkey transmission key
+    /// - `fvk_bytes`: 96-byte orchard FullViewingKey (ak[32] || nk[32] || rivk[32])
+    /// - `g_d_new_x`: 32-byte x-coordinate of hotkey diversified generator (for VAN)
+    /// - `pk_d_new_x`: 32-byte x-coordinate of hotkey transmission key (for VAN)
+    /// - `hotkey_raw_address`: 43-byte hotkey raw orchard address (for output note)
     pub fn construct_delegation_action(
         &self,
         round_id: &str,
-        hotkey: &VotingHotkey,
         notes: &[NoteInfo],
-        nk: &[u8],
+        fvk_bytes: &[u8],
         g_d_new_x: &[u8],
         pk_d_new_x: &[u8],
+        hotkey_raw_address: &[u8],
     ) -> Result<DelegationAction, VotingError> {
         let conn = self.conn();
         let params = queries::load_round_params(&conn, round_id)?;
         let action = crate::action::construct_delegation_action(
-            hotkey, notes, &params, nk, g_d_new_x, pk_d_new_x,
+            notes,
+            &params,
+            fvk_bytes,
+            g_d_new_x,
+            pk_d_new_x,
+            hotkey_raw_address,
         )?;
         queries::store_delegation_data(
             &conn,
@@ -91,6 +106,11 @@ impl VotingDb {
             &action.dummy_nullifiers,
             &action.rho_signed,
             &action.padded_cmx,
+            &action.nf_signed,
+            &action.cmx_new,
+            &action.alpha,
+            &action.rseed_signed,
+            &action.rseed_output,
         )?;
         Ok(action)
     }
@@ -100,6 +120,59 @@ impl VotingDb {
         let conn = self.conn();
         let params = queries::load_round_params(&conn, round_id)?;
         queries::store_tree_state(&conn, round_id, params.snapshot_height, tree_state)
+    }
+
+    /// Generate Merkle inclusion witnesses for notes in a round.
+    /// Uses cached tree state + wallet DB shard data to build witnesses.
+    /// Results are cached in the witnesses table — subsequent calls return cached data.
+    ///
+    /// Must be called after store_tree_state and before build_delegation_witness.
+    pub fn generate_note_witnesses(
+        &self,
+        round_id: &str,
+        wallet_db_path: &str,
+        notes: &[NoteInfo],
+    ) -> Result<Vec<WitnessData>, VotingError> {
+        let conn = self.conn();
+
+        // Return cached witnesses if available
+        if queries::has_witnesses(&conn, round_id)? {
+            return queries::load_witnesses(&conn, round_id);
+        }
+
+        // Load cached tree state (must have been stored via store_tree_state)
+        let tree_state_bytes = queries::load_tree_state(&conn, round_id)?;
+        let params = queries::load_round_params(&conn, round_id)?;
+
+        let positions: Vec<u64> = notes.iter().map(|n| n.position).collect();
+        let commitments: Vec<Vec<u8>> = notes.iter().map(|n| n.commitment.clone()).collect();
+
+        // Generate witnesses from wallet DB + frontier
+        let witnesses = crate::witness::generate_note_witnesses(
+            wallet_db_path,
+            &positions,
+            &commitments,
+            params.snapshot_height,
+            &tree_state_bytes,
+        )?;
+
+        // Verify each witness before caching
+        for w in &witnesses {
+            let valid = crate::witness::verify_witness(w)?;
+            if !valid {
+                return Err(VotingError::Internal {
+                    message: format!(
+                        "witness verification failed for position {} (internal bug)",
+                        w.position
+                    ),
+                });
+            }
+        }
+
+        // Cache results
+        queries::store_witnesses(&conn, round_id, &witnesses)?;
+
+        Ok(witnesses)
     }
 
     // --- Phase 2: Delegation proof ---
@@ -262,26 +335,52 @@ mod tests {
 
     #[test]
     fn test_construct_delegation_action() {
+        use orchard::keys::{FullViewingKey, SpendingKey};
+        use zip32::Scope;
+
         let db = test_db();
         db.init_round(&test_params(), None).unwrap();
 
-        let seed = [0x42_u8; 64];
-        let hotkey = db.generate_hotkey(ROUND_ID, &seed).unwrap();
         let note = NoteInfo {
             commitment: vec![0x01; 32],
             nullifier: vec![0x02; 32],
             value: 1_000_000,
             position: 42,
         };
-        let nk = vec![0x11; 32];
-        let g_d = vec![0x22; 32];
-        let pk_d = vec![0x33; 32];
+        // Derive valid FVK and hotkey address from deterministic spending keys
+        let sk = SpendingKey::from_bytes([0x42; 32]).expect("valid spending key");
+        let fvk = FullViewingKey::from(&sk);
+        let fvk_bytes = fvk.to_bytes().to_vec();
+
+        let hotkey_sk = SpendingKey::from_bytes([0x43; 32]).expect("valid spending key");
+        let hotkey_fvk = FullViewingKey::from(&hotkey_sk);
+        let hotkey_addr = hotkey_fvk.address_at(0u32, Scope::External);
+        let hotkey_raw_address = hotkey_addr.to_raw_address_bytes().to_vec();
+
+        let hotkey_addr_43: [u8; 43] = hotkey_raw_address
+            .as_slice()
+            .try_into()
+            .expect("hotkey raw address must be 43 bytes");
+        let (g_d_x, pk_d_x) =
+            crate::action::derive_hotkey_x_coords_from_raw_address(&hotkey_addr_43)
+                .expect("hotkey raw address should decode");
+        let g_d = g_d_x.to_vec();
+        let pk_d = pk_d_x.to_vec();
 
         let action = db
-            .construct_delegation_action(ROUND_ID, &hotkey, &[note], &nk, &g_d, &pk_d)
+            .construct_delegation_action(
+                ROUND_ID,
+                &[note],
+                &fvk_bytes,
+                &g_d,
+                &pk_d,
+                &hotkey_raw_address,
+            )
             .unwrap();
         assert_eq!(action.rk.len(), 32);
+        assert_ne!(action.rk, vec![0xDE; 32]);
         assert_eq!(action.sighash.len(), 32);
+        assert_ne!(action.sighash, vec![0x5A; 32]);
         assert_eq!(action.gov_nullifiers.len(), 4);
         assert_eq!(action.van.len(), 32);
         assert_eq!(action.gov_comm_rand.len(), 32);
@@ -296,6 +395,18 @@ mod tests {
             assert_eq!(cmx.len(), 32);
         }
 
+        // New fields: nf_signed, cmx_new, alpha
+        assert_eq!(action.nf_signed.len(), 32);
+        assert_ne!(action.nf_signed, vec![0u8; 32]);
+        assert_eq!(action.cmx_new.len(), 32);
+        assert_ne!(action.cmx_new, vec![0u8; 32]);
+        assert_eq!(action.alpha.len(), 32);
+        assert_ne!(action.alpha, vec![0u8; 32]);
+        assert_eq!(action.rseed_signed.len(), 32);
+        assert_ne!(action.rseed_signed, vec![0u8; 32]);
+        assert_eq!(action.rseed_output.len(), 32);
+        assert_ne!(action.rseed_output, vec![0u8; 32]);
+
         // Verify delegation secrets were persisted
         let conn = db.conn();
         let stored_rand = queries::load_gov_comm_rand(&conn, ROUND_ID).unwrap();
@@ -308,6 +419,18 @@ mod tests {
         assert_eq!(stored_rho, action.rho_signed);
         let stored_padded = queries::load_padded_cmx(&conn, ROUND_ID).unwrap();
         assert_eq!(stored_padded, action.padded_cmx);
+
+        // Verify new fields round-trip through DB
+        let stored_nf = queries::load_nf_signed(&conn, ROUND_ID).unwrap();
+        assert_eq!(stored_nf, action.nf_signed);
+        let stored_cmx = queries::load_cmx_new(&conn, ROUND_ID).unwrap();
+        assert_eq!(stored_cmx, action.cmx_new);
+        let stored_alpha = queries::load_alpha(&conn, ROUND_ID).unwrap();
+        assert_eq!(stored_alpha, action.alpha);
+        let stored_rseed_signed = queries::load_rseed_signed(&conn, ROUND_ID).unwrap();
+        assert_eq!(stored_rseed_signed, action.rseed_signed);
+        let stored_rseed_output = queries::load_rseed_output(&conn, ROUND_ID).unwrap();
+        assert_eq!(stored_rseed_output, action.rseed_output);
     }
 
     #[test]
@@ -338,6 +461,11 @@ mod tests {
             dummy_nullifiers: vec![],
             rho_signed: vec![0x04; 32],
             padded_cmx: vec![],
+            nf_signed: vec![0x05; 32],
+            cmx_new: vec![0x06; 32],
+            alpha: vec![0x07; 32],
+            rseed_signed: vec![0x08; 32],
+            rseed_output: vec![0x09; 32],
         };
         let inclusion = vec![vec![0x01; 32]; 4];
         let exclusion = vec![vec![0x02; 32]; 4];

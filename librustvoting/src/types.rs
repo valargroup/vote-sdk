@@ -56,6 +56,16 @@ pub struct DelegationAction {
     /// Extracted note commitments (cmx) for padded dummy notes.
     /// Needed for ZKP witness construction in later steps.
     pub padded_cmx: Vec<Vec<u8>>,
+    /// Signed note nullifier (32 bytes). Public input to ZKP #1.
+    pub nf_signed: Vec<u8>,
+    /// Output note commitment (32 bytes). Public input to ZKP #1.
+    pub cmx_new: Vec<u8>,
+    /// Spend auth randomizer scalar (32 bytes). Needed for Keystone signing.
+    pub alpha: Vec<u8>,
+    /// Signed note rseed (32 bytes). Needed for witness reconstruction.
+    pub rseed_signed: Vec<u8>,
+    /// Output note rseed (32 bytes). Needed for witness reconstruction.
+    pub rseed_output: Vec<u8>,
 }
 
 /// El Gamal ciphertext of a voting share.
@@ -166,12 +176,6 @@ pub fn validate_round_params(params: &VotingRoundParams) -> Result<(), VotingErr
     validate_32_bytes(&params.ea_pk, "ea_pk")?;
     validate_32_bytes(&params.nc_root, "nc_root")?;
     validate_32_bytes(&params.nullifier_imt_root, "nullifier_imt_root")?;
-    Ok(())
-}
-
-pub fn validate_hotkey(hotkey: &VotingHotkey) -> Result<(), VotingError> {
-    validate_32_bytes(&hotkey.secret_key, "hotkey.secret_key")?;
-    validate_32_bytes(&hotkey.public_key, "hotkey.public_key")?;
     Ok(())
 }
 

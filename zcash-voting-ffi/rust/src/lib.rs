@@ -1,8 +1,11 @@
 uniffi::setup_scaffolding!();
 
-use std::sync::Arc;
 use librustvoting as voting;
+use std::sync::Arc;
 use voting::storage::VotingDb;
+use zcash_keys::keys::UnifiedSpendingKey;
+use zcash_protocol::consensus::{MAIN_NETWORK, TEST_NETWORK};
+use zip32::{AccountId, Scope};
 
 // --- Error type ---
 
@@ -165,6 +168,22 @@ pub struct DelegationAction {
     pub dummy_nullifiers: Vec<Vec<u8>>,
     pub rho_signed: Vec<u8>,
     pub padded_cmx: Vec<Vec<u8>>,
+    pub nf_signed: Vec<u8>,
+    pub cmx_new: Vec<u8>,
+    pub alpha: Vec<u8>,
+    pub rseed_signed: Vec<u8>,
+    pub rseed_output: Vec<u8>,
+}
+
+/// Inputs needed for delegation action construction.
+#[derive(Clone, uniffi::Record)]
+pub struct DelegationInputs {
+    pub fvk_bytes: Vec<u8>,
+    pub g_d_new_x: Vec<u8>,
+    pub pk_d_new_x: Vec<u8>,
+    pub hotkey_raw_address: Vec<u8>,
+    pub hotkey_public_key: Vec<u8>,
+    pub hotkey_address: String,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -276,6 +295,11 @@ impl From<voting::DelegationAction> for DelegationAction {
             dummy_nullifiers: a.dummy_nullifiers,
             rho_signed: a.rho_signed,
             padded_cmx: a.padded_cmx,
+            nf_signed: a.nf_signed,
+            cmx_new: a.cmx_new,
+            alpha: a.alpha,
+            rseed_signed: a.rseed_signed,
+            rseed_output: a.rseed_output,
         }
     }
 }
@@ -292,6 +316,11 @@ impl From<DelegationAction> for voting::DelegationAction {
             dummy_nullifiers: a.dummy_nullifiers,
             rho_signed: a.rho_signed,
             padded_cmx: a.padded_cmx,
+            nf_signed: a.nf_signed,
+            cmx_new: a.cmx_new,
+            alpha: a.alpha,
+            rseed_signed: a.rseed_signed,
+            rseed_output: a.rseed_output,
         }
     }
 }
@@ -375,6 +404,17 @@ impl From<voting::WitnessData> for WitnessData {
     }
 }
 
+impl From<WitnessData> for voting::WitnessData {
+    fn from(w: WitnessData) -> Self {
+        Self {
+            note_commitment: w.note_commitment,
+            position: w.position,
+            root: w.root,
+            auth_path: w.auth_path,
+        }
+    }
+}
+
 // =============================================================================
 // VotingDatabase — stateful UniFFI Object (new API)
 // =============================================================================
@@ -396,8 +436,14 @@ impl VotingDatabase {
 
     // --- Round management ---
 
-    pub fn init_round(&self, params: VotingRoundParams, session_json: Option<String>) -> Result<(), VotingError> {
-        Ok(self.db.init_round(&params.into(), session_json.as_deref())?)
+    pub fn init_round(
+        &self,
+        params: VotingRoundParams,
+        session_json: Option<String>,
+    ) -> Result<(), VotingError> {
+        Ok(self
+            .db
+            .init_round(&params.into(), session_json.as_deref())?)
     }
 
     pub fn get_round_state(&self, round_id: String) -> Result<RoundState, VotingError> {
@@ -409,7 +455,12 @@ impl VotingDatabase {
     }
 
     pub fn get_votes(&self, round_id: String) -> Result<Vec<VoteRecord>, VotingError> {
-        Ok(self.db.get_votes(&round_id)?.into_iter().map(Into::into).collect())
+        Ok(self
+            .db
+            .get_votes(&round_id)?
+            .into_iter()
+            .map(Into::into)
+            .collect())
     }
 
     pub fn clear_round(&self, round_id: String) -> Result<(), VotingError> {
@@ -424,7 +475,9 @@ impl VotingDatabase {
         snapshot_height: u64,
         network_id: u32,
     ) -> Result<Vec<NoteInfo>, VotingError> {
-        Ok(self.db.get_wallet_notes(&wallet_db_path, snapshot_height, network_id)?
+        Ok(self
+            .db
+            .get_wallet_notes(&wallet_db_path, snapshot_height, network_id)?
             .into_iter()
             .map(Into::into)
             .collect())
@@ -432,27 +485,59 @@ impl VotingDatabase {
 
     // --- Phase 1: Delegation setup ---
 
-    pub fn generate_hotkey(&self, round_id: String, seed: Vec<u8>) -> Result<VotingHotkey, VotingError> {
+    pub fn generate_hotkey(
+        &self,
+        round_id: String,
+        seed: Vec<u8>,
+    ) -> Result<VotingHotkey, VotingError> {
         Ok(self.db.generate_hotkey(&round_id, &seed)?.into())
     }
 
     pub fn construct_delegation_action(
         &self,
         round_id: String,
-        hotkey: VotingHotkey,
         notes: Vec<NoteInfo>,
-        nk: Vec<u8>,
+        fvk_bytes: Vec<u8>,
         g_d_new_x: Vec<u8>,
         pk_d_new_x: Vec<u8>,
+        hotkey_raw_address: Vec<u8>,
     ) -> Result<DelegationAction, VotingError> {
         let core_notes: Vec<voting::NoteInfo> = notes.into_iter().map(Into::into).collect();
-        Ok(self.db.construct_delegation_action(
-            &round_id, &hotkey.into(), &core_notes, &nk, &g_d_new_x, &pk_d_new_x,
-        )?.into())
+        Ok(self
+            .db
+            .construct_delegation_action(
+                &round_id,
+                &core_notes,
+                &fvk_bytes,
+                &g_d_new_x,
+                &pk_d_new_x,
+                &hotkey_raw_address,
+            )?
+            .into())
     }
 
-    pub fn store_tree_state(&self, round_id: String, tree_state_bytes: Vec<u8>) -> Result<(), VotingError> {
+    pub fn store_tree_state(
+        &self,
+        round_id: String,
+        tree_state_bytes: Vec<u8>,
+    ) -> Result<(), VotingError> {
         Ok(self.db.store_tree_state(&round_id, &tree_state_bytes)?)
+    }
+
+    /// Generate Merkle inclusion witnesses for notes in a round.
+    /// Requires store_tree_state to have been called first.
+    /// Results are cached — subsequent calls return cached data.
+    pub fn generate_note_witnesses(
+        &self,
+        round_id: String,
+        wallet_db_path: String,
+        notes: Vec<NoteInfo>,
+    ) -> Result<Vec<WitnessData>, VotingError> {
+        let core_notes: Vec<voting::NoteInfo> = notes.into_iter().map(Into::into).collect();
+        Ok(self.db.generate_note_witnesses(&round_id, &wallet_db_path, &core_notes)?
+            .into_iter()
+            .map(Into::into)
+            .collect())
     }
 
     // --- Phase 2: Delegation proof ---
@@ -464,7 +549,12 @@ impl VotingDatabase {
         inclusion_proofs: Vec<Vec<u8>>,
         exclusion_proofs: Vec<Vec<u8>>,
     ) -> Result<Vec<u8>, VotingError> {
-        Ok(self.db.build_delegation_witness(&round_id, &action.into(), &inclusion_proofs, &exclusion_proofs)?)
+        Ok(self.db.build_delegation_witness(
+            &round_id,
+            &action.into(),
+            &inclusion_proofs,
+            &exclusion_proofs,
+        )?)
     }
 
     pub fn generate_delegation_proof(
@@ -473,13 +563,25 @@ impl VotingDatabase {
         progress: Box<dyn ProofProgressReporter>,
     ) -> Result<ProofResult, VotingError> {
         let bridge = ProgressBridge { inner: progress };
-        Ok(self.db.generate_delegation_proof(&round_id, &bridge)?.into())
+        Ok(self
+            .db
+            .generate_delegation_proof(&round_id, &bridge)?
+            .into())
     }
 
     // --- Phase 3: Voting ---
 
-    pub fn encrypt_shares(&self, round_id: String, shares: Vec<u64>) -> Result<Vec<EncryptedShare>, VotingError> {
-        Ok(self.db.encrypt_shares(&round_id, &shares)?.into_iter().map(Into::into).collect())
+    pub fn encrypt_shares(
+        &self,
+        round_id: String,
+        shares: Vec<u64>,
+    ) -> Result<Vec<EncryptedShare>, VotingError> {
+        Ok(self
+            .db
+            .encrypt_shares(&round_id, &shares)?
+            .into_iter()
+            .map(Into::into)
+            .collect())
     }
 
     pub fn build_vote_commitment(
@@ -491,9 +593,20 @@ impl VotingDatabase {
         van_witness: Vec<u8>,
         progress: Box<dyn ProofProgressReporter>,
     ) -> Result<VoteCommitmentBundle, VotingError> {
-        let core_shares: Vec<voting::EncryptedShare> = enc_shares.into_iter().map(Into::into).collect();
+        let core_shares: Vec<voting::EncryptedShare> =
+            enc_shares.into_iter().map(Into::into).collect();
         let bridge = ProgressBridge { inner: progress };
-        Ok(self.db.build_vote_commitment(&round_id, proposal_id, choice, &core_shares, &van_witness, &bridge)?.into())
+        Ok(self
+            .db
+            .build_vote_commitment(
+                &round_id,
+                proposal_id,
+                choice,
+                &core_shares,
+                &van_witness,
+                &bridge,
+            )?
+            .into())
     }
 
     pub fn build_share_payloads(
@@ -501,11 +614,21 @@ impl VotingDatabase {
         enc_shares: Vec<EncryptedShare>,
         commitment: VoteCommitmentBundle,
     ) -> Result<Vec<SharePayload>, VotingError> {
-        let core_shares: Vec<voting::EncryptedShare> = enc_shares.into_iter().map(Into::into).collect();
-        Ok(self.db.build_share_payloads(&core_shares, &commitment.into())?.into_iter().map(Into::into).collect())
+        let core_shares: Vec<voting::EncryptedShare> =
+            enc_shares.into_iter().map(Into::into).collect();
+        Ok(self
+            .db
+            .build_share_payloads(&core_shares, &commitment.into())?
+            .into_iter()
+            .map(Into::into)
+            .collect())
     }
 
-    pub fn mark_vote_submitted(&self, round_id: String, proposal_id: u32) -> Result<(), VotingError> {
+    pub fn mark_vote_submitted(
+        &self,
+        round_id: String,
+        proposal_id: u32,
+    ) -> Result<(), VotingError> {
         Ok(self.db.mark_vote_submitted(&round_id, proposal_id)?)
     }
 }
@@ -525,7 +648,10 @@ pub fn decompose_weight(weight: u64) -> Vec<u64> {
 }
 
 #[uniffi::export]
-pub fn encrypt_shares(shares: Vec<u64>, ea_pk: Vec<u8>) -> Result<Vec<EncryptedShare>, VotingError> {
+pub fn encrypt_shares(
+    shares: Vec<u64>,
+    ea_pk: Vec<u8>,
+) -> Result<Vec<EncryptedShare>, VotingError> {
     Ok(voting::elgamal::encrypt_shares(&shares, &ea_pk)?
         .into_iter()
         .map(Into::into)
@@ -534,17 +660,122 @@ pub fn encrypt_shares(shares: Vec<u64>, ea_pk: Vec<u8>) -> Result<Vec<EncryptedS
 
 #[uniffi::export]
 pub fn construct_delegation_action(
-    hotkey: VotingHotkey,
     notes: Vec<NoteInfo>,
     params: VotingRoundParams,
-    nk: Vec<u8>,
+    fvk_bytes: Vec<u8>,
     g_d_new_x: Vec<u8>,
     pk_d_new_x: Vec<u8>,
+    hotkey_raw_address: Vec<u8>,
 ) -> Result<DelegationAction, VotingError> {
     let core_notes: Vec<voting::NoteInfo> = notes.into_iter().map(Into::into).collect();
     Ok(voting::action::construct_delegation_action(
-        &hotkey.into(), &core_notes, &params.into(), &nk, &g_d_new_x, &pk_d_new_x,
-    )?.into())
+        &core_notes,
+        &params.into(),
+        &fvk_bytes,
+        &g_d_new_x,
+        &pk_d_new_x,
+        &hotkey_raw_address,
+    )?
+    .into())
+}
+
+#[uniffi::export]
+pub fn generate_delegation_inputs(
+    sender_seed: Vec<u8>,
+    hotkey_seed: Vec<u8>,
+    network_id: u32,
+    account_index: u32,
+) -> Result<DelegationInputs, VotingError> {
+    // ZIP-32 key derivation requires non-trivial seed material; fail fast with clear errors.
+    if sender_seed.len() < 32 {
+        return Err(VotingError::InvalidInput {
+            message: format!(
+                "sender_seed must be at least 32 bytes, got {}",
+                sender_seed.len()
+            ),
+        });
+    }
+    if hotkey_seed.len() < 32 {
+        return Err(VotingError::InvalidInput {
+            message: format!(
+                "hotkey_seed must be at least 32 bytes, got {}",
+                hotkey_seed.len()
+            ),
+        });
+    }
+
+    // Keep account index within the ZIP-32 account domain expected by AccountId.
+    let account = AccountId::try_from(account_index).map_err(|_| VotingError::InvalidInput {
+        message: format!("account_index must be < 2^31, got {}", account_index),
+    })?;
+
+    // Derive the sender Orchard FVK bytes consumed by construct_delegation_action.
+    // These bytes include nk (middle 32 bytes), which is used for gov nullifier derivation.
+    let sender_usk = match network_id {
+        0 => UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &sender_seed, account),
+        1 => UnifiedSpendingKey::from_seed(&TEST_NETWORK, &sender_seed, account),
+        _ => {
+            return Err(VotingError::InvalidInput {
+                message: format!(
+                    "invalid network_id {}, expected 0 (mainnet) or 1 (testnet)",
+                    network_id
+                ),
+            });
+        }
+    }
+    .map_err(|e| VotingError::InvalidInput {
+        message: format!("failed to derive sender UnifiedSpendingKey: {}", e),
+    })?;
+
+    let sender_fvk = sender_usk
+        .to_unified_full_viewing_key()
+        .orchard()
+        .ok_or_else(|| VotingError::InvalidInput {
+            message: "sender UFVK is missing Orchard component".to_string(),
+        })?
+        .to_bytes()
+        .to_vec();
+
+    // Derive hotkey-side Orchard material from the same network/account so all components
+    // (raw address, g_d_x, pk_d_x) are internally consistent.
+    let hotkey_usk = match network_id {
+        0 => UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &hotkey_seed, account),
+        1 => UnifiedSpendingKey::from_seed(&TEST_NETWORK, &hotkey_seed, account),
+        _ => unreachable!("network_id validated above"),
+    }
+    .map_err(|e| VotingError::InvalidInput {
+        message: format!("failed to derive hotkey UnifiedSpendingKey: {}", e),
+    })?;
+    let hotkey_ufvk = hotkey_usk.to_unified_full_viewing_key();
+    let hotkey_orchard_fvk = hotkey_ufvk
+        .orchard()
+        .ok_or_else(|| VotingError::InvalidInput {
+            message: "hotkey UFVK is missing Orchard component".to_string(),
+        })?;
+
+    // App-facing hotkey (pubkey/address string) is returned alongside Orchard receiver bytes.
+    // The Swift layer checks these values match before constructing/signing the delegation action.
+    let app_hotkey = voting::hotkey::generate_hotkey(&hotkey_seed)?;
+    let hotkey_addr = hotkey_orchard_fvk.address_at(0u32, Scope::External);
+    let hotkey_raw_address = hotkey_addr.to_raw_address_bytes().to_vec();
+
+    // Precompute x-coordinates used by VAN and ZKP public inputs from the raw Orchard receiver.
+    // Rust action construction re-validates this binding to reject mismatched caller inputs.
+    let hotkey_addr_43: [u8; 43] = hotkey_raw_address
+        .as_slice()
+        .try_into()
+        .expect("address serialization must be 43 bytes");
+    let (g_d_new_x, pk_d_new_x) =
+        voting::action::derive_hotkey_x_coords_from_raw_address(&hotkey_addr_43)?;
+
+    Ok(DelegationInputs {
+        fvk_bytes: sender_fvk,
+        g_d_new_x: g_d_new_x.to_vec(),
+        pk_d_new_x: pk_d_new_x.to_vec(),
+        hotkey_raw_address,
+        hotkey_public_key: app_hotkey.public_key,
+        hotkey_address: app_hotkey.address,
+    })
 }
 
 #[uniffi::export]
@@ -553,7 +784,15 @@ pub fn generate_note_witness(
     snapshot_height: u32,
     tree_state_bytes: Vec<u8>,
 ) -> Result<WitnessData, VotingError> {
-    Ok(voting::witness::generate_note_witness(note_position, snapshot_height, &tree_state_bytes)?.into())
+    Ok(
+        voting::witness::generate_note_witness(note_position, snapshot_height, &tree_state_bytes)?
+            .into(),
+    )
+}
+
+#[uniffi::export]
+pub fn verify_witness(witness: WitnessData) -> Result<bool, VotingError> {
+    Ok(voting::witness::verify_witness(&witness.into())?)
 }
 
 #[uniffi::export]
@@ -562,7 +801,11 @@ pub fn build_delegation_witness(
     inclusion_proofs: Vec<Vec<u8>>,
     exclusion_proofs: Vec<Vec<u8>>,
 ) -> Result<Vec<u8>, VotingError> {
-    Ok(voting::zkp1::build_delegation_witness(&action.into(), &inclusion_proofs, &exclusion_proofs)?)
+    Ok(voting::zkp1::build_delegation_witness(
+        &action.into(),
+        &inclusion_proofs,
+        &exclusion_proofs,
+    )?)
 }
 
 #[uniffi::export]
@@ -580,7 +823,14 @@ pub fn build_vote_commitment(
 ) -> Result<VoteCommitmentBundle, VotingError> {
     let core_shares: Vec<voting::EncryptedShare> = enc_shares.into_iter().map(Into::into).collect();
     let reporter = voting::NoopProgressReporter;
-    Ok(voting::zkp2::build_vote_commitment(proposal_id, choice, &core_shares, &van_witness, &reporter)?.into())
+    Ok(voting::zkp2::build_vote_commitment(
+        proposal_id,
+        choice,
+        &core_shares,
+        &van_witness,
+        &reporter,
+    )?
+    .into())
 }
 
 #[uniffi::export]
@@ -589,10 +839,12 @@ pub fn build_share_payloads(
     commitment: VoteCommitmentBundle,
 ) -> Result<Vec<SharePayload>, VotingError> {
     let core_shares: Vec<voting::EncryptedShare> = enc_shares.into_iter().map(Into::into).collect();
-    Ok(voting::vote_commitment::build_share_payloads(&core_shares, &commitment.into())?
-        .into_iter()
-        .map(Into::into)
-        .collect())
+    Ok(
+        voting::vote_commitment::build_share_payloads(&core_shares, &commitment.into())?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    )
 }
 
 #[uniffi::export]

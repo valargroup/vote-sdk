@@ -1120,6 +1120,7 @@ let package = Package(
                 "Generated",
                 "MnemonicClient",
                 "Pasteboard",
+                "SDKSynchronizer",
                 "UIComponents",
                 "VotingAPIClient",
                 "VotingCryptoClient",

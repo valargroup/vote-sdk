@@ -31,15 +31,25 @@ public struct VotingCryptoClient {
         _ networkId: UInt32
     ) async throws -> [NoteInfo]
 
+    // --- Witness generation & verification ---
+    public var generateNoteWitnesses: @Sendable (
+        _ roundId: String,
+        _ walletDbPath: String,
+        _ notes: [NoteInfo]
+    ) async throws -> [WitnessData]
+    public var verifyWitness: @Sendable (_ witness: WitnessData) async throws -> Bool
+
     // --- Crypto operations ---
     public var generateHotkey: @Sendable (_ roundId: String, _ seed: [UInt8]) async throws -> VotingHotkey
-    public var constructDelegationAction: @Sendable (
+    /// High-level boundary for sign-action generation:
+    /// derives delegation inputs from seeds and constructs a valid delegation action.
+    public var buildDelegationSignAction: @Sendable (
         _ roundId: String,
-        _ hotkey: VotingHotkey,
         _ notes: [NoteInfo],
-        _ nk: Data,
-        _ gdNewX: Data,
-        _ pkdNewX: Data
+        _ senderSeed: [UInt8],
+        _ hotkeySeed: [UInt8],
+        _ networkId: UInt32,
+        _ accountIndex: UInt32
     ) async throws -> DelegationAction
     public var storeTreeState: @Sendable (_ roundId: String, _ treeState: Data) async throws -> Void
     public var buildDelegationWitness: @Sendable (
@@ -61,7 +71,7 @@ public struct VotingCryptoClient {
         _ choice: VoteChoice,
         _ encShares: [EncryptedShare],
         _ vanWitness: Data
-    ) -> AsyncThrowingStream<ProofEvent, Error>
+    ) -> AsyncThrowingStream<VoteCommitmentBuildEvent, Error>
         = { _, _, _, _, _ in AsyncThrowingStream { $0.finish() } }
     public var buildSharePayloads: @Sendable (
         _ encShares: [EncryptedShare],

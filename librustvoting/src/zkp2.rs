@@ -1,6 +1,6 @@
 use crate::types::{
-    validate_encrypted_shares, validate_vote_decision, EncryptedShare,
-    ProofProgressReporter, VoteCommitmentBundle, VotingError,
+    validate_encrypted_shares, validate_vote_decision, EncryptedShare, ProofProgressReporter,
+    VoteCommitmentBundle, VotingError,
 };
 
 /// Build vote commitment + ZKP #2.
@@ -76,13 +76,17 @@ mod tests {
     }
 
     fn noop_reporter() -> TestReporter {
-        TestReporter { count: Arc::new(AtomicU32::new(0)) }
+        TestReporter {
+            count: Arc::new(AtomicU32::new(0)),
+        }
     }
 
     #[test]
     fn test_build_vote_commitment_stub() {
         let count = Arc::new(AtomicU32::new(0));
-        let reporter = TestReporter { count: count.clone() };
+        let reporter = TestReporter {
+            count: count.clone(),
+        };
         let result =
             build_vote_commitment(1, 0, &mock_enc_shares(), &[0xDD; 64], &reporter).unwrap();
         assert_eq!(result.van_nullifier.len(), 32);
@@ -95,11 +99,16 @@ mod tests {
 
     #[test]
     fn test_build_vote_commitment_bad_choice() {
-        assert!(build_vote_commitment(1, 3, &mock_enc_shares(), &[0xDD; 64], &noop_reporter()).is_err());
+        assert!(
+            build_vote_commitment(1, 3, &mock_enc_shares(), &[0xDD; 64], &noop_reporter()).is_err()
+        );
     }
 
     #[test]
     fn test_build_vote_commitment_empty_proposal() {
-        assert!(build_vote_commitment(16, 0, &mock_enc_shares(), &[0xDD; 64], &noop_reporter()).is_err());
+        assert!(
+            build_vote_commitment(16, 0, &mock_enc_shares(), &[0xDD; 64], &noop_reporter())
+                .is_err()
+        );
     }
 }

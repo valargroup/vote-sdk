@@ -5,6 +5,7 @@ import DatabaseFiles
 import Generated
 import MnemonicClient
 import Pasteboard
+import SDKSynchronizer
 import UIComponents
 import Utils
 import VotingAPIClient
@@ -13,11 +14,26 @@ import VotingModels
 import WalletStorage
 import ZcashSDKEnvironment
 
+private enum VotingFlowError: LocalizedError {
+    case missingActiveSession
+    case missingVoteCommitmentBundle
+
+    var errorDescription: String? {
+        switch self {
+        case .missingActiveSession:
+            return "missing active voting session"
+        case .missingVoteCommitmentBundle:
+            return "vote commitment build completed without a commitment bundle"
+        }
+    }
+}
+
 @Reducer
 public struct Voting {
     @Dependency(\.databaseFiles) var databaseFiles
     @Dependency(\.mnemonic) var mnemonic
     @Dependency(\.pasteboard) var pasteboard
+    @Dependency(\.sdkSynchronizer) var sdkSynchronizer
     @Dependency(\.votingAPI) var votingAPI
     @Dependency(\.votingCrypto) var votingCrypto
     @Dependency(\.walletStorage) var walletStorage
@@ -36,12 +52,34 @@ public struct Voting {
             public var choice: VoteChoice
         }
 
+        public struct NoteWitnessResult: Equatable, Identifiable {
+            public var id: UInt64 { position }
+            public let position: UInt64
+            public let value: UInt64
+            public let verified: Bool
+        }
+
+        public enum WitnessStatus: Equatable {
+            case notStarted
+            case inProgress
+            case completed
+            case failed(String)
+        }
+
+        public struct WitnessTiming: Equatable {
+            public let treeStateFetchMs: UInt64
+            public let witnessGenerationMs: UInt64
+            public let verificationMs: UInt64
+            public var totalMs: UInt64 { treeStateFetchMs + witnessGenerationMs + verificationMs }
+        }
+
         public var screenStack: [Screen] = [.delegationSigning]
         public var votingRound: VotingRound
         public var votes: [UInt32: VoteChoice] = [:]
         public var votingWeight: UInt64
         public var isKeystoneUser: Bool
         public var roundId: String
+        public var activeSession: VotingSession?
 
         /// Cached wallet notes from the snapshot query, used by delegation proof.
         public var walletNotes: [NoteInfo] = []
@@ -56,8 +94,22 @@ public struct Voting {
         // Vote awaiting user confirmation in detail view
         public var pendingVote: PendingVote?
 
+        // Witness verification results
+        public var noteWitnessResults: [NoteWitnessResult] = []
+        public var witnessStatus: WitnessStatus = .notStarted
+        /// Cached witness data from verification, used as inclusion proofs for delegation proof.
+        public var cachedWitnesses: [WitnessData] = []
+        /// Timing breakdown from the last witness generation run.
+        public var witnessTiming: WitnessTiming?
+
         // ZKP #1 (delegation) — runs in background
         public var delegationProofStatus: ProofStatus = .notStarted
+
+        /// Most recent Vote Commitment (VC) bundle built for UI/debug stubs.
+        public var lastVoteCommitmentBundle: VoteCommitmentBundle?
+
+        /// Last tx hash returned by submitVoteCommitment, used for completion/debug UI.
+        public var lastVoteCommitmentTxHash: String?
 
         public var currentScreen: Screen {
             screenStack.last ?? .proposalList
@@ -117,7 +169,7 @@ public struct Voting {
             votingRound: VotingRound = MockVotingService.votingRound,
             votingWeight: UInt64 = 0,
             isKeystoneUser: Bool = false,
-            roundId: String = "0101010101010101010101010101010101010101010101010101010101010101"
+            roundId: String = ""
         ) {
             self.votingRound = votingRound
             self.votingWeight = votingWeight
@@ -135,12 +187,19 @@ public struct Voting {
 
         // Initialization (DB, wallet notes, hotkey)
         case initialize
+        case activeSessionLoaded(VotingSession)
         case votingWeightLoaded(UInt64, [NoteInfo])
         case initializeFailed(String)
         case hotkeyLoaded(String)
 
         // DB state stream (single source of truth)
         case votingDbStateChanged(VotingDbState)
+
+        // Witness verification
+        case verifyWitnesses
+        case rerunWitnessVerification
+        case witnessVerificationCompleted([State.NoteWitnessResult], [WitnessData], State.WitnessTiming)
+        case witnessVerificationFailed(String)
 
         // Delegation signing
         case copyHotkeyAddress
@@ -160,6 +219,8 @@ public struct Voting {
         case castVote(proposalId: UInt32, choice: VoteChoice)
         case confirmVote
         case cancelPendingVote
+        case voteCommitmentBuilt(VoteCommitmentBundle)
+        case voteCommitmentSubmitted(String)
         case advanceAfterVote(nextId: UInt32?)
         case backToList
         case nextProposalDetail
@@ -188,17 +249,20 @@ public struct Voting {
             // MARK: - Initialization
 
             case .initialize:
-                let snapshotHeight = state.votingRound.snapshotHeight
-                let roundId = state.roundId
                 let network = zcashSDKEnvironment.network
                 let walletDbPath = databaseFiles.dataDbURLFor(network).path
                 let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
-                return .run { [votingCrypto, mnemonic, walletStorage] send in
+                return .run { [votingAPI, votingCrypto, mnemonic, walletStorage] send in
                     // Open the voting database (needed for FFI method)
                     let dbPath = FileManager.default
                         .urls(for: .documentDirectory, in: .userDomainMask)[0]
                         .appendingPathComponent("voting.sqlite3").path
                     try await votingCrypto.openDatabase(dbPath)
+
+                    let activeSession = try await votingAPI.fetchActiveVotingSession()
+                    let snapshotHeight = activeSession.snapshotHeight
+                    let roundId = activeSession.voteRoundId.hexString
+                    await send(.activeSessionLoaded(activeSession))
 
                     let notes = try await votingCrypto.getWalletNotes(
                         walletDbPath, snapshotHeight, networkId
@@ -228,10 +292,17 @@ public struct Voting {
                     await send(.initializeFailed(error.localizedDescription))
                 }
 
+            case .activeSessionLoaded(let session):
+                state.activeSession = session
+                state.roundId = session.voteRoundId.hexString
+                state.votingRound = sessionBackedRound(from: session, fallback: state.votingRound)
+                reconcileProposalState(&state)
+                return .none
+
             case .votingWeightLoaded(let weight, let notes):
                 state.votingWeight = weight
                 state.walletNotes = notes
-                return .none
+                return .send(.verifyWitnesses)
 
             case .initializeFailed(let error):
                 print("[Voting] Initialization error: \(error)")
@@ -239,6 +310,99 @@ public struct Voting {
 
             case .hotkeyLoaded(let address):
                 state.hotkeyAddress = address
+                return .none
+
+            // MARK: - Witness Verification
+
+            case .verifyWitnesses:
+                guard let activeSession = state.activeSession else {
+                    state.witnessStatus = .failed("missing active session")
+                    return .none
+                }
+                state.witnessStatus = .inProgress
+                state.witnessTiming = nil
+                let roundId = activeSession.voteRoundId.hexString
+                let snapshotHeight = activeSession.snapshotHeight
+                let notes = state.walletNotes
+                let network = zcashSDKEnvironment.network
+                let walletDbPath = databaseFiles.dataDbURLFor(network).path
+                return .run { [sdkSynchronizer, votingCrypto] send in
+                    // Always initialize the round in the DB (needed by delegation proof later)
+                    try? await votingCrypto.clearRound(roundId)
+                    let params = VotingRoundParams(
+                        voteRoundId: activeSession.voteRoundId,
+                        snapshotHeight: snapshotHeight,
+                        eaPK: activeSession.eaPK,
+                        ncRoot: activeSession.ncRoot,
+                        nullifierIMTRoot: activeSession.nullifierIMTRoot
+                    )
+                    try await votingCrypto.initRound(params, nil)
+
+                    // Skip witness pipeline if wallet has no notes at snapshot height
+                    guard !notes.isEmpty else {
+                        await send(.witnessVerificationCompleted([], [], Voting.State.WitnessTiming(
+                            treeStateFetchMs: 0, witnessGenerationMs: 0, verificationMs: 0
+                        )))
+                        return
+                    }
+
+                    // Phase 1: Fetch tree state from lightwalletd
+                    let t0 = ContinuousClock.now
+                    let treeStateBytes = try await sdkSynchronizer.getTreeState(snapshotHeight)
+                    try await votingCrypto.storeTreeState(roundId, treeStateBytes)
+                    let t1 = ContinuousClock.now
+                    let fetchMs = UInt64(t0.duration(to: t1).components.seconds * 1000)
+                        + UInt64(t0.duration(to: t1).components.attoseconds / 1_000_000_000_000_000)
+                    print("[Voting] Tree state fetch: \(fetchMs)ms")
+
+                    // Phase 2: Generate witnesses (includes Rust-side verification)
+                    let witnesses = try await votingCrypto.generateNoteWitnesses(roundId, walletDbPath, notes)
+                    let t2 = ContinuousClock.now
+                    let genMs = UInt64(t1.duration(to: t2).components.seconds * 1000)
+                        + UInt64(t1.duration(to: t2).components.attoseconds / 1_000_000_000_000_000)
+                    print("[Voting] Witness generation: \(genMs)ms (\(witnesses.count) notes)")
+
+                    // Phase 3: Verify each witness on Swift side for UI display
+                    var results: [Voting.State.NoteWitnessResult] = []
+                    for (i, witness) in witnesses.enumerated() {
+                        let verified = (try? await votingCrypto.verifyWitness(witness)) ?? false
+                        let note = notes[i]
+                        results.append(.init(position: note.position, value: note.value, verified: verified))
+                        print("[Voting] Note pos=\(note.position) value=\(note.value) verified=\(verified)")
+                    }
+                    let t3 = ContinuousClock.now
+                    let verifyMs = UInt64(t2.duration(to: t3).components.seconds * 1000)
+                        + UInt64(t2.duration(to: t3).components.attoseconds / 1_000_000_000_000_000)
+                    print("[Voting] Swift verification: \(verifyMs)ms")
+                    print("[Voting] Total witness pipeline: \(fetchMs + genMs + verifyMs)ms")
+
+                    let timing = Voting.State.WitnessTiming(
+                        treeStateFetchMs: fetchMs,
+                        witnessGenerationMs: genMs,
+                        verificationMs: verifyMs
+                    )
+                    await send(.witnessVerificationCompleted(results, witnesses, timing))
+                } catch: { error, send in
+                    print("[Voting] Witness verification failed: \(error)")
+                    await send(.witnessVerificationFailed(error.localizedDescription))
+                }
+
+            case .rerunWitnessVerification:
+                // Invalidate cached witnesses and re-run from scratch
+                state.noteWitnessResults = []
+                state.cachedWitnesses = []
+                state.witnessTiming = nil
+                return .send(.verifyWitnesses)
+
+            case .witnessVerificationCompleted(let results, let witnesses, let timing):
+                state.noteWitnessResults = results
+                state.cachedWitnesses = witnesses
+                state.witnessTiming = timing
+                state.witnessStatus = .completed
+                return .none
+
+            case .witnessVerificationFailed(let error):
+                state.witnessStatus = .failed(error)
                 return .none
 
             // MARK: - DB State Stream
@@ -276,10 +440,21 @@ public struct Voting {
             // MARK: - Background ZKP Delegation
 
             case .startDelegationProof:
+                guard let activeSession = state.activeSession else {
+                    return .send(.delegationProofFailed(
+                        VotingFlowError.missingActiveSession.localizedDescription
+                    ))
+                }
                 state.delegationProofStatus = .generating(progress: 0)
-                let roundId = state.roundId
-                let snapshotHeight = state.votingRound.snapshotHeight
+                let roundId = activeSession.voteRoundId.hexString
+                let snapshotHeight = activeSession.snapshotHeight
                 let cachedNotes = state.walletNotes
+                let networkId: UInt32 = zcashSDKEnvironment.network.networkType == .mainnet ? 0 : 1
+                let accountIndex: UInt32 = 0
+                // Flatten each witness auth path into a single Data for the delegation circuit
+                let inclusionProofs = state.cachedWitnesses.map { witness in
+                    witness.authPath.reduce(Data()) { $0 + $1 }
+                }
                 return .merge(
                     // Subscribe to DB state stream (follows SDKSynchronizer pattern)
                     .publisher {
@@ -289,35 +464,26 @@ public struct Voting {
                     }
                     .cancellable(id: cancelStateStreamId, cancelInFlight: true),
                     // Run delegation proof pipeline
+                    // Round is already initialized and witnesses cached by verifyWitnesses
                     .run { [votingCrypto, mnemonic, walletStorage] send in
-                        // DB already opened by initialize
-
-                        // Clear any previous data for this round, then initialize
-                        try? await votingCrypto.clearRound(roundId)
-                        let params = VotingRoundParams(
-                            voteRoundId: Data(repeating: 0x01, count: 32),
-                            snapshotHeight: snapshotHeight,
-                            eaPK: Data(repeating: 0xEA, count: 32),
-                            ncRoot: Data(repeating: 0xAA, count: 32),
-                            nullifierIMTRoot: Data(repeating: 0xBB, count: 32)
-                        )
-                        try await votingCrypto.initRound(params, nil)
-
                         // Reload hotkey from keychain (generated during initialize)
-                        let phrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
-                        let seed = try mnemonic.toSeed(phrase)
-                        let hotkey = try await votingCrypto.generateHotkey(roundId, seed)
-                        // Mock nk/g_d/pk_d — real derivation comes in a later step
-                        let mockNk = Data(repeating: 0x11, count: 32)
-                        let mockGd = Data(repeating: 0x22, count: 32)
-                        let mockPkd = Data(repeating: 0x33, count: 32)
-                        let action = try await votingCrypto.constructDelegationAction(
-                            roundId, hotkey, cachedNotes, mockNk, mockGd, mockPkd
+                        let senderPhrase = try walletStorage.exportWallet().seedPhrase.value()
+                        let senderSeed = try mnemonic.toSeed(senderPhrase)
+                        let hotkeyPhrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
+                        let hotkeySeed = try mnemonic.toSeed(hotkeyPhrase)
+                        let action = try await votingCrypto.buildDelegationSignAction(
+                            roundId,
+                            cachedNotes,
+                            senderSeed,
+                            hotkeySeed,
+                            networkId,
+                            accountIndex
                         )
+                        // Use real Merkle inclusion proofs from verified witnesses
                         _ = try await votingCrypto.buildDelegationWitness(
                             roundId, action,
-                            [Data(repeating: 0x11, count: 32)],
-                            [Data(repeating: 0x22, count: 32)]
+                            inclusionProofs,
+                            [Data(repeating: 0x22, count: 32)] // exclusion proofs still mocked
                         )
 
                         // Generate delegation proof (long-running, reports progress)
@@ -367,14 +533,19 @@ public struct Voting {
 
             case .confirmVote:
                 guard let pending = state.pendingVote else { return .none }
+                guard let activeSession = state.activeSession else { return .none }
                 state.votes[pending.proposalId] = pending.choice
                 state.pendingVote = nil
 
                 let proposalId = pending.proposalId
                 let choice = pending.choice
                 let roundId = state.roundId
+                let voteRoundId = activeSession.voteRoundId
+                // Placeholder until tree-anchor query is wired in Gov Steps Phase 3 (voting).
+                let voteCommTreeAnchorHeight: UInt64 = 0
                 let votingWeight = state.votingWeight
                 let nextId = nextUnvotedId(after: proposalId, in: state)
+                state.lastVoteCommitmentTxHash = nil
 
                 return .merge(
                     // Submit this vote to chain in background
@@ -387,24 +558,29 @@ public struct Voting {
                         let vanWitness = Data(repeating: 0xDD, count: 64) // mock VAN witness
 
                         // Build vote commitment + ZKP #2 (stored in DB)
-                        var proofData = Data()
+                        var builtBundle: VoteCommitmentBundle?
                         for try await event in votingCrypto.buildVoteCommitment(roundId, proposalId, choice, encShares, vanWitness) {
-                            if case .completed(let proof) = event {
-                                proofData = proof
+                            if case .completed(let bundle) = event {
+                                builtBundle = bundle
+                                await send(.voteCommitmentBuilt(bundle))
                             }
+                        }
+                        guard let builtBundle else {
+                            throw VotingFlowError.missingVoteCommitmentBundle
                         }
 
                         // Submit to chain (API stubs for now)
                         let bundle = VoteCommitmentBundle(
-                            vanNullifier: Data(repeating: 0, count: 32),
-                            voteAuthorityNoteNew: Data(repeating: 0, count: 32),
-                            voteCommitment: Data(repeating: 0, count: 32),
+                            vanNullifier: builtBundle.vanNullifier,
+                            voteAuthorityNoteNew: builtBundle.voteAuthorityNoteNew,
+                            voteCommitment: builtBundle.voteCommitment,
                             proposalId: proposalId,
-                            proof: proofData,
-                            voteRoundId: Data(repeating: 0, count: 32),
-                            voteCommTreeAnchorHeight: 0
+                            proof: builtBundle.proof,
+                            voteRoundId: voteRoundId,
+                            voteCommTreeAnchorHeight: voteCommTreeAnchorHeight
                         )
-                        _ = try await votingAPI.submitVoteCommitment(bundle)
+                        let txResult = try await votingAPI.submitVoteCommitment(bundle)
+                        await send(.voteCommitmentSubmitted(txResult.txHash))
                         let payloads = try await votingCrypto.buildSharePayloads(encShares, bundle)
                         try await votingAPI.delegateShares(payloads)
 
@@ -419,6 +595,14 @@ public struct Voting {
                         await send(.advanceAfterVote(nextId: nextId))
                     }
                 )
+
+            case .voteCommitmentBuilt(let bundle):
+                state.lastVoteCommitmentBundle = bundle
+                return .none
+
+            case .voteCommitmentSubmitted(let txHash):
+                state.lastVoteCommitmentTxHash = txHash
+                return .none
 
             case .advanceAfterVote(let nextId):
                 if case .proposalDetail = state.currentScreen {
@@ -477,5 +661,42 @@ public struct Voting {
         // Look forward first, then wrap
         return proposals[(currentIndex + 1)...].first { state.votes[$0.id] == nil }?.id
             ?? proposals[..<currentIndex].first { state.votes[$0.id] == nil }?.id
+    }
+
+    private func sessionBackedRound(from session: VotingSession, fallback: VotingRound) -> VotingRound {
+        let proposals = session.proposals.isEmpty ? fallback.proposals : session.proposals
+        return VotingRound(
+            id: session.voteRoundId.hexString,
+            title: fallback.title,
+            description: fallback.description,
+            snapshotHeight: session.snapshotHeight,
+            snapshotDate: fallback.snapshotDate,
+            votingStart: fallback.votingStart,
+            votingEnd: session.voteEndTime,
+            proposals: proposals
+        )
+    }
+
+    private func reconcileProposalState(_ state: inout State) {
+        let validProposalIDs = Set(state.votingRound.proposals.map(\.id))
+        state.votes = state.votes.filter { validProposalIDs.contains($0.key) }
+
+        if let selectedProposalId = state.selectedProposalId,
+           !validProposalIDs.contains(selectedProposalId) {
+            state.selectedProposalId = nil
+        }
+
+        if let pendingVote = state.pendingVote,
+           !validProposalIDs.contains(pendingVote.proposalId) {
+            state.pendingVote = nil
+        }
+
+        if case .proposalDetail(let proposalId) = state.currentScreen,
+           !validProposalIDs.contains(proposalId) {
+            if !state.screenStack.isEmpty {
+                state.screenStack.removeLast()
+            }
+            state.screenStack.append(.proposalList)
+        }
     }
 }

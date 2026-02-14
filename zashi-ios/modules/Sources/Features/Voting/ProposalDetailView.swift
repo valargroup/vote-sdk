@@ -49,6 +49,14 @@ struct ProposalDetailView: View {
                             // Vote section
                             voteSection()
 
+                            if let bundle = store.lastVoteCommitmentBundle,
+                               bundle.proposalId == proposal.id {
+                                VoteCommitmentStubCard(
+                                    bundle: bundle,
+                                    txHash: store.lastVoteCommitmentTxHash
+                                )
+                            }
+
                             Spacer()
                         }
                         .padding(.horizontal, 24)
