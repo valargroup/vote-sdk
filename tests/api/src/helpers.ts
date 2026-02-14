@@ -459,9 +459,46 @@ export function makeRevealSharePayload(
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns true if the error is a retryable socket error (e.g. stale keep-alive
+ * connection closed by the server). Node.js's built-in fetch (undici) does NOT
+ * automatically retry POST requests on dead sockets, so we handle it here.
+ */
+function isRetryableSocketError(err: unknown): boolean {
+  if (!(err instanceof TypeError)) return false;
+  const cause = (err as { cause?: { code?: string } }).cause;
+  if (!cause?.code) return false;
+  return (
+    cause.code === "UND_ERR_SOCKET" ||
+    cause.code === "ECONNRESET" ||
+    cause.code === "ECONNREFUSED"
+  );
+}
+
+/**
+ * fetch wrapper that retries on transient socket errors (stale keep-alive
+ * connections, brief server unavailability). Only retries on network-level
+ * errors — HTTP 4xx/5xx responses are returned normally, not retried.
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  maxRetries = 2,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(url, init);
+    } catch (err) {
+      if (attempt >= maxRetries || !isRetryableSocketError(err)) throw err;
+      // Brief back-off before retry (500ms, 1000ms).
+      await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+    }
+  }
+}
+
 /** POST JSON to a /zally/v1/* endpoint and return the parsed response. */
 export async function postJSON(path: string, body: unknown) {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetchWithRetry(`${BASE_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -472,7 +509,7 @@ export async function postJSON(path: string, body: unknown) {
 
 /** GET a /zally/v1/* endpoint and return the parsed response. */
 export async function getJSON(path: string) {
-  const res = await fetch(`${BASE_URL}${path}`);
+  const res = await fetchWithRetry(`${BASE_URL}${path}`, {});
   const json = await res.json();
   return { status: res.status, json };
 }
