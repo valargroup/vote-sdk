@@ -16,7 +16,7 @@ use imt_tree::{build_sentinel_tree, NullifierTree};
 use orchard::{
     delegation::{
         builder::{build_delegation_bundle, RealNoteInput},
-        imt::{ImtProofData as OrchardImtProofData, ImtProvider, IMT_DEPTH},
+        imt::{ImtProofData as OrchardImtProofData, ImtProvider},
     },
     keys::{FullViewingKey, Scope, SpendingKey},
     note::{ExtractedNoteCommitment, Note, Nullifier, Rho},
@@ -107,19 +107,16 @@ fn make_real_note_inputs(
     let l2_0 = MerkleHashOrchard::combine(Level::from(1), &l1_0, &l1_1);
 
     // Hash up through the remaining levels with empty subtree siblings.
-    // The delegation circuit uses IMT_DEPTH (29) levels for the note commitment
-    // Merkle path, so nc_root must be the level-29 root (not the full 32-level root).
+    // nc_root is the full 32-level Orchard note commitment tree root.
     let mut current = l2_0;
-    for level in 2..IMT_DEPTH {
+    for level in 2..NOTE_COMMITMENT_TREE_DEPTH {
         let sibling = MerkleHashOrchard::empty_root(Level::from(level as u8));
         current = MerkleHashOrchard::combine(Level::from(level as u8), &current, &sibling);
     }
     let nc_root = merkle_hash_to_base(current);
 
     // Build Merkle paths and RealNoteInputs.
-    // MerklePath requires NOTE_COMMITMENT_TREE_DEPTH (32) elements, but the
-    // delegation builder only uses the first IMT_DEPTH (29). We fill the first
-    // 29 with valid siblings and pad the rest with empty leaves.
+    // MerklePath requires NOTE_COMMITMENT_TREE_DEPTH (32) elements.
     let l1 = [l1_0, l1_1];
     let mut inputs = Vec::with_capacity(n);
     for (i, note) in notes.into_iter().enumerate() {
@@ -128,12 +125,10 @@ fn make_real_note_inputs(
         auth_path[0] = leaves[i ^ 1];
         // Level 1: sibling pair hash.
         auth_path[1] = l1[1 - (i >> 1)];
-        // Levels 2..IMT_DEPTH-1: empty subtree roots.
-        for level in 2..IMT_DEPTH {
+        // Levels 2..31: empty subtree roots.
+        for level in 2..NOTE_COMMITMENT_TREE_DEPTH {
             auth_path[level] = MerkleHashOrchard::empty_root(Level::from(level as u8));
         }
-        // Levels IMT_DEPTH..NOTE_COMMITMENT_TREE_DEPTH: unused by the circuit,
-        // already initialized to empty_leaf above.
         let merkle_path = MerklePath::from_parts(i as u32, auth_path);
 
         let real_nf = note.nullifier(fvk);

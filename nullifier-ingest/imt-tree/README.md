@@ -98,7 +98,7 @@ Since `p ~ 16.something x 2^250`, 17 sentinels cover the entire field. Adding re
 
 ## Circuit Integration (Condition 13)
 
-The delegation circuit proves 16 conditions for up to 4 notes. For each note, **condition 13** verifies IMT non-membership via three sub-checks:
+The delegation circuit proves 15 conditions for up to 4 notes. For each note, **condition 13** verifies IMT non-membership via three sub-checks:
 
 ### Leaf Hash (1 Poseidon call)
 

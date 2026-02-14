@@ -1,7 +1,7 @@
 //! Multi-note delegation bundle builder.
 //!
 //! Orchestrates the creation of a complete delegation proof:
-//! a single merged circuit proving all 16 conditions for up to 4 notes.
+//! a single merged circuit proving all 15 conditions for up to 4 notes.
 //! Handles padding unused note slots with zero-value notes that still carry
 //! valid IMT non-membership proofs against the real tree root.
 
@@ -21,7 +21,7 @@ use crate::{
 
 use super::{
     circuit::{self, gov_commitment_hash, rho_binding_hash, NoteSlotWitness},
-    imt::{gov_null_hash, ImtProofData, ImtProvider, IMT_DEPTH},
+    imt::{gov_null_hash, ImtProofData, ImtProvider},
 };
 
 /// Input for a single real note in the delegation.
@@ -37,7 +37,7 @@ pub struct RealNoteInput {
     pub imt_proof: ImtProofData,
 }
 
-/// Complete delegation bundle: a single circuit proving all 16 conditions.
+/// Complete delegation bundle: a single circuit proving all 15 conditions.
 #[derive(Debug)]
 pub struct DelegationBundle {
     /// The merged delegation circuit.
@@ -134,7 +134,7 @@ pub fn build_delegation_bundle(
             psi: Value::known(psi),
             rcm: Value::known(rcm),
             cm: Value::known(cm),
-            path: Value::known(input.merkle_path.auth_path()[..IMT_DEPTH].try_into().unwrap()),
+            path: Value::known(input.merkle_path.auth_path()),
             pos: Value::known(input.merkle_path.position()),
             is_note_real: Value::known(true),
             imt_low: Value::known(input.imt_proof.low),
@@ -189,7 +189,7 @@ pub fn build_delegation_bundle(
             psi: Value::known(psi),
             rcm: Value::known(rcm),
             cm: Value::known(cm),
-            path: Value::known(merkle_path.auth_path()[..IMT_DEPTH].try_into().unwrap()),
+            path: Value::known(merkle_path.auth_path()),
             pos: Value::known(merkle_path.position()),
             is_note_real: Value::known(false),
             imt_low: Value::known(imt_proof.low),
@@ -298,7 +298,7 @@ mod tests {
     use super::*;
     use crate::{
         constants::MERKLE_DEPTH_ORCHARD,
-        delegation::imt::{SpacedLeafImtProvider, IMT_DEPTH},
+        delegation::imt::SpacedLeafImtProvider,
         keys::{FullViewingKey, Scope, SpendingKey},
         note::{commitment::ExtractedNoteCommitment, Note, Rho},
         tree::{MerkleHashOrchard, MerklePath},
@@ -355,31 +355,23 @@ mod tests {
         let l2_0 = MerkleHashOrchard::combine(Level::from(1), &l1_0, &l1_1);
 
         // Hash up through the remaining levels with empty subtree siblings.
-        // The delegation circuit uses IMT_DEPTH (29) levels for the note commitment
-        // Merkle path, so nc_root must be the level-29 root.
         let mut current = l2_0;
-        for level in 2..IMT_DEPTH {
+        for level in 2..MERKLE_DEPTH_ORCHARD {
             let sibling = MerkleHashOrchard::empty_root(Level::from(level as u8));
             current = MerkleHashOrchard::combine(Level::from(level as u8), &current, &sibling);
         }
         let nc_root = current.inner();
 
         // Build Merkle paths and RealNoteInputs.
-        // MerklePath requires MERKLE_DEPTH_ORCHARD (32) elements, but the
-        // delegation builder only uses the first IMT_DEPTH (29).
         let l1 = [l1_0, l1_1];
         let mut inputs = Vec::with_capacity(n);
         for (i, note) in notes.into_iter().enumerate() {
             let mut auth_path = [MerkleHashOrchard::empty_leaf(); MERKLE_DEPTH_ORCHARD];
-            // Level 0: sibling leaf in the same pair.
             auth_path[0] = leaves[i ^ 1];
-            // Level 1: sibling pair hash.
             auth_path[1] = l1[1 - (i >> 1)];
-            // Levels 2..IMT_DEPTH-1: empty subtree roots.
-            for level in 2..IMT_DEPTH {
+            for level in 2..MERKLE_DEPTH_ORCHARD {
                 auth_path[level] = MerkleHashOrchard::empty_root(Level::from(level as u8));
             }
-            // Levels IMT_DEPTH..MERKLE_DEPTH_ORCHARD: unused by delegation circuit.
             let merkle_path = MerklePath::from_parts(i as u32, auth_path);
 
             let real_nf = note.nullifier(fvk);

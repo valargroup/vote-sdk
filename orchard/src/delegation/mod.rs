@@ -1,7 +1,7 @@
 //! Delegation ZKP circuit.
 //!
-//! A single circuit proving all 16 conditions of the delegation ZKP,
-//! including 4 per-note slots and gov null pairwise distinctness.
+//! A single circuit proving all 15 conditions of the delegation ZKP,
+//! including 4 per-note slots.
 //! The builder layer creates padded notes for unused slots and
 //! produces a single proof.
 
