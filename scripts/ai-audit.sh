@@ -213,27 +213,24 @@ run_audit() {
     exit 1
   fi
 
-  local system_prompt
-  system_prompt=$(cat "$PROMPT_FILE")
-
-  local context
-  context=$(cat "$CONTEXT_FILE")
-
   local timestamp
   timestamp=$(date -u '+%Y-%m-%d %H:%M UTC')
 
-  local user_message
-  user_message="Audit timestamp: $timestamp
+  # Build user message file (avoids ARG_MAX limits for large context)
+  local user_msg_file="/tmp/audit-user-message.txt"
+  {
+    echo "Audit timestamp: $timestamp"
+    echo ""
+    echo "Below is the full context: protocol specs, circuit READMEs, Halo2 circuit code, and recent changes. Perform the audit and produce the report as specified in your instructions."
+    echo ""
+    cat "$CONTEXT_FILE"
+  } > "$user_msg_file"
 
-Below is the full context: protocol specs, circuit READMEs, Halo2 circuit code, and recent changes. Perform the audit and produce the report as specified in your instructions.
-
-$context"
-
-  # Build JSON payload (using jq for safe escaping)
-  local payload
-  payload=$(jq -n \
-    --arg system "$system_prompt" \
-    --arg user "$user_message" \
+  # Build JSON payload via file-based jq (--rawfile avoids ARG_MAX)
+  local payload_file="/tmp/audit-payload.json"
+  jq -n \
+    --rawfile system "$PROMPT_FILE" \
+    --rawfile user "$user_msg_file" \
     '{
       model: "claude-opus-4-6",
       max_tokens: 4096,
@@ -241,7 +238,7 @@ $context"
       messages: [
         { role: "user", content: $user }
       ]
-    }')
+    }' > "$payload_file"
 
   echo "  Calling Anthropic API..."
 
@@ -251,7 +248,7 @@ $context"
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -H "anthropic-version: 2023-06-01" \
-    -d "$payload")
+    -d @"$payload_file")
 
   # Extract the text content from the response
   local report
