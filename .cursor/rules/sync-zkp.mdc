@@ -1,0 +1,53 @@
+---
+description: Load the full ZKP design context from the written spec and Figma diagrams
+alwaysApply: false
+---
+
+# /sync-zkp — Load ZKP Design Context
+
+When this rule is invoked, load the following sources for the ZKP (zero-knowledge proof) design and confirm what you retrieved.
+
+## 1. Written ZKP details (Obsidian)
+
+Read the design spec via the in-repo symlink:
+
+```
+zcaloooors/Voting/Gov Steps V1.md
+```
+
+This document contains the **written details of the ZKPs**: full protocol specification, glossary, Phase 0–5, and the three ZKP circuit definitions (ZKP #1 delegation, ZKP #2 vote proof, ZKP #3 share reveal), plus appendices on El Gamal and tally.
+
+## 2. Figma diagrams (conceptual layers)
+
+The following Figma boards help conceptualize the ZKP design at different layers. Fetch via the Figma MCP:
+
+- **ZKP 2 only — Vote proof constraints**
+  - **Tool:** `get_figjam`
+  - **fileKey:** `X1rCTkuaehvs3sOiNlkMKn`
+  - **nodeId:** `0:1`
+  - **URL:** https://www.figma.com/board/X1rCTkuaehvs3sOiNlkMKn/ZKP--2-%E2%80%94-Vote-Proof-Constraints?node-id=0-1&p=f&t=I7paV8dbCgyInMGK-0
+
+- **ZKP 2 + 1 — Vote proof in context of ZKP 1**
+  - **Tool:** `get_figjam`
+  - **fileKey:** `ifse1hlgyOZvA38G10Af6j`
+  - **nodeId:** `0:1`
+  - **URL:** https://www.figma.com/board/ifse1hlgyOZvA38G10Af6j/ZKP--2-Vote-Proof-%E2%80%94-with-ZKP--1-Context?node-id=0-1&p=f&t=GopFHz1CGpEvFdSX-0
+
+- **ZKP 1 → 2 → 3 — Full constraint flow**
+  - **Tool:** `get_figjam`
+  - **fileKey:** `BxPg7qT3hzB696Sxf853I1`
+  - **nodeId:** `0:1`
+  - **URL:** https://www.figma.com/board/BxPg7qT3hzB696Sxf853I1/ZKP--1-%E2%86%92--2-%E2%86%92--3-Full-Constraint-Flow?node-id=0-1&p=f&t=YZbZ7gU0PspEPrrZ-0
+
+## 3. Circuit locations in repo
+
+- **ZKP 1 (delegation):** `orchard/src/delegation`
+- **ZKP 2 (vote proof):** `orchard/src/vote-proof`
+
+## After loading
+
+Summarize what you loaded (written spec + which Figma boards) and confirm sources are available. Then ask how to proceed.
+
+## MCP setup reference
+
+See `docs/ai_setup.md` for Figma MCP configuration and Obsidian symlink setup.
