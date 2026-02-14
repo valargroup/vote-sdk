@@ -338,13 +338,23 @@ export const REAL_SIGHASH = blake2b(
 // from previous test runs (chain state persists).
 let nullifierCounter = Math.floor(Date.now() / 1000) % 1_000_000;
 
-/** Create a unique 32-byte nullifier by writing a counter value into it. */
+/** Create a unique 32-byte value by writing a counter value into it.
+ *
+ * The result is a valid canonical Pallas base field element (LE value < p).
+ * This is required because some callers use these values as commitment tree
+ * leaves, which the Poseidon Merkle root FFI deserializes via Fp::from_repr.
+ * The Pallas modulus has MSB ≈ 0x40, so byte 31 (MSB in LE) must be < 0x40
+ * to guarantee the encoding is canonical.
+ */
 function makeUniqueNullifier(): Uint8Array {
   const nf = new Uint8Array(32);
   const view = new DataView(nf.buffer);
   view.setUint32(0, nullifierCounter++, false);
-  // Fill remaining bytes with a pattern to satisfy non-empty checks
-  for (let i = 4; i < 32; i++) nf[i] = 0xab;
+  // Fill bytes 4–30 with a non-zero pattern.
+  for (let i = 4; i < 31; i++) nf[i] = 0xab;
+  // Byte 31 is the MSB in little-endian Pallas Fp encoding.
+  // Must be < 0x40 to stay below the field modulus.
+  nf[31] = 0x0a;
   return nf;
 }
 
