@@ -31,6 +31,8 @@ import {
   BLOCK_WAIT_MS,
   toHex,
   getElGamalFixtures,
+  runTreeCli,
+  BASE_URL,
   type TallyEntryPayload,
 } from "./helpers.js";
 
@@ -125,7 +127,7 @@ describe("E2E Voting Flow", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Step 3: Query commitment tree for anchor height
+  // Step 2: Query commitment tree for anchor height (derisk: root, next_index)
   // -------------------------------------------------------------------------
 
   it("step 2: commitment tree has a computed root after delegation", async () => {
@@ -136,10 +138,55 @@ describe("E2E Voting Flow", () => {
     expect(status).toBe(200);
     expect(json.tree).toBeTruthy();
     expect(json.tree.height).toBeGreaterThan(0);
+    // DelegateVote appends 2 leaves: cmx_new, gov_comm.
+    expect(json.tree.next_index).toBe(2);
+    // Root is computed by EndBlocker (Poseidon or placeholder); must be present and 32 bytes.
+    expect(json.tree.root).toBeTruthy();
+    const rootBytes = Buffer.from(json.tree.root, "base64");
+    expect(rootBytes.length).toBe(32);
 
     // Save anchor height for CastVote and RevealShare.
     anchorHeight = json.tree.height;
   });
+
+  it("step 2b: commitment tree at anchor height returns same root and next_index", async () => {
+    const { status, json } = await getJSON(
+      `/zally/v1/commitment-tree/${anchorHeight}`,
+    );
+
+    expect(status).toBe(200);
+    expect(json.tree).toBeTruthy();
+    expect(json.tree.height).toBe(anchorHeight);
+    expect(json.tree.next_index).toBe(2);
+    expect(json.tree.root).toBeTruthy();
+    expect(Buffer.from(json.tree.root, "base64").length).toBe(32);
+  });
+
+  // -------------------------------------------------------------------------
+  // Step 2c: Rust TreeClient sync — independently reconstructs the same root
+  // -------------------------------------------------------------------------
+
+  it("step 2c: Rust tree client sync matches chain root (2 leaves)", () => {
+    const output = runTreeCli(["sync", "--node", BASE_URL]);
+
+    expect(output).toContain("leaves synced:     2");
+    expect(output).toContain("root match:");
+    expect(output).toContain("OK");
+  }, 120_000); // generous timeout for first cargo build
+
+  // -------------------------------------------------------------------------
+  // Step 2d: Witness generation for first VAN leaf (position 0)
+  // -------------------------------------------------------------------------
+
+  it("step 2d: witness for first VAN leaf (position 0) verifies", () => {
+    const output = runTreeCli([
+      "witness", "--node", BASE_URL, "--position", "0",
+    ]);
+
+    expect(output).toContain("Witness (hex):");
+    expect(output).toContain("Witness size:  1028 bytes");
+    expect(output).toContain("Anchor root:");
+  }, 120_000);
 
   // -------------------------------------------------------------------------
   // Step 4: Cast vote (ZKP #2 — mock proof)
@@ -161,7 +208,7 @@ describe("E2E Voting Flow", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Step 5: Query updated commitment tree for reveal anchor
+  // Step 5: Query updated commitment tree for reveal anchor (derisk: next_index, root)
   // -------------------------------------------------------------------------
 
   it("step 4: commitment tree updated after cast vote", async () => {
@@ -172,10 +219,68 @@ describe("E2E Voting Flow", () => {
     expect(status).toBe(200);
     expect(json.tree).toBeTruthy();
     expect(json.tree.height).toBeGreaterThanOrEqual(anchorHeight);
+    // CastVote appends 2 leaves: vote_authority_note_new, vote_commitment. Total 4.
+    expect(json.tree.next_index).toBe(4);
+    expect(json.tree.root).toBeTruthy();
+    expect(Buffer.from(json.tree.root, "base64").length).toBe(32);
 
     // Update anchor height for RevealShare.
     anchorHeight = json.tree.height;
   });
+
+  it("step 4b: commitment leaves API returns blocks with correct leaf counts", async () => {
+    const { status, json } = await getJSON(
+      `/zally/v1/commitment-tree/leaves?from_height=1&to_height=${anchorHeight}`,
+    );
+
+    expect(status).toBe(200);
+    expect(json.blocks).toBeDefined();
+    expect(Array.isArray(json.blocks)).toBe(true);
+    // Delegate block: 2 leaves; cast block: 2 leaves.
+    const totalLeaves = json.blocks.reduce(
+      (sum: number, b: { leaves?: unknown[] }) => sum + (b.leaves?.length ?? 0),
+      0,
+    );
+    expect(totalLeaves).toBe(4);
+    // Each block has height, start_index, leaves; each leaf is 32 bytes (base64).
+    let expectedStart = 0;
+    for (const block of json.blocks) {
+      expect(block.height).toBeGreaterThan(0);
+      expect(block.start_index).toBe(expectedStart);
+      expect(block.leaves).toBeDefined();
+      expect(Array.isArray(block.leaves)).toBe(true);
+      for (const leaf of block.leaves) {
+        expect(Buffer.from(leaf, "base64").length).toBe(32);
+      }
+      expectedStart += block.leaves.length;
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Step 4c: Rust TreeClient sync — root still matches after cast-vote growth
+  // -------------------------------------------------------------------------
+
+  it("step 4c: Rust tree client sync matches chain root (4 leaves)", () => {
+    const output = runTreeCli(["sync", "--node", BASE_URL]);
+
+    expect(output).toContain("leaves synced:     4");
+    expect(output).toContain("root match:");
+    expect(output).toContain("OK");
+  }, 120_000);
+
+  // -------------------------------------------------------------------------
+  // Step 4d: Witness for VAN at position 2 (appended by CastVote)
+  // -------------------------------------------------------------------------
+
+  it("step 4d: witness for cast-vote VAN leaf (position 2) verifies", () => {
+    const output = runTreeCli([
+      "witness", "--node", BASE_URL, "--position", "2",
+    ]);
+
+    expect(output).toContain("Witness (hex):");
+    expect(output).toContain("Witness size:  1028 bytes");
+    expect(output).toContain("Anchor root:");
+  }, 120_000);
 
   // -------------------------------------------------------------------------
   // Step 6: Reveal share (ZKP #3 — mock proof)
