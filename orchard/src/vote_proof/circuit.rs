@@ -12,9 +12,10 @@
 //! - **Condition 7**: Shares Sum Correctness (AddChip, `constrain_equal`).
 //! - **Condition 8**: Shares Range (LookupRangeCheck, `[0, 2^30)`).
 //! - **Condition 9**: Shares Hash Integrity (Poseidon `ConstantLength<8>`, `constrain_instance`).
+//! - **Condition 10**: Encryption Integrity (ECC variable-base mul, `constrain_equal`).
 //!
-//! Remaining conditions (10–11) are stubbed with witness fields and
-//! public input slots; constraint logic will be added incrementally.
+//! Remaining condition (11) is stubbed with witness fields and
+//! a public input slot; constraint logic will be added incrementally.
 //!
 //! ## Conditions overview
 //!
@@ -42,6 +43,7 @@
 //! - **Condition 9**: Shares Hash Integrity — `shares_hash = H(enc_share_1..4)`.
 //!   *(implemented — temporarily bound to `VOTE_COMMITMENT`; condition 11 will chain it)*
 //! - **Condition 10**: Encryption Integrity — each `enc_share_i = ElGamal(shares_i, r_i, ea_pk)`.
+//!   *(implemented)*
 //! - **Condition 11**: Vote Commitment Integrity — `vote_commitment = H(DOMAIN_VC, shares_hash,
 //!   proposal_id, vote_decision)`.
 
@@ -55,12 +57,12 @@ use halo2_proofs::{
     },
     poly::Rotation,
 };
-use pasta_curves::{pallas, vesta};
+use pasta_curves::{arithmetic::CurveAffine, pallas, vesta};
 
 use halo2_gadgets::{
     ecc::{
         chip::{EccChip, EccConfig},
-        FixedPoint, ScalarFixed,
+        FixedPoint, NonIdentityPoint, ScalarFixed, ScalarVar,
     },
     poseidon::{
         primitives::{self as poseidon, ConstantLength},
@@ -90,12 +92,13 @@ pub const VOTE_COMM_TREE_DEPTH: usize = 24;
 
 /// Circuit size (2^K rows).
 ///
-/// K=12 (4,096 rows). Conditions 1, 2, 4, 5, 6, 9 use ~29 Poseidon
-/// hashes (~2,500 rows), plus AddChip additions, range-check running
-/// sums (conditions 5 + 8), ECC fixed-base mul (condition 3), and 24
-/// Merkle swap regions. The 10-bit lookup table requires 1,024 rows.
-/// K=12 provides headroom.
-pub const K: u32 = 12;
+/// K=14 (16,384 rows). Conditions 1–9 use ~29 Poseidon hashes plus
+/// AddChip additions, range-check running sums, ECC fixed-base mul
+/// (condition 3), and 24 Merkle swap regions. Condition 10 adds 12
+/// variable-base scalar multiplications (~6,000 rows) and 4 point
+/// additions. The 10-bit lookup table requires 1,024 rows.
+/// K=14 provides headroom.
+pub const K: u32 = 14;
 
 /// Domain tag for Vote Authority Notes.
 ///
@@ -105,7 +108,7 @@ pub const K: u32 = 12;
 pub const DOMAIN_VAN: u64 = 0;
 
 // ================================================================
-// Public input offsets (7 field elements).
+// Public input offsets (9 field elements).
 // ================================================================
 
 /// Public input offset for the VAN nullifier (prevents double-vote).
@@ -122,10 +125,14 @@ const VOTE_COMM_TREE_ANCHOR_HEIGHT: usize = 4;
 const PROPOSAL_ID: usize = 5;
 /// Public input offset for the voting round identifier.
 const VOTING_ROUND_ID: usize = 6;
+/// Public input offset for the election authority public key x-coordinate.
+const EA_PK_X: usize = 7;
+/// Public input offset for the election authority public key y-coordinate.
+const EA_PK_Y: usize = 8;
 
 // Suppress dead-code warnings for public input offsets that are
 // defined but not yet used by any condition's constraint logic.
-// These will be used as conditions 10–11 are implemented.
+// These will be used as condition 11 is implemented.
 const _: usize = VOTE_COMM_TREE_ANCHOR_HEIGHT;
 const _: usize = PROPOSAL_ID;
 
@@ -246,6 +253,68 @@ pub fn shares_hash(
     ])
 }
 
+/// Returns the SpendAuthG generator point (used as G in El Gamal).
+///
+/// This is the same generator used for spend authorization in the Zcash
+/// Orchard protocol. We reuse it as the El Gamal generator so that
+/// condition 3 (spend authority) and condition 10 (encryption integrity)
+/// share the same ECC chip configuration.
+pub fn spend_auth_g_affine() -> pallas::Affine {
+    use group::Curve;
+    let g = crate::constants::fixed_bases::spend_auth_g::generator();
+    pallas::Point::from(g).to_affine()
+}
+
+/// Converts a `pallas::Base` field element to a `pallas::Scalar`.
+///
+/// Both fields have 255-bit moduli that differ only in the low bits.
+/// For small values (< 2^30, as guaranteed by condition 8 for shares),
+/// the integer representation is identical in both fields. For full-size
+/// values (El Gamal randomness), the conversion is valid as long as the
+/// base element is < scalar field modulus (overwhelmingly likely for
+/// random elements; probability of failure ≈ 2^{-254}).
+///
+/// Returns `None` if the byte representation exceeds the scalar field modulus.
+pub fn base_to_scalar(b: pallas::Base) -> Option<pallas::Scalar> {
+    use ff::PrimeField;
+    pallas::Scalar::from_repr(b.to_repr()).into()
+}
+
+/// Out-of-circuit El Gamal encryption under SpendAuthG (condition 10).
+///
+/// Computes:
+/// ```text
+/// C1 = [r] * SpendAuthG
+/// C2 = [v] * SpendAuthG + [r] * ea_pk
+/// ```
+///
+/// Returns `(c1_x, c2_x)` — the x-coordinates of C1 and C2 (via ExtractP).
+/// The `randomness` and `share_value` are base field elements, converted
+/// to scalars for ECC multiplication.
+///
+/// Used by tests to compute the expected enc_share x-coordinates.
+pub fn elgamal_encrypt(
+    share_value: pallas::Base,
+    randomness: pallas::Base,
+    ea_pk: pallas::Point,
+) -> (pallas::Base, pallas::Base) {
+    use group::Curve;
+
+    let g = pallas::Point::from(spend_auth_g_affine());
+
+    let r_scalar = base_to_scalar(randomness)
+        .expect("randomness must be < scalar field modulus");
+    let v_scalar = base_to_scalar(share_value)
+        .expect("share value must be < scalar field modulus");
+
+    let c1 = g * r_scalar;
+    let c2 = g * v_scalar + ea_pk * r_scalar;
+
+    let c1_x = *c1.to_affine().coordinates().unwrap().x();
+    let c2_x = *c2.to_affine().coordinates().unwrap().x();
+    (c1_x, c2_x)
+}
+
 // ================================================================
 // Config
 // ================================================================
@@ -253,12 +322,12 @@ pub fn shares_hash(
 /// Configuration for the Vote Proof circuit.
 ///
 /// Holds chip configs for Poseidon (conditions 1, 2, 4, 6, 9), AddChip
-/// (conditions 5, 7), LookupRangeCheck (conditions 5, 8), ECC (condition 3),
-/// and the Merkle swap gate (condition 1). Will be extended with
-/// custom gates as conditions 10–11 are added.
+/// (conditions 5, 7), LookupRangeCheck (conditions 5, 8), ECC
+/// (conditions 3, 10), and the Merkle swap gate (condition 1). Will
+/// be extended with custom gates as condition 11 is added.
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// Public input column (7 field elements).
+    /// Public input column (9 field elements).
     primary: Column<InstanceColumn>,
     /// 10 advice columns for private witness data.
     ///
@@ -344,10 +413,10 @@ impl Config {
 /// revealing which VAN they hold. Contains witness fields for all
 /// 11 conditions; constraint logic is added incrementally.
 ///
-/// Currently constrained: conditions 1, 2, 3, 4, 5, 6, 7, 8, 9 (VAN
-/// membership, VAN integrity, spend authority, nullifier, authority
-/// decrement, new VAN integrity, shares sum, shares range, shares
-/// hash integrity).
+/// Currently constrained: conditions 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+/// (VAN membership, VAN integrity, spend authority, nullifier,
+/// authority decrement, new VAN integrity, shares sum, shares range,
+/// shares hash integrity, encryption integrity).
 #[derive(Clone, Debug, Default)]
 pub struct Circuit {
     // === VAN ownership and spending (conditions 1–4) ===
@@ -398,9 +467,14 @@ pub struct Circuit {
     /// X-coordinates of C2_i = shares_i * G + r_i * ea_pk for each share (via ExtractP).
     pub(crate) enc_share_c2_x: [Value<pallas::Base>; 4],
 
-    // Condition 10 (Encryption Integrity): El Gamal randomness per share.
-    /// El Gamal encryption randomness for each share.
-    pub(crate) share_randomness: [Value<pallas::Scalar>; 4],
+    // Condition 10 (Encryption Integrity): El Gamal randomness and public key.
+    /// El Gamal encryption randomness for each share (base field element,
+    /// converted to scalar via ScalarVar::from_base in-circuit).
+    pub(crate) share_randomness: [Value<pallas::Base>; 4],
+    /// Election authority public key (Pallas curve point).
+    /// The El Gamal encryption key — published as a round parameter.
+    /// Both coordinates are public inputs (EA_PK_X, EA_PK_Y).
+    pub(crate) ea_pk: Value<pallas::Affine>,
 
     // Condition 11 (Vote Commitment Integrity): vote decision.
     /// The voter's choice (hidden inside the vote commitment).
@@ -1314,6 +1388,18 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             self.enc_share_c2_x[3],
         )?;
 
+        // Clone enc_share cells before the Poseidon hash (which consumes
+        // them). These clones are used by condition 10 to constrain that
+        // the hashed x-coordinates match the computed El Gamal ciphertexts.
+        let enc_c1_0_cond10 = enc_c1_0.clone();
+        let enc_c2_0_cond10 = enc_c2_0.clone();
+        let enc_c1_1_cond10 = enc_c1_1.clone();
+        let enc_c2_1_cond10 = enc_c2_1.clone();
+        let enc_c1_2_cond10 = enc_c1_2.clone();
+        let enc_c2_2_cond10 = enc_c2_2.clone();
+        let enc_c1_3_cond10 = enc_c1_3.clone();
+        let enc_c2_3_cond10 = enc_c2_3.clone();
+
         // Compute shares_hash = Poseidon(c1_0, c2_0, c1_1, c2_1,
         //                                c1_2, c2_2, c1_3, c2_3).
         let _shares_hash = {
@@ -1347,6 +1433,233 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             h
         };
 
+        // ---------------------------------------------------------------
+        // Condition 10: Encryption Integrity.
+        //
+        // For each share i:
+        //   C1_i = [r_i] * G
+        //   C2_i = [v_i] * G + [r_i] * ea_pk
+        //
+        // where G = SpendAuthG (El Gamal generator) and ea_pk is the
+        // election authority's public key (public input).
+        //
+        // Each multiplication uses variable-base scalar multiplication
+        // via ScalarVar::from_base (converting base field elements to
+        // scalars). The computed x-coordinates are constrained against
+        // condition 9's witnessed enc_share cells, creating a binding
+        // between the Poseidon hash and the actual ECC computation.
+        //
+        // G is constrained to SpendAuthG by fixing both coordinates to
+        // compile-time constants. ea_pk is constrained to the public
+        // input coordinates at offsets EA_PK_X and EA_PK_Y.
+        // ---------------------------------------------------------------
+        {
+            let ecc_chip = config.ecc_chip();
+
+            // SpendAuthG coordinates as constants — baked into the
+            // verification key so the El Gamal generator cannot be changed.
+            let g_affine = spend_auth_g_affine();
+            let g_x_val = *g_affine.coordinates().unwrap().x();
+            let g_y_val = *g_affine.coordinates().unwrap().y();
+
+            let g_x_const = layouter.assign_region(
+                || "SpendAuthG x constant",
+                |mut region| {
+                    region.assign_advice_from_constant(
+                        || "g_x", config.advices[0], 0, g_x_val,
+                    )
+                },
+            )?;
+            let g_y_const = layouter.assign_region(
+                || "SpendAuthG y constant",
+                |mut region| {
+                    region.assign_advice_from_constant(
+                        || "g_y", config.advices[0], 0, g_y_val,
+                    )
+                },
+            )?;
+
+            // Copy ea_pk coordinates from the instance column.
+            let ea_pk_x_cell = layouter.assign_region(
+                || "copy ea_pk_x from instance",
+                |mut region| {
+                    region.assign_advice_from_instance(
+                        || "ea_pk_x",
+                        config.primary,
+                        EA_PK_X,
+                        config.advices[0],
+                        0,
+                    )
+                },
+            )?;
+            let ea_pk_y_cell = layouter.assign_region(
+                || "copy ea_pk_y from instance",
+                |mut region| {
+                    region.assign_advice_from_instance(
+                        || "ea_pk_y",
+                        config.primary,
+                        EA_PK_Y,
+                        config.advices[0],
+                        0,
+                    )
+                },
+            )?;
+
+            // Collect the enc_share cells and share cells for the loop.
+            let enc_c1_cells = [
+                enc_c1_0_cond10, enc_c1_1_cond10,
+                enc_c1_2_cond10, enc_c1_3_cond10,
+            ];
+            let enc_c2_cells = [
+                enc_c2_0_cond10, enc_c2_1_cond10,
+                enc_c2_2_cond10, enc_c2_3_cond10,
+            ];
+            let share_cells = [
+                share_0.clone(), share_1.clone(),
+                share_2.clone(), share_3.clone(),
+            ];
+
+            for i in 0..4 {
+                // --- C1_i = [r_i] * G ---
+
+                // Witness G as NonIdentityPoint, constrain to SpendAuthG.
+                let g_c1 = NonIdentityPoint::new(
+                    ecc_chip.clone(),
+                    layouter.namespace(|| alloc::format!("cond10 G for C1[{i}]")),
+                    Value::known(g_affine),
+                )?;
+                layouter.assign_region(
+                    || alloc::format!("cond10 constrain G_c1[{i}] x"),
+                    |mut region| {
+                        region.constrain_equal(
+                            g_c1.inner().x().cell(), g_x_const.cell(),
+                        )
+                    },
+                )?;
+                layouter.assign_region(
+                    || alloc::format!("cond10 constrain G_c1[{i}] y"),
+                    |mut region| {
+                        region.constrain_equal(
+                            g_c1.inner().y().cell(), g_y_const.cell(),
+                        )
+                    },
+                )?;
+
+                // Witness r_i and convert to ScalarVar for ECC multiplication.
+                let r_i = assign_free_advice(
+                    layouter.namespace(|| alloc::format!("witness r[{i}]")),
+                    config.advices[0],
+                    self.share_randomness[i],
+                )?;
+                let r_i_for_c2 = r_i.clone(); // used again for r_i * ea_pk
+
+                let r_i_scalar = ScalarVar::from_base(
+                    ecc_chip.clone(),
+                    layouter.namespace(|| alloc::format!("r[{i}] to ScalarVar (C1)")),
+                    &r_i,
+                )?;
+
+                let (c1_point, _) = g_c1.mul(
+                    layouter.namespace(|| alloc::format!("[r_{i}] * G")),
+                    r_i_scalar,
+                )?;
+
+                // ExtractP(C1_i) == enc_share_c1_x[i]
+                let c1_x = c1_point.extract_p().inner().clone();
+                layouter.assign_region(
+                    || alloc::format!("cond10 C1[{i}] x == enc_c1_x[{i}]"),
+                    |mut region| {
+                        region.constrain_equal(c1_x.cell(), enc_c1_cells[i].cell())
+                    },
+                )?;
+
+                // --- C2_i = [v_i] * G + [r_i] * ea_pk ---
+
+                // Witness G again for v_i * G, constrain to SpendAuthG.
+                let g_v = NonIdentityPoint::new(
+                    ecc_chip.clone(),
+                    layouter.namespace(|| alloc::format!("cond10 G for vG[{i}]")),
+                    Value::known(g_affine),
+                )?;
+                layouter.assign_region(
+                    || alloc::format!("cond10 constrain G_v[{i}] x"),
+                    |mut region| {
+                        region.constrain_equal(
+                            g_v.inner().x().cell(), g_x_const.cell(),
+                        )
+                    },
+                )?;
+                layouter.assign_region(
+                    || alloc::format!("cond10 constrain G_v[{i}] y"),
+                    |mut region| {
+                        region.constrain_equal(
+                            g_v.inner().y().cell(), g_y_const.cell(),
+                        )
+                    },
+                )?;
+
+                // [v_i] * G — share value multiplied by generator.
+                let v_i_scalar = ScalarVar::from_base(
+                    ecc_chip.clone(),
+                    layouter.namespace(|| alloc::format!("share[{i}] to ScalarVar")),
+                    &share_cells[i],
+                )?;
+                let (v_g_point, _) = g_v.mul(
+                    layouter.namespace(|| alloc::format!("[v_{i}] * G")),
+                    v_i_scalar,
+                )?;
+
+                // Witness ea_pk as NonIdentityPoint, constrain to public input.
+                let ea_pk_point = NonIdentityPoint::new(
+                    ecc_chip.clone(),
+                    layouter.namespace(|| alloc::format!("cond10 ea_pk for share[{i}]")),
+                    self.ea_pk,
+                )?;
+                layouter.assign_region(
+                    || alloc::format!("cond10 constrain ea_pk[{i}] x"),
+                    |mut region| {
+                        region.constrain_equal(
+                            ea_pk_point.inner().x().cell(), ea_pk_x_cell.cell(),
+                        )
+                    },
+                )?;
+                layouter.assign_region(
+                    || alloc::format!("cond10 constrain ea_pk[{i}] y"),
+                    |mut region| {
+                        region.constrain_equal(
+                            ea_pk_point.inner().y().cell(), ea_pk_y_cell.cell(),
+                        )
+                    },
+                )?;
+
+                // [r_i] * ea_pk — randomness multiplied by EA public key.
+                let r_i_scalar_c2 = ScalarVar::from_base(
+                    ecc_chip.clone(),
+                    layouter.namespace(|| alloc::format!("r[{i}] to ScalarVar (C2)")),
+                    &r_i_for_c2,
+                )?;
+                let (r_ea_pk_point, _) = ea_pk_point.mul(
+                    layouter.namespace(|| alloc::format!("[r_{i}] * ea_pk")),
+                    r_i_scalar_c2,
+                )?;
+
+                // C2_i = [v_i] * G + [r_i] * ea_pk
+                let c2_point = v_g_point.add(
+                    layouter.namespace(|| alloc::format!("C2[{i}] = vG + rP")),
+                    &r_ea_pk_point,
+                )?;
+
+                // ExtractP(C2_i) == enc_share_c2_x[i]
+                let c2_x = c2_point.extract_p().inner().clone();
+                layouter.assign_region(
+                    || alloc::format!("cond10 C2[{i}] x == enc_c2_x[{i}]"),
+                    |mut region| {
+                        region.constrain_equal(c2_x.cell(), enc_c2_cells[i].cell())
+                    },
+                )?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -1355,7 +1668,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 // Instance (public inputs)
 // ================================================================
 
-/// Public inputs to the Vote Proof circuit (7 field elements).
+/// Public inputs to the Vote Proof circuit (9 field elements).
 ///
 /// These are the values posted to the vote chain that both the prover
 /// and verifier agree on. The verifier checks the proof against these
@@ -1376,6 +1689,10 @@ pub struct Instance {
     pub proposal_id: pallas::Base,
     /// The voting round identifier.
     pub voting_round_id: pallas::Base,
+    /// Election authority public key x-coordinate.
+    pub ea_pk_x: pallas::Base,
+    /// Election authority public key y-coordinate.
+    pub ea_pk_y: pallas::Base,
 }
 
 impl Instance {
@@ -1388,6 +1705,8 @@ impl Instance {
         vote_comm_tree_anchor_height: pallas::Base,
         proposal_id: pallas::Base,
         voting_round_id: pallas::Base,
+        ea_pk_x: pallas::Base,
+        ea_pk_y: pallas::Base,
     ) -> Self {
         Instance {
             van_nullifier,
@@ -1397,6 +1716,8 @@ impl Instance {
             vote_comm_tree_anchor_height,
             proposal_id,
             voting_round_id,
+            ea_pk_x,
+            ea_pk_y,
         }
     }
 
@@ -1413,6 +1734,8 @@ impl Instance {
             self.vote_comm_tree_anchor_height,
             self.proposal_id,
             self.voting_round_id,
+            self.ea_pk_x,
+            self.ea_pk_y,
         ]
     }
 }
@@ -1427,7 +1750,6 @@ mod tests {
     use ff::Field;
     use group::Curve;
     use halo2_proofs::dev::MockProver;
-    use pasta_curves::arithmetic::CurveAffine;
     use pasta_curves::pallas;
     use rand::rngs::OsRng;
 
@@ -1439,39 +1761,52 @@ mod tests {
         *point.to_affine().coordinates().unwrap().x()
     }
 
-    /// Generates random El Gamal ciphertext x-coordinates for testing
-    /// and returns `(c1_x, c2_x, shares_hash)`.
-    ///
-    /// The x-coordinates are random field elements (not actual El Gamal
-    /// ciphertexts). Condition 10 will later constrain them to be valid
-    /// encryptions; condition 9 only cares about the Poseidon hash.
-    fn random_enc_shares(rng: &mut OsRng)
-        -> ([pallas::Base; 4], [pallas::Base; 4], pallas::Base)
-    {
-        let c1_x: [pallas::Base; 4] = [
-            pallas::Base::random(&mut *rng),
-            pallas::Base::random(&mut *rng),
-            pallas::Base::random(&mut *rng),
-            pallas::Base::random(&mut *rng),
-        ];
-        let c2_x: [pallas::Base; 4] = [
-            pallas::Base::random(&mut *rng),
-            pallas::Base::random(&mut *rng),
-            pallas::Base::random(&mut *rng),
-            pallas::Base::random(&mut *rng),
-        ];
-        let hash = shares_hash(c1_x, c2_x);
-        (c1_x, c2_x, hash)
+    /// Generates an El Gamal keypair for testing.
+    /// Returns `(ea_sk, ea_pk_point, ea_pk_affine)`.
+    fn generate_ea_keypair() -> (pallas::Scalar, pallas::Point, pallas::Affine) {
+        let ea_sk = pallas::Scalar::from(42u64);
+        let g = pallas::Point::from(spend_auth_g_affine());
+        let ea_pk = g * ea_sk;
+        let ea_pk_affine = ea_pk.to_affine();
+        (ea_sk, ea_pk, ea_pk_affine)
     }
 
-    /// Build valid test data for conditions 1, 2, 3, 4, 5, 6, 7, and 9.
+    /// Computes real El Gamal encryptions for 4 shares.
+    ///
+    /// Returns `(c1_x, c2_x, randomness, shares_hash_value)` where:
+    /// - `c1_x[i]` and `c2_x[i]` are correct ciphertext x-coordinates
+    /// - `randomness[i]` is the base field randomness used for each share
+    /// - `shares_hash_value` is the Poseidon hash of all 8 coordinates
+    fn encrypt_shares(
+        shares: [u64; 4],
+        ea_pk: pallas::Point,
+    ) -> ([pallas::Base; 4], [pallas::Base; 4], [pallas::Base; 4], pallas::Base) {
+        let mut c1_x = [pallas::Base::zero(); 4];
+        let mut c2_x = [pallas::Base::zero(); 4];
+        // Use small deterministic randomness (fits in both Base and Scalar).
+        let randomness: [pallas::Base; 4] = [
+            pallas::Base::from(101u64),
+            pallas::Base::from(202u64),
+            pallas::Base::from(303u64),
+            pallas::Base::from(404u64),
+        ];
+        for i in 0..4 {
+            let (c1, c2) = elgamal_encrypt(
+                pallas::Base::from(shares[i]),
+                randomness[i],
+                ea_pk,
+            );
+            c1_x[i] = c1;
+            c2_x[i] = c2;
+        }
+        let hash = shares_hash(c1_x, c2_x);
+        (c1_x, c2_x, randomness, hash)
+    }
+
+    /// Build valid test data for all implemented conditions (1–10).
     ///
     /// Returns a circuit with correctly-hashed VAN witnesses, valid
-    /// shares summing to `total_note_value`, random enc_share values
-    /// with a matching shares_hash, and a matching instance.
-    /// `proposal_authority_old` is set to a small positive value (5) so
-    /// conditions 5 and 6 can decrement it. Conditions not yet
-    /// constrained use placeholder values (zero).
+    /// shares, real El Gamal ciphertexts, and a matching instance.
     fn build_single_leaf_merkle_path(
         leaf: pallas::Base,
     ) -> ([pallas::Base; VOTE_COMM_TREE_DEPTH], u32, pallas::Base) {
@@ -1525,15 +1860,18 @@ mod tests {
 
         // Create shares that sum to total_note_value (conditions 7 + 8).
         // Each share must be in [0, 2^24) for condition 8's range check.
-        let s0 = pallas::Base::from(1_000u64);
-        let s1 = pallas::Base::from(2_000u64);
-        let s2 = pallas::Base::from(3_000u64);
-        let s3 = pallas::Base::from(4_000u64); // 1000 + 2000 + 3000 + 4000 = 10000
+        let shares_u64: [u64; 4] = [1_000, 2_000, 3_000, 4_000]; // sum = 10000
+        let s0 = pallas::Base::from(shares_u64[0]);
+        let s1 = pallas::Base::from(shares_u64[1]);
+        let s2 = pallas::Base::from(shares_u64[2]);
+        let s3 = pallas::Base::from(shares_u64[3]);
 
-        // Generate random enc_share ciphertext x-coordinates (condition 9).
-        // These are placeholder values — condition 10 will later constrain
-        // them to be valid El Gamal encryptions.
-        let (enc_c1_x, enc_c2_x, vote_commitment) = random_enc_shares(&mut rng);
+        // Condition 10: El Gamal encryption of shares under ea_pk.
+        let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
+        let ea_pk_x = *ea_pk_affine.coordinates().unwrap().x();
+        let ea_pk_y = *ea_pk_affine.coordinates().unwrap().y();
+        let (enc_c1_x, enc_c2_x, randomness, vote_commitment) =
+            encrypt_shares(shares_u64, ea_pk_point);
 
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
@@ -1554,6 +1892,8 @@ mod tests {
         ];
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
+        circuit.share_randomness = randomness.map(Value::known);
+        circuit.ea_pk = Value::known(ea_pk_affine);
 
         let instance = Instance::from_parts(
             van_nullifier,
@@ -1563,6 +1903,8 @@ mod tests {
             pallas::Base::zero(),
             pallas::Base::zero(),
             voting_round_id,
+            ea_pk_x,
+            ea_pk_y,
         );
 
         (circuit, instance)
@@ -1598,33 +1940,30 @@ mod tests {
         // Use witnesses that DON'T hash to wrong_van. Condition 3: derive pk from vsk.
         let vsk = pallas::Scalar::random(&mut rng);
         let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
-        let total_note_value = pallas::Base::from(10_000u64);
-        let s0 = pallas::Base::from(1_000u64);
-        let s1 = pallas::Base::from(2_000u64);
-        let s2 = pallas::Base::from(3_000u64);
-        let s3 = pallas::Base::from(4_000u64);
-        let (enc_c1_x, enc_c2_x, vote_commitment) = random_enc_shares(&mut rng);
+        let shares_u64: [u64; 4] = [1_000, 2_000, 3_000, 4_000];
+        let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
+        let (enc_c1_x, enc_c2_x, randomness, vote_commitment) =
+            encrypt_shares(shares_u64, ea_pk_point);
 
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
             Value::known(position),
             Value::known(voting_hotkey_pk),
-            Value::known(total_note_value),
+            Value::known(pallas::Base::from(10_000u64)),
             Value::known(pallas::Base::from(5u64)),
             Value::known(pallas::Base::random(&mut rng)),
             Value::known(wrong_van),
             Value::known(pallas::Base::random(&mut rng)),
         );
         circuit.vsk = Value::known(vsk);
-        circuit.shares = [
-            Value::known(s0),
-            Value::known(s1),
-            Value::known(s2),
-            Value::known(s3),
-        ];
+        circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
+        circuit.share_randomness = randomness.map(Value::known);
+        circuit.ea_pk = Value::known(ea_pk_affine);
         instance.vote_commitment = vote_commitment;
+        instance.ea_pk_x = *ea_pk_affine.coordinates().unwrap().x();
+        instance.ea_pk_y = *ea_pk_affine.coordinates().unwrap().y();
 
         let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
         // Should fail: derived hash ≠ witnessed vote_authority_note_old.
@@ -1713,13 +2052,12 @@ mod tests {
         let wrong_vsk_nk = pallas::Base::random(&mut rng);
 
         // Shares that sum to total_note_value (conditions 7 + 8).
-        let s0 = pallas::Base::from(1_000u64);
-        let s1 = pallas::Base::from(2_000u64);
-        let s2 = pallas::Base::from(3_000u64);
-        let s3 = pallas::Base::from(4_000u64);
+        let shares_u64: [u64; 4] = [1_000, 2_000, 3_000, 4_000];
 
-        // Condition 9: random enc_shares with matching hash.
-        let (enc_c1_x, enc_c2_x, vote_commitment) = random_enc_shares(&mut rng);
+        // Condition 10: real El Gamal encryption.
+        let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
+        let (enc_c1_x, enc_c2_x, randomness, vote_commitment) =
+            encrypt_shares(shares_u64, ea_pk_point);
 
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path), Value::known(position),
@@ -1728,19 +2066,18 @@ mod tests {
             Value::known(vote_authority_note_old), Value::known(wrong_vsk_nk),
         );
         circuit.vsk = Value::known(vsk);
-        circuit.shares = [
-            Value::known(s0),
-            Value::known(s1),
-            Value::known(s2),
-            Value::known(s3),
-        ];
+        circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
+        circuit.share_randomness = randomness.map(Value::known);
+        circuit.ea_pk = Value::known(ea_pk_affine);
 
         let instance = Instance::from_parts(
             van_nullifier, vote_authority_note_new, vote_commitment,
             vote_comm_tree_root, pallas::Base::zero(), pallas::Base::zero(),
             voting_round_id,
+            *ea_pk_affine.coordinates().unwrap().x(),
+            *ea_pk_affine.coordinates().unwrap().y(),
         );
 
         let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
@@ -1893,13 +2230,12 @@ mod tests {
         );
 
         // Shares that sum to total_note_value (conditions 7 + 8).
-        let s0 = pallas::Base::from(1_000u64);
-        let s1 = pallas::Base::from(2_000u64);
-        let s2 = pallas::Base::from(3_000u64);
-        let s3 = pallas::Base::from(4_000u64);
+        let shares_u64: [u64; 4] = [1_000, 2_000, 3_000, 4_000];
 
-        // Condition 9: random enc_shares with matching hash.
-        let (enc_c1_x, enc_c2_x, vote_commitment) = random_enc_shares(&mut rng);
+        // Condition 10: real El Gamal encryption.
+        let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
+        let (enc_c1_x, enc_c2_x, randomness, vote_commitment) =
+            encrypt_shares(shares_u64, ea_pk_point);
 
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path), Value::known(position),
@@ -1908,19 +2244,18 @@ mod tests {
             Value::known(vote_authority_note_old), Value::known(vsk_nk),
         );
         circuit.vsk = Value::known(vsk);
-        circuit.shares = [
-            Value::known(s0),
-            Value::known(s1),
-            Value::known(s2),
-            Value::known(s3),
-        ];
+        circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
+        circuit.share_randomness = randomness.map(Value::known);
+        circuit.ea_pk = Value::known(ea_pk_affine);
 
         let instance = Instance::from_parts(
             van_nullifier, vote_authority_note_new, vote_commitment,
             vote_comm_tree_root, pallas::Base::zero(), pallas::Base::zero(),
             voting_round_id,
+            *ea_pk_affine.coordinates().unwrap().x(),
+            *ea_pk_affine.coordinates().unwrap().y(),
         );
 
         let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
@@ -1989,8 +2324,12 @@ mod tests {
             proposal_authority_new, gov_comm_rand,
         );
 
-        // Condition 9: random enc_shares with matching hash.
-        let (enc_c1_x, enc_c2_x, vote_commitment) = random_enc_shares(&mut rng);
+        // Condition 10: real El Gamal encryption with max-value shares.
+        let max_share_u64 = (1u64 << 30) - 1;
+        let shares_u64: [u64; 4] = [max_share_u64; 4];
+        let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
+        let (enc_c1_x, enc_c2_x, randomness, vote_commitment) =
+            encrypt_shares(shares_u64, ea_pk_point);
 
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path), Value::known(position),
@@ -1999,19 +2338,18 @@ mod tests {
             Value::known(vote_authority_note_old), Value::known(vsk_nk),
         );
         circuit.vsk = Value::known(vsk);
-        circuit.shares = [
-            Value::known(max_share),
-            Value::known(max_share),
-            Value::known(max_share),
-            Value::known(max_share),
-        ];
+        circuit.shares = [Value::known(max_share); 4];
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
+        circuit.share_randomness = randomness.map(Value::known);
+        circuit.ea_pk = Value::known(ea_pk_affine);
 
         let instance = Instance::from_parts(
             van_nullifier, vote_authority_note_new, vote_commitment,
             vote_comm_tree_root, pallas::Base::zero(), pallas::Base::zero(),
             voting_round_id,
+            *ea_pk_affine.coordinates().unwrap().x(),
+            *ea_pk_affine.coordinates().unwrap().y(),
         );
 
         let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
@@ -2112,14 +2450,72 @@ mod tests {
     }
 
     // ================================================================
+    // Condition 10 (Encryption Integrity) tests
+    // ================================================================
+
+    /// Valid El Gamal encryptions should produce a valid proof.
+    #[test]
+    fn encryption_integrity_valid_proof() {
+        let (circuit, instance) = make_test_data();
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    /// A corrupted share_randomness[0] should fail condition 10:
+    /// the computed C1[0] won't match enc_share_c1_x[0].
+    #[test]
+    fn encryption_integrity_wrong_randomness_fails() {
+        let (mut circuit, instance) = make_test_data();
+
+        // Corrupt the randomness for share 0 — C1 will change.
+        circuit.share_randomness[0] = Value::known(pallas::Base::from(9999u64));
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+        assert!(prover.verify().is_err());
+    }
+
+    /// A wrong ea_pk in the instance should fail condition 10:
+    /// the computed r * ea_pk won't match the ciphertexts.
+    #[test]
+    fn encryption_integrity_wrong_ea_pk_instance_fails() {
+        let (circuit, mut instance) = make_test_data();
+
+        // Corrupt ea_pk_x in the instance — the constraint linking
+        // the witnessed ea_pk to the public input will fail.
+        instance.ea_pk_x = pallas::Base::from(12345u64);
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+        assert!(prover.verify().is_err());
+    }
+
+    /// The out-of-circuit elgamal_encrypt helper is deterministic.
+    #[test]
+    fn elgamal_encrypt_deterministic() {
+        let (_ea_sk, ea_pk_point, _ea_pk_affine) = generate_ea_keypair();
+
+        let v = pallas::Base::from(1000u64);
+        let r = pallas::Base::from(42u64);
+
+        let (c1_a, c2_a) = elgamal_encrypt(v, r, ea_pk_point);
+        let (c1_b, c2_b) = elgamal_encrypt(v, r, ea_pk_point);
+        assert_eq!(c1_a, c1_b);
+        assert_eq!(c2_a, c2_b);
+
+        // Different randomness → different C1.
+        let (c1_c, _) = elgamal_encrypt(v, pallas::Base::from(99u64), ea_pk_point);
+        assert_ne!(c1_a, c1_c);
+    }
+
+    // ================================================================
     // Instance and circuit sanity
     // ================================================================
 
-    /// Instance must serialize to exactly 7 public inputs.
+    /// Instance must serialize to exactly 9 public inputs.
     #[test]
-    fn instance_has_seven_public_inputs() {
+    fn instance_has_nine_public_inputs() {
         let (_, instance) = make_test_data();
-        assert_eq!(instance.to_halo2_instance().len(), 7);
+        assert_eq!(instance.to_halo2_instance().len(), 9);
     }
 
     /// Default circuit (all witnesses unknown) must not produce a valid proof.

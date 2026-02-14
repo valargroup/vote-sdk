@@ -2,19 +2,21 @@
 
 Proves that a registered voter is casting a valid vote, without revealing which VAN they hold. The structure follows the delegation circuit's pattern (ZKP 1) and implements conditions incrementally.
 
-**Public inputs:** 7 field elements.
-**Current K:** 12 (4,096 rows) — accommodates conditions 1–9, ECC (condition 3), and the 10-bit lookup table.
+**Public inputs:** 9 field elements.
+**Current K:** 14 (16,384 rows) — accommodates conditions 1–10, including 12 variable-base ECC scalar multiplications (condition 10), the fixed-base mul (condition 3), and the 10-bit lookup table.
 
 ## Inputs
 
-- Public (7 field elements)
+- Public (9 field elements)
    * **van_nullifier** (offset 0): the nullifier of the old VAN being spent (prevents double-vote).
    * **vote_authority_note_new** (offset 1): the new VAN commitment with decremented proposal authority.
-   * **vote_commitment** (offset 2): the vote commitment hash.
+   * **vote_commitment** (offset 2): the vote commitment hash (currently shares_hash; condition 11 will bind the full VC).
    * **vote_comm_tree_root** (offset 3): root of the Poseidon-based vote commitment tree at anchor height.
    * **vote_comm_tree_anchor_height** (offset 4): the vote-chain height at which the tree is snapshotted.
    * **proposal_id** (offset 5): which proposal this vote is for.
    * **voting_round_id** (offset 6): the voting round identifier — prevents cross-round replay.
+   * **ea_pk_x** (offset 7): x-coordinate of the election authority public key (El Gamal encryption key).
+   * **ea_pk_y** (offset 8): y-coordinate of the election authority public key. Both coordinates are public to prevent sign-ambiguity attacks (using −ea_pk would corrupt the tally).
 
 - Private (VAN ownership — conditions 1–4)
    * **voting_hotkey_pk**: the voting hotkey public key (x-coordinate of the ECC point derived from `vsk`).
@@ -31,7 +33,8 @@ Proves that a registered voter is casting a valid vote, without revealing which 
    * **shares_1..4**: the voting share vector (each in `[0, 2^24)`).
    * **enc_share_c1_x[0..3]**: x-coordinates of C1_i = r_i * G (El Gamal first component, via ExtractP).
    * **enc_share_c2_x[0..3]**: x-coordinates of C2_i = shares_i * G + r_i * ea_pk (El Gamal second component, via ExtractP).
-   * **share_randomness_1..4**: El Gamal encryption randomness per share.
+   * **share_randomness[0..3]**: El Gamal encryption randomness per share (base field elements, converted to scalars via `ScalarVar::from_base` in-circuit).
+   * **ea_pk**: election authority public key as a Pallas affine point (witnessed as `NonIdentityPoint`, constrained to public inputs at offsets 7–8).
    * **vote_decision**: the voter's choice.
 
 - Internal wires (not public inputs, not free witnesses)
@@ -39,6 +42,8 @@ Proves that a registered voter is casting a valid vote, without revealing which 
    * **domain_van_nullifier cell**: constant encoding of `"vote authority spend"` (condition 4).
    * **proposal_authority_new**: derived as `proposal_authority_old - 1` (condition 5).
    * **shares_hash**: Poseidon hash of 8 enc_share x-coordinates (condition 9). Temporarily bound to `VOTE_COMMITMENT`; will be consumed by condition 11.
+   * **SpendAuthG x, y constants**: coordinates of the El Gamal generator (condition 10). Baked into the verification key via `assign_advice_from_constant`.
+   * **ea_pk_x, ea_pk_y cells**: copied from the instance column (condition 10). Each ea_pk `NonIdentityPoint` witness is constrained to match these cells.
 
 ## Condition 2: VAN Integrity ✅
 
@@ -232,22 +237,55 @@ The 8 x-coordinates are interleaved per share — `(c1_0, c2_0, c1_1, c2_1, ...)
 **Constraint:** The circuit computes the Poseidon hash over all 8 witness values and enforces `constrain_instance(shares_hash, VOTE_COMMITMENT)` — temporarily binding the hash to the public input at offset 2. When condition 11 is implemented, this temporary binding will be replaced: `VOTE_COMMITMENT` will instead be bound to `H(DOMAIN_VC, shares_hash, proposal_id, vote_decision)`, and `shares_hash` will become a purely internal wire.
 
 **Relationship to other conditions:**
-- Condition 10 (not yet implemented) will constrain that the witnessed `(c1_i_x, c2_i_x)` values are actual valid El Gamal encryptions of the corresponding plaintext shares from conditions 7/8. Until then, the enc_share values are unconstrained private inputs — any field elements will satisfy condition 9.
+- Condition 10 constrains that the witnessed `(c1_i_x, c2_i_x)` values are valid El Gamal encryptions of the corresponding plaintext shares from conditions 7/8. The enc_share cells are cloned before the Poseidon hash and reused as `constrain_equal` targets in condition 10.
 - Condition 11 will chain `shares_hash` into the full vote commitment, removing the temporary `VOTE_COMMITMENT` binding.
 
 **Out-of-circuit helper:** `shares_hash()` computes the same Poseidon hash outside the circuit for builder and test use.
 
 **Constructions:** `PoseidonChip` (reused from conditions 1, 2, 4, 6).
 
-## Condition 10: Encryption Integrity (TODO)
+## Condition 10: Encryption Integrity ✅
 
-Purpose: each ciphertext is a valid El Gamal encryption of the corresponding plaintext share.
+Purpose: each ciphertext is a valid El Gamal encryption of the corresponding plaintext share under the election authority's public key.
 
 ```
-Each enc_share_i = ElGamal(shares_i, r_i, ea_pk) = (r_i * G, shares_i * G + r_i * ea_pk)
+For each share i (0..3):
+    C1_i = [r_i] * G                        (randomness point)
+    C2_i = [v_i] * G + [r_i] * ea_pk        (ciphertext point)
+    ExtractP(C1_i) == enc_share_c1_x[i]      (link to condition 9)
+    ExtractP(C2_i) == enc_share_c2_x[i]      (link to condition 9)
 ```
 
-**Constructions:** `EccChip`.
+Where:
+- **G**: SpendAuthG, the El Gamal generator. Reused from condition 3's ECC chip configuration. Both x and y coordinates are assigned via `assign_advice_from_constant`, baking them into the verification key. Each NonIdentityPoint witness of G is constrained to match these constants, preventing a malicious prover from using a different (or negated) generator.
+- **r_i**: El Gamal randomness for share `i` (private witness, `pallas::Base`). Converted to `ScalarVar` via `ScalarVar::from_base` for variable-base ECC multiplication. The same cell is cloned and used for both `[r_i] * G` (C1) and `[r_i] * ea_pk` (C2), ensuring the same randomness binds both ciphertext components.
+- **v_i**: plaintext share value from conditions 7/8. Cell-equality-linked to the same cells used in `AddChip` (condition 7) and range check (condition 8). Converted to `ScalarVar` via `ScalarVar::from_base` for ECC multiplication.
+- **ea_pk**: election authority public key (Pallas curve point, public input at offsets 7–8). Witnessed as a `NonIdentityPoint` (on-curve constraint included). Both x and y coordinates are constrained to match the instance column cells, preventing a prover from using a different or negated key.
+- **enc_share_c1_x[i]**, **enc_share_c2_x[i]**: the x-coordinate cells from condition 9's witness region. These are the same cells that were hashed into `shares_hash` by condition 9's Poseidon hash. Condition 10 constrains the ECC computation output to match them via `constrain_equal`, creating a binding between the Poseidon hash (condition 9) and the actual El Gamal encryption.
+
+**Structure:** For each of the 4 shares (iterated in a loop):
+1. Witness G as `NonIdentityPoint`, constrain x/y to SpendAuthG constants
+2. `ScalarVar::from_base(r_i)` → variable-base mul → C1 point
+3. `constrain_equal(ExtractP(C1), enc_c1_x[i])`
+4. Witness G again as `NonIdentityPoint` (consumed by mul), constrain x/y
+5. `ScalarVar::from_base(share[i])` → variable-base mul → vG point
+6. Witness ea_pk as `NonIdentityPoint`, constrain x/y to public inputs
+7. `ScalarVar::from_base(r_i clone)` → variable-base mul → rP point
+8. `vG.add(rP)` → C2 point
+9. `constrain_equal(ExtractP(C2), enc_c2_x[i])`
+
+Total: 12 variable-base scalar multiplications (~6,000 rows), 4 point additions, 12 `NonIdentityPoint` witnesses (8× G + 4× ea_pk), 8 coordinate `constrain_equal` constraints. This is why K was bumped from 12 to 14.
+
+**Scalar field handling:** All scalars (r_i, v_i) are base field elements converted via `ScalarVar::from_base`. This avoids cross-field consistency issues between `pallas::Base` and `pallas::Scalar`. For shares (< 2^30, guaranteed by condition 8), the integer representation is identical in both fields. For randomness, the probability of a base element exceeding the scalar field modulus is ≈ 2^{-254}.
+
+**Security properties:**
+- **Generator binding:** Each G witness is constrained to SpendAuthG's constant coordinates (both x and y), preventing the prover from using a negated generator. Using −G for v*G would produce C2 = −v*G + r*ea_pk, which decrypts to −v instead of v, corrupting the tally.
+- **ea_pk binding:** Both ea_pk coordinates are public inputs, so the verifier checks them against the published round parameter. This prevents the prover from encrypting under a different key.
+- **Randomness binding:** The same r_i cell (via clone) is used for both C1 and C2 computations. Cell equality ensures both `ScalarVar::from_base` calls decompose the same value.
+
+**Out-of-circuit helpers:** `elgamal_encrypt()` computes the same El Gamal encryption outside the circuit. `spend_auth_g_affine()` returns the SpendAuthG generator as a Pallas affine point. `base_to_scalar()` converts base field elements to scalars.
+
+**Constructions:** `EccChip` (reused from condition 3), `NonIdentityPoint`, `ScalarVar`, `Point::add`, `Point::extract_p`.
 
 ## Condition 11: Vote Commitment Integrity (TODO)
 
@@ -263,15 +301,15 @@ vote_commitment = H(DOMAIN_VC, shares_hash, proposal_id, vote_decision)
 
 | Columns | Current use | Future use |
 |---------|------------|------------|
-| `advices[0..5]` | General witness assignment | Sinsemilla/Merkle (if needed) |
+| `advices[0..5]` | General witness assignment, ECC (cond 3, 10) | Sinsemilla/Merkle (if needed) |
 | `advices[5]` | Poseidon partial S-box | — |
 | `advices[6]` | Poseidon state + AddChip output (c) | — |
 | `advices[7]` | Poseidon state + AddChip input (a) | — |
 | `advices[8]` | Poseidon state + AddChip input (b) | — |
 | `advices[9]` | Range check running sum | — |
-| `lagrange_coeffs[0]` | Constants (DOMAIN_VAN, ONE) | Constants (DOMAIN_VC, etc.) |
-| `lagrange_coeffs[1]` | Unused | ECC / Sinsemilla |
+| `lagrange_coeffs[0]` | Constants (DOMAIN_VAN, ONE, SpendAuthG x/y) | Constants (DOMAIN_VC, etc.) |
+| `lagrange_coeffs[1]` | ECC Lagrange coefficients | — |
 | `lagrange_coeffs[2..5]` | Poseidon rc_a | — |
 | `lagrange_coeffs[5..8]` | Poseidon rc_b | — |
 | `table_idx` | 10-bit lookup table [0, 1024) | — |
-| `primary` | 7 public inputs | — |
+| `primary` | 9 public inputs | — |

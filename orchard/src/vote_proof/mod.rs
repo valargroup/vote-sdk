@@ -13,10 +13,12 @@
 //! - **Condition 7**: Shares Sum Correctness (AddChip, `constrain_equal`).
 //! - **Condition 8**: Shares Range (LookupRangeCheck, `[0, 2^30)`).
 //! - **Condition 9**: Shares Hash Integrity (Poseidon `ConstantLength<8>`, `constrain_instance`).
+//! - **Condition 10**: Encryption Integrity (ECC variable-base mul, `constrain_equal`).
 
 pub mod circuit;
 
 pub use circuit::{
-    domain_van_nullifier, poseidon_hash_2, shares_hash, van_integrity_hash, van_nullifier_hash,
-    Circuit, Config, Instance, K, DOMAIN_VAN, VOTE_COMM_TREE_DEPTH,
+    base_to_scalar, domain_van_nullifier, elgamal_encrypt, poseidon_hash_2, shares_hash,
+    spend_auth_g_affine, van_integrity_hash, van_nullifier_hash, Circuit, Config, Instance, K,
+    DOMAIN_VAN, VOTE_COMM_TREE_DEPTH,
 };
