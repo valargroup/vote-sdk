@@ -2,8 +2,8 @@ name: ZK Circuit Security Audit
 
 on:
   schedule:
-    # Every 3 hours
-    - cron: '0 */3 * * *'
+    # Every 12 hours
+    - cron: '0 */12 * * *'
   workflow_dispatch:
     inputs:
       slack_summary:
