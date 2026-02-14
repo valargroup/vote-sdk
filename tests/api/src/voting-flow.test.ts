@@ -243,10 +243,11 @@ describe("E2E Voting Flow", () => {
     );
     expect(totalLeaves).toBe(4);
     // Each block has height, start_index, leaves; each leaf is 32 bytes (base64).
+    // start_index may be omitted when 0 (proto3 omitempty).
     let expectedStart = 0;
     for (const block of json.blocks) {
       expect(block.height).toBeGreaterThan(0);
-      expect(block.start_index).toBe(expectedStart);
+      expect(block.start_index ?? 0).toBe(expectedStart);
       expect(block.leaves).toBeDefined();
       expect(Array.isArray(block.leaves)).toBe(true);
       for (const leaf of block.leaves) {
