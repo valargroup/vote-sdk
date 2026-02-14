@@ -19,3 +19,7 @@
     - [Gadgets](design/circuit/gadgets.md)
     - [CommitIvk](design/circuit/commit-ivk.md)
     - [NoteCommit](design/circuit/note-commit.md)
+- [ZKPs](zkps.md)
+  - [ZKP 1 — Delegation proof](zkps/zkp1-delegation-proof.md)
+  - [ZKP 2 — Vote proof](zkps/zkp2-vote-proof.md)
+  - [ZKP 3 — Vote reveal proof](zkps/zkp3-vote-reveal-proof.md)

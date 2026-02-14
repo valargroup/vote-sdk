@@ -4,8 +4,9 @@
 //! revealing which VAN they hold. Currently implements:
 //!
 //! - **Condition 2**: VAN Integrity (Poseidon hash).
+//! - **Condition 4**: VAN Nullifier Integrity (nested Poseidon, `constrain_instance`).
 //!
-//! Remaining conditions (1, 3–11) are stubbed with witness fields and
+//! Remaining conditions (1, 3, 5–11) are stubbed with witness fields and
 //! public input slots; constraint logic will be added incrementally.
 //!
 //! ## Conditions overview
@@ -95,8 +96,7 @@ const VOTING_ROUND_ID: usize = 6;
 
 // Suppress dead-code warnings for public input offsets that are
 // defined but not yet used by any condition's constraint logic.
-// These will be used as conditions 1, 3–11 are implemented.
-const _: usize = VAN_NULLIFIER;
+// These will be used as conditions 1, 3, 5–11 are implemented.
 const _: usize = VOTE_AUTHORITY_NOTE_NEW;
 const _: usize = VOTE_COMMITMENT;
 const _: usize = VOTE_COMM_TREE_ROOT;
@@ -133,15 +133,64 @@ pub fn van_integrity_hash(
     ])
 }
 
+/// Returns the domain separator for the VAN nullifier inner hash.
+///
+/// Encodes `"vote authority spend"` as a Pallas base field element
+/// by interpreting the UTF-8 bytes as a little-endian 256-bit integer.
+/// This domain tag differentiates VAN nullifier derivation from other
+/// Poseidon uses in the protocol.
+pub fn domain_van_nullifier() -> pallas::Base {
+    // "vote authority spend" (20 bytes) zero-padded to 32, as LE u64 words.
+    pallas::Base::from_raw([
+        0x7475_6120_6574_6f76, // b"vote aut" LE
+        0x7320_7974_6972_6f68, // b"hority s" LE
+        0x0000_0000_646e_6570, // b"pend\0\0\0\0" LE
+        0,
+    ])
+}
+
+/// Out-of-circuit VAN nullifier hash (condition 4).
+///
+/// Three-layer `ConstantLength<2>` Poseidon chain (matches ZKP 1
+/// condition 14's governance nullifier pattern):
+/// ```text
+/// step1  = Poseidon(voting_round_id, vote_authority_note_old)   // scope to round + VAN
+/// step2  = Poseidon("vote authority spend", step1)              // domain separation
+/// van_nullifier = Poseidon(vsk_nk, step2)                       // key with nk
+/// ```
+///
+/// Used by the builder and tests to compute the expected VAN nullifier.
+pub fn van_nullifier_hash(
+    vsk_nk: pallas::Base,
+    voting_round_id: pallas::Base,
+    vote_authority_note_old: pallas::Base,
+) -> pallas::Base {
+    // Step 1: Poseidon(voting_round_id, vote_authority_note_old) — scope to round + VAN.
+    let step1 =
+        poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<2>, 3, 2>::init().hash([
+            voting_round_id,
+            vote_authority_note_old,
+        ]);
+    // Step 2: Poseidon(domain_tag, step1) — domain separation.
+    let step2 =
+        poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<2>, 3, 2>::init().hash([
+            domain_van_nullifier(),
+            step1,
+        ]);
+    // Step 3: Poseidon(vsk_nk, step2) — key the result so it can't be reversed.
+    poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<2>, 3, 2>::init()
+        .hash([vsk_nk, step2])
+}
+
 // ================================================================
 // Config
 // ================================================================
 
 /// Configuration for the Vote Proof circuit.
 ///
-/// Currently holds only the Poseidon chip config (condition 2).
+/// Currently holds the Poseidon chip config (conditions 2 and 4).
 /// Will be extended with ECC, range check, and custom gates as
-/// conditions 1, 3–11 are implemented.
+/// conditions 1, 3, 5–11 are implemented.
 #[derive(Clone, Debug)]
 pub struct Config {
     /// Public input column (7 field elements).
@@ -233,16 +282,19 @@ pub struct Circuit {
 }
 
 impl Circuit {
-    /// Creates a circuit with only condition 2 witnesses populated.
+    /// Creates a circuit with conditions 2 and 4 witnesses populated.
     ///
     /// All other witness fields are set to `Value::unknown()`.
-    /// Useful for testing condition 2 in isolation.
+    /// Condition 4 requires condition 2's witnesses because the
+    /// `vote_authority_note_old` cell flows from condition 2 into
+    /// condition 4 via cell equality.
     pub fn with_van_integrity_witnesses(
         voting_hotkey_pk: Value<pallas::Base>,
         total_note_value: Value<pallas::Base>,
         proposal_authority_old: Value<pallas::Base>,
         gov_comm_rand: Value<pallas::Base>,
         vote_authority_note_old: Value<pallas::Base>,
+        vsk_nk: Value<pallas::Base>,
     ) -> Self {
         Circuit {
             voting_hotkey_pk,
@@ -250,6 +302,7 @@ impl Circuit {
             proposal_authority_old,
             gov_comm_rand,
             vote_authority_note_old,
+            vsk_nk,
             ..Default::default()
         }
     }
@@ -393,6 +446,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             },
         )?;
 
+        // Clone voting_round_id for reuse in condition 4 (the condition 2
+        // message array below consumes the original via move).
+        let voting_round_id_cond4 = voting_round_id.clone();
+
         // ---------------------------------------------------------------
         // Condition 2: VAN Integrity.
         // vote_authority_note_old = Poseidon(DOMAIN_VAN, voting_hotkey_pk,
@@ -436,6 +493,107 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             || "VAN integrity check",
             |mut region| region.constrain_equal(derived_van.cell(), vote_authority_note_old.cell()),
         )?;
+
+        // ---------------------------------------------------------------
+        // Witness assignment for condition 4.
+        // ---------------------------------------------------------------
+
+        // Private witness: nullifier deriving key.
+        let vsk_nk = assign_free_advice(
+            layouter.namespace(|| "witness vsk_nk"),
+            config.advices[0],
+            self.vsk_nk,
+        )?;
+
+        // "vote authority spend" domain tag — constant-constrained so the
+        // value is baked into the verification key.
+        let domain_van_nf = layouter.assign_region(
+            || "DOMAIN_VAN_NULLIFIER constant",
+            |mut region| {
+                region.assign_advice_from_constant(
+                    || "domain_van_nullifier",
+                    config.advices[0],
+                    0,
+                    domain_van_nullifier(),
+                )
+            },
+        )?;
+
+        // ---------------------------------------------------------------
+        // Condition 4: VAN Nullifier Integrity.
+        // van_nullifier = Poseidon(vsk_nk,
+        //     Poseidon(domain, Poseidon(voting_round_id, vote_authority_note_old)))
+        //
+        // Three-layer ConstantLength<2> chain matching ZKP 1 condition 14:
+        //   Step 1: scope to round + VAN
+        //   Step 2: domain separation
+        //   Step 3: key with nullifier key
+        //
+        // voting_round_id and vote_authority_note_old are reused from
+        // condition 2 via cell equality — these cells flow directly into
+        // the Poseidon state without being re-witnessed.
+        // ---------------------------------------------------------------
+
+        let van_nullifier = {
+            // Step 1: Poseidon(voting_round_id, vote_authority_note_old)
+            // — scope to this round + VAN.
+            let step1_hasher = PoseidonHash::<
+                pallas::Base,
+                _,
+                poseidon::P128Pow5T3,
+                ConstantLength<2>,
+                3, // WIDTH
+                2, // RATE
+            >::init(
+                config.poseidon_chip(),
+                layouter.namespace(|| "VAN nullifier step 1 init"),
+            )?;
+            let step1 = step1_hasher.hash(
+                layouter.namespace(|| "Poseidon(voting_round_id, vote_authority_note_old)"),
+                [voting_round_id_cond4, vote_authority_note_old],
+            )?;
+
+            // Step 2: Poseidon(domain_tag, step1) — domain separation.
+            let step2_hasher = PoseidonHash::<
+                pallas::Base,
+                _,
+                poseidon::P128Pow5T3,
+                ConstantLength<2>,
+                3, // WIDTH
+                2, // RATE
+            >::init(
+                config.poseidon_chip(),
+                layouter.namespace(|| "VAN nullifier step 2 init"),
+            )?;
+            let step2 = step2_hasher.hash(
+                layouter.namespace(|| "Poseidon(domain_van_nullifier, step1)"),
+                [domain_van_nf, step1],
+            )?;
+
+            // Step 3: Poseidon(vsk_nk, step2) — key the result so it
+            // can't be reversed without knowing the spending key.
+            let step3_hasher = PoseidonHash::<
+                pallas::Base,
+                _,
+                poseidon::P128Pow5T3,
+                ConstantLength<2>,
+                3, // WIDTH
+                2, // RATE
+            >::init(
+                config.poseidon_chip(),
+                layouter.namespace(|| "VAN nullifier step 3 init"),
+            )?;
+            step3_hasher.hash(
+                layouter.namespace(|| "Poseidon(vsk_nk, step2)"),
+                [vsk_nk, step2],
+            )?
+        };
+
+        // Bind the derived nullifier to the VAN_NULLIFIER public input.
+        // This is the first constrain_instance call — the verifier checks
+        // that the prover's computed nullifier matches the publicly posted
+        // value, preventing double-voting.
+        layouter.constrain_instance(van_nullifier.cell(), config.primary, VAN_NULLIFIER)?;
 
         Ok(())
     }
@@ -519,11 +677,12 @@ mod tests {
     use pasta_curves::pallas;
     use rand::rngs::OsRng;
 
-    /// Build valid test data for condition 2 (VAN Integrity).
+    /// Build valid test data for conditions 2 and 4.
     ///
     /// Returns a circuit with correctly-hashed VAN witnesses and a
-    /// matching instance. All other public inputs are zero (unconstrained
-    /// by condition 2).
+    /// matching instance. Conditions 2 (VAN integrity) and 4 (VAN
+    /// nullifier) are fully constrained; other public inputs use
+    /// placeholder values (zero).
     fn make_van_integrity_test_data() -> (Circuit, Instance) {
         let mut rng = OsRng;
 
@@ -533,6 +692,7 @@ mod tests {
         let voting_round_id = pallas::Base::random(&mut rng);
         let proposal_authority_old = pallas::Base::random(&mut rng);
         let gov_comm_rand = pallas::Base::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
 
         // Compute expected VAN commitment out-of-circuit.
         let vote_authority_note_old = van_integrity_hash(
@@ -543,18 +703,22 @@ mod tests {
             gov_comm_rand,
         );
 
+        // Compute expected VAN nullifier out-of-circuit.
+        let van_nullifier = van_nullifier_hash(vsk_nk, voting_round_id, vote_authority_note_old);
+
         let circuit = Circuit::with_van_integrity_witnesses(
             Value::known(voting_hotkey_pk),
             Value::known(total_note_value),
             Value::known(proposal_authority_old),
             Value::known(gov_comm_rand),
             Value::known(vote_authority_note_old),
+            Value::known(vsk_nk),
         );
 
-        // Only voting_round_id is constrained to the instance in condition 2.
+        // Conditions 2 and 4 constrain voting_round_id and van_nullifier.
         // Other public inputs use placeholder values (zero).
         let instance = Instance::from_parts(
-            pallas::Base::zero(), // van_nullifier (condition 4)
+            van_nullifier,
             pallas::Base::zero(), // vote_authority_note_new (condition 6)
             pallas::Base::zero(), // vote_commitment (condition 11)
             pallas::Base::zero(), // vote_comm_tree_root (condition 1)
@@ -584,6 +748,7 @@ mod tests {
         let voting_round_id = pallas::Base::random(&mut rng);
         let proposal_authority_old = pallas::Base::random(&mut rng);
         let gov_comm_rand = pallas::Base::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
 
         // Deliberately wrong VAN value — does not match the Poseidon hash.
         let wrong_van = pallas::Base::random(&mut rng);
@@ -594,10 +759,23 @@ mod tests {
             Value::known(proposal_authority_old),
             Value::known(gov_comm_rand),
             Value::known(wrong_van),
+            Value::known(vsk_nk),
         );
 
+        // Nullifier computed with the correct VAN (not the wrong one).
+        // Condition 4 will also fail because the circuit hashes wrong_van,
+        // producing a different nullifier than the instance value.
+        let correct_van = van_integrity_hash(
+            voting_hotkey_pk,
+            total_note_value,
+            voting_round_id,
+            proposal_authority_old,
+            gov_comm_rand,
+        );
+        let van_nullifier = van_nullifier_hash(vsk_nk, voting_round_id, correct_van);
+
         let instance = Instance::from_parts(
-            pallas::Base::zero(),
+            van_nullifier,
             pallas::Base::zero(),
             pallas::Base::zero(),
             pallas::Base::zero(),
@@ -608,7 +786,9 @@ mod tests {
 
         let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
 
-        // Should fail: derived hash ≠ witnessed vote_authority_note_old.
+        // Should fail: derived hash ≠ witnessed vote_authority_note_old
+        // (condition 2), and the circuit-derived nullifier ≠ instance
+        // nullifier (condition 4, since it hashes wrong_van).
         assert!(prover.verify().is_err());
     }
 
@@ -621,6 +801,7 @@ mod tests {
         let voting_round_id = pallas::Base::random(&mut rng);
         let proposal_authority_old = pallas::Base::random(&mut rng);
         let gov_comm_rand = pallas::Base::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
 
         // Correct VAN for the given round_id.
         let vote_authority_note_old = van_integrity_hash(
@@ -631,20 +812,25 @@ mod tests {
             gov_comm_rand,
         );
 
+        // Nullifier computed with the correct round_id.
+        let van_nullifier = van_nullifier_hash(vsk_nk, voting_round_id, vote_authority_note_old);
+
         let circuit = Circuit::with_van_integrity_witnesses(
             Value::known(voting_hotkey_pk),
             Value::known(total_note_value),
             Value::known(proposal_authority_old),
             Value::known(gov_comm_rand),
             Value::known(vote_authority_note_old),
+            Value::known(vsk_nk),
         );
 
         // Supply a DIFFERENT voting_round_id in the instance.
         // The circuit copies this value from the instance into the Poseidon
         // hash, producing a different output than the witnessed VAN.
+        // Condition 4 also fails because the inner hash uses wrong_round_id.
         let wrong_round_id = pallas::Base::random(&mut rng);
         let instance = Instance::from_parts(
-            pallas::Base::zero(),
+            van_nullifier,
             pallas::Base::zero(),
             pallas::Base::zero(),
             pallas::Base::zero(),
@@ -656,7 +842,8 @@ mod tests {
         let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
 
         // Should fail: the voting_round_id from the instance doesn't match
-        // the one hashed into the VAN.
+        // the one hashed into the VAN (condition 2), and the nullifier's
+        // inner hash uses wrong_round_id (condition 4).
         assert!(prover.verify().is_err());
     }
 
@@ -678,5 +865,105 @@ mod tests {
         // Changing any input changes the hash.
         let h3 = van_integrity_hash(pallas::Base::random(&mut rng), val, round, auth, rand);
         assert_ne!(h1, h3);
+    }
+
+    // ================================================================
+    // Condition 4 (VAN Nullifier Integrity) tests
+    // ================================================================
+
+    /// Wrong VAN_NULLIFIER public input should fail condition 4.
+    #[test]
+    fn van_nullifier_wrong_public_input_fails() {
+        let (circuit, mut instance) = make_van_integrity_test_data();
+
+        // Corrupt the VAN nullifier public input.
+        instance.van_nullifier = pallas::Base::random(&mut OsRng);
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+
+        // Should fail: circuit-derived nullifier ≠ corrupted instance value.
+        assert!(prover.verify().is_err());
+    }
+
+    /// Using a different vsk_nk in the circuit than was used to compute
+    /// the instance nullifier should fail condition 4.
+    #[test]
+    fn van_nullifier_wrong_vsk_nk_fails() {
+        let mut rng = OsRng;
+
+        let voting_hotkey_pk = pallas::Base::random(&mut rng);
+        let total_note_value = pallas::Base::random(&mut rng);
+        let voting_round_id = pallas::Base::random(&mut rng);
+        let proposal_authority_old = pallas::Base::random(&mut rng);
+        let gov_comm_rand = pallas::Base::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
+
+        let vote_authority_note_old = van_integrity_hash(
+            voting_hotkey_pk,
+            total_note_value,
+            voting_round_id,
+            proposal_authority_old,
+            gov_comm_rand,
+        );
+
+        // Compute nullifier with the CORRECT vsk_nk.
+        let van_nullifier = van_nullifier_hash(vsk_nk, voting_round_id, vote_authority_note_old);
+
+        // Use a DIFFERENT vsk_nk in the circuit.
+        let wrong_vsk_nk = pallas::Base::random(&mut rng);
+
+        let circuit = Circuit::with_van_integrity_witnesses(
+            Value::known(voting_hotkey_pk),
+            Value::known(total_note_value),
+            Value::known(proposal_authority_old),
+            Value::known(gov_comm_rand),
+            Value::known(vote_authority_note_old),
+            Value::known(wrong_vsk_nk),
+        );
+
+        let instance = Instance::from_parts(
+            van_nullifier,
+            pallas::Base::zero(),
+            pallas::Base::zero(),
+            pallas::Base::zero(),
+            pallas::Base::zero(),
+            pallas::Base::zero(),
+            voting_round_id,
+        );
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+
+        // Should fail: circuit computes Poseidon(wrong_vsk_nk, inner_hash)
+        // which ≠ the instance van_nullifier (computed with correct vsk_nk).
+        assert!(prover.verify().is_err());
+    }
+
+    /// Verifies the out-of-circuit nullifier helper produces deterministic results.
+    #[test]
+    fn van_nullifier_hash_deterministic() {
+        let mut rng = OsRng;
+
+        let nk = pallas::Base::random(&mut rng);
+        let round = pallas::Base::random(&mut rng);
+        let van = pallas::Base::random(&mut rng);
+
+        let h1 = van_nullifier_hash(nk, round, van);
+        let h2 = van_nullifier_hash(nk, round, van);
+        assert_eq!(h1, h2);
+
+        // Changing any input changes the hash.
+        let h3 = van_nullifier_hash(pallas::Base::random(&mut rng), round, van);
+        assert_ne!(h1, h3);
+    }
+
+    /// Verifies the domain tag is non-zero and deterministic.
+    #[test]
+    fn domain_van_nullifier_deterministic() {
+        let d1 = domain_van_nullifier();
+        let d2 = domain_van_nullifier();
+        assert_eq!(d1, d2);
+
+        // Must differ from DOMAIN_VAN (which is 0).
+        assert_ne!(d1, pallas::Base::zero());
     }
 }

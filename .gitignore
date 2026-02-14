@@ -16,6 +16,11 @@ __debug**
 # Obsidian vault symlink
 zcaloooors
 
+# Orchard book ZKP docs (symlinked from Obsidian)
+orchard/book/src/zkps/zkp1-delegation-proof.md
+orchard/book/src/zkps/zkp2-vote-proof.md
+orchard/book/src/zkps/zkp3-vote-reveal-proof.md
+
 **/vendor/**
 
 # Swift build artifacts

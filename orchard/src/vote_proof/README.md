@@ -33,7 +33,8 @@ Proves that a registered voter is casting a valid vote, without revealing which 
    * **vote_decision**: the voter's choice.
 
 - Internal wires (not public inputs, not free witnesses)
-   * **voting_round_id cell**: copied from the instance column, used in condition 2 Poseidon hash.
+   * **voting_round_id cell**: copied from the instance column, used in condition 2 Poseidon hash and condition 4 inner hash.
+   * **domain_van_nullifier cell**: constant encoding of `"vote authority spend"` (condition 4).
    * **proposal_authority_new**: derived as `proposal_authority_old - 1` (condition 5).
    * **shares_hash**: derived from encrypted shares (condition 9).
 
@@ -85,15 +86,29 @@ voting_hotkey_pk = ExtractP([vsk] * G)
 
 **Constructions:** `EccChip`.
 
-## Condition 4: VAN Nullifier Integrity (TODO)
+## Condition 4: VAN Nullifier Integrity ✅
 
 Purpose: derive a nullifier that prevents double-voting without revealing the VAN.
 
 ```
-van_nullifier = Poseidon_vsk.nk("vote authority spend", voting_round_id, vote_authority_note_old)
+step1          = Poseidon(voting_round_id, vote_authority_note_old)
+step2          = Poseidon("vote authority spend", step1)
+van_nullifier  = Poseidon(vsk_nk, step2)
 ```
 
-**Constructions:** `PoseidonChip`.
+Three-layer `ConstantLength<2>` chain matching ZKP 1 condition 14's governance nullifier pattern:
+
+- **Step 1** `Poseidon(voting_round_id, vote_authority_note_old)` — scope to this round and VAN. Both cells are reused from condition 2 via cell equality (not re-witnessed), binding conditions 2 and 4 together.
+- **Step 2** `Poseidon("vote authority spend", step1)` — domain separation. The tag is encoded as a Pallas field element from its UTF-8 bytes (see `domain_van_nullifier()`), assigned via `assign_advice_from_constant` so the value is baked into the verification key.
+- **Step 3** `Poseidon(vsk_nk, step2)` — key with the nullifier deriving key. `vsk_nk` is a private witness derived from `vsk` out-of-circuit. Different from `vsk` itself: `vsk` is a scalar used for ECC in condition 3, while `vsk_nk` is a base field element.
+
+**Structure:** Three chained `ConstantLength<2>` Poseidon hashes (3 permutations, 192 rows). Each step has a clear semantic role: scoping, domain separation, keying. This uniform structure matches ZKP 1 condition 14.
+
+**Constraint:** The circuit computes the nested hash and enforces `constrain_instance(result, VAN_NULLIFIER)` — binding the derived value to the public input at offset 0. This is the first `constrain_instance` call in the circuit.
+
+**Out-of-circuit helper:** `van_nullifier_hash()` computes the same nested Poseidon hash outside the circuit. `domain_van_nullifier()` returns the domain separator constant.
+
+**Constructions:** `PoseidonChip` (reused from condition 2), `constrain_instance`.
 
 ## Condition 5: Proposal Authority Decrement (TODO)
 
