@@ -1,7 +1,7 @@
 package vote_test
 
 import (
-	"bytes"
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -18,6 +18,14 @@ import (
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
+
+// fpLE returns a 32-byte little-endian Pallas Fp encoding of a small integer.
+// Used so commitment leaves are canonical and accepted by the votetree FFI.
+func fpLE(v uint64) []byte {
+	buf := make([]byte, 32)
+	binary.LittleEndian.PutUint64(buf[:8], v)
+	return buf
+}
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -71,9 +79,9 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 			name: "computes and stores root when leaves exist",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				_, err := s.keeper.AppendCommitment(kv, bytes.Repeat([]byte{0xA1}, 32))
+				_, err := s.keeper.AppendCommitment(kv, fpLE(1))
 				s.Require().NoError(err)
-				_, err = s.keeper.AppendCommitment(kv, bytes.Repeat([]byte{0xA2}, 32))
+				_, err = s.keeper.AppendCommitment(kv, fpLE(2))
 				s.Require().NoError(err)
 			},
 			check: func() {
@@ -96,7 +104,7 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 			name: "skips when tree unchanged between blocks",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				_, err := s.keeper.AppendCommitment(kv, bytes.Repeat([]byte{0xB1}, 32))
+				_, err := s.keeper.AppendCommitment(kv, fpLE(1))
 				s.Require().NoError(err)
 
 				// Run EndBlock at height 10 to compute root.
@@ -127,14 +135,14 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 			name: "new root stored when leaves added after previous root",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				_, err := s.keeper.AppendCommitment(kv, bytes.Repeat([]byte{0xC1}, 32))
+				_, err := s.keeper.AppendCommitment(kv, fpLE(1))
 				s.Require().NoError(err)
 
 				// EndBlock at height 10.
 				s.Require().NoError(s.module.EndBlock(s.ctx))
 
 				// Add another leaf and advance height.
-				_, err = s.keeper.AppendCommitment(kv, bytes.Repeat([]byte{0xC2}, 32))
+				_, err = s.keeper.AppendCommitment(kv, fpLE(2))
 				s.Require().NoError(err)
 				s.ctx = s.ctx.WithBlockHeight(11)
 			},
