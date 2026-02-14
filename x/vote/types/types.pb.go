@@ -286,12 +286,13 @@ func (x *VoteRound) GetProposals() []*Proposal {
 
 // CommitmentTreeState holds the current state of the append-only commitment tree.
 type CommitmentTreeState struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NextIndex     uint64                 `protobuf:"varint,1,opt,name=next_index,json=nextIndex,proto3" json:"next_index,omitempty"` // Next leaf index to write
-	Root          []byte                 `protobuf:"bytes,2,opt,name=root,proto3" json:"root,omitempty"`                             // Current Merkle root (empty until EndBlocker computes it)
-	Height        uint64                 `protobuf:"varint,3,opt,name=height,proto3" json:"height,omitempty"`                        // Block height at which this root was last computed
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	NextIndex       uint64                 `protobuf:"varint,1,opt,name=next_index,json=nextIndex,proto3" json:"next_index,omitempty"`                       // Next leaf index to write
+	Root            []byte                 `protobuf:"bytes,2,opt,name=root,proto3" json:"root,omitempty"`                                                   // Current Merkle root (empty until EndBlocker computes it)
+	Height          uint64                 `protobuf:"varint,3,opt,name=height,proto3" json:"height,omitempty"`                                              // Block height at which this root was last computed
+	NextIndexAtRoot uint64                 `protobuf:"varint,4,opt,name=next_index_at_root,json=nextIndexAtRoot,proto3" json:"next_index_at_root,omitempty"` // NextIndex at the time the root was last stored (used to compute per-block leaf ranges)
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *CommitmentTreeState) Reset() {
@@ -341,6 +342,13 @@ func (x *CommitmentTreeState) GetRoot() []byte {
 func (x *CommitmentTreeState) GetHeight() uint64 {
 	if x != nil {
 		return x.Height
+	}
+	return 0
+}
+
+func (x *CommitmentTreeState) GetNextIndexAtRoot() uint64 {
+	if x != nil {
+		return x.NextIndexAtRoot
 	}
 	return 0
 }
@@ -598,6 +606,69 @@ func (x *TallyResult) GetTotalValue() uint64 {
 	return 0
 }
 
+// BlockCommitments holds the commitment leaves appended during a single block.
+// Used by the CommitmentLeaves query to serve tree data to remote clients
+// implementing the TreeSyncApi trait.
+type BlockCommitments struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Height        uint64                 `protobuf:"varint,1,opt,name=height,proto3" json:"height,omitempty"`                           // Block height
+	StartIndex    uint64                 `protobuf:"varint,2,opt,name=start_index,json=startIndex,proto3" json:"start_index,omitempty"` // Index of the first leaf in this block
+	Leaves        [][]byte               `protobuf:"bytes,3,rep,name=leaves,proto3" json:"leaves,omitempty"`                            // Commitment leaves (each 32 bytes, Pallas Fp LE)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlockCommitments) Reset() {
+	*x = BlockCommitments{}
+	mi := &file_zvote_v1_types_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockCommitments) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockCommitments) ProtoMessage() {}
+
+func (x *BlockCommitments) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_types_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockCommitments.ProtoReflect.Descriptor instead.
+func (*BlockCommitments) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *BlockCommitments) GetHeight() uint64 {
+	if x != nil {
+		return x.Height
+	}
+	return 0
+}
+
+func (x *BlockCommitments) GetStartIndex() uint64 {
+	if x != nil {
+		return x.StartIndex
+	}
+	return 0
+}
+
+func (x *BlockCommitments) GetLeaves() [][]byte {
+	if x != nil {
+		return x.Leaves
+	}
+	return nil
+}
+
 var File_zvote_v1_types_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_types_proto_rawDesc = "" +
@@ -622,12 +693,13 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\avk_zkp1\x18\v \x01(\fR\x06vkZkp1\x12\x17\n" +
 	"\avk_zkp2\x18\f \x01(\fR\x06vkZkp2\x12\x17\n" +
 	"\avk_zkp3\x18\r \x01(\fR\x06vkZkp3\x120\n" +
-	"\tproposals\x18\x0e \x03(\v2\x12.zvote.v1.ProposalR\tproposals\"`\n" +
+	"\tproposals\x18\x0e \x03(\v2\x12.zvote.v1.ProposalR\tproposals\"\x8d\x01\n" +
 	"\x13CommitmentTreeState\x12\x1d\n" +
 	"\n" +
 	"next_index\x18\x01 \x01(\x04R\tnextIndex\x12\x12\n" +
 	"\x04root\x18\x02 \x01(\fR\x04root\x12\x16\n" +
-	"\x06height\x18\x03 \x01(\x04R\x06height\"\xfa\x01\n" +
+	"\x06height\x18\x03 \x01(\x04R\x06height\x12+\n" +
+	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xfa\x01\n" +
 	"\fGenesisState\x12+\n" +
 	"\x06rounds\x18\x01 \x03(\v2\x13.zvote.v1.VoteRoundR\x06rounds\x12<\n" +
 	"\n" +
@@ -649,7 +721,12 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"proposalId\x12#\n" +
 	"\rvote_decision\x18\x03 \x01(\rR\fvoteDecision\x12\x1f\n" +
 	"\vtotal_value\x18\x04 \x01(\x04R\n" +
-	"totalValue*\x85\x01\n" +
+	"totalValue\"c\n" +
+	"\x10BlockCommitments\x12\x16\n" +
+	"\x06height\x18\x01 \x01(\x04R\x06height\x12\x1f\n" +
+	"\vstart_index\x18\x02 \x01(\x04R\n" +
+	"startIndex\x12\x16\n" +
+	"\x06leaves\x18\x03 \x03(\fR\x06leaves*\x85\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
@@ -669,7 +746,7 @@ func file_zvote_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_zvote_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_zvote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_zvote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_zvote_v1_types_proto_goTypes = []any{
 	(SessionStatus)(0),          // 0: zvote.v1.SessionStatus
 	(*Proposal)(nil),            // 1: zvote.v1.Proposal
@@ -679,6 +756,7 @@ var file_zvote_v1_types_proto_goTypes = []any{
 	(*CommitmentLeaf)(nil),      // 5: zvote.v1.CommitmentLeaf
 	(*NullifierEntry)(nil),      // 6: zvote.v1.NullifierEntry
 	(*TallyResult)(nil),         // 7: zvote.v1.TallyResult
+	(*BlockCommitments)(nil),    // 8: zvote.v1.BlockCommitments
 }
 var file_zvote_v1_types_proto_depIdxs = []int32{
 	0, // 0: zvote.v1.VoteRound.status:type_name -> zvote.v1.SessionStatus
@@ -705,7 +783,7 @@ func file_zvote_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_types_proto_rawDesc), len(file_zvote_v1_types_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

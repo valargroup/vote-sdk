@@ -38,9 +38,10 @@ message VoteRound {
 
 // CommitmentTreeState holds the current state of the append-only commitment tree.
 message CommitmentTreeState {
-  uint64 next_index = 1; // Next leaf index to write
-  bytes  root       = 2; // Current Merkle root (empty until EndBlocker computes it)
-  uint64 height     = 3; // Block height at which this root was last computed
+  uint64 next_index          = 1; // Next leaf index to write
+  bytes  root                = 2; // Current Merkle root (empty until EndBlocker computes it)
+  uint64 height              = 3; // Block height at which this root was last computed
+  uint64 next_index_at_root  = 4; // NextIndex at the time the root was last stored (used to compute per-block leaf ranges)
 }
 
 // GenesisState defines the vote module's genesis state.
@@ -71,4 +72,13 @@ message TallyResult {
   uint32 proposal_id    = 2;
   uint32 vote_decision  = 3;
   uint64 total_value    = 4;  // Decrypted aggregate (zatoshi)
+}
+
+// BlockCommitments holds the commitment leaves appended during a single block.
+// Used by the CommitmentLeaves query to serve tree data to remote clients
+// implementing the TreeSyncApi trait.
+message BlockCommitments {
+  uint64         height      = 1; // Block height
+  uint64         start_index = 2; // Index of the first leaf in this block
+  repeated bytes leaves      = 3; // Commitment leaves (each 32 bytes, Pallas Fp LE)
 }

@@ -125,3 +125,25 @@ func (qs queryServer) TallyResults(goCtx context.Context, req *types.QueryTallyR
 
 	return &types.QueryTallyResultsResponse{Results: results}, nil
 }
+
+// CommitmentLeaves returns the commitment tree leaves organized by block height.
+// This endpoint enables remote clients implementing TreeSyncApi to sync the
+// vote commitment tree without parsing full Cosmos blocks.
+func (qs queryServer) CommitmentLeaves(goCtx context.Context, req *types.QueryCommitmentLeavesRequest) (*types.QueryCommitmentLeavesResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+	if req.ToHeight < req.FromHeight {
+		return nil, status.Errorf(codes.InvalidArgument, "to_height (%d) must be >= from_height (%d)", req.ToHeight, req.FromHeight)
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	blocks, err := qs.k.GetCommitmentLeaves(kvStore, req.FromHeight, req.ToHeight)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get commitment leaves: %v", err)
+	}
+
+	return &types.QueryCommitmentLeavesResponse{Blocks: blocks}, nil
+}

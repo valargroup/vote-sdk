@@ -212,8 +212,19 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				return err
 			}
 
+			// Record the block-to-leaf-index mapping for the CommitmentLeaves query.
+			// New leaves this block span [NextIndexAtRoot, NextIndex).
+			leafStart := state.NextIndexAtRoot
+			leafCount := state.NextIndex - leafStart
+			if leafCount > 0 {
+				if err := am.keeper.SetBlockLeafIndex(kvStore, blockHeight, leafStart, leafCount); err != nil {
+					return err
+				}
+			}
+
 			state.Root = root
 			state.Height = blockHeight
+			state.NextIndexAtRoot = state.NextIndex
 			if err := am.keeper.SetCommitmentTreeState(kvStore, state); err != nil {
 				return err
 			}

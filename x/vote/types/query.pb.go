@@ -462,6 +462,102 @@ func (x *QueryTallyResultsResponse) GetResults() []*TallyResult {
 	return nil
 }
 
+type QueryCommitmentLeavesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FromHeight    uint64                 `protobuf:"varint,1,opt,name=from_height,json=fromHeight,proto3" json:"from_height,omitempty"`
+	ToHeight      uint64                 `protobuf:"varint,2,opt,name=to_height,json=toHeight,proto3" json:"to_height,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryCommitmentLeavesRequest) Reset() {
+	*x = QueryCommitmentLeavesRequest{}
+	mi := &file_zvote_v1_query_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryCommitmentLeavesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryCommitmentLeavesRequest) ProtoMessage() {}
+
+func (x *QueryCommitmentLeavesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_query_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryCommitmentLeavesRequest.ProtoReflect.Descriptor instead.
+func (*QueryCommitmentLeavesRequest) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_query_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *QueryCommitmentLeavesRequest) GetFromHeight() uint64 {
+	if x != nil {
+		return x.FromHeight
+	}
+	return 0
+}
+
+func (x *QueryCommitmentLeavesRequest) GetToHeight() uint64 {
+	if x != nil {
+		return x.ToHeight
+	}
+	return 0
+}
+
+type QueryCommitmentLeavesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Blocks        []*BlockCommitments    `protobuf:"bytes,1,rep,name=blocks,proto3" json:"blocks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryCommitmentLeavesResponse) Reset() {
+	*x = QueryCommitmentLeavesResponse{}
+	mi := &file_zvote_v1_query_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryCommitmentLeavesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryCommitmentLeavesResponse) ProtoMessage() {}
+
+func (x *QueryCommitmentLeavesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_query_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryCommitmentLeavesResponse.ProtoReflect.Descriptor instead.
+func (*QueryCommitmentLeavesResponse) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_query_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *QueryCommitmentLeavesResponse) GetBlocks() []*BlockCommitments {
+	if x != nil {
+		return x.Blocks
+	}
+	return nil
+}
+
 var File_zvote_v1_query_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_query_proto_rawDesc = "" +
@@ -491,13 +587,20 @@ const file_zvote_v1_query_proto_rawDesc = "" +
 	"\x18QueryTallyResultsRequest\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"L\n" +
 	"\x19QueryTallyResultsResponse\x12/\n" +
-	"\aresults\x18\x01 \x03(\v2\x15.zvote.v1.TallyResultR\aresults2\xd0\x03\n" +
+	"\aresults\x18\x01 \x03(\v2\x15.zvote.v1.TallyResultR\aresults\"\\\n" +
+	"\x1cQueryCommitmentLeavesRequest\x12\x1f\n" +
+	"\vfrom_height\x18\x01 \x01(\x04R\n" +
+	"fromHeight\x12\x1b\n" +
+	"\tto_height\x18\x02 \x01(\x04R\btoHeight\"S\n" +
+	"\x1dQueryCommitmentLeavesResponse\x122\n" +
+	"\x06blocks\x18\x01 \x03(\v2\x1a.zvote.v1.BlockCommitmentsR\x06blocks2\xb5\x04\n" +
 	"\x05Query\x12e\n" +
 	"\x16CommitmentTreeAtHeight\x12$.zvote.v1.QueryCommitmentTreeRequest\x1a%.zvote.v1.QueryCommitmentTreeResponse\x12[\n" +
 	"\x14LatestCommitmentTree\x12 .zvote.v1.QueryLatestTreeRequest\x1a!.zvote.v1.QueryLatestTreeResponse\x12N\n" +
 	"\tVoteRound\x12\x1f.zvote.v1.QueryVoteRoundRequest\x1a .zvote.v1.QueryVoteRoundResponse\x12Z\n" +
 	"\rProposalTally\x12#.zvote.v1.QueryProposalTallyRequest\x1a$.zvote.v1.QueryProposalTallyResponse\x12W\n" +
-	"\fTallyResults\x12\".zvote.v1.QueryTallyResultsRequest\x1a#.zvote.v1.QueryTallyResultsResponseB&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
+	"\fTallyResults\x12\".zvote.v1.QueryTallyResultsRequest\x1a#.zvote.v1.QueryTallyResultsResponse\x12c\n" +
+	"\x10CommitmentLeaves\x12&.zvote.v1.QueryCommitmentLeavesRequest\x1a'.zvote.v1.QueryCommitmentLeavesResponseB&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
 var (
 	file_zvote_v1_query_proto_rawDescOnce sync.Once
@@ -511,44 +614,50 @@ func file_zvote_v1_query_proto_rawDescGZIP() []byte {
 	return file_zvote_v1_query_proto_rawDescData
 }
 
-var file_zvote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_zvote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_zvote_v1_query_proto_goTypes = []any{
-	(*QueryCommitmentTreeRequest)(nil),  // 0: zvote.v1.QueryCommitmentTreeRequest
-	(*QueryCommitmentTreeResponse)(nil), // 1: zvote.v1.QueryCommitmentTreeResponse
-	(*QueryLatestTreeRequest)(nil),      // 2: zvote.v1.QueryLatestTreeRequest
-	(*QueryLatestTreeResponse)(nil),     // 3: zvote.v1.QueryLatestTreeResponse
-	(*QueryVoteRoundRequest)(nil),       // 4: zvote.v1.QueryVoteRoundRequest
-	(*QueryVoteRoundResponse)(nil),      // 5: zvote.v1.QueryVoteRoundResponse
-	(*QueryProposalTallyRequest)(nil),   // 6: zvote.v1.QueryProposalTallyRequest
-	(*QueryProposalTallyResponse)(nil),  // 7: zvote.v1.QueryProposalTallyResponse
-	(*QueryTallyResultsRequest)(nil),    // 8: zvote.v1.QueryTallyResultsRequest
-	(*QueryTallyResultsResponse)(nil),   // 9: zvote.v1.QueryTallyResultsResponse
-	nil,                                 // 10: zvote.v1.QueryProposalTallyResponse.TallyEntry
-	(*CommitmentTreeState)(nil),         // 11: zvote.v1.CommitmentTreeState
-	(*VoteRound)(nil),                   // 12: zvote.v1.VoteRound
-	(*TallyResult)(nil),                 // 13: zvote.v1.TallyResult
+	(*QueryCommitmentTreeRequest)(nil),    // 0: zvote.v1.QueryCommitmentTreeRequest
+	(*QueryCommitmentTreeResponse)(nil),   // 1: zvote.v1.QueryCommitmentTreeResponse
+	(*QueryLatestTreeRequest)(nil),        // 2: zvote.v1.QueryLatestTreeRequest
+	(*QueryLatestTreeResponse)(nil),       // 3: zvote.v1.QueryLatestTreeResponse
+	(*QueryVoteRoundRequest)(nil),         // 4: zvote.v1.QueryVoteRoundRequest
+	(*QueryVoteRoundResponse)(nil),        // 5: zvote.v1.QueryVoteRoundResponse
+	(*QueryProposalTallyRequest)(nil),     // 6: zvote.v1.QueryProposalTallyRequest
+	(*QueryProposalTallyResponse)(nil),    // 7: zvote.v1.QueryProposalTallyResponse
+	(*QueryTallyResultsRequest)(nil),      // 8: zvote.v1.QueryTallyResultsRequest
+	(*QueryTallyResultsResponse)(nil),     // 9: zvote.v1.QueryTallyResultsResponse
+	(*QueryCommitmentLeavesRequest)(nil),  // 10: zvote.v1.QueryCommitmentLeavesRequest
+	(*QueryCommitmentLeavesResponse)(nil), // 11: zvote.v1.QueryCommitmentLeavesResponse
+	nil,                                   // 12: zvote.v1.QueryProposalTallyResponse.TallyEntry
+	(*CommitmentTreeState)(nil),           // 13: zvote.v1.CommitmentTreeState
+	(*VoteRound)(nil),                     // 14: zvote.v1.VoteRound
+	(*TallyResult)(nil),                   // 15: zvote.v1.TallyResult
+	(*BlockCommitments)(nil),              // 16: zvote.v1.BlockCommitments
 }
 var file_zvote_v1_query_proto_depIdxs = []int32{
-	11, // 0: zvote.v1.QueryCommitmentTreeResponse.tree:type_name -> zvote.v1.CommitmentTreeState
-	11, // 1: zvote.v1.QueryLatestTreeResponse.tree:type_name -> zvote.v1.CommitmentTreeState
-	12, // 2: zvote.v1.QueryVoteRoundResponse.round:type_name -> zvote.v1.VoteRound
-	10, // 3: zvote.v1.QueryProposalTallyResponse.tally:type_name -> zvote.v1.QueryProposalTallyResponse.TallyEntry
-	13, // 4: zvote.v1.QueryTallyResultsResponse.results:type_name -> zvote.v1.TallyResult
-	0,  // 5: zvote.v1.Query.CommitmentTreeAtHeight:input_type -> zvote.v1.QueryCommitmentTreeRequest
-	2,  // 6: zvote.v1.Query.LatestCommitmentTree:input_type -> zvote.v1.QueryLatestTreeRequest
-	4,  // 7: zvote.v1.Query.VoteRound:input_type -> zvote.v1.QueryVoteRoundRequest
-	6,  // 8: zvote.v1.Query.ProposalTally:input_type -> zvote.v1.QueryProposalTallyRequest
-	8,  // 9: zvote.v1.Query.TallyResults:input_type -> zvote.v1.QueryTallyResultsRequest
-	1,  // 10: zvote.v1.Query.CommitmentTreeAtHeight:output_type -> zvote.v1.QueryCommitmentTreeResponse
-	3,  // 11: zvote.v1.Query.LatestCommitmentTree:output_type -> zvote.v1.QueryLatestTreeResponse
-	5,  // 12: zvote.v1.Query.VoteRound:output_type -> zvote.v1.QueryVoteRoundResponse
-	7,  // 13: zvote.v1.Query.ProposalTally:output_type -> zvote.v1.QueryProposalTallyResponse
-	9,  // 14: zvote.v1.Query.TallyResults:output_type -> zvote.v1.QueryTallyResultsResponse
-	10, // [10:15] is the sub-list for method output_type
-	5,  // [5:10] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	13, // 0: zvote.v1.QueryCommitmentTreeResponse.tree:type_name -> zvote.v1.CommitmentTreeState
+	13, // 1: zvote.v1.QueryLatestTreeResponse.tree:type_name -> zvote.v1.CommitmentTreeState
+	14, // 2: zvote.v1.QueryVoteRoundResponse.round:type_name -> zvote.v1.VoteRound
+	12, // 3: zvote.v1.QueryProposalTallyResponse.tally:type_name -> zvote.v1.QueryProposalTallyResponse.TallyEntry
+	15, // 4: zvote.v1.QueryTallyResultsResponse.results:type_name -> zvote.v1.TallyResult
+	16, // 5: zvote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> zvote.v1.BlockCommitments
+	0,  // 6: zvote.v1.Query.CommitmentTreeAtHeight:input_type -> zvote.v1.QueryCommitmentTreeRequest
+	2,  // 7: zvote.v1.Query.LatestCommitmentTree:input_type -> zvote.v1.QueryLatestTreeRequest
+	4,  // 8: zvote.v1.Query.VoteRound:input_type -> zvote.v1.QueryVoteRoundRequest
+	6,  // 9: zvote.v1.Query.ProposalTally:input_type -> zvote.v1.QueryProposalTallyRequest
+	8,  // 10: zvote.v1.Query.TallyResults:input_type -> zvote.v1.QueryTallyResultsRequest
+	10, // 11: zvote.v1.Query.CommitmentLeaves:input_type -> zvote.v1.QueryCommitmentLeavesRequest
+	1,  // 12: zvote.v1.Query.CommitmentTreeAtHeight:output_type -> zvote.v1.QueryCommitmentTreeResponse
+	3,  // 13: zvote.v1.Query.LatestCommitmentTree:output_type -> zvote.v1.QueryLatestTreeResponse
+	5,  // 14: zvote.v1.Query.VoteRound:output_type -> zvote.v1.QueryVoteRoundResponse
+	7,  // 15: zvote.v1.Query.ProposalTally:output_type -> zvote.v1.QueryProposalTallyResponse
+	9,  // 16: zvote.v1.Query.TallyResults:output_type -> zvote.v1.QueryTallyResultsResponse
+	11, // 17: zvote.v1.Query.CommitmentLeaves:output_type -> zvote.v1.QueryCommitmentLeavesResponse
+	12, // [12:18] is the sub-list for method output_type
+	6,  // [6:12] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_zvote_v1_query_proto_init() }
@@ -563,7 +672,7 @@ func file_zvote_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_query_proto_rawDesc), len(file_zvote_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

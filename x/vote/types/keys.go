@@ -46,6 +46,11 @@ var (
 
 	// TallyResultPrefix stores finalized tally results: 0x07 || round_id || big-endian uint32 proposal_id || big-endian uint32 decision -> TallyResult (protobuf)
 	TallyResultPrefix = []byte{0x07}
+
+	// BlockLeafIndexPrefix maps block heights to the range of commitment leaves
+	// appended during that block: 0x08 || big-endian uint64 height -> (start_index uint64 BE, count uint64 BE)
+	// Written by EndBlocker when tree root changes. Used by the CommitmentLeaves query.
+	BlockLeafIndexPrefix = []byte{0x08}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -145,6 +150,15 @@ func putUint64BE(b []byte, v uint64) {
 // appendUint32BE appends a uint32 in big-endian byte order.
 func appendUint32BE(b []byte, v uint32) []byte {
 	return append(b, byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
+}
+
+// BlockLeafIndexKey returns the store key for a block-to-leaf-index mapping.
+// Format: 0x08 || big-endian uint64 height
+func BlockLeafIndexKey(height uint64) []byte {
+	key := make([]byte, len(BlockLeafIndexPrefix)+8)
+	copy(key, BlockLeafIndexPrefix)
+	putUint64BE(key[len(BlockLeafIndexPrefix):], height)
+	return key
 }
 
 // TallyResultKey returns the store key for a finalized tally result.

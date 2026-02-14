@@ -19,14 +19,17 @@ import (
 //
 //	GET /zally/v1/commitment-tree/{height}
 //	GET /zally/v1/commitment-tree/latest
+//	GET /zally/v1/commitment-tree/leaves?from_height=X&to_height=Y
 //	GET /zally/v1/round/{round_id}
 //	GET /zally/v1/tally/{round_id}/{proposal_id}
 //	GET /zally/v1/tally-results/{round_id}
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
 	qh := &queryHandler{clientCtx: clientCtx}
 
-	// Register "latest" before "{height}" to avoid gorilla/mux treating "latest" as a height param.
+	// Register "latest" and "leaves" before "{height}" to avoid gorilla/mux
+	// treating them as a height param.
 	router.HandleFunc("/zally/v1/commitment-tree/latest", qh.handleLatestCommitmentTree).Methods("GET")
+	router.HandleFunc("/zally/v1/commitment-tree/leaves", qh.handleCommitmentLeaves).Methods("GET")
 	router.HandleFunc("/zally/v1/commitment-tree/{height}", qh.handleCommitmentTreeAtHeight).Methods("GET")
 	router.HandleFunc("/zally/v1/round/{round_id}", qh.handleVoteRound).Methods("GET")
 	router.HandleFunc("/zally/v1/tally/{round_id}/{proposal_id}", qh.handleProposalTally).Methods("GET")
@@ -115,6 +118,40 @@ func (qh *queryHandler) handleProposalTally(w http.ResponseWriter, r *http.Reque
 	resp := &types.QueryProposalTallyResponse{}
 
 	if err := qh.abciQuery("/zvote.v1.Query/ProposalTally", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handleCommitmentLeaves(w http.ResponseWriter, r *http.Request) {
+	fromStr := r.URL.Query().Get("from_height")
+	toStr := r.URL.Query().Get("to_height")
+
+	if fromStr == "" || toStr == "" {
+		writeError(w, http.StatusBadRequest, "from_height and to_height query params are required")
+		return
+	}
+
+	fromHeight, err := strconv.ParseUint(fromStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid from_height: %v", err))
+		return
+	}
+	toHeight, err := strconv.ParseUint(toStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid to_height: %v", err))
+		return
+	}
+
+	req := &types.QueryCommitmentLeavesRequest{
+		FromHeight: fromHeight,
+		ToHeight:   toHeight,
+	}
+	resp := &types.QueryCommitmentLeavesResponse{}
+
+	if err := qh.abciQuery("/zvote.v1.Query/CommitmentLeaves", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}

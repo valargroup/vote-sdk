@@ -21,6 +21,10 @@ service Query {
 
   // TallyResults returns finalized tally results for a vote round (after MsgSubmitTally).
   rpc TallyResults(QueryTallyResultsRequest) returns (QueryTallyResultsResponse);
+
+  // CommitmentLeaves returns the commitment tree leaves organized by block height.
+  // Used by remote clients implementing TreeSyncApi to sync the vote commitment tree.
+  rpc CommitmentLeaves(QueryCommitmentLeavesRequest) returns (QueryCommitmentLeavesResponse);
 }
 
 message QueryCommitmentTreeRequest {
@@ -61,4 +65,13 @@ message QueryTallyResultsRequest {
 
 message QueryTallyResultsResponse {
   repeated TallyResult results = 1;
+}
+
+message QueryCommitmentLeavesRequest {
+  uint64 from_height = 1;
+  uint64 to_height   = 2;
+}
+
+message QueryCommitmentLeavesResponse {
+  repeated BlockCommitments blocks = 1;
 }

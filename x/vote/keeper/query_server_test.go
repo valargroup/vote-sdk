@@ -98,10 +98,10 @@ func (s *QueryServerTestSuite) TestLatestCommitmentTree_EmptyTree() {
 func (s *QueryServerTestSuite) TestLatestCommitmentTree_WithCommitments() {
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
-	// Append some commitments.
-	_, err := s.keeper.AppendCommitment(kvStore, []byte("leaf1"))
+	// Append some commitments (valid 32-byte Pallas Fp encodings).
+	_, err := s.keeper.AppendCommitment(kvStore, bytes.Repeat([]byte{0x01}, 32))
 	s.Require().NoError(err)
-	_, err = s.keeper.AppendCommitment(kvStore, []byte("leaf2"))
+	_, err = s.keeper.AppendCommitment(kvStore, bytes.Repeat([]byte{0x02}, 32))
 	s.Require().NoError(err)
 
 	// Compute and store root (simulating EndBlocker).
@@ -239,4 +239,144 @@ func (s *QueryServerTestSuite) TestProposalTally_AccumulatesMultipleAdds() {
 	})
 	s.Require().NoError(err)
 	s.Require().Equal(ct, resp.Tally[0])
+}
+
+// ---------------------------------------------------------------------------
+// CommitmentLeaves
+// ---------------------------------------------------------------------------
+
+// fpLeaf returns a 32-byte little-endian Pallas Fp encoding of a small integer.
+func fpLeaf(v byte) []byte {
+	leaf := make([]byte, 32)
+	leaf[0] = v
+	return leaf
+}
+
+func (s *QueryServerTestSuite) TestCommitmentLeaves_NilRequest() {
+	_, err := s.queryServer.CommitmentLeaves(s.ctx, nil)
+	s.Require().Error(err)
+	s.Require().Equal(codes.InvalidArgument, status.Code(err))
+}
+
+func (s *QueryServerTestSuite) TestCommitmentLeaves_InvalidRange() {
+	_, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
+		FromHeight: 10,
+		ToHeight:   5,
+	})
+	s.Require().Error(err)
+	s.Require().Equal(codes.InvalidArgument, status.Code(err))
+}
+
+func (s *QueryServerTestSuite) TestCommitmentLeaves_EmptyRange() {
+	// No leaves have been stored, so the response should be empty.
+	resp, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
+		FromHeight: 1,
+		ToHeight:   10,
+	})
+	s.Require().NoError(err)
+	s.Require().Empty(resp.Blocks)
+}
+
+func (s *QueryServerTestSuite) TestCommitmentLeaves_SingleBlock() {
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+
+	// Append 2 leaves and record block leaf index at height 5.
+	leaf0 := fpLeaf(0x10)
+	leaf1 := fpLeaf(0x20)
+	_, err := s.keeper.AppendCommitment(kvStore, leaf0)
+	s.Require().NoError(err)
+	_, err = s.keeper.AppendCommitment(kvStore, leaf1)
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 5, 0, 2))
+
+	resp, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
+		FromHeight: 1,
+		ToHeight:   10,
+	})
+	s.Require().NoError(err)
+	s.Require().Len(resp.Blocks, 1)
+	s.Require().Equal(uint64(5), resp.Blocks[0].Height)
+	s.Require().Equal(uint64(0), resp.Blocks[0].StartIndex)
+	s.Require().Len(resp.Blocks[0].Leaves, 2)
+	s.Require().Equal(leaf0, resp.Blocks[0].Leaves[0])
+	s.Require().Equal(leaf1, resp.Blocks[0].Leaves[1])
+}
+
+func (s *QueryServerTestSuite) TestCommitmentLeaves_MultipleBlocks() {
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+
+	// Block 5: 2 leaves (index 0, 1)
+	_, err := s.keeper.AppendCommitment(kvStore, fpLeaf(0x01))
+	s.Require().NoError(err)
+	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(0x02))
+	s.Require().NoError(err)
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 5, 0, 2))
+
+	// Block 8: 1 leaf (index 2)
+	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(0x03))
+	s.Require().NoError(err)
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 8, 2, 1))
+
+	// Block 12: 3 leaves (index 3, 4, 5)
+	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(0x04))
+	s.Require().NoError(err)
+	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(0x05))
+	s.Require().NoError(err)
+	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(0x06))
+	s.Require().NoError(err)
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 12, 3, 3))
+
+	// Query all blocks.
+	resp, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
+		FromHeight: 1,
+		ToHeight:   20,
+	})
+	s.Require().NoError(err)
+	s.Require().Len(resp.Blocks, 3)
+
+	s.Require().Equal(uint64(5), resp.Blocks[0].Height)
+	s.Require().Equal(uint64(0), resp.Blocks[0].StartIndex)
+	s.Require().Len(resp.Blocks[0].Leaves, 2)
+
+	s.Require().Equal(uint64(8), resp.Blocks[1].Height)
+	s.Require().Equal(uint64(2), resp.Blocks[1].StartIndex)
+	s.Require().Len(resp.Blocks[1].Leaves, 1)
+
+	s.Require().Equal(uint64(12), resp.Blocks[2].Height)
+	s.Require().Equal(uint64(3), resp.Blocks[2].StartIndex)
+	s.Require().Len(resp.Blocks[2].Leaves, 3)
+
+	// Query subset: only block 8.
+	resp, err = s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
+		FromHeight: 6,
+		ToHeight:   10,
+	})
+	s.Require().NoError(err)
+	s.Require().Len(resp.Blocks, 1)
+	s.Require().Equal(uint64(8), resp.Blocks[0].Height)
+}
+
+// ---------------------------------------------------------------------------
+// BlockLeafIndex keeper tests
+// ---------------------------------------------------------------------------
+
+func (s *QueryServerTestSuite) TestBlockLeafIndex_SetAndGet() {
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 10, 0, 3))
+
+	start, count, found, err := s.keeper.GetBlockLeafIndex(kvStore, 10)
+	s.Require().NoError(err)
+	s.Require().True(found)
+	s.Require().Equal(uint64(0), start)
+	s.Require().Equal(uint64(3), count)
+}
+
+func (s *QueryServerTestSuite) TestBlockLeafIndex_NotFound() {
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+
+	_, _, found, err := s.keeper.GetBlockLeafIndex(kvStore, 999)
+	s.Require().NoError(err)
+	s.Require().False(found)
 }
