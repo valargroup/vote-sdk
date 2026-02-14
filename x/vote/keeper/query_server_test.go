@@ -65,16 +65,18 @@ func (s *QueryServerTestSuite) TestCommitmentTreeAtHeight_NotFound() {
 }
 
 func (s *QueryServerTestSuite) TestCommitmentTreeAtHeight_Found() {
-	// Store a root at height 50.
+	// Store a root at height 50 with a block-leaf-index mapping.
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 	root := bytes.Repeat([]byte{0xAB}, 32)
 	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, 50, root))
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 50, 0, 2))
 
 	resp, err := s.queryServer.CommitmentTreeAtHeight(s.ctx, &types.QueryCommitmentTreeRequest{Height: 50})
 	s.Require().NoError(err)
 	s.Require().NotNil(resp.Tree)
 	s.Require().Equal(root, resp.Tree.Root)
 	s.Require().Equal(uint64(50), resp.Tree.Height)
+	s.Require().Equal(uint64(2), resp.Tree.NextIndex)
 }
 
 // ---------------------------------------------------------------------------

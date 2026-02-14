@@ -39,10 +39,22 @@ func (qs queryServer) CommitmentTreeAtHeight(goCtx context.Context, req *types.Q
 		return nil, status.Errorf(codes.NotFound, "no commitment root at height %d", req.Height)
 	}
 
+	// Derive next_index at this height from the block-to-leaf-index mapping.
+	// EndBlocker stores (startIndex, count) per height; next_index = start + count.
+	var nextIndex uint64
+	startIndex, count, found, err := qs.k.GetBlockLeafIndex(kvStore, req.Height)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get block leaf index: %v", err)
+	}
+	if found {
+		nextIndex = startIndex + count
+	}
+
 	return &types.QueryCommitmentTreeResponse{
 		Tree: &types.CommitmentTreeState{
-			Root:   root,
-			Height: req.Height,
+			Root:      root,
+			Height:    req.Height,
+			NextIndex: nextIndex,
 		},
 	}, nil
 }
