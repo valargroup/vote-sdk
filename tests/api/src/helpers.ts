@@ -8,6 +8,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { blake2b } from "@noble/hashes/blake2b";
@@ -52,6 +53,38 @@ const FIXTURES_DIR = path.join(
   "..",
   "fixtures",
 );
+
+// ---------------------------------------------------------------------------
+// Vote commitment tree CLI (Rust shell-out)
+// ---------------------------------------------------------------------------
+
+/** Path to the vote-commitment-tree-client Cargo.toml (for `cargo run --manifest-path`). */
+const TREE_CLI_MANIFEST = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..", "..", "..", "..",
+  "vote-commitment-tree-client",
+  "Cargo.toml",
+);
+
+/**
+ * Run the `vote-tree-cli` Rust binary with the given arguments and return stdout.
+ *
+ * Uses `cargo run --manifest-path` so no `cd` is needed. The 120s timeout
+ * accommodates first-time compilation. On failure (non-zero exit), `execFileSync`
+ * throws — the test naturally fails with the CLI's stderr message.
+ */
+export function runTreeCli(args: string[]): string {
+  return execFileSync("cargo", [
+    "run", "--quiet",
+    "--manifest-path", TREE_CLI_MANIFEST,
+    "--bin", "vote-tree-cli",
+    "--", ...args,
+  ], { encoding: "utf-8", timeout: 120_000 }).trim();
+}
+
+// ---------------------------------------------------------------------------
+// Fixture loading
+// ---------------------------------------------------------------------------
 
 /** Read a binary fixture file from tests/api/fixtures/. */
 export function loadFixture(name: string): Uint8Array {
