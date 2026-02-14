@@ -5,13 +5,14 @@
 //!
 //! - **Condition 1**: VAN Membership (Poseidon Merkle path, `constrain_instance`).
 //! - **Condition 2**: VAN Integrity (Poseidon hash).
+//! - **Condition 3**: Spend Authority (ECC: `voting_hotkey_pk = ExtractP([vsk] * SpendAuthG)`).
 //! - **Condition 4**: VAN Nullifier Integrity (nested Poseidon, `constrain_instance`).
 //! - **Condition 5**: Proposal Authority Decrement (AddChip + range check).
 //! - **Condition 6**: New VAN Integrity (Poseidon hash, `constrain_instance`).
 //! - **Condition 7**: Shares Sum Correctness (AddChip, `constrain_equal`).
 //! - **Condition 8**: Shares Range (LookupRangeCheck, `[0, 2^30)`).
 //!
-//! Remaining conditions (3, 9–11) are stubbed with witness fields and
+//! Remaining conditions (9–11) are stubbed with witness fields and
 //! public input slots; constraint logic will be added incrementally.
 //!
 //! ## Conditions overview
@@ -22,7 +23,7 @@
 //! - **Condition 2**: VAN Integrity — `vote_authority_note_old` is a correct
 //!   Poseidon hash of its components. *(implemented)*
 //! - **Condition 3**: Spend Authority — prover knows `vsk` such that
-//!   `voting_hotkey_pk` is derived from `vsk`.
+//!   `voting_hotkey_pk = ExtractP([vsk] * SpendAuthG)`. *(implemented)*
 //! - **Condition 4**: VAN Nullifier Integrity — `van_nullifier` is correctly
 //!   derived from `vsk.nk`. *(implemented)*
 //!
@@ -55,12 +56,17 @@ use halo2_proofs::{
 use pasta_curves::{pallas, vesta};
 
 use halo2_gadgets::{
+    ecc::{
+        chip::{EccChip, EccConfig},
+        FixedPoint, ScalarFixed,
+    },
     poseidon::{
         primitives::{self as poseidon, ConstantLength},
         Hash as PoseidonHash, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig,
     },
     utilities::{bool_check, lookup_range_check::LookupRangeCheckConfig},
 };
+use crate::constants::{OrchardFixedBases, OrchardFixedBasesFull};
 use crate::circuit::gadget::{
     add_chip::{AddChip, AddConfig},
     AddInstruction,
@@ -216,9 +222,9 @@ pub fn poseidon_hash_2(a: pallas::Base, b: pallas::Base) -> pallas::Base {
 /// Configuration for the Vote Proof circuit.
 ///
 /// Holds chip configs for Poseidon (conditions 1, 2, 4, 6), AddChip
-/// (conditions 5, 7), LookupRangeCheck (conditions 5, 8), and the
-/// Merkle swap gate (condition 1). Will be extended with ECC and
-/// custom gates as conditions 3, 9–11 are added.
+/// (conditions 5, 7), LookupRangeCheck (conditions 5, 8), ECC (condition 3),
+/// and the Merkle swap gate (condition 1). Will be extended with
+/// custom gates as conditions 9–11 are added.
 #[derive(Clone, Debug)]
 pub struct Config {
     /// Public input column (7 field elements).
@@ -245,6 +251,11 @@ pub struct Config {
     /// Used in conditions 5 (proposal authority decrement) and 7 (shares
     /// sum correctness).
     add_config: AddConfig,
+    /// ECC chip configuration (condition 3: spend authority).
+    ///
+    /// Used to prove voting_hotkey_pk = ExtractP([vsk] * SpendAuthG).
+    /// Shares advice and fixed columns with Poseidon per delegation layout.
+    ecc_config: EccConfig<OrchardFixedBases>,
     /// 10-bit lookup range check configuration.
     ///
     /// Uses advices[9] as the running-sum column. Each word is 10 bits,
@@ -281,6 +292,11 @@ impl Config {
         AddChip::construct(self.add_config.clone())
     }
 
+    /// Constructs an ECC chip for curve operations (condition 3: spend authority).
+    fn ecc_chip(&self) -> EccChip<OrchardFixedBases> {
+        EccChip::construct(self.ecc_config.clone())
+    }
+
     /// Returns the range check configuration (10-bit words).
     fn range_check_config(&self) -> LookupRangeCheckConfig<pallas::Base, 10> {
         self.range_check
@@ -297,9 +313,9 @@ impl Config {
 /// revealing which VAN they hold. Contains witness fields for all
 /// 11 conditions; constraint logic is added incrementally.
 ///
-/// Currently constrained: conditions 1, 2, 4, 5, 6, 7, 8 (VAN
-/// membership, VAN integrity, nullifier, authority decrement, new VAN
-/// integrity, shares sum, shares range).
+/// Currently constrained: conditions 1, 2, 3, 4, 5, 6, 7, 8 (VAN
+/// membership, VAN integrity, spend authority, nullifier, authority
+/// decrement, new VAN integrity, shares sum, shares range).
 #[derive(Clone, Debug, Default)]
 pub struct Circuit {
     // === VAN ownership and spending (conditions 1–4) ===
@@ -496,6 +512,11 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // Range check configuration: 10-bit lookup words in advices[9].
         let range_check = LookupRangeCheckConfig::configure(meta, advices[9], table_idx);
 
+        // ECC chip: fixed-base scalar multiplication for condition 3 (spend authority).
+        // Shares columns with Poseidon per delegation circuit layout.
+        let ecc_config =
+            EccChip::<OrchardFixedBases>::configure(meta, advices, lagrange_coeffs, range_check);
+
         // Poseidon chip: P128Pow5T3 with width 3, rate 2.
         // State columns: advices[6..9] (3 columns for the width-3 state).
         // Partial S-box column: advices[5].
@@ -549,6 +570,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             advices,
             poseidon_config,
             add_config,
+            ecc_config,
             range_check,
             table_idx,
             q_merkle_swap,
@@ -654,13 +676,15 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // reused in later conditions:
         // - vote_authority_note_old: also used in condition 1 (Merkle leaf).
         // - voting_round_id: also used in condition 4 (VAN nullifier).
-        // - voting_hotkey_pk, total_note_value, voting_round_id,
-        //   proposal_authority_old, gov_comm_rand, domain_van: also used
-        //   in condition 6 (new VAN integrity).
+        // - voting_hotkey_pk: also used in condition 3 (spend authority) and
+        //   condition 6 (new VAN integrity).
+        // - total_note_value, voting_round_id, proposal_authority_old,
+        //   gov_comm_rand, domain_van: also used in condition 6 (new VAN integrity).
         // - total_note_value: also used in condition 7 (shares sum check).
         let vote_authority_note_old_cond1 = vote_authority_note_old.clone();
         let voting_round_id_cond4 = voting_round_id.clone();
         let domain_van_cond6 = domain_van.clone();
+        let voting_hotkey_pk_cond3 = voting_hotkey_pk.clone();
         let voting_hotkey_pk_cond6 = voting_hotkey_pk.clone();
         let total_note_value_cond6 = total_note_value.clone();
         let total_note_value_cond7 = total_note_value.clone();
@@ -692,6 +716,44 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             || "VAN integrity check",
             |mut region| region.constrain_equal(derived_van.cell(), vote_authority_note_old.cell()),
         )?;
+
+        // ---------------------------------------------------------------
+        // Condition 3: Spend Authority.
+        //
+        // voting_hotkey_pk = ExtractP([vsk] * SpendAuthG)
+        //
+        // Proves the prover knows vsk such that the witnessed voting_hotkey_pk
+        // is the x-coordinate of [vsk] * G, where G is the SpendAuth fixed base.
+        // ---------------------------------------------------------------
+        {
+            let ecc_chip = config.ecc_chip();
+
+            let vsk_scalar = ScalarFixed::new(
+                ecc_chip.clone(),
+                layouter.namespace(|| "vsk"),
+                self.vsk,
+            )?;
+
+            let spend_auth_g = OrchardFixedBasesFull::SpendAuthG;
+            let spend_auth_g = FixedPoint::from_inner(ecc_chip.clone(), spend_auth_g);
+
+            let (vsk_times_g, _) = spend_auth_g.mul(
+                layouter.namespace(|| "[vsk] SpendAuthG"),
+                vsk_scalar,
+            )?;
+
+            let derived_voting_hotkey_pk = vsk_times_g.extract_p().inner().clone();
+
+            layouter.assign_region(
+                || "Condition 3: voting_hotkey_pk = ExtractP([vsk] G)",
+                |mut region| {
+                    region.constrain_equal(
+                        derived_voting_hotkey_pk.cell(),
+                        voting_hotkey_pk_cond3.cell(),
+                    )
+                },
+            )?;
+        }
 
         // ---------------------------------------------------------------
         // Condition 1: VAN Membership.
@@ -1228,11 +1290,21 @@ impl Instance {
 mod tests {
     use super::*;
     use ff::Field;
+    use group::Curve;
     use halo2_proofs::dev::MockProver;
+    use pasta_curves::arithmetic::CurveAffine;
     use pasta_curves::pallas;
     use rand::rngs::OsRng;
 
-    /// Build valid test data for conditions 1, 2, 4, 5, 6, and 7.
+    /// Derives the voting hotkey public key (x-coordinate) from vsk for testing.
+    /// Matches condition 3: voting_hotkey_pk = ExtractP([vsk] * SpendAuthG).
+    fn derive_voting_hotkey_pk(vsk: pallas::Scalar) -> pallas::Base {
+        let g = crate::constants::fixed_bases::spend_auth_g::generator();
+        let point = pallas::Point::from(g) * vsk;
+        *point.to_affine().coordinates().unwrap().x()
+    }
+
+    /// Build valid test data for conditions 1, 2, 3, 4, 5, 6, and 7.
     ///
     /// Returns a circuit with correctly-hashed VAN witnesses, valid
     /// shares summing to `total_note_value`, and a matching instance.
@@ -1260,7 +1332,10 @@ mod tests {
     ) -> (Circuit, Instance) {
         let mut rng = OsRng;
 
-        let voting_hotkey_pk = pallas::Base::random(&mut rng);
+        // Condition 3: voting_hotkey_pk must equal ExtractP([vsk]*SpendAuthG).
+        let vsk = pallas::Scalar::from(1u64);
+        let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
+
         // total_note_value must be small enough that all 4 shares
         // fit in [0, 2^24) for condition 8's range check.
         let total_note_value = pallas::Base::from(10_000u64);
@@ -1304,6 +1379,7 @@ mod tests {
             Value::known(vote_authority_note_old),
             Value::known(vsk_nk),
         );
+        circuit.vsk = Value::known(vsk);
         circuit.shares = [
             Value::known(s0),
             Value::known(s1),
@@ -1350,8 +1426,9 @@ mod tests {
         let (auth_path, position, root) = build_single_leaf_merkle_path(wrong_van);
         instance.vote_comm_tree_root = root;
 
-        // Use random witnesses that DON'T hash to wrong_van.
-        // total_note_value is small so shares pass condition 8's range check.
+        // Use witnesses that DON'T hash to wrong_van. Condition 3: derive pk from vsk.
+        let vsk = pallas::Scalar::random(&mut OsRng);
+        let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
         let total_note_value = pallas::Base::from(10_000u64);
         let s0 = pallas::Base::from(1_000u64);
         let s1 = pallas::Base::from(2_000u64);
@@ -1361,13 +1438,14 @@ mod tests {
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
             Value::known(position),
-            Value::known(pallas::Base::random(&mut OsRng)),
+            Value::known(voting_hotkey_pk),
             Value::known(total_note_value),
             Value::known(pallas::Base::from(5u64)),
             Value::known(pallas::Base::random(&mut OsRng)),
             Value::known(wrong_van),
             Value::known(pallas::Base::random(&mut OsRng)),
         );
+        circuit.vsk = Value::known(vsk);
         circuit.shares = [
             Value::known(s0),
             Value::known(s1),
@@ -1437,7 +1515,8 @@ mod tests {
     fn van_nullifier_wrong_vsk_nk_fails() {
         let mut rng = OsRng;
 
-        let voting_hotkey_pk = pallas::Base::random(&mut rng);
+        let vsk = pallas::Scalar::random(&mut rng);
+        let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
         let total_note_value = pallas::Base::from(10_000u64);
         let voting_round_id = pallas::Base::random(&mut rng);
         let proposal_authority_old = pallas::Base::from(5u64);
@@ -1472,6 +1551,7 @@ mod tests {
             Value::known(proposal_authority_old), Value::known(gov_comm_rand),
             Value::known(vote_authority_note_old), Value::known(wrong_vsk_nk),
         );
+        circuit.vsk = Value::known(vsk);
         circuit.shares = [
             Value::known(s0),
             Value::known(s1),
@@ -1596,7 +1676,8 @@ mod tests {
     fn van_membership_nonzero_position() {
         let mut rng = OsRng;
 
-        let voting_hotkey_pk = pallas::Base::random(&mut rng);
+        let vsk = pallas::Scalar::random(&mut rng);
+        let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
         let total_note_value = pallas::Base::from(10_000u64);
         let voting_round_id = pallas::Base::random(&mut rng);
         let proposal_authority_old = pallas::Base::from(5u64);
@@ -1645,6 +1726,7 @@ mod tests {
             Value::known(proposal_authority_old), Value::known(gov_comm_rand),
             Value::known(vote_authority_note_old), Value::known(vsk_nk),
         );
+        circuit.vsk = Value::known(vsk);
         circuit.shares = [
             Value::known(s0),
             Value::known(s1),
@@ -1704,7 +1786,8 @@ mod tests {
         let total = max_share + max_share + max_share + max_share;
 
         let mut rng = OsRng;
-        let voting_hotkey_pk = pallas::Base::random(&mut rng);
+        let vsk = pallas::Scalar::random(&mut rng);
+        let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
         let voting_round_id = pallas::Base::random(&mut rng);
         let proposal_authority_old = pallas::Base::from(5u64);
         let gov_comm_rand = pallas::Base::random(&mut rng);
@@ -1729,6 +1812,7 @@ mod tests {
             Value::known(proposal_authority_old), Value::known(gov_comm_rand),
             Value::known(vote_authority_note_old), Value::known(vsk_nk),
         );
+        circuit.vsk = Value::known(vsk);
         circuit.shares = [
             Value::known(max_share),
             Value::known(max_share),

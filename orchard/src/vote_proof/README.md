@@ -93,7 +93,7 @@ Identical to the delegation circuit's `q_imt_swap` gate.
 
 **Constructions:** `PoseidonChip`, `q_merkle_swap` selector.
 
-## Condition 3: Spend Authority (TODO)
+## Condition 3: Spend Authority ✅
 
 Purpose: prove the voter controls the hotkey delegated to in Phase 1–2.
 
@@ -101,7 +101,9 @@ Purpose: prove the voter controls the hotkey delegated to in Phase 1–2.
 voting_hotkey_pk = ExtractP([vsk] * G)
 ```
 
-**Constructions:** `EccChip`.
+Where **G** is the SpendAuth fixed base (`OrchardFixedBasesFull::SpendAuthG`), matching the delegation circuit's spend authority pattern. The circuit witnesses `vsk` as a full-width scalar, computes `[vsk] * SpendAuthG` via fixed-base scalar multiplication, extracts the x-coordinate, and constrains it to equal the witnessed `voting_hotkey_pk` (the same cell used in conditions 2, 4, 5, 6).
+
+**Constructions:** `EccChip`, `ScalarFixed`, `FixedPoint`.
 
 ## Condition 4: VAN Nullifier Integrity ✅
 
