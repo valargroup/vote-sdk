@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -17,6 +18,14 @@ import (
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
+
+// fpLE returns a 32-byte little-endian Pallas Fp encoding of v (canonical for 0 <= v < 2^64).
+// Use for commitment tree leaves so the votetree FFI accepts them.
+func fpLE(v uint64) []byte {
+	buf := make([]byte, 32)
+	binary.LittleEndian.PutUint64(buf[:8], v)
+	return buf
+}
 
 // ---------------------------------------------------------------------------
 // Test constants
@@ -323,9 +332,9 @@ func (s *KeeperTestSuite) TestAppendCommitment_SequentialIndices() {
 	kv := s.keeper.OpenKVStore(s.ctx)
 
 	commitments := [][]byte{
-		bytes.Repeat([]byte{0xA1}, 32),
-		bytes.Repeat([]byte{0xA2}, 32),
-		bytes.Repeat([]byte{0xA3}, 32),
+		fpLE(0xA1),
+		fpLE(0xA2),
+		fpLE(0xA3),
 	}
 
 	for i, cm := range commitments {
@@ -354,7 +363,7 @@ func (s *KeeperTestSuite) TestAppendCommitment_ContinuesFromExistingState() {
 	// Seed the tree state to start at index 100.
 	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, &types.CommitmentTreeState{NextIndex: 100}))
 
-	idx, err := s.keeper.AppendCommitment(kv, bytes.Repeat([]byte{0xFF}, 32))
+	idx, err := s.keeper.AppendCommitment(kv, fpLE(0xFF))
 	s.Require().NoError(err)
 	s.Require().Equal(uint64(100), idx)
 
@@ -859,14 +868,14 @@ func (s *KeeperTestSuite) TestComputeTreeRoot() {
 		},
 		{
 			name:      "single leaf produces 32-byte root",
-			leaves:    [][]byte{bytes.Repeat([]byte{0x01}, 32)},
+			leaves:    [][]byte{fpLE(1)},
 			expectLen: 32,
 		},
 		{
 			name: "two leaves produce 32-byte root",
 			leaves: [][]byte{
-				bytes.Repeat([]byte{0x01}, 32),
-				bytes.Repeat([]byte{0x02}, 32),
+				fpLE(1),
+				fpLE(2),
 			},
 			expectLen: 32,
 		},
@@ -897,7 +906,7 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeterministicAndDistinct() {
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
-	_, err := s.keeper.AppendCommitment(kv, bytes.Repeat([]byte{0x01}, 32))
+	_, err := s.keeper.AppendCommitment(kv, fpLE(1))
 	s.Require().NoError(err)
 
 	root1, err := s.keeper.ComputeTreeRoot(kv, 1)
@@ -909,7 +918,7 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeterministicAndDistinct() {
 	s.Require().Equal(root1, root1Again)
 
 	// Add another leaf — root changes.
-	_, err = s.keeper.AppendCommitment(kv, bytes.Repeat([]byte{0x02}, 32))
+	_, err = s.keeper.AppendCommitment(kv, fpLE(2))
 	s.Require().NoError(err)
 
 	root2, err := s.keeper.ComputeTreeRoot(kv, 2)

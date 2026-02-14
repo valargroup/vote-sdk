@@ -95,7 +95,7 @@ pub unsafe fn compute_root_from_raw(
 
 /// Compute the Poseidon Merkle auth path from raw leaf bytes.
 ///
-/// Returns the serialized `MerklePath` ([`MERKLE_PATH_BYTES`] = 1028 bytes).
+/// Returns the serialized `MerklePath` ([`MERKLE_PATH_BYTES`] bytes).
 ///
 /// # Safety
 /// `leaves_ptr` must be valid for `leaf_count * 32` bytes.

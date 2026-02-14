@@ -106,15 +106,15 @@ int32_t zally_vote_tree_root(
  * Compute a Poseidon Merkle authentication path for a leaf in the tree.
  *
  * Builds a fresh tree from leaf_count leaves, checkpoints it, and
- * returns the serialized authentication path (1028 bytes):
+ * returns the serialized authentication path (772 bytes):
  *   - Bytes [0..4):    position (u32 LE)
- *   - Bytes [4..1028): auth path (32 sibling hashes, 32 bytes each, leaf→root)
+ *   - Bytes [4..772):  auth path (24 sibling hashes, 32 bytes each, leaf→root)
  *
  * Parameters:
  *   leaves_ptr - Pointer to flat byte array of leaves (each 32 bytes LE Fp).
  *   leaf_count - Number of leaves (must be > 0).
  *   position   - Leaf index for which to generate the path.
- *   path_out   - Pointer to a 1028-byte output buffer.
+ *   path_out   - Pointer to a 772-byte output buffer.
  *
  * Returns:
  *    0  on success (path written to path_out).

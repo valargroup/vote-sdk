@@ -243,8 +243,8 @@ func (s *MsgServerTestSuite) TestDelegateVote() {
 				Rk:                  bytes.Repeat([]byte{0xA1}, 32),
 				SpendAuthSig:        bytes.Repeat([]byte{0xA2}, 64),
 				SignedNoteNullifier: bytes.Repeat([]byte{0xA3}, 32),
-				CmxNew:              bytes.Repeat([]byte{0xB1}, 32),
-				GovComm:             bytes.Repeat([]byte{0xB2}, 32),
+				CmxNew:              fpLE(0xB1),
+				GovComm:             fpLE(0xB2),
 				GovNullifiers: [][]byte{
 					bytes.Repeat([]byte{0xC1}, 32),
 					bytes.Repeat([]byte{0xC2}, 32),
@@ -270,14 +270,14 @@ func (s *MsgServerTestSuite) TestDelegateVote() {
 				s.Require().NoError(err)
 				s.Require().Equal(uint64(2), state.NextIndex)
 
-				// Verify leaf contents at correct indices.
+				// Verify leaf contents at correct indices (canonical Fp encodings).
 				leaf0, err := kv.Get(types.CommitmentLeafKey(0))
 				s.Require().NoError(err)
-				s.Require().Equal(bytes.Repeat([]byte{0xB1}, 32), leaf0) // cmx_new first
+				s.Require().Equal(fpLE(0xB1), leaf0) // cmx_new first
 
 				leaf1, err := kv.Get(types.CommitmentLeafKey(1))
 				s.Require().NoError(err)
-				s.Require().Equal(bytes.Repeat([]byte{0xB2}, 32), leaf1) // gov_comm second
+				s.Require().Equal(fpLE(0xB2), leaf1) // gov_comm second
 			},
 		},
 	}
@@ -324,8 +324,8 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			},
 			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
-				VoteAuthorityNoteNew:     bytes.Repeat([]byte{0xE2}, 32),
-				VoteCommitment:           bytes.Repeat([]byte{0xE3}, 32),
+				VoteAuthorityNoteNew:     fpLE(0xE2),
+				VoteCommitment:           fpLE(0xE3),
 				ProposalId:               0,
 				Proof:                    bytes.Repeat([]byte{0xE4}, 64),
 				VoteRoundId:              roundID,
@@ -351,8 +351,8 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			},
 			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
-				VoteAuthorityNoteNew:     bytes.Repeat([]byte{0xE2}, 32),
-				VoteCommitment:           bytes.Repeat([]byte{0xE3}, 32),
+				VoteAuthorityNoteNew:     fpLE(0xE2),
+				VoteCommitment:           fpLE(0xE3),
 				ProposalId:               0,
 				Proof:                    bytes.Repeat([]byte{0xE4}, 64),
 				VoteRoundId:              roundID,
@@ -369,8 +369,8 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			},
 			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
-				VoteAuthorityNoteNew:     bytes.Repeat([]byte{0xE2}, 32),
-				VoteCommitment:           bytes.Repeat([]byte{0xE3}, 32),
+				VoteAuthorityNoteNew:     fpLE(0xE2),
+				VoteCommitment:           fpLE(0xE3),
 				ProposalId:               5, // out of range
 				Proof:                    bytes.Repeat([]byte{0xE4}, 64),
 				VoteRoundId:              roundID,

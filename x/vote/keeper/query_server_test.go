@@ -98,10 +98,10 @@ func (s *QueryServerTestSuite) TestLatestCommitmentTree_EmptyTree() {
 func (s *QueryServerTestSuite) TestLatestCommitmentTree_WithCommitments() {
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
-	// Append some commitments (valid 32-byte Pallas Fp encodings).
-	_, err := s.keeper.AppendCommitment(kvStore, bytes.Repeat([]byte{0x01}, 32))
+	// Append some commitments (canonical Pallas Fp encodings for votetree FFI).
+	_, err := s.keeper.AppendCommitment(kvStore, fpLeaf(1))
 	s.Require().NoError(err)
-	_, err = s.keeper.AppendCommitment(kvStore, bytes.Repeat([]byte{0x02}, 32))
+	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(2))
 	s.Require().NoError(err)
 
 	// Compute and store root (simulating EndBlocker).

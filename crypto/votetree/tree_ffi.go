@@ -27,8 +27,9 @@ const (
 	LeafBytes = 32
 
 	// MerklePathBytes is the serialized size of a Merkle authentication path:
-	// 4 bytes (position u32 LE) + 32 * 32 bytes (auth path) = 1028.
-	MerklePathBytes = 1028
+	// 4 bytes (position u32 LE) + 24 * 32 bytes (auth path) = 772.
+	// Tree depth is 24 (2^24 ≈ 16.7M leaf capacity).
+	MerklePathBytes = 772
 )
 
 // ComputePoseidonRoot computes the Poseidon Merkle root from a slice of
@@ -80,9 +81,9 @@ func ComputePoseidonRoot(leaves [][]byte) ([]byte, error) {
 // ComputeMerklePath computes the Poseidon Merkle authentication path for the
 // leaf at the given position. Each leaf must be exactly 32 bytes.
 //
-// Returns a 1028-byte serialized path:
+// Returns a 772-byte serialized path:
 //   - Bytes [0..4):    position (u32 LE)
-//   - Bytes [4..1028): auth path (32 sibling hashes, 32 bytes each, leaf→root)
+//   - Bytes [4..772):  auth path (24 sibling hashes, 32 bytes each, leaf→root)
 func ComputeMerklePath(leaves [][]byte, position uint64) ([]byte, error) {
 	if len(leaves) == 0 {
 		return nil, fmt.Errorf("votetree: cannot compute path for empty tree")

@@ -194,15 +194,15 @@ pub unsafe extern "C" fn zally_vote_tree_root(
 /// Compute the Poseidon Merkle authentication path for a leaf at `position`
 /// in a vote commitment tree built from the given leaves.
 ///
-/// The path is serialized as [`MERKLE_PATH_BYTES`] = 1028 bytes:
+/// The path is serialized as [`MERKLE_PATH_BYTES`] bytes:
 /// - Bytes `[0..4)`:    position (`u32` LE)
-/// - Bytes `[4..1028)`: auth path (32 sibling hashes, 32 bytes each, leaf→root)
+/// - Remaining bytes:   auth path (TREE_DEPTH sibling hashes, 32 bytes each, leaf→root)
 ///
 /// # Arguments
 /// * `leaves_ptr`  - Pointer to a flat byte array of leaves (each 32 bytes LE Fp).
 /// * `leaf_count`  - Number of leaves.
 /// * `position`    - Leaf index for which to generate the path.
-/// * `path_out`    - Pointer to a 1028-byte output buffer.
+/// * `path_out`    - Pointer to a [`MERKLE_PATH_BYTES`]-byte output buffer.
 ///
 /// # Returns
 /// * `0`  on success (path written to `path_out`).

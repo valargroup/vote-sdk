@@ -184,7 +184,7 @@ describe("E2E Voting Flow", () => {
     ]);
 
     expect(output).toContain("Witness (hex):");
-    expect(output).toContain("Witness size:  1028 bytes");
+    expect(output).toContain("Witness size:  772 bytes");
     expect(output).toContain("Anchor root:");
   }, 120_000);
 
@@ -278,7 +278,7 @@ describe("E2E Voting Flow", () => {
     ]);
 
     expect(output).toContain("Witness (hex):");
-    expect(output).toContain("Witness size:  1028 bytes");
+    expect(output).toContain("Witness size:  772 bytes");
     expect(output).toContain("Anchor root:");
   }, 120_000);
 

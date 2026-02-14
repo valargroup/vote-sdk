@@ -5,10 +5,19 @@ package testutil
 
 import (
 	"bytes"
+	"encoding/binary"
 	"time"
 
 	"github.com/z-cale/zally/x/vote/types"
 )
+
+// FpLE returns a 32-byte little-endian encoding of v as a Pallas Fp element.
+// Values 0 <= v < 2^64 are always canonical. Use for commitment tree leaves in tests.
+func FpLE(v uint64) []byte {
+	buf := make([]byte, 32)
+	binary.LittleEndian.PutUint64(buf[:8], v)
+	return buf
+}
 
 // SampleProposals returns two sample proposals for test fixtures.
 func SampleProposals() []*types.Proposal {
@@ -77,14 +86,15 @@ func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSessi
 
 // ValidDelegation returns a MsgDelegateVote with mock proof data.
 // Each call returns unique gov nullifiers derived from the provided seed.
+// CmxNew and GovComm use canonical Fp encodings so the commitment tree FFI accepts them.
 func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote {
 	return &types.MsgDelegateVote{
 		Rk:                  bytes.Repeat([]byte{0x01}, 32),
 		SpendAuthSig:        bytes.Repeat([]byte{0x02}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0x03}, 32),
-		CmxNew:              bytes.Repeat([]byte{nullifierSeed + 0x80}, 32),
+		CmxNew:              FpLE(0x80 + uint64(nullifierSeed)),
 		EncMemo:             bytes.Repeat([]byte{0x05}, 64),
-		GovComm:             bytes.Repeat([]byte{nullifierSeed + 0x90}, 32),
+		GovComm:             FpLE(0x90 + uint64(nullifierSeed)),
 		GovNullifiers: [][]byte{
 			MakeNullifier(nullifierSeed),
 			MakeNullifier(nullifierSeed + 1),
@@ -96,11 +106,12 @@ func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote 
 }
 
 // ValidCastVote returns a MsgCastVote with mock data.
+// VoteAuthorityNoteNew and VoteCommitment use canonical Fp encodings for the commitment tree.
 func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgCastVote {
 	return &types.MsgCastVote{
 		VanNullifier:             MakeNullifier(nullifierSeed),
-		VoteAuthorityNoteNew:     bytes.Repeat([]byte{nullifierSeed + 0xA0}, 32),
-		VoteCommitment:           bytes.Repeat([]byte{nullifierSeed + 0xB0}, 32),
+		VoteAuthorityNoteNew:     FpLE(0xA0 + uint64(nullifierSeed)),
+		VoteCommitment:           FpLE(0xB0 + uint64(nullifierSeed)),
 		ProposalId:               0,
 		Proof:                    []byte("mock-vote-commitment-proof"),
 		VoteRoundId:              roundID,
