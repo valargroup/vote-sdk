@@ -1,7 +1,7 @@
 BINARY = zallyd
 HOME_DIR = $(HOME)/.zallyd
 
-.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-api test-api-restart test-api-reinit fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi
+.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-api test-api-restart test-api-reinit test-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi
 
 ## install: Build and install the zallyd binary to $GOPATH/bin
 install:
@@ -55,12 +55,15 @@ test-integration:
 ## test: Run all tests (Go only, no Rust dependency)
 test: test-unit test-integration
 
-## test-api: TypeScript API tests against a running chain (requires: make start)
+## test-api: Rust E2E API tests against a running chain (requires: make init && make start)
 test-api:
-	cd tests/api && npm test
+	cargo test --release --manifest-path ../e2e-tests/Cargo.toml -- --nocapture --ignored
 
-## test-api-restart: init + fixtures + test-api (full API test cycle)
-test-api-restart: init fixtures test-api
+## test-e2e: Alias for test-api (Rust E2E tests)
+test-e2e: test-api
+
+## test-api-restart: init + test-api (full API test cycle; chain must be stopped first)
+test-api-restart: init test-api
 
 ## test-api-reinit: init + fixtures only (no test-api)
 test-api-reinit: init fixtures

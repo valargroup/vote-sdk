@@ -1,6 +1,9 @@
 package app
 
 import (
+	"fmt"
+	"time"
+
 	storetypes "cosmossdk.io/store/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -80,10 +83,19 @@ func handleVoteAnte(
 		ZKPVerifier: zkpVerifier,
 	}
 
+	start := time.Now()
 	if err := voteante.ValidateVoteTx(ctx, vtx.VoteMsg, k, opts); err != nil {
+		elapsed := time.Since(start)
+		k.Logger().Info("vote ante validation failed",
+			"duration_ms", elapsed.Milliseconds(),
+			"msg_type", fmt.Sprintf("%T", vtx.VoteMsg),
+			"error", err.Error())
 		return ctx, err
 	}
-
+	elapsed := time.Since(start)
+	k.Logger().Info("vote ante validation completed",
+		"duration_ms", elapsed.Milliseconds(),
+		"msg_type", fmt.Sprintf("%T", vtx.VoteMsg))
 	return ctx, nil
 }
 

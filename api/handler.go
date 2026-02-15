@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 	protov2 "google.golang.org/protobuf/proto"
@@ -33,9 +35,12 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	if endpoint == "" {
 		endpoint = "http://localhost:26657"
 	}
+	// Allow long waits for broadcast_tx_sync when CheckTx is slow (e.g. ZKP ~30–60s).
+	// CometBFT RPC server must also have a large enough WriteTimeout (see initCometBFTConfig).
+	client := &http.Client{Timeout: 120 * time.Second}
 	return &Handler{
 		cometRPC: endpoint,
-		client:   &http.Client{},
+		client:   client,
 	}
 }
 
@@ -113,8 +118,14 @@ func (h *Handler) broadcastVoteTx(w http.ResponseWriter, msg types.VoteMessage) 
 		return
 	}
 
+	start := time.Now()
 	result, err := h.cometBroadcastTxSync(raw)
+	elapsed := time.Since(start)
+	log.Printf("[zally-api] broadcast_tx_sync duration_ms=%d msg_type=%T", elapsed.Milliseconds(), msg)
 	if err != nil {
+		// 502 = CometBFT rejected the broadcast (RPC error). The error string now includes
+		// CometBFT's error.data when present (e.g. "tx already in cache", "context canceled").
+		log.Printf("[zally-api] broadcast_tx_sync failed: %v", err)
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("broadcast failed: %v", err))
 		return
 	}
@@ -160,6 +171,7 @@ func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error)
 		Error *struct {
 			Code    int    `json:"code"`
 			Message string `json:"message"`
+			Data    string `json:"data"`
 		} `json:"error"`
 	}
 
@@ -168,7 +180,14 @@ func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error)
 	}
 
 	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("CometBFT RPC error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+		// -32603 "Internal error" is used by CometBFT when BroadcastTxSync returns a Go error.
+		// The real cause is in error.data, e.g. "tx already in cache" (duplicate), "broadcast
+		// confirmation not received: context canceled" (RPC timeout), or app connection errors.
+		detail := rpcResp.Error.Data
+		if detail == "" {
+			detail = rpcResp.Error.Message
+		}
+		return nil, fmt.Errorf("CometBFT RPC error %d: %s", rpcResp.Error.Code, detail)
 	}
 
 	return &BroadcastResult{
