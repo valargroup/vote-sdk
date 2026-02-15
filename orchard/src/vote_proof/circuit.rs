@@ -5,7 +5,7 @@
 //!
 //! - **Condition 1**: VAN Membership (Poseidon Merkle path, `constrain_instance`).
 //! - **Condition 2**: VAN Integrity (Poseidon hash).
-//! - **Condition 3**: Spend Authority (ECC: `voting_hotkey_pk = ExtractP([vsk] * SpendAuthG)`).
+//! - **Condition 3**: Spend Authority (`vpk_pk_d = [ivk_v] * vpk_g_d` via CommitIvk).
 //! - **Condition 4**: VAN Nullifier Integrity (nested Poseidon, `constrain_instance`).
 //! - **Condition 5**: Proposal Authority Decrement (AddChip + range check).
 //! - **Condition 6**: New VAN Integrity (Poseidon hash, `constrain_instance`).
@@ -15,7 +15,7 @@
 //! - **Condition 10**: Encryption Integrity (ECC variable-base mul, `constrain_equal`).
 //! - **Condition 11**: Vote Commitment Integrity (Poseidon `ConstantLength<4>`, `constrain_instance`).
 //!
-//! All 11 conditions are fully implemented.
+//! All 11 conditions are fully constrained.
 //!
 //! ## Conditions overview
 //!
@@ -24,8 +24,8 @@
 //!   to `vote_comm_tree_root`.
 //! - **Condition 2**: VAN Integrity — `vote_authority_note_old` is the two-layer
 //!   Poseidon hash (ZKP 1–compatible: core then finalize with rand). *(implemented)*
-//! - **Condition 3**: Spend Authority — prover knows `vsk` such that
-//!   `voting_hotkey_pk = ExtractP([vsk] * SpendAuthG)`. *(implemented)*
+//! - **Condition 3**: Spend Authority — prover controls the VAN address via
+//!   `vpk_pk_d = [ivk_v] * vpk_g_d` where `ivk_v = CommitIvk(ExtractP([vsk]*SpendAuthG), vsk.nk)`. *(implemented)*
 //! - **Condition 4**: VAN Nullifier Integrity — `van_nullifier` is correctly
 //!   derived from `vsk.nk`. *(implemented)*
 //!
@@ -53,7 +53,7 @@ use halo2_proofs::{
     circuit::{floor_planner, AssignedCell, Layouter, Value},
     plonk::{
         self, Advice, Column, Constraints, ConstraintSystem, Fixed,
-        Instance as InstanceColumn, Selector, TableColumn,
+        Instance as InstanceColumn, Selector,
     },
     poly::Rotation,
 };
@@ -68,12 +68,16 @@ use halo2_gadgets::{
         primitives::{self as poseidon, ConstantLength},
         Hash as PoseidonHash, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig,
     },
+    sinsemilla::chip::{SinsemillaChip, SinsemillaConfig},
     utilities::{bool_check, lookup_range_check::LookupRangeCheckConfig},
 };
-use crate::constants::{OrchardFixedBases, OrchardFixedBasesFull};
+use crate::circuit::commit_ivk::{CommitIvkChip, CommitIvkConfig};
 use crate::circuit::gadget::{
     add_chip::{AddChip, AddConfig},
-    AddInstruction,
+    commit_ivk as commit_ivk_gadget, AddInstruction,
+};
+use crate::constants::{
+    OrchardCommitDomains, OrchardFixedBases, OrchardFixedBasesFull, OrchardHashDomains,
 };
 use crate::circuit::van_integrity;
 
@@ -143,7 +147,7 @@ const _: usize = VOTE_COMM_TREE_ANCHOR_HEIGHT;
 // Out-of-circuit helpers
 // ================================================================
 
-use van_integrity::van_integrity_hash;
+pub use van_integrity::van_integrity_hash;
 
 /// Returns the domain separator for the VAN nullifier inner hash.
 ///
@@ -356,11 +360,24 @@ pub struct Config {
     /// Used in conditions 5 (proposal authority decrement) and 7 (shares
     /// sum correctness).
     add_config: AddConfig,
-    /// ECC chip configuration (condition 3: spend authority).
+    /// ECC chip configuration (condition 3: spend authority, condition 10: El Gamal).
     ///
-    /// Used to prove voting_hotkey_pk = ExtractP([vsk] * SpendAuthG).
+    /// Condition 3 proves `vpk_pk_d = [ivk_v] * vpk_g_d` via the CommitIvk chain:
+    /// `[vsk] * SpendAuthG → ak → CommitIvk(ExtractP(ak), nk, rivk_v) → ivk_v → [ivk_v] * vpk_g_d`.
     /// Shares advice and fixed columns with Poseidon per delegation layout.
     ecc_config: EccConfig<OrchardFixedBases>,
+    /// Sinsemilla chip configuration (condition 3: CommitIvk requires Sinsemilla).
+    ///
+    /// Uses advices[0..5] for Sinsemilla message hashing, advices[6] for
+    /// witnessing message pieces, and lagrange_coeffs[0] for the fixed y_Q column.
+    /// Also loads the 10-bit lookup table used by LookupRangeCheckConfig.
+    sinsemilla_config:
+        SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
+    /// CommitIvk chip configuration (condition 3: canonicity checks on ak || nk).
+    ///
+    /// Provides the custom gate and decomposition logic for the
+    /// Sinsemilla-based `CommitIvk` commitment.
+    commit_ivk_config: CommitIvkConfig,
     /// 10-bit lookup range check configuration.
     ///
     /// Uses advices[9] as the running-sum column. Each word is 10 bits,
@@ -368,12 +385,6 @@ pub struct Config {
     /// Used in condition 5 to ensure `proposal_authority_old > 0`, and
     /// condition 8 to ensure each share is in `[0, 2^24)`.
     range_check: LookupRangeCheckConfig<pallas::Base, 10>,
-    /// Lookup table column for the 10-bit range check.
-    ///
-    /// Populated with [0, 2^10) during synthesis. Stored here because
-    /// the vote proof circuit doesn't use Sinsemilla (which would
-    /// normally load this table as a side effect).
-    table_idx: TableColumn,
     /// Selector for the Merkle conditional swap gate (condition 1).
     ///
     /// At each of the 24 Merkle tree levels, conditionally swaps
@@ -397,9 +408,21 @@ impl Config {
         AddChip::construct(self.add_config.clone())
     }
 
-    /// Constructs an ECC chip for curve operations (condition 3: spend authority).
+    /// Constructs an ECC chip for curve operations (conditions 3, 10).
     fn ecc_chip(&self) -> EccChip<OrchardFixedBases> {
         EccChip::construct(self.ecc_config.clone())
+    }
+
+    /// Constructs a Sinsemilla chip (condition 3: CommitIvk).
+    fn sinsemilla_chip(
+        &self,
+    ) -> SinsemillaChip<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases> {
+        SinsemillaChip::construct(self.sinsemilla_config.clone())
+    }
+
+    /// Constructs a CommitIvk chip for canonicity checks (condition 3).
+    fn commit_ivk_chip(&self) -> CommitIvkChip {
+        CommitIvkChip::construct(self.commit_ivk_config.clone())
     }
 
     /// Returns the range check configuration (10-bit words).
@@ -434,15 +457,22 @@ pub struct Circuit {
     pub(crate) vote_comm_tree_position: Value<u32>,
 
     // Condition 2 (VAN Integrity): two-layer hash matching ZKP 1 (delegation):
-    // gov_comm_core = Poseidon(DOMAIN_VAN, g_d_x, pk_d_x, total_note_value,
+    // gov_comm_core = Poseidon(DOMAIN_VAN, vpk_g_d.x, vpk_pk_d.x, total_note_value,
     //                          voting_round_id, proposal_authority_old);
     // vote_authority_note_old = Poseidon(gov_comm_core, gov_comm_rand).
-    /// Diversified base point x-coordinate (from DiversifyHash(d)).
-    pub(crate) g_d_x: Value<pallas::Base>,
-    /// Diversified transmission key x-coordinate (pk_d = [ivk] * g_d).
-    pub(crate) pk_d_x: Value<pallas::Base>,
-    /// The voting hotkey public key (x-coordinate of [vsk]*SpendAuthG); used for condition 3 (spend authority).
-    pub(crate) voting_hotkey_pk: Value<pallas::Base>,
+    //
+    // Condition 3 (Spend Authority): vpk_pk_d = [ivk_v] * vpk_g_d
+    // where ivk_v = CommitIvk(ExtractP([vsk]*SpendAuthG), vsk.nk, rivk_v).
+    // Full affine points are needed for condition 3's ECC operations;
+    // x-coordinates are extracted in-circuit for Poseidon hashing (conditions 2, 6).
+    /// Voting public key — diversified base point (from DiversifyHash(d)).
+    /// This is the vpk_g_d component of the voting hotkey address.
+    /// Condition 3 performs `[ivk_v] * vpk_g_d` to derive vpk_pk_d.
+    pub(crate) vpk_g_d: Value<pallas::Affine>,
+    /// Voting public key — diversified transmission key (pk_d = [ivk_v] * g_d).
+    /// This is the vpk_pk_d component of the voting hotkey address.
+    /// Condition 3 constrains this to equal `[ivk_v] * vpk_g_d`.
+    pub(crate) vpk_pk_d: Value<pallas::Affine>,
     /// The voter's total delegated weight.
     pub(crate) total_note_value: Value<pallas::Base>,
     /// Remaining proposal authority bitmask in the old VAN.
@@ -453,12 +483,18 @@ pub struct Circuit {
     /// leaf in condition 1 and constrained to equal the derived hash here.
     pub(crate) vote_authority_note_old: Value<pallas::Base>,
 
-    // Condition 3 (Spend Authority): prover knows vsk such that
-    // voting_hotkey_pk is correctly derived from vsk.
+    // Condition 3 (Spend Authority): prover controls the VAN address.
+    // vpk_pk_d = [ivk_v] * vpk_g_d
+    //   where ivk_v = CommitIvk_rivk_v(ExtractP([vsk]*SpendAuthG), vsk.nk)
     /// Voting spending key (scalar for ECC multiplication).
+    /// Used in condition 3 for `[vsk] * SpendAuthG`.
     pub(crate) vsk: Value<pallas::Scalar>,
+    /// CommitIvk randomness for the ivk_v derivation (condition 3).
+    /// Used as the blinding scalar in `CommitIvk(ak, nk, rivk_v)`.
+    pub(crate) rivk_v: Value<pallas::Scalar>,
 
     // Condition 4 (VAN Nullifier Integrity): nullifier deriving key.
+    // Also used in condition 3 as the nk input to CommitIvk.
     /// Nullifier deriving key derived from vsk.
     pub(crate) vsk_nk: Value<pallas::Base>,
 
@@ -493,14 +529,16 @@ pub struct Circuit {
 }
 
 impl Circuit {
-    /// Creates a circuit with conditions 1, 2, 4, 5, and 6 witnesses populated.
+    /// Creates a circuit with conditions 1–6 witnesses populated.
     ///
     /// All other witness fields are set to `Value::unknown()`.
     /// - Condition 1 uses `vote_authority_note_old` as the Merkle leaf,
     ///   with `vote_comm_tree_path` and `vote_comm_tree_position` for
     ///   the authentication path.
     /// - Condition 2 binds `vote_authority_note_old` to the Poseidon hash
-    ///   of its components.
+    ///   of its components (using x-coordinates extracted from vpk_g_d, vpk_pk_d).
+    /// - Condition 3 proves spend authority via CommitIvk chain:
+    ///   `[vsk] * SpendAuthG → ak → CommitIvk(ak, nk, rivk_v) → ivk_v → [ivk_v] * vpk_g_d = vpk_pk_d`.
     /// - Condition 4 reuses `vote_authority_note_old` and `voting_round_id`.
     /// - Condition 5 derives `proposal_authority_new` from
     ///   `proposal_authority_old`.
@@ -510,25 +548,27 @@ impl Circuit {
     pub fn with_van_witnesses(
         vote_comm_tree_path: Value<[pallas::Base; VOTE_COMM_TREE_DEPTH]>,
         vote_comm_tree_position: Value<u32>,
-        g_d_x: Value<pallas::Base>,
-        pk_d_x: Value<pallas::Base>,
-        voting_hotkey_pk: Value<pallas::Base>,
+        vpk_g_d: Value<pallas::Affine>,
+        vpk_pk_d: Value<pallas::Affine>,
         total_note_value: Value<pallas::Base>,
         proposal_authority_old: Value<pallas::Base>,
         gov_comm_rand: Value<pallas::Base>,
         vote_authority_note_old: Value<pallas::Base>,
+        vsk: Value<pallas::Scalar>,
+        rivk_v: Value<pallas::Scalar>,
         vsk_nk: Value<pallas::Base>,
     ) -> Self {
         Circuit {
             vote_comm_tree_path,
             vote_comm_tree_position,
-            g_d_x,
-            pk_d_x,
-            voting_hotkey_pk,
+            vpk_g_d,
+            vpk_pk_d,
             total_note_value,
             proposal_authority_old,
             gov_comm_rand,
             vote_authority_note_old,
+            vsk,
+            rivk_v,
             vsk_nk,
             ..Default::default()
         }
@@ -587,17 +627,43 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         //   a = advices[7], b = advices[8], c = advices[6].
         let add_config = AddChip::configure(meta, advices[7], advices[8], advices[6]);
 
-        // Lookup table column for 10-bit range checks.
-        // Populated with [0, 2^10) during synthesis.
+        // Lookup table columns for Sinsemilla (3 columns) and range checks.
+        // The first column (table_idx) is shared between Sinsemilla and
+        // LookupRangeCheckConfig. SinsemillaChip::load populates all three
+        // during synthesis (replacing the manual table loading).
         let table_idx = meta.lookup_table_column();
+        let lookup = (
+            table_idx,
+            meta.lookup_table_column(),
+            meta.lookup_table_column(),
+        );
 
         // Range check configuration: 10-bit lookup words in advices[9].
         let range_check = LookupRangeCheckConfig::configure(meta, advices[9], table_idx);
 
-        // ECC chip: fixed-base scalar multiplication for condition 3 (spend authority).
+        // ECC chip: fixed- and variable-base scalar multiplication for
+        // condition 3 (spend authority via CommitIvk chain) and condition 10
+        // (El Gamal encryption integrity).
         // Shares columns with Poseidon per delegation circuit layout.
         let ecc_config =
             EccChip::<OrchardFixedBases>::configure(meta, advices, lagrange_coeffs, range_check);
+
+        // Sinsemilla chip: required by CommitIvk for condition 3.
+        // Uses advices[0..5] for Sinsemilla message hashing, advices[6] for
+        // witnessing message pieces, and lagrange_coeffs[0] for the fixed
+        // y_Q column. Shares the lookup table with LookupRangeCheckConfig.
+        let sinsemilla_config = SinsemillaChip::configure(
+            meta,
+            advices[..5].try_into().unwrap(),
+            advices[6],
+            lagrange_coeffs[0],
+            lookup,
+            range_check,
+        );
+
+        // CommitIvk chip: canonicity checks on the ak || nk decomposition
+        // inside the CommitIvk Sinsemilla commitment (condition 3).
+        let commit_ivk_config = CommitIvkChip::configure(meta, advices);
 
         // Poseidon chip: P128Pow5T3 with width 3, rate 2.
         // State columns: advices[6..9] (3 columns for the width-3 state).
@@ -653,8 +719,9 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             poseidon_config,
             add_config,
             ecc_config,
+            sinsemilla_config,
+            commit_ivk_config,
             range_check,
-            table_idx,
             q_merkle_swap,
         }
     }
@@ -666,27 +733,16 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         mut layouter: impl Layouter<pallas::Base>,
     ) -> Result<(), plonk::Error> {
         // ---------------------------------------------------------------
-        // Load the 10-bit lookup table for range checks (condition 5).
+        // Load the Sinsemilla generator lookup table.
         //
-        // Populates [0, 2^10) into the table column. In the delegation
-        // circuit this is loaded as a side effect of SinsemillaChip::load;
-        // the vote proof circuit doesn't use Sinsemilla, so we load it
-        // directly.
+        // Populates the 10-bit lookup table and Sinsemilla generator
+        // points. Required by CommitIvk (condition 3), and also provides
+        // the range check table used by conditions 5 and 8.
         // ---------------------------------------------------------------
-        layouter.assign_table(
-            || "table_idx",
-            |mut table| {
-                for index in 0..(1 << 10) {
-                    table.assign_cell(
-                        || "table_idx",
-                        config.table_idx,
-                        index,
-                        || Value::known(pallas::Base::from(index as u64)),
-                    )?;
-                }
-                Ok(())
-            },
-        )?;
+        SinsemillaChip::load(config.sinsemilla_config.clone(), &mut layouter)?;
+
+        // Construct the ECC chip (used in conditions 3 and 10).
+        let ecc_chip = config.ecc_chip();
 
         // ---------------------------------------------------------------
         // Witness assignment for condition 2.
@@ -709,22 +765,24 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             },
         )?;
 
-        // Private witnesses for condition 2 (VAN integrity: g_d_x, pk_d_x match ZKP 1).
-        let g_d_x = assign_free_advice(
-            layouter.namespace(|| "witness g_d_x"),
-            config.advices[0],
-            self.g_d_x,
+        // Witness vpk_g_d as a full non-identity curve point (condition 3 needs
+        // the point for variable-base ECC mul; conditions 2/6 need the x-coordinate
+        // for Poseidon hashing).
+        let vpk_g_d_point = NonIdentityPoint::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "witness vpk_g_d"),
+            self.vpk_g_d.map(|p| p),
         )?;
-        let pk_d_x = assign_free_advice(
-            layouter.namespace(|| "witness pk_d_x"),
-            config.advices[0],
-            self.pk_d_x,
+        let vpk_g_d = vpk_g_d_point.extract_p().inner().clone();
+
+        // Witness vpk_pk_d as a full non-identity curve point (condition 3
+        // constrains the derived point to equal this; conditions 2/6 use x-coordinate).
+        let vpk_pk_d_point = NonIdentityPoint::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "witness vpk_pk_d"),
+            self.vpk_pk_d.map(|p| p),
         )?;
-        let voting_hotkey_pk = assign_free_advice(
-            layouter.namespace(|| "witness voting_hotkey_pk"),
-            config.advices[0],
-            self.voting_hotkey_pk,
-        )?;
+        let vpk_pk_d = vpk_pk_d_point.extract_p().inner().clone();
 
         let total_note_value = assign_free_advice(
             layouter.namespace(|| "witness total_note_value"),
@@ -764,29 +822,44 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             },
         )?;
 
+        // ---------------------------------------------------------------
+        // Witness assignment for conditions 3 and 4.
+        //
+        // vsk_nk is shared between condition 3 (CommitIvk input) and
+        // condition 4 (VAN nullifier). Witnessed here so it's available
+        // for condition 3 which runs before condition 4.
+        // ---------------------------------------------------------------
+
+        // Private witness: nullifier deriving key (shared by conditions 3, 4).
+        let vsk_nk = assign_free_advice(
+            layouter.namespace(|| "witness vsk_nk"),
+            config.advices[0],
+            self.vsk_nk,
+        )?;
+
         // Clone cells that are consumed by condition 2's Poseidon hash but
         // reused in later conditions:
         // - vote_authority_note_old: also used in condition 1 (Merkle leaf).
         // - voting_round_id: also used in condition 4 (VAN nullifier).
-        // - voting_hotkey_pk: also used in condition 3 (spend authority).
-        // - g_d_x, pk_d_x, total_note_value, voting_round_id, proposal_authority_old,
+        // - vpk_g_d, vpk_pk_d, total_note_value, voting_round_id, proposal_authority_old,
         //   gov_comm_rand, domain_van: also used in condition 6 (new VAN integrity).
         // - total_note_value: also used in condition 7 (shares sum check).
+        // - vsk_nk: also used in condition 4 (VAN nullifier).
         let vote_authority_note_old_cond1 = vote_authority_note_old.clone();
         let voting_round_id_cond4 = voting_round_id.clone();
         let domain_van_cond6 = domain_van.clone();
-        let g_d_x_cond6 = g_d_x.clone();
-        let pk_d_x_cond6 = pk_d_x.clone();
-        let voting_hotkey_pk_cond3 = voting_hotkey_pk.clone();
+        let vpk_g_d_cond6 = vpk_g_d.clone();
+        let vpk_pk_d_cond6 = vpk_pk_d.clone();
         let total_note_value_cond6 = total_note_value.clone();
         let total_note_value_cond7 = total_note_value.clone();
         let voting_round_id_cond6 = voting_round_id.clone();
         let proposal_authority_old_cond5 = proposal_authority_old.clone();
         let gov_comm_rand_cond6 = gov_comm_rand.clone();
+        let vsk_nk_cond4 = vsk_nk.clone();
 
         // ---------------------------------------------------------------
         // Condition 2: VAN Integrity (ZKP 1–compatible two-layer hash).
-        // gov_comm_core = Poseidon(DOMAIN_VAN, g_d_x, pk_d_x, total_note_value,
+        // gov_comm_core = Poseidon(DOMAIN_VAN, vpk_g_d, vpk_pk_d, total_note_value,
         //                          voting_round_id, proposal_authority_old)
         // vote_authority_note_old = Poseidon(gov_comm_core, gov_comm_rand)
         // ---------------------------------------------------------------
@@ -796,8 +869,8 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             &mut layouter,
             "Old VAN integrity",
             domain_van,
-            g_d_x,
-            pk_d_x,
+            vpk_g_d,
+            vpk_pk_d,
             total_note_value,
             voting_round_id,
             proposal_authority_old,
@@ -813,38 +886,72 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // ---------------------------------------------------------------
         // Condition 3: Spend Authority.
         //
-        // voting_hotkey_pk = ExtractP([vsk] * SpendAuthG)
+        // Proves the prover controls the VAN address by linking
+        // vsk → ak → ivk_v → vpk_pk_d through the CommitIvk chain:
         //
-        // Proves the prover knows vsk such that the witnessed voting_hotkey_pk
-        // is the x-coordinate of [vsk] * G, where G is the SpendAuth fixed base.
+        //   vsk_ak      = [vsk] * SpendAuthG               (fixed-base ECC mul)
+        //   ak          = ExtractP(vsk_ak)                  (x-coordinate)
+        //   ivk_v       = CommitIvk_rivk_v(ak, vsk.nk)     (Sinsemilla commitment)
+        //   vpk_pk_d    = [ivk_v] * vpk_g_d                (variable-base ECC mul)
+        //
+        // This is the same CommitIvk chain used in the delegation circuit
+        // (ZKP 1, condition 5) but applied to the voting key hierarchy.
         // ---------------------------------------------------------------
-        {
-            let ecc_chip = config.ecc_chip();
 
+        {
+            // Step 1: vsk_ak = [vsk] * SpendAuthG (fixed-base scalar multiplication).
+            // vsk is the voting spending key; SpendAuthG is the fixed generator.
             let vsk_scalar = ScalarFixed::new(
                 ecc_chip.clone(),
-                layouter.namespace(|| "vsk"),
+                layouter.namespace(|| "cond3: vsk"),
                 self.vsk,
             )?;
-
             let spend_auth_g = OrchardFixedBasesFull::SpendAuthG;
             let spend_auth_g = FixedPoint::from_inner(ecc_chip.clone(), spend_auth_g);
+            let (vsk_ak_point, _) =
+                spend_auth_g.mul(layouter.namespace(|| "cond3: [vsk] SpendAuthG"), vsk_scalar)?;
 
-            let (vsk_times_g, _) = spend_auth_g.mul(
-                layouter.namespace(|| "[vsk] SpendAuthG"),
-                vsk_scalar,
+            // Step 2: ak = ExtractP(vsk_ak) — extract the x-coordinate.
+            let ak = vsk_ak_point.extract_p().inner().clone();
+
+            // Step 3: ivk_v = CommitIvk(ak, nk, rivk_v) — Sinsemilla-based commitment.
+            // nk is the nullifier deriving key (vsk_nk), shared with condition 4.
+            // rivk_v is the CommitIvk randomness (blinding scalar).
+            let rivk_v_scalar = ScalarFixed::new(
+                ecc_chip.clone(),
+                layouter.namespace(|| "cond3: rivk_v"),
+                self.rivk_v,
             )?;
 
-            let derived_voting_hotkey_pk = vsk_times_g.extract_p().inner().clone();
+            let ivk_v = commit_ivk_gadget(
+                config.sinsemilla_chip(),
+                ecc_chip.clone(),
+                config.commit_ivk_chip(),
+                layouter.namespace(|| "cond3: CommitIvk"),
+                ak,
+                vsk_nk,
+                rivk_v_scalar,
+            )?;
 
-            layouter.assign_region(
-                || "Condition 3: voting_hotkey_pk = ExtractP([vsk] G)",
-                |mut region| {
-                    region.constrain_equal(
-                        derived_voting_hotkey_pk.cell(),
-                        voting_hotkey_pk_cond3.cell(),
-                    )
-                },
+            // Step 4: [ivk_v] * vpk_g_d — variable-base scalar multiplication.
+            // ivk_v is an x-coordinate (base field element); convert to a scalar
+            // for the variable-base ECC mul.
+            let ivk_v_scalar = ScalarVar::from_base(
+                ecc_chip.clone(),
+                layouter.namespace(|| "cond3: ivk_v as scalar"),
+                ivk_v.inner(),
+            )?;
+            let (derived_vpk_pk_d, _) = vpk_g_d_point.mul(
+                layouter.namespace(|| "cond3: [ivk_v] vpk_g_d"),
+                ivk_v_scalar,
+            )?;
+
+            // Step 5: Constrain derived vpk_pk_d == witnessed vpk_pk_d.
+            // This proves the prover knows vsk such that the voting address
+            // (vpk_g_d, vpk_pk_d) is correctly derived.
+            derived_vpk_pk_d.constrain_equal(
+                layouter.namespace(|| "cond3: vpk_pk_d equality"),
+                &vpk_pk_d_point,
             )?;
         }
 
@@ -987,14 +1094,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 
         // ---------------------------------------------------------------
         // Witness assignment for condition 4.
+        //
+        // vsk_nk was already witnessed before condition 3 (shared between
+        // conditions 3 and 4). The vsk_nk_cond4 clone is used here.
         // ---------------------------------------------------------------
-
-        // Private witness: nullifier deriving key.
-        let vsk_nk = assign_free_advice(
-            layouter.namespace(|| "witness vsk_nk"),
-            config.advices[0],
-            self.vsk_nk,
-        )?;
 
         // "vote authority spend" domain tag — constant-constrained so the
         // value is baked into the verification key.
@@ -1076,7 +1179,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             )?;
             step3_hasher.hash(
                 layouter.namespace(|| "Poseidon(vsk_nk, step2)"),
-                [vsk_nk, step2],
+                [vsk_nk_cond4, step2],
             )?
         };
 
@@ -1165,7 +1268,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // Condition 6: New VAN Integrity (ZKP 1–compatible two-layer hash).
         //
         // Same structure as condition 2; proposal_authority_new (from
-        // condition 5) replaces proposal_authority_old. g_d_x and pk_d_x
+        // condition 5) replaces proposal_authority_old. vpk_g_d and vpk_pk_d
         // are unchanged (same diversified address).
         // ---------------------------------------------------------------
 
@@ -1174,8 +1277,8 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             &mut layouter,
             "New VAN integrity",
             domain_van_cond6,
-            g_d_x_cond6,
-            pk_d_x_cond6,
+            vpk_g_d_cond6,
+            vpk_pk_d_cond6,
             total_note_value_cond6,
             voting_round_id_cond6,
             proposal_authority_new,
@@ -1419,8 +1522,6 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // input coordinates at offsets EA_PK_X and EA_PK_Y.
         // ---------------------------------------------------------------
         {
-            let ecc_chip = config.ecc_chip();
-
             // SpendAuthG coordinates as constants — baked into the
             // verification key so the El Gamal generator cannot be changed.
             let g_affine = spend_auth_g_affine();
@@ -1790,19 +1891,19 @@ impl Instance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::iter;
     use ff::Field;
-    use group::Curve;
+    use group::ff::PrimeFieldBits;
+    use group::{Curve, Group};
+    use halo2_gadgets::sinsemilla::primitives::CommitDomain;
     use halo2_proofs::dev::MockProver;
     use pasta_curves::pallas;
     use rand::rngs::OsRng;
 
-    /// Derives the voting hotkey public key (x-coordinate) from vsk for testing.
-    /// Matches condition 3: voting_hotkey_pk = ExtractP([vsk] * SpendAuthG).
-    fn derive_voting_hotkey_pk(vsk: pallas::Scalar) -> pallas::Base {
-        let g = crate::constants::fixed_bases::spend_auth_g::generator();
-        let point = pallas::Point::from(g) * vsk;
-        *point.to_affine().coordinates().unwrap().x()
-    }
+    use crate::constants::{
+        fixed_bases::COMMIT_IVK_PERSONALIZATION,
+        L_ORCHARD_BASE,
+    };
 
     /// Generates an El Gamal keypair for testing.
     /// Returns `(ea_sk, ea_pk_point, ea_pk_affine)`.
@@ -1844,6 +1945,54 @@ mod tests {
         }
         let hash = shares_hash(c1_x, c2_x);
         (c1_x, c2_x, randomness, hash)
+    }
+
+    /// Out-of-circuit voting key derivation for tests.
+    ///
+    /// Given a voting spending key (vsk), nullifier key (nk), and CommitIvk
+    /// randomness (rivk_v), derives the full voting address:
+    ///
+    /// 1. `ak = [vsk] * SpendAuthG` (spend validating key)
+    /// 2. `ak_x = ExtractP(ak)` (x-coordinate)
+    /// 3. `ivk_v = CommitIvk(ak_x, nk, rivk_v)` (incoming viewing key)
+    /// 4. `g_d = random non-identity point` (diversified base)
+    /// 5. `pk_d = [ivk_v] * g_d` (diversified transmission key)
+    ///
+    /// Returns `(g_d_affine, pk_d_affine, ak_x)` for use as circuit witnesses.
+    fn derive_voting_address(
+        vsk: pallas::Scalar,
+        nk: pallas::Base,
+        rivk_v: pallas::Scalar,
+    ) -> (pallas::Affine, pallas::Affine) {
+        // Step 1: ak = [vsk] * SpendAuthG
+        let g = pallas::Point::from(spend_auth_g_affine());
+        let ak_point = g * vsk;
+        let ak_x = *ak_point.to_affine().coordinates().unwrap().x();
+
+        // Step 2: ivk_v = CommitIvk(ak_x, nk, rivk_v)
+        let domain = CommitDomain::new(COMMIT_IVK_PERSONALIZATION);
+        let ivk_v = domain
+            .short_commit(
+                iter::empty()
+                    .chain(ak_x.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
+                    .chain(nk.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE)),
+                &rivk_v,
+            )
+            .expect("CommitIvk should not produce ⊥ for random inputs");
+
+        // Step 3: g_d = random non-identity point
+        // Using a deterministic point derived from a fixed seed ensures
+        // reproducibility while avoiding the identity point.
+        let g_d = pallas::Point::generator() * pallas::Scalar::from(12345u64);
+        let g_d_affine = g_d.to_affine();
+
+        // Step 4: pk_d = [ivk_v] * g_d
+        let ivk_v_scalar =
+            base_to_scalar(ivk_v).expect("ivk_v must be < scalar field modulus");
+        let pk_d = g_d * ivk_v_scalar;
+        let pk_d_affine = pk_d.to_affine();
+
+        (g_d_affine, pk_d_affine)
     }
 
     /// Default proposal_id and vote_decision for tests.
@@ -1890,24 +2039,27 @@ mod tests {
     ) -> (Circuit, Instance) {
         let mut rng = OsRng;
 
-        // Condition 3: voting_hotkey_pk must equal ExtractP([vsk]*SpendAuthG).
-        let vsk = pallas::Scalar::from(1u64);
-        let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
+        // Condition 3 (spend authority): derive proper voting key hierarchy.
+        // vsk → ak → ivk_v → (vpk_g_d, vpk_pk_d) through CommitIvk chain.
+        let vsk = pallas::Scalar::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
+        let rivk_v = pallas::Scalar::random(&mut rng);
 
-        // VAN uses diversified address (g_d_x, pk_d_x) matching ZKP 1.
-        let g_d_x = pallas::Base::random(&mut rng);
-        let pk_d_x = pallas::Base::random(&mut rng);
+        let (vpk_g_d_affine, vpk_pk_d_affine) = derive_voting_address(vsk, vsk_nk, rivk_v);
+
+        // Extract x-coordinates for Poseidon hashing (conditions 2, 6).
+        let vpk_g_d_x = *vpk_g_d_affine.coordinates().unwrap().x();
+        let vpk_pk_d_x = *vpk_pk_d_affine.coordinates().unwrap().x();
 
         // total_note_value must be small enough that all 4 shares
         // fit in [0, 2^24) for condition 8's range check.
         let total_note_value = pallas::Base::from(10_000u64);
         let voting_round_id = pallas::Base::random(&mut rng);
         let gov_comm_rand = pallas::Base::random(&mut rng);
-        let vsk_nk = pallas::Base::random(&mut rng);
 
         let vote_authority_note_old = van_integrity_hash(
-            g_d_x,
-            pk_d_x,
+            vpk_g_d_x,
+            vpk_pk_d_x,
             total_note_value,
             voting_round_id,
             proposal_authority_old,
@@ -1918,8 +2070,8 @@ mod tests {
         let van_nullifier = van_nullifier_hash(vsk_nk, voting_round_id, vote_authority_note_old);
         let proposal_authority_new = proposal_authority_old - pallas::Base::one();
         let vote_authority_note_new = van_integrity_hash(
-            g_d_x,
-            pk_d_x,
+            vpk_g_d_x,
+            vpk_pk_d_x,
             total_note_value,
             voting_round_id,
             proposal_authority_new,
@@ -1944,16 +2096,16 @@ mod tests {
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
             Value::known(position),
-            Value::known(g_d_x),
-            Value::known(pk_d_x),
-            Value::known(voting_hotkey_pk),
+            Value::known(vpk_g_d_affine),
+            Value::known(vpk_pk_d_affine),
             Value::known(total_note_value),
             Value::known(proposal_authority_old),
             Value::known(gov_comm_rand),
             Value::known(vote_authority_note_old),
+            Value::known(vsk),
+            Value::known(rivk_v),
             Value::known(vsk_nk),
         );
-        circuit.vsk = Value::known(vsk);
         circuit.shares = [
             Value::known(s0),
             Value::known(s1),
@@ -2010,11 +2162,12 @@ mod tests {
         let (auth_path, position, root) = build_single_leaf_merkle_path(wrong_van);
         instance.vote_comm_tree_root = root;
 
-        // Use witnesses that DON'T hash to wrong_van. Condition 3: derive pk from vsk.
+        // Use properly derived keys (condition 3 would pass) but the VAN
+        // hash won't match wrong_van, so condition 2 fails.
         let vsk = pallas::Scalar::random(&mut rng);
-        let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
-        let g_d_x = pallas::Base::random(&mut rng);
-        let pk_d_x = pallas::Base::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
+        let rivk_v = pallas::Scalar::random(&mut rng);
+        let (vpk_g_d_affine, vpk_pk_d_affine) = derive_voting_address(vsk, vsk_nk, rivk_v);
         let shares_u64: [u64; 4] = [1_000, 2_000, 3_000, 4_000];
         let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
         let (enc_c1_x, enc_c2_x, randomness, shares_hash_val) =
@@ -2023,16 +2176,16 @@ mod tests {
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
             Value::known(position),
-            Value::known(g_d_x),
-            Value::known(pk_d_x),
-            Value::known(voting_hotkey_pk),
+            Value::known(vpk_g_d_affine),
+            Value::known(vpk_pk_d_affine),
             Value::known(pallas::Base::from(10_000u64)),
             Value::known(pallas::Base::from(5u64)),
             Value::known(pallas::Base::random(&mut rng)),
             Value::known(wrong_van),
-            Value::known(pallas::Base::random(&mut rng)),
+            Value::known(vsk),
+            Value::known(rivk_v),
+            Value::known(vsk_nk),
         );
-        circuit.vsk = Value::known(vsk);
         circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
@@ -2067,21 +2220,21 @@ mod tests {
     fn van_integrity_hash_deterministic() {
         let mut rng = OsRng;
 
-        let g_d_x = pallas::Base::random(&mut rng);
-        let pk_d_x = pallas::Base::random(&mut rng);
+        let vpk_g_d = pallas::Base::random(&mut rng);
+        let vpk_pk_d = pallas::Base::random(&mut rng);
         let val = pallas::Base::random(&mut rng);
         let round = pallas::Base::random(&mut rng);
         let auth = pallas::Base::random(&mut rng);
         let rand = pallas::Base::random(&mut rng);
 
-        let h1 = van_integrity_hash(g_d_x, pk_d_x, val, round, auth, rand);
-        let h2 = van_integrity_hash(g_d_x, pk_d_x, val, round, auth, rand);
+        let h1 = van_integrity_hash(vpk_g_d, vpk_pk_d, val, round, auth, rand);
+        let h2 = van_integrity_hash(vpk_g_d, vpk_pk_d, val, round, auth, rand);
         assert_eq!(h1, h2);
 
         // Changing any input changes the hash.
         let h3 = van_integrity_hash(
             pallas::Base::random(&mut rng),
-            pk_d_x,
+            vpk_pk_d,
             val,
             round,
             auth,
@@ -2110,39 +2263,37 @@ mod tests {
 
     /// Using a different vsk_nk in the circuit than was used to compute
     /// the instance nullifier should fail condition 4.
+    /// Note: since vsk_nk is also used in CommitIvk (condition 3), the
+    /// wrong value also breaks condition 3 — but the test still verifies
+    /// that the proof fails as expected.
     #[test]
     fn van_nullifier_wrong_vsk_nk_fails() {
         let mut rng = OsRng;
 
+        // Derive proper keys with the CORRECT vsk_nk.
         let vsk = pallas::Scalar::random(&mut rng);
-        let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
-        let g_d_x = pallas::Base::random(&mut rng);
-        let pk_d_x = pallas::Base::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
+        let rivk_v = pallas::Scalar::random(&mut rng);
+        let (vpk_g_d_affine, vpk_pk_d_affine) = derive_voting_address(vsk, vsk_nk, rivk_v);
+        let vpk_g_d_x = *vpk_g_d_affine.coordinates().unwrap().x();
+        let vpk_pk_d_x = *vpk_pk_d_affine.coordinates().unwrap().x();
+
         let total_note_value = pallas::Base::from(10_000u64);
         let voting_round_id = pallas::Base::random(&mut rng);
         let proposal_authority_old = pallas::Base::from(5u64);
         let gov_comm_rand = pallas::Base::random(&mut rng);
-        let vsk_nk = pallas::Base::random(&mut rng);
 
         let vote_authority_note_old = van_integrity_hash(
-            g_d_x,
-            pk_d_x,
-            total_note_value,
-            voting_round_id,
-            proposal_authority_old,
-            gov_comm_rand,
+            vpk_g_d_x, vpk_pk_d_x, total_note_value, voting_round_id,
+            proposal_authority_old, gov_comm_rand,
         );
         let (auth_path, position, vote_comm_tree_root) =
             build_single_leaf_merkle_path(vote_authority_note_old);
         let van_nullifier = van_nullifier_hash(vsk_nk, voting_round_id, vote_authority_note_old);
         let proposal_authority_new = proposal_authority_old - pallas::Base::one();
         let vote_authority_note_new = van_integrity_hash(
-            g_d_x,
-            pk_d_x,
-            total_note_value,
-            voting_round_id,
-            proposal_authority_new,
-            gov_comm_rand,
+            vpk_g_d_x, vpk_pk_d_x, total_note_value, voting_round_id,
+            proposal_authority_new, gov_comm_rand,
         );
 
         // Use a DIFFERENT vsk_nk in the circuit.
@@ -2159,16 +2310,16 @@ mod tests {
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
             Value::known(position),
-            Value::known(g_d_x),
-            Value::known(pk_d_x),
-            Value::known(voting_hotkey_pk),
+            Value::known(vpk_g_d_affine),
+            Value::known(vpk_pk_d_affine),
             Value::known(total_note_value),
             Value::known(proposal_authority_old),
             Value::known(gov_comm_rand),
             Value::known(vote_authority_note_old),
+            Value::known(vsk),
+            Value::known(rivk_v),
             Value::known(wrong_vsk_nk),
         );
-        circuit.vsk = Value::known(vsk);
         circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
@@ -2188,6 +2339,7 @@ mod tests {
         let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
         // Should fail: circuit computes Poseidon(wrong_vsk_nk, inner_hash)
         // which ≠ the instance van_nullifier (computed with correct vsk_nk).
+        // Also fails condition 3 since wrong_vsk_nk breaks CommitIvk derivation.
         assert!(prover.verify().is_err());
     }
 
@@ -2296,23 +2448,22 @@ mod tests {
     fn van_membership_nonzero_position() {
         let mut rng = OsRng;
 
+        // Derive proper voting key hierarchy.
         let vsk = pallas::Scalar::random(&mut rng);
-        let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
-        let g_d_x = pallas::Base::random(&mut rng);
-        let pk_d_x = pallas::Base::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
+        let rivk_v = pallas::Scalar::random(&mut rng);
+        let (vpk_g_d_affine, vpk_pk_d_affine) = derive_voting_address(vsk, vsk_nk, rivk_v);
+        let vpk_g_d_x = *vpk_g_d_affine.coordinates().unwrap().x();
+        let vpk_pk_d_x = *vpk_pk_d_affine.coordinates().unwrap().x();
+
         let total_note_value = pallas::Base::from(10_000u64);
         let voting_round_id = pallas::Base::random(&mut rng);
         let proposal_authority_old = pallas::Base::from(5u64);
         let gov_comm_rand = pallas::Base::random(&mut rng);
-        let vsk_nk = pallas::Base::random(&mut rng);
 
         let vote_authority_note_old = van_integrity_hash(
-            g_d_x,
-            pk_d_x,
-            total_note_value,
-            voting_round_id,
-            proposal_authority_old,
-            gov_comm_rand,
+            vpk_g_d_x, vpk_pk_d_x, total_note_value, voting_round_id,
+            proposal_authority_old, gov_comm_rand,
         );
 
         // Place the leaf at position 7 (binary: ...0111).
@@ -2336,12 +2487,8 @@ mod tests {
         let van_nullifier = van_nullifier_hash(vsk_nk, voting_round_id, vote_authority_note_old);
         let proposal_authority_new = proposal_authority_old - pallas::Base::one();
         let vote_authority_note_new = van_integrity_hash(
-            g_d_x,
-            pk_d_x,
-            total_note_value,
-            voting_round_id,
-            proposal_authority_new,
-            gov_comm_rand,
+            vpk_g_d_x, vpk_pk_d_x, total_note_value, voting_round_id,
+            proposal_authority_new, gov_comm_rand,
         );
 
         // Shares that sum to total_note_value (conditions 7 + 8).
@@ -2355,16 +2502,16 @@ mod tests {
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
             Value::known(position),
-            Value::known(g_d_x),
-            Value::known(pk_d_x),
-            Value::known(voting_hotkey_pk),
+            Value::known(vpk_g_d_affine),
+            Value::known(vpk_pk_d_affine),
             Value::known(total_note_value),
             Value::known(proposal_authority_old),
             Value::known(gov_comm_rand),
             Value::known(vote_authority_note_old),
+            Value::known(vsk),
+            Value::known(rivk_v),
             Value::known(vsk_nk),
         );
-        circuit.vsk = Value::known(vsk);
         circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
@@ -2427,34 +2574,29 @@ mod tests {
         let total = max_share + max_share + max_share + max_share;
 
         let mut rng = OsRng;
+        // Derive proper voting key hierarchy.
         let vsk = pallas::Scalar::random(&mut rng);
-        let voting_hotkey_pk = derive_voting_hotkey_pk(vsk);
-        let g_d_x = pallas::Base::random(&mut rng);
-        let pk_d_x = pallas::Base::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
+        let rivk_v = pallas::Scalar::random(&mut rng);
+        let (vpk_g_d_affine, vpk_pk_d_affine) = derive_voting_address(vsk, vsk_nk, rivk_v);
+        let vpk_g_d_x = *vpk_g_d_affine.coordinates().unwrap().x();
+        let vpk_pk_d_x = *vpk_pk_d_affine.coordinates().unwrap().x();
+
         let voting_round_id = pallas::Base::random(&mut rng);
         let proposal_authority_old = pallas::Base::from(5u64);
         let gov_comm_rand = pallas::Base::random(&mut rng);
-        let vsk_nk = pallas::Base::random(&mut rng);
 
         let vote_authority_note_old = van_integrity_hash(
-            g_d_x,
-            pk_d_x,
-            total,
-            voting_round_id,
-            proposal_authority_old,
-            gov_comm_rand,
+            vpk_g_d_x, vpk_pk_d_x, total, voting_round_id,
+            proposal_authority_old, gov_comm_rand,
         );
         let (auth_path, position, vote_comm_tree_root) =
             build_single_leaf_merkle_path(vote_authority_note_old);
         let van_nullifier = van_nullifier_hash(vsk_nk, voting_round_id, vote_authority_note_old);
         let proposal_authority_new = proposal_authority_old - pallas::Base::one();
         let vote_authority_note_new = van_integrity_hash(
-            g_d_x,
-            pk_d_x,
-            total,
-            voting_round_id,
-            proposal_authority_new,
-            gov_comm_rand,
+            vpk_g_d_x, vpk_pk_d_x, total, voting_round_id,
+            proposal_authority_new, gov_comm_rand,
         );
 
         // Condition 10: real El Gamal encryption with max-value shares.
@@ -2467,16 +2609,16 @@ mod tests {
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
             Value::known(position),
-            Value::known(g_d_x),
-            Value::known(pk_d_x),
-            Value::known(voting_hotkey_pk),
+            Value::known(vpk_g_d_affine),
+            Value::known(vpk_pk_d_affine),
             Value::known(total),
             Value::known(proposal_authority_old),
             Value::known(gov_comm_rand),
             Value::known(vote_authority_note_old),
+            Value::known(vsk),
+            Value::known(rivk_v),
             Value::known(vsk_nk),
         );
-        circuit.vsk = Value::known(vsk);
         circuit.shares = [Value::known(max_share); 4];
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);

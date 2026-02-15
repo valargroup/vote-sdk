@@ -1,9 +1,9 @@
 # Vote Proof Circuit (ZKP 2)
 
-Proves that a registered voter is casting a valid vote, without revealing which VAN they hold. The structure follows the delegation circuit's pattern (ZKP 1). All 11 conditions are fully implemented.
+Proves that a registered voter is casting a valid vote, without revealing which VAN they hold. The structure follows the delegation circuit's pattern (ZKP 1). All 11 conditions are fully constrained.
 
 **Public inputs:** 9 field elements.
-**Current K:** 14 (16,384 rows) — accommodates all 11 conditions, including 12 variable-base ECC scalar multiplications (condition 10), the fixed-base mul (condition 3), ~31 Poseidon hashes, and the 10-bit lookup table.
+**Current K:** 14 (16,384 rows) — accommodates all 11 conditions, including 12 variable-base ECC scalar multiplications (condition 10), ~31 Poseidon hashes, and the 10-bit lookup table.
 
 ## Inputs
 
@@ -19,17 +19,17 @@ Proves that a registered voter is casting a valid vote, without revealing which 
    * **ea_pk_y** (offset 8): y-coordinate of the election authority public key. Both coordinates are public to prevent sign-ambiguity attacks (using −ea_pk would corrupt the tally).
 
 - Private (VAN ownership — conditions 1–4)
-   * **g_d_x**: diversified base point x-coordinate (from DiversifyHash(d)). Matches ZKP 1 (delegation) VAN structure.
-   * **pk_d_x**: diversified transmission key x-coordinate (pk_d = [ivk] * g_d). Matches ZKP 1 VAN structure.
-   * **voting_hotkey_pk**: the voting hotkey public key (x-coordinate of [vsk]*SpendAuthG); used for condition 3 (spend authority).
+   * **vpk_g_d**: voting public key — diversified base point (full affine point from DiversifyHash(d)). Witnessed as `NonIdentityPoint`; x-coordinate extracted for Poseidon hashing (conditions 2, 6). This is the `vpk_d` component of the voting hotkey address. Matches ZKP 1 (delegation) VAN structure.
+   * **vpk_pk_d**: voting public key — diversified transmission key (full affine point, pk_d = [ivk_v] * g_d). Witnessed as `NonIdentityPoint`; x-coordinate extracted for Poseidon hashing (conditions 2, 6). Condition 3 constrains this to equal `[ivk_v] * vpk_g_d`. Matches ZKP 1 VAN structure.
    * **total_note_value**: the voter's total delegated weight.
    * **proposal_authority_old**: remaining proposal authority bitmask in the old VAN.
    * **gov_comm_rand**: blinding randomness for the VAN commitment.
    * **vote_authority_note_old**: the old VAN commitment (two-layer Poseidon hash, same structure as ZKP 1 gov_comm).
    * **vote_comm_tree_path**: Poseidon-based Merkle authentication path (24 sibling hashes).
    * **vote_comm_tree_position**: leaf position in the vote commitment tree.
-   * **vsk**: voting spending key (scalar for ECC multiplication).
-   * **vsk_nk**: nullifier deriving key derived from `vsk`.
+   * **vsk**: voting spending key (scalar for ECC multiplication). Used in condition 3 for `[vsk] * SpendAuthG`.
+   * **rivk_v**: CommitIvk randomness (scalar). Blinding factor for `CommitIvk(ak, nk, rivk_v)` in condition 3.
+   * **vsk_nk**: nullifier deriving key derived from `vsk`. Shared between condition 3 (CommitIvk `nk` input) and condition 4 (VAN nullifier keying).
 
 - Private (vote commitment — conditions 7–11)
    * **shares_1..4**: the voting share vector (each in `[0, 2^24)`).
@@ -54,14 +54,14 @@ Proves that a registered voter is casting a valid vote, without revealing which 
 Purpose: prove that the old VAN commitment is correctly constructed from its components. Uses the **same two-layer hash structure as ZKP 1 (delegation)** so that a VAN created by the delegation circuit can be spent (opened) by the vote proof circuit.
 
 ```
-gov_comm_core = Poseidon(DOMAIN_VAN, g_d_x, pk_d_x, total_note_value,
+gov_comm_core = Poseidon(DOMAIN_VAN, vpk_g_d, vpk_pk_d, total_note_value,
                          voting_round_id, proposal_authority_old)
 vote_authority_note_old = Poseidon(gov_comm_core, gov_comm_rand)
 ```
 
 Where:
 - **DOMAIN_VAN**: `0`. Domain separation tag for Vote Authority Notes (vs `DOMAIN_VC = 1` for Vote Commitments). Assigned via `assign_advice_from_constant` so the value is baked into the verification key.
-- **g_d_x**, **pk_d_x**: diversified address components (diversified base and transmission key x-coordinates). Same encoding as in ZKP 1 condition 7, so a VAN created by delegation has the same commitment structure.
+- **vpk_g_d**, **vpk_pk_d**: voting public key address components (diversified base and transmission key x-coordinates). Same encoding as in ZKP 1 condition 7, so a VAN created by delegation has the same commitment structure.
 - **total_note_value**: the voter's total delegated weight. Shared with condition 7 (shares sum check).
 - **voting_round_id**: the vote round identifier (public input at offset 6). Copied from the instance column via `assign_advice_from_instance`, ensuring the in-circuit value matches the verifier's public input.
 - **proposal_authority_old**: remaining proposal authority bitmask. Shared with condition 5 (decrement check).
@@ -72,7 +72,7 @@ Where:
 
 **Constraint:** The circuit computes the two-layer hash and enforces strict equality with `vote_authority_note_old`. Since `vote_authority_note_old` will also be used as the Merkle leaf in condition 1, this creates a binding: the VAN membership proof and the VAN integrity check are tied to the same commitment.
 
-**Out-of-circuit helper:** `van_integrity::van_integrity_hash(g_d_x, pk_d_x, total_note_value, voting_round_id, proposal_authority_old, gov_comm_rand)` from the shared `circuit::van_integrity` module computes the same two-layer hash outside the circuit for builder and test use.
+**Out-of-circuit helper:** `van_integrity::van_integrity_hash(vpk_g_d, vpk_pk_d, total_note_value, voting_round_id, proposal_authority_old, gov_comm_rand)` from the shared `circuit::van_integrity` module computes the same two-layer hash outside the circuit for builder and test use. (Note: the shared module's parameter names are `g_d_x`/`pk_d_x`.)
 
 **Constructions:** `van_integrity::van_integrity_poseidon` (shared gadget from `circuit::van_integrity`).
 
@@ -107,15 +107,45 @@ Identical to the delegation circuit's `q_imt_swap` gate.
 
 ## Condition 3: Spend Authority ✅
 
-Purpose: prove the voter controls the hotkey delegated to in Phase 1–2.
+Purpose: prove the voter controls the voting hotkey address delegated to in Phase 1–2. Uses the same CommitIvk chain as ZKP 1 (delegation) condition 5.
 
 ```
-voting_hotkey_pk = ExtractP([vsk] * G)
+vsk_ak      = [vsk] * SpendAuthG               (fixed-base ECC mul)
+ak          = ExtractP(vsk_ak)                  (x-coordinate)
+ivk_v       = CommitIvk_rivk_v(ak, vsk.nk)     (Sinsemilla commitment)
+vpk_pk_d    = [ivk_v] * vpk_g_d                (variable-base ECC mul)
 ```
 
-Where **G** is the SpendAuth fixed base (`OrchardFixedBasesFull::SpendAuthG`), matching the delegation circuit's spend authority pattern. The circuit witnesses `vsk` as a full-width scalar, computes `[vsk] * SpendAuthG` via fixed-base scalar multiplication, extracts the x-coordinate, and constrains it to equal the witnessed `voting_hotkey_pk` (the same cell used in conditions 2, 4, 5, 6).
+Where:
+- **vsk**: voting spending key (private witness, `pallas::Scalar`). The secret key that authorizes vote casting.
+- **SpendAuthG**: fixed generator point on the Pallas curve, reused from the Zcash Orchard protocol. Used both here (condition 3) and in condition 10 (El Gamal generator).
+- **ak**: the spend validating key's x-coordinate, derived in-circuit from `[vsk] * SpendAuthG` then `ExtractP`. Not a separate witness — it's an internal wire.
+- **vsk_nk**: nullifier deriving key (private witness, `pallas::Base`). The same cell is shared with condition 4 (VAN nullifier keying). Witnessed before condition 3 in the synthesize flow.
+- **rivk_v**: CommitIvk randomness (private witness, `pallas::Scalar`). Blinding factor for the Sinsemilla commitment.
+- **ivk_v**: the incoming viewing key, derived in-circuit via `CommitIvk(ak, nk, rivk_v)`. Internal wire — flows from CommitIvk output to variable-base ECC mul input via `ScalarVar::from_base`.
+- **vpk_g_d**: diversified base point (private witness, full affine point). Witnessed as `NonIdentityPoint`. The x-coordinate is extracted for Poseidon hashing in conditions 2 and 6.
+- **vpk_pk_d**: diversified transmission key (private witness, full affine point). Witnessed as `NonIdentityPoint`. Constrained to equal the derived `[ivk_v] * vpk_g_d` via `Point::constrain_equal`.
 
-**Constructions:** `EccChip`, `ScalarFixed`, `FixedPoint`.
+**Structure:** Five steps in a scoped block:
+1. `ScalarFixed::new(vsk)` → `FixedPoint::mul(SpendAuthG)` → `vsk_ak_point` (fixed-base scalar mul, ~500 rows)
+2. `vsk_ak_point.extract_p()` → `ak` (x-coordinate extraction, 0 rows — just cell wiring)
+3. `ScalarFixed::new(rivk_v)` → `commit_ivk_gadget(sinsemilla_chip, ecc_chip, commit_ivk_chip, ak, vsk_nk, rivk_v)` → `ivk_v` (Sinsemilla commitment with canonicity checks, ~2,000 rows)
+4. `ScalarVar::from_base(ivk_v)` → `vpk_g_d_point.mul(ivk_v_scalar)` → `derived_vpk_pk_d` (variable-base scalar mul, ~500 rows)
+5. `derived_vpk_pk_d.constrain_equal(vpk_pk_d_point)` — full point equality (both coordinates)
+
+**Chip dependencies:** `SinsemillaChip` (for the CommitIvk Sinsemilla hash), `CommitIvkChip` (for ak/nk canonicity gate), `EccChip` (for fixed-base and variable-base scalar multiplication). The Sinsemilla chip also loads the 10-bit lookup table used by conditions 5 and 8 (replacing the manual table loading).
+
+**Constraint:** The circuit derives vpk_pk_d from vsk → ak → ivk_v → [ivk_v] * vpk_g_d and enforces full point equality with the witnessed vpk_pk_d. Since vpk_pk_d's x-coordinate flows into conditions 2 and 6 (VAN integrity hashes), and vpk_g_d's x-coordinate flows into the same hashes, any mismatch in the key hierarchy would break conditions 2/3/6 simultaneously.
+
+**Security properties:**
+- **Key binding:** The CommitIvk chain cryptographically binds vsk to the VAN address (vpk_g_d, vpk_pk_d). A prover who doesn't know vsk cannot produce a valid ivk_v that maps vpk_g_d to vpk_pk_d.
+- **Canonicity:** The CommitIvk gadget enforces canonical decomposition of ak and nk, preventing malleability attacks where different bit representations produce the same commitment.
+- **Non-identity:** Both vpk_g_d and vpk_pk_d are witnessed as `NonIdentityPoint`, ensuring they are not the curve identity (which would trivially satisfy the constraint for any ivk_v).
+- **Shared nk:** Using the same vsk_nk cell for both CommitIvk (condition 3) and the VAN nullifier (condition 4) ensures the nullifier is bound to the same key hierarchy that authorizes the vote.
+
+**Out-of-circuit helper:** `derive_voting_address(vsk, nk, rivk_v)` in tests performs the same computation: `[vsk] * SpendAuthG → ExtractP → CommitIvk → [ivk_v] * g_d`. Uses `CommitDomain::short_commit` from `halo2_gadgets::sinsemilla::primitives`.
+
+**Constructions:** `SinsemillaChip`, `CommitIvkChip`, `EccChip`, `FixedPoint`, `ScalarFixed`, `NonIdentityPoint`, `ScalarVar`, `Point::constrain_equal`.
 
 ## Condition 4: VAN Nullifier Integrity ✅
 
@@ -163,15 +193,15 @@ Where:
 
 Purpose: the new VAN has the same structure as the old (ZKP 1–compatible two-layer hash) except with decremented authority.
 
-Same two-layer formula as condition 2: `gov_comm_core = Poseidon(DOMAIN_VAN, g_d_x, pk_d_x, total_note_value, voting_round_id, proposal_authority_new)` then `vote_authority_note_new = Poseidon(gov_comm_core, gov_comm_rand)`.
+Same two-layer formula as condition 2: `gov_comm_core = Poseidon(DOMAIN_VAN, vpk_g_d, vpk_pk_d, total_note_value, voting_round_id, proposal_authority_new)` then `vote_authority_note_new = Poseidon(gov_comm_core, gov_comm_rand)`.
 
 Where:
-- **g_d_x**, **pk_d_x**, **total_note_value**, **voting_round_id**, **gov_comm_rand** are cell-equality-linked to the same witness cells used in condition 2.
+- **vpk_g_d**, **vpk_pk_d**, **total_note_value**, **voting_round_id**, **gov_comm_rand** are cell-equality-linked to the same witness cells used in condition 2.
 - **proposal_authority_new**: flows from condition 5's output. This is the only difference between the condition 2 and condition 6 hashes.
 
 **Constraint:** The circuit computes the two-layer hash and enforces `constrain_instance(derived_van_new, VOTE_AUTHORITY_NOTE_NEW)` — binding the result to the public input at offset 1.
 
-**Out-of-circuit helper:** Reuses `van_integrity::van_integrity_hash(g_d_x, pk_d_x, total_note_value, voting_round_id, proposal_authority_new, gov_comm_rand)` with `proposal_authority_new = proposal_authority_old - 1`.
+**Out-of-circuit helper:** Reuses `van_integrity::van_integrity_hash(vpk_g_d, vpk_pk_d, total_note_value, voting_round_id, proposal_authority_new, gov_comm_rand)` with `proposal_authority_new = proposal_authority_old - 1`. (Note: the shared module's parameter names are `g_d_x`/`pk_d_x`.)
 
 **Constructions:** `van_integrity::van_integrity_poseidon` (shared gadget from `circuit::van_integrity`).
 
@@ -257,7 +287,7 @@ For each share i (0..3):
 ```
 
 Where:
-- **G**: SpendAuthG, the El Gamal generator. Reused from condition 3's ECC chip configuration. Both x and y coordinates are assigned via `assign_advice_from_constant`, baking them into the verification key. Each NonIdentityPoint witness of G is constrained to match these constants, preventing a malicious prover from using a different (or negated) generator.
+- **G**: SpendAuthG, the El Gamal generator. Both x and y coordinates are assigned via `assign_advice_from_constant`, baking them into the verification key. Each NonIdentityPoint witness of G is constrained to match these constants, preventing a malicious prover from using a different (or negated) generator.
 - **r_i**: El Gamal randomness for share `i` (private witness, `pallas::Base`). Converted to `ScalarVar` via `ScalarVar::from_base` for variable-base ECC multiplication. The same cell is cloned and used for both `[r_i] * G` (C1) and `[r_i] * ea_pk` (C2), ensuring the same randomness binds both ciphertext components.
 - **v_i**: plaintext share value from conditions 7/8. Cell-equality-linked to the same cells used in `AddChip` (condition 7) and range check (condition 8). Converted to `ScalarVar` via `ScalarVar::from_base` for ECC multiplication.
 - **ea_pk**: election authority public key (Pallas curve point, public input at offsets 7–8). Witnessed as a `NonIdentityPoint` (on-curve constraint included). Both x and y coordinates are constrained to match the instance column cells, preventing a prover from using a different or negated key.
@@ -285,7 +315,7 @@ Total: 12 variable-base scalar multiplications (~6,000 rows), 4 point additions,
 
 **Out-of-circuit helpers:** `elgamal_encrypt()` computes the same El Gamal encryption outside the circuit. `spend_auth_g_affine()` returns the SpendAuthG generator as a Pallas affine point. `base_to_scalar()` converts base field elements to scalars.
 
-**Constructions:** `EccChip` (reused from condition 3), `NonIdentityPoint`, `ScalarVar`, `Point::add`, `Point::extract_p`.
+**Constructions:** `EccChip`, `NonIdentityPoint`, `ScalarVar`, `Point::add`, `Point::extract_p`.
 
 ## Condition 11: Vote Commitment Integrity ✅
 
@@ -321,17 +351,28 @@ vote_decision ──────────────────────
 
 ## Column Layout
 
-| Columns | Current use | Future use |
-|---------|------------|------------|
-| `advices[0..5]` | General witness assignment, ECC (cond 3, 10) | Sinsemilla/Merkle (if needed) |
-| `advices[5]` | Poseidon partial S-box | — |
-| `advices[6]` | Poseidon state + AddChip output (c) | — |
-| `advices[7]` | Poseidon state + AddChip input (a) | — |
-| `advices[8]` | Poseidon state + AddChip input (b) | — |
-| `advices[9]` | Range check running sum | — |
-| `lagrange_coeffs[0]` | Constants (DOMAIN_VAN, DOMAIN_VC, ONE, SpendAuthG x/y) | — |
-| `lagrange_coeffs[1]` | ECC Lagrange coefficients | — |
-| `lagrange_coeffs[2..5]` | Poseidon rc_a | — |
-| `lagrange_coeffs[5..8]` | Poseidon rc_b | — |
-| `table_idx` | 10-bit lookup table [0, 1024) | — |
-| `primary` | 9 public inputs | — |
+| Columns | Use |
+|---------|-----|
+| `advices[0..5]` | General witness assignment, ECC (cond 3, 10), Sinsemilla/CommitIvk (cond 3) |
+| `advices[5]` | Poseidon partial S-box |
+| `advices[6]` | Poseidon state + AddChip output (c) |
+| `advices[7]` | Poseidon state + AddChip input (a) |
+| `advices[8]` | Poseidon state + AddChip input (b) |
+| `advices[9]` | Range check running sum |
+| `lagrange_coeffs[0]` | Constants (DOMAIN_VAN, DOMAIN_VC, ONE, SpendAuthG x/y) |
+| `lagrange_coeffs[1]` | ECC Lagrange coefficients |
+| `lagrange_coeffs[2..5]` | Poseidon rc_a |
+| `lagrange_coeffs[5..8]` | Poseidon rc_b |
+| `table_idx` (+ additional lookup columns) | 10-bit lookup table [0, 1024), Sinsemilla lookup (loaded by `SinsemillaChip`) |
+| `primary` | 9 public inputs |
+
+## Chip Summary
+
+| Chip | Conditions | Role |
+|------|-----------|------|
+| `PoseidonChip` (Pow5) | 1, 2, 4, 6, 9, 11 | Poseidon hashing (Merkle paths, VAN integrity, nullifiers, shares hash, vote commitment) |
+| `EccChip` | 3, 10 | Fixed-base and variable-base scalar multiplication, point addition, ExtractP |
+| `SinsemillaChip` | 3 | Sinsemilla hash inside CommitIvk |
+| `CommitIvkChip` | 3 | Canonicity gate for ak/nk decomposition in CommitIvk |
+| `AddChip` | 5, 7 | Field element addition (authority decrement, shares sum) |
+| `LookupRangeCheckConfig` | 5, 8 | 10-bit running-sum range checks |

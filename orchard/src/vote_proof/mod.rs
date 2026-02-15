@@ -16,7 +16,9 @@
 //! - **Condition 10**: Encryption Integrity (ECC variable-base mul, `constrain_equal`).
 //! - **Condition 11**: Vote Commitment Integrity (Poseidon `ConstantLength<4>`, `constrain_instance`).
 //!
-//! All 11 conditions are fully implemented.
+//! - **Condition 3**: Spend Authority (CommitIvk chain, `constrain_equal`).
+//!
+//! All 11 conditions are fully constrained.
 
 pub mod circuit;
 
