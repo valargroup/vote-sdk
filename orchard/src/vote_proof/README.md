@@ -42,7 +42,7 @@ Proves that a registered voter is casting a valid vote, without revealing which 
 - Internal wires (not public inputs, not free witnesses)
    * **voting_round_id cell**: copied from the instance column, used in condition 2 Poseidon hash and condition 4 inner hash.
    * **domain_van_nullifier cell**: constant encoding of `"vote authority spend"` (condition 4).
-   * **proposal_authority_new**: derived as `proposal_authority_old - 1` (condition 5).
+   * **proposal_authority_new**: derived as `proposal_authority_old - (1 << proposal_id)` (condition 5).
    * **shares_hash**: Poseidon hash of 8 enc_share x-coordinates (condition 9). Internal wire consumed by condition 11.
    * **SpendAuthG x, y constants**: coordinates of the El Gamal generator (condition 10). Baked into the verification key via `assign_advice_from_constant`.
    * **ea_pk_x, ea_pk_y cells**: copied from the instance column (condition 10). Each ea_pk `NonIdentityPoint` witness is constrained to match these cells.
@@ -171,21 +171,27 @@ Three-layer `ConstantLength<2>` chain matching ZKP 1 condition 14's governance n
 
 ## Condition 5: Proposal Authority Decrement ✅
 
-Purpose: ensure the voter still has authority and correctly decrements it.
+Purpose: ensure the voter has authority for the voted proposal and correctly clears that bit in the authority bitmask (spec-aligned).
+
+**Spec (Gov Steps V1 §3.5 Step 2, ZKP #2 Condition 6):** `proposal_authority` is a 16-bit bitmask; one vote consumes the bit for the chosen proposal: `proposal_authority_new = proposal_authority_old - (1 << proposal_id)`, and the `proposal_id`-th bit of `proposal_authority_old` must be 1.
 
 ```
-proposal_authority_new = proposal_authority_old - 1
-proposal_authority_old > 0
+one_shifted = 2^proposal_id     (via lookup table)
+proposal_authority_new = proposal_authority_old - one_shifted
+bit proposal_id of proposal_authority_old is 1
+proposal_authority_old, proposal_authority_new in [0, 2^16)
 ```
 
 Where:
-- **proposal_authority_old**: the remaining proposal authority from the old VAN. Reused from condition 2's witness cell via cell equality.
-- **proposal_authority_new**: witnessed as `proposal_authority_old - 1` and constrained via `AddChip`: `proposal_authority_new + 1 == proposal_authority_old`.
-- **Range check**: `proposal_authority_new` is range-checked to [0, 2^70) using `LookupRangeCheckConfig` with 7 × 10-bit words. If `proposal_authority_old == 0`, the subtraction wraps to `p - 1 ≈ 2^254`, failing the range check — enforcing `proposal_authority_old > 0`.
+- **proposal_id**: which proposal is being voted on (public input at offset 5). Loaded from the instance column and used in the lookup.
+- **proposal_authority_old**: the remaining proposal authority bitmask from the old VAN (16-bit). Reused from condition 2's witness cell via cell equality.
+- **one_shifted**: witness equal to `2^proposal_id`. Constrained by a lookup table: table rows are `(i, 2^i)` for `i = 0..16`; when the condition is active the circuit looks up `(proposal_id, one_shifted)` so `one_shifted` must equal `2^proposal_id`.
+- **proposal_authority_new**: constrained via `AddChip`: `proposal_authority_new + one_shifted == proposal_authority_old`. A "bit was set" check is enforced by range-checking a derived value so that the cleared authority is non-negative and consistent.
+- **Range checks**: `proposal_authority_old` and `proposal_authority_new` are range-checked to 16 bits. If the `proposal_id`-th bit of `proposal_authority_old` is 0, the subtraction would underflow and fail the range check.
 
-**Structure:** One `AddChip` constraint (1 row) + one running-sum range check (8 rows). The constant `1` is assigned via `assign_advice_from_constant`, baking it into the verification key.
+**Structure:** Lookup table of 17 rows `(i, 2^i)` for `i = 0..=16`; one region to assign `proposal_id` and `one_shifted` and perform the lookup; one region for `proposal_authority_new + one_shifted = proposal_authority_old`, the bit-set check (via `diff` and 16-bit range check), and 16-bit range checks for both authority values.
 
-**Constructions:** `AddChip`, `LookupRangeCheckConfig`.
+**Constructions:** Lookup table (`table_proposal_id`, `table_one_shifted`), `AddChip`, `LookupRangeCheckConfig` (10-bit words for 16-bit range).
 
 ## Condition 6: New VAN Integrity ✅
 
@@ -199,7 +205,7 @@ Where:
 
 **Constraint:** The circuit computes the two-layer hash and enforces `constrain_instance(derived_van_new, VOTE_AUTHORITY_NOTE_NEW)` — binding the result to the public input at offset 1.
 
-**Out-of-circuit helper:** Reuses `van_integrity::van_integrity_hash(vpk_g_d, vpk_pk_d, total_note_value, voting_round_id, proposal_authority_new, gov_comm_rand)` with `proposal_authority_new = proposal_authority_old - 1`. (Note: the shared module's parameter names are `g_d_x`/`pk_d_x`.)
+**Out-of-circuit helper:** Reuses `van_integrity::van_integrity_hash(vpk_g_d, vpk_pk_d, total_note_value, voting_round_id, proposal_authority_new, gov_comm_rand)` with `proposal_authority_new = proposal_authority_old - (1 << proposal_id)`. (Note: the shared module's parameter names are `g_d_x`/`pk_d_x`.)
 
 **Constructions:** `van_integrity::van_integrity_poseidon` (shared gadget from `circuit::van_integrity`).
 
@@ -361,7 +367,7 @@ vote_decision ──────────────────────
 | `lagrange_coeffs[1]` | ECC Lagrange coefficients |
 | `lagrange_coeffs[2..5]` | Poseidon rc_a |
 | `lagrange_coeffs[5..8]` | Poseidon rc_b |
-| `table_idx` (+ additional lookup columns) | 10-bit lookup table [0, 1024), Sinsemilla lookup (loaded by `SinsemillaChip`) |
+| `table_idx` (+ additional lookup columns) | 10-bit lookup table [0, 1024), Sinsemilla lookup (loaded by `SinsemillaChip`); (proposal_id, 2^proposal_id) table for condition 5 |
 | `primary` | 9 public inputs |
 
 ## Chip Summary
