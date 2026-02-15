@@ -129,6 +129,40 @@ int32_t zally_vote_tree_path(
     uint8_t* path_out
 );
 
+/* -----------------------------------------------------------------------
+ * Delegation circuit (ZKP #1) — real Halo2 proof verification
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Verify a real delegation circuit proof (ZKP #1, 15 conditions, K=14).
+ *
+ * The public inputs are passed as a flat byte array of 11 x 32-byte
+ * chunks (352 bytes total), in order:
+ *   [nf_signed, rk_compressed, cmx_new, gov_comm, vote_round_id,
+ *    nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4]
+ *
+ * rk_compressed is a 32-byte compressed Pallas curve point. The FFI
+ * decompresses it into (rk_x, rk_y) for the circuit's 12 field elements.
+ *
+ * Parameters:
+ *   proof_ptr         - Pointer to serialized Halo2 proof bytes.
+ *   proof_len         - Length of the proof byte array.
+ *   public_inputs_ptr - Pointer to 352 bytes (11 x 32-byte chunks).
+ *   public_inputs_len - Length of the public inputs byte array (must be 352).
+ *
+ * Returns:
+ *    0  on successful verification.
+ *   -1  if inputs are invalid (null pointers or wrong lengths).
+ *   -2  if the proof does not verify.
+ *   -3  if there is an internal deserialization error (e.g. invalid rk).
+ */
+int32_t zally_verify_delegation_proof(
+    const uint8_t* proof_ptr,
+    size_t proof_len,
+    const uint8_t* public_inputs_ptr,
+    size_t public_inputs_len
+);
+
 #ifdef __cplusplus
 }
 #endif

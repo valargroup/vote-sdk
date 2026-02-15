@@ -38,6 +38,12 @@ $BINARY genesis collect-gentxs --home "$HOME_DIR"
 # Validate genesis
 $BINARY genesis validate-genesis --home "$HOME_DIR"
 
+# Enable the REST API server (default: disabled).
+# The API tests connect to this endpoint (default port 1317).
+APP_TOML="$HOME_DIR/config/app.toml"
+sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
+rm -f "${APP_TOML}.bak"
+
 echo ""
 echo "=== Chain initialized successfully! ==="
 echo "Start with: $BINARY start --home $HOME_DIR"

@@ -5,5 +5,6 @@ export default defineConfig({
     testTimeout: 30_000, // 30s per test (network + block times)
     hookTimeout: 30_000, // 30s for beforeAll/afterAll hooks
     fileParallelism: false, // run test files sequentially to avoid round ID collisions
+    bail: 1, // stop on first failure (do not continue)
   },
 });

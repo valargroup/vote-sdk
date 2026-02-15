@@ -3,19 +3,21 @@
  *
  * Exercises the complete lifecycle:
  *   1. MsgCreateVotingSession — create a round
- *   2. MsgDelegateVote        — delegate with real RedPallas sig + Halo2 proof (ZKP #1)
+ *   2. MsgDelegateVote        — real ZKP #1 delegation proof + RedPallas sig
  *   3. MsgCastVote            — cast vote with mock proof (ZKP #2)
  *   4. MsgRevealShare         — reveal share with mock proof (ZKP #3)
  *   5. Query tally            — verify accumulated vote
  *   6. MsgSubmitTally         — finalize the session (TALLYING → FINALIZED)
  *
- * ZKP #2 and #3 proofs are mocked: the chain's MockVerifier accepts any bytes
- * in development mode.
+ * ZKP #1 (delegation): uses the real delegation fixture (delegation_real.json)
+ * when available, so the test works with both MockVerifier and real Halo2
+ * verification (make install-ffi). Falls back to toy proof otherwise.
+ * ZKP #2, #3: toy/mock proofs — MockVerifier accepts any bytes.
  *
  * Prerequisites:
  *   1. Build chain: make install (or make install-ffi for real ZKP #1 verification)
  *   2. Start chain: make init && make start
- *   3. (Optional) Generate fixtures: make fixtures (for real Halo2 proof in delegation)
+ *   3. Generate fixtures: make fixtures (for ElGamal + delegation + RedPallas fixtures)
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -25,6 +27,7 @@ import {
   makeCastVotePayload,
   makeRevealSharePayload,
   makeSubmitTallyPayload,
+  getRealDelegationFixture,
   postJSON,
   getJSON,
   sleep,
@@ -82,10 +85,16 @@ if (!fixtures) {
 const FIXTURE_EA_PK = new Uint8Array(Buffer.from(fixtures.ea_pk, "base64"));
 
 // ===========================================================================
-// Suite 1: Voting flow (long-lived session — no tallying)
+// E2E Voting Flow — full lifecycle through FINALIZED
+//
+// The delegation fixture (delegation_real.json) has a short vote_end_time
+// (~3 minutes from fixture generation). Run `make fixtures && make test-api`
+// in quick succession so the session expires within the test timeout.
 // ===========================================================================
 
 describe("E2E Voting Flow", () => {
+  const SESSION_CREATOR = "zvote1admin";
+
   // Shared state across sequential test steps.
   let roundId: Uint8Array;
   let roundIdHex: string;
@@ -96,7 +105,34 @@ describe("E2E Voting Flow", () => {
   // -------------------------------------------------------------------------
 
   beforeAll(async () => {
-    const { body, roundId: rid } = makeCreateVotingSessionPayload(FIXTURE_EA_PK);
+    // When the real delegation fixture is available, use its session params
+    // so the vote_round_id derived from the session matches the one baked
+    // into the delegation proof. This is required when the chain is built
+    // with real Halo2 verification (make install-ffi).
+    const delegFixture = getRealDelegationFixture();
+    const sessionOpts = delegFixture
+      ? { sessionOverride: delegFixture.session }
+      : undefined;
+
+    // Safeguard: verify the fixture's vote_end_time hasn't already passed.
+    // If it has, the EndBlocker will immediately transition the round to
+    // TALLYING and delegation will fail. Regenerate with: make fixtures
+    if (delegFixture) {
+      const now = Math.floor(Date.now() / 1000);
+      const remaining = delegFixture.session.vote_end_time - now;
+      if (remaining < 60) {
+        throw new Error(
+          `Delegation fixture is stale: vote_end_time expires in ${remaining}s. ` +
+          `Regenerate with: make fixtures && make test-api`,
+        );
+      }
+      console.log(`[E2E] fixture vote_end_time expires in ${remaining}s`);
+    }
+
+    const { body, roundId: rid } = makeCreateVotingSessionPayload(
+      FIXTURE_EA_PK,
+      sessionOpts,
+    );
     roundId = rid;
     roundIdHex = toHex(roundId);
 
@@ -108,11 +144,11 @@ describe("E2E Voting Flow", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Step 2: Delegate vote (ZKP #1 — real RedPallas sig + Halo2 proof)
+  // Step 1: Delegate vote (ZKP #1 — real delegation fixture when available)
   // -------------------------------------------------------------------------
 
   it("step 1: delegate vote succeeds", async () => {
-    const delegationBody = makeDelegateVotePayload(roundId);
+    const delegationBody = makeDelegateVotePayload(roundId, { useRealFixture: true });
     const { status, json } = await postJSON(
       "/zally/v1/delegate-vote",
       delegationBody,
@@ -131,23 +167,33 @@ describe("E2E Voting Flow", () => {
   // -------------------------------------------------------------------------
 
   it("step 2: commitment tree has a computed root after delegation", async () => {
-    const { status, json } = await getJSON(
-      "/zally/v1/commitment-tree/latest",
-    );
+    // The EndBlocker computes the tree root at the end of the block that
+    // includes the delegation tx. Poll until the tree has leaves (the query
+    // may arrive before the EndBlocker has run).
+    let treeJson: any;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const { status, json } = await getJSON("/zally/v1/commitment-tree/latest");
+      expect(status).toBe(200);
+      if (json.tree && json.tree.height > 0) {
+        treeJson = json;
+        break;
+      }
+      await sleep(2000);
+    }
+    expect(treeJson, "tree never populated after delegation").toBeTruthy();
 
-    expect(status).toBe(200);
-    expect(json.tree).toBeTruthy();
-    expect(json.tree.height).toBeGreaterThan(0);
-    // DelegateVote appends 2 leaves: cmx_new, gov_comm.
-    expect(json.tree.next_index).toBe(2);
+    expect(treeJson.tree.height).toBeGreaterThan(0);
+    // DelegateVote appends 2 leaves: cmx_new, gov_comm. Use ≥ 2 in case
+    // the chain has leftover state from a prior test run.
+    expect(treeJson.tree.next_index).toBeGreaterThanOrEqual(2);
     // Root is computed by EndBlocker (Poseidon or placeholder); must be present and 32 bytes.
-    expect(json.tree.root).toBeTruthy();
-    const rootBytes = Buffer.from(json.tree.root, "base64");
+    expect(treeJson.tree.root).toBeTruthy();
+    const rootBytes = Buffer.from(treeJson.tree.root, "base64");
     expect(rootBytes.length).toBe(32);
 
     // Save anchor height for CastVote and RevealShare.
-    anchorHeight = json.tree.height;
-  });
+    anchorHeight = treeJson.tree.height;
+  }, 30_000);
 
   it("step 2b: commitment tree at anchor height returns same root and next_index", async () => {
     const { status, json } = await getJSON(
@@ -157,7 +203,7 @@ describe("E2E Voting Flow", () => {
     expect(status).toBe(200);
     expect(json.tree).toBeTruthy();
     expect(json.tree.height).toBe(anchorHeight);
-    expect(json.tree.next_index).toBe(2);
+    expect(json.tree.next_index).toBeGreaterThanOrEqual(2);
     expect(json.tree.root).toBeTruthy();
     expect(Buffer.from(json.tree.root, "base64").length).toBe(32);
   });
@@ -291,6 +337,7 @@ describe("E2E Voting Flow", () => {
     const revealBody = makeRevealSharePayload(roundId, anchorHeight, {
       proposalId: 0,
       voteDecision: 1,
+      encShare: fixtures!.shares[0].enc_share,
     });
     const { status, json } = await postJSON(
       "/zally/v1/reveal-share",
@@ -346,9 +393,11 @@ describe("E2E Voting Flow", () => {
   });
 
   it("step 8: duplicate reveal-share nullifier is rejected", async () => {
+    // Use voteDecision: 2 so the stub enc_share doesn't pollute the
+    // tally["1"] bucket that step 11 checks against expected_accumulated.
     const revealBody = makeRevealSharePayload(roundId, anchorHeight, {
       proposalId: 0,
-      voteDecision: 1,
+      voteDecision: 2,
     });
     const res1 = await postJSON("/zally/v1/reveal-share", revealBody);
     expect(res1.json.code, `first reveal should succeed: ${res1.json.log}`).toBe(0);
@@ -356,7 +405,10 @@ describe("E2E Voting Flow", () => {
     await sleep(BLOCK_WAIT_MS);
 
     // Resubmit with the SAME share_nullifier — should be rejected.
-    const duplicate = { ...makeRevealSharePayload(roundId, anchorHeight) };
+    const duplicate = { ...makeRevealSharePayload(roundId, anchorHeight, {
+      proposalId: 0,
+      voteDecision: 2,
+    }) };
     duplicate.share_nullifier = revealBody.share_nullifier;
 
     const res2 = await postJSON("/zally/v1/reveal-share", duplicate);
@@ -368,93 +420,37 @@ describe("E2E Voting Flow", () => {
       res2.status !== 200 || (res2.json.code !== undefined && res2.json.code !== 0);
     expect(rejected, `expected rejection but got status=${res2.status} code=${res2.json.code}`).toBe(true);
   });
-});
 
-// ===========================================================================
-// Suite 2: Tallying & finalization lifecycle
-//
-// Uses a short-lived session (30s expiry) so the EndBlocker transitions
-// the round from ACTIVE → TALLYING within the test timeout.
-// ===========================================================================
+  // =========================================================================
+  // Tallying & finalization (same round — expires naturally)
+  //
+  // The delegation fixture uses a short vote_end_time (~3 min from fixture
+  // generation). After the ACTIVE-phase tests above, we wait for the
+  // EndBlocker to transition the round ACTIVE → TALLYING, then continue.
+  // =========================================================================
 
-describe("E2E Tallying Lifecycle", () => {
-  const SESSION_CREATOR = "zvote1admin";
-  const SHORT_EXPIRY_SEC = 30; // session expires 30s after creation
+  it("step 9: wait for TALLYING transition", async () => {
+    // The fixture's vote_end_time is ~5 minutes from fixture generation.
+    // Depending on how long ago fixtures were generated, we may need to
+    // wait up to several minutes for the EndBlocker to transition the round.
+    const delegFixture = getRealDelegationFixture();
+    const now = Math.floor(Date.now() / 1000);
+    const secsUntilExpiry = delegFixture
+      ? delegFixture.session.vote_end_time - now
+      : 0;
+    // Wait at most secsUntilExpiry + 30s buffer (minimum 60s).
+    const waitMs = Math.max(60_000, (secsUntilExpiry + 30) * 1000);
+    console.log(`[E2E] waiting up to ${Math.round(waitMs / 1000)}s for TALLYING (vote_end_time in ${secsUntilExpiry}s)`);
 
-  let roundId: Uint8Array;
-  let roundIdHex: string;
-  let anchorHeight: number;
+    await waitForRoundStatus(roundIdHex, SESSION_STATUS.TALLYING, waitMs);
 
-  // -------------------------------------------------------------------------
-  // Setup: create a short-lived session with the fixture EA public key, run
-  // through the voting flow, wait for EndBlocker to transition ACTIVE → TALLYING.
-  // -------------------------------------------------------------------------
-
-  beforeAll(async () => {
-    // 1. Create session with short expiry AND fixture EA public key.
-    const { body, roundId: rid } = makeCreateVotingSessionPayload(FIXTURE_EA_PK, {
-      expiresInSec: SHORT_EXPIRY_SEC,
-    });
-    roundId = rid;
-    roundIdHex = toHex(roundId);
-
-    const createRes = await postJSON("/zally/v1/create-voting-session", body);
-    expect(createRes.json.code, `create session rejected: ${createRes.json.log}`).toBe(0);
-    await sleep(BLOCK_WAIT_MS);
-
-    // 2. Delegate vote
-    const delegationBody = makeDelegateVotePayload(roundId);
-    const delRes = await postJSON("/zally/v1/delegate-vote", delegationBody);
-    expect(delRes.json.code, `delegation rejected: ${delRes.json.log}`).toBe(0);
-    await sleep(BLOCK_WAIT_MS);
-
-    // 3. Get anchor height
-    const treeRes = await getJSON("/zally/v1/commitment-tree/latest");
-    expect(treeRes.json.tree).toBeTruthy();
-    anchorHeight = treeRes.json.tree.height;
-
-    // 4. Cast vote
-    const castBody = makeCastVotePayload(roundId, anchorHeight);
-    const castRes = await postJSON("/zally/v1/cast-vote", castBody);
-    expect(castRes.json.code, `cast vote rejected: ${castRes.json.log}`).toBe(0);
-    await sleep(BLOCK_WAIT_MS);
-
-    // 5. Update anchor
-    const tree2 = await getJSON("/zally/v1/commitment-tree/latest");
-    anchorHeight = tree2.json.tree.height;
-
-    // 6. Reveal first share (during ACTIVE phase) — fixture share[0].
-    const revealBody = makeRevealSharePayload(roundId, anchorHeight, {
-      proposalId: 0,
-      voteDecision: 1,
-      encShare: fixtures.shares[0].enc_share,
-    });
-    const revealRes = await postJSON("/zally/v1/reveal-share", revealBody);
-    expect(revealRes.json.code, `reveal share rejected: ${revealRes.json.log}`).toBe(0);
-    await sleep(BLOCK_WAIT_MS);
-
-    // 7. Wait for the round to transition to TALLYING (EndBlocker fires once
-    //    blockTime >= vote_end_time).
-    await waitForRoundStatus(roundIdHex, SESSION_STATUS.TALLYING);
-  }, 120_000); // generous timeout for beforeAll
-
-  // -------------------------------------------------------------------------
-  // Step 1: Round is confirmed TALLYING
-  // -------------------------------------------------------------------------
-
-  it("step 1: round status is TALLYING after expiry", async () => {
     const { status, json } = await getJSON(`/zally/v1/round/${roundIdHex}`);
-
     expect(status).toBe(200);
     expect(json.round).toBeTruthy();
     expect(json.round.status).toBe(SESSION_STATUS.TALLYING);
-  });
+  }, 600_000); // generous timeout — may need to wait for vote_end_time
 
-  // -------------------------------------------------------------------------
-  // Step 2: Reveals still accepted during TALLYING
-  // -------------------------------------------------------------------------
-
-  it("step 2: reveal share succeeds during TALLYING", async () => {
+  it("step 10: reveal share succeeds during TALLYING", async () => {
     const revealBody = makeRevealSharePayload(roundId, anchorHeight, {
       proposalId: 0,
       voteDecision: 1,
@@ -468,11 +464,7 @@ describe("E2E Tallying Lifecycle", () => {
     await sleep(BLOCK_WAIT_MS);
   });
 
-  // -------------------------------------------------------------------------
-  // Step 3: Tally reflects all accumulated reveals
-  // -------------------------------------------------------------------------
-
-  it("step 3: accumulated tally matches Go-computed HomomorphicAdd", async () => {
+  it("step 11: accumulated tally matches Go-computed HomomorphicAdd", async () => {
     const { status, json } = await getJSON(`/zally/v1/tally/${roundIdHex}/0`);
 
     expect(status).toBe(200);
@@ -486,11 +478,7 @@ describe("E2E Tallying Lifecycle", () => {
     expect(json.tally["1"]).toBe(fixtures!.expected_accumulated);
   });
 
-  // -------------------------------------------------------------------------
-  // Step 4: Delegations rejected during TALLYING
-  // -------------------------------------------------------------------------
-
-  it("step 4: delegate vote rejected during TALLYING", async () => {
+  it("step 12: delegate vote rejected during TALLYING", async () => {
     const delegationBody = makeDelegateVotePayload(roundId);
     const { status, json } = await postJSON("/zally/v1/delegate-vote", delegationBody);
 
@@ -500,11 +488,7 @@ describe("E2E Tallying Lifecycle", () => {
     expect(json.log).toBeTruthy();
   });
 
-  // -------------------------------------------------------------------------
-  // Step 5: Cast vote rejected during TALLYING
-  // -------------------------------------------------------------------------
-
-  it("step 5: cast vote rejected during TALLYING", async () => {
+  it("step 13: cast vote rejected during TALLYING", async () => {
     const castBody = makeCastVotePayload(roundId, anchorHeight);
     const { status, json } = await postJSON("/zally/v1/cast-vote", castBody);
 
@@ -513,12 +497,7 @@ describe("E2E Tallying Lifecycle", () => {
     expect(json.log).toBeTruthy();
   });
 
-  // -------------------------------------------------------------------------
-  // Step 6: Submit tally with wrong creator is rejected
-  // -------------------------------------------------------------------------
-
-  it("step 6: submit tally with wrong creator is rejected", async () => {
-    // Entries are included (required), but creator mismatch triggers first.
+  it("step 14: submit tally with wrong creator is rejected", async () => {
     const tallyBody = makeSubmitTallyPayload(roundId, "zvote1imposter", [
       { proposal_id: 0, vote_decision: 1, total_value: fixtures!.expected_total },
     ]);
@@ -529,13 +508,7 @@ describe("E2E Tallying Lifecycle", () => {
     expect(json.log).toMatch(/creator/i);
   });
 
-  // -------------------------------------------------------------------------
-  // Step 7: Submit tally by correct creator succeeds
-  // -------------------------------------------------------------------------
-
-  it("step 7: submit tally finalizes the round", async () => {
-    // Entries contain the EA-claimed plaintext totals per (proposal, decision).
-    // With DLEQ stubbed, any value is accepted — but we use the real sum.
+  it("step 15: submit tally finalizes the round", async () => {
     const entries: TallyEntryPayload[] = [
       { proposal_id: 0, vote_decision: 1, total_value: fixtures!.expected_total },
     ];
@@ -549,11 +522,7 @@ describe("E2E Tallying Lifecycle", () => {
     await sleep(BLOCK_WAIT_MS);
   });
 
-  // -------------------------------------------------------------------------
-  // Step 8: Round status is FINALIZED
-  // -------------------------------------------------------------------------
-
-  it("step 8: round status is FINALIZED after submit tally", async () => {
+  it("step 16: round status is FINALIZED after submit tally", async () => {
     const { status, json } = await getJSON(`/zally/v1/round/${roundIdHex}`);
 
     expect(status).toBe(200);
@@ -561,24 +530,16 @@ describe("E2E Tallying Lifecycle", () => {
     expect(json.round.status).toBe(SESSION_STATUS.FINALIZED);
   });
 
-  // -------------------------------------------------------------------------
-  // Step 9: Tally preserved after finalization
-  // -------------------------------------------------------------------------
-
-  it("step 9: tally is preserved after finalization", async () => {
+  it("step 17: tally is preserved after finalization", async () => {
     const { status, json } = await getJSON(`/zally/v1/tally/${roundIdHex}/0`);
 
     expect(status).toBe(200);
     expect(json.tally).toBeTruthy();
-    // Same accumulated ciphertext as step 3 — finalization doesn't alter the tally.
+    // Same accumulated ciphertext — finalization doesn't alter the tally.
     expect(json.tally["1"]).toBe(fixtures!.expected_accumulated);
   });
 
-  // -------------------------------------------------------------------------
-  // Step 9b: Finalized tally results are queryable via /tally-results
-  // -------------------------------------------------------------------------
-
-  it("step 9b: finalized tally results are queryable", async () => {
+  it("step 18: finalized tally results are queryable", async () => {
     const { status, json } = await getJSON(`/zally/v1/tally-results/${roundIdHex}`);
 
     expect(status).toBe(200);
@@ -591,11 +552,7 @@ describe("E2E Tallying Lifecycle", () => {
     expect(json.results[0].total_value).toBe(fixtures!.expected_total);
   });
 
-  // -------------------------------------------------------------------------
-  // Step 10: Reveals rejected after FINALIZED
-  // -------------------------------------------------------------------------
-
-  it("step 10: reveal share rejected after finalization", async () => {
+  it("step 19: reveal share rejected after finalization", async () => {
     const revealBody = makeRevealSharePayload(roundId, anchorHeight, {
       proposalId: 0,
       voteDecision: 1,
@@ -608,31 +565,18 @@ describe("E2E Tallying Lifecycle", () => {
     expect(json.log).toBeTruthy();
   });
 
-  // -------------------------------------------------------------------------
-  // Step 11: Submit tally again is rejected (already finalized)
-  // -------------------------------------------------------------------------
-
-  it("step 11: submit tally on finalized round is rejected", async () => {
+  it("step 20: submit tally on finalized round is rejected", async () => {
     const tallyBody = makeSubmitTallyPayload(roundId, SESSION_CREATOR, [
       { proposal_id: 0, vote_decision: 1, total_value: fixtures!.expected_total },
     ]);
     const { status, json } = await postJSON("/zally/v1/submit-tally", tallyBody);
 
-    // The chain rejects the tx because the round is FINALIZED, not TALLYING.
-    // Depending on how the error surfaces through BroadcastTxSync, the API
-    // may return either:
-    //   a) HTTP 200 with json.code != 0  (ante rejection in CheckTx response)
-    //   b) HTTP 502 with an error body   (broadcast-level error)
     const rejected =
       status !== 200 || (json.code !== undefined && json.code !== 0);
     expect(rejected, `expected rejection but got status=${status} code=${json.code}`).toBe(true);
   });
 
-  // -------------------------------------------------------------------------
-  // Step 12: Submit tally on an ACTIVE round is rejected
-  // -------------------------------------------------------------------------
-
-  it("step 12: submit tally on ACTIVE round is rejected", async () => {
+  it("step 21: submit tally on ACTIVE round is rejected", async () => {
     // Create a fresh long-lived session (default 1h expiry).
     const { body, roundId: activeRoundId } = makeCreateVotingSessionPayload(FIXTURE_EA_PK);
     const createRes = await postJSON("/zally/v1/create-voting-session", body);
@@ -649,4 +593,4 @@ describe("E2E Tallying Lifecycle", () => {
     expect(json.code).not.toBe(0);
     expect(json.log).toMatch(/tallying/i);
   });
-}, 180_000); // extended timeout for the tallying suite (includes waiting for expiry)
+}, 600_000); // extended timeout — includes waiting for vote_end_time expiry

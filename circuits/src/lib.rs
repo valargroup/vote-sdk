@@ -6,10 +6,21 @@
 //! - RedPallas (RedDSA over Pallas) spend-auth signature verification
 //! - C-compatible FFI functions for calling from Go via CGo
 //!
-//! Currently contains a toy circuit for validating the Halo2 FFI pipeline
-//! and real RedPallas signature verification via the `reddsa` crate.
+//! Includes the toy circuit for pipeline validation, and the real
+//! delegation circuit (ZKP #1) for production proof verification.
 
 pub mod toy;
 pub mod redpallas;
 pub mod votetree;
 pub mod ffi;
+
+/// Re-export the delegation circuit's prove/verify API from the `orchard` crate.
+pub mod delegation {
+    pub use orchard::delegation::{
+        verify_delegation_proof, verify_delegation_proof_raw,
+        create_delegation_proof, delegation_params, delegation_proving_key,
+        Circuit, Instance, K,
+    };
+    pub use orchard::delegation::builder;
+    pub use orchard::delegation::imt;
+}

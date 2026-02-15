@@ -1,7 +1,7 @@
 /**
  * Shared helpers for Zally API tests.
  *
- * - BASE_URL: the Cosmos SDK API server (default http://localhost:1318)
+ * - BASE_URL: the Cosmos SDK API server (default http://localhost:1317)
  * - deriveRoundId: replicates the on-chain Blake2b-256 round ID derivation
  * - makeCreateVotingSessionPayload / makeDelegateVotePayload: build valid JSON bodies
  * - getRealProofFixtures: loads real Halo2 toy proof + public input from disk
@@ -17,7 +17,7 @@ import { blake2b } from "@noble/hashes/blake2b";
 // Config
 // ---------------------------------------------------------------------------
 
-export const BASE_URL = process.env.ZALLY_API_URL ?? "http://localhost:1318";
+export const BASE_URL = process.env.ZALLY_API_URL ?? "http://localhost:1317";
 
 // ---------------------------------------------------------------------------
 // Byte encoding helpers
@@ -174,6 +174,87 @@ export function getRealProofFixtures(): {
 }
 
 // ---------------------------------------------------------------------------
+// Real delegation proof fixture (ZKP #1)
+// ---------------------------------------------------------------------------
+
+/** Full delegation proof fixture with all fields needed for e2e test. */
+export interface DelegationFixture {
+  proof: Uint8Array;
+  rk: Uint8Array;
+  spend_auth_sig: Uint8Array;
+  sighash: Uint8Array;
+  signed_note_nullifier: Uint8Array;
+  cmx_new: Uint8Array;
+  enc_memo: Uint8Array;
+  gov_comm: Uint8Array;
+  gov_nullifiers: Uint8Array[];
+  vote_round_id: Uint8Array;
+  session: {
+    snapshot_height: number;
+    snapshot_blockhash: Uint8Array;
+    proposals_hash: Uint8Array;
+    vote_end_time: number;
+    nullifier_imt_root: Uint8Array;
+    nc_root: Uint8Array;
+  };
+}
+
+let _delegationFixture: DelegationFixture | null = null;
+let _delegationFixtureAvailable: boolean | null = null;
+
+/**
+ * Load the real delegation proof fixture (delegation_real.json).
+ * Returns the full fixture if it exists, or null if missing.
+ *
+ * All byte fields in the JSON are base64-encoded; this function decodes them.
+ */
+export function getRealDelegationFixture(): DelegationFixture | null {
+  if (_delegationFixtureAvailable === false) return null;
+  if (_delegationFixture) return _delegationFixture;
+
+  try {
+    const raw = readFileSync(
+      path.join(FIXTURES_DIR, "delegation_real.json"),
+      "utf-8",
+    );
+    const json = JSON.parse(raw);
+
+    const fromB64 = (s: string): Uint8Array => Buffer.from(s, "base64");
+
+    _delegationFixture = {
+      proof: fromB64(json.proof),
+      rk: fromB64(json.rk),
+      spend_auth_sig: fromB64(json.spend_auth_sig),
+      sighash: fromB64(json.sighash),
+      signed_note_nullifier: fromB64(json.signed_note_nullifier),
+      cmx_new: fromB64(json.cmx_new),
+      enc_memo: fromB64(json.enc_memo),
+      gov_comm: fromB64(json.gov_comm),
+      gov_nullifiers: (json.gov_nullifiers as string[]).map(fromB64),
+      vote_round_id: fromB64(json.vote_round_id),
+      session: {
+        snapshot_height: json.session.snapshot_height,
+        snapshot_blockhash: fromB64(json.session.snapshot_blockhash),
+        proposals_hash: fromB64(json.session.proposals_hash),
+        vote_end_time: json.session.vote_end_time,
+        nullifier_imt_root: fromB64(json.session.nullifier_imt_root),
+        nc_root: fromB64(json.session.nc_root),
+      },
+    };
+    _delegationFixtureAvailable = true;
+    return _delegationFixture;
+  } catch {
+    _delegationFixtureAvailable = false;
+    console.warn(
+      "[zally-api-tests] delegation_real.json not found in tests/api/fixtures/. " +
+        "Falling back to toy proof + mock data. " +
+        "Run `make fixtures` to generate real delegation fixtures.",
+    );
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Round ID derivation (mirrors deriveRoundID in keeper/msg_server.go)
 // ---------------------------------------------------------------------------
 
@@ -261,46 +342,57 @@ export function makeSubmitTallyPayload(
  * Returns both the JSON-ready object (with base64 byte fields) and the raw
  * fields needed for deriveRoundId.
  *
- * Each call produces a unique round ID by incrementing snapshot_height.
+ * Each call produces a unique round ID by incrementing snapshot_height,
+ * unless `opts.sessionOverride` is provided (e.g. from a delegation fixture).
  *
  * @param eaPkBytes - EA public key (32-byte compressed Pallas point). Use
  *   getElGamalFixtures().ea_pk decoded from base64, or any valid 32-byte key.
  * @param opts.expiresInSec - Override vote_end_time offset (default: 3600 = 1 hour).
+ * @param opts.sessionOverride - Use exact session params (from delegation fixture).
  */
 export function makeCreateVotingSessionPayload(
   eaPkBytes: Uint8Array,
-  opts?: { expiresInSec?: number },
+  opts?: {
+    expiresInSec?: number;
+    sessionOverride?: SetupRoundFields;
+  },
 ) {
-  const snapshotBlockhash = repeatByte(0xaa, 32);
-  const proposalsHash = repeatByte(0xbb, 32);
-  const nullifierImtRoot = repeatByte(0xcc, 32);
-  const ncRoot = repeatByte(0xdd, 32);
-  const snapshotHeight = 1000 + roundCounter++;
-  const voteEndTime = Math.floor(Date.now() / 1000) + (opts?.expiresInSec ?? 3600);
+  let fields: SetupRoundFields;
 
-  const fields: SetupRoundFields = {
-    snapshot_height: snapshotHeight,
-    snapshot_blockhash: snapshotBlockhash,
-    proposals_hash: proposalsHash,
-    vote_end_time: voteEndTime,
-    nullifier_imt_root: nullifierImtRoot,
-    nc_root: ncRoot,
-  };
+  if (opts?.sessionOverride) {
+    fields = opts.sessionOverride;
+  } else {
+    const snapshotBlockhash = repeatByte(0xaa, 32);
+    const proposalsHash = repeatByte(0xbb, 32);
+    const nullifierImtRoot = repeatByte(0xcc, 32);
+    const ncRoot = repeatByte(0xdd, 32);
+    const snapshotHeight = 1000 + roundCounter++;
+    const voteEndTime =
+      Math.floor(Date.now() / 1000) + (opts?.expiresInSec ?? 3600);
 
-  const eaPk = eaPkBytes;
+    fields = {
+      snapshot_height: snapshotHeight,
+      snapshot_blockhash: snapshotBlockhash,
+      proposals_hash: proposalsHash,
+      vote_end_time: voteEndTime,
+      nullifier_imt_root: nullifierImtRoot,
+      nc_root: ncRoot,
+    };
+  }
+
   const vkZkp1 = repeatByte(0xf1, 64);
   const vkZkp2 = repeatByte(0xf2, 64);
   const vkZkp3 = repeatByte(0xf3, 64);
 
   const body = {
     creator: "zvote1admin",
-    snapshot_height: snapshotHeight,
-    snapshot_blockhash: toBase64(snapshotBlockhash),
-    proposals_hash: toBase64(proposalsHash),
-    vote_end_time: voteEndTime,
-    nullifier_imt_root: toBase64(nullifierImtRoot),
-    nc_root: toBase64(ncRoot),
-    ea_pk: toBase64(eaPk),
+    snapshot_height: fields.snapshot_height,
+    snapshot_blockhash: toBase64(fields.snapshot_blockhash),
+    proposals_hash: toBase64(fields.proposals_hash),
+    vote_end_time: fields.vote_end_time,
+    nullifier_imt_root: toBase64(fields.nullifier_imt_root),
+    nc_root: toBase64(fields.nc_root),
+    ea_pk: toBase64(eaPkBytes),
     vk_zkp1: toBase64(vkZkp1),
     vk_zkp2: toBase64(vkZkp2),
     vk_zkp3: toBase64(vkZkp3),
@@ -359,33 +451,55 @@ function makeUniqueNullifier(): Uint8Array {
 }
 
 /**
- * Build a valid MsgDelegateVote JSON body with real RedPallas
- * signature and Halo2 proof (when fixtures are available).
+ * Build a valid MsgDelegateVote JSON body.
  *
- * - `rk`, `spend_auth_sig`, `sighash` — pre-computed RedPallas fixtures.
- *   The signature covers REAL_SIGHASH, which is sent as the `sighash` field.
- * - `proof`, `gov_comm` — real Halo2 toy proof and public input when fixture
- *   files are present; mock data otherwise.
+ * By default, uses the toy circuit proof with standalone RedPallas
+ * fixtures (or mock data). Each call produces unique nullifiers.
  *
- * Every call produces unique nullifiers (using an auto-incrementing counter)
- * so delegations never collide even across test runs.
+ * When `opts.useRealFixture` is true AND delegation_real.json exists,
+ * uses the full ZKP #1 delegation proof with all 12 matching public
+ * inputs and a RedPallas signature generated with the same rk. The
+ * fixture's vote_round_id must match the session's derived round ID
+ * (the caller is responsible for creating the session with matching
+ * params — see `makeCreateVotingSessionPayload` with `sessionOverride`).
  *
  * @param roundId - The vote_round_id (raw bytes) to target.
+ * @param opts.useRealFixture - When true, use the real delegation fixture.
  */
-export function makeDelegateVotePayload(roundId: Uint8Array) {
+export function makeDelegateVotePayload(
+  roundId: Uint8Array,
+  opts?: { useRealFixture?: boolean },
+) {
+  // Use real delegation fixture only when explicitly requested.
+  if (opts?.useRealFixture) {
+    const delegationFixture = getRealDelegationFixture();
+    if (delegationFixture) {
+      return {
+        rk: toBase64(delegationFixture.rk),
+        spend_auth_sig: toBase64(delegationFixture.spend_auth_sig),
+        sighash: toBase64(delegationFixture.sighash),
+        signed_note_nullifier: toBase64(delegationFixture.signed_note_nullifier),
+        cmx_new: toBase64(delegationFixture.cmx_new),
+        enc_memo: toBase64(delegationFixture.enc_memo),
+        gov_comm: toBase64(delegationFixture.gov_comm),
+        gov_nullifiers: delegationFixture.gov_nullifiers.map(toBase64),
+        proof: toBase64(delegationFixture.proof),
+        vote_round_id: toBase64(roundId),
+      };
+    }
+  }
+
+  // Default: toy circuit proof + standalone RedPallas signature.
   const nf1 = makeUniqueNullifier();
   const nf2 = makeUniqueNullifier();
   const cmx = makeUniqueNullifier(); // unique cmx_new
 
-  // Use real Halo2 proof + public input when fixture files are present.
-  // The toy circuit convention uses gov_comm as the public input field
-  // (keeping rk free for RedPallas signature verification).
-  const fixtures = getRealProofFixtures();
-  const proof = fixtures
-    ? fixtures.proof
+  const toyFixtures = getRealProofFixtures();
+  const proof = toyFixtures
+    ? toyFixtures.proof
     : Buffer.from("mock-delegation-proof");
-  const govComm = fixtures
-    ? fixtures.publicInput
+  const govComm = toyFixtures
+    ? toyFixtures.publicInput
     : makeUniqueNullifier();
 
   return {

@@ -5,22 +5,20 @@ package halo2
 import "github.com/z-cale/zally/crypto/zkp"
 
 // Halo2Verifier implements zkp.Verifier using real Halo2 proof verification
-// via CGo bindings to the Rust verifier. Currently only VerifyDelegation is
-// wired to a real circuit (the toy circuit); the other methods are stubs that
-// always succeed until those circuits are implemented.
+// via CGo bindings to the Rust verifier. VerifyDelegation uses the real
+// 15-condition delegation circuit (K=14, 12 public inputs). The other methods
+// are stubs until those circuits are implemented.
 type Halo2Verifier struct{}
 
 // NewVerifier returns a Halo2Verifier backed by the Rust FFI library.
 // This function is only available when built with the "halo2" build tag.
 func NewVerifier() zkp.Verifier { return Halo2Verifier{} }
 
-// VerifyDelegation verifies ZKP #1 using the toy circuit as a proof-of-concept.
-// Convention: inputs.GovComm (32 bytes) is used as the public input to the toy
-// circuit. This keeps inputs.Rk free for RedPallas signature verification.
-// When the real delegation circuit is implemented, it will use ALL public inputs
-// (including Rk) and this convention will be replaced.
+// VerifyDelegation verifies ZKP #1 using the real delegation circuit.
+// All 12 public inputs (nf_signed, rk, cmx_new, gov_comm, vote_round_id,
+// nc_root, nf_imt_root, gov_null_1..4) are passed to the Rust verifier.
 func (h Halo2Verifier) VerifyDelegation(proof []byte, inputs zkp.DelegationInputs) error {
-	return VerifyToyProof(proof, inputs.GovComm)
+	return VerifyDelegationProof(proof, inputs)
 }
 
 // VerifyVoteCommitment is a stub — real circuit not yet implemented.

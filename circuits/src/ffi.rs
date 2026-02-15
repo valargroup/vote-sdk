@@ -12,6 +12,7 @@ use halo2_proofs::pasta::Fp;
 use crate::toy;
 use crate::redpallas;
 use crate::votetree;
+use crate::delegation;
 
 // ---------------------------------------------------------------------------
 // Halo2 toy circuit verification
@@ -236,5 +237,127 @@ pub unsafe extern "C" fn zally_vote_tree_path(
         Err(votetree::FfiError::InvalidInput) => -1,
         Err(votetree::FfiError::PositionOutOfRange) => -2,
         Err(votetree::FfiError::Deserialization) => -3,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Delegation circuit (ZKP #1) — real Halo2 proof verification
+// ---------------------------------------------------------------------------
+
+/// Verify a real delegation circuit proof (ZKP #1).
+///
+/// The public inputs are passed as a flat byte array of 11 × 32-byte
+/// chunks (352 bytes total), in the order:
+///   [nf_signed, rk_compressed, cmx_new, gov_comm, vote_round_id,
+///    nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4]
+///
+/// The `rk_compressed` is a 32-byte compressed Pallas curve point. The FFI
+/// decompresses it into (rk_x, rk_y) to produce the 12 field elements that
+/// the circuit expects.
+///
+/// # Arguments
+/// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
+/// * `proof_len`         - Length of the proof byte slice.
+/// * `public_inputs_ptr` - Pointer to 352 bytes (11 × 32-byte chunks).
+/// * `public_inputs_len` - Length of the public inputs byte slice (must be 352).
+///
+/// # Returns
+/// * `0`  on successful verification.
+/// * `-1` if inputs are invalid (null pointers or wrong lengths).
+/// * `-2` if the proof does not verify.
+/// * `-3` if there is an internal deserialization error (e.g. invalid rk point).
+///
+/// # Safety
+/// Caller must ensure the pointers are valid and the lengths are correct.
+#[no_mangle]
+pub unsafe extern "C" fn zally_verify_delegation_proof(
+    proof_ptr: *const u8,
+    proof_len: usize,
+    public_inputs_ptr: *const u8,
+    public_inputs_len: usize,
+) -> i32 {
+    use group::Curve;
+    use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
+
+    // Validate pointers and lengths.
+    if proof_ptr.is_null() || public_inputs_ptr.is_null() {
+        return -1;
+    }
+    if public_inputs_len != 11 * 32 {
+        return -1;
+    }
+    if proof_len == 0 {
+        return -1;
+    }
+
+    // Reconstruct slices from raw pointers.
+    let proof = std::slice::from_raw_parts(proof_ptr, proof_len);
+    let raw = std::slice::from_raw_parts(public_inputs_ptr, public_inputs_len);
+
+    // Helper: extract a 32-byte chunk.
+    let chunk = |i: usize| -> [u8; 32] {
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&raw[i * 32..(i + 1) * 32]);
+        buf
+    };
+
+    // Deserialize each chunk as a Pallas Fp, except rk which is a compressed point.
+    let deserialize_fp = |bytes: [u8; 32]| -> Option<pallas::Base> {
+        pallas::Base::from_repr(bytes).into()
+    };
+
+    // Slot 0: nf_signed
+    let nf_signed = match deserialize_fp(chunk(0)) {
+        Some(f) => f,
+        None => return -3,
+    };
+
+    // Slot 1: rk (compressed Pallas point) — decompress to (x, y).
+    let rk_bytes = chunk(1);
+    let rk_point: pallas::Point = match pallas::Point::from_bytes(&rk_bytes).into() {
+        Some(p) => p,
+        None => return -3,
+    };
+    let rk_affine = rk_point.to_affine();
+    let rk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+        rk_affine.coordinates().into();
+    let rk_coords = match rk_coords {
+        Some(c) => c,
+        None => return -3, // identity point
+    };
+    let rk_x: pallas::Base = *rk_coords.x();
+    let rk_y: pallas::Base = *rk_coords.y();
+
+    // Slots 2–10: the remaining 9 field elements.
+    let cmx_new = match deserialize_fp(chunk(2)) { Some(f) => f, None => return -3 };
+    let gov_comm = match deserialize_fp(chunk(3)) { Some(f) => f, None => return -3 };
+    let vote_round_id = match deserialize_fp(chunk(4)) { Some(f) => f, None => return -3 };
+    let nc_root = match deserialize_fp(chunk(5)) { Some(f) => f, None => return -3 };
+    let nf_imt_root = match deserialize_fp(chunk(6)) { Some(f) => f, None => return -3 };
+    let gov_null_1 = match deserialize_fp(chunk(7)) { Some(f) => f, None => return -3 };
+    let gov_null_2 = match deserialize_fp(chunk(8)) { Some(f) => f, None => return -3 };
+    let gov_null_3 = match deserialize_fp(chunk(9)) { Some(f) => f, None => return -3 };
+    let gov_null_4 = match deserialize_fp(chunk(10)) { Some(f) => f, None => return -3 };
+
+    // Build the 12-element public input vector (matches circuit instance order).
+    let public_inputs = vec![
+        nf_signed, rk_x, rk_y, cmx_new, gov_comm, vote_round_id,
+        nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4,
+    ];
+
+    // Run verification using the delegation circuit's params and VK.
+    let params = delegation::delegation_params();
+    let (_pk, vk) = delegation::delegation_proving_key(&params);
+
+    let strategy = halo2_proofs::plonk::SingleVerifier::new(&params);
+    let mut transcript = halo2_proofs::transcript::Blake2bRead::<
+        _, halo2_proofs::pasta::EqAffine, halo2_proofs::transcript::Challenge255<_>,
+    >::init(proof);
+
+    match halo2_proofs::plonk::verify_proof(
+        &params, &vk, strategy, &[&[&public_inputs]], &mut transcript,
+    ) {
+        Ok(()) => 0,
+        Err(_) => -2,
     }
 }
