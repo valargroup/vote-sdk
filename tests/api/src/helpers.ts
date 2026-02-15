@@ -590,18 +590,33 @@ function isRetryableSocketError(err: unknown): boolean {
 }
 
 /**
- * fetch wrapper that retries on transient socket errors (stale keep-alive
- * connections, brief server unavailability). Only retries on network-level
- * errors — HTTP 4xx/5xx responses are returned normally, not retried.
+ * fetch wrapper that retries on transient errors:
+ *  - Socket-level errors (stale keep-alive, ECONNRESET, ECONNREFUSED)
+ *  - HTTP 502 Bad Gateway — this can happen when the CometBFT node is busy
+ *    processing a slow CheckTx (e.g., K=14 Halo2 verification) and the
+ *    broadcast_tx_sync RPC times out. The tx may have actually been accepted
+ *    into the mempool, so a retry is safe (duplicate txs are rejected by
+ *    nullifier checks).
  */
 async function fetchWithRetry(
   url: string,
   init: RequestInit,
-  maxRetries = 2,
+  maxRetries = 3,
 ): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await fetch(url, init);
+      const res = await fetch(url, init);
+      if (res.status === 502 && attempt < maxRetries) {
+        console.warn(
+          `[fetchWithRetry] 502 on ${init.method ?? "GET"} ${url} (attempt ${attempt + 1}/${maxRetries + 1}), ` +
+          `retrying in ${3 * (attempt + 1)}s...`,
+        );
+        const body = await res.text();
+        if (body) console.warn(`[fetchWithRetry] 502 body: ${body}`);
+        await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+        continue;
+      }
+      return res;
     } catch (err) {
       if (attempt >= maxRetries || !isRetryableSocketError(err)) throw err;
       // Brief back-off before retry (500ms, 1000ms).
