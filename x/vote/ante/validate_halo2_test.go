@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/z-cale/zally/crypto/redpallas"
+	"github.com/z-cale/zally/crypto/zkp"
 	"github.com/z-cale/zally/crypto/zkp/halo2"
 	"github.com/z-cale/zally/x/vote/ante"
 	"github.com/z-cale/zally/x/vote/types"
@@ -33,6 +34,25 @@ func mustReadFixture(t *testing.T, name string) []byte {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err, "failed to read fixture %s", path)
 	return data
+}
+
+// toyAsDelegationVerifier uses the toy circuit verifier for delegation so that
+// the full ante pipeline can be tested with the only real proof fixture we have
+// (toy_valid_proof.bin). The real delegation circuit expects a different proof
+// format; once a delegation proof fixture exists, tests can switch to
+// halo2.NewVerifier() and that fixture.
+type toyAsDelegationVerifier struct{}
+
+func (toyAsDelegationVerifier) VerifyDelegation(proof []byte, inputs zkp.DelegationInputs) error {
+	return halo2.VerifyToyProof(proof, inputs.GovComm)
+}
+
+func (toyAsDelegationVerifier) VerifyVoteCommitment(proof []byte, _ zkp.VoteCommitmentInputs) error {
+	return nil
+}
+
+func (toyAsDelegationVerifier) VerifyVoteShare(proof []byte, _ zkp.VoteShareInputs) error {
+	return nil
 }
 
 // TestHalo2DelegationValidProof runs the full ante validation pipeline with a
@@ -60,11 +80,11 @@ func TestHalo2DelegationValidProof(t *testing.T) {
 		Sighash:     make([]byte, 32), // dummy sighash (mock sig verifier accepts anything)
 	}
 
-	// Use the real Halo2 verifier but mock the signature verifier
-	// (RedPallas is not under test here).
+	// Use toy-as-delegation verifier so the toy proof fixture passes; mock the
+	// signature verifier (RedPallas is not under test here).
 	opts := ante.ValidateOpts{
 		SigVerifier: redpallas.NewMockVerifier(),
-		ZKPVerifier: halo2.NewVerifier(),
+		ZKPVerifier: toyAsDelegationVerifier{},
 	}
 
 	// Create a test suite for the keeper/context setup, then run through
@@ -102,7 +122,7 @@ func TestHalo2DelegationWrongInput(t *testing.T) {
 
 	opts := ante.ValidateOpts{
 		SigVerifier: redpallas.NewMockVerifier(),
-		ZKPVerifier: halo2.NewVerifier(),
+		ZKPVerifier: toyAsDelegationVerifier{},
 	}
 
 	s := new(ValidateTestSuite)
