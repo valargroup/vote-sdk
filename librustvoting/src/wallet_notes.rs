@@ -1,5 +1,4 @@
 use rusqlite::{Connection, OpenFlags};
-use subtle::CtOption;
 
 use orchard::keys::Diversifier;
 use orchard::note::{ExtractedNoteCommitment, RandomSeed, Rho};
@@ -8,14 +7,14 @@ use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_protocol::consensus::Network;
 use zip32::Scope;
 
-use crate::types::{NoteInfo, VotingError};
+use crate::types::{ct_option_to_result, NoteInfo, VotingError};
 
 /// Open the Zcash wallet SQLite DB read-only and return all Orchard notes
 /// that were received and unspent at the given snapshot block height.
 ///
-/// For each note, the extracted note commitment (cmx) is computed by
-/// reconstructing the note from its stored parts (diversifier, value, rho, rseed)
-/// and the account's UFVK.
+/// Returns full note data including the raw fields needed to reconstruct
+/// `orchard::Note` objects for the delegation proof, plus the computed
+/// extracted note commitment (cmx).
 pub fn get_wallet_notes_at_snapshot(
     wallet_db_path: &str,
     snapshot_height: u64,
@@ -61,7 +60,8 @@ pub fn get_wallet_notes_at_snapshot(
                    JOIN transactions t_spend ON t_spend.id_tx = rns.transaction_id
                    WHERE t_spend.mined_height IS NOT NULL
                      AND t_spend.mined_height <= :snapshot_height
-               )",
+               )
+             ORDER BY rn.commitment_tree_position",
         )
         .map_err(|e| VotingError::Internal {
             message: format!("failed to prepare query: {e}"),
@@ -77,52 +77,40 @@ pub fn get_wallet_notes_at_snapshot(
             let position: i64 = row.get(5)?;
             let scope_code: i32 = row.get(6)?;
             let ufvk_str: String = row.get(7)?;
-            Ok((
-                diversifier,
-                value,
-                rho,
-                rseed,
-                nf,
-                position,
-                scope_code,
-                ufvk_str,
-            ))
+            Ok((diversifier, value as u64, rho, rseed, nf, position as u64, scope_code as u32, ufvk_str))
         })
         .map_err(|e| VotingError::Internal {
             message: format!("query failed: {e}"),
         })?;
 
     let mut notes = Vec::new();
-
     for row_result in rows {
-        let (
-            diversifier_bytes,
-            value,
-            rho_bytes,
-            rseed_bytes,
-            nf_bytes,
-            position,
-            scope_code,
-            ufvk_str,
-        ) = row_result.map_err(|e| VotingError::Internal {
-            message: format!("row read error: {e}"),
-        })?;
+        let (diversifier, value, rho, rseed, nullifier, position, scope, ufvk_str) =
+            row_result.map_err(|e| VotingError::Internal {
+                message: format!("row read error: {e}"),
+            })?;
 
+        // Compute cmx from note parts
         let cmx = compute_cmx(
             &ufvk_str,
-            scope_code,
-            &diversifier_bytes,
-            value as u64,
-            &rho_bytes,
-            &rseed_bytes,
+            scope as i32,
+            &diversifier,
+            value,
+            &rho,
+            &rseed,
             &network,
         )?;
 
         notes.push(NoteInfo {
             commitment: cmx.to_vec(),
-            nullifier: nf_bytes,
-            value: value as u64,
-            position: position as u64,
+            nullifier,
+            value,
+            position,
+            diversifier,
+            rho,
+            rseed,
+            scope,
+            ufvk_str,
         });
     }
 
@@ -203,15 +191,6 @@ fn compute_cmx(
     Ok(cmx.to_bytes())
 }
 
-fn ct_option_to_result<T>(opt: CtOption<T>, msg: &str) -> Result<T, VotingError> {
-    if opt.is_some().into() {
-        Ok(opt.unwrap())
-    } else {
-        Err(VotingError::Internal {
-            message: msg.to_string(),
-        })
-    }
-}
 
 #[cfg(test)]
 mod tests {

@@ -1,7 +1,7 @@
 use rusqlite::{named_params, Connection};
 
 use crate::storage::{RoundPhase, RoundState, RoundSummary, VoteRecord};
-use crate::types::{ProofResult, VotingError, VotingRoundParams};
+use crate::types::{VotingError, VotingRoundParams};
 
 // --- Rounds ---
 
@@ -523,48 +523,17 @@ pub fn load_witnesses(conn: &Connection, round_id: &str) -> Result<Vec<crate::ty
 
 // --- Proofs ---
 
-pub fn store_witness(conn: &Connection, round_id: &str, witness: &[u8]) -> Result<(), VotingError> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-
-    conn.execute(
-        "INSERT OR REPLACE INTO proofs (round_id, witness, proof, success, created_at)
-         VALUES (:round_id, :witness, NULL, 0, :created_at)",
-        named_params! {
-            ":round_id": round_id,
-            ":witness": witness,
-            ":created_at": now,
-        },
-    )
-    .map_err(|e| VotingError::Internal {
-        message: format!("failed to store witness: {}", e),
-    })?;
-    Ok(())
-}
-
-pub fn load_witness(conn: &Connection, round_id: &str) -> Result<Vec<u8>, VotingError> {
-    conn.query_row(
-        "SELECT witness FROM proofs WHERE round_id = :round_id",
-        named_params! { ":round_id": round_id },
-        |row| row.get(0),
-    )
-    .map_err(|e| VotingError::InvalidInput {
-        message: format!("no witness for round: {} ({})", round_id, e),
-    })
-}
-
 pub fn store_proof(
     conn: &Connection,
     round_id: &str,
-    proof: &ProofResult,
+    proof_bytes: &[u8],
 ) -> Result<(), VotingError> {
     conn.execute(
-        "UPDATE proofs SET proof = :proof, success = :success WHERE round_id = :round_id",
+        "INSERT INTO proofs (round_id, proof, success, created_at)
+         VALUES (:round_id, :proof, 1, strftime('%s','now'))
+         ON CONFLICT(round_id) DO UPDATE SET proof = :proof, success = 1",
         named_params! {
-            ":proof": proof.proof,
-            ":success": proof.success as i32,
+            ":proof": proof_bytes,
             ":round_id": round_id,
         },
     )

@@ -12,21 +12,21 @@ Used by `zcash-voting-ffi` (iOS via UniFFI) and potentially by other clients.
 | `hotkey`          | Real    | Random Pallas keypair generation for voting hotkeys                          |
 | `decompose`       | Real    | Binary weight decomposition into 4 shares (protocol max)                     |
 | `elgamal`         | Real    | El Gamal encryption of vote shares under EA public key (Pallas curve)        |
-| `action`          | Stubbed | Constructs dummy Orchard action for Keystone delegation signing              |
-| `governance`      | Stubbed | Governance commitment (VAN) construction                                     |
-| `witness`         | Stubbed | Delegation witness assembly from inclusion/exclusion proofs                  |
-| `zkp1`            | Stubbed | ZKP #1 — delegation proof (simulates progress, returns placeholder)          |
+| `action`          | Real    | Constructs Orchard action + governance PCZT for Keystone delegation signing  |
+| `witness`         | Real    | Merkle witness generation from wallet DB shard data                          |
+| `zkp1`            | Real    | ZKP #1 — delegation proof (real Halo2 prover, ~12s on iPhone)                |
 | `zkp2`            | Stubbed | ZKP #2 — vote commitment proof (returns placeholder bundle)                  |
 | `vote_commitment` | Stubbed | Share payload construction for helper server delegation                      |
+| `wallet_notes`    | Real    | Queries Orchard notes from wallet DB at snapshot height                      |
 | `types`           | Real    | Shared types: `VotingError`, `EncryptedShare`, `VoteCommitmentBundle`, etc.  |
 
 ## Storage Schema
 
 Four tables in `storage/migrations/001_init.sql`:
 
-**`rounds`** — One row per voting session. Tracks phase progression (Initialized → HotkeyGenerated → DelegationConstructed → WitnessBuilt → DelegationProved → VoteReady). Stores round parameters (snapshot height, EA public key, nc_root, nullifier IMT root) and optional session JSON.
+**`rounds`** — One row per voting session. Tracks phase progression (Initialized → HotkeyGenerated → DelegationConstructed → DelegationProved → VoteReady). Stores round parameters (snapshot height, EA public key, nc_root, nullifier IMT root) and optional session JSON.
 
-**`proofs`** — One row per round. Stores the delegation witness blob and proof blob with a success flag. Written by `build_delegation_witness()` and `generate_delegation_proof()`.
+**`proofs`** — One row per round. Stores the delegation proof blob with a success flag. Written by `build_and_prove_delegation()`.
 
 **`votes`** — One row per (round, proposal). Records the vote choice, commitment JSON, and a `submitted` flag that tracks whether the vote has landed on-chain. Unique constraint on `(round_id, proposal_id)`.
 
@@ -40,10 +40,10 @@ All operations go through `VotingDb`:
 let db = VotingDb::open("voting.sqlite3")?;
 db.init_round(&params, None)?;
 
-let hotkey = db.generate_hotkey(round_id)?;
-let action = db.construct_delegation_action(round_id, &hotkey, &notes)?;
-let witness = db.build_delegation_witness(round_id, &action, &inclusion, &exclusion)?;
-let proof = db.generate_delegation_proof(round_id, &progress_reporter)?;
+let hotkey = db.generate_hotkey(round_id, &seed)?;
+let pczt = db.build_governance_pczt(round_id, &notes, &fvk, &hotkey_addr, ...)?;
+// ... Keystone signs the PCZT ...
+let proof = db.build_and_prove_delegation(round_id, &wallet_db_path, &hotkey_addr, &imt_url, ...)?;
 
 let shares = db.encrypt_shares(round_id, &[64, 32, 2, 1])?;
 let bundle = db.build_vote_commitment(round_id, 0, 0, &shares, &van_witness, &reporter)?;
@@ -56,5 +56,6 @@ Each method validates the current phase, performs the operation, persists result
 
 - `pasta_curves` / `ff` / `group` — same curve library as Orchard/Zcash
 - `rusqlite` (bundled) — SQLite with no system dependency
-- `blake2b_simd` — hashing
-- Halo2, Poseidon, orchard crates are listed but not yet wired (pending real ZKP implementation)
+- `halo2_proofs` / `halo2_gadgets` — proof system for ZKP #1
+- `reqwest` (blocking) — HTTP client for IMT server exclusion proofs
+- `orchard` (local, delegation feature) — delegation circuit and builder

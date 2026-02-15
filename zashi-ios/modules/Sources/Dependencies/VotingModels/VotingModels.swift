@@ -90,7 +90,6 @@ public enum RoundPhaseInfo: Equatable, Sendable {
     case initialized
     case hotkeyGenerated
     case delegationConstructed
-    case witnessBuilt
     case delegationProved
     case voteReady
 }
@@ -260,25 +259,6 @@ public struct GovernancePcztResult: Equatable, Sendable {
         self.actionIndex = actionIndex
     }
 
-    /// Convert to a DelegationAction for the witness builder.
-    public func toDelegationAction(spendAuthSig: Data? = nil) -> DelegationAction {
-        DelegationAction(
-            actionBytes: actionBytes,
-            rk: rk,
-            govNullifiers: govNullifiers,
-            van: van,
-            govCommRand: govCommRand,
-            dummyNullifiers: dummyNullifiers,
-            rhoSigned: rhoSigned,
-            paddedCmx: paddedCmx,
-            nfSigned: nfSigned,
-            cmxNew: cmxNew,
-            alpha: alpha,
-            rseedSigned: rseedSigned,
-            rseedOutput: rseedOutput,
-            spendAuthSig: spendAuthSig
-        )
-    }
 }
 
 // MARK: - Delegation
@@ -503,12 +483,25 @@ public struct NoteInfo: Equatable, Sendable {
     public let nullifier: Data
     public let value: UInt64
     public let position: UInt64
+    public let diversifier: Data
+    public let rho: Data
+    public let rseed: Data
+    public let scope: UInt32
+    public let ufvkStr: String
 
-    public init(commitment: Data, nullifier: Data, value: UInt64, position: UInt64) {
+    public init(
+        commitment: Data, nullifier: Data, value: UInt64, position: UInt64,
+        diversifier: Data, rho: Data, rseed: Data, scope: UInt32, ufvkStr: String
+    ) {
         self.commitment = commitment
         self.nullifier = nullifier
         self.value = value
         self.position = position
+        self.diversifier = diversifier
+        self.rho = rho
+        self.rseed = rseed
+        self.scope = scope
+        self.ufvkStr = ufvkStr
     }
 }
 

@@ -18,11 +18,13 @@ import WalletStorage
 import ZcashSDKEnvironment
 import ZcashLightClientKit
 
+/// Nullifier IMT server used for ZKP #1 exclusion proofs.
+private let imtServerBaseUrl = "http://46.101.255.48:3000"
+
 private enum VotingFlowError: LocalizedError {
     case missingActiveSession
     case missingSigningAccount
     case missingHotkeyAddress
-    case missingPendingDelegationAction
     case missingPendingUnsignedPczt
     case invalidDelegationSignature
     case missingVoteCommitmentBundle
@@ -35,8 +37,6 @@ private enum VotingFlowError: LocalizedError {
             return "missing signing account for delegation PCZT"
         case .missingHotkeyAddress:
             return "missing hotkey address for delegation PCZT"
-        case .missingPendingDelegationAction:
-            return "missing pending delegation action"
         case .missingPendingUnsignedPczt:
             return "missing pending unsigned delegation PCZT"
         case .invalidDelegationSignature:
@@ -134,7 +134,7 @@ public struct Voting {
         // ZKP #1 (delegation) — runs in background
         public var delegationProofStatus: ProofStatus = .notStarted
         public var keystoneSigningStatus: KeystoneSigningStatus = .idle
-        public var pendingDelegationAction: DelegationAction?
+
         /// Governance PCZT result for Keystone signing flow (contains metadata + pczt_bytes).
         public var pendingGovernancePczt: GovernancePcztResult?
         /// Unsigned delegation PCZT request shown as QR and used for signature extraction.
@@ -532,14 +532,14 @@ public struct Voting {
                 return .send(.startDelegationProof)
 
             case .delegationRejected:
-                state.pendingDelegationAction = nil
+
                 state.pendingGovernancePczt = nil
                 state.pendingUnsignedDelegationPczt = nil
                 state.keystoneSigningStatus = .idle
                 return .send(.dismissFlow)
 
             case .retryKeystoneSigning:
-                state.pendingDelegationAction = nil
+
                 state.pendingGovernancePczt = nil
                 state.pendingUnsignedDelegationPczt = nil
                 state.keystoneSigningStatus = .idle
@@ -560,14 +560,15 @@ public struct Voting {
                 }
                 let roundId = activeSession.voteRoundId.hexString
                 let cachedNotes = state.walletNotes
-                let networkId: UInt32 = zcashSDKEnvironment.network.networkType == .mainnet ? 0 : 1
+                let network = zcashSDKEnvironment.network
+                let walletDbPath = databaseFiles.dataDbURLFor(network).path
+                let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
                 let accountIndex: UInt32 = 0
                 let isKeystoneUser = state.isKeystoneUser
                 let roundName = state.votingRound.title
-                // Flatten each witness auth path into a single Data for the delegation circuit
-                let inclusionProofs = state.cachedWitnesses.map { witness in
-                    witness.authPath.reduce(Data()) { $0 + $1 }
-                }
+                // TODO: Source from VotingSession or server config once the nullifier-ingest
+                // service endpoint is deployed.
+                let imtServerUrl = imtServerBaseUrl
                 return .merge(
                     // Subscribe to DB state stream (follows SDKSynchronizer pattern)
                     .publisher {
@@ -603,31 +604,17 @@ public struct Voting {
                             return
                         }
 
-                        // Non-Keystone path: build delegation action with placeholder signature
-                        let action = try await votingCrypto.buildDelegationSignAction(
-                            roundId,
-                            cachedNotes,
-                            senderSeed,
-                            hotkeySeed,
-                            networkId,
-                            accountIndex
-                        )
-                        let spendAuthSig = action.spendAuthSig ?? Data(repeating: 0x00, count: 64)
-                        // Use real Merkle inclusion proofs from verified witnesses
-                        _ = try await votingCrypto.buildDelegationWitness(
-                            roundId,
-                            action,
-                            spendAuthSig,
-                            inclusionProofs,
-                            [Data(repeating: 0x22, count: 32)] // exclusion proofs still mocked
-                        )
-
-                        // Generate delegation proof (long-running, reports progress)
-                        for try await event in votingCrypto.generateDelegationProof(roundId) {
+                        // Non-Keystone path: build and prove delegation in one step
+                        for try await event in votingCrypto.buildAndProveDelegation(
+                            roundId, walletDbPath, senderSeed, hotkeySeed,
+                            networkId, accountIndex, imtServerUrl
+                        ) {
                             switch event {
                             case .progress(let p):
+                                print("[Voting] ZKP #1 progress: \(Int(p * 100))%")
                                 await send(.delegationProofProgress(p))
-                            case .completed:
+                            case .completed(let proof):
+                                print("[Voting] ZKP #1 COMPLETE — proof size: \(proof.count) bytes (real=5216, mock=32)")
                                 await send(.delegationProofCompleted)
                             }
                         }
@@ -642,7 +629,7 @@ public struct Voting {
 
             case .keystoneSigningPrepared(let govPczt, let unsignedPczt):
                 state.pendingGovernancePczt = govPczt
-                state.pendingDelegationAction = govPczt.toDelegationAction()
+
                 state.pendingUnsignedDelegationPczt = unsignedPczt
                 state.keystoneSigningStatus = .awaitingSignature
                 return .none
@@ -686,18 +673,16 @@ public struct Voting {
             case .keystoneScan:
                 return .none
 
-            case .spendAuthSignatureExtracted(let spendAuthSig):
+            case .spendAuthSignatureExtracted:
+                // TODO: Store spendAuthSig in DB for on-chain submission.
+                // The sig is extracted from the Keystone-signed PCZT but not yet
+                // persisted — it will be needed when the cosmos submission flow is built.
                 guard let activeSession = state.activeSession else {
                     return .send(.delegationProofFailed(
                         VotingFlowError.missingActiveSession.localizedDescription
                     ))
                 }
-                guard let pendingAction = state.pendingDelegationAction else {
-                    return .send(.delegationProofFailed(
-                        VotingFlowError.missingPendingDelegationAction.localizedDescription
-                    ))
-                }
-                state.pendingDelegationAction = nil
+
                 state.pendingGovernancePczt = nil
                 state.pendingUnsignedDelegationPczt = nil
                 state.keystoneSigningStatus = .idle
@@ -705,23 +690,30 @@ public struct Voting {
                 state.delegationProofStatus = .generating(progress: 0)
 
                 let roundId = activeSession.voteRoundId.hexString
-                let inclusionProofs = state.cachedWitnesses.map { witness in
-                    witness.authPath.reduce(Data()) { $0 + $1 }
-                }
-                return .run { [votingCrypto] send in
-                    _ = try await votingCrypto.buildDelegationWitness(
-                        roundId,
-                        pendingAction,
-                        spendAuthSig,
-                        inclusionProofs,
-                        [Data(repeating: 0x22, count: 32)]
-                    )
+                let network = zcashSDKEnvironment.network
+                let walletDbPath = databaseFiles.dataDbURLFor(network).path
+                let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
+                let accountIndex: UInt32 = 0
+                // TODO: Source from VotingSession or server config once the nullifier-ingest
+                // service endpoint is deployed. For now, the Rust side fetches IMT proofs from
+                // this URL for each note's nullifier.
+                let imtServerUrl = imtServerBaseUrl
+                return .run { [votingCrypto, mnemonic, walletStorage] send in
+                    let senderPhrase = try walletStorage.exportWallet().seedPhrase.value()
+                    let senderSeed = try mnemonic.toSeed(senderPhrase)
+                    let hotkeyPhrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
+                    let hotkeySeed = try mnemonic.toSeed(hotkeyPhrase)
 
-                    for try await event in votingCrypto.generateDelegationProof(roundId) {
+                    for try await event in votingCrypto.buildAndProveDelegation(
+                        roundId, walletDbPath, senderSeed, hotkeySeed,
+                        networkId, accountIndex, imtServerUrl
+                    ) {
                         switch event {
                         case .progress(let p):
+                            print("[Voting] ZKP #1 progress: \(Int(p * 100))%")
                             await send(.delegationProofProgress(p))
-                        case .completed:
+                        case .completed(let proof):
+                            print("[Voting] ZKP #1 COMPLETE — proof size: \(proof.count) bytes (real=5216, mock=32)")
                             await send(.delegationProofCompleted)
                         }
                     }

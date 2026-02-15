@@ -1,3 +1,4 @@
+use subtle::CtOption;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -10,6 +11,17 @@ pub enum VotingError {
     Internal { message: String },
 }
 
+/// Unwrap a `CtOption`, returning a `VotingError` on `None`.
+pub fn ct_option_to_result<T>(opt: CtOption<T>, msg: &str) -> Result<T, VotingError> {
+    if opt.is_some().into() {
+        Ok(opt.unwrap())
+    } else {
+        Err(VotingError::Internal {
+            message: msg.to_string(),
+        })
+    }
+}
+
 /// Voting hotkey pair. secret_key must be 32 bytes (Pallas scalar).
 #[derive(Clone, Debug)]
 pub struct VotingHotkey {
@@ -18,13 +30,28 @@ pub struct VotingHotkey {
     pub address: String,
 }
 
-/// A shielded Orchard note with data needed for delegation.
+/// A shielded Orchard note from the wallet DB, containing all fields needed
+/// for delegation proof construction and governance PCZT building.
 #[derive(Clone, Debug)]
 pub struct NoteInfo {
+    /// Extracted note commitment (cmx), recomputed from note parts.
     pub commitment: Vec<u8>,
+    /// Nullifier (32 bytes).
     pub nullifier: Vec<u8>,
+    /// Note value in zatoshis.
     pub value: u64,
+    /// Position in the note commitment tree.
     pub position: u64,
+    /// Diversifier bytes (11 bytes).
+    pub diversifier: Vec<u8>,
+    /// Rho field (32 bytes, LE encoding of pallas::Base).
+    pub rho: Vec<u8>,
+    /// Random seed (32 bytes).
+    pub rseed: Vec<u8>,
+    /// Key scope: 0 = external, 1 = internal.
+    pub scope: u32,
+    /// Unified full viewing key string for this note's account.
+    pub ufvk_str: String,
 }
 
 /// Parameters for a voting round, sourced from vote chain.
@@ -139,12 +166,39 @@ pub struct SharePayload {
     pub tree_position: u64,
 }
 
-/// Result of ZKP generation.
+
+/// JSON deserialization struct for IMT server exclusion proof responses.
+#[derive(serde::Deserialize, Clone, Debug)]
+pub struct ImtProofJson {
+    /// IMT root (hex with 0x prefix).
+    pub root: String,
+    /// Low bound of the bracketing leaf (hex).
+    pub low: String,
+    /// High bound of the bracketing leaf (hex).
+    pub high: String,
+    /// Position of the leaf in the tree.
+    pub leaf_pos: u32,
+    /// Sibling hashes along the 29-level Merkle path (hex strings).
+    pub path: Vec<String>,
+}
+
+/// Result of real delegation proof generation (ZKP #1).
 #[derive(Clone, Debug)]
-pub struct ProofResult {
+pub struct DelegationProofResult {
+    /// Halo2 proof bytes.
     pub proof: Vec<u8>,
-    pub success: bool,
-    pub error: Option<String>,
+    /// 12 public input field elements, each as 32-byte LE arrays.
+    pub public_inputs: Vec<Vec<u8>>,
+    /// Signed note nullifier (32 bytes) — the ZKP's nf_signed (v=0 note).
+    pub nf_signed: Vec<u8>,
+    /// Output note commitment (32 bytes) — the ZKP's cmx_new (v=0 note).
+    pub cmx_new: Vec<u8>,
+    /// 4 governance nullifiers (each 32 bytes).
+    pub gov_nullifiers: Vec<Vec<u8>>,
+    /// Governance commitment / VAN (32 bytes).
+    pub gov_comm: Vec<u8>,
+    /// Randomized verification key (32 bytes, compressed).
+    pub rk: Vec<u8>,
 }
 
 /// Merkle witness for a note in the Orchard commitment tree.

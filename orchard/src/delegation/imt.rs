@@ -7,6 +7,7 @@
 //! A non-membership proof shows that a nullifier falls within the interval.
 //! Used by the delegation circuit and builder.
 
+use alloc::string::String;
 use ff::PrimeField;
 use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength};
 use pasta_curves::pallas;
@@ -63,6 +64,16 @@ pub struct ImtProofData {
     pub path: [pallas::Base; IMT_DEPTH],
 }
 
+/// Error type for IMT proof fetching failures.
+#[derive(Clone, Debug)]
+pub struct ImtError(pub String);
+
+impl core::fmt::Display for ImtError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "IMT error: {}", self.0)
+    }
+}
+
 /// Trait for providing IMT non-membership proofs.
 ///
 /// Implementations must return proofs against a consistent root — all proofs
@@ -71,7 +82,7 @@ pub trait ImtProvider {
     /// The current IMT root.
     fn root(&self) -> pallas::Base;
     /// Generate a non-membership proof for the given nullifier.
-    fn non_membership_proof(&self, nf: pallas::Base) -> ImtProofData;
+    fn non_membership_proof(&self, nf: pallas::Base) -> Result<ImtProofData, ImtError>;
 }
 
 // ================================================================
@@ -177,7 +188,7 @@ impl ImtProvider for SpacedLeafImtProvider {
         self.root
     }
 
-    fn non_membership_proof(&self, nf: pallas::Base) -> ImtProofData {
+    fn non_membership_proof(&self, nf: pallas::Base) -> Result<ImtProofData, ImtError> {
         // Determine which bracket nf falls in: k = nf >> 250.
         // In the LE byte repr, bit 250 is bit 2 of byte 31.
         let repr = nf.to_repr();
@@ -205,12 +216,12 @@ impl ImtProvider for SpacedLeafImtProvider {
             path[l] = empty[l];
         }
 
-        ImtProofData {
+        Ok(ImtProofData {
             root: self.root,
             low,
             high,
             leaf_pos,
             path,
-        }
+        })
     }
 }

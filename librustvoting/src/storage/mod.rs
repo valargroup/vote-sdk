@@ -15,9 +15,8 @@ pub enum RoundPhase {
     Initialized = 0,
     HotkeyGenerated = 1,
     DelegationConstructed = 2,
-    WitnessBuilt = 3,
-    DelegationProved = 4,
-    VoteReady = 5,
+    DelegationProved = 3,
+    VoteReady = 4,
 }
 
 impl RoundPhase {
@@ -26,9 +25,8 @@ impl RoundPhase {
             0 => Self::Initialized,
             1 => Self::HotkeyGenerated,
             2 => Self::DelegationConstructed,
-            3 => Self::WitnessBuilt,
-            4 => Self::DelegationProved,
-            5 => Self::VoteReady,
+            3 => Self::DelegationProved,
+            4 => Self::VoteReady,
             _ => Self::Initialized,
         }
     }
@@ -167,19 +165,7 @@ mod tests {
         let db = test_db();
         let conn = db.conn();
         queries::insert_round(&conn, &test_params(), None).unwrap();
-
-        let witness = vec![0xDD; 512];
-        queries::store_witness(&conn, "test-round-1", &witness).unwrap();
-
-        let loaded = queries::load_witness(&conn, "test-round-1").unwrap();
-        assert_eq!(loaded, witness);
-
-        let proof = crate::types::ProofResult {
-            proof: vec![0xAB; 256],
-            success: true,
-            error: None,
-        };
-        queries::store_proof(&conn, "test-round-1", &proof).unwrap();
+        queries::store_proof(&conn, "test-round-1", &vec![0xAB; 256]).unwrap();
 
         let state = queries::get_round_state(&conn, "test-round-1").unwrap();
         assert!(state.proof_generated);

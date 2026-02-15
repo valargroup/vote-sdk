@@ -51,6 +51,14 @@ pub struct DelegationBundle {
 pub enum DelegationBuildError {
     /// Must have 1–4 real notes.
     InvalidNoteCount(usize),
+    /// IMT proof fetch failed for a padded note nullifier.
+    ImtFetchFailed(super::imt::ImtError),
+}
+
+impl From<super::imt::ImtError> for DelegationBuildError {
+    fn from(e: super::imt::ImtError) -> Self {
+        DelegationBuildError::ImtFetchFailed(e)
+    }
 }
 
 impl std::fmt::Display for DelegationBuildError {
@@ -58,6 +66,9 @@ impl std::fmt::Display for DelegationBuildError {
         match self {
             DelegationBuildError::InvalidNoteCount(n) => {
                 write!(f, "invalid note count: {} (expected 1–4)", n)
+            }
+            DelegationBuildError::ImtFetchFailed(e) => {
+                write!(f, "IMT proof fetch failed: {e}")
             }
         }
     }
@@ -174,7 +185,7 @@ pub fn build_delegation_bundle(
         let gov_null = gov_null_hash(nk_val, vote_round_id, real_nf.0);
 
         // Get IMT non-membership proof for this padded note's nullifier.
-        let imt_proof = imt_provider.non_membership_proof(real_nf.0);
+        let imt_proof = imt_provider.non_membership_proof(real_nf.0)?;
 
         // Merkle path: zeros (condition 10 is skipped for padded notes).
         let merkle_path = MerklePath::dummy(&mut *rng);
@@ -375,7 +386,7 @@ mod tests {
             let merkle_path = MerklePath::from_parts(i as u32, auth_path);
 
             let real_nf = note.nullifier(fvk);
-            let imt_proof = imt_provider.non_membership_proof(real_nf.0);
+            let imt_proof = imt_provider.non_membership_proof(real_nf.0).unwrap();
 
             inputs.push(RealNoteInput {
                 note,

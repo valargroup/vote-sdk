@@ -1,8 +1,9 @@
 use crate::storage::queries;
 use crate::storage::{RoundPhase, RoundState, RoundSummary, VoteRecord, VotingDb};
 use crate::types::{
-    DelegationAction, EncryptedShare, GovernancePczt, NoteInfo, ProofProgressReporter, ProofResult,
-    SharePayload, VoteCommitmentBundle, VotingError, VotingHotkey, VotingRoundParams, WitnessData,
+    DelegationAction, DelegationProofResult, EncryptedShare, GovernancePczt, NoteInfo,
+    ProofProgressReporter, SharePayload, VoteCommitmentBundle, VotingError,
+    VotingHotkey, VotingRoundParams, WitnessData,
 };
 
 impl VotingDb {
@@ -179,7 +180,7 @@ impl VotingDb {
     /// Uses cached tree state + wallet DB shard data to build witnesses.
     /// Results are cached in the witnesses table — subsequent calls return cached data.
     ///
-    /// Must be called after store_tree_state and before build_delegation_witness.
+    /// Must be called after store_tree_state and before build_and_prove_delegation.
     pub fn generate_note_witnesses(
         &self,
         round_id: &str,
@@ -230,41 +231,119 @@ impl VotingDb {
 
     // --- Phase 2: Delegation proof ---
 
-    /// Build delegation witness from PIR responses. Stores witness in db.
-    /// The DelegationAction comes from the caller (not stored in db yet).
-    pub fn build_delegation_witness(
+    /// Build and prove the real delegation ZKP (#1). Long-running.
+    ///
+    /// Loads all required data from the voting DB and wallet DB:
+    /// - alpha, gov_comm_rand from delegation data (stored by `build_governance_pczt`)
+    /// - Merkle witnesses (stored by `generate_note_witnesses`)
+    /// - Full note data (queried from wallet DB)
+    /// - Vote round params (stored by `init_round`)
+    ///
+    /// Fetches IMT exclusion proofs from the IMT server for each note's nullifier.
+    /// For padded notes (< 4 real notes), the prover fetches proofs internally.
+    ///
+    /// Stores the proof result and advances phase to `DelegationProved`.
+    pub fn build_and_prove_delegation(
         &self,
         round_id: &str,
-        action: &DelegationAction,
-        inclusion_proofs: &[Vec<u8>],
-        exclusion_proofs: &[Vec<u8>],
-    ) -> Result<Vec<u8>, VotingError> {
-        let witness =
-            crate::zkp1::build_delegation_witness(action, inclusion_proofs, exclusion_proofs)?;
-        let conn = self.conn();
-        queries::store_witness(&conn, round_id, &witness)?;
-        queries::update_round_phase(&conn, round_id, RoundPhase::WitnessBuilt)?;
-        Ok(witness)
-    }
-
-    /// Generate ZKP #1 (delegation proof). Long-running.
-    /// Loads stored witness, generates proof, stores result, reports progress.
-    pub fn generate_delegation_proof(
-        &self,
-        round_id: &str,
+        wallet_db_path: &str,
+        hotkey_raw_address: &[u8],
+        imt_server_url: &str,
+        network_id: u32,
         progress: &dyn ProofProgressReporter,
-    ) -> Result<ProofResult, VotingError> {
-        let witness = {
-            let conn = self.conn();
-            queries::load_witness(&conn, round_id)?
-        };
+    ) -> Result<DelegationProofResult, VotingError> {
+        let total_start = std::time::Instant::now();
 
-        let proof = crate::zkp1::generate_delegation_proof(&witness, progress)?;
-
+        // Phase 1: DB queries
+        let db_start = std::time::Instant::now();
         let conn = self.conn();
-        queries::store_proof(&conn, round_id, &proof)?;
+        let params = queries::load_round_params(&conn, round_id)?;
+        let alpha = queries::load_alpha(&conn, round_id)?;
+        let gov_comm_rand = queries::load_gov_comm_rand(&conn, round_id)?;
+        let witnesses = queries::load_witnesses(&conn, round_id)?;
+
+        // Query full note data from wallet DB (includes diversifier, rseed, etc.)
+        let full_notes = crate::wallet_notes::get_wallet_notes_at_snapshot(
+            wallet_db_path,
+            params.snapshot_height,
+            network_id,
+        )?;
+        let db_elapsed = db_start.elapsed();
+        eprintln!("[ZKP1] DB queries: {:.2}s ({} notes, {} witnesses)", db_elapsed.as_secs_f64(), full_notes.len(), witnesses.len());
+
+        // Phase 2: Fetch IMT exclusion proofs
+        let imt_start = std::time::Instant::now();
+        eprintln!(
+            "[ZKP1] Fetching IMT exclusion proofs for {} notes from {}",
+            full_notes.len(),
+            imt_server_url
+        );
+        let mut imt_proofs = Vec::new();
+        for (i, note) in full_notes.iter().enumerate() {
+            let hex_nf = hex::encode(&note.nullifier);
+            let url = format!("{}/exclusion-proof/{}", imt_server_url, hex_nf);
+            let note_start = std::time::Instant::now();
+            let resp = reqwest::blocking::get(&url).map_err(|e| VotingError::Internal {
+                message: format!("IMT server request to {url} failed: {e}"),
+            })?;
+            if !resp.status().is_success() {
+                return Err(VotingError::Internal {
+                    message: format!(
+                        "IMT server returned {} for nullifier {}",
+                        resp.status(),
+                        hex_nf
+                    ),
+                });
+            }
+            let body = resp.bytes().map_err(|e| VotingError::Internal {
+                message: format!("failed to read IMT response body: {e}"),
+            })?;
+            eprintln!("[ZKP1] Note {}: IMT proof {} bytes in {:.2}s", i, body.len(), note_start.elapsed().as_secs_f64());
+            imt_proofs.push(body.to_vec());
+        }
+        let imt_elapsed = imt_start.elapsed();
+        eprintln!("[ZKP1] IMT fetch total: {:.2}s for {} proofs", imt_elapsed.as_secs_f64(), imt_proofs.len());
+
+        // Phase 3: Proof generation
+        let prove_start = std::time::Instant::now();
+        eprintln!("[ZKP1] Starting proof generation...");
+
+        // Parse vote_round_id from hex string to 32-byte field element
+        let vote_round_id_bytes =
+            hex::decode(&params.vote_round_id).map_err(|e| VotingError::Internal {
+                message: format!("invalid vote_round_id hex '{}': {e}", params.vote_round_id),
+            })?;
+
+        let result = crate::zkp1::build_and_prove_delegation(
+            &full_notes,
+            hotkey_raw_address,
+            &alpha,
+            &gov_comm_rand,
+            &vote_round_id_bytes,
+            &witnesses,
+            &imt_proofs,
+            imt_server_url,
+            network_id,
+            progress,
+        )?;
+        let prove_elapsed = prove_start.elapsed();
+        eprintln!("[ZKP1] Proof generation: {:.2}s", prove_elapsed.as_secs_f64());
+
+        // Store proof bytes for debugging/recovery
+        queries::store_proof(&conn, round_id, &result.proof)?;
         queries::update_round_phase(&conn, round_id, RoundPhase::DelegationProved)?;
-        Ok(proof)
+
+        let total_elapsed = total_start.elapsed();
+        eprintln!(
+            "[ZKP1] TOTAL: {:.2}s (DB: {:.2}s, IMT: {:.2}s, Prove: {:.2}s) — proof {} bytes",
+            total_elapsed.as_secs_f64(),
+            db_elapsed.as_secs_f64(),
+            imt_elapsed.as_secs_f64(),
+            prove_elapsed.as_secs_f64(),
+            result.proof.len(),
+        );
+
+        Ok(result)
     }
 
     // --- Phase 3: Voting ---
@@ -399,6 +478,11 @@ mod tests {
             nullifier: vec![0x02; 32],
             value: 1_000_000,
             position: 42,
+            diversifier: vec![0; 11],
+            rho: vec![0; 32],
+            rseed: vec![0; 32],
+            scope: 0,
+            ufvk_str: String::new(),
         };
         // Derive valid FVK and hotkey address from deterministic spending keys
         let sk = SpendingKey::from_bytes([0x42; 32]).expect("valid spending key");
@@ -495,46 +579,6 @@ mod tests {
         let conn = db.conn();
         let loaded = queries::load_tree_state(&conn, ROUND_ID).unwrap();
         assert_eq!(loaded, tree_state);
-    }
-
-    #[test]
-    fn test_witness_and_proof_flow() {
-        let db = test_db();
-        db.init_round(&test_params(), None).unwrap();
-
-        let action = DelegationAction {
-            action_bytes: vec![0xDA; 128],
-            rk: vec![0xDE; 32],
-            gov_nullifiers: vec![vec![0x01; 32]; 4],
-            van: vec![0x02; 32],
-            gov_comm_rand: vec![0x03; 32],
-            dummy_nullifiers: vec![],
-            rho_signed: vec![0x04; 32],
-            padded_cmx: vec![],
-            nf_signed: vec![0x05; 32],
-            cmx_new: vec![0x06; 32],
-            alpha: vec![0x07; 32],
-            spend_auth_sig: None,
-            rseed_signed: vec![0x08; 32],
-            rseed_output: vec![0x09; 32],
-        };
-        let inclusion = vec![vec![0x01; 32]; 4];
-        let exclusion = vec![vec![0x02; 32]; 4];
-
-        let witness = db
-            .build_delegation_witness(ROUND_ID, &action, &inclusion, &exclusion)
-            .unwrap();
-        assert!(!witness.is_empty());
-
-        let state = db.get_round_state(ROUND_ID).unwrap();
-        assert_eq!(state.phase, RoundPhase::WitnessBuilt);
-
-        let reporter = NoopProgressReporter;
-        let proof = db.generate_delegation_proof(ROUND_ID, &reporter).unwrap();
-        assert!(proof.success);
-
-        let state = db.get_round_state(ROUND_ID).unwrap();
-        assert_eq!(state.phase, RoundPhase::DelegationProved);
     }
 
     #[test]

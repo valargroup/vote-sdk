@@ -778,6 +778,11 @@ mod tests {
             nullifier: vec![0x02; 32],
             value: 1_000_000,
             position: 42,
+            diversifier: vec![0; 11],
+            rho: vec![0; 32],
+            rseed: vec![0; 32],
+            scope: 0,
+            ufvk_str: String::new(),
         }
     }
 
@@ -900,6 +905,11 @@ mod tests {
                 nullifier: vec![i as u8 + 0x10; 32],
                 value: 250_000,
                 position: i as u64,
+                diversifier: vec![0; 11],
+                rho: vec![0; 32],
+                rseed: vec![0; 32],
+                scope: 0,
+                ufvk_str: String::new(),
             })
             .collect();
 
@@ -1039,6 +1049,11 @@ mod tests {
                     nullifier,
                     value: 250_000,
                     position: i as u64,
+                    diversifier: vec![0; 11],
+                    rho: vec![0; 32],
+                    rseed: vec![0; 32],
+                    scope: 0,
+                    ufvk_str: String::new(),
                 }
             })
             .collect();
@@ -1054,6 +1069,11 @@ mod tests {
                     nullifier,
                     value: 250_000,
                     position: i as u64,
+                    diversifier: vec![0; 11],
+                    rho: vec![0; 32],
+                    rseed: vec![0; 32],
+                    scope: 0,
+                    ufvk_str: String::new(),
                 }
             })
             .collect();
@@ -1384,6 +1404,11 @@ mod tests {
                 nullifier: vec![i as u8 + 0x10; 32],
                 value: 250_000,
                 position: i as u64,
+                diversifier: vec![0; 11],
+                rho: vec![0; 32],
+                rseed: vec![0; 32],
+                scope: 0,
+                ufvk_str: String::new(),
             })
             .collect();
 

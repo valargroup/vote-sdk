@@ -12,28 +12,27 @@ Grouped by round lifecycle phase. Status key: **Real** = production implementati
 
 ### VotingCryptoClient
 
-| Phase      | Method                                                                                       | Status  | Notes                                                    |
-| ---------- | -------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------- |
-| —          | `stateStream()`                                                                              | Real    | Publishes DB state via `CurrentValueSubject`             |
-| —          | `openDatabase(path:)`                                                                        | Real    | Opens/creates SQLite via UniFFI                          |
-| Init       | `initRound(params:sessionJson:)`                                                             | Real    | Creates round row, sets phase to `initialized`           |
-| Init       | `getRoundState(roundId:)`                                                                    | Real    | Queries `rounds` table                                   |
-| Init       | `getVotes(roundId:)`                                                                         | Real    | Queries `votes` table                                    |
-| Init       | `listRounds()`                                                                               | Real    | Lists all round summaries                                |
-| Init       | `clearRound(roundId:)`                                                                       | Real    | Deletes round + associated votes                         |
-| Init       | `getWalletNotes(walletDbPath:snapshotHeight:networkId:)`                                     | Real    | Read-only query of Zcash wallet DB, cmx recomputed       |
-| Delegation | `generateHotkey(roundId:seed:)`                                                              | Real    | Random Pallas keypair from seed                          |
-| Delegation | `buildDelegationSignAction(roundId:notes:senderSeed:hotkeySeed:networkId:accountIndex:)`     | Real    | FVK derivation, receiver construction, action + sighash  |
-| Delegation | `storeTreeState(roundId:treeState:)`                                                         | Stubbed | Stores bytes but tree data is placeholder                |
-| Delegation | `buildDelegationWitness(roundId:action:spendAuthSig:inclusionProofs:exclusionProofs:)`       | Stubbed | Accepts placeholder proofs, returns dummy witness        |
-| Delegation | `buildGovernancePczt(roundId:notes:senderSeed:hotkeySeed:networkId:accountIndex:roundName:)` | Real    | Builds governance PCZT for Keystone signing              |
-| Delegation | `extractSpendAuthSignatureFromSignedPczt(signedPczt:actionIndex:)`                           | Real    | Parses signed PCZT and extracts 64-byte SpendAuthSig     |
-| Delegation | `generateDelegationProof(roundId:)`                                                          | Stubbed | Simulates progress over ~2s, returns 32-byte dummy proof |
-| Voting     | `decomposeWeight(weight:)`                                                                   | Real    | Binary decomposition, max 4 shares                       |
-| Voting     | `encryptShares(roundId:shares:)`                                                             | Real    | ElGamal encryption on Pallas curve                       |
-| Voting     | `buildVoteCommitment(roundId:proposalId:choice:encShares:vanWitness:)`                       | Stubbed | Returns placeholder hashes for bundle fields             |
-| Voting     | `buildSharePayloads(encShares:commitment:)`                                                  | Real    | Constructs helper server payloads from encrypted shares  |
-| Voting     | `markVoteSubmitted(roundId:proposalId:)`                                                     | Real    | Sets `submitted = true` in votes table                   |
+| Phase      | Method                                                                                       | Status  | Notes                                                   |
+| ---------- | -------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------- |
+| —          | `stateStream()`                                                                              | Real    | Publishes DB state via `CurrentValueSubject`            |
+| —          | `openDatabase(path:)`                                                                        | Real    | Opens/creates SQLite via UniFFI                         |
+| Init       | `initRound(params:sessionJson:)`                                                             | Real    | Creates round row, sets phase to `initialized`          |
+| Init       | `getRoundState(roundId:)`                                                                    | Real    | Queries `rounds` table                                  |
+| Init       | `getVotes(roundId:)`                                                                         | Real    | Queries `votes` table                                   |
+| Init       | `listRounds()`                                                                               | Real    | Lists all round summaries                               |
+| Init       | `clearRound(roundId:)`                                                                       | Real    | Deletes round + associated votes                        |
+| Init       | `getWalletNotes(walletDbPath:snapshotHeight:networkId:)`                                     | Real    | Read-only query of Zcash wallet DB, cmx recomputed      |
+| Delegation | `generateHotkey(roundId:seed:)`                                                              | Real    | Random Pallas keypair from seed                         |
+| Delegation | `buildDelegationSignAction(roundId:notes:senderSeed:hotkeySeed:networkId:accountIndex:)`     | Real    | FVK derivation, receiver construction, action + sighash |
+| Delegation | `storeTreeState(roundId:treeState:)`                                                         | Real    | Caches protobuf TreeState from lightwalletd via SDK     |
+| Delegation | `buildGovernancePczt(roundId:notes:senderSeed:hotkeySeed:networkId:accountIndex:roundName:)` | Real    | Builds governance PCZT for Keystone signing             |
+| Delegation | `extractSpendAuthSignatureFromSignedPczt(signedPczt:actionIndex:)`                           | Real    | Parses signed PCZT and extracts 64-byte SpendAuthSig    |
+| Delegation | `buildAndProveDelegation(roundId:...)`                                                       | Real    | Real Halo2 proof via delegation circuit                 |
+| Voting     | `decomposeWeight(weight:)`                                                                   | Real    | Binary decomposition, max 4 shares                      |
+| Voting     | `encryptShares(roundId:shares:)`                                                             | Real    | ElGamal encryption on Pallas curve                      |
+| Voting     | `buildVoteCommitment(roundId:proposalId:choice:encShares:vanWitness:)`                       | Stubbed | Returns placeholder hashes for bundle fields            |
+| Voting     | `buildSharePayloads(encShares:commitment:)`                                                  | Real    | Constructs helper server payloads from encrypted shares |
+| Voting     | `markVoteSubmitted(roundId:proposalId:)`                                                     | Real    | Sets `submitted = true` in votes table                  |
 
 ### VotingAPIClient
 
@@ -59,16 +58,15 @@ All methods are **Mocked** — they return hardcoded success responses after a s
 A voting round progresses through phases tracked in the `rounds.phase` SQLite column. Phase transitions happen atomically inside Rust — each operation validates the current phase, does its work, persists results, and advances the phase.
 
 ```
-initialized ──► hotkeyGenerated ──► delegationConstructed ──► witnessBuilt ──► delegationProved ──► voteReady
+initialized ──► hotkeyGenerated ──► delegationConstructed ──► delegationProved ──► voteReady
 ```
 
 | Phase                   | Entered by                  | Valid next calls                                                                  |
 | ----------------------- | --------------------------- | --------------------------------------------------------------------------------- |
 | `initialized`           | `initRound`                 | `generateHotkey`                                                                  |
 | `hotkeyGenerated`       | `generateHotkey`            | `buildDelegationSignAction`                                                       |
-| `delegationConstructed` | `buildDelegationSignAction` | `storeTreeState`, `buildDelegationWitness`                                        |
-| `witnessBuilt`          | `buildDelegationWitness`    | `generateDelegationProof`                                                         |
-| `delegationProved`      | `generateDelegationProof`   | `buildVoteCommitment` (first call)                                                |
+| `delegationConstructed` | `buildDelegationSignAction` | `storeTreeState`, `buildAndProveDelegation`                                       |
+| `delegationProved`      | `buildAndProveDelegation`   | `buildVoteCommitment` (first call)                                                |
 | `voteReady`             | `buildVoteCommitment`       | `buildVoteCommitment`, `encryptShares`, `buildSharePayloads`, `markVoteSubmitted` |
 
 Phase-independent methods (callable at any phase): `stateStream`, `openDatabase`, `getRoundState`, `getVotes`, `listRounds`, `clearRound`, `getWalletNotes`, `decomposeWeight`.
@@ -172,7 +170,7 @@ Queries the Zcash wallet database (read-only) for Orchard notes unspent at the s
 | `snapshotHeight` | `UInt64` | Block height for the note snapshot                     |
 | `networkId`      | `UInt32` | `0` = mainnet, `1` = testnet                           |
 
-**Output:** `[NoteInfo]` — each has `commitment` (32-byte cmx), `nullifier` (32 bytes), `value` (zatoshis), `position` (commitment tree position).
+**Output:** `[NoteInfo]` — each has `commitment` (32-byte cmx), `nullifier`, `value`, `position`, plus full note fields (`diversifier`, `rho`, `rseed`, `scope`, `ufvkStr`) needed for circuit witness construction.
 
 ### generateHotkey
 
@@ -221,31 +219,42 @@ High-level boundary method for delegation action construction. Derives the FVK f
 var storeTreeState: @Sendable (_ roundId: String, _ treeState: Data) async throws -> Void
 ```
 
-Stores serialized commitment tree state in the round row. Currently accepts placeholder data.
+Caches the protobuf-encoded `TreeState` fetched from lightwalletd (via `sdkSynchronizer.getTreeState`). Used by `generateNoteWitnesses` to build Merkle inclusion proofs from the wallet DB shard data + frontier.
 
-### buildDelegationWitness
+### buildAndProveDelegation
 
-```swift
-var buildDelegationWitness: @Sendable (
-    _ roundId: String,
-    _ action: DelegationAction,
-    _ spendAuthSig: Data,
-    _ inclusionProofs: [Data],
-    _ exclusionProofs: [Data]
-) async throws -> Data
+The combined real delegation proof function, replacing the previous `buildDelegationWitness` + `generateDelegationProof` stubs. Constructs the delegation circuit from wallet notes, Merkle witnesses, and IMT exclusion proofs, then generates a Halo2 proof. Advances phase to `delegationProved`.
+
+Rust signature:
+
+```rust
+pub fn build_and_prove_delegation(
+    notes: &[NoteInfo],
+    hotkey_raw_address: &[u8],     // 43-byte raw Orchard address
+    alpha_bytes: &[u8],            // 32-byte scalar
+    gov_comm_rand_bytes: &[u8],    // 32-byte field element
+    vote_round_id_bytes: &[u8],    // 32-byte field element
+    merkle_witnesses: &[WitnessData],
+    imt_proof_jsons: &[Vec<u8>],   // raw JSON from IMT server
+    imt_server_url: &str,          // base URL for padded-note proofs
+    network_id: u32,
+    progress: &dyn ProofProgressReporter,
+) -> Result<DelegationProofResult, VotingError>
 ```
 
-Builds the ZKP #1 circuit witness from the delegation action, note inclusion proofs, and nullifier exclusion proofs. Advances phase to `witnessBuilt`. Currently stubbed — accepts placeholder proof data.
+| Param                 | Type             | Description                                                   |
+| --------------------- | ---------------- | ------------------------------------------------------------- |
+| `notes`               | `[NoteInfo]` | 1–4 wallet notes from `get_wallet_notes_at_snapshot`     |
+| `hotkey_raw_address`  | `Data`           | 43-byte raw Orchard address of the voting hotkey              |
+| `alpha_bytes`         | `Data`           | 32-byte spend auth randomizer (from `GovernancePczt`)         |
+| `gov_comm_rand_bytes` | `Data`           | 32-byte governance commitment blinding factor                 |
+| `vote_round_id_bytes` | `Data`           | 32-byte voting round identifier                               |
+| `merkle_witnesses`    | `[WitnessData]`  | Merkle inclusion proofs from `generate_note_witnesses`        |
+| `imt_proof_jsons`     | `[Data]`         | Raw JSON from `GET /exclusion-proof/{hex}`, one per real note |
+| `imt_server_url`      | `String`         | IMT server base URL (for padded-note proofs fetched by Rust)  |
+| `network_id`          | `UInt32`         | 0 = mainnet, 1 = testnet                                      |
 
-| Param             | Type               | Description                                       |
-| ----------------- | ------------------ | ------------------------------------------------- |
-| `roundId`         | `String`           | Hex-encoded round ID                              |
-| `action`          | `DelegationAction` | From `buildDelegationSignAction`                  |
-| `spendAuthSig`    | `Data`             | 64-byte SpendAuthSig returned by Keystone         |
-| `inclusionProofs` | `[Data]`           | Merkle paths proving note membership in `nc_root` |
-| `exclusionProofs` | `[Data]`           | IMT non-membership proofs for nullifiers          |
-
-**Output:** `Data` — serialized witness bytes.
+**Output:** `DelegationProofResult` — contains Halo2 proof bytes, 12 public inputs (32 bytes each), nf_signed, cmx_new, gov_nullifiers, gov_comm, and rk.
 
 ### buildGovernancePczt
 
@@ -292,16 +301,6 @@ Parses the signed PCZT structurally (via Rust FFI) and extracts the `spend_auth_
 | `actionIndex` | `UInt32` | Expected action index from `GovernancePcztResult` |
 
 **Output:** `Data` — 64-byte SpendAuthSig.
-
-### generateDelegationProof
-
-```swift
-var generateDelegationProof: @Sendable (_ roundId: String) -> AsyncThrowingStream<ProofEvent, Error>
-```
-
-Long-running ZKP #1 proof generation. Runs on a detached task and streams progress updates via a UniFFI callback bridge. Advances phase to `delegationProved` on completion. Currently stubbed — simulates progress and returns a dummy 32-byte proof.
-
-**Output stream:** `.progress(Double)` (0.0–1.0) then `.completed(Data)`.
 
 ### decomposeWeight
 
@@ -463,14 +462,33 @@ Queries the finalized tally for a proposal. Returns per-decision vote totals.
 
 ### NoteInfo
 
-Orchard note from the Zcash wallet, unspent at the snapshot height.
+Orchard note from the Zcash wallet, unspent at the snapshot height. Returned by `get_wallet_notes_at_snapshot()`. Contains all fields needed to reconstruct an `orchard::Note` for the delegation circuit.
 
-| Field        | Type     | Size     | Description                                                 |
-| ------------ | -------- | -------- | ----------------------------------------------------------- |
-| `commitment` | `Data`   | 32 bytes | Extracted note commitment (cmx), recomputed from note parts |
-| `nullifier`  | `Data`   | 32 bytes | Note nullifier                                              |
-| `value`      | `UInt64` | 8 bytes  | Note value in zatoshis                                      |
-| `position`   | `UInt64` | 8 bytes  | Position in the Orchard commitment tree                     |
+| Field         | Type     | Size     | Description                                                 |
+| ------------- | -------- | -------- | ----------------------------------------------------------- |
+| `commitment`  | `Data`   | 32 bytes | Extracted note commitment (cmx), recomputed from note parts |
+| `nullifier`   | `Data`   | 32 bytes | Note nullifier                                              |
+| `value`       | `UInt64` | 8 bytes  | Note value in zatoshis                                      |
+| `position`    | `UInt64` | 8 bytes  | Position in the Orchard commitment tree                     |
+| `diversifier` | `Data`   | 11 bytes | Note diversifier                                            |
+| `rho`         | `Data`   | 32 bytes | Rho field (LE pallas::Base)                                 |
+| `rseed`       | `Data`   | 32 bytes | Random seed                                                 |
+| `scope`       | `UInt32` | 4 bytes  | 0 = external, 1 = internal                                  |
+| `ufvkStr`     | `String` | variable | UFVK string for this note's account                         |
+
+### DelegationProofResult
+
+Result of real delegation proof generation (ZKP #1), returned by `buildAndProveDelegation`.
+
+| Field           | Type     | Size          | Description                                     |
+| --------------- | -------- | ------------- | ----------------------------------------------- |
+| `proof`         | `Data`   | variable      | Halo2 proof bytes                               |
+| `publicInputs`  | `[Data]` | 12 × 32 bytes | Public input field elements (LE 32-byte arrays) |
+| `nfSigned`      | `Data`   | 32 bytes      | Signed note nullifier                           |
+| `cmxNew`        | `Data`   | 32 bytes      | Output note commitment                          |
+| `govNullifiers` | `[Data]` | 4 × 32 bytes  | Governance nullifiers                           |
+| `govComm`       | `Data`   | 32 bytes      | Governance commitment (VAN)                     |
+| `rk`            | `Data`   | 32 bytes      | Randomized verification key (compressed)        |
 
 ### DelegationAction
 
@@ -592,18 +610,19 @@ The app subscribes to `stateStream()` after initialization to drive all UI updat
 ```
 clearRound(roundId)                                 // reset if re-entering
 initRound(params, nil)
+getWalletNotes(walletDbPath, snapshotHeight, networkId) → [NoteInfo]
 buildGovernancePczt(roundId, notes, senderSeed, hotkeySeed, networkId, accountIndex, roundName)
                                                     → GovernancePcztResult
   // UR-encode GovernancePcztResult.pcztBytes as animated QR
   // Keystone scans QR, signs the PCZT, returns signed PCZT QR
 extractSpendAuthSignatureFromSignedPczt(signedPczt, actionIndex)
                                                     → spendAuthSig (64 bytes)
-storeTreeState(roundId, treeState)
-buildDelegationWitness(roundId, action, spendAuthSig, inclusionProofs, exclusionProofs)
-                                                    → Data (witness)
-generateDelegationProof(roundId)                    → stream ProofEvent
-  // UI shows progress bar during .progress events
-  // .completed triggers transition to proposal list
+buildAndProveDelegation(roundId, walletDbPath, senderSeed, hotkeySeed,
+    networkId, accountIndex, imtServerUrl)
+                                                    → stream ProofEvent
+  // Internally: loads notes + witnesses from DB, fetches IMT proofs from server,
+  //   generates real Halo2 proof. Progress events drive UI progress bar.
+  // .completed yields DelegationProofResult
 ```
 
 ### 3. Per-Proposal Voting

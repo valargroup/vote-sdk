@@ -36,15 +36,15 @@ impl ImtProvider for NullifierTreeAdapter<'_> {
         self.0.root()
     }
 
-    fn non_membership_proof(&self, nf: pallas::Base) -> OrchardImtProofData {
+    fn non_membership_proof(&self, nf: pallas::Base) -> Result<OrchardImtProofData, orchard::delegation::imt::ImtError> {
         let proof = self.0.prove(nf).expect("nullifier should be in a gap range");
-        OrchardImtProofData {
+        Ok(OrchardImtProofData {
             root: proof.root,
             low: proof.low,
             high: proof.high,
             leaf_pos: proof.leaf_pos,
             path: proof.path,
-        }
+        })
     }
 }
 
@@ -133,7 +133,8 @@ fn make_real_note_inputs(
 
         let real_nf = note.nullifier(fvk);
         let nf_base = nullifier_to_base(real_nf);
-        let imt_proof = imt_provider.non_membership_proof(nf_base);
+        let imt_proof = imt_provider.non_membership_proof(nf_base)
+            .expect("nullifier should be in a gap range");
 
         inputs.push(RealNoteInput {
             note,

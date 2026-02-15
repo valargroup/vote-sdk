@@ -54,7 +54,6 @@ pub enum RoundPhase {
     Initialized,
     HotkeyGenerated,
     DelegationConstructed,
-    WitnessBuilt,
     DelegationProved,
     VoteReady,
 }
@@ -65,7 +64,6 @@ impl From<voting::storage::RoundPhase> for RoundPhase {
             voting::storage::RoundPhase::Initialized => RoundPhase::Initialized,
             voting::storage::RoundPhase::HotkeyGenerated => RoundPhase::HotkeyGenerated,
             voting::storage::RoundPhase::DelegationConstructed => RoundPhase::DelegationConstructed,
-            voting::storage::RoundPhase::WitnessBuilt => RoundPhase::WitnessBuilt,
             voting::storage::RoundPhase::DelegationProved => RoundPhase::DelegationProved,
             voting::storage::RoundPhase::VoteReady => RoundPhase::VoteReady,
         }
@@ -146,6 +144,11 @@ pub struct NoteInfo {
     pub nullifier: Vec<u8>,
     pub value: u64,
     pub position: u64,
+    pub diversifier: Vec<u8>,
+    pub rho: Vec<u8>,
+    pub rseed: Vec<u8>,
+    pub scope: u32,
+    pub ufvk_str: String,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -255,11 +258,18 @@ pub struct SharePayload {
     pub tree_position: u64,
 }
 
+
+
+/// Result of real delegation proof generation (ZKP #1).
 #[derive(Clone, uniffi::Record)]
-pub struct ProofResult {
+pub struct DelegationProofResult {
     pub proof: Vec<u8>,
-    pub success: bool,
-    pub error: Option<String>,
+    pub public_inputs: Vec<Vec<u8>>,
+    pub nf_signed: Vec<u8>,
+    pub cmx_new: Vec<u8>,
+    pub gov_nullifiers: Vec<Vec<u8>>,
+    pub gov_comm: Vec<u8>,
+    pub rk: Vec<u8>,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -299,6 +309,11 @@ impl From<NoteInfo> for voting::NoteInfo {
             nullifier: n.nullifier,
             value: n.value,
             position: n.position,
+            diversifier: n.diversifier,
+            rho: n.rho,
+            rseed: n.rseed,
+            scope: n.scope,
+            ufvk_str: n.ufvk_str,
         }
     }
 }
@@ -310,6 +325,11 @@ impl From<voting::NoteInfo> for NoteInfo {
             nullifier: n.nullifier,
             value: n.value,
             position: n.position,
+            diversifier: n.diversifier,
+            rho: n.rho,
+            rseed: n.rseed,
+            scope: n.scope,
+            ufvk_str: n.ufvk_str,
         }
     }
 }
@@ -426,15 +446,6 @@ impl From<voting::SharePayload> for SharePayload {
     }
 }
 
-impl From<voting::ProofResult> for ProofResult {
-    fn from(r: voting::ProofResult) -> Self {
-        Self {
-            proof: r.proof,
-            success: r.success,
-            error: r.error,
-        }
-    }
-}
 
 impl From<voting::WitnessData> for WitnessData {
     fn from(w: voting::WitnessData) -> Self {
@@ -454,6 +465,21 @@ impl From<WitnessData> for voting::WitnessData {
             position: w.position,
             root: w.root,
             auth_path: w.auth_path,
+        }
+    }
+}
+
+
+impl From<voting::DelegationProofResult> for DelegationProofResult {
+    fn from(r: voting::DelegationProofResult) -> Self {
+        Self {
+            proof: r.proof,
+            public_inputs: r.public_inputs,
+            nf_signed: r.nf_signed,
+            cmx_new: r.cmx_new,
+            gov_nullifiers: r.gov_nullifiers,
+            gov_comm: r.gov_comm,
+            rk: r.rk,
         }
     }
 }
@@ -619,30 +645,38 @@ impl VotingDatabase {
 
     // --- Phase 2: Delegation proof ---
 
-    pub fn build_delegation_witness(
+    /// Build and prove the real delegation ZKP (#1). Long-running.
+    ///
+    /// Loads all required data from the voting DB and wallet DB, fetches IMT
+    /// exclusion proofs from the IMT server, generates a real Halo2 proof,
+    /// and advances the round phase to DelegationProved.
+    ///
+    /// - `round_id`: Voting round hex identifier.
+    /// - `wallet_db_path`: Path to the Zcash wallet SQLite DB (read-only).
+    /// - `hotkey_raw_address`: 43-byte raw Orchard address of the voting hotkey.
+    /// - `imt_server_url`: Base URL of the nullifier IMT server.
+    /// - `network_id`: 0 = mainnet, 1 = testnet.
+    /// - `progress`: Progress callback (0.0 → 1.0).
+    pub fn build_and_prove_delegation(
         &self,
         round_id: String,
-        action: DelegationAction,
-        inclusion_proofs: Vec<Vec<u8>>,
-        exclusion_proofs: Vec<Vec<u8>>,
-    ) -> Result<Vec<u8>, VotingError> {
-        Ok(self.db.build_delegation_witness(
-            &round_id,
-            &action.into(),
-            &inclusion_proofs,
-            &exclusion_proofs,
-        )?)
-    }
-
-    pub fn generate_delegation_proof(
-        &self,
-        round_id: String,
+        wallet_db_path: String,
+        hotkey_raw_address: Vec<u8>,
+        imt_server_url: String,
+        network_id: u32,
         progress: Box<dyn ProofProgressReporter>,
-    ) -> Result<ProofResult, VotingError> {
+    ) -> Result<DelegationProofResult, VotingError> {
         let bridge = ProgressBridge { inner: progress };
         Ok(self
             .db
-            .generate_delegation_proof(&round_id, &bridge)?
+            .build_and_prove_delegation(
+                &round_id,
+                &wallet_db_path,
+                &hotkey_raw_address,
+                &imt_server_url,
+                network_id,
+                &bridge,
+            )?
             .into())
     }
 
@@ -913,19 +947,6 @@ pub fn verify_witness(witness: WitnessData) -> Result<bool, VotingError> {
 }
 
 #[uniffi::export]
-pub fn build_delegation_witness(
-    action: DelegationAction,
-    inclusion_proofs: Vec<Vec<u8>>,
-    exclusion_proofs: Vec<Vec<u8>>,
-) -> Result<Vec<u8>, VotingError> {
-    Ok(voting::zkp1::build_delegation_witness(
-        &action.into(),
-        &inclusion_proofs,
-        &exclusion_proofs,
-    )?)
-}
-
-#[uniffi::export]
 pub fn extract_spend_auth_sig(
     signed_pczt_bytes: Vec<u8>,
     action_index: u32,
@@ -935,12 +956,6 @@ pub fn extract_spend_auth_sig(
         action_index as usize,
     )?
     .to_vec())
-}
-
-#[uniffi::export]
-pub fn generate_delegation_proof(witness: Vec<u8>) -> Result<ProofResult, VotingError> {
-    let reporter = voting::NoopProgressReporter;
-    Ok(voting::zkp1::generate_delegation_proof(&witness, &reporter)?.into())
 }
 
 #[uniffi::export]

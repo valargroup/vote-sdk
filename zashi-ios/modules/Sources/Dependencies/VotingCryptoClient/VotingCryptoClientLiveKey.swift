@@ -122,7 +122,12 @@ extension VotingCryptoClient: DependencyKey {
                         commitment: $0.commitment,
                         nullifier: $0.nullifier,
                         value: $0.value,
-                        position: $0.position
+                        position: $0.position,
+                        diversifier: $0.diversifier,
+                        rho: $0.rho,
+                        rseed: $0.rseed,
+                        scope: $0.scope,
+                        ufvkStr: $0.ufvkStr
                     )
                 }
             },
@@ -133,7 +138,12 @@ extension VotingCryptoClient: DependencyKey {
                         commitment: $0.commitment,
                         nullifier: $0.nullifier,
                         value: $0.value,
-                        position: $0.position
+                        position: $0.position,
+                        diversifier: $0.diversifier,
+                        rho: $0.rho,
+                        rseed: $0.rseed,
+                        scope: $0.scope,
+                        ufvkStr: $0.ufvkStr
                     )
                 }
                 let ffiWitnesses = try db.generateNoteWitnesses(
@@ -192,7 +202,12 @@ extension VotingCryptoClient: DependencyKey {
                         commitment: $0.commitment,
                         nullifier: $0.nullifier,
                         value: $0.value,
-                        position: $0.position
+                        position: $0.position,
+                        diversifier: $0.diversifier,
+                        rho: $0.rho,
+                        rseed: $0.rseed,
+                        scope: $0.scope,
+                        ufvkStr: $0.ufvkStr
                     )
                 }
                 let result = try db.constructDelegationAction(
@@ -234,7 +249,12 @@ extension VotingCryptoClient: DependencyKey {
                         commitment: $0.commitment,
                         nullifier: $0.nullifier,
                         value: $0.value,
-                        position: $0.position
+                        position: $0.position,
+                        diversifier: $0.diversifier,
+                        rho: $0.rho,
+                        rseed: $0.rseed,
+                        scope: $0.scope,
+                        ufvkStr: $0.ufvkStr
                     )
                 }
                 // NU6 consensus branch ID; coin_type 133 = mainnet, 1 = testnet
@@ -275,36 +295,6 @@ extension VotingCryptoClient: DependencyKey {
                 let db = try await dbActor.database()
                 try db.storeTreeState(roundId: roundId, treeStateBytes: treeState)
             },
-            buildDelegationWitness: { roundId, action, spendAuthSig, inclusionProofs, exclusionProofs in
-                guard spendAuthSig.count == 64 else {
-                    throw VotingCryptoError.invalidSpendAuthSignatureLength(spendAuthSig.count)
-                }
-                let db = try await dbActor.database()
-                let ffiAction = ZcashVotingFFI.DelegationAction(
-                    actionBytes: action.actionBytes,
-                    rk: action.rk,
-                    govNullifiers: action.govNullifiers,
-                    van: action.van,
-                    govCommRand: action.govCommRand,
-                    dummyNullifiers: action.dummyNullifiers,
-                    rhoSigned: action.rhoSigned,
-                    paddedCmx: action.paddedCmx,
-                    nfSigned: action.nfSigned,
-                    cmxNew: action.cmxNew,
-                    alpha: action.alpha,
-                    spendAuthSig: spendAuthSig,
-                    rseedSigned: action.rseedSigned,
-                    rseedOutput: action.rseedOutput
-                )
-                let witness = try db.buildDelegationWitness(
-                    roundId: roundId,
-                    action: ffiAction,
-                    inclusionProofs: inclusionProofs,
-                    exclusionProofs: exclusionProofs
-                )
-                publishState(db: db, roundId: roundId)
-                return witness
-            },
             extractSpendAuthSignatureFromSignedPczt: { signedPczt, actionIndex in
                 let sigBytes = try ZcashVotingFFI.extractSpendAuthSig(
                     signedPcztBytes: signedPczt,
@@ -312,22 +302,27 @@ extension VotingCryptoClient: DependencyKey {
                 )
                 return sigBytes
             },
-            generateDelegationProof: { roundId in
+            buildAndProveDelegation: { roundId, walletDbPath, senderSeed, hotkeySeed, networkId, accountIndex, imtServerUrl in
                 AsyncThrowingStream { continuation in
                     Task.detached {
                         do {
                             let db = try await dbActor.database()
                             let reporter = StreamProgressReporter(continuation)
-                            let result = try db.generateDelegationProof(
+                            // Derive hotkey raw address from seeds
+                            let ffiInputs = try ZcashVotingFFI.generateDelegationInputs(
+                                senderSeed: Data(senderSeed),
+                                hotkeySeed: Data(hotkeySeed),
+                                networkId: networkId,
+                                accountIndex: accountIndex
+                            )
+                            let result = try db.buildAndProveDelegation(
                                 roundId: roundId,
+                                walletDbPath: walletDbPath,
+                                hotkeyRawAddress: ffiInputs.hotkeyRawAddress,
+                                imtServerUrl: imtServerUrl,
+                                networkId: networkId,
                                 progress: reporter
                             )
-                            guard result.success else {
-                                continuation.finish(throwing: VotingCryptoError.proofFailed(
-                                    result.error ?? "unknown"
-                                ))
-                                return
-                            }
                             publishState(db: db, roundId: roundId)
                             continuation.yield(.completed(result.proof))
                             continuation.finish()
@@ -513,7 +508,6 @@ private extension ZcashVotingFFI.RoundPhase {
         case .initialized: return .initialized
         case .hotkeyGenerated: return .hotkeyGenerated
         case .delegationConstructed: return .delegationConstructed
-        case .witnessBuilt: return .witnessBuilt
         case .delegationProved: return .delegationProved
         case .voteReady: return .voteReady
         }

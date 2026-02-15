@@ -64,19 +64,23 @@ public struct VotingCryptoClient {
         _ roundName: String
     ) async throws -> GovernancePcztResult
     public var storeTreeState: @Sendable (_ roundId: String, _ treeState: Data) async throws -> Void
-    public var buildDelegationWitness: @Sendable (
-        _ roundId: String,
-        _ action: DelegationAction,
-        _ spendAuthSig: Data,
-        _ inclusionProofs: [Data],
-        _ exclusionProofs: [Data]
-    ) async throws -> Data
     public var extractSpendAuthSignatureFromSignedPczt: @Sendable (
         _ signedPczt: Data,
         _ actionIndex: UInt32
     ) throws -> Data
-    public var generateDelegationProof: @Sendable (_ roundId: String) -> AsyncThrowingStream<ProofEvent, Error>
-        = { _ in AsyncThrowingStream { $0.finish() } }
+    /// Build and prove the real delegation ZKP (#1). Long-running.
+    /// Loads data from voting DB and wallet DB, fetches IMT proofs from server,
+    /// generates a real Halo2 proof, and reports progress.
+    public var buildAndProveDelegation: @Sendable (
+        _ roundId: String,
+        _ walletDbPath: String,
+        _ senderSeed: [UInt8],
+        _ hotkeySeed: [UInt8],
+        _ networkId: UInt32,
+        _ accountIndex: UInt32,
+        _ imtServerUrl: String
+    ) -> AsyncThrowingStream<ProofEvent, Error>
+        = { _, _, _, _, _, _, _ in AsyncThrowingStream { $0.finish() } }
     public var decomposeWeight: @Sendable (_ weight: UInt64) -> [UInt64] = { _ in [] }
     public var encryptShares: @Sendable (
         _ roundId: String,

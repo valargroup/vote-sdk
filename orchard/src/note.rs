@@ -15,7 +15,8 @@ use crate::{
     Address,
 };
 
-pub(crate) mod commitment;
+/// Note commitment types.
+pub mod commitment;
 pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
 
 pub(crate) mod nullifier;
@@ -186,12 +187,7 @@ impl Note {
     /// Defined in [Zcash Protocol Spec § 4.7.3: Sending Notes (Orchard)][orchardsend].
     ///
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
-    pub fn new(
-        recipient: Address,
-        value: NoteValue,
-        rho: Rho,
-        mut rng: impl RngCore,
-    ) -> Self {
+    pub fn new(recipient: Address, value: NoteValue, rho: Rho, mut rng: impl RngCore) -> Self {
         loop {
             let note = Note::from_parts(recipient, value, rho, RandomSeed::random(&mut rng, &rho));
             if note.is_some().into() {
@@ -205,10 +201,7 @@ impl Note {
     /// Defined in [Zcash Protocol Spec § 4.8.3: Dummy Notes (Orchard)][orcharddummynotes].
     ///
     /// [orcharddummynotes]: https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
-    pub fn dummy(
-        rng: &mut impl RngCore,
-        rho: Option<Rho>,
-    ) -> (SpendingKey, FullViewingKey, Self) {
+    pub fn dummy(rng: &mut impl RngCore, rho: Option<Rho>) -> (SpendingKey, FullViewingKey, Self) {
         let sk = SpendingKey::random(rng);
         let fvk: FullViewingKey = (&sk).into();
         let recipient = fvk.address_at(0u32, Scope::External);

@@ -1987,7 +1987,7 @@ mod tests {
         }
         // IMT proof for real note (from shared provider).
         let real_nf = real_note.nullifier(&fvk);
-        let imt_0 = imt_provider.non_membership_proof(real_nf.0);
+        let imt_0 = imt_provider.non_membership_proof(real_nf.0).unwrap();
         let gov_null_0 = gov_null_hash(nk_val, vote_round_id, real_nf.0);
 
         let slot_0 = make_note_slot(&real_note, &auth_path_0, 0u32, &imt_0, true);
@@ -2012,7 +2012,7 @@ mod tests {
 
             let pad_cmx = ExtractedNoteCommitment::from(pad_note.commitment()).inner();
             let pad_nf = pad_note.nullifier(&fvk);
-            let pad_imt = imt_provider.non_membership_proof(pad_nf.0);
+            let pad_imt = imt_provider.non_membership_proof(pad_nf.0).unwrap();
             let pad_gov_null = gov_null_hash(nk_val, vote_round_id, pad_nf.0);
 
             note_slots.push(make_note_slot(

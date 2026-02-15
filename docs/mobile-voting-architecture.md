@@ -41,7 +41,7 @@ The mobile client is one of several components in the zally repo. This doc cover
 |  ZcashVotingFFI (UniFFI)                                  |  Generated Swift bindings
 +-----------------------------------------------------------+
 |  librustvoting                                            |  Rust
-|    storage (SQLite)  |  wallet_notes  |  crypto (stubs)   |
+|    storage (SQLite)  |  wallet_notes  |  zkp1 (real)  |  zkp2 (stub) |
 +-----------------------------------------------------------+
                             |
                     Zcash wallet DB (read-only)
@@ -76,9 +76,8 @@ HotkeyGenerated
     -> buildDelegationSignAction() + build 1-zatoshi self-spend PCZT + Keystone signing
 DelegationConstructed
     -> extract spendAuthSig from signed PCZT
-    -> buildDelegationWitness() (spendAuthSig + inclusion + exclusion proofs)
-WitnessBuilt
-    -> generateDelegationProof() (ZKP #1, long-running with progress)
+    -> generate Merkle witnesses + fetch IMT exclusion proofs
+    -> buildAndProveDelegation() (ZKP #1, real Halo2 proof with progress)
 DelegationProved
     -> buildVoteCommitment() per proposal (ZKP #2)
 VoteReady
@@ -169,22 +168,22 @@ Three dependency clients, each with live/test implementations:
 
 ## What's Real vs Stubbed
 
-| Component                      | Status  | Notes                                        |
-| ------------------------------ | ------- | -------------------------------------------- |
-| Wallet notes at snapshot       | Real    | Read-only query of wallet DB, cmx recomputed |
-| Voting weight from notes       | Real    | Sum of note values displayed in UI           |
-| SQLite storage + phase machine | Real    | Full CRUD, WAL mode, migrations              |
-| Round lifecycle orchestration  | Real    | Phase transitions enforced                   |
-| ElGamal share encryption       | Real    | Pallas curve, proper randomness              |
-| Binary weight decomposition    | Real    | 4-share limit enforced                       |
-| Hotkey generation              | Real    | Random Pallas keypair                        |
-| Vote commitment construction   | Stubbed | Returns placeholder hashes                   |
-| ZKP #1 (delegation proof)      | Stubbed | Simulates progress, returns dummy proof      |
-| ZKP #2 (vote proof)            | Stubbed | Returns placeholder bundle                   |
-| Keystone signing               | Real    | QR request/scan roundtrip via signed PCZT    |
-| Vote chain API                 | Mocked  | Returns success responses                    |
-| Helper server delegation       | Mocked  | `delegateShares()` is a no-op                |
-| VAN witness / tree sync        | Stubbed | Hardcoded placeholder data                   |
+| Component                      | Status  | Notes                                                                           |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------- |
+| Wallet notes at snapshot       | Real    | Read-only query of wallet DB, cmx recomputed                                    |
+| Voting weight from notes       | Real    | Sum of note values displayed in UI                                              |
+| SQLite storage + phase machine | Real    | Full CRUD, WAL mode, migrations                                                 |
+| Round lifecycle orchestration  | Real    | Phase transitions enforced                                                      |
+| ElGamal share encryption       | Real    | Pallas curve, proper randomness                                                 |
+| Binary weight decomposition    | Real    | 4-share limit enforced                                                          |
+| Hotkey generation              | Real    | Random Pallas keypair                                                           |
+| Vote commitment construction   | Stubbed | Returns placeholder hashes                                                      |
+| ZKP #1 (delegation proof)      | Real    | Halo2 proof via `build_and_prove_delegation()` using orchard delegation circuit |
+| ZKP #2 (vote proof)            | Stubbed | Returns placeholder bundle                                                      |
+| Keystone signing               | Real    | QR request/scan roundtrip via signed PCZT                                       |
+| Vote chain API                 | Mocked  | Returns success responses                                                       |
+| Helper server delegation       | Mocked  | `delegateShares()` is a no-op                                                   |
+| VAN witness / tree sync        | Stubbed | Hardcoded placeholder data                                                      |
 
 ## Key Design Decisions
 
