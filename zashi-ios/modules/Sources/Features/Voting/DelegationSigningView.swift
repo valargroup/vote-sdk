@@ -1,11 +1,14 @@
 import SwiftUI
 import ComposableArchitecture
 import Generated
+import SDKSynchronizer
 import UIComponents
+import Vendors
 import VotingModels
 
 struct DelegationSigningView: View {
     @Environment(\.colorScheme) var colorScheme
+    @Dependency(\.sdkSynchronizer) var sdkSynchronizer
 
     let store: StoreOf<Voting>
 
@@ -71,7 +74,7 @@ struct DelegationSigningView: View {
 
             // Keystone device (if applicable)
             if store.isKeystoneUser {
-                keystoneDevice()
+                keystoneSigningSection()
                     .padding(.horizontal, 24)
                     .padding(.top, 20)
             }
@@ -107,12 +110,15 @@ struct DelegationSigningView: View {
 
     @ViewBuilder
     private func memoSection() -> some View {
+        let zec = Double(store.votingWeight) / 100_000_000.0
+        let memoAmount = String(format: "%.8f", zec)
+
         VStack(alignment: .leading, spacing: 6) {
             Text("Memo")
                 .zFont(.medium, size: 14, style: Design.Text.tertiary)
 
             HStack {
-                Text("Delegating \(store.votingWeightZECString) ZEC of eligible notes to vote in \(store.votingRound.title)")
+                Text("I am authorizing this hotkey managed by my wallet to vote on \(store.votingRound.title) with \(memoAmount) ZEC.")
                     .zFont(.medium, size: 14, style: Design.Inputs.Filled.text)
                 Spacer(minLength: 0)
             }
@@ -246,11 +252,44 @@ struct DelegationSigningView: View {
             && store.noteWitnessResults.allSatisfy(\.verified)
 
         if store.isKeystoneUser {
-            ZashiButton("Confirm with Keystone") {
-                store.send(.delegationApproved)
+            switch store.keystoneSigningStatus {
+            case .idle:
+                ZashiButton("Confirm with Keystone") {
+                    store.send(.delegationApproved)
+                }
+                .disabled(!witnessReady)
+                .opacity(witnessReady ? 1.0 : 0.5)
+
+            case .preparingRequest:
+                ZashiButton("Preparing Keystone request...") { }
+                    .disabled(true)
+                    .opacity(0.5)
+
+            case .awaitingSignature:
+                VStack(spacing: 8) {
+                    ZashiButton("Scan Signed Keystone QR") {
+                        store.send(.openKeystoneSignatureScan)
+                    }
+                    ZashiButton("Rebuild Keystone Request", type: .ghost) {
+                        store.send(.retryKeystoneSigning)
+                    }
+                }
+
+            case .parsingSignature:
+                ZashiButton("Processing Keystone signature...") { }
+                    .disabled(true)
+                    .opacity(0.5)
+
+            case .failed:
+                VStack(spacing: 8) {
+                    ZashiButton("Retry Keystone Request") {
+                        store.send(.retryKeystoneSigning)
+                    }
+                    ZashiButton("Scan Signed Keystone QR", type: .ghost) {
+                        store.send(.openKeystoneSignatureScan)
+                    }
+                }
             }
-            .disabled(!witnessReady)
-            .opacity(witnessReady ? 1.0 : 0.5)
         } else {
             ZashiButton("Authorize Voting") {
                 store.send(.delegationApproved)
@@ -260,125 +299,48 @@ struct DelegationSigningView: View {
         }
     }
 
-    // MARK: - Keystone Device Simulation
-
-    private let keystoneYellow = Color(red: 0.95, green: 0.78, blue: 0.15)
-    private let keystoneCyan = Color(red: 0.45, green: 0.85, blue: 0.9)
+    // MARK: - Keystone
 
     @ViewBuilder
-    private func keystoneDevice() -> some View {
-        VStack(spacing: 12) {
-            VStack(spacing: 0) {
-                // Status bar
-                HStack {
-                    HStack(spacing: 4) {
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.system(size: 10))
-                        Text("ADAM")
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    Spacer()
-                    Image(systemName: "battery.75")
-                        .font(.system(size: 14))
+    private func keystoneSigningSection() -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch store.keystoneSigningStatus {
+            case .idle:
+                Text("Generate the delegation signing request to continue on Keystone.")
+                    .zFont(size: 12, style: Design.Text.tertiary)
+            case .preparingRequest:
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Building 1-zatoshi delegation PCZT for Keystone...")
+                        .zFont(.medium, size: 13, style: Design.Text.tertiary)
                 }
-                .foregroundStyle(.white.opacity(0.6))
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
-
-                // Title
-                VStack(spacing: 6) {
-                    ZStack {
-                        Circle()
-                            .fill(keystoneYellow)
-                            .frame(width: 28, height: 28)
-                        Text("Z")
-                            .font(.system(size: 16, weight: .black))
-                            .foregroundStyle(.black)
-                    }
-                    Text("Confirm Transaction")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .padding(.bottom, 14)
-
-                // Transaction outputs
-                VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("To")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.5))
-                        HStack(spacing: 6) {
-                            Text("#1")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                            Text("0.00 ZEC")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(keystoneYellow)
-                            Text("Change")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.7))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .stroke(.white.opacity(0.3), lineWidth: 1)
-                                )
+            case .awaitingSignature:
+                if let pczt = store.pendingUnsignedDelegationPczt,
+                   let encoder = sdkSynchronizer.urEncoderForPCZT(pczt) {
+                    AnimatedQRCode(urEncoder: encoder, size: 240)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(10)
+                        .background {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Asset.Colors.ZDesign.Base.bone.color)
                         }
-                        Text("<internal-address>")
-                            .font(.system(size: 11))
-                            .foregroundStyle(keystoneCyan)
-                        Text("Memo: Delegating \(store.votingWeightZECString) ZEC of eligible notes")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.6))
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text("#2")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                            Text("0.00 ZEC")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(keystoneYellow)
-                        }
-                        Text(store.hotkeyAddress ?? "")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(keystoneCyan)
-                            .lineLimit(3)
-                    }
+                    Text("Scan this QR in Keystone, sign the request, then scan the signed QR back.")
+                        .zFont(size: 12, style: Design.Text.tertiary)
+                } else {
+                    Text("Keystone request is ready, but QR encoding failed. Rebuild the request.")
+                        .zFont(size: 12, style: Design.Text.tertiary)
                 }
-                .padding(.horizontal, 16)
-
-                Spacer().frame(height: 16)
+            case .parsingSignature:
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Extracting SpendAuthSig from signed PCZT...")
+                        .zFont(.medium, size: 13, style: Design.Text.tertiary)
+                }
+            case .failed(let error):
+                Text("Keystone signing failed: \(error)")
+                    .zFont(size: 12, style: Design.Text.tertiary)
             }
-            .frame(maxWidth: .infinity)
-            .background(Color(red: 0.08, green: 0.08, blue: 0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color(white: 0.3), lineWidth: 2)
-            )
-
-            mockLabel("Simulated Keystone screen")
         }
     }
 
-    // MARK: - Helpers
-
-    @ViewBuilder
-    private func mockLabel(_ text: String) -> some View {
-        HStack(spacing: 6) {
-            Text("MOCK")
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(Color.orange)
-                .clipShape(Capsule())
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
 }

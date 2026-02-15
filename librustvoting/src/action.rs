@@ -5,15 +5,21 @@ use pasta_curves::pallas;
 use rand::RngCore;
 use subtle::CtOption;
 
+use orchard::builder::{Builder, BundleType};
 use orchard::keys::{FullViewingKey, SpendValidatingKey};
 use orchard::note::{ExtractedNoteCommitment, RandomSeed, Rho};
+use orchard::pczt::Zip32Derivation;
+use orchard::tree::{MerkleHashOrchard, MerklePath};
 use orchard::value::NoteValue;
-use orchard::Address;
+use orchard::{Anchor, Address};
 use zip32::Scope;
+
+/// Orchard Merkle tree depth (32 levels).
+const MERKLE_DEPTH: usize = 32;
 
 use crate::governance;
 use crate::types::{
-    validate_notes, validate_round_params, DelegationAction, NoteInfo, VotingError,
+    validate_notes, validate_round_params, DelegationAction, GovernancePczt, NoteInfo, VotingError,
     VotingRoundParams,
 };
 
@@ -88,18 +94,19 @@ fn random_rseed(rng: &mut impl RngCore, rho: &Rho) -> (RandomSeed, [u8; 32]) {
     }
 }
 
-/// Construct a zero-value orchard Note at the given address with the given Rho.
+/// Construct a 1-zatoshi orchard Note at the given address with the given Rho.
 /// Uses Note::from_parts (orchard 0.11 public API).
-fn make_zero_note(
+/// Value is 1 zatoshi so that Keystone renders the transaction on screen.
+fn make_dummy_note(
     addr: Address,
     rho: Rho,
     rng: &mut impl RngCore,
 ) -> Result<(orchard::Note, [u8; 32]), VotingError> {
     let (rseed, rseed_bytes) = random_rseed(rng, &rho);
-    let note = orchard::Note::from_parts(addr, NoteValue::from_raw(0), rho, rseed);
+    let note = orchard::Note::from_parts(addr, NoteValue::from_raw(1), rho, rseed);
     if !bool::from(note.is_some()) {
         return Err(VotingError::Internal {
-            message: "failed to construct zero-value note".to_string(),
+            message: "failed to construct dummy note".to_string(),
         });
     }
     Ok((note.expect("is_some checked above"), rseed_bytes))
@@ -146,7 +153,7 @@ fn encode_delegation_action_bytes(
 /// Construct the delegation action for Keystone signing.
 ///
 /// Computes real governance nullifiers (padded to 4), VAN, constrained rho (§1.3.4.1),
-/// signed note + output note (§1.3.4.2, §1.3.6), rk, and sighash.
+/// signed note + output note (§1.3.4.2, §1.3.6), and rk.
 ///
 /// - `fvk_bytes`: 96-byte orchard FullViewingKey (ak[32] || nk[32] || rivk[32])
 /// - `g_d_new_x`: 32-byte x-coordinate of hotkey diversified generator (for VAN)
@@ -243,8 +250,8 @@ pub fn construct_delegation_action(
             // Generate a random Rho (represents the "previous nullifier" for this padded note)
             let rho = random_rho(&mut rng);
 
-            // Construct the padded note with value=0
-            let (pad_note, _) = make_zero_note(pad_addr, rho, &mut rng)?;
+            // Construct the padded note with value=1 zatoshi
+            let (pad_note, _) = make_dummy_note(pad_addr, rho, &mut rng)?;
 
             let cmx: ExtractedNoteCommitment = pad_note.commitment().into();
             let real_nf = pad_note.nullifier(&fvk);
@@ -316,8 +323,8 @@ pub fn construct_delegation_action(
     // Sender address from FVK (diversifier index 0)
     let sender_address = fvk.address_at(0u32, Scope::External);
 
-    // Build signed note: v=0, address from sender, rho = rho_signed (§1.3.4.2)
-    let (signed_note, rseed_signed_bytes) = make_zero_note(sender_address, rho_for_note, &mut rng)?;
+    // Build signed note: v=1 zatoshi, address from sender, rho = rho_signed (§1.3.4.2)
+    let (signed_note, rseed_signed_bytes) = make_dummy_note(sender_address, rho_for_note, &mut rng)?;
 
     // Derive nullifier (§1.3.4.2: DeriveNullifier_nk(rho_signed, psi_signed, cm_signed))
     let nf_signed = signed_note.nullifier(&fvk);
@@ -332,8 +339,8 @@ pub fn construct_delegation_action(
             message: "nf_signed is not a valid Pallas field element for Rho".to_string(),
         })?;
 
-    // Output note: to hotkey address, v=0, rho = nf_signed
-    let (output_note, rseed_output_bytes) = make_zero_note(hotkey_addr, rho_output, &mut rng)?;
+    // Output note: to hotkey address, v=1 zatoshi, rho = nf_signed
+    let (output_note, rseed_output_bytes) = make_dummy_note(hotkey_addr, rho_output, &mut rng)?;
     let cmx_new: ExtractedNoteCommitment = output_note.commitment().into();
     let cmx_new_bytes: [u8; 32] = cmx_new.to_bytes();
 
@@ -344,16 +351,6 @@ pub fn construct_delegation_action(
     let rk_vk = ak.randomize(&alpha);
     let rk_bytes: [u8; 32] = (&rk_vk).into();
     let alpha_bytes: [u8; 32] = alpha.to_repr();
-
-    // --- Compute sighash ---
-    let sighash = governance::compute_delegation_sighash(
-        &nf_signed_bytes,
-        &rk_bytes,
-        &cmx_new_bytes,
-        &van,
-        &gov_nullifiers,
-        &vri_32,
-    );
 
     // --- Compute action_bytes ---
     let action_bytes = encode_delegation_action_bytes(
@@ -368,7 +365,6 @@ pub fn construct_delegation_action(
     Ok(DelegationAction {
         action_bytes,
         rk: rk_bytes.to_vec(),
-        sighash: sighash.to_vec(),
         gov_nullifiers,
         van,
         gov_comm_rand: gov_comm_rand.to_vec(),
@@ -378,8 +374,396 @@ pub fn construct_delegation_action(
         nf_signed: nf_signed_bytes.to_vec(),
         cmx_new: cmx_new_bytes.to_vec(),
         alpha: alpha_bytes.to_vec(),
+        spend_auth_sig: None,
         rseed_signed: rseed_signed_bytes.to_vec(),
         rseed_output: rseed_output_bytes.to_vec(),
+    })
+}
+
+/// Build a governance-specific PCZT for Keystone signing.
+///
+/// Constructs a PCZT whose single real Orchard action is the governance dummy action
+/// (spend of signed note with constrained rho → output to hotkey). The Builder
+/// generates alpha/rk internally, and the PCZT's ZIP-244 sighash is computed by
+/// Keystone when it runs the Signer role.
+///
+/// Parameters:
+/// - `notes`: 1-4 input notes for governance nullifier derivation
+/// - `params`: voting round parameters (round ID, snapshot height, etc.)
+/// - `fvk_bytes`: 96-byte orchard FullViewingKey (ak[32] || nk[32] || rivk[32])
+/// - `hotkey_raw_address`: 43-byte hotkey raw orchard address
+/// - `consensus_branch_id`: network consensus branch ID (e.g. 0xC2D6D0B4 for NU5)
+/// - `coin_type`: BIP-44 coin type (133 for mainnet, 1 for testnet)
+/// - `seed_fingerprint`: 32-byte ZIP-32 seed fingerprint (Keystone needs this to
+///   identify which seed to derive the spending key from)
+/// - `account_index`: ZIP-32 account index (typically 0)
+pub fn build_governance_pczt(
+    notes: &[NoteInfo],
+    params: &VotingRoundParams,
+    fvk_bytes: &[u8],
+    hotkey_raw_address: &[u8],
+    consensus_branch_id: u32,
+    coin_type: u32,
+    seed_fingerprint: &[u8; 32],
+    account_index: u32,
+    round_name: &str,
+) -> Result<GovernancePczt, VotingError> {
+    validate_notes(notes)?;
+    validate_round_params(params)?;
+
+    // Parse FVK from 96 bytes: ak[32] || nk[32] || rivk[32]
+    let fvk_96: [u8; 96] = fvk_bytes
+        .try_into()
+        .map_err(|_| VotingError::InvalidInput {
+            message: format!("fvk_bytes must be 96 bytes, got {}", fvk_bytes.len()),
+        })?;
+    let fvk = FullViewingKey::from_bytes(&fvk_96).ok_or_else(|| VotingError::InvalidInput {
+        message: "fvk_bytes is not a valid orchard FullViewingKey".to_string(),
+    })?;
+    let nk_bytes = &fvk_bytes[32..64];
+
+    // Parse hotkey raw address (43 bytes: 11-byte diversifier + 32-byte pk_d)
+    let addr_43: [u8; 43] =
+        hotkey_raw_address
+            .try_into()
+            .map_err(|_| VotingError::InvalidInput {
+                message: format!(
+                    "hotkey_raw_address must be 43 bytes, got {}",
+                    hotkey_raw_address.len()
+                ),
+            })?;
+    let hotkey_addr: Address = Address::from_raw_address_bytes(&addr_43)
+        .into_option()
+        .ok_or_else(|| VotingError::InvalidInput {
+            message: "hotkey_raw_address is not a valid orchard address".to_string(),
+        })?;
+
+    // Derive hotkey x-coordinates for VAN
+    let (derived_g_d_new_x, derived_pk_d_new_x) =
+        derive_hotkey_x_coords_from_raw_address(&addr_43)?;
+
+    // Convert vote_round_id from hex string to 32 bytes
+    let vote_round_id_bytes =
+        hex::decode(&params.vote_round_id).map_err(|e| VotingError::InvalidInput {
+            message: format!("vote_round_id is not valid hex: {}", e),
+        })?;
+    crate::types::validate_32_bytes(&vote_round_id_bytes, "vote_round_id (decoded hex)")?;
+    let vri_32: [u8; 32] = vote_round_id_bytes
+        .try_into()
+        .expect("validated as 32 bytes above");
+
+    let mut rng = rand::thread_rng();
+
+    // --- Compute governance nullifiers (same as construct_delegation_action) ---
+    let mut gov_nullifiers: Vec<Vec<u8>> = Vec::with_capacity(4);
+    for note in notes {
+        let gov_null = governance::derive_gov_nullifier(nk_bytes, &vri_32, &note.nullifier)?;
+        gov_nullifiers.push(gov_null);
+    }
+
+    // Padded note generation
+    let mut padded_cmx: Vec<Vec<u8>> = Vec::new();
+    let mut dummy_nullifiers: Vec<Vec<u8>> = Vec::new();
+    let n_real = notes.len();
+    if n_real < 4 {
+        for i in n_real..4 {
+            let pad_addr = fvk.address_at(1000u32 + i as u32, Scope::External);
+            let rho = random_rho(&mut rng);
+            let (pad_note, _) = make_dummy_note(pad_addr, rho, &mut rng)?;
+            let cmx: ExtractedNoteCommitment = pad_note.commitment().into();
+            let real_nf = pad_note.nullifier(&fvk);
+            let gov_null =
+                governance::derive_gov_nullifier(nk_bytes, &vri_32, &real_nf.to_bytes())?;
+            padded_cmx.push(cmx.to_bytes().to_vec());
+            gov_nullifiers.push(gov_null);
+            dummy_nullifiers.push(real_nf.to_bytes().to_vec());
+        }
+    }
+
+    // Total weight
+    let total_weight: u64 = notes
+        .iter()
+        .try_fold(0u64, |acc, n| acc.checked_add(n.value))
+        .ok_or_else(|| VotingError::InvalidInput {
+            message: "total note weight overflows u64".to_string(),
+        })?;
+
+    // Sample gov_comm_rand
+    let gov_comm_rand_fp = pallas::Base::random(&mut rng);
+    let gov_comm_rand: [u8; 32] = gov_comm_rand_fp.to_repr();
+
+    // Compute VAN
+    let van = governance::construct_van(
+        &derived_g_d_new_x,
+        &derived_pk_d_new_x,
+        total_weight,
+        &vri_32,
+        &gov_comm_rand,
+    )?;
+
+    // Collect all 4 cmx values
+    let mut all_cmx: Vec<Vec<u8>> = Vec::with_capacity(4);
+    for note in notes {
+        all_cmx.push(note.commitment.clone());
+    }
+    all_cmx.extend(padded_cmx.iter().cloned());
+    if all_cmx.len() != 4 {
+        return Err(VotingError::Internal {
+            message: format!("expected 4 cmx values, got {}", all_cmx.len()),
+        });
+    }
+
+    // Compute constrained rho
+    let rho_signed = governance::compute_rho_binding(
+        &all_cmx[0],
+        &all_cmx[1],
+        &all_cmx[2],
+        &all_cmx[3],
+        &van,
+        &vri_32,
+    )?;
+
+    // --- Build signed note (§1.3.4.2) ---
+    let rho_signed_32: [u8; 32] = rho_signed
+        .clone()
+        .try_into()
+        .expect("rho_signed is 32 bytes from compute_rho_binding");
+    let rho_for_note: Rho = Rho::from_bytes(&rho_signed_32)
+        .into_option()
+        .ok_or_else(|| VotingError::Internal {
+            message: "rho_signed is not a valid Pallas field element for Rho".to_string(),
+        })?;
+    let sender_address = fvk.address_at(0u32, Scope::External);
+    let (signed_note, rseed_signed_bytes) =
+        make_dummy_note(sender_address, rho_for_note, &mut rng)?;
+
+    // --- Build PCZT using orchard Builder ---
+    // Dummy MerklePath: all-zero siblings, position 0.
+    // Compute the anchor from the note commitment so the Builder's anchor check passes.
+    let dummy_auth_path: [MerkleHashOrchard; MERKLE_DEPTH] = {
+        let zero_hash = MerkleHashOrchard::from_bytes(&[0u8; 32])
+            .into_option()
+            .ok_or_else(|| VotingError::Internal {
+                message: "zero bytes is not a valid MerkleHashOrchard".to_string(),
+            })?;
+        [zero_hash; MERKLE_DEPTH]
+    };
+    let dummy_merkle_path = MerklePath::from_parts(0u32, dummy_auth_path);
+    let anchor = {
+        let cm = signed_note.commitment();
+        let root = dummy_merkle_path.root(cm.into());
+        Anchor::from(root)
+    };
+
+    let mut builder = Builder::new(BundleType::DEFAULT, anchor);
+
+    // Add the governance signed note as a spend
+    builder
+        .add_spend(fvk.clone(), signed_note, dummy_merkle_path)
+        .map_err(|e| VotingError::Internal {
+            message: format!("Builder::add_spend failed: {:?}", e),
+        })?;
+
+    // Add output to hotkey address (1 zatoshi, with delegation memo)
+    let ovk = fvk.to_ovk(Scope::External);
+    let memo = {
+        let zec_whole = total_weight / 100_000_000;
+        let zec_frac = total_weight % 100_000_000;
+        let memo_str = format!(
+            "I am authorizing this hotkey managed by my wallet to vote on {} with {}.{:08} ZEC.",
+            round_name, zec_whole, zec_frac
+        );
+        let mut buf = [0u8; 512];
+        let bytes = memo_str.as_bytes();
+        let len = bytes.len().min(512);
+        buf[..len].copy_from_slice(&bytes[..len]);
+        buf
+    };
+    builder
+        .add_output(Some(ovk), hotkey_addr, NoteValue::from_raw(1), memo)
+        .map_err(|e| VotingError::Internal {
+            message: format!("Builder::add_output failed: {:?}", e),
+        })?;
+
+    // Build the PCZT bundle
+    let (mut orchard_pczt_bundle, bundle_meta) =
+        builder.build_for_pczt(&mut rng).map_err(|e| {
+            VotingError::Internal {
+                message: format!("Builder::build_for_pczt failed: {:?}", e),
+            }
+        })?;
+
+    // Extract data from the real governance action (may be shuffled by Builder)
+    let spend_idx = bundle_meta.spend_action_index(0).ok_or_else(|| {
+        VotingError::Internal {
+            message: "BundleMetadata missing spend action index".to_string(),
+        }
+    })?;
+    let output_idx = bundle_meta.output_action_index(0).ok_or_else(|| {
+        VotingError::Internal {
+            message: "BundleMetadata missing output action index".to_string(),
+        }
+    })?;
+
+    let spend_action = &orchard_pczt_bundle.actions()[spend_idx];
+    let nf_signed_bytes: [u8; 32] = spend_action.spend().nullifier().to_bytes();
+    let rk_bytes: [u8; 32] = spend_action.spend().rk().into();
+    let alpha = spend_action
+        .spend()
+        .alpha()
+        .ok_or_else(|| VotingError::Internal {
+            message: "PCZT spend missing alpha".to_string(),
+        })?;
+    let alpha_bytes: [u8; 32] = alpha.to_repr();
+    let rseed_signed_from_pczt = spend_action
+        .spend()
+        .rseed()
+        .ok_or_else(|| VotingError::Internal {
+            message: "PCZT spend missing rseed".to_string(),
+        })?;
+    // Verify rseed consistency between our note and the PCZT
+    if rseed_signed_from_pczt.as_bytes() != &rseed_signed_bytes {
+        return Err(VotingError::Internal {
+            message: "rseed mismatch between note and PCZT".to_string(),
+        });
+    }
+
+    let output_action = &orchard_pczt_bundle.actions()[output_idx];
+    let cmx_new_bytes: [u8; 32] = output_action.output().cmx().to_bytes();
+    let rseed_output = output_action
+        .output()
+        .rseed()
+        .ok_or_else(|| VotingError::Internal {
+            message: "PCZT output missing rseed".to_string(),
+        })?;
+    let rseed_output_bytes: [u8; 32] = *rseed_output.as_bytes();
+
+    // --- Updater role: set zip32_derivation so Keystone can derive the spending key ---
+    // Orchard ZIP-32 derivation path: m / 32' / coin_type' / account'
+    let zip32_deriv = Zip32Derivation::parse(
+        *seed_fingerprint,
+        vec![
+            32 | (1 << 31),              // purpose: hardened(32)
+            coin_type | (1 << 31),        // coin_type
+            account_index | (1 << 31),    // account
+        ],
+    )
+    .map_err(|e| VotingError::Internal {
+        message: format!("Zip32Derivation::parse failed: {:?}", e),
+    })?;
+    orchard_pczt_bundle
+        .update_with(|mut updater| {
+            updater.update_action_with(spend_idx, |mut action_updater| {
+                action_updater.set_spend_zip32_derivation(zip32_deriv);
+                Ok(())
+            })
+        })
+        .map_err(|e| VotingError::Internal {
+            message: format!("PCZT updater failed: {:?}", e),
+        })?;
+
+    // --- Serialize to full PCZT ---
+    // Create an empty Pczt shell with Creator, then replace the orchard bundle.
+    let sapling_anchor = [0u8; 32]; // No sapling bundle
+    let orchard_anchor_bytes = anchor.to_bytes();
+    let mut pczt = pczt::roles::creator::Creator::new(
+        consensus_branch_id,
+        0, // expiry_height: 0 = no expiry (never broadcast)
+        coin_type,
+        sapling_anchor,
+        orchard_anchor_bytes,
+    )
+    // Keystone's determine_lock_time returns global.lock_time() for pure-Orchard PCZTs
+    // (no transparent inputs). Without a fallback_lock_time, it returns None → error.
+    .with_fallback_lock_time(0)
+    .build();
+
+    // Serialize the orchard pczt bundle and set it on the Pczt
+    let pczt_orchard_bundle = pczt::orchard::Bundle::serialize_from(orchard_pczt_bundle);
+    pczt.set_orchard(pczt_orchard_bundle);
+
+    // Run IO Finalizer so the Signer (Keystone) can compute the sighash
+    let pczt = pczt::roles::io_finalizer::IoFinalizer::new(pczt)
+        .finalize_io()
+        .map_err(|e| VotingError::Internal {
+            message: format!("IoFinalizer::finalize_io failed: {:?}", e),
+        })?;
+
+    let pczt_bytes = pczt.serialize();
+
+    // --- Encode canonical action bytes for cosmos chain ---
+    let action_bytes = encode_delegation_action_bytes(
+        &nf_signed_bytes,
+        &rk_bytes,
+        &cmx_new_bytes,
+        &van,
+        &gov_nullifiers,
+        &vri_32,
+    )?;
+
+    Ok(GovernancePczt {
+        pczt_bytes,
+        rk: rk_bytes.to_vec(),
+        alpha: alpha_bytes.to_vec(),
+        nf_signed: nf_signed_bytes.to_vec(),
+        cmx_new: cmx_new_bytes.to_vec(),
+        gov_nullifiers,
+        van,
+        gov_comm_rand: gov_comm_rand.to_vec(),
+        dummy_nullifiers,
+        rho_signed,
+        padded_cmx,
+        rseed_signed: rseed_signed_bytes.to_vec(),
+        rseed_output: rseed_output_bytes.to_vec(),
+        action_bytes,
+        action_index: spend_idx,
+    })
+}
+
+/// Extract the spend_auth_sig from a signed PCZT.
+///
+/// Keystone redacts sensitive fields (alpha, rseed, zip32_derivation, etc.) after signing,
+/// so a byte-diff between unsigned and signed PCZTs doesn't work. This function parses
+/// the signed PCZT structurally and reads the `spend_auth_sig` field directly.
+///
+/// Tries `action_index` first, then falls back to scanning all actions. The Builder
+/// shuffles action order, so the governance spend may not end up at the expected index
+/// from Keystone's perspective. Our governance PCZT has exactly 2 actions (1 real +
+/// 1 dummy padding); only the real one gets signed (the dummy lacks zip32_derivation).
+///
+/// Returns the 64-byte SpendAuthSig, or an error if no signed action is found.
+pub fn extract_spend_auth_sig(
+    signed_pczt_bytes: &[u8],
+    action_index: usize,
+) -> Result<[u8; 64], VotingError> {
+    let pczt = pczt::Pczt::parse(signed_pczt_bytes).map_err(|e| VotingError::Internal {
+        message: format!("Failed to parse signed PCZT: {:?}", e),
+    })?;
+
+    let actions = pczt.orchard().actions();
+
+    // Try the expected action index first.
+    if action_index < actions.len() {
+        if let Some(sig) = actions[action_index].spend().spend_auth_sig() {
+            return Ok(*sig);
+        }
+    }
+
+    // Fallback: scan all actions for a signature.
+    // The governance PCZT has 2 actions; only the real governance spend gets signed
+    // by Keystone (the padding action has no zip32_derivation so Keystone skips it).
+    // This is safe because there is exactly one signable action.
+    for action in actions {
+        if let Some(sig) = action.spend().spend_auth_sig() {
+            return Ok(*sig);
+        }
+    }
+
+    Err(VotingError::Internal {
+        message: format!(
+            "No spend_auth_sig found in any of the {} actions in the signed PCZT",
+            actions.len()
+        ),
     })
 }
 
@@ -458,10 +842,6 @@ mod tests {
         // rk is 32 bytes and NOT the old stub pattern
         assert_eq!(result.rk.len(), 32);
         assert_ne!(result.rk, vec![0xDE; 32]);
-
-        // sighash is 32 bytes and NOT the old stub pattern
-        assert_eq!(result.sighash.len(), 32);
-        assert_ne!(result.sighash, vec![0x5A; 32]);
 
         // action_bytes is non-empty and NOT the old stub pattern
         assert!(!result.action_bytes.is_empty());
@@ -911,5 +1291,161 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.action_bytes, expected);
+    }
+
+    // --- build_governance_pczt tests ---
+
+    /// NU5 mainnet consensus branch ID
+    const NU5_BRANCH_ID: u32 = 0xC2D6D0B4;
+    /// Mainnet coin type
+    const MAINNET_COIN_TYPE: u32 = 133;
+    /// Mock seed fingerprint (32 bytes)
+    const MOCK_SEED_FP: [u8; 32] = [0xAA; 32];
+    /// Mock account index
+    const MOCK_ACCOUNT: u32 = 0;
+
+    #[test]
+    fn test_build_governance_pczt_one_note() {
+        let result = build_governance_pczt(
+            &[mock_note()],
+            &mock_params(),
+            &mock_fvk_bytes(),
+            &mock_hotkey_address(),
+            NU5_BRANCH_ID,
+            MAINNET_COIN_TYPE,
+            &MOCK_SEED_FP,
+            MOCK_ACCOUNT,
+            "Test Round",
+        )
+        .unwrap();
+
+        // PCZT bytes are non-empty and parseable
+        assert!(!result.pczt_bytes.is_empty());
+        let parsed = pczt::Pczt::parse(&result.pczt_bytes);
+        assert!(parsed.is_ok(), "PCZT bytes should parse: {:?}", parsed.err());
+
+        // rk is 32 bytes, non-zero
+        assert_eq!(result.rk.len(), 32);
+        assert_ne!(result.rk, vec![0u8; 32]);
+
+        // alpha is 32 bytes, non-zero
+        assert_eq!(result.alpha.len(), 32);
+        assert_ne!(result.alpha, vec![0u8; 32]);
+
+        // nf_signed is 32 bytes, non-zero
+        assert_eq!(result.nf_signed.len(), 32);
+        assert_ne!(result.nf_signed, vec![0u8; 32]);
+
+        // cmx_new is 32 bytes, non-zero
+        assert_eq!(result.cmx_new.len(), 32);
+        assert_ne!(result.cmx_new, vec![0u8; 32]);
+
+        // Gov nullifiers padded to 4
+        assert_eq!(result.gov_nullifiers.len(), 4);
+        for gn in &result.gov_nullifiers {
+            assert_eq!(gn.len(), 32);
+        }
+
+        // VAN is 32 bytes
+        assert_eq!(result.van.len(), 32);
+
+        // gov_comm_rand is 32 bytes
+        assert_eq!(result.gov_comm_rand.len(), 32);
+
+        // rho_signed is 32 bytes
+        assert_eq!(result.rho_signed.len(), 32);
+        assert_ne!(result.rho_signed, vec![0u8; 32]);
+
+        // 3 padded cmx (1 real + 3 padded = 4)
+        assert_eq!(result.padded_cmx.len(), 3);
+
+        // rseed values are 32 bytes each
+        assert_eq!(result.rseed_signed.len(), 32);
+        assert_ne!(result.rseed_signed, vec![0u8; 32]);
+        assert_eq!(result.rseed_output.len(), 32);
+        assert_ne!(result.rseed_output, vec![0u8; 32]);
+
+        // action_bytes is 9 * 32 = 288 bytes
+        assert_eq!(result.action_bytes.len(), 288);
+
+        // action_index is 0 or 1 (2 actions total: 1 real + 1 dummy padding)
+        assert!(result.action_index <= 1);
+
+        // The parsed PCZT should have 2 orchard actions (1 real + 1 padding)
+        let pczt = parsed.unwrap();
+        assert_eq!(pczt.orchard().actions().len(), 2);
+    }
+
+    #[test]
+    fn test_build_governance_pczt_four_notes() {
+        let notes: Vec<NoteInfo> = (0..4)
+            .map(|i| NoteInfo {
+                commitment: vec![i as u8 + 1; 32],
+                nullifier: vec![i as u8 + 0x10; 32],
+                value: 250_000,
+                position: i as u64,
+            })
+            .collect();
+
+        let result = build_governance_pczt(
+            &notes,
+            &mock_params(),
+            &mock_fvk_bytes(),
+            &mock_hotkey_address(),
+            NU5_BRANCH_ID,
+            MAINNET_COIN_TYPE,
+            &MOCK_SEED_FP,
+            MOCK_ACCOUNT,
+            "Test Round",
+        )
+        .unwrap();
+
+        assert_eq!(result.gov_nullifiers.len(), 4);
+        assert!(result.padded_cmx.is_empty());
+        assert!(result.dummy_nullifiers.is_empty());
+
+        // Gov nullifiers should all differ
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                assert_ne!(result.gov_nullifiers[i], result.gov_nullifiers[j]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_build_governance_pczt_different_rk_each_call() {
+        let result1 = build_governance_pczt(
+            &[mock_note()],
+            &mock_params(),
+            &mock_fvk_bytes(),
+            &mock_hotkey_address(),
+            NU5_BRANCH_ID,
+            MAINNET_COIN_TYPE,
+            &MOCK_SEED_FP,
+            MOCK_ACCOUNT,
+            "Test Round",
+        )
+        .unwrap();
+
+        let result2 = build_governance_pczt(
+            &[mock_note()],
+            &mock_params(),
+            &mock_fvk_bytes(),
+            &mock_hotkey_address(),
+            NU5_BRANCH_ID,
+            MAINNET_COIN_TYPE,
+            &MOCK_SEED_FP,
+            MOCK_ACCOUNT,
+            "Test Round",
+        )
+        .unwrap();
+
+        // rk and alpha should differ due to randomization
+        assert_ne!(result1.rk, result2.rk);
+        assert_ne!(result1.alpha, result2.alpha);
+
+        // nf_signed should be deterministic (same rho_signed from same notes/params)
+        // but rho_signed differs because VAN includes random gov_comm_rand
+        // So nf_signed will differ between calls
     }
 }

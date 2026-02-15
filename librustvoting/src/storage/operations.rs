@@ -1,8 +1,8 @@
 use crate::storage::queries;
 use crate::storage::{RoundPhase, RoundState, RoundSummary, VoteRecord, VotingDb};
 use crate::types::{
-    DelegationAction, EncryptedShare, NoteInfo, ProofProgressReporter, ProofResult, SharePayload,
-    VoteCommitmentBundle, VotingError, VotingHotkey, VotingRoundParams, WitnessData,
+    DelegationAction, EncryptedShare, GovernancePczt, NoteInfo, ProofProgressReporter, ProofResult,
+    SharePayload, VoteCommitmentBundle, VotingError, VotingHotkey, VotingRoundParams, WitnessData,
 };
 
 impl VotingDb {
@@ -73,7 +73,7 @@ impl VotingDb {
 
     /// Construct the delegation action for Keystone signing.
     /// Loads round params from db. Notes come from caller (not stored yet).
-    /// Computes real governance nullifiers, VAN, signed note, output note, rk, and sighash.
+    /// Computes real governance nullifiers, VAN, signed note, output note, and rk.
     /// Persists delegation data (gov_comm_rand, dummy_nullifiers, rho_signed, etc.) to DB.
     ///
     /// - `fvk_bytes`: 96-byte orchard FullViewingKey (ak[32] || nk[32] || rivk[32])
@@ -113,6 +113,59 @@ impl VotingDb {
             &action.rseed_output,
         )?;
         Ok(action)
+    }
+
+    /// Build a governance-specific PCZT for Keystone signing.
+    /// Loads round params from db. Notes come from caller.
+    /// Computes governance values and builds a PCZT whose single Orchard action
+    /// IS the governance dummy action (spend of signed note → output to hotkey).
+    ///
+    /// - `fvk_bytes`: 96-byte orchard FullViewingKey (ak[32] || nk[32] || rivk[32])
+    /// - `hotkey_raw_address`: 43-byte hotkey raw orchard address (for output note)
+    /// - `consensus_branch_id`: NU6 = 0xC8E71055
+    /// - `coin_type`: 133 (mainnet) or 1 (testnet)
+    /// - `seed_fingerprint`: 32-byte ZIP-32 seed fingerprint for Keystone signing
+    /// - `account_index`: ZIP-32 account index (typically 0)
+    pub fn build_governance_pczt(
+        &self,
+        round_id: &str,
+        notes: &[NoteInfo],
+        fvk_bytes: &[u8],
+        hotkey_raw_address: &[u8],
+        consensus_branch_id: u32,
+        coin_type: u32,
+        seed_fingerprint: &[u8; 32],
+        account_index: u32,
+        round_name: &str,
+    ) -> Result<GovernancePczt, VotingError> {
+        let conn = self.conn();
+        let params = queries::load_round_params(&conn, round_id)?;
+        let result = crate::action::build_governance_pczt(
+            notes,
+            &params,
+            fvk_bytes,
+            hotkey_raw_address,
+            consensus_branch_id,
+            coin_type,
+            seed_fingerprint,
+            account_index,
+            round_name,
+        )?;
+        // Persist the same delegation data fields as construct_delegation_action
+        queries::store_delegation_data(
+            &conn,
+            round_id,
+            &result.gov_comm_rand,
+            &result.dummy_nullifiers,
+            &result.rho_signed,
+            &result.padded_cmx,
+            &result.nf_signed,
+            &result.cmx_new,
+            &result.alpha,
+            &result.rseed_signed,
+            &result.rseed_output,
+        )?;
+        Ok(result)
     }
 
     /// Cache tree state fetched from lightwalletd by SDK.
@@ -379,8 +432,6 @@ mod tests {
             .unwrap();
         assert_eq!(action.rk.len(), 32);
         assert_ne!(action.rk, vec![0xDE; 32]);
-        assert_eq!(action.sighash.len(), 32);
-        assert_ne!(action.sighash, vec![0x5A; 32]);
         assert_eq!(action.gov_nullifiers.len(), 4);
         assert_eq!(action.van.len(), 32);
         assert_eq!(action.gov_comm_rand.len(), 32);
@@ -454,7 +505,6 @@ mod tests {
         let action = DelegationAction {
             action_bytes: vec![0xDA; 128],
             rk: vec![0xDE; 32],
-            sighash: vec![0x5A; 32],
             gov_nullifiers: vec![vec![0x01; 32]; 4],
             van: vec![0x02; 32],
             gov_comm_rand: vec![0x03; 32],
@@ -464,6 +514,7 @@ mod tests {
             nf_signed: vec![0x05; 32],
             cmx_new: vec![0x06; 32],
             alpha: vec![0x07; 32],
+            spend_auth_sig: None,
             rseed_signed: vec![0x08; 32],
             rseed_output: vec![0x09; 32],
         };

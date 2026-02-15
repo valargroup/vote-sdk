@@ -3,8 +3,11 @@ import Foundation
 import ComposableArchitecture
 import DatabaseFiles
 import Generated
+import KeystoneHandler
 import MnemonicClient
+import Models
 import Pasteboard
+import Scan
 import SDKSynchronizer
 import UIComponents
 import Utils
@@ -13,15 +16,31 @@ import VotingCryptoClient
 import VotingModels
 import WalletStorage
 import ZcashSDKEnvironment
+import ZcashLightClientKit
 
 private enum VotingFlowError: LocalizedError {
     case missingActiveSession
+    case missingSigningAccount
+    case missingHotkeyAddress
+    case missingPendingDelegationAction
+    case missingPendingUnsignedPczt
+    case invalidDelegationSignature
     case missingVoteCommitmentBundle
 
     var errorDescription: String? {
         switch self {
         case .missingActiveSession:
             return "missing active voting session"
+        case .missingSigningAccount:
+            return "missing signing account for delegation PCZT"
+        case .missingHotkeyAddress:
+            return "missing hotkey address for delegation PCZT"
+        case .missingPendingDelegationAction:
+            return "missing pending delegation action"
+        case .missingPendingUnsignedPczt:
+            return "missing pending unsigned delegation PCZT"
+        case .invalidDelegationSignature:
+            return "Keystone signed the PCZT shielded sighash, which does not match the delegation action sighash required by ZKP #1."
         case .missingVoteCommitmentBundle:
             return "vote commitment build completed without a commitment bundle"
         }
@@ -31,6 +50,7 @@ private enum VotingFlowError: LocalizedError {
 @Reducer
 public struct Voting {
     @Dependency(\.databaseFiles) var databaseFiles
+    @Dependency(\.keystoneHandler) var keystoneHandler
     @Dependency(\.mnemonic) var mnemonic
     @Dependency(\.pasteboard) var pasteboard
     @Dependency(\.sdkSynchronizer) var sdkSynchronizer
@@ -41,6 +61,7 @@ public struct Voting {
     @ObservableState
     public struct State: Equatable {
         public enum Screen: Equatable {
+            case loading
             case delegationSigning
             case proposalList
             case proposalDetail(id: UInt32)
@@ -73,7 +94,15 @@ public struct Voting {
             public var totalMs: UInt64 { treeStateFetchMs + witnessGenerationMs + verificationMs }
         }
 
-        public var screenStack: [Screen] = [.delegationSigning]
+        public enum KeystoneSigningStatus: Equatable {
+            case idle
+            case preparingRequest
+            case awaitingSignature
+            case parsingSignature
+            case failed(String)
+        }
+
+        public var screenStack: [Screen] = [.loading]
         public var votingRound: VotingRound
         public var votes: [UInt32: VoteChoice] = [:]
         public var votingWeight: UInt64
@@ -104,6 +133,13 @@ public struct Voting {
 
         // ZKP #1 (delegation) — runs in background
         public var delegationProofStatus: ProofStatus = .notStarted
+        public var keystoneSigningStatus: KeystoneSigningStatus = .idle
+        public var pendingDelegationAction: DelegationAction?
+        /// Governance PCZT result for Keystone signing flow (contains metadata + pczt_bytes).
+        public var pendingGovernancePczt: GovernancePcztResult?
+        /// Unsigned delegation PCZT request shown as QR and used for signature extraction.
+        public var pendingUnsignedDelegationPczt: Pczt?
+        @Presents public var keystoneScan: Scan.State?
 
         /// Most recent Vote Commitment (VC) bundle built for UI/debug stubs.
         public var lastVoteCommitmentBundle: VoteCommitmentBundle?
@@ -150,7 +186,7 @@ public struct Voting {
             selectedProposalId ?? nextUnvotedProposalId
         }
 
-        public var selectedProposal: Proposal? {
+        public var selectedProposal: VotingModels.Proposal? {
             if case .proposalDetail(let id) = currentScreen {
                 return votingRound.proposals.first { $0.id == id }
             }
@@ -201,10 +237,20 @@ public struct Voting {
         case witnessVerificationCompleted([State.NoteWitnessResult], [WitnessData], State.WitnessTiming)
         case witnessVerificationFailed(String)
 
+        // Round resume check (skip delegation screen if already authorized)
+        case roundResumeChecked(alreadyAuthorized: Bool)
+
         // Delegation signing
         case copyHotkeyAddress
         case delegationApproved
         case delegationRejected
+        case keystoneSigningPrepared(GovernancePcztResult, Pczt)
+        case keystoneSigningFailed(String)
+        case openKeystoneSignatureScan
+        case retryKeystoneSigning
+        case spendAuthSignatureExtracted(Data)
+        case spendAuthSignatureExtractionFailed(String)
+        case keystoneScan(PresentationAction<Scan.Action>)
 
         // Background ZKP delegation
         case startDelegationProof
@@ -249,6 +295,11 @@ public struct Voting {
             // MARK: - Initialization
 
             case .initialize:
+                // Non-Keystone users skip the delegation signing screen entirely —
+                // set this synchronously so they never see it flash.
+                if !state.isKeystoneUser {
+                    state.screenStack = [.proposalList]
+                }
                 let network = zcashSDKEnvironment.network
                 let walletDbPath = databaseFiles.dataDbURLFor(network).path
                 let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
@@ -327,7 +378,18 @@ public struct Voting {
                 let network = zcashSDKEnvironment.network
                 let walletDbPath = databaseFiles.dataDbURLFor(network).path
                 return .run { [sdkSynchronizer, votingCrypto] send in
-                    // Always initialize the round in the DB (needed by delegation proof later)
+                    // Check if this round already exists and is past delegation
+                    let existingState = try? await votingCrypto.getRoundState(roundId)
+                    let alreadyAuthorized = existingState.map {
+                        $0.phase == .delegationProved || $0.phase == .voteReady
+                    } ?? false
+
+                    if alreadyAuthorized {
+                        await send(.roundResumeChecked(alreadyAuthorized: true))
+                        return
+                    }
+
+                    // Fresh round — clear and initialize
                     try? await votingCrypto.clearRound(roundId)
                     let params = VotingRoundParams(
                         voteRoundId: activeSession.voteRoundId,
@@ -399,10 +461,40 @@ public struct Voting {
                 state.cachedWitnesses = witnesses
                 state.witnessTiming = timing
                 state.witnessStatus = .completed
+                // Non-Keystone users skip the delegation signing screen entirely
+                if !state.isKeystoneUser {
+                    state.screenStack = [.proposalList]
+                    state.delegationProofStatus = .complete
+                    return .publisher {
+                        votingCrypto.stateStream()
+                            .receive(on: DispatchQueue.main)
+                            .map(Action.votingDbStateChanged)
+                    }
+                    .cancellable(id: cancelStateStreamId, cancelInFlight: true)
+                }
+                // Keystone fresh round: now show the delegation signing screen
+                state.screenStack = [.delegationSigning]
                 return .none
 
             case .witnessVerificationFailed(let error):
                 state.witnessStatus = .failed(error)
+                return .none
+
+            // MARK: - Round Resume
+
+            case .roundResumeChecked(let alreadyAuthorized):
+                if alreadyAuthorized {
+                    state.delegationProofStatus = .complete
+                    state.screenStack = [.proposalList]
+                    state.witnessStatus = .completed
+                    // Start state stream to sync votes and hotkey from the existing round
+                    return .publisher {
+                        votingCrypto.stateStream()
+                            .receive(on: DispatchQueue.main)
+                            .map(Action.votingDbStateChanged)
+                    }
+                    .cancellable(id: cancelStateStreamId, cancelInFlight: true)
+                }
                 return .none
 
             // MARK: - DB State Stream
@@ -431,11 +523,27 @@ public struct Voting {
                 return .none
 
             case .delegationApproved:
-                state.screenStack = [.proposalList]
+                if !state.isKeystoneUser {
+                    state.screenStack = [.proposalList]
+                    // Direct-wallet voting does not require delegation proof generation.
+                    state.delegationProofStatus = .complete
+                    return .none
+                }
                 return .send(.startDelegationProof)
 
             case .delegationRejected:
+                state.pendingDelegationAction = nil
+                state.pendingGovernancePczt = nil
+                state.pendingUnsignedDelegationPczt = nil
+                state.keystoneSigningStatus = .idle
                 return .send(.dismissFlow)
+
+            case .retryKeystoneSigning:
+                state.pendingDelegationAction = nil
+                state.pendingGovernancePczt = nil
+                state.pendingUnsignedDelegationPczt = nil
+                state.keystoneSigningStatus = .idle
+                return .send(.startDelegationProof)
 
             // MARK: - Background ZKP Delegation
 
@@ -445,12 +553,17 @@ public struct Voting {
                         VotingFlowError.missingActiveSession.localizedDescription
                     ))
                 }
-                state.delegationProofStatus = .generating(progress: 0)
+                if state.isKeystoneUser {
+                    state.keystoneSigningStatus = .preparingRequest
+                } else {
+                    state.delegationProofStatus = .generating(progress: 0)
+                }
                 let roundId = activeSession.voteRoundId.hexString
-                let snapshotHeight = activeSession.snapshotHeight
                 let cachedNotes = state.walletNotes
                 let networkId: UInt32 = zcashSDKEnvironment.network.networkType == .mainnet ? 0 : 1
                 let accountIndex: UInt32 = 0
+                let isKeystoneUser = state.isKeystoneUser
+                let roundName = state.votingRound.title
                 // Flatten each witness auth path into a single Data for the delegation circuit
                 let inclusionProofs = state.cachedWitnesses.map { witness in
                     witness.authPath.reduce(Data()) { $0 + $1 }
@@ -465,12 +578,32 @@ public struct Voting {
                     .cancellable(id: cancelStateStreamId, cancelInFlight: true),
                     // Run delegation proof pipeline
                     // Round is already initialized and witnesses cached by verifyWitnesses
-                    .run { [votingCrypto, mnemonic, walletStorage] send in
+                    .run { [sdkSynchronizer, votingCrypto, mnemonic, walletStorage] send in
                         // Reload hotkey from keychain (generated during initialize)
                         let senderPhrase = try walletStorage.exportWallet().seedPhrase.value()
                         let senderSeed = try mnemonic.toSeed(senderPhrase)
                         let hotkeyPhrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
                         let hotkeySeed = try mnemonic.toSeed(hotkeyPhrase)
+                        if isKeystoneUser {
+                            // Build governance PCZT — its single Orchard action IS the governance
+                            // dummy action, so Keystone's SpendAuth signature will verify against
+                            // the PCZT's ZIP-244 sighash (which binds to the governance values).
+                            let govPczt = try await votingCrypto.buildGovernancePczt(
+                                roundId,
+                                cachedNotes,
+                                senderSeed,
+                                hotkeySeed,
+                                networkId,
+                                accountIndex,
+                                roundName
+                            )
+                            let redactedPczt = try await sdkSynchronizer
+                                .redactPCZTForSigner(govPczt.pcztBytes)
+                            await send(.keystoneSigningPrepared(govPczt, redactedPczt))
+                            return
+                        }
+
+                        // Non-Keystone path: build delegation action with placeholder signature
                         let action = try await votingCrypto.buildDelegationSignAction(
                             roundId,
                             cachedNotes,
@@ -479,9 +612,12 @@ public struct Voting {
                             networkId,
                             accountIndex
                         )
+                        let spendAuthSig = action.spendAuthSig ?? Data(repeating: 0x00, count: 64)
                         // Use real Merkle inclusion proofs from verified witnesses
                         _ = try await votingCrypto.buildDelegationWitness(
-                            roundId, action,
+                            roundId,
+                            action,
+                            spendAuthSig,
                             inclusionProofs,
                             [Data(repeating: 0x22, count: 32)] // exclusion proofs still mocked
                         )
@@ -496,9 +632,106 @@ public struct Voting {
                             }
                         }
                     } catch: { error, send in
-                        await send(.delegationProofFailed(error.localizedDescription))
+                        if isKeystoneUser {
+                            await send(.keystoneSigningFailed(error.localizedDescription))
+                        } else {
+                            await send(.delegationProofFailed(error.localizedDescription))
+                        }
                     }
                 )
+
+            case .keystoneSigningPrepared(let govPczt, let unsignedPczt):
+                state.pendingGovernancePczt = govPczt
+                state.pendingDelegationAction = govPczt.toDelegationAction()
+                state.pendingUnsignedDelegationPczt = unsignedPczt
+                state.keystoneSigningStatus = .awaitingSignature
+                return .none
+
+            case .keystoneSigningFailed(let error):
+                state.keystoneSigningStatus = .failed(error)
+                return .none
+
+            case .openKeystoneSignatureScan:
+                keystoneHandler.resetQRDecoder()
+                var scanState = Scan.State.initial
+                scanState.instructions = "Scan signed delegation QR from Keystone"
+                scanState.checkers = [.keystoneVotingDelegationPCZTScanChecker]
+                state.keystoneScan = scanState
+                return .none
+
+            case .keystoneScan(.presented(.foundVotingDelegationPCZT(let signedPczt))):
+                state.keystoneScan = nil
+                state.keystoneSigningStatus = .parsingSignature
+                guard let govPczt = state.pendingGovernancePczt else {
+                    return .send(.spendAuthSignatureExtractionFailed(
+                        VotingFlowError.missingPendingUnsignedPczt.localizedDescription
+                    ))
+                }
+                let actionIndex = govPczt.actionIndex
+                return .run { [votingCrypto] send in
+                    let spendAuthSig = try votingCrypto.extractSpendAuthSignatureFromSignedPczt(
+                        signedPczt,
+                        actionIndex
+                    )
+                    await send(.spendAuthSignatureExtracted(spendAuthSig))
+                } catch: { error, send in
+                    await send(.spendAuthSignatureExtractionFailed(error.localizedDescription))
+                }
+
+            case .keystoneScan(.presented(.cancelTapped)),
+                    .keystoneScan(.dismiss):
+                state.keystoneScan = nil
+                return .none
+
+            case .keystoneScan:
+                return .none
+
+            case .spendAuthSignatureExtracted(let spendAuthSig):
+                guard let activeSession = state.activeSession else {
+                    return .send(.delegationProofFailed(
+                        VotingFlowError.missingActiveSession.localizedDescription
+                    ))
+                }
+                guard let pendingAction = state.pendingDelegationAction else {
+                    return .send(.delegationProofFailed(
+                        VotingFlowError.missingPendingDelegationAction.localizedDescription
+                    ))
+                }
+                state.pendingDelegationAction = nil
+                state.pendingGovernancePczt = nil
+                state.pendingUnsignedDelegationPczt = nil
+                state.keystoneSigningStatus = .idle
+                state.screenStack = [.proposalList]
+                state.delegationProofStatus = .generating(progress: 0)
+
+                let roundId = activeSession.voteRoundId.hexString
+                let inclusionProofs = state.cachedWitnesses.map { witness in
+                    witness.authPath.reduce(Data()) { $0 + $1 }
+                }
+                return .run { [votingCrypto] send in
+                    _ = try await votingCrypto.buildDelegationWitness(
+                        roundId,
+                        pendingAction,
+                        spendAuthSig,
+                        inclusionProofs,
+                        [Data(repeating: 0x22, count: 32)]
+                    )
+
+                    for try await event in votingCrypto.generateDelegationProof(roundId) {
+                        switch event {
+                        case .progress(let p):
+                            await send(.delegationProofProgress(p))
+                        case .completed:
+                            await send(.delegationProofCompleted)
+                        }
+                    }
+                } catch: { error, send in
+                    await send(.delegationProofFailed(error.localizedDescription))
+                }
+
+            case .spendAuthSignatureExtractionFailed(let error):
+                state.keystoneSigningStatus = .failed(error)
+                return .none
 
             case .delegationProofProgress(let progress):
                 state.delegationProofStatus = .generating(progress: progress)
@@ -650,6 +883,9 @@ public struct Voting {
             case .doneTapped:
                 return .send(.dismissFlow)
             }
+        }
+        .ifLet(\.$keystoneScan, action: \.keystoneScan) {
+            Scan()
         }
     }
 

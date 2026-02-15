@@ -80,6 +80,11 @@ impl Pczt {
         postcard::from_bytes(&bytes[8..]).map_err(ParseError::Invalid)
     }
 
+    /// Replaces the Orchard bundle in this PCZT.
+    pub fn set_orchard(&mut self, orchard: orchard::Bundle) {
+        self.orchard = orchard;
+    }
+
     /// Serializes this PCZT.
     pub fn serialize(&self) -> Vec<u8> {
         let mut bytes = vec![];

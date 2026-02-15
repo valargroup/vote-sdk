@@ -10,7 +10,6 @@ pub fn build_delegation_witness(
     exclusion_proofs: &[Vec<u8>],
 ) -> Result<Vec<u8>, VotingError> {
     validate_32_bytes(&action.rk, "action.rk")?;
-    validate_32_bytes(&action.sighash, "action.sighash")?;
 
     for (i, proof) in inclusion_proofs.iter().enumerate() {
         if proof.is_empty() {
@@ -75,7 +74,6 @@ mod tests {
         DelegationAction {
             action_bytes: vec![0xDA; 128],
             rk: vec![0xDE; 32],
-            sighash: vec![0x5A; 32],
             gov_nullifiers: vec![vec![0x01; 32]; 4],
             van: vec![0x02; 32],
             gov_comm_rand: vec![0x03; 32],
@@ -85,6 +83,7 @@ mod tests {
             nf_signed: vec![0x05; 32],
             cmx_new: vec![0x06; 32],
             alpha: vec![0x07; 32],
+            spend_auth_sig: None,
             rseed_signed: vec![0x08; 32],
             rseed_output: vec![0x09; 32],
         }

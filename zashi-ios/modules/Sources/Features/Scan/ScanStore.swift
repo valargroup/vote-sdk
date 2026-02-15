@@ -86,6 +86,7 @@ public struct Scan {
         case foundRequestZec(ParserResult)
         case foundAccounts(ZcashAccounts)
         case foundPCZT(Data)
+        case foundVotingDelegationPCZT(Data)
         case animatedQRProgress(Int, Int?, Int?)
         case scanFailed(ScanImageResult)
         case scan(RedactableString)
@@ -143,6 +144,11 @@ public struct Scan {
                 return .none
 
             case .foundPCZT:
+                state.isAnythingFound = true
+                state.progress = nil
+                return .none
+
+            case .foundVotingDelegationPCZT:
                 state.isAnythingFound = true
                 state.progress = nil
                 return .none

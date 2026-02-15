@@ -134,4 +134,20 @@ class ScanTests: XCTestCase {
         
         await store.finish()
     }
+
+    func testFoundVotingDelegationPcztMarksAnythingFound() async throws {
+        let store = TestStore(
+            initialState: Scan.State(
+                isAnythingFound: false,
+                progress: 42
+            )
+        ) {
+            Scan()
+        }
+
+        await store.send(.foundVotingDelegationPCZT(Data([0x01, 0x02, 0x03]))) { state in
+            state.isAnythingFound = true
+            state.progress = nil
+        }
+    }
 }

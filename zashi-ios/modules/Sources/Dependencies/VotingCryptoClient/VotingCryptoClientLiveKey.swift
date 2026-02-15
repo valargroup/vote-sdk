@@ -206,7 +206,6 @@ extension VotingCryptoClient: DependencyKey {
                 return DelegationAction(
                     actionBytes: result.actionBytes,
                     rk: result.rk,
-                    sighash: result.sighash,
                     govNullifiers: result.govNullifiers,
                     van: result.van,
                     govCommRand: result.govCommRand,
@@ -217,19 +216,73 @@ extension VotingCryptoClient: DependencyKey {
                     cmxNew: result.cmxNew,
                     alpha: result.alpha,
                     rseedSigned: result.rseedSigned,
-                    rseedOutput: result.rseedOutput
+                    rseedOutput: result.rseedOutput,
+                    spendAuthSig: nil
+                )
+            },
+            buildGovernancePczt: { roundId, notes, senderSeed, hotkeySeed, networkId, accountIndex, roundName in
+                let db = try await dbActor.database()
+                _ = try db.generateHotkey(roundId: roundId, seed: Data(hotkeySeed))
+                let ffiInputs = try ZcashVotingFFI.generateDelegationInputs(
+                    senderSeed: Data(senderSeed),
+                    hotkeySeed: Data(hotkeySeed),
+                    networkId: networkId,
+                    accountIndex: accountIndex
+                )
+                let ffiNotes = notes.map {
+                    ZcashVotingFFI.NoteInfo(
+                        commitment: $0.commitment,
+                        nullifier: $0.nullifier,
+                        value: $0.value,
+                        position: $0.position
+                    )
+                }
+                // NU6 consensus branch ID; coin_type 133 = mainnet, 1 = testnet
+                let consensusBranchId: UInt32 = 0xC8E7_1055
+                let coinType: UInt32 = networkId == 0 ? 133 : 1
+                // Round params are loaded from DB internally by build_governance_pczt
+                let result = try db.buildGovernancePczt(
+                    roundId: roundId,
+                    notes: ffiNotes,
+                    fvkBytes: ffiInputs.fvkBytes,
+                    hotkeyRawAddress: ffiInputs.hotkeyRawAddress,
+                    consensusBranchId: consensusBranchId,
+                    coinType: coinType,
+                    seedFingerprint: ffiInputs.seedFingerprint,
+                    accountIndex: accountIndex,
+                    roundName: roundName
+                )
+                publishState(db: db, roundId: roundId)
+                return GovernancePcztResult(
+                    pcztBytes: result.pcztBytes,
+                    rk: result.rk,
+                    alpha: result.alpha,
+                    nfSigned: result.nfSigned,
+                    cmxNew: result.cmxNew,
+                    govNullifiers: result.govNullifiers,
+                    van: result.van,
+                    govCommRand: result.govCommRand,
+                    dummyNullifiers: result.dummyNullifiers,
+                    rhoSigned: result.rhoSigned,
+                    paddedCmx: result.paddedCmx,
+                    rseedSigned: result.rseedSigned,
+                    rseedOutput: result.rseedOutput,
+                    actionBytes: result.actionBytes,
+                    actionIndex: result.actionIndex
                 )
             },
             storeTreeState: { roundId, treeState in
                 let db = try await dbActor.database()
                 try db.storeTreeState(roundId: roundId, treeStateBytes: treeState)
             },
-            buildDelegationWitness: { roundId, action, inclusionProofs, exclusionProofs in
+            buildDelegationWitness: { roundId, action, spendAuthSig, inclusionProofs, exclusionProofs in
+                guard spendAuthSig.count == 64 else {
+                    throw VotingCryptoError.invalidSpendAuthSignatureLength(spendAuthSig.count)
+                }
                 let db = try await dbActor.database()
                 let ffiAction = ZcashVotingFFI.DelegationAction(
                     actionBytes: action.actionBytes,
                     rk: action.rk,
-                    sighash: action.sighash,
                     govNullifiers: action.govNullifiers,
                     van: action.van,
                     govCommRand: action.govCommRand,
@@ -239,6 +292,7 @@ extension VotingCryptoClient: DependencyKey {
                     nfSigned: action.nfSigned,
                     cmxNew: action.cmxNew,
                     alpha: action.alpha,
+                    spendAuthSig: spendAuthSig,
                     rseedSigned: action.rseedSigned,
                     rseedOutput: action.rseedOutput
                 )
@@ -250,6 +304,13 @@ extension VotingCryptoClient: DependencyKey {
                 )
                 publishState(db: db, roundId: roundId)
                 return witness
+            },
+            extractSpendAuthSignatureFromSignedPczt: { signedPczt, actionIndex in
+                let sigBytes = try ZcashVotingFFI.extractSpendAuthSig(
+                    signedPcztBytes: signedPczt,
+                    actionIndex: actionIndex
+                )
+                return sigBytes
             },
             generateDelegationProof: { roundId in
                 AsyncThrowingStream { continuation in
@@ -405,6 +466,7 @@ enum VotingCryptoError: LocalizedError {
     case proofFailed(String)
     case databaseNotOpen
     case hotkeySeedBindingMismatch
+    case invalidSpendAuthSignatureLength(Int)
 
     var errorDescription: String? {
         switch self {
@@ -414,9 +476,12 @@ enum VotingCryptoError: LocalizedError {
             return "Voting database is not open."
         case .hotkeySeedBindingMismatch:
             return "Hotkey derivation mismatch while building delegation sign action."
+        case .invalidSpendAuthSignatureLength(let actual):
+            return "SpendAuthSig must be 64 bytes, got \(actual)."
         }
     }
 }
+
 
 private extension VoteChoice {
     var ffiValue: UInt32 {

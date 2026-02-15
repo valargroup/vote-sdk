@@ -42,7 +42,6 @@ pub struct VotingRoundParams {
 pub struct DelegationAction {
     pub action_bytes: Vec<u8>,
     pub rk: Vec<u8>,
-    pub sighash: Vec<u8>,
     /// Governance nullifiers, always padded to 4.
     pub gov_nullifiers: Vec<Vec<u8>>,
     /// 32-byte governance commitment (VAN).
@@ -62,10 +61,53 @@ pub struct DelegationAction {
     pub cmx_new: Vec<u8>,
     /// Spend auth randomizer scalar (32 bytes). Needed for Keystone signing.
     pub alpha: Vec<u8>,
+    /// Spend authorization signature over `sighash` (64 bytes), supplied after Keystone signing.
+    pub spend_auth_sig: Option<Vec<u8>>,
     /// Signed note rseed (32 bytes). Needed for witness reconstruction.
     pub rseed_signed: Vec<u8>,
     /// Output note rseed (32 bytes). Needed for witness reconstruction.
     pub rseed_output: Vec<u8>,
+}
+
+/// Governance PCZT for Keystone signing.
+///
+/// Contains a serialized PCZT whose single Orchard action IS the governance
+/// dummy action (spend of signed note → output to hotkey). The PCZT's rk and
+/// ZIP-244 sighash are internally consistent, so Keystone's SpendAuth signature
+/// will verify against them.
+#[derive(Clone, Debug)]
+pub struct GovernancePczt {
+    /// Serialized PCZT bytes ready for UR-encoding and Keystone signing.
+    pub pczt_bytes: Vec<u8>,
+    /// Randomized verification key (32 bytes). Extracted from the PCZT spend action.
+    pub rk: Vec<u8>,
+    /// Spend auth randomizer scalar (32 bytes). Needed for ZKP witness.
+    pub alpha: Vec<u8>,
+    /// Signed note nullifier (32 bytes). Public input to ZKP #1.
+    pub nf_signed: Vec<u8>,
+    /// Output note commitment (32 bytes). Public input to ZKP #1.
+    pub cmx_new: Vec<u8>,
+    /// Governance nullifiers, always padded to 4.
+    pub gov_nullifiers: Vec<Vec<u8>>,
+    /// 32-byte governance commitment (VAN).
+    pub van: Vec<u8>,
+    /// 32-byte blinding factor used for VAN (must be persisted for later use).
+    pub gov_comm_rand: Vec<u8>,
+    /// Random nullifiers used for padded dummy notes (needed for circuit witness).
+    pub dummy_nullifiers: Vec<Vec<u8>>,
+    /// Constrained rho for the signed note (32 bytes). Spec §1.3.4.1.
+    pub rho_signed: Vec<u8>,
+    /// Extracted note commitments (cmx) for padded dummy notes.
+    pub padded_cmx: Vec<Vec<u8>>,
+    /// Signed note rseed (32 bytes). Needed for witness reconstruction.
+    pub rseed_signed: Vec<u8>,
+    /// Output note rseed (32 bytes). Needed for witness reconstruction.
+    pub rseed_output: Vec<u8>,
+    /// Canonical delegation action payload for cosmos chain submission.
+    pub action_bytes: Vec<u8>,
+    /// Index of the real governance action within the PCZT's Orchard bundle.
+    /// (Actions are padded/shuffled by the Builder.)
+    pub action_index: usize,
 }
 
 /// El Gamal ciphertext of a voting share.

@@ -51,13 +51,30 @@ public struct VotingCryptoClient {
         _ networkId: UInt32,
         _ accountIndex: UInt32
     ) async throws -> DelegationAction
+    /// Build a governance-specific PCZT for Keystone signing.
+    /// The PCZT's single Orchard action IS the governance dummy action, so Keystone's
+    /// SpendAuth signature will be over the governance-bound ZIP-244 sighash.
+    public var buildGovernancePczt: @Sendable (
+        _ roundId: String,
+        _ notes: [NoteInfo],
+        _ senderSeed: [UInt8],
+        _ hotkeySeed: [UInt8],
+        _ networkId: UInt32,
+        _ accountIndex: UInt32,
+        _ roundName: String
+    ) async throws -> GovernancePcztResult
     public var storeTreeState: @Sendable (_ roundId: String, _ treeState: Data) async throws -> Void
     public var buildDelegationWitness: @Sendable (
         _ roundId: String,
         _ action: DelegationAction,
+        _ spendAuthSig: Data,
         _ inclusionProofs: [Data],
         _ exclusionProofs: [Data]
     ) async throws -> Data
+    public var extractSpendAuthSignatureFromSignedPczt: @Sendable (
+        _ signedPczt: Data,
+        _ actionIndex: UInt32
+    ) throws -> Data
     public var generateDelegationProof: @Sendable (_ roundId: String) -> AsyncThrowingStream<ProofEvent, Error>
         = { _ in AsyncThrowingStream { $0.finish() } }
     public var decomposeWeight: @Sendable (_ weight: UInt64) -> [UInt64] = { _ in [] }

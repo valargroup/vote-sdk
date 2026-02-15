@@ -73,9 +73,10 @@ A voting round progresses through phases, tracked in the `rounds.phase` column:
 Initialized
     -> generateHotkey()
 HotkeyGenerated
-    -> buildDelegationSignAction() + Keystone signing
+    -> buildDelegationSignAction() + build 1-zatoshi self-spend PCZT + Keystone signing
 DelegationConstructed
-    -> buildDelegationWitness() (inclusion + exclusion proofs)
+    -> extract spendAuthSig from signed PCZT
+    -> buildDelegationWitness() (spendAuthSig + inclusion + exclusion proofs)
 WitnessBuilt
     -> generateDelegationProof() (ZKP #1, long-running with progress)
 DelegationProved
@@ -180,7 +181,7 @@ Three dependency clients, each with live/test implementations:
 | Vote commitment construction   | Stubbed | Returns placeholder hashes                   |
 | ZKP #1 (delegation proof)      | Stubbed | Simulates progress, returns dummy proof      |
 | ZKP #2 (vote proof)            | Stubbed | Returns placeholder bundle                   |
-| Keystone signing               | Stubbed | Auto-approved in prototype                   |
+| Keystone signing               | Real    | QR request/scan roundtrip via signed PCZT    |
 | Vote chain API                 | Mocked  | Returns success responses                    |
 | Helper server delegation       | Mocked  | `delegateShares()` is a no-op                |
 | VAN witness / tree sync        | Stubbed | Hardcoded placeholder data                   |

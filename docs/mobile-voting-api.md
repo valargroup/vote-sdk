@@ -12,26 +12,28 @@ Grouped by round lifecycle phase. Status key: **Real** = production implementati
 
 ### VotingCryptoClient
 
-| Phase      | Method                                                                                   | Status  | Notes                                                    |
-| ---------- | ---------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------- |
-| —          | `stateStream()`                                                                          | Real    | Publishes DB state via `CurrentValueSubject`             |
-| —          | `openDatabase(path:)`                                                                    | Real    | Opens/creates SQLite via UniFFI                          |
-| Init       | `initRound(params:sessionJson:)`                                                         | Real    | Creates round row, sets phase to `initialized`           |
-| Init       | `getRoundState(roundId:)`                                                                | Real    | Queries `rounds` table                                   |
-| Init       | `getVotes(roundId:)`                                                                     | Real    | Queries `votes` table                                    |
-| Init       | `listRounds()`                                                                           | Real    | Lists all round summaries                                |
-| Init       | `clearRound(roundId:)`                                                                   | Real    | Deletes round + associated votes                         |
-| Init       | `getWalletNotes(walletDbPath:snapshotHeight:networkId:)`                                 | Real    | Read-only query of Zcash wallet DB, cmx recomputed       |
-| Delegation | `generateHotkey(roundId:seed:)`                                                          | Real    | Random Pallas keypair from seed                          |
-| Delegation | `buildDelegationSignAction(roundId:notes:senderSeed:hotkeySeed:networkId:accountIndex:)` | Real    | FVK derivation, receiver construction, action + sighash  |
-| Delegation | `storeTreeState(roundId:treeState:)`                                                     | Stubbed | Stores bytes but tree data is placeholder                |
-| Delegation | `buildDelegationWitness(roundId:action:inclusionProofs:exclusionProofs:)`                | Stubbed | Accepts placeholder proofs, returns dummy witness        |
-| Delegation | `generateDelegationProof(roundId:)`                                                      | Stubbed | Simulates progress over ~2s, returns 32-byte dummy proof |
-| Voting     | `decomposeWeight(weight:)`                                                               | Real    | Binary decomposition, max 4 shares                       |
-| Voting     | `encryptShares(roundId:shares:)`                                                         | Real    | ElGamal encryption on Pallas curve                       |
-| Voting     | `buildVoteCommitment(roundId:proposalId:choice:encShares:vanWitness:)`                   | Stubbed | Returns placeholder hashes for bundle fields             |
-| Voting     | `buildSharePayloads(encShares:commitment:)`                                              | Real    | Constructs helper server payloads from encrypted shares  |
-| Voting     | `markVoteSubmitted(roundId:proposalId:)`                                                 | Real    | Sets `submitted = true` in votes table                   |
+| Phase      | Method                                                                                       | Status  | Notes                                                    |
+| ---------- | -------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------- |
+| —          | `stateStream()`                                                                              | Real    | Publishes DB state via `CurrentValueSubject`             |
+| —          | `openDatabase(path:)`                                                                        | Real    | Opens/creates SQLite via UniFFI                          |
+| Init       | `initRound(params:sessionJson:)`                                                             | Real    | Creates round row, sets phase to `initialized`           |
+| Init       | `getRoundState(roundId:)`                                                                    | Real    | Queries `rounds` table                                   |
+| Init       | `getVotes(roundId:)`                                                                         | Real    | Queries `votes` table                                    |
+| Init       | `listRounds()`                                                                               | Real    | Lists all round summaries                                |
+| Init       | `clearRound(roundId:)`                                                                       | Real    | Deletes round + associated votes                         |
+| Init       | `getWalletNotes(walletDbPath:snapshotHeight:networkId:)`                                     | Real    | Read-only query of Zcash wallet DB, cmx recomputed       |
+| Delegation | `generateHotkey(roundId:seed:)`                                                              | Real    | Random Pallas keypair from seed                          |
+| Delegation | `buildDelegationSignAction(roundId:notes:senderSeed:hotkeySeed:networkId:accountIndex:)`     | Real    | FVK derivation, receiver construction, action + sighash  |
+| Delegation | `storeTreeState(roundId:treeState:)`                                                         | Stubbed | Stores bytes but tree data is placeholder                |
+| Delegation | `buildDelegationWitness(roundId:action:spendAuthSig:inclusionProofs:exclusionProofs:)`       | Stubbed | Accepts placeholder proofs, returns dummy witness        |
+| Delegation | `buildGovernancePczt(roundId:notes:senderSeed:hotkeySeed:networkId:accountIndex:roundName:)` | Real    | Builds governance PCZT for Keystone signing              |
+| Delegation | `extractSpendAuthSignatureFromSignedPczt(signedPczt:actionIndex:)`                           | Real    | Parses signed PCZT and extracts 64-byte SpendAuthSig     |
+| Delegation | `generateDelegationProof(roundId:)`                                                          | Stubbed | Simulates progress over ~2s, returns 32-byte dummy proof |
+| Voting     | `decomposeWeight(weight:)`                                                                   | Real    | Binary decomposition, max 4 shares                       |
+| Voting     | `encryptShares(roundId:shares:)`                                                             | Real    | ElGamal encryption on Pallas curve                       |
+| Voting     | `buildVoteCommitment(roundId:proposalId:choice:encShares:vanWitness:)`                       | Stubbed | Returns placeholder hashes for bundle fields             |
+| Voting     | `buildSharePayloads(encShares:commitment:)`                                                  | Real    | Constructs helper server payloads from encrypted shares  |
+| Voting     | `markVoteSubmitted(roundId:proposalId:)`                                                     | Real    | Sets `submitted = true` in votes table                   |
 
 ### VotingAPIClient
 
@@ -227,6 +229,7 @@ Stores serialized commitment tree state in the round row. Currently accepts plac
 var buildDelegationWitness: @Sendable (
     _ roundId: String,
     _ action: DelegationAction,
+    _ spendAuthSig: Data,
     _ inclusionProofs: [Data],
     _ exclusionProofs: [Data]
 ) async throws -> Data
@@ -238,10 +241,57 @@ Builds the ZKP #1 circuit witness from the delegation action, note inclusion pro
 | ----------------- | ------------------ | ------------------------------------------------- |
 | `roundId`         | `String`           | Hex-encoded round ID                              |
 | `action`          | `DelegationAction` | From `buildDelegationSignAction`                  |
+| `spendAuthSig`    | `Data`             | 64-byte SpendAuthSig returned by Keystone         |
 | `inclusionProofs` | `[Data]`           | Merkle paths proving note membership in `nc_root` |
 | `exclusionProofs` | `[Data]`           | IMT non-membership proofs for nullifiers          |
 
 **Output:** `Data` — serialized witness bytes.
+
+### buildGovernancePczt
+
+```swift
+var buildGovernancePczt: @Sendable (
+    _ roundId: String,
+    _ notes: [NoteInfo],
+    _ senderSeed: [UInt8],
+    _ hotkeySeed: [UInt8],
+    _ networkId: UInt32,
+    _ accountIndex: UInt32,
+    _ roundName: String
+) async throws -> GovernancePcztResult
+```
+
+Builds a governance-specific PCZT whose single real Orchard action is the delegation dummy action (spend of signed note with constrained rho → output to hotkey). The PCZT includes `zip32_derivation` metadata so Keystone can derive the spending key, and `fallback_lock_time` for pure-Orchard compatibility. The Builder generates alpha/rk internally; the PCZT's ZIP-244 sighash is computed by Keystone when it runs the Signer role. The PCZT memo uses `roundName` for human-readable display on the signing device.
+
+| Param          | Type         | Description                                     |
+| -------------- | ------------ | ----------------------------------------------- |
+| `roundId`      | `String`     | Hex-encoded round ID                            |
+| `notes`        | `[NoteInfo]` | Wallet notes at snapshot height                 |
+| `senderSeed`   | `[UInt8]`    | Sender wallet seed (for FVK + seed fingerprint) |
+| `hotkeySeed`   | `[UInt8]`    | Hotkey seed (for hotkey address derivation)     |
+| `networkId`    | `UInt32`     | 0 = mainnet, 1 = testnet                        |
+| `accountIndex` | `UInt32`     | ZIP-32 account index (typically 0)              |
+| `roundName`    | `String`     | Human-readable round title for the PCZT memo    |
+
+**Output:** `GovernancePcztResult` — contains serialized PCZT bytes (for UR-encoding to QR) plus all governance metadata (rk, alpha, nf_signed, cmx_new, gov_nullifiers, VAN, etc.) needed for ZKP #1 witness construction.
+
+### extractSpendAuthSignatureFromSignedPczt
+
+```swift
+var extractSpendAuthSignatureFromSignedPczt: @Sendable (
+    _ signedPczt: Data,
+    _ actionIndex: UInt32
+) throws -> Data
+```
+
+Parses the signed PCZT structurally (via Rust FFI) and extracts the `spend_auth_sig` field from the Orchard action. Tries the expected `actionIndex` first, then falls back to scanning all actions, since the Orchard Builder may shuffle action order.
+
+| Param         | Type     | Description                                       |
+| ------------- | -------- | ------------------------------------------------- |
+| `signedPczt`  | `Data`   | PCZT bytes returned by Keystone after signing     |
+| `actionIndex` | `UInt32` | Expected action index from `GovernancePcztResult` |
+
+**Output:** `Data` — 64-byte SpendAuthSig.
 
 ### generateDelegationProof
 
@@ -439,7 +489,7 @@ Intermediate type produced by `buildDelegationSignAction`. Contains everything n
 | `paddedCmx`       | `[Data]` | n × 32 bytes | Extracted note commitments for padded dummy notes        |
 | `nfSigned`        | `Data`   | 32 bytes     | Signed note nullifier (ZKP #1 public input)              |
 | `cmxNew`          | `Data`   | 32 bytes     | Output note commitment (ZKP #1 public input)             |
-| `alpha`           | `Data`   | 32 bytes     | Spend auth randomizer scalar (for Keystone signing)      |
+| `alpha`           | `Data`   | 32 bytes     | Spend auth randomizer scalar (used in PCZT construction) |
 | `rseedSigned`     | `Data`   | 32 bytes     | Signed note rseed (witness reconstruction)               |
 | `rseedOutput`     | `Data`   | 32 bytes     | Output note rseed (witness reconstruction)               |
 
@@ -542,12 +592,14 @@ The app subscribes to `stateStream()` after initialization to drive all UI updat
 ```
 clearRound(roundId)                                 // reset if re-entering
 initRound(params, nil)
-buildDelegationSignAction(roundId, notes, senderSeed, hotkeySeed, networkId, accountIndex)
-                                                    → DelegationAction
-  // Keystone signs action.sighash with action.alpha → spendAuthSig
-  // (currently auto-approved in prototype)
+buildGovernancePczt(roundId, notes, senderSeed, hotkeySeed, networkId, accountIndex, roundName)
+                                                    → GovernancePcztResult
+  // UR-encode GovernancePcztResult.pcztBytes as animated QR
+  // Keystone scans QR, signs the PCZT, returns signed PCZT QR
+extractSpendAuthSignatureFromSignedPczt(signedPczt, actionIndex)
+                                                    → spendAuthSig (64 bytes)
 storeTreeState(roundId, treeState)
-buildDelegationWitness(roundId, action, inclusionProofs, exclusionProofs)
+buildDelegationWitness(roundId, action, spendAuthSig, inclusionProofs, exclusionProofs)
                                                     → Data (witness)
 generateDelegationProof(roundId)                    → stream ProofEvent
   // UI shows progress bar during .progress events

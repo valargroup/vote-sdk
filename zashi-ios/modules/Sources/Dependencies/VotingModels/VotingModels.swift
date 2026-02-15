@@ -190,13 +190,103 @@ public struct VotingHotkey: Equatable, Sendable {
     }
 }
 
+// MARK: - Governance PCZT
+
+/// Result of building a governance-specific PCZT for Keystone signing.
+/// Contains the serialized PCZT bytes plus all metadata needed for ZKP #1 witness construction.
+public struct GovernancePcztResult: Equatable, Sendable {
+    /// Serialized PCZT bytes for UR-encoding and Keystone signing.
+    public let pcztBytes: Data
+    /// Randomized verification key (32 bytes).
+    public let rk: Data
+    /// Spend auth randomizer scalar (32 bytes).
+    public let alpha: Data
+    /// Signed note nullifier (32 bytes). Public input to ZKP #1.
+    public let nfSigned: Data
+    /// Output note commitment (32 bytes). Public input to ZKP #1.
+    public let cmxNew: Data
+    /// Governance nullifiers, always padded to 4.
+    public let govNullifiers: [Data]
+    /// 32-byte governance commitment (VAN).
+    public let van: Data
+    /// 32-byte blinding factor used for VAN.
+    public let govCommRand: Data
+    /// Random nullifiers used for padded dummy notes.
+    public let dummyNullifiers: [Data]
+    /// Constrained rho for the signed note (32 bytes).
+    public let rhoSigned: Data
+    /// Extracted note commitments (cmx) for padded dummy notes.
+    public let paddedCmx: [Data]
+    /// Signed note rseed (32 bytes).
+    public let rseedSigned: Data
+    /// Output note rseed (32 bytes).
+    public let rseedOutput: Data
+    /// Canonical delegation action payload for cosmos chain submission.
+    public let actionBytes: Data
+    /// Index of the governance action within the PCZT's Orchard bundle.
+    public let actionIndex: UInt32
+
+    public init(
+        pcztBytes: Data,
+        rk: Data,
+        alpha: Data,
+        nfSigned: Data,
+        cmxNew: Data,
+        govNullifiers: [Data],
+        van: Data,
+        govCommRand: Data,
+        dummyNullifiers: [Data],
+        rhoSigned: Data,
+        paddedCmx: [Data],
+        rseedSigned: Data,
+        rseedOutput: Data,
+        actionBytes: Data,
+        actionIndex: UInt32
+    ) {
+        self.pcztBytes = pcztBytes
+        self.rk = rk
+        self.alpha = alpha
+        self.nfSigned = nfSigned
+        self.cmxNew = cmxNew
+        self.govNullifiers = govNullifiers
+        self.van = van
+        self.govCommRand = govCommRand
+        self.dummyNullifiers = dummyNullifiers
+        self.rhoSigned = rhoSigned
+        self.paddedCmx = paddedCmx
+        self.rseedSigned = rseedSigned
+        self.rseedOutput = rseedOutput
+        self.actionBytes = actionBytes
+        self.actionIndex = actionIndex
+    }
+
+    /// Convert to a DelegationAction for the witness builder.
+    public func toDelegationAction(spendAuthSig: Data? = nil) -> DelegationAction {
+        DelegationAction(
+            actionBytes: actionBytes,
+            rk: rk,
+            govNullifiers: govNullifiers,
+            van: van,
+            govCommRand: govCommRand,
+            dummyNullifiers: dummyNullifiers,
+            rhoSigned: rhoSigned,
+            paddedCmx: paddedCmx,
+            nfSigned: nfSigned,
+            cmxNew: cmxNew,
+            alpha: alpha,
+            rseedSigned: rseedSigned,
+            rseedOutput: rseedOutput,
+            spendAuthSig: spendAuthSig
+        )
+    }
+}
+
 // MARK: - Delegation
 
 /// Intermediate client-side type: the built action before proof generation.
 public struct DelegationAction: Equatable, Sendable {
     public let actionBytes: Data
     public let rk: Data
-    public let sighash: Data
     /// Governance nullifiers, always padded to 4.
     public let govNullifiers: [Data]
     /// 32-byte governance commitment (VAN).
@@ -219,11 +309,12 @@ public struct DelegationAction: Equatable, Sendable {
     public let rseedSigned: Data
     /// Output note rseed (32 bytes). Needed for witness reconstruction.
     public let rseedOutput: Data
+    /// Spend authorization signature returned from Keystone over the delegation dummy action.
+    public let spendAuthSig: Data?
 
     public init(
         actionBytes: Data,
         rk: Data,
-        sighash: Data,
         govNullifiers: [Data],
         van: Data,
         govCommRand: Data,
@@ -234,11 +325,11 @@ public struct DelegationAction: Equatable, Sendable {
         cmxNew: Data,
         alpha: Data,
         rseedSigned: Data,
-        rseedOutput: Data
+        rseedOutput: Data,
+        spendAuthSig: Data? = nil
     ) {
         self.actionBytes = actionBytes
         self.rk = rk
-        self.sighash = sighash
         self.govNullifiers = govNullifiers
         self.van = van
         self.govCommRand = govCommRand
@@ -250,6 +341,7 @@ public struct DelegationAction: Equatable, Sendable {
         self.alpha = alpha
         self.rseedSigned = rseedSigned
         self.rseedOutput = rseedOutput
+        self.spendAuthSig = spendAuthSig
     }
 }
 

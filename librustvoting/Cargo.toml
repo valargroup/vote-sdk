@@ -36,6 +36,9 @@ zcash_protocol = "0.7"
 nonempty = "0.11"
 zip32 = "0.2"
 
+# PCZT construction (governance-specific PCZT for Keystone signing)
+pczt = { version = "0.5", features = ["orchard", "io-finalizer", "signer"] }
+
 # Tree witness generation
 zcash_client_sqlite = { version = "0.19", features = ["orchard"] }
 zcash_client_backend = { version = "0.21", features = ["orchard"] }
@@ -53,6 +56,8 @@ zcash_transparent = { path = "../librustzcash/zcash_transparent" }
 zcash_client_sqlite = { path = "../librustzcash/zcash_client_sqlite" }
 zcash_client_backend = { path = "../librustzcash/zcash_client_backend" }
 zcash_primitives = { path = "../librustzcash/zcash_primitives" }
+pczt = { path = "../librustzcash/pczt" }
+orchard = { path = "../orchard" }
 
 # Keep this crate as a standalone workspace
 [workspace]

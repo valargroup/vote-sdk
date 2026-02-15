@@ -253,7 +253,7 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureStr
 #endif
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_PROOF_PROGRESS_REPORTER_METHOD0
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_PROOF_PROGRESS_REPORTER_METHOD0
-typedef void (*UniffiCallbackInterfaceProofProgressReporterMethod0)(uint64_t, double, void* _Nonnull,
+typedef void (*UniffiCallbackInterfaceProofProgressReporterMethod0)(uint64_t, double, void* _Nonnull, 
         RustCallStatus *_Nonnull uniffiCallStatus
     );
 
@@ -284,6 +284,11 @@ void*_Nonnull uniffi_zcash_voting_ffi_fn_constructor_votingdatabase_open(RustBuf
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_METHOD_VOTINGDATABASE_BUILD_DELEGATION_WITNESS
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_METHOD_VOTINGDATABASE_BUILD_DELEGATION_WITNESS
 RustBuffer uniffi_zcash_voting_ffi_fn_method_votingdatabase_build_delegation_witness(void*_Nonnull ptr, RustBuffer round_id, RustBuffer action, RustBuffer inclusion_proofs, RustBuffer exclusion_proofs, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_METHOD_VOTINGDATABASE_BUILD_GOVERNANCE_PCZT
+#define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_METHOD_VOTINGDATABASE_BUILD_GOVERNANCE_PCZT
+RustBuffer uniffi_zcash_voting_ffi_fn_method_votingdatabase_build_governance_pczt(void*_Nonnull ptr, RustBuffer round_id, RustBuffer notes, RustBuffer fvk_bytes, RustBuffer hotkey_raw_address, uint32_t consensus_branch_id, uint32_t coin_type, RustBuffer seed_fingerprint, uint32_t account_index, RustBuffer round_name, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_METHOD_VOTINGDATABASE_BUILD_SHARE_PAYLOADS
@@ -371,6 +376,11 @@ void uniffi_zcash_voting_ffi_fn_init_callback_vtable_proofprogressreporter(const
 RustBuffer uniffi_zcash_voting_ffi_fn_func_build_delegation_witness(RustBuffer action, RustBuffer inclusion_proofs, RustBuffer exclusion_proofs, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_BUILD_GOVERNANCE_PCZT
+#define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_BUILD_GOVERNANCE_PCZT
+RustBuffer uniffi_zcash_voting_ffi_fn_func_build_governance_pczt(RustBuffer notes, RustBuffer params, RustBuffer fvk_bytes, RustBuffer hotkey_raw_address, uint32_t consensus_branch_id, uint32_t coin_type, RustBuffer seed_fingerprint, uint32_t account_index, RustBuffer round_name, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_BUILD_SHARE_PAYLOADS
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_BUILD_SHARE_PAYLOADS
 RustBuffer uniffi_zcash_voting_ffi_fn_func_build_share_payloads(RustBuffer enc_shares, RustBuffer commitment, RustCallStatus *_Nonnull out_status
@@ -394,6 +404,11 @@ RustBuffer uniffi_zcash_voting_ffi_fn_func_decompose_weight(uint64_t weight, Rus
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_ENCRYPT_SHARES
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_ENCRYPT_SHARES
 RustBuffer uniffi_zcash_voting_ffi_fn_func_encrypt_shares(RustBuffer shares, RustBuffer ea_pk, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_EXTRACT_SPEND_AUTH_SIG
+#define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_EXTRACT_SPEND_AUTH_SIG
+RustBuffer uniffi_zcash_voting_ffi_fn_func_extract_spend_auth_sig(RustBuffer signed_pczt_bytes, uint32_t action_index, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_GENERATE_DELEGATION_INPUTS
@@ -424,7 +439,7 @@ int8_t uniffi_zcash_voting_ffi_fn_func_verify_witness(RustBuffer witness, RustCa
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_VOTING_FFI_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_FN_FUNC_VOTING_FFI_VERSION
 RustBuffer uniffi_zcash_voting_ffi_fn_func_voting_ffi_version(RustCallStatus *_Nonnull out_status
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_ZCASH_VOTING_FFI_RUSTBUFFER_ALLOC
@@ -710,61 +725,73 @@ void ffi_zcash_voting_ffi_rust_future_complete_void(uint64_t handle, RustCallSta
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_BUILD_DELEGATION_WITNESS
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_BUILD_DELEGATION_WITNESS
 uint16_t uniffi_zcash_voting_ffi_checksum_func_build_delegation_witness(void
-
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_BUILD_GOVERNANCE_PCZT
+#define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_BUILD_GOVERNANCE_PCZT
+uint16_t uniffi_zcash_voting_ffi_checksum_func_build_governance_pczt(void
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_BUILD_SHARE_PAYLOADS
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_BUILD_SHARE_PAYLOADS
 uint16_t uniffi_zcash_voting_ffi_checksum_func_build_share_payloads(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_BUILD_VOTE_COMMITMENT
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_BUILD_VOTE_COMMITMENT
 uint16_t uniffi_zcash_voting_ffi_checksum_func_build_vote_commitment(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_CONSTRUCT_DELEGATION_ACTION
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_CONSTRUCT_DELEGATION_ACTION
 uint16_t uniffi_zcash_voting_ffi_checksum_func_construct_delegation_action(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_DECOMPOSE_WEIGHT
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_DECOMPOSE_WEIGHT
 uint16_t uniffi_zcash_voting_ffi_checksum_func_decompose_weight(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_ENCRYPT_SHARES
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_ENCRYPT_SHARES
 uint16_t uniffi_zcash_voting_ffi_checksum_func_encrypt_shares(void
-
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_EXTRACT_SPEND_AUTH_SIG
+#define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_EXTRACT_SPEND_AUTH_SIG
+uint16_t uniffi_zcash_voting_ffi_checksum_func_extract_spend_auth_sig(void
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_GENERATE_DELEGATION_INPUTS
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_GENERATE_DELEGATION_INPUTS
 uint16_t uniffi_zcash_voting_ffi_checksum_func_generate_delegation_inputs(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_GENERATE_DELEGATION_PROOF
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_GENERATE_DELEGATION_PROOF
 uint16_t uniffi_zcash_voting_ffi_checksum_func_generate_delegation_proof(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_GENERATE_HOTKEY
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_GENERATE_HOTKEY
 uint16_t uniffi_zcash_voting_ffi_checksum_func_generate_hotkey(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_GENERATE_NOTE_WITNESS
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_GENERATE_NOTE_WITNESS
 uint16_t uniffi_zcash_voting_ffi_checksum_func_generate_note_witness(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_VERIFY_WITNESS
@@ -776,55 +803,61 @@ uint16_t uniffi_zcash_voting_ffi_checksum_func_verify_witness(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_VOTING_FFI_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_FUNC_VOTING_FFI_VERSION
 uint16_t uniffi_zcash_voting_ffi_checksum_func_voting_ffi_version(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_BUILD_DELEGATION_WITNESS
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_BUILD_DELEGATION_WITNESS
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_delegation_witness(void
-
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_BUILD_GOVERNANCE_PCZT
+#define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_BUILD_GOVERNANCE_PCZT
+uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_governance_pczt(void
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_BUILD_SHARE_PAYLOADS
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_BUILD_SHARE_PAYLOADS
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_share_payloads(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_BUILD_VOTE_COMMITMENT
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_BUILD_VOTE_COMMITMENT
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_vote_commitment(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_CLEAR_ROUND
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_CLEAR_ROUND
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_clear_round(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_CONSTRUCT_DELEGATION_ACTION
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_CONSTRUCT_DELEGATION_ACTION
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_construct_delegation_action(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_ENCRYPT_SHARES
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_ENCRYPT_SHARES
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_encrypt_shares(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GENERATE_DELEGATION_PROOF
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GENERATE_DELEGATION_PROOF
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_generate_delegation_proof(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GENERATE_HOTKEY
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GENERATE_HOTKEY
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_generate_hotkey(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GENERATE_NOTE_WITNESSES
@@ -836,61 +869,61 @@ uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_generate_note_wi
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GET_ROUND_STATE
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GET_ROUND_STATE
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_get_round_state(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GET_VOTES
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GET_VOTES
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_get_votes(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GET_WALLET_NOTES
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_GET_WALLET_NOTES
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_get_wallet_notes(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_INIT_ROUND
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_INIT_ROUND
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_init_round(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_LIST_ROUNDS
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_LIST_ROUNDS
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_list_rounds(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_MARK_VOTE_SUBMITTED
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_MARK_VOTE_SUBMITTED
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_mark_vote_submitted(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_STORE_TREE_STATE
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_VOTINGDATABASE_STORE_TREE_STATE
 uint16_t uniffi_zcash_voting_ffi_checksum_method_votingdatabase_store_tree_state(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_CONSTRUCTOR_VOTINGDATABASE_OPEN
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_CONSTRUCTOR_VOTINGDATABASE_OPEN
 uint16_t uniffi_zcash_voting_ffi_checksum_constructor_votingdatabase_open(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_PROOFPROGRESSREPORTER_ON_PROGRESS
 #define UNIFFI_FFIDEF_UNIFFI_ZCASH_VOTING_FFI_CHECKSUM_METHOD_PROOFPROGRESSREPORTER_ON_PROGRESS
 uint16_t uniffi_zcash_voting_ffi_checksum_method_proofprogressreporter_on_progress(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_ZCASH_VOTING_FFI_UNIFFI_CONTRACT_VERSION
 #define UNIFFI_FFIDEF_FFI_ZCASH_VOTING_FFI_UNIFFI_CONTRACT_VERSION
 uint32_t ffi_zcash_voting_ffi_uniffi_contract_version(void
-
+    
 );
 #endif
 

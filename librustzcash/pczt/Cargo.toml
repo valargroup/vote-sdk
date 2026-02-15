@@ -30,7 +30,7 @@ serde_with = { version = "3", default-features = false, features = ["alloc", "ma
 # Payment protocols
 # - Transparent
 secp256k1 = { workspace = true, optional = true }
-transparent = { workspace = true, optional = true }
+transparent = { workspace = true, optional = true, features = ["transparent-inputs"] }
 zcash_script = { workspace = true, optional = true }
 
 # - Sapling

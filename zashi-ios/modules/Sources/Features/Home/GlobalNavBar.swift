@@ -14,11 +14,9 @@ import Settings
 extension HomeView {
     func settingsButton() -> some View {
         Button {
-            if store.selectedWalletAccount?.vendor == .keystone {
-                store.send(.settingsTapped)
-            } else {
-                store.send(.moreTapped)
-            }
+            // Keep "More" as the single entrypoint so voting is reachable
+            // from both Keystone and hotkey accounts.
+            store.send(.moreTapped)
         } label: {
             Asset.Assets.Icons.dotsMenu.image
                 .zImage(size: 24, style: Design.Text.primary)

@@ -1,5 +1,6 @@
 import SwiftUI
 import ComposableArchitecture
+import Scan
 import VotingModels
 
 public struct VotingView: View {
@@ -21,10 +22,16 @@ public struct VotingView: View {
         .onAppear {
             store.send(.initialize)
         }
+        .sheet(
+            store: store.scope(state: \.$keystoneScan, action: \.keystoneScan)
+        ) { scanStore in
+            ScanView(store: scanStore, popoverRatio: 1.075)
+        }
     }
 
     private func screenId(_ screen: Voting.State.Screen) -> String {
         switch screen {
+        case .loading: return "loading"
         case .delegationSigning: return "delegationSigning"
         case .proposalList: return "proposalList"
         case .proposalDetail(let id): return "detail-\(id)"
@@ -35,6 +42,8 @@ public struct VotingView: View {
     @ViewBuilder
     private func screenView(for screen: Voting.State.Screen) -> some View {
         switch screen {
+        case .loading:
+            ProgressView()
         case .delegationSigning:
             DelegationSigningView(store: store)
         case .proposalList:

@@ -161,7 +161,6 @@ pub struct VotingRoundParams {
 pub struct DelegationAction {
     pub action_bytes: Vec<u8>,
     pub rk: Vec<u8>,
-    pub sighash: Vec<u8>,
     pub gov_nullifiers: Vec<Vec<u8>>,
     pub van: Vec<u8>,
     pub gov_comm_rand: Vec<u8>,
@@ -171,8 +170,50 @@ pub struct DelegationAction {
     pub nf_signed: Vec<u8>,
     pub cmx_new: Vec<u8>,
     pub alpha: Vec<u8>,
+    pub spend_auth_sig: Option<Vec<u8>>,
     pub rseed_signed: Vec<u8>,
     pub rseed_output: Vec<u8>,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct GovernancePczt {
+    pub pczt_bytes: Vec<u8>,
+    pub rk: Vec<u8>,
+    pub alpha: Vec<u8>,
+    pub nf_signed: Vec<u8>,
+    pub cmx_new: Vec<u8>,
+    pub gov_nullifiers: Vec<Vec<u8>>,
+    pub van: Vec<u8>,
+    pub gov_comm_rand: Vec<u8>,
+    pub dummy_nullifiers: Vec<Vec<u8>>,
+    pub rho_signed: Vec<u8>,
+    pub padded_cmx: Vec<Vec<u8>>,
+    pub rseed_signed: Vec<u8>,
+    pub rseed_output: Vec<u8>,
+    pub action_bytes: Vec<u8>,
+    pub action_index: u32,
+}
+
+impl From<voting::GovernancePczt> for GovernancePczt {
+    fn from(g: voting::GovernancePczt) -> Self {
+        Self {
+            pczt_bytes: g.pczt_bytes,
+            rk: g.rk,
+            alpha: g.alpha,
+            nf_signed: g.nf_signed,
+            cmx_new: g.cmx_new,
+            gov_nullifiers: g.gov_nullifiers,
+            van: g.van,
+            gov_comm_rand: g.gov_comm_rand,
+            dummy_nullifiers: g.dummy_nullifiers,
+            rho_signed: g.rho_signed,
+            padded_cmx: g.padded_cmx,
+            rseed_signed: g.rseed_signed,
+            rseed_output: g.rseed_output,
+            action_bytes: g.action_bytes,
+            action_index: g.action_index as u32,
+        }
+    }
 }
 
 /// Inputs needed for delegation action construction.
@@ -184,6 +225,8 @@ pub struct DelegationInputs {
     pub hotkey_raw_address: Vec<u8>,
     pub hotkey_public_key: Vec<u8>,
     pub hotkey_address: String,
+    /// 32-byte ZIP-32 seed fingerprint (needed by Keystone to identify the signing seed).
+    pub seed_fingerprint: Vec<u8>,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -288,7 +331,6 @@ impl From<voting::DelegationAction> for DelegationAction {
         Self {
             action_bytes: a.action_bytes,
             rk: a.rk,
-            sighash: a.sighash,
             gov_nullifiers: a.gov_nullifiers,
             van: a.van,
             gov_comm_rand: a.gov_comm_rand,
@@ -298,6 +340,7 @@ impl From<voting::DelegationAction> for DelegationAction {
             nf_signed: a.nf_signed,
             cmx_new: a.cmx_new,
             alpha: a.alpha,
+            spend_auth_sig: a.spend_auth_sig,
             rseed_signed: a.rseed_signed,
             rseed_output: a.rseed_output,
         }
@@ -309,7 +352,6 @@ impl From<DelegationAction> for voting::DelegationAction {
         Self {
             action_bytes: a.action_bytes,
             rk: a.rk,
-            sighash: a.sighash,
             gov_nullifiers: a.gov_nullifiers,
             van: a.van,
             gov_comm_rand: a.gov_comm_rand,
@@ -319,6 +361,7 @@ impl From<DelegationAction> for voting::DelegationAction {
             nf_signed: a.nf_signed,
             cmx_new: a.cmx_new,
             alpha: a.alpha,
+            spend_auth_sig: a.spend_auth_sig,
             rseed_signed: a.rseed_signed,
             rseed_output: a.rseed_output,
         }
@@ -516,6 +559,40 @@ impl VotingDatabase {
             .into())
     }
 
+    pub fn build_governance_pczt(
+        &self,
+        round_id: String,
+        notes: Vec<NoteInfo>,
+        fvk_bytes: Vec<u8>,
+        hotkey_raw_address: Vec<u8>,
+        consensus_branch_id: u32,
+        coin_type: u32,
+        seed_fingerprint: Vec<u8>,
+        account_index: u32,
+        round_name: String,
+    ) -> Result<GovernancePczt, VotingError> {
+        let core_notes: Vec<voting::NoteInfo> = notes.into_iter().map(Into::into).collect();
+        let seed_fp_32: [u8; 32] = seed_fingerprint.try_into().map_err(|_| {
+            VotingError::InvalidInput {
+                message: "seed_fingerprint must be 32 bytes".to_string(),
+            }
+        })?;
+        Ok(self
+            .db
+            .build_governance_pczt(
+                &round_id,
+                &core_notes,
+                &fvk_bytes,
+                &hotkey_raw_address,
+                consensus_branch_id,
+                coin_type,
+                &seed_fp_32,
+                account_index,
+                &round_name,
+            )?
+            .into())
+    }
+
     pub fn store_tree_state(
         &self,
         round_id: String,
@@ -680,6 +757,38 @@ pub fn construct_delegation_action(
 }
 
 #[uniffi::export]
+pub fn build_governance_pczt(
+    notes: Vec<NoteInfo>,
+    params: VotingRoundParams,
+    fvk_bytes: Vec<u8>,
+    hotkey_raw_address: Vec<u8>,
+    consensus_branch_id: u32,
+    coin_type: u32,
+    seed_fingerprint: Vec<u8>,
+    account_index: u32,
+    round_name: String,
+) -> Result<GovernancePczt, VotingError> {
+    let core_notes: Vec<voting::NoteInfo> = notes.into_iter().map(Into::into).collect();
+    let seed_fp_32: [u8; 32] = seed_fingerprint.try_into().map_err(|_| {
+        VotingError::InvalidInput {
+            message: "seed_fingerprint must be 32 bytes".to_string(),
+        }
+    })?;
+    Ok(voting::action::build_governance_pczt(
+        &core_notes,
+        &params.into(),
+        &fvk_bytes,
+        &hotkey_raw_address,
+        consensus_branch_id,
+        coin_type,
+        &seed_fp_32,
+        account_index,
+        &round_name,
+    )?
+    .into())
+}
+
+#[uniffi::export]
 pub fn generate_delegation_inputs(
     sender_seed: Vec<u8>,
     hotkey_seed: Vec<u8>,
@@ -768,6 +877,13 @@ pub fn generate_delegation_inputs(
     let (g_d_new_x, pk_d_new_x) =
         voting::action::derive_hotkey_x_coords_from_raw_address(&hotkey_addr_43)?;
 
+    // Compute ZIP-32 seed fingerprint from the sender seed.
+    // Keystone uses this to identify which seed to derive the spending key from.
+    let seed_fp = zip32::fingerprint::SeedFingerprint::from_seed(&sender_seed)
+        .ok_or_else(|| VotingError::InvalidInput {
+            message: "failed to compute seed fingerprint (seed too short?)".to_string(),
+        })?;
+
     Ok(DelegationInputs {
         fvk_bytes: sender_fvk,
         g_d_new_x: g_d_new_x.to_vec(),
@@ -775,6 +891,7 @@ pub fn generate_delegation_inputs(
         hotkey_raw_address,
         hotkey_public_key: app_hotkey.public_key,
         hotkey_address: app_hotkey.address,
+        seed_fingerprint: seed_fp.to_bytes().to_vec(),
     })
 }
 
@@ -806,6 +923,18 @@ pub fn build_delegation_witness(
         &inclusion_proofs,
         &exclusion_proofs,
     )?)
+}
+
+#[uniffi::export]
+pub fn extract_spend_auth_sig(
+    signed_pczt_bytes: Vec<u8>,
+    action_index: u32,
+) -> Result<Vec<u8>, VotingError> {
+    Ok(voting::action::extract_spend_auth_sig(
+        &signed_pczt_bytes,
+        action_index as usize,
+    )?
+    .to_vec())
 }
 
 #[uniffi::export]
