@@ -163,7 +163,7 @@ describe("E2E Voting Flow", () => {
 
     // Wait for delegation tx to be included — EndBlocker computes tree root.
     await sleep(BLOCK_WAIT_MS);
-  }, 120_000); // K=14 Halo2 verification can take 30+ seconds on slow CI runners
+  });
 
   // -------------------------------------------------------------------------
   // Step 2: Query commitment tree for anchor height (derisk: root, next_index)

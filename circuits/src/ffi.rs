@@ -6,13 +6,31 @@
 //!   -2 = verification failed (proof/signature is invalid) / position out of range (tree path)
 //!   -3 = internal error (deserialization, etc.)
 
+use std::sync::OnceLock;
+
 use pasta_curves::group::ff::PrimeField;
-use halo2_proofs::pasta::Fp;
+use halo2_proofs::pasta::{Fp, EqAffine};
+use halo2_proofs::plonk::VerifyingKey;
+use halo2_proofs::poly::commitment::Params;
 
 use crate::toy;
 use crate::redpallas;
 use crate::votetree;
 use crate::delegation;
+
+/// Cached delegation circuit params and verifying key.
+///
+/// IPA params generation (K=14 → 16,384 group elements) and circuit keygen
+/// are expensive (~10-30s on slow hardware). They are deterministic and
+/// identical for every verification call, so we compute them once and reuse.
+fn delegation_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine>) {
+    static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let params = delegation::delegation_params();
+        let (_pk, vk) = delegation::delegation_proving_key(&params);
+        (params, vk)
+    })
+}
 
 // ---------------------------------------------------------------------------
 // Halo2 toy circuit verification
@@ -345,17 +363,17 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
         nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4,
     ];
 
-    // Run verification using the delegation circuit's params and VK.
-    let params = delegation::delegation_params();
-    let (_pk, vk) = delegation::delegation_proving_key(&params);
+    // Run verification using cached params and VK.
+    // First call initializes the cache (~10-30s); subsequent calls are fast.
+    let (params, vk) = delegation_vk_cached();
 
-    let strategy = halo2_proofs::plonk::SingleVerifier::new(&params);
+    let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
     let mut transcript = halo2_proofs::transcript::Blake2bRead::<
         _, halo2_proofs::pasta::EqAffine, halo2_proofs::transcript::Challenge255<_>,
     >::init(proof);
 
     match halo2_proofs::plonk::verify_proof(
-        &params, &vk, strategy, &[&[&public_inputs]], &mut transcript,
+        params, vk, strategy, &[&[&public_inputs]], &mut transcript,
     ) {
         Ok(()) => 0,
         Err(_) => -2,
