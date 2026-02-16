@@ -14,6 +14,7 @@
 package ante
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -135,8 +136,12 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, o
 // a MsgDelegateVote. It looks up the session to pass nc_root and
 // nullifier_imt_root as ZKP public inputs.
 func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k keeper.Keeper, opts ValidateOpts) error {
-	// RedPallas signature verification.
-	// The sighash is provided by the client as msg.Sighash.
+	// Require client-provided sighash to match the canonical hash of the message.
+	expectedSighash := types.ComputeDelegationSighash(msg)
+	if len(msg.Sighash) != 32 || !bytes.Equal(msg.Sighash, expectedSighash) {
+		return types.ErrSighashMismatch
+	}
+	// RedPallas signature verification over the verified sighash.
 	if err := opts.SigVerifier.Verify(msg.Rk, msg.Sighash, msg.SpendAuthSig); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
 	}

@@ -27,6 +27,22 @@ use pasta_curves::pallas;
 use rand::rngs::OsRng;
 use vote_commitment_tree::TreeServer;
 
+/// Append exactly 32 bytes to `out` from `b` (pad with zeros if shorter).
+fn extend_padded32(out: &mut Vec<u8>, b: &[u8]) {
+    let mut buf = [0u8; 32];
+    let n = b.len().min(32);
+    buf[..n].copy_from_slice(&b[..n]);
+    out.extend_from_slice(&buf);
+}
+
+/// Append exactly 64 bytes to `out` from `b` (pad with zeros if shorter).
+fn extend_padded64(out: &mut Vec<u8>, b: &[u8]) {
+    let mut buf = [0u8; 64];
+    let n = b.len().min(64);
+    buf[..n].copy_from_slice(&b[..n]);
+    out.extend_from_slice(&buf);
+}
+
 /// Data from delegation that the vote proof builder needs.
 pub struct VoteProofDelegationData {
     /// The spending key used during delegation.
@@ -160,17 +176,12 @@ pub fn build_delegation_bundle_for_test(
 
     let ask = SpendAuthorizingKey::from(&sk);
     let rsk = ask.randomize(&alpha);
-    let sighash_full = Blake2bParams::new().hash_length(32).hash(b"ZALLY_SIGHASH_V0");
-    let mut sighash = [0u8; 32];
-    sighash.copy_from_slice(sighash_full.as_bytes());
-    let sig = rsk.sign(&mut rng, &sighash);
 
     let rk_bytes: [u8; 32] = bundle.instance.rk.clone().into();
-    let sig_bytes: [u8; 64] = (&sig).into();
     let nf_signed_bytes = bundle.instance.nf_signed.to_bytes();
     let cmx_new_bytes = bundle.instance.cmx_new.to_repr();
+    let vote_round_id_repr = bundle.instance.vote_round_id.to_repr();
     let gov_comm_bytes = bundle.instance.gov_comm.to_repr();
-    let _vote_round_id_repr = bundle.instance.vote_round_id.to_repr();
     let gov_null_bytes: Vec<[u8; 32]> = bundle
         .instance
         .gov_null
@@ -178,6 +189,33 @@ pub fn build_delegation_bundle_for_test(
         .map(|g| g.to_repr())
         .collect();
     let enc_memo = [0x05u8; 64];
+
+    // Canonical sighash: Blake2b-256(domain || vote_round_id || rk || ...).
+    // Must match sdk/x/vote/types/sighash.go ComputeDelegationSighash.
+    const SIGHASH_DOMAIN: &[u8] = b"ZALLY_DELEGATION_SIGHASH_V0";
+    let mut canonical = Vec::with_capacity(
+        SIGHASH_DOMAIN.len() + 32 + 32 + 32 + 32 + 64 + 32 + 4 * 32,
+    );
+    canonical.extend_from_slice(SIGHASH_DOMAIN);
+    extend_padded32(&mut canonical, vote_round_id_repr.as_ref());
+    canonical.extend_from_slice(&rk_bytes);
+    extend_padded32(&mut canonical, &nf_signed_bytes);
+    canonical.extend_from_slice(cmx_new_bytes.as_ref());
+    extend_padded64(&mut canonical, &enc_memo);
+    extend_padded32(&mut canonical, gov_comm_bytes.as_ref());
+    for i in 0..4 {
+        if i < gov_null_bytes.len() {
+            canonical.extend_from_slice(&gov_null_bytes[i]);
+        } else {
+            canonical.extend_from_slice(&[0u8; 32]);
+        }
+    }
+    let sighash_full = Blake2bParams::new().hash_length(32).hash(&canonical);
+    let mut sighash = [0u8; 32];
+    sighash.copy_from_slice(sighash_full.as_bytes());
+    let sig = rsk.sign(&mut rng, &sighash);
+
+    let sig_bytes: [u8; 64] = (&sig).into();
 
     let payload = DelegationBundlePayload {
         rk: rk_bytes.to_vec(),
