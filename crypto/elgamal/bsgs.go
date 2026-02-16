@@ -46,7 +46,7 @@ func NewBSGSTable(N uint64) *BSGSTable {
 
 	m := ceilSqrt(N)
 
-	G := new(curvey.PointPallas).Generator()
+	G := PallasGenerator()
 	table := make(map[[32]byte]uint64, m)
 
 	// Baby steps: compute j*G for j = 0, 1, …, m−1 and store compressed point → j.

@@ -10,7 +10,7 @@ import (
 
 // vG computes v * G on the Pallas curve, used as the expected decryption result.
 func vG(v uint64) curvey.Point {
-	return new(curvey.PointPallas).Generator().Mul(scalarFromUint64(v))
+	return PallasGenerator().Mul(scalarFromUint64(v))
 }
 
 // mustEncrypt is a test helper that calls Encrypt and fails the test on error.
@@ -31,8 +31,7 @@ func TestKeyGen(t *testing.T) {
 	requirePallasPoint(t, pk.Point, "pk")
 
 	// pk == sk * G
-	G := new(curvey.PointPallas).Generator()
-	expected := G.Mul(sk.Scalar)
+	expected := PallasGenerator().Mul(sk.Scalar)
 	require.True(t, pk.Point.Equal(expected), "pk should equal sk*G")
 }
 

@@ -90,6 +90,7 @@ func TallyPrepareProposalHandler(
 		eaSk, err := loadSk()
 		if err != nil {
 			// No EA key available — pass through without injecting tally txs.
+			logger.Warn("PrepareProposal: no EA key found, tally will not be possible", "err", err)
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 

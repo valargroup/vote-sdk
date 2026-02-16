@@ -12,7 +12,7 @@ import (
 func TestBSGSSolveKnownValues(t *testing.T) {
 	table := NewBSGSTable(1 << 16) // bound = 65536
 
-	G := new(curvey.PointPallas).Generator()
+	G := PallasGenerator()
 
 	values := []uint64{0, 1, 2, 3, 7, 42, 100, 255, 1000, 12345, 65535}
 	for _, v := range values {
@@ -36,7 +36,7 @@ func TestBSGSSolveZero(t *testing.T) {
 func TestBSGSSolveBoundary(t *testing.T) {
 	N := uint64(1000)
 	table := NewBSGSTable(N)
-	G := new(curvey.PointPallas).Generator()
+	G := PallasGenerator()
 
 	// N-1 should succeed
 	point := G.Mul(scalarFromUint64(N - 1))
@@ -53,7 +53,7 @@ func TestBSGSSolveBoundary(t *testing.T) {
 // TestBSGSSolveSmallBound verifies BSGS with a very small table.
 func TestBSGSSolveSmallBound(t *testing.T) {
 	table := NewBSGSTable(10)
-	G := new(curvey.PointPallas).Generator()
+	G := PallasGenerator()
 
 	for v := uint64(0); v < 10; v++ {
 		point := G.Mul(scalarFromUint64(v))
@@ -71,7 +71,7 @@ func TestBSGSSolveSmallBound(t *testing.T) {
 // TestBSGSSolvePowerOfTwo verifies BSGS with a power-of-two bound (perfect square).
 func TestBSGSSolvePowerOfTwo(t *testing.T) {
 	table := NewBSGSTable(256) // sqrt(256) = 16
-	G := new(curvey.PointPallas).Generator()
+	G := PallasGenerator()
 
 	// Test several values across the range
 	for _, v := range []uint64{0, 1, 15, 16, 17, 100, 200, 255} {
@@ -85,7 +85,7 @@ func TestBSGSSolvePowerOfTwo(t *testing.T) {
 // TestBSGSSolveNotPerfectSquare verifies BSGS with a non-perfect-square bound.
 func TestBSGSSolveNotPerfectSquare(t *testing.T) {
 	table := NewBSGSTable(1000) // ceil(sqrt(1000)) = 32
-	G := new(curvey.PointPallas).Generator()
+	G := PallasGenerator()
 
 	for _, v := range []uint64{0, 1, 31, 32, 33, 500, 999} {
 		point := G.Mul(scalarFromUint64(v))
@@ -98,7 +98,7 @@ func TestBSGSSolveNotPerfectSquare(t *testing.T) {
 // TestBSGSSolveOutOfRange verifies error on values outside the bound.
 func TestBSGSSolveOutOfRange(t *testing.T) {
 	table := NewBSGSTable(100)
-	G := new(curvey.PointPallas).Generator()
+	G := PallasGenerator()
 
 	// Values at and beyond bound should fail
 	for _, v := range []uint64{100, 101, 200, 1000} {
@@ -159,7 +159,7 @@ func TestBSGSLargerBound(t *testing.T) {
 	}
 
 	table := NewBSGSTable(1 << 20)
-	G := new(curvey.PointPallas).Generator()
+	G := PallasGenerator()
 
 	// Test values spread across the range
 	values := []uint64{0, 1, 1023, 1024, 65535, 65536, 500000, (1 << 20) - 1}

@@ -24,11 +24,32 @@ type Ciphertext struct {
 	C2 curvey.Point // v * G + r * pk
 }
 
+// PallasGenerator returns the standard Pallas generator (-1, 2) as specified
+// in the Pasta paper. The curvey library's built-in Generator() returns (1, sqrt(6))
+// which is a valid group generator but differs from the standard. We use the
+// standard generator so that ElGamal operations are compatible with Rust's
+// pasta_curves crate (and the Zcash ecosystem).
+func PallasGenerator() curvey.Point {
+	// (-1, 2) compressed: x = p-1 in LE, y = 2 is even so sign bit = 0.
+	// The MSB of byte[31] is 0x40 because p-1 has bit 254 set.
+	standardGenBytes := []byte{
+		0x00, 0x00, 0x00, 0x00, 0xed, 0x30, 0x2d, 0x99,
+		0x1b, 0xf9, 0x4c, 0x09, 0xfc, 0x98, 0x46, 0x22,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40,
+	}
+	gen, err := new(curvey.PointPallas).Identity().FromAffineCompressed(standardGenBytes)
+	if err != nil {
+		panic("elgamal: failed to decompress standard Pallas generator: " + err.Error())
+	}
+	return gen
+}
+
 // KeyGen generates an election authority keypair.
 // The secret key sk is a random scalar in Fq and the public key is pk = sk * G.
 func KeyGen(rng io.Reader) (*SecretKey, *PublicKey) {
 	sk := new(curvey.ScalarPallas).Random(rng)
-	pk := new(curvey.PointPallas).Generator().Mul(sk)
+	pk := PallasGenerator().Mul(sk)
 	return &SecretKey{Scalar: sk}, &PublicKey{Point: pk}
 }
 
@@ -69,7 +90,7 @@ func EncryptWithRandomness(pk *PublicKey, v uint64, r curvey.Scalar) (*Ciphertex
 
 // encryptCore performs the actual encryption after all validation has passed.
 func encryptCore(pk *PublicKey, v uint64, r curvey.Scalar) *Ciphertext {
-	G := new(curvey.PointPallas).Generator()
+	G := PallasGenerator()
 	vScalar := scalarFromUint64(v)
 	C1 := G.Mul(r)                            // r * G
 	C2 := G.Mul(vScalar).Add(pk.Point.Mul(r)) // v*G + r*pk

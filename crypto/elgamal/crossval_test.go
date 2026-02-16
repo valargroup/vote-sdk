@@ -10,13 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestCrossValidationVectors prints compressed-point hex for known Pallas scalars.
-// These vectors are used by the TypeScript elgamal.ts cross-validation test to ensure
-// that curvey (Go) and @noble/curves (TypeScript) produce identical serialization.
+// TestCrossValidationVectors prints compressed-point hex for known Pallas scalars
+// using the standard Pallas generator (-1, 2). These vectors should match
+// Rust's pasta_curves output.
 //
 // Run:  go test -run TestCrossValidationVectors -v ./crypto/elgamal/
 func TestCrossValidationVectors(t *testing.T) {
-	G := new(curvey.PointPallas).Generator()
+	G := PallasGenerator()
 
 	scalars := []int{1, 2, 7, 42, 1000}
 
