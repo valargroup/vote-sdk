@@ -25,6 +25,10 @@ service Query {
   // CommitmentLeaves returns the commitment tree leaves organized by block height.
   // Used by remote clients implementing TreeSyncApi to sync the vote commitment tree.
   rpc CommitmentLeaves(QueryCommitmentLeavesRequest) returns (QueryCommitmentLeavesResponse);
+
+  // ActiveRound returns the first active voting round, if any.
+  // Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
+  rpc ActiveRound(QueryActiveRoundRequest) returns (QueryActiveRoundResponse);
 }
 
 message QueryCommitmentTreeRequest {
@@ -74,4 +78,10 @@ message QueryCommitmentLeavesRequest {
 
 message QueryCommitmentLeavesResponse {
   repeated BlockCommitments blocks = 1;
+}
+
+message QueryActiveRoundRequest {}
+
+message QueryActiveRoundResponse {
+  VoteRound round = 1;
 }

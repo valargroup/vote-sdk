@@ -159,3 +159,28 @@ func (qs queryServer) CommitmentLeaves(goCtx context.Context, req *types.QueryCo
 
 	return &types.QueryCommitmentLeavesResponse{Blocks: blocks}, nil
 }
+
+// ActiveRound returns the first active voting round, if any.
+// Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
+func (qs queryServer) ActiveRound(goCtx context.Context, req *types.QueryActiveRoundRequest) (*types.QueryActiveRoundResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	var found *types.VoteRound
+	if err := qs.k.IterateActiveRounds(kvStore, func(round *types.VoteRound) bool {
+		found = round
+		return true // stop after first
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to iterate rounds: %v", err)
+	}
+
+	if found == nil {
+		return nil, status.Error(codes.NotFound, "no active voting round")
+	}
+
+	return &types.QueryActiveRoundResponse{Round: found}, nil
+}
