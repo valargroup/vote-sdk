@@ -53,9 +53,19 @@ func TallyPrepareProposalHandler(
 			raw, err := os.ReadFile(eaSkPath)
 			if err != nil {
 				skErr = err
+				logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+				logger.Error("!! FAILED TO LOAD EA SECRET KEY — AUTO-TALLY IS DISABLED !!")
+				logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+				logger.Error("EA secret key load error", "path", eaSkPath, "err", err)
 				return
 			}
 			sk, skErr = elgamal.UnmarshalSecretKey(raw)
+			if skErr != nil {
+				logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+				logger.Error("!! FAILED TO PARSE EA SECRET KEY — AUTO-TALLY IS DISABLED !!")
+				logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+				logger.Error("EA secret key parse error", "path", eaSkPath, "err", skErr)
+			}
 		})
 		return sk, skErr
 	}
