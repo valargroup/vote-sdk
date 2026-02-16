@@ -116,7 +116,7 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, o
 		return verifyDelegation(ctx, m, k, opts)
 
 	case *types.MsgCastVote:
-		return verifyCastVote(m, opts)
+		return verifyCastVote(ctx, m, k, opts)
 
 	case *types.MsgRevealShare:
 		return verifyRevealShare(m, opts)
@@ -167,7 +167,26 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k keeper.
 }
 
 // verifyCastVote verifies ZKP #2 for a MsgCastVote.
-func verifyCastVote(msg *types.MsgCastVote, opts ValidateOpts) error {
+// It looks up the session to get ea_pk and the commitment tree root at the
+// anchor height, mirroring how verifyDelegation fetches nc_root and nf_imt_root.
+func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k keeper.Keeper, opts ValidateOpts) error {
+	kvStore := k.OpenKVStore(ctx)
+
+	// Fetch vote commitment tree root at the anchor height.
+	root, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteCommTreeAnchorHeight)
+	if err != nil {
+		return fmt.Errorf("failed to get commitment tree root at height %d: %w", msg.VoteCommTreeAnchorHeight, err)
+	}
+	if root == nil {
+		return fmt.Errorf("%w: no commitment tree root at height %d", types.ErrInvalidAnchorHeight, msg.VoteCommTreeAnchorHeight)
+	}
+
+	// Fetch the session to get the election authority public key.
+	round, err := k.GetVoteRound(kvStore, msg.VoteRoundId)
+	if err != nil {
+		return fmt.Errorf("failed to look up round for ZKP inputs: %w", err)
+	}
+
 	if err := opts.ZKPVerifier.VerifyVoteCommitment(msg.Proof, zkp.VoteCommitmentInputs{
 		VanNullifier:         msg.VanNullifier,
 		VoteAuthorityNoteNew: msg.VoteAuthorityNoteNew,
@@ -175,6 +194,8 @@ func verifyCastVote(msg *types.MsgCastVote, opts ValidateOpts) error {
 		ProposalId:           msg.ProposalId,
 		VoteRoundId:          msg.VoteRoundId,
 		AnchorHeight:         msg.VoteCommTreeAnchorHeight,
+		VoteCommTreeRoot:     root,
+		EaPk:                 round.EaPk,
 	}); err != nil {
 		return fmt.Errorf("%w: vote commitment: %v", types.ErrInvalidProof, err)
 	}
