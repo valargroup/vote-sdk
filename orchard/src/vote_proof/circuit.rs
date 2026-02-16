@@ -62,7 +62,7 @@ use pasta_curves::{arithmetic::CurveAffine, pallas, vesta};
 use halo2_gadgets::{
     ecc::{
         chip::{EccChip, EccConfig},
-        NonIdentityPoint, ScalarVar,
+        NonIdentityPoint, ScalarFixed, ScalarVar,
     },
     poseidon::{
         primitives::{self as poseidon, ConstantLength},
@@ -71,8 +71,7 @@ use halo2_gadgets::{
     sinsemilla::chip::{SinsemillaChip, SinsemillaConfig},
     utilities::{bool_check, lookup_range_check::LookupRangeCheckConfig},
 };
-// TODO: re-enable when condition 3 is restored
-// use crate::circuit::address_ownership::{prove_address_ownership, spend_auth_g_mul};
+use crate::circuit::address_ownership::{prove_address_ownership, spend_auth_g_mul};
 use crate::circuit::commit_ivk::{CommitIvkChip, CommitIvkConfig};
 use crate::circuit::gadget::{add_chip::{AddChip, AddConfig}, AddInstruction};
 use crate::constants::{
@@ -952,12 +951,39 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         )?;
 
         // ---------------------------------------------------------------
-        // Condition 3: Spend Authority — TEMPORARILY DISABLED.
+        // Condition 3: Spend Authority.
         //
-        // TODO: Re-enable once the CommitIvk canonicity range-check
-        // layout conflict is resolved. The out-of-circuit key-chain
-        // consistency check in the builder verifies the same property.
+        // vpk_pk_d = [ivk_v] * vpk_g_d where ivk_v = CommitIvk(ExtractP([vsk]*SpendAuthG), vsk_nk, rivk_v).
         // ---------------------------------------------------------------
+        let vsk_scalar = ScalarFixed::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "cond3 vsk"),
+            self.vsk,
+        )?;
+        let vsk_ak_point = spend_auth_g_mul(
+            ecc_chip.clone(),
+            layouter.namespace(|| "cond3 [vsk]G"),
+            "cond3: [vsk] SpendAuthG",
+            vsk_scalar,
+        )?;
+        let ak = vsk_ak_point.extract_p().inner().clone();
+        let rivk_v_scalar = ScalarFixed::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "cond3 rivk_v"),
+            self.rivk_v,
+        )?;
+        prove_address_ownership(
+            config.sinsemilla_chip(),
+            ecc_chip.clone(),
+            config.commit_ivk_chip(),
+            layouter.namespace(|| "cond3 address"),
+            "cond3",
+            ak,
+            vsk_nk.clone(),
+            rivk_v_scalar,
+            &vpk_g_d_point,
+            &vpk_pk_d_point,
+        )?;
 
         // ---------------------------------------------------------------
         // Condition 1: VAN Membership.
@@ -2211,6 +2237,180 @@ mod tests {
             rand,
         );
         assert_ne!(h1, h3);
+    }
+
+    // ================================================================
+    // Condition 3 (Spend Authority / Address Ownership) tests
+    //
+    // These tests ensure the circuit rejects witnesses that violate
+    // vpk_pk_d = [ivk_v] * vpk_g_d. Without condition 3 enabled, they
+    // would pass (invalid address ownership would not be detected).
+    // ================================================================
+
+    /// Using a different vsk in the circuit than was used to derive
+    /// (vpk_g_d, vpk_pk_d) should fail condition 3 only: in-circuit
+    /// [ivk']*vpk_g_d ≠ vpk_pk_d while VAN hash and nullifier stay valid.
+    #[test]
+    fn condition_3_wrong_vsk_fails() {
+        let mut rng = OsRng;
+
+        let vsk = pallas::Scalar::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
+        let rivk_v = pallas::Scalar::random(&mut rng);
+        let (vpk_g_d_affine, vpk_pk_d_affine) = derive_voting_address(vsk, vsk_nk, rivk_v);
+        let vpk_g_d_x = *vpk_g_d_affine.coordinates().unwrap().x();
+        let vpk_pk_d_x = *vpk_pk_d_affine.coordinates().unwrap().x();
+
+        let total_note_value = pallas::Base::from(10_000u64);
+        let voting_round_id = pallas::Base::random(&mut rng);
+        let proposal_authority_old = pallas::Base::from(13u64);
+        let proposal_id = 3u64;
+        let gov_comm_rand = pallas::Base::random(&mut rng);
+
+        let vote_authority_note_old = van_integrity_hash(
+            vpk_g_d_x, vpk_pk_d_x, total_note_value, voting_round_id,
+            proposal_authority_old, gov_comm_rand,
+        );
+        let (auth_path, position, vote_comm_tree_root) =
+            build_single_leaf_merkle_path(vote_authority_note_old);
+        let van_nullifier = van_nullifier_hash(vsk_nk, voting_round_id, vote_authority_note_old);
+        let one_shifted = pallas::Base::from(1u64 << proposal_id);
+        let proposal_authority_new = proposal_authority_old - one_shifted;
+        let vote_authority_note_new = van_integrity_hash(
+            vpk_g_d_x, vpk_pk_d_x, total_note_value, voting_round_id,
+            proposal_authority_new, gov_comm_rand,
+        );
+
+        let shares_u64: [u64; 4] = [1_000, 2_000, 3_000, 4_000];
+        let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
+        let (enc_c1_x, enc_c2_x, randomness, shares_hash_val) =
+            encrypt_shares(shares_u64, ea_pk_point);
+
+        let wrong_vsk = pallas::Scalar::random(&mut rng);
+        assert_ne!(wrong_vsk, vsk, "test assumes distinct vsk with high probability");
+
+        let mut circuit = Circuit::with_van_witnesses(
+            Value::known(auth_path),
+            Value::known(position),
+            Value::known(vpk_g_d_affine),
+            Value::known(vpk_pk_d_affine),
+            Value::known(total_note_value),
+            Value::known(proposal_authority_old),
+            Value::known(gov_comm_rand),
+            Value::known(vote_authority_note_old),
+            Value::known(wrong_vsk),
+            Value::known(rivk_v),
+            Value::known(vsk_nk),
+        );
+        circuit.one_shifted = Value::known(one_shifted);
+        circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
+        circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
+        circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
+        circuit.share_randomness = randomness.map(Value::known);
+        circuit.ea_pk = Value::known(ea_pk_affine);
+        let vc = set_condition_11(&mut circuit, shares_hash_val, proposal_id);
+
+        let instance = Instance::from_parts(
+            van_nullifier,
+            vote_authority_note_new,
+            vc,
+            vote_comm_tree_root,
+            pallas::Base::zero(),
+            pallas::Base::from(proposal_id),
+            voting_round_id,
+            *ea_pk_affine.coordinates().unwrap().x(),
+            *ea_pk_affine.coordinates().unwrap().y(),
+        );
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+        assert!(prover.verify().is_err(), "condition 3 must reject wrong vsk");
+    }
+
+    /// Using a vpk_pk_d that does not equal [ivk_v]*vpk_g_d should fail
+    /// condition 3. Instance is built with a wrong vpk_pk_d for the VAN
+    /// hash so condition 2 still passes; only condition 3 fails.
+    #[test]
+    fn condition_3_wrong_vpk_pk_d_fails() {
+        let mut rng = OsRng;
+
+        let vsk = pallas::Scalar::random(&mut rng);
+        let vsk_nk = pallas::Base::random(&mut rng);
+        let rivk_v = pallas::Scalar::random(&mut rng);
+        let (vpk_g_d_affine, _vpk_pk_d_correct) = derive_voting_address(vsk, vsk_nk, rivk_v);
+        let vpk_g_d_x = *vpk_g_d_affine.coordinates().unwrap().x();
+
+        let wrong_vpk_pk_d_affine = (pallas::Point::generator() * pallas::Scalar::from(99999u64))
+            .to_affine();
+        let wrong_vpk_pk_d_x = *wrong_vpk_pk_d_affine.coordinates().unwrap().x();
+
+        let total_note_value = pallas::Base::from(10_000u64);
+        let voting_round_id = pallas::Base::random(&mut rng);
+        let proposal_authority_old = pallas::Base::from(13u64);
+        let proposal_id = 3u64;
+        let gov_comm_rand = pallas::Base::random(&mut rng);
+
+        let vote_authority_note_old = van_integrity_hash(
+            vpk_g_d_x,
+            wrong_vpk_pk_d_x,
+            total_note_value,
+            voting_round_id,
+            proposal_authority_old,
+            gov_comm_rand,
+        );
+        let (auth_path, position, vote_comm_tree_root) =
+            build_single_leaf_merkle_path(vote_authority_note_old);
+        let van_nullifier = van_nullifier_hash(vsk_nk, voting_round_id, vote_authority_note_old);
+        let one_shifted = pallas::Base::from(1u64 << proposal_id);
+        let proposal_authority_new = proposal_authority_old - one_shifted;
+        let vote_authority_note_new = van_integrity_hash(
+            vpk_g_d_x,
+            wrong_vpk_pk_d_x,
+            total_note_value,
+            voting_round_id,
+            proposal_authority_new,
+            gov_comm_rand,
+        );
+
+        let shares_u64: [u64; 4] = [1_000, 2_000, 3_000, 4_000];
+        let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
+        let (enc_c1_x, enc_c2_x, randomness, shares_hash_val) =
+            encrypt_shares(shares_u64, ea_pk_point);
+
+        let mut circuit = Circuit::with_van_witnesses(
+            Value::known(auth_path),
+            Value::known(position),
+            Value::known(vpk_g_d_affine),
+            Value::known(wrong_vpk_pk_d_affine),
+            Value::known(total_note_value),
+            Value::known(proposal_authority_old),
+            Value::known(gov_comm_rand),
+            Value::known(vote_authority_note_old),
+            Value::known(vsk),
+            Value::known(rivk_v),
+            Value::known(vsk_nk),
+        );
+        circuit.one_shifted = Value::known(one_shifted);
+        circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
+        circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
+        circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
+        circuit.share_randomness = randomness.map(Value::known);
+        circuit.ea_pk = Value::known(ea_pk_affine);
+        let vc = set_condition_11(&mut circuit, shares_hash_val, proposal_id);
+
+        let instance = Instance::from_parts(
+            van_nullifier,
+            vote_authority_note_new,
+            vc,
+            vote_comm_tree_root,
+            pallas::Base::zero(),
+            pallas::Base::from(proposal_id),
+            voting_round_id,
+            *ea_pk_affine.coordinates().unwrap().x(),
+            *ea_pk_affine.coordinates().unwrap().y(),
+        );
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+        assert!(prover.verify().is_err(), "condition 3 must reject wrong vpk_pk_d");
     }
 
     // ================================================================

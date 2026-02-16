@@ -147,10 +147,30 @@ assumes full authority (all bits set), which violates this constraint.
 
 ---
 
+## Why no tests failed when condition 3 was disabled
+
+All existing tests use **consistent** witnesses: they derive `(vpk_g_d, vpk_pk_d)` from
+`(vsk, vsk_nk, rivk_v)` via `derive_voting_address` and pass those same values into
+the circuit. So even with condition 3 commented out, the circuit was never asked to
+verify the relation `vpk_pk_d = [ivk_v] * vpk_g_d` — and the witnesses happened to
+satisfy it. The tests therefore still passed; they did not exercise condition 3.
+
+The test `van_nullifier_wrong_vsk_nk_fails` does break the CommitIvk chain (wrong nk
+→ wrong ivk → wrong derived pk_d), but when condition 3 was disabled the proof
+failed only because of **condition 4** (VAN nullifier mismatch), not because of
+address ownership. There was no test that failed **solely** due to condition 3.
+
+To prevent regressions, dedicated condition 3 tests were added that use invalid
+address-ownership witnesses (wrong vsk or wrong vpk_pk_d) and assert that the
+circuit rejects them.
+
+---
+
 ## Current State
 
-- **Conditions 3 and 5**: Temporarily disabled (stub witnesses only)
-- **Active conditions**: 1, 2, 4, 6, 7, 8, 9, 10, 11
+- **Condition 3**: Re-enabled (spend authority via CommitIvk; `spend_auth_g_mul` and `prove_address_ownership`).
+- **Condition 5**: Temporarily disabled (stub witnesses only).
+- **Active conditions**: 1, 2, 3, 4, 6, 7, 8, 9, 10, 11
 - **Dedicated constants column**: Kept (clean separation from ECC Lagrange)
 - **All padding**: Removed
 - **MockProver**: Enabled
@@ -165,9 +185,7 @@ assumes full authority (all bits set), which violates this constraint.
    the proposal_id-th bit IS set in `proposal_authority_old`, not that the
    remainder is less than `one_shifted`.
 
-2. **Re-enable condition 3** — Once condition 5 is fixed, re-enable
-   `prove_address_ownership` (CommitIvk). Condition 3 was not the source of
-   the failure but was disabled during investigation.
+2. **Re-enable condition 3** — Done. Condition 3 (`prove_address_ownership` / CommitIvk) has been re-enabled; it was not the source of the failure.
 
 3. **Re-enable MockProver** as the standard gate (already done).
 
