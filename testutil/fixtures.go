@@ -112,9 +112,10 @@ func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote 
 // ValidCastVote returns a MsgCastVote with mock data.
 // VoteAuthorityNoteNew and VoteCommitment use canonical Fp encodings for the commitment tree.
 // RVpkX and RVpkY are 32-byte stubs for condition 4 (Spend Authority).
-// VoteAuthSig, Sighash, and RVpk are mock RedPallas fields (64, 32, 32 bytes) for ValidateBasic.
+// VoteAuthSig and RVpk are mock RedPallas fields (64, 32 bytes). Sighash is set to the
+// canonical ComputeCastVoteSighash so ante validation passes (sighash check + mock sig verifier).
 func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgCastVote {
-	return &types.MsgCastVote{
+	msg := &types.MsgCastVote{
 		VanNullifier:             MakeNullifier(nullifierSeed),
 		RVpkX:                    FpLE(0xA1 + uint64(nullifierSeed)),
 		RVpkY:                    FpLE(0xA2 + uint64(nullifierSeed)),
@@ -125,9 +126,10 @@ func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *typ
 		VoteRoundId:              roundID,
 		VoteCommTreeAnchorHeight: anchorHeight,
 		VoteAuthSig:              bytes.Repeat([]byte{0xC0 + nullifierSeed}, 64), // RedPallas sig stub
-		Sighash:                  bytes.Repeat([]byte{0xD0 + nullifierSeed}, 32),
 		RVpk:                     bytes.Repeat([]byte{0xE0 + nullifierSeed}, 32),
 	}
+	msg.Sighash = types.ComputeCastVoteSighash(msg)
+	return msg
 }
 
 // ValidRevealShare returns a MsgRevealShare with mock data.
