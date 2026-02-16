@@ -12,6 +12,7 @@ var (
 	ErrInvalidAnchorHeight   = errors.Register(ModuleName, 7, "invalid commitment tree anchor height")
 	ErrInvalidRoundID        = errors.Register(ModuleName, 8, "invalid vote round ID")
 	ErrInvalidField          = errors.Register(ModuleName, 9, "invalid message field")
+	ErrSighashMismatch       = errors.Register(ModuleName, 15, "sighash does not match message")
 	ErrRoundAlreadyExists    = errors.Register(ModuleName, 10, "vote round already exists")
 	ErrCommitmentTreeFull    = errors.Register(ModuleName, 11, "commitment tree is full")
 	ErrRoundNotTallying      = errors.Register(ModuleName, 12, "vote round is not in tallying state")

@@ -98,7 +98,7 @@ func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 }
 
 func newValidMsgDelegateVote() *types.MsgDelegateVote {
-	return &types.MsgDelegateVote{
+	msg := &types.MsgDelegateVote{
 		Rk:                  bytes.Repeat([]byte{0xAA}, 32),
 		SpendAuthSig:        bytes.Repeat([]byte{0xBB}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
@@ -111,8 +111,10 @@ func newValidMsgDelegateVote() *types.MsgDelegateVote {
 		},
 		Proof:       bytes.Repeat([]byte{0x22}, 192),
 		VoteRoundId: testRoundID,
-		Sighash:     bytes.Repeat([]byte{0x99}, 32),
+		Sighash:     make([]byte, 32), // overwritten below
 	}
+	msg.Sighash = types.ComputeDelegationSighash(msg)
+	return msg
 }
 
 func newValidMsgCastVote() *types.MsgCastVote {
@@ -446,6 +448,18 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
 			errContains: "proof",
+		},
+		{
+			name: "invalid: sighash does not match message",
+			msg: func() types.VoteMessage {
+				m := newValidMsgDelegateVote()
+				m.Sighash = bytes.Repeat([]byte{0x99}, 32) // wrong; must equal ComputeDelegationSighash(m)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "sighash does not match",
 		},
 		// --- Round state failures ---
 		{
