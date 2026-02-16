@@ -112,6 +112,7 @@ func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote 
 // ValidCastVote returns a MsgCastVote with mock data.
 // VoteAuthorityNoteNew and VoteCommitment use canonical Fp encodings for the commitment tree.
 // RVpkX and RVpkY are 32-byte stubs for condition 4 (Spend Authority).
+// VoteAuthSig, Sighash, and RVpk are mock RedPallas fields (64, 32, 32 bytes) for ValidateBasic.
 func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgCastVote {
 	return &types.MsgCastVote{
 		VanNullifier:             MakeNullifier(nullifierSeed),
@@ -123,6 +124,9 @@ func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *typ
 		Proof:                    []byte("mock-vote-commitment-proof"),
 		VoteRoundId:              roundID,
 		VoteCommTreeAnchorHeight: anchorHeight,
+		VoteAuthSig:              bytes.Repeat([]byte{0xC0 + nullifierSeed}, 64), // RedPallas sig stub
+		Sighash:                  bytes.Repeat([]byte{0xD0 + nullifierSeed}, 32),
+		RVpk:                     bytes.Repeat([]byte{0xE0 + nullifierSeed}, 32),
 	}
 }
 
