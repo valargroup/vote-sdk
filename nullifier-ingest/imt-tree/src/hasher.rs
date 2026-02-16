@@ -1,4 +1,4 @@
-use ff::{Field, PrimeField as _};
+use ff::PrimeField as _;
 use halo2_gadgets::poseidon::primitives::{P128Pow5T3, Spec};
 use pasta_curves::Fp;
 
@@ -62,9 +62,9 @@ impl PoseidonHasher {
         // First half: full rounds (S-box on every element).
         for _ in 0..R_F_HALF {
             let rc = &rcs[ri];
-            state[0] = (state[0] + rc[0]).pow_vartime([5]);
-            state[1] = (state[1] + rc[1]).pow_vartime([5]);
-            state[2] = (state[2] + rc[2]).pow_vartime([5]);
+            state[0] = Self::pow5(state[0] + rc[0]);
+            state[1] = Self::pow5(state[1] + rc[1]);
+            state[2] = Self::pow5(state[2] + rc[2]);
             self.apply_mds(state);
             ri += 1;
         }
@@ -75,7 +75,7 @@ impl PoseidonHasher {
             state[0] += rc[0];
             state[1] += rc[1];
             state[2] += rc[2];
-            state[0] = state[0].pow_vartime([5]);
+            state[0] = Self::pow5(state[0]);
             self.apply_mds(state);
             ri += 1;
         }
@@ -83,12 +83,21 @@ impl PoseidonHasher {
         // Second half: full rounds.
         for _ in 0..R_F_HALF {
             let rc = &rcs[ri];
-            state[0] = (state[0] + rc[0]).pow_vartime([5]);
-            state[1] = (state[1] + rc[1]).pow_vartime([5]);
-            state[2] = (state[2] + rc[2]).pow_vartime([5]);
+            state[0] = Self::pow5(state[0] + rc[0]);
+            state[1] = Self::pow5(state[1] + rc[1]);
+            state[2] = Self::pow5(state[2] + rc[2]);
             self.apply_mds(state);
             ri += 1;
         }
+    }
+
+    /// x^5 via explicit squaring: 3 multiplications instead of
+    /// the generic variable-time exponentiation loop.
+    #[inline(always)]
+    fn pow5(x: Fp) -> Fp {
+        let x2 = x.square();
+        let x4 = x2.square();
+        x4 * x
     }
 
     #[inline(always)]

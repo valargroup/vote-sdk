@@ -16,3 +16,8 @@ orchard = { path = "../../orchard", features = ["delegation"] }
 halo2_proofs = { version = "0.3" }
 rand = "0.8"
 incrementalmerkletree = "0.8.1"
+criterion = "0.5"
+
+[[bench]]
+name = "tree_build"
+harness = false
