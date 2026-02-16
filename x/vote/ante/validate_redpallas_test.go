@@ -122,3 +122,82 @@ func TestRedPallasDelegationWrongSig(t *testing.T) {
 	require.Error(t, err, "wrong signature should fail verification")
 	require.ErrorIs(t, err, types.ErrInvalidSignature, "should wrap ErrInvalidSignature")
 }
+
+// TestRedPallasCastVoteValidSig runs the full ante validation pipeline with a
+// real RedPallas signature on MsgCastVote. The ZKP verifier is mocked since
+// only the signature verification is under test here.
+//
+// The message layout must match canonical_cast_vote_payload_for_fixture in
+// sdk/circuits/tests/generate_fixtures.rs: vote_round_id = 32×0x01,
+// r_vpk = fixture, rest zeros except proposal_id=1, anchor_height=10.
+func TestRedPallasCastVoteValidSig(t *testing.T) {
+	rVpk := rpMustReadFixture(t, "cast_vote_r_vpk.bin")
+	sighash := rpMustReadFixture(t, "cast_vote_sighash.bin")
+	sig := rpMustReadFixture(t, "cast_vote_sig.bin")
+
+	msg := &types.MsgCastVote{
+		VanNullifier:             make([]byte, 32),
+		RVpkX:                    make([]byte, 32),
+		RVpkY:                    make([]byte, 32),
+		VoteAuthorityNoteNew:     make([]byte, 32),
+		VoteCommitment:           make([]byte, 32),
+		ProposalId:               1,
+		Proof:                    make([]byte, 192), // dummy proof (ZKP is mocked)
+		VoteRoundId:              testRoundID,
+		VoteCommTreeAnchorHeight: 10,
+		RVpk:                     rVpk,
+		Sighash:                  sighash,
+		VoteAuthSig:              sig,
+	}
+
+	opts := ante.ValidateOpts{
+		SigVerifier: redpallas.NewVerifier(),
+		ZKPVerifier: zkp.NewMockVerifier(),
+	}
+
+	s := new(ValidateTestSuite)
+	s.SetT(t)
+	s.SetupTest()
+	s.setupActiveRound()
+
+	err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
+	require.NoError(t, err, "valid RedPallas CastVote signature should pass the ante handler")
+}
+
+// TestRedPallasCastVoteWrongSig verifies that a real RedPallas signature
+// over the wrong message fails verification for MsgCastVote.
+func TestRedPallasCastVoteWrongSig(t *testing.T) {
+	rVpk := rpMustReadFixture(t, "cast_vote_r_vpk.bin")
+	sighash := rpMustReadFixture(t, "cast_vote_sighash.bin")
+	// Use delegation's wrong_sig.bin (signature over a different message)
+	wrongSig := rpMustReadFixture(t, "wrong_sig.bin")
+
+	msg := &types.MsgCastVote{
+		VanNullifier:             make([]byte, 32),
+		RVpkX:                    make([]byte, 32),
+		RVpkY:                    make([]byte, 32),
+		VoteAuthorityNoteNew:     make([]byte, 32),
+		VoteCommitment:           make([]byte, 32),
+		ProposalId:               1,
+		Proof:                    make([]byte, 192),
+		VoteRoundId:              testRoundID,
+		VoteCommTreeAnchorHeight: 10,
+		RVpk:                     rVpk,
+		Sighash:                  sighash,
+		VoteAuthSig:              wrongSig,
+	}
+
+	opts := ante.ValidateOpts{
+		SigVerifier: redpallas.NewVerifier(),
+		ZKPVerifier: zkp.NewMockVerifier(),
+	}
+
+	s := new(ValidateTestSuite)
+	s.SetT(t)
+	s.SetupTest()
+	s.setupActiveRound()
+
+	err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
+	require.Error(t, err, "wrong signature should fail verification")
+	require.ErrorIs(t, err, types.ErrInvalidSignature, "should wrap ErrInvalidSignature")
+}

@@ -109,21 +109,39 @@ func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote 
 	return msg
 }
 
+// ensureBytes32 returns a new 32-byte slice: copies b into it (pads with zeros if
+// shorter, truncates if longer). Used so MsgCastVote sighash inputs survive
+// protobuf round-trip unchanged (decoder returns new slices; length must match).
+func ensureBytes32(b []byte) []byte {
+	out := make([]byte, 32)
+	if len(b) > 0 {
+		copy(out, b)
+	}
+	return out
+}
+
 // ValidCastVote returns a MsgCastVote with mock data.
 // VoteAuthorityNoteNew and VoteCommitment use canonical Fp encodings for the commitment tree.
 // RVpkX and RVpkY are 32-byte stubs for condition 4 (Spend Authority).
+// All sighash inputs (VoteRoundId, RVpk, VanNullifier, VoteAuthorityNoteNew, VoteCommitment)
+// are normalized to 32-byte copies so encode/decode does not change them; Sighash is then set
+// to the canonical ComputeCastVoteSighash so ante validation passes.
 func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgCastVote {
-	return &types.MsgCastVote{
-		VanNullifier:             MakeNullifier(nullifierSeed),
+	msg := &types.MsgCastVote{
+		VanNullifier:             ensureBytes32(MakeNullifier(nullifierSeed)),
 		RVpkX:                    FpLE(0xA1 + uint64(nullifierSeed)),
 		RVpkY:                    FpLE(0xA2 + uint64(nullifierSeed)),
-		VoteAuthorityNoteNew:     FpLE(0xA0 + uint64(nullifierSeed)),
-		VoteCommitment:           FpLE(0xB0 + uint64(nullifierSeed)),
+		VoteAuthorityNoteNew:     ensureBytes32(FpLE(0xA0 + uint64(nullifierSeed))),
+		VoteCommitment:           ensureBytes32(FpLE(0xB0 + uint64(nullifierSeed))),
 		ProposalId:               1, // first proposal in SampleProposals()
 		Proof:                    []byte("mock-vote-commitment-proof"),
-		VoteRoundId:              roundID,
+		VoteRoundId:              ensureBytes32(roundID),
 		VoteCommTreeAnchorHeight: anchorHeight,
+		VoteAuthSig:              bytes.Repeat([]byte{0xC0 + nullifierSeed}, 64), // RedPallas sig stub
+		RVpk:                     ensureBytes32(bytes.Repeat([]byte{0xE0 + nullifierSeed}, 32)),
 	}
+	msg.Sighash = types.ComputeCastVoteSighash(msg)
+	return msg
 }
 
 // ValidRevealShare returns a MsgRevealShare with mock data.

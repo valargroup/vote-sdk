@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -181,12 +182,24 @@ func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error)
 
 	if rpcResp.Error != nil {
 		// -32603 "Internal error" is used by CometBFT when BroadcastTxSync returns a Go error.
-		// The real cause is in error.data, e.g. "tx already in cache" (duplicate), "broadcast
-		// confirmation not received: context canceled" (RPC timeout), or app connection errors.
+		// The real cause is in error.data, e.g. "tx already exists in cache" (duplicate),
+		// "broadcast confirmation not received: context canceled" (RPC timeout), or app
+		// connection errors.
 		detail := rpcResp.Error.Data
 		if detail == "" {
 			detail = rpcResp.Error.Message
 		}
+
+		// "tx already exists in cache" means the tx was previously accepted into the
+		// mempool. Treat this as success so callers don't retry indefinitely.
+		if strings.Contains(detail, "already exists in cache") {
+			log.Printf("[zally-api] tx already in mempool cache, treating as success")
+			return &BroadcastResult{
+				Code: 0,
+				Log:  "tx already exists in mempool cache",
+			}, nil
+		}
+
 		return nil, fmt.Errorf("CometBFT RPC error %d: %s", rpcResp.Error.Code, detail)
 	}
 
