@@ -137,6 +137,22 @@ func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *
 	}
 }
 
+// ValidRevealShareReal returns a MsgRevealShare with a real ElGamal ciphertext
+// as the EncShare. Use this when testing end-to-end encryption/decryption.
+func ValidRevealShareReal(roundID []byte, anchorHeight uint64, nullifierSeed byte,
+	proposalID uint32, decision uint32, encShare []byte,
+) *types.MsgRevealShare {
+	return &types.MsgRevealShare{
+		ShareNullifier:           MakeNullifier(nullifierSeed),
+		EncShare:                 encShare,
+		ProposalId:               proposalID,
+		VoteDecision:             decision,
+		Proof:                    []byte("mock-reveal-share-proof"),
+		VoteRoundId:              roundID,
+		VoteCommTreeAnchorHeight: anchorHeight,
+	}
+}
+
 // ValidSubmitTally returns a MsgSubmitTally for the given round ID and creator.
 // By default it includes a single entry matching the default ValidRevealShare
 // fixture (proposal_id=0, vote_decision=1, total_value=1000).

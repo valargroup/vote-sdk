@@ -100,49 +100,47 @@ func TallyPrepareProposalHandler(
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
-		// Find all rounds in TALLYING state.
-		var tallyingRounds []*types.VoteRound
+		// Find the first round in TALLYING state. We limit to one round per
+		// block to bound PrepareProposal latency (BSGS decryption is expensive).
+		var tallyRound *types.VoteRound
 		if err := voteKeeper.IterateTallyingRounds(kvStore, func(round *types.VoteRound) bool {
 			r := *round // copy
-			tallyingRounds = append(tallyingRounds, &r)
-			return false
+			tallyRound = &r
+			return true // stop after first
 		}); err != nil {
 			logger.Error("PrepareProposal: failed to iterate tallying rounds", "err", err)
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 
-		// Build and prepend a MsgSubmitTally for each tallying round.
-		var injectedTxs [][]byte
-		for _, round := range tallyingRounds {
-			entries, err := decryptRoundTallies(kvStore, voteKeeper, round, eaSk, table)
-			if err != nil {
-				logger.Error("PrepareProposal: failed to decrypt tally",
-					"round", round.VoteRoundId, "err", err)
-				continue // skip this round, try the next
-			}
-			if len(entries) == 0 {
-				continue // no accumulator entries, nothing to submit
-			}
-
-			msg := &types.MsgSubmitTally{
-				VoteRoundId: round.VoteRoundId,
-				Creator:     proposerValAddr,
-				Entries:     entries,
-			}
-
-			txBytes, err := voteapi.EncodeVoteTx(msg)
-			if err != nil {
-				logger.Error("PrepareProposal: failed to encode tally tx",
-					"round", round.VoteRoundId, "err", err)
-				continue
-			}
-			injectedTxs = append(injectedTxs, txBytes)
+		if tallyRound == nil {
+			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 
-		// Prepend injected tally txs before the mempool txs.
-		if len(injectedTxs) > 0 {
-			txs = append(injectedTxs, txs...)
+		entries, err := decryptRoundTallies(kvStore, voteKeeper, tallyRound, eaSk, table)
+		if err != nil {
+			logger.Error("PrepareProposal: failed to decrypt tally",
+				"round", tallyRound.VoteRoundId, "err", err)
+			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
+		if len(entries) == 0 {
+			return &abci.ResponsePrepareProposal{Txs: txs}, nil
+		}
+
+		msg := &types.MsgSubmitTally{
+			VoteRoundId: tallyRound.VoteRoundId,
+			Creator:     proposerValAddr,
+			Entries:     entries,
+		}
+
+		txBytes, err := voteapi.EncodeVoteTx(msg)
+		if err != nil {
+			logger.Error("PrepareProposal: failed to encode tally tx",
+				"round", tallyRound.VoteRoundId, "err", err)
+			return &abci.ResponsePrepareProposal{Txs: txs}, nil
+		}
+
+		// Prepend injected tally tx before the mempool txs.
+		txs = append([][]byte{txBytes}, txs...)
 
 		return &abci.ResponsePrepareProposal{Txs: txs}, nil
 	}

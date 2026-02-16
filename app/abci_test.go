@@ -2,10 +2,12 @@ package app_test
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/crypto/blake2b"
 
@@ -13,6 +15,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/testutil"
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -775,6 +778,91 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyRejectsActiveRound() {
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(tallyMsg))
 	s.Require().NotEqual(uint32(0), result.Code, "submit tally against ACTIVE round should fail")
 	s.Require().Contains(result.Log, "not in tallying state")
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.16: PrepareProposal Auto-Tally with Real ElGamal Encryption
+// ---------------------------------------------------------------------------
+
+func TestPrepareProposalAutoTally(t *testing.T) {
+	app, pk := testutil.SetupTestAppWithEAKey(t)
+
+	// Step 1: Create voting session expiring 30s from now.
+	voteEndTime := app.Time.Add(30 * time.Second)
+	setupMsg := &types.MsgCreateVotingSession{
+		Creator:           "zvote1admin",
+		SnapshotHeight:    700,
+		SnapshotBlockhash: bytes.Repeat([]byte{0x7A}, 32),
+		ProposalsHash:     bytes.Repeat([]byte{0x7B}, 32),
+		VoteEndTime:       uint64(voteEndTime.Unix()),
+		NullifierImtRoot:  bytes.Repeat([]byte{0x7C}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x7D}, 32),
+		EaPk:              bytes.Repeat([]byte{0x7E}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         testutil.SampleProposals(),
+	}
+	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
+	require.Equal(t, uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
+
+	roundID := computeRoundID(setupMsg)
+
+	// Step 2: Delegate to populate the commitment tree.
+	delegation := testutil.ValidDelegation(roundID, 0x10)
+	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	require.Equal(t, uint32(0), result.Code, "delegation should succeed, got: %s", result.Log)
+
+	anchorHeight := uint64(app.Height)
+
+	// Step 3: Cast vote.
+	castVote := testutil.ValidCastVote(roundID, anchorHeight, 0x30)
+	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
+	require.Equal(t, uint32(0), result.Code, "cast vote should succeed, got: %s", result.Log)
+
+	revealAnchor := uint64(app.Height)
+
+	// Step 4: Reveal share with a real ElGamal ciphertext encrypting v=42.
+	ct, err := elgamal.Encrypt(pk, 42, rand.Reader)
+	require.NoError(t, err)
+
+	encShare, err := elgamal.MarshalCiphertext(ct)
+	require.NoError(t, err)
+
+	revealMsg := testutil.ValidRevealShareReal(roundID, revealAnchor, 0x50, 0, 1, encShare)
+	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
+	require.Equal(t, uint32(0), result.Code, "reveal share should succeed, got: %s", result.Log)
+
+	// Step 5: Advance past VoteEndTime → TALLYING.
+	app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
+
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_TALLYING, round.Status,
+		"round should be TALLYING after expiry")
+
+	// Step 6: NextBlockWithPrepareProposal — PrepareProposal injects MsgSubmitTally,
+	// then FinalizeBlock processes it.
+	app.NextBlockWithPrepareProposal()
+
+	// Step 7: Verify round is FINALIZED and tally result matches the encrypted value.
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
+		"round should be FINALIZED after auto-tally")
+
+	tallyResults, err := app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
+	require.NoError(t, err)
+	require.Len(t, tallyResults, 1)
+	require.Equal(t, uint32(0), tallyResults[0].ProposalId)
+	require.Equal(t, uint32(1), tallyResults[0].VoteDecision)
+	require.Equal(t, uint64(42), tallyResults[0].TotalValue,
+		"decrypted tally should match encrypted value of 42")
 }
 
 // ---------------------------------------------------------------------------

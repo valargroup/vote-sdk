@@ -1,7 +1,10 @@
 package testutil
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,12 +20,14 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
+	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
 	"github.com/z-cale/zally/app"
+	"github.com/z-cale/zally/crypto/elgamal"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
 )
 
@@ -49,12 +54,40 @@ type TestApp struct {
 // and returns a TestApp ready for integration testing.
 func SetupTestApp(t *testing.T) *TestApp {
 	t.Helper()
+	return setupTestApp(t, simtestutil.EmptyAppOptions{})
+}
+
+// SetupTestAppWithEAKey creates a TestApp with a real ElGamal keypair for the
+// EA (Election Authority). The secret key is written to a temp file and passed
+// via the "vote.ea_sk_path" app option so that PrepareProposal can decrypt
+// tallies. Returns both the TestApp and the public key for encrypting shares.
+func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey) {
+	t.Helper()
+
+	sk, pk := elgamal.KeyGen(rand.Reader)
+
+	skBytes, err := elgamal.MarshalSecretKey(sk)
+	require.NoError(t, err)
+
+	skPath := filepath.Join(t.TempDir(), "ea.sk")
+	require.NoError(t, os.WriteFile(skPath, skBytes, 0600))
+
+	appOpts := simtestutil.AppOptionsMap{
+		"vote.ea_sk_path": skPath,
+	}
+
+	return setupTestApp(t, appOpts), pk
+}
+
+// setupTestApp is the shared implementation for SetupTestApp and SetupTestAppWithEAKey.
+func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
+	t.Helper()
 
 	db := dbm.NewMemDB()
 	logger := log.NewNopLogger()
 
 	zallyApp := app.NewZallyApp(
-		logger, db, nil, true, simtestutil.EmptyAppOptions{},
+		logger, db, nil, true, appOpts,
 		baseapp.SetChainID(testChainID),
 	)
 
@@ -247,4 +280,47 @@ func (ta *TestApp) RecheckTxSync(txBytes []byte) *abci.ResponseCheckTx {
 	})
 	require.NoError(ta.t, err)
 	return resp
+}
+
+// CallPrepareProposal builds a RequestPrepareProposal for the next block
+// (current height+1, time+5s) and calls PrepareProposal on the app.
+// Returns the response containing any auto-injected txs.
+func (ta *TestApp) CallPrepareProposal() *abci.ResponsePrepareProposal {
+	ta.t.Helper()
+
+	resp, err := ta.ZallyApp.PrepareProposal(&abci.RequestPrepareProposal{
+		Height:          ta.Height + 1,
+		Time:            ta.Time.Add(5 * time.Second),
+		ProposerAddress: ta.ProposerAddress,
+	})
+	require.NoError(ta.t, err)
+	return resp
+}
+
+// NextBlockWithPrepareProposal calls PrepareProposal to collect any auto-injected
+// txs, then feeds them into FinalizeBlock + Commit. This simulates a real block
+// production cycle where PrepareProposal injects tally txs.
+func (ta *TestApp) NextBlockWithPrepareProposal() {
+	ta.t.Helper()
+
+	ta.Height++
+	ta.Time = ta.Time.Add(5 * time.Second)
+
+	ppResp, err := ta.ZallyApp.PrepareProposal(&abci.RequestPrepareProposal{
+		Height:          ta.Height,
+		Time:            ta.Time,
+		ProposerAddress: ta.ProposerAddress,
+	})
+	require.NoError(ta.t, err)
+
+	_, err = ta.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height:          ta.Height,
+		Time:            ta.Time,
+		Txs:             ppResp.Txs,
+		ProposerAddress: ta.ProposerAddress,
+	})
+	require.NoError(ta.t, err)
+
+	_, err = ta.Commit()
+	require.NoError(ta.t, err)
 }
