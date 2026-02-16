@@ -132,6 +132,7 @@ func NewZallyApp(
 	// for rounds in TALLYING state. The EA secret key path is read from
 	// app.toml config (vote.ea_sk_path). If absent, tally injection is skipped.
 	eaSkPath, _ := appOpts.Get("vote.ea_sk_path").(string)
+	logger.Info("Auto-tally config", "vote.ea_sk_path", eaSkPath)
 	app.SetPrepareProposal(TallyPrepareProposalHandler(
 		app.VoteKeeper,
 		app.StakingKeeper,

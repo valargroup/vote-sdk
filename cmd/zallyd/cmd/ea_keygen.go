@@ -8,6 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/cosmos/cosmos-sdk/client/flags"
+	"github.com/z-cale/zally/app"
 	"github.com/z-cale/zally/crypto/elgamal"
 )
 
@@ -24,7 +26,7 @@ func EAKeygenCmd() *cobra.Command {
 The secret key path should be configured in app.toml as vote.ea_sk_path
 so that PrepareProposal can auto-decrypt tallies.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			homeDir, _ := cmd.Flags().GetString("home")
+			homeDir, _ := cmd.Flags().GetString(flags.FlagHome)
 			if homeDir == "" {
 				return fmt.Errorf("--home flag is required")
 			}
@@ -53,5 +55,6 @@ so that PrepareProposal can auto-decrypt tallies.`,
 			return nil
 		},
 	}
+	cmd.Flags().String(flags.FlagHome, app.DefaultNodeHome, "The application home directory")
 	return cmd
 }

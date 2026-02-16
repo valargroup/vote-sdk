@@ -19,8 +19,8 @@ import (
 )
 
 // bsgsDefaultBound is the upper bound for the baby-step giant-step discrete
-// log solver. 2^32 supports vote totals up to ~4 billion zatoshi.
-const bsgsDefaultBound = 1 << 32
+// log solver. 2^28 supports vote totals up to ~268 million.
+const bsgsDefaultBound = 1 << 28
 
 // TallyPrepareProposalHandler returns a PrepareProposalHandler that wraps the
 // default behavior (passing through req.Txs) and additionally injects
@@ -47,9 +47,11 @@ func TallyPrepareProposalHandler(
 	loadSk := func() (*elgamal.SecretKey, error) {
 		skOnce.Do(func() {
 			if eaSkPath == "" {
+				logger.Warn("PrepareProposal: vote.ea_sk_path is empty — auto-tally disabled")
 				skErr = os.ErrNotExist
 				return
 			}
+			logger.Info("PrepareProposal: loading EA secret key", "path", eaSkPath)
 			raw, err := os.ReadFile(eaSkPath)
 			if err != nil {
 				skErr = err
@@ -65,6 +67,8 @@ func TallyPrepareProposalHandler(
 				logger.Error("!! FAILED TO PARSE EA SECRET KEY — AUTO-TALLY IS DISABLED !!")
 				logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 				logger.Error("EA secret key parse error", "path", eaSkPath, "err", skErr)
+			} else {
+				logger.Info("PrepareProposal: EA secret key loaded successfully", "path", eaSkPath)
 			}
 		})
 		return sk, skErr
@@ -72,7 +76,9 @@ func TallyPrepareProposalHandler(
 
 	loadBSGS := func() *elgamal.BSGSTable {
 		bsgOnce.Do(func() {
+			logger.Info("PrepareProposal: building BSGS table", "bound", bsgsDefaultBound)
 			bsgs = elgamal.NewBSGSTable(bsgsDefaultBound)
+			logger.Info("PrepareProposal: BSGS table ready")
 		})
 		return bsgs
 	}
@@ -139,6 +145,8 @@ func TallyPrepareProposalHandler(
 		}
 
 		// Prepend injected tally tx before the mempool txs.
+		logger.Info("PrepareProposal: injecting MsgSubmitTally",
+			"round", tallyRound.VoteRoundId, "entries", len(entries))
 		txs = append([][]byte{txBytes}, txs...)
 
 		return &abci.ResponsePrepareProposal{Txs: txs}, nil
