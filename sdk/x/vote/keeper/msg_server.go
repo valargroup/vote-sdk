@@ -135,7 +135,14 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 		return nil, fmt.Errorf("%w: no root at height %d", types.ErrInvalidAnchorHeight, msg.VoteCommTreeAnchorHeight)
 	}
 
-	// Record vote-authority-note nullifier (scoped to type + round).
+	// Reject double-vote: VAN nullifier must not already be recorded (scoped to type + round).
+	has, err := ms.k.HasNullifier(kvStore, types.NullifierTypeVoteAuthorityNote, msg.VoteRoundId, msg.VanNullifier)
+	if err != nil {
+		return nil, err
+	}
+	if has {
+		return nil, fmt.Errorf("%w: nullifier already exists", types.ErrDuplicateNullifier)
+	}
 	if err := ms.k.SetNullifier(kvStore, types.NullifierTypeVoteAuthorityNote, msg.VoteRoundId, msg.VanNullifier); err != nil {
 		return nil, err
 	}
@@ -171,7 +178,14 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 		return nil, err
 	}
 
-	// Record share nullifier (scoped to share type + round).
+	// Reject duplicate reveal: share nullifier must not already be recorded (scoped to type + round).
+	has, err := ms.k.HasNullifier(kvStore, types.NullifierTypeShare, msg.VoteRoundId, msg.ShareNullifier)
+	if err != nil {
+		return nil, err
+	}
+	if has {
+		return nil, fmt.Errorf("%w: nullifier already exists", types.ErrDuplicateNullifier)
+	}
 	if err := ms.k.SetNullifier(kvStore, types.NullifierTypeShare, msg.VoteRoundId, msg.ShareNullifier); err != nil {
 		return nil, err
 	}

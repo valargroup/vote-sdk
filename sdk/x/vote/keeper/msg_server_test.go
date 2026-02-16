@@ -381,6 +381,40 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			expectErr:   true,
 			errContains: "invalid proposal ID",
 		},
+		{
+			name: "duplicate VAN nullifier rejected (double-vote)",
+			setup: func() {
+				s.setupActiveRound(roundID)
+				s.setupRootAtHeight(10)
+				// First CastVote with this nullifier succeeds and records it.
+				first := &types.MsgCastVote{
+					VanNullifier:             bytes.Repeat([]byte{0xDD}, 32),
+					RVpkX:                    fpLE(0xE1a),
+					RVpkY:                    fpLE(0xE1b),
+					VoteAuthorityNoteNew:     fpLE(0xE2),
+					VoteCommitment:           fpLE(0xE3),
+					ProposalId:               1,
+					Proof:                    bytes.Repeat([]byte{0xE4}, 64),
+					VoteRoundId:              roundID,
+					VoteCommTreeAnchorHeight: 10,
+				}
+				_, err := s.msgServer.CastVote(s.ctx, first)
+				s.Require().NoError(err)
+			},
+			msg: &types.MsgCastVote{
+				VanNullifier:             bytes.Repeat([]byte{0xDD}, 32), // same as first
+				RVpkX:                    fpLE(0xE1a),
+				RVpkY:                    fpLE(0xE1b),
+				VoteAuthorityNoteNew:     fpLE(0xE5),
+				VoteCommitment:           fpLE(0xE6),
+				ProposalId:               1,
+				Proof:                    bytes.Repeat([]byte{0xE4}, 64),
+				VoteRoundId:              roundID,
+				VoteCommTreeAnchorHeight: 10,
+			},
+			expectErr:   true,
+			errContains: "nullifier already",
+		},
 	}
 
 	for _, tc := range tests {
@@ -519,6 +553,36 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 			},
 			expectErr:   true,
 			errContains: "invalid proposal ID",
+		},
+		{
+			name: "duplicate share nullifier rejected (double-count)",
+			setup: func() {
+				s.setupActiveRound(roundID)
+				first := &types.MsgRevealShare{
+					ShareNullifier:           bytes.Repeat([]byte{0xFA}, 32),
+					EncShare:                 testEncShare(s, 100),
+					ProposalId:               1,
+					VoteDecision:             1,
+					Proof:                    bytes.Repeat([]byte{0xFB}, 64),
+					VoteRoundId:              roundID,
+					VoteCommTreeAnchorHeight: 10,
+				}
+				_, err := s.msgServer.RevealShare(s.ctx, first)
+				s.Require().NoError(err)
+			},
+			msg: func() *types.MsgRevealShare {
+				return &types.MsgRevealShare{
+					ShareNullifier:           bytes.Repeat([]byte{0xFA}, 32), // same as first
+					EncShare:                 testEncShare(s, 200),
+					ProposalId:               1,
+					VoteDecision:             1,
+					Proof:                    bytes.Repeat([]byte{0xFC}, 64),
+					VoteRoundId:              roundID,
+					VoteCommTreeAnchorHeight: 10,
+				}
+			},
+			expectErr:   true,
+			errContains: "nullifier already",
 		},
 	}
 
