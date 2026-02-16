@@ -60,6 +60,7 @@ use halo2_gadgets::{
 
 mod address_ownership;
 mod commit_ivk;
+mod elgamal;
 #[cfg(feature = "delegation")]
 #[path = "delegation/mod.rs"]
 pub mod delegation;

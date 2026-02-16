@@ -24,10 +24,10 @@ pub mod builder;
 pub mod circuit;
 pub mod prove;
 
+pub use crate::circuit::elgamal::{base_to_scalar, elgamal_encrypt, spend_auth_g_affine};
 pub use circuit::{
-    base_to_scalar, domain_van_nullifier, elgamal_encrypt, poseidon_hash_2, shares_hash,
-    spend_auth_g_affine, van_integrity_hash, van_nullifier_hash, vote_commitment_hash, Circuit,
-    Config, Instance, K, DOMAIN_VAN, DOMAIN_VC, VOTE_COMM_TREE_DEPTH,
+    domain_van_nullifier, poseidon_hash_2, shares_hash, van_integrity_hash, van_nullifier_hash,
+    vote_commitment_hash, Circuit, Config, Instance, K, DOMAIN_VAN, DOMAIN_VC, VOTE_COMM_TREE_DEPTH,
 };
 pub use builder::{build_vote_proof_from_delegation, VoteProofBuildError, VoteProofBundle};
 pub use prove::{

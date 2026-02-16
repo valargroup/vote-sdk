@@ -282,7 +282,7 @@ The 8 x-coordinates are interleaved per share — `(c1_0, c2_0, c1_1, c2_1, ...)
 
 ## Condition 11: Encryption Integrity ✅
 
-Purpose: each ciphertext is a valid El Gamal encryption of the corresponding plaintext share under the election authority's public key.
+Purpose: each ciphertext is a valid El Gamal encryption of the corresponding plaintext share under the election authority's public key. Implemented by the shared **`circuit::elgamal::prove_elgamal_encryptions`** gadget.
 
 ```
 For each share i (0..3):
@@ -319,9 +319,9 @@ Total: 12 variable-base scalar multiplications (~6,000 rows), 4 point additions,
 - **ea_pk binding:** Both ea_pk coordinates are public inputs, so the verifier checks them against the published round parameter. This prevents the prover from encrypting under a different key.
 - **Randomness binding:** The same r_i cell (via clone) is used for both C1 and C2 computations. Cell equality ensures both `ScalarVar::from_base` calls decompose the same value.
 
-**Out-of-circuit helpers:** `elgamal_encrypt()` computes the same El Gamal encryption outside the circuit. `spend_auth_g_affine()` returns the SpendAuthG generator as a Pallas affine point. `base_to_scalar()` converts base field elements to scalars.
+**Out-of-circuit helpers:** In `circuit::elgamal`: `elgamal_encrypt()` computes the same El Gamal encryption outside the circuit; `spend_auth_g_affine()` returns the SpendAuthG generator; `base_to_scalar()` converts base field elements to scalars.
 
-**Constructions:** `EccChip`, `NonIdentityPoint`, `ScalarVar`, `Point::add`, `Point::extract_p`.
+**Constructions:** Shared `circuit::elgamal::prove_elgamal_encryptions`; `EccChip`, `NonIdentityPoint`, `ScalarVar`, `Point::add`, `Point::extract_p`.
 
 ## Condition 12: Vote Commitment Integrity ✅
 

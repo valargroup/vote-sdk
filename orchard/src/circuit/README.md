@@ -127,7 +127,32 @@ constrain pk_d_signed     constrain vpk_pk_d
 ### See also
 
 - `address_ownership.rs` — shared SpendAuthG and CommitIvk-based address ownership (conditions 4/5 delegation, condition 3 vote proof).
+- `elgamal.rs` — shared El Gamal encryption integrity (vote proof condition 11).
 - `van_integrity.rs` — shared VAN integrity Poseidon hash (conditions 2/6/7).
 - `commit_ivk.rs` — Sinsemilla-based CommitIvk and canonicity gates.
 - Delegation README: conditions 4 and 5.
 - Vote proof README: condition 3.
+
+## El Gamal gadget
+
+Shared circuit gadget that proves **El Gamal encryption integrity** for the vote proof (ZKP #2, condition 11). For each of the 4 vote shares, it constrains that the witnessed ciphertext x-coordinates are correct: C1_i = [r_i]*G, C2_i = [v_i]*G + [r_i]*ea_pk, with G = SpendAuthG and ea_pk from public inputs.
+
+### Why it exists
+
+The vote proof must bind the Poseidon hash of enc_share x-coordinates (condition 10) to the actual ECC computation. Extracting this logic into a dedicated gadget keeps the vote proof synthesis simpler and allows layout/optimization work to be done in one place.
+
+### API
+
+**`prove_elgamal_encryptions(ecc_chip, layouter, namespace, g_affine, g_x_const, g_y_const, ea_pk, ea_pk_x_cell, ea_pk_y_cell, share_cells, r_cells, enc_c1_cells, enc_c2_cells) -> Result<(), Error>`**
+
+Per share i: constrains C1_i = [r_i]*G and C2_i = [v_i]*G + [r_i]*ea_pk, and `constrain_equal(ExtractP(C1_i), enc_c1_cells[i])` and similarly for C2. Caller must assign SpendAuthG constants (g_x_const, g_y_const), ea_pk instance cells, and the four r_i and share/enc_share cells before calling.
+
+**Out-of-circuit (same module):** `spend_auth_g_affine()`, `base_to_scalar(b)`, `elgamal_encrypt(share_value, randomness, ea_pk)` — used by the vote proof builder and tests.
+
+### Dependencies
+
+- Uses **EccChip** only (same config as condition 3). No new columns; no change to K.
+
+### Usage
+
+- **Vote proof:** `orchard/src/vote_proof/circuit.rs` — condition 11 assigns G constants, ea_pk from instance, r_0..r_3, then calls `prove_elgamal_encryptions`.

@@ -17,9 +17,10 @@ use rand::RngCore;
 use crate::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey};
 
 use super::circuit::{
-    base_to_scalar, elgamal_encrypt, shares_hash, van_integrity_hash, van_nullifier_hash,
-    vote_commitment_hash, Circuit, Instance, VOTE_COMM_TREE_DEPTH,
+    shares_hash, van_integrity_hash, van_nullifier_hash, vote_commitment_hash, Circuit, Instance,
+    VOTE_COMM_TREE_DEPTH,
 };
+use super::{base_to_scalar, elgamal_encrypt, spend_auth_g_affine};
 use super::prove::create_vote_proof;
 
 /// Maximum proposal authority bitmask for a fresh VAN (16 proposals).
@@ -61,8 +62,6 @@ impl core::fmt::Display for VoteProofBuildError {
 /// This replicates the sign-correction logic from `SpendAuthorizingKey::from`:
 /// `ask = PRF_expand(sk)`, then negate if the resulting ak has ỹ = 1.
 fn extract_vsk(sk: &SpendingKey) -> pallas::Scalar {
-    use super::circuit::spend_auth_g_affine;
-
     let ask_raw = SpendAuthorizingKey::derive_inner(sk);
     let g = pallas::Point::from(spend_auth_g_affine());
     let ak_point = (g * ask_raw).to_affine();
@@ -141,7 +140,6 @@ pub fn build_vote_proof_from_delegation(
 
     // ---- Fast key-chain consistency checks (instant, no circuit) ----
     {
-        use super::circuit::spend_auth_g_affine;
         use core::iter;
         use group::ff::PrimeFieldBits;
         use halo2_gadgets::sinsemilla::primitives::CommitDomain;
@@ -171,7 +169,7 @@ pub fn build_vote_proof_from_delegation(
                 &rivk_v,
             )
             .expect("CommitIvk must not produce bottom");
-        let ivk_scalar = super::circuit::base_to_scalar(ivk)
+        let ivk_scalar = base_to_scalar(ivk)
             .expect("ivk must be convertible to scalar");
         let pk_d_derived = (pallas::Point::from(vpk_g_d_affine) * ivk_scalar).to_affine();
         assert_eq!(
