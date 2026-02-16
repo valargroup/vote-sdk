@@ -97,6 +97,30 @@ fn generate_halo2_fixtures() {
     println!("Halo2 fixtures generated and validated.");
 }
 
+/// Canonical delegation sighash domain. Must match sdk/x/vote/types/sighash.go
+/// and e2e-tests/src/setup.rs.
+const DELEGATION_SIGHASH_DOMAIN: &[u8] = b"ZALLY_DELEGATION_SIGHASH_V0";
+
+/// Build the canonical signable payload for the RedPallas test message used in
+/// validate_redpallas_test.go: vote_round_id = 32×0x01, rk = given, rest zeros,
+/// gov_nullifiers = 4×32 zero bytes.
+fn canonical_delegation_payload_for_fixture(rk_bytes: &[u8; 32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(
+        DELEGATION_SIGHASH_DOMAIN.len() + 32 + 32 + 32 + 32 + 64 + 32 + 4 * 32,
+    );
+    out.extend_from_slice(DELEGATION_SIGHASH_DOMAIN);
+    out.extend_from_slice(&[0x01u8; 32]); // testRoundID in Go
+    out.extend_from_slice(rk_bytes);
+    out.extend_from_slice(&[0u8; 32]); // signed_note_nullifier
+    out.extend_from_slice(&[0u8; 32]); // cmx_new
+    out.extend_from_slice(&[0u8; 64]); // enc_memo
+    out.extend_from_slice(&[0u8; 32]); // gov_comm
+    for _ in 0..4 {
+        out.extend_from_slice(&[0u8; 32]); // gov_nullifiers (4 slots)
+    }
+    out
+}
+
 /// Generate RedPallas SpendAuth signature fixtures.
 fn generate_redpallas_fixtures() {
     let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -111,21 +135,18 @@ fn generate_redpallas_fixtures() {
     // Generate a signing key and derive the verification key (rk).
     let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut rng);
     let vk = VerificationKey::from(&sk);
+    let rk_bytes: [u8; 32] = vk.into();
 
-    // The sighash is Blake2b-256("ZALLY_SIGHASH_V0"). It must match the value
-    // sent by the client as msg.sighash and the REAL_SIGHASH constant in
-    // tests/api/src/helpers.ts.
-    let sighash_full = Blake2bParams::new()
-        .hash_length(32)
-        .hash(b"ZALLY_SIGHASH_V0");
+    // Sighash = Blake2b-256(canonical delegation payload). Must match the
+    // message built in validate_redpallas_test.go so the chain's
+    // ComputeDelegationSighash(msg) equals this value.
+    let canonical = canonical_delegation_payload_for_fixture(&rk_bytes);
+    let sighash_full = Blake2bParams::new().hash_length(32).hash(&canonical);
     let mut sighash = [0u8; 32];
     sighash.copy_from_slice(sighash_full.as_bytes());
 
     // Sign the sighash.
     let sig = sk.sign(&mut rng, &sighash);
-
-    // Serialize to byte arrays.
-    let rk_bytes: [u8; 32] = vk.into();
     let sig_bytes: [u8; 64] = sig.into();
 
     // Write valid rk.

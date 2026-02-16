@@ -160,14 +160,11 @@ func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 // VerifyVoteProof verifies a real vote proof circuit proof (ZKP #2)
 // using the Rust verifier via CGo.
 //
-// The inputs are serialized as 8 × 32-byte chunks (256 bytes):
+// The inputs are serialized as 10 × 32-byte chunks (320 bytes), matching the
+// circuit's 11 public inputs (ea_pk is decompressed to x,y in Rust):
 //
-//	[van_nullifier, vote_authority_note_new, vote_commitment,
-//	 vote_comm_tree_root, anchor_height_le, proposal_id_le,
-//	 voting_round_id, ea_pk_compressed]
-//
-// The Rust FFI decompresses ea_pk into (ea_pk_x, ea_pk_y) for the circuit's
-// 9 field elements.
+//	[van_nullifier, r_vpk_x, r_vpk_y, vote_authority_note_new, vote_commitment,
+//	 vote_comm_tree_root, anchor_height_le, proposal_id_le, voting_round_id, ea_pk_compressed]
 //
 // Returns nil on success, or an error describing the failure.
 func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
@@ -175,9 +172,9 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 		return fmt.Errorf("vote proof is empty")
 	}
 
-	// Serialize VoteCommitmentInputs into 8 × 32-byte flat buffer.
+	// Serialize VoteCommitmentInputs into 10 × 32-byte flat buffer (condition 4: r_vpk in-circuit).
 	const chunkSize = 32
-	const numChunks = 8
+	const numChunks = 10
 	buf := make([]byte, numChunks*chunkSize)
 
 	copyChunk := func(offset int, src []byte) error {
@@ -192,28 +189,35 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 	if err := copyChunk(0*chunkSize, inputs.VanNullifier); err != nil {
 		return fmt.Errorf("van_nullifier: %w", err)
 	}
-	// Slot 1: vote_authority_note_new (Fp)
-	if err := copyChunk(1*chunkSize, inputs.VoteAuthorityNoteNew); err != nil {
+	// Slots 1–2: r_vpk_x, r_vpk_y (condition 4: Spend Authority)
+	if err := copyChunk(1*chunkSize, inputs.RVpkX); err != nil {
+		return fmt.Errorf("r_vpk_x: %w", err)
+	}
+	if err := copyChunk(2*chunkSize, inputs.RVpkY); err != nil {
+		return fmt.Errorf("r_vpk_y: %w", err)
+	}
+	// Slot 3: vote_authority_note_new (Fp)
+	if err := copyChunk(3*chunkSize, inputs.VoteAuthorityNoteNew); err != nil {
 		return fmt.Errorf("vote_authority_note_new: %w", err)
 	}
-	// Slot 2: vote_commitment (Fp)
-	if err := copyChunk(2*chunkSize, inputs.VoteCommitment); err != nil {
+	// Slot 4: vote_commitment (Fp)
+	if err := copyChunk(4*chunkSize, inputs.VoteCommitment); err != nil {
 		return fmt.Errorf("vote_commitment: %w", err)
 	}
-	// Slot 3: vote_comm_tree_root (Fp, from on-chain state)
-	if err := copyChunk(3*chunkSize, inputs.VoteCommTreeRoot); err != nil {
+	// Slot 5: vote_comm_tree_root (Fp, from on-chain state)
+	if err := copyChunk(5*chunkSize, inputs.VoteCommTreeRoot); err != nil {
 		return fmt.Errorf("vote_comm_tree_root: %w", err)
 	}
-	// Slot 4: anchor_height (uint64 LE, zero-padded to 32 bytes)
-	binary.LittleEndian.PutUint64(buf[4*chunkSize:], inputs.AnchorHeight)
-	// Slot 5: proposal_id (uint32 LE, zero-padded to 32 bytes)
-	binary.LittleEndian.PutUint32(buf[5*chunkSize:], inputs.ProposalId)
-	// Slot 6: voting_round_id (Fp)
-	if err := copyChunk(6*chunkSize, inputs.VoteRoundId); err != nil {
+	// Slot 6: anchor_height (uint64 LE, zero-padded to 32 bytes)
+	binary.LittleEndian.PutUint64(buf[6*chunkSize:], inputs.AnchorHeight)
+	// Slot 7: proposal_id (uint32 LE, zero-padded to 32 bytes)
+	binary.LittleEndian.PutUint32(buf[7*chunkSize:], inputs.ProposalId)
+	// Slot 8: voting_round_id (Fp)
+	if err := copyChunk(8*chunkSize, inputs.VoteRoundId); err != nil {
 		return fmt.Errorf("voting_round_id: %w", err)
 	}
-	// Slot 7: ea_pk (compressed Pallas point, from session)
-	if err := copyChunk(7*chunkSize, inputs.EaPk); err != nil {
+	// Slot 9: ea_pk (compressed Pallas point, from session)
+	if err := copyChunk(9*chunkSize, inputs.EaPk); err != nil {
 		return fmt.Errorf("ea_pk: %w", err)
 	}
 

@@ -77,8 +77,8 @@ func TestHalo2DelegationValidProof(t *testing.T) {
 		},
 		Proof:       proof,
 		VoteRoundId: testRoundID,
-		Sighash:     make([]byte, 32), // dummy sighash (mock sig verifier accepts anything)
 	}
+	msg.Sighash = types.ComputeDelegationSighash(msg) // must match message so ante passes; mock sig verifier accepts any sig
 
 	// Use toy-as-delegation verifier so the toy proof fixture passes; mock the
 	// signature verifier (RedPallas is not under test here).
@@ -117,8 +117,8 @@ func TestHalo2DelegationWrongInput(t *testing.T) {
 		},
 		Proof:       proof,
 		VoteRoundId: testRoundID,
-		Sighash:     make([]byte, 32), // dummy sighash (mock sig verifier accepts anything)
 	}
+	msg.Sighash = types.ComputeDelegationSighash(msg) // match message so we reach ZKP; mock sig accepts; ZKP will fail
 
 	opts := ante.ValidateOpts{
 		SigVerifier: redpallas.NewMockVerifier(),
