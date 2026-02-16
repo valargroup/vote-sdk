@@ -9,6 +9,8 @@ description = "Rust E2E API tests for Zally voting flow (replaces TypeScript sui
 zally-circuits = { path = "../sdk/circuits" }
 orchard = { path = "../orchard", features = ["delegation", "vote-proof", "share-reveal"] }
 vote-commitment-tree = { path = "../vote-commitment-tree" }
+vote-commitment-tree-client = { path = "../vote-commitment-tree-client" }
+librustvoting = { path = "../librustvoting" }
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }
@@ -37,3 +39,20 @@ incrementalmerkletree = "0.8"
 [dev-dependencies]
 rand = "0.8"
 rand_chacha = "0.3"
+
+# Patches needed for librustvoting's transitive deps to resolve to local paths
+# (same pattern as zcash-voting-ffi/rust/Cargo.toml)
+[patch.crates-io]
+zcash_keys = { path = "../librustzcash/zcash_keys" }
+zcash_protocol = { path = "../librustzcash/components/zcash_protocol" }
+zcash_address = { path = "../librustzcash/components/zcash_address" }
+zcash_encoding = { path = "../librustzcash/components/zcash_encoding" }
+zcash_transparent = { path = "../librustzcash/zcash_transparent" }
+zcash_client_sqlite = { path = "../librustzcash/zcash_client_sqlite" }
+zcash_client_backend = { path = "../librustzcash/zcash_client_backend" }
+zcash_primitives = { path = "../librustzcash/zcash_primitives" }
+pczt = { path = "../librustzcash/pczt" }
+orchard = { path = "../orchard" }
+
+# Keep this crate as a standalone workspace
+[workspace]

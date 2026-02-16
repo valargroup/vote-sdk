@@ -89,7 +89,7 @@ fn voting_flow_full_lifecycle() {
     let mut rng = ChaCha20Rng::seed_from_u64(42);
 
     let (delegation_bundle, session_fields, vote_proof_data) =
-        build_delegation_bundle_for_test().expect("build_delegation_bundle_for_test");
+        build_delegation_bundle_for_test(None).expect("build_delegation_bundle_for_test");
     log_step("Setup", "delegation bundle ready");
 
     let (body, created_fields, round_id) =

@@ -77,17 +77,16 @@ pub struct VoteProofDelegationData {
 /// The round must stay ACTIVE through all submissions, then expire for auto-tally.
 /// Returns payload for MsgDelegateVote, session fields for MsgCreateVotingSession,
 /// and private witness data for building ZKP #2 (vote proof).
-pub fn build_delegation_bundle_for_test() -> Result<
-    (
-        DelegationBundlePayload,
-        SetupRoundFields,
-        VoteProofDelegationData,
-    ),
-    Box<dyn std::error::Error + Send + Sync>,
-> {
+///
+/// If `sk_override` is Some, uses that SpendingKey (e.g. derived from a hotkey seed
+/// via ZIP-32, for testing the librustvoting path). Otherwise generates a random key.
+pub fn build_delegation_bundle_for_test(
+    sk_override: Option<SpendingKey>,
+) -> Result<(DelegationBundlePayload, SetupRoundFields, VoteProofDelegationData), Box<dyn std::error::Error + Send + Sync>>
+{
     let mut rng = OsRng;
 
-    let sk = SpendingKey::random(&mut rng);
+    let sk = sk_override.unwrap_or_else(|| SpendingKey::random(&mut rng));
     let fvk: FullViewingKey = (&sk).into();
     let output_recipient = fvk.address_at(1u32, Scope::External);
     let alpha = pallas::Scalar::random(&mut rng);

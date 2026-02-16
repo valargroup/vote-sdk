@@ -164,7 +164,7 @@ pub fn build_vote_commitment(
 }
 
 /// Derive an Orchard SpendingKey from hotkey seed bytes using ZIP-32.
-fn derive_spending_key(hotkey_seed: &[u8], network_id: u32) -> Result<SpendingKey, VotingError> {
+pub fn derive_spending_key(hotkey_seed: &[u8], network_id: u32) -> Result<SpendingKey, VotingError> {
     use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_protocol::consensus::{MAIN_NETWORK, TEST_NETWORK};
     use zip32::AccountId;
