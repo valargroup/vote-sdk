@@ -57,6 +57,8 @@ message MsgDelegateVote {
 message MsgDelegateVoteResponse {}
 
 // MsgCastVote corresponds to ZKP #2: create a vote commitment.
+// Condition 4 (Spend Authority) adds r_vpk = vsk.ak + [alpha_v]*G; the circuit
+// exposes r_vpk_x and r_vpk_y as public inputs, so the client must send them.
 message MsgCastVote {
   bytes  van_nullifier                = 1;
   bytes  vote_authority_note_new      = 2;
@@ -65,6 +67,8 @@ message MsgCastVote {
   bytes  proof                        = 5;
   bytes  vote_round_id                = 6;
   uint64 vote_comm_tree_anchor_height = 7;
+  bytes  r_vpk_x                      = 8;  // Pallas Fp: x-coordinate of randomized voting key (condition 4)
+  bytes  r_vpk_y                      = 9;  // Pallas Fp: y-coordinate of randomized voting key (condition 4)
 }
 
 message MsgCastVoteResponse {}

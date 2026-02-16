@@ -8,6 +8,7 @@
 pub mod builder;
 pub mod circuit;
 pub mod imt;
+pub mod imt_circuit;
 pub mod prove;
 
 pub use circuit::{Circuit, Instance, K};

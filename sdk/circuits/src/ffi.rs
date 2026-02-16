@@ -400,24 +400,20 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
 
 /// Verify a real vote proof circuit proof (ZKP #2).
 ///
-/// The public inputs are passed as a flat byte array of 8 × 32-byte
-/// chunks (256 bytes total), in the order:
-///   [van_nullifier, vote_authority_note_new, vote_commitment,
-///    vote_comm_tree_root, anchor_height_le, proposal_id_le,
-///    voting_round_id, ea_pk_compressed]
+/// The public inputs are passed as a flat byte array of 10 × 32-byte
+/// chunks (320 bytes total), in the order:
+///   [van_nullifier, r_vpk_x, r_vpk_y, vote_authority_note_new, vote_commitment,
+///    vote_comm_tree_root, anchor_height_le, proposal_id_le, voting_round_id, ea_pk_compressed]
 ///
-/// - Slots 0–3 and 6 are 32-byte Pallas Fp field element encodings.
-/// - Slot 4 is a uint64 LE value zero-padded to 32 bytes (anchor height).
-/// - Slot 5 is a uint32 LE value zero-padded to 32 bytes (proposal ID).
-/// - Slot 7 is a 32-byte compressed Pallas curve point. The FFI
-///   decompresses it into (ea_pk_x, ea_pk_y) for the circuit's 9 field
-///   elements.
+/// Condition 4 (Spend Authority) adds r_vpk = vsk.ak + [alpha_v]*G; r_vpk_x and r_vpk_y
+/// are public inputs at slots 1 and 2. Slot 9 (ea_pk) is decompressed to (ea_pk_x, ea_pk_y)
+/// for the circuit's 11 field elements.
 ///
 /// # Arguments
 /// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
 /// * `proof_len`         - Length of the proof byte slice.
-/// * `public_inputs_ptr` - Pointer to 256 bytes (8 × 32-byte chunks).
-/// * `public_inputs_len` - Length of the public inputs byte slice (must be 256).
+/// * `public_inputs_ptr` - Pointer to 320 bytes (10 × 32-byte chunks).
+/// * `public_inputs_len` - Length of the public inputs byte slice (must be 320).
 ///
 /// # Returns
 /// * `0`  on successful verification.
@@ -437,11 +433,14 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
     use group::Curve;
     use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
 
+    const NUM_CHUNKS: usize = 10;
+    const EXPECTED_LEN: usize = NUM_CHUNKS * 32;
+
     // Validate pointers and lengths.
     if proof_ptr.is_null() || public_inputs_ptr.is_null() {
         return -1;
     }
-    if public_inputs_len != 8 * 32 {
+    if public_inputs_len != EXPECTED_LEN {
         return -1;
     }
     if proof_len == 0 {
@@ -469,46 +468,56 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
         None => return -3,
     };
 
-    // Slot 1: vote_authority_note_new (Fp)
-    let vote_authority_note_new = match deserialize_fp(chunk(1)) {
+    // Slots 1–2: r_vpk_x, r_vpk_y (condition 4: Spend Authority)
+    let r_vpk_x = match deserialize_fp(chunk(1)) {
+        Some(f) => f,
+        None => return -3,
+    };
+    let r_vpk_y = match deserialize_fp(chunk(2)) {
         Some(f) => f,
         None => return -3,
     };
 
-    // Slot 2: vote_commitment (Fp)
-    let vote_commitment = match deserialize_fp(chunk(2)) {
+    // Slot 3: vote_authority_note_new (Fp)
+    let vote_authority_note_new = match deserialize_fp(chunk(3)) {
         Some(f) => f,
         None => return -3,
     };
 
-    // Slot 3: vote_comm_tree_root (Fp)
-    let vote_comm_tree_root = match deserialize_fp(chunk(3)) {
+    // Slot 4: vote_commitment (Fp)
+    let vote_commitment = match deserialize_fp(chunk(4)) {
         Some(f) => f,
         None => return -3,
     };
 
-    // Slot 4: anchor_height (uint64 LE zero-padded to 32 bytes → Fp)
-    let anchor_height_bytes = chunk(4);
+    // Slot 5: vote_comm_tree_root (Fp)
+    let vote_comm_tree_root = match deserialize_fp(chunk(5)) {
+        Some(f) => f,
+        None => return -3,
+    };
+
+    // Slot 6: anchor_height (uint64 LE zero-padded to 32 bytes → Fp)
+    let anchor_height_bytes = chunk(6);
     let anchor_height_u64 = u64::from_le_bytes(
         anchor_height_bytes[..8].try_into().unwrap()
     );
     let vote_comm_tree_anchor_height = pallas::Base::from(anchor_height_u64);
 
-    // Slot 5: proposal_id (uint32 LE zero-padded to 32 bytes → Fp)
-    let proposal_id_bytes = chunk(5);
+    // Slot 7: proposal_id (uint32 LE zero-padded to 32 bytes → Fp)
+    let proposal_id_bytes = chunk(7);
     let proposal_id_u32 = u32::from_le_bytes(
         proposal_id_bytes[..4].try_into().unwrap()
     );
     let proposal_id = pallas::Base::from(u64::from(proposal_id_u32));
 
-    // Slot 6: voting_round_id (Fp)
-    let voting_round_id = match deserialize_fp(chunk(6)) {
+    // Slot 8: voting_round_id (Fp)
+    let voting_round_id = match deserialize_fp(chunk(8)) {
         Some(f) => f,
         None => return -3,
     };
 
-    // Slot 7: ea_pk (compressed Pallas point) — decompress to (x, y).
-    let ea_pk_bytes = chunk(7);
+    // Slot 9: ea_pk (compressed Pallas point) — decompress to (x, y).
+    let ea_pk_bytes = chunk(9);
     let ea_pk_point: pallas::Point = match pallas::Point::from_bytes(&ea_pk_bytes).into() {
         Some(p) => p,
         None => return -3,
@@ -523,9 +532,11 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
     let ea_pk_x: pallas::Base = *ea_pk_coords.x();
     let ea_pk_y: pallas::Base = *ea_pk_coords.y();
 
-    // Build the 9-element public input vector (matches circuit instance order).
+    // Build the 11-element public input vector (matches circuit instance order).
     let public_inputs = vec![
         van_nullifier,
+        r_vpk_x,
+        r_vpk_y,
         vote_authority_note_new,
         vote_commitment,
         vote_comm_tree_root,
