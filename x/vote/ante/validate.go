@@ -194,6 +194,8 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k keeper.Keeper
 
 	if err := opts.ZKPVerifier.VerifyVoteCommitment(msg.Proof, zkp.VoteCommitmentInputs{
 		VanNullifier:         msg.VanNullifier,
+		RVpkX:                msg.RVpkX,
+		RVpkY:                msg.RVpkY,
 		VoteAuthorityNoteNew: msg.VoteAuthorityNoteNew,
 		VoteCommitment:       msg.VoteCommitment,
 		ProposalId:           msg.ProposalId,
