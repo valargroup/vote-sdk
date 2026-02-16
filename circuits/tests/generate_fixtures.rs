@@ -1,4 +1,4 @@
-//! Integration test that generates fixture files for Go tests.
+//! Integration test that generates fixture files for Go and TypeScript tests.
 //!
 //! Run with: cargo test --release -- generate_fixtures --ignored --nocapture
 //!
@@ -10,6 +10,9 @@
 //!   crypto/redpallas/testdata/valid_sighash.bin  - 32-byte sighash (message)
 //!   crypto/redpallas/testdata/valid_sig.bin      - 64-byte valid RedPallas signature
 //!   crypto/redpallas/testdata/wrong_sig.bin      - 64-byte signature over wrong message
+//!
+//! Delegation fixture (ZKP #1) is no longer generated here; the Rust E2E tests
+//! build the delegation bundle inline via e2e_tests::setup::build_delegation_bundle_for_test.
 
 use pasta_curves::group::ff::PrimeField;
 use std::fs;
@@ -17,12 +20,12 @@ use std::path::Path;
 
 use blake2b_simd::Params as Blake2bParams;
 use rand::thread_rng;
-use reddsa::{orchard, SigningKey, VerificationKey};
+use reddsa::{orchard as reddsa_orchard, SigningKey, VerificationKey};
 
 use zally_circuits::toy;
 use zally_circuits::redpallas as rp;
 
-/// Generate fixture files for Go tests.
+/// Generate fixture files for Go and TypeScript tests.
 ///
 /// Marked `#[ignore]` so it only runs when explicitly requested
 /// (e.g., `cargo test --release -- generate_fixtures --ignored`).
@@ -106,7 +109,7 @@ fn generate_redpallas_fixtures() {
     let mut rng = thread_rng();
 
     // Generate a signing key and derive the verification key (rk).
-    let sk = SigningKey::<orchard::SpendAuth>::new(&mut rng);
+    let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut rng);
     let vk = VerificationKey::from(&sk);
 
     // The sighash is Blake2b-256("ZALLY_SIGHASH_V0"). It must match the value

@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"io"
+	"time"
 
 	cmtcfg "github.com/cometbft/cometbft/config"
 	dbm "github.com/cosmos/cosmos-db"
@@ -29,8 +30,12 @@ import (
 )
 
 // initCometBFTConfig helps to override default CometBFT Config values.
+// TimeoutBroadcastTxCommit is set to 120s so the RPC server's WriteTimeout allows
+// long CheckTx (e.g. ZKP verification ~30–60s); default 10s would close the connection
+// before the response and the API would see EOF.
 func initCometBFTConfig() *cmtcfg.Config {
 	cfg := cmtcfg.DefaultConfig()
+	cfg.RPC.TimeoutBroadcastTxCommit = 120 * time.Second
 	return cfg
 }
 

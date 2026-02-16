@@ -30,6 +30,8 @@ type VoteCommitmentInputs struct {
 	ProposalId           uint32 // Which proposal this vote is for
 	VoteRoundId          []byte // The vote round
 	AnchorHeight         uint64 // Commitment tree anchor height used by the proof
+	VoteCommTreeRoot     []byte // 32-byte Pallas Fp: tree root at AnchorHeight (from on-chain state)
+	EaPk                 []byte // 32-byte compressed Pallas point: election authority public key (from session)
 }
 
 // VoteShareInputs contains the public inputs for ZKP #3 (reveal vote share).

@@ -20,10 +20,11 @@ func FpLE(v uint64) []byte {
 }
 
 // SampleProposals returns two sample proposals for test fixtures.
+// Proposal IDs must be 1-indexed per ValidateBasic (expected 1, 2, ...).
 func SampleProposals() []*types.Proposal {
 	return []*types.Proposal{
-		{Id: 0, Title: "Proposal A", Description: "First proposal"},
-		{Id: 1, Title: "Proposal B", Description: "Second proposal"},
+		{Id: 1, Title: "Proposal A", Description: "First proposal"},
+		{Id: 2, Title: "Proposal B", Description: "Second proposal"},
 	}
 }
 
@@ -112,7 +113,7 @@ func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *typ
 		VanNullifier:             MakeNullifier(nullifierSeed),
 		VoteAuthorityNoteNew:     FpLE(0xA0 + uint64(nullifierSeed)),
 		VoteCommitment:           FpLE(0xB0 + uint64(nullifierSeed)),
-		ProposalId:               0,
+		ProposalId:               1, // first proposal in SampleProposals()
 		Proof:                    []byte("mock-vote-commitment-proof"),
 		VoteRoundId:              roundID,
 		VoteCommTreeAnchorHeight: anchorHeight,
@@ -129,7 +130,7 @@ func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *
 	return &types.MsgRevealShare{
 		ShareNullifier:           MakeNullifier(nullifierSeed),
 		EncShare:                 encShare,
-		ProposalId:               0,
+		ProposalId:               1, // first proposal in SampleProposals()
 		VoteDecision:             1, // "yes"
 		Proof:                    []byte("mock-reveal-share-proof"),
 		VoteRoundId:              roundID,
@@ -155,14 +156,14 @@ func ValidRevealShareReal(roundID []byte, anchorHeight uint64, nullifierSeed byt
 
 // ValidSubmitTally returns a MsgSubmitTally for the given round ID and creator.
 // By default it includes a single entry matching the default ValidRevealShare
-// fixture (proposal_id=0, vote_decision=1, total_value=1000).
+// fixture (proposal_id=1, vote_decision=1, total_value=1000).
 func ValidSubmitTally(roundID []byte, creator string) *types.MsgSubmitTally {
 	return &types.MsgSubmitTally{
 		VoteRoundId: roundID,
 		Creator:     creator,
 		Entries: []*types.TallyEntry{
 			{
-				ProposalId:   0,
+				ProposalId:   1,
 				VoteDecision: 1,
 				TotalValue:   1000,
 			},

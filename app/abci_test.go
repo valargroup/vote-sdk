@@ -688,7 +688,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	tallyResults, err := s.app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
 	s.Require().NoError(err)
 	s.Require().Len(tallyResults, 1)
-	s.Require().Equal(uint32(0), tallyResults[0].ProposalId)
+	s.Require().Equal(uint32(1), tallyResults[0].ProposalId) // 1-indexed; ValidSubmitTally uses proposal 1
 	s.Require().Equal(uint32(1), tallyResults[0].VoteDecision)
 	// TotalValue in TallyEntry is the EA-claimed plaintext; no longer compared to the encrypted share.
 	s.Require().NotZero(tallyResults[0].TotalValue)
@@ -740,7 +740,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyNonProposerRejected() {
 	// Use a valid valoper address that is not the genesis validator.
 	fakeValoper := sdk.ValAddress(bytes.Repeat([]byte{0xFF}, 20)).String()
 	badTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, fakeValoper, []*types.TallyEntry{
-		{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
+		{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
 	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badTallyMsg))
 	s.Require().NotEqual(uint32(0), result.Code, "submit tally with non-proposer creator should fail")
@@ -748,7 +748,8 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyNonProposerRejected() {
 
 	// Submit tally with the block proposer's validator address should succeed.
 	goodTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, s.app.ValidatorOperAddr(), []*types.TallyEntry{
-		{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
+		{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
+
 	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(goodTallyMsg))
 	s.Require().Equal(uint32(0), result.Code, "submit tally from block proposer should succeed, got: %s", result.Log)

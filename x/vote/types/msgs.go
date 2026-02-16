@@ -44,8 +44,8 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 		if p.Title == "" {
 			return fmt.Errorf("%w: proposal %d title cannot be empty", ErrInvalidField, i)
 		}
-		if p.Id != uint32(i) {
-			return fmt.Errorf("%w: proposal id mismatch at index %d: expected %d, got %d", ErrInvalidField, i, i, p.Id)
+		if p.Id != uint32(i+1) {
+			return fmt.Errorf("%w: proposal id mismatch at index %d: expected %d, got %d", ErrInvalidField, i, i+1, p.Id)
 		}
 	}
 	return nil

@@ -127,8 +127,8 @@ func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 0, Title: "Proposal A", Description: "First"},
-			{Id: 1, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First"},
+			{Id: 2, Title: "Proposal B", Description: "Second"},
 		},
 	}
 }
@@ -156,7 +156,7 @@ func newValidMsgCastVote() *types.MsgCastVote {
 		VanNullifier:             bytes.Repeat([]byte{0x33}, 32),
 		VoteAuthorityNoteNew:     bytes.Repeat([]byte{0x44}, 32),
 		VoteCommitment:           bytes.Repeat([]byte{0x55}, 32),
-		ProposalId:               0,
+		ProposalId:               1,
 		Proof:                    bytes.Repeat([]byte{0x66}, 192),
 		VoteRoundId:              testRoundID,
 		VoteCommTreeAnchorHeight: 10,
@@ -167,7 +167,7 @@ func newValidMsgRevealShare() *types.MsgRevealShare {
 	return &types.MsgRevealShare{
 		ShareNullifier:           bytes.Repeat([]byte{0x77}, 32),
 		EncShare:                 bytes.Repeat([]byte{0x88}, 64),
-		ProposalId:               0,
+		ProposalId:               1,
 		VoteDecision:             1,
 		Proof:                    bytes.Repeat([]byte{0x88}, 192),
 		VoteRoundId:              testRoundID,
@@ -252,9 +252,11 @@ func (s *ValidateTestSuite) SetupTest() {
 // Suite helpers
 // ---------------------------------------------------------------------------
 
-// setupActiveRound stores a vote round that is still active (endTime > block time).
+// setupActiveRound stores a vote round that is still active (endTime > block time)
+// and a commitment tree root at height 10 so CastVote/RevealShare validation can resolve the anchor.
 func (s *ValidateTestSuite) setupActiveRound() {
 	s.setupRound(testRoundID, activeEndTime)
+	s.setupCommitmentRootAtHeight(10)
 }
 
 // setupExpiredRound stores a vote round that has already expired.
@@ -285,8 +287,8 @@ func (s *ValidateTestSuite) setupRoundWithStatus(roundID []byte, endTime uint64,
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 0, Title: "Proposal A", Description: "First"},
-			{Id: 1, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First"},
+			{Id: 2, Title: "Proposal B", Description: "Second"},
 		},
 	}
 	err := s.keeper.SetVoteRound(kvStore, round)
@@ -296,6 +298,15 @@ func (s *ValidateTestSuite) setupRoundWithStatus(roundID []byte, endTime uint64,
 // setupTallyingRound stores a VoteRound in TALLYING status with an expired end time.
 func (s *ValidateTestSuite) setupTallyingRound() {
 	s.setupRoundWithStatus(testRoundID, expiredEndTime, types.SessionStatus_SESSION_STATUS_TALLYING)
+}
+
+// setupCommitmentRootAtHeight stores a commitment tree root at the given height
+// so that CastVote/RevealShare messages with that anchor height pass the anchor check.
+func (s *ValidateTestSuite) setupCommitmentRootAtHeight(height uint64) {
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+	root := bytes.Repeat([]byte{0xCC}, 32)
+	err := s.keeper.SetCommitmentRootAtHeight(kvStore, height, root)
+	s.Require().NoError(err)
 }
 
 // recordNullifier marks a nullifier as already spent in the KV store,
@@ -904,7 +915,7 @@ func newValidMsgSubmitTally() *types.MsgSubmitTally {
 		VoteRoundId: testRoundID,
 		Creator:     testValidatorAddr(),
 		Entries: []*types.TallyEntry{
-			{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+			{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
 		},
 	}
 }
