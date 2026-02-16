@@ -2832,6 +2832,18 @@ mod tests {
         assert!(prover.verify().is_err());
     }
 
+    /// Condition 6 enforces run_sel = 1 (exactly one selector active) at the last bit row;
+    /// see CONDITION_6_RUN_SEL_FIX.md. This test runs a valid proof (one selector) and
+    /// verifies it passes; a zero-selector witness would be rejected by that gate.
+    #[test]
+    fn proposal_authority_condition6_run_sel_constraint() {
+        let (circuit, instance) =
+            make_test_data_with_authority_and_proposal(pallas::Base::from(3u64), 1);
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
     // ================================================================
     // Condition 6 (New VAN Integrity) tests
     // ================================================================
