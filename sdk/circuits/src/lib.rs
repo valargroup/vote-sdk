@@ -24,3 +24,12 @@ pub mod delegation {
     pub use orchard::delegation::builder;
     pub use orchard::delegation::imt;
 }
+
+/// Re-export the vote proof circuit's prove/verify API from the `orchard` crate.
+pub mod vote_proof {
+    pub use orchard::vote_proof::{
+        verify_vote_proof, verify_vote_proof_raw,
+        vote_proof_params, vote_proof_proving_key,
+        Circuit, Instance, K,
+    };
+}

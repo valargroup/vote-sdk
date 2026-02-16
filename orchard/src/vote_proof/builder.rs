@@ -102,6 +102,8 @@ fn random_valid_base_as_scalar(rng: &mut impl RngCore) -> pallas::Base {
 /// * `vote_comm_tree_path` - Merkle authentication path (24 siblings) for
 ///   the VAN in the vote commitment tree.
 /// * `vote_comm_tree_position` - Leaf position of the VAN in the tree.
+/// * `anchor_height` - The block height at which the tree was snapshotted
+///   (must match the on-chain commitment tree root).
 /// * `proposal_id` - Which proposal to vote on (0-indexed, must be < 16).
 /// * `vote_decision` - The voter's choice.
 /// * `ea_pk` - Election authority public key (Pallas affine point from session).
@@ -117,6 +119,7 @@ pub fn build_vote_proof_from_delegation(
     voting_round_id: pallas::Base,
     vote_comm_tree_path: [pallas::Base; VOTE_COMM_TREE_DEPTH],
     vote_comm_tree_position: u32,
+    anchor_height: u32,
     proposal_id: u64,
     vote_decision: u64,
     ea_pk: pallas::Affine,
@@ -135,6 +138,49 @@ pub fn build_vote_proof_from_delegation(
 
     let vpk_g_d_x = *vpk_g_d_affine.coordinates().unwrap().x();
     let vpk_pk_d_x = *vpk_pk_d_affine.coordinates().unwrap().x();
+
+    // ---- Fast key-chain consistency checks (instant, no circuit) ----
+    {
+        use super::circuit::spend_auth_g_affine;
+        use core::iter;
+        use group::ff::PrimeFieldBits;
+        use halo2_gadgets::sinsemilla::primitives::CommitDomain;
+        use crate::constants::{fixed_bases::COMMIT_IVK_PERSONALIZATION, L_ORCHARD_BASE};
+
+        // Check 1: [vsk] * SpendAuthG must match the ak from the FullViewingKey.
+        let ak_from_vsk = (pallas::Point::from(spend_auth_g_affine()) * vsk).to_affine();
+        let fvk_bytes = fvk.to_bytes();
+        let ak_from_fvk_bytes: [u8; 32] = fvk_bytes[0..32].try_into().unwrap();
+        let ak_from_fvk: pallas::Affine = {
+            let opt: Option<pallas::Point> = pallas::Point::from_bytes(&ak_from_fvk_bytes).into();
+            opt.expect("ak from fvk must be a valid point").to_affine()
+        };
+        assert_eq!(
+            ak_from_vsk, ak_from_fvk,
+            "extract_vsk bug: [vsk]*SpendAuthG != ak from FullViewingKey"
+        );
+
+        // Check 2: CommitIvk(ak_x, nk, rivk) must produce an ivk where [ivk]*g_d == pk_d.
+        let ak_x = *ak_from_vsk.coordinates().unwrap().x();
+        let domain = CommitDomain::new(COMMIT_IVK_PERSONALIZATION);
+        let ivk = domain
+            .short_commit(
+                iter::empty()
+                    .chain(ak_x.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
+                    .chain(vsk_nk.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE)),
+                &rivk_v,
+            )
+            .expect("CommitIvk must not produce bottom");
+        let ivk_scalar = super::circuit::base_to_scalar(ivk)
+            .expect("ivk must be convertible to scalar");
+        let pk_d_derived = (pallas::Point::from(vpk_g_d_affine) * ivk_scalar).to_affine();
+        assert_eq!(
+            pk_d_derived, vpk_pk_d_affine,
+            "CommitIvk chain mismatch: [ivk]*g_d != pk_d from address"
+        );
+
+        std::eprintln!("[BUILDER] key-chain consistency checks passed");
+    }
 
     // ---- Proposal authority ----
 
@@ -266,11 +312,7 @@ pub fn build_vote_proof_from_delegation(
 
     // ---- Build instance (public inputs) ----
 
-    let anchor_height_base = pallas::Base::from(u64::from(vote_comm_tree_position));
-    // Note: anchor_height is set to 0 here; the caller passes the real anchor
-    // height as a separate field in the message. The circuit's public input
-    // at offset 4 is the position-derived value — the e2e test will set
-    // the actual anchor height in the payload.
+    let anchor_height_base = pallas::Base::from(u64::from(anchor_height));
     let instance = Instance::from_parts(
         van_nullifier,
         vote_authority_note_new,
@@ -282,6 +324,28 @@ pub fn build_vote_proof_from_delegation(
         ea_pk_x,
         ea_pk_y,
     );
+
+    // ---- MockProver check ----
+
+    {
+        use halo2_proofs::dev::MockProver;
+        let mock_circuit = circuit.clone();
+        let prover = MockProver::run(
+            super::circuit::K,
+            &mock_circuit,
+            vec![instance.to_halo2_instance()],
+        )
+        .expect("MockProver::run should not fail");
+
+        if let Err(failures) = prover.verify() {
+            return Err(VoteProofBuildError::InvalidShares(format!(
+                "circuit constraints not satisfied: {} failure(s): {:?}",
+                failures.len(),
+                failures,
+            )));
+        }
+        std::eprintln!("[BUILDER] MockProver passed");
+    }
 
     // ---- Generate proof ----
 

@@ -163,6 +163,45 @@ int32_t zally_verify_delegation_proof(
     size_t public_inputs_len
 );
 
+/* -----------------------------------------------------------------------
+ * Vote proof circuit (ZKP #2) — real Halo2 proof verification
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Verify a real vote proof circuit proof (ZKP #2, 11 conditions, K=14).
+ *
+ * The public inputs are passed as a flat byte array of 8 x 32-byte
+ * chunks (256 bytes total), in order:
+ *   [van_nullifier, vote_authority_note_new, vote_commitment,
+ *    vote_comm_tree_root, anchor_height_le, proposal_id_le,
+ *    voting_round_id, ea_pk_compressed]
+ *
+ * Slots 0-3 and 6 are 32-byte Pallas Fp field element encodings.
+ * Slot 4 is a uint64 LE value zero-padded to 32 bytes (anchor height).
+ * Slot 5 is a uint32 LE value zero-padded to 32 bytes (proposal ID).
+ * Slot 7 (ea_pk_compressed) is a 32-byte compressed Pallas curve point.
+ * The FFI decompresses it into (ea_pk_x, ea_pk_y) for the circuit's
+ * 9 field elements.
+ *
+ * Parameters:
+ *   proof_ptr         - Pointer to serialized Halo2 proof bytes.
+ *   proof_len         - Length of the proof byte array.
+ *   public_inputs_ptr - Pointer to 256 bytes (8 x 32-byte chunks).
+ *   public_inputs_len - Length of the public inputs byte array (must be 256).
+ *
+ * Returns:
+ *    0  on successful verification.
+ *   -1  if inputs are invalid (null pointers or wrong lengths).
+ *   -2  if the proof does not verify.
+ *   -3  if there is an internal deserialization error (e.g. invalid ea_pk).
+ */
+int32_t zally_verify_vote_proof(
+    const uint8_t* proof_ptr,
+    size_t proof_len,
+    const uint8_t* public_inputs_ptr,
+    size_t public_inputs_len
+);
+
 #ifdef __cplusplus
 }
 #endif

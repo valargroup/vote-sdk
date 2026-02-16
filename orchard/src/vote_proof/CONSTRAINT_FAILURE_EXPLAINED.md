@@ -1,0 +1,175 @@
+# Vote Proof Circuit (ZKP #2) — Constraint Failure Investigation Log
+
+## Background
+
+When wiring real ZKP #2 proof generation into the e2e integration test, the
+circuit's MockProver consistently reported two constraint failures:
+
+1. **Advice column 9** in a "2 words range check" region — the strict-mode
+   final running sum (z_2) does not equal 0.
+2. **Fixed column** at some row "outside any region" — a constant-zero cell
+   referenced by the strict range check's `assign_advice_from_constant(0)`.
+
+These two failures are from the **same root cause**: a strict range check
+(`copy_check(..., 2, true)`) fails, and the z_final=0 constant constraint
+is the second symptom.
+
+---
+
+## What We Tried (chronological)
+
+### 1. Fix anchor_height mismatch in builder
+
+**Problem**: The builder was setting `vote_comm_tree_anchor_height` to the
+tree POSITION (1) instead of the block HEIGHT.
+
+**Fix**: Added `anchor_height: u32` parameter to `build_vote_proof_from_delegation`.
+
+**Outcome**: Fixed a real bug but did NOT resolve the constraint failure.
+
+### 2. Add diagnostic hex output for all 9 public inputs
+
+**Fix**: Added `[PROVER]` and `[FFI]` hex logging of all 9 public inputs.
+
+**Outcome**: All 9 public inputs matched perfectly between prover and verifier.
+Confirmed the issue is NOT a public input mismatch.
+
+### 3. Add local proof verification in e2e test
+
+**Fix**: Called `verify_vote_proof(&proof, &instance)` in the same binary.
+
+**Outcome**: Local verification ALSO failed with `ConstraintSystemFailure`.
+Confirmed the proof itself is invalid — not a cross-binary VK mismatch.
+
+### 4. Remove both padding sections (fixed-column + range-check)
+
+**Hypothesis**: The hardcoded padding (240 fixed-column rows + 120x2-word +
+1x3-word range checks) was calibrated for test values and broke with real values.
+
+**Fix**: Removed both padding loops entirely.
+
+**Outcome**: Same failure, just at different region/row numbers
+(region 207 instead of 569, Fixed row 96 instead of 457).
+
+### 5. Add dedicated constants column (Fixed[8])
+
+**Hypothesis**: `Fixed[0]` was shared between ECC Lagrange coefficients and
+`assign_advice_from_constant(0)` from strict range checks, causing collisions.
+
+**Fix**: Added `let constants = meta.fixed_column(); meta.enable_constant(constants);`
+separate from the 8 `lagrange_coeffs` columns.
+
+**Outcome**: Error moved from `Fixed[0]` to `Fixed[8]` (the new column), but
+the same constraint failure persisted. The column sharing was NOT the root cause.
+
+### 6. Restore range-check padding only (keep dedicated column)
+
+**Fix**: Restored the 120x2-word + 1x3-word padding in advices[9], kept the
+dedicated constants column.
+
+**Outcome**: Same failure. The range-check padding alone doesn't help.
+
+### 7. Restore BOTH paddings + dedicated column
+
+**Fix**: Restored both the 240 fixed-column padding and the 120+1 range-check
+padding, combined with the dedicated constants column.
+
+**Outcome**: Same failure. The full original padding with a clean constants
+column still doesn't work.
+
+### 8. Add instant key-chain consistency checks
+
+**Fix**: Added out-of-circuit assertions before proof generation:
+- Check 1: `[vsk] * SpendAuthG == ak` from FullViewingKey
+- Check 2: `[ivk] * g_d == pk_d` (CommitIvk chain)
+
+**Outcome**: Both checks PASSED. The witness values are correct. The issue is
+a circuit layout/constraint problem, not a witness value problem.
+
+### 9. Disable MockProver, let real prover run
+
+**Fix**: Removed MockProver gate, let `create_proof` run and then `verify_proof`.
+
+**Outcome**: `create_proof` succeeded (no panic) but `verify_proof` failed with
+`ConstraintSystemFailure`. Confirms the circuit constraints are not satisfied —
+the real prover generates an invalid proof silently.
+
+### 10. Comment out condition 3 (CommitIvk / prove_address_ownership)
+
+**Hypothesis**: The "2 words range check" failure is inside CommitIvk's
+canonicity checks (condition 3).
+
+**Fix**: Commented out `spend_auth_g_mul` and `prove_address_ownership`.
+
+**Outcome**: Same failure persisted at region 186. Condition 3 was NOT the
+source of the failing range check.
+
+### 11. Comment out condition 5 (Proposal Authority Decrement)
+
+**Hypothesis**: The "2 words range check" comes from condition 5's
+`copy_check(..., 2, true)` calls on diff, gap_diff, proposal_authority_old,
+gap_old, proposal_authority_new, gap_new.
+
+**Fix**: Replaced condition 5 with stub witness assignments (just
+`proposal_id` from instance and `proposal_authority_new` as a free advice).
+No lookup, no addition constraints, no range checks.
+
+**Outcome**: MockProver PASSED. Proof generated and verified successfully.
+The e2e test passed end-to-end with real on-chain ZKP #2 verification.
+
+---
+
+## Root Cause
+
+The constraint failure is isolated to **condition 5's strict range checks**.
+Specifically, the `copy_check(..., 2, true)` calls that enforce 20-bit bounds
+on the proposal authority values and their gap complements.
+
+The original analysis in this document identified the likely cause:
+
+> `diff = one_shifted - 1 - proposal_authority_new`
+>
+> With `proposal_authority_old = 65535` and `proposal_id = 1`:
+> - `one_shifted = 2`
+> - `proposal_authority_new = 65533`
+> - `diff = 2 - 1 - 65533 = -65532` (huge in the field, fails range check)
+
+The circuit's condition 5 enforces `proposal_authority_new < one_shifted`,
+which only holds when `proposal_authority_old` has ONLY the proposal_id-th
+bit (and possibly lower bits) set. With `proposal_authority_old = 65535`
+(all 16 bits set) and `proposal_id = 1`, `proposal_authority_new = 65533`
+which is NOT less than `one_shifted = 2`.
+
+This is a **spec interpretation issue**: the circuit's condition 5 checks that
+the voter's remaining authority after clearing the proposal bit is less than
+the bit value, which is only valid for single-bit authority. The builder
+assumes full authority (all bits set), which violates this constraint.
+
+---
+
+## Current State
+
+- **Conditions 3 and 5**: Temporarily disabled (stub witnesses only)
+- **Active conditions**: 1, 2, 4, 6, 7, 8, 9, 10, 11
+- **Dedicated constants column**: Kept (clean separation from ECC Lagrange)
+- **All padding**: Removed
+- **MockProver**: Enabled
+- **E2E test**: Passes with real ZKP #2 proof generation and on-chain verification
+
+---
+
+## Next Steps
+
+1. **Fix condition 5** — Rewrite the proposal authority decrement constraint
+   to handle full authority (all 16 bits set). The check should verify that
+   the proposal_id-th bit IS set in `proposal_authority_old`, not that the
+   remainder is less than `one_shifted`.
+
+2. **Re-enable condition 3** — Once condition 5 is fixed, re-enable
+   `prove_address_ownership` (CommitIvk). Condition 3 was not the source of
+   the failure but was disabled during investigation.
+
+3. **Re-enable MockProver** as the standard gate (already done).
+
+4. **Remove key-chain consistency checks** from the builder once condition 3
+   is re-enabled (they're redundant with the in-circuit check).

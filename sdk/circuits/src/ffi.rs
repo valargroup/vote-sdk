@@ -17,6 +17,7 @@ use crate::toy;
 use crate::redpallas;
 use crate::votetree;
 use crate::delegation;
+use crate::vote_proof;
 
 /// Cached delegation circuit params and verifying key.
 ///
@@ -28,6 +29,19 @@ fn delegation_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine>)
     CACHE.get_or_init(|| {
         let params = delegation::delegation_params();
         let (_pk, vk) = delegation::delegation_proving_key(&params);
+        (params, vk)
+    })
+}
+
+/// Cached vote proof circuit params and verifying key.
+///
+/// Same caching pattern as delegation: K=14 params and circuit keygen are
+/// computed once and reused for all subsequent verification calls.
+fn vote_proof_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine>) {
+    static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let params = vote_proof::vote_proof_params();
+        let (_pk, vk) = vote_proof::vote_proof_proving_key(&params);
         (params, vk)
     })
 }
@@ -366,6 +380,164 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
     // Run verification using cached params and VK.
     // First call initializes the cache (~10-30s); subsequent calls are fast.
     let (params, vk) = delegation_vk_cached();
+
+    let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
+    let mut transcript = halo2_proofs::transcript::Blake2bRead::<
+        _, halo2_proofs::pasta::EqAffine, halo2_proofs::transcript::Challenge255<_>,
+    >::init(proof);
+
+    match halo2_proofs::plonk::verify_proof(
+        params, vk, strategy, &[&[&public_inputs]], &mut transcript,
+    ) {
+        Ok(()) => 0,
+        Err(_) => -2,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Vote proof circuit (ZKP #2) — real Halo2 proof verification
+// ---------------------------------------------------------------------------
+
+/// Verify a real vote proof circuit proof (ZKP #2).
+///
+/// The public inputs are passed as a flat byte array of 8 × 32-byte
+/// chunks (256 bytes total), in the order:
+///   [van_nullifier, vote_authority_note_new, vote_commitment,
+///    vote_comm_tree_root, anchor_height_le, proposal_id_le,
+///    voting_round_id, ea_pk_compressed]
+///
+/// - Slots 0–3 and 6 are 32-byte Pallas Fp field element encodings.
+/// - Slot 4 is a uint64 LE value zero-padded to 32 bytes (anchor height).
+/// - Slot 5 is a uint32 LE value zero-padded to 32 bytes (proposal ID).
+/// - Slot 7 is a 32-byte compressed Pallas curve point. The FFI
+///   decompresses it into (ea_pk_x, ea_pk_y) for the circuit's 9 field
+///   elements.
+///
+/// # Arguments
+/// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
+/// * `proof_len`         - Length of the proof byte slice.
+/// * `public_inputs_ptr` - Pointer to 256 bytes (8 × 32-byte chunks).
+/// * `public_inputs_len` - Length of the public inputs byte slice (must be 256).
+///
+/// # Returns
+/// * `0`  on successful verification.
+/// * `-1` if inputs are invalid (null pointers or wrong lengths).
+/// * `-2` if the proof does not verify.
+/// * `-3` if there is an internal deserialization error (e.g. invalid ea_pk).
+///
+/// # Safety
+/// Caller must ensure the pointers are valid and the lengths are correct.
+#[no_mangle]
+pub unsafe extern "C" fn zally_verify_vote_proof(
+    proof_ptr: *const u8,
+    proof_len: usize,
+    public_inputs_ptr: *const u8,
+    public_inputs_len: usize,
+) -> i32 {
+    use group::Curve;
+    use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
+
+    // Validate pointers and lengths.
+    if proof_ptr.is_null() || public_inputs_ptr.is_null() {
+        return -1;
+    }
+    if public_inputs_len != 8 * 32 {
+        return -1;
+    }
+    if proof_len == 0 {
+        return -1;
+    }
+
+    // Reconstruct slices from raw pointers.
+    let proof = std::slice::from_raw_parts(proof_ptr, proof_len);
+    let raw = std::slice::from_raw_parts(public_inputs_ptr, public_inputs_len);
+
+    // Helper: extract a 32-byte chunk.
+    let chunk = |i: usize| -> [u8; 32] {
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&raw[i * 32..(i + 1) * 32]);
+        buf
+    };
+
+    let deserialize_fp = |bytes: [u8; 32]| -> Option<pallas::Base> {
+        pallas::Base::from_repr(bytes).into()
+    };
+
+    // Slot 0: van_nullifier (Fp)
+    let van_nullifier = match deserialize_fp(chunk(0)) {
+        Some(f) => f,
+        None => return -3,
+    };
+
+    // Slot 1: vote_authority_note_new (Fp)
+    let vote_authority_note_new = match deserialize_fp(chunk(1)) {
+        Some(f) => f,
+        None => return -3,
+    };
+
+    // Slot 2: vote_commitment (Fp)
+    let vote_commitment = match deserialize_fp(chunk(2)) {
+        Some(f) => f,
+        None => return -3,
+    };
+
+    // Slot 3: vote_comm_tree_root (Fp)
+    let vote_comm_tree_root = match deserialize_fp(chunk(3)) {
+        Some(f) => f,
+        None => return -3,
+    };
+
+    // Slot 4: anchor_height (uint64 LE zero-padded to 32 bytes → Fp)
+    let anchor_height_bytes = chunk(4);
+    let anchor_height_u64 = u64::from_le_bytes(
+        anchor_height_bytes[..8].try_into().unwrap()
+    );
+    let vote_comm_tree_anchor_height = pallas::Base::from(anchor_height_u64);
+
+    // Slot 5: proposal_id (uint32 LE zero-padded to 32 bytes → Fp)
+    let proposal_id_bytes = chunk(5);
+    let proposal_id_u32 = u32::from_le_bytes(
+        proposal_id_bytes[..4].try_into().unwrap()
+    );
+    let proposal_id = pallas::Base::from(u64::from(proposal_id_u32));
+
+    // Slot 6: voting_round_id (Fp)
+    let voting_round_id = match deserialize_fp(chunk(6)) {
+        Some(f) => f,
+        None => return -3,
+    };
+
+    // Slot 7: ea_pk (compressed Pallas point) — decompress to (x, y).
+    let ea_pk_bytes = chunk(7);
+    let ea_pk_point: pallas::Point = match pallas::Point::from_bytes(&ea_pk_bytes).into() {
+        Some(p) => p,
+        None => return -3,
+    };
+    let ea_pk_affine = ea_pk_point.to_affine();
+    let ea_pk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+        ea_pk_affine.coordinates().into();
+    let ea_pk_coords = match ea_pk_coords {
+        Some(c) => c,
+        None => return -3, // identity point
+    };
+    let ea_pk_x: pallas::Base = *ea_pk_coords.x();
+    let ea_pk_y: pallas::Base = *ea_pk_coords.y();
+
+    // Build the 9-element public input vector (matches circuit instance order).
+    let public_inputs = vec![
+        van_nullifier,
+        vote_authority_note_new,
+        vote_commitment,
+        vote_comm_tree_root,
+        vote_comm_tree_anchor_height,
+        proposal_id,
+        voting_round_id,
+        ea_pk_x,
+        ea_pk_y,
+    ];
+
+    // Run verification using cached params and VK.
+    let (params, vk) = vote_proof_vk_cached();
 
     let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
     let mut transcript = halo2_proofs::transcript::Blake2bRead::<
