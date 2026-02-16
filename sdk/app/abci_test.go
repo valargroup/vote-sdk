@@ -585,8 +585,10 @@ func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
 	s.Require().Equal(uint32(0), result.Code, "cast vote with valid proposal_id should succeed, got: %s", result.Log)
 
 	// CastVote with invalid proposal_id (5) should fail.
+	// Recompute sighash after changing ProposalId so ante passes and we hit proposal_id validation.
 	badCastVote := testutil.ValidCastVote(roundID, anchorHeight, 0x40)
 	badCastVote.ProposalId = 5
+	badCastVote.Sighash = types.ComputeCastVoteSighash(badCastVote)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badCastVote))
 	s.Require().NotEqual(uint32(0), result.Code, "cast vote with invalid proposal_id should fail")
 	s.Require().Contains(result.Log, "invalid proposal ID")
