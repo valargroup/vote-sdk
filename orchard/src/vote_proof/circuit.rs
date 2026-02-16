@@ -804,6 +804,23 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             },
         )?;
 
+        // Pad the fixed column so that (Fixed 0, row 240) is 0 (DOMAIN_VAN).
+        // This avoids a permutation conflict: the range-check column (advices[9])
+        // at row 240 is later padded to 0, and the fixed column at 240 must match.
+        for i in 0..240 {
+            layouter.assign_region(
+                || alloc::format!("layout pad constant {i}"),
+                |mut region| {
+                    region.assign_advice_from_constant(
+                        || "pad",
+                        config.advices[0],
+                        0,
+                        pallas::Base::zero(),
+                    )
+                },
+            )?;
+        }
+
         // Construct the ECC chip (used in conditions 3 and 10).
         let ecc_chip = config.ecc_chip();
 
@@ -1242,7 +1259,31 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // must be in [0, 2^16) per spec (16-bit bitmask). copy_check(·, 2, true)
         // only proves [0, 2^20). We add an upper bound by range-checking
         // (2^16 - 1 - value): that forces value <= 2^16 - 1.
+        //
+        // Layout padding: pad advices[9] so that row 240 holds 0, matching
+        // (Fixed 0, 240) = DOMAIN_VAN = 0 and avoiding permutation conflict
+        // when witness values (e.g. large authority, nonzero position) vary.
         // ---------------------------------------------------------------
+
+        let zero_cell = assign_free_advice(
+            layouter.namespace(|| "cond5 padding zero"),
+            config.advices[0],
+            Value::known(pallas::Base::zero()),
+        )?;
+        for i in 0..120 {
+            config.range_check_config().copy_check(
+                layouter.namespace(|| alloc::format!("cond5 padding rc 0 ({i})")),
+                zero_cell.clone(),
+                2,
+                true,
+            )?;
+        }
+        config.range_check_config().copy_check(
+            layouter.namespace(|| "cond5 padding rc 0 (3 words)"),
+            zero_cell,
+            3,
+            true,
+        )?;
 
         // Copy proposal_id from instance and assign one_shifted in the lookup row.
         let (proposal_id, _one_shifted_cell, proposal_authority_new) = {
@@ -2156,15 +2197,18 @@ mod tests {
     ///
     /// Computes `H(DOMAIN_VC, shares_hash, proposal_id, vote_decision)`
     /// and sets `circuit.vote_decision`. Returns the vote_commitment
-    /// for use in the Instance.
+    /// for use in the Instance. The `proposal_id` must match the
+    /// instance's proposal_id so the circuit's condition 11 (which
+    /// copies proposal_id from the instance) agrees with the instance.
     fn set_condition_11(
         circuit: &mut Circuit,
         shares_hash_val: pallas::Base,
+        proposal_id: u64,
     ) -> pallas::Base {
-        let proposal_id = pallas::Base::from(TEST_PROPOSAL_ID);
+        let proposal_id_base = pallas::Base::from(proposal_id);
         let vote_decision = pallas::Base::from(TEST_VOTE_DECISION);
         circuit.vote_decision = Value::known(vote_decision);
-        vote_commitment_hash(shares_hash_val, proposal_id, vote_decision)
+        vote_commitment_hash(shares_hash_val, proposal_id_base, vote_decision)
     }
 
     /// Build valid test data for all 11 conditions.
@@ -2277,7 +2321,7 @@ mod tests {
         circuit.ea_pk = Value::known(ea_pk_affine);
 
         // Condition 11: vote commitment from shares_hash + proposal + decision.
-        let vote_commitment = set_condition_11(&mut circuit, shares_hash_val);
+        let vote_commitment = set_condition_11(&mut circuit, shares_hash_val, proposal_id);
 
         let instance = Instance::from_parts(
             van_nullifier,
@@ -2361,7 +2405,7 @@ mod tests {
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
         circuit.share_randomness = randomness.map(Value::known);
         circuit.ea_pk = Value::known(ea_pk_affine);
-        let vc = set_condition_11(&mut circuit, shares_hash_val);
+        let vc = set_condition_11(&mut circuit, shares_hash_val, TEST_PROPOSAL_ID);
         instance.vote_commitment = vc;
         instance.proposal_id = pallas::Base::from(TEST_PROPOSAL_ID);
         instance.ea_pk_x = *ea_pk_affine.coordinates().unwrap().x();
@@ -2498,7 +2542,7 @@ mod tests {
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
         circuit.share_randomness = randomness.map(Value::known);
         circuit.ea_pk = Value::known(ea_pk_affine);
-        let vc = set_condition_11(&mut circuit, shares_hash_val);
+        let vc = set_condition_11(&mut circuit, shares_hash_val, proposal_id);
 
         let instance = Instance::from_parts(
             van_nullifier, vote_authority_note_new, vc,
@@ -2551,7 +2595,6 @@ mod tests {
 
     /// Proposal authority with only bit 0 set (value 1): vote on proposal 0, new = 0.
     #[test]
-    #[ignore] // TODO: permutation/layout conflict with current floor planner; spec logic is correct (see make_test_data, proposal_authority_zero_fails)
     fn proposal_authority_decrement_minimum_valid() {
         let (circuit, instance) =
             make_test_data_with_authority_and_proposal(pallas::Base::one(), 0);
@@ -2594,7 +2637,6 @@ mod tests {
     /// New VAN integrity with a large (but valid) 16-bit proposal authority.
     /// Authority 0xFFF8 has bits 3..15 set; voting on proposal 3 gives new = 0xFFF0.
     #[test]
-    #[ignore] // TODO: permutation/layout conflict with current floor planner
     fn new_van_integrity_large_authority() {
         let (circuit, instance) =
             make_test_data_with_authority(pallas::Base::from(0xFFF8u64));
@@ -2621,7 +2663,6 @@ mod tests {
 
     /// A VAN at a non-zero position in the tree should verify.
     #[test]
-    #[ignore] // TODO: permutation/layout conflict with current floor planner
     fn van_membership_nonzero_position() {
         let mut rng = OsRng;
 
@@ -2697,7 +2738,7 @@ mod tests {
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
         circuit.share_randomness = randomness.map(Value::known);
         circuit.ea_pk = Value::known(ea_pk_affine);
-        let vc = set_condition_11(&mut circuit, shares_hash_val);
+        let vc = set_condition_11(&mut circuit, shares_hash_val, proposal_id);
 
         let instance = Instance::from_parts(
             van_nullifier, vote_authority_note_new, vc,
@@ -2749,7 +2790,6 @@ mod tests {
 
     /// A share at the maximum valid value (2^30 - 1) should pass.
     #[test]
-    #[ignore] // TODO: permutation/layout conflict with current floor planner
     fn shares_range_max_valid() {
         let max_share = pallas::Base::from((1u64 << 30) - 1); // 1,073,741,823
         let total = max_share + max_share + max_share + max_share;
@@ -2808,7 +2848,7 @@ mod tests {
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
         circuit.share_randomness = randomness.map(Value::known);
         circuit.ea_pk = Value::known(ea_pk_affine);
-        let vc = set_condition_11(&mut circuit, shares_hash_val);
+        let vc = set_condition_11(&mut circuit, shares_hash_val, proposal_id);
 
         let instance = Instance::from_parts(
             van_nullifier, vote_authority_note_new, vc,
