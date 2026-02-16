@@ -104,13 +104,13 @@ canonicity checks (condition 3).
 **Outcome**: Same failure persisted at region 186. Condition 3 was NOT the
 source of the failing range check.
 
-### 11. Comment out condition 5 (Proposal Authority Decrement)
+### 11. Comment out condition 6 (Proposal Authority Decrement)
 
-**Hypothesis**: The "2 words range check" comes from condition 5's
+**Hypothesis**: The "2 words range check" comes from condition 6's
 `copy_check(..., 2, true)` calls on diff, gap_diff, proposal_authority_old,
 gap_old, proposal_authority_new, gap_new.
 
-**Fix**: Replaced condition 5 with stub witness assignments (just
+**Fix**: Replaced condition 6 with stub witness assignments (just
 `proposal_id` from instance and `proposal_authority_new` as a free advice).
 No lookup, no addition constraints, no range checks.
 
@@ -121,7 +121,7 @@ The e2e test passed end-to-end with real on-chain ZKP #2 verification.
 
 ## Root Cause
 
-The constraint failure is isolated to **condition 5's strict range checks**.
+The constraint failure is isolated to **condition 6's strict range checks**.
 Specifically, the `copy_check(..., 2, true)` calls that enforce 20-bit bounds
 on the proposal authority values and their gap complements.
 
@@ -134,13 +134,13 @@ The original analysis in this document identified the likely cause:
 > - `proposal_authority_new = 65533`
 > - `diff = 2 - 1 - 65533 = -65532` (huge in the field, fails range check)
 
-The circuit's condition 5 enforces `proposal_authority_new < one_shifted`,
+The circuit's condition 6 enforces `proposal_authority_new < one_shifted`,
 which only holds when `proposal_authority_old` has ONLY the proposal_id-th
 bit (and possibly lower bits) set. With `proposal_authority_old = 65535`
 (all 16 bits set) and `proposal_id = 1`, `proposal_authority_new = 65533`
 which is NOT less than `one_shifted = 2`.
 
-This is a **spec interpretation issue**: the circuit's condition 5 checks that
+This is a **spec interpretation issue**: the circuit's condition 6 checks that
 the voter's remaining authority after clearing the proposal bit is less than
 the bit value, which is only valid for single-bit authority. The builder
 assumes full authority (all bits set), which violates this constraint.
@@ -169,21 +169,18 @@ circuit rejects them.
 ## Current State
 
 - **Condition 3**: Re-enabled (spend authority via CommitIvk; `spend_auth_g_mul` and `prove_address_ownership`).
-- **Condition 5**: Temporarily disabled (stub witnesses only).
-- **Active conditions**: 1, 2, 3, 4, 6, 7, 8, 9, 10, 11
+- **Condition 6 (Proposal Authority Decrement)**: Re-enabled via bit-decomposition (no diff/gap range check). Step 1: decompose `proposal_authority_old` into 16 bits; Step 2: selector `sel_i = 1` iff `proposal_id == i`, exactly one active, `run_selected = sum(sel_i * b_i) = 1`; Step 3: `b_new_i = b_i*(1-sel_i)`, recompose to `proposal_authority_new`. The 16-bit decomposition proves values in `[0, 2^16)` without strict range-check chip calls.
+- **Active conditions**: 1, 2, 3, 4, 5 (VAN nullifier), 6 (proposal authority decrement), 7, 8, 9, 10, 11
 - **Dedicated constants column**: Kept (clean separation from ECC Lagrange)
 - **All padding**: Removed
 - **MockProver**: Enabled
-- **E2E test**: Passes with real ZKP #2 proof generation and on-chain verification
+- **E2E test**: Builder witnesses (full authority 65535, `proposal_authority_new = old - (1<<proposal_id)`) satisfy the new constraints.
 
 ---
 
 ## Next Steps
 
-1. **Fix condition 5** — Rewrite the proposal authority decrement constraint
-   to handle full authority (all 16 bits set). The check should verify that
-   the proposal_id-th bit IS set in `proposal_authority_old`, not that the
-   remainder is less than `one_shifted`.
+1. **Fix condition 6** — Done. Re-implemented via bit decomposition (selected bit = 1, clear and recompose); supports full authority (65535).
 
 2. **Re-enable condition 3** — Done. Condition 3 (`prove_address_ownership` / CommitIvk) has been re-enabled; it was not the source of the failure.
 

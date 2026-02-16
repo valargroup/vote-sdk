@@ -8,7 +8,7 @@
 //! - **Condition 1**: VAN Membership (Poseidon Merkle path, `constrain_instance`).
 //! - **Condition 2**: VAN Integrity (Poseidon hash).
 //! - **Condition 4**: VAN Nullifier Integrity (nested Poseidon, `constrain_instance`).
-//! - **Condition 5**: Proposal Authority Decrement (AddChip + range check).
+//! - **Condition 6**: Proposal Authority Decrement (bit decomposition).
 //! - **Condition 6**: New VAN Integrity (Poseidon hash, `constrain_instance`).
 //! - **Condition 7**: Shares Sum Correctness (AddChip, `constrain_equal`).
 //! - **Condition 8**: Shares Range (LookupRangeCheck, `[0, 2^30)`).

@@ -51,6 +51,7 @@
 
 use alloc::vec::Vec;
 
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::{floor_planner, AssignedCell, Layouter, Value},
     plonk::{
@@ -339,7 +340,7 @@ pub struct Config {
     /// Uses advices[0..5]: pos_bit, current, sibling, left, right.
     /// Identical to the delegation circuit's `q_imt_swap` gate.
     q_merkle_swap: Selector,
-    /// Selector for condition 6 (Proposal Authority Decrement) row.
+    /// Selector for condition 6 (Proposal Authority Decrement) lookup row.
     /// When 1, the (proposal_id, one_shifted) lookup is enforced; when 0,
     /// the lookup input is (0, 1) so it passes without constraining.
     q_cond5: Selector,
@@ -348,6 +349,12 @@ pub struct Config {
     table_proposal_id: TableColumn,
     /// Lookup table column for one_shifted = 2^proposal_id.
     table_one_shifted: TableColumn,
+    /// Selector for condition 6 init row (index=0, two_pow_i=1).
+    q_cond5_init: Selector,
+    /// Selector for condition 6 bit rows 2..17 (recurrence).
+    q_cond5_bits: Selector,
+    /// Selector for condition 6 last bit row: run_selected = 1.
+    q_cond5_selected_one: Selector,
 }
 
 impl Config {
@@ -678,7 +685,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             )
         });
 
-        // Condition 5: (proposal_id, one_shifted) lookup table for
+        // Condition 6: (proposal_id, one_shifted) lookup table for
         // one_shifted = 2^proposal_id. When q_cond5 = 0 the lookup input
         // is (0, 1) so it passes; when q_cond5 = 1 we enforce (proposal_id,
         // one_shifted) in {(0,1), (1,2), ..., (15, 32768)}.
@@ -700,6 +707,94 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             ]
         });
 
+        // Condition 6 (Proposal Authority Decrement) bit-decomposition gates.
+        // Row 1: init (index=0, two_pow_i=1, running sums from first bit).
+        let q_cond5_init = meta.selector();
+        // Rows 2..17: recurrence (index++, two_pow_i *= 2, running sums).
+        let q_cond5_bits = meta.selector();
+
+        let zero = Expression::Constant(pallas::Base::zero());
+        let one_expr = Expression::Constant(pallas::Base::one());
+        let two_expr = Expression::Constant(pallas::Base::from(2u64));
+
+        meta.create_gate("cond6 init: index=0, two_pow_i=1, running sums", |meta| {
+            let q = meta.query_selector(q_cond5_init);
+            let proposal_id = meta.query_advice(advices[0], Rotation::cur());
+            let b_i = meta.query_advice(advices[1], Rotation::cur());
+            let sel_i = meta.query_advice(advices[2], Rotation::cur());
+            let b_new_i = meta.query_advice(advices[3], Rotation::cur());
+            let run_sel = meta.query_advice(advices[4], Rotation::cur());
+            let run_selected = meta.query_advice(advices[5], Rotation::cur());
+            let run_old = meta.query_advice(advices[6], Rotation::cur());
+            let run_new = meta.query_advice(advices[7], Rotation::cur());
+            let two_pow_i = meta.query_advice(advices[8], Rotation::cur());
+            let index = meta.query_advice(advices[9], Rotation::cur());
+            let run_sel_prev = meta.query_advice(advices[4], Rotation::prev());
+            let run_selected_prev = meta.query_advice(advices[5], Rotation::prev());
+            let run_old_prev = meta.query_advice(advices[6], Rotation::prev());
+            let run_new_prev = meta.query_advice(advices[7], Rotation::prev());
+
+            Constraints::with_selector(
+                q,
+                [
+                    ("two_pow_i = 1", two_pow_i.clone() - one_expr.clone()),
+                    ("index = 0", index.clone() - zero.clone()),
+                    ("run_sel", run_sel - run_sel_prev - sel_i.clone()),
+                    ("run_selected", run_selected - run_selected_prev - sel_i.clone() * b_i.clone()),
+                    ("run_old", run_old - run_old_prev - b_i.clone() * two_pow_i.clone()),
+                    ("run_new", run_new - run_new_prev - b_new_i.clone() * two_pow_i),
+                    ("(proposal_id - index)*sel_i", (proposal_id - index) * sel_i.clone()),
+                    ("b_new_i = b_i*(1-sel_i)", b_new_i - b_i.clone() + b_i.clone() * sel_i.clone()),
+                    ("bool b_i", bool_check(b_i)),
+                    ("bool sel_i", bool_check(sel_i)),
+                ],
+            )
+        });
+
+        meta.create_gate("cond6 bits: index++, two_pow_i*=2, running sums", |meta| {
+            let q = meta.query_selector(q_cond5_bits);
+            let proposal_id = meta.query_advice(advices[0], Rotation::cur());
+            let b_i = meta.query_advice(advices[1], Rotation::cur());
+            let sel_i = meta.query_advice(advices[2], Rotation::cur());
+            let b_new_i = meta.query_advice(advices[3], Rotation::cur());
+            let run_sel = meta.query_advice(advices[4], Rotation::cur());
+            let run_selected = meta.query_advice(advices[5], Rotation::cur());
+            let run_old = meta.query_advice(advices[6], Rotation::cur());
+            let run_new = meta.query_advice(advices[7], Rotation::cur());
+            let two_pow_i = meta.query_advice(advices[8], Rotation::cur());
+            let index = meta.query_advice(advices[9], Rotation::cur());
+            let two_pow_i_prev = meta.query_advice(advices[8], Rotation::prev());
+            let index_prev = meta.query_advice(advices[9], Rotation::prev());
+            let run_sel_prev = meta.query_advice(advices[4], Rotation::prev());
+            let run_selected_prev = meta.query_advice(advices[5], Rotation::prev());
+            let run_old_prev = meta.query_advice(advices[6], Rotation::prev());
+            let run_new_prev = meta.query_advice(advices[7], Rotation::prev());
+
+            Constraints::with_selector(
+                q,
+                [
+                    ("two_pow_i = 2*prev", two_pow_i.clone() - two_expr.clone() * two_pow_i_prev),
+                    ("index = prev+1", index.clone() - index_prev - one_expr.clone()),
+                    ("run_sel", run_sel - run_sel_prev - sel_i.clone()),
+                    ("run_selected", run_selected - run_selected_prev - sel_i.clone() * b_i.clone()),
+                    ("run_old", run_old - run_old_prev - b_i.clone() * two_pow_i.clone()),
+                    ("run_new", run_new - run_new_prev - b_new_i.clone() * two_pow_i),
+                    ("(proposal_id - index)*sel_i", (proposal_id - index) * sel_i.clone()),
+                    ("b_new_i = b_i*(1-sel_i)", b_new_i - b_i.clone() + b_i.clone() * sel_i.clone()),
+                    ("bool b_i", bool_check(b_i)),
+                    ("bool sel_i", bool_check(sel_i)),
+                ],
+            )
+        });
+
+        // At the last bit row (row 16): run_selected must equal 1 (selected bit was set).
+        let q_cond5_selected_one = meta.selector();
+        meta.create_gate("cond6 run_selected = 1", |meta| {
+            let q = meta.query_selector(q_cond5_selected_one);
+            let run_selected = meta.query_advice(advices[5], Rotation::cur());
+            Constraints::with_selector(q, [("run_selected = 1", run_selected - one_expr)])
+        });
+
         Config {
             primary,
             advices,
@@ -713,6 +808,9 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             q_cond5,
             table_proposal_id,
             table_one_shifted,
+            q_cond5_init,
+            q_cond5_bits,
+            q_cond5_selected_one,
         }
     }
 
@@ -867,7 +965,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         let total_note_value_cond6 = total_note_value.clone();
         let total_note_value_cond7 = total_note_value.clone();
         let voting_round_id_cond6 = voting_round_id.clone();
-        let _proposal_authority_old_cond5 = proposal_authority_old.clone();
+        let _proposal_authority_old_cond6 = proposal_authority_old.clone();
         let gov_comm_rand_cond6 = gov_comm_rand.clone();
         let vsk_nk_cond4 = vsk_nk.clone();
 
@@ -887,7 +985,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             vpk_pk_d,
             total_note_value,
             voting_round_id,
-            proposal_authority_old,
+            proposal_authority_old.clone(),
             gov_comm_rand,
         )?;
 
@@ -1183,38 +1281,241 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         layouter.constrain_instance(van_nullifier.cell(), config.primary, VAN_NULLIFIER)?;
 
         // ---------------------------------------------------------------
-        // Condition 6: Proposal Authority Decrement — TEMPORARILY DISABLED.
+        // Condition 6: Proposal Authority Decrement (bit decomposition).
         //
-        // TODO: Re-enable the lookup, addition constraints, and range checks
-        // once the strict range-check layout conflict is resolved.
-        // Only the witness assignments are kept so that condition 7 (which
-        // needs proposal_authority_new) and condition 12 (which needs
-        // proposal_id) can still reference them.
+        // Step 1: Decompose proposal_authority_old into 16 bits b_i (boolean).
+        // Step 2: Selector sel_i = 1 iff proposal_id == i; exactly one active;
+        //         selected bit = sum(sel_i * b_i) = 1 (voter has authority).
+        // Step 3: b_new_i = b_i*(1-sel_i); recompose to proposal_authority_new.
+        // No diff/gap range check; decomposition proves [0, 2^16).
         // ---------------------------------------------------------------
 
-        let proposal_id = layouter.assign_region(
-            || "copy proposal_id from instance (cond5 stub)",
+        let (proposal_id, proposal_authority_new, run_old_final, run_new_final) =
+            layouter.assign_region(
+                || "cond6 proposal authority decrement",
+                |mut region| {
+                    let proposal_authority_old_val = self.proposal_authority_old;
+
+                    // Row 0: (proposal_id, one_shifted) for lookup; init running sums to 0.
+                    config.q_cond5.enable(&mut region, 0)?;
+                    let proposal_id_cell = region.assign_advice_from_instance(
+                        || "proposal_id",
+                        config.primary,
+                        PROPOSAL_ID,
+                        config.advices[0],
+                        0,
+                    )?;
+                    let _one_shifted_cell = region.assign_advice(
+                        || "one_shifted",
+                        config.advices[1],
+                        0,
+                        || self.one_shifted,
+                    )?;
+                    region.assign_advice_from_constant(
+                        || "run_sel init",
+                        config.advices[4],
+                        0,
+                        pallas::Base::zero(),
+                    )?;
+                    region.assign_advice_from_constant(
+                        || "run_selected init",
+                        config.advices[5],
+                        0,
+                        pallas::Base::zero(),
+                    )?;
+                    region.assign_advice_from_constant(
+                        || "run_old init",
+                        config.advices[6],
+                        0,
+                        pallas::Base::zero(),
+                    )?;
+                    region.assign_advice_from_constant(
+                        || "run_new init",
+                        config.advices[7],
+                        0,
+                        pallas::Base::zero(),
+                    )?;
+
+                    // Rows 1..17: bits, selectors, running sums.
+                    let zero_val = Value::known(pallas::Base::zero());
+                    let mut run_old_prev = zero_val;
+                    let mut run_new_prev = zero_val;
+                    let mut run_sel_prev = zero_val;
+                    let mut run_selected_prev = zero_val;
+
+                    for i in 0..MAX_PROPOSAL_ID {
+                        let row = 1 + i;
+                        let proposal_id_base = proposal_id_cell.value().copied();
+                        let b_i_val = proposal_authority_old_val.map(|b| {
+                            let r = b.to_repr();
+                            let arr = r.as_ref();
+                            let low = u64::from_le_bytes(arr[0..8].try_into().unwrap()) & 0xFFFF;
+                            let bit = (low >> i) & 1;
+                            pallas::Base::from(bit)
+                        });
+                        let sel_i_val = proposal_id_base.map(|pid| {
+                            let r = pid.to_repr();
+                            let arr = r.as_ref();
+                            let pid_u64 = u64::from_le_bytes(arr[0..8].try_into().unwrap());
+                            pallas::Base::from(if pid_u64 == i as u64 { 1u64 } else { 0 })
+                        });
+                        let b_new_i_val = b_i_val.zip(sel_i_val)
+                            .map(|(b, s)| b - b * s);
+                        let two_pow_i_val = Value::known(pallas::Base::from(1u64 << i));
+                        run_sel_prev = run_sel_prev.zip(sel_i_val).map(|(r, s)| r + s);
+                        run_selected_prev = run_selected_prev
+                            .zip(sel_i_val)
+                            .zip(b_i_val)
+                            .map(|((r, s), b)| r + s * b);
+                        run_old_prev = run_old_prev
+                            .zip(b_i_val)
+                            .zip(two_pow_i_val)
+                            .map(|((r, b), t)| r + b * t);
+                        run_new_prev = run_new_prev
+                            .zip(b_new_i_val)
+                            .zip(two_pow_i_val)
+                            .map(|((r, b), t)| r + b * t);
+
+                        region.assign_advice(
+                            || format!("proposal_id copy {}", i),
+                            config.advices[0],
+                            row,
+                            || proposal_id_cell.value().copied(),
+                        )?;
+                        region.assign_advice(
+                            || format!("b_{}", i),
+                            config.advices[1],
+                            row,
+                            || b_i_val,
+                        )?;
+                        region.assign_advice(
+                            || format!("sel_{}", i),
+                            config.advices[2],
+                            row,
+                            || sel_i_val,
+                        )?;
+                        region.assign_advice(
+                            || format!("b_new_{}", i),
+                            config.advices[3],
+                            row,
+                            || b_new_i_val,
+                        )?;
+                        region.assign_advice(
+                            || format!("run_sel {}", i),
+                            config.advices[4],
+                            row,
+                            || run_sel_prev,
+                        )?;
+                        region.assign_advice(
+                            || format!("run_selected {}", i),
+                            config.advices[5],
+                            row,
+                            || run_selected_prev,
+                        )?;
+                        region.assign_advice(
+                            || format!("run_old {}", i),
+                            config.advices[6],
+                            row,
+                            || run_old_prev,
+                        )?;
+                        region.assign_advice(
+                            || format!("run_new {}", i),
+                            config.advices[7],
+                            row,
+                            || run_new_prev,
+                        )?;
+                        region.assign_advice(
+                            || format!("two_pow_i {}", i),
+                            config.advices[8],
+                            row,
+                            || two_pow_i_val,
+                        )?;
+                        region.assign_advice(
+                            || format!("index {}", i),
+                            config.advices[9],
+                            row,
+                            || Value::known(pallas::Base::from(i as u64)),
+                        )?;
+
+                        if i == 0 {
+                            config.q_cond5_init.enable(&mut region, row)?;
+                        } else {
+                            config.q_cond5_bits.enable(&mut region, row)?;
+                        }
+                        if i == MAX_PROPOSAL_ID - 1 {
+                            config.q_cond5_selected_one.enable(&mut region, row)?;
+                        }
+                    }
+
+                    // proposal_authority_new = recomposed value (same as old - one_shifted when spec is satisfied).
+                    let proposal_authority_new_val = self.proposal_authority_old
+                        .zip(self.one_shifted)
+                        .map(|(old, shift)| old - shift);
+                    let proposal_authority_new_cell = region.assign_advice(
+                        || "proposal_authority_new",
+                        config.advices[0],
+                        17,
+                        || proposal_authority_new_val,
+                    )?;
+                    let run_old_cell = region.assign_advice(
+                        || "run_old final",
+                        config.advices[6],
+                        17,
+                        || run_old_prev,
+                    )?;
+                    let run_new_cell = region.assign_advice(
+                        || "run_new final",
+                        config.advices[7],
+                        17,
+                        || run_new_prev,
+                    )?;
+
+                    Ok((
+                        proposal_id_cell,
+                        proposal_authority_new_cell,
+                        run_old_cell,
+                        run_new_cell,
+                    ))
+                },
+            )?;
+
+        // Constrain recomposed run_old == proposal_authority_old, run_new == proposal_authority_new.
+        layouter.assign_region(
+            || "cond6 authority equality",
             |mut region| {
-                region.assign_advice_from_instance(
-                    || "proposal_id",
-                    config.primary,
-                    PROPOSAL_ID,
+                let a = proposal_authority_old.copy_advice(
+                    || "copy proposal_authority_old",
+                    &mut region,
                     config.advices[0],
                     0,
-                )
+                )?;
+                let b = run_old_final.copy_advice(
+                    || "copy run_old",
+                    &mut region,
+                    config.advices[1],
+                    0,
+                )?;
+                region.constrain_equal(a.cell(), b.cell())
             },
         )?;
-
-        let proposal_authority_new = {
-            let val = self.proposal_authority_old
-                .zip(self.one_shifted)
-                .map(|(old, shift)| old - shift);
-            assign_free_advice(
-                layouter.namespace(|| "witness proposal_authority_new (cond5 stub)"),
-                config.advices[0],
-                val,
-            )?
-        };
+        layouter.assign_region(
+            || "cond6 new authority equality",
+            |mut region| {
+                let a = proposal_authority_new.copy_advice(
+                    || "copy proposal_authority_new",
+                    &mut region,
+                    config.advices[0],
+                    0,
+                )?;
+                let b = run_new_final.copy_advice(
+                    || "copy run_new",
+                    &mut region,
+                    config.advices[1],
+                    0,
+                )?;
+                region.constrain_equal(a.cell(), b.cell())
+            },
+        )?;
 
         // ---------------------------------------------------------------
         // Condition 7: New VAN Integrity (ZKP 1–compatible two-layer hash).
@@ -2464,7 +2765,7 @@ mod tests {
     }
 
     // ================================================================
-    // Condition 5 (Proposal Authority Decrement) tests
+    // Condition 6 (Proposal Authority Decrement) tests
     // ================================================================
 
     /// Proposal authority with only bit 0 set (value 1): vote on proposal 0, new = 0.
@@ -2477,20 +2778,51 @@ mod tests {
         assert_eq!(prover.verify(), Ok(()));
     }
 
-    /// With proposal_authority_old = 0, the circuit still verifies because
-    /// Condition 6 (Proposal Authority Decrement) is temporarily disabled:
-    /// only witness assignment is done; the lookup and range checks that
-    /// would reject diff = 0 - 2^proposal_id are not applied.
-    /// When Condition 6 is re-enabled, this test should be updated to
-    /// assert!(prover.verify().is_err()).
+    /// With proposal_authority_old = 0, the selected bit is 0 so the
+    /// "run_selected = 1" constraint (selected bit was set) fails.
     #[test]
     fn proposal_authority_zero_fails() {
         let (circuit, instance) = make_test_data_with_authority(pallas::Base::zero());
 
         let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
 
-        // Currently passes: condition 6 constraints are disabled (see synthesize).
+        assert!(prover.verify().is_err());
+    }
+
+    /// Full authority (65535), proposal_id 1 → new = 65533 (e2e scenario).
+    #[test]
+    fn proposal_authority_full_authority_proposal_1_passes() {
+        const MAX_PROPOSAL_AUTHORITY: u64 = 65535;
+        let (circuit, instance) = make_test_data_with_authority_and_proposal(
+            pallas::Base::from(MAX_PROPOSAL_AUTHORITY),
+            1,
+        );
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
         assert_eq!(prover.verify(), Ok(()));
+    }
+
+    /// Wrong vote_authority_note_new (e.g. not clearing the bit) fails condition 6.
+    #[test]
+    fn proposal_authority_wrong_new_fails() {
+        let (circuit, mut instance) =
+            make_test_data_with_authority_and_proposal(pallas::Base::from(65535u64), 1);
+
+        instance.vote_authority_note_new = pallas::Base::random(&mut OsRng);
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+        assert!(prover.verify().is_err());
+    }
+
+    /// proposal_authority_old has bit 2 set only (4); proposal_id 0 → selected bit is 0, so
+    /// "run_selected = 1" fails.
+    #[test]
+    fn proposal_authority_bit_not_set_fails() {
+        let (circuit, instance) =
+            make_test_data_with_authority_and_proposal(pallas::Base::from(4u64), 0);
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+        assert!(prover.verify().is_err());
     }
 
     // ================================================================

@@ -199,21 +199,15 @@ Purpose: ensure the voter has authority for the voted proposal and correctly cle
 
 **Spec (Gov Steps V1 §3.5 Step 2, ZKP #2 Condition 6):** `proposal_authority` is a 16-bit bitmask; one vote consumes the bit for the chosen proposal: `proposal_authority_new = proposal_authority_old - (1 << proposal_id)`, and the `proposal_id`-th bit of `proposal_authority_old` must be 1.
 
-```
-one_shifted = 2^proposal_id     (via lookup table)
-proposal_authority_new = proposal_authority_old - one_shifted
-bit proposal_id of proposal_authority_old is 1
-proposal_authority_old, proposal_authority_new in [0, 2^16)
-```
+**Implementation (bit decomposition):**
 
-Where:
-- **proposal_id**: which proposal is being voted on (public input at offset 5). Loaded from the instance column and used in the lookup.
-- **proposal_authority_old**: the remaining proposal authority bitmask from the old VAN (16-bit). Reused from condition 2's witness cell via cell equality.
-- **one_shifted**: witness equal to `2^proposal_id`. Constrained by a lookup table: table rows are `(i, 2^i)` for `i = 0..16`; when the condition is active the circuit looks up `(proposal_id, one_shifted)` so `one_shifted` must equal `2^proposal_id`.
-- **proposal_authority_new**: constrained via `AddChip`: `proposal_authority_new + one_shifted == proposal_authority_old`. A "bit was set" check is enforced by range-checking a derived value so that the cleared authority is non-negative and consistent.
-- **Range checks**: `diff`, `proposal_authority_old`, and `proposal_authority_new` are enforced to be in `[0, 2^16)` per spec. The chip's `copy_check(·, 2, true)` only proves `[0, 2^20)` (2 × 10-bit limbs); we add an upper bound by range-checking `(2^16 - 1 - value)`, which is in `[0, 2^20)` iff `value <= 65535`. If the `proposal_id`-th bit of `proposal_authority_old` is 0, the subtraction would underflow and fail the range check.
+1. **Decompose** `proposal_authority_old` into 16 bits `b_i` (each boolean), with recomposition `sum(b_i * 2^i) = proposal_authority_old`.
+2. **Selector** `sel_i = 1` iff `proposal_id == i` (exactly one active); constrain `run_selected = sum(sel_i * b_i) = 1` so the selected bit is set (voter has authority).
+3. **Clear and recompose**: `b_new_i = b_i*(1-sel_i)`; then `sum(b_new_i * 2^i) = proposal_authority_new`. Constrain this to equal the witnessed `proposal_authority_new` (and thus the new VAN in condition 7).
 
-**Structure:** Lookup table of 17 rows `(i, 2^i)` for `i = 0..=16`; one region to assign `proposal_id` and `one_shifted` and perform the lookup; one region for `proposal_authority_new + one_shifted = proposal_authority_old`, the bit-set check (via `diff` and 16-bit range check), and 16-bit range checks for all three values (20-bit limb decomposition plus gap-based upper bound).
+No diff/gap or strict range-check chip; the 16-bit decomposition implies `proposal_authority_old` and `proposal_authority_new` are in `[0, 2^16)`. The existing `(proposal_id, one_shifted)` lookup remains to constrain `proposal_id in [0, 15]` and `one_shifted = 2^proposal_id`; the builder still provides `one_shifted` and `proposal_authority_new = old - one_shifted`.
+
+**Structure:** One region: row 0 has `proposal_id`, `one_shifted` (lookup); rows 1..17 have bits, selectors, running sums; gates for init (row 1), recurrence (rows 2..17), and `run_selected = 1` at the last bit row. Equality constraints bind recomposed `run_old` to `proposal_authority_old` and `run_new` to `proposal_authority_new`.
 
 **Constructions:** Lookup table (`table_proposal_id`, `table_one_shifted`), `AddChip`, `LookupRangeCheckConfig` (10-bit words; 16-bit range enforced via limb checks and `(2^16 - 1) - value` gap check).
 
