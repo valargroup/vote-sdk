@@ -40,12 +40,13 @@ type VoteCommitmentInputs struct {
 
 // VoteShareInputs contains the public inputs for ZKP #3 (reveal vote share).
 type VoteShareInputs struct {
-	ShareNullifier []byte // Share nullifier (prevents double-reveal)
-	EncShare       []byte // 64 bytes: ElGamal ciphertext (encrypted vote share)
-	ProposalId     uint32 // Which proposal
-	VoteDecision   uint32 // The vote choice
-	VoteRoundId    []byte // The vote round
-	AnchorHeight   uint64 // Commitment tree anchor height used by the proof
+	ShareNullifier  []byte // Share nullifier (prevents double-reveal)
+	EncShare        []byte // 64 bytes: ElGamal ciphertext (encrypted vote share)
+	ProposalId      uint32 // Which proposal
+	VoteDecision    uint32 // The vote choice
+	VoteRoundId     []byte // The vote round
+	AnchorHeight    uint64 // Commitment tree anchor height used by the proof
+	VoteCommTreeRoot []byte // Vote commitment tree root at AnchorHeight (32 bytes)
 }
 
 // Verifier defines the interface for zero-knowledge proof verification.

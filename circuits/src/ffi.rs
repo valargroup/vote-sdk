@@ -8,16 +8,34 @@
 
 use std::sync::OnceLock;
 
-use pasta_curves::group::ff::PrimeField;
-use halo2_proofs::pasta::{Fp, EqAffine};
+use halo2_proofs::pasta::{EqAffine, Fp};
 use halo2_proofs::plonk::VerifyingKey;
 use halo2_proofs::poly::commitment::Params;
+use pasta_curves::group::ff::{FromUniformBytes, PrimeField};
 
-use crate::toy;
-use crate::redpallas;
-use crate::votetree;
 use crate::delegation;
+use crate::redpallas;
+use crate::share_reveal;
+use crate::toy;
 use crate::vote_proof;
+use crate::votetree;
+
+/// Convert a 32-byte hash (e.g. Blake2b-256 output) to a canonical Pallas Fp
+/// element via wide reduction.
+///
+/// Raw 32-byte hashes are frequently non-canonical (the Pallas modulus is
+/// ~2^254, so ~75% of random 32-byte values exceed it). This function
+/// zero-extends the input to 64 bytes and calls `from_uniform_bytes`, which
+/// performs a modular reduction that always yields a valid, canonical Fp.
+///
+/// Used for `voting_round_id` (Blake2b-256 derived) in ZKP #1, #2, and #3.
+///
+/// TODO: Once we move vote round to a field element we can delete this.
+fn hash_bytes_to_fp(bytes: [u8; 32]) -> pasta_curves::pallas::Base {
+    let mut wide = [0u8; 64];
+    wide[..32].copy_from_slice(&bytes);
+    pasta_curves::pallas::Base::from_uniform_bytes(&wide)
+}
 
 /// Cached delegation circuit params and verifying key.
 ///
@@ -334,9 +352,8 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
     };
 
     // Deserialize each chunk as a Pallas Fp, except rk which is a compressed point.
-    let deserialize_fp = |bytes: [u8; 32]| -> Option<pallas::Base> {
-        pallas::Base::from_repr(bytes).into()
-    };
+    let deserialize_fp =
+        |bytes: [u8; 32]| -> Option<pallas::Base> { pallas::Base::from_repr(bytes).into() };
 
     // Slot 0: nf_signed
     let nf_signed = match deserialize_fp(chunk(0)) {
@@ -361,20 +378,58 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
     let rk_y: pallas::Base = *rk_coords.y();
 
     // Slots 2–10: the remaining 9 field elements.
-    let cmx_new = match deserialize_fp(chunk(2)) { Some(f) => f, None => return -3 };
-    let van_comm = match deserialize_fp(chunk(3)) { Some(f) => f, None => return -3 };
-    let vote_round_id = match deserialize_fp(chunk(4)) { Some(f) => f, None => return -3 };
-    let nc_root = match deserialize_fp(chunk(5)) { Some(f) => f, None => return -3 };
-    let nf_imt_root = match deserialize_fp(chunk(6)) { Some(f) => f, None => return -3 };
-    let gov_null_1 = match deserialize_fp(chunk(7)) { Some(f) => f, None => return -3 };
-    let gov_null_2 = match deserialize_fp(chunk(8)) { Some(f) => f, None => return -3 };
-    let gov_null_3 = match deserialize_fp(chunk(9)) { Some(f) => f, None => return -3 };
-    let gov_null_4 = match deserialize_fp(chunk(10)) { Some(f) => f, None => return -3 };
+    let cmx_new = match deserialize_fp(chunk(2)) {
+        Some(f) => f,
+        None => return -3,
+    };
+    let van_comm = match deserialize_fp(chunk(3)) {
+        Some(f) => f,
+        None => return -3,
+    };
+    // vote_round_id is a Blake2b-256 hash and may be non-canonical as a raw
+    // Fp encoding. Use wide reduction to get a canonical field element.
+    //
+    // TODO: Once we move vote round to a field element we can use deserialize_fp directly.
+    let vote_round_id = hash_bytes_to_fp(chunk(4));
+    let nc_root = match deserialize_fp(chunk(5)) {
+        Some(f) => f,
+        None => return -3,
+    };
+    let nf_imt_root = match deserialize_fp(chunk(6)) {
+        Some(f) => f,
+        None => return -3,
+    };
+    let gov_null_1 = match deserialize_fp(chunk(7)) {
+        Some(f) => f,
+        None => return -3,
+    };
+    let gov_null_2 = match deserialize_fp(chunk(8)) {
+        Some(f) => f,
+        None => return -3,
+    };
+    let gov_null_3 = match deserialize_fp(chunk(9)) {
+        Some(f) => f,
+        None => return -3,
+    };
+    let gov_null_4 = match deserialize_fp(chunk(10)) {
+        Some(f) => f,
+        None => return -3,
+    };
 
     // Build the 12-element public input vector (matches circuit instance order).
     let public_inputs = vec![
-        nf_signed, rk_x, rk_y, cmx_new, van_comm, vote_round_id,
-        nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4,
+        nf_signed,
+        rk_x,
+        rk_y,
+        cmx_new,
+        van_comm,
+        vote_round_id,
+        nc_root,
+        nf_imt_root,
+        gov_null_1,
+        gov_null_2,
+        gov_null_3,
+        gov_null_4,
     ];
 
     // Run verification using cached params and VK.
@@ -383,11 +438,17 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
 
     let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
     let mut transcript = halo2_proofs::transcript::Blake2bRead::<
-        _, halo2_proofs::pasta::EqAffine, halo2_proofs::transcript::Challenge255<_>,
+        _,
+        halo2_proofs::pasta::EqAffine,
+        halo2_proofs::transcript::Challenge255<_>,
     >::init(proof);
 
     match halo2_proofs::plonk::verify_proof(
-        params, vk, strategy, &[&[&public_inputs]], &mut transcript,
+        params,
+        vk,
+        strategy,
+        &[&[&public_inputs]],
+        &mut transcript,
     ) {
         Ok(()) => 0,
         Err(_) => -2,
@@ -458,9 +519,8 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
         buf
     };
 
-    let deserialize_fp = |bytes: [u8; 32]| -> Option<pallas::Base> {
-        pallas::Base::from_repr(bytes).into()
-    };
+    let deserialize_fp =
+        |bytes: [u8; 32]| -> Option<pallas::Base> { pallas::Base::from_repr(bytes).into() };
 
     // Slot 0: van_nullifier (Fp)
     let van_nullifier = match deserialize_fp(chunk(0)) {
@@ -498,23 +558,18 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
 
     // Slot 6: anchor_height (uint64 LE zero-padded to 32 bytes → Fp)
     let anchor_height_bytes = chunk(6);
-    let anchor_height_u64 = u64::from_le_bytes(
-        anchor_height_bytes[..8].try_into().unwrap()
-    );
+    let anchor_height_u64 = u64::from_le_bytes(anchor_height_bytes[..8].try_into().unwrap());
     let vote_comm_tree_anchor_height = pallas::Base::from(anchor_height_u64);
 
     // Slot 7: proposal_id (uint32 LE zero-padded to 32 bytes → Fp)
     let proposal_id_bytes = chunk(7);
-    let proposal_id_u32 = u32::from_le_bytes(
-        proposal_id_bytes[..4].try_into().unwrap()
-    );
+    let proposal_id_u32 = u32::from_le_bytes(proposal_id_bytes[..4].try_into().unwrap());
     let proposal_id = pallas::Base::from(u64::from(proposal_id_u32));
 
-    // Slot 8: voting_round_id (Fp)
-    let voting_round_id = match deserialize_fp(chunk(8)) {
-        Some(f) => f,
-        None => return -3,
-    };
+    // Slot 8: voting_round_id (Blake2b-256 hash — use wide reduction like ZKP #1 and #3)
+    //
+    // TODO: Once we move vote round to a field element we can use deserialize_fp directly.
+    let voting_round_id = hash_bytes_to_fp(chunk(8));
 
     // Slot 9: ea_pk (compressed Pallas point) — decompress to (x, y).
     let ea_pk_bytes = chunk(9);
@@ -552,11 +607,131 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
 
     let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
     let mut transcript = halo2_proofs::transcript::Blake2bRead::<
-        _, halo2_proofs::pasta::EqAffine, halo2_proofs::transcript::Challenge255<_>,
+        _,
+        halo2_proofs::pasta::EqAffine,
+        halo2_proofs::transcript::Challenge255<_>,
     >::init(proof);
 
     match halo2_proofs::plonk::verify_proof(
-        params, vk, strategy, &[&[&public_inputs]], &mut transcript,
+        params,
+        vk,
+        strategy,
+        &[&[&public_inputs]],
+        &mut transcript,
+    ) {
+        Ok(()) => 0,
+        Err(_) => -2,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Share Reveal circuit (ZKP #3) — real Halo2 proof verification
+// ---------------------------------------------------------------------------
+
+/// Cached share reveal circuit params and verifying key.
+///
+/// Same caching pattern as delegation_vk_cached().
+fn share_reveal_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine>) {
+    static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let params = share_reveal::share_reveal_params();
+        let (_pk, vk) = share_reveal::share_reveal_proving_key(&params);
+        (params, vk)
+    })
+}
+
+/// Verify a real share reveal circuit proof (ZKP #3).
+///
+/// The public inputs are passed as a flat byte array of 7 × 32-byte
+/// chunks (224 bytes total), in order:
+///   [share_nullifier, enc_share_c1_x, enc_share_c2_x, proposal_id,
+///    vote_decision, vote_comm_tree_root, voting_round_id]
+///
+/// All values are plain Fp elements (32-byte LE canonical encoding).
+/// No compressed point decompression needed (unlike delegation's rk).
+///
+/// # Arguments
+/// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
+/// * `proof_len`         - Length of the proof byte slice.
+/// * `public_inputs_ptr` - Pointer to 224 bytes (7 × 32-byte chunks).
+/// * `public_inputs_len` - Length of the public inputs byte slice (must be 224).
+///
+/// # Returns
+/// * `0`  on successful verification.
+/// * `-1` if inputs are invalid (null pointers or wrong lengths).
+/// * `-2` if the proof does not verify.
+/// * `-3` if there is an internal deserialization error.
+///
+/// # Safety
+/// Caller must ensure the pointers are valid and the lengths are correct.
+#[no_mangle]
+pub unsafe extern "C" fn zally_verify_share_reveal_proof(
+    proof_ptr: *const u8,
+    proof_len: usize,
+    public_inputs_ptr: *const u8,
+    public_inputs_len: usize,
+) -> i32 {
+    use pasta_curves::pallas;
+
+    const NUM_PUBLIC_INPUTS: usize = 7;
+    const EXPECTED_BYTES: usize = NUM_PUBLIC_INPUTS * 32;
+
+    // Validate pointers and lengths.
+    if proof_ptr.is_null() || public_inputs_ptr.is_null() {
+        return -1;
+    }
+    if public_inputs_len != EXPECTED_BYTES {
+        return -1;
+    }
+    if proof_len == 0 {
+        return -1;
+    }
+
+    // Reconstruct slices from raw pointers.
+    let proof = std::slice::from_raw_parts(proof_ptr, proof_len);
+    let raw = std::slice::from_raw_parts(public_inputs_ptr, public_inputs_len);
+
+    // Helper: extract a 32-byte chunk by index.
+    let chunk = |i: usize| -> [u8; 32] {
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&raw[i * 32..(i + 1) * 32]);
+        buf
+    };
+    let deserialize_fp =
+        |bytes: [u8; 32]| -> Option<pallas::Base> { pallas::Base::from_repr(bytes).into() };
+
+    // Deserialize each 32-byte chunk as a Pallas Fp element.
+    // Slot 6 (voting_round_id) uses wide reduction because it is a
+    // Blake2b-256 hash that may be non-canonical as a raw Fp encoding.
+    let mut public_inputs: Vec<pallas::Base> = Vec::with_capacity(NUM_PUBLIC_INPUTS);
+    for i in 0..NUM_PUBLIC_INPUTS {
+        if i == 6 {
+            // voting_round_id: wide reduction for Blake2b-256 output.
+            public_inputs.push(hash_bytes_to_fp(chunk(i)));
+        } else {
+            match deserialize_fp(chunk(i)) {
+                Some(f) => public_inputs.push(f),
+                None => return -3,
+            }
+        }
+    }
+
+    // Run verification using cached params and VK.
+    let (params, vk) = share_reveal_vk_cached();
+
+    let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
+    let mut transcript = halo2_proofs::transcript::Blake2bRead::<
+        _,
+        halo2_proofs::pasta::EqAffine,
+        halo2_proofs::transcript::Challenge255<_>,
+    >::init(proof);
+
+    match halo2_proofs::plonk::verify_proof(
+        params,
+        vk,
+        strategy,
+        &[&[&public_inputs]],
+        &mut transcript,
     ) {
         Ok(()) => 0,
         Err(_) => -2,

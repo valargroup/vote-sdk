@@ -124,7 +124,7 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, o
 		return verifyCastVote(ctx, m, k, opts)
 
 	case *types.MsgRevealShare:
-		return verifyRevealShare(m, opts)
+		return verifyRevealShare(ctx, m, k, opts)
 
 	case *types.MsgSubmitTally:
 		// No cryptographic verification needed for tally submission.
@@ -228,14 +228,27 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k keeper.Keeper
 }
 
 // verifyRevealShare verifies ZKP #3 for a MsgRevealShare.
-func verifyRevealShare(msg *types.MsgRevealShare, opts ValidateOpts) error {
+// It looks up the vote commitment tree root at the anchor height specified
+// in the message and includes it as a public input to the ZKP verifier.
+func verifyRevealShare(ctx context.Context, msg *types.MsgRevealShare, k keeper.Keeper, opts ValidateOpts) error {
+	// Look up the commitment tree root at the specified anchor height.
+	kvStore := k.OpenKVStore(ctx)
+	treeRoot, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteCommTreeAnchorHeight)
+	if err != nil {
+		return fmt.Errorf("failed to look up commitment tree root: %w", err)
+	}
+	if treeRoot == nil {
+		return fmt.Errorf("%w: no commitment tree root at height %d", types.ErrInvalidProof, msg.VoteCommTreeAnchorHeight)
+	}
+
 	if err := opts.ZKPVerifier.VerifyVoteShare(msg.Proof, zkp.VoteShareInputs{
-		ShareNullifier: msg.ShareNullifier,
-		EncShare:       msg.EncShare,
-		ProposalId:     msg.ProposalId,
-		VoteDecision:   msg.VoteDecision,
-		VoteRoundId:    msg.VoteRoundId,
-		AnchorHeight:   msg.VoteCommTreeAnchorHeight,
+		ShareNullifier:   msg.ShareNullifier,
+		EncShare:         msg.EncShare,
+		ProposalId:       msg.ProposalId,
+		VoteDecision:     msg.VoteDecision,
+		VoteRoundId:      msg.VoteRoundId,
+		AnchorHeight:     msg.VoteCommTreeAnchorHeight,
+		VoteCommTreeRoot: treeRoot,
 	}); err != nil {
 		return fmt.Errorf("%w: vote share: %v", types.ErrInvalidProof, err)
 	}

@@ -241,3 +241,82 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 		return fmt.Errorf("vote proof halo2: unknown error code %d", rc)
 	}
 }
+
+// VerifyShareRevealProof verifies a real share reveal circuit proof (ZKP #3)
+// using the Rust verifier via CGo.
+//
+// The inputs are serialized as 7 × 32-byte chunks (224 bytes):
+//
+//	[share_nullifier, enc_share_c1_x, enc_share_c2_x, proposal_id,
+//	 vote_decision, vote_comm_tree_root, voting_round_id]
+//
+// All values are plain Fp elements (32-byte LE canonical encoding).
+// enc_share is split into C1 and C2 x-coordinates (sign bit cleared).
+//
+// Returns nil on success, or an error describing the failure.
+func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
+	if len(proof) == 0 {
+		return fmt.Errorf("share reveal proof is empty")
+	}
+
+	const chunkSize = 32
+	const numChunks = 7
+	buf := make([]byte, numChunks*chunkSize)
+
+	// Slot 0: share_nullifier
+	if len(inputs.ShareNullifier) != chunkSize {
+		return fmt.Errorf("share_nullifier must be %d bytes, got %d", chunkSize, len(inputs.ShareNullifier))
+	}
+	copy(buf[0:32], inputs.ShareNullifier)
+
+	// Slots 1-2: enc_share_c1_x, enc_share_c2_x
+	// EncShare is 64 bytes: C1 (32 bytes) || C2 (32 bytes), as compressed Pallas points.
+	// Extract x-coordinates by clearing the sign bit (bit 7 of byte 31).
+	if len(inputs.EncShare) != 64 {
+		return fmt.Errorf("enc_share must be 64 bytes, got %d", len(inputs.EncShare))
+	}
+	copy(buf[32:64], inputs.EncShare[:32])
+	buf[63] &= 0x7F // clear sign bit for c1_x
+	copy(buf[64:96], inputs.EncShare[32:64])
+	buf[95] &= 0x7F // clear sign bit for c2_x
+
+	// Slot 3: proposal_id (encode as 32-byte LE Fp)
+	binary.LittleEndian.PutUint64(buf[96:104], uint64(inputs.ProposalId))
+	// bytes 104..128 already zero
+
+	// Slot 4: vote_decision (encode as 32-byte LE Fp)
+	binary.LittleEndian.PutUint64(buf[128:136], uint64(inputs.VoteDecision))
+	// bytes 136..160 already zero
+
+	// Slot 5: vote_comm_tree_root
+	if len(inputs.VoteCommTreeRoot) != chunkSize {
+		return fmt.Errorf("vote_comm_tree_root must be %d bytes, got %d", chunkSize, len(inputs.VoteCommTreeRoot))
+	}
+	copy(buf[160:192], inputs.VoteCommTreeRoot)
+
+	// Slot 6: voting_round_id
+	if len(inputs.VoteRoundId) != chunkSize {
+		return fmt.Errorf("voting_round_id must be %d bytes, got %d", chunkSize, len(inputs.VoteRoundId))
+	}
+	copy(buf[192:224], inputs.VoteRoundId)
+
+	rc := C.zally_verify_share_reveal_proof(
+		(*C.uint8_t)(unsafe.Pointer(&proof[0])),
+		C.size_t(len(proof)),
+		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
+		C.size_t(len(buf)),
+	)
+
+	switch rc {
+	case 0:
+		return nil
+	case -1:
+		return fmt.Errorf("share reveal halo2: invalid inputs")
+	case -2:
+		return fmt.Errorf("share reveal halo2: proof verification failed")
+	case -3:
+		return fmt.Errorf("share reveal halo2: internal deserialization error")
+	default:
+		return fmt.Errorf("share reveal halo2: unknown error code %d", rc)
+	}
+}

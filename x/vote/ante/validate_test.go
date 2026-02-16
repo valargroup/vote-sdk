@@ -326,6 +326,15 @@ func (s *ValidateTestSuite) recordNullifier(nfType types.NullifierType, roundID,
 	s.Require().NoError(err)
 }
 
+// seedCommitmentRoot stores a dummy commitment tree root at the given height.
+// MsgRevealShare tests need this because verifyRevealShare looks up the root.
+func (s *ValidateTestSuite) seedCommitmentRoot(height uint64) {
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+	root := bytes.Repeat([]byte{0xAB}, 32)
+	err := s.keeper.SetCommitmentRootAtHeight(kvStore, height, root)
+	s.Require().NoError(err)
+}
+
 // ---------------------------------------------------------------------------
 // Tests: MsgCreateVotingSession
 // ---------------------------------------------------------------------------
@@ -839,10 +848,13 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 		errContains string
 	}{
 		{
-			name:  "valid reveal share with active round and mock verifiers",
-			msg:   func() types.VoteMessage { return newValidMsgRevealShare() },
-			opts:  mockOpts(),
-			setup: func() { s.setupActiveRound() },
+			name: "valid reveal share with active round and mock verifiers",
+			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
+			opts: mockOpts(),
+			setup: func() {
+				s.setupActiveRound()
+				s.seedCommitmentRoot(10) // anchor height used by newValidMsgRevealShare
+			},
 		},
 		// --- ValidateBasic failures ---
 		{
@@ -932,10 +944,13 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 		},
 		// --- ZKP verification failure ---
 		{
-			name:        "ZKP reveal share proof fails",
-			msg:         func() types.VoteMessage { return newValidMsgRevealShare() },
-			opts:        failZKPOpts(),
-			setup:       func() { s.setupActiveRound() },
+			name: "ZKP reveal share proof fails",
+			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
+			opts: failZKPOpts(),
+			setup: func() {
+				s.setupActiveRound()
+				s.seedCommitmentRoot(10)
+			},
 			expectErr:   true,
 			errContains: "invalid zero-knowledge proof",
 		},

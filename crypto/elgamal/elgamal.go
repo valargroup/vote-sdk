@@ -24,23 +24,33 @@ type Ciphertext struct {
 	C2 curvey.Point // v * G + r * pk
 }
 
-// PallasGenerator returns the standard Pallas generator (-1, 2) as specified
-// in the Pasta paper. The curvey library's built-in Generator() returns (1, sqrt(6))
-// which is a valid group generator but differs from the standard. We use the
-// standard generator so that ElGamal operations are compatible with Rust's
-// pasta_curves crate (and the Zcash ecosystem).
+// PallasGenerator returns the SpendAuthG generator from the Orchard protocol,
+// used as the base point G for all El Gamal operations in this package.
+//
+// Why SpendAuthG? The ZKP #2 vote proof circuit already loads
+// SpendAuthG as a fixed-base with precomputed lookup tables (for spend-auth
+// re-randomization in Condition 4). Reusing it for El Gamal encryption
+// (Condition 11) avoids adding a second fixed-base table, which would
+// significantly increase circuit size and proving time. The Go side must
+// use the same point so that ciphertexts produced here verify against the
+// in-circuit El Gamal constraints.
+//
+// Safety: reusing SpendAuthG for both spend authorization (secret ask) and
+// El Gamal (secret ea_sk) is safe because these are independent secrets
+// held by different parties — no cross-protocol discrete log relation exists.
+//
+// SpendAuthG is defined in orchard::constants::fixed_bases::spend_auth_g.
 func PallasGenerator() curvey.Point {
-	// (-1, 2) compressed: x = p-1 in LE, y = 2 is even so sign bit = 0.
-	// The MSB of byte[31] is 0x40 because p-1 has bit 254 set.
-	standardGenBytes := []byte{
-		0x00, 0x00, 0x00, 0x00, 0xed, 0x30, 0x2d, 0x99,
-		0x1b, 0xf9, 0x4c, 0x09, 0xfc, 0x98, 0x46, 0x22,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40,
+	// SpendAuthG compressed: x-coordinate in LE with sign bit in byte[31].
+	spendAuthGBytes := []byte{
+		0x63, 0xc9, 0x75, 0xb8, 0x84, 0x72, 0x1a, 0x8d,
+		0x0c, 0xa1, 0x70, 0x7b, 0xe3, 0x0c, 0x7f, 0x0c,
+		0x5f, 0x44, 0x5f, 0x3e, 0x7c, 0x18, 0x8d, 0x3b,
+		0x06, 0xd6, 0xf1, 0x28, 0xb3, 0x23, 0x55, 0xb7,
 	}
-	gen, err := new(curvey.PointPallas).Identity().FromAffineCompressed(standardGenBytes)
+	gen, err := new(curvey.PointPallas).Identity().FromAffineCompressed(spendAuthGBytes)
 	if err != nil {
-		panic("elgamal: failed to decompress standard Pallas generator: " + err.Error())
+		panic("elgamal: failed to decompress SpendAuthG generator: " + err.Error())
 	}
 	return gen
 }

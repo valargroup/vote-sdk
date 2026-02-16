@@ -29,7 +29,7 @@ func (h Halo2Verifier) VerifyVoteCommitment(proof []byte, inputs zkp.VoteCommitm
 	return VerifyVoteProof(proof, inputs)
 }
 
-// VerifyVoteShare is a stub — real circuit not yet implemented.
+// VerifyVoteShare verifies ZKP #3 using the real share reveal circuit.
 func (h Halo2Verifier) VerifyVoteShare(proof []byte, inputs zkp.VoteShareInputs) error {
-	return nil
+	return VerifyShareRevealProof(proof, inputs)
 }

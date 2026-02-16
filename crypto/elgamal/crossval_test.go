@@ -11,8 +11,8 @@ import (
 )
 
 // TestCrossValidationVectors prints compressed-point hex for known Pallas scalars
-// using the standard Pallas generator (-1, 2). These vectors should match
-// Rust's pasta_curves output.
+// using the SpendAuthG generator. These vectors should match Rust's
+// orchard SpendAuthG-based scalar multiplication output.
 //
 // Run:  go test -run TestCrossValidationVectors -v ./crypto/elgamal/
 func TestCrossValidationVectors(t *testing.T) {

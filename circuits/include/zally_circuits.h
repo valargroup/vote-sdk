@@ -197,6 +197,39 @@ int32_t zally_verify_vote_proof(
     size_t public_inputs_len
 );
 
+/* -----------------------------------------------------------------------
+ * Share Reveal circuit (ZKP #3) — real Halo2 proof verification
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Verify a real share reveal circuit proof (ZKP #3, 5 conditions, K=14).
+ *
+ * The public inputs are passed as a flat byte array of 7 x 32-byte
+ * chunks (224 bytes total), in order:
+ *   [share_nullifier, enc_share_c1_x, enc_share_c2_x, proposal_id,
+ *    vote_decision, vote_comm_tree_root, voting_round_id]
+ *
+ * All values are plain Fp elements (32-byte LE canonical encoding).
+ *
+ * Parameters:
+ *   proof_ptr         - Pointer to serialized Halo2 proof bytes.
+ *   proof_len         - Length of the proof byte array.
+ *   public_inputs_ptr - Pointer to 224 bytes (7 x 32-byte chunks).
+ *   public_inputs_len - Length of the public inputs byte array (must be 224).
+ *
+ * Returns:
+ *    0  on successful verification.
+ *   -1  if inputs are invalid (null pointers or wrong lengths).
+ *   -2  if the proof does not verify.
+ *   -3  if there is an internal deserialization error.
+ */
+int32_t zally_verify_share_reveal_proof(
+    const uint8_t* proof_ptr,
+    size_t proof_len,
+    const uint8_t* public_inputs_ptr,
+    size_t public_inputs_len
+);
+
 #ifdef __cplusplus
 }
 #endif
