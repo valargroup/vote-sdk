@@ -200,10 +200,18 @@ fn voting_flow_full_lifecycle() {
     // 4c-verify: Verify the proof locally (same binary = same VK as prover).
     orchard::vote_proof::verify_vote_proof(&vote_bundle.proof, &vote_bundle.instance)
         .expect("local vote proof verification must pass");
+    // Instance must have 11 public inputs (van_nullifier, r_vpk_x, r_vpk_y, vote_authority_note_new, ...).
+    assert_eq!(
+        vote_bundle.instance.to_halo2_instance().len(),
+        11,
+        "vote proof instance must have 11 public inputs (condition 4: r_vpk in-circuit)"
+    );
     log_step("Step 4", "local verification passed, submitting cast-vote");
 
-    // 4d: Extract public inputs from the instance for the payload.
+    // 4d: Extract public inputs from the instance for the payload (condition 4: r_vpk required).
     let van_nullifier_bytes = vote_bundle.instance.van_nullifier.to_repr();
+    let r_vpk_x_bytes = vote_bundle.instance.r_vpk_x.to_repr();
+    let r_vpk_y_bytes = vote_bundle.instance.r_vpk_y.to_repr();
     let van_new_bytes = vote_bundle.instance.vote_authority_note_new.to_repr();
     let vote_comm_bytes = vote_bundle.instance.vote_commitment.to_repr();
 
@@ -211,6 +219,8 @@ fn voting_flow_full_lifecycle() {
         &round_id,
         anchor_height,
         van_nullifier_bytes.as_ref(),
+        r_vpk_x_bytes.as_ref(),
+        r_vpk_y_bytes.as_ref(),
         van_new_bytes.as_ref(),
         vote_comm_bytes.as_ref(),
         1,  // proposal_id

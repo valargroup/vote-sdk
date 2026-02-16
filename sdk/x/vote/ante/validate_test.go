@@ -118,6 +118,8 @@ func newValidMsgDelegateVote() *types.MsgDelegateVote {
 func newValidMsgCastVote() *types.MsgCastVote {
 	return &types.MsgCastVote{
 		VanNullifier:             bytes.Repeat([]byte{0x33}, 32),
+		RVpkX:                    bytes.Repeat([]byte{0x3a}, 32),
+		RVpkY:                    bytes.Repeat([]byte{0x3b}, 32),
 		VoteAuthorityNoteNew:     bytes.Repeat([]byte{0x44}, 32),
 		VoteCommitment:           bytes.Repeat([]byte{0x55}, 32),
 		ProposalId:               1,

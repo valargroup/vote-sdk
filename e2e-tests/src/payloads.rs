@@ -157,10 +157,13 @@ pub fn cast_vote_payload(round_id: &[u8], anchor_height: u32) -> Value {
 }
 
 /// Build MsgCastVote body with a real ZKP #2 proof and public inputs.
+/// Condition 4 (Spend Authority) requires r_vpk_x and r_vpk_y in the payload.
 pub fn cast_vote_payload_real(
     round_id: &[u8],
     anchor_height: u32,
     van_nullifier: &[u8],
+    r_vpk_x: &[u8],
+    r_vpk_y: &[u8],
     vote_authority_note_new: &[u8],
     vote_commitment: &[u8],
     proposal_id: u32,
@@ -168,6 +171,8 @@ pub fn cast_vote_payload_real(
 ) -> Value {
     json!({
         "van_nullifier": to_base64(van_nullifier),
+        "r_vpk_x": to_base64(r_vpk_x),
+        "r_vpk_y": to_base64(r_vpk_y),
         "vote_authority_note_new": to_base64(vote_authority_note_new),
         "vote_commitment": to_base64(vote_commitment),
         "proposal_id": proposal_id,

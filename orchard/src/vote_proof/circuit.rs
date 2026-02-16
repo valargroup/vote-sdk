@@ -6,7 +6,7 @@
 //! - **Condition 1**: VAN Membership (Poseidon Merkle path, `constrain_instance`).
 //! - **Condition 2**: VAN Integrity (Poseidon hash).
 //! - **Condition 3**: Diversified Address Integrity (`vpk_pk_d = [ivk_v] * vpk_g_d` via CommitIvk).
-//! - **Condition 4**: Spend Authority — verified out-of-circuit (`r_vpk = vsk.ak + [alpha_v] * G`, signature).
+//! - **Condition 4**: Spend Authority — `r_vpk = vsk.ak + [alpha_v] * G` (fixed-base mul + point add, `constrain_instance`).
 //! - **Condition 5**: VAN Nullifier Integrity (nested Poseidon, `constrain_instance`).
 //! - **Condition 6**: Proposal Authority Decrement (AddChip + range check).
 //! - **Condition 7**: New VAN Integrity (Poseidon hash, `constrain_instance`).
@@ -16,7 +16,7 @@
 //! - **Condition 11**: Encryption Integrity (ECC variable-base mul, `constrain_equal`).
 //! - **Condition 12**: Vote Commitment Integrity (Poseidon `ConstantLength<4>`, `constrain_instance`).
 //!
-//! Conditions 1–3 and 5–12 are fully constrained in-circuit; condition 4 is enforced out-of-circuit.
+//! Conditions 1–4 and 5–12 are fully constrained in-circuit.
 //!
 //! ## Conditions overview
 //!
@@ -27,7 +27,7 @@
 //!   Poseidon hash (ZKP 1–compatible: core then finalize with rand). *(implemented)*
 //! - **Condition 3**: Diversified Address Integrity — `vpk_pk_d = [ivk_v] * vpk_g_d`
 //!   where `ivk_v = CommitIvk(ExtractP([vsk]*SpendAuthG), vsk.nk)`. *(implemented)*
-//! - **Condition 4**: Spend Authority — `r_vpk = vsk.ak + [alpha_v] * G`; verified out-of-circuit via signature.
+//! - **Condition 4**: Spend Authority — `r_vpk = vsk.ak + [alpha_v] * G`; enforced in-circuit (fixed-base mul + point add, `constrain_instance`).
 //! - **Condition 5**: VAN Nullifier Integrity — `van_nullifier` is correctly
 //!   derived from `vsk.nk`. *(implemented)*
 //!
@@ -120,27 +120,32 @@ pub const DOMAIN_VC: u64 = 1;
 pub const MAX_PROPOSAL_ID: usize = 16;
 
 // ================================================================
-// Public input offsets (9 field elements).
+// Public input offsets (11 field elements).
 // ================================================================
 
 /// Public input offset for the VAN nullifier (prevents double-vote).
 const VAN_NULLIFIER: usize = 0;
+/// Public input offset for the randomized voting public key (condition 4: Spend Authority).
+/// x-coordinate of r_vpk = vsk.ak + [alpha_v] * G.
+const R_VPK_X: usize = 1;
+/// Public input offset for r_vpk y-coordinate.
+const R_VPK_Y: usize = 2;
 /// Public input offset for the new VAN commitment (with decremented authority).
-const VOTE_AUTHORITY_NOTE_NEW: usize = 1;
+const VOTE_AUTHORITY_NOTE_NEW: usize = 3;
 /// Public input offset for the vote commitment hash.
-const VOTE_COMMITMENT: usize = 2;
+const VOTE_COMMITMENT: usize = 4;
 /// Public input offset for the vote commitment tree root.
-const VOTE_COMM_TREE_ROOT: usize = 3;
+const VOTE_COMM_TREE_ROOT: usize = 5;
 /// Public input offset for the tree anchor height.
-const VOTE_COMM_TREE_ANCHOR_HEIGHT: usize = 4;
+const VOTE_COMM_TREE_ANCHOR_HEIGHT: usize = 6;
 /// Public input offset for the proposal identifier.
-const PROPOSAL_ID: usize = 5;
+const PROPOSAL_ID: usize = 7;
 /// Public input offset for the voting round identifier.
-const VOTING_ROUND_ID: usize = 6;
+const VOTING_ROUND_ID: usize = 8;
 /// Public input offset for the election authority public key x-coordinate.
-const EA_PK_X: usize = 7;
+const EA_PK_X: usize = 9;
 /// Public input offset for the election authority public key y-coordinate.
-const EA_PK_Y: usize = 8;
+const EA_PK_Y: usize = 10;
 
 // Suppress dead-code warnings for public input offsets that are
 // defined but not yet used by any condition's constraint logic.
@@ -441,6 +446,8 @@ pub struct Circuit {
     /// CommitIvk randomness for the ivk_v derivation (condition 3).
     /// Used as the blinding scalar in `CommitIvk(ak, nk, rivk_v)`.
     pub(crate) rivk_v: Value<pallas::Scalar>,
+    /// Spend auth randomizer for condition 4: r_vpk = vsk.ak + [alpha_v] * G.
+    pub(crate) alpha_v: Value<pallas::Scalar>,
 
     // Condition 5 (VAN Nullifier Integrity): nullifier deriving key.
     // Also used in condition 3 as the nk input to CommitIvk.
@@ -510,6 +517,7 @@ impl Circuit {
         vsk: Value<pallas::Scalar>,
         rivk_v: Value<pallas::Scalar>,
         vsk_nk: Value<pallas::Base>,
+        alpha_v: Value<pallas::Scalar>,
     ) -> Self {
         Circuit {
             vote_comm_tree_path,
@@ -522,6 +530,7 @@ impl Circuit {
             vote_authority_note_old,
             vsk,
             rivk_v,
+            alpha_v,
             vsk_nk,
             ..Default::default()
         }
@@ -922,6 +931,23 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             &vpk_g_d_point,
             &vpk_pk_d_point,
         )?;
+
+        // ---------------------------------------------------------------
+        // Condition 4: Spend authority.
+        // r_vpk = [alpha_v] * SpendAuthG + vsk_ak_point
+        // ---------------------------------------------------------------
+        // Spend authority: proves that the public r_vpk is a valid rerandomization of the prover's ak.
+        // The out-of-circuit verifier checks that the vote signature is valid under r_vpk,
+        // so this links the ZKP to the signature without revealing ak.
+        {
+            let alpha_v =
+                ScalarFixed::new(ecc_chip.clone(), layouter.namespace(|| "alpha_v"), self.alpha_v)?;
+            let alpha_v_commitment =
+                spend_auth_g_mul(ecc_chip.clone(), layouter.namespace(|| "cond4"), "[alpha_v] SpendAuthG", alpha_v)?;
+            let r_vpk = alpha_v_commitment.add(layouter.namespace(|| "r_vpk"), &vsk_ak_point)?;
+            layouter.constrain_instance(r_vpk.inner().x().cell(), config.primary, R_VPK_X)?;
+            layouter.constrain_instance(r_vpk.inner().y().cell(), config.primary, R_VPK_Y)?;
+        }
 
         // ---------------------------------------------------------------
         // Condition 1: VAN Membership.
@@ -1608,7 +1634,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 // Instance (public inputs)
 // ================================================================
 
-/// Public inputs to the Vote Proof circuit (9 field elements).
+/// Public inputs to the Vote Proof circuit (11 field elements).
 ///
 /// These are the values posted to the vote chain that both the prover
 /// and verifier agree on. The verifier checks the proof against these
@@ -1617,6 +1643,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 pub struct Instance {
     /// The nullifier of the old VAN being spent (prevents double-vote).
     pub van_nullifier: pallas::Base,
+    /// Randomized voting public key (condition 4): x-coordinate of r_vpk = vsk.ak + [alpha_v] * G.
+    pub r_vpk_x: pallas::Base,
+    /// Randomized voting public key: y-coordinate.
+    pub r_vpk_y: pallas::Base,
     /// The new VAN commitment (with decremented proposal authority).
     pub vote_authority_note_new: pallas::Base,
     /// The vote commitment hash.
@@ -1639,6 +1669,8 @@ impl Instance {
     /// Constructs an [`Instance`] from its constituent parts.
     pub fn from_parts(
         van_nullifier: pallas::Base,
+        r_vpk_x: pallas::Base,
+        r_vpk_y: pallas::Base,
         vote_authority_note_new: pallas::Base,
         vote_commitment: pallas::Base,
         vote_comm_tree_root: pallas::Base,
@@ -1650,6 +1682,8 @@ impl Instance {
     ) -> Self {
         Instance {
             van_nullifier,
+            r_vpk_x,
+            r_vpk_y,
             vote_authority_note_new,
             vote_commitment,
             vote_comm_tree_root,
@@ -1664,10 +1698,12 @@ impl Instance {
     /// Serializes public inputs for halo2 proof creation/verification.
     ///
     /// The order must match the instance column offsets defined at the
-    /// top of this file (`VAN_NULLIFIER`, `VOTE_AUTHORITY_NOTE_NEW`, etc.).
+    /// top of this file (`VAN_NULLIFIER`, `R_VPK_X`, `R_VPK_Y`, etc.).
     pub fn to_halo2_instance(&self) -> Vec<vesta::Scalar> {
         alloc::vec![
             self.van_nullifier,
+            self.r_vpk_x,
+            self.r_vpk_y,
             self.vote_authority_note_new,
             self.vote_commitment,
             self.vote_comm_tree_root,
@@ -1847,8 +1883,16 @@ mod tests {
         let vsk = pallas::Scalar::random(&mut rng);
         let vsk_nk = pallas::Base::random(&mut rng);
         let rivk_v = pallas::Scalar::random(&mut rng);
+        let alpha_v = pallas::Scalar::random(&mut rng);
 
         let (vpk_g_d_affine, vpk_pk_d_affine) = derive_voting_address(vsk, vsk_nk, rivk_v);
+
+        // Condition 4: r_vpk = ak + [alpha_v] * G
+        let g = pallas::Point::from(spend_auth_g_affine());
+        let ak_point = g * vsk;
+        let r_vpk = (ak_point + g * alpha_v).to_affine();
+        let r_vpk_x = *r_vpk.coordinates().unwrap().x();
+        let r_vpk_y = *r_vpk.coordinates().unwrap().y();
 
         // Extract x-coordinates for Poseidon hashing (conditions 2, 6).
         let vpk_g_d_x = *vpk_g_d_affine.coordinates().unwrap().x();
@@ -1910,6 +1954,7 @@ mod tests {
             Value::known(vsk),
             Value::known(rivk_v),
             Value::known(vsk_nk),
+            Value::known(alpha_v),
         );
         circuit.one_shifted = Value::known(one_shifted);
         circuit.shares = [
@@ -1928,6 +1973,8 @@ mod tests {
 
         let instance = Instance::from_parts(
             van_nullifier,
+            r_vpk_x,
+            r_vpk_y,
             vote_authority_note_new,
             vote_commitment,
             vote_comm_tree_root,
@@ -1979,7 +2026,13 @@ mod tests {
         let vsk = pallas::Scalar::random(&mut rng);
         let vsk_nk = pallas::Base::random(&mut rng);
         let rivk_v = pallas::Scalar::random(&mut rng);
+        let alpha_v = pallas::Scalar::random(&mut rng);
         let (vpk_g_d_affine, vpk_pk_d_affine) = derive_voting_address(vsk, vsk_nk, rivk_v);
+        let g = pallas::Point::from(spend_auth_g_affine());
+        let r_vpk = (g * vsk + g * alpha_v).to_affine();
+        instance.r_vpk_x = *r_vpk.coordinates().unwrap().x();
+        instance.r_vpk_y = *r_vpk.coordinates().unwrap().y();
+
         let shares_u64: [u64; 4] = [1_000, 2_000, 3_000, 4_000];
         let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
         let (enc_c1_x, enc_c2_x, randomness, shares_hash_val) =
@@ -2001,6 +2054,7 @@ mod tests {
             Value::known(vsk),
             Value::known(rivk_v),
             Value::known(vsk_nk),
+            Value::known(alpha_v),
         );
         circuit.one_shifted = Value::known(pallas::Base::from(1u64 << TEST_PROPOSAL_ID));
         circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
@@ -2109,6 +2163,11 @@ mod tests {
 
         let wrong_vsk = pallas::Scalar::random(&mut rng);
         assert_ne!(wrong_vsk, vsk, "test assumes distinct vsk with high probability");
+        let alpha_v = pallas::Scalar::random(&mut rng);
+        let g = pallas::Point::from(spend_auth_g_affine());
+        let r_vpk = (g * vsk + g * alpha_v).to_affine();
+        let r_vpk_x = *r_vpk.coordinates().unwrap().x();
+        let r_vpk_y = *r_vpk.coordinates().unwrap().y();
 
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
@@ -2122,6 +2181,7 @@ mod tests {
             Value::known(wrong_vsk),
             Value::known(rivk_v),
             Value::known(vsk_nk),
+            Value::known(alpha_v),
         );
         circuit.one_shifted = Value::known(one_shifted);
         circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
@@ -2133,6 +2193,8 @@ mod tests {
 
         let instance = Instance::from_parts(
             van_nullifier,
+            r_vpk_x,
+            r_vpk_y,
             vote_authority_note_new,
             vc,
             vote_comm_tree_root,
@@ -2197,6 +2259,12 @@ mod tests {
         let (enc_c1_x, enc_c2_x, randomness, shares_hash_val) =
             encrypt_shares(shares_u64, ea_pk_point);
 
+        let alpha_v = pallas::Scalar::random(&mut rng);
+        let g = pallas::Point::from(spend_auth_g_affine());
+        let r_vpk = (g * vsk + g * alpha_v).to_affine();
+        let r_vpk_x = *r_vpk.coordinates().unwrap().x();
+        let r_vpk_y = *r_vpk.coordinates().unwrap().y();
+
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
             Value::known(position),
@@ -2209,6 +2277,7 @@ mod tests {
             Value::known(vsk),
             Value::known(rivk_v),
             Value::known(vsk_nk),
+            Value::known(alpha_v),
         );
         circuit.one_shifted = Value::known(one_shifted);
         circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
@@ -2220,6 +2289,8 @@ mod tests {
 
         let instance = Instance::from_parts(
             van_nullifier,
+            r_vpk_x,
+            r_vpk_y,
             vote_authority_note_new,
             vc,
             vote_comm_tree_root,
@@ -2235,7 +2306,22 @@ mod tests {
     }
 
     // ================================================================
-    // Condition 4 (VAN Nullifier Integrity) tests
+    // Condition 4 (Spend Authority) tests
+    // ================================================================
+
+    /// Wrong r_vpk public input should fail condition 4.
+    #[test]
+    fn condition_4_wrong_r_vpk_fails() {
+        let (circuit, mut instance) = make_test_data();
+
+        instance.r_vpk_x = pallas::Base::random(&mut OsRng);
+
+        let prover = MockProver::run(K, &circuit, vec![instance.to_halo2_instance()]).unwrap();
+        assert!(prover.verify().is_err(), "condition 4 must reject wrong r_vpk");
+    }
+
+    // ================================================================
+    // Condition 5 (VAN Nullifier Integrity) tests
     // ================================================================
 
     /// Wrong VAN_NULLIFIER public input should fail condition 5.
@@ -2291,6 +2377,11 @@ mod tests {
 
         // Use a DIFFERENT vsk_nk in the circuit.
         let wrong_vsk_nk = pallas::Base::random(&mut rng);
+        let alpha_v = pallas::Scalar::random(&mut rng);
+        let g = pallas::Point::from(spend_auth_g_affine());
+        let r_vpk = (g * vsk + g * alpha_v).to_affine();
+        let r_vpk_x = *r_vpk.coordinates().unwrap().x();
+        let r_vpk_y = *r_vpk.coordinates().unwrap().y();
 
         // Shares that sum to total_note_value (conditions 8 + 9).
         let shares_u64: [u64; 4] = [1_000, 2_000, 3_000, 4_000];
@@ -2312,6 +2403,7 @@ mod tests {
             Value::known(vsk),
             Value::known(rivk_v),
             Value::known(wrong_vsk_nk),
+            Value::known(alpha_v),
         );
         circuit.one_shifted = Value::known(one_shifted);
         circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
@@ -2322,8 +2414,13 @@ mod tests {
         let vc = set_condition_11(&mut circuit, shares_hash_val, proposal_id);
 
         let instance = Instance::from_parts(
-            van_nullifier, vote_authority_note_new, vc,
-            vote_comm_tree_root, pallas::Base::zero(),
+            van_nullifier,
+            r_vpk_x,
+            r_vpk_y,
+            vote_authority_note_new,
+            vc,
+            vote_comm_tree_root,
+            pallas::Base::zero(),
             pallas::Base::from(proposal_id),
             voting_round_id,
             *ea_pk_affine.coordinates().unwrap().x(),
@@ -2491,6 +2588,12 @@ mod tests {
             proposal_authority_new, gov_comm_rand,
         );
 
+        let alpha_v = pallas::Scalar::random(&mut rng);
+        let g = pallas::Point::from(spend_auth_g_affine());
+        let r_vpk = (g * vsk + g * alpha_v).to_affine();
+        let r_vpk_x = *r_vpk.coordinates().unwrap().x();
+        let r_vpk_y = *r_vpk.coordinates().unwrap().y();
+
         // Shares that sum to total_note_value (conditions 8 + 9).
         let shares_u64: [u64; 4] = [1_000, 2_000, 3_000, 4_000];
 
@@ -2511,6 +2614,7 @@ mod tests {
             Value::known(vsk),
             Value::known(rivk_v),
             Value::known(vsk_nk),
+            Value::known(alpha_v),
         );
         circuit.one_shifted = Value::known(one_shifted);
         circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
@@ -2521,8 +2625,13 @@ mod tests {
         let vc = set_condition_11(&mut circuit, shares_hash_val, proposal_id);
 
         let instance = Instance::from_parts(
-            van_nullifier, vote_authority_note_new, vc,
-            vote_comm_tree_root, pallas::Base::zero(),
+            van_nullifier,
+            r_vpk_x,
+            r_vpk_y,
+            vote_authority_note_new,
+            vc,
+            vote_comm_tree_root,
+            pallas::Base::zero(),
             pallas::Base::from(proposal_id),
             voting_round_id,
             *ea_pk_affine.coordinates().unwrap().x(),
@@ -2609,6 +2718,12 @@ mod tests {
         let (enc_c1_x, enc_c2_x, randomness, shares_hash_val) =
             encrypt_shares(shares_u64, ea_pk_point);
 
+        let alpha_v = pallas::Scalar::random(&mut rng);
+        let g = pallas::Point::from(spend_auth_g_affine());
+        let r_vpk = (g * vsk + g * alpha_v).to_affine();
+        let r_vpk_x = *r_vpk.coordinates().unwrap().x();
+        let r_vpk_y = *r_vpk.coordinates().unwrap().y();
+
         let mut circuit = Circuit::with_van_witnesses(
             Value::known(auth_path),
             Value::known(position),
@@ -2621,6 +2736,7 @@ mod tests {
             Value::known(vsk),
             Value::known(rivk_v),
             Value::known(vsk_nk),
+            Value::known(alpha_v),
         );
         circuit.one_shifted = Value::known(one_shifted);
         circuit.shares = [Value::known(max_share); 4];
@@ -2631,8 +2747,13 @@ mod tests {
         let vc = set_condition_11(&mut circuit, shares_hash_val, proposal_id);
 
         let instance = Instance::from_parts(
-            van_nullifier, vote_authority_note_new, vc,
-            vote_comm_tree_root, pallas::Base::zero(),
+            van_nullifier,
+            r_vpk_x,
+            r_vpk_y,
+            vote_authority_note_new,
+            vc,
+            vote_comm_tree_root,
+            pallas::Base::zero(),
             pallas::Base::from(proposal_id),
             voting_round_id,
             *ea_pk_affine.coordinates().unwrap().x(),
@@ -2923,9 +3044,9 @@ mod tests {
 
     /// Instance must serialize to exactly 9 public inputs.
     #[test]
-    fn instance_has_nine_public_inputs() {
+    fn instance_has_eleven_public_inputs() {
         let (_, instance) = make_test_data();
-        assert_eq!(instance.to_halo2_instance().len(), 9);
+        assert_eq!(instance.to_halo2_instance().len(), 11);
     }
 
     /// Default circuit (all witnesses unknown) must not produce a valid proof.

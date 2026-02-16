@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -76,7 +77,9 @@ func TestEncodeDecodeDelegateVote(t *testing.T) {
 
 func TestEncodeDecodeCastVote(t *testing.T) {
 	msg := &types.MsgCastVote{
-		VanNullifier:             []byte("van"),
+		VanNullifier:             bytes.Repeat([]byte("van"), 11)[:32], // 32 bytes for Fp
+		RVpkX:                    bytes.Repeat([]byte{0x01}, 32),
+		RVpkY:                    bytes.Repeat([]byte{0x02}, 32),
 		VoteAuthorityNoteNew:     []byte("note"),
 		VoteCommitment:           []byte("commitment"),
 		ProposalId:               1,

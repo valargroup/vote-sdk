@@ -255,6 +255,14 @@ pub fn build_vote_proof_from_delegation(
 
     let shares_hash_val = shares_hash(enc_c1_x, enc_c2_x);
 
+    // ---- Condition 4: r_vpk = ak + [alpha_v] * G ----
+    let ak_point = pallas::Point::from(spend_auth_g_affine()) * vsk;
+    let alpha_v = pallas::Scalar::random(rng);
+    let r_vpk = (ak_point + pallas::Point::from(spend_auth_g_affine()) * alpha_v)
+        .to_affine();
+    let r_vpk_x = *r_vpk.coordinates().unwrap().x();
+    let r_vpk_y = *r_vpk.coordinates().unwrap().y();
+
     // ---- Vote commitment ----
 
     let proposal_id_base = pallas::Base::from(proposal_id);
@@ -294,6 +302,7 @@ pub fn build_vote_proof_from_delegation(
         Value::known(vsk),
         Value::known(rivk_v),
         Value::known(vsk_nk),
+        Value::known(alpha_v),
     );
     circuit.one_shifted = Value::known(one_shifted);
     circuit.shares = [
@@ -313,6 +322,8 @@ pub fn build_vote_proof_from_delegation(
     let anchor_height_base = pallas::Base::from(u64::from(anchor_height));
     let instance = Instance::from_parts(
         van_nullifier,
+        r_vpk_x,
+        r_vpk_y,
         vote_authority_note_new,
         vote_commitment,
         vote_comm_tree_root,
