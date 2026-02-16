@@ -584,6 +584,11 @@ func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
 	s.Require().Equal(uint32(0), result.Code, "cast vote with valid proposal_id should succeed, got: %s", result.Log)
 
+	// Capture the anchor height for the reveal share now, while the tree root
+	// exists at this height. The failed bad cast vote below will bump the app
+	// height without adding tree leaves, so no root will be stored there.
+	revealAnchor := uint64(s.app.Height)
+
 	// CastVote with invalid proposal_id (5) should fail.
 	// Recompute sighash after changing ProposalId so ante passes and we hit proposal_id validation.
 	badCastVote := testutil.ValidCastVote(roundID, anchorHeight, 0x40)
@@ -594,7 +599,6 @@ func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
 	s.Require().Contains(result.Log, "invalid proposal ID")
 
 	// RevealShare with valid proposal_id (0) should succeed.
-	revealAnchor := uint64(s.app.Height)
 	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
 	s.Require().Equal(uint32(0), result.Code, "reveal share with valid proposal_id should succeed, got: %s", result.Log)
