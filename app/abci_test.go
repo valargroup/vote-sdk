@@ -485,11 +485,10 @@ func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// RevealShare should be rejected during TALLYING (reveals only accepted during ACTIVE).
+	// RevealShare should be accepted during TALLYING (shares are revealed after voting ends).
 	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
-	s.Require().NotEqual(uint32(0), result.Code, "reveal share during TALLYING should be rejected")
-	s.Require().Contains(result.Log, "vote round is not active")
+	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
 
 	// DelegateVote should be rejected during TALLYING.
 	delegation2 := testutil.ValidDelegation(roundID, 0x60)
@@ -666,11 +665,10 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// Reveal share should be rejected during TALLYING.
+	// RevealShare should still be accepted during TALLYING.
 	revealMsgTallying := testutil.ValidRevealShare(roundID, revealAnchor, 0x60)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsgTallying))
-	s.Require().NotEqual(uint32(0), result.Code, "reveal share during TALLYING should be rejected")
-	s.Require().Contains(result.Log, "vote round is not active")
+	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
 
 	// Submit tally to finalize (use the genesis validator's operator address).
 	submitTallyMsg := testutil.ValidSubmitTally(roundID, s.app.ValidatorOperAddr())

@@ -1,15 +1,15 @@
 {
-  "ea_pk": "fzJkmr+u4sCS94IIQFy/YzfTyHrWMyBFHyUqkZUndqI=",
+  "ea_pk": "zpSxvNPPEgdC/oMOT4ctFeYmpe0iOnv1VuJ2YO5It5I=",
   "shares": [
     {
       "value": 5,
-      "enc_share": "vTc7DmG6ncAou5MeRI+0uyUcM/7fyUeltnVtKBR28aeCSFG2ZvjYMJ3lZZY43ibPuxt3LPGLrXtOu3S6LdiOCw=="
+      "enc_share": "SBjl7KXmalpFhLnhAk4DmhQPpniiWxwmG90fq8+nboNG1kOWSys3YUY/EQosOW/pzzEn9aGKOcmvFkWZ7P5FNA=="
     },
     {
       "value": 10,
-      "enc_share": "Tni6s65JTmb+p+8LJ5yvR4gvkhsyf3IEV4knikQMJLypPj6r2uhNBY5W/HcWfCZvjTs2F8/VRL5DTMLyQpgsGg=="
+      "enc_share": "MWyfoDP3yCFNZh9AVTfew2W0yj1cYmy4EVTPrcHPJyYqWmz91cxA7v5bYzdxMq41iroAnKbLahfZi4XcPe7fuQ=="
     }
   ],
-  "expected_accumulated": "6X2VG+3De1OR26ir7e3z5zFKCJDkaaZXofvkEvzS+6fLd+sUGlpqHhbb+BvuXxIv/gj4MRWTk7DBVlRlFIIukA==",
+  "expected_accumulated": "hqCBwNLoaAvl7DsoLdkA2F8wdI3bKS85Edjgl8KiFScOeox6exTZCz694CUY0xuO8EuHfmirc6SPj1PKXnooug==",
   "expected_total": 15
 }

@@ -903,22 +903,22 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 			errContains: "vote round not found",
 		},
 		{
-			name: "expired ACTIVE round rejected for shares",
+			name: "expired ACTIVE round accepted for shares",
 			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts: mockOpts(),
-			setup: func() { s.setupExpiredRound() },
-			// MsgRevealShare now uses ValidateRoundForVoting, which rejects
-			// expired rounds. Shares are only accepted during the ACTIVE window.
-			expectErr:   true,
-			errContains: "vote round is not active",
+			setup: func() {
+				s.setupExpiredRound()
+				s.seedCommitmentRoot(10) // anchor height used by newValidMsgRevealShare
+			},
 		},
 		{
-			name:  "tallying round rejected for shares",
-			msg:   func() types.VoteMessage { return newValidMsgRevealShare() },
-			opts:  mockOpts(),
-			setup: func() { s.setupTallyingRound() },
-			expectErr:   true,
-			errContains: "vote round is not active",
+			name: "tallying round accepted for shares",
+			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
+			opts: mockOpts(),
+			setup: func() {
+				s.setupTallyingRound()
+				s.seedCommitmentRoot(10) // anchor height used by newValidMsgRevealShare
+			},
 		},
 		{
 			name: "finalized round rejected for shares",
