@@ -678,7 +678,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	tallyResults, err := s.app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
 	s.Require().NoError(err)
 	s.Require().Len(tallyResults, 1)
-	s.Require().Equal(uint32(0), tallyResults[0].ProposalId)
+	s.Require().Equal(uint32(1), tallyResults[0].ProposalId) // 1-indexed; ValidSubmitTally uses proposal 1
 	s.Require().Equal(uint32(1), tallyResults[0].VoteDecision)
 	// TotalValue in TallyEntry is the EA-claimed plaintext; no longer compared to the encrypted share.
 	s.Require().NotZero(tallyResults[0].TotalValue)
@@ -727,9 +727,9 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyCreatorMismatch() {
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
 	// Submit tally with wrong creator should fail.
-	// Use zero-valued entries since no reveals happened.
+	// Use zero-valued entries since no reveals happened (proposal_id must be 1-indexed: 1 or 2).
 	badTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, "zvote1imposter", []*types.TallyEntry{
-		{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
+		{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
 	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badTallyMsg))
 	s.Require().NotEqual(uint32(0), result.Code, "submit tally with wrong creator should fail")
@@ -737,7 +737,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyCreatorMismatch() {
 
 	// Submit tally with correct creator should succeed (zero-valued entries since no reveals).
 	goodTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, "zvote1admin", []*types.TallyEntry{
-		{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
+		{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
 	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(goodTallyMsg))
 	s.Require().Equal(uint32(0), result.Code, "submit tally with correct creator should succeed, got: %s", result.Log)
