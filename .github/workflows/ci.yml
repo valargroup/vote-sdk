@@ -164,7 +164,7 @@ jobs:
       - name: Wait for chain readiness
         run: |
           for i in $(seq 1 60); do
-            if curl -sf http://localhost:1317/cosmos/base/tendermint/v1beta1/blocks/latest > /dev/null 2>&1; then
+            if curl -sf http://localhost:1318/cosmos/base/tendermint/v1beta1/blocks/latest > /dev/null 2>&1; then
               echo "Chain is producing blocks"
               exit 0
             fi
@@ -177,7 +177,7 @@ jobs:
       - name: Run Rust E2E API tests
         run: cargo test --release --manifest-path ../e2e-tests/Cargo.toml -- --nocapture --ignored --test-threads=1
         env:
-          ZALLY_API_URL: http://localhost:1317
+          ZALLY_API_URL: http://localhost:1318
           ZALLY_EA_PK_PATH: /home/runner/.zallyd/ea.pk
       - name: Upload chain log on failure
         if: failure()
