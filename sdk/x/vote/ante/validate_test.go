@@ -208,9 +208,11 @@ func (s *ValidateTestSuite) SetupTest() {
 // Suite helpers
 // ---------------------------------------------------------------------------
 
-// setupActiveRound stores a vote round that is still active (endTime > block time).
+// setupActiveRound stores a vote round that is still active (endTime > block time)
+// and a commitment tree root at height 10 so CastVote/RevealShare validation can resolve the anchor.
 func (s *ValidateTestSuite) setupActiveRound() {
 	s.setupRound(testRoundID, activeEndTime)
+	s.setupCommitmentRootAtHeight(10)
 }
 
 // setupExpiredRound stores a vote round that has already expired.
@@ -252,6 +254,15 @@ func (s *ValidateTestSuite) setupRoundWithStatus(roundID []byte, endTime uint64,
 // setupTallyingRound stores a VoteRound in TALLYING status with an expired end time.
 func (s *ValidateTestSuite) setupTallyingRound() {
 	s.setupRoundWithStatus(testRoundID, expiredEndTime, types.SessionStatus_SESSION_STATUS_TALLYING)
+}
+
+// setupCommitmentRootAtHeight stores a commitment tree root at the given height
+// so that CastVote/RevealShare messages with that anchor height pass the anchor check.
+func (s *ValidateTestSuite) setupCommitmentRootAtHeight(height uint64) {
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+	root := bytes.Repeat([]byte{0xCC}, 32)
+	err := s.keeper.SetCommitmentRootAtHeight(kvStore, height, root)
+	s.Require().NoError(err)
 }
 
 // recordNullifier marks a nullifier as already spent in the KV store,
