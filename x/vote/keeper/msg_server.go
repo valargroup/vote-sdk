@@ -212,9 +212,9 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 
 	// Validate each entry and store finalized tally results.
 	for i, entry := range msg.Entries {
-		// Validate proposal_id is within range.
-		if int(entry.ProposalId) >= len(round.Proposals) {
-			return nil, fmt.Errorf("%w: entry[%d] proposal_id %d >= proposals count %d",
+		// Validate proposal_id is within range (1-indexed).
+		if entry.ProposalId < 1 || int(entry.ProposalId) > len(round.Proposals) {
+			return nil, fmt.Errorf("%w: entry[%d] proposal_id %d out of range [1, %d]",
 				types.ErrInvalidProposalID, i, entry.ProposalId, len(round.Proposals))
 		}
 

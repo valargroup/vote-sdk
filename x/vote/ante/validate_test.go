@@ -91,8 +91,8 @@ func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 0, Title: "Proposal A", Description: "First"},
-			{Id: 1, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First"},
+			{Id: 2, Title: "Proposal B", Description: "Second"},
 		},
 	}
 }
@@ -120,7 +120,7 @@ func newValidMsgCastVote() *types.MsgCastVote {
 		VanNullifier:             bytes.Repeat([]byte{0x33}, 32),
 		VoteAuthorityNoteNew:     bytes.Repeat([]byte{0x44}, 32),
 		VoteCommitment:           bytes.Repeat([]byte{0x55}, 32),
-		ProposalId:               0,
+		ProposalId:               1,
 		Proof:                    bytes.Repeat([]byte{0x66}, 192),
 		VoteRoundId:              testRoundID,
 		VoteCommTreeAnchorHeight: 10,
@@ -131,7 +131,7 @@ func newValidMsgRevealShare() *types.MsgRevealShare {
 	return &types.MsgRevealShare{
 		ShareNullifier:           bytes.Repeat([]byte{0x77}, 32),
 		EncShare:                 bytes.Repeat([]byte{0x88}, 64),
-		ProposalId:               0,
+		ProposalId:               1,
 		VoteDecision:             1,
 		Proof:                    bytes.Repeat([]byte{0x88}, 192),
 		VoteRoundId:              testRoundID,
@@ -241,8 +241,8 @@ func (s *ValidateTestSuite) setupRoundWithStatus(roundID []byte, endTime uint64,
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 0, Title: "Proposal A", Description: "First"},
-			{Id: 1, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First"},
+			{Id: 2, Title: "Proposal B", Description: "Second"},
 		},
 	}
 	err := s.keeper.SetVoteRound(kvStore, round)
@@ -850,7 +850,7 @@ func newValidMsgSubmitTally() *types.MsgSubmitTally {
 		VoteRoundId: testRoundID,
 		Creator:     "zvote1testcreator",
 		Entries: []*types.TallyEntry{
-			{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+			{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
 		},
 	}
 }

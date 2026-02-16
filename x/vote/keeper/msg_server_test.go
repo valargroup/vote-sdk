@@ -68,8 +68,8 @@ func (s *MsgServerTestSuite) setupActiveRound(roundID []byte) {
 		VkZkp2:           bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:           bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 0, Title: "Proposal A", Description: "First"},
-			{Id: 1, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First"},
+			{Id: 2, Title: "Proposal B", Description: "Second"},
 		},
 	}))
 }
@@ -113,8 +113,8 @@ func validSetupMsg() *types.MsgCreateVotingSession {
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 0, Title: "Proposal A", Description: "First"},
-			{Id: 1, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First"},
+			{Id: 2, Title: "Proposal B", Description: "Second"},
 		},
 	}
 }
@@ -189,8 +189,8 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 				VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 				Proposals: []*types.Proposal{
-					{Id: 0, Title: "Proposal A", Description: "First"},
-					{Id: 1, Title: "Proposal B", Description: "Second"},
+					{Id: 1, Title: "Proposal A", Description: "First"},
+					{Id: 2, Title: "Proposal B", Description: "Second"},
 				},
 			},
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -326,7 +326,7 @@ func (s *MsgServerTestSuite) TestCastVote() {
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
 				VoteAuthorityNoteNew:     fpLE(0xE2),
 				VoteCommitment:           fpLE(0xE3),
-				ProposalId:               0,
+				ProposalId:               1,
 				Proof:                    bytes.Repeat([]byte{0xE4}, 64),
 				VoteRoundId:              roundID,
 				VoteCommTreeAnchorHeight: 10,
@@ -353,7 +353,7 @@ func (s *MsgServerTestSuite) TestCastVote() {
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
 				VoteAuthorityNoteNew:     fpLE(0xE2),
 				VoteCommitment:           fpLE(0xE3),
-				ProposalId:               0,
+				ProposalId:               1,
 				Proof:                    bytes.Repeat([]byte{0xE4}, 64),
 				VoteRoundId:              roundID,
 				VoteCommTreeAnchorHeight: 999,
@@ -364,7 +364,7 @@ func (s *MsgServerTestSuite) TestCastVote() {
 		{
 			name: "invalid proposal_id rejected",
 			setup: func() {
-				s.setupActiveRound(roundID) // round has 2 proposals (id 0, 1)
+				s.setupActiveRound(roundID) // round has 2 proposals (id 1, 2)
 				s.setupRootAtHeight(10)
 			},
 			msg: &types.MsgCastVote{
@@ -444,7 +444,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 				return &types.MsgRevealShare{
 					ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
 					EncShare:                 testEncShare(s, 500),
-					ProposalId:               0,
+					ProposalId:               1,
 					VoteDecision:             1,
 					Proof:                    bytes.Repeat([]byte{0xF2}, 64),
 					VoteRoundId:              roundID,
@@ -458,7 +458,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 				s.Require().NoError(err)
 				s.Require().True(has)
 
-				tally, err := s.keeper.GetTally(kv, roundID, 0, 1)
+				tally, err := s.keeper.GetTally(kv, roundID, 1, 1)
 				s.Require().NoError(err)
 				s.Require().NotNil(tally, "tally should be stored")
 				s.Require().Len(tally, 64, "tally should be 64 bytes (ElGamal ciphertext)")
@@ -474,7 +474,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 				_, err := s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
 					ShareNullifier:           bytes.Repeat([]byte{0xF3}, 32),
 					EncShare:                 testEncShareWithPK(s, pk, 300),
-					ProposalId:               0,
+					ProposalId:               1,
 					VoteDecision:             1,
 					Proof:                    bytes.Repeat([]byte{0xF4}, 64),
 					VoteRoundId:              roundID,
@@ -486,7 +486,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 				return &types.MsgRevealShare{
 					ShareNullifier:           bytes.Repeat([]byte{0xF5}, 32),
 					EncShare:                 testEncShare(s, 200),
-					ProposalId:               0,
+					ProposalId:               1,
 					VoteDecision:             1,
 					Proof:                    bytes.Repeat([]byte{0xF6}, 64),
 					VoteRoundId:              roundID,
@@ -495,7 +495,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 			},
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				tally, err := s.keeper.GetTally(kv, roundID, 0, 1)
+				tally, err := s.keeper.GetTally(kv, roundID, 1, 1)
 				s.Require().NoError(err)
 				s.Require().NotNil(tally)
 				s.Require().Len(tally, 64, "accumulated tally should be 64 bytes")
@@ -558,11 +558,11 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			VoteEndTime: 500_000,
 			Creator:     creator,
 			Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
-			Proposals: []*types.Proposal{
-				{Id: 0, Title: "Proposal A", Description: "First"},
-				{Id: 1, Title: "Proposal B", Description: "Second"},
-			},
-		}))
+		Proposals: []*types.Proposal{
+			{Id: 1, Title: "Proposal A", Description: "First"},
+			{Id: 2, Title: "Proposal B", Description: "Second"},
+		},
+	}))
 		// Pre-populate the tally accumulator with a ciphertext.
 		encShare := testEncShare(s, 500)
 		s.Require().NoError(s.keeper.AddToTally(kv, roundID, 0, 1, encShare))
@@ -585,7 +585,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 				VoteRoundId: roundID,
 				Creator:     creator,
 				Entries: []*types.TallyEntry{
-					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
 				},
 			},
 			check: func(resp *types.MsgSubmitTallyResponse) {
@@ -599,11 +599,11 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 				s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
 
 				// TallyResult is stored (uint64 decrypted value from EA).
-				result, err := s.keeper.GetTallyResult(kv, roundID, 0, 1)
+				result, err := s.keeper.GetTallyResult(kv, roundID, 1, 1)
 				s.Require().NoError(err)
 				s.Require().NotNil(result)
 				s.Require().Equal(uint64(500), result.TotalValue)
-				s.Require().Equal(uint32(0), result.ProposalId)
+				s.Require().Equal(uint32(1), result.ProposalId)
 				s.Require().Equal(uint32(1), result.VoteDecision)
 			},
 		},
@@ -631,7 +631,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 				VoteRoundId: roundID,
 				Creator:     "zvote1creator",
 				Entries: []*types.TallyEntry{
-					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
 				},
 			},
 			expectErr:   true,
@@ -652,7 +652,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 				VoteRoundId: roundID,
 				Creator:     creator,
 				Entries: []*types.TallyEntry{
-					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
 				},
 			},
 			expectErr:   true,
@@ -667,7 +667,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 				VoteRoundId: roundID,
 				Creator:     "zvote1imposter",
 				Entries: []*types.TallyEntry{
-					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
 				},
 			},
 			expectErr:   true,
@@ -679,7 +679,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 				VoteRoundId: bytes.Repeat([]byte{0xFF}, 32),
 				Creator:     creator,
 				Entries: []*types.TallyEntry{
-					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
 				},
 			},
 			expectErr:   true,
@@ -689,13 +689,13 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			name: "happy path: zero-valued entry for (proposal, decision) with no reveals",
 			setup: func() {
 				setupTallyingRoundWithAccumulator()
-				// proposal 1 / decision 0 has no reveals → accumulator is nil.
+				// proposal 1 / decision 0 has no reveals for that decision → accumulator is nil.
 			},
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: roundID,
 				Creator:     creator,
 				Entries: []*types.TallyEntry{
-					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
+					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
 					{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
 				},
 			},
@@ -786,7 +786,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_FinalizedRejectsShares() {
 		Creator:     creator,
 		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
 		Proposals: []*types.Proposal{
-			{Id: 0, Title: "Proposal A", Description: "First"},
+			{Id: 1, Title: "Proposal A", Description: "First"},
 		},
 	}))
 
@@ -801,7 +801,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_FinalizedRejectsShares() {
 	_, err = s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
 		ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
 		EncShare:                 testEncShare(s, 100),
-		ProposalId:               0,
+		ProposalId:               1,
 		VoteDecision:             1,
 		Proof:                    bytes.Repeat([]byte{0xF2}, 64),
 		VoteRoundId:              roundID,

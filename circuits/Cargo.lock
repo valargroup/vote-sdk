@@ -909,6 +909,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ff",
+ "halo2_gadgets",
  "imt-tree",
  "incrementalmerkletree",
  "lazy_static",

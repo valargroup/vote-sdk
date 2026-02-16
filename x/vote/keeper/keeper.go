@@ -323,14 +323,14 @@ func getUint32BE(b []byte) uint32 {
 // Proposal validation
 // ---------------------------------------------------------------------------
 
-// ValidateProposalId checks that proposalId is a valid index into the round's proposals list.
+// ValidateProposalId checks that proposalId is valid for the round (1-indexed).
 func (k Keeper) ValidateProposalId(kvStore store.KVStore, roundID []byte, proposalId uint32) error {
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
 		return err
 	}
-	if int(proposalId) >= len(round.Proposals) {
-		return fmt.Errorf("%w: proposal_id %d >= proposals count %d", types.ErrInvalidProposalID, proposalId, len(round.Proposals))
+	if proposalId < 1 || int(proposalId) > len(round.Proposals) {
+		return fmt.Errorf("%w: proposal_id %d out of range [1, %d]", types.ErrInvalidProposalID, proposalId, len(round.Proposals))
 	}
 	return nil
 }
