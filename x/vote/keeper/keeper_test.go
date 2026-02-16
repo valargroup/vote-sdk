@@ -59,7 +59,7 @@ func (s *KeeperTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(testBlockTime)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger())
+	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
 }
 
 // ---------------------------------------------------------------------------

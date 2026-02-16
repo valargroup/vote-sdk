@@ -43,7 +43,7 @@ func (s *QueryServerTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC()).WithBlockHeight(10)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger())
+	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
 	s.queryServer = keeper.NewQueryServerImpl(s.keeper)
 	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }

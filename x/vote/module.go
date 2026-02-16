@@ -21,6 +21,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
+
 	"github.com/z-cale/zally/x/vote/keeper"
 	modulev1 "github.com/z-cale/zally/x/vote/module/v1"
 	"github.com/z-cale/zally/x/vote/types"
@@ -108,10 +110,11 @@ func ProvideSubmitTallySigner() signing.CustomGetSigner {
 type ModuleInputs struct {
 	depinject.In
 
-	StoreService store.KVStoreService
-	Cdc          codec.Codec
-	Logger       log.Logger
-	Config       *modulev1.Module
+	StoreService  store.KVStoreService
+	Cdc           codec.Codec
+	Logger        log.Logger
+	Config        *modulev1.Module
+	StakingKeeper *stakingkeeper.Keeper
 }
 
 // ModuleOutputs defines the outputs produced by the vote module.
@@ -128,6 +131,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.StoreService,
 		in.Config.Authority,
 		in.Logger,
+		in.StakingKeeper,
 	)
 
 	m := NewAppModule(k, in.Cdc)

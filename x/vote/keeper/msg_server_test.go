@@ -45,7 +45,7 @@ func (s *MsgServerTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC())
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger())
+	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
 	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }
 
@@ -659,19 +659,20 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			errContains: "not in tallying state",
 		},
 		{
-			name: "rejected: creator mismatch",
+			name: "accepted: different creator (validator check is in ante, not msg_server)",
 			setup: func() {
 				setupTallyingRoundWithAccumulator()
 			},
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: roundID,
-				Creator:     "zvote1imposter",
+				Creator:     "zvote1othervalidator",
 				Entries: []*types.TallyEntry{
 					{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
 				},
 			},
-			expectErr:   true,
-			errContains: "creator mismatch",
+			check: func(resp *types.MsgSubmitTallyResponse) {
+				s.Require().Equal(uint32(1), resp.FinalizedEntries)
+			},
 		},
 		{
 			name: "rejected: round does not exist",

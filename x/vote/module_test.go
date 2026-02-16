@@ -51,7 +51,7 @@ func (s *EndBlockerTestSuite) SetupTest() {
 		WithBlockTime(time.Unix(1_000_000, 0).UTC()).
 		WithBlockHeight(10)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger())
+	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
 	s.module = vote.NewAppModule(s.keeper, nil) // codec unused by EndBlock
 }
 

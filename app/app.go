@@ -128,6 +128,17 @@ func NewZallyApp(
 	// - Standard Cosmos txs: standard SDK ante chain (sig verify, fees)
 	app.setAnteHandler(app.txConfig)
 
+	// Install PrepareProposal handler that auto-injects MsgSubmitTally
+	// for rounds in TALLYING state. The EA secret key path is read from
+	// app.toml config (vote.ea_sk_path). If absent, tally injection is skipped.
+	eaSkPath, _ := appOpts.Get("vote.ea_sk_path").(string)
+	app.SetPrepareProposal(TallyPrepareProposalHandler(
+		app.VoteKeeper,
+		app.StakingKeeper,
+		eaSkPath,
+		logger,
+	))
+
 	if err := app.Load(loadLatest); err != nil {
 		panic(err)
 	}

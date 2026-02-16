@@ -13,6 +13,8 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
@@ -115,6 +117,18 @@ func SetupTestApp(t *testing.T) *TestApp {
 // VoteKeeper returns the vote module keeper for querying state in tests.
 func (ta *TestApp) VoteKeeper() votekeeper.Keeper {
 	return ta.ZallyApp.VoteKeeper
+}
+
+// ValidatorOperAddr returns the operator (valoper) address of the genesis
+// validator. This queries the staking keeper for all validators and returns
+// the first one's operator address.
+func (ta *TestApp) ValidatorOperAddr() string {
+	ta.t.Helper()
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	vals, err := ta.StakingKeeper.GetAllValidators(ctx)
+	require.NoError(ta.t, err)
+	require.NotEmpty(ta.t, vals, "expected at least one genesis validator")
+	return vals[0].OperatorAddress
 }
 
 // NextBlock commits an empty block, advancing height and time by 5 seconds.

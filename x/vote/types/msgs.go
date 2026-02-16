@@ -226,8 +226,9 @@ func (msg *MsgDelegateVote) AcceptsTallyingRound() bool { return false }
 // AcceptsTallyingRound returns false — casting votes requires ACTIVE status.
 func (msg *MsgCastVote) AcceptsTallyingRound() bool { return false }
 
-// AcceptsTallyingRound returns true — revealing shares is accepted during TALLYING.
-func (msg *MsgRevealShare) AcceptsTallyingRound() bool { return true }
+// AcceptsTallyingRound returns false — revealing shares is only accepted during ACTIVE.
+// Once a round transitions to TALLYING, no more reveals are accepted.
+func (msg *MsgRevealShare) AcceptsTallyingRound() bool { return false }
 
 // AcceptsTallyingRound returns false — session creation is unrelated to tallying.
 func (msg *MsgCreateVotingSession) AcceptsTallyingRound() bool { return false }

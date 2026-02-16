@@ -206,10 +206,6 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 		return nil, fmt.Errorf("%w: status is %s", types.ErrRoundNotTallying, round.Status)
 	}
 
-	if round.Creator != msg.Creator {
-		return nil, fmt.Errorf("%w: creator mismatch: expected %s, got %s", types.ErrInvalidField, round.Creator, msg.Creator)
-	}
-
 	// Validate each entry and store finalized tally results.
 	for i, entry := range msg.Entries {
 		// Validate proposal_id is within range.

@@ -2,6 +2,7 @@ package ante_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -15,12 +16,29 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+
 	"github.com/z-cale/zally/crypto/redpallas"
 	"github.com/z-cale/zally/crypto/zkp"
 	"github.com/z-cale/zally/x/vote/ante"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
+
+// mockStakingKeeper is a test double for the keeper.StakingKeeper interface.
+// It always returns a bonded validator for any address.
+type mockStakingKeeper struct{}
+
+func (mockStakingKeeper) GetValidator(_ context.Context, _ sdk.ValAddress) (stakingtypes.Validator, error) {
+	return stakingtypes.Validator{Status: stakingtypes.Bonded}, nil
+}
+
+// errStakingKeeper always returns ErrNoValidatorFound.
+type errStakingKeeper struct{}
+
+func (errStakingKeeper) GetValidator(_ context.Context, _ sdk.ValAddress) (stakingtypes.Validator, error) {
+	return stakingtypes.Validator{}, stakingtypes.ErrNoValidatorFound
+}
 
 // ---------------------------------------------------------------------------
 // Failing mock verifiers (for negative test cases)
@@ -195,13 +213,18 @@ func TestValidateTestSuite(t *testing.T) {
 // SetupTest creates a fresh in-memory KV store, vote keeper, and SDK context
 // with a deterministic block time before each test case.
 func (s *ValidateTestSuite) SetupTest() {
+	// Configure bech32 prefixes for validator address parsing.
+	cfg := sdk.GetConfig()
+	cfg.SetBech32PrefixForValidator("zvotevaloper", "zvotevaloperpub")
+	cfg.SetBech32PrefixForAccount("zvote", "zvotepub")
+
 	key := storetypes.NewKVStoreKey(types.StoreKey)
 	tkey := storetypes.NewTransientStoreKey("transient_test")
 	testCtx := testutil.DefaultContextWithDB(s.T(), key, tkey)
 
 	s.ctx = testCtx.Ctx.WithBlockTime(testBlockTime)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger())
+	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), mockStakingKeeper{})
 }
 
 // ---------------------------------------------------------------------------
@@ -758,18 +781,22 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 			errContains: "vote round not found",
 		},
 		{
-			name: "expired ACTIVE round still accepted for shares (pre-EndBlocker window)",
+			name: "expired ACTIVE round rejected for shares",
 			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts: mockOpts(),
 			setup: func() { s.setupExpiredRound() },
-			// MsgRevealShare uses ValidateRoundForShares, which accepts ACTIVE
-			// rounds even past vote_end_time (shares are always valid until FINALIZED).
+			// MsgRevealShare now uses ValidateRoundForVoting, which rejects
+			// expired rounds. Shares are only accepted during the ACTIVE window.
+			expectErr:   true,
+			errContains: "vote round is not active",
 		},
 		{
-			name: "tallying round accepted for shares",
-			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
-			opts: mockOpts(),
+			name:  "tallying round rejected for shares",
+			msg:   func() types.VoteMessage { return newValidMsgRevealShare() },
+			opts:  mockOpts(),
 			setup: func() { s.setupTallyingRound() },
+			expectErr:   true,
+			errContains: "vote round is not active",
 		},
 		{
 			name: "finalized round rejected for shares",
@@ -845,10 +872,16 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 // Tests: MsgSubmitTally
 // ---------------------------------------------------------------------------
 
+// testValidatorAddr returns a valid zvotevaloper bech32 address for test use.
+// Must be called after bech32 config is set in SetupTest.
+func testValidatorAddr() string {
+	return sdk.ValAddress(bytes.Repeat([]byte{0x01}, 20)).String()
+}
+
 func newValidMsgSubmitTally() *types.MsgSubmitTally {
 	return &types.MsgSubmitTally{
 		VoteRoundId: testRoundID,
-		Creator:     "zvote1testcreator",
+		Creator:     testValidatorAddr(),
 		Entries: []*types.TallyEntry{
 			{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
 		},
@@ -920,18 +953,18 @@ func (s *ValidateTestSuite) TestValidateVoteTx_SubmitTally() {
 			expectErr:   true,
 			errContains: "not in tallying state",
 		},
-		// --- Creator mismatch ---
+		// --- Validator check ---
 		{
-			name: "creator mismatch rejected",
+			name: "invalid validator address rejected",
 			msg: func() types.VoteMessage {
 				m := newValidMsgSubmitTally()
-				m.Creator = "zvote1imposter"
+				m.Creator = "not-a-valid-bech32"
 				return m
 			},
 			opts:        mockOpts(),
 			setup:       func() { s.setupTallyingRound() },
 			expectErr:   true,
-			errContains: "creator mismatch",
+			errContains: "invalid validator address",
 		},
 		// --- RecheckTx behavior ---
 		{

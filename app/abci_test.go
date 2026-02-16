@@ -430,7 +430,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerStatusTransition() {
 }
 
 // ---------------------------------------------------------------------------
-// 6.2.10: TALLYING Phase — RevealShare Accepted, DelegateVote Rejected
+// 6.2.10: TALLYING Phase — Both RevealShare and DelegateVote Rejected
 // ---------------------------------------------------------------------------
 
 func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
@@ -482,10 +482,11 @@ func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// RevealShare should succeed during TALLYING.
+	// RevealShare should be rejected during TALLYING (reveals only accepted during ACTIVE).
 	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
-	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
+	s.Require().NotEqual(uint32(0), result.Code, "reveal share during TALLYING should be rejected")
+	s.Require().Contains(result.Log, "vote round is not active")
 
 	// DelegateVote should be rejected during TALLYING.
 	delegation2 := testutil.ValidDelegation(roundID, 0x60)
@@ -641,6 +642,11 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 
 	revealAnchor := uint64(s.app.Height)
 
+	// Reveal share while ACTIVE (before TALLYING transition).
+	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
+	s.Require().Equal(uint32(0), result.Code, "reveal share during ACTIVE should succeed, got: %s", result.Log)
+
 	// Advance past VoteEndTime → triggers TALLYING.
 	s.app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
 
@@ -651,13 +657,14 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// Reveal share during TALLYING.
-	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
-	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
-	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
+	// Reveal share should be rejected during TALLYING.
+	revealMsgTallying := testutil.ValidRevealShare(roundID, revealAnchor, 0x60)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsgTallying))
+	s.Require().NotEqual(uint32(0), result.Code, "reveal share during TALLYING should be rejected")
+	s.Require().Contains(result.Log, "vote round is not active")
 
-	// Submit tally to finalize.
-	submitTallyMsg := testutil.ValidSubmitTally(roundID, setupMsg.Creator)
+	// Submit tally to finalize (use the genesis validator's operator address).
+	submitTallyMsg := testutil.ValidSubmitTally(roundID, s.app.ValidatorOperAddr())
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(submitTallyMsg))
 	s.Require().Equal(uint32(0), result.Code, "submit tally should succeed, got: %s", result.Log)
 
@@ -691,10 +698,10 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 }
 
 // ---------------------------------------------------------------------------
-// 6.2.14: SubmitTally — Authorization (Creator Mismatch Rejected)
+// 6.2.14: SubmitTally — Authorization (Non-Validator Rejected)
 // ---------------------------------------------------------------------------
 
-func (s *ABCIIntegrationSuite) TestSubmitTallyCreatorMismatch() {
+func (s *ABCIIntegrationSuite) TestSubmitTallyNonValidatorRejected() {
 	// Create a session expiring 10 seconds from now.
 	voteEndTime := s.app.Time.Add(10 * time.Second)
 	setupMsg := &types.MsgCreateVotingSession{
@@ -726,21 +733,20 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyCreatorMismatch() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// Submit tally with wrong creator should fail.
-	// Use zero-valued entries since no reveals happened.
-	badTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, "zvote1imposter", []*types.TallyEntry{
+	// Submit tally with invalid bech32 address should fail.
+	badTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, "not-a-valid-bech32", []*types.TallyEntry{
 		{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
 	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badTallyMsg))
-	s.Require().NotEqual(uint32(0), result.Code, "submit tally with wrong creator should fail")
-	s.Require().Contains(result.Log, "creator mismatch")
+	s.Require().NotEqual(uint32(0), result.Code, "submit tally with invalid address should fail")
+	s.Require().Contains(result.Log, "invalid validator address")
 
-	// Submit tally with correct creator should succeed (zero-valued entries since no reveals).
-	goodTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, "zvote1admin", []*types.TallyEntry{
+	// Submit tally with a valid bonded validator should succeed.
+	goodTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, s.app.ValidatorOperAddr(), []*types.TallyEntry{
 		{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
 	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(goodTallyMsg))
-	s.Require().Equal(uint32(0), result.Code, "submit tally with correct creator should succeed, got: %s", result.Log)
+	s.Require().Equal(uint32(0), result.Code, "submit tally with bonded validator should succeed, got: %s", result.Log)
 }
 
 // ---------------------------------------------------------------------------
@@ -762,8 +768,8 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyRejectsActiveRound() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
 
-	// Submit tally against ACTIVE round should fail.
-	tallyMsg := testutil.ValidSubmitTally(roundID, setupMsg.Creator)
+	// Submit tally against ACTIVE round should fail (even from a valid validator).
+	tallyMsg := testutil.ValidSubmitTally(roundID, s.app.ValidatorOperAddr())
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(tallyMsg))
 	s.Require().NotEqual(uint32(0), result.Code, "submit tally against ACTIVE round should fail")
 	s.Require().Contains(result.Log, "not in tallying state")

@@ -81,6 +81,29 @@ func decompressPallasPoint(data []byte) (curvey.Point, error) {
 	return receiver.FromAffineCompressed(data)
 }
 
+// UnmarshalSecretKey deserializes a 32-byte Pallas scalar into a SecretKey.
+func UnmarshalSecretKey(data []byte) (*SecretKey, error) {
+	if len(data) != CompressedPointSize {
+		return nil, fmt.Errorf("elgamal: UnmarshalSecretKey: expected %d bytes, got %d", CompressedPointSize, len(data))
+	}
+	s, err := new(curvey.ScalarPallas).SetBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("elgamal: UnmarshalSecretKey: invalid scalar: %w", err)
+	}
+	if s.IsZero() {
+		return nil, fmt.Errorf("elgamal: UnmarshalSecretKey: secret key must not be zero")
+	}
+	return &SecretKey{Scalar: s}, nil
+}
+
+// MarshalSecretKey serializes a SecretKey to 32 bytes.
+func MarshalSecretKey(sk *SecretKey) ([]byte, error) {
+	if sk == nil || sk.Scalar == nil {
+		return nil, fmt.Errorf("elgamal: MarshalSecretKey: secret key must not be nil")
+	}
+	return sk.Scalar.Bytes(), nil
+}
+
 // IdentityCiphertextBytes returns 64 bytes representing Enc(0) = (O, O),
 // where O is the identity (zero) point on the Pallas curve.
 // Used as the initial accumulator value.
