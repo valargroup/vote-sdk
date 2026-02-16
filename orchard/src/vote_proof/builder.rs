@@ -8,7 +8,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use ff::Field;
+use ff::{Field, PrimeField};
 use group::{Curve, GroupEncoding};
 use halo2_proofs::circuit::Value;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
@@ -29,6 +29,25 @@ const MAX_PROPOSAL_AUTHORITY: u64 = 65535; // 2^16 - 1
 /// Ballot divisor — must match `delegation::circuit::BALLOT_DIVISOR`.
 const BALLOT_DIVISOR: u64 = 12_500_000;
 
+/// Encrypted share output from the vote proof builder.
+///
+/// Contains the El Gamal ciphertext components (compressed point bytes),
+/// plaintext share value, and encryption randomness. Returned so the caller
+/// can build reveal-share payloads using the exact ciphertexts committed in the proof.
+#[derive(Debug, Clone)]
+pub struct EncryptedShareOutput {
+    /// Compressed El Gamal C1 point (32 bytes).
+    pub c1: [u8; 32],
+    /// Compressed El Gamal C2 point (32 bytes).
+    pub c2: [u8; 32],
+    /// Share index (0-3).
+    pub share_index: u32,
+    /// Plaintext share value.
+    pub plaintext_value: u64,
+    /// El Gamal randomness r (32 bytes, LE pallas::Base repr).
+    pub randomness: [u8; 32],
+}
+
 /// Result of building a vote proof.
 #[derive(Debug)]
 pub struct VoteProofBundle {
@@ -38,13 +57,10 @@ pub struct VoteProofBundle {
     pub instance: Instance,
     /// Compressed r_vpk (32 bytes) for sighash computation and signature verification.
     pub r_vpk_bytes: [u8; 32],
-    /// El Gamal encrypted share C1 x-coordinates (needed for ZKP #3).
-    pub enc_c1_x: [pallas::Base; 4],
-    /// El Gamal encrypted share C2 x-coordinates (needed for ZKP #3).
-    pub enc_c2_x: [pallas::Base; 4],
-    /// Compressed encrypted share bytes per share (64 bytes each: C1 || C2).
-    /// Used for the chain's `enc_share` field in MsgRevealShare.
-    pub enc_shares_compressed: [[u8; 64]; 4],
+    /// Encrypted shares generated during proof construction.
+    /// These are the exact ciphertexts committed in the vote commitment hash
+    /// and must be used for reveal-share payloads.
+    pub encrypted_shares: [EncryptedShareOutput; 4],
 }
 
 /// Errors that can occur during vote proof construction.
@@ -256,6 +272,9 @@ pub fn build_vote_proof_from_delegation(
     ];
 
     // ---- El Gamal encryption of shares ----
+    //
+    // Encrypts each share and captures both the x-coordinates (for circuit constraints)
+    // and the full compressed point bytes (for reveal-share payloads).
 
     let ea_pk_point = pallas::Point::from(ea_pk);
     let ea_pk_x = *ea_pk.coordinates().unwrap().x();
@@ -265,24 +284,31 @@ pub fn build_vote_proof_from_delegation(
     let mut enc_c1_x = [pallas::Base::zero(); 4];
     let mut enc_c2_x = [pallas::Base::zero(); 4];
     let mut share_randomness = [pallas::Base::zero(); 4];
-    let mut enc_shares_compressed = [[0u8; 64]; 4];
+    let mut enc_share_outputs: [EncryptedShareOutput; 4] = core::array::from_fn(|i| {
+        EncryptedShareOutput {
+            c1: [0u8; 32],
+            c2: [0u8; 32],
+            share_index: i as u32,
+            plaintext_value: shares_u64[i],
+            randomness: [0u8; 32],
+        }
+    });
 
     for i in 0..4 {
         let r = random_valid_base_as_scalar(rng);
         share_randomness[i] = r;
-        let r_scalar =
-            base_to_scalar(r).expect("randomness was validated in random_valid_base_as_scalar");
-        let v_scalar =
-            base_to_scalar(shares_base[i]).expect("share value must fit in scalar field");
-        let c1_point = g * r_scalar;
-        let c2_point = g * v_scalar + ea_pk_point * r_scalar;
-        enc_c1_x[i] = *c1_point.to_affine().coordinates().unwrap().x();
-        enc_c2_x[i] = *c2_point.to_affine().coordinates().unwrap().x();
-        // Full compressed bytes for the chain's enc_share field.
-        let c1_bytes = c1_point.to_bytes();
-        let c2_bytes = c2_point.to_bytes();
-        enc_shares_compressed[i][..32].copy_from_slice(c1_bytes.as_ref());
-        enc_shares_compressed[i][32..].copy_from_slice(c2_bytes.as_ref());
+        let r_scalar = base_to_scalar(r).expect("validated by random_valid_base_as_scalar");
+        let v_scalar = base_to_scalar(shares_base[i]).expect("share value in range");
+
+        let c1_point = (g * r_scalar).to_affine();
+        let c2_point = (g * v_scalar + ea_pk_point * r_scalar).to_affine();
+
+        enc_c1_x[i] = *c1_point.coordinates().unwrap().x();
+        enc_c2_x[i] = *c2_point.coordinates().unwrap().x();
+
+        enc_share_outputs[i].c1 = c1_point.to_bytes();
+        enc_share_outputs[i].c2 = c2_point.to_bytes();
+        enc_share_outputs[i].randomness = r.to_repr();
     }
 
     let shares_hash_val = shares_hash(enc_c1_x, enc_c2_x);
@@ -396,8 +422,6 @@ pub fn build_vote_proof_from_delegation(
         proof,
         instance,
         r_vpk_bytes,
-        enc_c1_x,
-        enc_c2_x,
-        enc_shares_compressed,
+        encrypted_shares: enc_share_outputs,
     })
 }

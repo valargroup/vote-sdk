@@ -29,7 +29,7 @@ pub use circuit::{
     domain_van_nullifier, poseidon_hash_2, shares_hash, van_integrity_hash, van_nullifier_hash,
     vote_commitment_hash, Circuit, Config, Instance, K, DOMAIN_VAN, DOMAIN_VC, VOTE_COMM_TREE_DEPTH,
 };
-pub use builder::{build_vote_proof_from_delegation, VoteProofBuildError, VoteProofBundle};
+pub use builder::{build_vote_proof_from_delegation, EncryptedShareOutput, VoteProofBuildError, VoteProofBundle};
 pub use prove::{
     create_vote_proof, verify_vote_proof, verify_vote_proof_raw, vote_proof_params,
     vote_proof_proving_key,
