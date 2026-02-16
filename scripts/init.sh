@@ -50,6 +50,25 @@ CONFIG_TOML="$HOME_DIR/config/config.toml"
 sed -i.bak 's/^timeout_broadcast_tx_commit = .*/timeout_broadcast_tx_commit = "120s"/' "$CONFIG_TOML"
 rm -f "${CONFIG_TOML}.bak"
 
+# Generate EA (Election Authority) ElGamal keypair for auto-tally.
+# The secret key is used by PrepareProposal to decrypt tallies.
+$BINARY ea-keygen --home "$HOME_DIR"
+
+# Configure the EA secret key path in app.toml so the node can auto-tally.
+EA_SK_PATH="$HOME_DIR/ea.sk"
+cat >> "$APP_TOML" <<EACFG
+
+###############################################################################
+###                          Vote Module                                    ###
+###############################################################################
+
+[vote]
+
+# Path to the Election Authority secret key file (32 bytes).
+# Used by PrepareProposal to decrypt tallies and auto-inject MsgSubmitTally.
+ea_sk_path = "$EA_SK_PATH"
+EACFG
+
 echo ""
 echo "=== Chain initialized successfully! ==="
 echo "Start with: $BINARY start --home $HOME_DIR"
