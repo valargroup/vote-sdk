@@ -208,8 +208,10 @@ fn voting_flow_full_lifecycle() {
     );
     log_step("Step 4", "local verification passed, submitting cast-vote");
 
-    // 4d: Extract public inputs from the instance for the payload.
+    // 4d: Extract public inputs from the instance for the payload (condition 4: r_vpk required).
     let van_nullifier_bytes = vote_bundle.instance.van_nullifier.to_repr();
+    let r_vpk_x_bytes = vote_bundle.instance.r_vpk_x.to_repr();
+    let r_vpk_y_bytes = vote_bundle.instance.r_vpk_y.to_repr();
     let van_new_bytes = vote_bundle.instance.vote_authority_note_new.to_repr();
     let vote_comm_bytes = vote_bundle.instance.vote_commitment.to_repr();
 
@@ -217,6 +219,8 @@ fn voting_flow_full_lifecycle() {
         &round_id,
         anchor_height,
         van_nullifier_bytes.as_ref(),
+        r_vpk_x_bytes.as_ref(),
+        r_vpk_y_bytes.as_ref(),
         van_new_bytes.as_ref(),
         vote_comm_bytes.as_ref(),
         1,  // proposal_id

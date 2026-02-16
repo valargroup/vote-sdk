@@ -170,24 +170,19 @@ int32_t zally_verify_delegation_proof(
 /*
  * Verify a real vote proof circuit proof (ZKP #2, 11 conditions, K=14).
  *
- * The public inputs are passed as a flat byte array of 8 x 32-byte
- * chunks (256 bytes total), in order:
- *   [van_nullifier, vote_authority_note_new, vote_commitment,
- *    vote_comm_tree_root, anchor_height_le, proposal_id_le,
- *    voting_round_id, ea_pk_compressed]
+ * The public inputs are passed as a flat byte array of 10 x 32-byte
+ * chunks (320 bytes total), in order:
+ *   [van_nullifier, r_vpk_x, r_vpk_y, vote_authority_note_new, vote_commitment,
+ *    vote_comm_tree_root, anchor_height_le, proposal_id_le, voting_round_id, ea_pk_compressed]
  *
- * Slots 0-3 and 6 are 32-byte Pallas Fp field element encodings.
- * Slot 4 is a uint64 LE value zero-padded to 32 bytes (anchor height).
- * Slot 5 is a uint32 LE value zero-padded to 32 bytes (proposal ID).
- * Slot 7 (ea_pk_compressed) is a 32-byte compressed Pallas curve point.
- * The FFI decompresses it into (ea_pk_x, ea_pk_y) for the circuit's
- * 9 field elements.
+ * Condition 4 (Spend Authority) adds r_vpk at slots 1-2. Slot 9 (ea_pk_compressed)
+ * is decompressed to (ea_pk_x, ea_pk_y) for the circuit's 11 field elements.
  *
  * Parameters:
  *   proof_ptr         - Pointer to serialized Halo2 proof bytes.
  *   proof_len         - Length of the proof byte array.
- *   public_inputs_ptr - Pointer to 256 bytes (8 x 32-byte chunks).
- *   public_inputs_len - Length of the public inputs byte array (must be 256).
+ *   public_inputs_ptr - Pointer to 320 bytes (10 x 32-byte chunks).
+ *   public_inputs_len - Length of the public inputs byte array (must be 320).
  *
  * Returns:
  *    0  on successful verification.
