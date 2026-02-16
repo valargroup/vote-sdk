@@ -19,7 +19,6 @@
 //! - **Condition 15** (×4): Padded-note zero-value enforcement.
 
 use alloc::vec::Vec;
-use ff::Field;
 use group::{Curve, GroupEncoding};
 use halo2_proofs::{
     circuit::{floor_planner, AssignedCell, Layouter, Value},
@@ -75,6 +74,7 @@ use halo2_gadgets::{
     },
 };
 use super::imt::IMT_DEPTH;
+use super::imt_circuit::{ImtNonMembershipConfig, synthesize_imt_non_membership};
 use crate::circuit::van_integrity;
 use crate::constants::MERKLE_DEPTH_ORCHARD;
 
@@ -219,14 +219,8 @@ pub struct Config {
     // Enforces: is_note_real is boolean, padded notes have v=0,
     // real notes' Merkle root matches nc_root, IMT root matches nf_imt_root.
     q_per_note: Selector,
-    // IMT conditional swap gate selector (condition 13).
-    // At each of the 29 IMT Merkle levels, swaps (current, sibling) into (left, right)
-    // based on the position bit before Poseidon hashing (condition 13).
-    q_imt_swap: Selector,
-    // Interval check gate selector (condition 13).
-    // Proves low <= real_nf <= high by constraining x and x_shifted
-    // values that are then range-checked to [0, 2^250).
-    q_interval: Selector,
+    // IMT non-membership gates (condition 13): conditional swap + interval check.
+    imt_config: ImtNonMembershipConfig,
 }
 
 impl Config {
@@ -457,81 +451,8 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             )
         });
 
-        // IMT conditional swap gate (condition 13).
-        // At each level of the Poseidon Merkle path, we need to place (current, sibling)
-        // into (left, right) based on the position bit. If pos_bit=0, current is the
-        // left child; if pos_bit=1, they swap.
-        let q_imt_swap = meta.selector();
-        meta.create_gate("IMT conditional swap", |meta| {
-            let q = meta.query_selector(q_imt_swap);
-            let pos_bit = meta.query_advice(advices[0], Rotation::cur());
-            let current = meta.query_advice(advices[1], Rotation::cur());
-            let sibling = meta.query_advice(advices[2], Rotation::cur());
-            let left = meta.query_advice(advices[3], Rotation::cur());
-            let right = meta.query_advice(advices[4], Rotation::cur());
-
-            Constraints::with_selector(
-                q,
-                [
-                    // left = current + pos_bit * (sibling - current)
-                    // i.e. left = current when pos_bit=0, left = sibling when pos_bit=1.
-                    (
-                        "swap left",
-                        left.clone()
-                            - current.clone()
-                            - pos_bit.clone() * (sibling.clone() - current.clone()),
-                    ),
-                    // left + right = current + sibling (conservation: no values lost).
-                    ("swap right", left + right - current - sibling),
-                    // pos_bit must be 0 or 1.
-                    ("bool_check pos_bit", bool_check(pos_bit)),
-                ],
-            )
-        });
-
-        // Interval check gate (condition 13, (low, high) leaf model).
-        // Proves low <= real_nf <= high by constraining:
-        //   x = real_nf - low  (range-checked to [0, 2^250) outside)
-        //   x_shifted = 2^250 - y + x - 1  (range-checked to [0, 2^250) outside)
-        // where y = high - low (the interval width).
-        //
-        // NOTE: The 250-bit range checks are only sound when every IMT bracket
-        // has width < 2^250. The IMT MUST be initialized with ~17 sentinel
-        // nullifiers at multiples of 2^250 before any real nullifiers are
-        // inserted. This invariant holds permanently once established, since
-        // inserting a nullifier only splits a bracket into two smaller ones.
-        let q_interval = meta.selector();
-        meta.create_gate("Interval check", |meta| {
-            let q = meta.query_selector(q_interval);
-            let low = meta.query_advice(advices[0], Rotation::cur());
-            let high = meta.query_advice(advices[1], Rotation::cur());
-            let real_nf = meta.query_advice(advices[2], Rotation::cur());
-            let y = meta.query_advice(advices[0], Rotation::next());
-            let x = meta.query_advice(advices[1], Rotation::next());
-            let x_shifted = meta.query_advice(advices[2], Rotation::next());
-
-            let two_250 = Expression::Constant(pallas::Base::from(2u64).pow([250, 0, 0, 0]));
-            let one = Expression::Constant(pallas::Base::one());
-
-            Constraints::with_selector(
-                q,
-                [
-                    // Interval width.
-                    ("y = high - low", y.clone() - (high - low.clone())),
-                    // Lower bound: x = real_nf - low.
-                    // Range-checking x to [0, 2^250) proves real_nf >= low,
-                    // since a negative difference wraps to a large field element.
-                    ("x = real_nf - low", x.clone() - (real_nf - low)),
-                    // Upper bound: x_shifted = 2^250 - y + x - 1.
-                    // If real_nf <= high then x <= y, so x_shifted <= 2^250 - 1 (passes).
-                    // If real_nf > high then x > y, so x_shifted >= 2^250 (fails range check).
-                    (
-                        "x_shifted = 2^250 - y + x - 1",
-                        x_shifted - (two_250 - y + x - one),
-                    ),
-                ],
-            )
-        });
+        // IMT non-membership gates (condition 13): conditional swap + interval check.
+        let imt_config = ImtNonMembershipConfig::configure(meta, &advices);
 
         let add_config = AddChip::configure(meta, advices[7], advices[8], advices[6]);
 
@@ -645,8 +566,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             merkle_config_1,
             merkle_config_2,
             q_per_note,
-            q_imt_swap,
-            q_interval,
+            imt_config,
         }
     }
 
@@ -1548,202 +1468,17 @@ fn synthesize_note_slot(
     // Condition 13: IMT non-membership.
     // ---------------------------------------------------------------
 
-    // Proves the note's real nullifier (from cond 12) has NOT been spent on
-    // mainchain. Uses a (low, high) leaf Indexed Merkle Tree where each leaf
-    // stores an explicit interval [low, high].
-    //
-    // The proof has three parts:
-    //   1. Leaf hash: Poseidon(low, high)
-    //   2. Merkle path: 29 levels from the leaf hash to the root.
-    //   3. Interval check: low <= real_nf <= high, proved by
-    //      range-checking x and x_shifted to [0, 2^250).
-    //
-    // Witness low and high explicitly.
-    let imt_low = assign_free_advice(
-        layouter.namespace(|| format!("note {s} imt_low")),
-        config.advices[0],
+    let imt_root = synthesize_imt_non_membership(
+        &config.imt_config,
+        &config.poseidon_config,
+        &config.ecc_config,
+        layouter,
         note.imt_low,
-    )?;
-
-    let imt_high = assign_free_advice(
-        layouter.namespace(|| format!("note {s} imt_high")),
-        config.advices[0],
         note.imt_high,
-    )?;
-
-    // Compute leaf hash: Poseidon(low, high).
-    let leaf_hash = {
-        let poseidon_hasher = PoseidonHash::<
-            pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<2>, 3, 2
-        >::init(config.poseidon_chip(), layouter.namespace(|| format!("note {s} imt leaf hash init")))?;
-        poseidon_hasher.hash(
-            layouter.namespace(|| format!("note {s} Poseidon(low, high)")),
-            [imt_low.clone(), imt_high.clone()],
-        )?
-    };
-
-    // Poseidon Merkle path from leaf_hash, 29 levels.
-    // At each level, q_imt_swap orders (current, sibling) by position bit,
-    // then Poseidon(left, right) computes the parent.
-    let mut current = leaf_hash;
-
-    for i in 0..IMT_DEPTH {
-        let pos_bit = assign_free_advice(
-            layouter.namespace(|| format!("note {s} imt pos_bit {i}")),
-            config.advices[0],
-            note.imt_leaf_pos
-                .map(|p| pallas::Base::from(((p >> i) & 1) as u64)),
-        )?;
-
-        let sibling = assign_free_advice(
-            layouter.namespace(|| format!("note {s} imt sibling {i}")),
-            config.advices[0],
-            note.imt_path.map(|path| path[i]),
-        )?;
-
-        let (left, right) = layouter.assign_region(
-            || format!("note {s} imt swap level {i}"),
-            |mut region| {
-                config.q_imt_swap.enable(&mut region, 0)?;
-
-                let pos_bit_cell =
-                    pos_bit.copy_advice(|| "pos_bit", &mut region, config.advices[0], 0)?;
-                let current_cell =
-                    current.copy_advice(|| "current", &mut region, config.advices[1], 0)?;
-                let sibling_cell =
-                    sibling.copy_advice(|| "sibling", &mut region, config.advices[2], 0)?;
-
-                let left = region.assign_advice(
-                    || "left",
-                    config.advices[3],
-                    0,
-                    || {
-                        pos_bit_cell
-                            .value()
-                            .copied()
-                            .zip(current_cell.value().copied())
-                            .zip(sibling_cell.value().copied())
-                            .map(|((bit, cur), sib)| {
-                                if bit == pallas::Base::zero() {
-                                    cur
-                                } else {
-                                    sib
-                                }
-                            })
-                    },
-                )?;
-
-                let right = region.assign_advice(
-                    || "right",
-                    config.advices[4],
-                    0,
-                    || {
-                        current_cell
-                            .value()
-                            .copied()
-                            .zip(sibling_cell.value().copied())
-                            .zip(left.value().copied())
-                            .map(|((cur, sib), l)| cur + sib - l)
-                    },
-                )?;
-
-                Ok((left, right))
-            },
-        )?;
-
-        let parent = {
-            let poseidon_hasher = PoseidonHash::<
-                pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<2>, 3, 2
-            >::init(config.poseidon_chip(), layouter.namespace(|| format!("note {s} imt path hash init level {i}")))?;
-            poseidon_hasher.hash(
-                layouter.namespace(|| format!("note {s} Poseidon(left, right) level {i}")),
-                [left, right],
-            )?
-        };
-        current = parent;
-    }
-    // The computed root is checked against the public nf_imt_root in the
-    // q_per_note gate below.
-    let imt_root = current;
-
-    // Interval check: prove low <= real_nf <= high.
-    // The q_interval gate constrains y, x, x_shifted from the witnessed values.
-    // Range checks on x and x_shifted enforce the interval inclusion.
-    let (x, x_shifted) = layouter.assign_region(
-        || format!("note {s} interval check"),
-        |mut region| {
-            config.q_interval.enable(&mut region, 0)?;
-
-            // Row 0: low, high, real_nf
-            imt_low.copy_advice(|| "low", &mut region, config.advices[0], 0)?;
-            imt_high.copy_advice(|| "high", &mut region, config.advices[1], 0)?;
-            real_nf
-                .inner()
-                .copy_advice(|| "real_nf", &mut region, config.advices[2], 0)?;
-
-            // Row 1: witness the derived values constrained by q_interval.
-            // y = interval width, x = lower bound offset, x_shifted = upper bound check.
-            // x and x_shifted are range-checked to [0, 2^250) after this region.
-            let y = region.assign_advice(
-                || "y = high - low",
-                config.advices[0],
-                1,
-                || {
-                    imt_high
-                        .value()
-                        .copied()
-                        .zip(imt_low.value().copied())
-                        .map(|(e, s)| e - s)
-                },
-            )?;
-
-            let x = region.assign_advice(
-                || "x = real_nf - low",
-                config.advices[1],
-                1,
-                || {
-                    real_nf
-                        .inner()
-                        .value()
-                        .copied()
-                        .zip(imt_low.value().copied())
-                        .map(|(nf, s)| nf - s)
-                },
-            )?;
-
-            let two_250 = pallas::Base::from(2u64).pow([250, 0, 0, 0]);
-            let x_shifted = region.assign_advice(
-                || "x_shifted = 2^250 - y + x - 1",
-                config.advices[2],
-                1,
-                || {
-                    y.value()
-                        .copied()
-                        .zip(x.value().copied())
-                        .map(|(y_val, x_val)| two_250 - y_val + x_val - pallas::Base::one())
-                },
-            )?;
-
-            Ok((x, x_shifted))
-        },
-    )?;
-
-    // Range checks enforce the interval inclusion.
-    // x in [0, 2^250) proves low <= real_nf.
-    // x_shifted in [0, 2^250) proves real_nf <= high.
-    // 25 limbs × 10 bits = 250-bit range.
-    config.ecc_config.lookup_config.copy_check(
-        layouter.namespace(|| format!("note {s} x < 2^250")),
-        x,
-        25,
-        true,
-    )?;
-
-    config.ecc_config.lookup_config.copy_check(
-        layouter.namespace(|| format!("note {s} x_shifted < 2^250")),
-        x_shifted,
-        25,
-        true,
+        note.imt_leaf_pos,
+        note.imt_path,
+        real_nf.inner(),
+        s,
     )?;
 
     // ---------------------------------------------------------------
