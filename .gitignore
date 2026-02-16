@@ -30,6 +30,7 @@ orchard/book/src/zkps/zkp3-vote-reveal-proof.md
 # Environment files (secrets)
 .env
 **/.env
+.secrets
 
 **/vendor/**
 

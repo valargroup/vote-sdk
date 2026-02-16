@@ -1,0 +1,83 @@
+# Deploy nullifier-ingest to a remote host on every push to main.
+# Requires repository secrets: DEPLOY_HOST, DEPLOY_USER, SSH_PASSWORD.
+# See nullifier-ingest/docs/deploy-setup.md for one-time remote setup.
+
+name: Deploy nullifier-ingest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'nullifier-ingest/**'
+  workflow_dispatch: # allow manual run
+
+permissions:
+  contents: read
+
+env:
+  DEPLOY_PATH: /opt/nullifier-ingest
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            nullifier-ingest/imt-tree/target
+            nullifier-ingest/service/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-nullifier-ingest-${{ hashFiles('nullifier-ingest/service/Cargo.lock', 'nullifier-ingest/imt-tree/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nullifier-ingest-
+
+      - name: Build release binaries
+        run: make build
+        working-directory: nullifier-ingest
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: nullifier-ingest-binaries
+          path: |
+            nullifier-ingest/service/target/release/query-server
+            nullifier-ingest/service/target/release/ingest-nfs
+
+  deploy:
+    name: Deploy to remote
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: nullifier-ingest-binaries
+
+      - name: Deploy via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: "query-server,ingest-nfs"
+          target: ${{ env.DEPLOY_PATH }}
+
+      - name: Restart service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            sudo systemctl restart nullifier-query-server || true

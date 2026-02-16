@@ -1,0 +1,15 @@
+[Unit]
+Description=Nullifier ingest query server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/nullifier-ingest
+Environment="DB_PATH=/opt/nullifier-ingest/nullifiers.db"
+Environment="PORT=3000"
+ExecStart=/opt/nullifier-ingest/query-server
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
