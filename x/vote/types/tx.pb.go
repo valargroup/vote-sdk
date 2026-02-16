@@ -354,6 +354,8 @@ func (*MsgDelegateVoteResponse) Descriptor() ([]byte, []int) {
 }
 
 // MsgCastVote corresponds to ZKP #2: create a vote commitment.
+// Condition 4 (Spend Authority) adds r_vpk = vsk.ak + [alpha_v]*G; the circuit
+// exposes r_vpk_x and r_vpk_y as public inputs, so the client must send them.
 type MsgCastVote struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	VanNullifier             []byte                 `protobuf:"bytes,1,opt,name=van_nullifier,json=vanNullifier,proto3" json:"van_nullifier,omitempty"`
@@ -363,6 +365,8 @@ type MsgCastVote struct {
 	Proof                    []byte                 `protobuf:"bytes,5,opt,name=proof,proto3" json:"proof,omitempty"`
 	VoteRoundId              []byte                 `protobuf:"bytes,6,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
 	VoteCommTreeAnchorHeight uint64                 `protobuf:"varint,7,opt,name=vote_comm_tree_anchor_height,json=voteCommTreeAnchorHeight,proto3" json:"vote_comm_tree_anchor_height,omitempty"`
+	RVpkX                    []byte                 `protobuf:"bytes,8,opt,name=r_vpk_x,json=rVpkX,proto3" json:"r_vpk_x,omitempty"` // Pallas Fp: x-coordinate of randomized voting key (condition 4)
+	RVpkY                    []byte                 `protobuf:"bytes,9,opt,name=r_vpk_y,json=rVpkY,proto3" json:"r_vpk_y,omitempty"` // Pallas Fp: y-coordinate of randomized voting key (condition 4)
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -444,6 +448,20 @@ func (x *MsgCastVote) GetVoteCommTreeAnchorHeight() uint64 {
 		return x.VoteCommTreeAnchorHeight
 	}
 	return 0
+}
+
+func (x *MsgCastVote) GetRVpkX() []byte {
+	if x != nil {
+		return x.RVpkX
+	}
+	return nil
+}
+
+func (x *MsgCastVote) GetRVpkY() []byte {
+	if x != nil {
+		return x.RVpkY
+	}
+	return nil
 }
 
 type MsgCastVoteResponse struct {
@@ -820,7 +838,7 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\rvote_round_id\x18\t \x01(\fR\vvoteRoundId\x12\x18\n" +
 	"\asighash\x18\n" +
 	" \x01(\fR\asighash\"\x19\n" +
-	"\x17MsgDelegateVoteResponse\"\xad\x02\n" +
+	"\x17MsgDelegateVoteResponse\"\xdd\x02\n" +
 	"\vMsgCastVote\x12#\n" +
 	"\rvan_nullifier\x18\x01 \x01(\fR\fvanNullifier\x125\n" +
 	"\x17vote_authority_note_new\x18\x02 \x01(\fR\x14voteAuthorityNoteNew\x12'\n" +
@@ -829,7 +847,9 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"proposalId\x12\x14\n" +
 	"\x05proof\x18\x05 \x01(\fR\x05proof\x12\"\n" +
 	"\rvote_round_id\x18\x06 \x01(\fR\vvoteRoundId\x12>\n" +
-	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\"\x15\n" +
+	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\x12\x16\n" +
+	"\ar_vpk_x\x18\b \x01(\fR\x05rVpkX\x12\x16\n" +
+	"\ar_vpk_y\x18\t \x01(\fR\x05rVpkY\"\x15\n" +
 	"\x13MsgCastVoteResponse\"\x96\x02\n" +
 	"\x0eMsgRevealShare\x12'\n" +
 	"\x0fshare_nullifier\x18\x01 \x01(\fR\x0eshareNullifier\x12\x1b\n" +
