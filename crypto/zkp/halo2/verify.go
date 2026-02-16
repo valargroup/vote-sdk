@@ -73,7 +73,7 @@ func VerifyToyProof(proof, publicInput []byte) error {
 //
 // The inputs are serialized as 11 × 32-byte chunks (352 bytes):
 //
-//	[nf_signed, rk_compressed, cmx_new, gov_comm, vote_round_id,
+//	[nf_signed, rk_compressed, cmx_new, van_cmx, vote_round_id,
 //	 nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4]
 //
 // The Rust FFI decompresses rk into (rk_x, rk_y) for the circuit's 12 field elements.
@@ -111,9 +111,9 @@ func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 	if err := copyChunk(2*chunkSize, inputs.CmxNew); err != nil {
 		return fmt.Errorf("cmx_new: %w", err)
 	}
-	// Slot 3: gov_comm
-	if err := copyChunk(3*chunkSize, inputs.GovComm); err != nil {
-		return fmt.Errorf("gov_comm: %w", err)
+	// Slot 3: van_cmx
+	if err := copyChunk(3*chunkSize, inputs.VanCmx); err != nil {
+		return fmt.Errorf("van_cmx: %w", err)
 	}
 	// Slot 4: vote_round_id
 	if err := copyChunk(4*chunkSize, inputs.VoteRoundId); err != nil {

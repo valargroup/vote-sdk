@@ -53,7 +53,7 @@ func TestEncodeDecodeDelegateVote(t *testing.T) {
 		SpendAuthSig:        []byte("sig"),
 		SignedNoteNullifier: []byte("nullifier"),
 		CmxNew:              []byte("cmx"),
-		GovComm:             []byte("comm"),
+		VanCmx:              []byte("comm"),
 		GovNullifiers:       [][]byte{[]byte("nf1"), []byte("nf2")},
 		Proof:               []byte("proof"),
 		VoteRoundId:         []byte("roundid"),

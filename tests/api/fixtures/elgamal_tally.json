@@ -1,0 +1,15 @@
+{
+  "ea_pk": "fzJkmr+u4sCS94IIQFy/YzfTyHrWMyBFHyUqkZUndqI=",
+  "shares": [
+    {
+      "value": 5,
+      "enc_share": "vTc7DmG6ncAou5MeRI+0uyUcM/7fyUeltnVtKBR28aeCSFG2ZvjYMJ3lZZY43ibPuxt3LPGLrXtOu3S6LdiOCw=="
+    },
+    {
+      "value": 10,
+      "enc_share": "Tni6s65JTmb+p+8LJ5yvR4gvkhsyf3IEV4knikQMJLypPj6r2uhNBY5W/HcWfCZvjTs2F8/VRL5DTMLyQpgsGg=="
+    }
+  ],
+  "expected_accumulated": "6X2VG+3De1OR26ir7e3z5zFKCJDkaaZXofvkEvzS+6fLd+sUGlpqHhbb+BvuXxIv/gj4MRWTk7DBVlRlFIIukA==",
+  "expected_total": 15
+}

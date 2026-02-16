@@ -208,7 +208,7 @@ type MsgDelegateVote struct {
 	SignedNoteNullifier []byte                 `protobuf:"bytes,3,opt,name=signed_note_nullifier,json=signedNoteNullifier,proto3" json:"signed_note_nullifier,omitempty"` // Nullifier of the dummy signed note
 	CmxNew              []byte                 `protobuf:"bytes,4,opt,name=cmx_new,json=cmxNew,proto3" json:"cmx_new,omitempty"`                                          // Output note commitment
 	EncMemo             []byte                 `protobuf:"bytes,5,opt,name=enc_memo,json=encMemo,proto3" json:"enc_memo,omitempty"`                                       // Encrypted memo
-	GovComm             []byte                 `protobuf:"bytes,6,opt,name=gov_comm,json=govComm,proto3" json:"gov_comm,omitempty"`                                       // Governance commitment
+	VanCmx              []byte                 `protobuf:"bytes,6,opt,name=van_cmx,json=vanCmx,proto3" json:"van_cmx,omitempty"`                                          // Vote authority note commitment
 	GovNullifiers       [][]byte               `protobuf:"bytes,7,rep,name=gov_nullifiers,json=govNullifiers,proto3" json:"gov_nullifiers,omitempty"`                     // Up to 4 governance nullifiers
 	Proof               []byte                 `protobuf:"bytes,8,opt,name=proof,proto3" json:"proof,omitempty"`                                                          // Halo2 ZKP #1
 	VoteRoundId         []byte                 `protobuf:"bytes,9,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
@@ -282,9 +282,9 @@ func (x *MsgDelegateVote) GetEncMemo() []byte {
 	return nil
 }
 
-func (x *MsgDelegateVote) GetGovComm() []byte {
+func (x *MsgDelegateVote) GetVanCmx() []byte {
 	if x != nil {
-		return x.GovComm
+		return x.VanCmx
 	}
 	return nil
 }
@@ -825,14 +825,14 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\avk_zkp3\x18\v \x01(\fR\x06vkZkp3\x120\n" +
 	"\tproposals\x18\f \x03(\v2\x12.zvote.v1.ProposalR\tproposals\"D\n" +
 	"\x1eMsgCreateVotingSessionResponse\x12\"\n" +
-	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xc5\x02\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xc3\x02\n" +
 	"\x0fMsgDelegateVote\x12\x0e\n" +
 	"\x02rk\x18\x01 \x01(\fR\x02rk\x12$\n" +
 	"\x0espend_auth_sig\x18\x02 \x01(\fR\fspendAuthSig\x122\n" +
 	"\x15signed_note_nullifier\x18\x03 \x01(\fR\x13signedNoteNullifier\x12\x17\n" +
 	"\acmx_new\x18\x04 \x01(\fR\x06cmxNew\x12\x19\n" +
-	"\benc_memo\x18\x05 \x01(\fR\aencMemo\x12\x19\n" +
-	"\bgov_comm\x18\x06 \x01(\fR\agovComm\x12%\n" +
+	"\benc_memo\x18\x05 \x01(\fR\aencMemo\x12\x17\n" +
+	"\avan_cmx\x18\x06 \x01(\fR\x06vanCmx\x12%\n" +
 	"\x0egov_nullifiers\x18\a \x03(\fR\rgovNullifiers\x12\x14\n" +
 	"\x05proof\x18\b \x01(\fR\x05proof\x12\"\n" +
 	"\rvote_round_id\x18\t \x01(\fR\vvoteRoundId\x12\x18\n" +

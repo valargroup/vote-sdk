@@ -87,7 +87,7 @@ func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSessi
 
 // ValidDelegation returns a MsgDelegateVote with mock proof data.
 // Each call returns unique gov nullifiers derived from the provided seed.
-// CmxNew and GovComm use canonical Fp encodings so the commitment tree FFI accepts them.
+// CmxNew and VanCmx use canonical Fp encodings so the commitment tree FFI accepts them.
 // Sighash is set to the canonical ComputeDelegationSighash so ante validation passes.
 func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote {
 	msg := &types.MsgDelegateVote{
@@ -96,7 +96,7 @@ func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote 
 		SignedNoteNullifier: bytes.Repeat([]byte{0x03}, 32),
 		CmxNew:              FpLE(0x80 + uint64(nullifierSeed)),
 		EncMemo:             bytes.Repeat([]byte{0x05}, 64),
-		GovComm:             FpLE(0x90 + uint64(nullifierSeed)),
+		VanCmx:              FpLE(0x90 + uint64(nullifierSeed)),
 		GovNullifiers: [][]byte{
 			MakeNullifier(nullifierSeed),
 			MakeNullifier(nullifierSeed + 1),

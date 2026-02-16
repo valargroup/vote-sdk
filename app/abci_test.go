@@ -86,10 +86,10 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 		s.Require().True(has, "gov nullifier should be recorded after delegation")
 	}
 
-	// Verify commitment tree advanced by 2 (cmx_new + gov_comm).
+	// Verify commitment tree advanced by 1 (only van_cmx; cmx_new is not in the tree).
 	treeState, err := s.app.VoteKeeper().GetCommitmentTreeState(kvStore)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(2), treeState.NextIndex)
+	s.Require().Equal(uint64(1), treeState.NextIndex)
 
 	// Step 3: EndBlocker already ran during the delegation's FinalizeBlock,
 	// computing the tree root at that block height.
@@ -116,10 +116,10 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	s.Require().NoError(err)
 	s.Require().True(has, "vote-authority-note nullifier should be recorded")
 
-	// Tree advanced by 2 more (vote_authority_note_new + vote_commitment).
+	// Tree advanced by 2 more (vote_authority_note_new + vote_commitment): 1 + 2 = 3.
 	treeState, err = s.app.VoteKeeper().GetCommitmentTreeState(kvStore)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(4), treeState.NextIndex)
+	s.Require().Equal(uint64(3), treeState.NextIndex)
 
 	// EndBlocker already computed a new root for this block (tree grew).
 	revealAnchor := uint64(s.app.Height)

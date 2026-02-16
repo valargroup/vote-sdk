@@ -244,7 +244,7 @@ func (s *MsgServerTestSuite) TestDelegateVote() {
 				SpendAuthSig:        bytes.Repeat([]byte{0xA2}, 64),
 				SignedNoteNullifier: bytes.Repeat([]byte{0xA3}, 32),
 				CmxNew:              fpLE(0xB1),
-				GovComm:             fpLE(0xB2),
+				VanCmx:              fpLE(0xB2),
 				GovNullifiers: [][]byte{
 					bytes.Repeat([]byte{0xC1}, 32),
 					bytes.Repeat([]byte{0xC2}, 32),
@@ -265,19 +265,15 @@ func (s *MsgServerTestSuite) TestDelegateVote() {
 					s.Require().True(has)
 				}
 
-				// Tree state advanced by 2 (cmx_new + gov_comm).
+				// Tree state advanced by 1 (only van_cmx; cmx_new is not in the tree).
 				state, err := s.keeper.GetCommitmentTreeState(kv)
 				s.Require().NoError(err)
-				s.Require().Equal(uint64(2), state.NextIndex)
+				s.Require().Equal(uint64(1), state.NextIndex)
 
-				// Verify leaf contents at correct indices (canonical Fp encodings).
+				// Verify the single leaf is van_cmx.
 				leaf0, err := kv.Get(types.CommitmentLeafKey(0))
 				s.Require().NoError(err)
-				s.Require().Equal(fpLE(0xB1), leaf0) // cmx_new first
-
-				leaf1, err := kv.Get(types.CommitmentLeafKey(1))
-				s.Require().NoError(err)
-				s.Require().Equal(fpLE(0xB2), leaf1) // gov_comm second
+				s.Require().Equal(fpLE(0xB2), leaf0) // van_cmx
 			},
 		},
 	}

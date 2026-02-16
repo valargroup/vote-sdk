@@ -163,7 +163,7 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k keeper.
 		SignedNoteNullifier: msg.SignedNoteNullifier,
 		CmxNew:              msg.CmxNew,
 		EncMemo:             msg.EncMemo,
-		GovComm:             msg.GovComm,
+		VanCmx:              msg.VanCmx,
 		GovNullifiers:       msg.GovNullifiers,
 		VoteRoundId:         msg.VoteRoundId,
 		NcRoot:              round.NcRoot,

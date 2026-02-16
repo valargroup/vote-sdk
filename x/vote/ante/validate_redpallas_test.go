@@ -58,7 +58,7 @@ func TestRedPallasDelegationValidSig(t *testing.T) {
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
 		EncMemo:             make([]byte, 64),
-		GovComm:             make([]byte, 32),
+		VanCmx:              make([]byte, 32),
 		GovNullifiers: [][]byte{
 			make([]byte, 32),
 		},
@@ -100,7 +100,7 @@ func TestRedPallasDelegationWrongSig(t *testing.T) {
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
 		EncMemo:             make([]byte, 64),
-		GovComm:             make([]byte, 32),
+		VanCmx:              make([]byte, 32),
 		GovNullifiers: [][]byte{
 			make([]byte, 32),
 		},

@@ -15,7 +15,7 @@ type Halo2Verifier struct{}
 func NewVerifier() zkp.Verifier { return Halo2Verifier{} }
 
 // VerifyDelegation verifies ZKP #1 using the real delegation circuit.
-// All 12 public inputs (nf_signed, rk, cmx_new, gov_comm, vote_round_id,
+// All 12 public inputs (nf_signed, rk, cmx_new, van_cmx, vote_round_id,
 // nc_root, nf_imt_root, gov_null_1..4) are passed to the Rust verifier.
 func (h Halo2Verifier) VerifyDelegation(proof []byte, inputs zkp.DelegationInputs) error {
 	return VerifyDelegationProof(proof, inputs)

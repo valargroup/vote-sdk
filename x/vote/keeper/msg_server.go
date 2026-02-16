@@ -76,25 +76,30 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 }
 
 // DelegateVote handles MsgDelegateVote (ZKP #1).
-// Records governance nullifiers, appends cmx_new and gov_comm to the
-// commitment tree, and emits an event.
+// Records governance nullifiers, appends van_cmx to the commitment tree,
+// and emits an event.
 func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVote) (*types.MsgDelegateVoteResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
 	// Record each governance nullifier (scoped to gov type + round).
 	for _, nf := range msg.GovNullifiers {
+		has, err := ms.k.HasNullifier(kvStore, types.NullifierTypeGov, msg.VoteRoundId, nf)
+		if err != nil {
+			return nil, err
+		}
+		if has {
+			return nil, fmt.Errorf("%w: nullifier already exists", types.ErrDuplicateNullifier)
+		}
 		if err := ms.k.SetNullifier(kvStore, types.NullifierTypeGov, msg.VoteRoundId, nf); err != nil {
 			return nil, err
 		}
 	}
 
-	// Append cmx_new, then gov_comm to the commitment tree.
-	cmxIdx, err := ms.k.AppendCommitment(kvStore, msg.CmxNew)
-	if err != nil {
-		return nil, err
-	}
-	govCommIdx, err := ms.k.AppendCommitment(kvStore, msg.GovComm)
+	// Only van_cmx is appended to the commitment tree. cmx_new is recorded
+	// on-chain but not included in the tree — no subsequent proof references it;
+	// only the VAN (van_cmx) needs a Merkle path for ZKP #2.
+	vanCmxIdx, err := ms.k.AppendCommitment(kvStore, msg.VanCmx)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +107,7 @@ func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVo
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeDelegateVote,
 		sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", msg.VoteRoundId)),
-		sdk.NewAttribute(types.AttributeKeyLeafIndex, fmt.Sprintf("%d,%d", cmxIdx, govCommIdx)),
+		sdk.NewAttribute(types.AttributeKeyLeafIndex, fmt.Sprintf("%d", vanCmxIdx)),
 		sdk.NewAttribute(types.AttributeKeyNullifiers, strconv.Itoa(len(msg.GovNullifiers))),
 	))
 

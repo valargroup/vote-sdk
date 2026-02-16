@@ -44,7 +44,7 @@ func mustReadFixture(t *testing.T, name string) []byte {
 type toyAsDelegationVerifier struct{}
 
 func (toyAsDelegationVerifier) VerifyDelegation(proof []byte, inputs zkp.DelegationInputs) error {
-	return halo2.VerifyToyProof(proof, inputs.GovComm)
+	return halo2.VerifyToyProof(proof, inputs.VanCmx)
 }
 
 func (toyAsDelegationVerifier) VerifyVoteCommitment(proof []byte, _ zkp.VoteCommitmentInputs) error {
@@ -57,13 +57,13 @@ func (toyAsDelegationVerifier) VerifyVoteShare(proof []byte, _ zkp.VoteShareInpu
 
 // TestHalo2DelegationValidProof runs the full ante validation pipeline with a
 // real Halo2 toy proof. The MsgDelegateVote.Proof carries the real proof
-// bytes and GovComm carries the 32-byte public input (toy circuit convention).
+// bytes and VanCmx carries the 32-byte public input (toy circuit convention).
 func TestHalo2DelegationValidProof(t *testing.T) {
 	proof := mustReadFixture(t, "toy_valid_proof.bin")
 	publicInput := mustReadFixture(t, "toy_valid_input.bin")
 
 	// Build a MsgDelegateVote with the real proof.
-	// GovComm carries the toy circuit public input; Rk is a dummy 32-byte value
+	// VanCmx carries the toy circuit public input; Rk is a dummy 32-byte value
 	// (not used by the toy circuit, but required by ValidateBasic).
 	msg := &types.MsgDelegateVote{
 		Rk:                  make([]byte, 32),
@@ -71,7 +71,7 @@ func TestHalo2DelegationValidProof(t *testing.T) {
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
 		EncMemo:             make([]byte, 64),
-		GovComm:             publicInput, // 32-byte toy circuit public input
+		VanCmx:              publicInput, // 32-byte toy circuit public input
 		GovNullifiers: [][]byte{
 			make([]byte, 32),
 		},
@@ -111,7 +111,7 @@ func TestHalo2DelegationWrongInput(t *testing.T) {
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
 		EncMemo:             make([]byte, 64),
-		GovComm:             wrongInput, // wrong public input
+		VanCmx:              wrongInput, // wrong public input
 		GovNullifiers: [][]byte{
 			make([]byte, 32),
 		},

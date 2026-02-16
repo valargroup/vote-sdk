@@ -47,7 +47,7 @@ message MsgDelegateVote {
   bytes signed_note_nullifier  = 3;  // Nullifier of the dummy signed note
   bytes cmx_new                = 4;  // Output note commitment
   bytes enc_memo               = 5;  // Encrypted memo
-  bytes gov_comm               = 6;  // Governance commitment
+  bytes van_cmx                = 6;  // Vote authority note commitment
   repeated bytes gov_nullifiers = 7; // Up to 4 governance nullifiers
   bytes proof                  = 8;  // Halo2 ZKP #1
   bytes vote_round_id          = 9;

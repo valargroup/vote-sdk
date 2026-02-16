@@ -65,8 +65,8 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 	if len(msg.CmxNew) == 0 {
 		return fmt.Errorf("%w: cmx_new cannot be empty", ErrInvalidField)
 	}
-	if len(msg.GovComm) == 0 {
-		return fmt.Errorf("%w: gov_comm cannot be empty", ErrInvalidField)
+	if len(msg.VanCmx) == 0 {
+		return fmt.Errorf("%w: van_cmx cannot be empty", ErrInvalidField)
 	}
 	if len(msg.GovNullifiers) == 0 {
 		return fmt.Errorf("%w: gov_nullifiers cannot be empty", ErrInvalidField)
