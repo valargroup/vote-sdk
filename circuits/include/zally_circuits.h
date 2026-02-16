@@ -138,7 +138,7 @@ int32_t zally_vote_tree_path(
  *
  * The public inputs are passed as a flat byte array of 11 x 32-byte
  * chunks (352 bytes total), in order:
- *   [nf_signed, rk_compressed, cmx_new, gov_comm, vote_round_id,
+ *   [nf_signed, rk_compressed, cmx_new, van_comm, vote_round_id,
  *    nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4]
  *
  * rk_compressed is a 32-byte compressed Pallas curve point. The FFI

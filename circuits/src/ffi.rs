@@ -280,7 +280,7 @@ pub unsafe extern "C" fn zally_vote_tree_path(
 ///
 /// The public inputs are passed as a flat byte array of 11 × 32-byte
 /// chunks (352 bytes total), in the order:
-///   [nf_signed, rk_compressed, cmx_new, gov_comm, vote_round_id,
+///   [nf_signed, rk_compressed, cmx_new, van_comm, vote_round_id,
 ///    nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4]
 ///
 /// The `rk_compressed` is a 32-byte compressed Pallas curve point. The FFI
@@ -362,7 +362,7 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
 
     // Slots 2–10: the remaining 9 field elements.
     let cmx_new = match deserialize_fp(chunk(2)) { Some(f) => f, None => return -3 };
-    let gov_comm = match deserialize_fp(chunk(3)) { Some(f) => f, None => return -3 };
+    let van_comm = match deserialize_fp(chunk(3)) { Some(f) => f, None => return -3 };
     let vote_round_id = match deserialize_fp(chunk(4)) { Some(f) => f, None => return -3 };
     let nc_root = match deserialize_fp(chunk(5)) { Some(f) => f, None => return -3 };
     let nf_imt_root = match deserialize_fp(chunk(6)) { Some(f) => f, None => return -3 };
@@ -373,7 +373,7 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
 
     // Build the 12-element public input vector (matches circuit instance order).
     let public_inputs = vec![
-        nf_signed, rk_x, rk_y, cmx_new, gov_comm, vote_round_id,
+        nf_signed, rk_x, rk_y, cmx_new, van_comm, vote_round_id,
         nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4,
     ];
 

@@ -114,7 +114,7 @@ fn canonical_delegation_payload_for_fixture(rk_bytes: &[u8; 32]) -> Vec<u8> {
     out.extend_from_slice(&[0u8; 32]); // signed_note_nullifier
     out.extend_from_slice(&[0u8; 32]); // cmx_new
     out.extend_from_slice(&[0u8; 64]); // enc_memo
-    out.extend_from_slice(&[0u8; 32]); // gov_comm
+    out.extend_from_slice(&[0u8; 32]); // van_comm
     for _ in 0..4 {
         out.extend_from_slice(&[0u8; 32]); // gov_nullifiers (4 slots)
     }
