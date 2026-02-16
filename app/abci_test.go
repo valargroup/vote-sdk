@@ -830,7 +830,7 @@ func TestPrepareProposalAutoTally(t *testing.T) {
 	encShare, err := elgamal.MarshalCiphertext(ct)
 	require.NoError(t, err)
 
-	revealMsg := testutil.ValidRevealShareReal(roundID, revealAnchor, 0x50, 0, 1, encShare)
+	revealMsg := testutil.ValidRevealShareReal(roundID, revealAnchor, 0x50, 1, 1, encShare)
 	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
 	require.Equal(t, uint32(0), result.Code, "reveal share should succeed, got: %s", result.Log)
 
@@ -860,7 +860,7 @@ func TestPrepareProposalAutoTally(t *testing.T) {
 	tallyResults, err := app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
 	require.NoError(t, err)
 	require.Len(t, tallyResults, 1)
-	require.Equal(t, uint32(0), tallyResults[0].ProposalId)
+	require.Equal(t, uint32(1), tallyResults[0].ProposalId)
 	require.Equal(t, uint32(1), tallyResults[0].VoteDecision)
 	require.Equal(t, uint64(42), tallyResults[0].TotalValue,
 		"decrypted tally should match encrypted value of 42")

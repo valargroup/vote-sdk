@@ -104,8 +104,7 @@ func TallyPrepareProposalHandler(
 		// block to bound PrepareProposal latency (BSGS decryption is expensive).
 		var tallyRound *types.VoteRound
 		if err := voteKeeper.IterateTallyingRounds(kvStore, func(round *types.VoteRound) bool {
-			r := *round // copy
-			tallyRound = &r
+			tallyRound = round
 			return true // stop after first
 		}); err != nil {
 			logger.Error("PrepareProposal: failed to iterate tallying rounds", "err", err)
