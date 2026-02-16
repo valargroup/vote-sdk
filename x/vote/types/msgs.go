@@ -117,6 +117,15 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	if msg.VoteCommTreeAnchorHeight == 0 {
 		return fmt.Errorf("%w: vote_comm_tree_anchor_height cannot be zero", ErrInvalidField)
 	}
+	if len(msg.VoteAuthSig) == 0 {
+		return fmt.Errorf("%w: vote_auth_sig cannot be empty", ErrInvalidField)
+	}
+	if len(msg.Sighash) != 32 {
+		return fmt.Errorf("%w: sighash must be 32 bytes, got %d", ErrInvalidField, len(msg.Sighash))
+	}
+	if len(msg.RVpk) != 32 {
+		return fmt.Errorf("%w: r_vpk must be 32 bytes, got %d", ErrInvalidField, len(msg.RVpk))
+	}
 	return nil
 }
 

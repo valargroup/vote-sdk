@@ -365,8 +365,11 @@ type MsgCastVote struct {
 	Proof                    []byte                 `protobuf:"bytes,5,opt,name=proof,proto3" json:"proof,omitempty"`
 	VoteRoundId              []byte                 `protobuf:"bytes,6,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
 	VoteCommTreeAnchorHeight uint64                 `protobuf:"varint,7,opt,name=vote_comm_tree_anchor_height,json=voteCommTreeAnchorHeight,proto3" json:"vote_comm_tree_anchor_height,omitempty"`
-	RVpkX                    []byte                 `protobuf:"bytes,8,opt,name=r_vpk_x,json=rVpkX,proto3" json:"r_vpk_x,omitempty"` // Pallas Fp: x-coordinate of randomized voting key (condition 4)
-	RVpkY                    []byte                 `protobuf:"bytes,9,opt,name=r_vpk_y,json=rVpkY,proto3" json:"r_vpk_y,omitempty"` // Pallas Fp: y-coordinate of randomized voting key (condition 4)
+	RVpkX                    []byte                 `protobuf:"bytes,8,opt,name=r_vpk_x,json=rVpkX,proto3" json:"r_vpk_x,omitempty"`                    // Pallas Fp: x-coordinate of randomized voting key (condition 4)
+	RVpkY                    []byte                 `protobuf:"bytes,9,opt,name=r_vpk_y,json=rVpkY,proto3" json:"r_vpk_y,omitempty"`                    // Pallas Fp: y-coordinate of randomized voting key (condition 4)
+	VoteAuthSig              []byte                 `protobuf:"bytes,10,opt,name=vote_auth_sig,json=voteAuthSig,proto3" json:"vote_auth_sig,omitempty"` // RedPallas signature under randomized voting key
+	Sighash                  []byte                 `protobuf:"bytes,11,opt,name=sighash,proto3" json:"sighash,omitempty"`                              // Client-provided canonical sighash (32 bytes)
+	RVpk                     []byte                 `protobuf:"bytes,12,opt,name=r_vpk,json=rVpk,proto3" json:"r_vpk,omitempty"`                        // Compressed Pallas point (32 bytes) for sig verification
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -460,6 +463,27 @@ func (x *MsgCastVote) GetRVpkX() []byte {
 func (x *MsgCastVote) GetRVpkY() []byte {
 	if x != nil {
 		return x.RVpkY
+	}
+	return nil
+}
+
+func (x *MsgCastVote) GetVoteAuthSig() []byte {
+	if x != nil {
+		return x.VoteAuthSig
+	}
+	return nil
+}
+
+func (x *MsgCastVote) GetSighash() []byte {
+	if x != nil {
+		return x.Sighash
+	}
+	return nil
+}
+
+func (x *MsgCastVote) GetRVpk() []byte {
+	if x != nil {
+		return x.RVpk
 	}
 	return nil
 }
@@ -838,7 +862,7 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\rvote_round_id\x18\t \x01(\fR\vvoteRoundId\x12\x18\n" +
 	"\asighash\x18\n" +
 	" \x01(\fR\asighash\"\x19\n" +
-	"\x17MsgDelegateVoteResponse\"\xdd\x02\n" +
+	"\x17MsgDelegateVoteResponse\"\xb0\x03\n" +
 	"\vMsgCastVote\x12#\n" +
 	"\rvan_nullifier\x18\x01 \x01(\fR\fvanNullifier\x125\n" +
 	"\x17vote_authority_note_new\x18\x02 \x01(\fR\x14voteAuthorityNoteNew\x12'\n" +
@@ -849,7 +873,11 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\rvote_round_id\x18\x06 \x01(\fR\vvoteRoundId\x12>\n" +
 	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\x12\x16\n" +
 	"\ar_vpk_x\x18\b \x01(\fR\x05rVpkX\x12\x16\n" +
-	"\ar_vpk_y\x18\t \x01(\fR\x05rVpkY\"\x15\n" +
+	"\ar_vpk_y\x18\t \x01(\fR\x05rVpkY\x12\"\n" +
+	"\rvote_auth_sig\x18\n" +
+	" \x01(\fR\vvoteAuthSig\x12\x18\n" +
+	"\asighash\x18\v \x01(\fR\asighash\x12\x13\n" +
+	"\x05r_vpk\x18\f \x01(\fR\x04rVpk\"\x15\n" +
 	"\x13MsgCastVoteResponse\"\x96\x02\n" +
 	"\x0eMsgRevealShare\x12'\n" +
 	"\x0fshare_nullifier\x18\x01 \x01(\fR\x0eshareNullifier\x12\x1b\n" +

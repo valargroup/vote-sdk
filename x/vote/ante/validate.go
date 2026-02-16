@@ -175,10 +175,23 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k keeper.
 	return nil
 }
 
-// verifyCastVote verifies ZKP #2 for a MsgCastVote.
+// verifyCastVote verifies the RedPallas signature and ZKP #2 for a MsgCastVote.
 // It looks up the session to get ea_pk and the commitment tree root at the
 // anchor height, mirroring how verifyDelegation fetches nc_root and nf_imt_root.
 func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k keeper.Keeper, opts ValidateOpts) error {
+	// Require client-provided sighash to match the canonical hash of the message.
+	expectedSighash := types.ComputeCastVoteSighash(msg)
+	if len(msg.Sighash) != 32 || !bytes.Equal(msg.Sighash, expectedSighash) {
+		return types.ErrSighashMismatch
+	}
+
+	// RedPallas signature verification over the verified sighash.
+	// r_vpk is the compressed randomized voting key; the ZKP proves it
+	// equals vsk.ak + [alpha_v]*G (condition 4).
+	if err := opts.SigVerifier.Verify(msg.RVpk, msg.Sighash, msg.VoteAuthSig); err != nil {
+		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
+	}
+
 	kvStore := k.OpenKVStore(ctx)
 
 	// Fetch vote commitment tree root at the anchor height.

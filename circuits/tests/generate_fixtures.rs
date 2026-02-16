@@ -232,5 +232,77 @@ fn generate_redpallas_fixtures() {
     println!("REAL_SIG = \"{}\"", b64(&sig_bytes));
     println!("-------------------------------------------");
 
-    println!("RedPallas fixtures generated and validated.");
+    println!("RedPallas delegation fixtures generated and validated.");
+
+    // --- CastVote fixtures ---
+    generate_cast_vote_redpallas_fixtures(&testdata_dir, &mut rng);
+}
+
+/// Canonical cast vote sighash domain. Must match sdk/x/vote/types/sighash.go.
+const CAST_VOTE_SIGHASH_DOMAIN: &[u8] = b"ZALLY_CAST_VOTE_SIGHASH_V0";
+
+/// Build the canonical signable payload for the RedPallas CastVote test message
+/// used in validate_redpallas_test.go: vote_round_id = 32×0x01, r_vpk = given,
+/// rest zeros except proposal_id = 1 (LE, padded to 32) and anchor_height = 10 (LE, padded to 32).
+fn canonical_cast_vote_payload_for_fixture(r_vpk_bytes: &[u8; 32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(
+        CAST_VOTE_SIGHASH_DOMAIN.len() + 7 * 32, // domain + 7 fields of 32 bytes each
+    );
+    out.extend_from_slice(CAST_VOTE_SIGHASH_DOMAIN);
+    out.extend_from_slice(&[0x01u8; 32]); // vote_round_id (testRoundID in Go)
+    out.extend_from_slice(r_vpk_bytes);    // r_vpk (compressed)
+    out.extend_from_slice(&[0u8; 32]);     // van_nullifier
+    out.extend_from_slice(&[0u8; 32]);     // vote_authority_note_new
+    out.extend_from_slice(&[0u8; 32]);     // vote_commitment
+    // proposal_id: 1 as 4 bytes LE, padded to 32 bytes
+    let mut pid_buf = [0u8; 32];
+    pid_buf[..4].copy_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&pid_buf);
+    // anchor_height: 10 as 8 bytes LE, padded to 32 bytes
+    let mut ah_buf = [0u8; 32];
+    ah_buf[..8].copy_from_slice(&10u64.to_le_bytes());
+    out.extend_from_slice(&ah_buf);
+    out
+}
+
+/// Generate RedPallas SpendAuth signature fixtures for CastVote.
+fn generate_cast_vote_redpallas_fixtures(
+    testdata_dir: &std::path::Path,
+    rng: &mut (impl rand::RngCore + rand::CryptoRng),
+) {
+    // Generate a signing key and derive the verification key (r_vpk).
+    let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut *rng);
+    let vk = VerificationKey::from(&sk);
+    let r_vpk_bytes: [u8; 32] = vk.into();
+
+    // Sighash = Blake2b-256(canonical cast vote payload).
+    let canonical = canonical_cast_vote_payload_for_fixture(&r_vpk_bytes);
+    let sighash_full = Blake2bParams::new().hash_length(32).hash(&canonical);
+    let mut sighash = [0u8; 32];
+    sighash.copy_from_slice(sighash_full.as_bytes());
+
+    // Sign the sighash.
+    let sig = sk.sign(&mut *rng, &sighash);
+    let sig_bytes: [u8; 64] = sig.into();
+
+    // Write CastVote fixtures.
+    let r_vpk_path = testdata_dir.join("cast_vote_r_vpk.bin");
+    fs::write(&r_vpk_path, &r_vpk_bytes).expect("failed to write cast_vote r_vpk fixture");
+    println!("Wrote cast_vote r_vpk ({} bytes) to {}", r_vpk_bytes.len(), r_vpk_path.display());
+
+    let sighash_path = testdata_dir.join("cast_vote_sighash.bin");
+    fs::write(&sighash_path, &sighash).expect("failed to write cast_vote sighash fixture");
+    println!("Wrote cast_vote sighash ({} bytes) to {}", sighash.len(), sighash_path.display());
+
+    let sig_path = testdata_dir.join("cast_vote_sig.bin");
+    fs::write(&sig_path, &sig_bytes).expect("failed to write cast_vote sig fixture");
+    println!("Wrote cast_vote sig ({} bytes) to {}", sig_bytes.len(), sig_path.display());
+
+    // Verify the generated fixtures work.
+    assert!(
+        rp::verify_spend_auth_sig(&r_vpk_bytes, &sighash, &sig_bytes).is_ok(),
+        "CastVote valid signature should verify"
+    );
+
+    println!("RedPallas CastVote fixtures generated and validated.");
 }

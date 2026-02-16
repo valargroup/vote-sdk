@@ -39,9 +39,10 @@ $BINARY genesis collect-gentxs --home "$HOME_DIR"
 $BINARY genesis validate-genesis --home "$HOME_DIR"
 
 # Enable the REST API server (default: disabled).
-# The API tests connect to this endpoint (default port 1317).
+# Use port 1318 to avoid Cursor IDE occupying 1317.
 APP_TOML="$HOME_DIR/config/app.toml"
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
+sed -i.bak 's|address = "tcp://localhost:1317"|address = "tcp://localhost:1318"|' "$APP_TOML"
 rm -f "${APP_TOML}.bak"
 
 # Allow long CheckTx (ZKP verification ~30–60s). Default 10s closes the RPC connection

@@ -57,7 +57,7 @@ test: test-unit test-integration
 
 ## test-api: Rust E2E API tests against a running chain (requires: make init && make start)
 test-api:
-	cargo test --release --manifest-path ../e2e-tests/Cargo.toml -- --nocapture --ignored
+	ZALLY_API_URL=http://localhost:1318 ZALLY_EA_PK_PATH=$(HOME)/.zallyd/ea.pk cargo test --release --manifest-path ../e2e-tests/Cargo.toml -- --nocapture --ignored
 
 ## test-e2e: Alias for test-api (Rust E2E tests)
 test-e2e: test-api
