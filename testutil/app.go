@@ -37,6 +37,11 @@ type TestApp struct {
 	t      *testing.T
 	Height int64
 	Time   time.Time
+
+	// ProposerAddress is the consensus address of the genesis validator,
+	// passed in every FinalizeBlock request so the ante handler can verify
+	// that MsgSubmitTally creators match the block proposer.
+	ProposerAddress []byte
 }
 
 // SetupTestApp creates a fresh ZallyApp backed by an in-memory database,
@@ -95,11 +100,16 @@ func SetupTestApp(t *testing.T) *TestApp {
 	})
 	require.NoError(t, err)
 
+	// The genesis validator's consensus address, used as ProposerAddress
+	// in all FinalizeBlock calls.
+	proposerAddr := valSet.Validators[0].Address.Bytes()
+
 	// Finalize the genesis block (height 1) so the app is fully initialized.
 	_, err = zallyApp.FinalizeBlock(&abci.RequestFinalizeBlock{
 		Height:             1,
 		Time:               now,
 		NextValidatorsHash: valSet.Hash(),
+		ProposerAddress:    proposerAddr,
 	})
 	require.NoError(t, err)
 
@@ -107,10 +117,11 @@ func SetupTestApp(t *testing.T) *TestApp {
 	require.NoError(t, err)
 
 	return &TestApp{
-		ZallyApp: zallyApp,
-		t:        t,
-		Height:   1,
-		Time:     now,
+		ZallyApp:        zallyApp,
+		t:               t,
+		Height:          1,
+		Time:            now,
+		ProposerAddress: proposerAddr,
 	}
 }
 
@@ -140,8 +151,9 @@ func (ta *TestApp) NextBlock() {
 	ta.Time = ta.Time.Add(5 * time.Second)
 
 	_, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
-		Height: ta.Height,
-		Time:   ta.Time,
+		Height:          ta.Height,
+		Time:            ta.Time,
+		ProposerAddress: ta.ProposerAddress,
 	})
 	require.NoError(ta.t, err)
 
@@ -158,8 +170,9 @@ func (ta *TestApp) NextBlockAtTime(t time.Time) {
 	ta.Time = t
 
 	_, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
-		Height: ta.Height,
-		Time:   ta.Time,
+		Height:          ta.Height,
+		Time:            ta.Time,
+		ProposerAddress: ta.ProposerAddress,
 	})
 	require.NoError(ta.t, err)
 
@@ -176,9 +189,10 @@ func (ta *TestApp) DeliverVoteTx(txBytes []byte) *abci.ExecTxResult {
 	ta.Time = ta.Time.Add(5 * time.Second)
 
 	resp, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
-		Height: ta.Height,
-		Time:   ta.Time,
-		Txs:    [][]byte{txBytes},
+		Height:          ta.Height,
+		Time:            ta.Time,
+		Txs:             [][]byte{txBytes},
+		ProposerAddress: ta.ProposerAddress,
 	})
 	require.NoError(ta.t, err)
 
@@ -198,9 +212,10 @@ func (ta *TestApp) DeliverVoteTxs(txs [][]byte) []*abci.ExecTxResult {
 	ta.Time = ta.Time.Add(5 * time.Second)
 
 	resp, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
-		Height: ta.Height,
-		Time:   ta.Time,
-		Txs:    txs,
+		Height:          ta.Height,
+		Time:            ta.Time,
+		Txs:             txs,
+		ProposerAddress: ta.ProposerAddress,
 	})
 	require.NoError(ta.t, err)
 

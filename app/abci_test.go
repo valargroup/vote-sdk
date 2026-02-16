@@ -698,10 +698,10 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 }
 
 // ---------------------------------------------------------------------------
-// 6.2.14: SubmitTally — Authorization (Non-Validator Rejected)
+// 6.2.14: SubmitTally — Authorization (Non-Proposer Rejected)
 // ---------------------------------------------------------------------------
 
-func (s *ABCIIntegrationSuite) TestSubmitTallyNonValidatorRejected() {
+func (s *ABCIIntegrationSuite) TestSubmitTallyNonProposerRejected() {
 	// Create a session expiring 10 seconds from now.
 	voteEndTime := s.app.Time.Add(10 * time.Second)
 	setupMsg := &types.MsgCreateVotingSession{
@@ -733,20 +733,22 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyNonValidatorRejected() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// Submit tally with invalid bech32 address should fail.
-	badTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, "not-a-valid-bech32", []*types.TallyEntry{
+	// Submit tally with a creator that doesn't match the block proposer should fail.
+	// Use a valid valoper address that is not the genesis validator.
+	fakeValoper := sdk.ValAddress(bytes.Repeat([]byte{0xFF}, 20)).String()
+	badTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, fakeValoper, []*types.TallyEntry{
 		{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
 	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badTallyMsg))
-	s.Require().NotEqual(uint32(0), result.Code, "submit tally with invalid address should fail")
-	s.Require().Contains(result.Log, "invalid validator address")
+	s.Require().NotEqual(uint32(0), result.Code, "submit tally with non-proposer creator should fail")
+	s.Require().Contains(result.Log, "does not match block proposer")
 
-	// Submit tally with a valid bonded validator should succeed.
+	// Submit tally with the block proposer's validator address should succeed.
 	goodTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, s.app.ValidatorOperAddr(), []*types.TallyEntry{
 		{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
 	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(goodTallyMsg))
-	s.Require().Equal(uint32(0), result.Code, "submit tally with bonded validator should succeed, got: %s", result.Log)
+	s.Require().Equal(uint32(0), result.Code, "submit tally from block proposer should succeed, got: %s", result.Log)
 }
 
 // ---------------------------------------------------------------------------

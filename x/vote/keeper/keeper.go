@@ -17,6 +17,7 @@ import (
 // StakingKeeper defines the staking module interface needed by the vote module.
 type StakingKeeper interface {
 	GetValidator(ctx context.Context, addr sdk.ValAddress) (stakingtypes.Validator, error)
+	GetValidatorByConsAddr(ctx context.Context, consAddr sdk.ConsAddress) (stakingtypes.Validator, error)
 }
 
 // Keeper of the vote module store.
@@ -489,18 +490,28 @@ func (k Keeper) ValidateRoundForTally(ctx context.Context, roundID []byte) error
 	return nil
 }
 
-// ValidateSubmitterIsValidator checks that the submitter is a bonded validator.
-func (k Keeper) ValidateSubmitterIsValidator(ctx context.Context, submitter string) error {
-	valAddr, err := sdk.ValAddressFromBech32(submitter)
-	if err != nil {
-		return fmt.Errorf("%w: invalid validator address: %v", types.ErrInvalidField, err)
+// ValidateTallySubmitter checks that MsgSubmitTally is only submitted during
+// block execution (not via mempool) and that the Creator matches the current
+// block proposer. This ensures only the block proposer can inject tally txs
+// (via PrepareProposal), preventing forged tally submissions.
+func (k Keeper) ValidateTallySubmitter(ctx context.Context, creator string) error {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	// MsgSubmitTally must never enter the mempool — it can only be injected
+	// by the block proposer via PrepareProposal.
+	if sdkCtx.IsCheckTx() || sdkCtx.IsReCheckTx() {
+		return fmt.Errorf("%w: MsgSubmitTally cannot be submitted via mempool", types.ErrInvalidField)
 	}
-	val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
+
+	// During FinalizeBlock, verify Creator matches the block proposer.
+	proposerConsAddr := sdk.ConsAddress(sdkCtx.BlockHeader().ProposerAddress)
+	val, err := k.stakingKeeper.GetValidatorByConsAddr(ctx, proposerConsAddr)
 	if err != nil {
-		return fmt.Errorf("%w: submitter is not a validator: %v", types.ErrInvalidField, err)
+		return fmt.Errorf("%w: failed to resolve block proposer: %v", types.ErrInvalidField, err)
 	}
-	if !val.IsBonded() {
-		return fmt.Errorf("%w: validator %s is not bonded", types.ErrInvalidField, submitter)
+	if val.OperatorAddress != creator {
+		return fmt.Errorf("%w: tally creator %s does not match block proposer %s",
+			types.ErrInvalidField, creator, val.OperatorAddress)
 	}
 	return nil
 }

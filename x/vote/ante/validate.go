@@ -73,8 +73,8 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper,
 			if err := k.ValidateRoundForTally(ctx, roundID); err != nil {
 				return err
 			}
-			// Submitter must be a bonded validator.
-			if err := k.ValidateSubmitterIsValidator(ctx, m.Creator); err != nil {
+			// Creator must be the block proposer; rejected entirely in CheckTx.
+			if err := k.ValidateTallySubmitter(ctx, m.Creator); err != nil {
 				return err
 			}
 		default:

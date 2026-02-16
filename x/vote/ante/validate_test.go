@@ -12,6 +12,8 @@ import (
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -25,18 +27,34 @@ import (
 	"github.com/z-cale/zally/x/vote/types"
 )
 
+// testProposerConsAddr is the consensus address embedded in the test block header.
+// The mock staking keeper maps this to testValidatorAddr().
+var testProposerConsAddr = bytes.Repeat([]byte{0xAA}, 20)
+
 // mockStakingKeeper is a test double for the keeper.StakingKeeper interface.
-// It always returns a bonded validator for any address.
+// It always returns a bonded validator for any address. GetValidatorByConsAddr
+// maps testProposerConsAddr to testValidatorAddr() for proposer checks.
 type mockStakingKeeper struct{}
 
 func (mockStakingKeeper) GetValidator(_ context.Context, _ sdk.ValAddress) (stakingtypes.Validator, error) {
 	return stakingtypes.Validator{Status: stakingtypes.Bonded}, nil
 }
 
+func (mockStakingKeeper) GetValidatorByConsAddr(_ context.Context, _ sdk.ConsAddress) (stakingtypes.Validator, error) {
+	return stakingtypes.Validator{
+		Status:          stakingtypes.Bonded,
+		OperatorAddress: testValidatorAddr(),
+	}, nil
+}
+
 // errStakingKeeper always returns ErrNoValidatorFound.
 type errStakingKeeper struct{}
 
 func (errStakingKeeper) GetValidator(_ context.Context, _ sdk.ValAddress) (stakingtypes.Validator, error) {
+	return stakingtypes.Validator{}, stakingtypes.ErrNoValidatorFound
+}
+
+func (errStakingKeeper) GetValidatorByConsAddr(_ context.Context, _ sdk.ConsAddress) (stakingtypes.Validator, error) {
 	return stakingtypes.Validator{}, stakingtypes.ErrNoValidatorFound
 }
 
@@ -222,7 +240,10 @@ func (s *ValidateTestSuite) SetupTest() {
 	tkey := storetypes.NewTransientStoreKey("transient_test")
 	testCtx := testutil.DefaultContextWithDB(s.T(), key, tkey)
 
-	s.ctx = testCtx.Ctx.WithBlockTime(testBlockTime)
+	s.ctx = testCtx.Ctx.WithBlockTime(testBlockTime).WithBlockHeader(cmtproto.Header{
+		Time:            testBlockTime,
+		ProposerAddress: testProposerConsAddr,
+	})
 	storeService := runtime.NewKVStoreService(key)
 	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), mockStakingKeeper{})
 }
@@ -889,16 +910,26 @@ func newValidMsgSubmitTally() *types.MsgSubmitTally {
 }
 
 func (s *ValidateTestSuite) TestValidateVoteTx_SubmitTally() {
+	// checkTxCtx returns a context with IsCheckTx=true for testing mempool rejection.
+	checkTxCtx := func() sdk.Context {
+		return s.ctx.WithIsCheckTx(true)
+	}
+	// recheckTxCtx returns a context with IsReCheckTx=true.
+	recheckTxCtx := func() sdk.Context {
+		return s.ctx.WithIsReCheckTx(true)
+	}
+
 	tests := []struct {
 		name        string
 		msg         func() types.VoteMessage
 		opts        ante.ValidateOpts
 		setup       func()
+		ctxFn       func() sdk.Context // optional: override context (e.g. CheckTx)
 		expectErr   bool
 		errContains string
 	}{
 		{
-			name:  "valid submit tally with tallying round",
+			name:  "valid submit tally with tallying round (FinalizeBlock context)",
 			msg:   func() types.VoteMessage { return newValidMsgSubmitTally() },
 			opts:  mockOpts(),
 			setup: func() { s.setupTallyingRound() },
@@ -953,25 +984,39 @@ func (s *ValidateTestSuite) TestValidateVoteTx_SubmitTally() {
 			expectErr:   true,
 			errContains: "not in tallying state",
 		},
-		// --- Validator check ---
+		// --- Proposer check ---
 		{
-			name: "invalid validator address rejected",
+			name: "creator mismatch with block proposer rejected",
 			msg: func() types.VoteMessage {
 				m := newValidMsgSubmitTally()
-				m.Creator = "not-a-valid-bech32"
+				// Use a valid valoper address that is NOT the proposer.
+				m.Creator = sdk.ValAddress(bytes.Repeat([]byte{0xFF}, 20)).String()
 				return m
 			},
 			opts:        mockOpts(),
 			setup:       func() { s.setupTallyingRound() },
 			expectErr:   true,
-			errContains: "invalid validator address",
+			errContains: "does not match block proposer",
+		},
+		// --- CheckTx rejection ---
+		{
+			name:        "rejected in CheckTx (mempool submission not allowed)",
+			msg:         func() types.VoteMessage { return newValidMsgSubmitTally() },
+			opts:        mockOpts(),
+			setup:       func() { s.setupTallyingRound() },
+			ctxFn:       checkTxCtx,
+			expectErr:   true,
+			errContains: "cannot be submitted via mempool",
 		},
 		// --- RecheckTx behavior ---
 		{
-			name:  "recheck: passes with tallying round and correct creator",
-			msg:   func() types.VoteMessage { return newValidMsgSubmitTally() },
-			opts:  recheckOpts(),
-			setup: func() { s.setupTallyingRound() },
+			name:        "recheck: also rejected (mempool re-validation)",
+			msg:         func() types.VoteMessage { return newValidMsgSubmitTally() },
+			opts:        recheckOpts(),
+			setup:       func() { s.setupTallyingRound() },
+			ctxFn:       recheckTxCtx,
+			expectErr:   true,
+			errContains: "cannot be submitted via mempool",
 		},
 	}
 
@@ -981,7 +1026,11 @@ func (s *ValidateTestSuite) TestValidateVoteTx_SubmitTally() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			err := ante.ValidateVoteTx(s.ctx, tc.msg(), s.keeper, tc.opts)
+			ctx := s.ctx
+			if tc.ctxFn != nil {
+				ctx = tc.ctxFn()
+			}
+			err := ante.ValidateVoteTx(ctx, tc.msg(), s.keeper, tc.opts)
 			if tc.expectErr {
 				s.Require().Error(err)
 				if tc.errContains != "" {
