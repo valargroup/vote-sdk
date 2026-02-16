@@ -650,8 +650,14 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 
 	revealAnchor := uint64(s.app.Height)
 
-	// Reveal share while ACTIVE (before TALLYING transition).
-	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
+	// Reveal share while ACTIVE (before TALLYING transition) using a real
+	// ciphertext so later homomorphic accumulation can deserialize it.
+	_, pk := elgamal.KeyGen(rand.Reader)
+	ctActive, err := elgamal.Encrypt(pk, 100, rand.Reader)
+	s.Require().NoError(err)
+	encShareActive, err := elgamal.MarshalCiphertext(ctActive)
+	s.Require().NoError(err)
+	revealMsg := testutil.ValidRevealShareReal(roundID, revealAnchor, 0x50, 1, 1, encShareActive)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
 	s.Require().Equal(uint32(0), result.Code, "reveal share during ACTIVE should succeed, got: %s", result.Log)
 
@@ -666,7 +672,11 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
 	// RevealShare should still be accepted during TALLYING.
-	revealMsgTallying := testutil.ValidRevealShare(roundID, revealAnchor, 0x60)
+	ctTallying, err := elgamal.Encrypt(pk, 200, rand.Reader)
+	s.Require().NoError(err)
+	encShareTallying, err := elgamal.MarshalCiphertext(ctTallying)
+	s.Require().NoError(err)
+	revealMsgTallying := testutil.ValidRevealShareReal(roundID, revealAnchor, 0x60, 1, 1, encShareTallying)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsgTallying))
 	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
 
@@ -683,10 +693,13 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
 		"round should be FINALIZED after SubmitTally")
 
-	// Verify tally accumulator is preserved.
+	// Verify tally accumulator preserved the homomorphic sum of both shares.
 	tally, err := s.app.VoteKeeper().GetTally(kvStore, roundID, revealMsg.ProposalId, revealMsg.VoteDecision)
 	s.Require().NoError(err)
-	s.Require().Equal(revealMsg.EncShare, tally, "tally should be preserved after finalization")
+	expectedAccumulated := elgamal.HomomorphicAdd(ctActive, ctTallying)
+	expectedAccumulatedBz, err := elgamal.MarshalCiphertext(expectedAccumulated)
+	s.Require().NoError(err)
+	s.Require().Equal(expectedAccumulatedBz, tally, "tally should be preserved after finalization")
 
 	// Verify finalized tally results are stored and queryable.
 	tallyResults, err := s.app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
