@@ -81,7 +81,7 @@ const (
 	CeremonyStatus_CEREMONY_STATUS_UNSPECIFIED CeremonyStatus = 0
 	CeremonyStatus_CEREMONY_STATUS_REGISTERING CeremonyStatus = 1 // Accepting validator pk_i registrations (phase_timeout==0 means idle)
 	CeremonyStatus_CEREMONY_STATUS_DEALT       CeremonyStatus = 2 // DealerTx landed, awaiting acks
-	CeremonyStatus_CEREMONY_STATUS_CONFIRMED   CeremonyStatus = 3 // All validators acked, ea_pk ready
+	CeremonyStatus_CEREMONY_STATUS_CONFIRMED   CeremonyStatus = 3 // >=2/3 validators acked, ea_pk ready
 )
 
 // Enum value maps for CeremonyStatus.

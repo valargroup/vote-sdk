@@ -24,19 +24,21 @@ The ceremony lifecycle is tracked by a singleton `CeremonyState` in the KV store
 
 #### State Machine
 
-The ceremony is a looping state machine. Timeout in any active phase resets to idle `REGISTERING` (`phase_timeout=0`), allowing the ceremony to restart cleanly. The `REGISTERING` state has two sub-modes: **idle** (`phase_timeout=0`, no timer, waiting for first registration) and **active** (`phase_timeout>0`, timer running, accepting registrations).
+The ceremony is a looping state machine. The `REGISTERING` state has two sub-modes: **idle** (`phase_timeout=0`, no timer, waiting for first registration) and **active** (`phase_timeout>0`, timer running, accepting registrations). On REGISTERING timeout, the ceremony resets to idle. On DEALT timeout, the ceremony either confirms (>= 2/3 acked, non-ackers jailed) or resets (< 2/3 acked).
 
 ```
         ┌──────────────────────────────────────────┐
         │                                          │
         v                                          │
   [*] ──> REGISTERING ──> DEALT ──> CONFIRMED      │
-              │              │                     │
-              │   timeout    │  timeout            │
-              └──────────────┘                     │
-                     │                             │
-                     v                             │
-               REGISTERING (idle)                  │
+              │              │  │                  │
+              │   timeout    │  │ all acked        │
+              └──────────────┘  │ (fast path)      │
+                     │          │                  │
+                     v          v                  │
+               REGISTERING   CONFIRMED             │
+               (idle)        + strip & jail        │
+               (< 2/3)      non-ackers (≥ 2/3)    │
                                                    │
         MsgReInitializeElectionAuthority ──────────┘
 ```
@@ -46,13 +48,16 @@ The ceremony is a looping state machine. Timeout in any active phase resets to i
 | nil / idle REGISTERING | active REGISTERING | First `MsgRegisterPallasKey` or `MsgCreateValidatorWithPallasKey` | Auto-created on first registration, starts timer |
 | REGISTERING | DEALT | `MsgDealExecutiveAuthorityKey` | >= 1 validator registered, valid ea_pk, 1:1 payload-to-validator mapping |
 | REGISTERING | idle REGISTERING | EndBlocker timeout | `phase_timeout > 0 && block_time >= phase_start + phase_timeout` (full reset) |
-| DEALT | CONFIRMED | `MsgAckExecutiveAuthorityKey` | **All** registered validators have acked |
-| DEALT | idle REGISTERING | EndBlocker timeout | `phase_timeout > 0 && block_time >= phase_start + phase_timeout` (full reset, regardless of partial acks) |
+| DEALT | CONFIRMED | `MsgAckExecutiveAuthorityKey` | **All** registered validators have acked (fast path, immediate) |
+| DEALT | CONFIRMED | EndBlocker timeout | **>= 2/3** validators acked at timeout; non-ackers stripped from state and jailed via staking module |
+| DEALT | idle REGISTERING | EndBlocker timeout | **< 2/3** validators acked at timeout (full reset, ceremony failed) |
 | CONFIRMED / idle REGISTERING / nil | idle REGISTERING | `MsgReInitializeElectionAuthority` | No active session (active REGISTERING or DEALT) |
 
 Key behaviors:
-- **CONFIRMED** is only reached when every registered validator explicitly acks. Timeout never produces CONFIRMED.
-- Timeout in either active REGISTERING or DEALT performs a **full reset** to idle REGISTERING (all fields cleared, `phase_timeout=0`).
+- **CONFIRMED** is reached via two paths: (1) all validators ack before timeout (immediate transition), or (2) >= 2/3 validators acked when the DEALT timeout fires (timeout transition with jailing).
+- On DEALT timeout with >= 2/3 acks: non-acking validators are **stripped** from `CeremonyState.validators` and `CeremonyState.payloads`, and **jailed** via the staking module (removed from the active validator set).
+- On DEALT timeout with < 2/3 acks: full reset to idle REGISTERING (ceremony failed, no jailing).
+- Timeout in active REGISTERING performs a **full reset** to idle REGISTERING (all fields cleared, `phase_timeout=0`).
 - From CONFIRMED (or idle REGISTERING / nil), a validator can submit `MsgReInitializeElectionAuthority` to reset the ceremony for a fresh key ceremony.
 
 #### Messages
@@ -86,7 +91,8 @@ Key behaviors:
 - Rejects acks from non-registered validators
 - Rejects duplicate acks from the same validator
 - Records the ack with block height and signature `SHA256("ack" || ea_pk || validator_address)`
-- When all validators have acked, transitions to CONFIRMED
+- **Fast path:** When all validators have acked, transitions to CONFIRMED immediately
+- **Timeout path:** If the DEALT timeout fires with >= 2/3 acks, EndBlocker transitions to CONFIRMED, strips non-ackers from ceremony state, and jails them via the staking module. If < 2/3 acked, the ceremony resets.
 - With round-robin proposer selection and `n` validators, all acks complete within ~`n` blocks after the DealerTx lands
 
 **`MsgReInitializeElectionAuthority`** -- Resets the ceremony back to idle REGISTERING (`phase_timeout=0`) so a new key ceremony can begin.
@@ -120,9 +126,9 @@ pallas_sk_path = "$HOME/.zallyd/pallas.sk"
 #### Timeout (EndBlocker)
 
 Both active REGISTERING (`phase_timeout > 0`) and DEALT phases are subject to timeout (`block_time >= phase_start + phase_timeout`):
-- On timeout in either phase, the ceremony is **fully reset** to idle REGISTERING (`phase_timeout=0`, all fields cleared)
-- Registration timeout: 120 seconds (validators to register)
-- Deal/ack timeout: 30 seconds (validators to acknowledge)
+- **REGISTERING timeout:** Full reset to idle REGISTERING (`phase_timeout=0`, all fields cleared). Default: 120 seconds.
+- **DEALT timeout with >= 2/3 acks:** Transition to CONFIRMED. Non-acking validators are stripped from `CeremonyState` (removed from `validators` and `payloads`) and jailed via the staking module's `Jail()` method, which removes them from the active validator set. A `ceremony_validator_jailed` event is emitted for each jailed validator. Default: 30 seconds.
+- **DEALT timeout with < 2/3 acks:** Full reset to idle REGISTERING (ceremony failed, no jailing). This ensures a quorum is required for the ceremony to succeed.
 
 #### ECIES Encryption Scheme
 
@@ -231,7 +237,7 @@ enum CeremonyStatus {
   CEREMONY_STATUS_UNSPECIFIED   = 0;
   CEREMONY_STATUS_REGISTERING   = 1; // Accepting validator pk_i registrations (phase_timeout==0 means idle)
   CEREMONY_STATUS_DEALT         = 2; // DealerTx landed, awaiting acks
-  CEREMONY_STATUS_CONFIRMED     = 3; // All validators acked, ea_pk ready
+  CEREMONY_STATUS_CONFIRMED     = 3; // >=2/3 validators acked, ea_pk ready
 }
 
 message CeremonyState {
