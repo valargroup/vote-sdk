@@ -427,3 +427,149 @@ async fn end_to_end_share_processing() {
     assert_eq!(result.code, 0);
     assert!(result.tx_hash.starts_with("mock_"));
 }
+
+// ---------------------------------------------------------------------------
+// Persistence / crash recovery tests
+// ---------------------------------------------------------------------------
+
+/// Helper to create a test SharePayload value.
+fn make_test_payload(share_index: u32, round_id: &str) -> helper_server::types::SharePayload {
+    serde_json::from_value(test_share_payload(share_index, 1, round_id)).unwrap()
+}
+
+#[tokio::test]
+async fn crash_recovery_requeues_shares() {
+    // Use a temp file so we can reopen it.
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let db_path = tmp.path().to_str().unwrap().to_string();
+
+    let round_id = hex::encode([0xBB; 32]);
+
+    // Phase 1: enqueue shares, then drop the store (simulates crash).
+    {
+        let config = Config {
+            min_delay_secs: 0,
+            max_delay_secs: 0,
+            db_path: db_path.clone(),
+            ..Config::default()
+        };
+        let store = ShareStore::new(&config);
+        store.enqueue(make_test_payload(0, &round_id));
+        store.enqueue(make_test_payload(1, &round_id));
+
+        let status = store.status();
+        assert_eq!(status[&round_id].total, 2);
+        // Drop store — simulates server crash.
+    }
+
+    // Phase 2: reopen from the same DB — shares should be recovered.
+    {
+        let config = Config {
+            min_delay_secs: 0,
+            max_delay_secs: 0,
+            db_path: db_path.clone(),
+            ..Config::default()
+        };
+        let store = ShareStore::new(&config);
+
+        let status = store.status();
+        assert_eq!(status[&round_id].total, 2);
+        assert_eq!(status[&round_id].pending, 2);
+
+        // Recovered shares should be immediately ready (delay=0).
+        let ready = store.take_ready();
+        assert_eq!(ready.len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn witnessed_shares_reset_on_recovery() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let db_path = tmp.path().to_str().unwrap().to_string();
+
+    let round_id = hex::encode([0xCC; 32]);
+
+    // Phase 1: enqueue, take_ready (→Witnessed), then "crash".
+    {
+        let config = Config {
+            min_delay_secs: 0,
+            max_delay_secs: 0,
+            db_path: db_path.clone(),
+            ..Config::default()
+        };
+        let store = ShareStore::new(&config);
+        store.enqueue(make_test_payload(0, &round_id));
+
+        let ready = store.take_ready();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].state, helper_server::types::ShareState::Witnessed);
+
+        // Don't mark submitted — simulate crash mid-processing.
+    }
+
+    // Phase 2: recover — witnessed share should be back to Received.
+    {
+        let config = Config {
+            min_delay_secs: 0,
+            max_delay_secs: 0,
+            db_path: db_path.clone(),
+            ..Config::default()
+        };
+        let store = ShareStore::new(&config);
+
+        let status = store.status();
+        assert_eq!(status[&round_id].pending, 1);
+
+        // Should be able to take_ready again.
+        let ready = store.take_ready();
+        assert_eq!(ready.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn submitted_shares_not_recovered() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let db_path = tmp.path().to_str().unwrap().to_string();
+
+    let round_id = hex::encode([0xDD; 32]);
+
+    // Phase 1: enqueue, process through to Submitted.
+    {
+        let config = Config {
+            min_delay_secs: 0,
+            max_delay_secs: 0,
+            db_path: db_path.clone(),
+            ..Config::default()
+        };
+        let store = ShareStore::new(&config);
+        store.enqueue(make_test_payload(0, &round_id));
+
+        let ready = store.take_ready();
+        assert_eq!(ready.len(), 1);
+
+        store.mark_submitted(&round_id, 0);
+
+        let status = store.status();
+        assert_eq!(status[&round_id].submitted, 1);
+    }
+
+    // Phase 2: recover — submitted share should not be in-flight.
+    {
+        let config = Config {
+            min_delay_secs: 0,
+            max_delay_secs: 0,
+            db_path: db_path.clone(),
+            ..Config::default()
+        };
+        let store = ShareStore::new(&config);
+
+        // No in-flight shares to take.
+        let ready = store.take_ready();
+        assert_eq!(ready.len(), 0);
+
+        // Status still shows the submitted share.
+        let status = store.status();
+        assert_eq!(status[&round_id].submitted, 1);
+        assert_eq!(status[&round_id].pending, 0);
+    }
+}

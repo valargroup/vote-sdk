@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod chain_client;
+pub mod migrations;
 pub mod mock_tree;
 pub mod nullifier;
 pub mod processor;

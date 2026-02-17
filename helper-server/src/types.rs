@@ -137,6 +137,8 @@ pub struct Config {
     pub sync_interval_secs: u64,
     /// How often to check for shares ready to submit (seconds).
     pub process_interval_secs: u64,
+    /// Path to the SQLite database file. Use ":memory:" for in-memory DB.
+    pub db_path: String,
 }
 
 impl Default for Config {
@@ -149,6 +151,7 @@ impl Default for Config {
             max_delay_secs: 300,
             sync_interval_secs: 5,
             process_interval_secs: 2,
+            db_path: ":memory:".into(),
         }
     }
 }
