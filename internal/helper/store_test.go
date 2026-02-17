@@ -69,7 +69,7 @@ func TestMarkSubmitted(t *testing.T) {
 	ready := s.TakeReady()
 	require.Len(t, ready, 1)
 
-	s.MarkSubmitted("round1", 0)
+	s.MarkSubmitted("round1", 0, 1)
 
 	status := s.Status()
 	assert.Equal(t, 1, status["round1"].Submitted)
@@ -85,17 +85,17 @@ func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	for i := range 4 {
 		ready := s.TakeReady()
 		require.Len(t, ready, 1, "attempt %d", i)
-		s.MarkFailed("round1", 0)
+		s.MarkFailed("round1", 0, 1)
 		// Fast-forward schedule so it's immediately ready again.
 		s.mu.Lock()
-		s.schedule[schedKey("round1", 0)] = time.Now().Add(-time.Second)
+		s.schedule[schedKey("round1", 0, 1)] = time.Now().Add(-time.Second)
 		s.mu.Unlock()
 	}
 
 	// After 4 failures (attempts = 4), take once more.
 	ready := s.TakeReady()
 	require.Len(t, ready, 1)
-	s.MarkFailed("round1", 0) // 5th attempt = permanent failure
+	s.MarkFailed("round1", 0, 1) // 5th attempt = permanent failure
 
 	// Now it should be permanently failed.
 	status := s.Status()
@@ -147,6 +147,32 @@ func TestConflictingDuplicateEnqueue(t *testing.T) {
 
 	status := s.Status()
 	assert.Equal(t, 1, status["round1"].Total)
+}
+
+func TestSameShareIndexDifferentProposals(t *testing.T) {
+	s := newTestStore(t)
+
+	// share_index 0 repeats across proposals in the same round — both must be accepted.
+	p1 := testPayload("round1", 0)
+	p1.ProposalID = 1
+	enqueueAndRequireInserted(t, s, p1)
+
+	p2 := testPayload("round1", 0)
+	p2.ProposalID = 2
+	enqueueAndRequireInserted(t, s, p2)
+
+	status := s.Status()
+	assert.Equal(t, 2, status["round1"].Total)
+
+	// Both should be independently takeable and submittable.
+	ready := s.TakeReady()
+	assert.Len(t, ready, 2)
+
+	s.MarkSubmitted("round1", 0, 1)
+	s.MarkSubmitted("round1", 0, 2)
+
+	status = s.Status()
+	assert.Equal(t, 2, status["round1"].Submitted)
 }
 
 func TestRecovery(t *testing.T) {

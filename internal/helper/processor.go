@@ -99,11 +99,11 @@ func (p *Processor) processBatch(ctx context.Context) {
 					"share_index", share.Payload.EncShare.ShareIndex,
 					"error", err,
 				)
-				p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex)
+				p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID)
 				return nil
 			}
 
-			p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex)
+			p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID)
 			p.logger.Info("share submitted",
 				"round_id", share.Payload.VoteRoundID,
 				"share_index", share.Payload.EncShare.ShareIndex,
