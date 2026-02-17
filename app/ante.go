@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	voteapi "github.com/z-cale/zally/api"
 	"github.com/z-cale/zally/crypto/redpallas"
@@ -60,6 +61,14 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 			return handleVoteAnte(ctx, vtx, voteKeeper, sigVerifier, zkpVerifier)
 		}
 
+		// Block raw MsgCreateValidator — post-genesis validators must use
+		// MsgCreateValidatorWithPallasKey to atomically register their Pallas key.
+		for _, msg := range tx.GetMsgs() {
+			if _, ok := msg.(*stakingtypes.MsgCreateValidator); ok {
+				return ctx, fmt.Errorf("MsgCreateValidator is disabled; use MsgCreateValidatorWithPallasKey via /zally/v1/create-validator-with-pallas")
+			}
+		}
+
 		// Standard Cosmos tx path: signature verification, fee deduction, etc.
 		return standardHandler(ctx, tx, simulate)
 	}, nil
@@ -78,7 +87,7 @@ func handleVoteAnte(
 	// All custom txs (vote + ceremony) are free — infinite gas meter.
 	ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
 
-	// Ceremony messages (tags 0x06–0x08) bypass the vote validation pipeline.
+	// Ceremony messages (tags 0x06–0x09) bypass the vote validation pipeline.
 	// Most ceremony messages flow directly to MsgServer handlers for validation.
 	// MsgAckExecutiveAuthorityKey is special: it must be blocked from the
 	// mempool (only injectable via PrepareProposal).

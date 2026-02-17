@@ -5,6 +5,7 @@ package api
 import (
 	"fmt"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/z-cale/zally/x/vote/types"
@@ -21,15 +22,16 @@ const (
 	TagRevealShare         byte = 0x04
 	TagSubmitTally         byte = 0x05
 
-	TagRegisterPallasKey         byte = 0x06
-	TagDealExecutiveAuthorityKey byte = 0x07
-	TagAckExecutiveAuthorityKey  byte = 0x08
+	TagRegisterPallasKey              byte = 0x06
+	TagDealExecutiveAuthorityKey      byte = 0x07
+	TagAckExecutiveAuthorityKey       byte = 0x08
+	TagCreateValidatorWithPallasKey   byte = 0x09
 )
 
 // IsCustomTag returns true if b is a valid custom transaction type tag
-// (vote-round 0x01–0x05 or ceremony 0x06–0x08).
+// (vote-round 0x01–0x05 or ceremony 0x06–0x09).
 func IsCustomTag(b byte) bool {
-	return b >= TagCreateVotingSession && b <= TagAckExecutiveAuthorityKey
+	return b >= TagCreateVotingSession && b <= TagCreateValidatorWithPallasKey
 }
 
 // IsVoteTag returns true if b is a vote-round transaction type tag (0x01–0x05).
@@ -37,9 +39,9 @@ func IsVoteTag(b byte) bool {
 	return b >= TagCreateVotingSession && b <= TagSubmitTally
 }
 
-// IsCeremonyTag returns true if b is a ceremony transaction type tag (0x06–0x08).
+// IsCeremonyTag returns true if b is a ceremony transaction type tag (0x06–0x09).
 func IsCeremonyTag(b byte) bool {
-	return b >= TagRegisterPallasKey && b <= TagAckExecutiveAuthorityKey
+	return b >= TagRegisterPallasKey && b <= TagCreateValidatorWithPallasKey
 }
 
 // TagForMessage returns the wire-format tag for a VoteMessage.
@@ -138,6 +140,17 @@ func EncodeCeremonyTx(msg proto.Message, tag byte) ([]byte, error) {
 	return raw, nil
 }
 
+// EncodeCeremonyTxCreateValidator serializes a MsgCreateValidatorWithPallasKey
+// into the wire format. This message is hand-written (not protoc-generated),
+// so it uses manual protowire encoding instead of proto.Marshal.
+func EncodeCeremonyTxCreateValidator(msg *types.MsgCreateValidatorWithPallasKey) ([]byte, error) {
+	body := encodeCreateValidatorWithPallasKey(msg)
+	raw := make([]byte, 1+len(body))
+	raw[0] = TagCreateValidatorWithPallasKey
+	copy(raw[1:], body)
+	return raw, nil
+}
+
 // DecodeCeremonyTx decodes raw wire-format bytes into a tag and a ceremony
 // message (proto.Message). Returns an error if the bytes are too short, the
 // tag is not a ceremony tag, or protobuf decoding fails.
@@ -157,6 +170,9 @@ func DecodeCeremonyTx(raw []byte) (byte, proto.Message, error) {
 		msg = &types.MsgDealExecutiveAuthorityKey{}
 	case TagAckExecutiveAuthorityKey:
 		msg = &types.MsgAckExecutiveAuthorityKey{}
+	case TagCreateValidatorWithPallasKey:
+		// Handled separately — see DecodeCreateValidatorWithPallasKeyTx.
+		return 0, nil, fmt.Errorf("use DecodeCreateValidatorWithPallasKeyTx for tag 0x09")
 	default:
 		return 0, nil, fmt.Errorf("invalid ceremony tx tag: 0x%02x", tag)
 	}
@@ -166,4 +182,70 @@ func DecodeCeremonyTx(raw []byte) (byte, proto.Message, error) {
 	}
 
 	return tag, msg, nil
+}
+
+// DecodeCreateValidatorWithPallasKeyTx decodes a tag-0x09 wire-format tx
+// into MsgCreateValidatorWithPallasKey. This is separate from DecodeCeremonyTx
+// because the hand-written type does not implement proto.Message.
+func DecodeCreateValidatorWithPallasKeyTx(raw []byte) (*types.MsgCreateValidatorWithPallasKey, error) {
+	if len(raw) < 2 {
+		return nil, fmt.Errorf("tx too short: %d bytes", len(raw))
+	}
+	if raw[0] != TagCreateValidatorWithPallasKey {
+		return nil, fmt.Errorf("expected tag 0x09, got 0x%02x", raw[0])
+	}
+	return decodeCreateValidatorWithPallasKey(raw[1:])
+}
+
+// encodeCreateValidatorWithPallasKey manually encodes MsgCreateValidatorWithPallasKey
+// using protowire. Field 1 (staking_msg) and field 2 (pallas_pk) are both
+// length-delimited bytes.
+func encodeCreateValidatorWithPallasKey(msg *types.MsgCreateValidatorWithPallasKey) []byte {
+	var buf []byte
+	if len(msg.StakingMsg) > 0 {
+		buf = protowire.AppendTag(buf, 1, protowire.BytesType)
+		buf = protowire.AppendBytes(buf, msg.StakingMsg)
+	}
+	if len(msg.PallasPk) > 0 {
+		buf = protowire.AppendTag(buf, 2, protowire.BytesType)
+		buf = protowire.AppendBytes(buf, msg.PallasPk)
+	}
+	return buf
+}
+
+// decodeCreateValidatorWithPallasKey manually decodes MsgCreateValidatorWithPallasKey
+// from protobuf wire format using protowire.
+func decodeCreateValidatorWithPallasKey(b []byte) (*types.MsgCreateValidatorWithPallasKey, error) {
+	msg := &types.MsgCreateValidatorWithPallasKey{}
+	for len(b) > 0 {
+		num, wtype, n := protowire.ConsumeTag(b)
+		if n < 0 {
+			return nil, fmt.Errorf("invalid protobuf tag")
+		}
+		b = b[n:]
+
+		if wtype != protowire.BytesType {
+			// Skip unknown wire types.
+			n = protowire.ConsumeFieldValue(num, wtype, b)
+			if n < 0 {
+				return nil, fmt.Errorf("invalid protobuf field value")
+			}
+			b = b[n:]
+			continue
+		}
+
+		val, n := protowire.ConsumeBytes(b)
+		if n < 0 {
+			return nil, fmt.Errorf("invalid protobuf bytes field %d", num)
+		}
+		b = b[n:]
+
+		switch num {
+		case 1:
+			msg.StakingMsg = append([]byte(nil), val...)
+		case 2:
+			msg.PallasPk = append([]byte(nil), val...)
+		}
+	}
+	return msg, nil
 }

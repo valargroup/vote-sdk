@@ -23,14 +23,14 @@ type VoteTxWrapper struct {
 	// RawBytes is the original wire-format bytes [tag || protobuf].
 	RawBytes []byte
 
-	// Tag is the message type tag (0x01–0x05 for vote-round, 0x06–0x08 for ceremony).
+	// Tag is the message type tag (0x01–0x05 for vote-round, 0x06–0x09 for ceremony).
 	Tag byte
 
 	// VoteMsg is the decoded vote message, used by the validation pipeline.
 	// Set for vote-round tags (0x01–0x05). Nil for ceremony messages.
 	VoteMsg types.VoteMessage
 
-	// CeremonyMsg is the decoded ceremony message (tags 0x06–0x08).
+	// CeremonyMsg is the decoded ceremony message (tags 0x06–0x09).
 	// Set for ceremony tags. Nil for vote-round messages.
 	CeremonyMsg sdk.Msg
 }
@@ -47,9 +47,16 @@ func (vtx *VoteTxWrapper) GetMsgs() []sdk.Msg {
 // GetMsgsV2 satisfies sdk.Tx. Returns the message as a protov2.Message.
 // Our protoc-gen-go v2 generated types implement both gogoproto.Message and
 // protov2.Message (google.golang.org/protobuf/proto.Message).
+//
+// Hand-written ceremony types (e.g. MsgCreateValidatorWithPallasKey) may not
+// implement protov2.Message; in that case we return nil. BaseApp's runMsgs()
+// uses GetMsgs() (gogoproto) for routing, not GetMsgsV2().
 func (vtx *VoteTxWrapper) GetMsgsV2() ([]protov2.Message, error) {
 	if vtx.CeremonyMsg != nil {
-		return []protov2.Message{vtx.CeremonyMsg.(protov2.Message)}, nil
+		if pm, ok := vtx.CeremonyMsg.(protov2.Message); ok {
+			return []protov2.Message{pm}, nil
+		}
+		return nil, nil
 	}
 	return []protov2.Message{vtx.VoteMsg.(protov2.Message)}, nil
 }

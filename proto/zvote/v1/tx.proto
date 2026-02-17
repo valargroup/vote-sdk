@@ -20,6 +20,7 @@ service Msg {
   rpc RegisterPallasKey(MsgRegisterPallasKey) returns (MsgRegisterPallasKeyResponse);
   rpc DealExecutiveAuthorityKey(MsgDealExecutiveAuthorityKey) returns (MsgDealExecutiveAuthorityKeyResponse);
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
+  rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -137,3 +138,13 @@ message MsgAckExecutiveAuthorityKey {
 }
 
 message MsgAckExecutiveAuthorityKeyResponse {}
+
+// MsgCreateValidatorWithPallasKey wraps standard MsgCreateValidator with a Pallas public key.
+// The handler creates the validator via the staking module, then registers the Pallas key
+// in the ceremony state. Raw MsgCreateValidator is blocked by the ante handler for live txs.
+message MsgCreateValidatorWithPallasKey {
+  bytes staking_msg = 1;  // Encoded cosmos.staking.v1beta1.MsgCreateValidator
+  bytes pallas_pk   = 2;  // Compressed Pallas point (32 bytes)
+}
+
+message MsgCreateValidatorWithPallasKeyResponse {}

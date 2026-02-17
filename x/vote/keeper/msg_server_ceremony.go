@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/types"
@@ -206,4 +208,82 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 	))
 
 	return &types.MsgAckExecutiveAuthorityKeyResponse{}, nil
+}
+
+// CreateValidatorWithPallasKey handles MsgCreateValidatorWithPallasKey.
+// It atomically creates a validator via the staking module and registers
+// the validator's Pallas public key in the ceremony state. This replaces
+// the two-step flow of MsgCreateValidator + MsgRegisterPallasKey for
+// post-genesis validators.
+func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *types.MsgCreateValidatorWithPallasKey) (*types.MsgCreateValidatorWithPallasKeyResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := ms.k.OpenKVStore(ctx)
+
+	// Decode the embedded staking MsgCreateValidator (gogoproto binary format).
+	stakingMsg := &stakingtypes.MsgCreateValidator{}
+	if err := stakingMsg.Unmarshal(msg.StakingMsg); err != nil {
+		return nil, fmt.Errorf("failed to decode staking_msg: %w", err)
+	}
+
+	// Validate pallas_pk: 32 bytes, valid Pallas point, not identity.
+	if _, err := elgamal.UnmarshalPublicKey(msg.PallasPk); err != nil {
+		return nil, fmt.Errorf("%w: %v", types.ErrInvalidPallasPoint, err)
+	}
+
+	// Call through to the staking module's MsgServer to create the validator.
+	// The stakingKeeper is injected as the concrete *stakingkeeper.Keeper via depinject.
+	concreteKeeper, ok := ms.k.stakingKeeper.(*stakingkeeper.Keeper)
+	if !ok {
+		return nil, fmt.Errorf("staking keeper is not *stakingkeeper.Keeper (got %T); cannot create validator", ms.k.stakingKeeper)
+	}
+	stakingMsgServer := stakingkeeper.NewMsgServerImpl(concreteKeeper)
+	if _, err := stakingMsgServer.CreateValidator(goCtx, stakingMsg); err != nil {
+		return nil, fmt.Errorf("staking CreateValidator failed: %w", err)
+	}
+
+	// Register the Pallas key in ceremony state (same logic as RegisterPallasKey).
+	state, err := ms.k.GetCeremonyState(kvStore)
+	if err != nil {
+		return nil, err
+	}
+
+	// First registration: create ceremony and transition to REGISTERING.
+	if state == nil || state.Status == types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING {
+		state = &types.CeremonyState{
+			Status:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+			PhaseStart:   uint64(ctx.BlockTime().Unix()),
+			PhaseTimeout: types.DefaultRegistrationTimeout,
+		}
+	}
+
+	// Only accept registrations while REGISTERING.
+	if state.Status != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
+		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, state.Status)
+	}
+
+	// Use the validator operator address from the staking message as the key.
+	validatorAddr := stakingMsg.ValidatorAddress
+
+	// Reject duplicate registration.
+	if _, found := FindValidatorInCeremony(state, validatorAddr); found {
+		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateRegistration, validatorAddr)
+	}
+
+	// Append validator key.
+	state.Validators = append(state.Validators, &types.ValidatorPallasKey{
+		ValidatorAddress: validatorAddr,
+		PallasPk:         msg.PallasPk,
+	})
+
+	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeRegisterPallasKey,
+		sdk.NewAttribute(types.AttributeKeyValidatorAddress, validatorAddr),
+		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, state.Status.String()),
+	))
+
+	return &types.MsgCreateValidatorWithPallasKeyResponse{}, nil
 }
