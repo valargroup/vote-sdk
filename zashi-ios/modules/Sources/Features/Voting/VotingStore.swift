@@ -1006,6 +1006,16 @@ public struct Voting {
                     // 5. POST to chain
                     try await votingAPI.createTestSession(payload)
                     print("[Voting] Test session created successfully")
+
+                    // 6. Poll until the new round is queryable (TX needs to land in a block)
+                    let deadline = Date().addingTimeInterval(30)
+                    while Date() < deadline {
+                        if let _ = try? await votingAPI.fetchActiveVotingSession() {
+                            break
+                        }
+                        try await Task.sleep(for: .seconds(1))
+                    }
+
                     await send(.testRoundCreated)
                 } catch: { error, send in
                     print("[Voting] Test round creation failed: \(error)")
