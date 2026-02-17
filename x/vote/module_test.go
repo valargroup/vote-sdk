@@ -236,25 +236,25 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 		wantStatus types.CeremonyStatus
 	}{
 		{
-			name: "DEALT + partial acks + timeout -> INITIALIZING",
+			name: "DEALT + partial acks + timeout -> idle REGISTERING",
 			setup: func() {
 				seedDealtCeremony(1) // 1 of 3 acked
 			},
-			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		},
 		{
-			name: "DEALT + all acks + timeout -> INITIALIZING",
+			name: "DEALT + all acks + timeout -> idle REGISTERING",
 			setup: func() {
 				seedDealtCeremony(3) // 3 of 3 acked (timeout still resets)
 			},
-			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		},
 		{
-			name: "DEALT + zero acks + timeout -> INITIALIZING",
+			name: "DEALT + zero acks + timeout -> idle REGISTERING",
 			setup: func() {
 				seedDealtCeremony(0)
 			},
-			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		},
 		{
 			name: "DEALT + no timeout yet (block_time < deadline)",
@@ -270,19 +270,19 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 		},
 		{
-			name: "DEALT + exact deadline -> INITIALIZING",
+			name: "DEALT + exact deadline -> idle REGISTERING",
 			setup: func() {
 				seedDealtCeremony(2) // 2 of 3 acked
 				// phase_start=999_400 + phase_timeout=600 = 1_000_000 == block_time
 			},
-			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		},
 		{
-			name: "REGISTERING + timeout -> INITIALIZING",
+			name: "REGISTERING + timeout -> idle REGISTERING",
 			setup: func() {
 				seedRegisteringCeremony(2)
 			},
-			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		},
 		{
 			name: "REGISTERING + no timeout yet",
@@ -307,14 +307,15 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
 		},
 		{
-			name: "skip when ceremony is INITIALIZING",
+			name: "skip when ceremony is idle REGISTERING (phase_timeout=0)",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
-					Status: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+					Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+					// PhaseTimeout=0 means idle — no timer to expire.
 				}))
 			},
-			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		},
 	}
 

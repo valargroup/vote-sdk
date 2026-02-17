@@ -251,11 +251,12 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			errContains: "ceremony not in confirmed status",
 		},
 		{
-			name: "rejected: ceremony in INITIALIZING status",
+			name: "rejected: ceremony in idle REGISTERING status (phase_timeout=0)",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
-					Status: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+					Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+					// PhaseTimeout=0 means idle — not confirmed.
 				}))
 			},
 			msg:         msg,

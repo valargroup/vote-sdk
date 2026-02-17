@@ -160,8 +160,9 @@ func TestKeyCeremonyFullLifecycle(t *testing.T) {
 // ---------------------------------------------------------------------------
 // TestKeyCeremonyRegistrationTimeout
 //
-// Registration phase times out before dealing. Ceremony resets to
-// INITIALIZING. Validators re-register and complete the ceremony.
+// Registration phase times out before dealing. Ceremony resets to idle
+// REGISTERING (phase_timeout=0). Validators re-register and complete the
+// ceremony.
 // ---------------------------------------------------------------------------
 
 func TestKeyCeremonyRegistrationTimeout(t *testing.T) {
@@ -189,10 +190,10 @@ func TestKeyCeremonyRegistrationTimeout(t *testing.T) {
 	deadline := time.Unix(int64(state.PhaseStart+state.PhaseTimeout), 0).UTC()
 	ta.NextBlockAtTime(deadline.Add(1 * time.Second))
 
-	// EndBlocker should have reset ceremony to INITIALIZING.
+	// EndBlocker should have reset ceremony to idle REGISTERING (phase_timeout=0).
 	state = getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING, state.Status,
-		"ceremony should reset to INITIALIZING after registration timeout")
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status,
+		"ceremony should reset to idle REGISTERING after registration timeout")
 	require.Empty(t, state.Validators, "validators should be cleared after reset")
 	require.Empty(t, state.Payloads, "payloads should be cleared after reset")
 	require.Empty(t, state.Acks, "acks should be cleared after reset")
@@ -231,8 +232,8 @@ func TestKeyCeremonyRegistrationTimeout(t *testing.T) {
 // TestKeyCeremonyDealTimeout
 //
 // Deal phase (awaiting acks) times out before all validators ack.
-// Ceremony resets to INITIALIZING. Re-registration and a fresh deal
-// complete the ceremony on the second attempt.
+// Ceremony resets to idle REGISTERING (phase_timeout=0). Re-registration
+// and a fresh deal complete the ceremony on the second attempt.
 // ---------------------------------------------------------------------------
 
 func TestKeyCeremonyDealTimeout(t *testing.T) {
@@ -272,10 +273,10 @@ func TestKeyCeremonyDealTimeout(t *testing.T) {
 	deadline := time.Unix(int64(state.PhaseStart+state.PhaseTimeout), 0).UTC()
 	ta.NextBlockAtTime(deadline.Add(1 * time.Second))
 
-	// EndBlocker should have reset ceremony to INITIALIZING.
+	// EndBlocker should have reset ceremony to idle REGISTERING (phase_timeout=0).
 	state = getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING, state.Status,
-		"ceremony should reset to INITIALIZING after deal/ack timeout")
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status,
+		"ceremony should reset to idle REGISTERING after deal/ack timeout")
 	require.Empty(t, state.Validators, "validators should be cleared after reset")
 	require.Empty(t, state.Payloads, "payloads should be cleared after reset")
 	require.Nil(t, state.EaPk, "ea_pk should be cleared after reset")
@@ -508,7 +509,8 @@ func TestReInitializeElectionAuthority_AllowedWhenNoCeremony(t *testing.T) {
 
 	state = getCeremonyState(t, ta)
 	require.NotNil(t, state)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING, state.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
+	require.Equal(t, uint64(0), state.PhaseTimeout, "reinit should produce idle REGISTERING (phase_timeout=0)")
 }
 
 // TestReInitializeElectionAuthority_AllowedWhenConfirmed
@@ -550,7 +552,7 @@ func TestReInitializeElectionAuthority_AllowedWhenConfirmed(t *testing.T) {
 		"MsgReInitializeElectionAuthority should succeed when ceremony is CONFIRMED")
 
 	state = getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING, state.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
 	require.Empty(t, state.Validators, "validators should be cleared after re-init")
 	require.Empty(t, state.Payloads, "payloads should be cleared after re-init")
 	require.Empty(t, state.Acks, "acks should be cleared after re-init")
@@ -607,15 +609,16 @@ func TestReInitializeElectionAuthority_RejectedDuringDealt(t *testing.T) {
 		"MsgReInitializeElectionAuthority should be rejected during DEALT")
 }
 
-// TestReInitializeElectionAuthority_AllowedWhenInitializing
+// TestReInitializeElectionAuthority_AllowedWhenIdleRegistering
 //
-// Re-initialization succeeds when the ceremony is already in INITIALIZING state.
-func TestReInitializeElectionAuthority_AllowedWhenInitializing(t *testing.T) {
+// Re-initialization succeeds when the ceremony is in idle REGISTERING state
+// (phase_timeout=0, after a timeout reset).
+func TestReInitializeElectionAuthority_AllowedWhenIdleRegistering(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	valAddr := ta.ValidatorOperAddr()
 
-	// Register then time out to get to INITIALIZING.
+	// Register then time out to get to idle REGISTERING (phase_timeout=0).
 	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	state := getCeremonyState(t, ta)
@@ -623,15 +626,17 @@ func TestReInitializeElectionAuthority_AllowedWhenInitializing(t *testing.T) {
 	ta.NextBlockAtTime(deadline.Add(1 * time.Second))
 
 	state = getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING, state.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
+	require.Equal(t, uint64(0), state.PhaseTimeout, "should be idle REGISTERING after timeout")
 
 	// Re-initialize should succeed.
 	code := reInitializeEA(t, ta, valAddr)
 	require.Equal(t, uint32(0), code,
-		"MsgReInitializeElectionAuthority should succeed when INITIALIZING")
+		"MsgReInitializeElectionAuthority should succeed when idle REGISTERING")
 
 	state = getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING, state.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
+	require.Equal(t, uint64(0), state.PhaseTimeout)
 }
 
 // TestReInitializeElectionAuthority_NewCeremonyAfterReInit
