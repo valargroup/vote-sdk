@@ -260,6 +260,25 @@ func TestDecryptRejectsNilEnvelope(t *testing.T) {
 	require.Contains(t, err.Error(), "envelope must not be nil")
 }
 
+// TestEncryptRejectsIdentityEphemeralKey verifies that if the computed
+// ephemeral key E = e * G is the identity point (i.e. e = 0), Encrypt
+// rejects it. This exercises the defense-in-depth validatePoint(E) check
+// inside encryptWithEphemeral, which prevents producing an envelope that
+// would later fail to decrypt.
+func TestEncryptRejectsIdentityEphemeralKey(t *testing.T) {
+	G := testGenerator()
+	_, pk := testKeypair()
+	plaintext := []byte("test")
+
+	// A zero scalar produces E = 0 * G = identity.
+	zeroScalar := new(curvey.ScalarPallas).Zero()
+
+	_, err := encryptWithEphemeral(G, pk, plaintext, zeroScalar)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ephemeral public key")
+	require.Contains(t, err.Error(), "identity point")
+}
+
 // TestDecryptRejectsIdentityEphemeral verifies that an envelope with an
 // identity ephemeral key is rejected.
 func TestDecryptRejectsIdentityEphemeral(t *testing.T) {
@@ -290,6 +309,67 @@ func TestDecryptRejectsTruncatedCiphertext(t *testing.T) {
 	_, err := Decrypt(sk, env)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ciphertext too short")
+}
+
+// ---------------------------------------------------------------------------
+// Defense-in-depth: ECDH shared-secret identity check
+// ---------------------------------------------------------------------------
+
+// TestEncryptRejectsZeroEphemeralScalar verifies that a zero ephemeral scalar
+// is caught by the defense-in-depth checks in Encrypt. On prime-order Pallas,
+// e = 0 produces E = O (identity), which is caught by the ephemeral point
+// validation. The ECDH shared secret S = 0 * pk = O is also identity, so even
+// if the E check were removed, the shared-secret check would prevent a
+// deterministic symmetric key.
+func TestEncryptRejectsZeroEphemeralScalar(t *testing.T) {
+	G := testGenerator()
+	_, pk := testKeypair()
+	zero := new(curvey.ScalarPallas).Zero()
+
+	_, err := encryptWithEphemeral(G, pk, []byte("test"), zero)
+	require.Error(t, err)
+	// First defense layer catches it: E = 0 * G = identity.
+	require.Contains(t, err.Error(), "identity point")
+}
+
+// TestDecryptRejectsIdentityECDHSharedSecret exercises the ECDH shared-secret
+// identity check in Decrypt by calling decryptWithCheckedInputs directly with
+// a zero secret key. The outer Decrypt rejects zero sk before reaching this
+// point; this test bypasses that first check to verify the second defense layer
+// fires correctly: S = 0 * E = O → "ECDH shared secret is the identity point".
+func TestDecryptRejectsIdentityECDHSharedSecret(t *testing.T) {
+	G := testGenerator()
+	_, pk := testKeypair()
+
+	// Create a valid envelope with a non-identity ephemeral point.
+	env, err := Encrypt(G, pk, []byte("test plaintext"), rand.Reader)
+	require.NoError(t, err)
+
+	// Bypass the zero-sk check in Decrypt by calling the core directly.
+	zero := new(curvey.ScalarPallas).Zero()
+	_, err = decryptWithCheckedInputs(zero, env)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ECDH shared secret is the identity point")
+}
+
+// TestZeroScalarProducesIdentitySharedSecret verifies the mathematical
+// property underlying the defense-in-depth check: on prime-order Pallas,
+// multiplying any valid point by the zero scalar produces the identity point.
+// This confirms the check in Encrypt and Decrypt would fire if a zero scalar
+// were ever produced by a faulty RNG or refactored code path.
+func TestZeroScalarProducesIdentitySharedSecret(t *testing.T) {
+	G := testGenerator()
+	zero := new(curvey.ScalarPallas).Zero()
+
+	// 0 * G = O
+	require.True(t, G.Mul(zero).IsIdentity(),
+		"zero scalar * generator must be identity")
+
+	// 0 * pk = O for a random public key
+	_, pk := testKeypair()
+	S := pk.Mul(zero)
+	require.True(t, S.IsIdentity(),
+		"zero scalar * public key must be identity")
 }
 
 // ---------------------------------------------------------------------------

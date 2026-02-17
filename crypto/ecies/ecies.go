@@ -55,8 +55,41 @@ func Encrypt(G, recipientPK curvey.Point, plaintext []byte, rng io.Reader) (*Env
 	}
 	e := new(curvey.ScalarPallas).Hash(seed[:])
 
+	return encryptWithEphemeral(G, recipientPK, plaintext, e)
+}
+
+// Decrypt performs ECIES decryption using the recipient's secret key.
+//
+// The scheme:
+//  1. S = recipientSK * E                  (ECDH shared secret)
+//  2. k = SHA256(E_compressed || S.x)      (derive same symmetric key)
+//  3. plaintext = ChaCha20-Poly1305.Open(k, nonce=0, ciphertext)
+func Decrypt(recipientSK curvey.Scalar, env *Envelope) ([]byte, error) {
+	if recipientSK == nil || recipientSK.IsZero() {
+		return nil, fmt.Errorf("ecies: Decrypt: secret key must not be nil or zero")
+	}
+	if env == nil {
+		return nil, fmt.Errorf("ecies: Decrypt: envelope must not be nil")
+	}
+	if err := validatePoint(env.Ephemeral, "ephemeral public key"); err != nil {
+		return nil, fmt.Errorf("ecies: Decrypt: %w", err)
+	}
+	if len(env.Ciphertext) < chacha20poly1305.Overhead {
+		return nil, fmt.Errorf("ecies: Decrypt: ciphertext too short")
+	}
+
+	return decryptWithCheckedInputs(recipientSK, env)
+}
+
+// encryptWithEphemeral performs the core ECIES encryption using the provided
+// ephemeral scalar. Split out from Encrypt to allow testing the defense-in-depth
+// ECDH shared-secret validation with controlled inputs.
+func encryptWithEphemeral(G, recipientPK curvey.Point, plaintext []byte, e curvey.Scalar) (*Envelope, error) {
 	// E = e * G (ephemeral public key)
 	E := G.Mul(e)
+	if err := validatePoint(E, "ephemeral public key"); err != nil {
+		return nil, fmt.Errorf("ecies: Encrypt: %w", err)
+	}
 
 	// S = e * recipientPK (ECDH shared secret)
 	S := recipientPK.Mul(e)
@@ -81,26 +114,10 @@ func Encrypt(G, recipientPK curvey.Point, plaintext []byte, rng io.Reader) (*Env
 	}, nil
 }
 
-// Decrypt performs ECIES decryption using the recipient's secret key.
-//
-// The scheme:
-//  1. S = recipientSK * E                  (ECDH shared secret)
-//  2. k = SHA256(E_compressed || S.x)      (derive same symmetric key)
-//  3. plaintext = ChaCha20-Poly1305.Open(k, nonce=0, ciphertext)
-func Decrypt(recipientSK curvey.Scalar, env *Envelope) ([]byte, error) {
-	if recipientSK == nil || recipientSK.IsZero() {
-		return nil, fmt.Errorf("ecies: Decrypt: secret key must not be nil or zero")
-	}
-	if env == nil {
-		return nil, fmt.Errorf("ecies: Decrypt: envelope must not be nil")
-	}
-	if err := validatePoint(env.Ephemeral, "ephemeral public key"); err != nil {
-		return nil, fmt.Errorf("ecies: Decrypt: %w", err)
-	}
-	if len(env.Ciphertext) < chacha20poly1305.Overhead {
-		return nil, fmt.Errorf("ecies: Decrypt: ciphertext too short")
-	}
-
+// decryptWithCheckedInputs performs the core ECIES decryption after input
+// validation. Split out from Decrypt to allow testing the defense-in-depth
+// ECDH shared-secret validation with controlled inputs.
+func decryptWithCheckedInputs(recipientSK curvey.Scalar, env *Envelope) ([]byte, error) {
 	// S = sk * E (ECDH shared secret)
 	S := env.Ephemeral.Mul(recipientSK)
 	if S == nil || S.IsIdentity() {
