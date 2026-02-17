@@ -178,35 +178,23 @@ pub fn domain_van_nullifier() -> pallas::Base {
 
 /// Out-of-circuit VAN nullifier hash (condition 5).
 ///
-/// Three-layer `ConstantLength<2>` Poseidon chain (matches ZKP 1
-/// condition 14's governance nullifier pattern):
 /// ```text
-/// step1  = Poseidon(voting_round_id, vote_authority_note_old)   // scope to round + VAN
-/// step2  = Poseidon("vote authority spend", step1)              // domain separation
-/// van_nullifier = Poseidon(vsk_nk, step2)                       // key with nk
+/// van_nullifier = Poseidon(vsk_nk, domain_tag, voting_round_id, vote_authority_note_old)
 /// ```
 ///
+/// Single `ConstantLength<4>` call (2 permutations at rate=2).
 /// Used by the builder and tests to compute the expected VAN nullifier.
 pub fn van_nullifier_hash(
     vsk_nk: pallas::Base,
     voting_round_id: pallas::Base,
     vote_authority_note_old: pallas::Base,
 ) -> pallas::Base {
-    // Step 1: Poseidon(voting_round_id, vote_authority_note_old) — scope to round + VAN.
-    let step1 =
-        poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<2>, 3, 2>::init().hash([
-            voting_round_id,
-            vote_authority_note_old,
-        ]);
-    // Step 2: Poseidon(domain_tag, step1) — domain separation.
-    let step2 =
-        poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<2>, 3, 2>::init().hash([
-            domain_van_nullifier(),
-            step1,
-        ]);
-    // Step 3: Poseidon(vsk_nk, step2) — key the result so it can't be reversed.
-    poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<2>, 3, 2>::init()
-        .hash([vsk_nk, step2])
+    poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<4>, 3, 2>::init().hash([
+        vsk_nk,
+        domain_van_nullifier(),
+        voting_round_id,
+        vote_authority_note_old,
+    ])
 }
 
 /// Out-of-circuit Poseidon hash of two field elements.
@@ -1218,13 +1206,9 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 
         // ---------------------------------------------------------------
         // Condition 5: VAN Nullifier Integrity.
-        // van_nullifier = Poseidon(vsk_nk,
-        //     Poseidon(domain, Poseidon(voting_round_id, vote_authority_note_old)))
+        // van_nullifier = Poseidon(vsk_nk, domain_tag, voting_round_id, vote_authority_note_old)
         //
-        // Three-layer ConstantLength<2> chain matching ZKP 1 condition 14:
-        //   Step 1: scope to round + VAN
-        //   Step 2: domain separation
-        //   Step 3: key with nullifier key
+        // Single ConstantLength<4> Poseidon hash (2 permutations at rate=2).
         //
         // voting_round_id and vote_authority_note_old are reused from
         // condition 2 via cell equality — these cells flow directly into
@@ -1232,57 +1216,20 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // ---------------------------------------------------------------
 
         let van_nullifier = {
-            // Step 1: Poseidon(voting_round_id, vote_authority_note_old)
-            // — scope to this round + VAN.
-            let step1_hasher = PoseidonHash::<
+            let hasher = PoseidonHash::<
                 pallas::Base,
                 _,
                 poseidon::P128Pow5T3,
-                ConstantLength<2>,
+                ConstantLength<4>,
                 3, // WIDTH
                 2, // RATE
             >::init(
                 config.poseidon_chip(),
-                layouter.namespace(|| "VAN nullifier step 1 init"),
+                layouter.namespace(|| "VAN nullifier Poseidon init"),
             )?;
-            let step1 = step1_hasher.hash(
-                layouter.namespace(|| "Poseidon(voting_round_id, vote_authority_note_old)"),
-                [voting_round_id_cond4, vote_authority_note_old],
-            )?;
-
-            // Step 2: Poseidon(domain_tag, step1) — domain separation.
-            let step2_hasher = PoseidonHash::<
-                pallas::Base,
-                _,
-                poseidon::P128Pow5T3,
-                ConstantLength<2>,
-                3, // WIDTH
-                2, // RATE
-            >::init(
-                config.poseidon_chip(),
-                layouter.namespace(|| "VAN nullifier step 2 init"),
-            )?;
-            let step2 = step2_hasher.hash(
-                layouter.namespace(|| "Poseidon(domain_van_nullifier, step1)"),
-                [domain_van_nf, step1],
-            )?;
-
-            // Step 3: Poseidon(vsk_nk, step2) — key the result so it
-            // can't be reversed without knowing the spending key.
-            let step3_hasher = PoseidonHash::<
-                pallas::Base,
-                _,
-                poseidon::P128Pow5T3,
-                ConstantLength<2>,
-                3, // WIDTH
-                2, // RATE
-            >::init(
-                config.poseidon_chip(),
-                layouter.namespace(|| "VAN nullifier step 3 init"),
-            )?;
-            step3_hasher.hash(
-                layouter.namespace(|| "Poseidon(vsk_nk, step2)"),
-                [vsk_nk_cond4, step2],
+            hasher.hash(
+                layouter.namespace(|| "Poseidon(vsk_nk, domain, round_id, van_old)"),
+                [vsk_nk_cond4, domain_van_nf, voting_round_id_cond4, vote_authority_note_old],
             )?
         };
 

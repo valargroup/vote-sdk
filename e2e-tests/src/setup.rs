@@ -24,9 +24,9 @@ use orchard::{
     note::{ExtractedNoteCommitment, Note, Rho},
     tree::{MerkleHashOrchard, MerklePath},
     value::NoteValue,
-    vote_proof::VOTE_COMM_TREE_DEPTH,
     NOTE_COMMITMENT_TREE_DEPTH,
 };
+use orchard::vote_proof::VOTE_COMM_TREE_DEPTH;
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
 use vote_commitment_tree::TreeServer;
@@ -242,9 +242,9 @@ pub fn build_delegation_bundle_for_test(
         spend_auth_sig: sig_bytes.to_vec(),
         sighash: sighash.to_vec(),
         signed_note_nullifier: nf_signed_bytes.to_vec(),
-        cmx_new: cmx_new_bytes.as_ref().to_vec(),
+        cmx_new: cmx_new_bytes[..].to_vec(),
         enc_memo: enc_memo.to_vec(),
-        van_cmx: van_cmx_bytes.as_ref().to_vec(),
+        van_cmx: van_cmx_bytes[..].to_vec(),
         gov_nullifiers: gov_null_bytes.iter().map(|b| b.to_vec()).collect(),
         proof,
     };
@@ -254,8 +254,8 @@ pub fn build_delegation_bundle_for_test(
         snapshot_blockhash,
         proposals_hash,
         vote_end_time,
-        nullifier_imt_root: nf_imt_root_repr.as_ref().try_into().unwrap(),
-        nc_root: nc_root_repr.as_ref().try_into().unwrap(),
+        nullifier_imt_root: nf_imt_root_repr,
+        nc_root: nc_root_repr,
     };
 
     let vote_proof_data = VoteProofDelegationData {

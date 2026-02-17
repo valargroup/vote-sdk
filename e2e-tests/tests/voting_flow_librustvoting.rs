@@ -1,8 +1,7 @@
-//! E2E test exercising the **librustvoting** path: VotingDb → TreeClient →
+//! E2E test exercising the full voting flow: VotingDb → TreeClient →
 //! real ZKP #2 → cast-vote → helper server (ZKP #3) → tally → finalize.
 //!
-//! Unlike voting_flow.rs which calls the orchard builder directly, this test
-//! validates that the full library stack works: DB persistence of delegation
+//! Validates that the full library stack works: DB persistence of delegation
 //! data, HTTP tree sync, witness generation, and proof generation all through
 //! the librustvoting / vote-commitment-tree-client APIs.
 //!

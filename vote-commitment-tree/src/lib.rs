@@ -59,6 +59,13 @@ pub fn poseidon_hash(left: Fp, right: Fp) -> Fp {
     imt_tree::poseidon_hash(left, right)
 }
 
+/// Poseidon hash of six field elements (`ConstantLength<6>`, width 3, rate 2).
+pub fn poseidon_hash_6(a: Fp, b: Fp, c: Fp, d: Fp, e: Fp, f: Fp) -> Fp {
+    use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
+
+    poseidon::Hash::<_, P128Pow5T3, ConstantLength<6>, 3, 2>::init().hash([a, b, c, d, e, f])
+}
+
 /// Compute the vote commitment leaf hash (arity-4 Poseidon).
 ///
 /// ```text

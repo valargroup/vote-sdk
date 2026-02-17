@@ -45,7 +45,7 @@ use halo2_gadgets::{
     utilities::bool_check,
 };
 
-use crate::vote_proof::{poseidon_hash_2, DOMAIN_VC, VOTE_COMM_TREE_DEPTH};
+use crate::vote_proof::{DOMAIN_VC, VOTE_COMM_TREE_DEPTH};
 
 // ================================================================
 // Constants
@@ -99,19 +99,14 @@ pub fn domain_tag_share_spend() -> pallas::Base {
 
 /// Out-of-circuit share nullifier hash (condition 5).
 ///
-/// Four arity-2 Poseidon hashes:
 /// ```text
-/// enc_share_hash   = Poseidon(c1_x, c2_x)
-/// left             = Poseidon(domain_tag, vote_commitment)
-/// right            = Poseidon(share_index, enc_share_hash)
-/// inner            = Poseidon(left, right)
-/// share_nullifier  = Poseidon(inner, voting_round_id)
+/// share_nullifier = Poseidon(domain_tag, vote_commitment, share_index, c1_x, c2_x, voting_round_id)
 /// ```
 ///
-/// The final hash with `voting_round_id` binds the nullifier to the
-/// voting round, preventing cross-round proof replay. The commitment
-/// tree is global (not per-round), so `vote_comm_tree_root` alone does
-/// not provide round scoping.
+/// Single `ConstantLength<6>` call (3 permutations at rate=2).
+/// The `voting_round_id` input binds the nullifier to a specific
+/// voting round, preventing cross-round proof replay (the commitment
+/// tree is global, not per-round).
 ///
 /// Matches `helper-server/src/nullifier.rs::derive_share_nullifier`.
 pub fn share_nullifier_hash(
@@ -121,12 +116,14 @@ pub fn share_nullifier_hash(
     c2_x: pallas::Base,
     voting_round_id: pallas::Base,
 ) -> pallas::Base {
-    let domain_tag = domain_tag_share_spend();
-    let enc_share_hash = poseidon_hash_2(c1_x, c2_x);
-    let left = poseidon_hash_2(domain_tag, vote_commitment);
-    let right = poseidon_hash_2(share_index, enc_share_hash);
-    let inner = poseidon_hash_2(left, right);
-    poseidon_hash_2(inner, voting_round_id)
+    poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<6>, 3, 2>::init().hash([
+        domain_tag_share_spend(),
+        vote_commitment,
+        share_index,
+        c1_x,
+        c2_x,
+        voting_round_id,
+    ])
 }
 
 // ================================================================
@@ -823,15 +820,12 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // ---------------------------------------------------------------
         // Condition 5: Share Nullifier Integrity.
         //
-        // enc_share_hash  = Poseidon(selected_c1, selected_c2)
-        // left            = Poseidon(domain_tag, vote_commitment)
-        // right           = Poseidon(share_index, enc_share_hash)
-        // inner           = Poseidon(left, right)
-        // share_nullifier = Poseidon(inner, voting_round_id)
+        // share_nullifier = Poseidon(domain_tag, vote_commitment, share_index,
+        //                            selected_c1, selected_c2, voting_round_id)
         //
-        // Four arity-2 Poseidon hashes. The final hash with
-        // voting_round_id binds the nullifier to the round, preventing
-        // cross-round proof replay (the commitment tree is global).
+        // Single ConstantLength<6> Poseidon hash (3 permutations at rate=2).
+        // The voting_round_id input binds the nullifier to the round,
+        // preventing cross-round proof replay (the commitment tree is global).
         // Matches helper-server/src/nullifier.rs exactly.
         // ---------------------------------------------------------------
         {
@@ -863,98 +857,24 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 },
             )?;
 
-            // enc_share_hash = Poseidon(selected_c1, selected_c2)
-            let enc_share_hash = {
-                let hasher = PoseidonHash::<
-                    pallas::Base,
-                    _,
-                    poseidon::P128Pow5T3,
-                    ConstantLength<2>,
-                    3,
-                    2,
-                >::init(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| "cond5: enc_share_hash Poseidon init"),
-                )?;
-                hasher.hash(
-                    layouter.namespace(|| "cond5: enc_share_hash = Poseidon(c1, c2)"),
-                    [selected_c1_cond5, selected_c2_cond5],
-                )?
-            };
-
-            // left = Poseidon(domain_tag, vote_commitment)
-            let left = {
-                let hasher = PoseidonHash::<
-                    pallas::Base,
-                    _,
-                    poseidon::P128Pow5T3,
-                    ConstantLength<2>,
-                    3,
-                    2,
-                >::init(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| "cond5: nullifier left Poseidon init"),
-                )?;
-                hasher.hash(
-                    layouter.namespace(|| "cond5: left = Poseidon(tag, vc)"),
-                    [domain_tag, vote_commitment_cond5],
-                )?
-            };
-
-            // right = Poseidon(share_index, enc_share_hash)
-            let right = {
-                let hasher = PoseidonHash::<
-                    pallas::Base,
-                    _,
-                    poseidon::P128Pow5T3,
-                    ConstantLength<2>,
-                    3,
-                    2,
-                >::init(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| "cond5: nullifier right Poseidon init"),
-                )?;
-                hasher.hash(
-                    layouter.namespace(|| "cond5: right = Poseidon(idx, esh)"),
-                    [share_index_cond5, enc_share_hash],
-                )?
-            };
-
-            // inner = Poseidon(left, right)
-            let inner = {
-                let hasher = PoseidonHash::<
-                    pallas::Base,
-                    _,
-                    poseidon::P128Pow5T3,
-                    ConstantLength<2>,
-                    3,
-                    2,
-                >::init(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| "cond5: nullifier inner Poseidon init"),
-                )?;
-                hasher.hash(
-                    layouter.namespace(|| "cond5: inner = Poseidon(left, right)"),
-                    [left, right],
-                )?
-            };
-
-            // share_nullifier = Poseidon(inner, voting_round_id)
+            // share_nullifier = Poseidon(domain_tag, vote_commitment, share_index,
+            //                            selected_c1, selected_c2, voting_round_id)
             let share_nullifier = {
                 let hasher = PoseidonHash::<
                     pallas::Base,
                     _,
                     poseidon::P128Pow5T3,
-                    ConstantLength<2>,
+                    ConstantLength<6>,
                     3,
                     2,
                 >::init(
                     config.poseidon_chip(),
-                    layouter.namespace(|| "cond5: nullifier final Poseidon init"),
+                    layouter.namespace(|| "cond5: share nullifier Poseidon init"),
                 )?;
                 hasher.hash(
-                    layouter.namespace(|| "cond5: nf = Poseidon(inner, round_id)"),
-                    [inner, voting_round_id],
+                    layouter.namespace(|| "cond5: Poseidon(tag, vc, idx, c1, c2, round_id)"),
+                    [domain_tag, vote_commitment_cond5, share_index_cond5,
+                     selected_c1_cond5, selected_c2_cond5, voting_round_id],
                 )?
             };
 
@@ -1047,8 +967,8 @@ mod tests {
     use pasta_curves::pallas;
 
     use crate::vote_proof::{
-        elgamal_encrypt, shares_hash as compute_shares_hash, spend_auth_g_affine,
-        vote_commitment_hash as compute_vote_commitment_hash,
+        elgamal_encrypt, poseidon_hash_2, shares_hash as compute_shares_hash,
+        spend_auth_g_affine, vote_commitment_hash as compute_vote_commitment_hash,
     };
 
     /// Generates an El Gamal keypair for testing.

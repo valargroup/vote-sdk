@@ -2,16 +2,12 @@
 //!
 //! Per Gov Steps V1 §5.3 (extended with round binding):
 //! ```text
-//! enc_share_hash  = Poseidon(c1_x, c2_x)
-//! left            = Poseidon(domain_tag, vote_commitment)
-//! right           = Poseidon(share_index_fp, enc_share_hash)
-//! inner           = Poseidon(left, right)
-//! share_nullifier = Poseidon(inner, voting_round_id)
+//! share_nullifier = Poseidon(domain_tag, vote_commitment, share_index, c1_x, c2_x, voting_round_id)
 //! ```
 //!
-//! The final hash with `voting_round_id` binds the nullifier to a specific
-//! voting round, preventing cross-round proof replay (the commitment tree is
-//! global, not per-round).
+//! Single `ConstantLength<6>` Poseidon hash (3 permutations at rate=2).
+//! The `voting_round_id` input binds the nullifier to a specific voting round,
+//! preventing cross-round proof replay (the commitment tree is global, not per-round).
 //!
 //! Uses the same Poseidon (P128Pow5T3 over Pallas Fp) as the vote-commitment-tree
 //! crate.
@@ -20,7 +16,7 @@ use base64::prelude::*;
 use ff::PrimeField;
 use pasta_curves::Fp;
 
-use vote_commitment_tree::poseidon_hash;
+use vote_commitment_tree::poseidon_hash_6;
 
 use crate::types::SharePayload;
 
@@ -65,13 +61,15 @@ pub fn derive_share_nullifier(
     c2_arr[31] &= 0x7F;
     let c1_fp = Option::from(Fp::from_repr(c1_arr))?;
     let c2_fp = Option::from(Fp::from_repr(c2_arr))?;
-    let enc_share_hash = poseidon_hash(c1_fp, c2_fp);
-
-    // Four arity-2 Poseidon hashes (matches ZKP #3 circuit condition 5).
-    let left = poseidon_hash(domain_tag(), vote_commitment);
-    let right = poseidon_hash(share_index_fp, enc_share_hash);
-    let inner = poseidon_hash(left, right);
-    Some(poseidon_hash(inner, voting_round_id))
+    // Single ConstantLength<6> Poseidon hash (matches ZKP #3 circuit condition 5).
+    Some(poseidon_hash_6(
+        domain_tag(),
+        vote_commitment,
+        share_index_fp,
+        c1_fp,
+        c2_fp,
+        voting_round_id,
+    ))
 }
 
 #[cfg(test)]

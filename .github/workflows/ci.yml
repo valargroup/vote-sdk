@@ -177,12 +177,6 @@ jobs:
           echo "Chain failed to start within 120s"
           cat chain.log
           exit 1
-      - name: Run E2E test (voting_flow)
-        run: cargo test --release --manifest-path ../e2e-tests/Cargo.toml --test voting_flow -- --nocapture --ignored --test-threads=1
-        env:
-          ZALLY_API_URL: http://localhost:1318
-          ZALLY_EA_PK_PATH: /home/runner/.zallyd/ea.pk
-          ZALLY_E2E_VOTE_WINDOW_SECS: "420"
       - name: Build helper server
         run: cargo build --release --manifest-path ../helper-server/Cargo.toml --bin helper-server
       - name: Start helper server in background
