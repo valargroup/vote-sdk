@@ -2,10 +2,18 @@ package keeper_test
 
 import (
 	"bytes"
+	"crypto/rand"
 
+	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
+
+// testPallasPK generates a random valid compressed Pallas public key (32 bytes).
+func testPallasPK() []byte {
+	_, pk := elgamal.KeyGen(rand.Reader)
+	return pk.Point.ToAffineCompressed()
+}
 
 // ---------------------------------------------------------------------------
 // CeremonyState CRUD
@@ -268,6 +276,149 @@ func (s *KeeperTestSuite) TestAllValidatorsAcked() {
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
 			s.Require().Equal(tc.expect, keeper.AllValidatorsAcked(tc.state))
+		})
+	}
+}
+
+// ===========================================================================
+// MsgRegisterPallasKey handler tests (Step 4)
+// ===========================================================================
+
+func (s *MsgServerTestSuite) TestRegisterPallasKey_HappyPath() {
+	s.SetupTest()
+
+	pks := []struct {
+		creator string
+		pk      []byte
+	}{
+		{"val1", testPallasPK()},
+		{"val2", testPallasPK()},
+		{"val3", testPallasPK()},
+	}
+
+	for i, tc := range pks {
+		_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+			Creator:  tc.creator,
+			PallasPk: tc.pk,
+		})
+		s.Require().NoError(err, "registration %d", i)
+
+		kv := s.keeper.OpenKVStore(s.ctx)
+		state, err := s.keeper.GetCeremonyState(kv)
+		s.Require().NoError(err)
+		s.Require().NotNil(state)
+		s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
+		s.Require().Len(state.Validators, i+1)
+		s.Require().Equal(tc.creator, state.Validators[i].ValidatorAddress)
+		s.Require().Equal(tc.pk, state.Validators[i].PallasPk)
+	}
+
+	// Verify event was emitted for each registration.
+	var eventCount int
+	for _, e := range s.ctx.EventManager().Events() {
+		if e.Type == types.EventTypeRegisterPallasKey {
+			eventCount++
+		}
+	}
+	s.Require().Equal(len(pks), eventCount, "expected one event per registration")
+}
+
+func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
+	tests := []struct {
+		name        string
+		setup       func() // optional: pre-seed ceremony state
+		msg         *types.MsgRegisterPallasKey
+		errContains string
+	}{
+		{
+			name: "wrong size (16 bytes)",
+			msg: &types.MsgRegisterPallasKey{
+				Creator:  "val1",
+				PallasPk: bytes.Repeat([]byte{0x01}, 16),
+			},
+			errContains: "invalid pallas point",
+		},
+		{
+			name: "wrong size (64 bytes)",
+			msg: &types.MsgRegisterPallasKey{
+				Creator:  "val1",
+				PallasPk: bytes.Repeat([]byte{0x01}, 64),
+			},
+			errContains: "invalid pallas point",
+		},
+		{
+			name: "identity point (all zeros)",
+			msg: &types.MsgRegisterPallasKey{
+				Creator:  "val1",
+				PallasPk: make([]byte, 32),
+			},
+			errContains: "invalid pallas point",
+		},
+		{
+			name: "off-curve point",
+			msg: &types.MsgRegisterPallasKey{
+				Creator:  "val1",
+				PallasPk: bytes.Repeat([]byte{0xFF}, 32),
+			},
+			errContains: "invalid pallas point",
+		},
+		{
+			name: "duplicate validator address",
+			setup: func() {
+				_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+					Creator:  "val1",
+					PallasPk: testPallasPK(),
+				})
+				s.Require().NoError(err)
+			},
+			msg: &types.MsgRegisterPallasKey{
+				Creator:  "val1",
+				PallasPk: testPallasPK(),
+			},
+			errContains: "already registered",
+		},
+		{
+			name: "wrong ceremony status (DEALT)",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
+					Status: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+					Validators: []*types.ValidatorPallasKey{
+						{ValidatorAddress: "val1", PallasPk: testPallasPK()},
+					},
+				}))
+			},
+			msg: &types.MsgRegisterPallasKey{
+				Creator:  "val2",
+				PallasPk: testPallasPK(),
+			},
+			errContains: "operation invalid for current ceremony status",
+		},
+		{
+			name: "wrong ceremony status (CONFIRMED)",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
+					Status: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
+				}))
+			},
+			msg: &types.MsgRegisterPallasKey{
+				Creator:  "val1",
+				PallasPk: testPallasPK(),
+			},
+			errContains: "operation invalid for current ceremony status",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			if tc.setup != nil {
+				tc.setup()
+			}
+			_, err := s.msgServer.RegisterPallasKey(s.ctx, tc.msg)
+			s.Require().Error(err)
+			s.Require().Contains(err.Error(), tc.errContains)
 		})
 	}
 }
