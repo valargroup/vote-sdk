@@ -74,6 +74,62 @@ func (SessionStatus) EnumDescriptor() ([]byte, []int) {
 	return file_zvote_v1_types_proto_rawDescGZIP(), []int{0}
 }
 
+// CeremonyStatus represents the lifecycle state of the EA key ceremony.
+type CeremonyStatus int32
+
+const (
+	CeremonyStatus_CEREMONY_STATUS_UNSPECIFIED CeremonyStatus = 0
+	CeremonyStatus_CEREMONY_STATUS_REGISTERING CeremonyStatus = 1 // Accepting validator pk_i registrations
+	CeremonyStatus_CEREMONY_STATUS_DEALT       CeremonyStatus = 2 // DealerTx landed, awaiting acks
+	CeremonyStatus_CEREMONY_STATUS_CONFIRMED   CeremonyStatus = 3 // Sufficient acks received, ea_pk ready
+	CeremonyStatus_CEREMONY_STATUS_ABORTED     CeremonyStatus = 4 // Timeout with zero acks
+)
+
+// Enum value maps for CeremonyStatus.
+var (
+	CeremonyStatus_name = map[int32]string{
+		0: "CEREMONY_STATUS_UNSPECIFIED",
+		1: "CEREMONY_STATUS_REGISTERING",
+		2: "CEREMONY_STATUS_DEALT",
+		3: "CEREMONY_STATUS_CONFIRMED",
+		4: "CEREMONY_STATUS_ABORTED",
+	}
+	CeremonyStatus_value = map[string]int32{
+		"CEREMONY_STATUS_UNSPECIFIED": 0,
+		"CEREMONY_STATUS_REGISTERING": 1,
+		"CEREMONY_STATUS_DEALT":       2,
+		"CEREMONY_STATUS_CONFIRMED":   3,
+		"CEREMONY_STATUS_ABORTED":     4,
+	}
+)
+
+func (x CeremonyStatus) Enum() *CeremonyStatus {
+	p := new(CeremonyStatus)
+	*p = x
+	return p
+}
+
+func (x CeremonyStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CeremonyStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_zvote_v1_types_proto_enumTypes[1].Descriptor()
+}
+
+func (CeremonyStatus) Type() protoreflect.EnumType {
+	return &file_zvote_v1_types_proto_enumTypes[1]
+}
+
+func (x CeremonyStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CeremonyStatus.Descriptor instead.
+func (CeremonyStatus) EnumDescriptor() ([]byte, []int) {
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{1}
+}
+
 // Proposal represents a single ballot option within a voting session.
 type Proposal struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -669,6 +725,282 @@ func (x *BlockCommitments) GetLeaves() [][]byte {
 	return nil
 }
 
+// CeremonyState tracks the singleton EA key ceremony lifecycle.
+type CeremonyState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        CeremonyStatus         `protobuf:"varint,1,opt,name=status,proto3,enum=zvote.v1.CeremonyStatus" json:"status,omitempty"`
+	EaPk          []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                    // Set when DealerTx lands
+	Validators    []*ValidatorPallasKey  `protobuf:"bytes,3,rep,name=validators,proto3" json:"validators,omitempty"`                    // All registered pk_i
+	Payloads      []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                        // ECIES envelopes from DealerTx
+	Acks          []*AckEntry            `protobuf:"bytes,5,rep,name=acks,proto3" json:"acks,omitempty"`                                // Per-validator ack status
+	Dealer        string                 `protobuf:"bytes,6,opt,name=dealer,proto3" json:"dealer,omitempty"`                            // Validator address of the dealer
+	DealHeight    uint64                 `protobuf:"varint,7,opt,name=deal_height,json=dealHeight,proto3" json:"deal_height,omitempty"` // Block height when DealerTx landed
+	AckTimeout    uint64                 `protobuf:"varint,8,opt,name=ack_timeout,json=ackTimeout,proto3" json:"ack_timeout,omitempty"` // Timeout in seconds after deal_height
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CeremonyState) Reset() {
+	*x = CeremonyState{}
+	mi := &file_zvote_v1_types_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CeremonyState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CeremonyState) ProtoMessage() {}
+
+func (x *CeremonyState) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_types_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CeremonyState.ProtoReflect.Descriptor instead.
+func (*CeremonyState) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *CeremonyState) GetStatus() CeremonyStatus {
+	if x != nil {
+		return x.Status
+	}
+	return CeremonyStatus_CEREMONY_STATUS_UNSPECIFIED
+}
+
+func (x *CeremonyState) GetEaPk() []byte {
+	if x != nil {
+		return x.EaPk
+	}
+	return nil
+}
+
+func (x *CeremonyState) GetValidators() []*ValidatorPallasKey {
+	if x != nil {
+		return x.Validators
+	}
+	return nil
+}
+
+func (x *CeremonyState) GetPayloads() []*DealerPayload {
+	if x != nil {
+		return x.Payloads
+	}
+	return nil
+}
+
+func (x *CeremonyState) GetAcks() []*AckEntry {
+	if x != nil {
+		return x.Acks
+	}
+	return nil
+}
+
+func (x *CeremonyState) GetDealer() string {
+	if x != nil {
+		return x.Dealer
+	}
+	return ""
+}
+
+func (x *CeremonyState) GetDealHeight() uint64 {
+	if x != nil {
+		return x.DealHeight
+	}
+	return 0
+}
+
+func (x *CeremonyState) GetAckTimeout() uint64 {
+	if x != nil {
+		return x.AckTimeout
+	}
+	return 0
+}
+
+// ValidatorPallasKey records a validator's registered Pallas public key.
+type ValidatorPallasKey struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ValidatorAddress string                 `protobuf:"bytes,1,opt,name=validator_address,json=validatorAddress,proto3" json:"validator_address,omitempty"`
+	PallasPk         []byte                 `protobuf:"bytes,2,opt,name=pallas_pk,json=pallasPk,proto3" json:"pallas_pk,omitempty"` // Compressed Pallas point (32 bytes)
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ValidatorPallasKey) Reset() {
+	*x = ValidatorPallasKey{}
+	mi := &file_zvote_v1_types_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidatorPallasKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidatorPallasKey) ProtoMessage() {}
+
+func (x *ValidatorPallasKey) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_types_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidatorPallasKey.ProtoReflect.Descriptor instead.
+func (*ValidatorPallasKey) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ValidatorPallasKey) GetValidatorAddress() string {
+	if x != nil {
+		return x.ValidatorAddress
+	}
+	return ""
+}
+
+func (x *ValidatorPallasKey) GetPallasPk() []byte {
+	if x != nil {
+		return x.PallasPk
+	}
+	return nil
+}
+
+// DealerPayload is an ECIES envelope from the dealer to a specific validator.
+type DealerPayload struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ValidatorAddress string                 `protobuf:"bytes,1,opt,name=validator_address,json=validatorAddress,proto3" json:"validator_address,omitempty"`
+	EphemeralPk      []byte                 `protobuf:"bytes,2,opt,name=ephemeral_pk,json=ephemeralPk,proto3" json:"ephemeral_pk,omitempty"` // E_i (32 bytes)
+	Ciphertext       []byte                 `protobuf:"bytes,3,opt,name=ciphertext,proto3" json:"ciphertext,omitempty"`                      // ct_i: ChaCha20-Poly1305 (32 + 16 = 48 bytes)
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DealerPayload) Reset() {
+	*x = DealerPayload{}
+	mi := &file_zvote_v1_types_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DealerPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DealerPayload) ProtoMessage() {}
+
+func (x *DealerPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_types_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DealerPayload.ProtoReflect.Descriptor instead.
+func (*DealerPayload) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *DealerPayload) GetValidatorAddress() string {
+	if x != nil {
+		return x.ValidatorAddress
+	}
+	return ""
+}
+
+func (x *DealerPayload) GetEphemeralPk() []byte {
+	if x != nil {
+		return x.EphemeralPk
+	}
+	return nil
+}
+
+func (x *DealerPayload) GetCiphertext() []byte {
+	if x != nil {
+		return x.Ciphertext
+	}
+	return nil
+}
+
+// AckEntry records a validator's acknowledgement of receiving their share.
+type AckEntry struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ValidatorAddress string                 `protobuf:"bytes,1,opt,name=validator_address,json=validatorAddress,proto3" json:"validator_address,omitempty"`
+	AckSignature     []byte                 `protobuf:"bytes,2,opt,name=ack_signature,json=ackSignature,proto3" json:"ack_signature,omitempty"` // Signature over H("ack" || ea_pk || validator_address)
+	AckHeight        uint64                 `protobuf:"varint,3,opt,name=ack_height,json=ackHeight,proto3" json:"ack_height,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *AckEntry) Reset() {
+	*x = AckEntry{}
+	mi := &file_zvote_v1_types_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AckEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AckEntry) ProtoMessage() {}
+
+func (x *AckEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_types_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AckEntry.ProtoReflect.Descriptor instead.
+func (*AckEntry) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *AckEntry) GetValidatorAddress() string {
+	if x != nil {
+		return x.ValidatorAddress
+	}
+	return ""
+}
+
+func (x *AckEntry) GetAckSignature() []byte {
+	if x != nil {
+		return x.AckSignature
+	}
+	return nil
+}
+
+func (x *AckEntry) GetAckHeight() uint64 {
+	if x != nil {
+		return x.AckHeight
+	}
+	return 0
+}
+
 var File_zvote_v1_types_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_types_proto_rawDesc = "" +
@@ -726,12 +1058,45 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x06height\x18\x01 \x01(\x04R\x06height\x12\x1f\n" +
 	"\vstart_index\x18\x02 \x01(\x04R\n" +
 	"startIndex\x12\x16\n" +
-	"\x06leaves\x18\x03 \x03(\fR\x06leaves*\x85\x01\n" +
+	"\x06leaves\x18\x03 \x03(\fR\x06leaves\"\xcb\x02\n" +
+	"\rCeremonyState\x120\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x18.zvote.v1.CeremonyStatusR\x06status\x12\x13\n" +
+	"\x05ea_pk\x18\x02 \x01(\fR\x04eaPk\x12<\n" +
+	"\n" +
+	"validators\x18\x03 \x03(\v2\x1c.zvote.v1.ValidatorPallasKeyR\n" +
+	"validators\x123\n" +
+	"\bpayloads\x18\x04 \x03(\v2\x17.zvote.v1.DealerPayloadR\bpayloads\x12&\n" +
+	"\x04acks\x18\x05 \x03(\v2\x12.zvote.v1.AckEntryR\x04acks\x12\x16\n" +
+	"\x06dealer\x18\x06 \x01(\tR\x06dealer\x12\x1f\n" +
+	"\vdeal_height\x18\a \x01(\x04R\n" +
+	"dealHeight\x12\x1f\n" +
+	"\vack_timeout\x18\b \x01(\x04R\n" +
+	"ackTimeout\"^\n" +
+	"\x12ValidatorPallasKey\x12+\n" +
+	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12\x1b\n" +
+	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\"\x7f\n" +
+	"\rDealerPayload\x12+\n" +
+	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12!\n" +
+	"\fephemeral_pk\x18\x02 \x01(\fR\vephemeralPk\x12\x1e\n" +
+	"\n" +
+	"ciphertext\x18\x03 \x01(\fR\n" +
+	"ciphertext\"{\n" +
+	"\bAckEntry\x12+\n" +
+	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12#\n" +
+	"\rack_signature\x18\x02 \x01(\fR\fackSignature\x12\x1d\n" +
+	"\n" +
+	"ack_height\x18\x03 \x01(\x04R\tackHeight*\x85\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
 	"\x17SESSION_STATUS_TALLYING\x10\x02\x12\x1c\n" +
-	"\x18SESSION_STATUS_FINALIZED\x10\x03B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
+	"\x18SESSION_STATUS_FINALIZED\x10\x03*\xa9\x01\n" +
+	"\x0eCeremonyStatus\x12\x1f\n" +
+	"\x1bCEREMONY_STATUS_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bCEREMONY_STATUS_REGISTERING\x10\x01\x12\x19\n" +
+	"\x15CEREMONY_STATUS_DEALT\x10\x02\x12\x1d\n" +
+	"\x19CEREMONY_STATUS_CONFIRMED\x10\x03\x12\x1b\n" +
+	"\x17CEREMONY_STATUS_ABORTED\x10\x04B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
 var (
 	file_zvote_v1_types_proto_rawDescOnce sync.Once
@@ -745,31 +1110,40 @@ func file_zvote_v1_types_proto_rawDescGZIP() []byte {
 	return file_zvote_v1_types_proto_rawDescData
 }
 
-var file_zvote_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_zvote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_zvote_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_zvote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_zvote_v1_types_proto_goTypes = []any{
 	(SessionStatus)(0),          // 0: zvote.v1.SessionStatus
-	(*Proposal)(nil),            // 1: zvote.v1.Proposal
-	(*VoteRound)(nil),           // 2: zvote.v1.VoteRound
-	(*CommitmentTreeState)(nil), // 3: zvote.v1.CommitmentTreeState
-	(*GenesisState)(nil),        // 4: zvote.v1.GenesisState
-	(*CommitmentLeaf)(nil),      // 5: zvote.v1.CommitmentLeaf
-	(*NullifierEntry)(nil),      // 6: zvote.v1.NullifierEntry
-	(*TallyResult)(nil),         // 7: zvote.v1.TallyResult
-	(*BlockCommitments)(nil),    // 8: zvote.v1.BlockCommitments
+	(CeremonyStatus)(0),         // 1: zvote.v1.CeremonyStatus
+	(*Proposal)(nil),            // 2: zvote.v1.Proposal
+	(*VoteRound)(nil),           // 3: zvote.v1.VoteRound
+	(*CommitmentTreeState)(nil), // 4: zvote.v1.CommitmentTreeState
+	(*GenesisState)(nil),        // 5: zvote.v1.GenesisState
+	(*CommitmentLeaf)(nil),      // 6: zvote.v1.CommitmentLeaf
+	(*NullifierEntry)(nil),      // 7: zvote.v1.NullifierEntry
+	(*TallyResult)(nil),         // 8: zvote.v1.TallyResult
+	(*BlockCommitments)(nil),    // 9: zvote.v1.BlockCommitments
+	(*CeremonyState)(nil),       // 10: zvote.v1.CeremonyState
+	(*ValidatorPallasKey)(nil),  // 11: zvote.v1.ValidatorPallasKey
+	(*DealerPayload)(nil),       // 12: zvote.v1.DealerPayload
+	(*AckEntry)(nil),            // 13: zvote.v1.AckEntry
 }
 var file_zvote_v1_types_proto_depIdxs = []int32{
-	0, // 0: zvote.v1.VoteRound.status:type_name -> zvote.v1.SessionStatus
-	1, // 1: zvote.v1.VoteRound.proposals:type_name -> zvote.v1.Proposal
-	2, // 2: zvote.v1.GenesisState.rounds:type_name -> zvote.v1.VoteRound
-	3, // 3: zvote.v1.GenesisState.tree_state:type_name -> zvote.v1.CommitmentTreeState
-	5, // 4: zvote.v1.GenesisState.commitment_leaves:type_name -> zvote.v1.CommitmentLeaf
-	6, // 5: zvote.v1.GenesisState.nullifiers:type_name -> zvote.v1.NullifierEntry
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	0,  // 0: zvote.v1.VoteRound.status:type_name -> zvote.v1.SessionStatus
+	2,  // 1: zvote.v1.VoteRound.proposals:type_name -> zvote.v1.Proposal
+	3,  // 2: zvote.v1.GenesisState.rounds:type_name -> zvote.v1.VoteRound
+	4,  // 3: zvote.v1.GenesisState.tree_state:type_name -> zvote.v1.CommitmentTreeState
+	6,  // 4: zvote.v1.GenesisState.commitment_leaves:type_name -> zvote.v1.CommitmentLeaf
+	7,  // 5: zvote.v1.GenesisState.nullifiers:type_name -> zvote.v1.NullifierEntry
+	1,  // 6: zvote.v1.CeremonyState.status:type_name -> zvote.v1.CeremonyStatus
+	11, // 7: zvote.v1.CeremonyState.validators:type_name -> zvote.v1.ValidatorPallasKey
+	12, // 8: zvote.v1.CeremonyState.payloads:type_name -> zvote.v1.DealerPayload
+	13, // 9: zvote.v1.CeremonyState.acks:type_name -> zvote.v1.AckEntry
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_zvote_v1_types_proto_init() }
@@ -782,8 +1156,8 @@ func file_zvote_v1_types_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_types_proto_rawDesc), len(file_zvote_v1_types_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   8,
+			NumEnums:      2,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -17,23 +17,26 @@ service Msg {
   rpc CastVote(MsgCastVote) returns (MsgCastVoteResponse);
   rpc RevealShare(MsgRevealShare) returns (MsgRevealShareResponse);
   rpc SubmitTally(MsgSubmitTally) returns (MsgSubmitTallyResponse);
+  rpc RegisterPallasKey(MsgRegisterPallasKey) returns (MsgRegisterPallasKeyResponse);
+  rpc DealExecutiveAuthorityKey(MsgDealExecutiveAuthorityKey) returns (MsgDealExecutiveAuthorityKeyResponse);
+  rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
 // vote_round_id is computed on-chain as Blake2b(snapshot_height, snapshot_blockhash, proposals_hash, vote_end_time, nullifier_imt_root, nc_root).
+// ea_pk is sourced from the confirmed CeremonyState, not supplied by the caller.
 message MsgCreateVotingSession {
-  string creator             = 1;
-  uint64 snapshot_height     = 2;
-  bytes  snapshot_blockhash  = 3;
-  bytes  proposals_hash      = 4;
-  uint64 vote_end_time       = 5;
-  bytes  nullifier_imt_root  = 6;
-  bytes  nc_root             = 7;
-  bytes  ea_pk               = 8;  // Election authority public key (Pallas, 32 bytes)
-  bytes  vk_zkp1             = 9;  // Verification key for ZKP #1
-  bytes  vk_zkp2             = 10; // Verification key for ZKP #2
-  bytes  vk_zkp3             = 11; // Verification key for ZKP #3
-  repeated Proposal proposals = 12;
+  string creator              = 1;
+  uint64 snapshot_height      = 2;
+  bytes  snapshot_blockhash   = 3;
+  bytes  proposals_hash       = 4;
+  uint64 vote_end_time        = 5;
+  bytes  nullifier_imt_root   = 6;
+  bytes  nc_root              = 7;
+  bytes  vk_zkp1              = 8;  // Verification key for ZKP #1
+  bytes  vk_zkp2              = 9;  // Verification key for ZKP #2
+  bytes  vk_zkp3              = 10; // Verification key for ZKP #3
+  repeated Proposal proposals = 11;
 }
 
 message MsgCreateVotingSessionResponse {
@@ -109,3 +112,28 @@ message TallyEntry {
 message MsgSubmitTallyResponse {
   uint32 finalized_entries = 1;  // Number of tally entries stored
 }
+
+// MsgRegisterPallasKey registers a validator's Pallas public key for the EA key ceremony.
+message MsgRegisterPallasKey {
+  string creator   = 1; // Validator address
+  bytes  pallas_pk = 2; // Compressed Pallas point (32 bytes)
+}
+
+message MsgRegisterPallasKeyResponse {}
+
+// MsgDealExecutiveAuthorityKey is submitted by the bootstrap dealer to distribute encrypted ea_sk shares.
+message MsgDealExecutiveAuthorityKey {
+  string                 creator  = 1; // Dealer's validator address
+  bytes                  ea_pk    = 2; // Executive authority public key (Pallas, 32 bytes)
+  repeated DealerPayload payloads = 3; // One ECIES envelope per registered validator
+}
+
+message MsgDealExecutiveAuthorityKeyResponse {}
+
+// MsgAckExecutiveAuthorityKey is submitted by a validator to acknowledge receipt of their ea_sk share.
+message MsgAckExecutiveAuthorityKey {
+  string creator       = 1; // Validator address
+  bytes  ack_signature = 2; // Signature over H("ack" || ea_pk || validator_address)
+}
+
+message MsgAckExecutiveAuthorityKeyResponse {}

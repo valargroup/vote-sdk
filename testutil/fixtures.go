@@ -39,7 +39,6 @@ func ValidCreateVotingSession() *types.MsgCreateVotingSession {
 		VoteEndTime:       uint64(time.Now().Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0xCC}, 32),
 		NcRoot:            bytes.Repeat([]byte{0xDD}, 32),
-		EaPk:              bytes.Repeat([]byte{0xEE}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
@@ -58,11 +57,10 @@ func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession
 		VoteEndTime:       uint64(refTime.Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0xCC}, 32),
 		NcRoot:            bytes.Repeat([]byte{0xDD}, 32),
-		EaPk:              bytes.Repeat([]byte{0xEE}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
-		Proposals:         SampleProposals(),
+		VkZkp1:    bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:    bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:    bytes.Repeat([]byte{0x33}, 64),
+		Proposals: SampleProposals(),
 	}
 }
 
@@ -77,11 +75,10 @@ func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSessi
 		VoteEndTime:       uint64(refTime.Add(-1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0xCC}, 32),
 		NcRoot:            bytes.Repeat([]byte{0xDD}, 32),
-		EaPk:              bytes.Repeat([]byte{0xEE}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
-		Proposals:         SampleProposals(),
+		VkZkp1:    bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:    bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:    bytes.Repeat([]byte{0x33}, 64),
+		Proposals: SampleProposals(),
 	}
 }
 

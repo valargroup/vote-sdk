@@ -34,7 +34,6 @@ func validCreateSession() *types.MsgCreateVotingSession {
 		VoteEndTime:       2_000_000,
 		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-		EaPk:              bytes.Repeat([]byte{0x05}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
@@ -60,24 +59,7 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			name:   "valid: all fields correct",
 			modify: func(m *types.MsgCreateVotingSession) {},
 		},
-		{
-			name:        "invalid: empty ea_pk",
-			modify:      func(m *types.MsgCreateVotingSession) { m.EaPk = nil },
-			expectErr:   true,
-			errContains: "ea_pk must be 32 bytes",
-		},
-		{
-			name:        "invalid: ea_pk wrong length (16 bytes)",
-			modify:      func(m *types.MsgCreateVotingSession) { m.EaPk = bytes.Repeat([]byte{0x05}, 16) },
-			expectErr:   true,
-			errContains: "ea_pk must be 32 bytes",
-		},
-		{
-			name:        "invalid: ea_pk wrong length (64 bytes)",
-			modify:      func(m *types.MsgCreateVotingSession) { m.EaPk = bytes.Repeat([]byte{0x05}, 64) },
-			expectErr:   true,
-			errContains: "ea_pk must be 32 bytes",
-		},
+		// ea_pk is no longer in MsgCreateVotingSession; sourced from CeremonyState.
 		{
 			name:        "invalid: empty vk_zkp1",
 			modify:      func(m *types.MsgCreateVotingSession) { m.VkZkp1 = nil },

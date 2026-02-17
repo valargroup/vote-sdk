@@ -122,7 +122,6 @@ func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 		VoteEndTime:       2_000_000,
 		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-		EaPk:              bytes.Repeat([]byte{0x05}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),

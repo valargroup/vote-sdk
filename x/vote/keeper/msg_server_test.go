@@ -108,7 +108,6 @@ func validSetupMsg() *types.MsgCreateVotingSession {
 		VoteEndTime:       2_000_000,
 		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-		EaPk:              bytes.Repeat([]byte{0x05}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
@@ -150,8 +149,6 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				s.Require().Equal(msg.VoteEndTime, round.VoteEndTime)
 				s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
 
-				// Verify new session fields are stored.
-				s.Require().Equal(msg.EaPk, round.EaPk)
 				s.Require().Equal(msg.VkZkp1, round.VkZkp1)
 				s.Require().Equal(msg.VkZkp2, round.VkZkp2)
 				s.Require().Equal(msg.VkZkp3, round.VkZkp3)
@@ -184,7 +181,6 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				VoteEndTime:       2_000_000,
 				NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 				NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-				EaPk:              bytes.Repeat([]byte{0x05}, 32),
 				VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
 				VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 				VkZkp3:            bytes.Repeat([]byte{0x08}, 64),

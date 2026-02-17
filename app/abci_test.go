@@ -403,7 +403,6 @@ func (s *ABCIIntegrationSuite) TestEndBlockerStatusTransition() {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0xCC}, 32),
 		NcRoot:            bytes.Repeat([]byte{0xDD}, 32),
-		EaPk:              bytes.Repeat([]byte{0xEE}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
@@ -448,7 +447,6 @@ func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x1C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x1D}, 32),
-		EaPk:              bytes.Repeat([]byte{0x1E}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
@@ -514,7 +512,6 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 		VoteEndTime:       uint64(soonEnd.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x2C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x2D}, 32),
-		EaPk:              bytes.Repeat([]byte{0x2E}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
@@ -531,7 +528,6 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 		VoteEndTime:       uint64(lateEnd.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x3C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x3D}, 32),
-		EaPk:              bytes.Repeat([]byte{0x3E}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
@@ -617,7 +613,6 @@ func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
 func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	// Generate a real EA keypair for DLEQ proof generation/verification.
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
-	eaPkBytes := eaPk.Point.ToAffineCompressed()
 
 	// Create a session expiring 30 seconds from now.
 	voteEndTime := s.app.Time.Add(30 * time.Second)
@@ -629,7 +624,6 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x4C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x4D}, 32),
-		EaPk:              eaPkBytes,
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
@@ -740,7 +734,6 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyNonProposerRejected() {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x5C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x5D}, 32),
-		EaPk:              bytes.Repeat([]byte{0x5E}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
@@ -814,8 +807,6 @@ func TestPrepareProposalAutoTally(t *testing.T) {
 	app, pk := testutil.SetupTestAppWithEAKey(t)
 
 	// Step 1: Create voting session expiring 30s from now.
-	// Use the real EA public key so SubmitTally can verify the DLEQ proof.
-	eaPkBytes := pk.Point.ToAffineCompressed()
 	voteEndTime := app.Time.Add(30 * time.Second)
 	setupMsg := &types.MsgCreateVotingSession{
 		Creator:           "zvote1admin",
@@ -825,7 +816,6 @@ func TestPrepareProposalAutoTally(t *testing.T) {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x7C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x7D}, 32),
-		EaPk:              eaPkBytes,
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
