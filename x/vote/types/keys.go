@@ -11,9 +11,6 @@ const (
 	RouterKey = ModuleName
 )
 
-// DefaultRegistrationTimeout is the ceremony registration phase timeout in seconds (2 minutes).
-const DefaultRegistrationTimeout uint64 = 120
-
 // DefaultDealTimeout is the ceremony deal/ack phase timeout in seconds (30 seconds).
 const DefaultDealTimeout uint64 = 30
 

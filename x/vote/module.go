@@ -311,25 +311,23 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		))
 	}
 
-	// --- 3. Ceremony phase timeout ---
-	// REGISTERING (active, phase_timeout > 0) and DEALT phases have a timeout.
-	// On REGISTERING timeout: full reset to idle REGISTERING.
+	// --- 3. Ceremony DEALT phase timeout ---
+	// Only the DEALT phase has a timeout. REGISTERING persists indefinitely
+	// until a deal is submitted or the ceremony is re-initialized.
 	// On DEALT timeout: if >= 2/3 validators acked, transition to CONFIRMED,
 	// strip non-ackers from ceremony state, and jail them via staking module.
-	// If < 2/3 acked, full reset to idle REGISTERING (ceremony failed).
-	// Idle REGISTERING (phase_timeout==0) is skipped — it has no timer to expire.
+	// If < 2/3 acked, full reset to REGISTERING (ceremony failed).
 	ceremony, err := am.keeper.GetCeremonyState(kvStore)
 	if err != nil {
 		return err
 	}
 	if ceremony != nil && ceremony.PhaseTimeout > 0 &&
-		(ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING ||
-			ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_DEALT) {
+		ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_DEALT {
 		deadline := ceremony.PhaseStart + ceremony.PhaseTimeout
 		if blockTime >= deadline {
 			oldStatus := ceremony.Status
 
-			if ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_DEALT && keeper.TwoThirdsAcked(ceremony) {
+			if keeper.TwoThirdsAcked(ceremony) {
 				// >= 2/3 acked: strip non-ackers, confirm, and jail non-participants.
 				nonAckers := keeper.NonAckingValidators(ceremony)
 				keeper.StripNonAckers(ceremony)
@@ -356,7 +354,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 					sdk.NewAttribute(types.AttributeKeyNewStatus, ceremony.Status.String()),
 				))
 			} else {
-				// REGISTERING timeout, or DEALT with < 2/3 acks: full reset.
+				// DEALT with < 2/3 acks: full reset.
 				resetState := &types.CeremonyState{
 					Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 				}

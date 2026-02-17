@@ -669,9 +669,9 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 	}
 }
 
-// TestRegisterPallasKey_SetsPhaseFields verifies that the first registration
-// sets PhaseStart and PhaseTimeout for the REGISTERING phase.
-func (s *MsgServerTestSuite) TestRegisterPallasKey_SetsPhaseFields() {
+// TestRegisterPallasKey_NoPhaseTimeout verifies that the REGISTERING phase
+// does not set a phase timeout (it persists until deal or reinit).
+func (s *MsgServerTestSuite) TestRegisterPallasKey_NoPhaseTimeout() {
 	s.SetupTest()
 
 	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
@@ -683,23 +683,21 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_SetsPhaseFields() {
 	kv := s.keeper.OpenKVStore(s.ctx)
 	state, err := s.keeper.GetCeremonyState(kv)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), state.PhaseStart)
-	s.Require().Equal(types.DefaultRegistrationTimeout, state.PhaseTimeout)
+	s.Require().Equal(uint64(0), state.PhaseTimeout, "REGISTERING should have no timeout")
 }
 
 // TestRegisterPallasKey_AfterReset verifies that registration works after the
-// ceremony was reset to idle REGISTERING (phase_timeout=0, e.g., after a timeout).
+// ceremony was reset to REGISTERING (e.g., after a DEALT timeout or reinit).
 func (s *MsgServerTestSuite) TestRegisterPallasKey_AfterReset() {
 	s.SetupTest()
 
-	// Seed idle REGISTERING state (simulating post-timeout reset).
+	// Seed empty REGISTERING state (simulating post-reset).
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
 		Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-		// PhaseTimeout=0 means idle — first registration starts the timer.
 	}))
 
-	// Registration should succeed, transitioning to REGISTERING.
+	// Registration should succeed.
 	pk := testPallasPK()
 	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
 		Creator:  "val1",
@@ -713,8 +711,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_AfterReset() {
 	s.Require().Len(state.Validators, 1)
 	s.Require().Equal("val1", state.Validators[0].ValidatorAddress)
 	s.Require().Equal(pk, state.Validators[0].PallasPk)
-	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), state.PhaseStart)
-	s.Require().Equal(types.DefaultRegistrationTimeout, state.PhaseTimeout)
+	s.Require().Equal(uint64(0), state.PhaseTimeout, "REGISTERING should have no timeout")
 }
 
 // ===========================================================================
