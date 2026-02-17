@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/z-cale/zally/app"
+	"github.com/z-cale/zally/crypto/votetree"
 	"github.com/z-cale/zally/internal/helper"
 )
 
@@ -65,7 +66,7 @@ func helperPostSetup(
 		prover := &halo2Prover{}
 
 		homeDir := svrCtx.Config.RootDir
-		h, err := helper.New(cfg, treeReader, prover, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, votetree.ComputeMerklePath, prover, homeDir, logger)
 		if err != nil {
 			return fmt.Errorf("helper: %w", err)
 		}

@@ -9,19 +9,19 @@ import (
 
 	"cosmossdk.io/log"
 	"golang.org/x/sync/errgroup"
-	"github.com/z-cale/zally/crypto/votetree"
 )
 
 // Processor is the background share processing loop. It periodically checks the
 // share queue for shares whose delay has elapsed, generates Merkle paths and ZKP #3
 // proofs, and submits MsgRevealShare to the chain.
 type Processor struct {
-	store     *ShareStore
-	tree      TreeReader
-	prover    ProofGenerator
-	submitter *ChainSubmitter
-	logger    log.Logger
-	interval  time.Duration
+	store      *ShareStore
+	tree       TreeReader
+	merklePath MerklePathFunc
+	prover     ProofGenerator
+	submitter  *ChainSubmitter
+	logger     log.Logger
+	interval   time.Duration
 	// maxConcurrent bounds the number of shares processed in parallel.
 	maxConcurrent int
 }
@@ -30,6 +30,7 @@ type Processor struct {
 func NewProcessor(
 	store *ShareStore,
 	tree TreeReader,
+	merklePath MerklePathFunc,
 	prover ProofGenerator,
 	submitter *ChainSubmitter,
 	logger log.Logger,
@@ -41,12 +42,13 @@ func NewProcessor(
 	}
 
 	return &Processor{
-		store:     store,
-		tree:      tree,
-		prover:    prover,
-		submitter: submitter,
-		logger:    logger,
-		interval:  interval,
+		store:      store,
+		tree:       tree,
+		merklePath: merklePath,
+		prover:     prover,
+		submitter:  submitter,
+		logger:     logger,
+		interval:   interval,
 		maxConcurrent: maxConcurrent,
 	}
 }
@@ -128,7 +130,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	}
 
 	// Compute Merkle authentication path.
-	merklePath, err := votetree.ComputeMerklePath(leaves, share.Payload.TreePosition)
+	merklePath, err := p.merklePath(leaves, share.Payload.TreePosition)
 	if err != nil {
 		return fmt.Errorf("compute merkle path: %w", err)
 	}

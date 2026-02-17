@@ -26,7 +26,7 @@ type Helper struct {
 //   - prover: generates ZKP #3 proofs (real FFI or mock)
 //   - homeDir: the chain's home directory (for default DB path)
 //   - logger: module logger
-func New(cfg Config, tree TreeReader, prover ProofGenerator, homeDir string, logger log.Logger) (*Helper, error) {
+func New(cfg Config, tree TreeReader, merklePath MerklePathFunc, prover ProofGenerator, homeDir string, logger log.Logger) (*Helper, error) {
 	logger = logger.With("module", "helper")
 
 	if cfg.Disable {
@@ -67,6 +67,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, homeDir string, log
 	processor := NewProcessor(
 		store,
 		tree,
+		merklePath,
 		prover,
 		submitter,
 		logger,

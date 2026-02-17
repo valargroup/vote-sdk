@@ -115,3 +115,8 @@ type TreeReader interface {
 	// height that has a stored root.
 	GetAllLeaves() (leaves [][]byte, anchorHeight uint64, err error)
 }
+
+// MerklePathFunc computes a Poseidon Merkle authentication path for a leaf.
+// In production this is votetree.ComputeMerklePath; injected to avoid a
+// transitive CGo dependency on libzally_circuits.a in the helper package.
+type MerklePathFunc func(leaves [][]byte, position uint64) ([]byte, error)
