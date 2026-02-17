@@ -42,6 +42,10 @@ struct Cli {
     /// Share processing interval (seconds).
     #[arg(long, default_value = "2")]
     process_interval: u64,
+
+    /// Path to the SQLite database file for share persistence.
+    #[arg(long, default_value = "helper-server.db")]
+    db_path: String,
 }
 
 #[tokio::main]
@@ -62,6 +66,7 @@ async fn main() {
         max_delay_secs: cli.max_delay,
         sync_interval_secs: cli.sync_interval,
         process_interval_secs: cli.process_interval,
+        db_path: cli.db_path,
     };
 
     let store = ShareStore::new(&config);

@@ -31,7 +31,9 @@ rand = "0.8"
 pasta_curves = "0.5"
 ff = "0.13"
 orchard = { path = "../orchard", features = ["share-reveal"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+tempfile = "3"
