@@ -282,6 +282,250 @@ func (s *KeeperTestSuite) TestAllValidatorsAcked() {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// TwoThirdsAcked
+// ---------------------------------------------------------------------------
+
+func (s *KeeperTestSuite) TestTwoThirdsAcked() {
+	tests := []struct {
+		name   string
+		state  *types.CeremonyState
+		expect bool
+	}{
+		{
+			name: "all acked (3/3)",
+			state: &types.CeremonyState{
+				Validators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"},
+				},
+				Acks: []*types.AckEntry{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "exactly 2/3 (2 of 3)",
+			state: &types.CeremonyState{
+				Validators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"},
+				},
+				Acks: []*types.AckEntry{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "below 2/3 (1 of 3)",
+			state: &types.CeremonyState{
+				Validators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"},
+				},
+				Acks: []*types.AckEntry{
+					{ValidatorAddress: "val1"},
+				},
+			},
+			expect: false,
+		},
+		{
+			name: "no acks",
+			state: &types.CeremonyState{
+				Validators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+				},
+				Acks: nil,
+			},
+			expect: false,
+		},
+		{
+			name:   "no validators",
+			state:  &types.CeremonyState{},
+			expect: false,
+		},
+		{
+			name: "single validator acked (1/1 >= 2/3)",
+			state: &types.CeremonyState{
+				Validators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"},
+				},
+				Acks: []*types.AckEntry{
+					{ValidatorAddress: "val1"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "3 of 4 (75% >= 66.7%)",
+			state: &types.CeremonyState{
+				Validators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"},
+					{ValidatorAddress: "val4"},
+				},
+				Acks: []*types.AckEntry{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "2 of 4 (50% < 66.7%)",
+			state: &types.CeremonyState{
+				Validators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"},
+					{ValidatorAddress: "val4"},
+				},
+				Acks: []*types.AckEntry{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+				},
+			},
+			expect: false,
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.Require().Equal(tc.expect, keeper.TwoThirdsAcked(tc.state))
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NonAckingValidators
+// ---------------------------------------------------------------------------
+
+func (s *KeeperTestSuite) TestNonAckingValidators() {
+	tests := []struct {
+		name   string
+		state  *types.CeremonyState
+		expect []string
+	}{
+		{
+			name: "all acked - none missing",
+			state: &types.CeremonyState{
+				Validators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+				},
+				Acks: []*types.AckEntry{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+				},
+			},
+			expect: nil,
+		},
+		{
+			name: "one missing",
+			state: &types.CeremonyState{
+				Validators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"},
+				},
+				Acks: []*types.AckEntry{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val3"},
+				},
+			},
+			expect: []string{"val2"},
+		},
+		{
+			name: "none acked",
+			state: &types.CeremonyState{
+				Validators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"},
+					{ValidatorAddress: "val2"},
+				},
+			},
+			expect: []string{"val1", "val2"},
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			got := keeper.NonAckingValidators(tc.state)
+			s.Require().Equal(tc.expect, got)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// StripNonAckers
+// ---------------------------------------------------------------------------
+
+func (s *KeeperTestSuite) TestStripNonAckers() {
+	state := &types.CeremonyState{
+		Validators: []*types.ValidatorPallasKey{
+			{ValidatorAddress: "val1", PallasPk: []byte{0x01}},
+			{ValidatorAddress: "val2", PallasPk: []byte{0x02}},
+			{ValidatorAddress: "val3", PallasPk: []byte{0x03}},
+		},
+		Payloads: []*types.DealerPayload{
+			{ValidatorAddress: "val1", Ciphertext: []byte{0x10}},
+			{ValidatorAddress: "val2", Ciphertext: []byte{0x20}},
+			{ValidatorAddress: "val3", Ciphertext: []byte{0x30}},
+		},
+		Acks: []*types.AckEntry{
+			{ValidatorAddress: "val1"},
+			{ValidatorAddress: "val3"},
+		},
+	}
+
+	keeper.StripNonAckers(state)
+
+	// Only val1 and val3 should remain.
+	s.Require().Len(state.Validators, 2)
+	s.Require().Equal("val1", state.Validators[0].ValidatorAddress)
+	s.Require().Equal("val3", state.Validators[1].ValidatorAddress)
+
+	s.Require().Len(state.Payloads, 2)
+	s.Require().Equal("val1", state.Payloads[0].ValidatorAddress)
+	s.Require().Equal("val3", state.Payloads[1].ValidatorAddress)
+
+	// Acks unchanged.
+	s.Require().Len(state.Acks, 2)
+}
+
+func (s *KeeperTestSuite) TestStripNonAckers_AllAcked() {
+	state := &types.CeremonyState{
+		Validators: []*types.ValidatorPallasKey{
+			{ValidatorAddress: "val1"},
+			{ValidatorAddress: "val2"},
+		},
+		Payloads: []*types.DealerPayload{
+			{ValidatorAddress: "val1"},
+			{ValidatorAddress: "val2"},
+		},
+		Acks: []*types.AckEntry{
+			{ValidatorAddress: "val1"},
+			{ValidatorAddress: "val2"},
+		},
+	}
+
+	keeper.StripNonAckers(state)
+
+	// All remain.
+	s.Require().Len(state.Validators, 2)
+	s.Require().Len(state.Payloads, 2)
+}
+
 // ===========================================================================
 // MsgRegisterPallasKey handler tests (Step 4)
 // ===========================================================================
