@@ -174,8 +174,16 @@ jobs:
           echo "Chain failed to start within 120s"
           cat chain.log
           exit 1
-      - name: Run Rust E2E API tests
-        run: cargo test --release --manifest-path ../e2e-tests/Cargo.toml -- --nocapture --ignored --test-threads=1
+      - name: Run Rust E2E API test (PR commits)
+        if: github.event_name == 'pull_request'
+        run: cargo test --release --manifest-path ../e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1
+        env:
+          ZALLY_API_URL: http://localhost:1318
+          ZALLY_EA_PK_PATH: /home/runner/.zallyd/ea.pk
+          ZALLY_E2E_VOTE_WINDOW_SECS: "420"
+      - name: Run Rust E2E API test (main merges)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cargo test --release --manifest-path ../e2e-tests/Cargo.toml --test voting_flow -- --nocapture --ignored --test-threads=1
         env:
           ZALLY_API_URL: http://localhost:1318
           ZALLY_EA_PK_PATH: /home/runner/.zallyd/ea.pk
