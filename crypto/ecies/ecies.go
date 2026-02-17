@@ -107,6 +107,11 @@ func encryptWithEphemeral(G, recipientPK curvey.Point, plaintext []byte, e curve
 	if err != nil {
 		return nil, fmt.Errorf("ecies: Encrypt: failed to create AEAD: %w", err)
 	}
+	// The zero nonce is safe because every encryption derives a fresh unique
+	// key from the ephemeral scalar e, so the (key, nonce) pair is never reused.
+	// This "single-use key, zero nonce" pattern works with any nonce-based AEAD
+	// (ChaCha20-Poly1305, AES-GCM, etc.) since the critical requirement — never
+	// reuse (key, nonce) — is satisfied by construction.
 	nonce := make([]byte, chacha20poly1305.NonceSize) // all zeros
 	ct := aead.Seal(nil, nonce, plaintext, nil)
 
@@ -134,6 +139,11 @@ func decryptWithCheckedInputs(recipientSK curvey.Scalar, env *Envelope) ([]byte,
 	if err != nil {
 		return nil, fmt.Errorf("ecies: Decrypt: failed to create AEAD: %w", err)
 	}
+	// The zero nonce is safe because every encryption derives a fresh unique
+	// key from the ephemeral scalar e, so the (key, nonce) pair is never reused.
+	// This "single-use key, zero nonce" pattern works with any nonce-based AEAD
+	// (ChaCha20-Poly1305, AES-GCM, etc.) since the critical requirement — never
+	// reuse (key, nonce) — is satisfied by construction.
 	nonce := make([]byte, chacha20poly1305.NonceSize) // all zeros
 	plaintext, err := aead.Open(nil, nonce, env.Ciphertext, nil)
 	if err != nil {
