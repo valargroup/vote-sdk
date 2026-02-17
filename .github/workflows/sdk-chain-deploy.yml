@@ -31,7 +31,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.24"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -112,4 +112,56 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            sudo systemctl restart zallyd || true
+            sudo systemctl restart zallyd
+
+      - name: Verify systemd service active
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            sleep 5
+            if ! sudo systemctl is-active --quiet zallyd; then
+              echo "FAIL: zallyd service not active"
+              sudo systemctl status zallyd --no-pager
+              sudo journalctl -u zallyd --no-pager -n 100
+              exit 1
+            fi
+
+      - name: Verify services healthy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            # Wait up to 60s for zallyd to start serving
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:1318/zally/v1/commitment-tree/latest > /dev/null 2>&1; then
+                echo "Chain API healthy (port 1318)"
+                break
+              fi
+              if [ "$i" = "30" ]; then
+                echo "FAIL: Chain API not responding after 60s"
+                sudo journalctl -u zallyd --no-pager -n 50
+                exit 1
+              fi
+              sleep 2
+            done
+
+            # Verify helper server endpoint responds
+            for i in $(seq 1 15); do
+              if curl -sf http://localhost:1318/api/v1/status > /dev/null 2>&1; then
+                echo "Helper server healthy"
+                break
+              fi
+              if [ "$i" = "15" ]; then
+                echo "FAIL: Helper server /api/v1/status not responding after 30s"
+                sudo journalctl -u zallyd --no-pager -n 50
+                exit 1
+              fi
+              sleep 2
+            done
+
+            echo "Deploy verified: chain + helper server both healthy"

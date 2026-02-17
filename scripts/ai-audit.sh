@@ -64,12 +64,12 @@ CODE_FILES=(
   "$REPO_ROOT/sdk/app/ante.go"
 
   # ── Tier 4: Helper Server (ZKP #3 relay) ──
-  "$REPO_ROOT/helper-server/src/processor.rs"
-  "$REPO_ROOT/helper-server/src/api.rs"
-  "$REPO_ROOT/helper-server/src/types.rs"
-  "$REPO_ROOT/helper-server/src/nullifier.rs"
-  "$REPO_ROOT/helper-server/src/store.rs"
-  "$REPO_ROOT/helper-server/src/tree.rs"
+  "$REPO_ROOT/sdk/internal/helper/processor.go"
+  "$REPO_ROOT/sdk/internal/helper/api.go"
+  "$REPO_ROOT/sdk/internal/helper/types.go"
+  "$REPO_ROOT/sdk/internal/helper/store.go"
+  "$REPO_ROOT/sdk/internal/helper/submit.go"
+  "$REPO_ROOT/sdk/internal/helper/helper.go"
 
   # ── Tier 5: Nullifier Ingest (exclusion proofs for ZKP #1) ──
   "$REPO_ROOT/nullifier-ingest/imt-tree/src/tree/nullifier_tree.rs"
@@ -157,7 +157,7 @@ collect_context() {
   done
 
   # 4. Include git diff against main (uncommitted changes)
-  local scan_dirs="orchard/src/ vote-commitment-tree/src/ sdk/x/vote/ sdk/crypto/ sdk/app/ helper-server/src/ nullifier-ingest/"
+  local scan_dirs="orchard/src/ vote-commitment-tree/src/ sdk/x/vote/ sdk/crypto/ sdk/app/ sdk/internal/helper/ nullifier-ingest/"
   local diff
   diff=$(cd "$REPO_ROOT" && git diff HEAD -- $scan_dirs 2>/dev/null || true)
   if [ -n "$diff" ]; then

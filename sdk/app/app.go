@@ -3,6 +3,7 @@ package app
 import (
 	"io"
 	"strings"
+	"sync/atomic"
 
 	dbm "github.com/cosmos/cosmos-db"
 
@@ -32,6 +33,7 @@ import (
 	voteapi "github.com/z-cale/zally/api"
 	"github.com/z-cale/zally/crypto/redpallas"
 	"github.com/z-cale/zally/crypto/zkp/halo2"
+	"github.com/z-cale/zally/internal/helper"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
 )
 
@@ -66,6 +68,9 @@ type ZallyApp struct {
 
 	// CometBFT RPC endpoint for the vote API handler (read from app.toml vote.comet_rpc).
 	cometRPC string
+
+	// Helper server (set externally by PostSetup, may be nil).
+	helperRef atomic.Pointer[helper.Helper]
 }
 
 func init() {
@@ -265,8 +270,35 @@ func (app *ZallyApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 	voteHandler.RegisterTxRoutes(apiSvr.Router)
 	voteHandler.RegisterQueryRoutes(apiSvr.Router, apiSvr.ClientCtx)
 
+	// Register helper routes unconditionally; handler resolves the backing store
+	// at request time, so routes are mounted even before PostSetup initializes
+	// the helper runtime.
+	helper.RegisterRoutesWithGetters(apiSvr.Router, func() *helper.ShareStore {
+		h := app.GetHelper()
+		if h == nil {
+			return nil
+		}
+		return h.Store
+	}, func() string {
+		h := app.GetHelper()
+		if h == nil {
+			return ""
+		}
+		return h.APIToken
+	}, app.Logger().With("module", "helper"))
+
 	// Register swagger API.
 	if err := server.RegisterSwaggerAPI(apiSvr.ClientCtx, apiSvr.Router, apiConfig.Swagger); err != nil {
 		panic(err)
 	}
+}
+
+// SetHelper publishes the helper instance for concurrent readers.
+func (app *ZallyApp) SetHelper(h *helper.Helper) {
+	app.helperRef.Store(h)
+}
+
+// GetHelper returns the currently published helper instance.
+func (app *ZallyApp) GetHelper() *helper.Helper {
+	return app.helperRef.Load()
 }

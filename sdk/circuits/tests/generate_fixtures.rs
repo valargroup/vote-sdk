@@ -22,8 +22,8 @@ use blake2b_simd::Params as Blake2bParams;
 use rand::thread_rng;
 use reddsa::{orchard as reddsa_orchard, SigningKey, VerificationKey};
 
-use zally_circuits::toy;
 use zally_circuits::redpallas as rp;
+use zally_circuits::toy;
 
 /// Generate fixture files for Go and TypeScript tests.
 ///
@@ -35,6 +35,7 @@ use zally_circuits::redpallas as rp;
 fn generate_fixtures() {
     generate_halo2_fixtures();
     generate_redpallas_fixtures();
+    generate_share_reveal_fixtures();
     println!("\nAll fixtures generated and validated successfully.");
 }
 
@@ -105,9 +106,8 @@ const DELEGATION_SIGHASH_DOMAIN: &[u8] = b"ZALLY_DELEGATION_SIGHASH_V0";
 /// validate_redpallas_test.go: vote_round_id = 32×0x01, rk = given, rest zeros,
 /// gov_nullifiers = 4×32 zero bytes.
 fn canonical_delegation_payload_for_fixture(rk_bytes: &[u8; 32]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(
-        DELEGATION_SIGHASH_DOMAIN.len() + 32 + 32 + 32 + 32 + 64 + 32 + 4 * 32,
-    );
+    let mut out =
+        Vec::with_capacity(DELEGATION_SIGHASH_DOMAIN.len() + 32 + 32 + 32 + 32 + 64 + 32 + 4 * 32);
     out.extend_from_slice(DELEGATION_SIGHASH_DOMAIN);
     out.extend_from_slice(&[0x01u8; 32]); // testRoundID in Go
     out.extend_from_slice(rk_bytes);
@@ -152,7 +152,11 @@ fn generate_redpallas_fixtures() {
     // Write valid rk.
     let rk_path = testdata_dir.join("valid_rk.bin");
     fs::write(&rk_path, &rk_bytes).expect("failed to write rk fixture");
-    println!("Wrote valid rk ({} bytes) to {}", rk_bytes.len(), rk_path.display());
+    println!(
+        "Wrote valid rk ({} bytes) to {}",
+        rk_bytes.len(),
+        rk_path.display()
+    );
 
     // Write valid sighash.
     let sighash_path = testdata_dir.join("valid_sighash.bin");
@@ -207,18 +211,34 @@ fn generate_redpallas_fixtures() {
             let mut i = 0;
             while i < bytes.len() {
                 let b0 = bytes[i] as u32;
-                let b1 = if i + 1 < bytes.len() { bytes[i + 1] as u32 } else { 0 };
-                let b2 = if i + 2 < bytes.len() { bytes[i + 2] as u32 } else { 0 };
+                let b1 = if i + 1 < bytes.len() {
+                    bytes[i + 1] as u32
+                } else {
+                    0
+                };
+                let b2 = if i + 2 < bytes.len() {
+                    bytes[i + 2] as u32
+                } else {
+                    0
+                };
                 let triple = (b0 << 16) | (b1 << 8) | b2;
-                cursor.write_all(&[alphabet[((triple >> 18) & 0x3F) as usize]]).unwrap();
-                cursor.write_all(&[alphabet[((triple >> 12) & 0x3F) as usize]]).unwrap();
+                cursor
+                    .write_all(&[alphabet[((triple >> 18) & 0x3F) as usize]])
+                    .unwrap();
+                cursor
+                    .write_all(&[alphabet[((triple >> 12) & 0x3F) as usize]])
+                    .unwrap();
                 if i + 1 < bytes.len() {
-                    cursor.write_all(&[alphabet[((triple >> 6) & 0x3F) as usize]]).unwrap();
+                    cursor
+                        .write_all(&[alphabet[((triple >> 6) & 0x3F) as usize]])
+                        .unwrap();
                 } else {
                     cursor.write_all(b"=").unwrap();
                 }
                 if i + 2 < bytes.len() {
-                    cursor.write_all(&[alphabet[(triple & 0x3F) as usize]]).unwrap();
+                    cursor
+                        .write_all(&[alphabet[(triple & 0x3F) as usize]])
+                        .unwrap();
                 } else {
                     cursor.write_all(b"=").unwrap();
                 }
@@ -250,11 +270,11 @@ fn canonical_cast_vote_payload_for_fixture(r_vpk_bytes: &[u8; 32]) -> Vec<u8> {
     );
     out.extend_from_slice(CAST_VOTE_SIGHASH_DOMAIN);
     out.extend_from_slice(&[0x01u8; 32]); // vote_round_id (testRoundID in Go)
-    out.extend_from_slice(r_vpk_bytes);    // r_vpk (compressed)
-    out.extend_from_slice(&[0u8; 32]);     // van_nullifier
-    out.extend_from_slice(&[0u8; 32]);     // vote_authority_note_new
-    out.extend_from_slice(&[0u8; 32]);     // vote_commitment
-    // proposal_id: 1 as 4 bytes LE, padded to 32 bytes
+    out.extend_from_slice(r_vpk_bytes); // r_vpk (compressed)
+    out.extend_from_slice(&[0u8; 32]); // van_nullifier
+    out.extend_from_slice(&[0u8; 32]); // vote_authority_note_new
+    out.extend_from_slice(&[0u8; 32]); // vote_commitment
+                                       // proposal_id: 1 as 4 bytes LE, padded to 32 bytes
     let mut pid_buf = [0u8; 32];
     pid_buf[..4].copy_from_slice(&1u32.to_le_bytes());
     out.extend_from_slice(&pid_buf);
@@ -288,15 +308,27 @@ fn generate_cast_vote_redpallas_fixtures(
     // Write CastVote fixtures.
     let r_vpk_path = testdata_dir.join("cast_vote_r_vpk.bin");
     fs::write(&r_vpk_path, &r_vpk_bytes).expect("failed to write cast_vote r_vpk fixture");
-    println!("Wrote cast_vote r_vpk ({} bytes) to {}", r_vpk_bytes.len(), r_vpk_path.display());
+    println!(
+        "Wrote cast_vote r_vpk ({} bytes) to {}",
+        r_vpk_bytes.len(),
+        r_vpk_path.display()
+    );
 
     let sighash_path = testdata_dir.join("cast_vote_sighash.bin");
     fs::write(&sighash_path, &sighash).expect("failed to write cast_vote sighash fixture");
-    println!("Wrote cast_vote sighash ({} bytes) to {}", sighash.len(), sighash_path.display());
+    println!(
+        "Wrote cast_vote sighash ({} bytes) to {}",
+        sighash.len(),
+        sighash_path.display()
+    );
 
     let sig_path = testdata_dir.join("cast_vote_sig.bin");
     fs::write(&sig_path, &sig_bytes).expect("failed to write cast_vote sig fixture");
-    println!("Wrote cast_vote sig ({} bytes) to {}", sig_bytes.len(), sig_path.display());
+    println!(
+        "Wrote cast_vote sig ({} bytes) to {}",
+        sig_bytes.len(),
+        sig_path.display()
+    );
 
     // Verify the generated fixtures work.
     assert!(
@@ -305,4 +337,52 @@ fn generate_cast_vote_redpallas_fixtures(
     );
 
     println!("RedPallas CastVote fixtures generated and validated.");
+}
+
+/// Generate share reveal (ZKP #3) proof generation fixture for the Go round-trip test.
+///
+/// Writes all inputs needed by `halo2.GenerateShareRevealProof()` to a single
+/// binary file so the Go test can call generate + verify without needing Poseidon
+/// in Go.
+///
+/// Format (1104 bytes total):
+///   [0..772)      merkle_path (772 bytes)
+///   [772..1028)   all_enc_shares (256 bytes: C1_0, C2_0, ..., C1_3, C2_3)
+///   [1028..1032)  share_index (u32 LE)
+///   [1032..1036)  proposal_id (u32 LE)
+///   [1036..1040)  vote_decision (u32 LE)
+///   [1040..1072)  round_id (32 bytes)
+///   [1072..1104)  shares_hash (32 bytes)
+fn generate_share_reveal_fixtures() {
+    use zally_circuits::ffi::build_share_reveal_test_data;
+
+    let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("crypto/zkp/testdata");
+
+    fs::create_dir_all(&testdata_dir).expect("failed to create testdata directory");
+
+    let (merkle_path, enc_shares, share_index, proposal_id, vote_decision, round_id, shares_hash) =
+        build_share_reveal_test_data();
+
+    let mut fixture: Vec<u8> = Vec::with_capacity(1104);
+    fixture.extend_from_slice(&merkle_path); // 772 bytes
+    fixture.extend_from_slice(&enc_shares); // 256 bytes
+    fixture.extend_from_slice(&(share_index as u32).to_le_bytes()); // 4 bytes
+    fixture.extend_from_slice(&(proposal_id as u32).to_le_bytes()); // 4 bytes
+    fixture.extend_from_slice(&(vote_decision as u32).to_le_bytes()); // 4 bytes
+    fixture.extend_from_slice(&round_id); // 32 bytes
+    fixture.extend_from_slice(&shares_hash); // 32 bytes
+    assert_eq!(fixture.len(), 1104);
+
+    let fixture_path = testdata_dir.join("share_reveal_inputs.bin");
+    fs::write(&fixture_path, &fixture).expect("failed to write share reveal fixture");
+    println!(
+        "Wrote share reveal inputs ({} bytes) to {}",
+        fixture.len(),
+        fixture_path.display()
+    );
+
+    println!("Share reveal fixtures generated.");
 }

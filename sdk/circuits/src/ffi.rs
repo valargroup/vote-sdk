@@ -737,3 +737,382 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
         Err(_) => -2,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Share Reveal proof generation (ZKP #3) — composite FFI function
+// ---------------------------------------------------------------------------
+
+/// Generate a share reveal proof (ZKP #3) from raw inputs.
+///
+/// This composite function performs the entire crypto pipeline in a single
+/// CGo call, avoiding the need to expose 6+ individual Poseidon/field-arithmetic
+/// functions to Go:
+///
+/// 1. Decode Merkle auth path from serialized bytes
+/// 2. Decode 8 compressed Pallas points (all_enc_shares), clear sign bits → x-coords
+/// 3. Compute shares_hash and verify against expected value
+/// 4. Convert round_id via wide reduction to canonical Fp
+/// 5. Compute vote_commitment via Poseidon hash
+/// 6. Derive share_nullifier via Poseidon hash
+/// 7. Build share reveal circuit with all witnesses
+/// 8. Generate Halo2 proof (CPU-intensive, ~30-60s in release mode)
+///
+/// # Arguments
+/// * `merkle_path_ptr/len`       - 772-byte serialized Merkle path (from `zally_vote_tree_path`)
+/// * `all_enc_shares_ptr/len`    - 256 bytes: 4 shares × (C1 + C2) × 32 bytes each
+///                                 Order: C1_0, C2_0, C1_1, C2_1, C1_2, C2_2, C1_3, C2_3
+/// * `share_index`               - Which of the 4 shares (0..3)
+/// * `proposal_id`               - Proposal being voted on
+/// * `vote_decision`             - Vote choice (0=support, 1=oppose, 2=skip)
+/// * `round_id_ptr/len`          - 32-byte raw Blake2b-256 round ID
+/// * `expected_shares_hash_ptr`  - 32-byte expected shares_hash (Fp, canonical LE)
+/// * `proof_out/capacity/len_out` - Output buffer for the proof bytes
+/// * `nullifier_out`             - 32-byte output buffer for share nullifier
+/// * `tree_root_out`             - 32-byte output buffer for commitment tree root
+///
+/// # Returns
+/// *  `0` on success (proof, nullifier, tree_root written to output buffers)
+/// * `-1` invalid input (null pointers, wrong lengths)
+/// * `-3` deserialization error (non-canonical Fp, invalid point)
+/// * `-4` shares_hash mismatch (all_enc_shares don't match expected_shares_hash)
+/// * `-5` proof generation failure
+///
+/// # Safety
+/// Caller must ensure all pointers are valid and buffers are correctly sized.
+#[no_mangle]
+pub unsafe extern "C" fn zally_generate_share_reveal(
+    merkle_path_ptr: *const u8,
+    merkle_path_len: usize,
+    all_enc_shares_ptr: *const u8,
+    all_enc_shares_len: usize,
+    share_index: u32,
+    proposal_id: u32,
+    vote_decision: u32,
+    round_id_ptr: *const u8,
+    round_id_len: usize,
+    expected_shares_hash_ptr: *const u8,
+    proof_out: *mut u8,
+    proof_out_capacity: usize,
+    proof_len_out: *mut usize,
+    nullifier_out: *mut u8,
+    tree_root_out: *mut u8,
+) -> i32 {
+    use pasta_curves::pallas;
+
+    // --- Input validation ---
+    if merkle_path_ptr.is_null()
+        || all_enc_shares_ptr.is_null()
+        || round_id_ptr.is_null()
+        || expected_shares_hash_ptr.is_null()
+        || proof_out.is_null()
+        || proof_len_out.is_null()
+        || nullifier_out.is_null()
+        || tree_root_out.is_null()
+    {
+        return -1;
+    }
+    if merkle_path_len != votetree::MERKLE_PATH_BYTES {
+        return -1;
+    }
+    // 4 shares × 2 points (C1+C2) × 32 bytes = 256
+    if all_enc_shares_len != 256 {
+        return -1;
+    }
+    if round_id_len != 32 {
+        return -1;
+    }
+    if share_index > 3 {
+        return -1;
+    }
+
+    // --- Step 1: Decode Merkle auth path ---
+    let merkle_path_raw = std::slice::from_raw_parts(merkle_path_ptr, merkle_path_len);
+
+    // Position is first 4 bytes (u32 LE).
+    let position = u32::from_le_bytes([
+        merkle_path_raw[0],
+        merkle_path_raw[1],
+        merkle_path_raw[2],
+        merkle_path_raw[3],
+    ]);
+
+    // Auth path: TREE_DEPTH sibling hashes, 32 bytes each, starting at offset 4.
+    const TREE_DEPTH: usize = vote_commitment_tree::TREE_DEPTH;
+    let mut auth_path = [pallas::Base::zero(); TREE_DEPTH];
+    for i in 0..TREE_DEPTH {
+        let offset = 4 + i * 32;
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(&merkle_path_raw[offset..offset + 32]);
+        match Option::from(pallas::Base::from_repr(bytes)) {
+            Some(fp) => auth_path[i] = fp,
+            None => return -3,
+        }
+    }
+
+    // --- Step 2: Decode all 8 encrypted share x-coordinates ---
+    // Layout: C1_0(32) C2_0(32) C1_1(32) C2_1(32) C1_2(32) C2_2(32) C1_3(32) C2_3(32)
+    let enc_shares_raw = std::slice::from_raw_parts(all_enc_shares_ptr, all_enc_shares_len);
+
+    let mut all_c1_x = [pallas::Base::zero(); 4];
+    let mut all_c2_x = [pallas::Base::zero(); 4];
+
+    for i in 0..4usize {
+        let c1_offset = i * 64;
+        let c2_offset = c1_offset + 32;
+
+        let mut c1_bytes = [0u8; 32];
+        c1_bytes.copy_from_slice(&enc_shares_raw[c1_offset..c1_offset + 32]);
+        // Clear sign bit to get raw x-coordinate.
+        c1_bytes[31] &= 0x7F;
+        match Option::from(pallas::Base::from_repr(c1_bytes)) {
+            Some(fp) => all_c1_x[i] = fp,
+            None => return -3,
+        }
+
+        let mut c2_bytes = [0u8; 32];
+        c2_bytes.copy_from_slice(&enc_shares_raw[c2_offset..c2_offset + 32]);
+        c2_bytes[31] &= 0x7F;
+        match Option::from(pallas::Base::from_repr(c2_bytes)) {
+            Some(fp) => all_c2_x[i] = fp,
+            None => return -3,
+        }
+    }
+
+    // --- Step 3: Compute shares_hash and verify against expected ---
+    let computed_shares_hash = orchard::vote_proof::shares_hash(all_c1_x, all_c2_x);
+
+    let expected_hash_raw = std::slice::from_raw_parts(expected_shares_hash_ptr, 32);
+    let mut expected_hash_bytes = [0u8; 32];
+    expected_hash_bytes.copy_from_slice(expected_hash_raw);
+    let expected_shares_hash = match Option::from(pallas::Base::from_repr(expected_hash_bytes)) {
+        Some(fp) => fp,
+        None => return -3,
+    };
+    if computed_shares_hash != expected_shares_hash {
+        return -4;
+    }
+
+    // --- Step 4: Convert round_id to Fp via wide reduction ---
+    let round_id_raw = std::slice::from_raw_parts(round_id_ptr, 32);
+    let mut round_id_bytes = [0u8; 32];
+    round_id_bytes.copy_from_slice(round_id_raw);
+    let voting_round_id = hash_bytes_to_fp(round_id_bytes);
+
+    // --- Step 5: Compute vote_commitment ---
+    let proposal_id_fp = pallas::Base::from(u64::from(proposal_id));
+    let vote_decision_fp = pallas::Base::from(u64::from(vote_decision));
+    let _vote_commitment = vote_commitment_tree::vote_commitment_hash(
+        computed_shares_hash,
+        proposal_id_fp,
+        vote_decision_fp,
+    );
+
+    // --- Step 6: Build circuit and instance ---
+    // build_share_reveal internally computes the nullifier, tree root, and
+    // populates all circuit witnesses.
+    let bundle = share_reveal::builder::build_share_reveal(
+        auth_path,
+        position,
+        all_c1_x,
+        all_c2_x,
+        share_index,
+        proposal_id_fp,
+        vote_decision_fp,
+        voting_round_id,
+    );
+
+    // Extract the nullifier and tree root from the instance.
+    let share_nullifier = bundle.instance.share_nullifier;
+    let tree_root = bundle.instance.vote_comm_tree_root;
+
+    // --- Step 7: Generate Halo2 proof ---
+    // Uses cached params and proving key (~30-60s in release mode).
+    let proof_bytes = std::panic::catch_unwind(|| {
+        share_reveal::create_share_reveal_proof(bundle.circuit, &bundle.instance)
+    });
+    let proof_bytes = match proof_bytes {
+        Ok(bytes) => bytes,
+        Err(_) => return -5,
+    };
+
+    // --- Step 8: Write outputs ---
+    if proof_bytes.len() > proof_out_capacity {
+        return -5; // proof too large for output buffer
+    }
+
+    std::ptr::copy_nonoverlapping(proof_bytes.as_ptr(), proof_out, proof_bytes.len());
+    *proof_len_out = proof_bytes.len();
+
+    let nullifier_bytes = share_nullifier.to_repr();
+    std::ptr::copy_nonoverlapping(nullifier_bytes.as_ptr(), nullifier_out, 32);
+
+    let tree_root_bytes = tree_root.to_repr();
+    std::ptr::copy_nonoverlapping(tree_root_bytes.as_ptr(), tree_root_out, 32);
+
+    0
+}
+
+/// Build test data for `zally_generate_share_reveal` FFI round-trip tests.
+///
+/// Uses synthetic x-coordinates (small Fp values) as stand-ins for actual
+/// encrypted share x-coordinates. Since canonical Pallas Fp elements never
+/// have the sign bit set (modulus < 2^255), the FFI's sign-bit clearing is
+/// a no-op and the round-trip is clean.
+///
+/// Returns (merkle_path, all_enc_shares_flat, share_index, proposal_id,
+///          vote_decision, round_id, shares_hash).
+pub fn build_share_reveal_test_data()
+    -> (Vec<u8>, [u8; 256], u32, u32, u32, [u8; 32], [u8; 32])
+{
+    use pasta_curves::group::ff::PrimeField;
+    use pasta_curves::pallas;
+
+    let proposal_id: u32 = 3;
+    let vote_decision: u32 = 1;
+    let round_id = [0u8; 32]; // simple zero round ID
+
+    // Synthetic x-coordinates for encrypted shares.
+    let mut all_c1_x = [pallas::Base::zero(); 4];
+    let mut all_c2_x = [pallas::Base::zero(); 4];
+    for i in 0..4u64 {
+        all_c1_x[i as usize] = pallas::Base::from(100 + i);
+        all_c2_x[i as usize] = pallas::Base::from(200 + i);
+    }
+
+    // Compute shares_hash.
+    let shares_hash_fp = orchard::vote_proof::shares_hash(all_c1_x, all_c2_x);
+    let shares_hash_bytes: [u8; 32] = shares_hash_fp.to_repr();
+
+    // Compute vote_commitment.
+    let proposal_id_fp = pallas::Base::from(u64::from(proposal_id));
+    let vote_decision_fp = pallas::Base::from(u64::from(vote_decision));
+    let vote_commitment = vote_commitment_tree::vote_commitment_hash(
+        shares_hash_fp,
+        proposal_id_fp,
+        vote_decision_fp,
+    );
+
+    // Build single-leaf Merkle tree with vote_commitment as the leaf.
+    let vc_bytes = vote_commitment.to_repr();
+    let mut path_buf = [0u8; votetree::MERKLE_PATH_BYTES];
+    unsafe {
+        let rc = zally_vote_tree_path(
+            vc_bytes.as_ptr(),
+            1, // leaf_count
+            0, // position
+            path_buf.as_mut_ptr(),
+        );
+        assert_eq!(rc, 0, "zally_vote_tree_path failed");
+    }
+
+    // Flatten enc_shares: C1_0(32) C2_0(32) C1_1(32) C2_1(32) ...
+    let mut enc_shares_flat = [0u8; 256];
+    for i in 0..4 {
+        let c1_bytes = all_c1_x[i].to_repr();
+        let c2_bytes = all_c2_x[i].to_repr();
+        enc_shares_flat[i * 64..i * 64 + 32].copy_from_slice(&c1_bytes);
+        enc_shares_flat[i * 64 + 32..i * 64 + 64].copy_from_slice(&c2_bytes);
+    }
+
+    (
+        path_buf.to_vec(),
+        enc_shares_flat,
+        0,
+        proposal_id,
+        vote_decision,
+        round_id,
+        shares_hash_bytes,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// Full round-trip test: generate a share reveal proof and verify it via FFI.
+    ///
+    /// This test runs real Halo2 proving (~30-60s in release mode).
+    /// Run with: `cargo test --release -p zally-circuits test_generate_share_reveal -- --ignored`
+    #[test]
+    #[ignore]
+    fn test_generate_share_reveal() {
+        let (
+            merkle_path,
+            enc_shares,
+            share_index,
+            proposal_id,
+            vote_decision,
+            round_id,
+            shares_hash,
+        ) = build_share_reveal_test_data();
+
+        let mut proof_buf = [0u8; 8192];
+        let mut proof_len: usize = 0;
+        let mut nullifier = [0u8; 32];
+        let mut tree_root = [0u8; 32];
+
+        let rc = unsafe {
+            zally_generate_share_reveal(
+                merkle_path.as_ptr(),
+                merkle_path.len(),
+                enc_shares.as_ptr(),
+                enc_shares.len(),
+                share_index,
+                proposal_id,
+                vote_decision,
+                round_id.as_ptr(),
+                round_id.len(),
+                shares_hash.as_ptr(),
+                proof_buf.as_mut_ptr(),
+                proof_buf.len(),
+                &mut proof_len,
+                nullifier.as_mut_ptr(),
+                tree_root.as_mut_ptr(),
+            )
+        };
+
+        assert_eq!(rc, 0, "generate returned error code {}", rc);
+        assert!(proof_len > 0, "proof should not be empty");
+
+        let proof = &proof_buf[..proof_len];
+
+        // Build public inputs for the verifier: 7 × 32-byte chunks.
+        // [share_nullifier, enc_share_c1_x, enc_share_c2_x, proposal_id,
+        //  vote_decision, vote_comm_tree_root, voting_round_id]
+        let mut public_inputs = [0u8; 7 * 32];
+
+        // Slot 0: share_nullifier
+        public_inputs[0..32].copy_from_slice(&nullifier);
+
+        // Slot 1: enc_share_c1_x (for share_index=0 → enc_shares[0..32])
+        let idx = share_index as usize;
+        public_inputs[32..64].copy_from_slice(&enc_shares[idx * 64..idx * 64 + 32]);
+        public_inputs[63] &= 0x7F; // clear sign bit
+
+        // Slot 2: enc_share_c2_x
+        public_inputs[64..96].copy_from_slice(&enc_shares[idx * 64 + 32..idx * 64 + 64]);
+        public_inputs[95] &= 0x7F;
+
+        // Slot 3: proposal_id as Fp (small u32 → first 4 bytes LE)
+        public_inputs[96..100].copy_from_slice(&proposal_id.to_le_bytes());
+
+        // Slot 4: vote_decision as Fp
+        public_inputs[128..132].copy_from_slice(&vote_decision.to_le_bytes());
+
+        // Slot 5: vote_comm_tree_root
+        public_inputs[160..192].copy_from_slice(&tree_root);
+
+        // Slot 6: voting_round_id (raw bytes; verifier applies wide reduction)
+        public_inputs[192..224].copy_from_slice(&round_id);
+
+        let verify_rc = unsafe {
+            zally_verify_share_reveal_proof(
+                proof.as_ptr(),
+                proof.len(),
+                public_inputs.as_ptr(),
+                public_inputs.len(),
+            )
+        };
+
+        assert_eq!(verify_rc, 0, "verification failed with code {}", verify_rc);
+    }
+}

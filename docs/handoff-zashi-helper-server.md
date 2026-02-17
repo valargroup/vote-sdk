@@ -11,8 +11,8 @@ Get Zashi (iOS app) submitting shares through the helper server instead of direc
 The full voting pipeline is validated by an integration test (`voting_flow_librustvoting_path`, CI green on PR #80):
 
 ```
-Zashi / E2E Test              Chain (1318)           Helper Server (9091)
-────────────────              ────────────           ──────────────────
+Zashi / E2E Test              zallyd (1318, chain + helper)
+────────────────              ─────────────────────────────
 discover round ──────────────► GET /rounds/active
 delegate-vote (ZKP#1) ──────► POST /delegate-vote
                                ◄── tree updated (VAN leaf)
@@ -23,12 +23,12 @@ sign cast-vote
 cast-vote ───────────────────► POST /cast-vote
                                ◄── tree updated (+2 leaves)
 build share payloads
-POST 4 shares ─────────────────────────────────────► POST /api/v1/shares
-                                                     │ sync tree from chain
-                                                     │ generate VC witness
-                                                     │ derive share nullifier
-                                                     │ generate ZKP #3 (30-60s)
-                               ◄── POST /reveal-share┘
+POST 4 shares ───────────────► POST /api/v1/shares (helper)
+                               │ read tree from keeper KV store
+                               │ generate VC witness
+                               │ derive share nullifier
+                               │ generate ZKP #3 (30-60s)
+                               ◄── internal MsgRevealShare
                                (×4 shares, with delay)
 auto-tally via PrepareProposal
 ```
@@ -37,7 +37,7 @@ auto-tally via PrepareProposal
 
 **Zashi iOS**: Steps 1 through cast-vote work. Share submission is the gap — it currently posts directly to the chain with a mock proof instead of going through the helper server.
 
-**Helper server**: Complete. Accepts shares, generates real ZKP #3, handles temporal delay for unlinkability, submits `MsgRevealShare` to chain.
+**Helper server**: Complete. Now built into `zallyd` (Go port in `sdk/internal/helper/`). Runs on the same port as the chain API (default 1318). Accepts shares, generates real ZKP #3, handles temporal delay for unlinkability, submits `MsgRevealShare` to chain.
 
 ### What's broken in Zashi
 
@@ -82,15 +82,7 @@ return ffiPayloads.map {
 
 The app needs a separate URL for the helper server (different from chain URL).
 
-**Suggested approach**: Add to `ZallyAPIConfig` or similar:
-```swift
-struct ZallyAPIConfig {
-    static var baseURL = "http://localhost:1318"        // chain
-    static var helperServerURL = "http://localhost:9091" // helper server
-}
-```
-
-This should eventually come from server config / round discovery, but hardcoded is fine for now.
+The helper server is now built into `zallyd` and runs on the same port as the chain API (default 1318). No separate URL is needed — use the chain URL for both chain and helper endpoints.
 
 ### Task 3: Rewrite `delegateShares` to POST to helper server
 
@@ -130,8 +122,8 @@ let body: [String: Any] = [
     "vote_round_id": roundIdHex,  // hex string, NOT base64
     "all_enc_shares": allEncSharesJSON
 ]
-// POST to helper server, not chain
-let json = try await postJSON(ZallyAPIConfig.helperServerURL + "/api/v1/shares", body: body)
+// POST to helper endpoint on the same chain URL
+let json = try await postJSON(ZallyAPIConfig.baseURL + "/api/v1/shares", body: body)
 ```
 
 Key differences from current code:
@@ -196,25 +188,21 @@ The reference implementation is in `e2e-tests/src/payloads.rs:helper_share_paylo
 | **Reference** | |
 | `e2e-tests/tests/voting_flow_librustvoting.rs` | Canonical e2e test (steps 9-10 show share flow) |
 | `e2e-tests/src/payloads.rs` | `helper_share_payload()` — exact wire format |
-| `helper-server/src/types.rs` | `SharePayload` struct the server deserializes |
+| `sdk/internal/helper/types.go` | `SharePayload` struct the server deserializes |
 
 ## Running locally
 
 ```bash
-# Terminal 1: Chain
-cd sdk && make init && make start
+# Terminal 1: Chain (helper server starts automatically inside zallyd)
+cd sdk && make init-ffi && make start
 
-# Terminal 2: Helper server
-cd helper-server && cargo run --release --bin helper-server -- \
-  --tree-node http://127.0.0.1:1318 \
-  --chain-submit http://127.0.0.1:1318 \
-  --min-delay 1 --max-delay 3 \
-  --db-path :memory:
-
-# Terminal 3: E2E test (validates the full flow)
+# Terminal 2: E2E test (validates the full flow)
+HELPER_SERVER_URL=http://localhost:1318 \
 cargo test --release --manifest-path e2e-tests/Cargo.toml \
   voting_flow_librustvoting_path -- --nocapture --ignored
 ```
+
+The helper server is built into `zallyd` and starts automatically. Its API endpoints (`/api/v1/shares`, `/api/v1/status`) are on the same port as the chain (default 1318). Configuration is in `app.toml` under `[helper]`.
 
 ## Remaining items (not in scope for this task)
 
