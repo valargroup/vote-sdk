@@ -29,6 +29,7 @@ import (
 	"github.com/z-cale/zally/app"
 	"github.com/z-cale/zally/crypto/elgamal"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
+	"github.com/z-cale/zally/x/vote/types"
 )
 
 const testChainID = "zally-test-1"
@@ -54,7 +55,14 @@ type TestApp struct {
 // and returns a TestApp ready for integration testing.
 func SetupTestApp(t *testing.T) *TestApp {
 	t.Helper()
-	return setupTestApp(t, simtestutil.EmptyAppOptions{})
+	ta := setupTestApp(t, simtestutil.EmptyAppOptions{})
+
+	// Seed a confirmed ceremony with a dummy EA keypair so that
+	// CreateVotingSession (which requires a confirmed ceremony) works.
+	_, pk := elgamal.KeyGen(rand.Reader)
+	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
+
+	return ta
 }
 
 // SetupTestAppWithEAKey creates a TestApp with a real ElGamal keypair for the
@@ -76,7 +84,10 @@ func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey) {
 		"vote.ea_sk_path": skPath,
 	}
 
-	return setupTestApp(t, appOpts), pk
+	ta := setupTestApp(t, appOpts)
+	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
+
+	return ta, pk
 }
 
 // setupTestApp is the shared implementation for SetupTestApp and SetupTestAppWithEAKey.
@@ -161,6 +172,27 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 // VoteKeeper returns the vote module keeper for querying state in tests.
 func (ta *TestApp) VoteKeeper() votekeeper.Keeper {
 	return ta.ZallyApp.VoteKeeper
+}
+
+// SeedConfirmedCeremony writes a confirmed ceremony state (with ea_pk) directly
+// into the module's KV store and commits it via an empty block. This must be
+// called before any CreateVotingSession call, since that handler now requires
+// a confirmed ceremony.
+func (ta *TestApp) SeedConfirmedCeremony(eaPk []byte) {
+	ta.t.Helper()
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	state := &types.CeremonyState{
+		Status: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
+		EaPk:   eaPk,
+	}
+	err := ta.VoteKeeper().SetCeremonyState(kvStore, state)
+	require.NoError(ta.t, err)
+
+	// Commit via an empty block so the IAVL working set changes are persisted.
+	ta.NextBlock()
 }
 
 // ValidatorOperAddr returns the operator (valoper) address of the genesis

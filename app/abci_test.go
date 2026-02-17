@@ -614,6 +614,10 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	// Generate a real EA keypair for DLEQ proof generation/verification.
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
 
+	// Re-seed the ceremony with this test's EA public key so the vote round
+	// stores the matching ea_pk (needed for DLEQ verification).
+	s.app.SeedConfirmedCeremony(eaPk.Point.ToAffineCompressed())
+
 	// Create a session expiring 30 seconds from now.
 	voteEndTime := s.app.Time.Add(30 * time.Second)
 	setupMsg := &types.MsgCreateVotingSession{
