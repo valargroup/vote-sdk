@@ -22,6 +22,7 @@ service Msg {
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
   rpc ReInitializeElectionAuthority(MsgReInitializeElectionAuthority) returns (MsgReInitializeElectionAuthorityResponse);
+  rpc SetVoteManager(MsgSetVoteManager) returns (MsgSetVoteManagerResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -39,6 +40,7 @@ message MsgCreateVotingSession {
   bytes  vk_zkp2              = 9;  // Verification key for ZKP #2
   bytes  vk_zkp3              = 10; // Verification key for ZKP #3
   repeated Proposal proposals = 11;
+  string description          = 12; // Human-readable round description
 }
 
 message MsgCreateVotingSessionResponse {
@@ -158,3 +160,13 @@ message MsgReInitializeElectionAuthority {
 }
 
 message MsgReInitializeElectionAuthorityResponse {}
+
+// MsgSetVoteManager sets or changes the vote manager address.
+// Only callable by the current vote manager or any bonded validator.
+// On first call (no vote manager set), accepts any bonded validator.
+message MsgSetVoteManager {
+  string creator     = 1; // Sender address (must be current vote manager or a validator)
+  string new_manager = 2; // New vote manager address
+}
+
+message MsgSetVoteManagerResponse {}

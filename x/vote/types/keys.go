@@ -57,6 +57,9 @@ var (
 
 	// CeremonyStateKey stores the singleton EA key ceremony state: single key -> CeremonyState (protobuf)
 	CeremonyStateKey = []byte{0x09}
+
+	// VoteManagerKey stores the singleton vote manager address: single key -> VoteManagerState (protobuf)
+	VoteManagerKey = []byte{0x0A}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.

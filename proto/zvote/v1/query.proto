@@ -32,6 +32,9 @@ service Query {
 
   // CeremonyState returns the current EA key ceremony lifecycle state.
   rpc CeremonyState(QueryCeremonyStateRequest) returns (QueryCeremonyStateResponse);
+
+  // VoteManager returns the current vote manager address.
+  rpc VoteManager(QueryVoteManagerRequest) returns (QueryVoteManagerResponse);
 }
 
 message QueryCommitmentTreeRequest {
@@ -93,4 +96,10 @@ message QueryCeremonyStateRequest {}
 
 message QueryCeremonyStateResponse {
   CeremonyState ceremony = 1;
+}
+
+message QueryVoteManagerRequest {}
+
+message QueryVoteManagerResponse {
+  string address = 1;
 }

@@ -15,6 +15,7 @@ const (
 	EventTypeCeremonyStatusChange             = "ceremony_status_change"
 	EventTypeCeremonyValidatorJailed          = "ceremony_validator_jailed"
 	EventTypeReInitializeElectionAuthority    = "reinitialize_election_authority"
+	EventTypeSetVoteManager                   = "set_vote_manager"
 )
 
 // Event attribute keys.
@@ -34,4 +35,5 @@ const (
 	AttributeKeyValidatorAddress   = "validator_address"
 	AttributeKeyCeremonyStatus     = "ceremony_status"
 	AttributeKeyEAPK               = "ea_pk"
+	AttributeKeyVoteManager        = "vote_manager"
 )

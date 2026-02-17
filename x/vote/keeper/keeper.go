@@ -55,6 +55,11 @@ func NewKeeper(
 	}
 }
 
+// SetStakingKeeper replaces the staking keeper. Used in tests.
+func (k *Keeper) SetStakingKeeper(sk StakingKeeper) {
+	k.stakingKeeper = sk
+}
+
 // OpenKVStore opens the module's KV store from a context.
 func (k Keeper) OpenKVStore(ctx context.Context) store.KVStore {
 	return k.storeService.OpenKVStore(ctx)

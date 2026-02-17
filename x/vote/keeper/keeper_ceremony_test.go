@@ -1216,6 +1216,7 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 	s.Require().Equal(eaPkBytes, state.EaPk)
 
 	// 8. Create a voting session, verify round.EaPk == ea_pk.
+	s.seedVoteManager("zvote1admin")
 	msg := &types.MsgCreateVotingSession{
 		Creator:           "zvote1admin",
 		SnapshotHeight:    100,

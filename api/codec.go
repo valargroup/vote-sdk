@@ -12,8 +12,8 @@ import (
 
 // Vote transaction type tags. The first byte of the wire format identifies
 // the message type. Tags 0x01–0x05 are vote-round transactions; tags
-// 0x06–0x08 are ceremony transactions. Any other first byte is assumed
-// to be a standard Cosmos SDK Tx.
+// 0x06–0x09, 0x0B–0x0C are ceremony/management transactions. Any other
+// first byte is assumed to be a standard Cosmos SDK Tx.
 const (
 	TagCreateVotingSession byte = 0x01
 	TagDelegateVote        byte = 0x02
@@ -26,10 +26,11 @@ const (
 	TagAckExecutiveAuthorityKey       byte = 0x08
 	TagCreateValidatorWithPallasKey         byte = 0x09
 	TagReInitializeElectionAuthority       byte = 0x0B
+	TagSetVoteManager                      byte = 0x0C
 )
 
 // IsCustomTag returns true if b is a valid custom transaction type tag
-// (vote-round 0x01–0x05 or ceremony 0x06–0x09, 0x0B).
+// (vote-round 0x01–0x05 or ceremony 0x06–0x09, 0x0B–0x0C).
 // Note: 0x0A is NOT used because it collides with standard Cosmos Tx protobuf
 // encoding (field 1, wire type 2 = length-delimited body).
 func IsCustomTag(b byte) bool {
@@ -41,10 +42,11 @@ func IsVoteTag(b byte) bool {
 	return b >= TagCreateVotingSession && b <= TagSubmitTally
 }
 
-// IsCeremonyTag returns true if b is a ceremony transaction type tag (0x06–0x09, 0x0B).
+// IsCeremonyTag returns true if b is a ceremony transaction type tag (0x06–0x09, 0x0B–0x0C).
 func IsCeremonyTag(b byte) bool {
 	return (b >= TagRegisterPallasKey && b <= TagCreateValidatorWithPallasKey) ||
-		b == TagReInitializeElectionAuthority
+		b == TagReInitializeElectionAuthority ||
+		b == TagSetVoteManager
 }
 
 // TagForMessage returns the wire-format tag for a VoteMessage.
@@ -166,6 +168,8 @@ func DecodeCeremonyTx(raw []byte) (byte, proto.Message, error) {
 		msg = &types.MsgCreateValidatorWithPallasKey{}
 	case TagReInitializeElectionAuthority:
 		msg = &types.MsgReInitializeElectionAuthority{}
+	case TagSetVoteManager:
+		msg = &types.MsgSetVoteManager{}
 	default:
 		return 0, nil, fmt.Errorf("invalid ceremony tx tag: 0x%02x", tag)
 	}

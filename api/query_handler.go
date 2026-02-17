@@ -25,6 +25,7 @@ import (
 //	GET /zally/v1/tally/{round_id}/{proposal_id}
 //	GET /zally/v1/tally-results/{round_id}
 //	GET /zally/v1/ceremony
+//	GET /zally/v1/vote-manager
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
 	qh := &queryHandler{clientCtx: clientCtx}
 
@@ -38,6 +39,7 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.HandleFunc("/zally/v1/tally/{round_id}/{proposal_id}", qh.handleProposalTally).Methods("GET")
 	router.HandleFunc("/zally/v1/tally-results/{round_id}", qh.handleTallyResults).Methods("GET")
 	router.HandleFunc("/zally/v1/ceremony", qh.handleCeremonyState).Methods("GET")
+	router.HandleFunc("/zally/v1/vote-manager", qh.handleVoteManager).Methods("GET")
 }
 
 // queryHandler handles query REST endpoints by delegating to the gRPC query
@@ -200,6 +202,18 @@ func (qh *queryHandler) handleCeremonyState(w http.ResponseWriter, _ *http.Reque
 	resp := &types.QueryCeremonyStateResponse{}
 
 	if err := qh.abciQuery("/zvote.v1.Query/CeremonyState", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handleVoteManager(w http.ResponseWriter, _ *http.Request) {
+	req := &types.QueryVoteManagerRequest{}
+	resp := &types.QueryVoteManagerResponse{}
+
+	if err := qh.abciQuery("/zvote.v1.Query/VoteManager", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}

@@ -24,5 +24,6 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgAckExecutiveAuthorityKey{},
 		&MsgCreateValidatorWithPallasKey{},
 		&MsgReInitializeElectionAuthority{},
+		&MsgSetVoteManager{},
 	)
 }

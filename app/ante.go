@@ -92,7 +92,7 @@ func handleVoteAnte(
 	// All custom txs (vote + ceremony) are free — infinite gas meter.
 	ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
 
-	// Ceremony messages (tags 0x06–0x09) bypass the vote validation pipeline.
+	// Ceremony messages bypass the vote validation pipeline.
 	// Most ceremony messages flow directly to MsgServer handlers for validation.
 	// MsgAckExecutiveAuthorityKey is special: it must be blocked from the
 	// mempool (only injectable via PrepareProposal).

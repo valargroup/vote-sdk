@@ -34,6 +34,12 @@ message VoteRound {
   bytes  vk_zkp2                    = 12; // Verification key for ZKP #2
   bytes  vk_zkp3                    = 13; // Verification key for ZKP #3
   repeated Proposal proposals       = 14;
+  string            description     = 15; // Human-readable round description
+}
+
+// VoteManagerState stores the singleton vote manager address.
+message VoteManagerState {
+  string address = 1;
 }
 
 // CommitmentTreeState holds the current state of the append-only commitment tree.
@@ -50,6 +56,7 @@ message GenesisState {
   CommitmentTreeState         tree_state      = 2;
   repeated CommitmentLeaf     commitment_leaves = 3;
   repeated NullifierEntry     nullifiers      = 4;
+  string                      vote_manager    = 5;
 }
 
 // CommitmentLeaf is an entry in the append-only commitment tree.

@@ -148,12 +148,13 @@ func (s *QueryServerTestSuite) TestVoteRound_NotFound() {
 }
 
 func (s *QueryServerTestSuite) TestVoteRound_Found() {
-	// Seed a confirmed ceremony so CreateVotingSession is allowed.
+	// Seed a confirmed ceremony and vote manager so CreateVotingSession is allowed.
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
 		Status: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
 		EaPk:   bytes.Repeat([]byte{0xEA}, 32),
 	}))
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "zvote1creator"}))
 
 	// Create a vote round via MsgServer.
 	resp, err := s.msgServer.CreateVotingSession(s.ctx, &types.MsgCreateVotingSession{

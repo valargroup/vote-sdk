@@ -62,6 +62,9 @@ func SetupTestApp(t *testing.T) *TestApp {
 	_, pk := elgamal.KeyGen(rand.Reader)
 	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
 
+	// Seed the vote manager so CreateVotingSession passes authorization.
+	ta.SeedVoteManager("zvote1admin")
+
 	return ta
 }
 
@@ -86,6 +89,7 @@ func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey) {
 
 	ta := setupTestApp(t, appOpts)
 	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
+	ta.SeedVoteManager("zvote1admin")
 
 	return ta, pk
 }
@@ -202,6 +206,22 @@ func SetupTestAppWithPallasKey(t *testing.T) (ta *TestApp, pallasSk *elgamal.Sec
 // VoteKeeper returns the vote module keeper for querying state in tests.
 func (ta *TestApp) VoteKeeper() votekeeper.Keeper {
 	return ta.ZallyApp.VoteKeeper
+}
+
+// SeedVoteManager writes the vote manager address directly into the module's
+// KV store and commits via an empty block. Must be called before any
+// CreateVotingSession, since that handler requires the creator to be the
+// vote manager.
+func (ta *TestApp) SeedVoteManager(addr string) {
+	ta.t.Helper()
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	err := ta.VoteKeeper().SetVoteManager(kvStore, &types.VoteManagerState{Address: addr})
+	require.NoError(ta.t, err)
+
+	ta.NextBlock()
 }
 
 // SeedConfirmedCeremony writes a confirmed ceremony state (with ea_pk) directly

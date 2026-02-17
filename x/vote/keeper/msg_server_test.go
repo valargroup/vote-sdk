@@ -156,6 +156,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: round created with ACTIVE status and ID returned",
 			setup: func() {
 				s.seedConfirmedCeremony()
+				s.seedVoteManager("zvote1admin")
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -185,6 +186,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "duplicate round rejected",
 			setup: func() {
 				s.seedConfirmedCeremony()
+				s.seedVoteManager("zvote1admin")
 				// Create the round first.
 				_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 				s.Require().NoError(err)
@@ -197,6 +199,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "different fields produce different round ID",
 			setup: func() {
 				s.seedConfirmedCeremony()
+				s.seedVoteManager("zvote1admin")
 			},
 			msg: &types.MsgCreateVotingSession{
 				Creator:           "zvote1admin",
@@ -220,7 +223,10 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			},
 		},
 		{
-			name:        "rejected: no ceremony exists",
+			name: "rejected: no ceremony exists",
+			setup: func() {
+				s.seedVoteManager("zvote1admin")
+			},
 			msg:         msg,
 			expectErr:   true,
 			errContains: "ceremony not in confirmed status",
@@ -228,6 +234,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 		{
 			name: "rejected: ceremony in DEALT status (not yet CONFIRMED)",
 			setup: func() {
+				s.seedVoteManager("zvote1admin")
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
 					Status: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
@@ -241,6 +248,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 		{
 			name: "rejected: ceremony in REGISTERING status",
 			setup: func() {
+				s.seedVoteManager("zvote1admin")
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
 					Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
@@ -253,6 +261,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 		{
 			name: "rejected: ceremony in REGISTERING status (no validators)",
 			setup: func() {
+				s.seedVoteManager("zvote1admin")
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
 					Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
@@ -266,6 +275,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "round.EaPk matches ceremony ea_pk",
 			setup: func() {
 				s.seedConfirmedCeremony()
+				s.seedVoteManager("zvote1admin")
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -1045,6 +1055,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_FinalizedRejectsShares() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 	s.SetupTest()
 	s.seedConfirmedCeremony()
+	s.seedVoteManager("zvote1admin")
 	msg := validSetupMsg()
 
 	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
@@ -1063,6 +1074,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
 	s.SetupTest()
 	s.seedConfirmedCeremony()
+	s.seedVoteManager("zvote1admin")
 	msg := validSetupMsg()
 
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)

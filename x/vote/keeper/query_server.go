@@ -177,6 +177,28 @@ func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCerem
 	return &types.QueryCeremonyStateResponse{Ceremony: state}, nil
 }
 
+// VoteManager returns the current vote manager address.
+func (qs queryServer) VoteManager(goCtx context.Context, req *types.QueryVoteManagerRequest) (*types.QueryVoteManagerResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	state, err := qs.k.GetVoteManager(kvStore)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get vote manager: %v", err)
+	}
+
+	var addr string
+	if state != nil {
+		addr = state.Address
+	}
+
+	return &types.QueryVoteManagerResponse{Address: addr}, nil
+}
+
 // ActiveRound returns the first active voting round, if any.
 // Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
 func (qs queryServer) ActiveRound(goCtx context.Context, req *types.QueryActiveRoundRequest) (*types.QueryActiveRoundResponse, error) {

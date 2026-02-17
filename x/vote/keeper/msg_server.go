@@ -31,6 +31,12 @@ func NewMsgServerImpl(keeper Keeper) types.MsgServer {
 // stores the VoteRound, and emits an event.
 func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
+
+	// Only the vote manager can create voting sessions.
+	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
+		return nil, err
+	}
+
 	kvStore := ms.k.OpenKVStore(ctx)
 
 	// Derive vote_round_id deterministically.
@@ -70,6 +76,7 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		VkZkp2:            msg.VkZkp2,
 		VkZkp3:            msg.VkZkp3,
 		Proposals:         msg.Proposals,
+		Description:       msg.Description,
 	}
 
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {

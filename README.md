@@ -44,14 +44,14 @@ The ceremony is a looping state machine. `REGISTERING` persists indefinitely unt
         MsgReInitializeElectionAuthority ────────────────────────┘
 ```
 
-| From | To | Trigger | Condition |
-|------|-----|---------|-----------|
-| nil / REGISTERING (empty) | REGISTERING | First `MsgRegisterPallasKey` or `MsgCreateValidatorWithPallasKey` | Auto-created on first registration |
-| REGISTERING | DEALT | `MsgDealExecutiveAuthorityKey` | >= 1 validator registered, valid ea_pk, 1:1 payload-to-validator mapping |
-| DEALT | CONFIRMED | `MsgAckExecutiveAuthorityKey` | **All** registered validators have acked (fast path, immediate) |
-| DEALT | CONFIRMED | EndBlocker timeout | **>= 2/3** validators acked at timeout; non-ackers stripped from state and jailed via staking module |
-| DEALT | REGISTERING | EndBlocker timeout | **< 2/3** validators acked at timeout (full reset, ceremony failed) |
-| CONFIRMED / REGISTERING / nil | REGISTERING | `MsgReInitializeElectionAuthority` | Not during DEALT; no active/tallying voting sessions |
+| From                          | To          | Trigger                                                           | Condition                                                                                            |
+| ----------------------------- | ----------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| nil / REGISTERING (empty)     | REGISTERING | First `MsgRegisterPallasKey` or `MsgCreateValidatorWithPallasKey` | Auto-created on first registration                                                                   |
+| REGISTERING                   | DEALT       | `MsgDealExecutiveAuthorityKey`                                    | >= 1 validator registered, valid ea_pk, 1:1 payload-to-validator mapping                             |
+| DEALT                         | CONFIRMED   | `MsgAckExecutiveAuthorityKey`                                     | **All** registered validators have acked (fast path, immediate)                                      |
+| DEALT                         | CONFIRMED   | EndBlocker timeout                                                | **>= 2/3** validators acked at timeout; non-ackers stripped from state and jailed via staking module |
+| DEALT                         | REGISTERING | EndBlocker timeout                                                | **< 2/3** validators acked at timeout (full reset, ceremony failed)                                  |
+| CONFIRMED / REGISTERING / nil | REGISTERING | `MsgReInitializeElectionAuthority`                                | Not during DEALT; no active/tallying voting sessions                                                 |
 
 Key behaviors:
 - **REGISTERING** has **no timeout** — it persists until a deal is submitted or the ceremony is re-initialized via `MsgReInitializeElectionAuthority`.
@@ -144,17 +144,28 @@ Validators decrypt by computing `S = sk_i * E` and deriving the same symmetric k
 
 **Why SpendAuthG?** The Pallas keypair (`pallas-keygen`) is generated using `elgamal.KeyGen`, which uses SpendAuthG as the generator. The ECIES ephemeral key must use the same generator so that the ECDH shared secrets match: `e * (sk * SpendAuthG) == sk * (e * SpendAuthG)`. Using the standard Pallas generator would break this equality.
 
+### VoteManager Role
+
+The VoteManager is a singleton on-chain address that gates who can create voting sessions. Before any `MsgCreateVotingSession` is accepted, a VoteManager must be set.
+
+**`MsgSetVoteManager`** -- Sets or changes the VoteManager address.
+- **Bootstrap:** When no VoteManager exists, any bonded validator can set the first one
+- **Update:** Once set, the current VoteManager **or any bonded validator** can change it
+- Non-validators who are not the current VoteManager are rejected
+- Uses custom wire format tag `0x0C` and REST endpoint `POST /zally/v1/set-vote-manager`
+- Stored as a singleton `VoteManagerState` in the KV store (key `0x0A`)
+
 ### Voting Rounds
 
-After the ceremony reaches CONFIRMED, voting sessions can be created.
+After the ceremony reaches CONFIRMED and a VoteManager is set, voting sessions can be created.
 
 ```
 ACTIVE ──> TALLYING ──> FINALIZED
   ^
-  │ (gated: requires CONFIRMED ceremony)
+  │ (gated: requires CONFIRMED ceremony + VoteManager)
 ```
 
-**`MsgCreateVotingSession`** reads `ea_pk` from the confirmed ceremony state (not from the message). The round stores its own copy of `ea_pk` for future key rotation support.
+**`MsgCreateVotingSession`** reads `ea_pk` from the confirmed ceremony state (not from the message). The round stores its own copy of `ea_pk` for future key rotation support. Only the VoteManager can create voting sessions. An optional `description` field provides human-readable context for the round.
 
 **`MsgSubmitTally`** is auto-injected via `PrepareProposal` when a round enters TALLYING (same pattern as auto-ack). Cannot be submitted through the mempool.
 
@@ -174,18 +185,19 @@ Vote and ceremony transactions bypass the standard Cosmos SDK `Tx` envelope. Eac
 [tag (1 byte)] [proto-encoded message body]
 ```
 
-| Tag | Message | Category |
-|-----|---------|----------|
-| `0x01` | `MsgCreateVotingSession` | Voting round |
-| `0x02` | `MsgDelegateVote` | Voting round |
-| `0x03` | `MsgCastVote` | Voting round |
-| `0x04` | `MsgRevealShare` | Voting round |
-| `0x05` | `MsgSubmitTally` | Voting round (injected) |
-| `0x06` | `MsgRegisterPallasKey` | Ceremony |
-| `0x07` | `MsgDealExecutiveAuthorityKey` | Ceremony |
-| `0x08` | `MsgAckExecutiveAuthorityKey` | Ceremony (injected) |
-| `0x09` | `MsgCreateValidatorWithPallasKey` | Ceremony |
-| `0x0B` | `MsgReInitializeElectionAuthority` | Ceremony |
+| Tag    | Message                            | Category                |
+| ------ | ---------------------------------- | ----------------------- |
+| `0x01` | `MsgCreateVotingSession`           | Voting round            |
+| `0x02` | `MsgDelegateVote`                  | Voting round            |
+| `0x03` | `MsgCastVote`                      | Voting round            |
+| `0x04` | `MsgRevealShare`                   | Voting round            |
+| `0x05` | `MsgSubmitTally`                   | Voting round (injected) |
+| `0x06` | `MsgRegisterPallasKey`             | Ceremony                |
+| `0x07` | `MsgDealExecutiveAuthorityKey`     | Ceremony                |
+| `0x08` | `MsgAckExecutiveAuthorityKey`      | Ceremony (injected)     |
+| `0x09` | `MsgCreateValidatorWithPallasKey`  | Ceremony                |
+| `0x0B` | `MsgReInitializeElectionAuthority` | Ceremony                |
+| `0x0C` | `MsgSetVoteManager`                | Management              |
 
 Any transaction whose first byte does not match a known tag is decoded as a standard Cosmos SDK `Tx`. Tag `0x0A` is deliberately skipped because it collides with the standard Cosmos Tx protobuf encoding (field 1, wire type 2). Note that raw `MsgCreateValidator` is blocked by the ante handler for live transactions -- post-genesis validators must use `MsgCreateValidatorWithPallasKey` (tag `0x09`) instead.
 
@@ -195,40 +207,43 @@ The chain exposes a JSON REST API alongside CometBFT RPC. Clients POST JSON bodi
 
 #### Transaction Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/zally/v1/register-pallas-key` | Register validator Pallas PK for ceremony |
-| POST | `/zally/v1/create-validator-with-pallas` | Create validator + register Pallas key (post-genesis) |
-| POST | `/zally/v1/reinitialize-ea` | Reset ceremony to REGISTERING (rejected during DEALT) |
-| POST | `/zally/v1/deal-ea-key` | Deal ECIES-encrypted `ea_sk` shares to validators |
-| POST | `/zally/v1/create-voting-session` | Create a new voting round (requires CONFIRMED ceremony) |
-| POST | `/zally/v1/delegate-vote` | Submit a delegation proof (ZKP #1) |
-| POST | `/zally/v1/cast-vote` | Cast an encrypted vote (ZKP #2) |
-| POST | `/zally/v1/reveal-share` | Reveal an encrypted share (ZKP #3) |
-| POST | `/zally/v1/submit-tally` | Submit tally results (normally auto-injected) |
+| Method | Path                                     | Description                                             |
+| ------ | ---------------------------------------- | ------------------------------------------------------- |
+| POST   | `/zally/v1/register-pallas-key`          | Register validator Pallas PK for ceremony               |
+| POST   | `/zally/v1/create-validator-with-pallas` | Create validator + register Pallas key (post-genesis)   |
+| POST   | `/zally/v1/reinitialize-ea`              | Reset ceremony to REGISTERING (rejected during DEALT)   |
+| POST   | `/zally/v1/deal-ea-key`                  | Deal ECIES-encrypted `ea_sk` shares to validators       |
+| POST   | `/zally/v1/create-voting-session`        | Create a new voting round (requires CONFIRMED ceremony) |
+| POST   | `/zally/v1/delegate-vote`                | Submit a delegation proof (ZKP #1)                      |
+| POST   | `/zally/v1/cast-vote`                    | Cast an encrypted vote (ZKP #2)                         |
+| POST   | `/zally/v1/reveal-share`                 | Reveal an encrypted share (ZKP #3)                      |
+| POST   | `/zally/v1/submit-tally`                 | Submit tally results (normally auto-injected)           |
+| POST   | `/zally/v1/set-vote-manager`             | Set or change the VoteManager address                   |
 
 All POST endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`.
 
 #### Query Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/zally/v1/ceremony` | Current ceremony state and status |
-| GET | `/zally/v1/rounds/active` | Currently active voting round |
-| GET | `/zally/v1/round/{round_id}` | Voting round by hex round ID |
-| GET | `/zally/v1/tally/{round_id}/{proposal_id}` | Tally for a specific proposal |
-| GET | `/zally/v1/tally-results/{round_id}` | All tally results for a round |
-| GET | `/zally/v1/commitment-tree/{height}` | Vote commitment tree at block height |
-| GET | `/zally/v1/commitment-tree/latest` | Latest vote commitment tree |
-| GET | `/zally/v1/commitment-tree/leaves` | Tree leaves (`?from_height=X&to_height=Y`) |
+| Method | Path                                       | Description                                |
+| ------ | ------------------------------------------ | ------------------------------------------ |
+| GET    | `/zally/v1/ceremony`                       | Current ceremony state and status          |
+| GET    | `/zally/v1/rounds/active`                  | Currently active voting round              |
+| GET    | `/zally/v1/round/{round_id}`               | Voting round by hex round ID               |
+| GET    | `/zally/v1/tally/{round_id}/{proposal_id}` | Tally for a specific proposal              |
+| GET    | `/zally/v1/tally-results/{round_id}`       | All tally results for a round              |
+| GET    | `/zally/v1/commitment-tree/{height}`       | Vote commitment tree at block height       |
+| GET    | `/zally/v1/commitment-tree/latest`         | Latest vote commitment tree                |
+| GET    | `/zally/v1/commitment-tree/leaves`         | Tree leaves (`?from_height=X&to_height=Y`) |
+| GET    | `/zally/v1/vote-manager`                   | Current VoteManager address                |
 
 ### On-Chain State (KV Store Keys)
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `0x09` | `CeremonyState` (singleton) | EA key ceremony lifecycle |
-| `0x01` | `VoteRound` (per round) | Voting session state |
-| `0x02-0x08` | Various | Nullifiers, tallies, commitment tree, etc. |
+| Key         | Type                           | Description                                |
+| ----------- | ------------------------------ | ------------------------------------------ |
+| `0x09`      | `CeremonyState` (singleton)    | EA key ceremony lifecycle                  |
+| `0x0A`      | `VoteManagerState` (singleton) | VoteManager address                        |
+| `0x01`      | `VoteRound` (per round)        | Voting session state                       |
+| `0x02-0x08` | Various                        | Nullifiers, tallies, commitment tree, etc. |
 
 ### CeremonyState Fields
 

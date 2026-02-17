@@ -162,6 +162,38 @@ func TestEncodeDecodeSubmitTally(t *testing.T) {
 	require.Equal(t, uint64(200), decodedMsg.Entries[1].TotalValue)
 }
 
+func TestIsCeremonyTag(t *testing.T) {
+	require.True(t, IsCeremonyTag(TagRegisterPallasKey))
+	require.True(t, IsCeremonyTag(TagDealExecutiveAuthorityKey))
+	require.True(t, IsCeremonyTag(TagAckExecutiveAuthorityKey))
+	require.True(t, IsCeremonyTag(TagCreateValidatorWithPallasKey))
+	require.True(t, IsCeremonyTag(TagReInitializeElectionAuthority))
+	require.True(t, IsCeremonyTag(TagSetVoteManager))
+	require.False(t, IsCeremonyTag(0x00))
+	require.False(t, IsCeremonyTag(0x0A)) // reserved: collides with Cosmos Tx protobuf
+	require.False(t, IsCeremonyTag(0x01)) // vote tag, not ceremony
+}
+
+func TestEncodeDecodeSetVoteManager(t *testing.T) {
+	msg := &types.MsgSetVoteManager{
+		Creator:    "zvote1admin",
+		NewManager: "zvote1manager",
+	}
+
+	raw, err := EncodeCeremonyTx(msg, TagSetVoteManager)
+	require.NoError(t, err)
+	require.Equal(t, TagSetVoteManager, raw[0])
+
+	tag, decoded, err := DecodeCeremonyTx(raw)
+	require.NoError(t, err)
+	require.Equal(t, TagSetVoteManager, tag)
+
+	decodedMsg, ok := decoded.(*types.MsgSetVoteManager)
+	require.True(t, ok)
+	require.Equal(t, msg.Creator, decodedMsg.Creator)
+	require.Equal(t, msg.NewManager, decodedMsg.NewManager)
+}
+
 func TestDecodeVoteTx_TooShort(t *testing.T) {
 	_, _, err := DecodeVoteTx(nil)
 	require.Error(t, err)

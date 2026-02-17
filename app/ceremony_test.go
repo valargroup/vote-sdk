@@ -141,6 +141,7 @@ func TestKeyCeremonyFullLifecycle(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 5: Create a voting session and verify ea_pk propagation.
 	// ---------------------------------------------------------------
+	ta.SeedVoteManager("zvote1admin")
 	setupMsg := testutil.ValidCreateVotingSessionAt(ta.Time)
 	setupTx := testutil.MustEncodeVoteTx(setupMsg)
 	result := ta.DeliverVoteTx(setupTx)
@@ -340,6 +341,9 @@ func TestKeyCeremonyVotingSessionRequiresConfirmedCeremony(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	valAddr := ta.ValidatorOperAddr()
+
+	// Seed the vote manager so we reach the ceremony check.
+	ta.SeedVoteManager("zvote1admin")
 
 	// Register only — ceremony is REGISTERING, not CONFIRMED.
 	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
@@ -634,6 +638,9 @@ func TestReInitializeElectionAuthority_RejectedWithActiveVotingSession(t *testin
 
 	state := getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status)
+
+	// Seed the vote manager so CreateVotingSession passes authorization.
+	ta.SeedVoteManager("zvote1admin")
 
 	// Create a voting session — the round will be ACTIVE.
 	setupMsg := testutil.ValidCreateVotingSessionAt(ta.Time)

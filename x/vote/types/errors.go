@@ -29,4 +29,8 @@ var (
 	ErrNotRegisteredValidator  = errors.Register(ModuleName, 26, "validator not in ceremony validator list")
 	ErrCeremonySessionActive   = errors.Register(ModuleName, 27, "ceremony session is in progress")
 	ErrVotingSessionActive     = errors.Register(ModuleName, 28, "voting session is active or tallying")
+
+	// Vote manager errors.
+	ErrNotAuthorized  = errors.Register(ModuleName, 30, "sender is not authorized")
+	ErrNoVoteManager  = errors.Register(ModuleName, 31, "no vote manager set")
 )
