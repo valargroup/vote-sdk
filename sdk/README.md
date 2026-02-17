@@ -4,7 +4,7 @@ Cosmos SDK application chain for private voting using Zcash-derived cryptography
 
 ## Technical Assumptions
 
-1. The chain launches with a single genesis validator. Additional validators join post-genesis via `MsgCreateValidator`. Validator set changes beyond that are handled via major upgrades or a PoA module (future).
+1. The chain launches with a single genesis validator. Additional validators join post-genesis via `MsgCreateValidatorWithPallasKey`, which atomically creates the validator and registers their Pallas key for the ceremony. Raw `MsgCreateValidator` is blocked in the ante handler for live transactions. Validator set changes beyond that are handled via major upgrades or a PoA module (future).
 2. Client interaction avoids Cosmos SDK protobuf encoding:
    - **Tx submission:** Client sends a plain JSON POST; server handler parses JSON and encodes as needed.
    - **Query:** gRPC gateway supports JSON out-of-the-box.
@@ -41,7 +41,7 @@ The ceremony is a looping state machine. Timeout in any active phase resets to `
 
 | From | To | Trigger | Condition |
 |------|-----|---------|-----------|
-| INITIALIZING / nil | REGISTERING | First `MsgRegisterPallasKey` | Auto-created on first registration |
+| INITIALIZING / nil | REGISTERING | First `MsgRegisterPallasKey` or `MsgCreateValidatorWithPallasKey` | Auto-created on first registration |
 | REGISTERING | DEALT | `MsgDealExecutiveAuthorityKey` | >= 1 validator registered, valid ea_pk, 1:1 payload-to-validator mapping |
 | REGISTERING | INITIALIZING | EndBlocker timeout | `block_time >= phase_start + phase_timeout` (full reset) |
 | DEALT | CONFIRMED | `MsgAckExecutiveAuthorityKey` | **All** registered validators have acked |
@@ -60,6 +60,14 @@ Key behaviors:
 - Validates the key is a valid, non-identity, on-curve Pallas point (32 bytes compressed)
 - Rejects duplicate registrations from the same validator address
 - Only accepted while ceremony is REGISTERING or INITIALIZING
+
+**`MsgCreateValidatorWithPallasKey`** -- Atomically creates a validator and registers their Pallas key.
+- Wraps a standard `MsgCreateValidator` (encoded as bytes) plus a `pallas_pk` field
+- Decodes the embedded staking message and calls through to the staking module's `MsgServer.CreateValidator`
+- Registers the Pallas key in the ceremony state (same logic as `MsgRegisterPallasKey`)
+- Required for all post-genesis validators — raw `MsgCreateValidator` is blocked by the ante handler
+- Uses custom wire format tag `0x09` and a dedicated REST endpoint
+- The bootstrap validator (created via `gentx` at genesis) registers their Pallas key separately via `MsgRegisterPallasKey`
 
 **`MsgDealExecutiveAuthorityKey`** -- The bootstrap dealer distributes encrypted `ea_sk` shares.
 - Validates `ea_pk` is a valid Pallas point
@@ -159,8 +167,9 @@ Vote and ceremony transactions bypass the standard Cosmos SDK `Tx` envelope. Eac
 | `0x06` | `MsgRegisterPallasKey` | Ceremony |
 | `0x07` | `MsgDealExecutiveAuthorityKey` | Ceremony |
 | `0x08` | `MsgAckExecutiveAuthorityKey` | Ceremony (injected) |
+| `0x09` | `MsgCreateValidatorWithPallasKey` | Ceremony |
 
-Any transaction whose first byte does not match a known tag is decoded as a standard Cosmos SDK `Tx` (e.g. `MsgCreateValidator`).
+Any transaction whose first byte does not match a known tag is decoded as a standard Cosmos SDK `Tx`. Note that raw `MsgCreateValidator` is blocked by the ante handler for live transactions -- post-genesis validators must use `MsgCreateValidatorWithPallasKey` (tag `0x09`) instead.
 
 ### REST API
 
@@ -171,6 +180,7 @@ The chain exposes a JSON REST API alongside CometBFT RPC. Clients POST JSON bodi
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/zally/v1/register-pallas-key` | Register validator Pallas PK for ceremony |
+| POST | `/zally/v1/create-validator-with-pallas` | Create validator + register Pallas key (post-genesis) |
 | POST | `/zally/v1/deal-ea-key` | Deal ECIES-encrypted `ea_sk` shares to validators |
 | POST | `/zally/v1/create-voting-session` | Create a new voting round (requires CONFIRMED ceremony) |
 | POST | `/zally/v1/delegate-vote` | Submit a delegation proof (ZKP #1) |

@@ -22,5 +22,6 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgRegisterPallasKey{},
 		&MsgDealExecutiveAuthorityKey{},
 		&MsgAckExecutiveAuthorityKey{},
+		&MsgCreateValidatorWithPallasKey{},
 	)
 }

@@ -257,6 +257,16 @@ pub fn deal_ea_key_payload(creator: &str, ea_pk: &[u8], payloads: &[DealerPayloa
 // Note: MsgAckExecutiveAuthorityKey has no payload builder — acks are injected
 // in-protocol via PrepareProposal (auto-ack).
 
+/// Build MsgCreateValidatorWithPallasKey JSON body.
+/// `staking_msg` is the protobuf-encoded MsgCreateValidator bytes.
+/// `pallas_pk` is the compressed Pallas point (32 bytes).
+pub fn create_validator_with_pallas_key_payload(staking_msg: &[u8], pallas_pk: &[u8]) -> Value {
+    json!({
+        "staking_msg": to_base64(staking_msg),
+        "pallas_pk": to_base64(pallas_pk),
+    })
+}
+
 /// Build a share payload for the helper server's POST /api/v1/shares endpoint.
 ///
 /// The helper server expects base64 for binary fields and hex for vote_round_id.

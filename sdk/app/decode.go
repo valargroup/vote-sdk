@@ -13,7 +13,7 @@ import (
 //
 //	[1 byte: msg_type_tag] [N bytes: protobuf message]
 //
-// Tags 0x01–0x05 are vote-round messages, 0x06–0x08 are ceremony messages.
+// Tags 0x01–0x05 are vote-round messages, 0x06–0x09 are ceremony messages.
 // These tag bytes do not collide with valid Cosmos Tx protobuf encodings,
 // which start with a field tag byte (typically 0x0a for field 1,
 // length-delimited).
@@ -24,6 +24,20 @@ func CustomTxDecoder(standardDecoder sdk.TxDecoder) sdk.TxDecoder {
 	return func(txBytes []byte) (sdk.Tx, error) {
 		if len(txBytes) > 1 && voteapi.IsCustomTag(txBytes[0]) {
 			if voteapi.IsCeremonyTag(txBytes[0]) {
+				// MsgCreateValidatorWithPallasKey (0x09) is hand-written and
+				// doesn't implement proto.Message, so it needs a dedicated decoder.
+				if txBytes[0] == voteapi.TagCreateValidatorWithPallasKey {
+					msg, err := voteapi.DecodeCreateValidatorWithPallasKeyTx(txBytes)
+					if err != nil {
+						return nil, err
+					}
+					return &voteapi.VoteTxWrapper{
+						RawBytes:    txBytes,
+						Tag:         voteapi.TagCreateValidatorWithPallasKey,
+						CeremonyMsg: msg,
+					}, nil
+				}
+
 				tag, ceremonyMsg, err := voteapi.DecodeCeremonyTx(txBytes)
 				if err != nil {
 					return nil, err
