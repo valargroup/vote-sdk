@@ -21,6 +21,7 @@ type HandlerConfig struct {
 	// CometRPCEndpoint is the URL of the local CometBFT RPC server.
 	// Default: "http://localhost:26657"
 	CometRPCEndpoint string
+
 }
 
 // Handler provides JSON REST endpoints for vote transaction submission
@@ -75,9 +76,26 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 
 func (h *Handler) handleCreateVotingSession(w http.ResponseWriter, r *http.Request) {
 	msg := &types.MsgCreateVotingSession{}
-	if !h.decodeAndValidate(w, r, msg) {
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
 		return
 	}
+	if len(body) == 0 {
+		writeError(w, http.StatusBadRequest, "empty request body")
+		return
+	}
+	if err := json.Unmarshal(body, msg); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
+		return
+	}
+
+	if err := msg.ValidateBasic(); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", err))
+		return
+	}
+
 	h.broadcastVoteTx(w, msg)
 }
 
