@@ -78,28 +78,25 @@ func (SessionStatus) EnumDescriptor() ([]byte, []int) {
 type CeremonyStatus int32
 
 const (
-	CeremonyStatus_CEREMONY_STATUS_UNSPECIFIED  CeremonyStatus = 0
-	CeremonyStatus_CEREMONY_STATUS_INITIALIZING CeremonyStatus = 1 // Waiting for first validator registration
-	CeremonyStatus_CEREMONY_STATUS_REGISTERING  CeremonyStatus = 2 // Accepting validator pk_i registrations
-	CeremonyStatus_CEREMONY_STATUS_DEALT        CeremonyStatus = 3 // DealerTx landed, awaiting acks
-	CeremonyStatus_CEREMONY_STATUS_CONFIRMED    CeremonyStatus = 4 // All validators acked, ea_pk ready
+	CeremonyStatus_CEREMONY_STATUS_UNSPECIFIED CeremonyStatus = 0
+	CeremonyStatus_CEREMONY_STATUS_REGISTERING CeremonyStatus = 1 // Accepting validator pk_i registrations (phase_timeout==0 means idle)
+	CeremonyStatus_CEREMONY_STATUS_DEALT       CeremonyStatus = 2 // DealerTx landed, awaiting acks
+	CeremonyStatus_CEREMONY_STATUS_CONFIRMED   CeremonyStatus = 3 // All validators acked, ea_pk ready
 )
 
 // Enum value maps for CeremonyStatus.
 var (
 	CeremonyStatus_name = map[int32]string{
 		0: "CEREMONY_STATUS_UNSPECIFIED",
-		1: "CEREMONY_STATUS_INITIALIZING",
-		2: "CEREMONY_STATUS_REGISTERING",
-		3: "CEREMONY_STATUS_DEALT",
-		4: "CEREMONY_STATUS_CONFIRMED",
+		1: "CEREMONY_STATUS_REGISTERING",
+		2: "CEREMONY_STATUS_DEALT",
+		3: "CEREMONY_STATUS_CONFIRMED",
 	}
 	CeremonyStatus_value = map[string]int32{
-		"CEREMONY_STATUS_UNSPECIFIED":  0,
-		"CEREMONY_STATUS_INITIALIZING": 1,
-		"CEREMONY_STATUS_REGISTERING":  2,
-		"CEREMONY_STATUS_DEALT":        3,
-		"CEREMONY_STATUS_CONFIRMED":    4,
+		"CEREMONY_STATUS_UNSPECIFIED": 0,
+		"CEREMONY_STATUS_REGISTERING": 1,
+		"CEREMONY_STATUS_DEALT":       2,
+		"CEREMONY_STATUS_CONFIRMED":   3,
 	}
 )
 
@@ -1089,13 +1086,12 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
 	"\x17SESSION_STATUS_TALLYING\x10\x02\x12\x1c\n" +
-	"\x18SESSION_STATUS_FINALIZED\x10\x03*\xae\x01\n" +
+	"\x18SESSION_STATUS_FINALIZED\x10\x03*\x8c\x01\n" +
 	"\x0eCeremonyStatus\x12\x1f\n" +
-	"\x1bCEREMONY_STATUS_UNSPECIFIED\x10\x00\x12 \n" +
-	"\x1cCEREMONY_STATUS_INITIALIZING\x10\x01\x12\x1f\n" +
-	"\x1bCEREMONY_STATUS_REGISTERING\x10\x02\x12\x19\n" +
-	"\x15CEREMONY_STATUS_DEALT\x10\x03\x12\x1d\n" +
-	"\x19CEREMONY_STATUS_CONFIRMED\x10\x04B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
+	"\x1bCEREMONY_STATUS_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bCEREMONY_STATUS_REGISTERING\x10\x01\x12\x19\n" +
+	"\x15CEREMONY_STATUS_DEALT\x10\x02\x12\x1d\n" +
+	"\x19CEREMONY_STATUS_CONFIRMED\x10\x03B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
 var (
 	file_zvote_v1_types_proto_rawDescOnce sync.Once
