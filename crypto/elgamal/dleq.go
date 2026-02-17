@@ -69,6 +69,13 @@ func GenerateDLEQProof(sk *SecretKey, ct *Ciphertext, totalValue uint64) ([]byte
 //
 // Verifies: log_G(pk) = log_C1(C2 - totalValue*G)
 //
+// Security assumptions on inputs:
+//   - pk and ct points must be on the Pallas curve. This is enforced at
+//     deserialization time by UnmarshalPublicKey and UnmarshalCiphertext,
+//     which call FromAffineCompressed (rejects off-curve points).
+//   - The proof contains only scalars (e, z), not points. SetBytes validates
+//     each scalar is a canonical encoding in the Pallas scalar field Fq.
+//
 // Returns nil on success, an error on failure.
 func VerifyDLEQProof(proof []byte, pk *PublicKey, ct *Ciphertext, totalValue uint64) error {
 	if len(proof) != DLEQProofSize {
@@ -81,7 +88,8 @@ func VerifyDLEQProof(proof []byte, pk *PublicKey, ct *Ciphertext, totalValue uin
 		return fmt.Errorf("elgamal: VerifyDLEQProof: ciphertext must not be nil")
 	}
 
-	// Deserialize e and z
+	// Deserialize e and z. SetBytes rejects non-canonical encodings and
+	// values outside the scalar field, so no further validation is needed.
 	e, err := new(curvey.ScalarPallas).SetBytes(proof[:CompressedPointSize])
 	if err != nil {
 		return fmt.Errorf("elgamal: VerifyDLEQProof: invalid challenge scalar: %w", err)
@@ -113,8 +121,13 @@ func VerifyDLEQProof(proof []byte, pk *PublicKey, ct *Ciphertext, totalValue uin
 	return nil
 }
 
-// dleqChallenge computes the Fiat-Shamir challenge hash:
-// e = HashToScalar("zally-dleq-v1" || G || pk || C1 || D || R1 || R2)
+// dleqChallenge computes the Fiat-Shamir challenge hash for Chaum-Pedersen:
+//
+//	e = HashToScalar("zally-dleq-v1" || G || pk || C1 || D || R1 || R2)
+//
+// The hash binds the challenge to the full proof statement (G, pk, C1, D) and
+// the prover's commitments (R1, R2), with a domain separator tag to prevent
+// cross-protocol replays. This is the standard Fiat-Shamir transform for DLEQ;
 func dleqChallenge(G, pk, C1, D, R1, R2 curvey.Point) curvey.Scalar {
 	h, _ := blake2b.New256(nil) // unkeyed; never errors
 	h.Write([]byte(dleqDomainTag))
