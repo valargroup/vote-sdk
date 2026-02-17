@@ -141,3 +141,59 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 
 	return &types.MsgDealExecutiveAuthorityKeyResponse{}, nil
 }
+
+// AckExecutiveAuthorityKey handles MsgAckExecutiveAuthorityKey.
+// A registered validator acknowledges receipt of their ea_sk share.
+// When all validators have acked, ceremony transitions DEALT -> CONFIRMED.
+func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.MsgAckExecutiveAuthorityKey) (*types.MsgAckExecutiveAuthorityKeyResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := ms.k.OpenKVStore(ctx)
+
+	state, err := ms.k.GetCeremonyState(kvStore)
+	if err != nil {
+		return nil, err
+	}
+	if state == nil {
+		return nil, fmt.Errorf("%w: no ceremony exists", types.ErrCeremonyWrongStatus)
+	}
+
+	// Only accept acks while DEALT.
+	if state.Status != types.CeremonyStatus_CEREMONY_STATUS_DEALT {
+		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, state.Status)
+	}
+
+	// Validate creator is a registered validator.
+	if _, found := FindValidatorInCeremony(state, msg.Creator); !found {
+		return nil, fmt.Errorf("%w: %s", types.ErrNotRegisteredValidator, msg.Creator)
+	}
+
+	// Reject duplicate ack.
+	if _, found := FindAckForValidator(state, msg.Creator); found {
+		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateAck, msg.Creator)
+	}
+
+	// Record ack.
+	state.Acks = append(state.Acks, &types.AckEntry{
+		ValidatorAddress: msg.Creator,
+		AckSignature:     msg.AckSignature,
+		AckHeight:        uint64(ctx.BlockHeight()),
+	})
+
+	// Check if all validators have acked -> transition to CONFIRMED.
+	confirmed := AllValidatorsAcked(state)
+	if confirmed {
+		state.Status = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+	}
+
+	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeAckExecutiveAuthorityKey,
+		sdk.NewAttribute(types.AttributeKeyValidatorAddress, msg.Creator),
+		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, state.Status.String()),
+	))
+
+	return &types.MsgAckExecutiveAuthorityKeyResponse{}, nil
+}

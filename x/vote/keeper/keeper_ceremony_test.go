@@ -653,3 +653,164 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 		})
 	}
 }
+
+// ===========================================================================
+// MsgAckExecutiveAuthorityKey handler tests (Step 6)
+// ===========================================================================
+
+// dealCeremony registers n validators and deals, leaving the ceremony in DEALT.
+// Returns the validator addresses used.
+func (s *MsgServerTestSuite) dealCeremony(n int) []string {
+	addrs, _ := s.registerValidators(n)
+	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
+		Creator:  "dealer",
+		EaPk:     testPallasPK(),
+		Payloads: makePayloads(addrs),
+	})
+	s.Require().NoError(err)
+	return addrs
+}
+
+func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_HappyPath() {
+	s.SetupTest()
+	addrs := s.dealCeremony(3)
+
+	// First two acks: status stays DEALT.
+	for _, addr := range addrs[:2] {
+		_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+			Creator:      addr,
+			AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		})
+		s.Require().NoError(err)
+
+		kv := s.keeper.OpenKVStore(s.ctx)
+		state, err := s.keeper.GetCeremonyState(kv)
+		s.Require().NoError(err)
+		s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status,
+			"should remain DEALT after %d of %d acks", len(state.Acks), len(state.Validators))
+	}
+
+	// Third (final) ack: triggers CONFIRMED.
+	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+		Creator:      addrs[2],
+		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	state, err := s.keeper.GetCeremonyState(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status)
+	s.Require().Len(state.Acks, 3)
+	for i, ack := range state.Acks {
+		s.Require().Equal(addrs[i], ack.ValidatorAddress)
+		s.Require().Equal(uint64(s.ctx.BlockHeight()), ack.AckHeight)
+	}
+
+	// Verify event emission: one per ack.
+	var ackEvents int
+	for _, e := range s.ctx.EventManager().Events() {
+		if e.Type == types.EventTypeAckExecutiveAuthorityKey {
+			ackEvents++
+		}
+	}
+	s.Require().Equal(3, ackEvents, "expected one event per ack")
+}
+
+func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
+	tests := []struct {
+		name        string
+		setup       func() []string // returns validator addrs from deal
+		msg         func(addrs []string) *types.MsgAckExecutiveAuthorityKey
+		errContains string
+	}{
+		{
+			name: "no ceremony exists",
+			setup: func() []string {
+				return nil
+			},
+			msg: func(_ []string) *types.MsgAckExecutiveAuthorityKey {
+				return &types.MsgAckExecutiveAuthorityKey{
+					Creator:      "val1",
+					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+				}
+			},
+			errContains: "no ceremony exists",
+		},
+		{
+			name: "ceremony still REGISTERING",
+			setup: func() []string {
+				addrs, _ := s.registerValidators(2)
+				return addrs
+			},
+			msg: func(addrs []string) *types.MsgAckExecutiveAuthorityKey {
+				return &types.MsgAckExecutiveAuthorityKey{
+					Creator:      addrs[0],
+					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+				}
+			},
+			errContains: "operation invalid for current ceremony status",
+		},
+		{
+			name: "ceremony already CONFIRMED",
+			setup: func() []string {
+				addrs := s.dealCeremony(1)
+				// Force to CONFIRMED.
+				kv := s.keeper.OpenKVStore(s.ctx)
+				state, _ := s.keeper.GetCeremonyState(kv)
+				state.Status = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+				s.Require().NoError(s.keeper.SetCeremonyState(kv, state))
+				return addrs
+			},
+			msg: func(addrs []string) *types.MsgAckExecutiveAuthorityKey {
+				return &types.MsgAckExecutiveAuthorityKey{
+					Creator:      addrs[0],
+					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+				}
+			},
+			errContains: "operation invalid for current ceremony status",
+		},
+		{
+			name: "non-registered validator",
+			setup: func() []string {
+				return s.dealCeremony(2)
+			},
+			msg: func(_ []string) *types.MsgAckExecutiveAuthorityKey {
+				return &types.MsgAckExecutiveAuthorityKey{
+					Creator:      "outsider",
+					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+				}
+			},
+			errContains: "validator not in ceremony",
+		},
+		{
+			name: "duplicate ack",
+			setup: func() []string {
+				addrs := s.dealCeremony(2)
+				_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+					Creator:      addrs[0],
+					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+				})
+				s.Require().NoError(err)
+				return addrs
+			},
+			msg: func(addrs []string) *types.MsgAckExecutiveAuthorityKey {
+				return &types.MsgAckExecutiveAuthorityKey{
+					Creator:      addrs[0], // same validator again
+					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+				}
+			},
+			errContains: "already acknowledged",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			addrs := tc.setup()
+			_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, tc.msg(addrs))
+			s.Require().Error(err)
+			s.Require().Contains(err.Error(), tc.errContains)
+		})
+	}
+}
