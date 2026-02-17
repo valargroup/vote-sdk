@@ -18,7 +18,6 @@ import (
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -221,70 +220,6 @@ func (AppModule) RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServerImpl(am.keeper))
 	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
-
-	// Register the MsgCreateValidatorWithPallasKey handler separately.
-	// This message is hand-written (not protoc-generated) and its method
-	// descriptor is not in the proto file descriptor registry. The SDK's
-	// RegisterService would panic when trying to register the hybrid handler.
-	// We catch the panic from the hybrid handler registration since the
-	// primary msg handler is registered before the hybrid handler.
-	registerCreateValidatorHandler(cfg.MsgServer(), am.keeper)
-}
-
-// registerCreateValidatorHandler registers the MsgCreateValidatorWithPallasKey
-// handler with the MsgServiceRouter. Since this message type is hand-written
-// (not protoc-generated), its method descriptor is absent from the proto file
-// descriptor registry. The SDK's RegisterService calls both
-// registerMsgServiceHandler (which succeeds) and registerHybridHandler (which
-// panics due to the missing descriptor). We catch the hybrid handler panic
-// since the primary msg handler — the one used by BaseApp.runMsgs() — is
-// already registered by the time the panic occurs.
-func registerCreateValidatorHandler(server grpc.ServiceRegistrar, k keeper.Keeper) {
-	handler := keeper.NewCreateValidatorWithPallasKeyHandler(k)
-
-	// Minimal gRPC ServiceDesc with just the one method.
-	desc := grpc.ServiceDesc{
-		ServiceName: "zvote.v1.Msg",
-		HandlerType: (*types.MsgServer)(nil),
-		Methods: []grpc.MethodDesc{
-			{
-				MethodName: "CreateValidatorWithPallasKey",
-				Handler: func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-					in := new(types.MsgCreateValidatorWithPallasKey)
-					if err := dec(in); err != nil {
-						return nil, err
-					}
-					if interceptor == nil {
-						return handler.Handle(ctx, in)
-					}
-					info := &grpc.UnaryServerInfo{
-						Server:     srv,
-						FullMethod: "/zvote.v1.Msg/CreateValidatorWithPallasKey",
-					}
-					h := func(ctx context.Context, req interface{}) (interface{}, error) {
-						return handler.Handle(ctx, req.(*types.MsgCreateValidatorWithPallasKey))
-					}
-					return interceptor(ctx, in, info, h)
-				},
-			},
-		},
-		Streams:  []grpc.StreamDesc{},
-		Metadata: "zvote/v1/tx.proto",
-	}
-
-	// RegisterService registers the msg handler first, then tries to register
-	// the hybrid handler. The hybrid handler will panic because the proto file
-	// descriptor doesn't include this method. We recover from that panic since
-	// the primary msg handler (used by BaseApp.runMsgs) is already registered.
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				// Expected panic from hybrid handler registration.
-				// The primary msg handler is already registered successfully.
-			}
-		}()
-		server.RegisterService(&desc, handler)
-	}()
 }
 
 // EndBlock computes the commitment tree root and transitions expired ACTIVE

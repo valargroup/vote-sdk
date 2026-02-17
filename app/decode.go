@@ -24,20 +24,6 @@ func CustomTxDecoder(standardDecoder sdk.TxDecoder) sdk.TxDecoder {
 	return func(txBytes []byte) (sdk.Tx, error) {
 		if len(txBytes) > 1 && voteapi.IsCustomTag(txBytes[0]) {
 			if voteapi.IsCeremonyTag(txBytes[0]) {
-				// MsgCreateValidatorWithPallasKey (0x09) is hand-written and
-				// doesn't implement proto.Message, so it needs a dedicated decoder.
-				if txBytes[0] == voteapi.TagCreateValidatorWithPallasKey {
-					msg, err := voteapi.DecodeCreateValidatorWithPallasKeyTx(txBytes)
-					if err != nil {
-						return nil, err
-					}
-					return &voteapi.VoteTxWrapper{
-						RawBytes:    txBytes,
-						Tag:         voteapi.TagCreateValidatorWithPallasKey,
-						CeremonyMsg: msg,
-					}, nil
-				}
-
 				tag, ceremonyMsg, err := voteapi.DecodeCeremonyTx(txBytes)
 				if err != nil {
 					return nil, err

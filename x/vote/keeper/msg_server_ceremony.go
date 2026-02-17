@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
@@ -223,6 +225,17 @@ func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *typ
 	stakingMsg := &stakingtypes.MsgCreateValidator{}
 	if err := stakingMsg.Unmarshal(msg.StakingMsg); err != nil {
 		return nil, fmt.Errorf("failed to decode staking_msg: %w", err)
+	}
+
+	// Unpack the Any-wrapped consensus pubkey so the staking module can
+	// access it via GetCachedValue(). Without this, the pubkey field is
+	// raw bytes and staking's CreateValidator fails with "got <nil>".
+	if stakingMsg.Pubkey != nil {
+		registry := codectypes.NewInterfaceRegistry()
+		cryptocodec.RegisterInterfaces(registry)
+		if err := stakingMsg.UnpackInterfaces(registry); err != nil {
+			return nil, fmt.Errorf("failed to unpack staking_msg pubkey: %w", err)
+		}
 	}
 
 	// Validate pallas_pk: 32 bytes, valid Pallas point, not identity.

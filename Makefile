@@ -1,7 +1,7 @@
 BINARY = zallyd
 HOME_DIR = $(HOME)/.zallyd
 
-.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-api test-api-restart test-api-reinit test-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi
+.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-api test-api-restart test-api-reinit test-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi
 
 ## install: Build and install the zallyd binary to $GOPATH/bin
 install:
@@ -35,6 +35,26 @@ start:
 clean:
 	rm -rf $(HOME_DIR)
 	rm -f $(BINARY)
+
+## init-multi: Initialize a 3-validator chain on localhost (wipes existing data)
+init-multi: install
+	bash scripts/init_multi.sh
+
+## stop-multi: Stop all multi-validator processes
+stop-multi:
+	@if [ -f $(HOME)/.zallyd-multi-pids ]; then \
+		echo "Stopping validators..."; \
+		while read pid; do \
+			kill "$$pid" 2>/dev/null && echo "  Killed PID $$pid" || echo "  PID $$pid already stopped"; \
+		done < $(HOME)/.zallyd-multi-pids; \
+		rm -f $(HOME)/.zallyd-multi-pids; \
+	else \
+		echo "No PID file found at $(HOME)/.zallyd-multi-pids"; \
+	fi
+
+## clean-multi: Remove all multi-validator data directories
+clean-multi: stop-multi
+	rm -rf $(HOME)/.zallyd-val1 $(HOME)/.zallyd-val2 $(HOME)/.zallyd-val3
 
 ## fmt: Format Go code
 fmt:

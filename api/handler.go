@@ -131,10 +131,10 @@ func (h *Handler) handleDealEAKey(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleCreateValidatorWithPallasKey(w http.ResponseWriter, r *http.Request) {
 	msg := &types.MsgCreateValidatorWithPallasKey{}
-	if !h.decodeCeremonyMsgManual(w, r, msg) {
+	if !h.decodeCeremonyMsg(w, r, msg) {
 		return
 	}
-	h.broadcastCeremonyTxCreateValidator(w, msg)
+	h.broadcastCeremonyTx(w, msg, TagCreateValidatorWithPallasKey)
 }
 
 // decodeCeremonyMsg reads the JSON request body and unmarshals it into the
@@ -156,48 +156,6 @@ func (h *Handler) decodeCeremonyMsg(w http.ResponseWriter, r *http.Request, msg 
 		return false
 	}
 	return true
-}
-
-// decodeCeremonyMsgManual reads the JSON request body and unmarshals it into
-// a hand-written (non-protoc-generated) message using standard encoding/json.
-func (h *Handler) decodeCeremonyMsgManual(w http.ResponseWriter, r *http.Request, msg interface{}) bool {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
-		return false
-	}
-	if len(body) == 0 {
-		writeError(w, http.StatusBadRequest, "empty request body")
-		return false
-	}
-	if err := json.Unmarshal(body, msg); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
-		return false
-	}
-	return true
-}
-
-// broadcastCeremonyTxCreateValidator encodes a MsgCreateValidatorWithPallasKey
-// to wire format and broadcasts it. Uses the manual protowire encoder since
-// this type is not protoc-generated.
-func (h *Handler) broadcastCeremonyTxCreateValidator(w http.ResponseWriter, msg *types.MsgCreateValidatorWithPallasKey) {
-	raw, err := EncodeCeremonyTxCreateValidator(msg)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("encode failed: %v", err))
-		return
-	}
-
-	start := time.Now()
-	result, err := h.cometBroadcastTxSync(raw)
-	elapsed := time.Since(start)
-	log.Printf("[zally-api] broadcast_tx_sync ceremony duration_ms=%d tag=0x%02x", elapsed.Milliseconds(), TagCreateValidatorWithPallasKey)
-	if err != nil {
-		log.Printf("[zally-api] broadcast_tx_sync ceremony failed: %v", err)
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("broadcast failed: %v", err))
-		return
-	}
-
-	writeJSON(w, http.StatusOK, result)
 }
 
 // broadcastCeremonyTx encodes a ceremony message to wire format and broadcasts

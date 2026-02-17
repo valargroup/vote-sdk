@@ -2,6 +2,7 @@ package app
 
 import (
 	"io"
+	"strings"
 
 	dbm "github.com/cosmos/cosmos-db"
 
@@ -62,6 +63,9 @@ type ZallyApp struct {
 
 	// Vote module keeper.
 	VoteKeeper votekeeper.Keeper
+
+	// CometBFT RPC endpoint for the vote API handler (read from app.toml vote.comet_rpc).
+	cometRPC string
 }
 
 func init() {
@@ -131,9 +135,11 @@ func NewZallyApp(
 	// Read config paths for auto-injection handlers.
 	eaSkPath, _ := appOpts.Get("vote.ea_sk_path").(string)
 	pallasSkPath, _ := appOpts.Get("vote.pallas_sk_path").(string)
+	app.cometRPC, _ = appOpts.Get("vote.comet_rpc").(string)
 	logger.Info("Auto-injection config",
 		"vote.ea_sk_path", eaSkPath,
-		"vote.pallas_sk_path", pallasSkPath)
+		"vote.pallas_sk_path", pallasSkPath,
+		"vote.comet_rpc", app.cometRPC)
 
 	// Install composed PrepareProposal handler:
 	// 1. Ceremony ack injection: auto-ack when ceremony is DEALT
@@ -245,8 +251,16 @@ func (app *ZallyApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 	app.App.RegisterAPIRoutes(apiSvr, apiConfig)
 
 	// Register vote module REST endpoints (tx submission + queries).
+	// Use the CometBFT RPC address from app.toml [vote] section so it
+	// works regardless of port offsets (e.g. multi-validator local setups).
+	cometRPC := app.cometRPC
+	if cometRPC == "" {
+		cometRPC = "http://localhost:26657"
+	} else if strings.HasPrefix(cometRPC, "tcp://") {
+		cometRPC = "http://" + strings.TrimPrefix(cometRPC, "tcp://")
+	}
 	voteHandler := voteapi.NewHandler(voteapi.HandlerConfig{
-		CometRPCEndpoint: "http://localhost:26657",
+		CometRPCEndpoint: cometRPC,
 	})
 	voteHandler.RegisterTxRoutes(apiSvr.Router)
 	voteHandler.RegisterQueryRoutes(apiSvr.Router, apiSvr.ClientCtx)
