@@ -1,7 +1,7 @@
 BINARY = zallyd
 HOME_DIR = $(HOME)/.zallyd
 
-.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi
+.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi
 
 ## install: Build and install the zallyd binary to $GOPATH/bin
 install:
@@ -89,6 +89,10 @@ test-api:
 
 ## test-e2e: Alias for test-api (Rust E2E tests)
 test-e2e: test-api
+
+## test-ceremony-e2e: Rust E2E ceremony lifecycle test against a running 3-validator chain (requires: make init-multi)
+test-ceremony-e2e:
+	ZALLY_API_URL=http://localhost:1418 cargo test --release --manifest-path ../e2e-tests/Cargo.toml ceremony_lifecycle_multi_validator -- --nocapture --ignored
 
 ## test-api-restart: init + test-api (full API test cycle; chain must be stopped first)
 test-api-restart: init test-api

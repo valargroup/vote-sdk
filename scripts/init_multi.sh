@@ -10,6 +10,9 @@
 #   # or: make init-multi
 set -e
 
+# Ensure Go toolchain matches go.mod (system may have a newer default).
+export GOTOOLCHAIN=go1.23.12
+
 CHAIN_ID="zvote-1"
 BINARY="zallyd"
 DENOM="stake"
@@ -50,6 +53,20 @@ PID_FILE="$HOME/.zallyd-multi-pids"
 # Cleanup
 # ---------------------------------------------------------------------------
 echo "=== Cleaning up previous multi-validator data ==="
+
+# Kill any running zallyd processes for these home directories (catches stale
+# processes from previous sessions that aren't tracked in the PID file).
+for home in "${HOMES[@]}"; do
+    pkill -f "zallyd start --home ${home}" 2>/dev/null || true
+done
+# Also kill PIDs from the PID file if it exists.
+if [ -f "$PID_FILE" ]; then
+    while read -r pid; do
+        kill "$pid" 2>/dev/null || true
+    done < "$PID_FILE"
+fi
+sleep 1
+
 for home in "${HOMES[@]}"; do
     rm -rf "$home"
 done
