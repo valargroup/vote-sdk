@@ -16,7 +16,7 @@ import (
 )
 
 // RegisterPallasKey handles MsgRegisterPallasKey.
-// On first call (state nil or INITIALIZING), transitions to REGISTERING and
+// On first call (state nil or idle REGISTERING with phase_timeout==0),
 // starts the registration phase timer. Then appends the validator's Pallas
 // public key to the ceremony's validator list.
 func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegisterPallasKey) (*types.MsgRegisterPallasKeyResponse, error) {
@@ -28,8 +28,8 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 		return nil, err
 	}
 
-	// First registration: create ceremony and transition to REGISTERING.
-	if state == nil || state.Status == types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING {
+	// First registration: create ceremony and start the timer.
+	if state == nil || (state.Status == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING && state.PhaseTimeout == 0) {
 		state = &types.CeremonyState{
 			Status:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 			PhaseStart:   uint64(ctx.BlockTime().Unix()),
@@ -213,9 +213,9 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 }
 
 // ReInitializeElectionAuthority handles MsgReInitializeElectionAuthority.
-// Resets the ceremony state back to INITIALIZING so a new key ceremony can begin.
-// Only allowed when no ceremony session is in progress (REGISTERING or DEALT)
-// and no voting session is active or tallying.
+// Resets the ceremony state back to idle REGISTERING (phase_timeout=0) so a
+// new key ceremony can begin. Only allowed when no ceremony session is
+// actively in progress and no voting session is active or tallying.
 func (ms msgServer) ReInitializeElectionAuthority(goCtx context.Context, msg *types.MsgReInitializeElectionAuthority) (*types.MsgReInitializeElectionAuthorityResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
@@ -226,10 +226,13 @@ func (ms msgServer) ReInitializeElectionAuthority(goCtx context.Context, msg *ty
 	}
 
 	// Reject if a ceremony session is actively in progress.
+	// Active REGISTERING has PhaseTimeout > 0 (timer running).
+	// Idle REGISTERING (PhaseTimeout == 0) is allowed (same as the old INITIALIZING).
 	if state != nil {
-		switch state.Status {
-		case types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-			types.CeremonyStatus_CEREMONY_STATUS_DEALT:
+		switch {
+		case state.Status == types.CeremonyStatus_CEREMONY_STATUS_DEALT:
+			return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonySessionActive, state.Status)
+		case state.Status == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING && state.PhaseTimeout > 0:
 			return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonySessionActive, state.Status)
 		}
 	}
@@ -244,9 +247,9 @@ func (ms msgServer) ReInitializeElectionAuthority(goCtx context.Context, msg *ty
 		return nil, fmt.Errorf("%w: cannot reset ceremony while voting sessions are in progress", types.ErrVotingSessionActive)
 	}
 
-	// Reset to a fresh INITIALIZING state.
+	// Reset to idle REGISTERING state (phase_timeout=0, no timer).
 	state = &types.CeremonyState{
-		Status: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+		Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 	}
 
 	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {
@@ -310,8 +313,8 @@ func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *typ
 		return nil, err
 	}
 
-	// First registration: create ceremony and transition to REGISTERING.
-	if state == nil || state.Status == types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING {
+	// First registration: create ceremony and start the timer.
+	if state == nil || (state.Status == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING && state.PhaseTimeout == 0) {
 		state = &types.CeremonyState{
 			Status:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 			PhaseStart:   uint64(ctx.BlockTime().Unix()),
