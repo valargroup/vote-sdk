@@ -19,5 +19,8 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgCastVote{},
 		&MsgRevealShare{},
 		&MsgSubmitTally{},
+		&MsgRegisterPallasKey{},
+		&MsgDealExecutiveAuthorityKey{},
+		&MsgAckExecutiveAuthorityKey{},
 	)
 }

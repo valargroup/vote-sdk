@@ -51,6 +51,9 @@ var (
 	// appended during that block: 0x08 || big-endian uint64 height -> (start_index uint64 BE, count uint64 BE)
 	// Written by EndBlocker when tree root changes. Used by the CommitmentLeaves query.
 	BlockLeafIndexPrefix = []byte{0x08}
+
+	// CeremonyStateKey stores the singleton EA key ceremony state: single key -> CeremonyState (protobuf)
+	CeremonyStateKey = []byte{0x09}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
