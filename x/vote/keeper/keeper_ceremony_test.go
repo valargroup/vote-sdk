@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 
+	"github.com/z-cale/zally/crypto/ecies"
 	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
@@ -813,4 +814,141 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 			s.Require().Contains(err.Error(), tc.errContains)
 		})
 	}
+}
+
+// ===========================================================================
+// Full ceremony integration test with real ECIES (Step 10)
+// ===========================================================================
+
+func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
+	s.SetupTest()
+	G := elgamal.PallasGenerator()
+	const numValidators = 3
+
+	// 1. Generate 3 validator keypairs (sk_i, pk_i).
+	type validatorKeys struct {
+		sk *elgamal.SecretKey
+		pk *elgamal.PublicKey
+	}
+	validators := make([]validatorKeys, numValidators)
+	addrs := make([]string, numValidators)
+	for i := range validators {
+		sk, pk := elgamal.KeyGen(rand.Reader)
+		validators[i] = validatorKeys{sk: sk, pk: pk}
+		addrs[i] = fmt.Sprintf("val%d", i+1)
+	}
+
+	// 2. Register all 3 pk_i via MsgRegisterPallasKey.
+	for i, v := range validators {
+		_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+			Creator:  addrs[i],
+			PallasPk: v.pk.Point.ToAffineCompressed(),
+		})
+		s.Require().NoError(err, "register validator %d", i)
+	}
+
+	// 3. Generate ea_sk, ea_pk.
+	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
+	eaSkBytes, err := elgamal.MarshalSecretKey(eaSk)
+	s.Require().NoError(err)
+	eaPkBytes := eaPk.Point.ToAffineCompressed()
+
+	// 4. For each validator, encrypt ea_sk to pk_i using ECIES.
+	payloads := make([]*types.DealerPayload, numValidators)
+	for i, v := range validators {
+		env, err := ecies.Encrypt(G, v.pk.Point, eaSkBytes, rand.Reader)
+		s.Require().NoError(err, "ECIES encrypt for validator %d", i)
+
+		payloads[i] = &types.DealerPayload{
+			ValidatorAddress: addrs[i],
+			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+			Ciphertext:       env.Ciphertext,
+		}
+	}
+
+	// 5. Submit MsgDealExecutiveAuthorityKey.
+	_, err = s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
+		Creator:  "dealer",
+		EaPk:     eaPkBytes,
+		Payloads: payloads,
+	})
+	s.Require().NoError(err)
+
+	// Verify DEALT status.
+	kv := s.keeper.OpenKVStore(s.ctx)
+	state, err := s.keeper.GetCeremonyState(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
+
+	// 6. For each validator: decrypt, verify, ack.
+	for i, v := range validators {
+		// 6a. Grab their (E_i, ct_i) from ceremony state.
+		payload := state.Payloads[i]
+		s.Require().Equal(addrs[i], payload.ValidatorAddress)
+
+		// Reconstruct the ECIES envelope from on-chain bytes.
+		ephPk, err := elgamal.UnmarshalPublicKey(payload.EphemeralPk)
+		s.Require().NoError(err, "unmarshal ephemeral_pk for validator %d", i)
+
+		env := &ecies.Envelope{
+			Ephemeral:  ephPk.Point,
+			Ciphertext: payload.Ciphertext,
+		}
+
+		// 6b. Decrypt using sk_i.
+		decryptedEaSk, err := ecies.Decrypt(v.sk.Scalar, env)
+		s.Require().NoError(err, "ECIES decrypt for validator %d", i)
+
+		// 6c. Verify decrypted bytes == ea_sk bytes.
+		s.Require().Equal(eaSkBytes, decryptedEaSk,
+			"decrypted ea_sk mismatch for validator %d", i)
+
+		// 6d. Verify ea_sk * G == ea_pk.
+		recoveredSk, err := elgamal.UnmarshalSecretKey(decryptedEaSk)
+		s.Require().NoError(err)
+		recoveredPk := G.Mul(recoveredSk.Scalar)
+		s.Require().Equal(eaPkBytes, recoveredPk.ToAffineCompressed(),
+			"recovered ea_pk mismatch for validator %d", i)
+
+		// 6e. Submit MsgAckExecutiveAuthorityKey.
+		_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+			Creator:      addrs[i],
+			AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		})
+		s.Require().NoError(err, "ack for validator %d", i)
+	}
+
+	// 7. Verify ceremony is CONFIRMED.
+	state, err = s.keeper.GetCeremonyState(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status)
+	s.Require().Len(state.Acks, numValidators)
+	s.Require().Equal(eaPkBytes, state.EaPk)
+
+	// 8. Create a voting session, verify round.EaPk == ea_pk.
+	msg := &types.MsgCreateVotingSession{
+		Creator:           "zvote1admin",
+		SnapshotHeight:    100,
+		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
+		ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
+		VoteEndTime:       2_000_000,
+		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
+		Proposals: []*types.Proposal{
+			{Id: 1, Title: "Proposal A", Description: "First"},
+			{Id: 2, Title: "Proposal B", Description: "Second"},
+		},
+	}
+	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	s.Require().NoError(err)
+	s.Require().NotEmpty(resp.VoteRoundId)
+
+	// Read the round back and verify ea_pk matches the ceremony's.
+	round, err := s.keeper.GetVoteRound(kv, resp.VoteRoundId)
+	s.Require().NoError(err)
+	s.Require().Equal(eaPkBytes, round.EaPk,
+		"round.EaPk should match the ceremony's confirmed ea_pk")
 }
