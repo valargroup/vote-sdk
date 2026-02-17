@@ -60,6 +60,9 @@ func Encrypt(G, recipientPK curvey.Point, plaintext []byte, rng io.Reader) (*Env
 
 	// S = e * recipientPK (ECDH shared secret)
 	S := recipientPK.Mul(e)
+	if S == nil || S.IsIdentity() {
+		return nil, fmt.Errorf("ecies: Encrypt: ECDH shared secret is the identity point (degenerate)")
+	}
 
 	// Derive symmetric key
 	key := deriveKey(E, S)
@@ -100,6 +103,9 @@ func Decrypt(recipientSK curvey.Scalar, env *Envelope) ([]byte, error) {
 
 	// S = sk * E (ECDH shared secret)
 	S := env.Ephemeral.Mul(recipientSK)
+	if S == nil || S.IsIdentity() {
+		return nil, fmt.Errorf("ecies: Decrypt: ECDH shared secret is the identity point (degenerate)")
+	}
 
 	// Derive symmetric key
 	key := deriveKey(env.Ephemeral, S)
