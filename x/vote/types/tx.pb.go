@@ -1188,6 +1188,89 @@ func (*MsgCreateValidatorWithPallasKeyResponse) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{18}
 }
 
+// MsgReInitializeElectionAuthority resets the EA key ceremony back to INITIALIZING.
+// Can only be submitted when no ceremony session is in progress (REGISTERING or DEALT).
+// Allowed when ceremony is nil, UNSPECIFIED, INITIALIZING, or CONFIRMED.
+type MsgReInitializeElectionAuthority struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"` // Validator address
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgReInitializeElectionAuthority) Reset() {
+	*x = MsgReInitializeElectionAuthority{}
+	mi := &file_zvote_v1_tx_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgReInitializeElectionAuthority) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgReInitializeElectionAuthority) ProtoMessage() {}
+
+func (x *MsgReInitializeElectionAuthority) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_tx_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgReInitializeElectionAuthority.ProtoReflect.Descriptor instead.
+func (*MsgReInitializeElectionAuthority) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *MsgReInitializeElectionAuthority) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+type MsgReInitializeElectionAuthorityResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgReInitializeElectionAuthorityResponse) Reset() {
+	*x = MsgReInitializeElectionAuthorityResponse{}
+	mi := &file_zvote_v1_tx_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgReInitializeElectionAuthorityResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgReInitializeElectionAuthorityResponse) ProtoMessage() {}
+
+func (x *MsgReInitializeElectionAuthorityResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_tx_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgReInitializeElectionAuthorityResponse.ProtoReflect.Descriptor instead.
+func (*MsgReInitializeElectionAuthorityResponse) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{20}
+}
+
 var File_zvote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_tx_proto_rawDesc = "" +
@@ -1278,7 +1361,10 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\vstaking_msg\x18\x01 \x01(\fR\n" +
 	"stakingMsg\x12\x1b\n" +
 	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\")\n" +
-	"'MsgCreateValidatorWithPallasKeyResponse2\xd7\x06\n" +
+	"'MsgCreateValidatorWithPallasKeyResponse\"<\n" +
+	" MsgReInitializeElectionAuthority\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\"*\n" +
+	"(MsgReInitializeElectionAuthorityResponse2\xd8\a\n" +
 	"\x03Msg\x12a\n" +
 	"\x13CreateVotingSession\x12 .zvote.v1.MsgCreateVotingSession\x1a(.zvote.v1.MsgCreateVotingSessionResponse\x12L\n" +
 	"\fDelegateVote\x12\x19.zvote.v1.MsgDelegateVote\x1a!.zvote.v1.MsgDelegateVoteResponse\x12@\n" +
@@ -1288,7 +1374,8 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\x11RegisterPallasKey\x12\x1e.zvote.v1.MsgRegisterPallasKey\x1a&.zvote.v1.MsgRegisterPallasKeyResponse\x12s\n" +
 	"\x19DealExecutiveAuthorityKey\x12&.zvote.v1.MsgDealExecutiveAuthorityKey\x1a..zvote.v1.MsgDealExecutiveAuthorityKeyResponse\x12p\n" +
 	"\x18AckExecutiveAuthorityKey\x12%.zvote.v1.MsgAckExecutiveAuthorityKey\x1a-.zvote.v1.MsgAckExecutiveAuthorityKeyResponse\x12|\n" +
-	"\x1cCreateValidatorWithPallasKey\x12).zvote.v1.MsgCreateValidatorWithPallasKey\x1a1.zvote.v1.MsgCreateValidatorWithPallasKeyResponse\x1a\x05\x80\xe7\xb0*\x01B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
+	"\x1cCreateValidatorWithPallasKey\x12).zvote.v1.MsgCreateValidatorWithPallasKey\x1a1.zvote.v1.MsgCreateValidatorWithPallasKeyResponse\x12\x7f\n" +
+	"\x1dReInitializeElectionAuthority\x12*.zvote.v1.MsgReInitializeElectionAuthority\x1a2.zvote.v1.MsgReInitializeElectionAuthorityResponse\x1a\x05\x80\xe7\xb0*\x01B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
 var (
 	file_zvote_v1_tx_proto_rawDescOnce sync.Once
@@ -1302,34 +1389,36 @@ func file_zvote_v1_tx_proto_rawDescGZIP() []byte {
 	return file_zvote_v1_tx_proto_rawDescData
 }
 
-var file_zvote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_zvote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_zvote_v1_tx_proto_goTypes = []any{
-	(*MsgCreateVotingSession)(nil),                  // 0: zvote.v1.MsgCreateVotingSession
-	(*MsgCreateVotingSessionResponse)(nil),          // 1: zvote.v1.MsgCreateVotingSessionResponse
-	(*MsgDelegateVote)(nil),                         // 2: zvote.v1.MsgDelegateVote
-	(*MsgDelegateVoteResponse)(nil),                 // 3: zvote.v1.MsgDelegateVoteResponse
-	(*MsgCastVote)(nil),                             // 4: zvote.v1.MsgCastVote
-	(*MsgCastVoteResponse)(nil),                     // 5: zvote.v1.MsgCastVoteResponse
-	(*MsgRevealShare)(nil),                          // 6: zvote.v1.MsgRevealShare
-	(*MsgRevealShareResponse)(nil),                  // 7: zvote.v1.MsgRevealShareResponse
-	(*MsgSubmitTally)(nil),                          // 8: zvote.v1.MsgSubmitTally
-	(*TallyEntry)(nil),                              // 9: zvote.v1.TallyEntry
-	(*MsgSubmitTallyResponse)(nil),                  // 10: zvote.v1.MsgSubmitTallyResponse
-	(*MsgRegisterPallasKey)(nil),                    // 11: zvote.v1.MsgRegisterPallasKey
-	(*MsgRegisterPallasKeyResponse)(nil),            // 12: zvote.v1.MsgRegisterPallasKeyResponse
-	(*MsgDealExecutiveAuthorityKey)(nil),            // 13: zvote.v1.MsgDealExecutiveAuthorityKey
-	(*MsgDealExecutiveAuthorityKeyResponse)(nil),    // 14: zvote.v1.MsgDealExecutiveAuthorityKeyResponse
-	(*MsgAckExecutiveAuthorityKey)(nil),             // 15: zvote.v1.MsgAckExecutiveAuthorityKey
-	(*MsgAckExecutiveAuthorityKeyResponse)(nil),     // 16: zvote.v1.MsgAckExecutiveAuthorityKeyResponse
-	(*MsgCreateValidatorWithPallasKey)(nil),         // 17: zvote.v1.MsgCreateValidatorWithPallasKey
-	(*MsgCreateValidatorWithPallasKeyResponse)(nil), // 18: zvote.v1.MsgCreateValidatorWithPallasKeyResponse
-	(*Proposal)(nil),                                // 19: zvote.v1.Proposal
-	(*DealerPayload)(nil),                           // 20: zvote.v1.DealerPayload
+	(*MsgCreateVotingSession)(nil),                   // 0: zvote.v1.MsgCreateVotingSession
+	(*MsgCreateVotingSessionResponse)(nil),           // 1: zvote.v1.MsgCreateVotingSessionResponse
+	(*MsgDelegateVote)(nil),                          // 2: zvote.v1.MsgDelegateVote
+	(*MsgDelegateVoteResponse)(nil),                  // 3: zvote.v1.MsgDelegateVoteResponse
+	(*MsgCastVote)(nil),                              // 4: zvote.v1.MsgCastVote
+	(*MsgCastVoteResponse)(nil),                      // 5: zvote.v1.MsgCastVoteResponse
+	(*MsgRevealShare)(nil),                           // 6: zvote.v1.MsgRevealShare
+	(*MsgRevealShareResponse)(nil),                   // 7: zvote.v1.MsgRevealShareResponse
+	(*MsgSubmitTally)(nil),                           // 8: zvote.v1.MsgSubmitTally
+	(*TallyEntry)(nil),                               // 9: zvote.v1.TallyEntry
+	(*MsgSubmitTallyResponse)(nil),                   // 10: zvote.v1.MsgSubmitTallyResponse
+	(*MsgRegisterPallasKey)(nil),                     // 11: zvote.v1.MsgRegisterPallasKey
+	(*MsgRegisterPallasKeyResponse)(nil),             // 12: zvote.v1.MsgRegisterPallasKeyResponse
+	(*MsgDealExecutiveAuthorityKey)(nil),             // 13: zvote.v1.MsgDealExecutiveAuthorityKey
+	(*MsgDealExecutiveAuthorityKeyResponse)(nil),     // 14: zvote.v1.MsgDealExecutiveAuthorityKeyResponse
+	(*MsgAckExecutiveAuthorityKey)(nil),              // 15: zvote.v1.MsgAckExecutiveAuthorityKey
+	(*MsgAckExecutiveAuthorityKeyResponse)(nil),      // 16: zvote.v1.MsgAckExecutiveAuthorityKeyResponse
+	(*MsgCreateValidatorWithPallasKey)(nil),          // 17: zvote.v1.MsgCreateValidatorWithPallasKey
+	(*MsgCreateValidatorWithPallasKeyResponse)(nil),  // 18: zvote.v1.MsgCreateValidatorWithPallasKeyResponse
+	(*MsgReInitializeElectionAuthority)(nil),         // 19: zvote.v1.MsgReInitializeElectionAuthority
+	(*MsgReInitializeElectionAuthorityResponse)(nil), // 20: zvote.v1.MsgReInitializeElectionAuthorityResponse
+	(*Proposal)(nil),                                 // 21: zvote.v1.Proposal
+	(*DealerPayload)(nil),                            // 22: zvote.v1.DealerPayload
 }
 var file_zvote_v1_tx_proto_depIdxs = []int32{
-	19, // 0: zvote.v1.MsgCreateVotingSession.proposals:type_name -> zvote.v1.Proposal
+	21, // 0: zvote.v1.MsgCreateVotingSession.proposals:type_name -> zvote.v1.Proposal
 	9,  // 1: zvote.v1.MsgSubmitTally.entries:type_name -> zvote.v1.TallyEntry
-	20, // 2: zvote.v1.MsgDealExecutiveAuthorityKey.payloads:type_name -> zvote.v1.DealerPayload
+	22, // 2: zvote.v1.MsgDealExecutiveAuthorityKey.payloads:type_name -> zvote.v1.DealerPayload
 	0,  // 3: zvote.v1.Msg.CreateVotingSession:input_type -> zvote.v1.MsgCreateVotingSession
 	2,  // 4: zvote.v1.Msg.DelegateVote:input_type -> zvote.v1.MsgDelegateVote
 	4,  // 5: zvote.v1.Msg.CastVote:input_type -> zvote.v1.MsgCastVote
@@ -1339,17 +1428,19 @@ var file_zvote_v1_tx_proto_depIdxs = []int32{
 	13, // 9: zvote.v1.Msg.DealExecutiveAuthorityKey:input_type -> zvote.v1.MsgDealExecutiveAuthorityKey
 	15, // 10: zvote.v1.Msg.AckExecutiveAuthorityKey:input_type -> zvote.v1.MsgAckExecutiveAuthorityKey
 	17, // 11: zvote.v1.Msg.CreateValidatorWithPallasKey:input_type -> zvote.v1.MsgCreateValidatorWithPallasKey
-	1,  // 12: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
-	3,  // 13: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
-	5,  // 14: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
-	7,  // 15: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
-	10, // 16: zvote.v1.Msg.SubmitTally:output_type -> zvote.v1.MsgSubmitTallyResponse
-	12, // 17: zvote.v1.Msg.RegisterPallasKey:output_type -> zvote.v1.MsgRegisterPallasKeyResponse
-	14, // 18: zvote.v1.Msg.DealExecutiveAuthorityKey:output_type -> zvote.v1.MsgDealExecutiveAuthorityKeyResponse
-	16, // 19: zvote.v1.Msg.AckExecutiveAuthorityKey:output_type -> zvote.v1.MsgAckExecutiveAuthorityKeyResponse
-	18, // 20: zvote.v1.Msg.CreateValidatorWithPallasKey:output_type -> zvote.v1.MsgCreateValidatorWithPallasKeyResponse
-	12, // [12:21] is the sub-list for method output_type
-	3,  // [3:12] is the sub-list for method input_type
+	19, // 12: zvote.v1.Msg.ReInitializeElectionAuthority:input_type -> zvote.v1.MsgReInitializeElectionAuthority
+	1,  // 13: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
+	3,  // 14: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
+	5,  // 15: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
+	7,  // 16: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
+	10, // 17: zvote.v1.Msg.SubmitTally:output_type -> zvote.v1.MsgSubmitTallyResponse
+	12, // 18: zvote.v1.Msg.RegisterPallasKey:output_type -> zvote.v1.MsgRegisterPallasKeyResponse
+	14, // 19: zvote.v1.Msg.DealExecutiveAuthorityKey:output_type -> zvote.v1.MsgDealExecutiveAuthorityKeyResponse
+	16, // 20: zvote.v1.Msg.AckExecutiveAuthorityKey:output_type -> zvote.v1.MsgAckExecutiveAuthorityKeyResponse
+	18, // 21: zvote.v1.Msg.CreateValidatorWithPallasKey:output_type -> zvote.v1.MsgCreateValidatorWithPallasKeyResponse
+	20, // 22: zvote.v1.Msg.ReInitializeElectionAuthority:output_type -> zvote.v1.MsgReInitializeElectionAuthorityResponse
+	13, // [13:23] is the sub-list for method output_type
+	3,  // [3:13] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -1367,7 +1458,7 @@ func file_zvote_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_tx_proto_rawDesc), len(file_zvote_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -19,15 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Msg_CreateVotingSession_FullMethodName          = "/zvote.v1.Msg/CreateVotingSession"
-	Msg_DelegateVote_FullMethodName                 = "/zvote.v1.Msg/DelegateVote"
-	Msg_CastVote_FullMethodName                     = "/zvote.v1.Msg/CastVote"
-	Msg_RevealShare_FullMethodName                  = "/zvote.v1.Msg/RevealShare"
-	Msg_SubmitTally_FullMethodName                  = "/zvote.v1.Msg/SubmitTally"
-	Msg_RegisterPallasKey_FullMethodName            = "/zvote.v1.Msg/RegisterPallasKey"
-	Msg_DealExecutiveAuthorityKey_FullMethodName    = "/zvote.v1.Msg/DealExecutiveAuthorityKey"
-	Msg_AckExecutiveAuthorityKey_FullMethodName     = "/zvote.v1.Msg/AckExecutiveAuthorityKey"
-	Msg_CreateValidatorWithPallasKey_FullMethodName = "/zvote.v1.Msg/CreateValidatorWithPallasKey"
+	Msg_CreateVotingSession_FullMethodName           = "/zvote.v1.Msg/CreateVotingSession"
+	Msg_DelegateVote_FullMethodName                  = "/zvote.v1.Msg/DelegateVote"
+	Msg_CastVote_FullMethodName                      = "/zvote.v1.Msg/CastVote"
+	Msg_RevealShare_FullMethodName                   = "/zvote.v1.Msg/RevealShare"
+	Msg_SubmitTally_FullMethodName                   = "/zvote.v1.Msg/SubmitTally"
+	Msg_RegisterPallasKey_FullMethodName             = "/zvote.v1.Msg/RegisterPallasKey"
+	Msg_DealExecutiveAuthorityKey_FullMethodName     = "/zvote.v1.Msg/DealExecutiveAuthorityKey"
+	Msg_AckExecutiveAuthorityKey_FullMethodName      = "/zvote.v1.Msg/AckExecutiveAuthorityKey"
+	Msg_CreateValidatorWithPallasKey_FullMethodName  = "/zvote.v1.Msg/CreateValidatorWithPallasKey"
+	Msg_ReInitializeElectionAuthority_FullMethodName = "/zvote.v1.Msg/ReInitializeElectionAuthority"
 )
 
 // MsgClient is the client API for Msg service.
@@ -48,6 +49,7 @@ type MsgClient interface {
 	DealExecutiveAuthorityKey(ctx context.Context, in *MsgDealExecutiveAuthorityKey, opts ...grpc.CallOption) (*MsgDealExecutiveAuthorityKeyResponse, error)
 	AckExecutiveAuthorityKey(ctx context.Context, in *MsgAckExecutiveAuthorityKey, opts ...grpc.CallOption) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(ctx context.Context, in *MsgCreateValidatorWithPallasKey, opts ...grpc.CallOption) (*MsgCreateValidatorWithPallasKeyResponse, error)
+	ReInitializeElectionAuthority(ctx context.Context, in *MsgReInitializeElectionAuthority, opts ...grpc.CallOption) (*MsgReInitializeElectionAuthorityResponse, error)
 }
 
 type msgClient struct {
@@ -148,6 +150,16 @@ func (c *msgClient) CreateValidatorWithPallasKey(ctx context.Context, in *MsgCre
 	return out, nil
 }
 
+func (c *msgClient) ReInitializeElectionAuthority(ctx context.Context, in *MsgReInitializeElectionAuthority, opts ...grpc.CallOption) (*MsgReInitializeElectionAuthorityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgReInitializeElectionAuthorityResponse)
+	err := c.cc.Invoke(ctx, Msg_ReInitializeElectionAuthority_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MsgServer is the server API for Msg service.
 // All implementations must embed UnimplementedMsgServer
 // for forward compatibility.
@@ -166,6 +178,7 @@ type MsgServer interface {
 	DealExecutiveAuthorityKey(context.Context, *MsgDealExecutiveAuthorityKey) (*MsgDealExecutiveAuthorityKeyResponse, error)
 	AckExecutiveAuthorityKey(context.Context, *MsgAckExecutiveAuthorityKey) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(context.Context, *MsgCreateValidatorWithPallasKey) (*MsgCreateValidatorWithPallasKeyResponse, error)
+	ReInitializeElectionAuthority(context.Context, *MsgReInitializeElectionAuthority) (*MsgReInitializeElectionAuthorityResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
 
@@ -202,6 +215,9 @@ func (UnimplementedMsgServer) AckExecutiveAuthorityKey(context.Context, *MsgAckE
 }
 func (UnimplementedMsgServer) CreateValidatorWithPallasKey(context.Context, *MsgCreateValidatorWithPallasKey) (*MsgCreateValidatorWithPallasKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateValidatorWithPallasKey not implemented")
+}
+func (UnimplementedMsgServer) ReInitializeElectionAuthority(context.Context, *MsgReInitializeElectionAuthority) (*MsgReInitializeElectionAuthorityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReInitializeElectionAuthority not implemented")
 }
 func (UnimplementedMsgServer) mustEmbedUnimplementedMsgServer() {}
 func (UnimplementedMsgServer) testEmbeddedByValue()             {}
@@ -386,6 +402,24 @@ func _Msg_CreateValidatorWithPallasKey_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_ReInitializeElectionAuthority_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgReInitializeElectionAuthority)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).ReInitializeElectionAuthority(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_ReInitializeElectionAuthority_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).ReInitializeElectionAuthority(ctx, req.(*MsgReInitializeElectionAuthority))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Msg_ServiceDesc is the grpc.ServiceDesc for Msg service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -428,6 +462,10 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateValidatorWithPallasKey",
 			Handler:    _Msg_CreateValidatorWithPallasKey_Handler,
+		},
+		{
+			MethodName: "ReInitializeElectionAuthority",
+			Handler:    _Msg_ReInitializeElectionAuthority_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

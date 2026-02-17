@@ -31,12 +31,14 @@ The ceremony is a looping state machine. Timeout in any active phase resets to `
         │                                      │
         v                                      │
   INITIALIZING ──> REGISTERING ──> DEALT ──> CONFIRMED
-                       │              │
-                       │   timeout    │  timeout
-                       └──────────────┘
-                              │
-                              v
-                        INITIALIZING
+        ^              │              │          │
+        │              │   timeout    │  timeout  │
+        │              └──────────────┘          │
+        │                     │                  │
+        │                     v                  │
+        │               INITIALIZING             │
+        │                                        │
+        └── MsgReInitializeElectionAuthority ────┘
 ```
 
 | From | To | Trigger | Condition |
@@ -46,11 +48,12 @@ The ceremony is a looping state machine. Timeout in any active phase resets to `
 | REGISTERING | INITIALIZING | EndBlocker timeout | `block_time >= phase_start + phase_timeout` (full reset) |
 | DEALT | CONFIRMED | `MsgAckExecutiveAuthorityKey` | **All** registered validators have acked |
 | DEALT | INITIALIZING | EndBlocker timeout | `block_time >= phase_start + phase_timeout` (full reset, regardless of partial acks) |
+| CONFIRMED / INITIALIZING / nil | INITIALIZING | `MsgReInitializeElectionAuthority` | No active session (REGISTERING or DEALT) |
 
 Key behaviors:
 - **CONFIRMED** is only reached when every registered validator explicitly acks. Timeout never produces CONFIRMED.
 - Timeout in either REGISTERING or DEALT performs a **full reset** to INITIALIZING (all fields cleared).
-- After CONFIRMED, no reset mechanism exists.
+- From CONFIRMED (or INITIALIZING / nil), a validator can submit `MsgReInitializeElectionAuthority` to reset the ceremony back to INITIALIZING for a fresh key ceremony.
 
 #### Messages
 
@@ -85,6 +88,14 @@ Key behaviors:
 - Records the ack with block height and signature `SHA256("ack" || ea_pk || validator_address)`
 - When all validators have acked, transitions to CONFIRMED
 - With round-robin proposer selection and `n` validators, all acks complete within ~`n` blocks after the DealerTx lands
+
+**`MsgReInitializeElectionAuthority`** -- Resets the ceremony back to INITIALIZING so a new key ceremony can begin.
+- Can only be submitted when **no** ceremony session is in progress (rejected during REGISTERING or DEALT)
+- Also rejected if any voting session is ACTIVE or TALLYING — resetting the ceremony would orphan in-flight sessions that depend on the current `ea_pk`
+- Allowed when ceremony state is nil, INITIALIZING, or CONFIRMED (and no active/tallying voting sessions exist)
+- Clears all ceremony fields (validators, payloads, acks, `ea_pk`, dealer, timers)
+- Uses custom wire format tag `0x0B` and REST endpoint `POST /zally/v1/reinitialize-ea`
+- Enables key rotation: after a CONFIRMED ceremony and all voting sessions are finalized, validators can start a fresh one
 
 #### Auto-Ack via PrepareProposal
 
@@ -168,8 +179,9 @@ Vote and ceremony transactions bypass the standard Cosmos SDK `Tx` envelope. Eac
 | `0x07` | `MsgDealExecutiveAuthorityKey` | Ceremony |
 | `0x08` | `MsgAckExecutiveAuthorityKey` | Ceremony (injected) |
 | `0x09` | `MsgCreateValidatorWithPallasKey` | Ceremony |
+| `0x0B` | `MsgReInitializeElectionAuthority` | Ceremony |
 
-Any transaction whose first byte does not match a known tag is decoded as a standard Cosmos SDK `Tx`. Note that raw `MsgCreateValidator` is blocked by the ante handler for live transactions -- post-genesis validators must use `MsgCreateValidatorWithPallasKey` (tag `0x09`) instead.
+Any transaction whose first byte does not match a known tag is decoded as a standard Cosmos SDK `Tx`. Tag `0x0A` is deliberately skipped because it collides with the standard Cosmos Tx protobuf encoding (field 1, wire type 2). Note that raw `MsgCreateValidator` is blocked by the ante handler for live transactions -- post-genesis validators must use `MsgCreateValidatorWithPallasKey` (tag `0x09`) instead.
 
 ### REST API
 
@@ -181,6 +193,7 @@ The chain exposes a JSON REST API alongside CometBFT RPC. Clients POST JSON bodi
 |--------|------|-------------|
 | POST | `/zally/v1/register-pallas-key` | Register validator Pallas PK for ceremony |
 | POST | `/zally/v1/create-validator-with-pallas` | Create validator + register Pallas key (post-genesis) |
+| POST | `/zally/v1/reinitialize-ea` | Reset ceremony to INITIALIZING (no active session required) |
 | POST | `/zally/v1/deal-ea-key` | Deal ECIES-encrypted `ea_sk` shares to validators |
 | POST | `/zally/v1/create-voting-session` | Create a new voting round (requires CONFIRMED ceremony) |
 | POST | `/zally/v1/delegate-vote` | Submit a delegation proof (ZKP #1) |

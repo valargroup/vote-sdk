@@ -55,6 +55,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 //	POST /zally/v1/register-pallas-key            → MsgRegisterPallasKey
 //	POST /zally/v1/deal-ea-key                    → MsgDealExecutiveAuthorityKey
 //	POST /zally/v1/create-validator-with-pallas   → MsgCreateValidatorWithPallasKey
+//	POST /zally/v1/reinitialize-ea               → MsgReInitializeElectionAuthority
 //
 // Note: MsgAckExecutiveAuthorityKey has no REST endpoint — acks are injected
 // in-protocol via PrepareProposal (auto-ack).
@@ -67,6 +68,7 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.HandleFunc("/zally/v1/register-pallas-key", h.handleRegisterPallasKey).Methods("POST")
 	router.HandleFunc("/zally/v1/deal-ea-key", h.handleDealEAKey).Methods("POST")
 	router.HandleFunc("/zally/v1/create-validator-with-pallas", h.handleCreateValidatorWithPallasKey).Methods("POST")
+	router.HandleFunc("/zally/v1/reinitialize-ea", h.handleReInitializeElectionAuthority).Methods("POST")
 }
 
 // --- Tx submission handlers ---
@@ -135,6 +137,14 @@ func (h *Handler) handleCreateValidatorWithPallasKey(w http.ResponseWriter, r *h
 		return
 	}
 	h.broadcastCeremonyTx(w, msg, TagCreateValidatorWithPallasKey)
+}
+
+func (h *Handler) handleReInitializeElectionAuthority(w http.ResponseWriter, r *http.Request) {
+	msg := &types.MsgReInitializeElectionAuthority{}
+	if !h.decodeCeremonyMsg(w, r, msg) {
+		return
+	}
+	h.broadcastCeremonyTx(w, msg, TagReInitializeElectionAuthority)
 }
 
 // decodeCeremonyMsg reads the JSON request body and unmarshals it into the

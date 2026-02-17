@@ -21,6 +21,7 @@ service Msg {
   rpc DealExecutiveAuthorityKey(MsgDealExecutiveAuthorityKey) returns (MsgDealExecutiveAuthorityKeyResponse);
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
+  rpc ReInitializeElectionAuthority(MsgReInitializeElectionAuthority) returns (MsgReInitializeElectionAuthorityResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -148,3 +149,12 @@ message MsgCreateValidatorWithPallasKey {
 }
 
 message MsgCreateValidatorWithPallasKeyResponse {}
+
+// MsgReInitializeElectionAuthority resets the EA key ceremony back to INITIALIZING.
+// Can only be submitted when no ceremony session is in progress (REGISTERING or DEALT).
+// Allowed when ceremony is nil, UNSPECIFIED, INITIALIZING, or CONFIRMED.
+message MsgReInitializeElectionAuthority {
+  string creator = 1; // Validator address
+}
+
+message MsgReInitializeElectionAuthorityResponse {}

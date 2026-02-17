@@ -12,7 +12,8 @@ const (
 	EventTypeRegisterPallasKey            = "register_pallas_key"
 	EventTypeDealExecutiveAuthorityKey    = "deal_executive_authority_key"
 	EventTypeAckExecutiveAuthorityKey     = "ack_executive_authority_key"
-	EventTypeCeremonyStatusChange         = "ceremony_status_change"
+	EventTypeCeremonyStatusChange             = "ceremony_status_change"
+	EventTypeReInitializeElectionAuthority    = "reinitialize_election_authority"
 )
 
 // Event attribute keys.

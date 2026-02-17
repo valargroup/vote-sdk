@@ -212,6 +212,56 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 	return &types.MsgAckExecutiveAuthorityKeyResponse{}, nil
 }
 
+// ReInitializeElectionAuthority handles MsgReInitializeElectionAuthority.
+// Resets the ceremony state back to INITIALIZING so a new key ceremony can begin.
+// Only allowed when no ceremony session is in progress (REGISTERING or DEALT)
+// and no voting session is active or tallying.
+func (ms msgServer) ReInitializeElectionAuthority(goCtx context.Context, msg *types.MsgReInitializeElectionAuthority) (*types.MsgReInitializeElectionAuthorityResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := ms.k.OpenKVStore(ctx)
+
+	state, err := ms.k.GetCeremonyState(kvStore)
+	if err != nil {
+		return nil, err
+	}
+
+	// Reject if a ceremony session is actively in progress.
+	if state != nil {
+		switch state.Status {
+		case types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+			types.CeremonyStatus_CEREMONY_STATUS_DEALT:
+			return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonySessionActive, state.Status)
+		}
+	}
+
+	// Reject if any voting session is active or tallying — resetting the
+	// ceremony would orphan in-flight sessions that depend on the current ea_pk.
+	hasActive, err := ms.k.HasActiveOrTallyingRound(kvStore)
+	if err != nil {
+		return nil, err
+	}
+	if hasActive {
+		return nil, fmt.Errorf("%w: cannot reset ceremony while voting sessions are in progress", types.ErrVotingSessionActive)
+	}
+
+	// Reset to a fresh INITIALIZING state.
+	state = &types.CeremonyState{
+		Status: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+	}
+
+	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeReInitializeElectionAuthority,
+		sdk.NewAttribute(types.AttributeKeyValidatorAddress, msg.Creator),
+		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, state.Status.String()),
+	))
+
+	return &types.MsgReInitializeElectionAuthorityResponse{}, nil
+}
+
 // CreateValidatorWithPallasKey handles MsgCreateValidatorWithPallasKey.
 // It atomically creates a validator via the staking module and registers
 // the validator's Pallas public key in the ceremony state. This replaces

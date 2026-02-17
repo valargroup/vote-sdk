@@ -416,6 +416,32 @@ func (k Keeper) IterateTallyingRounds(kvStore store.KVStore, cb func(round *type
 	return nil
 }
 
+// HasActiveOrTallyingRound returns true if any stored VoteRound has status
+// ACTIVE or TALLYING. Used to prevent ceremony re-initialization while voting
+// sessions are in flight.
+func (k Keeper) HasActiveOrTallyingRound(kvStore store.KVStore) (bool, error) {
+	prefix := types.VoteRoundPrefix
+	end := types.PrefixEndBytes(prefix)
+
+	iter, err := kvStore.Iterator(prefix, end)
+	if err != nil {
+		return false, err
+	}
+	defer iter.Close()
+
+	for ; iter.Valid(); iter.Next() {
+		var round types.VoteRound
+		if err := unmarshal(iter.Value(), &round); err != nil {
+			return false, err
+		}
+		if round.Status == types.SessionStatus_SESSION_STATUS_ACTIVE ||
+			round.Status == types.SessionStatus_SESSION_STATUS_TALLYING {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ---------------------------------------------------------------------------
 // Validation helpers (used by the ante validation pipeline, Phase 3)
 // ---------------------------------------------------------------------------
