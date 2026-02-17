@@ -63,9 +63,14 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 
 		// Block raw MsgCreateValidator — post-genesis validators must use
 		// MsgCreateValidatorWithPallasKey to atomically register their Pallas key.
+		// Allow during genesis (block height 0) since gentx produces standard
+		// MsgCreateValidator; genesis validators register Pallas keys via the
+		// ceremony flow after chain start.
 		for _, msg := range tx.GetMsgs() {
 			if _, ok := msg.(*stakingtypes.MsgCreateValidator); ok {
-				return ctx, fmt.Errorf("MsgCreateValidator is disabled; use MsgCreateValidatorWithPallasKey via /zally/v1/create-validator-with-pallas")
+				if ctx.BlockHeight() > 0 {
+					return ctx, fmt.Errorf("MsgCreateValidator is disabled; use MsgCreateValidatorWithPallasKey via /zally/v1/create-validator-with-pallas")
+				}
 			}
 		}
 
