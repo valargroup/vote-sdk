@@ -12,8 +12,9 @@ import (
 )
 
 // RegisterPallasKey handles MsgRegisterPallasKey.
-// Creates a new ceremony in REGISTERING status on first call, then appends
-// the validator's Pallas public key to the ceremony's validator list.
+// On first call (state nil or INITIALIZING), transitions to REGISTERING and
+// starts the registration phase timer. Then appends the validator's Pallas
+// public key to the ceremony's validator list.
 func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegisterPallasKey) (*types.MsgRegisterPallasKeyResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
@@ -23,10 +24,12 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 		return nil, err
 	}
 
-	// First registration: create ceremony in REGISTERING status.
-	if state == nil {
+	// First registration: create ceremony and transition to REGISTERING.
+	if state == nil || state.Status == types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING {
 		state = &types.CeremonyState{
-			Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+			Status:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+			PhaseStart:   uint64(ctx.BlockTime().Unix()),
+			PhaseTimeout: types.DefaultRegistrationTimeout,
 		}
 	}
 
@@ -101,7 +104,6 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	}
 
 	// Validate each payload maps 1:1 to a registered validator.
-	// Track which validators have been covered to detect duplicates.
 	covered := make(map[string]bool, len(state.Validators))
 	for _, p := range msg.Payloads {
 		if _, found := FindValidatorInCeremony(state, p.ValidatorAddress); !found {
@@ -125,8 +127,8 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	state.EaPk = msg.EaPk
 	state.Payloads = msg.Payloads
 	state.Dealer = msg.Creator
-	state.DealTime = uint64(ctx.BlockTime().Unix())
-	state.AckTimeout = types.DefaultAckTimeout
+	state.PhaseStart = uint64(ctx.BlockTime().Unix())
+	state.PhaseTimeout = types.DefaultDealTimeout
 	state.Status = types.CeremonyStatus_CEREMONY_STATUS_DEALT
 
 	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {
@@ -181,8 +183,7 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 	})
 
 	// Check if all validators have acked -> transition to CONFIRMED.
-	confirmed := AllValidatorsAcked(state)
-	if confirmed {
+	if AllValidatorsAcked(state) {
 		state.Status = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 	}
 

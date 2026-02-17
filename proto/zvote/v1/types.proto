@@ -86,22 +86,22 @@ message BlockCommitments {
 // CeremonyStatus represents the lifecycle state of the EA key ceremony.
 enum CeremonyStatus {
   CEREMONY_STATUS_UNSPECIFIED   = 0;
-  CEREMONY_STATUS_REGISTERING   = 1; // Accepting validator pk_i registrations
-  CEREMONY_STATUS_DEALT         = 2; // DealerTx landed, awaiting acks
-  CEREMONY_STATUS_CONFIRMED     = 3; // Sufficient acks received, ea_pk ready
-  CEREMONY_STATUS_ABORTED       = 4; // Timeout with zero acks
+  CEREMONY_STATUS_INITIALIZING  = 1; // Waiting for first validator registration
+  CEREMONY_STATUS_REGISTERING   = 2; // Accepting validator pk_i registrations
+  CEREMONY_STATUS_DEALT         = 3; // DealerTx landed, awaiting acks
+  CEREMONY_STATUS_CONFIRMED     = 4; // All validators acked, ea_pk ready
 }
 
 // CeremonyState tracks the singleton EA key ceremony lifecycle.
 message CeremonyState {
-  CeremonyStatus              status      = 1;
-  bytes                       ea_pk       = 2;  // Set when DealerTx lands
-  repeated ValidatorPallasKey validators  = 3;  // All registered pk_i
-  repeated DealerPayload      payloads    = 4;  // ECIES envelopes from DealerTx
-  repeated AckEntry           acks        = 5;  // Per-validator ack status
-  string                      dealer      = 6;  // Validator address of the dealer
-  uint64                      deal_time   = 7;  // Unix seconds when DealerTx landed
-  uint64                      ack_timeout = 8;  // Timeout in seconds after deal_time
+  CeremonyStatus              status        = 1;
+  bytes                       ea_pk         = 2;  // Set when DealerTx lands
+  repeated ValidatorPallasKey validators    = 3;  // All registered pk_i
+  repeated DealerPayload      payloads      = 4;  // ECIES envelopes from DealerTx
+  repeated AckEntry           acks          = 5;  // Per-validator ack status
+  string                      dealer        = 6;  // Validator address of the dealer
+  uint64                      phase_start   = 7;  // Unix seconds when current phase started
+  uint64                      phase_timeout = 8;  // Timeout in seconds for current phase
 }
 
 // ValidatorPallasKey records a validator's registered Pallas public key.

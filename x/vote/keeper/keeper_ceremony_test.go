@@ -40,9 +40,9 @@ func (s *KeeperTestSuite) TestCeremonyState_RoundTrip() {
 			{ValidatorAddress: "val1", PallasPk: bytes.Repeat([]byte{0x01}, 32)},
 			{ValidatorAddress: "val2", PallasPk: bytes.Repeat([]byte{0x02}, 32)},
 		},
-		Dealer:   "val1",
-		DealTime: 100,
-		AckTimeout: 300,
+		Dealer:       "val1",
+		PhaseStart:   100,
+		PhaseTimeout: 300,
 	}
 
 	s.Require().NoError(s.keeper.SetCeremonyState(kv, original))
@@ -56,8 +56,8 @@ func (s *KeeperTestSuite) TestCeremonyState_RoundTrip() {
 	s.Require().Equal("val2", got.Validators[1].ValidatorAddress)
 	s.Require().Equal(bytes.Repeat([]byte{0x01}, 32), got.Validators[0].PallasPk)
 	s.Require().Equal("val1", got.Dealer)
-	s.Require().Equal(uint64(100), got.DealTime)
-	s.Require().Equal(uint64(300), got.AckTimeout)
+	s.Require().Equal(uint64(100), got.PhaseStart)
+	s.Require().Equal(uint64(300), got.PhaseTimeout)
 }
 
 func (s *KeeperTestSuite) TestCeremonyState_Overwrite() {
@@ -100,7 +100,7 @@ func (s *KeeperTestSuite) TestCeremonyState_FullLifecycle() {
 	state.Status = types.CeremonyStatus_CEREMONY_STATUS_DEALT
 	state.EaPk = bytes.Repeat([]byte{0xEA}, 32)
 	state.Dealer = "val1"
-	state.DealTime = 50
+	state.PhaseStart = 50
 	state.Payloads = []*types.DealerPayload{
 		{ValidatorAddress: "val1", EphemeralPk: bytes.Repeat([]byte{0x10}, 32), Ciphertext: bytes.Repeat([]byte{0x11}, 48)},
 		{ValidatorAddress: "val2", EphemeralPk: bytes.Repeat([]byte{0x20}, 32), Ciphertext: bytes.Repeat([]byte{0x21}, 48)},
@@ -425,6 +425,53 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 	}
 }
 
+// TestRegisterPallasKey_SetsPhaseFields verifies that the first registration
+// sets PhaseStart and PhaseTimeout for the REGISTERING phase.
+func (s *MsgServerTestSuite) TestRegisterPallasKey_SetsPhaseFields() {
+	s.SetupTest()
+
+	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+		Creator:  "val1",
+		PallasPk: testPallasPK(),
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	state, err := s.keeper.GetCeremonyState(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), state.PhaseStart)
+	s.Require().Equal(types.DefaultRegistrationTimeout, state.PhaseTimeout)
+}
+
+// TestRegisterPallasKey_AfterReset verifies that registration works after the
+// ceremony was reset to INITIALIZING (e.g., after a timeout).
+func (s *MsgServerTestSuite) TestRegisterPallasKey_AfterReset() {
+	s.SetupTest()
+
+	// Seed INITIALIZING state (simulating post-timeout reset).
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
+		Status: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+	}))
+
+	// Registration should succeed, transitioning to REGISTERING.
+	pk := testPallasPK()
+	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+		Creator:  "val1",
+		PallasPk: pk,
+	})
+	s.Require().NoError(err)
+
+	state, err := s.keeper.GetCeremonyState(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
+	s.Require().Len(state.Validators, 1)
+	s.Require().Equal("val1", state.Validators[0].ValidatorAddress)
+	s.Require().Equal(pk, state.Validators[0].PallasPk)
+	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), state.PhaseStart)
+	s.Require().Equal(types.DefaultRegistrationTimeout, state.PhaseTimeout)
+}
+
 // ===========================================================================
 // MsgDealExecutiveAuthorityKey handler tests (Step 5)
 // ===========================================================================
@@ -480,7 +527,8 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
 	s.Require().Equal(eaPk, state.EaPk)
 	s.Require().Equal("dealer1", state.Dealer)
-	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), state.DealTime)
+	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), state.PhaseStart)
+	s.Require().Equal(types.DefaultDealTimeout, state.PhaseTimeout)
 	s.Require().Len(state.Payloads, 3)
 	for i, p := range state.Payloads {
 		s.Require().Equal(addrs[i], p.ValidatorAddress)

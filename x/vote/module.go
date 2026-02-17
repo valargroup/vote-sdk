@@ -295,29 +295,33 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		))
 	}
 
-	// --- 3. Ceremony ack timeout ---
+	// --- 3. Ceremony phase timeout ---
+	// Both REGISTERING and DEALT phases have a timeout. On timeout in either
+	// phase, the ceremony is fully reset to INITIALIZING. CONFIRMED is only
+	// reached when all validators explicitly ack.
 	ceremony, err := am.keeper.GetCeremonyState(kvStore)
 	if err != nil {
 		return err
 	}
-	if ceremony != nil && ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_DEALT {
-		deadline := ceremony.DealTime + ceremony.AckTimeout
+	if ceremony != nil &&
+		(ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING ||
+			ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_DEALT) {
+		deadline := ceremony.PhaseStart + ceremony.PhaseTimeout
 		if blockTime >= deadline {
 			oldStatus := ceremony.Status
-			if keeper.AllValidatorsAcked(ceremony) {
-				ceremony.Status = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
-			} else {
-				ceremony.Status = types.CeremonyStatus_CEREMONY_STATUS_ABORTED
+			// Any timeout = full reset. CONFIRMED only via all-ack.
+			resetState := &types.CeremonyState{
+				Status: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
 			}
 
-			if err := am.keeper.SetCeremonyState(kvStore, ceremony); err != nil {
+			if err := am.keeper.SetCeremonyState(kvStore, resetState); err != nil {
 				return err
 			}
 
 			ctx.EventManager().EmitEvent(sdk.NewEvent(
 				types.EventTypeCeremonyStatusChange,
 				sdk.NewAttribute(types.AttributeKeyOldStatus, oldStatus.String()),
-				sdk.NewAttribute(types.AttributeKeyNewStatus, ceremony.Status.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, resetState.Status.String()),
 			))
 		}
 	}

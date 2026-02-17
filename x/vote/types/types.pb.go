@@ -78,28 +78,28 @@ func (SessionStatus) EnumDescriptor() ([]byte, []int) {
 type CeremonyStatus int32
 
 const (
-	CeremonyStatus_CEREMONY_STATUS_UNSPECIFIED CeremonyStatus = 0
-	CeremonyStatus_CEREMONY_STATUS_REGISTERING CeremonyStatus = 1 // Accepting validator pk_i registrations
-	CeremonyStatus_CEREMONY_STATUS_DEALT       CeremonyStatus = 2 // DealerTx landed, awaiting acks
-	CeremonyStatus_CEREMONY_STATUS_CONFIRMED   CeremonyStatus = 3 // Sufficient acks received, ea_pk ready
-	CeremonyStatus_CEREMONY_STATUS_ABORTED     CeremonyStatus = 4 // Timeout with zero acks
+	CeremonyStatus_CEREMONY_STATUS_UNSPECIFIED  CeremonyStatus = 0
+	CeremonyStatus_CEREMONY_STATUS_INITIALIZING CeremonyStatus = 1 // Waiting for first validator registration
+	CeremonyStatus_CEREMONY_STATUS_REGISTERING  CeremonyStatus = 2 // Accepting validator pk_i registrations
+	CeremonyStatus_CEREMONY_STATUS_DEALT        CeremonyStatus = 3 // DealerTx landed, awaiting acks
+	CeremonyStatus_CEREMONY_STATUS_CONFIRMED    CeremonyStatus = 4 // All validators acked, ea_pk ready
 )
 
 // Enum value maps for CeremonyStatus.
 var (
 	CeremonyStatus_name = map[int32]string{
 		0: "CEREMONY_STATUS_UNSPECIFIED",
-		1: "CEREMONY_STATUS_REGISTERING",
-		2: "CEREMONY_STATUS_DEALT",
-		3: "CEREMONY_STATUS_CONFIRMED",
-		4: "CEREMONY_STATUS_ABORTED",
+		1: "CEREMONY_STATUS_INITIALIZING",
+		2: "CEREMONY_STATUS_REGISTERING",
+		3: "CEREMONY_STATUS_DEALT",
+		4: "CEREMONY_STATUS_CONFIRMED",
 	}
 	CeremonyStatus_value = map[string]int32{
-		"CEREMONY_STATUS_UNSPECIFIED": 0,
-		"CEREMONY_STATUS_REGISTERING": 1,
-		"CEREMONY_STATUS_DEALT":       2,
-		"CEREMONY_STATUS_CONFIRMED":   3,
-		"CEREMONY_STATUS_ABORTED":     4,
+		"CEREMONY_STATUS_UNSPECIFIED":  0,
+		"CEREMONY_STATUS_INITIALIZING": 1,
+		"CEREMONY_STATUS_REGISTERING":  2,
+		"CEREMONY_STATUS_DEALT":        3,
+		"CEREMONY_STATUS_CONFIRMED":    4,
 	}
 )
 
@@ -729,13 +729,13 @@ func (x *BlockCommitments) GetLeaves() [][]byte {
 type CeremonyState struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Status        CeremonyStatus         `protobuf:"varint,1,opt,name=status,proto3,enum=zvote.v1.CeremonyStatus" json:"status,omitempty"`
-	EaPk          []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                    // Set when DealerTx lands
-	Validators    []*ValidatorPallasKey  `protobuf:"bytes,3,rep,name=validators,proto3" json:"validators,omitempty"`                    // All registered pk_i
-	Payloads      []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                        // ECIES envelopes from DealerTx
-	Acks          []*AckEntry            `protobuf:"bytes,5,rep,name=acks,proto3" json:"acks,omitempty"`                                // Per-validator ack status
-	Dealer        string                 `protobuf:"bytes,6,opt,name=dealer,proto3" json:"dealer,omitempty"`                            // Validator address of the dealer
-	DealTime      uint64                 `protobuf:"varint,7,opt,name=deal_time,json=dealTime,proto3" json:"deal_time,omitempty"`       // Unix seconds when DealerTx landed
-	AckTimeout    uint64                 `protobuf:"varint,8,opt,name=ack_timeout,json=ackTimeout,proto3" json:"ack_timeout,omitempty"` // Timeout in seconds after deal_time
+	EaPk          []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                          // Set when DealerTx lands
+	Validators    []*ValidatorPallasKey  `protobuf:"bytes,3,rep,name=validators,proto3" json:"validators,omitempty"`                          // All registered pk_i
+	Payloads      []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                              // ECIES envelopes from DealerTx
+	Acks          []*AckEntry            `protobuf:"bytes,5,rep,name=acks,proto3" json:"acks,omitempty"`                                      // Per-validator ack status
+	Dealer        string                 `protobuf:"bytes,6,opt,name=dealer,proto3" json:"dealer,omitempty"`                                  // Validator address of the dealer
+	PhaseStart    uint64                 `protobuf:"varint,7,opt,name=phase_start,json=phaseStart,proto3" json:"phase_start,omitempty"`       // Unix seconds when current phase started
+	PhaseTimeout  uint64                 `protobuf:"varint,8,opt,name=phase_timeout,json=phaseTimeout,proto3" json:"phase_timeout,omitempty"` // Timeout in seconds for current phase
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -812,16 +812,16 @@ func (x *CeremonyState) GetDealer() string {
 	return ""
 }
 
-func (x *CeremonyState) GetDealTime() uint64 {
+func (x *CeremonyState) GetPhaseStart() uint64 {
 	if x != nil {
-		return x.DealTime
+		return x.PhaseStart
 	}
 	return 0
 }
 
-func (x *CeremonyState) GetAckTimeout() uint64 {
+func (x *CeremonyState) GetPhaseTimeout() uint64 {
 	if x != nil {
-		return x.AckTimeout
+		return x.PhaseTimeout
 	}
 	return 0
 }
@@ -1058,7 +1058,7 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x06height\x18\x01 \x01(\x04R\x06height\x12\x1f\n" +
 	"\vstart_index\x18\x02 \x01(\x04R\n" +
 	"startIndex\x12\x16\n" +
-	"\x06leaves\x18\x03 \x03(\fR\x06leaves\"\xc7\x02\n" +
+	"\x06leaves\x18\x03 \x03(\fR\x06leaves\"\xcf\x02\n" +
 	"\rCeremonyState\x120\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.zvote.v1.CeremonyStatusR\x06status\x12\x13\n" +
 	"\x05ea_pk\x18\x02 \x01(\fR\x04eaPk\x12<\n" +
@@ -1067,10 +1067,10 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"validators\x123\n" +
 	"\bpayloads\x18\x04 \x03(\v2\x17.zvote.v1.DealerPayloadR\bpayloads\x12&\n" +
 	"\x04acks\x18\x05 \x03(\v2\x12.zvote.v1.AckEntryR\x04acks\x12\x16\n" +
-	"\x06dealer\x18\x06 \x01(\tR\x06dealer\x12\x1b\n" +
-	"\tdeal_time\x18\a \x01(\x04R\bdealTime\x12\x1f\n" +
-	"\vack_timeout\x18\b \x01(\x04R\n" +
-	"ackTimeout\"^\n" +
+	"\x06dealer\x18\x06 \x01(\tR\x06dealer\x12\x1f\n" +
+	"\vphase_start\x18\a \x01(\x04R\n" +
+	"phaseStart\x12#\n" +
+	"\rphase_timeout\x18\b \x01(\x04R\fphaseTimeout\"^\n" +
 	"\x12ValidatorPallasKey\x12+\n" +
 	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12\x1b\n" +
 	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\"\x7f\n" +
@@ -1089,13 +1089,13 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
 	"\x17SESSION_STATUS_TALLYING\x10\x02\x12\x1c\n" +
-	"\x18SESSION_STATUS_FINALIZED\x10\x03*\xa9\x01\n" +
+	"\x18SESSION_STATUS_FINALIZED\x10\x03*\xae\x01\n" +
 	"\x0eCeremonyStatus\x12\x1f\n" +
-	"\x1bCEREMONY_STATUS_UNSPECIFIED\x10\x00\x12\x1f\n" +
-	"\x1bCEREMONY_STATUS_REGISTERING\x10\x01\x12\x19\n" +
-	"\x15CEREMONY_STATUS_DEALT\x10\x02\x12\x1d\n" +
-	"\x19CEREMONY_STATUS_CONFIRMED\x10\x03\x12\x1b\n" +
-	"\x17CEREMONY_STATUS_ABORTED\x10\x04B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
+	"\x1bCEREMONY_STATUS_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cCEREMONY_STATUS_INITIALIZING\x10\x01\x12\x1f\n" +
+	"\x1bCEREMONY_STATUS_REGISTERING\x10\x02\x12\x19\n" +
+	"\x15CEREMONY_STATUS_DEALT\x10\x03\x12\x1d\n" +
+	"\x19CEREMONY_STATUS_CONFIRMED\x10\x04B&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
 var (
 	file_zvote_v1_types_proto_rawDescOnce sync.Once

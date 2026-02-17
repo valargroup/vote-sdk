@@ -2,6 +2,7 @@ package vote_test
 
 import (
 	"encoding/binary"
+	"fmt"
 	"testing"
 	"time"
 
@@ -182,12 +183,12 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 }
 
 // ---------------------------------------------------------------------------
-// Ceremony ack timeout tests (Step 7)
+// Ceremony phase timeout tests
 // ---------------------------------------------------------------------------
 
 func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
-	// Helper: seed a DEALT ceremony with 3 validators, deal_time=999_400, ack_timeout=600.
-	// Deadline = 999_400 + 600 = 1_000_000, which equals the default block_time.
+	// Helper: seed a DEALT ceremony with 3 validators.
+	// phase_start=999_400, phase_timeout=600 -> deadline = 1_000_000 == block_time.
 	seedDealtCeremony := func(ackCount int) {
 		kv := s.keeper.OpenKVStore(s.ctx)
 		state := &types.CeremonyState{
@@ -198,14 +199,32 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 				{ValidatorAddress: "val2", PallasPk: make([]byte, 32)},
 				{ValidatorAddress: "val3", PallasPk: make([]byte, 32)},
 			},
-			Dealer:     "val1",
-			DealTime:   999_400,
-			AckTimeout: 600,
+			Dealer:       "val1",
+			PhaseStart:   999_400,
+			PhaseTimeout: 600,
 		}
 		for i := 0; i < ackCount; i++ {
 			state.Acks = append(state.Acks, &types.AckEntry{
 				ValidatorAddress: state.Validators[i].ValidatorAddress,
 				AckHeight:        9,
+			})
+		}
+		s.Require().NoError(s.keeper.SetCeremonyState(kv, state))
+	}
+
+	// Helper: seed a REGISTERING ceremony.
+	// phase_start=999_400, phase_timeout=600 -> deadline = 1_000_000 == block_time.
+	seedRegisteringCeremony := func(valCount int) {
+		kv := s.keeper.OpenKVStore(s.ctx)
+		state := &types.CeremonyState{
+			Status:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+			PhaseStart:   999_400,
+			PhaseTimeout: 600,
+		}
+		for i := 0; i < valCount; i++ {
+			state.Validators = append(state.Validators, &types.ValidatorPallasKey{
+				ValidatorAddress: fmt.Sprintf("val%d", i+1),
+				PallasPk:         make([]byte, 32),
 			})
 		}
 		s.Require().NoError(s.keeper.SetCeremonyState(kv, state))
@@ -217,54 +236,63 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 		wantStatus types.CeremonyStatus
 	}{
 		{
-			name: "all acks + timeout -> CONFIRMED",
-			setup: func() {
-				seedDealtCeremony(3) // 3 of 3 acked
-			},
-			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
-		},
-		{
-			name: "partial acks + timeout -> ABORTED",
+			name: "DEALT + partial acks + timeout -> INITIALIZING",
 			setup: func() {
 				seedDealtCeremony(1) // 1 of 3 acked
 			},
-			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_ABORTED,
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
 		},
 		{
-			name: "zero acks + timeout -> ABORTED",
+			name: "DEALT + all acks + timeout -> INITIALIZING",
+			setup: func() {
+				seedDealtCeremony(3) // 3 of 3 acked (timeout still resets)
+			},
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+		},
+		{
+			name: "DEALT + zero acks + timeout -> INITIALIZING",
 			setup: func() {
 				seedDealtCeremony(0)
 			},
-			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_ABORTED,
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
 		},
 		{
-			name: "no timeout yet (block_time < deadline)",
+			name: "DEALT + no timeout yet (block_time < deadline)",
 			setup: func() {
 				seedDealtCeremony(0)
-				// Push deal_time forward so deadline = 999_401 + 600 = 1_000_001 > block_time.
+				// Push phase_start forward so deadline = 999_401 + 600 = 1_000_001 > block_time.
 				kv := s.keeper.OpenKVStore(s.ctx)
 				state, err := s.keeper.GetCeremonyState(kv)
 				s.Require().NoError(err)
-				state.DealTime = 999_401
+				state.PhaseStart = 999_401
 				s.Require().NoError(s.keeper.SetCeremonyState(kv, state))
 			},
 			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 		},
 		{
-			name: "exact deadline with partial acks -> ABORTED",
+			name: "DEALT + exact deadline -> INITIALIZING",
 			setup: func() {
 				seedDealtCeremony(2) // 2 of 3 acked
-				// deal_time=999_400 + ack_timeout=600 = 1_000_000 == block_time
+				// phase_start=999_400 + phase_timeout=600 = 1_000_000 == block_time
 			},
-			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_ABORTED,
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
 		},
 		{
-			name: "skip when ceremony is REGISTERING",
+			name: "REGISTERING + timeout -> INITIALIZING",
 			setup: func() {
+				seedRegisteringCeremony(2)
+			},
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+		},
+		{
+			name: "REGISTERING + no timeout yet",
+			setup: func() {
+				seedRegisteringCeremony(1)
 				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
-					Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-				}))
+				state, err := s.keeper.GetCeremonyState(kv)
+				s.Require().NoError(err)
+				state.PhaseStart = 999_401
+				s.Require().NoError(s.keeper.SetCeremonyState(kv, state))
 			},
 			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		},
@@ -277,6 +305,16 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 				}))
 			},
 			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
+		},
+		{
+			name: "skip when ceremony is INITIALIZING",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
+					Status: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+				}))
+			},
+			wantStatus: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
 		},
 	}
 

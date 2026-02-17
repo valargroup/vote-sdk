@@ -251,11 +251,11 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			errContains: "ceremony not in confirmed status",
 		},
 		{
-			name: "rejected: ceremony in ABORTED status",
+			name: "rejected: ceremony in INITIALIZING status",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
-					Status: types.CeremonyStatus_CEREMONY_STATUS_ABORTED,
+					Status: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
 				}))
 			},
 			msg:         msg,

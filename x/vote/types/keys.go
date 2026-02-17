@@ -11,8 +11,11 @@ const (
 	RouterKey = ModuleName
 )
 
-// DefaultAckTimeout is the default ceremony ack timeout in seconds (30 seconds).
-const DefaultAckTimeout uint64 = 30
+// DefaultRegistrationTimeout is the ceremony registration phase timeout in seconds (2 minutes).
+const DefaultRegistrationTimeout uint64 = 120
+
+// DefaultDealTimeout is the ceremony deal/ack phase timeout in seconds (30 seconds).
+const DefaultDealTimeout uint64 = 30
 
 // NullifierType distinguishes the three independent nullifier sets per voting round.
 type NullifierType byte
