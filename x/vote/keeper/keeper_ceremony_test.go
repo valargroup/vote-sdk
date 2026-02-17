@@ -3,6 +3,7 @@ package keeper_test
 import (
 	"bytes"
 	"crypto/rand"
+	"fmt"
 
 	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/keeper"
@@ -417,6 +418,236 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 				tc.setup()
 			}
 			_, err := s.msgServer.RegisterPallasKey(s.ctx, tc.msg)
+			s.Require().Error(err)
+			s.Require().Contains(err.Error(), tc.errContains)
+		})
+	}
+}
+
+// ===========================================================================
+// MsgDealExecutiveAuthorityKey handler tests (Step 5)
+// ===========================================================================
+
+// registerValidators is a test helper that registers N validators and returns
+// the validator addresses and their Pallas public keys.
+func (s *MsgServerTestSuite) registerValidators(n int) (addrs []string, pks [][]byte) {
+	for i := 0; i < n; i++ {
+		addr := fmt.Sprintf("val%d", i+1)
+		pk := testPallasPK()
+		_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+			Creator:  addr,
+			PallasPk: pk,
+		})
+		s.Require().NoError(err)
+		addrs = append(addrs, addr)
+		pks = append(pks, pk)
+	}
+	return
+}
+
+// makePayloads builds valid DealerPayloads for the given validator addresses.
+func makePayloads(addrs []string) []*types.DealerPayload {
+	payloads := make([]*types.DealerPayload, len(addrs))
+	for i, addr := range addrs {
+		payloads[i] = &types.DealerPayload{
+			ValidatorAddress: addr,
+			EphemeralPk:      testPallasPK(),
+			Ciphertext:       bytes.Repeat([]byte{byte(i + 1)}, 48),
+		}
+	}
+	return payloads
+}
+
+func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
+	s.SetupTest()
+
+	addrs, _ := s.registerValidators(3)
+	eaPk := testPallasPK()
+	payloads := makePayloads(addrs)
+
+	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
+		Creator:  "dealer1",
+		EaPk:     eaPk,
+		Payloads: payloads,
+	})
+	s.Require().NoError(err)
+
+	// Verify state transitioned to DEALT with all fields set.
+	kv := s.keeper.OpenKVStore(s.ctx)
+	state, err := s.keeper.GetCeremonyState(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
+	s.Require().Equal(eaPk, state.EaPk)
+	s.Require().Equal("dealer1", state.Dealer)
+	s.Require().Equal(uint64(s.ctx.BlockHeight()), state.DealHeight)
+	s.Require().Len(state.Payloads, 3)
+	for i, p := range state.Payloads {
+		s.Require().Equal(addrs[i], p.ValidatorAddress)
+	}
+
+	// Verify event emission.
+	var found bool
+	for _, e := range s.ctx.EventManager().Events() {
+		if e.Type == types.EventTypeDealExecutiveAuthorityKey {
+			found = true
+			for _, attr := range e.Attributes {
+				if attr.Key == types.AttributeKeyEAPK {
+					s.Require().NotEmpty(attr.Value)
+				}
+			}
+		}
+	}
+	s.Require().True(found, "expected %s event", types.EventTypeDealExecutiveAuthorityKey)
+}
+
+func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
+	tests := []struct {
+		name        string
+		setup       func() (addrs []string) // register validators, return addrs
+		msg         func(addrs []string) *types.MsgDealExecutiveAuthorityKey
+		errContains string
+	}{
+		{
+			name: "no ceremony exists",
+			setup: func() []string {
+				return nil
+			},
+			msg: func(_ []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:  "dealer1",
+					EaPk:     testPallasPK(),
+					Payloads: []*types.DealerPayload{},
+				}
+			},
+			errContains: "no ceremony exists",
+		},
+		{
+			name: "ceremony already DEALT",
+			setup: func() []string {
+				addrs, _ := s.registerValidators(2)
+				// Force ceremony to DEALT.
+				kv := s.keeper.OpenKVStore(s.ctx)
+				state, _ := s.keeper.GetCeremonyState(kv)
+				state.Status = types.CeremonyStatus_CEREMONY_STATUS_DEALT
+				s.Require().NoError(s.keeper.SetCeremonyState(kv, state))
+				return addrs
+			},
+			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:  "dealer1",
+					EaPk:     testPallasPK(),
+					Payloads: makePayloads(addrs),
+				}
+			},
+			errContains: "operation invalid for current ceremony status",
+		},
+		{
+			name: "no validators registered",
+			setup: func() []string {
+				// Seed empty REGISTERING ceremony with no validators.
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
+					Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+				}))
+				return nil
+			},
+			msg: func(_ []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:  "dealer1",
+					EaPk:     testPallasPK(),
+					Payloads: []*types.DealerPayload{},
+				}
+			},
+			errContains: "no validators registered",
+		},
+		{
+			name: "invalid ea_pk",
+			setup: func() []string {
+				addrs, _ := s.registerValidators(2)
+				return addrs
+			},
+			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:  "dealer1",
+					EaPk:     bytes.Repeat([]byte{0xFF}, 32), // off-curve
+					Payloads: makePayloads(addrs),
+				}
+			},
+			errContains: "invalid pallas point",
+		},
+		{
+			name: "payload count mismatch (too few)",
+			setup: func() []string {
+				addrs, _ := s.registerValidators(3)
+				return addrs
+			},
+			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:  "dealer1",
+					EaPk:     testPallasPK(),
+					Payloads: makePayloads(addrs[:2]), // only 2 of 3
+				}
+			},
+			errContains: "payload count does not match",
+		},
+		{
+			name: "payload references unknown validator",
+			setup: func() []string {
+				addrs, _ := s.registerValidators(2)
+				return addrs
+			},
+			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				payloads := makePayloads(addrs)
+				payloads[1].ValidatorAddress = "unknown_val"
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:  "dealer1",
+					EaPk:     testPallasPK(),
+					Payloads: payloads,
+				}
+			},
+			errContains: "unknown validator",
+		},
+		{
+			name: "duplicate validator in payloads",
+			setup: func() []string {
+				addrs, _ := s.registerValidators(2)
+				return addrs
+			},
+			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				payloads := makePayloads(addrs)
+				payloads[1].ValidatorAddress = addrs[0] // duplicate
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:  "dealer1",
+					EaPk:     testPallasPK(),
+					Payloads: payloads,
+				}
+			},
+			errContains: "duplicate payload",
+		},
+		{
+			name: "invalid ephemeral_pk in payload",
+			setup: func() []string {
+				addrs, _ := s.registerValidators(2)
+				return addrs
+			},
+			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				payloads := makePayloads(addrs)
+				payloads[0].EphemeralPk = make([]byte, 32) // identity point
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:  "dealer1",
+					EaPk:     testPallasPK(),
+					Payloads: payloads,
+				}
+			},
+			errContains: "invalid pallas point",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			addrs := tc.setup()
+			_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, tc.msg(addrs))
 			s.Require().Error(err)
 			s.Require().Contains(err.Error(), tc.errContains)
 		})

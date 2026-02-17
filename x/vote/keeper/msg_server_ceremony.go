@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -61,4 +62,82 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 	))
 
 	return &types.MsgRegisterPallasKeyResponse{}, nil
+}
+
+// DealExecutiveAuthorityKey handles MsgDealExecutiveAuthorityKey.
+// The dealer distributes encrypted ea_sk shares to all registered validators
+// and publishes the ea_pk. Ceremony transitions REGISTERING -> DEALT.
+func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.MsgDealExecutiveAuthorityKey) (*types.MsgDealExecutiveAuthorityKeyResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := ms.k.OpenKVStore(ctx)
+
+	state, err := ms.k.GetCeremonyState(kvStore)
+	if err != nil {
+		return nil, err
+	}
+	if state == nil {
+		return nil, fmt.Errorf("%w: no ceremony exists", types.ErrCeremonyWrongStatus)
+	}
+
+	// Only accept deals while REGISTERING.
+	if state.Status != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
+		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, state.Status)
+	}
+
+	// Need at least one registered validator.
+	if len(state.Validators) == 0 {
+		return nil, fmt.Errorf("%w: no validators registered", types.ErrCeremonyWrongStatus)
+	}
+
+	// Validate ea_pk is a valid Pallas point.
+	if _, err := elgamal.UnmarshalPublicKey(msg.EaPk); err != nil {
+		return nil, fmt.Errorf("%w: ea_pk: %v", types.ErrInvalidPallasPoint, err)
+	}
+
+	// Validate payload count matches validator count.
+	if len(msg.Payloads) != len(state.Validators) {
+		return nil, fmt.Errorf("%w: got %d payloads, expected %d",
+			types.ErrPayloadMismatch, len(msg.Payloads), len(state.Validators))
+	}
+
+	// Validate each payload maps 1:1 to a registered validator.
+	// Track which validators have been covered to detect duplicates.
+	covered := make(map[string]bool, len(state.Validators))
+	for _, p := range msg.Payloads {
+		if _, found := FindValidatorInCeremony(state, p.ValidatorAddress); !found {
+			return nil, fmt.Errorf("%w: payload references unknown validator %s",
+				types.ErrNotRegisteredValidator, p.ValidatorAddress)
+		}
+		if covered[p.ValidatorAddress] {
+			return nil, fmt.Errorf("%w: duplicate payload for validator %s",
+				types.ErrPayloadMismatch, p.ValidatorAddress)
+		}
+		covered[p.ValidatorAddress] = true
+
+		// Validate ephemeral_pk is a valid Pallas point.
+		if _, err := elgamal.UnmarshalPublicKey(p.EphemeralPk); err != nil {
+			return nil, fmt.Errorf("%w: ephemeral_pk for %s: %v",
+				types.ErrInvalidPallasPoint, p.ValidatorAddress, err)
+		}
+	}
+
+	// Store deal data and transition to DEALT.
+	state.EaPk = msg.EaPk
+	state.Payloads = msg.Payloads
+	state.Dealer = msg.Creator
+	state.DealHeight = uint64(ctx.BlockHeight())
+	state.Status = types.CeremonyStatus_CEREMONY_STATUS_DEALT
+
+	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeDealExecutiveAuthorityKey,
+		sdk.NewAttribute(types.AttributeKeyValidatorAddress, msg.Creator),
+		sdk.NewAttribute(types.AttributeKeyEAPK, hex.EncodeToString(msg.EaPk)),
+		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, state.Status.String()),
+	))
+
+	return &types.MsgDealExecutiveAuthorityKeyResponse{}, nil
 }
