@@ -6,7 +6,8 @@
 
 use pasta_curves::group::ff::PrimeField;
 use pasta_curves::Fp;
-use vote_commitment_tree::{TreeServer, MERKLE_PATH_BYTES};
+pub use vote_commitment_tree::MERKLE_PATH_BYTES;
+use vote_commitment_tree::TreeServer;
 
 // ---------------------------------------------------------------------------
 // Error type

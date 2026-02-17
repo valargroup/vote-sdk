@@ -56,6 +56,24 @@ func initRootCmd(
 	cfg := sdk.GetConfig()
 	cfg.Seal()
 
+	// Capture a reference to the ZallyApp created by newApp, so the helper
+	// PostSetup can access the VoteKeeper for reading tree leaves.
+	var zallyAppRef *app.ZallyApp
+	newAppFn := func(
+		logger log.Logger,
+		db dbm.DB,
+		traceStore io.Writer,
+		appOpts servertypes.AppOptions,
+	) servertypes.Application {
+		baseappOptions := server.DefaultBaseappOptions(appOpts)
+		zallyAppRef = app.NewZallyApp(
+			logger, db, traceStore, true,
+			appOpts,
+			baseappOptions...,
+		)
+		return zallyAppRef
+	}
+
 	rootCmd.AddCommand(
 		genutilcli.InitCmd(basicManager, app.DefaultNodeHome),
 		debug.Cmd(),
@@ -65,7 +83,10 @@ func initRootCmd(
 		PallasKeygenCmd(),
 	)
 
-	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newApp, appExport, server.StartCmdOptions{})
+	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newAppFn, appExport, server.StartCmdOptions{
+		PostSetup: helperPostSetup(&zallyAppRef),
+		AddFlags:  addHelperFlags,
+	})
 
 	// add keybase, auxiliary RPC, query, genesis, and tx child commands
 	rootCmd.AddCommand(
