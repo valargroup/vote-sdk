@@ -79,6 +79,37 @@ ea_sk_path = "$EA_SK_PATH"
 # Used by PrepareProposal to ECIES-decrypt the EA key share during ceremony
 # and auto-inject MsgAckExecutiveAuthorityKey.
 pallas_sk_path = "$PALLAS_SK_PATH"
+
+###############################################################################
+###                         Helper Server                                   ###
+###############################################################################
+
+[helper]
+
+# Set to true to disable the helper server.
+disable = false
+
+# Optional auth token for POST /api/v1/shares (sent via X-Helper-Token header).
+# Empty disables token auth.
+api_token = ""
+
+# Path to the SQLite database file. Empty = default ($HOME/.zallyd/helper.db).
+db_path = ""
+
+# Minimum random delay before submitting a share (seconds).
+min_delay = 10
+
+# Maximum random delay before submitting a share (seconds).
+max_delay = 300
+
+# How often to check for shares ready to submit (seconds).
+process_interval = 5
+
+# Port of the chain's REST API (used for MsgRevealShare submission).
+chain_api_port = 1318
+
+# Maximum concurrent proof generation goroutines.
+max_concurrent_proofs = 2
 EACFG
 
 echo ""

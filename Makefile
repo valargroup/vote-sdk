@@ -1,7 +1,7 @@
 BINARY = zallyd
 HOME_DIR = $(HOME)/.zallyd
 
-.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-api test-api-restart test-api-reinit test-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi
+.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-helper test-api test-api-restart test-api-reinit test-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi
 
 ## install: Build and install the zallyd binary to $GOPATH/bin
 install:
@@ -72,8 +72,12 @@ test-unit:
 test-integration:
 	go test -count=1 -race -timeout 5m ./app/...
 
+## test-helper: Helper server unit tests (SQLite store, API, processor)
+test-helper:
+	go test -count=1 -race ./internal/helper/...
+
 ## test: Run all tests (Go only, no Rust dependency)
-test: test-unit test-integration
+test: test-unit test-integration test-helper
 
 ## test-api: Rust E2E API tests against a running chain (requires: make init && make start)
 test-api:

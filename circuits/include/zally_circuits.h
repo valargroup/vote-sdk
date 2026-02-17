@@ -230,6 +230,60 @@ int32_t zally_verify_share_reveal_proof(
     size_t public_inputs_len
 );
 
+/* -----------------------------------------------------------------------
+ * Share Reveal proof generation (ZKP #3) — composite function
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Generate a share reveal proof (ZKP #3) in a single call.
+ *
+ * Performs the entire crypto pipeline: decode inputs, compute shares_hash,
+ * verify consistency, derive nullifier, build circuit, generate Halo2 proof.
+ *
+ * Parameters:
+ *   merkle_path_ptr       - Pointer to 772-byte serialized Merkle path
+ *                           (from zally_vote_tree_path: 4 bytes position + 24*32 siblings).
+ *   merkle_path_len       - Length (must be 772).
+ *   all_enc_shares_ptr    - Pointer to 256 bytes: 4 shares x (C1 + C2) x 32 bytes.
+ *                           Order: C1_0, C2_0, C1_1, C2_1, C1_2, C2_2, C1_3, C2_3.
+ *   all_enc_shares_len    - Length (must be 256).
+ *   share_index           - Which of the 4 shares (0..3).
+ *   proposal_id           - Proposal being voted on.
+ *   vote_decision         - Vote choice.
+ *   round_id_ptr          - Pointer to 32-byte raw Blake2b-256 round ID.
+ *   round_id_len          - Length (must be 32).
+ *   expected_shares_hash_ptr - Pointer to 32-byte expected shares_hash (Fp LE).
+ *   proof_out             - Output buffer for proof bytes.
+ *   proof_out_capacity    - Size of proof_out buffer (recommend 8192).
+ *   proof_len_out         - On success, receives actual proof length.
+ *   nullifier_out         - 32-byte output buffer for share nullifier.
+ *   tree_root_out         - 32-byte output buffer for commitment tree root.
+ *
+ * Returns:
+ *    0  on success.
+ *   -1  invalid input (null pointers, wrong lengths).
+ *   -3  deserialization error (non-canonical Fp).
+ *   -4  shares_hash mismatch.
+ *   -5  proof generation failure.
+ */
+int32_t zally_generate_share_reveal(
+    const uint8_t* merkle_path_ptr,
+    size_t merkle_path_len,
+    const uint8_t* all_enc_shares_ptr,
+    size_t all_enc_shares_len,
+    uint32_t share_index,
+    uint32_t proposal_id,
+    uint32_t vote_decision,
+    const uint8_t* round_id_ptr,
+    size_t round_id_len,
+    const uint8_t* expected_shares_hash_ptr,
+    uint8_t* proof_out,
+    size_t proof_out_capacity,
+    size_t* proof_len_out,
+    uint8_t* nullifier_out,
+    uint8_t* tree_root_out
+);
+
 #ifdef __cplusplus
 }
 #endif
