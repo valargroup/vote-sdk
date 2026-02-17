@@ -444,14 +444,15 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_SetsPhaseFields() {
 }
 
 // TestRegisterPallasKey_AfterReset verifies that registration works after the
-// ceremony was reset to INITIALIZING (e.g., after a timeout).
+// ceremony was reset to idle REGISTERING (phase_timeout=0, e.g., after a timeout).
 func (s *MsgServerTestSuite) TestRegisterPallasKey_AfterReset() {
 	s.SetupTest()
 
-	// Seed INITIALIZING state (simulating post-timeout reset).
+	// Seed idle REGISTERING state (simulating post-timeout reset).
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
-		Status: types.CeremonyStatus_CEREMONY_STATUS_INITIALIZING,
+		Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		// PhaseTimeout=0 means idle — first registration starts the timer.
 	}))
 
 	// Registration should succeed, transitioning to REGISTERING.
