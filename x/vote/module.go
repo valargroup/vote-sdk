@@ -50,6 +50,9 @@ func init() {
 			ProvideCastVoteSigner,
 			ProvideRevealShareSigner,
 			ProvideSubmitTallySigner,
+			ProvideRegisterPallasKeySigner,
+			ProvideDealExecutiveAuthorityKeySigner,
+			ProvideAckExecutiveAuthorityKeySigner,
 		),
 	)
 }
@@ -102,6 +105,27 @@ func ProvideRevealShareSigner() signing.CustomGetSigner {
 func ProvideSubmitTallySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgSubmitTally"),
+		Fn:      noopSignerFn,
+	}
+}
+
+func ProvideRegisterPallasKeySigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("zvote.v1.MsgRegisterPallasKey"),
+		Fn:      noopSignerFn,
+	}
+}
+
+func ProvideDealExecutiveAuthorityKeySigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("zvote.v1.MsgDealExecutiveAuthorityKey"),
+		Fn:      noopSignerFn,
+	}
+}
+
+func ProvideAckExecutiveAuthorityKeySigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("zvote.v1.MsgAckExecutiveAuthorityKey"),
 		Fn:      noopSignerFn,
 	}
 }
@@ -269,6 +293,33 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_ACTIVE.String()),
 			sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_TALLYING.String()),
 		))
+	}
+
+	// --- 3. Ceremony ack timeout ---
+	ceremony, err := am.keeper.GetCeremonyState(kvStore)
+	if err != nil {
+		return err
+	}
+	if ceremony != nil && ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_DEALT {
+		deadline := ceremony.DealTime + ceremony.AckTimeout
+		if blockTime >= deadline {
+			oldStatus := ceremony.Status
+			if keeper.AllValidatorsAcked(ceremony) {
+				ceremony.Status = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+			} else {
+				ceremony.Status = types.CeremonyStatus_CEREMONY_STATUS_ABORTED
+			}
+
+			if err := am.keeper.SetCeremonyState(kvStore, ceremony); err != nil {
+				return err
+			}
+
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeCeremonyStatusChange,
+				sdk.NewAttribute(types.AttributeKeyOldStatus, oldStatus.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, ceremony.Status.String()),
+			))
+		}
 	}
 
 	return nil

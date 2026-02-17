@@ -100,8 +100,8 @@ message CeremonyState {
   repeated DealerPayload      payloads    = 4;  // ECIES envelopes from DealerTx
   repeated AckEntry           acks        = 5;  // Per-validator ack status
   string                      dealer      = 6;  // Validator address of the dealer
-  uint64                      deal_height = 7;  // Block height when DealerTx landed
-  uint64                      ack_timeout = 8;  // Timeout in seconds after deal_height
+  uint64                      deal_time   = 7;  // Unix seconds when DealerTx landed
+  uint64                      ack_timeout = 8;  // Timeout in seconds after deal_time
 }
 
 // ValidatorPallasKey records a validator's registered Pallas public key.

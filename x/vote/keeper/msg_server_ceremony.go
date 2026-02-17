@@ -125,7 +125,8 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	state.EaPk = msg.EaPk
 	state.Payloads = msg.Payloads
 	state.Dealer = msg.Creator
-	state.DealHeight = uint64(ctx.BlockHeight())
+	state.DealTime = uint64(ctx.BlockTime().Unix())
+	state.AckTimeout = types.DefaultAckTimeout
 	state.Status = types.CeremonyStatus_CEREMONY_STATUS_DEALT
 
 	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {

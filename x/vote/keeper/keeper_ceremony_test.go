@@ -39,8 +39,8 @@ func (s *KeeperTestSuite) TestCeremonyState_RoundTrip() {
 			{ValidatorAddress: "val1", PallasPk: bytes.Repeat([]byte{0x01}, 32)},
 			{ValidatorAddress: "val2", PallasPk: bytes.Repeat([]byte{0x02}, 32)},
 		},
-		Dealer:     "val1",
-		DealHeight: 100,
+		Dealer:   "val1",
+		DealTime: 100,
 		AckTimeout: 300,
 	}
 
@@ -55,7 +55,7 @@ func (s *KeeperTestSuite) TestCeremonyState_RoundTrip() {
 	s.Require().Equal("val2", got.Validators[1].ValidatorAddress)
 	s.Require().Equal(bytes.Repeat([]byte{0x01}, 32), got.Validators[0].PallasPk)
 	s.Require().Equal("val1", got.Dealer)
-	s.Require().Equal(uint64(100), got.DealHeight)
+	s.Require().Equal(uint64(100), got.DealTime)
 	s.Require().Equal(uint64(300), got.AckTimeout)
 }
 
@@ -99,7 +99,7 @@ func (s *KeeperTestSuite) TestCeremonyState_FullLifecycle() {
 	state.Status = types.CeremonyStatus_CEREMONY_STATUS_DEALT
 	state.EaPk = bytes.Repeat([]byte{0xEA}, 32)
 	state.Dealer = "val1"
-	state.DealHeight = 50
+	state.DealTime = 50
 	state.Payloads = []*types.DealerPayload{
 		{ValidatorAddress: "val1", EphemeralPk: bytes.Repeat([]byte{0x10}, 32), Ciphertext: bytes.Repeat([]byte{0x11}, 48)},
 		{ValidatorAddress: "val2", EphemeralPk: bytes.Repeat([]byte{0x20}, 32), Ciphertext: bytes.Repeat([]byte{0x21}, 48)},
@@ -479,7 +479,7 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
 	s.Require().Equal(eaPk, state.EaPk)
 	s.Require().Equal("dealer1", state.Dealer)
-	s.Require().Equal(uint64(s.ctx.BlockHeight()), state.DealHeight)
+	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), state.DealTime)
 	s.Require().Len(state.Payloads, 3)
 	for i, p := range state.Payloads {
 		s.Require().Equal(addrs[i], p.ValidatorAddress)

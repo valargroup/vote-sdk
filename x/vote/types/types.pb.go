@@ -734,8 +734,8 @@ type CeremonyState struct {
 	Payloads      []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                        // ECIES envelopes from DealerTx
 	Acks          []*AckEntry            `protobuf:"bytes,5,rep,name=acks,proto3" json:"acks,omitempty"`                                // Per-validator ack status
 	Dealer        string                 `protobuf:"bytes,6,opt,name=dealer,proto3" json:"dealer,omitempty"`                            // Validator address of the dealer
-	DealHeight    uint64                 `protobuf:"varint,7,opt,name=deal_height,json=dealHeight,proto3" json:"deal_height,omitempty"` // Block height when DealerTx landed
-	AckTimeout    uint64                 `protobuf:"varint,8,opt,name=ack_timeout,json=ackTimeout,proto3" json:"ack_timeout,omitempty"` // Timeout in seconds after deal_height
+	DealTime      uint64                 `protobuf:"varint,7,opt,name=deal_time,json=dealTime,proto3" json:"deal_time,omitempty"`       // Unix seconds when DealerTx landed
+	AckTimeout    uint64                 `protobuf:"varint,8,opt,name=ack_timeout,json=ackTimeout,proto3" json:"ack_timeout,omitempty"` // Timeout in seconds after deal_time
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -812,9 +812,9 @@ func (x *CeremonyState) GetDealer() string {
 	return ""
 }
 
-func (x *CeremonyState) GetDealHeight() uint64 {
+func (x *CeremonyState) GetDealTime() uint64 {
 	if x != nil {
-		return x.DealHeight
+		return x.DealTime
 	}
 	return 0
 }
@@ -1058,7 +1058,7 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x06height\x18\x01 \x01(\x04R\x06height\x12\x1f\n" +
 	"\vstart_index\x18\x02 \x01(\x04R\n" +
 	"startIndex\x12\x16\n" +
-	"\x06leaves\x18\x03 \x03(\fR\x06leaves\"\xcb\x02\n" +
+	"\x06leaves\x18\x03 \x03(\fR\x06leaves\"\xc7\x02\n" +
 	"\rCeremonyState\x120\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.zvote.v1.CeremonyStatusR\x06status\x12\x13\n" +
 	"\x05ea_pk\x18\x02 \x01(\fR\x04eaPk\x12<\n" +
@@ -1067,9 +1067,8 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"validators\x123\n" +
 	"\bpayloads\x18\x04 \x03(\v2\x17.zvote.v1.DealerPayloadR\bpayloads\x12&\n" +
 	"\x04acks\x18\x05 \x03(\v2\x12.zvote.v1.AckEntryR\x04acks\x12\x16\n" +
-	"\x06dealer\x18\x06 \x01(\tR\x06dealer\x12\x1f\n" +
-	"\vdeal_height\x18\a \x01(\x04R\n" +
-	"dealHeight\x12\x1f\n" +
+	"\x06dealer\x18\x06 \x01(\tR\x06dealer\x12\x1b\n" +
+	"\tdeal_time\x18\a \x01(\x04R\bdealTime\x12\x1f\n" +
 	"\vack_timeout\x18\b \x01(\x04R\n" +
 	"ackTimeout\"^\n" +
 	"\x12ValidatorPallasKey\x12+\n" +
