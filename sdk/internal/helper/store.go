@@ -21,7 +21,7 @@ import (
 type ShareStore struct {
 	db       *sql.DB
 	mu       sync.Mutex
-	schedule map[string]time.Time // key: "round_id:share_index"
+	schedule map[string]time.Time // key: "round_id:share_index:proposal_id"
 	minDelay time.Duration
 	maxDelay time.Duration
 	logger   func(msg string, keyvals ...any) // optional error logger
@@ -85,14 +85,14 @@ func migrate(db *sql.DB) error {
 			all_enc_shares  TEXT NOT NULL,
 			state           INTEGER NOT NULL DEFAULT 0,
 			attempts        INTEGER NOT NULL DEFAULT 0,
-			PRIMARY KEY (round_id, share_index)
+			PRIMARY KEY (round_id, share_index, proposal_id)
 		)
 	`)
 	return err
 }
 
-func schedKey(roundID string, shareIndex uint32) string {
-	return fmt.Sprintf("%s:%d", roundID, shareIndex)
+func schedKey(roundID string, shareIndex, proposalID uint32) string {
+	return fmt.Sprintf("%s:%d:%d", roundID, shareIndex, proposalID)
 }
 
 // Enqueue adds a share payload with a random submission delay.
@@ -116,7 +116,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
 		  enc_share_c1, enc_share_c2, tree_position, all_enc_shares, state, attempts)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
-		 ON CONFLICT(round_id, share_index) DO NOTHING`,
+		 ON CONFLICT(round_id, share_index, proposal_id) DO NOTHING`,
 		payload.VoteRoundID,
 		payload.EncShare.ShareIndex,
 		payload.SharesHash,
@@ -135,18 +135,19 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	affected, _ := res.RowsAffected()
 	if affected > 0 {
 		delay := s.randomDelay()
-		key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex)
+		key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID)
 		s.schedule[key] = time.Now().Add(delay)
 		return EnqueueInserted, nil
 	}
 
 	// Conflict path: row already exists, classify as idempotent duplicate vs conflict.
-	existing, ok := s.loadShare(payload.VoteRoundID, payload.EncShare.ShareIndex)
+	existing, ok := s.loadShare(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID)
 	if !ok {
 		return EnqueueConflict, fmt.Errorf(
-			"load existing share after conflict: round_id=%s share_index=%d",
+			"load existing share after conflict: round_id=%s share_index=%d proposal_id=%d",
 			payload.VoteRoundID,
 			payload.EncShare.ShareIndex,
+			payload.ProposalID,
 		)
 	}
 	if payloadEqual(existing.Payload, payload) {
@@ -178,15 +179,22 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 
 	var result []QueuedShare
 	for _, key := range readyKeys {
-		// Parse round_id and share_index from key.
-		roundID, idxStr, _ := strings.Cut(key, ":")
-		idx64, _ := strconv.ParseUint(idxStr, 10, 32)
+		// Parse round_id, share_index, and proposal_id from key.
+		parts := strings.SplitN(key, ":", 3)
+		if len(parts) != 3 {
+			delete(s.schedule, key)
+			continue
+		}
+		roundID := parts[0]
+		idx64, _ := strconv.ParseUint(parts[1], 10, 32)
 		shareIndex := uint32(idx64)
+		pid64, _ := strconv.ParseUint(parts[2], 10, 32)
+		proposalID := uint32(pid64)
 
 		// Only take shares in Received state (0).
 		res, err := s.db.Exec(
-			"UPDATE shares SET state = 1 WHERE round_id = ? AND share_index = ? AND state = 0",
-			roundID, shareIndex,
+			"UPDATE shares SET state = 1 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND state = 0",
+			roundID, shareIndex, proposalID,
 		)
 		if err != nil {
 			continue
@@ -199,7 +207,7 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 		}
 
 		// Load the payload.
-		if share, ok := s.loadShare(roundID, shareIndex); ok {
+		if share, ok := s.loadShare(roundID, shareIndex, proposalID); ok {
 			result = append(result, share)
 		}
 		delete(s.schedule, key)
@@ -209,22 +217,22 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 }
 
 // MarkSubmitted marks a share as successfully submitted to the chain.
-func (s *ShareStore) MarkSubmitted(roundID string, shareIndex uint32) {
+func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if _, err := s.db.Exec(
-		"UPDATE shares SET state = 2 WHERE round_id = ? AND share_index = ? AND state = 1",
-		roundID, shareIndex,
+		"UPDATE shares SET state = 2 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND state = 1",
+		roundID, shareIndex, proposalID,
 	); err != nil {
-		s.logError("MarkSubmitted: db update failed", "round_id", roundID, "share_index", shareIndex, "error", err)
+		s.logError("MarkSubmitted: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "error", err)
 	}
-	delete(s.schedule, schedKey(roundID, shareIndex))
+	delete(s.schedule, schedKey(roundID, shareIndex, proposalID))
 }
 
 // MarkFailed marks a share processing attempt as failed, with retry or
 // permanent failure after max attempts.
-func (s *ShareStore) MarkFailed(roundID string, shareIndex uint32) {
+func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32) {
 	const maxAttempts = 5
 
 	s.mu.Lock()
@@ -232,21 +240,21 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex uint32) {
 
 	var attempts int
 	if err := s.db.QueryRow(
-		"SELECT attempts FROM shares WHERE round_id = ? AND share_index = ?",
-		roundID, shareIndex,
+		"SELECT attempts FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ?",
+		roundID, shareIndex, proposalID,
 	).Scan(&attempts); err != nil {
-		s.logError("MarkFailed: db query failed", "round_id", roundID, "share_index", shareIndex, "error", err)
+		s.logError("MarkFailed: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "error", err)
 		return
 	}
 
 	newAttempts := attempts + 1
-	key := schedKey(roundID, shareIndex)
+	key := schedKey(roundID, shareIndex, proposalID)
 
 	if newAttempts >= maxAttempts {
 		// Permanently failed.
 		if _, err := s.db.Exec(
-			"UPDATE shares SET state = 3, attempts = ? WHERE round_id = ? AND share_index = ?",
-			newAttempts, roundID, shareIndex,
+			"UPDATE shares SET state = 3, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ?",
+			newAttempts, roundID, shareIndex, proposalID,
 		); err != nil {
 			s.logError("MarkFailed: db update (permanent) failed", "error", err)
 		}
@@ -254,8 +262,8 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex uint32) {
 	} else {
 		// Re-schedule with exponential backoff.
 		if _, err := s.db.Exec(
-			"UPDATE shares SET state = 0, attempts = ? WHERE round_id = ? AND share_index = ?",
-			newAttempts, roundID, shareIndex,
+			"UPDATE shares SET state = 0, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ?",
+			newAttempts, roundID, shareIndex, proposalID,
 		); err != nil {
 			s.logError("MarkFailed: db update (retry) failed", "error", err)
 		}
@@ -319,7 +327,7 @@ func (s *ShareStore) recover() error {
 	}
 
 	// Load all non-terminal shares.
-	rows, err := s.db.Query("SELECT round_id, share_index FROM shares WHERE state = 0")
+	rows, err := s.db.Query("SELECT round_id, share_index, proposal_id FROM shares WHERE state = 0")
 	if err != nil {
 		return fmt.Errorf("query recoverable shares: %w", err)
 	}
@@ -327,17 +335,17 @@ func (s *ShareStore) recover() error {
 
 	for rows.Next() {
 		var roundID string
-		var shareIndex uint32
-		if err := rows.Scan(&roundID, &shareIndex); err != nil {
+		var shareIndex, proposalID uint32
+		if err := rows.Scan(&roundID, &shareIndex, &proposalID); err != nil {
 			continue
 		}
 		delay := s.randomDelay()
-		s.schedule[schedKey(roundID, shareIndex)] = time.Now().Add(delay)
+		s.schedule[schedKey(roundID, shareIndex, proposalID)] = time.Now().Add(delay)
 	}
 	return nil
 }
 
-func (s *ShareStore) loadShare(roundID string, shareIndex uint32) (QueuedShare, bool) {
+func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32) (QueuedShare, bool) {
 	var q QueuedShare
 	var allEncJSON string
 	var state, attempts int
@@ -345,8 +353,8 @@ func (s *ShareStore) loadShare(roundID string, shareIndex uint32) (QueuedShare, 
 	err := s.db.QueryRow(
 		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
 		        tree_position, all_enc_shares, state, attempts
-		 FROM shares WHERE round_id = ? AND share_index = ?`,
-		roundID, shareIndex,
+		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ?`,
+		roundID, shareIndex, proposalID,
 	).Scan(
 		&q.Payload.SharesHash,
 		&q.Payload.ProposalID,
