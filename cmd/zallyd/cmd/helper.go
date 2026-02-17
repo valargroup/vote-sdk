@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"cosmossdk.io/log"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/server"
 	"github.com/spf13/cobra"
@@ -132,7 +133,7 @@ type keeperTreeReader struct {
 
 // GetAllLeaves returns all commitment leaves up to the latest stored root.
 func (r *keeperTreeReader) GetAllLeaves() ([][]byte, uint64, error) {
-	ctx := r.app.NewContext(false)
+	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
 
 	// Get tree state to know total leaf count.
