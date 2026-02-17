@@ -1,7 +1,7 @@
 BINARY = zallyd
 HOME_DIR = $(HOME)/.zallyd
 
-.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-api test-api-restart test-api-reinit test-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi
+.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration ceremony test-api test-api-restart test-api-reinit test-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi
 
 ## install: Build and install the zallyd binary to $GOPATH/bin
 install:
@@ -74,6 +74,10 @@ test-integration:
 
 ## test: Run all tests (Go only, no Rust dependency)
 test: test-unit test-integration
+
+## ceremony: Bootstrap the EA key ceremony on a running chain (requires: make init && make start)
+ceremony:
+	ZALLY_API_URL=http://localhost:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml ceremony_bootstrap -- --nocapture --ignored
 
 ## test-api: Rust E2E API tests against a running chain (requires: make init && make start)
 test-api:
