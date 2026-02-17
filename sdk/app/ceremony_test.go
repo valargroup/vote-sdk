@@ -158,82 +158,11 @@ func TestKeyCeremonyFullLifecycle(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestKeyCeremonyRegistrationTimeout
-//
-// Registration phase times out before dealing. Ceremony resets to idle
-// REGISTERING (phase_timeout=0). Validators re-register and complete the
-// ceremony.
-// ---------------------------------------------------------------------------
-
-func TestKeyCeremonyRegistrationTimeout(t *testing.T) {
-	ta, _, pallasPk, eaSk, eaPk := testutil.SetupTestAppWithPallasKey(t)
-
-	eaPkBytes := eaPk.Point.ToAffineCompressed()
-	eaSkBytes, err := elgamal.MarshalSecretKey(eaSk)
-	require.NoError(t, err)
-
-	valAddr := ta.ValidatorOperAddr()
-
-	// ---------------------------------------------------------------
-	// Step 1: Register Pallas key → ceremony enters REGISTERING.
-	// ---------------------------------------------------------------
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
-
-	state := getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
-
-	// ---------------------------------------------------------------
-	// Step 2: Advance time past the registration timeout (120s).
-	//         Each NextBlock advances 5s. We need 120/5 = 24 blocks,
-	//         plus a buffer to be safely past the deadline.
-	// ---------------------------------------------------------------
-	deadline := time.Unix(int64(state.PhaseStart+state.PhaseTimeout), 0).UTC()
-	ta.NextBlockAtTime(deadline.Add(1 * time.Second))
-
-	// EndBlocker should have reset ceremony to idle REGISTERING (phase_timeout=0).
-	state = getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status,
-		"ceremony should reset to idle REGISTERING after registration timeout")
-	require.Empty(t, state.Validators, "validators should be cleared after reset")
-	require.Empty(t, state.Payloads, "payloads should be cleared after reset")
-	require.Empty(t, state.Acks, "acks should be cleared after reset")
-
-	// ---------------------------------------------------------------
-	// Step 3: Re-register after reset and complete the full ceremony.
-	// ---------------------------------------------------------------
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
-
-	state = getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status,
-		"re-registration should succeed after timeout reset")
-
-	// Deal EA key.
-	G := elgamal.PallasGenerator()
-	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
-	require.NoError(t, err)
-	payloads := []*types.DealerPayload{
-		{
-			ValidatorAddress: valAddr,
-			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-			Ciphertext:       env.Ciphertext,
-		},
-	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
-
-	// Auto-ack.
-	ta.NextBlockWithPrepareProposal()
-
-	state = getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status,
-		"ceremony should complete after retry")
-}
-
-// ---------------------------------------------------------------------------
 // TestKeyCeremonyDealTimeout
 //
 // Deal phase (awaiting acks) times out before all validators ack.
-// Ceremony resets to idle REGISTERING (phase_timeout=0). Re-registration
-// and a fresh deal complete the ceremony on the second attempt.
+// Ceremony resets to REGISTERING. Re-registration and a fresh deal
+// complete the ceremony on the second attempt.
 // ---------------------------------------------------------------------------
 
 func TestKeyCeremonyDealTimeout(t *testing.T) {
@@ -273,10 +202,10 @@ func TestKeyCeremonyDealTimeout(t *testing.T) {
 	deadline := time.Unix(int64(state.PhaseStart+state.PhaseTimeout), 0).UTC()
 	ta.NextBlockAtTime(deadline.Add(1 * time.Second))
 
-	// EndBlocker should have reset ceremony to idle REGISTERING (phase_timeout=0).
+	// EndBlocker should have reset ceremony to REGISTERING.
 	state = getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status,
-		"ceremony should reset to idle REGISTERING after deal/ack timeout")
+		"ceremony should reset to REGISTERING after deal/ack timeout")
 	require.Empty(t, state.Validators, "validators should be cleared after reset")
 	require.Empty(t, state.Payloads, "payloads should be cleared after reset")
 	require.Nil(t, state.EaPk, "ea_pk should be cleared after reset")
@@ -510,7 +439,7 @@ func TestReInitializeElectionAuthority_AllowedWhenNoCeremony(t *testing.T) {
 	state = getCeremonyState(t, ta)
 	require.NotNil(t, state)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
-	require.Equal(t, uint64(0), state.PhaseTimeout, "reinit should produce idle REGISTERING (phase_timeout=0)")
+	require.Equal(t, uint64(0), state.PhaseTimeout, "reinit should produce empty REGISTERING")
 }
 
 // TestReInitializeElectionAuthority_AllowedWhenConfirmed
@@ -559,11 +488,13 @@ func TestReInitializeElectionAuthority_AllowedWhenConfirmed(t *testing.T) {
 	require.Nil(t, state.EaPk, "ea_pk should be cleared after re-init")
 }
 
-// TestReInitializeElectionAuthority_RejectedDuringRegistering
+// TestReInitializeElectionAuthority_AllowedDuringRegistering
 //
-// Re-initialization is rejected when the ceremony is actively collecting
-// validator registrations.
-func TestReInitializeElectionAuthority_RejectedDuringRegistering(t *testing.T) {
+// Re-initialization is allowed when the ceremony is in REGISTERING state.
+// This provides an escape hatch for stuck registrations (e.g., wrong keys,
+// validators offline). REGISTERING has no timeout, so reinit is the only
+// way to restart.
+func TestReInitializeElectionAuthority_AllowedDuringRegistering(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	valAddr := ta.ValidatorOperAddr()
@@ -574,10 +505,15 @@ func TestReInitializeElectionAuthority_RejectedDuringRegistering(t *testing.T) {
 	state := getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
 
-	// Re-initialize should be rejected.
+	// Re-initialize should succeed (REGISTERING is not a blocking state).
 	code := reInitializeEA(t, ta, valAddr)
-	require.NotEqual(t, uint32(0), code,
-		"MsgReInitializeElectionAuthority should be rejected during REGISTERING")
+	require.Equal(t, uint32(0), code,
+		"MsgReInitializeElectionAuthority should be allowed during REGISTERING")
+
+	// Ceremony should be reset.
+	state = getCeremonyState(t, ta)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
+	require.Empty(t, state.Validators, "validators should be cleared after reinit")
 }
 
 // TestReInitializeElectionAuthority_RejectedDuringDealt
@@ -607,36 +543,6 @@ func TestReInitializeElectionAuthority_RejectedDuringDealt(t *testing.T) {
 	code := reInitializeEA(t, ta, valAddr)
 	require.NotEqual(t, uint32(0), code,
 		"MsgReInitializeElectionAuthority should be rejected during DEALT")
-}
-
-// TestReInitializeElectionAuthority_AllowedWhenIdleRegistering
-//
-// Re-initialization succeeds when the ceremony is in idle REGISTERING state
-// (phase_timeout=0, after a timeout reset).
-func TestReInitializeElectionAuthority_AllowedWhenIdleRegistering(t *testing.T) {
-	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-
-	valAddr := ta.ValidatorOperAddr()
-
-	// Register then time out to get to idle REGISTERING (phase_timeout=0).
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
-
-	state := getCeremonyState(t, ta)
-	deadline := time.Unix(int64(state.PhaseStart+state.PhaseTimeout), 0).UTC()
-	ta.NextBlockAtTime(deadline.Add(1 * time.Second))
-
-	state = getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
-	require.Equal(t, uint64(0), state.PhaseTimeout, "should be idle REGISTERING after timeout")
-
-	// Re-initialize should succeed.
-	code := reInitializeEA(t, ta, valAddr)
-	require.Equal(t, uint32(0), code,
-		"MsgReInitializeElectionAuthority should succeed when idle REGISTERING")
-
-	state = getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
-	require.Equal(t, uint64(0), state.PhaseTimeout)
 }
 
 // TestReInitializeElectionAuthority_NewCeremonyAfterReInit

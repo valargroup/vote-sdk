@@ -311,36 +311,64 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		))
 	}
 
-	// --- 3. Ceremony phase timeout ---
-	// Both REGISTERING (active, phase_timeout > 0) and DEALT phases have a
-	// timeout. On timeout in either phase, the ceremony is fully reset to
-	// idle REGISTERING (phase_timeout=0). CONFIRMED is only reached when all
-	// validators explicitly ack. Idle REGISTERING (phase_timeout==0) is
-	// skipped — it has no timer to expire.
+	// --- 3. Ceremony DEALT phase timeout ---
+	// Only the DEALT phase has a timeout. REGISTERING persists indefinitely
+	// until a deal is submitted or the ceremony is re-initialized.
+	// On DEALT timeout: if >= 2/3 validators acked, transition to CONFIRMED,
+	// strip non-ackers from ceremony state, and jail them via staking module.
+	// If < 2/3 acked, full reset to REGISTERING (ceremony failed).
 	ceremony, err := am.keeper.GetCeremonyState(kvStore)
 	if err != nil {
 		return err
 	}
 	if ceremony != nil && ceremony.PhaseTimeout > 0 &&
-		(ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING ||
-			ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_DEALT) {
+		ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_DEALT {
 		deadline := ceremony.PhaseStart + ceremony.PhaseTimeout
 		if blockTime >= deadline {
 			oldStatus := ceremony.Status
-			// Any timeout = full reset to idle REGISTERING. CONFIRMED only via all-ack.
-			resetState := &types.CeremonyState{
-				Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-			}
 
-			if err := am.keeper.SetCeremonyState(kvStore, resetState); err != nil {
-				return err
-			}
+			if keeper.TwoThirdsAcked(ceremony) {
+				// >= 2/3 acked: strip non-ackers, confirm, and jail non-participants.
+				nonAckers := keeper.NonAckingValidators(ceremony)
+				keeper.StripNonAckers(ceremony)
+				ceremony.Status = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 
-			ctx.EventManager().EmitEvent(sdk.NewEvent(
-				types.EventTypeCeremonyStatusChange,
-				sdk.NewAttribute(types.AttributeKeyOldStatus, oldStatus.String()),
-				sdk.NewAttribute(types.AttributeKeyNewStatus, resetState.Status.String()),
-			))
+				if err := am.keeper.SetCeremonyState(kvStore, ceremony); err != nil {
+					return err
+				}
+
+				// Jail each non-acking validator via the staking module.
+				for _, addr := range nonAckers {
+					if err := am.keeper.JailValidator(goCtx, addr); err != nil {
+						am.keeper.Logger().Error("failed to jail non-acking validator", "addr", addr, "err", err)
+					}
+					ctx.EventManager().EmitEvent(sdk.NewEvent(
+						types.EventTypeCeremonyValidatorJailed,
+						sdk.NewAttribute(types.AttributeKeyValidatorAddress, addr),
+					))
+				}
+
+				ctx.EventManager().EmitEvent(sdk.NewEvent(
+					types.EventTypeCeremonyStatusChange,
+					sdk.NewAttribute(types.AttributeKeyOldStatus, oldStatus.String()),
+					sdk.NewAttribute(types.AttributeKeyNewStatus, ceremony.Status.String()),
+				))
+			} else {
+				// DEALT with < 2/3 acks: full reset.
+				resetState := &types.CeremonyState{
+					Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+				}
+
+				if err := am.keeper.SetCeremonyState(kvStore, resetState); err != nil {
+					return err
+				}
+
+				ctx.EventManager().EmitEvent(sdk.NewEvent(
+					types.EventTypeCeremonyStatusChange,
+					sdk.NewAttribute(types.AttributeKeyOldStatus, oldStatus.String()),
+					sdk.NewAttribute(types.AttributeKeyNewStatus, resetState.Status.String()),
+				))
+			}
 		}
 	}
 

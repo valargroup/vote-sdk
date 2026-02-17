@@ -5,6 +5,12 @@
 //! After `init_multi.sh`, validators 2 and 3 have already registered Pallas
 //! keys via `CreateValidatorWithPallasKey`, so the ceremony starts in active
 //! REGISTERING. The test handles this by waiting for the EndBlocker timeout.
+//!
+//! The ceremony confirms via two paths:
+//!   - Fast path: all validators ack before the DEALT timeout → immediate CONFIRMED.
+//!   - Timeout path: >=2/3 validators acked when DEALT timeout fires → CONFIRMED,
+//!     non-ackers stripped from ceremony state and jailed via staking module.
+//! This test exercises the fast path (all 3 validators ack).
 
 use base64::Engine;
 use e2e_tests::{
@@ -32,7 +38,7 @@ fn block_wait() {
 ///   1. Ensure ceremony is idle (handle post-init_multi state)
 ///   2. Register all 3 validators' Pallas keys
 ///   3. Deal EA key (ECIES-encrypt ea_sk to each validator's Pallas PK)
-///   4. Wait for 3 auto-acks via PrepareProposal → CONFIRMED
+///   4. Wait for 3 auto-acks via PrepareProposal → CONFIRMED (fast path: all acked)
 ///   5. Verify CONFIRMED state: ea_pk, 3 validators, 3 acks
 ///   6. POST /reinitialize-ea
 ///   7. Verify idle REGISTERING with all fields cleared
