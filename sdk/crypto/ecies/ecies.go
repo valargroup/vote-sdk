@@ -10,6 +10,8 @@ import (
 )
 
 // CompressedPointSize is the size of a compressed Pallas curve point (32 bytes).
+// A compressed point stores the 255-bit x-coordinate in little-endian form with
+// the y-coordinate sign bit packed into bit 7 of the last byte.
 const CompressedPointSize = 32
 
 // Envelope holds an ECIES ciphertext: an ephemeral public key and an
