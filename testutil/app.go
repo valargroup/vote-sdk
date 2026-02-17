@@ -169,6 +169,36 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 	}
 }
 
+// SetupTestAppWithPallasKey creates a TestApp with both an EA keypair and a
+// Pallas keypair written to temp files and passed via app options. This enables
+// testing the auto-ack PrepareProposal handler. Returns the TestApp, the
+// validator's Pallas secret key, the EA secret key, and the EA public key.
+func SetupTestAppWithPallasKey(t *testing.T) (ta *TestApp, pallasSk *elgamal.SecretKey, pallasPk *elgamal.PublicKey, eaSk *elgamal.SecretKey, eaPk *elgamal.PublicKey) {
+	t.Helper()
+
+	pallasSk, pallasPk = elgamal.KeyGen(rand.Reader)
+	eaSk, eaPk = elgamal.KeyGen(rand.Reader)
+
+	pallasSkBytes, err := elgamal.MarshalSecretKey(pallasSk)
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	pallasSkPath := filepath.Join(tmpDir, "pallas.sk")
+	require.NoError(t, os.WriteFile(pallasSkPath, pallasSkBytes, 0600))
+
+	eaSkPath := filepath.Join(tmpDir, "ea.sk")
+	// ea.sk is intentionally NOT pre-written — the ceremony ack handler
+	// writes it after successful decryption.
+
+	appOpts := simtestutil.AppOptionsMap{
+		"vote.pallas_sk_path": pallasSkPath,
+		"vote.ea_sk_path":     eaSkPath,
+	}
+
+	ta = setupTestApp(t, appOpts)
+	return ta, pallasSk, pallasPk, eaSk, eaPk
+}
+
 // VoteKeeper returns the vote module keeper for querying state in tests.
 func (ta *TestApp) VoteKeeper() votekeeper.Keeper {
 	return ta.ZallyApp.VoteKeeper
@@ -187,6 +217,31 @@ func (ta *TestApp) SeedConfirmedCeremony(eaPk []byte) {
 	state := &types.CeremonyState{
 		Status: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
 		EaPk:   eaPk,
+	}
+	err := ta.VoteKeeper().SetCeremonyState(kvStore, state)
+	require.NoError(ta.t, err)
+
+	// Commit via an empty block so the IAVL working set changes are persisted.
+	ta.NextBlock()
+}
+
+// SeedDealtCeremony writes a DEALT ceremony state into the KV store. The
+// ceremony includes a single validator (the genesis validator) with an ECIES
+// payload encrypting eaSkBytes under pallasPk. Commits via an empty block.
+func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads []*types.DealerPayload, validators []*types.ValidatorPallasKey) {
+	ta.t.Helper()
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	state := &types.CeremonyState{
+		Status:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+		EaPk:         eaPkBytes,
+		Dealer:       "dealer",
+		Validators:   validators,
+		Payloads:     payloads,
+		PhaseStart:   uint64(ta.Time.Unix()),
+		PhaseTimeout: 30,
 	}
 	err := ta.VoteKeeper().SetCeremonyState(kvStore, state)
 	require.NoError(ta.t, err)
@@ -323,6 +378,36 @@ func (ta *TestApp) CallPrepareProposal() *abci.ResponsePrepareProposal {
 	resp, err := ta.ZallyApp.PrepareProposal(&abci.RequestPrepareProposal{
 		Height:          ta.Height + 1,
 		Time:            ta.Time.Add(5 * time.Second),
+		ProposerAddress: ta.ProposerAddress,
+	})
+	require.NoError(ta.t, err)
+	return resp
+}
+
+// CallPrepareProposalWithTxs builds a RequestPrepareProposal for the next block
+// with the given mempool txs and calls PrepareProposal. Returns the response.
+func (ta *TestApp) CallPrepareProposalWithTxs(txs [][]byte) *abci.ResponsePrepareProposal {
+	ta.t.Helper()
+
+	resp, err := ta.ZallyApp.PrepareProposal(&abci.RequestPrepareProposal{
+		Height:          ta.Height + 1,
+		Time:            ta.Time.Add(5 * time.Second),
+		Txs:             txs,
+		ProposerAddress: ta.ProposerAddress,
+	})
+	require.NoError(ta.t, err)
+	return resp
+}
+
+// CallProcessProposal calls ProcessProposal with the given txs at the next
+// block height (current height+1, time+5s). Returns the response.
+func (ta *TestApp) CallProcessProposal(txs [][]byte) *abci.ResponseProcessProposal {
+	ta.t.Helper()
+
+	resp, err := ta.ZallyApp.ProcessProposal(&abci.RequestProcessProposal{
+		Height:          ta.Height + 1,
+		Time:            ta.Time.Add(5 * time.Second),
+		Txs:             txs,
 		ProposerAddress: ta.ProposerAddress,
 	})
 	require.NoError(ta.t, err)

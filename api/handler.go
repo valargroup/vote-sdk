@@ -51,12 +51,20 @@ func NewHandler(cfg HandlerConfig) *Handler {
 //	POST /zally/v1/delegate-vote          → MsgDelegateVote
 //	POST /zally/v1/cast-vote              → MsgCastVote
 //	POST /zally/v1/reveal-share           → MsgRevealShare
+//	POST /zally/v1/submit-tally           → MsgSubmitTally
+//	POST /zally/v1/register-pallas-key    → MsgRegisterPallasKey
+//	POST /zally/v1/deal-ea-key            → MsgDealExecutiveAuthorityKey
+//
+// Note: MsgAckExecutiveAuthorityKey has no REST endpoint — acks are injected
+// in-protocol via PrepareProposal (auto-ack).
 func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.HandleFunc("/zally/v1/create-voting-session", h.handleCreateVotingSession).Methods("POST")
 	router.HandleFunc("/zally/v1/delegate-vote", h.handleDelegateVote).Methods("POST")
 	router.HandleFunc("/zally/v1/cast-vote", h.handleCastVote).Methods("POST")
 	router.HandleFunc("/zally/v1/reveal-share", h.handleRevealShare).Methods("POST")
 	router.HandleFunc("/zally/v1/submit-tally", h.handleSubmitTally).Methods("POST")
+	router.HandleFunc("/zally/v1/register-pallas-key", h.handleRegisterPallasKey).Methods("POST")
+	router.HandleFunc("/zally/v1/deal-ea-key", h.handleDealEAKey).Methods("POST")
 }
 
 // --- Tx submission handlers ---
@@ -99,6 +107,67 @@ func (h *Handler) handleSubmitTally(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.broadcastVoteTx(w, msg)
+}
+
+// --- Ceremony tx handlers ---
+
+func (h *Handler) handleRegisterPallasKey(w http.ResponseWriter, r *http.Request) {
+	msg := &types.MsgRegisterPallasKey{}
+	if !h.decodeCeremonyMsg(w, r, msg) {
+		return
+	}
+	h.broadcastCeremonyTx(w, msg, TagRegisterPallasKey)
+}
+
+func (h *Handler) handleDealEAKey(w http.ResponseWriter, r *http.Request) {
+	msg := &types.MsgDealExecutiveAuthorityKey{}
+	if !h.decodeCeremonyMsg(w, r, msg) {
+		return
+	}
+	h.broadcastCeremonyTx(w, msg, TagDealExecutiveAuthorityKey)
+}
+
+// decodeCeremonyMsg reads the JSON request body and unmarshals it into the
+// protobuf message. Unlike decodeAndValidate, ceremony messages don't
+// implement VoteMessage so we skip ValidateBasic here — the keeper performs
+// all ceremony validation.
+func (h *Handler) decodeCeremonyMsg(w http.ResponseWriter, r *http.Request, msg protov2.Message) bool {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
+		return false
+	}
+	if len(body) == 0 {
+		writeError(w, http.StatusBadRequest, "empty request body")
+		return false
+	}
+	if err := json.Unmarshal(body, msg); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
+		return false
+	}
+	return true
+}
+
+// broadcastCeremonyTx encodes a ceremony message to wire format and broadcasts
+// it to the local CometBFT node via broadcast_tx_sync.
+func (h *Handler) broadcastCeremonyTx(w http.ResponseWriter, msg protov2.Message, tag byte) {
+	raw, err := EncodeCeremonyTx(msg, tag)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("encode failed: %v", err))
+		return
+	}
+
+	start := time.Now()
+	result, err := h.cometBroadcastTxSync(raw)
+	elapsed := time.Since(start)
+	log.Printf("[zally-api] broadcast_tx_sync ceremony duration_ms=%d tag=0x%02x", elapsed.Milliseconds(), tag)
+	if err != nil {
+		log.Printf("[zally-api] broadcast_tx_sync ceremony failed: %v", err)
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("broadcast failed: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // --- Broadcast ---

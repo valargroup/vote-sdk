@@ -23,6 +23,32 @@ import (
 // log solver. 2^28 supports vote totals up to ~268 million.
 const bsgsDefaultBound = 1 << 28
 
+// PrepareProposalInjector is a function that may inject txs into the block
+// proposal. It receives the current tx list and returns the (possibly modified)
+// tx list. Injectors should prepend their txs before the existing ones.
+type PrepareProposalInjector = func(ctx sdk.Context, req *abci.RequestPrepareProposal, txs [][]byte) [][]byte
+
+// ComposedPrepareProposalHandler composes multiple PrepareProposalInjectors
+// into a single sdk.PrepareProposalHandler. Injectors run sequentially;
+// each receives the tx list produced by the previous one.
+func ComposedPrepareProposalHandler(
+	ceremonyInjector PrepareProposalInjector,
+	tallyHandler sdk.PrepareProposalHandler,
+) sdk.PrepareProposalHandler {
+	return func(ctx sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
+		// Start with the mempool txs from CometBFT.
+		txs := req.Txs
+
+		// Run ceremony ack injection (may prepend MsgAckExecutiveAuthorityKey).
+		txs = ceremonyInjector(ctx, req, txs)
+
+		// Run tally injection by creating a modified request with the updated txs.
+		modifiedReq := *req
+		modifiedReq.Txs = txs
+		return tallyHandler(ctx, &modifiedReq)
+	}
+}
+
 // TallyPrepareProposalHandler returns a PrepareProposalHandler that wraps the
 // default behavior (passing through req.Txs) and additionally injects
 // MsgSubmitTally transactions for any rounds in TALLYING state.

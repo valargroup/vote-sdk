@@ -11,19 +11,35 @@ import (
 )
 
 // Vote transaction type tags. The first byte of the wire format identifies
-// the message type. Tags 0x01–0x04 are reserved for vote transactions;
-// any other first byte is assumed to be a standard Cosmos SDK Tx.
+// the message type. Tags 0x01–0x05 are vote-round transactions; tags
+// 0x06–0x08 are ceremony transactions. Any other first byte is assumed
+// to be a standard Cosmos SDK Tx.
 const (
 	TagCreateVotingSession byte = 0x01
 	TagDelegateVote        byte = 0x02
 	TagCastVote            byte = 0x03
 	TagRevealShare         byte = 0x04
 	TagSubmitTally         byte = 0x05
+
+	TagRegisterPallasKey         byte = 0x06
+	TagDealExecutiveAuthorityKey byte = 0x07
+	TagAckExecutiveAuthorityKey  byte = 0x08
 )
 
-// IsVoteTag returns true if b is a valid vote transaction type tag.
+// IsCustomTag returns true if b is a valid custom transaction type tag
+// (vote-round 0x01–0x05 or ceremony 0x06–0x08).
+func IsCustomTag(b byte) bool {
+	return b >= TagCreateVotingSession && b <= TagAckExecutiveAuthorityKey
+}
+
+// IsVoteTag returns true if b is a vote-round transaction type tag (0x01–0x05).
 func IsVoteTag(b byte) bool {
 	return b >= TagCreateVotingSession && b <= TagSubmitTally
+}
+
+// IsCeremonyTag returns true if b is a ceremony transaction type tag (0x06–0x08).
+func IsCeremonyTag(b byte) bool {
+	return b >= TagRegisterPallasKey && b <= TagAckExecutiveAuthorityKey
 }
 
 // TagForMessage returns the wire-format tag for a VoteMessage.
@@ -101,4 +117,53 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 	}
 
 	return tag, voteMsg, nil
+}
+
+// EncodeCeremonyTx serializes a ceremony message into the wire format:
+//
+//	[1 byte: msg_type_tag] [N bytes: protobuf-encoded message]
+func EncodeCeremonyTx(msg proto.Message, tag byte) ([]byte, error) {
+	if !IsCeremonyTag(tag) {
+		return nil, fmt.Errorf("invalid ceremony tag: 0x%02x", tag)
+	}
+
+	body, err := proto.Marshal(msg)
+	if err != nil {
+		return nil, fmt.Errorf("protobuf marshal failed: %w", err)
+	}
+
+	raw := make([]byte, 1+len(body))
+	raw[0] = tag
+	copy(raw[1:], body)
+	return raw, nil
+}
+
+// DecodeCeremonyTx decodes raw wire-format bytes into a tag and a ceremony
+// message (proto.Message). Returns an error if the bytes are too short, the
+// tag is not a ceremony tag, or protobuf decoding fails.
+func DecodeCeremonyTx(raw []byte) (byte, proto.Message, error) {
+	if len(raw) < 2 {
+		return 0, nil, fmt.Errorf("ceremony tx too short: %d bytes", len(raw))
+	}
+
+	tag := raw[0]
+	body := raw[1:]
+
+	var msg proto.Message
+	switch tag {
+	case TagRegisterPallasKey:
+		msg = &types.MsgRegisterPallasKey{}
+	case TagDealExecutiveAuthorityKey:
+		msg = &types.MsgDealExecutiveAuthorityKey{}
+	case TagAckExecutiveAuthorityKey:
+		msg = &types.MsgAckExecutiveAuthorityKey{}
+	default:
+		return 0, nil, fmt.Errorf("invalid ceremony tx tag: 0x%02x", tag)
+	}
+
+	if err := proto.Unmarshal(body, msg); err != nil {
+		return 0, nil, fmt.Errorf("protobuf unmarshal failed for tag 0x%02x: %w", tag, err)
+	}
+
+	return tag, msg, nil
 }

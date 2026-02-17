@@ -55,8 +55,14 @@ rm -f "${CONFIG_TOML}.bak"
 # The secret key is used by PrepareProposal to decrypt tallies.
 $BINARY ea-keygen --home "$HOME_DIR"
 
-# Configure the EA secret key path in app.toml so the node can auto-tally.
+# Generate Pallas keypair for ECIES (ceremony key distribution).
+# The secret key is used by PrepareProposal to decrypt the EA key share
+# and auto-inject MsgAckExecutiveAuthorityKey.
+$BINARY pallas-keygen --home "$HOME_DIR"
+
+# Configure key paths in app.toml for PrepareProposal auto-injection.
 EA_SK_PATH="$HOME_DIR/ea.sk"
+PALLAS_SK_PATH="$HOME_DIR/pallas.sk"
 cat >> "$APP_TOML" <<EACFG
 
 ###############################################################################
@@ -68,6 +74,11 @@ cat >> "$APP_TOML" <<EACFG
 # Path to the Election Authority secret key file (32 bytes).
 # Used by PrepareProposal to decrypt tallies and auto-inject MsgSubmitTally.
 ea_sk_path = "$EA_SK_PATH"
+
+# Path to the Pallas secret key file (32 bytes).
+# Used by PrepareProposal to ECIES-decrypt the EA key share during ceremony
+# and auto-inject MsgAckExecutiveAuthorityKey.
+pallas_sk_path = "$PALLAS_SK_PATH"
 EACFG
 
 echo ""

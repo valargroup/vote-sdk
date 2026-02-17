@@ -148,7 +148,15 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 // AckExecutiveAuthorityKey handles MsgAckExecutiveAuthorityKey.
 // A registered validator acknowledges receipt of their ea_sk share.
 // When all validators have acked, ceremony transitions DEALT -> CONFIRMED.
+//
+// This message can only be injected by the block proposer via PrepareProposal;
+// direct submission through the mempool is rejected by ValidateAckSubmitter.
 func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.MsgAckExecutiveAuthorityKey) (*types.MsgAckExecutiveAuthorityKeyResponse, error) {
+	// Block mempool submission — acks must arrive via PrepareProposal only.
+	if err := ms.k.ValidateAckSubmitter(goCtx); err != nil {
+		return nil, err
+	}
+
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 

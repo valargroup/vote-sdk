@@ -128,15 +128,34 @@ func NewZallyApp(
 	// - Standard Cosmos txs: standard SDK ante chain (sig verify, fees)
 	app.setAnteHandler(app.txConfig)
 
-	// Install PrepareProposal handler that auto-injects MsgSubmitTally
-	// for rounds in TALLYING state. The EA secret key path is read from
-	// app.toml config (vote.ea_sk_path). If absent, tally injection is skipped.
+	// Read config paths for auto-injection handlers.
 	eaSkPath, _ := appOpts.Get("vote.ea_sk_path").(string)
-	logger.Info("Auto-tally config", "vote.ea_sk_path", eaSkPath)
-	app.SetPrepareProposal(TallyPrepareProposalHandler(
+	pallasSkPath, _ := appOpts.Get("vote.pallas_sk_path").(string)
+	logger.Info("Auto-injection config",
+		"vote.ea_sk_path", eaSkPath,
+		"vote.pallas_sk_path", pallasSkPath)
+
+	// Install composed PrepareProposal handler:
+	// 1. Ceremony ack injection: auto-ack when ceremony is DEALT
+	// 2. Tally injection: auto-tally when a round is TALLYING
+	ceremonyAckHandler := CeremonyAckPrepareProposalHandler(
+		app.VoteKeeper,
+		app.StakingKeeper,
+		pallasSkPath,
+		eaSkPath,
+		logger,
+	)
+	tallyHandler := TallyPrepareProposalHandler(
 		app.VoteKeeper,
 		app.StakingKeeper,
 		eaSkPath,
+		logger,
+	)
+	app.SetPrepareProposal(ComposedPrepareProposalHandler(ceremonyAckHandler, tallyHandler))
+
+	// Install ProcessProposal handler that validates injected ack and tally txs.
+	app.SetProcessProposal(ProcessProposalHandler(
+		app.VoteKeeper,
 		logger,
 	))
 

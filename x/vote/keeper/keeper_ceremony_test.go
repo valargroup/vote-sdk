@@ -1000,3 +1000,35 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 	s.Require().Equal(eaPkBytes, round.EaPk,
 		"round.EaPk should match the ceremony's confirmed ea_pk")
 }
+
+// ===========================================================================
+// ValidateAckSubmitter mempool-blocking tests
+// ===========================================================================
+
+func (s *KeeperTestSuite) TestValidateAckSubmitter_BlocksCheckTx() {
+	s.SetupTest()
+
+	// CheckTx context: should reject.
+	checkCtx := s.ctx.WithIsCheckTx(true)
+	err := s.keeper.ValidateAckSubmitter(checkCtx)
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "cannot be submitted via mempool")
+}
+
+func (s *KeeperTestSuite) TestValidateAckSubmitter_BlocksReCheckTx() {
+	s.SetupTest()
+
+	// ReCheckTx context: should reject.
+	recheckCtx := s.ctx.WithIsReCheckTx(true)
+	err := s.keeper.ValidateAckSubmitter(recheckCtx)
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "cannot be submitted via mempool")
+}
+
+func (s *KeeperTestSuite) TestValidateAckSubmitter_AllowsFinalizeBlock() {
+	s.SetupTest()
+
+	// FinalizeBlock context (neither CheckTx nor ReCheckTx): should allow.
+	err := s.keeper.ValidateAckSubmitter(s.ctx)
+	s.Require().NoError(err)
+}

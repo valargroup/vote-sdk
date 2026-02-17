@@ -516,6 +516,22 @@ func (k Keeper) ValidateTallySubmitter(ctx context.Context, creator string) erro
 	return nil
 }
 
+// ValidateAckSubmitter checks that MsgAckExecutiveAuthorityKey is only
+// submitted during block execution (not via mempool). This ensures acks
+// can only be injected by the block proposer via PrepareProposal,
+// mirroring the pattern used by ValidateTallySubmitter.
+func (k Keeper) ValidateAckSubmitter(ctx context.Context) error {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	// MsgAckExecutiveAuthorityKey must never enter the mempool — it can only
+	// be injected by the block proposer via PrepareProposal.
+	if sdkCtx.IsCheckTx() || sdkCtx.IsReCheckTx() {
+		return fmt.Errorf("%w: MsgAckExecutiveAuthorityKey cannot be submitted via mempool", types.ErrInvalidField)
+	}
+
+	return nil
+}
+
 // ValidateRoundActive checks that a vote round exists and has not expired.
 // Deprecated: Use ValidateRoundForVoting or ValidateRoundForShares instead.
 // Kept as a thin wrapper to minimize churn in existing callers.

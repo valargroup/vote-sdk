@@ -26,6 +26,7 @@ const (
 	Query_TallyResults_FullMethodName           = "/zvote.v1.Query/TallyResults"
 	Query_CommitmentLeaves_FullMethodName       = "/zvote.v1.Query/CommitmentLeaves"
 	Query_ActiveRound_FullMethodName            = "/zvote.v1.Query/ActiveRound"
+	Query_CeremonyState_FullMethodName          = "/zvote.v1.Query/CeremonyState"
 )
 
 // QueryClient is the client API for Query service.
@@ -50,6 +51,8 @@ type QueryClient interface {
 	// ActiveRound returns the first active voting round, if any.
 	// Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
 	ActiveRound(ctx context.Context, in *QueryActiveRoundRequest, opts ...grpc.CallOption) (*QueryActiveRoundResponse, error)
+	// CeremonyState returns the current EA key ceremony lifecycle state.
+	CeremonyState(ctx context.Context, in *QueryCeremonyStateRequest, opts ...grpc.CallOption) (*QueryCeremonyStateResponse, error)
 }
 
 type queryClient struct {
@@ -130,6 +133,16 @@ func (c *queryClient) ActiveRound(ctx context.Context, in *QueryActiveRoundReque
 	return out, nil
 }
 
+func (c *queryClient) CeremonyState(ctx context.Context, in *QueryCeremonyStateRequest, opts ...grpc.CallOption) (*QueryCeremonyStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryCeremonyStateResponse)
+	err := c.cc.Invoke(ctx, Query_CeremonyState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
@@ -152,6 +165,8 @@ type QueryServer interface {
 	// ActiveRound returns the first active voting round, if any.
 	// Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
 	ActiveRound(context.Context, *QueryActiveRoundRequest) (*QueryActiveRoundResponse, error)
+	// CeremonyState returns the current EA key ceremony lifecycle state.
+	CeremonyState(context.Context, *QueryCeremonyStateRequest) (*QueryCeremonyStateResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -182,6 +197,9 @@ func (UnimplementedQueryServer) CommitmentLeaves(context.Context, *QueryCommitme
 }
 func (UnimplementedQueryServer) ActiveRound(context.Context, *QueryActiveRoundRequest) (*QueryActiveRoundResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ActiveRound not implemented")
+}
+func (UnimplementedQueryServer) CeremonyState(context.Context, *QueryCeremonyStateRequest) (*QueryCeremonyStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CeremonyState not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -330,6 +348,24 @@ func _Query_ActiveRound_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_CeremonyState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryCeremonyStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).CeremonyState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_CeremonyState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).CeremonyState(ctx, req.(*QueryCeremonyStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -364,6 +400,10 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ActiveRound",
 			Handler:    _Query_ActiveRound_Handler,
+		},
+		{
+			MethodName: "CeremonyState",
+			Handler:    _Query_CeremonyState_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

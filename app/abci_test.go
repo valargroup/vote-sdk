@@ -15,6 +15,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	voteapi "github.com/z-cale/zally/api"
+	"github.com/z-cale/zally/crypto/ecies"
 	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/testutil"
 	"github.com/z-cale/zally/x/vote/types"
@@ -885,6 +887,98 @@ func TestPrepareProposalAutoTally(t *testing.T) {
 	require.Equal(t, uint32(1), tallyResults[0].VoteDecision)
 	require.Equal(t, uint64(42), tallyResults[0].TotalValue,
 		"decrypted tally should match encrypted value of 42")
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.17: PrepareProposal Auto-Ack Ceremony
+// ---------------------------------------------------------------------------
+
+func TestPrepareProposalAutoAck(t *testing.T) {
+	app, _, pallasPk, eaSk, eaPk := testutil.SetupTestAppWithPallasKey(t)
+
+	eaPkBytes := eaPk.Point.ToAffineCompressed()
+	eaSkBytes, err := elgamal.MarshalSecretKey(eaSk)
+	require.NoError(t, err)
+
+	// Get the genesis validator's operator address — this is our proposer.
+	valAddr := app.ValidatorOperAddr()
+
+	// ECIES-encrypt ea_sk to the validator's Pallas public key.
+	G := elgamal.PallasGenerator()
+	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
+	require.NoError(t, err)
+
+	// Seed a DEALT ceremony with the validator and ECIES payload.
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+	}
+	payloads := []*types.DealerPayload{
+		{
+			ValidatorAddress: valAddr,
+			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+			Ciphertext:       env.Ciphertext,
+		},
+	}
+	app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+
+	// Verify ceremony is DEALT before PrepareProposal.
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	state, err := app.VoteKeeper().GetCeremonyState(kvStore)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
+	require.Len(t, state.Acks, 0)
+
+	// Run a block with PrepareProposal — should inject MsgAckExecutiveAuthorityKey.
+	app.NextBlockWithPrepareProposal()
+
+	// Verify ceremony is now CONFIRMED (single validator, so one ack = all acked).
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	state, err = app.VoteKeeper().GetCeremonyState(kvStore)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status,
+		"ceremony should be CONFIRMED after auto-ack")
+	require.Len(t, state.Acks, 1)
+	require.Equal(t, valAddr, state.Acks[0].ValidatorAddress)
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.18: MsgAckExecutiveAuthorityKey Mempool Blocking
+// ---------------------------------------------------------------------------
+
+func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
+	app, _, pallasPk, _, eaPk := testutil.SetupTestAppWithPallasKey(t)
+
+	eaPkBytes := eaPk.Point.ToAffineCompressed()
+	valAddr := app.ValidatorOperAddr()
+
+	// Seed a DEALT ceremony so the ack message is otherwise valid.
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+	}
+	payloads := []*types.DealerPayload{
+		{
+			ValidatorAddress: valAddr,
+			EphemeralPk:      pallasPk.Point.ToAffineCompressed(), // dummy
+			Ciphertext:       bytes.Repeat([]byte{0xAB}, 48),     // dummy
+		},
+	}
+	app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+
+	// Encode a MsgAckExecutiveAuthorityKey.
+	ackMsg := &types.MsgAckExecutiveAuthorityKey{
+		Creator:      valAddr,
+		AckSignature: bytes.Repeat([]byte{0xAC}, 32),
+	}
+
+	txBytes, err := voteapi.EncodeCeremonyTx(ackMsg, voteapi.TagAckExecutiveAuthorityKey)
+	require.NoError(t, err)
+
+	// CheckTx should reject — acks cannot be submitted via mempool.
+	checkResp := app.CheckTxSync(txBytes)
+	require.NotEqual(t, uint32(0), checkResp.Code, "CheckTx should reject MsgAckExecutiveAuthorityKey")
+	require.Contains(t, checkResp.Log, "cannot be submitted via mempool")
 }
 
 // ---------------------------------------------------------------------------

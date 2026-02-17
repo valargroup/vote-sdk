@@ -160,6 +160,23 @@ func (qs queryServer) CommitmentLeaves(goCtx context.Context, req *types.QueryCo
 	return &types.QueryCommitmentLeavesResponse{Blocks: blocks}, nil
 }
 
+// CeremonyState returns the current EA key ceremony lifecycle state.
+func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCeremonyStateRequest) (*types.QueryCeremonyStateResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	state, err := qs.k.GetCeremonyState(kvStore)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get ceremony state: %v", err)
+	}
+
+	return &types.QueryCeremonyStateResponse{Ceremony: state}, nil
+}
+
 // ActiveRound returns the first active voting round, if any.
 // Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
 func (qs queryServer) ActiveRound(goCtx context.Context, req *types.QueryActiveRoundRequest) (*types.QueryActiveRoundResponse, error) {

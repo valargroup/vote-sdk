@@ -14,6 +14,7 @@ import (
 	"github.com/z-cale/zally/crypto/zkp"
 	voteante "github.com/z-cale/zally/x/vote/ante"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
+	"github.com/z-cale/zally/x/vote/types"
 )
 
 // DualAnteHandlerOptions configures the dual-mode ante handler that supports
@@ -54,7 +55,7 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 	zkpVerifier := opts.ZKPVerifier
 
 	return func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
-		// Vote tx path: custom ZKP/RedPallas validation.
+		// Custom tx path (vote or ceremony).
 		if vtx, ok := tx.(*voteapi.VoteTxWrapper); ok {
 			return handleVoteAnte(ctx, vtx, voteKeeper, sigVerifier, zkpVerifier)
 		}
@@ -74,8 +75,21 @@ func handleVoteAnte(
 	sigVerifier redpallas.Verifier,
 	zkpVerifier zkp.Verifier,
 ) (sdk.Context, error) {
-	// Vote txs are free — use an infinite gas meter so no gas limit errors.
+	// All custom txs (vote + ceremony) are free — infinite gas meter.
 	ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
+
+	// Ceremony messages (tags 0x06–0x08) bypass the vote validation pipeline.
+	// Most ceremony messages flow directly to MsgServer handlers for validation.
+	// MsgAckExecutiveAuthorityKey is special: it must be blocked from the
+	// mempool (only injectable via PrepareProposal).
+	if vtx.CeremonyMsg != nil {
+		if _, isAck := vtx.CeremonyMsg.(*types.MsgAckExecutiveAuthorityKey); isAck {
+			if err := k.ValidateAckSubmitter(ctx); err != nil {
+				return ctx, err
+			}
+		}
+		return ctx, nil
+	}
 
 	opts := voteante.ValidateOpts{
 		IsRecheck:   ctx.IsReCheckTx(),
