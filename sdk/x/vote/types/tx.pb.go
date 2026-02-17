@@ -1188,9 +1188,9 @@ func (*MsgCreateValidatorWithPallasKeyResponse) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{18}
 }
 
-// MsgReInitializeElectionAuthority resets the EA key ceremony back to INITIALIZING.
-// Can only be submitted when no ceremony session is in progress (REGISTERING or DEALT).
-// Allowed when ceremony is nil, UNSPECIFIED, INITIALIZING, or CONFIRMED.
+// MsgReInitializeElectionAuthority resets the EA key ceremony back to REGISTERING (idle, phase_timeout=0).
+// Can only be submitted when no ceremony session is actively in progress.
+// Allowed when ceremony is nil, UNSPECIFIED, idle REGISTERING (phase_timeout==0), or CONFIRMED.
 type MsgReInitializeElectionAuthority struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"` // Validator address
