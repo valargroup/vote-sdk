@@ -47,6 +47,10 @@ func (mockStakingKeeper) GetValidatorByConsAddr(_ context.Context, _ sdk.ConsAdd
 	}, nil
 }
 
+func (mockStakingKeeper) Jail(_ context.Context, _ sdk.ConsAddress) error {
+	return nil
+}
+
 // errStakingKeeper always returns ErrNoValidatorFound.
 type errStakingKeeper struct{}
 
@@ -56,6 +60,10 @@ func (errStakingKeeper) GetValidator(_ context.Context, _ sdk.ValAddress) (staki
 
 func (errStakingKeeper) GetValidatorByConsAddr(_ context.Context, _ sdk.ConsAddress) (stakingtypes.Validator, error) {
 	return stakingtypes.Validator{}, stakingtypes.ErrNoValidatorFound
+}
+
+func (errStakingKeeper) Jail(_ context.Context, _ sdk.ConsAddress) error {
+	return stakingtypes.ErrNoValidatorFound
 }
 
 // ---------------------------------------------------------------------------
