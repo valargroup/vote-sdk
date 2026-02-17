@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -119,7 +120,7 @@ jobs:
 
   test-api:
     name: API Integration Tests
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -133,14 +134,15 @@ jobs:
           go-version: "1.23"
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Cache Rust build (circuits + e2e-tests + tree client)
+      - name: Cache Rust build (circuits + e2e-tests + tree client + helper-server)
         uses: actions/cache@v4
         with:
           path: |
             sdk/circuits/target
             e2e-tests/target
             vote-commitment-tree-client/target
-          key: ${{ runner.os }}-api-rust-${{ hashFiles('sdk/circuits/Cargo.lock', 'e2e-tests/Cargo.lock', 'vote-commitment-tree-client/Cargo.lock') }}
+            helper-server/target
+          key: ${{ runner.os }}-api-rust-${{ hashFiles('sdk/circuits/Cargo.lock', 'e2e-tests/Cargo.lock', 'vote-commitment-tree-client/Cargo.lock', 'helper-server/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-api-rust-
       - name: Cache Go build
@@ -181,11 +183,35 @@ jobs:
           ZALLY_API_URL: http://localhost:1318
           ZALLY_EA_PK_PATH: /home/runner/.zallyd/ea.pk
           ZALLY_E2E_VOTE_WINDOW_SECS: "420"
+      - name: Build helper server
+        run: cargo build --release --manifest-path ../helper-server/Cargo.toml --bin helper-server
+      - name: Start helper server in background
+        run: |
+          ../helper-server/target/release/helper-server \
+            --tree-node http://localhost:1318 \
+            --chain-submit http://localhost:1318 \
+            --min-delay 1 --max-delay 3 \
+            --db-path :memory: > helper-server.log 2>&1 &
+          echo "Helper server PID: $!"
+      - name: Wait for helper server readiness
+        run: |
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:9091/api/v1/status > /dev/null 2>&1; then
+              echo "Helper server is ready"
+              exit 0
+            fi
+            echo "Waiting for helper server... ($i/15)"
+            sleep 1
+          done
+          echo "Helper server failed to start"
+          cat helper-server.log
+          exit 1
       - name: Run E2E test (voting_flow_librustvoting)
         run: cargo test --release --manifest-path ../e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1
         env:
           ZALLY_API_URL: http://localhost:1318
           ZALLY_EA_PK_PATH: /home/runner/.zallyd/ea.pk
+          HELPER_SERVER_URL: http://localhost:9091
           ZALLY_E2E_VOTE_WINDOW_SECS: "420"
       - name: Upload chain log on failure
         if: failure()
@@ -193,4 +219,11 @@ jobs:
         with:
           name: chain-log
           path: sdk/chain.log
+          retention-days: 7
+      - name: Upload helper server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: helper-server-log
+          path: sdk/helper-server.log
           retention-days: 7

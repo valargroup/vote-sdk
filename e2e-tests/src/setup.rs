@@ -28,8 +28,8 @@ use pasta_curves::pallas;
 use rand::rngs::OsRng;
 use vote_commitment_tree::TreeServer;
 
-const DEFAULT_E2E_VOTE_WINDOW_SECS: u64 = 480;
-const MIN_E2E_VOTE_WINDOW_SECS: u64 = 300;
+const DEFAULT_E2E_VOTE_WINDOW_SECS: u64 = 180;
+const MIN_E2E_VOTE_WINDOW_SECS: u64 = 120;
 
 fn vote_window_secs() -> u64 {
     std::env::var("ZALLY_E2E_VOTE_WINDOW_SECS")

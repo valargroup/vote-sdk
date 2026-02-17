@@ -13,6 +13,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 use crate::store::{QueueStatus, ShareStore};
+use crate::tree::TreeSync;
 use crate::types::SharePayload;
 
 // ---------------------------------------------------------------------------
@@ -23,6 +24,7 @@ use crate::types::SharePayload;
 #[derive(Clone)]
 pub struct AppState {
     pub store: ShareStore,
+    pub tree: TreeSync,
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +61,11 @@ async fn handle_submit_share(
         tree_position = payload.tree_position,
         "share received"
     );
+
+    // Mark the tree position for witness retention BEFORE the next sync
+    // prunes past it. Without this, TreeClient discards the sibling hashes
+    // needed to build a Merkle proof for this leaf.
+    state.tree.mark_position(payload.tree_position);
 
     state.store.enqueue(payload);
 

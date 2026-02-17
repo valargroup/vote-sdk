@@ -238,3 +238,44 @@ pub fn submit_tally_payload(round_id: &[u8], creator: &str, entries: &[TallyEntr
 pub fn ciphertext_to_base64(ct: &Ciphertext) -> String {
     to_base64(&elgamal::marshal(ct))
 }
+
+/// Build a share payload for the helper server's POST /api/v1/shares endpoint.
+///
+/// The helper server expects base64 for binary fields and hex for vote_round_id.
+pub fn helper_share_payload(
+    round_id: &[u8],
+    shares_hash: &[u8],
+    proposal_id: u32,
+    vote_decision: u32,
+    enc_share_c1: &[u8],
+    enc_share_c2: &[u8],
+    share_index: u32,
+    tree_position: u64,
+    all_enc_shares: &[(&[u8], &[u8], u32)], // (c1, c2, share_index) for each of 4 shares
+) -> Value {
+    let all_shares_json: Vec<Value> = all_enc_shares
+        .iter()
+        .map(|(c1, c2, idx)| {
+            json!({
+                "c1": to_base64(c1),
+                "c2": to_base64(c2),
+                "share_index": idx,
+            })
+        })
+        .collect();
+
+    json!({
+        "shares_hash": to_base64(shares_hash),
+        "proposal_id": proposal_id,
+        "vote_decision": vote_decision,
+        "enc_share": {
+            "c1": to_base64(enc_share_c1),
+            "c2": to_base64(enc_share_c2),
+            "share_index": share_index,
+        },
+        "share_index": share_index,
+        "tree_position": tree_position,
+        "vote_round_id": hex::encode(round_id),
+        "all_enc_shares": all_shares_json,
+    })
+}

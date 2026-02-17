@@ -4,7 +4,13 @@
 //! [`HttpTreeSyncApi`]. The tree is synced periodically in a background task,
 //! and positions are marked as shares arrive so Merkle witnesses can be
 //! generated later.
+//!
+//! When a share arrives after the tree has already synced past its position,
+//! the witness data is gone (ShardTree treats unmarked positions as ephemeral
+//! and prunes them). In that case, [`TreeSync::witness_or_resync`] rebuilds
+//! the tree from scratch with the position marked, then retries.
 
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use pasta_curves::Fp;
@@ -20,6 +26,9 @@ use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
 pub struct TreeSync {
     client: Arc<Mutex<TreeClient>>,
     node_url: String,
+    /// Positions marked for witness retention, tracked separately from
+    /// TreeClient so we can rebuild from scratch if needed.
+    marked: Arc<Mutex<BTreeSet<u64>>>,
 }
 
 impl TreeSync {
@@ -27,12 +36,13 @@ impl TreeSync {
         Self {
             client: Arc::new(Mutex::new(TreeClient::empty())),
             node_url,
+            marked: Arc::new(Mutex::new(BTreeSet::new())),
         }
     }
 
-    /// Mark a leaf position for witness retention. Must be called before the
-    /// tree syncs past this position.
+    /// Mark a leaf position for witness retention.
     pub fn mark_position(&self, position: u64) {
+        self.marked.lock().unwrap().insert(position);
         let mut client = self.client.lock().unwrap();
         client.mark_position(position);
     }
@@ -51,6 +61,39 @@ impl TreeSync {
     /// given anchor height.
     pub fn witness(&self, position: u64, anchor_height: u32) -> Option<MerklePath> {
         let client = self.client.lock().unwrap();
+        client.witness(position, anchor_height)
+    }
+
+    /// Try to generate a witness; if it fails (position was synced before
+    /// being marked), rebuild the tree from scratch with all marked positions
+    /// and retry. This is a blocking call.
+    pub fn witness_or_resync(&self, position: u64, anchor_height: u32) -> Option<MerklePath> {
+        // Fast path: witness available.
+        if let Some(w) = self.witness(position, anchor_height) {
+            return Some(w);
+        }
+
+        // Slow path: position was synced as ephemeral. Rebuild from scratch.
+        tracing::info!(
+            position,
+            anchor_height,
+            "witness not found, rebuilding tree from scratch with marked positions"
+        );
+
+        self.mark_position(position);
+        let marks = self.marked.lock().unwrap().clone();
+
+        let api = HttpTreeSyncApi::new(&self.node_url);
+        let mut client = self.client.lock().unwrap();
+        *client = TreeClient::empty();
+        for pos in &marks {
+            client.mark_position(*pos);
+        }
+        if let Err(e) = client.sync(&api) {
+            tracing::error!(error = %e, "tree resync from scratch failed");
+            return None;
+        }
+
         client.witness(position, anchor_height)
     }
 

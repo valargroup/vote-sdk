@@ -14,8 +14,8 @@ use helper_server::types::Config;
 #[derive(Parser)]
 #[command(name = "helper-server", about = "Zally vote share relay server")]
 struct Cli {
-    /// Port to listen on.
-    #[arg(long, default_value = "9090")]
+    /// Port to listen on (default 9091 to avoid the chain's gRPC on 9090).
+    #[arg(long, default_value = "9091")]
     port: u16,
 
     /// Base URL of the chain's REST API (or mock tree dev server).
@@ -96,7 +96,7 @@ async fn main() {
     tokio::spawn(tree_sync.clone().run_sync_loop(config.sync_interval_secs));
     tokio::spawn(processor::run_processor(
         store.clone(),
-        tree_sync,
+        tree_sync.clone(),
         chain_client,
         config.process_interval_secs,
     ));
@@ -104,6 +104,7 @@ async fn main() {
     // Start HTTP server.
     let app = helper_server::api::router(AppState {
         store: store.clone(),
+        tree: tree_sync,
     });
 
     let addr = format!("0.0.0.0:{}", config.port);

@@ -122,15 +122,24 @@ async fn process_share(
         .latest_height()
         .ok_or("tree not synced yet (no checkpoint)")?;
 
-    // Generate VC Merkle witness.
-    let witness = tree
-        .witness(share.payload.tree_position, anchor_height)
-        .ok_or_else(|| {
-            format!(
-                "no witness for position {} at height {}",
-                share.payload.tree_position, anchor_height
-            )
-        })?;
+    // Generate VC Merkle witness. If the position was synced before being
+    // marked (share arrived after background sync), this rebuilds the tree
+    // from scratch with the position marked and retries.
+    // witness_or_resync does blocking HTTP, so run it on the blocking pool.
+    let tree_for_witness = tree.clone();
+    let w_position = share.payload.tree_position;
+    let w_anchor = anchor_height;
+    let witness = tokio::task::spawn_blocking(move || {
+        tree_for_witness.witness_or_resync(w_position, w_anchor)
+    })
+    .await
+    .map_err(|e| format!("witness task failed: {}", e))?
+    .ok_or_else(|| {
+        format!(
+            "no witness for position {} at height {} (even after resync)",
+            share.payload.tree_position, anchor_height
+        )
+    })?;
 
     // Reconstruct the vote commitment (VC) leaf value.
     // The VC leaf is vote_commitment_hash(shares_hash, proposal_id, vote_decision),

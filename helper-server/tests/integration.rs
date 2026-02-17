@@ -182,8 +182,10 @@ async fn share_intake_and_queue() {
         ..Config::default()
     };
     let store = ShareStore::new(&config);
+    let tree = TreeSync::new("http://localhost:0".to_string());
     let app = helper_server::api::router(AppState {
         store: store.clone(),
+        tree,
     });
 
     let round_id = hex::encode([0x0A; 32]);
@@ -276,7 +278,8 @@ fn valid_payload() -> Value {
 fn make_app() -> axum::Router {
     let config = Config::default();
     let store = ShareStore::new(&config);
-    helper_server::api::router(AppState { store })
+    let tree = TreeSync::new("http://localhost:0".to_string());
+    helper_server::api::router(AppState { store, tree })
 }
 
 #[tokio::test]

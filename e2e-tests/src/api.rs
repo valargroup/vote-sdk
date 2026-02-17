@@ -5,9 +5,46 @@
 
 use serde_json::Value;
 
-/// Base URL for the chain REST API (e.g. http://localhost:1317).
+/// Base URL for the chain REST API.
+/// Default port 1318 matches init.sh (moved from 1317 to avoid Cursor IDE conflict).
+/// Uses 127.0.0.1 instead of localhost to avoid IPv6 resolution issues on macOS.
 pub fn base_url() -> String {
-    std::env::var("ZALLY_API_URL").unwrap_or_else(|_| "http://localhost:1317".to_string())
+    std::env::var("ZALLY_API_URL").unwrap_or_else(|_| "http://127.0.0.1:1318".to_string())
+}
+
+/// Helper server URL (default port 9091 to avoid the chain's gRPC on 9090).
+/// Uses 127.0.0.1 instead of localhost to avoid IPv6 resolution issues on macOS.
+pub fn helper_server_url() -> String {
+    std::env::var("HELPER_SERVER_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:9091".to_string())
+}
+
+/// POST JSON to the helper server. Retries on connection errors.
+pub fn post_helper_json(path: &str, body: &Value) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
+    let url = format!("{}{}", helper_server_url(), path);
+    let mut last_err = None;
+    for attempt in 0..MAX_RETRIES {
+        match client().post(&url).json(body).send() {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                let json: Value = resp.json()?;
+                return Ok((status, json));
+            }
+            Err(e) => {
+                last_err = Some(e);
+                if let Some(ref err) = last_err {
+                    if is_retryable(err) && attempt < MAX_RETRIES - 1 {
+                        let backoff_ms = 500 * (attempt + 1) as u64;
+                        eprintln!("[E2E] POST helper {} connection error (attempt {}/{}), retrying in {}ms...", path, attempt + 1, MAX_RETRIES, backoff_ms);
+                        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                        continue;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| unreachable!()).into())
 }
 
 /// Create a blocking client with a reasonable timeout.
