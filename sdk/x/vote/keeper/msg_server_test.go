@@ -616,43 +616,60 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 	roundID := bytes.Repeat([]byte{0x40}, 32)
 	creator := "zvote1creator"
 
-	// Helper: set up a TALLYING round with an encrypted tally accumulator.
-	setupTallyingRoundWithAccumulator := func() {
+	// Generate a real EA keypair for DLEQ proof tests.
+	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
+	eaPkBytes := eaPk.Point.ToAffineCompressed()
+
+	// Helper: set up a TALLYING round with an encrypted tally accumulator
+	// using the real EA public key.
+	setupTallyingRoundWithAccumulator := func() (*elgamal.Ciphertext, []byte) {
 		kv := s.keeper.OpenKVStore(s.ctx)
 		s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
 			VoteRoundId: roundID,
 			VoteEndTime: 500_000,
 			Creator:     creator,
 			Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
-		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First"},
-			{Id: 2, Title: "Proposal B", Description: "Second"},
-		},
-	}))
-		// Pre-populate the tally accumulator with a ciphertext.
-		encShare := testEncShare(s, 500)
-		s.Require().NoError(s.keeper.AddToTally(kv, roundID, 0, 1, encShare))
+			EaPk:        eaPkBytes,
+			Proposals: []*types.Proposal{
+				{Id: 1, Title: "Proposal A", Description: "First"},
+				{Id: 2, Title: "Proposal B", Description: "Second"},
+			},
+		}))
+		// Pre-populate the tally accumulator with a ciphertext encrypted under the real EA key.
+		encShareBytes := testEncShareWithPK(s, eaPk, 500)
+		s.Require().NoError(s.keeper.AddToTally(kv, roundID, 1, 1, encShareBytes))
+
+		ct, err := elgamal.UnmarshalCiphertext(encShareBytes)
+		s.Require().NoError(err)
+		return ct, encShareBytes
+	}
+
+	// Helper: generate a valid DLEQ proof for the given ciphertext and value.
+	makeDLEQProof := func(ct *elgamal.Ciphertext, value uint64) []byte {
+		proof, err := elgamal.GenerateDLEQProof(eaSk, ct, value)
+		s.Require().NoError(err)
+		return proof
 	}
 
 	tests := []struct {
 		name        string
 		setup       func()
-		msg         *types.MsgSubmitTally
+		msg         func() *types.MsgSubmitTally
 		expectErr   bool
 		errContains string
 		check       func(resp *types.MsgSubmitTallyResponse)
 	}{
 		{
-			name: "happy path: round finalized and results stored (DLEQ stubbed)",
-			setup: func() {
-				setupTallyingRoundWithAccumulator()
-			},
-			msg: &types.MsgSubmitTally{
-				VoteRoundId: roundID,
-				Creator:     creator,
-				Entries: []*types.TallyEntry{
-					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
-				},
+			name: "happy path: round finalized with valid DLEQ proof",
+			msg: func() *types.MsgSubmitTally {
+				ct, _ := setupTallyingRoundWithAccumulator()
+				return &types.MsgSubmitTally{
+					VoteRoundId: roundID,
+					Creator:     creator,
+					Entries: []*types.TallyEntry{
+						{ProposalId: 1, VoteDecision: 1, TotalValue: 500, DecryptionProof: makeDLEQProof(ct, 500)},
+					},
+				}
 			},
 			check: func(resp *types.MsgSubmitTallyResponse) {
 				s.Require().Equal(uint32(1), resp.FinalizedEntries)
@@ -674,16 +691,47 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			},
 		},
 		{
-			name: "rejected: entry references non-existent proposal",
-			setup: func() {
-				setupTallyingRoundWithAccumulator()
+			name: "rejected: invalid DLEQ proof (wrong value)",
+			msg: func() *types.MsgSubmitTally {
+				ct, _ := setupTallyingRoundWithAccumulator()
+				// Generate proof for 500 but claim 999.
+				return &types.MsgSubmitTally{
+					VoteRoundId: roundID,
+					Creator:     creator,
+					Entries: []*types.TallyEntry{
+						{ProposalId: 1, VoteDecision: 1, TotalValue: 999, DecryptionProof: makeDLEQProof(ct, 500)},
+					},
+				}
 			},
-			msg: &types.MsgSubmitTally{
-				VoteRoundId: roundID,
-				Creator:     creator,
-				Entries: []*types.TallyEntry{
-					{ProposalId: 5, VoteDecision: 1, TotalValue: 500},
-				},
+			expectErr:   true,
+			errContains: "tally entry does not match",
+		},
+		{
+			name: "rejected: missing DLEQ proof when accumulator exists",
+			msg: func() *types.MsgSubmitTally {
+				setupTallyingRoundWithAccumulator()
+				return &types.MsgSubmitTally{
+					VoteRoundId: roundID,
+					Creator:     creator,
+					Entries: []*types.TallyEntry{
+						{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
+					},
+				}
+			},
+			expectErr:   true,
+			errContains: "tally entry does not match",
+		},
+		{
+			name: "rejected: entry references non-existent proposal",
+			msg: func() *types.MsgSubmitTally {
+				setupTallyingRoundWithAccumulator()
+				return &types.MsgSubmitTally{
+					VoteRoundId: roundID,
+					Creator:     creator,
+					Entries: []*types.TallyEntry{
+						{ProposalId: 5, VoteDecision: 1, TotalValue: 500},
+					},
+				}
 			},
 			expectErr:   true,
 			errContains: "invalid proposal ID",
@@ -693,12 +741,14 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			setup: func() {
 				s.setupActiveRound(roundID)
 			},
-			msg: &types.MsgSubmitTally{
-				VoteRoundId: roundID,
-				Creator:     "zvote1creator",
-				Entries: []*types.TallyEntry{
-					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
-				},
+			msg: func() *types.MsgSubmitTally {
+				return &types.MsgSubmitTally{
+					VoteRoundId: roundID,
+					Creator:     "zvote1creator",
+					Entries: []*types.TallyEntry{
+						{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
+					},
+				}
 			},
 			expectErr:   true,
 			errContains: "not in tallying state",
@@ -714,27 +764,29 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 					Status:      types.SessionStatus_SESSION_STATUS_FINALIZED,
 				}))
 			},
-			msg: &types.MsgSubmitTally{
-				VoteRoundId: roundID,
-				Creator:     creator,
-				Entries: []*types.TallyEntry{
-					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
-				},
+			msg: func() *types.MsgSubmitTally {
+				return &types.MsgSubmitTally{
+					VoteRoundId: roundID,
+					Creator:     creator,
+					Entries: []*types.TallyEntry{
+						{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
+					},
+				}
 			},
 			expectErr:   true,
 			errContains: "not in tallying state",
 		},
 		{
-			name: "accepted: different creator (validator check is in ante, not msg_server)",
-			setup: func() {
-				setupTallyingRoundWithAccumulator()
-			},
-			msg: &types.MsgSubmitTally{
-				VoteRoundId: roundID,
-				Creator:     "zvote1othervalidator",
-				Entries: []*types.TallyEntry{
-					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
-				},
+			name: "accepted: different creator with valid DLEQ proof",
+			msg: func() *types.MsgSubmitTally {
+				ct, _ := setupTallyingRoundWithAccumulator()
+				return &types.MsgSubmitTally{
+					VoteRoundId: roundID,
+					Creator:     "zvote1othervalidator",
+					Entries: []*types.TallyEntry{
+						{ProposalId: 1, VoteDecision: 1, TotalValue: 500, DecryptionProof: makeDLEQProof(ct, 500)},
+					},
+				}
 			},
 			check: func(resp *types.MsgSubmitTallyResponse) {
 				s.Require().Equal(uint32(1), resp.FinalizedEntries)
@@ -742,33 +794,51 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 		},
 		{
 			name: "rejected: round does not exist",
-			msg: &types.MsgSubmitTally{
-				VoteRoundId: bytes.Repeat([]byte{0xFF}, 32),
-				Creator:     creator,
-				Entries: []*types.TallyEntry{
-					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
-				},
+			msg: func() *types.MsgSubmitTally {
+				return &types.MsgSubmitTally{
+					VoteRoundId: bytes.Repeat([]byte{0xFF}, 32),
+					Creator:     creator,
+					Entries: []*types.TallyEntry{
+						{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
+					},
+				}
 			},
 			expectErr:   true,
 			errContains: "vote round not found",
 		},
 		{
 			name: "happy path: zero-valued entry for (proposal, decision) with no reveals",
-			setup: func() {
-				setupTallyingRoundWithAccumulator()
-				// proposal 1 / decision 0 has no reveals for that decision → accumulator is nil.
-			},
-			msg: &types.MsgSubmitTally{
-				VoteRoundId: roundID,
-				Creator:     creator,
-				Entries: []*types.TallyEntry{
-					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
-					{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
-				},
+			msg: func() *types.MsgSubmitTally {
+				ct, _ := setupTallyingRoundWithAccumulator()
+				// proposal 1 / decision 0 has no reveals → accumulator nil → no proof needed.
+				return &types.MsgSubmitTally{
+					VoteRoundId: roundID,
+					Creator:     creator,
+					Entries: []*types.TallyEntry{
+						{ProposalId: 1, VoteDecision: 1, TotalValue: 500, DecryptionProof: makeDLEQProof(ct, 500)},
+						{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
+					},
+				}
 			},
 			check: func(resp *types.MsgSubmitTallyResponse) {
 				s.Require().Equal(uint32(2), resp.FinalizedEntries)
 			},
+		},
+		{
+			name: "rejected: non-zero value claimed for nil accumulator",
+			msg: func() *types.MsgSubmitTally {
+				ct, _ := setupTallyingRoundWithAccumulator()
+				return &types.MsgSubmitTally{
+					VoteRoundId: roundID,
+					Creator:     creator,
+					Entries: []*types.TallyEntry{
+						{ProposalId: 1, VoteDecision: 1, TotalValue: 500, DecryptionProof: makeDLEQProof(ct, 500)},
+						{ProposalId: 1, VoteDecision: 0, TotalValue: 42}, // no accumulator for decision 0
+					},
+				}
+			},
+			expectErr:   true,
+			errContains: "tally entry does not match",
 		},
 	}
 
@@ -778,7 +848,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			resp, err := s.msgServer.SubmitTally(s.ctx, tc.msg)
+			resp, err := s.msgServer.SubmitTally(s.ctx, tc.msg())
 			if tc.expectErr {
 				s.Require().Error(err)
 				if tc.errContains != "" {

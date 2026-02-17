@@ -615,6 +615,10 @@ func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
 // ---------------------------------------------------------------------------
 
 func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
+	// Generate a real EA keypair for DLEQ proof generation/verification.
+	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
+	eaPkBytes := eaPk.Point.ToAffineCompressed()
+
 	// Create a session expiring 30 seconds from now.
 	voteEndTime := s.app.Time.Add(30 * time.Second)
 	setupMsg := &types.MsgCreateVotingSession{
@@ -625,7 +629,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x4C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x4D}, 32),
-		EaPk:              bytes.Repeat([]byte{0x4E}, 32),
+		EaPk:              eaPkBytes,
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
@@ -651,9 +655,8 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	revealAnchor := uint64(s.app.Height)
 
 	// Reveal share while ACTIVE (before TALLYING transition) using a real
-	// ciphertext so later homomorphic accumulation can deserialize it.
-	_, pk := elgamal.KeyGen(rand.Reader)
-	ctActive, err := elgamal.Encrypt(pk, 100, rand.Reader)
+	// ciphertext encrypted under the EA key so DLEQ verification works.
+	ctActive, err := elgamal.Encrypt(eaPk, 100, rand.Reader)
 	s.Require().NoError(err)
 	encShareActive, err := elgamal.MarshalCiphertext(ctActive)
 	s.Require().NoError(err)
@@ -672,7 +675,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
 	// RevealShare should still be accepted during TALLYING.
-	ctTallying, err := elgamal.Encrypt(pk, 200, rand.Reader)
+	ctTallying, err := elgamal.Encrypt(eaPk, 200, rand.Reader)
 	s.Require().NoError(err)
 	encShareTallying, err := elgamal.MarshalCiphertext(ctTallying)
 	s.Require().NoError(err)
@@ -680,8 +683,15 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsgTallying))
 	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
 
+	// Generate DLEQ proof for the accumulated ciphertext.
+	accumulated := elgamal.HomomorphicAdd(ctActive, ctTallying)
+	dleqProof, err := elgamal.GenerateDLEQProof(eaSk, accumulated, 300)
+	s.Require().NoError(err)
+
 	// Submit tally to finalize (use the genesis validator's operator address).
-	submitTallyMsg := testutil.ValidSubmitTally(roundID, s.app.ValidatorOperAddr())
+	submitTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, s.app.ValidatorOperAddr(), []*types.TallyEntry{
+		{ProposalId: 1, VoteDecision: 1, TotalValue: 300, DecryptionProof: dleqProof},
+	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(submitTallyMsg))
 	s.Require().Equal(uint32(0), result.Code, "submit tally should succeed, got: %s", result.Log)
 
@@ -696,8 +706,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	// Verify tally accumulator preserved the homomorphic sum of both shares.
 	tally, err := s.app.VoteKeeper().GetTally(kvStore, roundID, revealMsg.ProposalId, revealMsg.VoteDecision)
 	s.Require().NoError(err)
-	expectedAccumulated := elgamal.HomomorphicAdd(ctActive, ctTallying)
-	expectedAccumulatedBz, err := elgamal.MarshalCiphertext(expectedAccumulated)
+	expectedAccumulatedBz, err := elgamal.MarshalCiphertext(accumulated)
 	s.Require().NoError(err)
 	s.Require().Equal(expectedAccumulatedBz, tally, "tally should be preserved after finalization")
 
@@ -705,10 +714,9 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	tallyResults, err := s.app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
 	s.Require().NoError(err)
 	s.Require().Len(tallyResults, 1)
-	s.Require().Equal(uint32(1), tallyResults[0].ProposalId) // 1-indexed; ValidSubmitTally uses proposal 1
+	s.Require().Equal(uint32(1), tallyResults[0].ProposalId)
 	s.Require().Equal(uint32(1), tallyResults[0].VoteDecision)
-	// TotalValue in TallyEntry is the EA-claimed plaintext; no longer compared to the encrypted share.
-	s.Require().NotZero(tallyResults[0].TotalValue)
+	s.Require().Equal(uint64(300), tallyResults[0].TotalValue)
 
 	// RevealShare should fail after FINALIZED.
 	revealMsg2 := testutil.ValidRevealShare(roundID, revealAnchor, 0x70)
@@ -806,6 +814,8 @@ func TestPrepareProposalAutoTally(t *testing.T) {
 	app, pk := testutil.SetupTestAppWithEAKey(t)
 
 	// Step 1: Create voting session expiring 30s from now.
+	// Use the real EA public key so SubmitTally can verify the DLEQ proof.
+	eaPkBytes := pk.Point.ToAffineCompressed()
 	voteEndTime := app.Time.Add(30 * time.Second)
 	setupMsg := &types.MsgCreateVotingSession{
 		Creator:           "zvote1admin",
@@ -815,7 +825,7 @@ func TestPrepareProposalAutoTally(t *testing.T) {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x7C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x7D}, 32),
-		EaPk:              bytes.Repeat([]byte{0x7E}, 32),
+		EaPk:              eaPkBytes,
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"sync"
 
@@ -188,10 +189,17 @@ func decryptRoundTallies(
 				return nil, err
 			}
 
+			// Generate DLEQ proof that the decryption is correct.
+			proof, err := elgamal.GenerateDLEQProof(sk, ct, totalValue)
+			if err != nil {
+				return nil, fmt.Errorf("DLEQ proof generation failed: %w", err)
+			}
+
 			entries = append(entries, &types.TallyEntry{
-				ProposalId:   proposalID,
-				VoteDecision: decision,
-				TotalValue:   totalValue,
+				ProposalId:      proposalID,
+				VoteDecision:    decision,
+				TotalValue:      totalValue,
+				DecryptionProof: proof,
 			})
 		}
 	}

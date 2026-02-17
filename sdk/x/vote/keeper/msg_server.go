@@ -9,6 +9,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"golang.org/x/crypto/blake2b"
 
+	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/types"
 )
 
@@ -233,10 +234,33 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 				types.ErrInvalidProposalID, i, entry.ProposalId, len(round.Proposals))
 		}
 
-		// TODO(dleq): Verify Chaum-Pedersen DLEQ proof that total_value matches
-		// the encrypted accumulator. For now, trust the EA's claimed value since
-		// MsgSubmitTally is authority-gated (only session creator can submit).
-		// Future: Use elgamal.VerifyDLEQ(entry.DecryptionProof, session.EaPk, accumulatorC1, ...)
+		// Verify Chaum-Pedersen DLEQ proof that total_value matches the
+		// encrypted accumulator.
+		accBytes, err := ms.k.GetTally(kvStore, msg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get tally for entry[%d]: %w", i, err)
+		}
+		if accBytes == nil {
+			// No shares revealed for this (proposal, decision) — require zero value and no proof.
+			if entry.TotalValue != 0 {
+				return nil, fmt.Errorf("%w: entry[%d] claims value %d but no accumulator exists",
+					types.ErrTallyMismatch, i, entry.TotalValue)
+			}
+		} else {
+			// Shares are revealed, verify the DLEQ proof.
+			ct, err := elgamal.UnmarshalCiphertext(accBytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to unmarshal accumulator for entry[%d]: %w", i, err)
+			}
+			pk, err := elgamal.UnmarshalPublicKey(round.EaPk)
+			if err != nil {
+				return nil, fmt.Errorf("failed to unmarshal EA public key: %w", err)
+			}
+			if err := elgamal.VerifyDLEQProof(entry.DecryptionProof, pk, ct, entry.TotalValue); err != nil {
+				return nil, fmt.Errorf("%w: entry[%d] DLEQ verification failed: %v",
+					types.ErrTallyMismatch, i, err)
+			}
+		}
 
 		// Store the finalized tally result (decrypted plaintext from EA).
 		if err := ms.k.SetTallyResult(kvStore, &types.TallyResult{
