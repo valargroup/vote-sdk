@@ -833,6 +833,7 @@ impl VotingDatabase {
         network_id: u32,
         proposal_id: u32,
         choice: u32,
+        num_options: u32,
         van_auth_path: Vec<Vec<u8>>,
         van_position: u32,
         anchor_height: u32,
@@ -856,6 +857,7 @@ impl VotingDatabase {
                 network_id,
                 proposal_id,
                 choice,
+                num_options,
                 &auth_path,
                 van_position,
                 anchor_height,
@@ -869,13 +871,14 @@ impl VotingDatabase {
         enc_shares: Vec<EncryptedShare>,
         commitment: VoteCommitmentBundle,
         vote_decision: u32,
+        num_options: u32,
         vc_tree_position: u64,
     ) -> Result<Vec<SharePayload>, VotingError> {
         let core_shares: Vec<voting::EncryptedShare> =
             enc_shares.into_iter().map(Into::into).collect();
         Ok(self
             .db
-            .build_share_payloads(&core_shares, &commitment.into(), vote_decision, vc_tree_position)?
+            .build_share_payloads(&core_shares, &commitment.into(), vote_decision, num_options, vc_tree_position)?
             .into_iter()
             .map(Into::into)
             .collect())
@@ -1208,6 +1211,7 @@ pub fn build_vote_commitment(
     ea_pk: Vec<u8>,
     proposal_id: u32,
     choice: u32,
+    num_options: u32,
     van_auth_path: Vec<Vec<u8>>,
     van_position: u32,
     anchor_height: u32,
@@ -1232,6 +1236,7 @@ pub fn build_vote_commitment(
         &ea_pk,
         proposal_id,
         choice,
+        num_options,
         &auth_path,
         van_position,
         anchor_height,
@@ -1246,6 +1251,7 @@ pub fn build_share_payloads(
     enc_shares: Vec<EncryptedShare>,
     commitment: VoteCommitmentBundle,
     vote_decision: u32,
+    num_options: u32,
     vc_tree_position: u64,
 ) -> Result<Vec<SharePayload>, VotingError> {
     let core_shares: Vec<voting::EncryptedShare> = enc_shares.into_iter().map(Into::into).collect();
@@ -1254,6 +1260,7 @@ pub fn build_share_payloads(
             &core_shares,
             &commitment.into(),
             vote_decision,
+            num_options,
             vc_tree_position,
         )?
         .into_iter()

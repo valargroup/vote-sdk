@@ -19,6 +19,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/z-cale/zally/crypto/elgamal"
+	zallytest "github.com/z-cale/zally/testutil"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -68,8 +69,8 @@ func (s *MsgServerTestSuite) setupActiveRound(roundID []byte) {
 		VkZkp2:           bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:           bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First"},
-			{Id: 2, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
+			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
 		},
 	}))
 }
@@ -112,8 +113,8 @@ func validSetupMsg() *types.MsgCreateVotingSession {
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First"},
-			{Id: 2, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
+			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
 		},
 	}
 }
@@ -213,8 +214,8 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 				VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 				Proposals: []*types.Proposal{
-					{Id: 1, Title: "Proposal A", Description: "First"},
-					{Id: 2, Title: "Proposal B", Description: "Second"},
+					{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
+					{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
 				},
 			},
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -726,8 +727,8 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
 			EaPk:        eaPkBytes,
 			Proposals: []*types.Proposal{
-				{Id: 1, Title: "Proposal A", Description: "First"},
-				{Id: 2, Title: "Proposal B", Description: "Second"},
+				{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
+				{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
 			},
 		}))
 		// Pre-populate the tally accumulator with a ciphertext encrypted under the real EA key.
@@ -1018,7 +1019,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_FinalizedRejectsShares() {
 		Creator:     creator,
 		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First"},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
 		},
 	}))
 

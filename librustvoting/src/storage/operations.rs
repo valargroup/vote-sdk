@@ -416,6 +416,7 @@ impl VotingDb {
         network_id: u32,
         proposal_id: u32,
         choice: u32,
+        num_options: u32,
         van_auth_path: &[[u8; 32]],
         van_position: u32,
         anchor_height: u32,
@@ -443,6 +444,7 @@ impl VotingDb {
             &zkp2_data.ea_pk,
             proposal_id,
             choice,
+            num_options,
             van_auth_path,
             van_position,
             anchor_height,
@@ -468,7 +470,8 @@ impl VotingDb {
 
     /// Build share payloads for helper server delegation.
     ///
-    /// - `vote_decision`: The voter's choice (0=support, 1=oppose, 2=skip).
+    /// - `vote_decision`: The voter's choice (0-indexed into the proposal's options).
+    /// - `num_options`: Number of options declared for this proposal (2-8).
     /// - `vc_tree_position`: Position of the Vote Commitment leaf in the VC tree,
     ///   known after the cast-vote TX is confirmed on chain.
     pub fn build_share_payloads(
@@ -476,12 +479,14 @@ impl VotingDb {
         enc_shares: &[EncryptedShare],
         commitment: &VoteCommitmentBundle,
         vote_decision: u32,
+        num_options: u32,
         vc_tree_position: u64,
     ) -> Result<Vec<SharePayload>, VotingError> {
         crate::vote_commitment::build_share_payloads(
             enc_shares,
             commitment,
             vote_decision,
+            num_options,
             vc_tree_position,
         )
     }

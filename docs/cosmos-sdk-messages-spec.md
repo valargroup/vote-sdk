@@ -153,10 +153,16 @@ enum SessionStatus {
   SESSION_STATUS_FINALIZED   = 3;  // Tally submitted and verified
 }
 
+message VoteOption {
+  uint32 index = 1; // 0-indexed, sequential
+  string label = 2; // e.g. "Support", "Oppose"
+}
+
 message Proposal {
-  uint32 id          = 1; // 0-indexed, max 15
-  string title       = 2;
-  string description = 3;
+  uint32 id                    = 1; // 1-indexed, sequential
+  string title                 = 2;
+  string description           = 3;
+  repeated VoteOption options  = 4; // 2-8 named choices per proposal
 }
 ```
 
@@ -765,7 +771,7 @@ These are items marked as TODO in the protocol spec that affect message design:
 |---|---|---|---|
 | 1 | **Historical root window size:** How many recent tree roots should the chain maintain for concurrent proof generation? | §5.2 | Affects `vote_comm_tree_root` validation in MsgCastVote and MsgRevealShare |
 | 2 | **Share grace period:** How long after `vote_end_time` should the chain accept `MsgRevealShare`? The helper server staggers submissions for temporal unlinkability. | §5.1 | Affects MsgRevealShare validation window |
-| 3 | **`vote_decision` encoding:** Is this a simple integer (e.g., 0=no, 1=yes), or a more complex structure? | §3.2 | Affects `vote_decision` field type |
+| 3 | **`vote_decision` encoding:** ~~Resolved~~ — `vote_decision` is a `uint32` indexing into the proposal's `options` array (0-indexed). Each proposal declares 2–8 named `VoteOption`s; the chain validates `vote_decision < len(proposal.options)`. Convention: option 0 = "Support", option 1 = "Oppose" for binary votes. | §3.2 | Resolved |
 | 4 | **Sighash computation:** What exactly is the sighash for `MsgDelegateVote`? Standard Cosmos SDK tx hash, or a custom domain-separated hash? | §2.4 | Affects out-of-circuit signature verification |
 | 5 | **Governance authority model:** Who can create voting sessions? A single admin, a multisig, or via Cosmos governance proposal? | §Phase 0 | Affects MsgCreateVotingSession authorization |
 | 6 | **Differential privacy for share count:** The spec mentions replacing binary decomposition with a DP random distribution (§3.3). Changing from 4 shares would require updating ZKP #2 and #3 circuit parameters. | §3.3 | Affects shares_hash computation and ZKP constraints |

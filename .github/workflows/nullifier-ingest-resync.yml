@@ -1,0 +1,40 @@
+# Manually trigger an incremental nullifier resync on the deploy host.
+# SSHes into the remote and runs ingest-nfs with INVALIDATE_TREE=1 so the
+# next query-server restart rebuilds the Merkle tree from the updated flat file.
+# Requires repository secrets: DEPLOY_HOST, DEPLOY_USER, SSH_PASSWORD.
+
+name: Resync nullifier snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_height:
+        description: "Stop syncing at this block height. If not provided, syncs to the latest chain tip."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DEPLOY_PATH: /opt/nullifier-ingest
+
+jobs:
+  resync:
+    name: Ingest resync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run ingest-resync via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          command_timeout: 30m
+          script: |
+            cd /opt/nullifier-ingest && \
+              DATA_DIR=/opt/nullifier-ingest \
+              LWD_URL=https://zec.rocks:443 \
+              INVALIDATE_TREE=1 \
+              MAX_HEIGHT=${{ github.event.inputs.max_height }} \
+              ./ingest-nfs

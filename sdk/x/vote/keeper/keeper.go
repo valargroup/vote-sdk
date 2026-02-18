@@ -351,6 +351,25 @@ func (k Keeper) ValidateProposalId(kvStore store.KVStore, roundID []byte, propos
 	return nil
 }
 
+// ValidateVoteDecision checks that voteDecision is a valid option index for the
+// given proposal within the round. Proposals are 1-indexed; vote decisions are
+// 0-indexed into the proposal's options list.
+func (k Keeper) ValidateVoteDecision(kvStore store.KVStore, roundID []byte, proposalId, voteDecision uint32) error {
+	round, err := k.GetVoteRound(kvStore, roundID)
+	if err != nil {
+		return err
+	}
+	if proposalId < 1 || int(proposalId) > len(round.Proposals) {
+		return fmt.Errorf("%w: proposal_id %d out of range [1, %d]", types.ErrInvalidProposalID, proposalId, len(round.Proposals))
+	}
+	proposal := round.Proposals[proposalId-1]
+	if int(voteDecision) >= len(proposal.Options) {
+		return fmt.Errorf("%w: vote_decision %d out of range [0, %d) for proposal %d",
+			types.ErrInvalidField, voteDecision, len(proposal.Options), proposalId)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Round status management
 // ---------------------------------------------------------------------------

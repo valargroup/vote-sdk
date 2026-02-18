@@ -11,7 +11,6 @@ use axum::routing::get;
 use axum::{Json, Router};
 use ff::PrimeField as _;
 use pasta_curves::Fp;
-use rusqlite::Connection;
 use serde::Serialize;
 
 use imt_tree::NullifierTree;
@@ -152,9 +151,9 @@ async fn main() -> Result<()> {
         .parse()
         .expect("PORT must be a valid u16");
 
-    // Load tree: prefer full-tree file > ranges file > SQLite database.
-    // After a DB build, the full tree is automatically saved as a sidecar
-    // file so subsequent restarts skip all hashing.
+    // Load tree: prefer full-tree file > ranges file > flat nullifier data.
+    // After a flat-file build, the full tree is saved as a sidecar so
+    // subsequent restarts skip all hashing.
     let tree = if let Ok(tree_file) = env::var("TREE_FILE") {
         eprintln!("Loading full tree from file: {}", tree_file);
         NullifierTree::load_full(Path::new(&tree_file))?
@@ -162,21 +161,22 @@ async fn main() -> Result<()> {
         eprintln!("Loading tree from ranges file: {}", tree_path);
         NullifierTree::load(Path::new(&tree_path))?
     } else {
-        let db_path = env::var("DB_PATH").unwrap_or_else(|_| "nullifiers.db".into());
+        let data_dir = env::var("DATA_DIR").unwrap_or_else(|_| ".".into());
+        let dir = Path::new(&data_dir);
+        let sidecar = dir.join("nullifiers.tree");
 
-        // Check for an auto-saved sidecar from a previous run.
-        let sidecar = format!("{}.tree", db_path);
-        if Path::new(&sidecar).exists() {
-            eprintln!("Loading full tree from sidecar: {}", sidecar);
-            NullifierTree::load_full(Path::new(&sidecar))?
+        if sidecar.exists() {
+            eprintln!("Loading full tree from sidecar: {}", sidecar.display());
+            NullifierTree::load_full(&sidecar)?
         } else {
-            eprintln!("Loading tree from database: {}", db_path);
-            let connection = Connection::open(&db_path)?;
-            let tree = tree_db::tree_from_db(&connection)?;
+            eprintln!(
+                "Building tree from flat file: {}",
+                dir.join("nullifiers.bin").display()
+            );
+            let tree = tree_db::tree_from_file(dir)?;
 
-            // Auto-save full tree so next restart is instant.
-            eprintln!("Saving full tree to sidecar: {}", sidecar);
-            tree.save_full(Path::new(&sidecar))?;
+            eprintln!("Saving full tree to sidecar: {}", sidecar.display());
+            tree.save_full(&sidecar)?;
 
             tree
         }

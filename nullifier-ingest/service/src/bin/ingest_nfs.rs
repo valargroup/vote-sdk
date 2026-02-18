@@ -1,10 +1,9 @@
 use std::env;
+use std::path::Path;
 
 use anyhow::Result;
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
 
-use nullifier_service::db;
+use nullifier_service::file_store;
 use nullifier_service::sync_nullifiers;
 
 /// Default lightwalletd endpoints
@@ -13,9 +12,6 @@ const DEFAULT_LWD_URLS: &[&str] = &[
     "https://eu2.zec.stardust.rest:443",
     "https://eu.zec.stardust.rest:443",
 ];
-
-/// Default SQLite database path
-const DEFAULT_DB_PATH: &str = "nullifiers.db";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,25 +22,18 @@ async fn main() -> Result<()> {
                 .map(|u| vec![u])
                 .unwrap_or_else(|_| DEFAULT_LWD_URLS.iter().map(|s| s.to_string()).collect())
         });
-    let db_path = env::var("DB_PATH").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
+    let data_dir = env::var("DATA_DIR").unwrap_or_else(|_| ".".to_string());
+    let dir = Path::new(&data_dir);
 
-    println!("Opening SQLite database: {}", db_path);
-    let manager = SqliteConnectionManager::file(&db_path);
-    let pool = Pool::new(manager)?;
-    let connection = pool.get()?;
+    let max_height: Option<u64> = env::var("MAX_HEIGHT")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.parse().expect("MAX_HEIGHT must be a valid integer"));
 
-    db::create_schema(&connection)?;
-
-    connection.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA synchronous = NORMAL;
-         PRAGMA cache_size = -256000;
-         PRAGMA temp_store = MEMORY;
-         PRAGMA mmap_size = 2147483648;",
-    )?;
-
-    sync_nullifiers::migrate_nullifiers_table(&connection)?;
-
+    println!("Data directory: {}", dir.display());
+    if let Some(h) = max_height {
+        println!("Max height: {}", h);
+    }
     println!(
         "Connecting to {} lightwalletd server(s): {}",
         lwd_urls.len(),
@@ -52,17 +41,17 @@ async fn main() -> Result<()> {
     );
     let t_start = std::time::Instant::now();
 
-    let result = sync_nullifiers::sync(&connection, &lwd_urls, |height, tip, batch, total| {
+    let result = sync_nullifiers::sync(dir, &lwd_urls, max_height, |height, target, batch, total| {
         let elapsed = t_start.elapsed().as_secs_f64();
         let bps = if elapsed > 0.0 {
             (height - sync_nullifiers::NU5_ACTIVATION_HEIGHT) as f64 / elapsed
         } else {
             0.0
         };
-        let remaining = (tip - height) as f64 / bps.max(1.0);
+        let remaining = (target - height) as f64 / bps.max(1.0);
         println!(
             "  height {}/{} | +{} nfs | {} total nfs | {:.0} blocks/s | ~{:.0}s remaining",
-            height, tip, batch, total, bps, remaining
+            height, target, batch, total, bps, remaining
         );
     })
     .await?;
@@ -76,17 +65,19 @@ async fn main() -> Result<()> {
             result.blocks_synced,
             t_start.elapsed().as_secs_f64()
         );
+
+        // Delete the sidecar tree so the server rebuilds from the updated data.
+        if env::var("INVALIDATE_TREE").is_ok() {
+            let sidecar = dir.join("nullifiers.tree");
+            if sidecar.exists() {
+                std::fs::remove_file(&sidecar)?;
+                println!("Deleted stale sidecar: {}", sidecar.display());
+            }
+        }
     }
 
-    println!("Database: {}", db_path);
-    let count: u64 = connection.query_row(
-        "SELECT COUNT(*) FROM nullifiers",
-        [],
-        |r| r.get(0),
-    )?;
-    println!("Total nullifiers in DB: {}", count);
-
-    sync_nullifiers::rebuild_index(&connection)?;
+    let count = file_store::nullifier_count(dir)?;
+    println!("Total nullifiers: {}", count);
 
     Ok(())
 }

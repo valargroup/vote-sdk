@@ -1,7 +1,7 @@
 BINARY = zallyd
 HOME_DIR = $(HOME)/.zallyd
 
-.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi
+.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi caddy
 
 ## install: Build and install the zallyd binary to $GOPATH/bin
 install:
@@ -141,3 +141,13 @@ test-redpallas-ante: circuits
 ## test-all-ffi: Run all FFI-backed tests (Halo2 + RedPallas) (requires circuits)
 test-all-ffi: circuits
 	go test -tags "halo2 redpallas" -count=1 -v ./crypto/zkp/halo2/... ./crypto/redpallas/... ./x/vote/ante/...
+
+# ---------------------------------------------------------------------------
+# Deployment targets
+# ---------------------------------------------------------------------------
+
+## caddy: Install Caddyfile and restart Caddy (HTTPS reverse proxy for the chain API)
+caddy:
+	sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+	sudo systemctl restart caddy
+	@echo "Caddy restarted — HTTPS at https://46-101-255-48.sslip.io"

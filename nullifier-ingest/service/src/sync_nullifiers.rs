@@ -1,10 +1,11 @@
+use std::path::Path;
+
 use anyhow::Result;
-use rusqlite::{params, Connection};
 use tonic::transport::Channel;
 use tonic::Request;
 
-use crate::db;
 use crate::download::connect_lwd;
+use crate::file_store;
 use crate::rpc::compact_tx_streamer_client::CompactTxStreamerClient;
 use crate::rpc::{BlockId, BlockRange, ChainSpec};
 
@@ -14,26 +15,16 @@ pub const NU5_ACTIVATION_HEIGHT: u64 = 1_687_104;
 /// How many blocks to request per gRPC streaming call.
 const BATCH_SIZE: u64 = 10_000;
 
-/// Insert a batch of `(height, nullifier)` pairs into the database within the
-/// current transaction.
-pub fn insert_nullifiers(connection: &Connection, nfs: &[(u64, Vec<u8>)]) -> Result<()> {
-    let mut stmt = connection
-        .prepare_cached("INSERT INTO nullifiers(height, nullifier) VALUES (?1, ?2)")?;
-    for (height, nf) in nfs {
-        stmt.execute(params![height, nf])?;
-    }
-    Ok(())
-}
-
 /// Determine the block height to resume syncing from.
 ///
-/// If a checkpoint exists, nullifiers at that height are deleted (partial batch)
-/// and syncing resumes from the block before. Otherwise starts from NU5 activation.
-pub fn resume_height(connection: &Connection) -> Result<u64> {
-    match db::load_checkpoint(connection)? {
-        Some(h) if h >= NU5_ACTIVATION_HEIGHT => {
-            db::delete_nullifiers_at_height(connection, h)?;
-            Ok(h - 1)
+/// Reads the checkpoint file and truncates any uncommitted bytes from
+/// the data file, then returns the last fully-committed height.
+/// If no checkpoint exists, starts from NU5 activation.
+pub fn resume_height(dir: &Path) -> Result<u64> {
+    match file_store::load_checkpoint(dir)? {
+        Some((h, offset)) if h >= NU5_ACTIVATION_HEIGHT => {
+            file_store::truncate_to_checkpoint(dir, offset)?;
+            Ok(h)
         }
         _ => Ok(NU5_ACTIVATION_HEIGHT),
     }
@@ -72,17 +63,21 @@ async fn fetch_block_range(
     Ok(nf_buffer)
 }
 
-/// Sync nullifiers from multiple lightwalletd servers into the database.
+/// Sync nullifiers from multiple lightwalletd servers into flat files.
 ///
 /// Connects to each URL in `lwd_urls`, streams blocks from the resume point to
-/// chain tip using parallel downloads (one batch per server), and inserts all
-/// Orchard nullifiers. Calls `progress` after each parallel cycle with
-/// `(last_height, chain_tip, cycle_nullifier_count, total_nullifier_count)`.
+/// `max_height` (or chain tip when `None`) using parallel downloads (one batch
+/// per server), and appends all Orchard nullifiers to the data file.  Calls
+/// `progress` after each parallel cycle with
+/// `(last_height, target_height, cycle_nullifier_count, total_nullifier_count)`.
 pub async fn sync(
-    connection: &Connection,
+    dir: &Path,
     lwd_urls: &[String],
+    max_height: Option<u64>,
     progress: impl Fn(u64, u64, u64, u64),
 ) -> Result<SyncResult> {
+    std::fs::create_dir_all(dir)?;
+
     let mut clients = Vec::with_capacity(lwd_urls.len());
     for url in lwd_urls {
         clients.push(connect_lwd(url).await?);
@@ -94,9 +89,28 @@ pub async fn sync(
         .await?;
     let chain_tip = latest.into_inner().height;
 
-    let start = resume_height(connection)?;
+    let target = match max_height {
+        Some(h) => std::cmp::min(h, chain_tip),
+        None => chain_tip,
+    };
 
-    if start >= chain_tip {
+    let start = resume_height(dir)?;
+    let existing = file_store::nullifier_count(dir)?;
+
+    if start > NU5_ACTIVATION_HEIGHT {
+        eprintln!(
+            "Resuming from checkpoint: height {} ({} nullifiers on disk)",
+            start, existing
+        );
+    } else {
+        eprintln!("Starting fresh from NU5 activation height {}", NU5_ACTIVATION_HEIGHT);
+    }
+    if let Some(h) = max_height {
+        eprintln!("Max height: {} (chain tip: {})", h, chain_tip);
+    }
+    eprintln!("Target: {} ({} blocks to sync)", target, target.saturating_sub(start));
+
+    if start >= target {
         return Ok(SyncResult {
             chain_tip,
             blocks_synced: 0,
@@ -108,15 +122,15 @@ pub async fn sync(
     let mut total_nfs: u64 = 0;
     let mut blocks_synced: u64 = 0;
 
-    while current <= chain_tip {
+    while current <= target {
         // Build up to N batch ranges, one per server
         let mut batch_ranges: Vec<(u64, u64)> = Vec::with_capacity(n);
         let mut batch_start = current;
         for _ in 0..n {
-            if batch_start > chain_tip {
+            if batch_start > target {
                 break;
             }
-            let batch_end = std::cmp::min(batch_start + BATCH_SIZE - 1, chain_tip);
+            let batch_end = std::cmp::min(batch_start + BATCH_SIZE - 1, target);
             batch_ranges.push((batch_start, batch_end));
             batch_start = batch_end + 1;
         }
@@ -136,19 +150,17 @@ pub async fn sync(
             all_nfs.extend(handle.await??);
         }
         let cycle_end = batch_ranges.last().unwrap().1;
-
         let cycle_nfs = all_nfs.len() as u64;
 
-        connection.execute_batch("BEGIN")?;
-        insert_nullifiers(connection, &all_nfs)?;
-        db::save_checkpoint(connection, cycle_end)?;
-        connection.execute_batch("COMMIT")?;
+        // Append nullifiers then atomically commit the checkpoint
+        let offset = file_store::append_nullifiers(dir, &all_nfs)?;
+        file_store::save_checkpoint(dir, cycle_end, offset)?;
 
         drop(all_nfs);
 
         total_nfs += cycle_nfs;
         blocks_synced += cycle_end - current + 1;
-        progress(cycle_end, chain_tip, cycle_nfs, total_nfs);
+        progress(cycle_end, target, cycle_nfs, total_nfs);
 
         current = cycle_end + 1;
     }
@@ -167,148 +179,70 @@ pub struct SyncResult {
     pub nullifiers_synced: u64,
 }
 
-/// Migrate the nullifiers table: remove the column-level UNIQUE constraint
-/// so that bulk inserts don't pay the cost of index maintenance on every row.
-/// Idempotent.
-pub fn migrate_nullifiers_table(connection: &Connection) -> Result<()> {
-    let has_autoindex: bool = connection.query_row(
-        "SELECT COUNT(*) > 0 FROM sqlite_master
-         WHERE type='index' AND name='sqlite_autoindex_nullifiers_1'",
-        [],
-        |r| r.get(0),
-    )?;
-
-    if !has_autoindex {
-        return Ok(());
-    }
-
-    let row_count: u64 =
-        connection.query_row("SELECT COUNT(*) FROM nullifiers", [], |r| r.get(0))?;
-    println!(
-        "Migrating nullifiers table ({} rows): removing column UNIQUE constraint for bulk perf...",
-        row_count
-    );
-    let t = std::time::Instant::now();
-
-    connection.execute_batch(
-        "CREATE TABLE nullifiers_new(
-            height INTEGER NOT NULL,
-            nullifier BLOB NOT NULL
-         );
-         INSERT INTO nullifiers_new SELECT * FROM nullifiers;
-         DROP TABLE nullifiers;
-         ALTER TABLE nullifiers_new RENAME TO nullifiers;",
-    )?;
-
-    println!(
-        "Migration complete in {:.1}s. Unique index will be built after ingestion finishes.",
-        t.elapsed().as_secs_f64()
-    );
-    Ok(())
-}
-
-/// Recreate the unique index on nullifiers after bulk loading completes.
-/// Idempotent.
-pub fn rebuild_index(connection: &Connection) -> Result<()> {
-    let has_index: bool = connection.query_row(
-        "SELECT COUNT(*) > 0 FROM sqlite_master
-         WHERE type='index' AND tbl_name='nullifiers'
-         AND (name='idx_nullifiers' OR name='sqlite_autoindex_nullifiers_1')",
-        [],
-        |r| r.get(0),
-    )?;
-
-    if has_index {
-        return Ok(());
-    }
-
-    println!("Building unique index on nullifiers...");
-    let t = std::time::Instant::now();
-    connection.execute_batch("CREATE UNIQUE INDEX idx_nullifiers ON nullifiers(nullifier);")?;
-    println!("Index built in {:.1}s", t.elapsed().as_secs_f64());
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db;
+    use std::path::PathBuf;
 
-    fn setup_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        db::create_schema(&conn).unwrap();
-        conn
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "nf_sync_test_{}_{}",
+            std::process::id(),
+            name
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     #[test]
-    fn test_checkpoint_round_trip() {
-        let conn = setup_db();
-
-        assert_eq!(db::load_checkpoint(&conn).unwrap(), None);
-
-        db::save_checkpoint(&conn, 1_700_000).unwrap();
-        assert_eq!(db::load_checkpoint(&conn).unwrap(), Some(1_700_000));
-
-        // Overwrite
-        db::save_checkpoint(&conn, 1_800_000).unwrap();
-        assert_eq!(db::load_checkpoint(&conn).unwrap(), Some(1_800_000));
+    fn resume_height_fresh() {
+        let dir = temp_dir("fresh");
+        assert_eq!(resume_height(&dir).unwrap(), NU5_ACTIVATION_HEIGHT);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn test_insert_and_delete_nullifiers() {
-        let conn = setup_db();
+    fn resume_height_from_checkpoint() {
+        let dir = temp_dir("resume");
 
-        let nfs = vec![
-            (100u64, vec![1u8; 32]),
-            (100, vec![2u8; 32]),
-            (200, vec![3u8; 32]),
-        ];
-
-        conn.execute_batch("BEGIN").unwrap();
-        insert_nullifiers(&conn, &nfs).unwrap();
-        conn.execute_batch("COMMIT").unwrap();
-
-        let count: u64 = conn
-            .query_row("SELECT COUNT(*) FROM nullifiers", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 3);
-
-        // Delete height 100 — should remove 2 rows
-        db::delete_nullifiers_at_height(&conn, 100).unwrap();
-        let count: u64 = conn
-            .query_row("SELECT COUNT(*) FROM nullifiers", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn test_resume_height_fresh() {
-        let conn = setup_db();
-        assert_eq!(resume_height(&conn).unwrap(), NU5_ACTIVATION_HEIGHT);
-    }
-
-    #[test]
-    fn test_resume_height_deletes_checkpoint_block() {
-        let conn = setup_db();
-
-        // Insert some nullifiers and checkpoint
+        // Write some nullifiers and commit a checkpoint
         let nfs = vec![
             (1_700_000u64, vec![1u8; 32]),
             (1_700_000, vec![2u8; 32]),
             (1_700_001, vec![3u8; 32]),
         ];
-        conn.execute_batch("BEGIN").unwrap();
-        insert_nullifiers(&conn, &nfs).unwrap();
-        db::save_checkpoint(&conn, 1_700_001).unwrap();
-        conn.execute_batch("COMMIT").unwrap();
+        let offset = file_store::append_nullifiers(&dir, &nfs).unwrap();
+        file_store::save_checkpoint(&dir, 1_700_001, offset).unwrap();
 
-        // Resume should delete nullifiers at height 1_700_001 and return 1_700_000
-        let h = resume_height(&conn).unwrap();
+        let h = resume_height(&dir).unwrap();
+        assert_eq!(h, 1_700_001);
+
+        // All 3 nullifiers should still be present (checkpoint was exact)
+        assert_eq!(file_store::nullifier_count(&dir).unwrap(), 3);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resume_height_truncates_uncommitted() {
+        let dir = temp_dir("trunc");
+
+        // Committed batch
+        let batch1 = vec![(1_700_000u64, vec![1u8; 32]), (1_700_000, vec![2u8; 32])];
+        let offset = file_store::append_nullifiers(&dir, &batch1).unwrap();
+        file_store::save_checkpoint(&dir, 1_700_000, offset).unwrap();
+
+        // Uncommitted partial batch (simulates crash)
+        let batch2 = vec![(1_700_001u64, vec![3u8; 32])];
+        file_store::append_nullifiers(&dir, &batch2).unwrap();
+        assert_eq!(file_store::nullifier_count(&dir).unwrap(), 3);
+
+        // resume_height should truncate back to the committed state
+        let h = resume_height(&dir).unwrap();
         assert_eq!(h, 1_700_000);
+        assert_eq!(file_store::nullifier_count(&dir).unwrap(), 2);
 
-        let count: u64 = conn
-            .query_row("SELECT COUNT(*) FROM nullifiers", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 2); // only height 1_700_000 remains
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

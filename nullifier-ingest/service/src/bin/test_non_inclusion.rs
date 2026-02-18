@@ -1,21 +1,22 @@
 use std::env;
+use std::path::Path;
 
 use anyhow::Result;
 use ff::PrimeField as _;
 use pasta_curves::Fp;
-use rusqlite::Connection;
 
+use nullifier_service::file_store;
 use nullifier_service::tree_db;
 
 fn main() -> Result<()> {
-    let db_path = env::var("DB_PATH").unwrap_or_else(|_| "nullifiers.db".to_string());
+    let data_dir = env::var("DATA_DIR").unwrap_or_else(|_| ".".to_string());
+    let dir = Path::new(&data_dir);
 
-    println!("Opening database: {}", db_path);
-    let connection = Connection::open(&db_path)?;
+    println!("Data directory: {}", dir.display());
 
     // ── 1. Build the nullifier tree ────────────────────────────────────
-    println!("Building NullifierTree from database...");
-    let tree = tree_db::tree_from_db(&connection)?;
+    println!("Building NullifierTree from flat file...");
+    let tree = tree_db::tree_from_file(dir)?;
     println!(
         "  Tree built: {} ranges, root = 0x{}",
         tree.len(),
@@ -23,11 +24,13 @@ fn main() -> Result<()> {
     );
 
     // ── 2. Load a raw nullifier for testing ────────────────────────────
-    let mut stmt = connection.prepare("SELECT nullifier FROM nullifiers LIMIT 1")?;
-    let existing_nf: Fp = stmt.query_row([], |r| {
-        let v = r.get::<_, [u8; 32]>(0)?;
-        Ok(Fp::from_repr(v).unwrap())
-    })?;
+    let all_nfs = file_store::load_all_nullifiers(dir)?;
+    assert!(
+        !all_nfs.is_empty(),
+        "No nullifiers found in {}",
+        dir.display()
+    );
+    let existing_nf = all_nfs[0];
 
     // ══════════════════════════════════════════════════════════════════════
     //  TEST 1: Non-existing nullifier  →  exclusion proof SHOULD succeed

@@ -23,7 +23,7 @@ export const LIGHTWALLETD_ENDPOINTS: LightwalletdEndpoint[] = [
   { label: "zec.rocks AP", url: "https://ap.zec.rocks", region: "AP" },
 ];
 
-export const DEFAULT_RPC = LIGHTWALLETD_ENDPOINTS[0].url;
+export const DEFAULT_RPC = import.meta.env.VITE_LIGHTWALLETD_RPC || LIGHTWALLETD_ENDPOINTS[0].url;
 
 export function getStoredRpc(): string {
   return localStorage.getItem(RPC_STORAGE_KEY) || DEFAULT_RPC;

@@ -300,12 +300,12 @@ pub fn validate_share_index(index: u32) -> Result<(), VotingError> {
     Ok(())
 }
 
-pub fn validate_vote_decision(decision: u32) -> Result<(), VotingError> {
-    if decision > 2 {
+pub fn validate_vote_decision(decision: u32, num_options: u32) -> Result<(), VotingError> {
+    if decision >= num_options {
         return Err(VotingError::InvalidInput {
             message: format!(
-                "vote_decision must be 0 (support), 1 (oppose), or 2 (skip), got {}",
-                decision
+                "vote_decision must be in [0, {}), got {}",
+                num_options, decision
             ),
         });
     }
