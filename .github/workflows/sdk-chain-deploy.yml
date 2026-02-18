@@ -105,6 +105,21 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             sudo systemctl stop zallyd || true
+            # Kill any orphaned zallyd processes not managed by systemd
+            sudo pkill -9 -f zallyd || true
+            # Wait for ports 26657 and 6060 to be freed
+            for i in $(seq 1 15); do
+              if ! ss -tlnp | grep -qE ':26657|:6060'; then
+                echo "Ports freed"
+                break
+              fi
+              if [ "$i" = "15" ]; then
+                echo "WARN: ports still bound after 15s, forcing..."
+                sudo fuser -k 26657/tcp 6060/tcp || true
+                sleep 1
+              fi
+              sleep 1
+            done
 
       - name: Initialize chain
         uses: appleboy/ssh-action@v1.0.3
