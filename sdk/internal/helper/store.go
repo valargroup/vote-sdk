@@ -422,6 +422,17 @@ func (s *ShareStore) recover() error {
 		if err := rows.Scan(&roundID, &shareIndex, &proposalID, &voteEndTime); err != nil {
 			continue
 		}
+		// Heal rows with vote_end_time=0 (legacy migration or transient fetch
+		// failure at enqueue time) from the round cache.
+		if voteEndTime == 0 {
+			if cached, ok := s.roundCache[roundID]; ok && cached != 0 {
+				voteEndTime = cached
+				_, _ = s.db.Exec(
+					"UPDATE shares SET vote_end_time = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ?",
+					voteEndTime, roundID, shareIndex, proposalID,
+				)
+			}
+		}
 		delay := s.cappedExponentialDelay(voteEndTime)
 		s.schedule[schedKey(roundID, shareIndex, proposalID)] = time.Now().Add(delay)
 	}
