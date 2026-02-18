@@ -51,7 +51,7 @@ $BINARY genesis validate-genesis --home "$HOME_DIR"
 # Use port 1318 to avoid Cursor IDE occupying 1317.
 APP_TOML="$HOME_DIR/config/app.toml"
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
-sed -i.bak 's|address = "tcp://localhost:1317"|address = "tcp://localhost:1318"|' "$APP_TOML"
+sed -i.bak 's|address = "tcp://localhost:1317"|address = "tcp://0.0.0.0:1318"|' "$APP_TOML"
 # Enable CORS for dev (Vite dev server on port 5173).
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP_TOML"
 rm -f "${APP_TOML}.bak"

@@ -119,7 +119,10 @@ configure_app_toml() {
 
     # Enable the REST API and set port.
     sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$app_toml"
-    sed -i.bak "s|address = \"tcp://localhost:1317\"|address = \"tcp://localhost:${api_port}\"|" "$app_toml"
+    sed -i.bak "s|address = \"tcp://localhost:1317\"|address = \"tcp://0.0.0.0:${api_port}\"|" "$app_toml"
+
+    # Enable CORS for cross-origin access (e.g. Vercel deployments).
+    sed -i.bak '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$app_toml"
 
     # gRPC server port.
     sed -i.bak "s|address = \"localhost:9090\"|address = \"localhost:${grpc_port}\"|" "$app_toml"
