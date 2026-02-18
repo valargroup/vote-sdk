@@ -8,5 +8,8 @@
 #   — or —  make caddy   (from the sdk directory)
 
 46-101-255-48.sslip.io {
+	handle_path /nullifier/* {
+		reverse_proxy localhost:3000
+	}
 	reverse_proxy localhost:1318
 }
