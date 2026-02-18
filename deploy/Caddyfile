@@ -8,6 +8,12 @@
 #   — or —  make caddy   (from the sdk directory)
 
 46-101-255-48.sslip.io {
+	header {
+		Access-Control-Allow-Origin *
+		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type"
+	}
+
 	handle_path /nullifier/* {
 		reverse_proxy localhost:3000
 	}
