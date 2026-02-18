@@ -231,6 +231,10 @@ func (h *Handler) handleSubmitSession(w http.ResponseWriter, r *http.Request) {
 			ID          uint32 `json:"id"`
 			Title       string `json:"title"`
 			Description string `json:"description"`
+			Options     []struct {
+				Index uint32 `json:"index"`
+				Label string `json:"label"`
+			} `json:"options"`
 		} `json:"proposals"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -266,10 +270,15 @@ func (h *Handler) handleSubmitSession(w http.ResponseWriter, r *http.Request) {
 	protoProposals := make([]*types.Proposal, len(req.Proposals))
 	proposalsHasher, _ := blake2b.New256(nil)
 	for i, p := range req.Proposals {
+		opts := make([]*types.VoteOption, len(p.Options))
+		for j, o := range p.Options {
+			opts[j] = &types.VoteOption{Index: o.Index, Label: o.Label}
+		}
 		prop := &types.Proposal{
 			Id:          p.ID,
 			Title:       p.Title,
 			Description: p.Description,
+			Options:     opts,
 		}
 		protoProposals[i] = prop
 

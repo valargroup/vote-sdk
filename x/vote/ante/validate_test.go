@@ -22,6 +22,7 @@ import (
 
 	"github.com/z-cale/zally/crypto/redpallas"
 	"github.com/z-cale/zally/crypto/zkp"
+	zallytest "github.com/z-cale/zally/testutil"
 	"github.com/z-cale/zally/x/vote/ante"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
@@ -134,8 +135,8 @@ func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First"},
-			{Id: 2, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
+			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
 		},
 	}
 }
@@ -303,8 +304,8 @@ func (s *ValidateTestSuite) setupRoundWithStatus(roundID []byte, endTime uint64,
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First"},
-			{Id: 2, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
+			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
 		},
 	}
 	err := s.keeper.SetVoteRound(kvStore, round)
