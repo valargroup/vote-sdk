@@ -25,11 +25,51 @@ import "C"
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"unsafe"
 
 	"github.com/z-cale/zally/crypto/zkp"
 )
+
+// pallasFpModulus is the Pallas base field modulus in big-endian byte order:
+// p = 0x40000000000000000000000000000000224698fc094cf91b992d30ed00000001
+var pallasFpModulus = [32]byte{
+	0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x22, 0x46, 0x98, 0xfc, 0x09, 0x4c, 0xf9, 0x1b,
+	0x99, 0x2d, 0x30, 0xed, 0x00, 0x00, 0x00, 0x01,
+}
+
+// isCanonicalPallasFp checks whether a 32-byte little-endian value is
+// strictly less than the Pallas base field modulus p.
+func isCanonicalPallasFp(b []byte) bool {
+	// Compare in big-endian order (byte 31 is the most significant).
+	for i := 31; i >= 0; i-- {
+		be := 31 - i // index into big-endian modulus
+		if b[i] < pallasFpModulus[be] {
+			return true
+		}
+		if b[i] > pallasFpModulus[be] {
+			return false
+		}
+	}
+	// Equal to p — not canonical.
+	return false
+}
+
+// validatePallasFp returns an error if b is not a canonical 32-byte
+// little-endian Pallas Fp element. The name is included in the error
+// message to identify which field is invalid.
+func validatePallasFp(name string, b []byte) error {
+	if len(b) != 32 {
+		return fmt.Errorf("%s: expected 32 bytes, got %d", name, len(b))
+	}
+	if !isCanonicalPallasFp(b) {
+		return fmt.Errorf("%s is not a canonical Pallas field element (got 0x%s)", name, hex.EncodeToString(b))
+	}
+	return nil
+}
 
 // VerifyToyProof verifies a Halo2 proof for the toy circuit
 // (constant * a^2 * b^2 = c) using the Rust verifier via CGo.
@@ -136,6 +176,32 @@ func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 		// Else: already zero-filled by make().
 	}
 
+	// Validate Fp fields before the FFI call so we get a clear error
+	// naming the exact field, instead of the opaque "-3" from Rust.
+	// Slots skipped: rk (slot 1, compressed point), vote_round_id (slot 4, wide-reduced in Rust).
+	if err := validatePallasFp("nf_signed", inputs.SignedNoteNullifier); err != nil {
+		return err
+	}
+	if err := validatePallasFp("cmx_new", inputs.CmxNew); err != nil {
+		return err
+	}
+	if err := validatePallasFp("van_cmx", inputs.VanCmx); err != nil {
+		return err
+	}
+	if err := validatePallasFp("nc_root", inputs.NcRoot); err != nil {
+		return err
+	}
+	if err := validatePallasFp("nf_imt_root", inputs.NullifierImtRoot); err != nil {
+		return err
+	}
+	for i := 0; i < len(inputs.GovNullifiers); i++ {
+		if len(inputs.GovNullifiers[i]) == chunkSize {
+			if err := validatePallasFp(fmt.Sprintf("gov_nullifier_%d", i+1), inputs.GovNullifiers[i]); err != nil {
+				return err
+			}
+		}
+	}
+
 	rc := C.zally_verify_delegation_proof(
 		(*C.uint8_t)(unsafe.Pointer(&proof[0])),
 		C.size_t(len(proof)),
@@ -221,6 +287,28 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 		return fmt.Errorf("ea_pk: %w", err)
 	}
 
+	// Validate Fp fields before the FFI call.
+	// Slots skipped: anchor_height (slot 6, uint64), proposal_id (slot 7, uint32),
+	// voting_round_id (slot 8, wide-reduced in Rust), ea_pk (slot 9, compressed point).
+	if err := validatePallasFp("van_nullifier", inputs.VanNullifier); err != nil {
+		return err
+	}
+	if err := validatePallasFp("r_vpk_x", inputs.RVpkX); err != nil {
+		return err
+	}
+	if err := validatePallasFp("r_vpk_y", inputs.RVpkY); err != nil {
+		return err
+	}
+	if err := validatePallasFp("vote_authority_note_new", inputs.VoteAuthorityNoteNew); err != nil {
+		return err
+	}
+	if err := validatePallasFp("vote_commitment", inputs.VoteCommitment); err != nil {
+		return err
+	}
+	if err := validatePallasFp("vote_comm_tree_root", inputs.VoteCommTreeRoot); err != nil {
+		return err
+	}
+
 	rc := C.zally_verify_vote_proof(
 		(*C.uint8_t)(unsafe.Pointer(&proof[0])),
 		C.size_t(len(proof)),
@@ -299,6 +387,23 @@ func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
 		return fmt.Errorf("voting_round_id must be %d bytes, got %d", chunkSize, len(inputs.VoteRoundId))
 	}
 	copy(buf[192:224], inputs.VoteRoundId)
+
+	// Validate Fp fields before the FFI call.
+	// Slots skipped: proposal_id (slot 3, small uint), vote_decision (slot 4, small uint),
+	// voting_round_id (slot 6, wide-reduced in Rust).
+	if err := validatePallasFp("share_nullifier", inputs.ShareNullifier); err != nil {
+		return err
+	}
+	// enc_share c1_x and c2_x are already in the buffer with sign bits cleared.
+	if err := validatePallasFp("enc_share_c1_x", buf[32:64]); err != nil {
+		return err
+	}
+	if err := validatePallasFp("enc_share_c2_x", buf[64:96]); err != nil {
+		return err
+	}
+	if err := validatePallasFp("vote_comm_tree_root", inputs.VoteCommTreeRoot); err != nil {
+		return err
+	}
 
 	rc := C.zally_verify_share_reveal_proof(
 		(*C.uint8_t)(unsafe.Pointer(&proof[0])),
