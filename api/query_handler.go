@@ -21,6 +21,7 @@ import (
 //	GET /zally/v1/commitment-tree/latest
 //	GET /zally/v1/commitment-tree/leaves?from_height=X&to_height=Y
 //	GET /zally/v1/round/{round_id}
+//	GET /zally/v1/rounds
 //	GET /zally/v1/rounds/active
 //	GET /zally/v1/tally/{round_id}/{proposal_id}
 //	GET /zally/v1/tally-results/{round_id}
@@ -35,6 +36,7 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.HandleFunc("/zally/v1/commitment-tree/leaves", qh.handleCommitmentLeaves).Methods("GET")
 	router.HandleFunc("/zally/v1/commitment-tree/{height}", qh.handleCommitmentTreeAtHeight).Methods("GET")
 	router.HandleFunc("/zally/v1/rounds/active", qh.handleActiveRound).Methods("GET")
+	router.HandleFunc("/zally/v1/rounds", qh.handleListRounds).Methods("GET")
 	router.HandleFunc("/zally/v1/round/{round_id}", qh.handleVoteRound).Methods("GET")
 	router.HandleFunc("/zally/v1/tally/{round_id}/{proposal_id}", qh.handleProposalTally).Methods("GET")
 	router.HandleFunc("/zally/v1/tally-results/{round_id}", qh.handleTallyResults).Methods("GET")
@@ -202,6 +204,18 @@ func (qh *queryHandler) handleCeremonyState(w http.ResponseWriter, _ *http.Reque
 	resp := &types.QueryCeremonyStateResponse{}
 
 	if err := qh.abciQuery("/zvote.v1.Query/CeremonyState", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handleListRounds(w http.ResponseWriter, _ *http.Request) {
+	req := &types.QueryListRoundsRequest{}
+	resp := &types.QueryListRoundsResponse{}
+
+	if err := qh.abciQuery("/zvote.v1.Query/ListRounds", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}

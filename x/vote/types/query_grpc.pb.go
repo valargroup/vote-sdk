@@ -28,6 +28,7 @@ const (
 	Query_ActiveRound_FullMethodName            = "/zvote.v1.Query/ActiveRound"
 	Query_CeremonyState_FullMethodName          = "/zvote.v1.Query/CeremonyState"
 	Query_VoteManager_FullMethodName            = "/zvote.v1.Query/VoteManager"
+	Query_ListRounds_FullMethodName             = "/zvote.v1.Query/ListRounds"
 )
 
 // QueryClient is the client API for Query service.
@@ -56,6 +57,8 @@ type QueryClient interface {
 	CeremonyState(ctx context.Context, in *QueryCeremonyStateRequest, opts ...grpc.CallOption) (*QueryCeremonyStateResponse, error)
 	// VoteManager returns the current vote manager address.
 	VoteManager(ctx context.Context, in *QueryVoteManagerRequest, opts ...grpc.CallOption) (*QueryVoteManagerResponse, error)
+	// ListRounds returns all stored vote rounds.
+	ListRounds(ctx context.Context, in *QueryListRoundsRequest, opts ...grpc.CallOption) (*QueryListRoundsResponse, error)
 }
 
 type queryClient struct {
@@ -156,6 +159,16 @@ func (c *queryClient) VoteManager(ctx context.Context, in *QueryVoteManagerReque
 	return out, nil
 }
 
+func (c *queryClient) ListRounds(ctx context.Context, in *QueryListRoundsRequest, opts ...grpc.CallOption) (*QueryListRoundsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryListRoundsResponse)
+	err := c.cc.Invoke(ctx, Query_ListRounds_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
@@ -182,6 +195,8 @@ type QueryServer interface {
 	CeremonyState(context.Context, *QueryCeremonyStateRequest) (*QueryCeremonyStateResponse, error)
 	// VoteManager returns the current vote manager address.
 	VoteManager(context.Context, *QueryVoteManagerRequest) (*QueryVoteManagerResponse, error)
+	// ListRounds returns all stored vote rounds.
+	ListRounds(context.Context, *QueryListRoundsRequest) (*QueryListRoundsResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -218,6 +233,9 @@ func (UnimplementedQueryServer) CeremonyState(context.Context, *QueryCeremonySta
 }
 func (UnimplementedQueryServer) VoteManager(context.Context, *QueryVoteManagerRequest) (*QueryVoteManagerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method VoteManager not implemented")
+}
+func (UnimplementedQueryServer) ListRounds(context.Context, *QueryListRoundsRequest) (*QueryListRoundsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListRounds not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -402,6 +420,24 @@ func _Query_VoteManager_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_ListRounds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryListRoundsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).ListRounds(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_ListRounds_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).ListRounds(ctx, req.(*QueryListRoundsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -444,6 +480,10 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "VoteManager",
 			Handler:    _Query_VoteManager_Handler,
+		},
+		{
+			MethodName: "ListRounds",
+			Handler:    _Query_ListRounds_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

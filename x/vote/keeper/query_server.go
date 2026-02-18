@@ -199,6 +199,26 @@ func (qs queryServer) VoteManager(goCtx context.Context, req *types.QueryVoteMan
 	return &types.QueryVoteManagerResponse{Address: addr}, nil
 }
 
+// ListRounds returns all stored vote rounds.
+func (qs queryServer) ListRounds(goCtx context.Context, req *types.QueryListRoundsRequest) (*types.QueryListRoundsResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	var rounds []*types.VoteRound
+	if err := qs.k.IterateAllRounds(kvStore, func(round *types.VoteRound) bool {
+		rounds = append(rounds, round)
+		return false // collect all
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to iterate rounds: %v", err)
+	}
+
+	return &types.QueryListRoundsResponse{Rounds: rounds}, nil
+}
+
 // ActiveRound returns the first active voting round, if any.
 // Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
 func (qs queryServer) ActiveRound(goCtx context.Context, req *types.QueryActiveRoundRequest) (*types.QueryActiveRoundResponse, error) {

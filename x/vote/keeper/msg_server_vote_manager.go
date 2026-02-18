@@ -20,6 +20,12 @@ func (ms msgServer) SetVoteManager(goCtx context.Context, msg *types.MsgSetVoteM
 		return nil, fmt.Errorf("%w: new_manager cannot be empty", types.ErrInvalidField)
 	}
 
+	// new_manager must be a valid account address (not a validator operator address).
+	_, err := sdk.AccAddressFromBech32(msg.NewManager)
+	if err != nil {
+		return nil, fmt.Errorf("%w: new_manager is not a valid account address: %v", types.ErrInvalidField, err)
+	}
+
 	// Authorization: current vote manager or any validator.
 	if err := ms.k.ValidateVoteManagerOrValidator(goCtx, msg.Creator); err != nil {
 		return nil, err

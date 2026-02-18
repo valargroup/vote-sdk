@@ -18,6 +18,13 @@ func testValAddr(seed byte) string {
 	return sdk.ValAddress(addr).String()
 }
 
+// testAccAddr generates a deterministic valid bech32 account address from a seed byte.
+func testAccAddr(seed byte) string {
+	addr := make([]byte, 20)
+	addr[0] = seed
+	return sdk.AccAddress(addr).String()
+}
+
 // mockStakingKeeper implements keeper.StakingKeeper for tests.
 // validators maps bech32 operator address -> validator.
 type mockStakingKeeper struct {
@@ -99,70 +106,79 @@ func (s *MsgServerTestSuite) TestSetVoteManager_Bootstrap() {
 	// First call when no vote manager exists — any validator can set it.
 	s.SetupTest()
 	val1 := testValAddr(1)
+	mgr1 := testAccAddr(10)
 	s.setupWithMockStaking(val1)
 
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
 		Creator:    val1,
-		NewManager: "zvote1manager",
+		NewManager: mgr1,
 	})
 	s.Require().NoError(err)
 
 	kv := s.keeper.OpenKVStore(s.ctx)
 	mgr, err := s.keeper.GetVoteManager(kv)
 	s.Require().NoError(err)
-	s.Require().Equal("zvote1manager", mgr.Address)
+	s.Require().Equal(mgr1, mgr.Address)
 }
 
 func (s *MsgServerTestSuite) TestSetVoteManager_VoteManagerCanChange() {
 	s.SetupTest()
 	s.setupWithMockStaking()
 
+	currentMgr := testAccAddr(20)
+	newMgr := testAccAddr(21)
+
 	// Seed a vote manager.
 	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "current_manager"}))
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: currentMgr}))
 
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    "current_manager",
-		NewManager: "new_manager",
+		Creator:    currentMgr,
+		NewManager: newMgr,
 	})
 	s.Require().NoError(err)
 
 	mgr, err := s.keeper.GetVoteManager(kv)
 	s.Require().NoError(err)
-	s.Require().Equal("new_manager", mgr.Address)
+	s.Require().Equal(newMgr, mgr.Address)
 }
 
 func (s *MsgServerTestSuite) TestSetVoteManager_ValidatorCanChange() {
 	s.SetupTest()
 	val1 := testValAddr(1)
+	currentMgr := testAccAddr(30)
+	newMgr := testAccAddr(31)
 	s.setupWithMockStaking(val1)
 
 	// Seed a vote manager that is NOT the validator.
 	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "current_manager"}))
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: currentMgr}))
 
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
 		Creator:    val1,
-		NewManager: "yet_another_manager",
+		NewManager: newMgr,
 	})
 	s.Require().NoError(err)
 
 	mgr, err := s.keeper.GetVoteManager(kv)
 	s.Require().NoError(err)
-	s.Require().Equal("yet_another_manager", mgr.Address)
+	s.Require().Equal(newMgr, mgr.Address)
 }
 
 func (s *MsgServerTestSuite) TestSetVoteManager_NonValidatorNonManagerRejected() {
 	s.SetupTest()
 	s.setupWithMockStaking() // no validators in the mock
 
+	currentMgr := testAccAddr(40)
+	newMgr := testAccAddr(41)
+
 	// Seed a vote manager.
 	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "current_manager"}))
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: currentMgr}))
 
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
 		Creator:    "random_address",
-		NewManager: "whatever",
+		NewManager: newMgr,
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not authorized")
@@ -186,22 +202,47 @@ func (s *MsgServerTestSuite) TestSetVoteManager_BootstrapNonValidatorRejected() 
 	s.SetupTest()
 	s.setupWithMockStaking() // no validators
 
+	newMgr := testAccAddr(50)
+
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
 		Creator:    "random_address",
-		NewManager: "whatever",
+		NewManager: newMgr,
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not authorized")
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_EmitsEvent() {
+func (s *MsgServerTestSuite) TestSetVoteManager_InvalidAddressRejected() {
 	s.SetupTest()
 	val1 := testValAddr(1)
 	s.setupWithMockStaking(val1)
 
+	// Reject non-bech32 string.
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
 		Creator:    val1,
-		NewManager: "zvote1manager",
+		NewManager: "not_a_valid_address",
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not a valid account address")
+
+	// Reject validator operator address (valoper).
+	_, err = s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    val1,
+		NewManager: testValAddr(2),
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not a valid account address")
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_EmitsEvent() {
+	s.SetupTest()
+	val1 := testValAddr(1)
+	mgr1 := testAccAddr(60)
+	s.setupWithMockStaking(val1)
+
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    val1,
+		NewManager: mgr1,
 	})
 	s.Require().NoError(err)
 
@@ -211,7 +252,7 @@ func (s *MsgServerTestSuite) TestSetVoteManager_EmitsEvent() {
 			found = true
 			for _, attr := range e.Attributes {
 				if attr.Key == types.AttributeKeyVoteManager {
-					s.Require().Equal("zvote1manager", attr.Value)
+					s.Require().Equal(mgr1, attr.Value)
 				}
 			}
 		}
