@@ -940,6 +940,7 @@ dependencies = [
  "ff",
  "group",
  "halo2_proofs",
+ "hex",
  "incrementalmerkletree",
  "orchard",
  "pasta_curves",

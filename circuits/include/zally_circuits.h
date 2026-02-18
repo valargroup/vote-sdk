@@ -284,6 +284,33 @@ int32_t zally_generate_share_reveal(
     uint8_t* tree_root_out
 );
 
+/* -----------------------------------------------------------------------
+ * Orchard note commitment tree root extraction
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Compute the Orchard nc_root from a hex-encoded frontier string.
+ *
+ * The orchardTree field from lightwalletd's GetTreeState response is a
+ * hex-encoded serialized CommitmentTree. This function hex-decodes it,
+ * parses the frontier, and computes the Sinsemilla-based Merkle root.
+ *
+ * Parameters:
+ *   hex_ptr  - Pointer to the hex-encoded orchard frontier string (ASCII).
+ *   hex_len  - Length of the hex string (bytes/characters).
+ *   root_out - Pointer to a 32-byte output buffer for the root.
+ *
+ * Returns:
+ *    0  on success (root written to root_out).
+ *   -1  if inputs are invalid (null pointers, zero length).
+ *   -3  if the hex string or frontier data is invalid.
+ */
+int32_t zally_extract_nc_root(
+    const uint8_t* hex_ptr,
+    size_t hex_len,
+    uint8_t* root_out
+);
+
 #ifdef __cplusplus
 }
 #endif

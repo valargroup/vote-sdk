@@ -2,11 +2,14 @@ package api
 
 import (
 	"bytes"
+	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +24,10 @@ type HandlerConfig struct {
 	// CometRPCEndpoint is the URL of the local CometBFT RPC server.
 	// Default: "http://localhost:26657"
 	CometRPCEndpoint string
+
+	// Snapshot configures external service URLs for fetching Zcash snapshot
+	// data (nc_root from lightwalletd, nullifier IMT root from IMT service).
+	Snapshot SnapshotConfig
 }
 
 // Handler provides JSON REST endpoints for vote transaction submission
@@ -28,6 +35,7 @@ type HandlerConfig struct {
 type Handler struct {
 	cometRPC string
 	client   *http.Client
+	snapshot SnapshotConfig
 }
 
 // NewHandler creates a new REST API handler.
@@ -42,6 +50,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	return &Handler{
 		cometRPC: endpoint,
 		client:   client,
+		snapshot: cfg.Snapshot,
 	}
 }
 
@@ -67,6 +76,10 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.HandleFunc("/zally/v1/cast-vote", h.handleCastVote).Methods("POST")
 	router.HandleFunc("/zally/v1/reveal-share", h.handleRevealShare).Methods("POST")
 	router.HandleFunc("/zally/v1/submit-tally", h.handleSubmitTally).Methods("POST")
+
+	// Snapshot data endpoint: fetches real nc_root and nullifier_imt_root
+	// for session creation. Used by the admin UI to replace stub values.
+	router.HandleFunc("/zally/v1/snapshot-data/{height}", h.handleSnapshotData).Methods("GET")
 }
 
 // --- Tx submission handlers ---
@@ -101,6 +114,34 @@ func (h *Handler) handleSubmitTally(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.broadcastVoteTx(w, msg)
+}
+
+// --- Snapshot data ---
+
+func (h *Handler) handleSnapshotData(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	heightStr := vars["height"]
+	height, err := strconv.ParseUint(heightStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid height: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	data, err := fetchSnapshotData(ctx, h.snapshot, height)
+	if err != nil {
+		log.Printf("[zally-api] snapshot-data error: %v", err)
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("fetch snapshot data: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"nc_root":            hex.EncodeToString(data.NcRoot),
+		"nullifier_imt_root": hex.EncodeToString(data.NullifierIMTRoot),
+		"snapshot_blockhash": hex.EncodeToString(data.SnapshotBlockhash),
+	})
 }
 
 // --- Broadcast ---

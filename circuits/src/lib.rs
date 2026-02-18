@@ -12,6 +12,7 @@
 pub mod toy;
 pub mod redpallas;
 pub mod votetree;
+pub mod nc_root;
 pub mod ffi;
 
 /// Re-export the delegation circuit's prove/verify API from the `orchard` crate.

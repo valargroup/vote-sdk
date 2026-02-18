@@ -432,6 +432,27 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
         gov_null_4,
     ];
 
+    // Debug: dump all 12 field elements so we can compare with prover side.
+    {
+        fn bytes_to_hex(b: &[u8]) -> String {
+            b.iter().map(|byte| format!("{:02x}", byte)).collect()
+        }
+        let names = [
+            "nf_signed", "rk_x", "rk_y", "cmx_new", "van_comm",
+            "vote_round_id", "nc_root", "nf_imt_root",
+            "gov_null_1", "gov_null_2", "gov_null_3", "gov_null_4",
+        ];
+        eprintln!("[zkp1-verify] 12 public inputs (post-deser, hex LE):");
+        for (i, (fe, name)) in public_inputs.iter().zip(names.iter()).enumerate() {
+            let bytes: [u8; 32] = fe.to_repr();
+            eprintln!("[zkp1-verify]   [{:>2}] {:<14} {}", i, name, bytes_to_hex(&bytes));
+        }
+        // Also dump raw input chunks for slot 4 (vote_round_id before wide reduction)
+        let raw_vrid = chunk(4);
+        eprintln!("[zkp1-verify] raw vote_round_id (slot 4, before wide reduction): {}", bytes_to_hex(&raw_vrid));
+        eprintln!("[zkp1-verify] proof_len={}", proof_len);
+    }
+
     // Run verification using cached params and VK.
     // First call initializes the cache (~10-30s); subsequent calls are fast.
     let (params, vk) = delegation_vk_cached();
@@ -1023,6 +1044,54 @@ pub fn build_share_reveal_test_data()
         round_id,
         shares_hash_bytes,
     )
+}
+
+// ---------------------------------------------------------------------------
+// nc_root extraction — Sinsemilla-based Orchard commitment tree root
+// ---------------------------------------------------------------------------
+
+/// Compute the Orchard note commitment tree root from a hex-encoded frontier.
+///
+/// Lightwalletd's TreeState contains an `orchardTree` field: a hex string
+/// encoding a serialized `CommitmentTree<MerkleHashOrchard, 32>`. Go can
+/// fetch this via gRPC but cannot compute the Sinsemilla-based root.
+/// This FFI function bridges that gap.
+///
+/// # Arguments
+/// * `hex_ptr` - Pointer to the hex-encoded orchard frontier string (ASCII).
+/// * `hex_len` - Length of the hex string (in bytes/characters).
+/// * `root_out` - Pointer to a 32-byte output buffer for the root.
+///
+/// # Returns
+/// *  `0` on success (root written to root_out).
+/// * `-1` if inputs are invalid (null pointers, zero length).
+/// * `-3` if the hex string is invalid or the frontier cannot be parsed.
+///
+/// # Safety
+/// Caller must ensure pointers are valid and root_out has room for 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn zally_extract_nc_root(
+    hex_ptr: *const u8,
+    hex_len: usize,
+    root_out: *mut u8,
+) -> i32 {
+    if hex_ptr.is_null() || root_out.is_null() || hex_len == 0 {
+        return -1;
+    }
+
+    let hex_bytes = std::slice::from_raw_parts(hex_ptr, hex_len);
+    let hex_str = match std::str::from_utf8(hex_bytes) {
+        Ok(s) => s,
+        Err(_) => return -3,
+    };
+
+    match crate::nc_root::compute_nc_root(hex_str) {
+        Ok(root) => {
+            std::ptr::copy_nonoverlapping(root.as_ptr(), root_out, 32);
+            0
+        }
+        Err(_) => -3,
+    }
 }
 
 #[cfg(test)]

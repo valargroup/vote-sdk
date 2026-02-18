@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/z-cale/zally/crypto/ncroot"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -41,14 +42,16 @@ type SnapshotData struct {
 //
 // The nullifier IMT root is the real value from the running IMT service.
 // The snapshot blockhash is the real block hash from lightwalletd.
-//
-// nc_root: The orchardTree field from lightwalletd is a serialized frontier,
-// not the root. Computing the actual Orchard commitment tree root requires
-// the Sinsemilla hash function (not available in Go). We use SHA-256 of the
-// frontier as a deterministic placeholder. This allows session creation to
-// succeed; the correct nc_root computation should be added via Rust FFI
-// when voter proof generation is wired up.
+// The nc_root is computed via Rust FFI (Sinsemilla hash of the orchard frontier).
 func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (*SnapshotData, error) {
+	// Apply defaults.
+	if cfg.IMTServiceURL == "" {
+		cfg.IMTServiceURL = "http://46.101.255.48:3000"
+	}
+	if cfg.LightwalletdURL == "" {
+		cfg.LightwalletdURL = "https://us.zec.stardust.rest:443"
+	}
+
 	// Fetch IMT root and tree state in parallel.
 	type imtResult struct {
 		root []byte
@@ -88,10 +91,13 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 		return nil, fmt.Errorf("decode blockhash hex %q: %w", ts.Hash, err)
 	}
 
-	// nc_root placeholder: SHA-256 of the orchard frontier hex string.
-	ncRoot := sha256.Sum256([]byte(ts.OrchardTree))
+	// nc_root: compute real Sinsemilla root via Rust FFI.
+	ncRoot, err := ncroot.ExtractNcRoot(ts.OrchardTree)
+	if err != nil {
+		return nil, fmt.Errorf("compute nc_root from orchard frontier: %w", err)
+	}
 
-	log.Printf("[zally-api] snapshot data fetched: height=%d blockhash=%s imt_root=%x nc_root=%x (placeholder)",
+	log.Printf("[zally-api] snapshot data fetched: height=%d blockhash=%s imt_root=%x nc_root=%x",
 		ts.Height, ts.Hash[:min(16, len(ts.Hash))]+"...", imtRes.root[:8], ncRoot[:8])
 
 	return &SnapshotData{
