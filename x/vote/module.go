@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
+	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
 	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/core/store"
 	"cosmossdk.io/depinject"
@@ -285,6 +286,84 @@ func (AppModule) RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServerImpl(am.keeper))
 	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
+}
+
+// AutoCLIOptions implements autocli.HasAutoCLIConfig.
+func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
+	return &autocliv1.ModuleOptions{
+		Query: &autocliv1.ServiceCommandDescriptor{
+			Service: "zvote.v1.Query",
+			RpcCommandOptions: []*autocliv1.RpcCommandOptions{
+				{
+					RpcMethod: "CommitmentTreeAtHeight",
+					Use:       "commitment-tree [height]",
+					Short:     "Query the commitment tree root at a specific block height",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "height"},
+					},
+				},
+				{
+					RpcMethod: "LatestCommitmentTree",
+					Use:       "latest-tree",
+					Short:     "Query the latest commitment tree state",
+				},
+				{
+					RpcMethod: "VoteRound",
+					Use:       "vote-round [vote-round-id]",
+					Short:     "Query a vote round by its hex-encoded ID",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "vote_round_id"},
+					},
+				},
+				{
+					RpcMethod: "ProposalTally",
+					Use:       "proposal-tally [vote-round-id] [proposal-id]",
+					Short:     "Query the accumulated tally for a proposal within a vote round",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "vote_round_id"},
+						{ProtoField: "proposal_id"},
+					},
+				},
+				{
+					RpcMethod: "TallyResults",
+					Use:       "tally-results [vote-round-id]",
+					Short:     "Query finalized tally results for a vote round",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "vote_round_id"},
+					},
+				},
+				{
+					RpcMethod: "CommitmentLeaves",
+					Use:       "commitment-leaves [from-height] [to-height]",
+					Short:     "Query commitment tree leaves in a block height range",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "from_height"},
+						{ProtoField: "to_height"},
+					},
+				},
+				{
+					RpcMethod: "ActiveRound",
+					Use:       "active-round",
+					Short:     "Query the currently active voting round",
+				},
+				{
+					RpcMethod: "CeremonyState",
+					Use:       "ceremony-state",
+					Short:     "Query the current EA key ceremony lifecycle state",
+				},
+				{
+					RpcMethod: "VoteManager",
+					Use:       "vote-manager",
+					Short:     "Query the current vote manager address",
+				},
+				{
+					RpcMethod: "ListRounds",
+					Use:       "list-rounds",
+					Short:     "List all stored vote rounds",
+				},
+			},
+		},
+	}
 }
 
 // EndBlock computes the commitment tree root and transitions expired ACTIVE
