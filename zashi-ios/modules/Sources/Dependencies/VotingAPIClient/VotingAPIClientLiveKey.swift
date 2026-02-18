@@ -4,14 +4,27 @@ import VotingModels
 
 // MARK: - API Configuration
 
-/// Configuration for the Zally chain REST API and helper server.
-public enum ZallyAPIConfig {
-    /// Base URL for the chain REST API (e.g. "http://localhost:1317").
-    /// TODO: Source from app configuration or server discovery.
-    public static var baseURL = "http://localhost:1318"
-    /// Base URL for the helper server that generates ZKP #3 and submits reveal-share TXs.
-    /// TODO: Source from app configuration or round discovery.
-    public static var helperServerURL = "http://localhost:9091"
+/// Mutable runtime configuration for the Zally chain REST API and helper server.
+/// URLs are resolved from the CDN service config at startup.
+actor ZallyAPIConfigStore {
+    static let shared = ZallyAPIConfigStore()
+
+    /// Primary vote server URL (serves both chain API and helper endpoints).
+    var baseURL = "http://localhost:1318"
+    /// All vote server URLs from CDN config (used for share distribution).
+    var voteServerURLs: [String] = ["http://localhost:1318"]
+    /// Primary nullifier IMT provider URL.
+    var nullifierProviderURL = "http://localhost:3000"
+
+    func configure(from config: VotingServiceConfig) {
+        if let first = config.voteServers.first {
+            baseURL = first.url
+        }
+        voteServerURLs = config.voteServers.map(\.url)
+        if let first = config.nullifierProviders.first {
+            nullifierProviderURL = first.url
+        }
+    }
 }
 
 // MARK: - Errors
@@ -45,9 +58,10 @@ private let httpSession: URLSession = {
     return URLSession(configuration: config)
 }()
 
-private func getJSON(_ path: String) async throws -> [String: Any] {
-    guard let url = URL(string: "\(ZallyAPIConfig.baseURL)\(path)") else {
-        throw ZallyAPIError.invalidResponse("invalid URL: \(ZallyAPIConfig.baseURL)\(path)")
+private func getJSON(_ path: String, baseURL: String? = nil) async throws -> [String: Any] {
+    let base = baseURL ?? (await ZallyAPIConfigStore.shared.baseURL)
+    guard let url = URL(string: "\(base)\(path)") else {
+        throw ZallyAPIError.invalidResponse("invalid URL: \(base)\(path)")
     }
     let (data, response) = try await httpSession.data(from: url)
     guard let http = response as? HTTPURLResponse else {
@@ -63,9 +77,10 @@ private func getJSON(_ path: String) async throws -> [String: Any] {
     return json
 }
 
-private func postJSON(_ path: String, body: [String: Any]) async throws -> [String: Any] {
-    guard let url = URL(string: "\(ZallyAPIConfig.baseURL)\(path)") else {
-        throw ZallyAPIError.invalidResponse("invalid URL: \(ZallyAPIConfig.baseURL)\(path)")
+private func postJSON(_ path: String, body: [String: Any], baseURL: String? = nil) async throws -> [String: Any] {
+    let base = baseURL ?? (await ZallyAPIConfigStore.shared.baseURL)
+    guard let url = URL(string: "\(base)\(path)") else {
+        throw ZallyAPIError.invalidResponse("invalid URL: \(base)\(path)")
     }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -86,10 +101,10 @@ private func postJSON(_ path: String, body: [String: Any]) async throws -> [Stri
     return json
 }
 
-/// POST JSON to the helper server. Returns parsed JSON response.
-private func postHelperJSON(_ path: String, body: [String: Any]) async throws -> [String: Any] {
-    guard let url = URL(string: "\(ZallyAPIConfig.helperServerURL)\(path)") else {
-        throw ZallyAPIError.invalidResponse("invalid URL: \(ZallyAPIConfig.helperServerURL)\(path)")
+/// POST JSON to a specific vote server URL. Returns parsed JSON response.
+private func postServerJSON(_ serverURL: String, _ path: String, body: [String: Any]) async throws -> [String: Any] {
+    guard let url = URL(string: "\(serverURL)\(path)") else {
+        throw ZallyAPIError.invalidResponse("invalid URL: \(serverURL)\(path)")
     }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -165,14 +180,24 @@ private func parseVotingSession(from round: [String: Any]) throws -> VotingSessi
     let voteEndTime = Date(timeIntervalSince1970: TimeInterval(voteEndTimeUnix))
     let statusRaw = parseUInt32(round["status"])
 
-    // Parse proposals array
+    // Parse proposals array with options
     var proposals: [Proposal] = []
     if let proposalsJSON = round["proposals"] as? [[String: Any]] {
         proposals = proposalsJSON.map { p in
-            Proposal(
+            var options: [VoteOption] = []
+            if let optionsJSON = p["options"] as? [[String: Any]] {
+                options = optionsJSON.map { o in
+                    VoteOption(
+                        index: parseUInt32(o["index"]),
+                        label: o["label"] as? String ?? "Option \(parseUInt32(o["index"]))"
+                    )
+                }
+            }
+            return Proposal(
                 id: parseUInt32(p["id"]),
                 title: p["title"] as? String ?? "",
-                description: p["description"] as? String ?? ""
+                description: p["description"] as? String ?? "",
+                options: options
             )
         }
     }
@@ -209,12 +234,79 @@ private func parseCommitmentTree(from tree: [String: Any]) -> CommitmentTreeStat
 extension VotingAPIClient: DependencyKey {
     public static var liveValue: Self {
         Self(
+            fetchServiceConfig: {
+                // 1. Check for local override in app bundle
+                if let localURL = Bundle.main.url(
+                    forResource: "voting-config-local",
+                    withExtension: "json"
+                ) {
+                    if let data = try? Data(contentsOf: localURL),
+                       let config = try? JSONDecoder().decode(VotingServiceConfig.self, from: data) {
+                        print("[VotingAPI] Using local override config: \(config.voteServers.count) vote servers")
+                        return config
+                    }
+                }
+
+                // 2. Try CDN
+                do {
+                    let (data, response) = try await httpSession.data(from: VotingServiceConfig.cdnURL)
+                    if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                        let config = try JSONDecoder().decode(VotingServiceConfig.self, from: data)
+                        print("[VotingAPI] Loaded CDN config: \(config.voteServers.count) vote servers")
+                        return config
+                    }
+                } catch {
+                    print("[VotingAPI] CDN config fetch failed: \(error)")
+                }
+
+                // 3. Fall back to localhost defaults
+                print("[VotingAPI] Using localhost fallback config")
+                return .localhost
+            },
+            configureURLs: { config in
+                await ZallyAPIConfigStore.shared.configure(from: config)
+                print("[VotingAPI] URLs configured: base=\(await ZallyAPIConfigStore.shared.baseURL), "
+                    + "servers=\(config.voteServers.count), "
+                    + "nullifier=\(await ZallyAPIConfigStore.shared.nullifierProviderURL)")
+            },
             fetchActiveVotingSession: {
                 let json = try await getJSON("/zally/v1/rounds/active")
                 guard let round = json["round"] as? [String: Any] else {
                     throw ZallyAPIError.invalidResponse("missing 'round' in response")
                 }
                 return try parseVotingSession(from: round)
+            },
+            fetchAllRounds: {
+                let json = try await getJSON("/zally/v1/rounds")
+                guard let roundsArray = json["rounds"] as? [[String: Any]] else {
+                    // No rounds — return empty
+                    return []
+                }
+                return try roundsArray.map { try parseVotingSession(from: $0) }
+            },
+            fetchRoundById: { roundIdHex in
+                let json = try await getJSON("/zally/v1/round/\(roundIdHex)")
+                guard let round = json["round"] as? [String: Any] else {
+                    throw ZallyAPIError.invalidResponse("missing 'round' in response")
+                }
+                return try parseVotingSession(from: round)
+            },
+            fetchTallyResults: { roundIdHex in
+                let json = try await getJSON("/zally/v1/tally-results/\(roundIdHex)")
+                guard let results = json["results"] as? [[String: Any]] else {
+                    return [:]
+                }
+                // Group by proposal_id
+                var grouped: [UInt32: [TallyResult.Entry]] = [:]
+                for entry in results {
+                    let proposalId = parseUInt32(entry["proposal_id"])
+                    let tallyEntry = TallyResult.Entry(
+                        decision: parseUInt32(entry["vote_decision"]),
+                        amount: parseUInt64(entry["total_value"])
+                    )
+                    grouped[proposalId, default: []].append(tallyEntry)
+                }
+                return grouped.mapValues { TallyResult(entries: $0) }
             },
             fetchVotingWeight: { _ in
                 // Weight is computed locally from wallet notes; this endpoint is unused.
@@ -279,9 +371,21 @@ extension VotingAPIClient: DependencyKey {
                 return try parseTxResult(json)
             },
             delegateShares: { payloads, roundIdHex in
-                // Submit each share to the helper server, which generates ZKP #3
-                // and submits reveal-share TXs to the chain on our behalf.
-                for payload in payloads {
+                // Distribute shares across available vote servers for temporal unlinkability.
+                let servers = await ZallyAPIConfigStore.shared.voteServerURLs
+                for (i, payload) in payloads.enumerated() {
+                    let serverURL: String
+                    if servers.count >= payloads.count {
+                        // One share per server (shuffled for privacy)
+                        serverURL = servers.shuffled()[i % servers.count]
+                    } else if servers.count > 1 {
+                        // Round-robin across available servers
+                        serverURL = servers[i % servers.count]
+                    } else {
+                        // Single server — all shares go there
+                        serverURL = servers[0]
+                    }
+
                     let allEncSharesJSON: [[String: Any]] = payload.allEncShares.map { share in
                         [
                             "c1": share.c1.base64EncodedString(),
@@ -303,7 +407,7 @@ extension VotingAPIClient: DependencyKey {
                         "vote_round_id": roundIdHex,
                         "all_enc_shares": allEncSharesJSON
                     ]
-                    _ = try await postHelperJSON("/api/v1/shares", body: body)
+                    _ = try await postServerJSON(serverURL, "/api/v1/shares", body: body)
                 }
             },
             fetchProposalTally: { roundId, proposalId in
@@ -337,9 +441,6 @@ extension VotingAPIClient: DependencyKey {
                     try await Task.sleep(for: .seconds(1))
                 }
                 throw ZallyAPIError.commitmentTreeTimeout(seconds: timeoutSeconds)
-            },
-            createTestSession: { payload in
-                _ = try await postJSON("/zally/v1/create-voting-session", body: payload)
             }
         )
     }
