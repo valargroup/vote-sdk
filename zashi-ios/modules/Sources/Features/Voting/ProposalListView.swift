@@ -40,13 +40,13 @@ struct ProposalListView: View {
                         noActiveRoundCard()
                     } else {
                         roundInfoCard()
-                    }
-                    zkpBanner()
-                    progressHeader()
+                        zkpBanner()
+                        progressHeader()
 
-                    ForEach(store.votingRound.proposals) { proposal in
-                        proposalCard(proposal)
-                            .id(proposal.id)
+                        ForEach(store.votingRound.proposals) { proposal in
+                            proposalCard(proposal)
+                                .id(proposal.id)
+                        }
                     }
                 }
                 .padding(.horizontal, 24)
