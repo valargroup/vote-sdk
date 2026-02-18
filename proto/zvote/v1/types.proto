@@ -97,6 +97,22 @@ message BlockCommitments {
   repeated bytes leaves      = 3; // Commitment leaves (each 32 bytes, Pallas Fp LE)
 }
 
+// ProposalSummary is a denormalized view of a proposal for the VoteSummary query.
+message ProposalSummary {
+  uint32 id                       = 1;
+  string title                    = 2;
+  string description              = 3;
+  repeated OptionSummary options  = 4;
+}
+
+// OptionSummary is a denormalized view of a vote option for the VoteSummary query.
+message OptionSummary {
+  uint32 index        = 1;
+  string label        = 2;
+  uint64 ballot_count = 3; // shares revealed for this (proposal, decision)
+  uint64 total_value  = 4; // only populated when status = FINALIZED
+}
+
 // CeremonyStatus represents the lifecycle state of the EA key ceremony.
 enum CeremonyStatus {
   CEREMONY_STATUS_UNSPECIFIED   = 0;

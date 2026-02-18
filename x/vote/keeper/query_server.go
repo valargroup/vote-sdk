@@ -219,6 +219,27 @@ func (qs queryServer) ListRounds(goCtx context.Context, req *types.QueryListRoun
 	return &types.QueryListRoundsResponse{Rounds: rounds}, nil
 }
 
+// VoteSummary returns a denormalized view of a vote round with proposals,
+// ballot counts, and (if finalized) decrypted totals.
+func (qs queryServer) VoteSummary(goCtx context.Context, req *types.QueryVoteSummaryRequest) (*types.QueryVoteSummaryResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+	if len(req.VoteRoundId) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "vote_round_id is required")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	resp, err := qs.k.GetVoteSummary(kvStore, req.VoteRoundId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get vote summary: %v", err)
+	}
+
+	return resp, nil
+}
+
 // ActiveRound returns the first active voting round, if any.
 // Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
 func (qs queryServer) ActiveRound(goCtx context.Context, req *types.QueryActiveRoundRequest) (*types.QueryActiveRoundResponse, error) {

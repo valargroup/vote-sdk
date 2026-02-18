@@ -60,6 +60,10 @@ var (
 
 	// VoteManagerKey stores the singleton vote manager address: single key -> VoteManagerState (protobuf)
 	VoteManagerKey = []byte{0x0A}
+
+	// ShareCountPrefix stores share reveal counts per (round, proposal, decision):
+	//   0x0B || round_id || big-endian uint32 proposal_id || big-endian uint32 decision -> uint64 BE
+	ShareCountPrefix = []byte{0x0B}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -175,6 +179,17 @@ func BlockLeafIndexKey(height uint64) []byte {
 func TallyResultKey(roundID []byte, proposalID uint32, decision uint32) []byte {
 	key := make([]byte, 0, len(TallyResultPrefix)+len(roundID)+4+4)
 	key = append(key, TallyResultPrefix...)
+	key = append(key, roundID...)
+	key = appendUint32BE(key, proposalID)
+	key = appendUint32BE(key, decision)
+	return key
+}
+
+// ShareCountKey returns the store key for a share count entry.
+// Format: 0x0B || round_id || big-endian uint32 proposal_id || big-endian uint32 decision
+func ShareCountKey(roundID []byte, proposalID uint32, decision uint32) []byte {
+	key := make([]byte, 0, len(ShareCountPrefix)+len(roundID)+4+4)
+	key = append(key, ShareCountPrefix...)
 	key = append(key, roundID...)
 	key = appendUint32BE(key, proposalID)
 	key = appendUint32BE(key, decision)

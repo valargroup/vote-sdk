@@ -844,6 +844,144 @@ func (x *BlockCommitments) GetLeaves() [][]byte {
 	return nil
 }
 
+// ProposalSummary is a denormalized view of a proposal for the VoteSummary query.
+type ProposalSummary struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	Options       []*OptionSummary       `protobuf:"bytes,4,rep,name=options,proto3" json:"options,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProposalSummary) Reset() {
+	*x = ProposalSummary{}
+	mi := &file_zvote_v1_types_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProposalSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProposalSummary) ProtoMessage() {}
+
+func (x *ProposalSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_types_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProposalSummary.ProtoReflect.Descriptor instead.
+func (*ProposalSummary) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ProposalSummary) GetId() uint32 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ProposalSummary) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ProposalSummary) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *ProposalSummary) GetOptions() []*OptionSummary {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+// OptionSummary is a denormalized view of a vote option for the VoteSummary query.
+type OptionSummary struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Label         string                 `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
+	BallotCount   uint64                 `protobuf:"varint,3,opt,name=ballot_count,json=ballotCount,proto3" json:"ballot_count,omitempty"` // shares revealed for this (proposal, decision)
+	TotalValue    uint64                 `protobuf:"varint,4,opt,name=total_value,json=totalValue,proto3" json:"total_value,omitempty"`    // only populated when status = FINALIZED
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OptionSummary) Reset() {
+	*x = OptionSummary{}
+	mi := &file_zvote_v1_types_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OptionSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OptionSummary) ProtoMessage() {}
+
+func (x *OptionSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_types_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OptionSummary.ProtoReflect.Descriptor instead.
+func (*OptionSummary) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *OptionSummary) GetIndex() uint32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *OptionSummary) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *OptionSummary) GetBallotCount() uint64 {
+	if x != nil {
+		return x.BallotCount
+	}
+	return 0
+}
+
+func (x *OptionSummary) GetTotalValue() uint64 {
+	if x != nil {
+		return x.TotalValue
+	}
+	return 0
+}
+
 // CeremonyState tracks the singleton EA key ceremony lifecycle.
 type CeremonyState struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -861,7 +999,7 @@ type CeremonyState struct {
 
 func (x *CeremonyState) Reset() {
 	*x = CeremonyState{}
-	mi := &file_zvote_v1_types_proto_msgTypes[10]
+	mi := &file_zvote_v1_types_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -873,7 +1011,7 @@ func (x *CeremonyState) String() string {
 func (*CeremonyState) ProtoMessage() {}
 
 func (x *CeremonyState) ProtoReflect() protoreflect.Message {
-	mi := &file_zvote_v1_types_proto_msgTypes[10]
+	mi := &file_zvote_v1_types_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -886,7 +1024,7 @@ func (x *CeremonyState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CeremonyState.ProtoReflect.Descriptor instead.
 func (*CeremonyState) Descriptor() ([]byte, []int) {
-	return file_zvote_v1_types_proto_rawDescGZIP(), []int{10}
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CeremonyState) GetStatus() CeremonyStatus {
@@ -956,7 +1094,7 @@ type ValidatorPallasKey struct {
 
 func (x *ValidatorPallasKey) Reset() {
 	*x = ValidatorPallasKey{}
-	mi := &file_zvote_v1_types_proto_msgTypes[11]
+	mi := &file_zvote_v1_types_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -968,7 +1106,7 @@ func (x *ValidatorPallasKey) String() string {
 func (*ValidatorPallasKey) ProtoMessage() {}
 
 func (x *ValidatorPallasKey) ProtoReflect() protoreflect.Message {
-	mi := &file_zvote_v1_types_proto_msgTypes[11]
+	mi := &file_zvote_v1_types_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -981,7 +1119,7 @@ func (x *ValidatorPallasKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidatorPallasKey.ProtoReflect.Descriptor instead.
 func (*ValidatorPallasKey) Descriptor() ([]byte, []int) {
-	return file_zvote_v1_types_proto_rawDescGZIP(), []int{11}
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ValidatorPallasKey) GetValidatorAddress() string {
@@ -1010,7 +1148,7 @@ type DealerPayload struct {
 
 func (x *DealerPayload) Reset() {
 	*x = DealerPayload{}
-	mi := &file_zvote_v1_types_proto_msgTypes[12]
+	mi := &file_zvote_v1_types_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1022,7 +1160,7 @@ func (x *DealerPayload) String() string {
 func (*DealerPayload) ProtoMessage() {}
 
 func (x *DealerPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_zvote_v1_types_proto_msgTypes[12]
+	mi := &file_zvote_v1_types_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1035,7 +1173,7 @@ func (x *DealerPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DealerPayload.ProtoReflect.Descriptor instead.
 func (*DealerPayload) Descriptor() ([]byte, []int) {
-	return file_zvote_v1_types_proto_rawDescGZIP(), []int{12}
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DealerPayload) GetValidatorAddress() string {
@@ -1071,7 +1209,7 @@ type AckEntry struct {
 
 func (x *AckEntry) Reset() {
 	*x = AckEntry{}
-	mi := &file_zvote_v1_types_proto_msgTypes[13]
+	mi := &file_zvote_v1_types_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1083,7 +1221,7 @@ func (x *AckEntry) String() string {
 func (*AckEntry) ProtoMessage() {}
 
 func (x *AckEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_zvote_v1_types_proto_msgTypes[13]
+	mi := &file_zvote_v1_types_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1096,7 +1234,7 @@ func (x *AckEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AckEntry.ProtoReflect.Descriptor instead.
 func (*AckEntry) Descriptor() ([]byte, []int) {
-	return file_zvote_v1_types_proto_rawDescGZIP(), []int{13}
+	return file_zvote_v1_types_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *AckEntry) GetValidatorAddress() string {
@@ -1186,7 +1324,18 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x06height\x18\x01 \x01(\x04R\x06height\x12\x1f\n" +
 	"\vstart_index\x18\x02 \x01(\x04R\n" +
 	"startIndex\x12\x16\n" +
-	"\x06leaves\x18\x03 \x03(\fR\x06leaves\"\xcf\x02\n" +
+	"\x06leaves\x18\x03 \x03(\fR\x06leaves\"\x8c\x01\n" +
+	"\x0fProposalSummary\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\x121\n" +
+	"\aoptions\x18\x04 \x03(\v2\x17.zvote.v1.OptionSummaryR\aoptions\"\x7f\n" +
+	"\rOptionSummary\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\rR\x05index\x12\x14\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\x12!\n" +
+	"\fballot_count\x18\x03 \x01(\x04R\vballotCount\x12\x1f\n" +
+	"\vtotal_value\x18\x04 \x01(\x04R\n" +
+	"totalValue\"\xcf\x02\n" +
 	"\rCeremonyState\x120\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.zvote.v1.CeremonyStatusR\x06status\x12\x13\n" +
 	"\x05ea_pk\x18\x02 \x01(\fR\x04eaPk\x12<\n" +
@@ -1237,7 +1386,7 @@ func file_zvote_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_zvote_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_zvote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_zvote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_zvote_v1_types_proto_goTypes = []any{
 	(SessionStatus)(0),          // 0: zvote.v1.SessionStatus
 	(CeremonyStatus)(0),         // 1: zvote.v1.CeremonyStatus
@@ -1251,10 +1400,12 @@ var file_zvote_v1_types_proto_goTypes = []any{
 	(*NullifierEntry)(nil),      // 9: zvote.v1.NullifierEntry
 	(*TallyResult)(nil),         // 10: zvote.v1.TallyResult
 	(*BlockCommitments)(nil),    // 11: zvote.v1.BlockCommitments
-	(*CeremonyState)(nil),       // 12: zvote.v1.CeremonyState
-	(*ValidatorPallasKey)(nil),  // 13: zvote.v1.ValidatorPallasKey
-	(*DealerPayload)(nil),       // 14: zvote.v1.DealerPayload
-	(*AckEntry)(nil),            // 15: zvote.v1.AckEntry
+	(*ProposalSummary)(nil),     // 12: zvote.v1.ProposalSummary
+	(*OptionSummary)(nil),       // 13: zvote.v1.OptionSummary
+	(*CeremonyState)(nil),       // 14: zvote.v1.CeremonyState
+	(*ValidatorPallasKey)(nil),  // 15: zvote.v1.ValidatorPallasKey
+	(*DealerPayload)(nil),       // 16: zvote.v1.DealerPayload
+	(*AckEntry)(nil),            // 17: zvote.v1.AckEntry
 }
 var file_zvote_v1_types_proto_depIdxs = []int32{
 	2,  // 0: zvote.v1.Proposal.options:type_name -> zvote.v1.VoteOption
@@ -1264,15 +1415,16 @@ var file_zvote_v1_types_proto_depIdxs = []int32{
 	6,  // 4: zvote.v1.GenesisState.tree_state:type_name -> zvote.v1.CommitmentTreeState
 	8,  // 5: zvote.v1.GenesisState.commitment_leaves:type_name -> zvote.v1.CommitmentLeaf
 	9,  // 6: zvote.v1.GenesisState.nullifiers:type_name -> zvote.v1.NullifierEntry
-	1,  // 7: zvote.v1.CeremonyState.status:type_name -> zvote.v1.CeremonyStatus
-	13, // 8: zvote.v1.CeremonyState.validators:type_name -> zvote.v1.ValidatorPallasKey
-	14, // 9: zvote.v1.CeremonyState.payloads:type_name -> zvote.v1.DealerPayload
-	15, // 10: zvote.v1.CeremonyState.acks:type_name -> zvote.v1.AckEntry
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	13, // 7: zvote.v1.ProposalSummary.options:type_name -> zvote.v1.OptionSummary
+	1,  // 8: zvote.v1.CeremonyState.status:type_name -> zvote.v1.CeremonyStatus
+	15, // 9: zvote.v1.CeremonyState.validators:type_name -> zvote.v1.ValidatorPallasKey
+	16, // 10: zvote.v1.CeremonyState.payloads:type_name -> zvote.v1.DealerPayload
+	17, // 11: zvote.v1.CeremonyState.acks:type_name -> zvote.v1.AckEntry
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_zvote_v1_types_proto_init() }
@@ -1286,7 +1438,7 @@ func file_zvote_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_types_proto_rawDesc), len(file_zvote_v1_types_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   14,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

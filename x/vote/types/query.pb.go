@@ -798,6 +798,126 @@ func (x *QueryVoteManagerResponse) GetAddress() string {
 	return ""
 }
 
+type QueryVoteSummaryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VoteRoundId   []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryVoteSummaryRequest) Reset() {
+	*x = QueryVoteSummaryRequest{}
+	mi := &file_zvote_v1_query_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryVoteSummaryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryVoteSummaryRequest) ProtoMessage() {}
+
+func (x *QueryVoteSummaryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_query_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryVoteSummaryRequest.ProtoReflect.Descriptor instead.
+func (*QueryVoteSummaryRequest) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_query_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *QueryVoteSummaryRequest) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
+}
+
+type QueryVoteSummaryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VoteRoundId   []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
+	Status        SessionStatus          `protobuf:"varint,2,opt,name=status,proto3,enum=zvote.v1.SessionStatus" json:"status,omitempty"`
+	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	VoteEndTime   uint64                 `protobuf:"varint,4,opt,name=vote_end_time,json=voteEndTime,proto3" json:"vote_end_time,omitempty"`
+	Proposals     []*ProposalSummary     `protobuf:"bytes,5,rep,name=proposals,proto3" json:"proposals,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryVoteSummaryResponse) Reset() {
+	*x = QueryVoteSummaryResponse{}
+	mi := &file_zvote_v1_query_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryVoteSummaryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryVoteSummaryResponse) ProtoMessage() {}
+
+func (x *QueryVoteSummaryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_query_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryVoteSummaryResponse.ProtoReflect.Descriptor instead.
+func (*QueryVoteSummaryResponse) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_query_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *QueryVoteSummaryResponse) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
+}
+
+func (x *QueryVoteSummaryResponse) GetStatus() SessionStatus {
+	if x != nil {
+		return x.Status
+	}
+	return SessionStatus_SESSION_STATUS_UNSPECIFIED
+}
+
+func (x *QueryVoteSummaryResponse) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *QueryVoteSummaryResponse) GetVoteEndTime() uint64 {
+	if x != nil {
+		return x.VoteEndTime
+	}
+	return 0
+}
+
+func (x *QueryVoteSummaryResponse) GetProposals() []*ProposalSummary {
+	if x != nil {
+		return x.Proposals
+	}
+	return nil
+}
+
 type QueryListRoundsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -806,7 +926,7 @@ type QueryListRoundsRequest struct {
 
 func (x *QueryListRoundsRequest) Reset() {
 	*x = QueryListRoundsRequest{}
-	mi := &file_zvote_v1_query_proto_msgTypes[18]
+	mi := &file_zvote_v1_query_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -818,7 +938,7 @@ func (x *QueryListRoundsRequest) String() string {
 func (*QueryListRoundsRequest) ProtoMessage() {}
 
 func (x *QueryListRoundsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zvote_v1_query_proto_msgTypes[18]
+	mi := &file_zvote_v1_query_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -831,7 +951,7 @@ func (x *QueryListRoundsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryListRoundsRequest.ProtoReflect.Descriptor instead.
 func (*QueryListRoundsRequest) Descriptor() ([]byte, []int) {
-	return file_zvote_v1_query_proto_rawDescGZIP(), []int{18}
+	return file_zvote_v1_query_proto_rawDescGZIP(), []int{20}
 }
 
 type QueryListRoundsResponse struct {
@@ -843,7 +963,7 @@ type QueryListRoundsResponse struct {
 
 func (x *QueryListRoundsResponse) Reset() {
 	*x = QueryListRoundsResponse{}
-	mi := &file_zvote_v1_query_proto_msgTypes[19]
+	mi := &file_zvote_v1_query_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -855,7 +975,7 @@ func (x *QueryListRoundsResponse) String() string {
 func (*QueryListRoundsResponse) ProtoMessage() {}
 
 func (x *QueryListRoundsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zvote_v1_query_proto_msgTypes[19]
+	mi := &file_zvote_v1_query_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -868,7 +988,7 @@ func (x *QueryListRoundsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryListRoundsResponse.ProtoReflect.Descriptor instead.
 func (*QueryListRoundsResponse) Descriptor() ([]byte, []int) {
-	return file_zvote_v1_query_proto_rawDescGZIP(), []int{19}
+	return file_zvote_v1_query_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *QueryListRoundsResponse) GetRounds() []*VoteRound {
@@ -922,10 +1042,18 @@ const file_zvote_v1_query_proto_rawDesc = "" +
 	"\bceremony\x18\x01 \x01(\v2\x17.zvote.v1.CeremonyStateR\bceremony\"\x19\n" +
 	"\x17QueryVoteManagerRequest\"4\n" +
 	"\x18QueryVoteManagerResponse\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"=\n" +
+	"\x17QueryVoteSummaryRequest\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xee\x01\n" +
+	"\x18QueryVoteSummaryResponse\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12/\n" +
+	"\x06status\x18\x02 \x01(\x0e2\x17.zvote.v1.SessionStatusR\x06status\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\"\n" +
+	"\rvote_end_time\x18\x04 \x01(\x04R\vvoteEndTime\x127\n" +
+	"\tproposals\x18\x05 \x03(\v2\x19.zvote.v1.ProposalSummaryR\tproposals\"\x18\n" +
 	"\x16QueryListRoundsRequest\"F\n" +
 	"\x17QueryListRoundsResponse\x12+\n" +
-	"\x06rounds\x18\x01 \x03(\v2\x13.zvote.v1.VoteRoundR\x06rounds2\x90\a\n" +
+	"\x06rounds\x18\x01 \x03(\v2\x13.zvote.v1.VoteRoundR\x06rounds2\xe6\a\n" +
 	"\x05Query\x12e\n" +
 	"\x16CommitmentTreeAtHeight\x12$.zvote.v1.QueryCommitmentTreeRequest\x1a%.zvote.v1.QueryCommitmentTreeResponse\x12[\n" +
 	"\x14LatestCommitmentTree\x12 .zvote.v1.QueryLatestTreeRequest\x1a!.zvote.v1.QueryLatestTreeResponse\x12N\n" +
@@ -935,7 +1063,8 @@ const file_zvote_v1_query_proto_rawDesc = "" +
 	"\x10CommitmentLeaves\x12&.zvote.v1.QueryCommitmentLeavesRequest\x1a'.zvote.v1.QueryCommitmentLeavesResponse\x12T\n" +
 	"\vActiveRound\x12!.zvote.v1.QueryActiveRoundRequest\x1a\".zvote.v1.QueryActiveRoundResponse\x12Z\n" +
 	"\rCeremonyState\x12#.zvote.v1.QueryCeremonyStateRequest\x1a$.zvote.v1.QueryCeremonyStateResponse\x12T\n" +
-	"\vVoteManager\x12!.zvote.v1.QueryVoteManagerRequest\x1a\".zvote.v1.QueryVoteManagerResponse\x12Q\n" +
+	"\vVoteManager\x12!.zvote.v1.QueryVoteManagerRequest\x1a\".zvote.v1.QueryVoteManagerResponse\x12T\n" +
+	"\vVoteSummary\x12!.zvote.v1.QueryVoteSummaryRequest\x1a\".zvote.v1.QueryVoteSummaryResponse\x12Q\n" +
 	"\n" +
 	"ListRounds\x12 .zvote.v1.QueryListRoundsRequest\x1a!.zvote.v1.QueryListRoundsResponseB&Z$github.com/z-cale/zally/x/vote/typesb\x06proto3"
 
@@ -951,7 +1080,7 @@ func file_zvote_v1_query_proto_rawDescGZIP() []byte {
 	return file_zvote_v1_query_proto_rawDescData
 }
 
-var file_zvote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_zvote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_zvote_v1_query_proto_goTypes = []any{
 	(*QueryCommitmentTreeRequest)(nil),    // 0: zvote.v1.QueryCommitmentTreeRequest
 	(*QueryCommitmentTreeResponse)(nil),   // 1: zvote.v1.QueryCommitmentTreeResponse
@@ -971,50 +1100,58 @@ var file_zvote_v1_query_proto_goTypes = []any{
 	(*QueryCeremonyStateResponse)(nil),    // 15: zvote.v1.QueryCeremonyStateResponse
 	(*QueryVoteManagerRequest)(nil),       // 16: zvote.v1.QueryVoteManagerRequest
 	(*QueryVoteManagerResponse)(nil),      // 17: zvote.v1.QueryVoteManagerResponse
-	(*QueryListRoundsRequest)(nil),        // 18: zvote.v1.QueryListRoundsRequest
-	(*QueryListRoundsResponse)(nil),       // 19: zvote.v1.QueryListRoundsResponse
-	nil,                                   // 20: zvote.v1.QueryProposalTallyResponse.TallyEntry
-	(*CommitmentTreeState)(nil),           // 21: zvote.v1.CommitmentTreeState
-	(*VoteRound)(nil),                     // 22: zvote.v1.VoteRound
-	(*TallyResult)(nil),                   // 23: zvote.v1.TallyResult
-	(*BlockCommitments)(nil),              // 24: zvote.v1.BlockCommitments
-	(*CeremonyState)(nil),                 // 25: zvote.v1.CeremonyState
+	(*QueryVoteSummaryRequest)(nil),       // 18: zvote.v1.QueryVoteSummaryRequest
+	(*QueryVoteSummaryResponse)(nil),      // 19: zvote.v1.QueryVoteSummaryResponse
+	(*QueryListRoundsRequest)(nil),        // 20: zvote.v1.QueryListRoundsRequest
+	(*QueryListRoundsResponse)(nil),       // 21: zvote.v1.QueryListRoundsResponse
+	nil,                                   // 22: zvote.v1.QueryProposalTallyResponse.TallyEntry
+	(*CommitmentTreeState)(nil),           // 23: zvote.v1.CommitmentTreeState
+	(*VoteRound)(nil),                     // 24: zvote.v1.VoteRound
+	(*TallyResult)(nil),                   // 25: zvote.v1.TallyResult
+	(*BlockCommitments)(nil),              // 26: zvote.v1.BlockCommitments
+	(*CeremonyState)(nil),                 // 27: zvote.v1.CeremonyState
+	(SessionStatus)(0),                    // 28: zvote.v1.SessionStatus
+	(*ProposalSummary)(nil),               // 29: zvote.v1.ProposalSummary
 }
 var file_zvote_v1_query_proto_depIdxs = []int32{
-	21, // 0: zvote.v1.QueryCommitmentTreeResponse.tree:type_name -> zvote.v1.CommitmentTreeState
-	21, // 1: zvote.v1.QueryLatestTreeResponse.tree:type_name -> zvote.v1.CommitmentTreeState
-	22, // 2: zvote.v1.QueryVoteRoundResponse.round:type_name -> zvote.v1.VoteRound
-	20, // 3: zvote.v1.QueryProposalTallyResponse.tally:type_name -> zvote.v1.QueryProposalTallyResponse.TallyEntry
-	23, // 4: zvote.v1.QueryTallyResultsResponse.results:type_name -> zvote.v1.TallyResult
-	24, // 5: zvote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> zvote.v1.BlockCommitments
-	22, // 6: zvote.v1.QueryActiveRoundResponse.round:type_name -> zvote.v1.VoteRound
-	25, // 7: zvote.v1.QueryCeremonyStateResponse.ceremony:type_name -> zvote.v1.CeremonyState
-	22, // 8: zvote.v1.QueryListRoundsResponse.rounds:type_name -> zvote.v1.VoteRound
-	0,  // 9: zvote.v1.Query.CommitmentTreeAtHeight:input_type -> zvote.v1.QueryCommitmentTreeRequest
-	2,  // 10: zvote.v1.Query.LatestCommitmentTree:input_type -> zvote.v1.QueryLatestTreeRequest
-	4,  // 11: zvote.v1.Query.VoteRound:input_type -> zvote.v1.QueryVoteRoundRequest
-	6,  // 12: zvote.v1.Query.ProposalTally:input_type -> zvote.v1.QueryProposalTallyRequest
-	8,  // 13: zvote.v1.Query.TallyResults:input_type -> zvote.v1.QueryTallyResultsRequest
-	10, // 14: zvote.v1.Query.CommitmentLeaves:input_type -> zvote.v1.QueryCommitmentLeavesRequest
-	12, // 15: zvote.v1.Query.ActiveRound:input_type -> zvote.v1.QueryActiveRoundRequest
-	14, // 16: zvote.v1.Query.CeremonyState:input_type -> zvote.v1.QueryCeremonyStateRequest
-	16, // 17: zvote.v1.Query.VoteManager:input_type -> zvote.v1.QueryVoteManagerRequest
-	18, // 18: zvote.v1.Query.ListRounds:input_type -> zvote.v1.QueryListRoundsRequest
-	1,  // 19: zvote.v1.Query.CommitmentTreeAtHeight:output_type -> zvote.v1.QueryCommitmentTreeResponse
-	3,  // 20: zvote.v1.Query.LatestCommitmentTree:output_type -> zvote.v1.QueryLatestTreeResponse
-	5,  // 21: zvote.v1.Query.VoteRound:output_type -> zvote.v1.QueryVoteRoundResponse
-	7,  // 22: zvote.v1.Query.ProposalTally:output_type -> zvote.v1.QueryProposalTallyResponse
-	9,  // 23: zvote.v1.Query.TallyResults:output_type -> zvote.v1.QueryTallyResultsResponse
-	11, // 24: zvote.v1.Query.CommitmentLeaves:output_type -> zvote.v1.QueryCommitmentLeavesResponse
-	13, // 25: zvote.v1.Query.ActiveRound:output_type -> zvote.v1.QueryActiveRoundResponse
-	15, // 26: zvote.v1.Query.CeremonyState:output_type -> zvote.v1.QueryCeremonyStateResponse
-	17, // 27: zvote.v1.Query.VoteManager:output_type -> zvote.v1.QueryVoteManagerResponse
-	19, // 28: zvote.v1.Query.ListRounds:output_type -> zvote.v1.QueryListRoundsResponse
-	19, // [19:29] is the sub-list for method output_type
-	9,  // [9:19] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	23, // 0: zvote.v1.QueryCommitmentTreeResponse.tree:type_name -> zvote.v1.CommitmentTreeState
+	23, // 1: zvote.v1.QueryLatestTreeResponse.tree:type_name -> zvote.v1.CommitmentTreeState
+	24, // 2: zvote.v1.QueryVoteRoundResponse.round:type_name -> zvote.v1.VoteRound
+	22, // 3: zvote.v1.QueryProposalTallyResponse.tally:type_name -> zvote.v1.QueryProposalTallyResponse.TallyEntry
+	25, // 4: zvote.v1.QueryTallyResultsResponse.results:type_name -> zvote.v1.TallyResult
+	26, // 5: zvote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> zvote.v1.BlockCommitments
+	24, // 6: zvote.v1.QueryActiveRoundResponse.round:type_name -> zvote.v1.VoteRound
+	27, // 7: zvote.v1.QueryCeremonyStateResponse.ceremony:type_name -> zvote.v1.CeremonyState
+	28, // 8: zvote.v1.QueryVoteSummaryResponse.status:type_name -> zvote.v1.SessionStatus
+	29, // 9: zvote.v1.QueryVoteSummaryResponse.proposals:type_name -> zvote.v1.ProposalSummary
+	24, // 10: zvote.v1.QueryListRoundsResponse.rounds:type_name -> zvote.v1.VoteRound
+	0,  // 11: zvote.v1.Query.CommitmentTreeAtHeight:input_type -> zvote.v1.QueryCommitmentTreeRequest
+	2,  // 12: zvote.v1.Query.LatestCommitmentTree:input_type -> zvote.v1.QueryLatestTreeRequest
+	4,  // 13: zvote.v1.Query.VoteRound:input_type -> zvote.v1.QueryVoteRoundRequest
+	6,  // 14: zvote.v1.Query.ProposalTally:input_type -> zvote.v1.QueryProposalTallyRequest
+	8,  // 15: zvote.v1.Query.TallyResults:input_type -> zvote.v1.QueryTallyResultsRequest
+	10, // 16: zvote.v1.Query.CommitmentLeaves:input_type -> zvote.v1.QueryCommitmentLeavesRequest
+	12, // 17: zvote.v1.Query.ActiveRound:input_type -> zvote.v1.QueryActiveRoundRequest
+	14, // 18: zvote.v1.Query.CeremonyState:input_type -> zvote.v1.QueryCeremonyStateRequest
+	16, // 19: zvote.v1.Query.VoteManager:input_type -> zvote.v1.QueryVoteManagerRequest
+	18, // 20: zvote.v1.Query.VoteSummary:input_type -> zvote.v1.QueryVoteSummaryRequest
+	20, // 21: zvote.v1.Query.ListRounds:input_type -> zvote.v1.QueryListRoundsRequest
+	1,  // 22: zvote.v1.Query.CommitmentTreeAtHeight:output_type -> zvote.v1.QueryCommitmentTreeResponse
+	3,  // 23: zvote.v1.Query.LatestCommitmentTree:output_type -> zvote.v1.QueryLatestTreeResponse
+	5,  // 24: zvote.v1.Query.VoteRound:output_type -> zvote.v1.QueryVoteRoundResponse
+	7,  // 25: zvote.v1.Query.ProposalTally:output_type -> zvote.v1.QueryProposalTallyResponse
+	9,  // 26: zvote.v1.Query.TallyResults:output_type -> zvote.v1.QueryTallyResultsResponse
+	11, // 27: zvote.v1.Query.CommitmentLeaves:output_type -> zvote.v1.QueryCommitmentLeavesResponse
+	13, // 28: zvote.v1.Query.ActiveRound:output_type -> zvote.v1.QueryActiveRoundResponse
+	15, // 29: zvote.v1.Query.CeremonyState:output_type -> zvote.v1.QueryCeremonyStateResponse
+	17, // 30: zvote.v1.Query.VoteManager:output_type -> zvote.v1.QueryVoteManagerResponse
+	19, // 31: zvote.v1.Query.VoteSummary:output_type -> zvote.v1.QueryVoteSummaryResponse
+	21, // 32: zvote.v1.Query.ListRounds:output_type -> zvote.v1.QueryListRoundsResponse
+	22, // [22:33] is the sub-list for method output_type
+	11, // [11:22] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_zvote_v1_query_proto_init() }
@@ -1029,7 +1166,7 @@ func file_zvote_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_query_proto_rawDesc), len(file_zvote_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

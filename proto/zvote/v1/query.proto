@@ -36,6 +36,10 @@ service Query {
   // VoteManager returns the current vote manager address.
   rpc VoteManager(QueryVoteManagerRequest) returns (QueryVoteManagerResponse);
 
+  // VoteSummary returns a denormalized view of a vote round with proposals,
+  // ballot counts, and (if finalized) decrypted totals. Single query for frontend display.
+  rpc VoteSummary(QueryVoteSummaryRequest) returns (QueryVoteSummaryResponse);
+
   // ListRounds returns all stored vote rounds.
   rpc ListRounds(QueryListRoundsRequest) returns (QueryListRoundsResponse);
 }
@@ -105,6 +109,18 @@ message QueryVoteManagerRequest {}
 
 message QueryVoteManagerResponse {
   string address = 1;
+}
+
+message QueryVoteSummaryRequest {
+  bytes vote_round_id = 1;
+}
+
+message QueryVoteSummaryResponse {
+  bytes                    vote_round_id = 1;
+  SessionStatus            status        = 2;
+  string                   description   = 3;
+  uint64                   vote_end_time = 4;
+  repeated ProposalSummary proposals     = 5;
 }
 
 message QueryListRoundsRequest {}

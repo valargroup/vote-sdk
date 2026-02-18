@@ -330,6 +330,102 @@ func (k Keeper) GetProposalTally(kvStore store.KVStore, roundID []byte, proposal
 	return tally, nil
 }
 
+// ---------------------------------------------------------------------------
+// Share count tracking (incremented by RevealShare, read by VoteSummary)
+// ---------------------------------------------------------------------------
+
+// IncrementShareCount atomically increments the share reveal count for a
+// (round, proposal, decision) tuple. If no count exists yet, writes 1.
+func (k Keeper) IncrementShareCount(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) error {
+	key := types.ShareCountKey(roundID, proposalID, decision)
+	bz, err := kvStore.Get(key)
+	if err != nil {
+		return err
+	}
+	var count uint64
+	if len(bz) == 8 {
+		count = getUint64BE(bz)
+	}
+	count++
+	val := make([]byte, 8)
+	putUint64BE(val, count)
+	return kvStore.Set(key, val)
+}
+
+// GetShareCount returns the number of shares revealed for a (round, proposal, decision) tuple.
+// Returns 0 if no shares have been revealed.
+func (k Keeper) GetShareCount(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) (uint64, error) {
+	bz, err := kvStore.Get(types.ShareCountKey(roundID, proposalID, decision))
+	if err != nil {
+		return 0, err
+	}
+	if len(bz) < 8 {
+		return 0, nil
+	}
+	return getUint64BE(bz), nil
+}
+
+// GetVoteSummary builds a denormalized QueryVoteSummaryResponse for a vote round,
+// including proposals with option labels, ballot counts, and (if finalized) totals.
+func (k Keeper) GetVoteSummary(kvStore store.KVStore, roundID []byte) (*types.QueryVoteSummaryResponse, error) {
+	round, err := k.GetVoteRound(kvStore, roundID)
+	if err != nil {
+		return nil, err
+	}
+
+	proposals := make([]*types.ProposalSummary, len(round.Proposals))
+
+	// If finalized, pre-load all tally results for this round.
+	var tallyResults map[uint64]*types.TallyResult // key: (proposalID<<32)|decision
+	if round.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
+		results, err := k.GetAllTallyResults(kvStore, roundID)
+		if err != nil {
+			return nil, err
+		}
+		tallyResults = make(map[uint64]*types.TallyResult, len(results))
+		for _, r := range results {
+			key := uint64(r.ProposalId)<<32 | uint64(r.VoteDecision)
+			tallyResults[key] = r
+		}
+	}
+
+	for i, prop := range round.Proposals {
+		options := make([]*types.OptionSummary, len(prop.Options))
+		for j, opt := range prop.Options {
+			count, err := k.GetShareCount(kvStore, roundID, prop.Id, opt.Index)
+			if err != nil {
+				return nil, err
+			}
+			os := &types.OptionSummary{
+				Index:       opt.Index,
+				Label:       opt.Label,
+				BallotCount: count,
+			}
+			if tallyResults != nil {
+				key := uint64(prop.Id)<<32 | uint64(opt.Index)
+				if tr, ok := tallyResults[key]; ok {
+					os.TotalValue = tr.TotalValue
+				}
+			}
+			options[j] = os
+		}
+		proposals[i] = &types.ProposalSummary{
+			Id:          prop.Id,
+			Title:       prop.Title,
+			Description: prop.Description,
+			Options:     options,
+		}
+	}
+
+	return &types.QueryVoteSummaryResponse{
+		VoteRoundId: round.VoteRoundId,
+		Status:      round.Status,
+		Description: round.Description,
+		VoteEndTime: round.VoteEndTime,
+		Proposals:   proposals,
+	}, nil
+}
+
 // getUint32BE reads a uint32 from big-endian bytes.
 func getUint32BE(b []byte) uint32 {
 	return uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])

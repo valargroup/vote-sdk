@@ -25,6 +25,7 @@ import (
 //	GET /zally/v1/rounds/active
 //	GET /zally/v1/tally/{round_id}/{proposal_id}
 //	GET /zally/v1/tally-results/{round_id}
+//	GET /zally/v1/vote-summary/{round_id}
 //	GET /zally/v1/ceremony
 //	GET /zally/v1/vote-manager
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
@@ -40,6 +41,7 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.HandleFunc("/zally/v1/round/{round_id}", qh.handleVoteRound).Methods("GET")
 	router.HandleFunc("/zally/v1/tally/{round_id}/{proposal_id}", qh.handleProposalTally).Methods("GET")
 	router.HandleFunc("/zally/v1/tally-results/{round_id}", qh.handleTallyResults).Methods("GET")
+	router.HandleFunc("/zally/v1/vote-summary/{round_id}", qh.handleVoteSummary).Methods("GET")
 	router.HandleFunc("/zally/v1/ceremony", qh.handleCeremonyState).Methods("GET")
 	router.HandleFunc("/zally/v1/vote-manager", qh.handleVoteManager).Methods("GET")
 }
@@ -192,6 +194,26 @@ func (qh *queryHandler) handleTallyResults(w http.ResponseWriter, r *http.Reques
 	resp := &types.QueryTallyResultsResponse{}
 
 	if err := qh.abciQuery("/zvote.v1.Query/TallyResults", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handleVoteSummary(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	roundIDHex := vars["round_id"]
+	roundID, err := hex.DecodeString(roundIDHex)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid round_id (expected hex): %v", err))
+		return
+	}
+
+	req := &types.QueryVoteSummaryRequest{VoteRoundId: roundID}
+	resp := &types.QueryVoteSummaryResponse{}
+
+	if err := qh.abciQuery("/zvote.v1.Query/VoteSummary", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}

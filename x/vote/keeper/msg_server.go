@@ -217,6 +217,11 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 		return nil, err
 	}
 
+	// Track share count for the VoteSummary query.
+	if err := ms.k.IncrementShareCount(kvStore, msg.VoteRoundId, msg.ProposalId, msg.VoteDecision); err != nil {
+		return nil, err
+	}
+
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeRevealShare,
 		sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", msg.VoteRoundId)),
