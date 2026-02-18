@@ -59,7 +59,8 @@ private let httpSession: URLSession = {
 }()
 
 private func getJSON(_ path: String, baseURL: String? = nil) async throws -> [String: Any] {
-    let base = baseURL ?? (await ZallyAPIConfigStore.shared.baseURL)
+    let resolvedDefault = await ZallyAPIConfigStore.shared.baseURL
+    let base = baseURL ?? resolvedDefault
     guard let url = URL(string: "\(base)\(path)") else {
         throw ZallyAPIError.invalidResponse("invalid URL: \(base)\(path)")
     }
@@ -78,7 +79,8 @@ private func getJSON(_ path: String, baseURL: String? = nil) async throws -> [St
 }
 
 private func postJSON(_ path: String, body: [String: Any], baseURL: String? = nil) async throws -> [String: Any] {
-    let base = baseURL ?? (await ZallyAPIConfigStore.shared.baseURL)
+    let resolvedDefault = await ZallyAPIConfigStore.shared.baseURL
+    let base = baseURL ?? resolvedDefault
     guard let url = URL(string: "\(base)\(path)") else {
         throw ZallyAPIError.invalidResponse("invalid URL: \(base)\(path)")
     }
@@ -265,9 +267,9 @@ extension VotingAPIClient: DependencyKey {
             },
             configureURLs: { config in
                 await ZallyAPIConfigStore.shared.configure(from: config)
-                print("[VotingAPI] URLs configured: base=\(await ZallyAPIConfigStore.shared.baseURL), "
-                    + "servers=\(config.voteServers.count), "
-                    + "nullifier=\(await ZallyAPIConfigStore.shared.nullifierProviderURL)")
+                let base = await ZallyAPIConfigStore.shared.baseURL
+                let nullifier = await ZallyAPIConfigStore.shared.nullifierProviderURL
+                print("[VotingAPI] URLs configured: base=\(base), servers=\(config.voteServers.count), nullifier=\(nullifier)")
             },
             fetchActiveVotingSession: {
                 let json = try await getJSON("/zally/v1/rounds/active")
