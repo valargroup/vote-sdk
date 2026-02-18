@@ -109,11 +109,20 @@ type ProofGenerator interface {
 	) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error)
 }
 
+// TreeStatus holds lightweight commitment tree statistics.
+type TreeStatus struct {
+	LeafCount    uint64 `json:"leaf_count"`
+	AnchorHeight uint64 `json:"anchor_height"`
+}
+
 // TreeReader abstracts reading commitment tree leaves and state from the keeper.
 type TreeReader interface {
 	// GetAllLeaves returns all commitment leaves from height 0 up to the latest
 	// height that has a stored root.
 	GetAllLeaves() (leaves [][]byte, anchorHeight uint64, err error)
+
+	// GetTreeStatus returns lightweight tree statistics without reading leaf data.
+	GetTreeStatus() (TreeStatus, error)
 }
 
 // MerklePathFunc computes a Poseidon Merkle authentication path for a leaf.

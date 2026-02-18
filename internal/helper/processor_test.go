@@ -91,6 +91,16 @@ func (m *mockTreeReader) GetAllLeaves() ([][]byte, uint64, error) {
 	return m.leaves, m.anchorHeight, nil
 }
 
+func (m *mockTreeReader) GetTreeStatus() (TreeStatus, error) {
+	if m.err != nil {
+		return TreeStatus{}, m.err
+	}
+	return TreeStatus{
+		LeafCount:    uint64(len(m.leaves)),
+		AnchorHeight: m.anchorHeight,
+	}, nil
+}
+
 func newMockTreeReader() *mockTreeReader {
 	// Create leaves for a tree with at least 1 leaf.
 	// Each leaf is 32 bytes (a vote commitment hash).

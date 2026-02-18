@@ -285,6 +285,12 @@ func (app *ZallyApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			return ""
 		}
 		return h.APIToken
+	}, func() helper.TreeReader {
+		h := app.GetHelper()
+		if h == nil {
+			return nil
+		}
+		return h.Tree()
 	}, app.Logger().With("module", "helper"))
 
 	// Register swagger API.

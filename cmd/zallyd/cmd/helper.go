@@ -131,6 +131,35 @@ type keeperTreeReader struct {
 	logger log.Logger
 }
 
+// GetTreeStatus returns lightweight tree statistics without reading leaf data.
+func (r *keeperTreeReader) GetTreeStatus() (helper.TreeStatus, error) {
+	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
+	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
+
+	treeState, err := r.app.VoteKeeper.GetCommitmentTreeState(kvStore)
+	if err != nil {
+		return helper.TreeStatus{}, fmt.Errorf("get tree state: %w", err)
+	}
+
+	var anchorHeight uint64
+	latestHeight := uint64(r.app.LastBlockHeight())
+	for h := latestHeight; h > 0; h-- {
+		root, err := r.app.VoteKeeper.GetCommitmentRootAtHeight(kvStore, h)
+		if err != nil {
+			continue
+		}
+		if root != nil {
+			anchorHeight = h
+			break
+		}
+	}
+
+	return helper.TreeStatus{
+		LeafCount:    treeState.NextIndex,
+		AnchorHeight: anchorHeight,
+	}, nil
+}
+
 // GetAllLeaves returns all commitment leaves up to the latest stored root.
 func (r *keeperTreeReader) GetAllLeaves() ([][]byte, uint64, error) {
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})

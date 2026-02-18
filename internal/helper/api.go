@@ -18,6 +18,7 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 		router,
 		func() *ShareStore { return store },
 		func() string { return "" },
+		nil,
 		logger,
 	)
 }
@@ -26,18 +27,19 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 // mux router, resolving the store at request time. This allows routes to be
 // mounted before the helper is fully initialized.
 func RegisterRoutesWithStoreGetter(router *mux.Router, getStore func() *ShareStore, logger log.Logger) {
-	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, logger)
+	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, nil, logger)
 }
 
 // RegisterRoutesWithGetters registers helper routes using runtime getters for
-// both store and API token.
+// store, API token, and tree reader.
 func RegisterRoutesWithGetters(
 	router *mux.Router,
 	getStore func() *ShareStore,
 	getAPIToken func() string,
+	getTree func() TreeReader,
 	logger log.Logger,
 ) {
-	h := &apiHandler{getStore: getStore, getAPIToken: getAPIToken, logger: logger}
+	h := &apiHandler{getStore: getStore, getAPIToken: getAPIToken, getTree: getTree, logger: logger}
 	router.HandleFunc("/api/v1/shares", h.handleSubmitShare).Methods("POST")
 	router.HandleFunc("/api/v1/status", h.handleStatus).Methods("GET")
 }
@@ -45,6 +47,7 @@ func RegisterRoutesWithGetters(
 type apiHandler struct {
 	getStore    func() *ShareStore
 	getAPIToken func() string
+	getTree     func() TreeReader
 	logger      log.Logger
 }
 
@@ -106,6 +109,7 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 type statusResponse struct {
 	Status string                 `json:"status"`
 	Queues map[string]QueueStatus `json:"queues"`
+	Tree   *TreeStatus            `json:"tree,omitempty"`
 }
 
 func (h *apiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -115,11 +119,21 @@ func (h *apiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(statusResponse{
+	resp := statusResponse{
 		Status: "ok",
 		Queues: store.Status(),
-	})
+	}
+
+	if h.getTree != nil {
+		if tree := h.getTree(); tree != nil {
+			if ts, err := tree.GetTreeStatus(); err == nil {
+				resp.Tree = &ts
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (h *apiHandler) authorizeSubmit(r *http.Request) bool {

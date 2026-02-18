@@ -245,6 +245,7 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 		router,
 		func() *ShareStore { return store },
 		func() string { return "secret-token" },
+		nil,
 		log.NewNopLogger(),
 	)
 

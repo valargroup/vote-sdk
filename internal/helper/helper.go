@@ -89,8 +89,14 @@ func (h *Helper) RegisterRoutes(router *mux.Router) {
 		router,
 		func() *ShareStore { return h.Store },
 		func() string { return h.APIToken },
+		func() TreeReader { return h.Processor.tree },
 		h.Logger,
 	)
+}
+
+// Tree returns the tree reader used by the processor.
+func (h *Helper) Tree() TreeReader {
+	return h.Processor.tree
 }
 
 // Start launches the background processor in the given context.
