@@ -11,17 +11,19 @@ use crate::types::{
 ///
 /// - `enc_shares`: Encrypted shares from `VoteCommitmentBundle.enc_shares`.
 /// - `commitment`: The vote commitment bundle (provides shares_hash + proposal_id).
-/// - `vote_decision`: The voter's choice (0=support, 1=oppose, 2=skip).
+/// - `vote_decision`: The voter's choice (0-indexed into the proposal's options).
+/// - `num_options`: Number of options declared for this proposal (2-8).
 /// - `vc_tree_position`: Position of the Vote Commitment leaf in the VC tree,
 ///   known after the cast-vote TX is confirmed on chain.
 pub fn build_share_payloads(
     enc_shares: &[EncryptedShare],
     commitment: &VoteCommitmentBundle,
     vote_decision: u32,
+    num_options: u32,
     vc_tree_position: u64,
 ) -> Result<Vec<SharePayload>, VotingError> {
     validate_encrypted_shares(enc_shares)?;
-    validate_vote_decision(vote_decision)?;
+    validate_vote_decision(vote_decision, num_options)?;
 
     let all_enc_shares: Vec<EncryptedShare> = enc_shares.to_vec();
 
@@ -195,7 +197,7 @@ mod tests {
     #[test]
     fn test_build_share_payloads() {
         let commitment = mock_commitment();
-        let result = build_share_payloads(&mock_enc_shares(), &commitment, 1, 42).unwrap();
+        let result = build_share_payloads(&mock_enc_shares(), &commitment, 1, 2, 42).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].proposal_id, 1);
         assert_eq!(result[0].vote_decision, 1);

@@ -11,11 +11,18 @@ enum SessionStatus {
   SESSION_STATUS_FINALIZED   = 3;
 }
 
+// VoteOption represents a named choice within a proposal.
+message VoteOption {
+  uint32 index = 1; // 0-indexed
+  string label = 2; // e.g. "Support", "Oppose"
+}
+
 // Proposal represents a single ballot option within a voting session.
 message Proposal {
-  uint32 id          = 1;
-  string title       = 2;
-  string description = 3;
+  uint32 id                    = 1;
+  string title                 = 2;
+  string description           = 3;
+  repeated VoteOption options  = 4; // 2-8 named choices
 }
 
 // VoteRound represents a voting session created by MsgCreateVotingSession.

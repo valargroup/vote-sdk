@@ -195,6 +195,11 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 		return nil, err
 	}
 
+	// Validate vote_decision is a valid option for this proposal.
+	if err := ms.k.ValidateVoteDecision(kvStore, msg.VoteRoundId, msg.ProposalId, msg.VoteDecision); err != nil {
+		return nil, err
+	}
+
 	// Reject duplicate reveal: share nullifier must not already be recorded (scoped to type + round).
 	has, err := ms.k.HasNullifier(kvStore, types.NullifierTypeShare, msg.VoteRoundId, msg.ShareNullifier)
 	if err != nil {
@@ -248,6 +253,13 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 		if entry.ProposalId < 1 || int(entry.ProposalId) > len(round.Proposals) {
 			return nil, fmt.Errorf("%w: entry[%d] proposal_id %d out of range [1, %d]",
 				types.ErrInvalidProposalID, i, entry.ProposalId, len(round.Proposals))
+		}
+
+		// Validate vote_decision is a valid option for this proposal.
+		proposal := round.Proposals[entry.ProposalId-1]
+		if int(entry.VoteDecision) >= len(proposal.Options) {
+			return nil, fmt.Errorf("%w: entry[%d] vote_decision %d out of range [0, %d) for proposal %d",
+				types.ErrInvalidField, i, entry.VoteDecision, len(proposal.Options), entry.ProposalId)
 		}
 
 		// Verify Chaum-Pedersen DLEQ proof that total_value matches the

@@ -19,12 +19,20 @@ func FpLE(v uint64) []byte {
 	return buf
 }
 
+// DefaultOptions returns the standard binary vote options (Support/Oppose).
+func DefaultOptions() []*types.VoteOption {
+	return []*types.VoteOption{
+		{Index: 0, Label: "Support"},
+		{Index: 1, Label: "Oppose"},
+	}
+}
+
 // SampleProposals returns two sample proposals for test fixtures.
 // Proposal IDs must be 1-indexed per ValidateBasic (expected 1, 2, ...).
 func SampleProposals() []*types.Proposal {
 	return []*types.Proposal{
-		{Id: 1, Title: "Proposal A", Description: "First proposal"},
-		{Id: 2, Title: "Proposal B", Description: "Second proposal"},
+		{Id: 1, Title: "Proposal A", Description: "First proposal", Options: DefaultOptions()},
+		{Id: 2, Title: "Proposal B", Description: "Second proposal", Options: DefaultOptions()},
 	}
 }
 

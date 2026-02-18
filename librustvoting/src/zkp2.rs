@@ -26,7 +26,8 @@ use crate::types::{
 /// * `voting_round_id` - 32-byte voting round identifier (from DB, hex-decoded).
 /// * `ea_pk` - 32-byte compressed election authority public key.
 /// * `proposal_id` - Which proposal to vote on (0-15).
-/// * `choice` - 0=support, 1=oppose, 2=skip.
+/// * `choice` - Vote decision index (0-indexed into the proposal's options).
+/// * `num_options` - Number of options declared for this proposal (2-8).
 /// * `van_auth_path` - 24 siblings for the VAN Merkle path in the vote commitment tree.
 /// * `van_position` - Leaf position of the VAN in the tree.
 /// * `anchor_height` - Block height at which the tree was snapshotted.
@@ -42,13 +43,14 @@ pub fn build_vote_commitment(
     ea_pk: &[u8],
     proposal_id: u32,
     choice: u32,
+    num_options: u32,
     van_auth_path: &[[u8; 32]],
     van_position: u32,
     anchor_height: u32,
     proposal_authority: u64,
     progress: &dyn ProofProgressReporter,
 ) -> Result<VoteCommitmentBundle, VotingError> {
-    validate_vote_decision(choice)?;
+    validate_vote_decision(choice, num_options)?;
     if proposal_id > 15 {
         return Err(VotingError::InvalidInput {
             message: format!("proposal_id must be 0..15, got {}", proposal_id),
@@ -239,7 +241,8 @@ mod tests {
             &[0u8; 32],
             &[0u8; 32],
             0,
-            3, // invalid choice
+            3, // invalid choice (num_options=2)
+            2,
             &[[0u8; 32]; 24],
             0,
             1,
@@ -261,6 +264,7 @@ mod tests {
             &[0u8; 32],
             16, // invalid proposal_id
             0,
+            2,
             &[[0u8; 32]; 24],
             0,
             1,
@@ -282,6 +286,7 @@ mod tests {
             &[0u8; 32],
             0,
             0,
+            2,
             &[[0u8; 32]; 10], // wrong length
             0,
             1,

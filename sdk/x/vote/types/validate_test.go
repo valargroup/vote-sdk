@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	zallytest "github.com/z-cale/zally/testutil"
 	"github.com/z-cale/zally/x/vote/types"
 )
 
@@ -38,8 +39,8 @@ func validCreateSession() *types.MsgCreateVotingSession {
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First"},
-			{Id: 2, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
+			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
 		},
 	}
 }
@@ -89,7 +90,7 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			modify: func(m *types.MsgCreateVotingSession) {
 				m.Proposals = make([]*types.Proposal, 17)
 				for i := range m.Proposals {
-					m.Proposals[i] = &types.Proposal{Id: uint32(i), Title: "P"}
+					m.Proposals[i] = &types.Proposal{Id: uint32(i), Title: "P", Options: zallytest.DefaultOptions()}
 				}
 			},
 			expectErr:   true,
@@ -99,7 +100,7 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			name: "invalid: proposal with empty title",
 			modify: func(m *types.MsgCreateVotingSession) {
 				m.Proposals = []*types.Proposal{
-					{Id: 1, Title: "", Description: "No title"},
+					{Id: 1, Title: "", Description: "No title", Options: zallytest.DefaultOptions()},
 				}
 			},
 			expectErr:   true,
@@ -109,8 +110,8 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			name: "invalid: proposal ID mismatch (non-sequential)",
 			modify: func(m *types.MsgCreateVotingSession) {
 				m.Proposals = []*types.Proposal{
-					{Id: 1, Title: "A", Description: "ok"},
-					{Id: 5, Title: "B", Description: "bad id"},
+					{Id: 1, Title: "A", Description: "ok", Options: zallytest.DefaultOptions()},
+					{Id: 5, Title: "B", Description: "bad id", Options: zallytest.DefaultOptions()},
 				}
 			},
 			expectErr:   true,
@@ -120,7 +121,7 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			name: "valid: single proposal",
 			modify: func(m *types.MsgCreateVotingSession) {
 				m.Proposals = []*types.Proposal{
-					{Id: 1, Title: "Only Option", Description: "Single"},
+					{Id: 1, Title: "Only Option", Description: "Single", Options: zallytest.DefaultOptions()},
 				}
 			},
 		},
@@ -129,7 +130,84 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			modify: func(m *types.MsgCreateVotingSession) {
 				m.Proposals = make([]*types.Proposal, 16)
 				for i := range m.Proposals {
-					m.Proposals[i] = &types.Proposal{Id: uint32(i + 1), Title: "P"}
+					m.Proposals[i] = &types.Proposal{Id: uint32(i + 1), Title: "P", Options: zallytest.DefaultOptions()}
+				}
+			},
+		},
+		{
+			name: "invalid: proposal with too few options",
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{
+					{Id: 1, Title: "A", Description: "ok", Options: []*types.VoteOption{
+						{Index: 0, Label: "Only one"},
+					}},
+				}
+			},
+			expectErr:   true,
+			errContains: "must have 2-8 options",
+		},
+		{
+			name: "invalid: proposal with too many options (9)",
+			modify: func(m *types.MsgCreateVotingSession) {
+				opts := make([]*types.VoteOption, 9)
+				for i := range opts {
+					opts[i] = &types.VoteOption{Index: uint32(i), Label: "Opt"}
+				}
+				m.Proposals = []*types.Proposal{
+					{Id: 1, Title: "A", Description: "ok", Options: opts},
+				}
+			},
+			expectErr:   true,
+			errContains: "must have 2-8 options",
+		},
+		{
+			name: "invalid: option index not sequential",
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{
+					{Id: 1, Title: "A", Description: "ok", Options: []*types.VoteOption{
+						{Index: 0, Label: "Support"},
+						{Index: 5, Label: "Oppose"},
+					}},
+				}
+			},
+			expectErr:   true,
+			errContains: "option index mismatch",
+		},
+		{
+			name: "invalid: option with empty label",
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{
+					{Id: 1, Title: "A", Description: "ok", Options: []*types.VoteOption{
+						{Index: 0, Label: "Support"},
+						{Index: 1, Label: ""},
+					}},
+				}
+			},
+			expectErr:   true,
+			errContains: "label cannot be empty",
+		},
+		{
+			name: "invalid: option with non-ASCII label",
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{
+					{Id: 1, Title: "A", Description: "ok", Options: []*types.VoteOption{
+						{Index: 0, Label: "Support"},
+						{Index: 1, Label: "Opposé"},
+					}},
+				}
+			},
+			expectErr:   true,
+			errContains: "ASCII",
+		},
+		{
+			name: "valid: 8 options (max)",
+			modify: func(m *types.MsgCreateVotingSession) {
+				opts := make([]*types.VoteOption, 8)
+				for i := range opts {
+					opts[i] = &types.VoteOption{Index: uint32(i), Label: "Candidate"}
+				}
+				m.Proposals = []*types.Proposal{
+					{Id: 1, Title: "A", Description: "ok", Options: opts},
 				}
 			},
 		},

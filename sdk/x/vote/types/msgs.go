@@ -44,6 +44,21 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 		if p.Id != uint32(i+1) {
 			return fmt.Errorf("%w: proposal id mismatch at index %d: expected %d, got %d", ErrInvalidField, i, i+1, p.Id)
 		}
+		// Each proposal must have 2-8 vote options.
+		if len(p.Options) < 2 || len(p.Options) > 8 {
+			return fmt.Errorf("%w: proposal %d must have 2-8 options, got %d", ErrInvalidField, i, len(p.Options))
+		}
+		for j, opt := range p.Options {
+			if opt.Index != uint32(j) {
+				return fmt.Errorf("%w: proposal %d option index mismatch at position %d: expected %d, got %d", ErrInvalidField, i, j, j, opt.Index)
+			}
+			if opt.Label == "" {
+				return fmt.Errorf("%w: proposal %d option %d label cannot be empty", ErrInvalidField, i, j)
+			}
+			if !isASCII(opt.Label) {
+				return fmt.Errorf("%w: proposal %d option %d label must contain only ASCII characters", ErrInvalidField, i, j)
+			}
+		}
 	}
 	return nil
 }
@@ -255,3 +270,13 @@ func (msg *MsgSubmitTally) GetNullifierType() NullifierType { return 0 }
 
 // AcceptsTallyingRound returns true — submitting a tally requires TALLYING status.
 func (msg *MsgSubmitTally) AcceptsTallyingRound() bool { return true }
+
+// isASCII returns true if every byte in s is in the ASCII range (0x00-0x7F).
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > 127 {
+			return false
+		}
+	}
+	return true
+}

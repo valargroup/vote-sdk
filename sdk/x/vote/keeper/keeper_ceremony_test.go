@@ -7,6 +7,7 @@ import (
 
 	"github.com/z-cale/zally/crypto/ecies"
 	"github.com/z-cale/zally/crypto/elgamal"
+	zallytest "github.com/z-cale/zally/testutil"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -1229,8 +1230,8 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First"},
-			{Id: 2, Title: "Proposal B", Description: "Second"},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
+			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
 		},
 	}
 	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
