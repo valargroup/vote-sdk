@@ -11,6 +11,8 @@ orchard = { path = "../orchard", features = ["delegation", "vote-proof", "share-
 vote-commitment-tree = { path = "../vote-commitment-tree" }
 vote-commitment-tree-client = { path = "../vote-commitment-tree-client" }
 librustvoting = { path = "../librustvoting" }
+zcash_client_backend = { path = "../librustzcash/zcash_client_backend", features = ["orchard"] }
+prost = "0.14"
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }

@@ -618,6 +618,7 @@ dependencies = [
  "librustvoting",
  "orchard",
  "pasta_curves",
+ "prost",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
@@ -628,6 +629,7 @@ dependencies = [
  "vote-commitment-tree",
  "vote-commitment-tree-client",
  "zally-circuits",
+ "zcash_client_backend",
 ]
 
 [[package]]
@@ -3615,6 +3617,8 @@ dependencies = [
  "ff",
  "group",
  "halo2_proofs",
+ "hex",
+ "incrementalmerkletree",
  "orchard",
  "pasta_curves",
  "rand_core 0.6.4",
