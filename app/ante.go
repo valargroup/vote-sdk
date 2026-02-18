@@ -15,7 +15,6 @@ import (
 	"github.com/z-cale/zally/crypto/zkp"
 	voteante "github.com/z-cale/zally/x/vote/ante"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
 )
 
 // DualAnteHandlerOptions configures the dual-mode ante handler that supports
@@ -46,7 +45,8 @@ type DualAnteHandlerOptions struct {
 // through the same BaseApp instance.
 func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 	// Build the standard Cosmos ante chain for non-vote transactions.
-	standardHandler, err := buildStandardAnteHandler(opts.HandlerOptions)
+	// Includes ceremony-specific decorators for validator gating and fee exemption.
+	standardHandler, err := buildStandardAnteHandler(opts.HandlerOptions, opts.VoteKeeper)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,8 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 		// MsgCreateValidatorWithPallasKey to atomically register their Pallas key.
 		// Allow during genesis (block height 0) since gentx produces standard
 		// MsgCreateValidator; genesis validators register Pallas keys via the
-		// ceremony flow after chain start.
+		// ceremony flow after chain start. MsgCreateValidatorWithPallasKey is
+		// allowed since it wraps MsgCreateValidator with Pallas key registration.
 		for _, msg := range tx.GetMsgs() {
 			if _, ok := msg.(*stakingtypes.MsgCreateValidator); ok {
 				if ctx.BlockHeight() > 0 {
@@ -73,6 +74,9 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 				}
 			}
 		}
+
+		// Ceremony messages pass through to the standard ante chain where
+		// they get signature verification, fee exemption, and validator gating.
 
 		// Standard Cosmos tx path: signature verification, fee deduction, etc.
 		return standardHandler(ctx, tx, simulate)
@@ -92,15 +96,14 @@ func handleVoteAnte(
 	// All custom txs (vote + ceremony) are free — infinite gas meter.
 	ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
 
-	// Ceremony messages bypass the vote validation pipeline.
-	// Most ceremony messages flow directly to MsgServer handlers for validation.
-	// MsgAckExecutiveAuthorityKey is special: it must be blocked from the
-	// mempool (only injectable via PrepareProposal).
+	// Only MsgAckExecutiveAuthorityKey remains on the custom wire format path.
+	// It is auto-injected by PrepareProposal and must be blocked from the
+	// mempool (only injectable by the block proposer). All other ceremony
+	// messages now flow through standard Cosmos SDK transactions with
+	// signature verification and validator gating.
 	if vtx.CeremonyMsg != nil {
-		if _, isAck := vtx.CeremonyMsg.(*types.MsgAckExecutiveAuthorityKey); isAck {
-			if err := k.ValidateAckSubmitter(ctx); err != nil {
-				return ctx, err
-			}
+		if err := k.ValidateAckSubmitter(ctx); err != nil {
+			return ctx, err
 		}
 		return ctx, nil
 	}
@@ -128,8 +131,9 @@ func handleVoteAnte(
 }
 
 // buildStandardAnteHandler creates the standard Cosmos SDK ante handler chain
-// for non-vote transactions (staking operations, bank transfers, etc.).
-func buildStandardAnteHandler(options ante.HandlerOptions) (sdk.AnteHandler, error) {
+// for non-vote transactions (staking operations, bank transfers, ceremony
+// messages, etc.). Ceremony messages get fee exemption and a validator gate.
+func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper votekeeper.Keeper) (sdk.AnteHandler, error) {
 	anteDecorators := []sdk.AnteDecorator{
 		ante.NewSetUpContextDecorator(),
 		ante.NewExtensionOptionsDecorator(options.ExtensionOptionChecker),
@@ -137,12 +141,16 @@ func buildStandardAnteHandler(options ante.HandlerOptions) (sdk.AnteHandler, err
 		ante.NewTxTimeoutHeightDecorator(),
 		ante.NewValidateMemoDecorator(options.AccountKeeper),
 		ante.NewConsumeGasForTxSizeDecorator(options.AccountKeeper),
+		// Ceremony messages are free — grant infinite gas before fee deduction.
+		NewCeremonyFeeExemptDecorator(),
 		ante.NewDeductFeeDecorator(options.AccountKeeper, options.BankKeeper, options.FeegrantKeeper, options.TxFeeChecker),
 		ante.NewSetPubKeyDecorator(options.AccountKeeper),
 		ante.NewValidateSigCountDecorator(options.AccountKeeper),
 		ante.NewSigGasConsumeDecorator(options.AccountKeeper, options.SigGasConsumer),
 		ante.NewSigVerificationDecorator(options.AccountKeeper, options.SignModeHandler, options.SigVerifyOptions...),
 		ante.NewIncrementSequenceDecorator(options.AccountKeeper),
+		// After signature verification, gate ceremony messages to bonded validators.
+		NewCeremonyValidatorDecorator(voteKeeper),
 	}
 
 	return sdk.ChainAnteDecorators(anteDecorators...), nil

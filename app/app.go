@@ -2,7 +2,6 @@ package app
 
 import (
 	"io"
-	"os"
 	"strings"
 	"sync/atomic"
 
@@ -267,8 +266,6 @@ func (app *ZallyApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 	}
 	voteHandler := voteapi.NewHandler(voteapi.HandlerConfig{
 		CometRPCEndpoint: cometRPC,
-		IMTServiceURL:    os.Getenv("ZALLY_IMT_URL"),
-		LightwalletdURL:  os.Getenv("ZALLY_LWD_URL"),
 	})
 	voteHandler.RegisterTxRoutes(apiSvr.Router)
 	voteHandler.RegisterQueryRoutes(apiSvr.Router, apiSvr.ClientCtx)
@@ -305,3 +302,4 @@ func (app *ZallyApp) SetHelper(h *helper.Helper) {
 func (app *ZallyApp) GetHelper() *helper.Helper {
 	return app.helperRef.Load()
 }
+

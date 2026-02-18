@@ -1,9 +1,23 @@
 package types
 
 import (
+	gogoproto "github.com/cosmos/gogoproto/proto"
+
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
+
+func init() {
+	// The Cosmos SDK's unknownproto.RejectUnknownFields resolves nested message
+	// types via gogoproto.MessageType(), which only checks the gogoproto (v1)
+	// global registry. Our types are generated with protoc-gen-go v2, which
+	// registers with the v2 registry only. Bridge all types that appear as
+	// nested messages inside transaction Msg types into the gogoproto registry
+	// so that standard Cosmos SDK tx decoding succeeds.
+	gogoproto.RegisterType((*DealerPayload)(nil), "zvote.v1.DealerPayload")
+	gogoproto.RegisterType((*Proposal)(nil), "zvote.v1.Proposal")
+	gogoproto.RegisterType((*TallyEntry)(nil), "zvote.v1.TallyEntry")
+}
 
 // RegisterInterfaces registers the vote module's message types with the
 // InterfaceRegistry. This is required for the MsgServiceRouter to accept

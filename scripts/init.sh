@@ -24,8 +24,9 @@ VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend 
 echo "Validator address: $VALIDATOR_ADDR"
 echo "Validator valoper: $VALIDATOR_VALOPER"
 
-# Create a second key for VoteManager testing
-$BINARY keys add manager --keyring-backend test --home "$HOME_DIR"
+# Import the deterministic vote-manager key (matches E2E test constant).
+VM_PRIVKEY="b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee"
+$BINARY keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_DIR"
 MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_DIR")
 echo "Manager address:   $MANAGER_ADDR"
 

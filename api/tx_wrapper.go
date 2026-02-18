@@ -15,23 +15,24 @@ var _ sdk.Tx = (*VoteTxWrapper)(nil)
 // VoteTxWrapper wraps a vote module message so it can flow through BaseApp's
 // standard tx lifecycle (TxDecoder → AnteHandler → MsgServiceRouter).
 //
-// Vote transactions bypass the Cosmos SDK Tx envelope. They use a simple
-// wire format: [1-byte tag || protobuf message]. This wrapper makes them
-// compatible with sdk.Tx so BaseApp can process them alongside standard
-// Cosmos transactions.
+// Vote transactions and MsgAckExecutiveAuthorityKey bypass the Cosmos SDK Tx
+// envelope. They use a simple wire format: [1-byte tag || protobuf message].
+// This wrapper makes them compatible with sdk.Tx so BaseApp can process them
+// alongside standard Cosmos transactions. All other ceremony messages now use
+// standard Cosmos SDK transactions with proper signature verification.
 type VoteTxWrapper struct {
 	// RawBytes is the original wire-format bytes [tag || protobuf].
 	RawBytes []byte
 
-	// Tag is the message type tag (0x01–0x05 for vote-round, 0x06–0x09 for ceremony).
+	// Tag is the message type tag (0x01–0x05 for vote-round, 0x08 for MsgAck).
 	Tag byte
 
 	// VoteMsg is the decoded vote message, used by the validation pipeline.
 	// Set for vote-round tags (0x01–0x05). Nil for ceremony messages.
 	VoteMsg types.VoteMessage
 
-	// CeremonyMsg is the decoded ceremony message (tags 0x06–0x09).
-	// Set for ceremony tags. Nil for vote-round messages.
+	// CeremonyMsg is the decoded ceremony message (tag 0x08 only).
+	// Only MsgAckExecutiveAuthorityKey uses this path.
 	CeremonyMsg sdk.Msg
 }
 

@@ -3,14 +3,11 @@ package app_test
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/binary"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"golang.org/x/crypto/blake2b"
-
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -57,13 +54,9 @@ func (s *ABCIIntegrationSuite) queryCtx() sdk.Context {
 func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	// Step 1: Create voting session.
 	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
-	setupTx := testutil.MustEncodeVoteTx(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
-	result := s.app.DeliverVoteTx(setupTx)
-	s.Require().Equal(uint32(0), result.Code, "CreateVotingSession should succeed, got: %s", result.Log)
-
-	// Derive the round ID and verify it was stored.
-	roundID := computeRoundID(setupMsg)
+	// Verify the round was stored.
 	ctx := s.queryCtx()
 	kvStore := s.app.VoteKeeper().OpenKVStore(ctx)
 
@@ -76,7 +69,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	delegationMsg := testutil.ValidDelegation(roundID, 0x10)
 	delegationTx := testutil.MustEncodeVoteTx(delegationMsg)
 
-	result = s.app.DeliverVoteTx(delegationTx)
+	result := s.app.DeliverVoteTx(delegationTx)
 	s.Require().Equal(uint32(0), result.Code, "DelegateVote should succeed, got: %s", result.Log)
 
 	// Verify nullifiers recorded.
@@ -153,8 +146,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 func (s *ABCIIntegrationSuite) TestNullifierDoubleSpend() {
 	// Create voting session.
 	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
-	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// First delegation succeeds.
 	delegation1 := testutil.ValidDelegation(roundID, 0x10)
@@ -175,8 +167,7 @@ func (s *ABCIIntegrationSuite) TestNullifierDoubleSpend() {
 func (s *ABCIIntegrationSuite) TestCheckTxVsRecheckTx() {
 	// Create voting session.
 	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
-	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// CheckTx (New) for a delegation should succeed.
 	delegation := testutil.ValidDelegation(roundID, 0x20)
@@ -202,8 +193,7 @@ func (s *ABCIIntegrationSuite) TestCheckTxVsRecheckTx() {
 func (s *ABCIIntegrationSuite) TestCommitmentTreeAnchorValidation() {
 	// Create voting session and delegate vote.
 	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
-	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	delegation := testutil.ValidDelegation(roundID, 0x10)
 	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
@@ -231,8 +221,7 @@ func (s *ABCIIntegrationSuite) TestCommitmentTreeAnchorValidation() {
 func (s *ABCIIntegrationSuite) TestExpiredRoundRejection() {
 	// Create a session that is already expired relative to block time.
 	expiredMsg := testutil.ExpiredCreateVotingSessionAt(s.app.Time)
-	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(expiredMsg))
-	expiredRoundID := computeRoundID(expiredMsg)
+	expiredRoundID := s.app.SeedVotingSession(expiredMsg)
 
 	// Delegation against the expired round should fail.
 	delegation := testutil.ValidDelegation(expiredRoundID, 0x70)
@@ -294,8 +283,7 @@ func (s *ABCIIntegrationSuite) TestMalformedEmptyRequiredFields() {
 func (s *ABCIIntegrationSuite) TestConcurrentSubmissionsInSameBlock() {
 	// Create voting session.
 	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
-	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Submit 5 delegations with unique nullifiers in the same block.
 	var txs [][]byte
@@ -344,8 +332,7 @@ func (s *ABCIIntegrationSuite) TestConcurrentSubmissionsInSameBlock() {
 func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
 	// Create voting session.
 	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
-	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Register first delegation → 2 leaves in tree.
 	delegation1 := testutil.ValidDelegation(roundID, 0x10)
@@ -410,10 +397,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerStatusTransition() {
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
-	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	s.Require().Equal(uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
-
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Verify round is ACTIVE.
 	ctx := s.queryCtx()
@@ -454,14 +438,11 @@ func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
-	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	s.Require().Equal(uint32(0), result.Code, "create session should succeed")
-
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Delegate while ACTIVE to populate the tree.
 	delegation := testutil.ValidDelegation(roundID, 0x10)
-	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
 	s.Require().Equal(uint32(0), result.Code, "delegation during ACTIVE should succeed")
 
 	// Get anchor height for cast vote / reveal share.
@@ -519,8 +500,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
-	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(soonMsg))
-	soonRoundID := computeRoundID(soonMsg)
+	soonRoundID := s.app.SeedVotingSession(soonMsg)
 
 	lateMsg := &types.MsgCreateVotingSession{
 		Creator:           "zvote1admin",
@@ -535,8 +515,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
-	s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(lateMsg))
-	lateRoundID := computeRoundID(lateMsg)
+	lateRoundID := s.app.SeedVotingSession(lateMsg)
 
 	// Advance past soonEnd but before lateEnd.
 	s.app.NextBlockAtTime(soonEnd.Add(1 * time.Second))
@@ -564,14 +543,11 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
 	// Create a session with 2 proposals (IDs 0 and 1).
 	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
-	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	s.Require().Equal(uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
-
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Delegate to populate the tree.
 	delegation := testutil.ValidDelegation(roundID, 0x10)
-	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
 	s.Require().Equal(uint32(0), result.Code, "delegation should succeed")
 
 	anchorHeight := uint64(s.app.Height)
@@ -635,14 +611,11 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
-	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	s.Require().Equal(uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
-
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Delegate while ACTIVE to populate the tree.
 	delegation := testutil.ValidDelegation(roundID, 0x10)
-	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
 	s.Require().Equal(uint32(0), result.Code, "delegation should succeed")
 
 	anchorHeight := uint64(s.app.Height)
@@ -745,10 +718,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyNonProposerRejected() {
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
-	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	s.Require().Equal(uint32(0), result.Code, "create session should succeed")
-
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Advance past VoteEndTime → TALLYING.
 	s.app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
@@ -766,7 +736,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyNonProposerRejected() {
 	badTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, fakeValoper, []*types.TallyEntry{
 		{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
 	})
-	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badTallyMsg))
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badTallyMsg))
 	s.Require().NotEqual(uint32(0), result.Code, "submit tally with non-proposer creator should fail")
 	s.Require().Contains(result.Log, "does not match block proposer")
 
@@ -786,10 +756,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyNonProposerRejected() {
 func (s *ABCIIntegrationSuite) TestSubmitTallyRejectsActiveRound() {
 	// Create an active session (not expired).
 	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
-	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	s.Require().Equal(uint32(0), result.Code, "create session should succeed")
-
-	roundID := computeRoundID(setupMsg)
+	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Verify round is ACTIVE.
 	ctx := s.queryCtx()
@@ -800,7 +767,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyRejectsActiveRound() {
 
 	// Submit tally against ACTIVE round should fail (even from a valid validator).
 	tallyMsg := testutil.ValidSubmitTally(roundID, s.app.ValidatorOperAddr())
-	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(tallyMsg))
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(tallyMsg))
 	s.Require().NotEqual(uint32(0), result.Code, "submit tally against ACTIVE round should fail")
 	s.Require().Contains(result.Log, "not in tallying state")
 }
@@ -827,14 +794,11 @@ func TestPrepareProposalAutoTally(t *testing.T) {
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
-	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	require.Equal(t, uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
-
-	roundID := computeRoundID(setupMsg)
+	roundID := app.SeedVotingSession(setupMsg)
 
 	// Step 2: Delegate to populate the commitment tree.
 	delegation := testutil.ValidDelegation(roundID, 0x10)
-	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
 	require.Equal(t, uint32(0), result.Code, "delegation should succeed, got: %s", result.Log)
 
 	anchorHeight := uint64(app.Height)
@@ -985,22 +949,3 @@ func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// computeRoundID mirrors the deriveRoundID function from msg_server.go.
-// Blake2b-256(snapshot_height || snapshot_blockhash || proposals_hash ||
-//
-//	vote_end_time || nullifier_imt_root || nc_root)
-func computeRoundID(msg *types.MsgCreateVotingSession) []byte {
-	h, _ := blake2b.New256(nil)
-	var buf [8]byte
-
-	binary.BigEndian.PutUint64(buf[:], msg.SnapshotHeight)
-	h.Write(buf[:])
-	h.Write(msg.SnapshotBlockhash)
-	h.Write(msg.ProposalsHash)
-	binary.BigEndian.PutUint64(buf[:], msg.VoteEndTime)
-	h.Write(buf[:])
-	h.Write(msg.NullifierImtRoot)
-	h.Write(msg.NcRoot)
-
-	return h.Sum(nil)
-}

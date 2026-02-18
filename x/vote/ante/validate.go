@@ -56,8 +56,6 @@ func DefaultOpts() ValidateOpts {
 //   - RecheckTx: lightweight re-validation (basic + round + nullifiers only)
 //   - FinalizeBlock: full validation before keeper execution
 //
-// MsgCreateVotingSession is special: it has no round ID, no nullifiers, no signature,
-// and no ZKP, so only basic field validation runs.
 func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, opts ValidateOpts) error {
 	// 1. Basic field validation (stateless).
 	if err := msg.ValidateBasic(); err != nil {

@@ -1,12 +1,17 @@
 package testutil
 
 import (
+	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/blake2b"
 
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/stretchr/testify/require"
@@ -15,16 +20,23 @@ import (
 	sdkmath "cosmossdk.io/math"
 
 	abci "github.com/cometbft/cometbft/abci/types"
-
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	cmttypes "github.com/cometbft/cometbft/types"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/tx/signing"
+	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+
+	"github.com/cosmos/cosmos-sdk/codec"
 
 	"github.com/z-cale/zally/app"
 	"github.com/z-cale/zally/crypto/elgamal"
@@ -48,6 +60,10 @@ type TestApp struct {
 	// passed in every FinalizeBlock request so the ante handler can verify
 	// that MsgSubmitTally creators match the block proposer.
 	ProposerAddress []byte
+
+	// ValPrivKey is the secp256k1 private key of the genesis validator's
+	// operator account. Used for signing ceremony messages in tests.
+	ValPrivKey *secp256k1.PrivKey
 }
 
 // SetupTestApp creates a fresh ZallyApp backed by an in-memory database,
@@ -111,6 +127,7 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 	require.NoError(t, err)
 
 	// Create a genesis account with enough funds for the validator's self-delegation.
+	// This key is also used for signing ceremony messages in tests.
 	privKey := secp256k1.GenPrivKey()
 	genAcc := authtypes.NewBaseAccount(
 		privKey.PubKey().Address().Bytes(),
@@ -122,8 +139,12 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 		Coins:   sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.NewInt(1_000_000_000_000))),
 	}
 
-	// Build genesis state with the validator set and funded account.
-	genesisState, err := simtestutil.GenesisStateWithValSet(
+	// Build genesis state. GenesisStateWithValSet sets the validator operator
+	// address to sdk.ValAddress(val.Address) (from the CometBFT key), and the
+	// genesis account as the delegator. We then patch the staking genesis to
+	// use the genesis account as operator so that ceremony message signing
+	// (which requires the operator's account key) works in tests.
+	genesisState, err := genesisStateWithAccountOperator(
 		zallyApp.AppCodec(),
 		zallyApp.DefaultGenesis(),
 		valSet,
@@ -170,6 +191,7 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 		Height:          1,
 		Time:            now,
 		ProposerAddress: proposerAddr,
+		ValPrivKey:      privKey,
 	}
 }
 
@@ -243,6 +265,75 @@ func (ta *TestApp) SeedConfirmedCeremony(eaPk []byte) {
 
 	// Commit via an empty block so the IAVL working set changes are persisted.
 	ta.NextBlock()
+}
+
+// SeedVotingSession creates a VoteRound directly in the KV store from a
+// MsgCreateVotingSession, bypassing the ABCI pipeline. The round is committed
+// via an empty block. Returns the derived vote_round_id.
+//
+// MsgCreateVotingSession is now a standard Cosmos SDK tx (signed by the vote
+// manager), so it can no longer be submitted via the custom vote tx wire
+// format. For integration tests that need an active round to test other vote
+// messages (delegation, cast, reveal, tally), this helper seeds the round
+// directly — the session creation itself is not under test here.
+func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {
+	ta.t.Helper()
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	// Read ea_pk from confirmed ceremony state (if present).
+	var eaPk []byte
+	ceremony, err := ta.VoteKeeper().GetCeremonyState(kvStore)
+	if err == nil && ceremony != nil && len(ceremony.EaPk) > 0 {
+		eaPk = ceremony.EaPk
+	} else {
+		eaPk = make([]byte, 32)
+	}
+
+	roundID := deriveRoundID(msg)
+
+	round := &types.VoteRound{
+		VoteRoundId:       roundID,
+		SnapshotHeight:    msg.SnapshotHeight,
+		SnapshotBlockhash: msg.SnapshotBlockhash,
+		ProposalsHash:     msg.ProposalsHash,
+		VoteEndTime:       msg.VoteEndTime,
+		NullifierImtRoot:  msg.NullifierImtRoot,
+		NcRoot:            msg.NcRoot,
+		Creator:           msg.Creator,
+		Status:            types.SessionStatus_SESSION_STATUS_ACTIVE,
+		EaPk:              eaPk,
+		VkZkp1:            msg.VkZkp1,
+		VkZkp2:            msg.VkZkp2,
+		VkZkp3:            msg.VkZkp3,
+		Proposals:         msg.Proposals,
+		Description:       msg.Description,
+	}
+
+	err = ta.VoteKeeper().SetVoteRound(kvStore, round)
+	require.NoError(ta.t, err)
+
+	ta.NextBlock()
+	return roundID
+}
+
+// deriveRoundID computes Blake2b-256(snapshot_height || snapshot_blockhash ||
+// proposals_hash || vote_end_time || nullifier_imt_root || nc_root).
+func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
+	h, _ := blake2b.New256(nil)
+	var buf [8]byte
+
+	binary.BigEndian.PutUint64(buf[:], msg.SnapshotHeight)
+	h.Write(buf[:])
+	h.Write(msg.SnapshotBlockhash)
+	h.Write(msg.ProposalsHash)
+	binary.BigEndian.PutUint64(buf[:], msg.VoteEndTime)
+	h.Write(buf[:])
+	h.Write(msg.NullifierImtRoot)
+	h.Write(msg.NcRoot)
+
+	return h.Sum(nil)
 }
 
 // SeedDealtCeremony writes a DEALT ceremony state into the KV store. The
@@ -460,4 +551,160 @@ func (ta *TestApp) NextBlockWithPrepareProposal() {
 
 	_, err = ta.Commit()
 	require.NoError(ta.t, err)
+}
+
+// MustBuildSignedCeremonyTx builds a standard Cosmos SDK transaction containing
+// the ceremony message, signs it with the genesis validator's secp256k1 key,
+// and returns the encoded tx bytes. Panics on failure (safe for tests).
+func (ta *TestApp) MustBuildSignedCeremonyTx(msg sdk.Msg) []byte {
+	ta.t.Helper()
+
+	txConfig := ta.ZallyApp.TxConfig()
+	privKey := ta.ValPrivKey
+	accAddr := sdk.AccAddress(privKey.PubKey().Address())
+
+	// Query the account for the current sequence number.
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	acc := ta.AccountKeeper.GetAccount(ctx, accAddr)
+	require.NotNil(ta.t, acc, "validator account not found at address %s", accAddr)
+
+	accNum := acc.GetAccountNumber()
+	accSeq := acc.GetSequence()
+
+	// Build the unsigned tx.
+	txBuilder := txConfig.NewTxBuilder()
+	err := txBuilder.SetMsgs(msg)
+	require.NoError(ta.t, err)
+	txBuilder.SetGasLimit(200000)
+	txBuilder.SetFeeAmount(sdk.NewCoins())
+
+	// Determine sign mode.
+	signMode, err := authsigning.APISignModeToInternal(txConfig.SignModeHandler().DefaultMode())
+	require.NoError(ta.t, err)
+
+	// Set empty signature first (required for SIGN_MODE_DIRECT).
+	sigData := signing.SingleSignatureData{
+		SignMode:  signMode,
+		Signature: nil,
+	}
+	sig := signing.SignatureV2{
+		PubKey:   privKey.PubKey(),
+		Data:     &sigData,
+		Sequence: accSeq,
+	}
+	err = txBuilder.SetSignatures(sig)
+	require.NoError(ta.t, err)
+
+	// Generate sign bytes and sign.
+	signerData := authsigning.SignerData{
+		ChainID:       testChainID,
+		AccountNumber: accNum,
+		Sequence:      accSeq,
+		PubKey:        privKey.PubKey(),
+		Address:       accAddr.String(),
+	}
+
+	signBytes, err := authsigning.GetSignBytesAdapter(
+		context.Background(), txConfig.SignModeHandler(), signMode, signerData, txBuilder.GetTx())
+	require.NoError(ta.t, err)
+
+	sigBytes, err := privKey.Sign(signBytes)
+	require.NoError(ta.t, err)
+
+	// Set the real signature.
+	sigData = signing.SingleSignatureData{
+		SignMode:  signMode,
+		Signature: sigBytes,
+	}
+	sig = signing.SignatureV2{
+		PubKey:   privKey.PubKey(),
+		Data:     &sigData,
+		Sequence: accSeq,
+	}
+	err = txBuilder.SetSignatures(sig)
+	require.NoError(ta.t, err)
+
+	// Encode.
+	txBytes, err := txConfig.TxEncoder()(txBuilder.GetTx())
+	require.NoError(ta.t, err)
+
+	// Sanity check: verify the tx can be decoded.
+	_, err = txConfig.TxDecoder()(txBytes)
+	require.NoError(ta.t, err, "self-decode check failed for signed ceremony tx")
+
+	return txBytes
+}
+
+// genesisStateWithAccountOperator is a variant of simtestutil.GenesisStateWithValSet
+// that sets the validator's operator address to the genesis account's address
+// (instead of deriving it from the CometBFT consensus key). This allows test
+// ceremony messages to be signed by the genesis account's secp256k1 key.
+func genesisStateWithAccountOperator(
+	cdc codec.Codec,
+	genesisState map[string]json.RawMessage,
+	valSet *cmttypes.ValidatorSet,
+	genAccs []authtypes.GenesisAccount,
+	balances ...banktypes.Balance,
+) (map[string]json.RawMessage, error) {
+	authGenesis := authtypes.NewGenesisState(authtypes.DefaultParams(), genAccs)
+	genesisState[authtypes.ModuleName] = cdc.MustMarshalJSON(authGenesis)
+
+	validators := make([]stakingtypes.Validator, 0, len(valSet.Validators))
+	delegations := make([]stakingtypes.Delegation, 0, len(valSet.Validators))
+
+	bondAmt := sdk.DefaultPowerReduction
+
+	// Use the genesis account as the validator operator so that the
+	// operator's private key (secp256k1) is available for signing.
+	operAddr := sdk.ValAddress(genAccs[0].GetAddress()).String()
+
+	for _, val := range valSet.Validators {
+		pk, err := cryptocodec.FromCmtPubKeyInterface(val.PubKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert pubkey: %w", err)
+		}
+
+		pkAny, err := codectypes.NewAnyWithValue(pk)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create new any: %w", err)
+		}
+
+		validator := stakingtypes.Validator{
+			OperatorAddress:   operAddr,
+			ConsensusPubkey:   pkAny,
+			Jailed:            false,
+			Status:            stakingtypes.Bonded,
+			Tokens:            bondAmt,
+			DelegatorShares:   sdkmath.LegacyOneDec(),
+			Description:       stakingtypes.Description{},
+			UnbondingHeight:   int64(0),
+			UnbondingTime:     time.Unix(0, 0).UTC(),
+			Commission:        stakingtypes.NewCommission(sdkmath.LegacyZeroDec(), sdkmath.LegacyZeroDec(), sdkmath.LegacyZeroDec()),
+			MinSelfDelegation: sdkmath.ZeroInt(),
+		}
+		validators = append(validators, validator)
+		delegations = append(delegations, stakingtypes.NewDelegation(
+			genAccs[0].GetAddress().String(), operAddr, sdkmath.LegacyOneDec()))
+	}
+
+	stakingGenesis := stakingtypes.NewGenesisState(stakingtypes.DefaultParams(), validators, delegations)
+	genesisState[stakingtypes.ModuleName] = cdc.MustMarshalJSON(stakingGenesis)
+
+	totalSupply := sdk.NewCoins()
+	for _, b := range balances {
+		totalSupply = totalSupply.Add(b.Coins...)
+	}
+	for range delegations {
+		totalSupply = totalSupply.Add(sdk.NewCoin(sdk.DefaultBondDenom, bondAmt))
+	}
+
+	balances = append(balances, banktypes.Balance{
+		Address: authtypes.NewModuleAddress(stakingtypes.BondedPoolName).String(),
+		Coins:   sdk.Coins{sdk.NewCoin(sdk.DefaultBondDenom, bondAmt)},
+	})
+
+	bankGenesis := banktypes.NewGenesisState(banktypes.DefaultGenesisState().Params, balances, totalSupply, []banktypes.Metadata{}, []banktypes.SendEnabled{})
+	genesisState[banktypes.ModuleName] = cdc.MustMarshalJSON(bankGenesis)
+
+	return genesisState, nil
 }

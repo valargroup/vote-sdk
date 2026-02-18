@@ -220,10 +220,7 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
-	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	require.Equal(t, uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
-
-	roundID := computeRoundID(setupMsg)
+	roundID := app.SeedVotingSession(setupMsg)
 
 	// Helper to build a tally tx.
 	buildTallyTx := func(rid []byte) []byte {
@@ -379,14 +376,11 @@ func TestPrepareProposalThenProcessProposalTally(t *testing.T) {
 		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
-	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(setupMsg))
-	require.Equal(t, uint32(0), result.Code, "create session should succeed, got: %s", result.Log)
-
-	roundID := computeRoundID(setupMsg)
+	roundID := app.SeedVotingSession(setupMsg)
 
 	// Delegate and reveal a share so there is tally data.
 	delegation := testutil.ValidDelegation(roundID, 0x10)
-	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
 	require.Equal(t, uint32(0), result.Code, "delegation should succeed")
 
 	anchorHeight := uint64(app.Height)
