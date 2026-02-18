@@ -1,0 +1,12 @@
+# Reverse-proxy the Zally chain REST API with automatic HTTPS.
+#
+# Uses sslip.io for DNS so a bare IP gets a valid Let's Encrypt certificate.
+# Replace the hostname if you have a real domain.
+#
+# Install:  apt install caddy
+# Deploy:   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl restart caddy
+#   — or —  make caddy   (from the sdk directory)
+
+46-101-255-48.sslip.io {
+	reverse_proxy localhost:1318
+}
