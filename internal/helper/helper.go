@@ -40,10 +40,13 @@ func New(cfg Config, tree TreeReader, merklePath MerklePathFunc, prover ProofGen
 		dbPath = filepath.Join(homeDir, "helper.db")
 	}
 
+	submitURL := fmt.Sprintf("http://localhost:%d", cfg.ChainAPIPort)
+	submitter := NewChainSubmitter(submitURL)
+
 	store, err := NewShareStore(
 		dbPath,
-		time.Duration(cfg.MinDelay)*time.Second,
-		time.Duration(cfg.MaxDelay)*time.Second,
+		time.Duration(cfg.MeanDelay)*time.Second,
+		submitter.FetchVoteRound,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create share store: %w", err)
@@ -51,9 +54,9 @@ func New(cfg Config, tree TreeReader, merklePath MerklePathFunc, prover ProofGen
 	store.logger = func(msg string, keyvals ...any) {
 		logger.Error(msg, keyvals...)
 	}
-
-	submitURL := fmt.Sprintf("http://localhost:%d", cfg.ChainAPIPort)
-	submitter := NewChainSubmitter(submitURL)
+	store.logInfo = func(msg string, keyvals ...any) {
+		logger.Info(msg, keyvals...)
+	}
 
 	if cfg.MaxConcurrentProofs < 1 {
 		logger.Info(

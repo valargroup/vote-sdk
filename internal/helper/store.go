@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,12 +20,14 @@ import (
 // provide temporal unlinkability) are kept only in memory — on recovery,
 // shares get fresh random delays per spec.
 type ShareStore struct {
-	db       *sql.DB
-	mu       sync.Mutex
-	schedule map[string]time.Time // key: "round_id:share_index:proposal_id"
-	minDelay time.Duration
-	maxDelay time.Duration
-	logger   func(msg string, keyvals ...any) // optional error logger
+	db             *sql.DB
+	mu             sync.Mutex
+	schedule       map[string]time.Time // key: "round_id:share_index:proposal_id"
+	meanDelay      time.Duration
+	roundCache     map[string]uint64 // roundID → vote_end_time (unix seconds)
+	fetchRoundInfo RoundInfoFetcher  // queries the chain; may be nil in tests
+	logger         func(msg string, keyvals ...any) // optional error logger
+	logInfo        func(msg string, keyvals ...any) // optional info logger
 }
 
 // EnqueueResult reports how an enqueue attempt was handled.
@@ -37,7 +40,7 @@ const (
 )
 
 // NewShareStore opens (or creates) a SQLite database and runs migrations.
-func NewShareStore(dbPath string, minDelay, maxDelay time.Duration) (*ShareStore, error) {
+func NewShareStore(dbPath string, meanDelay time.Duration, fetcher RoundInfoFetcher) (*ShareStore, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -56,10 +59,11 @@ func NewShareStore(dbPath string, minDelay, maxDelay time.Duration) (*ShareStore
 	}
 
 	s := &ShareStore{
-		db:       db,
-		schedule: make(map[string]time.Time),
-		minDelay: minDelay,
-		maxDelay: maxDelay,
+		db:             db,
+		schedule:       make(map[string]time.Time),
+		meanDelay:      meanDelay,
+		roundCache:     make(map[string]uint64),
+		fetchRoundInfo: fetcher,
 	}
 
 	// Recover non-terminal shares from SQLite.
@@ -72,7 +76,7 @@ func NewShareStore(dbPath string, minDelay, maxDelay time.Duration) (*ShareStore
 }
 
 func migrate(db *sql.DB) error {
-	_, err := db.Exec(`
+	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS shares (
 			round_id        TEXT NOT NULL,
 			share_index     INTEGER NOT NULL,
@@ -85,17 +89,68 @@ func migrate(db *sql.DB) error {
 			all_enc_shares  TEXT NOT NULL,
 			state           INTEGER NOT NULL DEFAULT 0,
 			attempts        INTEGER NOT NULL DEFAULT 0,
+			vote_end_time   INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (round_id, share_index, proposal_id)
 		)
-	`)
-	return err
+	`); err != nil {
+		return fmt.Errorf("create shares table: %w", err)
+	}
+
+	hasVoteEndTime, err := tableHasColumn(db, "shares", "vote_end_time")
+	if err != nil {
+		return fmt.Errorf("check shares schema: %w", err)
+	}
+	if !hasVoteEndTime {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN vote_end_time INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add shares.vote_end_time: %w", err)
+		}
+	}
+
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS rounds (
+			round_id       TEXT PRIMARY KEY,
+			vote_end_time  INTEGER NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("create rounds table: %w", err)
+	}
+
+	return nil
+}
+
+func tableHasColumn(db *sql.DB, tableName, columnName string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", tableName))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == columnName {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func schedKey(roundID string, shareIndex, proposalID uint32) string {
 	return fmt.Sprintf("%s:%d:%d", roundID, shareIndex, proposalID)
 }
 
-// Enqueue adds a share payload with a random submission delay.
+// Enqueue adds a share payload with an exponential random submission delay,
+// capped at the vote end time for the round.
 //
 // Returns:
 //   - EnqueueInserted when a new row was inserted and scheduled.
@@ -108,14 +163,17 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		return EnqueueConflict, fmt.Errorf("marshal all_enc_shares: %w", err)
 	}
 
+	// Fetch vote_end_time before acquiring the lock (may do HTTP).
+	voteEndTime := s.getVoteEndTime(payload.VoteRoundID)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	res, err := s.db.Exec(
 		`INSERT INTO shares
 		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
-		  enc_share_c1, enc_share_c2, tree_position, all_enc_shares, state, attempts)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+		  enc_share_c1, enc_share_c2, tree_position, all_enc_shares, state, attempts, vote_end_time)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
 		 ON CONFLICT(round_id, share_index, proposal_id) DO NOTHING`,
 		payload.VoteRoundID,
 		payload.EncShare.ShareIndex,
@@ -126,6 +184,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		payload.EncShare.C2,
 		payload.TreePosition,
 		string(allEncJSON),
+		voteEndTime,
 	)
 	if err != nil {
 		return EnqueueConflict, fmt.Errorf("insert share: %w", err)
@@ -134,9 +193,17 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	// Only schedule if the row was actually inserted (not a duplicate).
 	affected, _ := res.RowsAffected()
 	if affected > 0 {
-		delay := s.randomDelay()
+		delay := s.cappedExponentialDelay(voteEndTime)
 		key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID)
 		s.schedule[key] = time.Now().Add(delay)
+		if s.logInfo != nil {
+			s.logInfo("share scheduled",
+				"round_id", payload.VoteRoundID,
+				"share_index", payload.EncShare.ShareIndex,
+				"proposal_id", payload.ProposalID,
+				"delay_seconds", int(delay.Seconds()),
+			)
+		}
 		return EnqueueInserted, nil
 	}
 
@@ -326,8 +393,23 @@ func (s *ShareStore) recover() error {
 		return fmt.Errorf("reset witnessed shares: %w", err)
 	}
 
-	// Load all non-terminal shares.
-	rows, err := s.db.Query("SELECT round_id, share_index, proposal_id FROM shares WHERE state = 0")
+	// Repopulate round cache from rounds table.
+	roundRows, err := s.db.Query("SELECT round_id, vote_end_time FROM rounds")
+	if err != nil {
+		return fmt.Errorf("query rounds cache: %w", err)
+	}
+	defer roundRows.Close()
+	for roundRows.Next() {
+		var roundID string
+		var vet uint64
+		if err := roundRows.Scan(&roundID, &vet); err != nil {
+			continue
+		}
+		s.roundCache[roundID] = vet
+	}
+
+	// Load all non-terminal shares with their denormalized vote_end_time.
+	rows, err := s.db.Query("SELECT round_id, share_index, proposal_id, vote_end_time FROM shares WHERE state = 0")
 	if err != nil {
 		return fmt.Errorf("query recoverable shares: %w", err)
 	}
@@ -336,10 +418,22 @@ func (s *ShareStore) recover() error {
 	for rows.Next() {
 		var roundID string
 		var shareIndex, proposalID uint32
-		if err := rows.Scan(&roundID, &shareIndex, &proposalID); err != nil {
+		var voteEndTime uint64
+		if err := rows.Scan(&roundID, &shareIndex, &proposalID, &voteEndTime); err != nil {
 			continue
 		}
-		delay := s.randomDelay()
+		// Heal rows with vote_end_time=0 (transient fetch failure at enqueue
+		// time) from the round cache.
+		if voteEndTime == 0 {
+			if cached, ok := s.roundCache[roundID]; ok && cached != 0 {
+				voteEndTime = cached
+				_, _ = s.db.Exec(
+					"UPDATE shares SET vote_end_time = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ?",
+					voteEndTime, roundID, shareIndex, proposalID,
+				)
+			}
+		}
+		delay := s.cappedExponentialDelay(voteEndTime)
 		s.schedule[schedKey(roundID, shareIndex, proposalID)] = time.Now().Add(delay)
 	}
 	return nil
@@ -404,19 +498,78 @@ func payloadEqual(existing, incoming SharePayload) bool {
 	return true
 }
 
-func (s *ShareStore) randomDelay() time.Duration {
-	minSecs := int64(s.minDelay.Seconds())
-	maxSecs := int64(s.maxDelay.Seconds())
-	if maxSecs <= minSecs {
-		return s.minDelay
+// getVoteEndTime returns the cached vote_end_time for a round, fetching from
+// SQLite or the chain if not in memory. Returns 0 if the round is unknown
+// (delay will be uncapped).
+func (s *ShareStore) getVoteEndTime(roundID string) uint64 {
+	s.mu.Lock()
+	if vet, ok := s.roundCache[roundID]; ok {
+		s.mu.Unlock()
+		return vet
+	}
+
+	// Check SQLite rounds table.
+	var vet uint64
+	err := s.db.QueryRow("SELECT vote_end_time FROM rounds WHERE round_id = ?", roundID).Scan(&vet)
+	if err == nil {
+		s.roundCache[roundID] = vet
+		s.mu.Unlock()
+		return vet
+	}
+	s.mu.Unlock()
+
+	// Fetch from chain (outside lock — may do HTTP).
+	if s.fetchRoundInfo == nil {
+		return 0
+	}
+	vet, err = s.fetchRoundInfo(roundID)
+	if err != nil {
+		s.logError("getVoteEndTime: fetch failed", "round_id", roundID, "error", err)
+		return 0
+	}
+
+	// Cache in both memory and SQLite.
+	s.mu.Lock()
+	s.roundCache[roundID] = vet
+	s.mu.Unlock()
+
+	_, _ = s.db.Exec(
+		"INSERT OR IGNORE INTO rounds (round_id, vote_end_time) VALUES (?, ?)",
+		roundID, vet,
+	)
+
+	return vet
+}
+
+// exponentialSample generates a sample from Exp(1/mean) using crypto/rand.
+// Returns 0 if meanDelay is 0.
+func (s *ShareStore) exponentialSample() time.Duration {
+	if s.meanDelay <= 0 {
+		return 0
 	}
 	// Use crypto/rand for unpredictable delays (temporal unlinkability).
 	var buf [8]byte
 	_, _ = rand.Read(buf[:])
-	n := int64(binary.LittleEndian.Uint64(buf[:]))
-	if n < 0 {
-		n = -n
+	// Map uint64 to (0, 1]: add 1 to numerator, add 1 to denominator.
+	u := (float64(binary.LittleEndian.Uint64(buf[:])) + 1.0) / (float64(1<<64) + 1.0)
+	delaySecs := -s.meanDelay.Seconds() * math.Log(u)
+	return time.Duration(delaySecs * float64(time.Second))
+}
+
+// cappedExponentialDelay generates an exponential delay capped so the share
+// is submitted before voteEndTime (with a 60s buffer). If voteEndTime is 0
+// (unknown), the delay is uncapped.
+func (s *ShareStore) cappedExponentialDelay(voteEndTime uint64) time.Duration {
+	delay := s.exponentialSample()
+	if voteEndTime == 0 {
+		return delay
 	}
-	secs := minSecs + n%(maxSecs-minSecs+1)
-	return time.Duration(secs) * time.Second
+	remaining := time.Until(time.Unix(int64(voteEndTime), 0)) - 60*time.Second
+	if remaining <= 0 {
+		return 0
+	}
+	if delay > remaining {
+		return remaining
+	}
+	return delay
 }
