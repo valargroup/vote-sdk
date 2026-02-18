@@ -422,8 +422,8 @@ func (s *ShareStore) recover() error {
 		if err := rows.Scan(&roundID, &shareIndex, &proposalID, &voteEndTime); err != nil {
 			continue
 		}
-		// Heal rows with vote_end_time=0 (legacy migration or transient fetch
-		// failure at enqueue time) from the round cache.
+		// Heal rows with vote_end_time=0 (transient fetch failure at enqueue
+		// time) from the round cache.
 		if voteEndTime == 0 {
 			if cached, ok := s.roundCache[roundID]; ok && cached != 0 {
 				voteEndTime = cached

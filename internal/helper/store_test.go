@@ -285,14 +285,14 @@ func TestGetVoteEndTime_NilFetcher(t *testing.T) {
 	assert.Equal(t, uint64(0), vet)
 }
 
-func TestMigrateLegacySchema(t *testing.T) {
-	dbPath := t.TempDir() + "/legacy_helper.db"
+func TestMigrateOldSchema(t *testing.T) {
+	dbPath := t.TempDir() + "/old_helper.db"
 
-	// Simulate a pre-migration database: shares table without vote_end_time.
-	legacyDB, err := sql.Open("sqlite", dbPath)
+	// Simulate a database without vote_end_time column.
+	oldDB, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
 
-	_, err = legacyDB.Exec(`
+	_, err = oldDB.Exec(`
 		CREATE TABLE shares (
 			round_id        TEXT NOT NULL,
 			share_index     INTEGER NOT NULL,
@@ -309,7 +309,7 @@ func TestMigrateLegacySchema(t *testing.T) {
 		)
 	`)
 	require.NoError(t, err)
-	require.NoError(t, legacyDB.Close())
+	require.NoError(t, oldDB.Close())
 
 	// Opening with current code should migrate in place (no startup crash).
 	s, err := NewShareStore(dbPath, 0, nil)
