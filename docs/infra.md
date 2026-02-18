@@ -46,6 +46,47 @@ curl -sf https://46-101-255-48.sslip.io/api/v1/status
 curl -sf https://46-101-255-48.sslip.io/nullifier/
 ```
 
+## Remote Ceremony Bootstrap
+
+After a fresh deploy (or chain reset), the DKG ceremony needs to be bootstrapped
+before voting sessions can be created. The `scripts/remote-ceremony.sh` script
+runs the ceremony from your local machine, using SSH to execute `zallyd` sign and
+broadcast commands on the server (which has the vote module types registered).
+
+### Prerequisites
+
+- SSH access to the server (e.g. `zally` host alias in `~/.ssh/config`)
+- The chain must be running and producing blocks
+
+### Usage
+
+```bash
+# Bootstrap the ceremony (fetches key files on first run)
+./scripts/remote-ceremony.sh zally
+
+# With a custom local key cache directory
+./scripts/remote-ceremony.sh zally /tmp/zally-ceremony
+
+# Override the API URL (if not using sslip.io pattern)
+ZALLY_API_URL=https://custom-domain.com ./scripts/remote-ceremony.sh zally
+```
+
+### How it works
+
+The script fetches `ea.sk`, `ea.pk`, and `pallas.pk` from the server via SCP
+(cached locally for reruns), then runs the `ceremony_bootstrap` e2e test with:
+
+- REST queries (register Pallas key, deal EA key, poll status) hit the public HTTPS URL from your local machine
+- Transaction signing and broadcasting execute on the remote via SSH (`/opt/zally-chain/zallyd`)
+- ECIES encryption of the EA secret key runs locally in Rust
+
+### Verify
+
+```bash
+curl -s https://46-101-255-48.sslip.io/zally/v1/ceremony | jq .ceremony.status
+# Should return "3" (CEREMONY_STATUS_CONFIRMED)
+```
+
 ## CI / CD
 
 | Workflow | Trigger | What it does |

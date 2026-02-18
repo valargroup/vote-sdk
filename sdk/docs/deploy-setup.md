@@ -1,16 +1,27 @@
 # Auto-deploy setup for SDK chain (zallyd)
 
-The workflow `.github/workflows/sdk-chain-deploy.yml` builds zallyd (with circuits FFI) on every push to `main` (when `sdk/**` changes) and deploys to a remote host via SSH. Each deploy runs `init.sh` for a fresh chain, then restarts the systemd service.
+The workflow `.github/workflows/sdk-chain-deploy.yml` builds zallyd (with circuits FFI) on every push to `main` (when `sdk/**` changes) and deploys to a remote host via SSH. Each deploy runs `init.sh` for a fresh chain, restarts the systemd service, then bootstraps the EA key ceremony so the chain is immediately ready for use.
 
 ## 1. GitHub repository secrets
 
 In the repo: **Settings → Secrets and variables → Actions**, add (or reuse from nullifier-ingest):
 
-| Secret         | Description                                       |
-| -------------- | ------------------------------------------------- |
-| `DEPLOY_HOST`  | Remote hostname or IP (e.g. `chain.example.com`). |
-| `DEPLOY_USER`  | SSH user on that host (e.g. `deploy` or `root`).  |
-| `SSH_PASSWORD` | SSH password for that user.                       |
+| Secret         | Scope       | Description                                       |
+| -------------- | ----------- | ------------------------------------------------- |
+| `DEPLOY_HOST`  | Repository  | Remote hostname or IP (e.g. `chain.example.com`). |
+| `DEPLOY_USER`  | Repository  | SSH user on that host (e.g. `deploy` or `root`).  |
+| `SSH_PASSWORD` | Repository  | SSH password for that user.                       |
+| `CEREMONY_SSH_KEY` | Environment (`production`) | Ed25519 private key for ceremony bootstrap SSH. |
+
+The `CEREMONY_SSH_KEY` secret lives in the GitHub **production** environment (Settings → Environments → production). Generate the keypair and authorize it on the remote:
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-ceremony" -f /tmp/zally-ci-key -N ""
+# Add public key to remote
+cat /tmp/zally-ci-key.pub | ssh root@<DEPLOY_HOST> 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys'
+# Copy private key contents into the CEREMONY_SSH_KEY secret
+cat /tmp/zally-ci-key
+```
 
 ## 2. One-time setup on the remote host
 
@@ -43,6 +54,7 @@ No pre-existing chain data is needed — the first deploy will initialize a fres
 2. **Deploy**: `zallyd` and `init.sh` are SCP'd to `/opt/zally-chain` on the remote host.
 3. **Init**: `init.sh` runs with `HOME=/opt/zally-chain`, so chain data lives at `/opt/zally-chain/.zallyd`. This wipes and reinitializes the chain on every deploy.
 4. **Restart**: `sudo systemctl restart zallyd` starts the chain with the new binary and fresh data.
+5. **Ceremony bootstrap**: After the chain is healthy, a separate job compiles the `e2e-tests` crate on the CI runner and runs `scripts/remote-ceremony.sh`. This registers the validator's Pallas key and deals the ECIES-encrypted EA secret key. The ECIES crypto and REST queries run on the CI runner; only `zallyd tx sign` and `zallyd tx broadcast` execute on the remote via SSH (because the remote binary has the vote module types registered). The chain reaches `CEREMONY_STATUS_CONFIRMED` automatically via in-protocol auto-ack.
 
 ## 4. Changing deploy path or restart command
 

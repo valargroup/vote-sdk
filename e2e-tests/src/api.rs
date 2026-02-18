@@ -379,33 +379,33 @@ pub fn default_cosmos_tx_config() -> CosmosTxConfig {
 /// message. The message must include an `@type` field with the full protobuf
 /// type URL (e.g. "/zvote.v1.MsgRegisterPallasKey").
 ///
+/// When `ZALLY_SSH_HOST` is set, sign and broadcast commands run on the remote
+/// host via SSH (the remote has the vote module types registered in its `zallyd`
+/// binary). The remote binary path defaults to `zallyd` but can be overridden
+/// with `ZALLY_REMOTE_ZALLYD`.
+///
 /// Returns `(200, json)` on successful broadcast or an error.
 pub fn broadcast_cosmos_msg(
+    msg: &Value,
+    config: &CosmosTxConfig,
+) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
+    let ssh_host = std::env::var("ZALLY_SSH_HOST").ok();
+    if let Some(host) = ssh_host {
+        broadcast_cosmos_msg_ssh(msg, config, &host)
+    } else {
+        broadcast_cosmos_msg_local(msg, config)
+    }
+}
+
+/// Local sign + broadcast (original behavior).
+fn broadcast_cosmos_msg_local(
     msg: &Value,
     config: &CosmosTxConfig,
 ) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
     use std::io::Write;
     use std::process::Command;
 
-    let unsigned_tx = serde_json::json!({
-        "body": {
-            "messages": [msg],
-            "memo": "",
-            "timeout_height": "0",
-            "extension_options": [],
-            "non_critical_extension_options": []
-        },
-        "auth_info": {
-            "signer_infos": [],
-            "fee": {
-                "amount": [],
-                "gas_limit": "200000",
-                "payer": "",
-                "granter": ""
-            }
-        },
-        "signatures": []
-    });
+    let unsigned_tx = build_unsigned_tx(msg);
 
     let tmp_dir = std::env::temp_dir();
     let ts = std::time::SystemTime::now()
@@ -463,7 +463,145 @@ pub fn broadcast_cosmos_msg(
         return Err(format!("zallyd tx broadcast failed: {}", stderr).into());
     }
 
-    let stdout = String::from_utf8_lossy(&broadcast_output.stdout);
+    parse_broadcast_stdout(&broadcast_output.stdout)
+}
+
+/// Remote sign + broadcast via SSH.
+///
+/// Pipes the unsigned tx to a temp file on the remote host, signs and
+/// broadcasts there, then cleans up. This lets us use the server's `zallyd`
+/// binary which has the vote module types registered.
+fn broadcast_cosmos_msg_ssh(
+    msg: &Value,
+    config: &CosmosTxConfig,
+    ssh_host: &str,
+) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
+    use std::io::Write;
+    use std::process::Command;
+
+    let remote_zallyd = std::env::var("ZALLY_REMOTE_ZALLYD")
+        .unwrap_or_else(|_| "zallyd".to_string());
+
+    let unsigned_tx = build_unsigned_tx(msg);
+    let unsigned_json = serde_json::to_string_pretty(&unsigned_tx)?;
+
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let remote_unsigned = format!("/tmp/zally_unsigned_{}.json", ts);
+    let remote_signed = format!("/tmp/zally_signed_{}.json", ts);
+
+    // Pipe unsigned tx to remote temp file.
+    let mut upload = Command::new("ssh")
+        .args([ssh_host, &format!("cat > {}", remote_unsigned)])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    upload
+        .stdin
+        .as_mut()
+        .expect("stdin pipe")
+        .write_all(unsigned_json.as_bytes())?;
+    let upload_status = upload.wait()?;
+    if !upload_status.success() {
+        return Err("failed to upload unsigned tx to remote".into());
+    }
+
+    // Sign on remote.
+    let sign_output = Command::new("ssh")
+        .args([
+            ssh_host,
+            &format!(
+                "{zallyd} tx sign {unsigned} \
+                 --from {from} \
+                 --keyring-backend test \
+                 --chain-id {chain_id} \
+                 --home {home} \
+                 --node {node} \
+                 --output-document {signed} \
+                 --yes",
+                zallyd = remote_zallyd,
+                unsigned = remote_unsigned,
+                from = config.key_name,
+                chain_id = config.chain_id,
+                home = config.home_dir,
+                node = config.node_url,
+                signed = remote_signed,
+            ),
+        ])
+        .output()?;
+
+    // Clean up remote unsigned file regardless of sign outcome.
+    let _ = Command::new("ssh")
+        .args([ssh_host, &format!("rm -f {}", remote_unsigned)])
+        .output();
+
+    if !sign_output.status.success() {
+        let _ = Command::new("ssh")
+            .args([ssh_host, &format!("rm -f {}", remote_signed)])
+            .output();
+        let stderr = String::from_utf8_lossy(&sign_output.stderr);
+        return Err(format!("zallyd tx sign (remote) failed: {}", stderr).into());
+    }
+
+    // Broadcast on remote.
+    let broadcast_output = Command::new("ssh")
+        .args([
+            ssh_host,
+            &format!(
+                "{zallyd} tx broadcast {signed} \
+                 --node {node} \
+                 --output json",
+                zallyd = remote_zallyd,
+                signed = remote_signed,
+                node = config.node_url,
+            ),
+        ])
+        .output()?;
+
+    // Clean up remote signed file.
+    let _ = Command::new("ssh")
+        .args([ssh_host, &format!("rm -f {}", remote_signed)])
+        .output();
+
+    if !broadcast_output.status.success() {
+        let stderr = String::from_utf8_lossy(&broadcast_output.stderr);
+        return Err(format!("zallyd tx broadcast (remote) failed: {}", stderr).into());
+    }
+
+    parse_broadcast_stdout(&broadcast_output.stdout)
+}
+
+/// Build the unsigned tx JSON envelope around a message.
+fn build_unsigned_tx(msg: &Value) -> Value {
+    serde_json::json!({
+        "body": {
+            "messages": [msg],
+            "memo": "",
+            "timeout_height": "0",
+            "extension_options": [],
+            "non_critical_extension_options": []
+        },
+        "auth_info": {
+            "signer_infos": [],
+            "fee": {
+                "amount": [],
+                "gas_limit": "200000",
+                "payer": "",
+                "granter": ""
+            }
+        },
+        "signatures": []
+    })
+}
+
+/// Parse zallyd broadcast stdout JSON, normalizing field names.
+fn parse_broadcast_stdout(
+    stdout_bytes: &[u8],
+) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
+    let stdout = String::from_utf8_lossy(stdout_bytes);
     let mut result: Value = serde_json::from_str(&stdout)
         .map_err(|e| format!("failed to parse broadcast output: {} (raw: {})", e, stdout))?;
 
