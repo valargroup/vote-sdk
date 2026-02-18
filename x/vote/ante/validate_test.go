@@ -118,7 +118,7 @@ var (
 	testBlockTime  = time.Unix(1_000_000, 0).UTC()
 	activeEndTime  = uint64(2_000_000) // well in the future relative to testBlockTime
 	expiredEndTime = uint64(999_999)   // in the past relative to testBlockTime
-	testRoundID = bytes.Repeat([]byte{0x01}, 32)
+	testRoundID    = bytes.Repeat([]byte{0x01}, 32)
 )
 
 func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
@@ -356,12 +356,12 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CreateVotingSession() {
 		errContains string
 	}{
 		{
-			name: "valid create voting session passes all checks",
+			name: "valid create voting session passes basic validation",
 			msg:  func() types.VoteMessage { return newValidMsgCreateVotingSession() },
 			opts: mockOpts(),
 		},
 		{
-			name: "valid create voting session on recheck also passes (no expensive checks needed)",
+			name: "valid create voting session on recheck also passes",
 			msg:  func() types.VoteMessage { return newValidMsgCreateVotingSession() },
 			opts: recheckOpts(),
 		},

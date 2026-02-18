@@ -10,7 +10,7 @@ import (
 )
 
 func TestIsVoteTag(t *testing.T) {
-	require.True(t, IsVoteTag(TagCreateVotingSession))
+	require.False(t, IsVoteTag(TagCreateVotingSession))
 	require.True(t, IsVoteTag(TagDelegateVote))
 	require.True(t, IsVoteTag(TagCastVote))
 	require.True(t, IsVoteTag(TagRevealShare))
@@ -19,32 +19,6 @@ func TestIsVoteTag(t *testing.T) {
 	require.False(t, IsVoteTag(0x06))
 	require.False(t, IsVoteTag(0x0a)) // Typical Cosmos Tx first byte
 	require.False(t, IsVoteTag(0xff))
-}
-
-func TestEncodeDecodeCreateVotingSession(t *testing.T) {
-	msg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1creator",
-		SnapshotHeight:    100,
-		SnapshotBlockhash: []byte("blockhash123456789012345678901234"),
-		ProposalsHash:     []byte("prophash1234567890123456789012345"),
-		VoteEndTime:       1700000000,
-		NullifierImtRoot:  []byte("nullroot1234567890123456789012345"),
-		NcRoot:            []byte("ncroot12345678901234567890123456"),
-	}
-
-	raw, err := EncodeVoteTx(msg)
-	require.NoError(t, err)
-	require.Equal(t, TagCreateVotingSession, raw[0])
-
-	tag, decoded, err := DecodeVoteTx(raw)
-	require.NoError(t, err)
-	require.Equal(t, TagCreateVotingSession, tag)
-
-	decodedMsg, ok := decoded.(*types.MsgCreateVotingSession)
-	require.True(t, ok)
-	require.Equal(t, msg.Creator, decodedMsg.Creator)
-	require.Equal(t, msg.SnapshotHeight, decodedMsg.SnapshotHeight)
-	require.Equal(t, msg.VoteEndTime, decodedMsg.VoteEndTime)
 }
 
 func TestEncodeDecodeDelegateVote(t *testing.T) {
@@ -231,20 +205,25 @@ func TestDecodeVoteTx_InvalidTag(t *testing.T) {
 
 func TestTagForMessage(t *testing.T) {
 	tests := []struct {
-		msg  types.VoteMessage
-		tag  byte
-		name string
+		msg       types.VoteMessage
+		tag       byte
+		name      string
+		expectErr bool
 	}{
-		{&types.MsgCreateVotingSession{}, TagCreateVotingSession, "CreateVotingSession"},
-		{&types.MsgDelegateVote{}, TagDelegateVote, "DelegateVote"},
-		{&types.MsgCastVote{}, TagCastVote, "CastVote"},
-		{&types.MsgRevealShare{}, TagRevealShare, "RevealShare"},
-		{&types.MsgSubmitTally{}, TagSubmitTally, "SubmitTally"},
+		{&types.MsgCreateVotingSession{}, TagCreateVotingSession, "CreateVotingSession", true},
+		{&types.MsgDelegateVote{}, TagDelegateVote, "DelegateVote", false},
+		{&types.MsgCastVote{}, TagCastVote, "CastVote", false},
+		{&types.MsgRevealShare{}, TagRevealShare, "RevealShare", false},
+		{&types.MsgSubmitTally{}, TagSubmitTally, "SubmitTally", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tag, err := TagForMessage(tt.msg)
+			if tt.expectErr {
+				require.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, tt.tag, tag)
 		})

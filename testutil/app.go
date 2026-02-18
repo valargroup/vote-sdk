@@ -3,12 +3,15 @@ package testutil
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/blake2b"
 
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/stretchr/testify/require"
@@ -262,6 +265,75 @@ func (ta *TestApp) SeedConfirmedCeremony(eaPk []byte) {
 
 	// Commit via an empty block so the IAVL working set changes are persisted.
 	ta.NextBlock()
+}
+
+// SeedVotingSession creates a VoteRound directly in the KV store from a
+// MsgCreateVotingSession, bypassing the ABCI pipeline. The round is committed
+// via an empty block. Returns the derived vote_round_id.
+//
+// MsgCreateVotingSession is now a standard Cosmos SDK tx (signed by the vote
+// manager), so it can no longer be submitted via the custom vote tx wire
+// format. For integration tests that need an active round to test other vote
+// messages (delegation, cast, reveal, tally), this helper seeds the round
+// directly — the session creation itself is not under test here.
+func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {
+	ta.t.Helper()
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	// Read ea_pk from confirmed ceremony state (if present).
+	var eaPk []byte
+	ceremony, err := ta.VoteKeeper().GetCeremonyState(kvStore)
+	if err == nil && ceremony != nil && len(ceremony.EaPk) > 0 {
+		eaPk = ceremony.EaPk
+	} else {
+		eaPk = make([]byte, 32)
+	}
+
+	roundID := deriveRoundID(msg)
+
+	round := &types.VoteRound{
+		VoteRoundId:       roundID,
+		SnapshotHeight:    msg.SnapshotHeight,
+		SnapshotBlockhash: msg.SnapshotBlockhash,
+		ProposalsHash:     msg.ProposalsHash,
+		VoteEndTime:       msg.VoteEndTime,
+		NullifierImtRoot:  msg.NullifierImtRoot,
+		NcRoot:            msg.NcRoot,
+		Creator:           msg.Creator,
+		Status:            types.SessionStatus_SESSION_STATUS_ACTIVE,
+		EaPk:              eaPk,
+		VkZkp1:            msg.VkZkp1,
+		VkZkp2:            msg.VkZkp2,
+		VkZkp3:            msg.VkZkp3,
+		Proposals:         msg.Proposals,
+		Description:       msg.Description,
+	}
+
+	err = ta.VoteKeeper().SetVoteRound(kvStore, round)
+	require.NoError(ta.t, err)
+
+	ta.NextBlock()
+	return roundID
+}
+
+// deriveRoundID computes Blake2b-256(snapshot_height || snapshot_blockhash ||
+// proposals_hash || vote_end_time || nullifier_imt_root || nc_root).
+func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
+	h, _ := blake2b.New256(nil)
+	var buf [8]byte
+
+	binary.BigEndian.PutUint64(buf[:], msg.SnapshotHeight)
+	h.Write(buf[:])
+	h.Write(msg.SnapshotBlockhash)
+	h.Write(msg.ProposalsHash)
+	binary.BigEndian.PutUint64(buf[:], msg.VoteEndTime)
+	h.Write(buf[:])
+	h.Write(msg.NullifierImtRoot)
+	h.Write(msg.NcRoot)
+
+	return h.Sum(nil)
 }
 
 // SeedDealtCeremony writes a DEALT ceremony state into the KV store. The

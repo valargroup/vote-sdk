@@ -102,15 +102,18 @@ func isCeremonyOnlyTx(tx sdk.Tx) bool {
 	return true
 }
 
-// isCeremonyMsg returns true if the message is a ceremony type that flows
-// through the standard Cosmos SDK transaction path.
+// isCeremonyMsg returns true if the message is a ceremony or governance type
+// that flows through the standard Cosmos SDK transaction path.
+// MsgCreateVotingSession is included here because it requires signature
+// verification (the vote manager must sign) rather than ZKP authentication.
 func isCeremonyMsg(msg sdk.Msg) bool {
 	switch msg.(type) {
 	case *types.MsgRegisterPallasKey,
 		*types.MsgDealExecutiveAuthorityKey,
 		*types.MsgCreateValidatorWithPallasKey,
 		*types.MsgReInitializeElectionAuthority,
-		*types.MsgSetVoteManager:
+		*types.MsgSetVoteManager,
+		*types.MsgCreateVotingSession:
 		return true
 	default:
 		return false

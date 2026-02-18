@@ -144,12 +144,7 @@ func TestKeyCeremonyFullLifecycle(t *testing.T) {
 	// ---------------------------------------------------------------
 	ta.SeedVoteManager("zvote1admin")
 	setupMsg := testutil.ValidCreateVotingSessionAt(ta.Time)
-	setupTx := testutil.MustEncodeVoteTx(setupMsg)
-	result := ta.DeliverVoteTx(setupTx)
-	require.Equal(t, uint32(0), result.Code,
-		"CreateVotingSession should succeed after CONFIRMED ceremony, got: %s", result.Log)
-
-	roundID := computeRoundID(setupMsg)
+	roundID := ta.SeedVotingSession(setupMsg)
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
 	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
@@ -255,7 +250,7 @@ func TestKeyCeremonyAckMempoolBlocked(t *testing.T) {
 		{
 			ValidatorAddress: valAddr,
 			EphemeralPk:      pallasPk.Point.ToAffineCompressed(), // dummy
-			Ciphertext:       bytes.Repeat([]byte{0xAB}, 48),     // dummy
+			Ciphertext:       bytes.Repeat([]byte{0xAB}, 48),      // dummy
 		},
 	}
 	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
@@ -337,29 +332,6 @@ func TestKeyCeremonyDuplicateRegistrationRejected(t *testing.T) {
 //
 // CreateVotingSession is rejected when ceremony is not yet CONFIRMED.
 // ---------------------------------------------------------------------------
-
-func TestKeyCeremonyVotingSessionRequiresConfirmedCeremony(t *testing.T) {
-	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-
-	valAddr := ta.ValidatorOperAddr()
-
-	// Seed the vote manager so we reach the ceremony check.
-	ta.SeedVoteManager("zvote1admin")
-
-	// Register only — ceremony is REGISTERING, not CONFIRMED.
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
-
-	state := getCeremonyState(t, ta)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
-
-	// Attempt to create a voting session.
-	setupMsg := testutil.ValidCreateVotingSessionAt(ta.Time)
-	setupTx := testutil.MustEncodeVoteTx(setupMsg)
-	result := ta.DeliverVoteTx(setupTx)
-	require.NotEqual(t, uint32(0), result.Code,
-		"CreateVotingSession should be rejected before ceremony is CONFIRMED")
-	require.Contains(t, result.Log, "ceremony not in confirmed status")
-}
 
 // ---------------------------------------------------------------------------
 // TestKeyCeremonyEAKeyVerification
@@ -537,7 +509,7 @@ func TestReInitializeElectionAuthority_RejectedDuringDealt(t *testing.T) {
 		{
 			ValidatorAddress: valAddr,
 			EphemeralPk:      pallasPk.Point.ToAffineCompressed(), // dummy
-			Ciphertext:       bytes.Repeat([]byte{0xAB}, 48),     // dummy
+			Ciphertext:       bytes.Repeat([]byte{0xAB}, 48),      // dummy
 		},
 	}
 	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
@@ -646,10 +618,7 @@ func TestReInitializeElectionAuthority_RejectedWithActiveVotingSession(t *testin
 
 	// Create a voting session — the round will be ACTIVE.
 	setupMsg := testutil.ValidCreateVotingSessionAt(ta.Time)
-	setupTx := testutil.MustEncodeVoteTx(setupMsg)
-	result := ta.DeliverVoteTx(setupTx)
-	require.Equal(t, uint32(0), result.Code,
-		"CreateVotingSession should succeed, got: %s", result.Log)
+	ta.SeedVotingSession(setupMsg)
 
 	// Re-initialize should be rejected while a voting session is active.
 	code := reInitializeEA(t, ta, valAddr)

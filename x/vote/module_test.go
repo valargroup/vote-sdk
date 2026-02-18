@@ -16,6 +16,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	vote "github.com/z-cale/zally/x/vote"
@@ -306,20 +307,26 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 // returns a CustomGetSigner targeting the correct protobuf message type and
 // that the no-op Fn returns nil signers (ceremony messages use ZKP auth).
 func TestCeremonySignerProviders(t *testing.T) {
+	valAddr := sdk.ValAddress([]byte("testvalidator___________"))
+	accAddrBytes := []byte(sdk.AccAddress(valAddr))
+
 	tests := []struct {
 		name    string
 		signer  func() signing.CustomGetSigner
 		wantMsg protoreflect.FullName
+		msg     proto.Message // nil → noop signer; non-nil → ceremonyCreatorSignerFn
 	}{
 		{
 			name:    "RegisterPallasKey",
 			signer:  vote.ProvideRegisterPallasKeySigner,
 			wantMsg: "zvote.v1.MsgRegisterPallasKey",
+			msg:     &types.MsgRegisterPallasKey{Creator: valAddr.String()},
 		},
 		{
 			name:    "DealExecutiveAuthorityKey",
 			signer:  vote.ProvideDealExecutiveAuthorityKeySigner,
 			wantMsg: "zvote.v1.MsgDealExecutiveAuthorityKey",
+			msg:     &types.MsgDealExecutiveAuthorityKey{Creator: valAddr.String()},
 		},
 		{
 			name:    "AckExecutiveAuthorityKey",
@@ -334,10 +341,16 @@ func TestCeremonySignerProviders(t *testing.T) {
 			require.Equal(t, tc.wantMsg, s.MsgType, "MsgType mismatch")
 			require.NotNil(t, s.Fn, "Fn must not be nil")
 
-			// No-op signer: calling Fn returns nil signers, no error.
-			signers, err := s.Fn(nil)
-			require.NoError(t, err)
-			require.Nil(t, signers)
+			if tc.msg == nil {
+				signers, err := s.Fn(nil)
+				require.NoError(t, err)
+				require.Nil(t, signers)
+			} else {
+				signers, err := s.Fn(tc.msg)
+				require.NoError(t, err)
+				require.Len(t, signers, 1)
+				require.Equal(t, accAddrBytes, signers[0])
+			}
 		})
 	}
 }

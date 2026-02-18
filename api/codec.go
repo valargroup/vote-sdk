@@ -11,10 +11,10 @@ import (
 )
 
 // Vote transaction type tags. The first byte of the wire format identifies
-// the message type. Tags 0x01–0x05 are vote-round transactions that use
+// the message type. Tags 0x02–0x05 are vote-round transactions that use
 // ZKP/RedPallas authentication. Tag 0x08 is the only ceremony tag that
 // still uses the custom wire format (auto-injected by PrepareProposal).
-// All other ceremony messages (0x06, 0x07, 0x09, 0x0B, 0x0C) now flow
+// MsgCreateVotingSession (0x01) and other ceremony messages now flow
 // through standard Cosmos SDK transactions with signature verification.
 const (
 	TagCreateVotingSession byte = 0x01
@@ -40,9 +40,10 @@ func IsCustomTag(b byte) bool {
 	return IsVoteTag(b) || IsCeremonyTag(b)
 }
 
-// IsVoteTag returns true if b is a vote-round transaction type tag (0x01–0x05).
+// IsVoteTag returns true if b is a vote-round transaction type tag (0x02–0x05).
+// MsgCreateVotingSession (0x01) now uses standard Cosmos SDK transactions.
 func IsVoteTag(b byte) bool {
-	return b >= TagCreateVotingSession && b <= TagSubmitTally
+	return b >= TagDelegateVote && b <= TagSubmitTally
 }
 
 // IsCeremonyTag returns true if b is a ceremony transaction type tag that
@@ -57,8 +58,6 @@ func IsCeremonyTag(b byte) bool {
 // TagForMessage returns the wire-format tag for a VoteMessage.
 func TagForMessage(msg types.VoteMessage) (byte, error) {
 	switch msg.(type) {
-	case *types.MsgCreateVotingSession:
-		return TagCreateVotingSession, nil
 	case *types.MsgDelegateVote:
 		return TagDelegateVote, nil
 	case *types.MsgCastVote:
@@ -105,8 +104,6 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 
 	var msg proto.Message
 	switch tag {
-	case TagCreateVotingSession:
-		msg = &types.MsgCreateVotingSession{}
 	case TagDelegateVote:
 		msg = &types.MsgDelegateVote{}
 	case TagCastVote:

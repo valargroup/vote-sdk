@@ -131,7 +131,7 @@ func createValidatorWithPallasKeySignerFn(msg proto.Message) ([][]byte, error) {
 func ProvideCreateVotingSessionSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgCreateVotingSession"),
-		Fn:      noopSignerFn,
+		Fn:      ceremonyCreatorSignerFn,
 	}
 }
 
@@ -432,9 +432,22 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	return nil
 }
 
+// DefaultVoteManagerAddress is a well-known secp256k1 account used as the
+// default vote manager when no explicit manager is configured in genesis.
+//
+// Private key (hex): b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee
+const DefaultVoteManagerAddress = "zvote15fjfr6rrs60vu4st6arrd94w5j6z7f6kxr92cg"
+
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {
-	return json.RawMessage(`{}`)
+	gs := &types.GenesisState{
+		VoteManager: DefaultVoteManagerAddress,
+	}
+	bz, err := json.Marshal(gs)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal default genesis: %v", err))
+	}
+	return bz
 }
 
 // ValidateGenesis performs genesis state validation.
@@ -443,11 +456,30 @@ func (am AppModule) ValidateGenesis(_ codec.JSONCodec, _ client.TxEncodingConfig
 }
 
 // InitGenesis initializes the module state from genesis.
-func (am AppModule) InitGenesis(_ context.Context, _ codec.JSONCodec, _ json.RawMessage) {
-	// No-op for Phase 2. Vote module has no initial genesis state.
+// Uses sdk.Context (not context.Context) to satisfy module.HasGenesis interface.
+func (am AppModule) InitGenesis(ctx sdk.Context, _ codec.JSONCodec, data json.RawMessage) {
+	var gs types.GenesisState
+	if err := json.Unmarshal(data, &gs); err != nil {
+		panic(fmt.Sprintf("vote: failed to unmarshal genesis state: %v", err))
+	}
+
+	kvStore := am.keeper.OpenKVStore(ctx)
+	if err := am.keeper.InitGenesis(kvStore, &gs); err != nil {
+		panic(fmt.Sprintf("vote: InitGenesis failed: %v", err))
+	}
 }
 
 // ExportGenesis exports the module state as genesis.
-func (am AppModule) ExportGenesis(_ context.Context, _ codec.JSONCodec) json.RawMessage {
-	return json.RawMessage(`{}`)
+// Uses sdk.Context (not context.Context) to satisfy module.HasGenesis interface.
+func (am AppModule) ExportGenesis(ctx sdk.Context, _ codec.JSONCodec) json.RawMessage {
+	kvStore := am.keeper.OpenKVStore(ctx)
+	gs, err := am.keeper.ExportGenesis(kvStore)
+	if err != nil {
+		panic(fmt.Sprintf("vote: ExportGenesis failed: %v", err))
+	}
+	bz, err := json.Marshal(gs)
+	if err != nil {
+		panic(fmt.Sprintf("vote: failed to marshal genesis state: %v", err))
+	}
+	return bz
 }
