@@ -7,6 +7,11 @@ name: Resync nullifier snapshot
 
 on:
   workflow_dispatch:
+    inputs:
+      max_height:
+        description: "Stop syncing at this block height. If not provided, syncs to the latest chain tip."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -31,4 +36,5 @@ jobs:
               DATA_DIR=/opt/nullifier-ingest \
               LWD_URL=https://zec.rocks:443 \
               INVALIDATE_TREE=1 \
+              MAX_HEIGHT=${{ github.event.inputs.max_height }} \
               ./ingest-nfs

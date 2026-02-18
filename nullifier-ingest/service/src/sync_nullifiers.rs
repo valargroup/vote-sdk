@@ -66,12 +66,14 @@ async fn fetch_block_range(
 /// Sync nullifiers from multiple lightwalletd servers into flat files.
 ///
 /// Connects to each URL in `lwd_urls`, streams blocks from the resume point to
-/// chain tip using parallel downloads (one batch per server), and appends all
-/// Orchard nullifiers to the data file. Calls `progress` after each parallel
-/// cycle with `(last_height, chain_tip, cycle_nullifier_count, total_nullifier_count)`.
+/// `max_height` (or chain tip when `None`) using parallel downloads (one batch
+/// per server), and appends all Orchard nullifiers to the data file.  Calls
+/// `progress` after each parallel cycle with
+/// `(last_height, target_height, cycle_nullifier_count, total_nullifier_count)`.
 pub async fn sync(
     dir: &Path,
     lwd_urls: &[String],
+    max_height: Option<u64>,
     progress: impl Fn(u64, u64, u64, u64),
 ) -> Result<SyncResult> {
     std::fs::create_dir_all(dir)?;
@@ -87,6 +89,11 @@ pub async fn sync(
         .await?;
     let chain_tip = latest.into_inner().height;
 
+    let target = match max_height {
+        Some(h) => std::cmp::min(h, chain_tip),
+        None => chain_tip,
+    };
+
     let start = resume_height(dir)?;
     let existing = file_store::nullifier_count(dir)?;
 
@@ -98,9 +105,12 @@ pub async fn sync(
     } else {
         eprintln!("Starting fresh from NU5 activation height {}", NU5_ACTIVATION_HEIGHT);
     }
-    eprintln!("Chain tip: {} ({} blocks to sync)", chain_tip, chain_tip.saturating_sub(start));
+    if let Some(h) = max_height {
+        eprintln!("Max height: {} (chain tip: {})", h, chain_tip);
+    }
+    eprintln!("Target: {} ({} blocks to sync)", target, target.saturating_sub(start));
 
-    if start >= chain_tip {
+    if start >= target {
         return Ok(SyncResult {
             chain_tip,
             blocks_synced: 0,
@@ -112,15 +122,15 @@ pub async fn sync(
     let mut total_nfs: u64 = 0;
     let mut blocks_synced: u64 = 0;
 
-    while current <= chain_tip {
+    while current <= target {
         // Build up to N batch ranges, one per server
         let mut batch_ranges: Vec<(u64, u64)> = Vec::with_capacity(n);
         let mut batch_start = current;
         for _ in 0..n {
-            if batch_start > chain_tip {
+            if batch_start > target {
                 break;
             }
-            let batch_end = std::cmp::min(batch_start + BATCH_SIZE - 1, chain_tip);
+            let batch_end = std::cmp::min(batch_start + BATCH_SIZE - 1, target);
             batch_ranges.push((batch_start, batch_end));
             batch_start = batch_end + 1;
         }
@@ -150,7 +160,7 @@ pub async fn sync(
 
         total_nfs += cycle_nfs;
         blocks_synced += cycle_end - current + 1;
-        progress(cycle_end, chain_tip, cycle_nfs, total_nfs);
+        progress(cycle_end, target, cycle_nfs, total_nfs);
 
         current = cycle_end + 1;
     }
