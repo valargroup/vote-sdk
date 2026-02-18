@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"github.com/z-cale/zally/x/vote/keeper"
 	modulev1 "github.com/z-cale/zally/x/vote/module/v1"
@@ -61,21 +62,71 @@ func init() {
 }
 
 // ---------------------------------------------------------------------------
-// Custom signers for vote messages
+// Custom signers for vote and ceremony messages
 // ---------------------------------------------------------------------------
 //
-// Vote transactions bypass the Cosmos SDK Tx envelope and use ZKP/RedPallas
-// authentication instead of standard Cosmos signatures. The SDK's
-// InterfaceRegistry requires every Msg service message to have either a
-// cosmos.msg.v1.signer protobuf option or a custom GetSigners function.
+// The SDK's InterfaceRegistry requires every Msg service message to have
+// either a cosmos.msg.v1.signer protobuf option or a custom GetSigners
+// function.
 //
-// We satisfy this by providing no-op signers via depinject. Each function
-// returns a signing.CustomGetSigner (a ManyPerContainerType), which the
-// runtime collects into []signing.CustomGetSigner for ProvideInterfaceRegistry.
+// Vote-round messages (0x01–0x05) bypass the Cosmos SDK Tx envelope and use
+// ZKP/RedPallas authentication, so they use no-op signers.
+//
+// Ceremony messages (except MsgAckExecutiveAuthorityKey) are standard Cosmos
+// SDK transactions and use real signers derived from their creator field.
+// MsgAckExecutiveAuthorityKey stays noop because it is auto-injected by
+// PrepareProposal and never client-signed.
 
 // noopSignerFn is a GetSignersFunc that returns nil — vote messages have no
 // standard Cosmos signers.
 func noopSignerFn(proto.Message) ([][]byte, error) { return nil, nil }
+
+// ceremonyCreatorSignerFn extracts the signer from a ceremony message's
+// "creator" field (a valoper bech32 address) and returns the corresponding
+// account address bytes. Used for all ceremony messages that have a creator
+// field and go through standard Cosmos SDK signature verification.
+func ceremonyCreatorSignerFn(msg proto.Message) ([][]byte, error) {
+	fd := msg.ProtoReflect().Descriptor().Fields().ByName("creator")
+	if fd == nil {
+		return nil, fmt.Errorf("message %s has no creator field", msg.ProtoReflect().Descriptor().FullName())
+	}
+	creator := msg.ProtoReflect().Get(fd).String()
+
+	// creator is a valoper address; convert to account address bytes for signing.
+	valAddr, err := sdk.ValAddressFromBech32(creator)
+	if err != nil {
+		// Fall back to acc address parse in case it's already an acc address.
+		accAddr, accErr := sdk.AccAddressFromBech32(creator)
+		if accErr != nil {
+			return nil, fmt.Errorf("invalid creator address %q: %w", creator, err)
+		}
+		return [][]byte{accAddr}, nil
+	}
+	return [][]byte{sdk.AccAddress(valAddr)}, nil
+}
+
+// createValidatorWithPallasKeySignerFn extracts the signer from the embedded
+// staking_msg's ValidatorAddress field. MsgCreateValidatorWithPallasKey has
+// no creator field; the signer is the account behind the validator address
+// in the embedded MsgCreateValidator.
+func createValidatorWithPallasKeySignerFn(msg proto.Message) ([][]byte, error) {
+	fd := msg.ProtoReflect().Descriptor().Fields().ByName("staking_msg")
+	if fd == nil {
+		return nil, fmt.Errorf("MsgCreateValidatorWithPallasKey has no staking_msg field")
+	}
+	stakingMsgBytes := msg.ProtoReflect().Get(fd).Bytes()
+
+	stakingMsg := &stakingtypes.MsgCreateValidator{}
+	if err := stakingMsg.Unmarshal(stakingMsgBytes); err != nil {
+		return nil, fmt.Errorf("failed to decode staking_msg for signer extraction: %w", err)
+	}
+
+	valAddr, err := sdk.ValAddressFromBech32(stakingMsg.ValidatorAddress)
+	if err != nil {
+		return nil, fmt.Errorf("invalid validator address in staking_msg: %w", err)
+	}
+	return [][]byte{sdk.AccAddress(valAddr)}, nil
+}
 
 func ProvideCreateVotingSessionSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
@@ -115,17 +166,19 @@ func ProvideSubmitTallySigner() signing.CustomGetSigner {
 func ProvideRegisterPallasKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgRegisterPallasKey"),
-		Fn:      noopSignerFn,
+		Fn:      ceremonyCreatorSignerFn,
 	}
 }
 
 func ProvideDealExecutiveAuthorityKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgDealExecutiveAuthorityKey"),
-		Fn:      noopSignerFn,
+		Fn:      ceremonyCreatorSignerFn,
 	}
 }
 
+// MsgAckExecutiveAuthorityKey stays noop: it is auto-injected by
+// PrepareProposal and never goes through standard Cosmos SDK signing.
 func ProvideAckExecutiveAuthorityKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgAckExecutiveAuthorityKey"),
@@ -136,21 +189,21 @@ func ProvideAckExecutiveAuthorityKeySigner() signing.CustomGetSigner {
 func ProvideCreateValidatorWithPallasKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgCreateValidatorWithPallasKey"),
-		Fn:      noopSignerFn,
+		Fn:      createValidatorWithPallasKeySignerFn,
 	}
 }
 
 func ProvideReInitializeElectionAuthoritySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgReInitializeElectionAuthority"),
-		Fn:      noopSignerFn,
+		Fn:      ceremonyCreatorSignerFn,
 	}
 }
 
 func ProvideSetVoteManagerSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgSetVoteManager"),
-		Fn:      noopSignerFn,
+		Fn:      ceremonyCreatorSignerFn,
 	}
 }
 
@@ -224,15 +277,11 @@ func (AppModule) RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 
 // RegisterServices registers the module's gRPC services with the app.
 //
-// Both QueryServer and MsgServer are registered. Although vote transactions
-// bypass the Cosmos SDK Tx envelope (using a raw [tag || protobuf] wire format),
-// the MsgServer is registered so BaseApp's MsgServiceRouter can route vote
-// messages to the keeper after the custom AnteHandler validates them.
-//
-// The cosmos.msg.v1.signer annotation is only used by the standard SDK
-// SigVerificationDecorator (which we replace with custom ZKP/RedPallas
-// validation in the AnteHandler). BaseApp's runMsgs() simply looks up
-// handlers by message type URL — no signer checking occurs during execution.
+// Both QueryServer and MsgServer are registered. Vote-round messages bypass
+// the Cosmos SDK Tx envelope (using a raw [tag || protobuf] wire format) with
+// ZKP/RedPallas authentication. Ceremony messages (except MsgAck) use
+// standard Cosmos SDK transactions with signature verification and validator
+// gating. All messages are routed to the keeper via BaseApp's MsgServiceRouter.
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServerImpl(am.keeper))
 	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))

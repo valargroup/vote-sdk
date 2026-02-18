@@ -163,35 +163,50 @@ func TestEncodeDecodeSubmitTally(t *testing.T) {
 }
 
 func TestIsCeremonyTag(t *testing.T) {
-	require.True(t, IsCeremonyTag(TagRegisterPallasKey))
-	require.True(t, IsCeremonyTag(TagDealExecutiveAuthorityKey))
+	// Only MsgAckExecutiveAuthorityKey (0x08) uses the custom wire format.
 	require.True(t, IsCeremonyTag(TagAckExecutiveAuthorityKey))
-	require.True(t, IsCeremonyTag(TagCreateValidatorWithPallasKey))
-	require.True(t, IsCeremonyTag(TagReInitializeElectionAuthority))
-	require.True(t, IsCeremonyTag(TagSetVoteManager))
+
+	// All other ceremony tags now use standard Cosmos SDK transactions.
+	require.False(t, IsCeremonyTag(TagRegisterPallasKey))
+	require.False(t, IsCeremonyTag(TagDealExecutiveAuthorityKey))
+	require.False(t, IsCeremonyTag(TagCreateValidatorWithPallasKey))
+	require.False(t, IsCeremonyTag(TagReInitializeElectionAuthority))
+	require.False(t, IsCeremonyTag(TagSetVoteManager))
 	require.False(t, IsCeremonyTag(0x00))
 	require.False(t, IsCeremonyTag(0x0A)) // reserved: collides with Cosmos Tx protobuf
 	require.False(t, IsCeremonyTag(0x01)) // vote tag, not ceremony
 }
 
-func TestEncodeDecodeSetVoteManager(t *testing.T) {
+func TestEncodeDecodeAckExecutiveAuthorityKey(t *testing.T) {
+	msg := &types.MsgAckExecutiveAuthorityKey{
+		Creator:      "zvotevaloper1val",
+		AckSignature: []byte("signature"),
+	}
+
+	raw, err := EncodeCeremonyTx(msg, TagAckExecutiveAuthorityKey)
+	require.NoError(t, err)
+	require.Equal(t, TagAckExecutiveAuthorityKey, raw[0])
+
+	tag, decoded, err := DecodeCeremonyTx(raw)
+	require.NoError(t, err)
+	require.Equal(t, TagAckExecutiveAuthorityKey, tag)
+
+	decodedMsg, ok := decoded.(*types.MsgAckExecutiveAuthorityKey)
+	require.True(t, ok)
+	require.Equal(t, msg.Creator, decodedMsg.Creator)
+	require.Equal(t, msg.AckSignature, decodedMsg.AckSignature)
+}
+
+func TestEncodeCeremonyTx_RejectsNonAckTags(t *testing.T) {
 	msg := &types.MsgSetVoteManager{
 		Creator:    "zvote1admin",
 		NewManager: "zvote1manager",
 	}
 
-	raw, err := EncodeCeremonyTx(msg, TagSetVoteManager)
-	require.NoError(t, err)
-	require.Equal(t, TagSetVoteManager, raw[0])
-
-	tag, decoded, err := DecodeCeremonyTx(raw)
-	require.NoError(t, err)
-	require.Equal(t, TagSetVoteManager, tag)
-
-	decodedMsg, ok := decoded.(*types.MsgSetVoteManager)
-	require.True(t, ok)
-	require.Equal(t, msg.Creator, decodedMsg.Creator)
-	require.Equal(t, msg.NewManager, decodedMsg.NewManager)
+	// Non-ack ceremony tags should be rejected since they now use standard Cosmos txs.
+	_, err := EncodeCeremonyTx(msg, TagSetVoteManager)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "only 0x08 uses custom wire format")
 }
 
 func TestDecodeVoteTx_TooShort(t *testing.T) {

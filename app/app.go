@@ -305,3 +305,4 @@ func (app *ZallyApp) SetHelper(h *helper.Helper) {
 func (app *ZallyApp) GetHelper() *helper.Helper {
 	return app.helperRef.Load()
 }
+

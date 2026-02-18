@@ -18,13 +18,14 @@ func MustEncodeVoteTx(msg types.VoteMessage) []byte {
 	return raw
 }
 
-// MustEncodeCeremonyTx encodes a ceremony protobuf message into the raw wire
-// format [tag || protobuf_msg] used by the custom ABCI pipeline.
+// MustEncodeAckCeremonyTx encodes a MsgAckExecutiveAuthorityKey into the raw
+// wire format [tag || protobuf_msg]. Only MsgAck uses the custom wire format;
+// all other ceremony messages use standard Cosmos SDK transactions.
 // Panics on encoding failure (safe for tests).
-func MustEncodeCeremonyTx(msg proto.Message, tag byte) []byte {
-	raw, err := api.EncodeCeremonyTx(msg, tag)
+func MustEncodeAckCeremonyTx(msg proto.Message) []byte {
+	raw, err := api.EncodeCeremonyTx(msg, api.TagAckExecutiveAuthorityKey)
 	if err != nil {
-		panic("testutil.MustEncodeCeremonyTx: " + err.Error())
+		panic("testutil.MustEncodeAckCeremonyTx: " + err.Error())
 	}
 	return raw
 }

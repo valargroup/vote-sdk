@@ -10,7 +10,6 @@ import (
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
-	voteapi "github.com/z-cale/zally/api"
 	"github.com/z-cale/zally/crypto/ecies"
 	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/testutil"
@@ -37,20 +36,22 @@ func getCeremonyState(t *testing.T, ta *testutil.TestApp) *types.CeremonyState {
 	return state
 }
 
-// registerPallasKey encodes and delivers MsgRegisterPallasKey via the ABCI pipeline.
+// registerPallasKey builds a signed Cosmos SDK tx for MsgRegisterPallasKey
+// and delivers it via the ABCI pipeline.
 func registerPallasKey(t *testing.T, ta *testutil.TestApp, creator string, pallasPk []byte) {
 	t.Helper()
 	msg := &types.MsgRegisterPallasKey{
 		Creator:  creator,
 		PallasPk: pallasPk,
 	}
-	txBytes := testutil.MustEncodeCeremonyTx(msg, voteapi.TagRegisterPallasKey)
+	txBytes := ta.MustBuildSignedCeremonyTx(msg)
 	result := ta.DeliverVoteTx(txBytes)
 	require.Equal(t, uint32(0), result.Code,
 		"MsgRegisterPallasKey should succeed, got: %s", result.Log)
 }
 
-// dealEAKey encodes and delivers MsgDealExecutiveAuthorityKey via the ABCI pipeline.
+// dealEAKey builds a signed Cosmos SDK tx for MsgDealExecutiveAuthorityKey
+// and delivers it via the ABCI pipeline.
 func dealEAKey(t *testing.T, ta *testutil.TestApp, dealer string, eaPk []byte, payloads []*types.DealerPayload) {
 	t.Helper()
 	msg := &types.MsgDealExecutiveAuthorityKey{
@@ -58,7 +59,7 @@ func dealEAKey(t *testing.T, ta *testutil.TestApp, dealer string, eaPk []byte, p
 		EaPk:     eaPk,
 		Payloads: payloads,
 	}
-	txBytes := testutil.MustEncodeCeremonyTx(msg, voteapi.TagDealExecutiveAuthorityKey)
+	txBytes := ta.MustBuildSignedCeremonyTx(msg)
 	result := ta.DeliverVoteTx(txBytes)
 	require.Equal(t, uint32(0), result.Code,
 		"MsgDealExecutiveAuthorityKey should succeed, got: %s", result.Log)
@@ -267,7 +268,7 @@ func TestKeyCeremonyAckMempoolBlocked(t *testing.T) {
 		Creator:      valAddr,
 		AckSignature: bytes.Repeat([]byte{0xAC}, 32),
 	}
-	ackTx := testutil.MustEncodeCeremonyTx(ackMsg, voteapi.TagAckExecutiveAuthorityKey)
+	ackTx := testutil.MustEncodeAckCeremonyTx(ackMsg)
 	checkResp := ta.CheckTxSync(ackTx)
 	require.NotEqual(t, uint32(0), checkResp.Code,
 		"CheckTx should reject MsgAckExecutiveAuthorityKey from mempool")
@@ -297,7 +298,7 @@ func TestKeyCeremonyDealRejectedBeforeRegistration(t *testing.T) {
 			},
 		},
 	}
-	txBytes := testutil.MustEncodeCeremonyTx(msg, voteapi.TagDealExecutiveAuthorityKey)
+	txBytes := ta.MustBuildSignedCeremonyTx(msg)
 	result := ta.DeliverVoteTx(txBytes)
 	require.NotEqual(t, uint32(0), result.Code,
 		"deal should be rejected when no ceremony exists")
@@ -324,7 +325,7 @@ func TestKeyCeremonyDuplicateRegistrationRejected(t *testing.T) {
 		Creator:  valAddr,
 		PallasPk: pkBytes,
 	}
-	txBytes := testutil.MustEncodeCeremonyTx(msg, voteapi.TagRegisterPallasKey)
+	txBytes := ta.MustBuildSignedCeremonyTx(msg)
 	result := ta.DeliverVoteTx(txBytes)
 	require.NotEqual(t, uint32(0), result.Code,
 		"duplicate registration should be rejected")
@@ -412,13 +413,14 @@ func TestKeyCeremonyEAKeyVerification(t *testing.T) {
 // MsgReInitializeElectionAuthority Tests
 // ---------------------------------------------------------------------------
 
-// reInitializeEA encodes and delivers MsgReInitializeElectionAuthority via the ABCI pipeline.
+// reInitializeEA builds a signed Cosmos SDK tx for MsgReInitializeElectionAuthority
+// and delivers it via the ABCI pipeline.
 func reInitializeEA(t *testing.T, ta *testutil.TestApp, creator string) uint32 {
 	t.Helper()
 	msg := &types.MsgReInitializeElectionAuthority{
 		Creator: creator,
 	}
-	txBytes := testutil.MustEncodeCeremonyTx(msg, voteapi.TagReInitializeElectionAuthority)
+	txBytes := ta.MustBuildSignedCeremonyTx(msg)
 	result := ta.DeliverVoteTx(txBytes)
 	return result.Code
 }
