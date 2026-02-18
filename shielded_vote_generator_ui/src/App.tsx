@@ -762,7 +762,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
           </div>
           <SettingsStubRow
             label="Anchor interval"
-            value="1,000 blocks"
+            value="10 blocks"
           />
           <SettingsStubRow
             label="Block time"

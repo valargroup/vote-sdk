@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 
 const RPC_STORAGE_KEY = "shielded-vote-rpc";
 const BLOCK_TIME_SECONDS = 75;
-const ANCHOR_INTERVAL = 1000;
+const ANCHOR_INTERVAL = 10;
 
 export interface LightwalletdEndpoint {
   label: string;
