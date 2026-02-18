@@ -18,11 +18,10 @@ type Config struct {
 	// DBPath is the path to the SQLite database file. Use ":memory:" for testing.
 	DBPath string `mapstructure:"db_path"`
 
-	// MinDelay is the minimum random delay before submitting a share (seconds).
-	MinDelay int `mapstructure:"min_delay"`
-
-	// MaxDelay is the maximum random delay before submitting a share (seconds).
-	MaxDelay int `mapstructure:"max_delay"`
+	// MeanDelay is the mean of the exponential delay distribution (seconds).
+	// Shares are delayed by Exp(1/mean) seconds for temporal unlinkability,
+	// capped at the vote end time. Default: 43200 (12 hours).
+	MeanDelay int `mapstructure:"mean_delay"`
 
 	// ProcessInterval is how often to check for shares ready to submit (seconds).
 	ProcessInterval int `mapstructure:"process_interval"`
@@ -41,13 +40,16 @@ func DefaultConfig() Config {
 		Disable:             false,
 		APIToken:            "",
 		DBPath:              "",
-		MinDelay:            10,
-		MaxDelay:            300,
+		MeanDelay:           43200,
 		ProcessInterval:     5,
 		ChainAPIPort:        1318,
 		MaxConcurrentProofs: 2,
 	}
 }
+
+// RoundInfoFetcher queries the chain for vote round metadata.
+// Returns the vote_end_time (unix seconds) for the given round ID (hex).
+type RoundInfoFetcher func(roundID string) (voteEndTime uint64, err error)
 
 // EncryptedShareWire is the wire format for an encrypted ElGamal share component.
 type EncryptedShareWire struct {
