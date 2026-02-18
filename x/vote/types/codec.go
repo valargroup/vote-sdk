@@ -16,6 +16,7 @@ func init() {
 	// so that standard Cosmos SDK tx decoding succeeds.
 	gogoproto.RegisterType((*DealerPayload)(nil), "zvote.v1.DealerPayload")
 	gogoproto.RegisterType((*Proposal)(nil), "zvote.v1.Proposal")
+	gogoproto.RegisterType((*VoteOption)(nil), "zvote.v1.VoteOption")
 	gogoproto.RegisterType((*TallyEntry)(nil), "zvote.v1.TallyEntry")
 }
 
