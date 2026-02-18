@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { ProposalList } from "./components/ProposalList";
@@ -7,7 +7,7 @@ import { JsonView } from "./components/JsonView";
 import { RoundEditor } from "./components/RoundEditor";
 import { RoundsList } from "./components/RoundsList";
 import { useStore } from "./store/useStore";
-import { Shield, Plus, FileText, Settings, Server, Settings2, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, X, Loader2, Server } from "lucide-react";
 import type { Proposal, RoundSettings, RoundStatus, VotingRound } from "./types";
 import {
   LIGHTWALLETD_ENDPOINTS,
@@ -15,14 +15,19 @@ import {
   setStoredRpc,
   useChainInfo,
 } from "./store/rpc";
+import * as chainApi from "./api/chain";
 
-type Section = "about" | "rounds" | "builder" | "json" | "downloads" | "preview" | "settings";
+type Section = "about" | "rounds" | "builder" | "json" | "downloads" | "preview" | "settings" | "chain-rounds";
 
 function App() {
   const store = useStore();
   const [section, setSection] = useState<Section>("about");
   const [filter, setFilter] = useState<RoundStatus | "all">("all");
   const importRef = useRef<HTMLInputElement>(null);
+  const [publishModal, setPublishModal] = useState<string | null>(null); // round id
+  const [publishStatus, setPublishStatus] = useState<"idle" | "publishing" | "ok" | "error">("idle");
+  const [publishResult, setPublishResult] = useState<string>("");
+  const [publishError, setPublishError] = useState("");
 
   const handleSelectRound = useCallback(
     (id: string) => {
@@ -68,6 +73,61 @@ function App() {
     },
     [store]
   );
+
+  const handlePublish = useCallback(
+    (roundId: string) => {
+      setPublishModal(roundId);
+      setPublishStatus("idle");
+      setPublishResult("");
+      setPublishError("");
+    },
+    [store]
+  );
+
+  const handlePublishConfirm = useCallback(async () => {
+    if (!publishModal) return;
+    const round = store.rounds.find((r) => r.id === publishModal);
+    if (!round) return;
+
+    setPublishStatus("publishing");
+    try {
+      const vm = await chainApi.getVoteManager();
+      if (!vm.address) {
+        setPublishError("No VoteManager address set on the chain. Set one in Settings first.");
+        setPublishStatus("error");
+        return;
+      }
+
+      const result = await chainApi.submitSession({
+        creator: vm.address,
+        snapshot_height: round.settings.snapshotHeight
+          ? parseInt(round.settings.snapshotHeight, 10)
+          : 0,
+        vote_end_time: round.settings.endTime
+          ? Math.floor(new Date(round.settings.endTime).getTime() / 1000)
+          : Math.floor(Date.now() / 1000) + 86400 * 7, // default: 7 days from now
+        description: round.settings.description || round.name,
+        proposals: round.proposals.map((p, i) => ({
+          id: i + 1,
+          title: p.title,
+          description: p.description,
+        })),
+      });
+
+      if (result.code !== 0) {
+        setPublishError(result.log || `Transaction failed with code ${result.code}`);
+        setPublishStatus("error");
+      } else {
+        setPublishResult(result.tx_hash);
+        setPublishStatus("ok");
+        store.setRoundStatus(publishModal, "published");
+        store.updateRound(publishModal, { chainTxHash: result.tx_hash });
+      }
+    } catch (err) {
+      setPublishError(err instanceof Error ? err.message : String(err));
+      setPublishStatus("error");
+    }
+  }, [publishModal, store]);
 
   const handleNavigate = useCallback(
     (s: string) => {
@@ -134,10 +194,7 @@ function App() {
               onUpdateName={(name) =>
                 store.updateRound(store.activeRound!.id, { name })
               }
-              onPublish={() =>
-                store.setRoundStatus(store.activeRound!.id, "published")
-              }
-              onExportJson={() => setSection("json")}
+              onPublish={() => handlePublish(store.activeRound!.id)}
               onPreview={() => setSection("preview")}
               onDuplicate={() => store.duplicateRound(store.activeRound!.id)}
               onArchive={() =>
@@ -241,8 +298,23 @@ function App() {
           </div>
         )}
 
+        {/* On-chain rounds */}
+        {section === "chain-rounds" && <ChainRoundsView />}
+
         {/* Settings */}
         {section === "settings" && <SettingsPage />}
+
+        {/* Publish modal */}
+        {publishModal && (
+          <PublishModal
+            round={store.rounds.find((r) => r.id === publishModal)!}
+            status={publishStatus}
+            result={publishResult}
+            error={publishError}
+            onConfirm={handlePublishConfirm}
+            onClose={() => setPublishModal(null)}
+          />
+        )}
       </main>
     </div>
   );
@@ -436,15 +508,76 @@ function Step({ n, text }: { n: number; text: string }) {
 
 /* ── Settings page ───────────────────────────────────────────── */
 
+const CEREMONY_STATUS_NAMES: Record<number, string> = {
+  0: "unspecified",
+  1: "registering",
+  2: "dealt",
+  3: "confirmed",
+};
+
 function SettingsPage() {
   const [rpcUrl, setRpcUrl] = useState(getStoredRpc);
   const chain = useChainInfo();
   const isCustom = !LIGHTWALLETD_ENDPOINTS.some((e) => e.url === rpcUrl);
 
+  // Voting chain state
+  const [chainUrl, setChainUrlLocal] = useState(chainApi.getChainUrl);
+  const [connStatus, setConnStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [connError, setConnError] = useState("");
+  const [ceremony, setCeremony] = useState<chainApi.CeremonyState | null>(null);
+  const [voteManager, setVoteManager] = useState<string>("");
+  const [vmCreator, setVmCreator] = useState("");
+  const [vmNewAddr, setVmNewAddr] = useState("");
+  const [vmStatus, setVmStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
+  const [vmError, setVmError] = useState("");
+
   const handleRpcChange = (url: string) => {
     setRpcUrl(url);
     setStoredRpc(url);
   };
+
+  const handleChainUrlChange = (url: string) => {
+    setChainUrlLocal(url);
+    chainApi.setChainUrl(url);
+    setConnStatus("idle");
+  };
+
+  const handleTestConnection = async () => {
+    setConnStatus("testing");
+    setConnError("");
+    try {
+      const state = await chainApi.testConnection();
+      setCeremony(state);
+      const vm = await chainApi.getVoteManager();
+      setVoteManager(vm.address || "");
+      setConnStatus("ok");
+    } catch (err) {
+      setConnError(err instanceof Error ? err.message : String(err));
+      setConnStatus("error");
+    }
+  };
+
+  const handleSetVoteManager = async () => {
+    setVmStatus("sending");
+    setVmError("");
+    try {
+      const result = await chainApi.setVoteManager(vmCreator, vmNewAddr);
+      if (result.code !== 0) {
+        setVmError(result.log || `tx failed with code ${result.code}`);
+        setVmStatus("error");
+      } else {
+        setVmStatus("ok");
+        setVoteManager(vmNewAddr);
+        setVmCreator("");
+        setVmNewAddr("");
+      }
+    } catch (err) {
+      setVmError(err instanceof Error ? err.message : String(err));
+      setVmStatus("error");
+    }
+  };
+
+  const ceremonyPhase = CEREMONY_STATUS_NAMES[Number(ceremony?.ceremony?.status)] ?? String(ceremony?.ceremony?.status ?? "unknown");
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -545,37 +678,119 @@ function SettingsPage() {
           />
         </div>
 
-        {/* Voting chain (TODO) */}
+        {/* Voting chain */}
         <h2 className="text-xs font-semibold text-text-primary mb-3">
           Voting chain
         </h2>
         <div className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-4 mb-6">
           <div>
             <label className="block text-[11px] text-text-secondary mb-1">
-              Chain ID
+              Chain API URL
             </label>
-            <input
-              type="text"
-              disabled
-              placeholder="TODO"
-              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-muted placeholder:text-text-muted cursor-not-allowed"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={chainUrl}
+                onChange={(e) => handleChainUrlChange(e.target.value)}
+                placeholder="http://localhost:1318"
+                className="flex-1 px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+              />
+              <button
+                onClick={handleTestConnection}
+                disabled={connStatus === "testing"}
+                className="px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {connStatus === "testing" ? (
+                  <RefreshCw size={12} className="animate-spin" />
+                ) : (
+                  "Test"
+                )}
+              </button>
+            </div>
           </div>
-          <div>
-            <label className="block text-[11px] text-text-secondary mb-1">
-              RPC endpoint
-            </label>
-            <input
-              type="text"
-              disabled
-              placeholder="TODO"
-              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-muted placeholder:text-text-muted cursor-not-allowed"
-            />
-          </div>
-          <p className="text-[10px] text-text-muted">
-            Voting chain configuration will be required to submit rounds
-            directly. For now, export rounds as JSON.
-          </p>
+
+          {connStatus === "ok" && (
+            <div className="flex items-center gap-1.5 text-[11px] text-success">
+              <CheckCircle2 size={12} /> Connected
+            </div>
+          )}
+          {connStatus === "error" && (
+            <div className="flex items-center gap-1.5 text-[11px] text-danger">
+              <AlertCircle size={12} /> {connError}
+            </div>
+          )}
+
+          {/* Ceremony status (shown when connected) */}
+          {connStatus === "ok" && ceremony?.ceremony && (
+            <>
+              <div className="border-t border-border-subtle pt-3 space-y-2">
+                <SettingsStubRow label="Ceremony phase" value={ceremonyPhase} />
+                {ceremony.ceremony.ea_pk && (
+                  <SettingsStubRow
+                    label="EA public key"
+                    value={ceremony.ceremony.ea_pk.slice(0, 16) + "..."}
+                  />
+                )}
+                <SettingsStubRow
+                  label="Validators"
+                  value={String(ceremony.ceremony.validators?.length ?? 0)}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Vote manager (shown when connected) */}
+          {connStatus === "ok" && (
+            <div className="border-t border-border-subtle pt-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary">VoteManager</span>
+                <span className="text-[11px] font-mono text-text-primary">
+                  {voteManager || <span className="text-text-muted italic">not set</span>}
+                </span>
+              </div>
+
+              <details className="group">
+                <summary className="text-[11px] text-accent cursor-pointer hover:text-accent-glow">
+                  Set VoteManager address
+                </summary>
+                <div className="mt-2 space-y-2">
+                  <input
+                    type="text"
+                    value={vmCreator}
+                    onChange={(e) => setVmCreator(e.target.value)}
+                    placeholder="Creator address (validator operator)"
+                    className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+                  />
+                  <input
+                    type="text"
+                    value={vmNewAddr}
+                    onChange={(e) => setVmNewAddr(e.target.value)}
+                    placeholder="New VoteManager address"
+                    className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+                  />
+                  <button
+                    onClick={handleSetVoteManager}
+                    disabled={!vmCreator || !vmNewAddr || vmStatus === "sending"}
+                    className="px-3 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {vmStatus === "sending" ? "Sending..." : "Set VoteManager"}
+                  </button>
+                  {vmStatus === "ok" && (
+                    <p className="text-[11px] text-success">VoteManager updated.</p>
+                  )}
+                  {vmStatus === "error" && (
+                    <p className="text-[11px] text-danger">{vmError}</p>
+                  )}
+                </div>
+              </details>
+            </div>
+          )}
+
+          {connStatus === "idle" && (
+            <p className="text-[10px] text-text-muted">
+              Enter the Zally chain API URL and click Test to connect.
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -595,6 +810,339 @@ function SettingsStubRow({
       <span className="text-[11px] text-text-muted">{value}</span>
     </div>
   );
+}
+
+/* ── Publish modal ───────────────────────────────────────────── */
+
+function PublishModal({
+  round,
+  status,
+  result,
+  error,
+  onConfirm,
+  onClose,
+}: {
+  round: VotingRound;
+  status: "idle" | "publishing" | "ok" | "error";
+  result: string;
+  error: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="bg-surface-1 border border-border rounded-xl shadow-xl max-w-md w-full mx-4">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
+          <h3 className="text-sm font-semibold text-text-primary">
+            Publish to chain
+          </h3>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-surface-3 rounded text-text-muted cursor-pointer"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          <div className="space-y-2">
+            <SettingsStubRow label="Round" value={round.name} />
+            <SettingsStubRow
+              label="Proposals"
+              value={String(round.proposals.length)}
+            />
+            <SettingsStubRow
+              label="Snapshot height"
+              value={round.settings.snapshotHeight || "0 (stub)"}
+            />
+            <SettingsStubRow
+              label="End time"
+              value={
+                round.settings.endTime
+                  ? new Date(round.settings.endTime).toLocaleString()
+                  : "7 days from now (default)"
+              }
+            />
+          </div>
+
+          {status === "ok" && (
+            <div className="bg-success/10 border border-success/30 rounded-lg p-3">
+              <p className="text-[11px] text-success font-semibold mb-1">
+                Published successfully
+              </p>
+              <p className="text-[10px] text-text-secondary font-mono break-all">
+                TX: {result}
+              </p>
+            </div>
+          )}
+
+          {status === "error" && (
+            <div className="bg-danger/10 border border-danger/30 rounded-lg p-3">
+              <p className="text-[11px] text-danger">{error}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-border-subtle">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary hover:bg-surface-2 rounded-md transition-colors cursor-pointer"
+          >
+            {status === "ok" ? "Done" : "Cancel"}
+          </button>
+          {status !== "ok" && (
+            <button
+              onClick={onConfirm}
+              disabled={status === "publishing"}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-md text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {status === "publishing" ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" /> Publishing...
+                </>
+              ) : (
+                "Publish to chain"
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── On-chain rounds view ────────────────────────────────────── */
+
+const STATUS_MAP: Record<string | number, { label: string; color: string }> = {
+  SESSION_STATUS_ACTIVE: { label: "Active", color: "bg-success/20 text-success" },
+  SESSION_STATUS_TALLYING: { label: "Tallying", color: "bg-warning/20 text-warning" },
+  SESSION_STATUS_FINALIZED: { label: "Finalized", color: "bg-accent-dim/40 text-accent-glow" },
+  1: { label: "Active", color: "bg-success/20 text-success" },
+  2: { label: "Tallying", color: "bg-warning/20 text-warning" },
+  3: { label: "Finalized", color: "bg-accent-dim/40 text-accent-glow" },
+};
+
+function ChainRoundsView() {
+  const [rounds, setRounds] = useState<chainApi.ChainRound[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [tallyResults, setTallyResults] = useState<Record<string, chainApi.TallyResult[]>>({});
+
+  const fetchRounds = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const resp = await chainApi.listRounds();
+      setRounds(resp.rounds ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRounds();
+  }, []);
+
+  const handleExpand = async (roundIdB64: string) => {
+    if (expandedId === roundIdB64) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(roundIdB64);
+
+    // Fetch tally results if finalized and not yet loaded.
+    const round = rounds.find((r) => r.vote_round_id === roundIdB64);
+    const isFinalized = Number(round?.status) === 3 || round?.status === "SESSION_STATUS_FINALIZED";
+    if (isFinalized && !tallyResults[roundIdB64]) {
+      try {
+        const hex = base64ToHex(roundIdB64);
+        const resp = await chainApi.getTallyResults(hex);
+        if (resp.results) {
+          setTallyResults((prev) => ({ ...prev, [roundIdB64]: resp.results! }));
+        }
+      } catch {
+        // Ignore tally fetch errors silently
+      }
+    }
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-2xl mx-auto px-6 py-12">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-accent/15 flex items-center justify-center">
+              <Server size={22} className="text-accent" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-text-primary">
+                On-chain rounds
+              </h1>
+              <p className="text-[11px] text-text-muted">
+                Voting rounds on the Zally chain
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={fetchRounds}
+            className="p-2 hover:bg-surface-3 rounded-lg text-text-muted hover:text-text-secondary cursor-pointer"
+            title="Refresh"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
+
+        {error && (
+          <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 rounded-lg p-3 mb-4">
+            <AlertCircle size={14} className="text-danger shrink-0" />
+            <p className="text-[11px] text-danger">{error}</p>
+          </div>
+        )}
+
+        {!loading && !error && rounds.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-xs text-text-muted">
+              No voting rounds found on the chain.
+            </p>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {rounds.map((round) => {
+            const roundId = round.vote_round_id ?? "";
+            const statusInfo = STATUS_MAP[round.status ?? ""] ?? {
+              label: String(round.status ?? "Unknown"),
+              color: "bg-surface-3 text-text-muted",
+            };
+            const isExpanded = expandedId === roundId;
+
+            return (
+              <div
+                key={roundId}
+                className="bg-surface-1 border border-border-subtle rounded-xl overflow-hidden"
+              >
+                <button
+                  onClick={() => handleExpand(roundId)}
+                  className="w-full flex items-center justify-between px-5 py-4 text-left cursor-pointer hover:bg-surface-2/50 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-text-primary truncate">
+                      {round.description || `Round ${roundId.slice(0, 12)}...`}
+                    </p>
+                    <p className="text-[10px] text-text-muted mt-0.5">
+                      {round.proposals?.length ?? 0} proposal
+                      {(round.proposals?.length ?? 0) !== 1 ? "s" : ""}
+                      {round.creator && (
+                        <span className="ml-2">
+                          by {round.creator.slice(0, 12)}...
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <span
+                    className={`text-[9px] px-2 py-0.5 rounded-full shrink-0 ml-3 ${statusInfo.color}`}
+                  >
+                    {statusInfo.label}
+                  </span>
+                </button>
+
+                {isExpanded && (
+                  <div className="px-5 pb-4 border-t border-border-subtle pt-3 space-y-3">
+                    <div className="space-y-1.5">
+                      <SettingsStubRow
+                        label="Round ID"
+                        value={roundId.length > 24 ? roundId.slice(0, 24) + "..." : roundId}
+                      />
+                      {round.snapshot_height && (
+                        <SettingsStubRow
+                          label="Snapshot height"
+                          value={round.snapshot_height}
+                        />
+                      )}
+                      {round.vote_end_time && round.vote_end_time !== "0" && (
+                        <SettingsStubRow
+                          label="Vote end time"
+                          value={new Date(
+                            parseInt(round.vote_end_time) * 1000
+                          ).toLocaleString()}
+                        />
+                      )}
+                    </div>
+
+                    {round.proposals && round.proposals.length > 0 && (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-text-muted mb-1.5">
+                          Proposals
+                        </p>
+                        <div className="space-y-1.5">
+                          {round.proposals.map((p) => (
+                            <div
+                              key={p.id}
+                              className="flex items-start gap-2 px-3 py-2 bg-surface-2 rounded-lg"
+                            >
+                              <span className="text-[10px] font-bold text-text-muted bg-surface-3 rounded px-1.5 py-0.5 shrink-0">
+                                {String(p.id).padStart(2, "0")}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-xs text-text-primary">
+                                  {p.title}
+                                </p>
+                                {p.description && (
+                                  <p className="text-[10px] text-text-muted mt-0.5 line-clamp-2">
+                                    {p.description}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tally results */}
+                    {tallyResults[roundId] &&
+                      tallyResults[roundId].length > 0 && (
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-text-muted mb-1.5">
+                            Tally results
+                          </p>
+                          <div className="space-y-1">
+                            {tallyResults[roundId].map((tr, i) => (
+                              <div
+                                key={i}
+                                className="flex items-center justify-between px-3 py-1.5 bg-surface-2 rounded-lg text-[11px]"
+                              >
+                                <span className="text-text-secondary">
+                                  Proposal {tr.proposal_id}, Decision{" "}
+                                  {tr.vote_decision}
+                                </span>
+                                <span className="text-text-primary font-mono">
+                                  {tr.total_value ?? 0}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function base64ToHex(b64: string): string {
+  const bytes = atob(b64);
+  return Array.from(bytes, (c) =>
+    c.charCodeAt(0).toString(16).padStart(2, "0")
+  ).join("");
 }
 
 /* ── Preview page ────────────────────────────────────────────── */

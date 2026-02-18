@@ -1,14 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { Eye, Code2, MoreHorizontal, Copy, Archive, Trash2, Check } from "lucide-react";
 import { StatusPill } from "./StatusPill";
-import type { VotingRound, RoundStatus } from "../types";
+import type { VotingRound } from "../types";
 
 interface TopBarProps {
   round: VotingRound;
   saveState: "saved" | "saving";
   onUpdateName: (name: string) => void;
   onPublish: () => void;
-  onExportJson: () => void;
   onPreview: () => void;
   onDuplicate: () => void;
   onArchive: () => void;
@@ -21,7 +20,6 @@ export function TopBar({
   saveState,
   onUpdateName,
   onPublish,
-  onExportJson,
   onPreview,
   onDuplicate,
   onArchive,

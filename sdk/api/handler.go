@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +12,10 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"golang.org/x/crypto/blake2b"
 	protov2 "google.golang.org/protobuf/proto"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -22,13 +26,23 @@ type HandlerConfig struct {
 	// Default: "http://localhost:26657"
 	CometRPCEndpoint string
 
+	// IMTServiceURL is the URL of the nullifier IMT query service (e.g. "http://localhost:3000").
+	// Used by submit-session to fetch the current nullifier IMT root.
+	// Default: "http://localhost:3000"
+	IMTServiceURL string
+
+	// LightwalletdURL is the gRPC address of a lightwalletd server (e.g. "https://zec.rocks:443").
+	// Used by submit-session to fetch block hashes and tree state.
+	// Default: "https://zec.rocks:443"
+	LightwalletdURL string
 }
 
 // Handler provides JSON REST endpoints for vote transaction submission
 // and query access.
 type Handler struct {
-	cometRPC string
-	client   *http.Client
+	cometRPC    string
+	client      *http.Client
+	snapshotCfg SnapshotConfig
 }
 
 // NewHandler creates a new REST API handler.
@@ -37,12 +51,24 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	if endpoint == "" {
 		endpoint = "http://localhost:26657"
 	}
+	imtURL := cfg.IMTServiceURL
+	if imtURL == "" {
+		imtURL = "http://localhost:3000"
+	}
+	lwdURL := cfg.LightwalletdURL
+	if lwdURL == "" {
+		lwdURL = "https://zec.rocks:443"
+	}
 	// Allow long waits for broadcast_tx_sync when CheckTx is slow (e.g. ZKP ~30–60s).
 	// CometBFT RPC server must also have a large enough WriteTimeout (see initCometBFTConfig).
 	client := &http.Client{Timeout: 120 * time.Second}
 	return &Handler{
 		cometRPC: endpoint,
 		client:   client,
+		snapshotCfg: SnapshotConfig{
+			IMTServiceURL:   imtURL,
+			LightwalletdURL: lwdURL,
+		},
 	}
 }
 
@@ -58,6 +84,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 //	POST /zally/v1/create-validator-with-pallas   → MsgCreateValidatorWithPallasKey
 //	POST /zally/v1/reinitialize-ea               → MsgReInitializeElectionAuthority
 //	POST /zally/v1/set-vote-manager              → MsgSetVoteManager
+//	POST /zally/v1/submit-session               → MsgCreateVotingSession (simplified)
 //
 // Note: MsgAckExecutiveAuthorityKey has no REST endpoint — acks are injected
 // in-protocol via PrepareProposal (auto-ack).
@@ -72,6 +99,7 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.HandleFunc("/zally/v1/create-validator-with-pallas", h.handleCreateValidatorWithPallasKey).Methods("POST")
 	router.HandleFunc("/zally/v1/reinitialize-ea", h.handleReInitializeElectionAuthority).Methods("POST")
 	router.HandleFunc("/zally/v1/set-vote-manager", h.handleSetVoteManager).Methods("POST")
+	router.HandleFunc("/zally/v1/submit-session", h.handleSubmitSession).Methods("POST")
 }
 
 // --- Tx submission handlers ---
@@ -172,7 +200,115 @@ func (h *Handler) handleSetVoteManager(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeCeremonyMsg(w, r, msg) {
 		return
 	}
+	// Validate new_manager is a valid account address before broadcasting.
+	if _, err := sdk.AccAddressFromBech32(msg.NewManager); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("new_manager is not a valid account address: %v", err))
+		return
+	}
 	h.broadcastCeremonyTx(w, msg, TagSetVoteManager)
+}
+
+// handleSubmitSession accepts a simplified JSON payload from the UI, fetches
+// snapshot data from the nullifier IMT service and lightwalletd, computes
+// proposals_hash, and broadcasts a MsgCreateVotingSession.
+func (h *Handler) handleSubmitSession(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
+		return
+	}
+	if len(body) == 0 {
+		writeError(w, http.StatusBadRequest, "empty request body")
+		return
+	}
+
+	var req struct {
+		Creator        string `json:"creator"`
+		SnapshotHeight uint64 `json:"snapshot_height"`
+		VoteEndTime    uint64 `json:"vote_end_time"`
+		Description    string `json:"description"`
+		Proposals      []struct {
+			ID          uint32 `json:"id"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+		} `json:"proposals"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
+		return
+	}
+
+	if req.Creator == "" {
+		writeError(w, http.StatusBadRequest, "creator is required")
+		return
+	}
+	if req.SnapshotHeight == 0 {
+		writeError(w, http.StatusBadRequest, "snapshot_height is required")
+		return
+	}
+	if len(req.Proposals) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one proposal is required")
+		return
+	}
+
+	// Fetch snapshot data from IMT service + lightwalletd (parallel).
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	snapshot, err := fetchSnapshotData(ctx, h.snapshotCfg, req.SnapshotHeight)
+	if err != nil {
+		log.Printf("[zally-api] snapshot data fetch failed: %v", err)
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("fetch snapshot data: %v", err))
+		return
+	}
+
+	// Build proto proposals and compute proposals_hash (Blake2b-256 of serialized proposals).
+	protoProposals := make([]*types.Proposal, len(req.Proposals))
+	proposalsHasher, _ := blake2b.New256(nil)
+	for i, p := range req.Proposals {
+		prop := &types.Proposal{
+			Id:          p.ID,
+			Title:       p.Title,
+			Description: p.Description,
+		}
+		protoProposals[i] = prop
+
+		propBytes, err := protov2.Marshal(prop)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("marshal proposal: %v", err))
+			return
+		}
+		proposalsHasher.Write(propBytes)
+	}
+	proposalsHash := proposalsHasher.Sum(nil)
+
+	// Build the full MsgCreateVotingSession.
+	// - nullifier_imt_root: real value from IMT service
+	// - snapshot_blockhash: real value from lightwalletd
+	// - nc_root: SHA-256 placeholder of orchard tree frontier (see snapshot.go)
+	// - vk_zkp1/2/3: dummy values — the chain stores but does not verify these
+	//   during session creation; verification uses compiled circuit VKs via FFI.
+	msg := &types.MsgCreateVotingSession{
+		Creator:           req.Creator,
+		SnapshotHeight:    req.SnapshotHeight,
+		SnapshotBlockhash: snapshot.SnapshotBlockhash,
+		ProposalsHash:     proposalsHash,
+		VoteEndTime:       req.VoteEndTime,
+		NullifierImtRoot:  snapshot.NullifierIMTRoot,
+		NcRoot:            snapshot.NcRoot,
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         protoProposals,
+		Description:       req.Description,
+	}
+
+	if err := msg.ValidateBasic(); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", err))
+		return
+	}
+
+	h.broadcastVoteTx(w, msg)
 }
 
 // decodeCeremonyMsg reads the JSON request body and unmarshals it into the

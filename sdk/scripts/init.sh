@@ -20,10 +20,19 @@ $BINARY keys add validator --keyring-backend test --home "$HOME_DIR"
 
 # Get the validator address
 VALIDATOR_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_DIR")
+VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend test --home "$HOME_DIR")
 echo "Validator address: $VALIDATOR_ADDR"
+echo "Validator valoper: $VALIDATOR_VALOPER"
 
-# Add genesis account with tokens
+# Create a second key for VoteManager testing
+$BINARY keys add manager --keyring-backend test --home "$HOME_DIR"
+MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_DIR")
+echo "Manager address:   $MANAGER_ADDR"
+
+# Add genesis accounts with tokens
 $BINARY genesis add-genesis-account "$VALIDATOR_ADDR" "100000000${DENOM}" \
+    --keyring-backend test --home "$HOME_DIR"
+$BINARY genesis add-genesis-account "$MANAGER_ADDR" "10000000${DENOM}" \
     --keyring-backend test --home "$HOME_DIR"
 
 # Create genesis transaction (self-delegation)
@@ -43,6 +52,8 @@ $BINARY genesis validate-genesis --home "$HOME_DIR"
 APP_TOML="$HOME_DIR/config/app.toml"
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
 sed -i.bak 's|address = "tcp://localhost:1317"|address = "tcp://localhost:1318"|' "$APP_TOML"
+# Enable CORS for dev (Vite dev server on port 5173).
+sed -i.bak '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP_TOML"
 rm -f "${APP_TOML}.bak"
 
 # Allow long CheckTx (ZKP verification ~30–60s). Default 10s closes the RPC connection
@@ -114,4 +125,7 @@ EACFG
 
 echo ""
 echo "=== Chain initialized successfully! ==="
+echo "Validator valoper: $VALIDATOR_VALOPER"
+echo "Manager address:   $MANAGER_ADDR"
+echo ""
 echo "Start with: $BINARY start --home $HOME_DIR"

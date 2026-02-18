@@ -35,6 +35,9 @@ service Query {
 
   // VoteManager returns the current vote manager address.
   rpc VoteManager(QueryVoteManagerRequest) returns (QueryVoteManagerResponse);
+
+  // ListRounds returns all stored vote rounds.
+  rpc ListRounds(QueryListRoundsRequest) returns (QueryListRoundsResponse);
 }
 
 message QueryCommitmentTreeRequest {
@@ -102,4 +105,10 @@ message QueryVoteManagerRequest {}
 
 message QueryVoteManagerResponse {
   string address = 1;
+}
+
+message QueryListRoundsRequest {}
+
+message QueryListRoundsResponse {
+  repeated VoteRound rounds = 1;
 }

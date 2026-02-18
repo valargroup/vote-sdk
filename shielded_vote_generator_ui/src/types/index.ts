@@ -39,4 +39,5 @@ export interface VotingRound {
   settings: RoundSettings;
   createdAt: string;
   updatedAt: string;
+  chainTxHash?: string;
 }

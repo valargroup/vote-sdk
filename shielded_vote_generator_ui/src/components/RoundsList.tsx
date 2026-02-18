@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, MoreHorizontal, Copy, Code2, Archive } from "lucide-react";
+import { Search, MoreHorizontal, Copy, Archive } from "lucide-react";
 import { StatusPill } from "./StatusPill";
 import type { VotingRound, RoundStatus } from "../types";
 
