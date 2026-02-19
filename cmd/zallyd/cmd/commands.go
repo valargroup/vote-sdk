@@ -84,6 +84,7 @@ func initRootCmd(
 		EAKeygenCmd(),
 		PallasKeygenCmd(),
 		EncryptEAKeyCmd(),
+		InitValidatorKeysCmd(),
 	)
 
 	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newAppFn, appExport, server.StartCmdOptions{
