@@ -41,13 +41,52 @@ func initCometBFTConfig() *cmtcfg.Config {
 	return cfg
 }
 
+// VoteConfig holds the [vote] section of app.toml.
+type VoteConfig struct {
+	EASkPath     string `mapstructure:"ea_sk_path"`
+	PallasSkPath string `mapstructure:"pallas_sk_path"`
+	CometRPC     string `mapstructure:"comet_rpc"`
+}
+
+// CustomAppConfig embeds the standard server config and adds [vote].
+type CustomAppConfig struct {
+	serverconfig.Config `mapstructure:",squash"`
+	Vote                VoteConfig `mapstructure:"vote"`
+}
+
+const voteConfigTemplate = `
+###############################################################################
+###                         Vote Configuration                              ###
+###############################################################################
+
+[vote]
+
+# Path to the Election Authority secret key file.
+ea_sk_path = "{{ .Vote.EASkPath }}"
+
+# Path to the Pallas secret key file.
+pallas_sk_path = "{{ .Vote.PallasSkPath }}"
+
+# CometBFT RPC endpoint. Adjust to the node's RPC port.
+comet_rpc = "{{ .Vote.CometRPC }}"
+`
+
 // initAppConfig helps to override default appConfig template and configs.
 func initAppConfig() (string, interface{}) {
 	srvCfg := serverconfig.DefaultConfig()
 	// Set default min gas prices to 0 for the vote chain (no fees needed).
 	srvCfg.MinGasPrices = "0stake"
 
-	return serverconfig.DefaultConfigTemplate, srvCfg
+	customConfig := CustomAppConfig{
+		Config: *srvCfg,
+		Vote: VoteConfig{
+			EASkPath:     "$HOME/.zallyd/ea.sk",
+			PallasSkPath: "$HOME/.zallyd/pallas.sk",
+			CometRPC:     "http://localhost:26257",
+		},
+	}
+
+	return serverconfig.DefaultConfigTemplate + voteConfigTemplate, customConfig
 }
 
 func initRootCmd(
