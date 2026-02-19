@@ -46,5 +46,9 @@ nullifier-ingest/service/nullifiers.bin
 nullifier-ingest/service/nullifiers.checkpoint
 nullifier-ingest/service/nullifiers.tree
 
+nullifiers.bin
+nullifiers.checkpoint
+nullifiers.tree
+
 # macOS
 .DS_Store
