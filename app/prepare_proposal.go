@@ -193,7 +193,7 @@ func decryptRoundTallies(
 	var entries []*types.TallyEntry
 
 	for proposalIdx := range round.Proposals {
-		proposalID := uint32(proposalIdx)
+		proposalID := round.Proposals[proposalIdx].Id
 
 		tallyMap, err := voteKeeper.GetProposalTally(kvStore, round.VoteRoundId, proposalID)
 		if err != nil {

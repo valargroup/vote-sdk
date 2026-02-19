@@ -361,6 +361,14 @@ func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					Use:       "list-rounds",
 					Short:     "List all stored vote rounds",
 				},
+				{
+					RpcMethod: "VoteSummary",
+					Use:       "vote-summary [vote-round-id]",
+					Short:     "Query a denormalized summary of a vote round including proposals and options",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "vote_round_id"},
+					},
+				},
 			},
 		},
 	}
