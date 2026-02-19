@@ -38,5 +38,12 @@ orchard/book/src/zkps/zkp3-vote-reveal-proof.md
 # Swift build artifacts
 keystone-qr/.build/
 
+# xcframework (regenerated via `cd zcash-voting-ffi && make dev`)
+zcash-voting-ffi/releases/zcash_voting_ffiFFI.xcframework/
+
+# Nullifier service data
+nullifier-ingest/service/nullifiers.checkpoint
+nullifier-ingest/service/nullifiers.tree
+
 # macOS
 .DS_Store

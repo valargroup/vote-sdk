@@ -237,7 +237,8 @@ extension VotingAPIClient: DependencyKey {
     public static var liveValue: Self {
         Self(
             fetchServiceConfig: {
-                // 1. Check for local override in app bundle
+                // 1. Check for local override in app bundle (debug builds only)
+                #if DEBUG
                 if let localURL = Bundle.main.url(
                     forResource: "voting-config-local",
                     withExtension: "json"
@@ -248,6 +249,7 @@ extension VotingAPIClient: DependencyKey {
                         return config
                     }
                 }
+                #endif
 
                 // 2. Try CDN
                 do {

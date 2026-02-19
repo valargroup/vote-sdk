@@ -1,5 +1,0 @@
-framework module zcash_voting_ffiFFI {
-    umbrella header "zcash_voting_ffiFFI.h"
-    export *
-    module * { export * }
-}

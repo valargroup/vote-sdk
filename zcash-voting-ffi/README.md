@@ -18,6 +18,15 @@ The key FFI type is `VotingDatabase` — a stateful UniFFI object that owns the 
 
 `ProofProgressReporter` is a UniFFI callback interface that bridges Rust progress updates into Swift's `AsyncThrowingStream<ProofEvent>`.
 
+## Initial Setup
+
+The xcframework binary is not checked into git. After cloning, you must build it before opening the iOS project:
+
+```bash
+cd zcash-voting-ffi
+make dev
+```
+
 ## Rebuilding After Rust Changes
 
 When you modify `librustvoting` or the FFI wrapper:
