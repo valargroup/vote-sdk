@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
+use tower_http::cors::{Any, CorsLayer};
 use ff::PrimeField as _;
 use pasta_curves::Fp;
 use serde::Serialize;
@@ -318,12 +319,18 @@ async fn main() -> Result<()> {
         lwd_client: Mutex::new(None),
     });
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     let app = Router::new()
         .route("/exclusion-proof/:nullifier", get(exclusion_proof))
         .route("/root", get(root))
         .route("/nc-root/:height", get(nc_root_handler))
         .route("/health", get(health))
         .route("/status", get(status))
+        .layer(cors)
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

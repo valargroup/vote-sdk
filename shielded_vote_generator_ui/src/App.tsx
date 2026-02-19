@@ -544,11 +544,9 @@ interface NullifierStatus {
 const NULLIFIER_BASE_URL = import.meta.env.VITE_NULLIFIER_URL || "";
 
 function nullifierApiBase(): string {
-  if (
-    !NULLIFIER_BASE_URL &&
-    typeof window !== "undefined" &&
-    window.location.port === "5173"
-  ) {
+  // In dev mode, always use the Vite proxy path — VITE_NULLIFIER_URL is only
+  // the proxy *target* (server-side), not a browser-reachable URL.
+  if (typeof window !== "undefined" && window.location.port === "5173") {
     return "/nullifier";
   }
   return NULLIFIER_BASE_URL || "/nullifier";

@@ -328,9 +328,6 @@ function filledBytes(byte: number, len: number): Uint8Array {
   return arr;
 }
 
-const STUB_SNAPSHOT_BLOCKHASH  = filledBytes(0xaa, 32);
-const STUB_NULLIFIER_IMT_ROOT = filledBytes(0xcc, 32);
-const STUB_NC_ROOT            = filledBytes(0xdd, 32);
 const STUB_PROPOSALS_HASH     = filledBytes(0xbb, 32);
 const STUB_VK_ZKP1            = filledBytes(0xf1, 64);
 const STUB_VK_ZKP2            = filledBytes(0xf2, 64);
@@ -349,7 +346,8 @@ function hexToBytes(hex: string): Uint8Array {
 
 /**
  * Fetch real snapshot data (nc_root, nullifier_imt_root, blockhash) from the
- * chain's snapshot-data endpoint. Falls back to stubs if the endpoint fails.
+ * chain's snapshot-data endpoint. Throws on failure — creating a round with
+ * stub roots would cause delegation proofs (ZKP #1) to fail silently.
  */
 async function fetchSnapshotData(
   apiBase: string,
@@ -359,29 +357,21 @@ async function fetchSnapshotData(
   nullifierImtRoot: Uint8Array;
   snapshotBlockhash: Uint8Array;
 }> {
-  try {
-    const resp = await fetch(`${apiBase}/zally/v1/snapshot-data/${snapshotHeight}`);
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`);
-    }
-    const data: { nc_root: string; nullifier_imt_root: string; snapshot_blockhash: string } =
-      await resp.json();
-
-    return {
-      ncRoot: hexToBytes(data.nc_root),
-      nullifierImtRoot: hexToBytes(data.nullifier_imt_root),
-      snapshotBlockhash: hexToBytes(data.snapshot_blockhash),
-    };
-  } catch (e) {
-    console.warn(
-      `[createVotingSession] snapshot-data fetch failed (${e}), using stubs`,
+  const resp = await fetch(`${apiBase}/zally/v1/snapshot-data/${snapshotHeight}`);
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(
+      `Failed to fetch snapshot data for height ${snapshotHeight}: HTTP ${resp.status}${body ? ` – ${body}` : ""}`,
     );
-    return {
-      ncRoot: STUB_NC_ROOT,
-      nullifierImtRoot: STUB_NULLIFIER_IMT_ROOT,
-      snapshotBlockhash: STUB_SNAPSHOT_BLOCKHASH,
-    };
   }
+  const data: { nc_root: string; nullifier_imt_root: string; snapshot_blockhash: string } =
+    await resp.json();
+
+  return {
+    ncRoot: hexToBytes(data.nc_root),
+    nullifierImtRoot: hexToBytes(data.nullifier_imt_root),
+    snapshotBlockhash: hexToBytes(data.snapshot_blockhash),
+  };
 }
 
 // ── Public API ──────────────────────────────────────────────────
