@@ -3,7 +3,8 @@ package keeper_test
 import (
 	"bytes"
 	"crypto/rand"
-	"fmt"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/z-cale/zally/crypto/ecies"
 	"github.com/z-cale/zally/crypto/elgamal"
@@ -16,6 +17,14 @@ import (
 func testPallasPK() []byte {
 	_, pk := elgamal.KeyGen(rand.Reader)
 	return pk.Point.ToAffineCompressed()
+}
+
+// testValoperAddr returns the valoper address corresponding to testAccAddr(seed).
+// This is what RegisterPallasKey stores after converting account → valoper.
+func testValoperAddr(seed byte) string {
+	addr := make([]byte, 20)
+	addr[0] = seed
+	return sdk.ValAddress(addr).String()
 }
 
 // ---------------------------------------------------------------------------
@@ -535,12 +544,13 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_HappyPath() {
 	s.SetupTest()
 
 	pks := []struct {
-		creator string
-		pk      []byte
+		creator    string // account address sent as msg.Creator
+		storedAddr string // valoper address stored in ceremony state after conversion
+		pk         []byte
 	}{
-		{"val1", testPallasPK()},
-		{"val2", testPallasPK()},
-		{"val3", testPallasPK()},
+		{testAccAddr(1), testValoperAddr(1), testPallasPK()},
+		{testAccAddr(2), testValoperAddr(2), testPallasPK()},
+		{testAccAddr(3), testValoperAddr(3), testPallasPK()},
 	}
 
 	for i, tc := range pks {
@@ -556,7 +566,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_HappyPath() {
 		s.Require().NotNil(state)
 		s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
 		s.Require().Len(state.Validators, i+1)
-		s.Require().Equal(tc.creator, state.Validators[i].ValidatorAddress)
+		s.Require().Equal(tc.storedAddr, state.Validators[i].ValidatorAddress)
 		s.Require().Equal(tc.pk, state.Validators[i].PallasPk)
 	}
 
@@ -580,7 +590,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 		{
 			name: "wrong size (16 bytes)",
 			msg: &types.MsgRegisterPallasKey{
-				Creator:  "val1",
+				Creator:  testAccAddr(1),
 				PallasPk: bytes.Repeat([]byte{0x01}, 16),
 			},
 			errContains: "invalid pallas point",
@@ -588,7 +598,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 		{
 			name: "wrong size (64 bytes)",
 			msg: &types.MsgRegisterPallasKey{
-				Creator:  "val1",
+				Creator:  testAccAddr(1),
 				PallasPk: bytes.Repeat([]byte{0x01}, 64),
 			},
 			errContains: "invalid pallas point",
@@ -596,7 +606,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 		{
 			name: "identity point (all zeros)",
 			msg: &types.MsgRegisterPallasKey{
-				Creator:  "val1",
+				Creator:  testAccAddr(1),
 				PallasPk: make([]byte, 32),
 			},
 			errContains: "invalid pallas point",
@@ -604,22 +614,30 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 		{
 			name: "off-curve point",
 			msg: &types.MsgRegisterPallasKey{
-				Creator:  "val1",
+				Creator:  testAccAddr(1),
 				PallasPk: bytes.Repeat([]byte{0xFF}, 32),
 			},
 			errContains: "invalid pallas point",
 		},
 		{
+			name: "invalid creator address",
+			msg: &types.MsgRegisterPallasKey{
+				Creator:  "not-a-bech32-address",
+				PallasPk: testPallasPK(),
+			},
+			errContains: "invalid creator address",
+		},
+		{
 			name: "duplicate validator address",
 			setup: func() {
 				_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
-					Creator:  "val1",
+					Creator:  testAccAddr(1),
 					PallasPk: testPallasPK(),
 				})
 				s.Require().NoError(err)
 			},
 			msg: &types.MsgRegisterPallasKey{
-				Creator:  "val1",
+				Creator:  testAccAddr(1), // same account → same valoper → duplicate
 				PallasPk: testPallasPK(),
 			},
 			errContains: "already registered",
@@ -631,12 +649,12 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
 					Status: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 					Validators: []*types.ValidatorPallasKey{
-						{ValidatorAddress: "val1", PallasPk: testPallasPK()},
+						{ValidatorAddress: testValoperAddr(1), PallasPk: testPallasPK()},
 					},
 				}))
 			},
 			msg: &types.MsgRegisterPallasKey{
-				Creator:  "val2",
+				Creator:  testAccAddr(2),
 				PallasPk: testPallasPK(),
 			},
 			errContains: "operation invalid for current ceremony status",
@@ -650,7 +668,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 				}))
 			},
 			msg: &types.MsgRegisterPallasKey{
-				Creator:  "val1",
+				Creator:  testAccAddr(1),
 				PallasPk: testPallasPK(),
 			},
 			errContains: "operation invalid for current ceremony status",
@@ -676,7 +694,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_NoPhaseTimeout() {
 	s.SetupTest()
 
 	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
-		Creator:  "val1",
+		Creator:  testAccAddr(1),
 		PallasPk: testPallasPK(),
 	})
 	s.Require().NoError(err)
@@ -701,7 +719,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_AfterReset() {
 	// Registration should succeed.
 	pk := testPallasPK()
 	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
-		Creator:  "val1",
+		Creator:  testAccAddr(1),
 		PallasPk: pk,
 	})
 	s.Require().NoError(err)
@@ -710,7 +728,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_AfterReset() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
 	s.Require().Len(state.Validators, 1)
-	s.Require().Equal("val1", state.Validators[0].ValidatorAddress)
+	s.Require().Equal(testValoperAddr(1), state.Validators[0].ValidatorAddress)
 	s.Require().Equal(pk, state.Validators[0].PallasPk)
 	s.Require().Equal(uint64(0), state.PhaseTimeout, "REGISTERING should have no timeout")
 }
@@ -720,17 +738,21 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_AfterReset() {
 // ===========================================================================
 
 // registerValidators is a test helper that registers N validators and returns
-// the validator addresses and their Pallas public keys.
+// the stored valoper addresses and their Pallas public keys.
+// It sends account addresses as msg.Creator; the keeper converts them to valoper
+// before storing, so the returned addrs are in valoper format and can be used
+// directly in DealerPayloads and AckExecutiveAuthorityKey.Creator.
 func (s *MsgServerTestSuite) registerValidators(n int) (addrs []string, pks [][]byte) {
 	for i := 0; i < n; i++ {
-		addr := fmt.Sprintf("val%d", i+1)
+		acc := testAccAddr(i + 1)
+		val := testValoperAddr(i + 1)
 		pk := testPallasPK()
 		_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
-			Creator:  addr,
+			Creator:  acc,
 			PallasPk: pk,
 		})
 		s.Require().NoError(err)
-		addrs = append(addrs, addr)
+		addrs = append(addrs, val) // return valoper (what's stored in state)
 		pks = append(pks, pk)
 	}
 	return
@@ -1122,17 +1144,20 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 		pk *elgamal.PublicKey
 	}
 	validators := make([]validatorKeys, numValidators)
-	addrs := make([]string, numValidators)
+	// accAddrs are used as msg.Creator; valoperAddrs are stored in ceremony state.
+	accAddrs := make([]string, numValidators)
+	addrs := make([]string, numValidators) // valoper addresses stored in state
 	for i := range validators {
 		sk, pk := elgamal.KeyGen(rand.Reader)
 		validators[i] = validatorKeys{sk: sk, pk: pk}
-		addrs[i] = fmt.Sprintf("val%d", i+1)
+		accAddrs[i] = testAccAddr(i + 1)
+		addrs[i] = testValoperAddr(i + 1)
 	}
 
 	// 2. Register all 3 pk_i via MsgRegisterPallasKey.
 	for i, v := range validators {
 		_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
-			Creator:  addrs[i],
+			Creator:  accAddrs[i],
 			PallasPk: v.pk.Point.ToAffineCompressed(),
 		})
 		s.Require().NoError(err, "register validator %d", i)

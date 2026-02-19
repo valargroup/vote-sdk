@@ -1,6 +1,8 @@
 BINARY = zallyd
 HOME_DIR = $(HOME)/.zallyd
 
+export PATH := $(HOME)/go/bin:$(PATH)
+
 .PHONY: install install-ffi init start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi status-multi clean-multi caddy
 
 ## install: Build and install the zallyd binary to $GOPATH/bin

@@ -46,14 +46,23 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 		return nil, fmt.Errorf("%w: %v", types.ErrInvalidPallasPoint, err)
 	}
 
+	// Derive the validator operator address from the sender's account address.
+	// PrepareProposal identifies the proposer by val.OperatorAddress (valoper
+	// bech32), so the ceremony state must use the same format for lookups.
+	accAddr, err := sdk.AccAddressFromBech32(msg.Creator)
+	if err != nil {
+		return nil, fmt.Errorf("invalid creator address %q: %w", msg.Creator, err)
+	}
+	valAddr := sdk.ValAddress(accAddr).String()
+
 	// Reject duplicate registration.
-	if _, found := FindValidatorInCeremony(state, msg.Creator); found {
-		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateRegistration, msg.Creator)
+	if _, found := FindValidatorInCeremony(state, valAddr); found {
+		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateRegistration, valAddr)
 	}
 
 	// Append validator key.
 	state.Validators = append(state.Validators, &types.ValidatorPallasKey{
-		ValidatorAddress: msg.Creator,
+		ValidatorAddress: valAddr,
 		PallasPk:         msg.PallasPk,
 	})
 
@@ -63,7 +72,7 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeRegisterPallasKey,
-		sdk.NewAttribute(types.AttributeKeyValidatorAddress, msg.Creator),
+		sdk.NewAttribute(types.AttributeKeyValidatorAddress, valAddr),
 		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, state.Status.String()),
 	))
 
@@ -344,3 +353,4 @@ func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *typ
 
 	return &types.MsgCreateValidatorWithPallasKeyResponse{}, nil
 }
+

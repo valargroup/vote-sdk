@@ -27,6 +27,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
+
+	votecli "github.com/z-cale/zally/x/vote/client/cli"
 )
 
 // initCometBFTConfig helps to override default CometBFT Config values.
@@ -81,6 +83,7 @@ func initRootCmd(
 		snapshot.Cmd(newApp),
 		EAKeygenCmd(),
 		PallasKeygenCmd(),
+		EncryptEAKeyCmd(),
 	)
 
 	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newAppFn, appExport, server.StartCmdOptions{
@@ -149,6 +152,7 @@ func txCommand() *cobra.Command {
 		authcmd.GetEncodeCommand(),
 		authcmd.GetDecodeCommand(),
 		authcmd.GetSimulateCmd(),
+		votecli.GetTxCmd(),
 	)
 
 	return cmd

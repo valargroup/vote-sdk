@@ -79,6 +79,8 @@ func CeremonyAckPrepareProposalHandler(
 		}
 
 		// Resolve proposer consensus address to validator operator address.
+		// The ceremony state stores valoper addresses (set by RegisterPallasKey
+		// and CreateValidatorWithPallasKey), so this matches directly.
 		consAddr := sdk.ConsAddress(req.ProposerAddress)
 		val, err := stakingKeeper.GetValidatorByConsAddr(ctx, consAddr)
 		if err != nil {
