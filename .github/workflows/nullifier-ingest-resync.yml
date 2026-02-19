@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       max_height:
-        description: "Stop syncing at this block height. If not provided, syncs to the latest chain tip."
+        description: "Stop syncing at this block height. Non-multiples of 10 are rounded down. If not provided, defaults to the latest chain tip rounded down to the nearest multiple of 10."
         required: false
         type: string
 
@@ -24,6 +24,16 @@ jobs:
     name: Ingest resync
     runs-on: ubuntu-latest
     steps:
+      - name: Round max_height down to nearest multiple of 10
+        id: round_height
+        run: |
+          MAX_HEIGHT="${{ github.event.inputs.max_height }}"
+          if [ -z "$MAX_HEIGHT" ]; then
+            MAX_HEIGHT=$(curl -sf "https://api.blockchair.com/zcash/stats" | jq -r '.data.best_block_height')
+          fi
+          ROUNDED=$(( (MAX_HEIGHT / 10) * 10 ))
+          echo "value=$ROUNDED" >> "$GITHUB_OUTPUT"
+
       - name: Run ingest-resync via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -36,5 +46,5 @@ jobs:
               DATA_DIR=/opt/nullifier-ingest \
               LWD_URL=https://zec.rocks:443 \
               INVALIDATE_TREE=1 \
-              MAX_HEIGHT=${{ github.event.inputs.max_height }} \
+              MAX_HEIGHT=${{ steps.round_height.outputs.value }} \
               ./ingest-nfs
