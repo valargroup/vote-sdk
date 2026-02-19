@@ -1,7 +1,7 @@
 BINARY = zallyd
 HOME_DIR = $(HOME)/.zallyd
 
-.PHONY: install install-ffi init init-ffi start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi caddy
+.PHONY: install install-ffi init start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi caddy
 
 ## install: Build and install the zallyd binary to $GOPATH/bin
 install:
@@ -19,12 +19,8 @@ build:
 build-ffi: circuits
 	go build -tags "halo2,redpallas" -o $(BINARY) ./cmd/zallyd
 
-## init: Initialize a single-validator chain (wipes existing data)
-init: install
-	bash scripts/init.sh
-
-## init-ffi: Initialize chain with real RedPallas + Halo2 verification (wipes existing data)
-init-ffi: install-ffi
+## init: Initialize a single-validator chain with real RedPallas + Halo2 verification (wipes existing data)
+init: install-ffi
 	bash scripts/init.sh
 
 ## start: Start the chain
