@@ -140,8 +140,10 @@ func NewZallyApp(
 
 	// Read config paths for auto-injection handlers.
 	// Expand environment variables (e.g. $HOME) in paths from app.toml.
-	eaSkPath := os.ExpandEnv(appOpts.Get("vote.ea_sk_path").(string))
-	pallasSkPath := os.ExpandEnv(appOpts.Get("vote.pallas_sk_path").(string))
+	eaSkPathRaw, _ := appOpts.Get("vote.ea_sk_path").(string)
+	eaSkPath := os.ExpandEnv(eaSkPathRaw)
+	pallasSkPathRaw, _ := appOpts.Get("vote.pallas_sk_path").(string)
+	pallasSkPath := os.ExpandEnv(pallasSkPathRaw)
 	app.cometRPC, _ = appOpts.Get("vote.comet_rpc").(string)
 	logger.Info("Auto-injection config",
 		"vote.ea_sk_path", eaSkPath,
