@@ -352,7 +352,7 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 		Validators:   validators,
 		Payloads:     payloads,
 		PhaseStart:   uint64(ta.Time.Unix()),
-		PhaseTimeout: 30,
+		PhaseTimeout: types.DefaultDealTimeout,
 	}
 	err := ta.VoteKeeper().SetCeremonyState(kvStore, state)
 	require.NoError(ta.t, err)

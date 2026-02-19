@@ -11,8 +11,8 @@ const (
 	RouterKey = ModuleName
 )
 
-// DefaultDealTimeout is the ceremony deal/ack phase timeout in seconds (30 seconds).
-const DefaultDealTimeout uint64 = 30
+// DefaultDealTimeout is the ceremony deal/ack phase timeout in seconds (30 minutes).
+const DefaultDealTimeout uint64 = 1800
 
 // NullifierType distinguishes the three independent nullifier sets per voting round.
 type NullifierType byte
