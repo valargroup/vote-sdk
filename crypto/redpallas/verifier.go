@@ -1,3 +1,5 @@
+//go:build redpallas
+
 package redpallas
 
 // RedPallasVerifier implements Verifier using real RedPallas signature
@@ -6,6 +8,7 @@ package redpallas
 type RedPallasVerifier struct{}
 
 // NewVerifier returns a RedPallasVerifier backed by the Rust FFI library.
+// This function is only available when built with the "redpallas" build tag.
 func NewVerifier() Verifier { return RedPallasVerifier{} }
 
 // Verify verifies a RedPallas SpendAuth signature via the Rust FFI.

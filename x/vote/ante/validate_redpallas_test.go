@@ -1,3 +1,5 @@
+//go:build redpallas
+
 package ante_test
 
 import (

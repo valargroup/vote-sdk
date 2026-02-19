@@ -84,7 +84,6 @@ func TestKeyCeremonyFullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
-	accAddr := ta.ValidatorAccAddr()
 
 	// ---------------------------------------------------------------
 	// Step 1: No ceremony exists yet.
@@ -95,7 +94,7 @@ func TestKeyCeremonyFullLifecycle(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 2: Register genesis validator's Pallas key via ABCI tx.
 	// ---------------------------------------------------------------
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	state = getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
@@ -171,13 +170,12 @@ func TestKeyCeremonyDealTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
-	accAddr := ta.ValidatorAccAddr()
 	G := elgamal.PallasGenerator()
 
 	// ---------------------------------------------------------------
 	// Step 1: Register and deal.
 	// ---------------------------------------------------------------
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
 	require.NoError(t, err)
@@ -212,7 +210,7 @@ func TestKeyCeremonyDealTimeout(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 3: Complete the ceremony on a second attempt.
 	// ---------------------------------------------------------------
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	env2, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
 	require.NoError(t, err)
@@ -244,10 +242,9 @@ func TestKeyCeremonyAckMempoolBlocked(t *testing.T) {
 
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
 	valAddr := ta.ValidatorOperAddr()
-	accAddr := ta.ValidatorAccAddr()
 
 	// Register and deal to put ceremony in DEALT state.
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	payloads := []*types.DealerPayload{
 		{
@@ -312,15 +309,15 @@ func TestKeyCeremonyDealRejectedBeforeRegistration(t *testing.T) {
 func TestKeyCeremonyDuplicateRegistrationRejected(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
-	accAddr := ta.ValidatorAccAddr()
+	valAddr := ta.ValidatorOperAddr()
 	pkBytes := pallasPk.Point.ToAffineCompressed()
 
 	// First registration succeeds.
-	registerPallasKey(t, ta, accAddr, pkBytes)
+	registerPallasKey(t, ta, valAddr, pkBytes)
 
 	// Second registration with the same address should fail.
 	msg := &types.MsgRegisterPallasKey{
-		Creator:  accAddr,
+		Creator:  valAddr,
 		PallasPk: pkBytes,
 	}
 	txBytes := ta.MustBuildSignedCeremonyTx(msg)
@@ -353,10 +350,9 @@ func TestKeyCeremonyEAKeyVerification(t *testing.T) {
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
-	accAddr := ta.ValidatorAccAddr()
 
 	// Register and deal with real ECIES encryption.
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	G := elgamal.PallasGenerator()
 	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
@@ -436,10 +432,9 @@ func TestReInitializeElectionAuthority_AllowedWhenConfirmed(t *testing.T) {
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
-	accAddr := ta.ValidatorAccAddr()
 
 	// Complete the full ceremony lifecycle.
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	G := elgamal.PallasGenerator()
 	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
@@ -481,10 +476,9 @@ func TestReInitializeElectionAuthority_AllowedDuringRegistering(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	valAddr := ta.ValidatorOperAddr()
-	accAddr := ta.ValidatorAccAddr()
 
 	// Register a key — ceremony transitions to REGISTERING.
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	state := getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
@@ -508,9 +502,8 @@ func TestReInitializeElectionAuthority_RejectedDuringDealt(t *testing.T) {
 
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
 	valAddr := ta.ValidatorOperAddr()
-	accAddr := ta.ValidatorAccAddr()
 
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	payloads := []*types.DealerPayload{
 		{
@@ -541,11 +534,10 @@ func TestReInitializeElectionAuthority_NewCeremonyAfterReInit(t *testing.T) {
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
-	accAddr := ta.ValidatorAccAddr()
 	G := elgamal.PallasGenerator()
 
 	// Complete the first ceremony.
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
 	require.NoError(t, err)
@@ -567,7 +559,7 @@ func TestReInitializeElectionAuthority_NewCeremonyAfterReInit(t *testing.T) {
 	require.Equal(t, uint32(0), code)
 
 	// Complete a second ceremony.
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	env2, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
 	require.NoError(t, err)
@@ -601,11 +593,10 @@ func TestReInitializeElectionAuthority_RejectedWithActiveVotingSession(t *testin
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
-	accAddr := ta.ValidatorAccAddr()
 	G := elgamal.PallasGenerator()
 
 	// Complete the full ceremony.
-	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
 
 	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
 	require.NoError(t, err)
