@@ -66,7 +66,7 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 	tsCh := make(chan tsResult, 1)
 
 	go func() {
-		root, err := fetchNullifierIMTRoot(ctx, cfg.IMTServiceURL)
+		root, err := fetchNullifierIMTRoot(ctx, cfg.IMTServiceURL, height)
 		imtCh <- imtResult{root, err}
 	}()
 	go func() {
@@ -109,9 +109,10 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 
 // --- Nullifier IMT service client ---
 
-// fetchNullifierIMTRoot queries the IMT service GET /root endpoint.
+// fetchNullifierIMTRoot queries the IMT service GET /root endpoint and
+// validates that the tree was built to exactly the expected snapshot height.
 // Returns the 32-byte Poseidon tree root.
-func fetchNullifierIMTRoot(ctx context.Context, imtURL string) ([]byte, error) {
+func fetchNullifierIMTRoot(ctx context.Context, imtURL string, expectedHeight uint64) ([]byte, error) {
 	url := strings.TrimRight(imtURL, "/") + "/root"
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -131,10 +132,19 @@ func fetchNullifierIMTRoot(ctx context.Context, imtURL string) ([]byte, error) {
 	}
 
 	var result struct {
-		Root string `json:"root"`
+		Root         string  `json:"root"`
+		LatestHeight *uint64 `json:"latest_height"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode IMT response: %w", err)
+	}
+
+	// Validate that the IMT tree height matches the requested snapshot height.
+	if result.LatestHeight == nil {
+		return nil, fmt.Errorf("IMT service has no checkpoint height (tree not synced)")
+	}
+	if *result.LatestHeight != expectedHeight {
+		return nil, fmt.Errorf("IMT service tree height %d does not match requested snapshot height %d", *result.LatestHeight, expectedHeight)
 	}
 
 	// The IMT service returns "0x"-prefixed hex of a Pallas Fp element (32 bytes LE).
