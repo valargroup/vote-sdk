@@ -8,15 +8,10 @@
 #   — or —  make caddy   (from the sdk directory)
 
 46-101-255-48.sslip.io {
-	# CORS headers only for the nullifier service (zallyd already sets its own
-	# via enabled-unsafe-cors = true; adding them here too causes duplicate
-	# Access-Control-Allow-Origin values which browsers reject).
+	# No CORS headers here — the nullifier query-server sets its own via
+	# CorsLayer (same reason we skip them for zallyd; duplicates cause browsers
+	# to reject the response with "multiple values" errors).
 	handle_path /nullifier/* {
-		header {
-			Access-Control-Allow-Origin *
-			Access-Control-Allow-Methods "GET, POST, OPTIONS"
-			Access-Control-Allow-Headers "Content-Type"
-		}
 		reverse_proxy localhost:3000
 	}
 
