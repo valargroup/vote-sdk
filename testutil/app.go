@@ -373,6 +373,15 @@ func (ta *TestApp) ValidatorOperAddr() string {
 	return vals[0].OperatorAddress
 }
 
+// ValidatorAccAddr returns the account (bech32 acc) address of the genesis
+// validator's operator key. Same raw bytes as ValidatorOperAddr but encoded
+// with the account prefix. Use this as the Creator field in ceremony messages
+// that are handled by RegisterPallasKey and similar handlers which derive the
+// valoper address internally from the account address.
+func (ta *TestApp) ValidatorAccAddr() string {
+	return sdk.AccAddress(ta.ValPrivKey.PubKey().Address()).String()
+}
+
 // NextBlock commits an empty block, advancing height and time by 5 seconds.
 // Triggers EndBlocker (commitment tree root computation).
 func (ta *TestApp) NextBlock() {

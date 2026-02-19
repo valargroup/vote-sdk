@@ -84,6 +84,7 @@ func TestKeyCeremonyFullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 
 	// ---------------------------------------------------------------
 	// Step 1: No ceremony exists yet.
@@ -94,7 +95,7 @@ func TestKeyCeremonyFullLifecycle(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 2: Register genesis validator's Pallas key via ABCI tx.
 	// ---------------------------------------------------------------
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	state = getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
@@ -117,7 +118,7 @@ func TestKeyCeremonyFullLifecycle(t *testing.T) {
 			Ciphertext:       env.Ciphertext,
 		},
 	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
+	dealEAKey(t, ta, accAddr, eaPkBytes, payloads)
 
 	state = getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
@@ -170,12 +171,13 @@ func TestKeyCeremonyDealTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 	G := elgamal.PallasGenerator()
 
 	// ---------------------------------------------------------------
 	// Step 1: Register and deal.
 	// ---------------------------------------------------------------
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
 	require.NoError(t, err)
@@ -186,7 +188,7 @@ func TestKeyCeremonyDealTimeout(t *testing.T) {
 			Ciphertext:       env.Ciphertext,
 		},
 	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
+	dealEAKey(t, ta, accAddr, eaPkBytes, payloads)
 
 	state := getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
@@ -210,7 +212,7 @@ func TestKeyCeremonyDealTimeout(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 3: Complete the ceremony on a second attempt.
 	// ---------------------------------------------------------------
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	env2, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
 	require.NoError(t, err)
@@ -221,7 +223,7 @@ func TestKeyCeremonyDealTimeout(t *testing.T) {
 			Ciphertext:       env2.Ciphertext,
 		},
 	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads2)
+	dealEAKey(t, ta, accAddr, eaPkBytes, payloads2)
 
 	ta.NextBlockWithPrepareProposal()
 
@@ -242,9 +244,10 @@ func TestKeyCeremonyAckMempoolBlocked(t *testing.T) {
 
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
 	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 
 	// Register and deal to put ceremony in DEALT state.
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	payloads := []*types.DealerPayload{
 		{
@@ -253,14 +256,14 @@ func TestKeyCeremonyAckMempoolBlocked(t *testing.T) {
 			Ciphertext:       bytes.Repeat([]byte{0xAB}, 48),      // dummy
 		},
 	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
+	dealEAKey(t, ta, accAddr, eaPkBytes, payloads)
 
 	state := getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
 
 	// Attempt to submit ack via mempool (CheckTx) — should be rejected.
 	ackMsg := &types.MsgAckExecutiveAuthorityKey{
-		Creator:      valAddr,
+		Creator:      accAddr,
 		AckSignature: bytes.Repeat([]byte{0xAC}, 32),
 	}
 	ackTx := testutil.MustEncodeAckCeremonyTx(ackMsg)
@@ -281,9 +284,10 @@ func TestKeyCeremonyDealRejectedBeforeRegistration(t *testing.T) {
 
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
 	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 
 	msg := &types.MsgDealExecutiveAuthorityKey{
-		Creator: valAddr,
+		Creator: accAddr,
 		EaPk:    eaPkBytes,
 		Payloads: []*types.DealerPayload{
 			{
@@ -309,15 +313,15 @@ func TestKeyCeremonyDealRejectedBeforeRegistration(t *testing.T) {
 func TestKeyCeremonyDuplicateRegistrationRejected(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
-	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 	pkBytes := pallasPk.Point.ToAffineCompressed()
 
 	// First registration succeeds.
-	registerPallasKey(t, ta, valAddr, pkBytes)
+	registerPallasKey(t, ta, accAddr, pkBytes)
 
 	// Second registration with the same address should fail.
 	msg := &types.MsgRegisterPallasKey{
-		Creator:  valAddr,
+		Creator:  accAddr,
 		PallasPk: pkBytes,
 	}
 	txBytes := ta.MustBuildSignedCeremonyTx(msg)
@@ -350,9 +354,10 @@ func TestKeyCeremonyEAKeyVerification(t *testing.T) {
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 
 	// Register and deal with real ECIES encryption.
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	G := elgamal.PallasGenerator()
 	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
@@ -365,7 +370,7 @@ func TestKeyCeremonyEAKeyVerification(t *testing.T) {
 			Ciphertext:       env.Ciphertext,
 		},
 	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
+	dealEAKey(t, ta, accAddr, eaPkBytes, payloads)
 
 	// Auto-ack via PrepareProposal.
 	ta.NextBlockWithPrepareProposal()
@@ -403,14 +408,14 @@ func reInitializeEA(t *testing.T, ta *testutil.TestApp, creator string) uint32 {
 func TestReInitializeElectionAuthority_AllowedWhenNoCeremony(t *testing.T) {
 	ta, _, _, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
-	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 
 	// No ceremony exists yet.
 	state := getCeremonyState(t, ta)
 	require.Nil(t, state)
 
 	// Re-initialize should succeed.
-	code := reInitializeEA(t, ta, valAddr)
+	code := reInitializeEA(t, ta, accAddr)
 	require.Equal(t, uint32(0), code,
 		"MsgReInitializeElectionAuthority should succeed when no ceremony exists")
 
@@ -432,9 +437,10 @@ func TestReInitializeElectionAuthority_AllowedWhenConfirmed(t *testing.T) {
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 
 	// Complete the full ceremony lifecycle.
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	G := elgamal.PallasGenerator()
 	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
@@ -447,14 +453,14 @@ func TestReInitializeElectionAuthority_AllowedWhenConfirmed(t *testing.T) {
 			Ciphertext:       env.Ciphertext,
 		},
 	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
+	dealEAKey(t, ta, accAddr, eaPkBytes, payloads)
 	ta.NextBlockWithPrepareProposal()
 
 	state := getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status)
 
 	// Re-initialize should succeed from CONFIRMED state.
-	code := reInitializeEA(t, ta, valAddr)
+	code := reInitializeEA(t, ta, accAddr)
 	require.Equal(t, uint32(0), code,
 		"MsgReInitializeElectionAuthority should succeed when ceremony is CONFIRMED")
 
@@ -475,16 +481,16 @@ func TestReInitializeElectionAuthority_AllowedWhenConfirmed(t *testing.T) {
 func TestReInitializeElectionAuthority_AllowedDuringRegistering(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
-	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 
 	// Register a key — ceremony transitions to REGISTERING.
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	state := getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
 
 	// Re-initialize should succeed (REGISTERING is not a blocking state).
-	code := reInitializeEA(t, ta, valAddr)
+	code := reInitializeEA(t, ta, accAddr)
 	require.Equal(t, uint32(0), code,
 		"MsgReInitializeElectionAuthority should be allowed during REGISTERING")
 
@@ -502,8 +508,9 @@ func TestReInitializeElectionAuthority_RejectedDuringDealt(t *testing.T) {
 
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
 	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	payloads := []*types.DealerPayload{
 		{
@@ -512,13 +519,13 @@ func TestReInitializeElectionAuthority_RejectedDuringDealt(t *testing.T) {
 			Ciphertext:       bytes.Repeat([]byte{0xAB}, 48),      // dummy
 		},
 	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
+	dealEAKey(t, ta, accAddr, eaPkBytes, payloads)
 
 	state := getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
 
 	// Re-initialize should be rejected.
-	code := reInitializeEA(t, ta, valAddr)
+	code := reInitializeEA(t, ta, accAddr)
 	require.NotEqual(t, uint32(0), code,
 		"MsgReInitializeElectionAuthority should be rejected during DEALT")
 }
@@ -534,10 +541,11 @@ func TestReInitializeElectionAuthority_NewCeremonyAfterReInit(t *testing.T) {
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 	G := elgamal.PallasGenerator()
 
 	// Complete the first ceremony.
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
 	require.NoError(t, err)
@@ -548,18 +556,18 @@ func TestReInitializeElectionAuthority_NewCeremonyAfterReInit(t *testing.T) {
 			Ciphertext:       env.Ciphertext,
 		},
 	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
+	dealEAKey(t, ta, accAddr, eaPkBytes, payloads)
 	ta.NextBlockWithPrepareProposal()
 
 	state := getCeremonyState(t, ta)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status)
 
 	// Re-initialize.
-	code := reInitializeEA(t, ta, valAddr)
+	code := reInitializeEA(t, ta, accAddr)
 	require.Equal(t, uint32(0), code)
 
 	// Complete a second ceremony.
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	env2, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
 	require.NoError(t, err)
@@ -570,7 +578,7 @@ func TestReInitializeElectionAuthority_NewCeremonyAfterReInit(t *testing.T) {
 			Ciphertext:       env2.Ciphertext,
 		},
 	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads2)
+	dealEAKey(t, ta, accAddr, eaPkBytes, payloads2)
 	ta.NextBlockWithPrepareProposal()
 
 	state = getCeremonyState(t, ta)
@@ -593,10 +601,11 @@ func TestReInitializeElectionAuthority_RejectedWithActiveVotingSession(t *testin
 	require.NoError(t, err)
 
 	valAddr := ta.ValidatorOperAddr()
+	accAddr := ta.ValidatorAccAddr()
 	G := elgamal.PallasGenerator()
 
 	// Complete the full ceremony.
-	registerPallasKey(t, ta, valAddr, pallasPk.Point.ToAffineCompressed())
+	registerPallasKey(t, ta, accAddr, pallasPk.Point.ToAffineCompressed())
 
 	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
 	require.NoError(t, err)
@@ -607,7 +616,7 @@ func TestReInitializeElectionAuthority_RejectedWithActiveVotingSession(t *testin
 			Ciphertext:       env.Ciphertext,
 		},
 	}
-	dealEAKey(t, ta, valAddr, eaPkBytes, payloads)
+	dealEAKey(t, ta, accAddr, eaPkBytes, payloads)
 	ta.NextBlockWithPrepareProposal()
 
 	state := getCeremonyState(t, ta)
@@ -621,7 +630,7 @@ func TestReInitializeElectionAuthority_RejectedWithActiveVotingSession(t *testin
 	ta.SeedVotingSession(setupMsg)
 
 	// Re-initialize should be rejected while a voting session is active.
-	code := reInitializeEA(t, ta, valAddr)
+	code := reInitializeEA(t, ta, accAddr)
 	require.NotEqual(t, uint32(0), code,
 		"MsgReInitializeElectionAuthority should be rejected with an active voting session")
 }
