@@ -744,15 +744,14 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_AfterReset() {
 // directly in DealerPayloads and AckExecutiveAuthorityKey.Creator.
 func (s *MsgServerTestSuite) registerValidators(n int) (addrs []string, pks [][]byte) {
 	for i := 0; i < n; i++ {
-		acc := testAccAddr(i + 1)
-		val := testValoperAddr(i + 1)
+		seed := byte(i + 1)
 		pk := testPallasPK()
 		_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
-			Creator:  acc,
+			Creator:  testAccAddr(seed),
 			PallasPk: pk,
 		})
 		s.Require().NoError(err)
-		addrs = append(addrs, val) // return valoper (what's stored in state)
+		addrs = append(addrs, testValoperAddr(seed)) // valoper form stored in state
 		pks = append(pks, pk)
 	}
 	return
@@ -1144,20 +1143,17 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 		pk *elgamal.PublicKey
 	}
 	validators := make([]validatorKeys, numValidators)
-	// accAddrs are used as msg.Creator; valoperAddrs are stored in ceremony state.
-	accAddrs := make([]string, numValidators)
 	addrs := make([]string, numValidators) // valoper addresses stored in state
 	for i := range validators {
 		sk, pk := elgamal.KeyGen(rand.Reader)
 		validators[i] = validatorKeys{sk: sk, pk: pk}
-		accAddrs[i] = testAccAddr(i + 1)
-		addrs[i] = testValoperAddr(i + 1)
+		addrs[i] = testValoperAddr(byte(i + 1))
 	}
 
 	// 2. Register all 3 pk_i via MsgRegisterPallasKey.
 	for i, v := range validators {
 		_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
-			Creator:  accAddrs[i],
+			Creator:  testAccAddr(byte(i + 1)),
 			PallasPk: v.pk.Point.ToAffineCompressed(),
 		})
 		s.Require().NoError(err, "register validator %d", i)
