@@ -1,7 +1,7 @@
 BINARY = zallyd
 HOME_DIR = $(HOME)/.zallyd
 
-.PHONY: install install-ffi init start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi clean-multi caddy
+.PHONY: install install-ffi init start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi status-multi clean-multi caddy
 
 ## install: Build and install the zallyd binary to $GOPATH/bin
 install:
@@ -47,6 +47,42 @@ stop-multi:
 	else \
 		echo "No PID file found at $(HOME)/.zallyd-multi-pids"; \
 	fi
+
+## status-multi: Show running status of all 3 validators (process + RPC health)
+status-multi:
+	@echo "=== Multi-Validator Status ==="
+	@for i in 1 2 3; do \
+		home="$(HOME)/.zallyd-val$$i"; \
+		rpc_port=$$((26057 + $$i * 100)); \
+		api_port=$$((1318 + $$i * 100)); \
+		echo ""; \
+		echo "--- Validator $$i (home: $$home) ---"; \
+		proc=$$(pgrep -f "zallyd start --home .*val$$i$$" 2>/dev/null | head -1); \
+		if [ -n "$$proc" ]; then \
+			echo "  Process : RUNNING (PID $$proc)"; \
+		else \
+			echo "  Process : STOPPED"; \
+		fi; \
+		rpc_resp=$$(curl -sf --max-time 2 "http://127.0.0.1:$$rpc_port/status" 2>/dev/null); \
+		if [ -n "$$rpc_resp" ]; then \
+			latest=$$(echo "$$rpc_resp" | grep -o '"latest_block_height":"[^"]*"' | head -1 | cut -d'"' -f4); \
+			moniker=$$(echo "$$rpc_resp" | grep -o '"moniker":"[^"]*"' | head -1 | cut -d'"' -f4); \
+			catching=$$(echo "$$rpc_resp" | grep -o '"catching_up":[a-z]*' | cut -d':' -f2); \
+			echo "  RPC     : UP (port $$rpc_port)"; \
+			echo "  Moniker : $$moniker"; \
+			echo "  Block   : $$latest"; \
+			echo "  Syncing : $$catching"; \
+		else \
+			echo "  RPC     : UNREACHABLE (port $$rpc_port)"; \
+		fi; \
+		api_resp=$$(curl -sf --max-time 2 "http://127.0.0.1:$$api_port/cosmos/base/tendermint/v1beta1/syncing" 2>/dev/null); \
+		if [ -n "$$api_resp" ]; then \
+			echo "  REST API: UP (port $$api_port)"; \
+		else \
+			echo "  REST API: UNREACHABLE (port $$api_port)"; \
+		fi; \
+	done
+	@echo ""
 
 ## clean-multi: Remove all multi-validator data directories
 clean-multi: stop-multi
