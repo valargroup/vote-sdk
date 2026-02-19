@@ -182,6 +182,13 @@ $BINARY keys add validator --keyring-backend test --home "$HOME_VAL1"
 VAL1_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_VAL1")
 echo "Val1 address: $VAL1_ADDR"
 
+# Import the deterministic vote-manager key (matches E2E test constant).
+# This key must be funded in genesis so MsgCreateVotingSession can be signed.
+VM_PRIVKEY="b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee"
+$BINARY keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_VAL1"
+MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_VAL1")
+echo "Manager address:   $MANAGER_ADDR"
+
 # Initialize keys for validators 2 and 3 (separate home dirs, but we need
 # their addresses now to add as genesis accounts).
 echo ""
@@ -206,8 +213,10 @@ done
 # Save val1 address too.
 echo "$VAL1_ADDR" > "$HOME_VAL1/validator_address.txt"
 
-# Add genesis accounts for all 3 validators (val1 gets more for gentx).
+# Add genesis accounts for all 3 validators and the vote manager.
 $BINARY genesis add-genesis-account "$VAL1_ADDR" "$GENESIS_BALANCE" \
+    --keyring-backend test --home "$HOME_VAL1"
+$BINARY genesis add-genesis-account "$MANAGER_ADDR" "10000000${DENOM}" \
     --keyring-backend test --home "$HOME_VAL1"
 
 for i in 2 3; do
