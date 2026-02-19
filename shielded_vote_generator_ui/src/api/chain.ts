@@ -133,6 +133,39 @@ export interface HelperStatus {
   tree?: HelperTreeStatus;
 }
 
+// -- Cosmos SDK staking types --
+
+export interface ValidatorDescription {
+  moniker?: string;
+  identity?: string;
+  website?: string;
+  security_contact?: string;
+  details?: string;
+}
+
+export interface ValidatorCommission {
+  commission_rates?: {
+    rate?: string;       // decimal string e.g. "0.100000000000000000"
+    max_rate?: string;
+    max_change_rate?: string;
+  };
+  update_time?: string;
+}
+
+export interface Validator {
+  operator_address?: string;
+  consensus_pubkey?: { "@type"?: string; key?: string };
+  jailed?: boolean;
+  status?: string;           // BOND_STATUS_BONDED | BOND_STATUS_UNBONDING | BOND_STATUS_UNBONDED
+  tokens?: string;           // total delegated tokens (raw amount)
+  delegator_shares?: string;
+  description?: ValidatorDescription;
+  unbonding_height?: string;
+  unbonding_time?: string;
+  commission?: ValidatorCommission;
+  min_self_delegation?: string;
+}
+
 // -- API methods --
 
 export async function getCeremonyState(): Promise<CeremonyState> {
@@ -201,6 +234,31 @@ export async function getVoteSummary(
   return fetchJson<VoteSummaryResponse>(
     `/zally/v1/vote-summary/${roundIdHex}`
   );
+}
+
+export async function getValidators(): Promise<{ validators: Validator[]; pagination?: { total?: string } }> {
+  // Fetch all bonded validators first, then unbonding/unbonded.
+  const bonded = await fetchJson<{ validators: Validator[]; pagination?: { total?: string } }>(
+    "/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED&pagination.limit=200"
+  );
+  let all = bonded.validators ?? [];
+
+  // Also fetch unbonding + unbonded so the page is complete.
+  try {
+    const [unbonding, unbonded] = await Promise.all([
+      fetchJson<{ validators: Validator[] }>(
+        "/cosmos/staking/v1beta1/validators?status=BOND_STATUS_UNBONDING&pagination.limit=200"
+      ),
+      fetchJson<{ validators: Validator[] }>(
+        "/cosmos/staking/v1beta1/validators?status=BOND_STATUS_UNBONDED&pagination.limit=200"
+      ),
+    ]);
+    all = [...all, ...(unbonding.validators ?? []), ...(unbonded.validators ?? [])];
+  } catch {
+    // If the extra queries fail (e.g. custom chain without these statuses), just use bonded.
+  }
+
+  return { validators: all };
 }
 
 // submitSession was removed: MsgCreateVotingSession is now a standard Cosmos

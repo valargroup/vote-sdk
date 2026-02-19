@@ -1,6 +1,7 @@
 # make up log files
 ingest-serve.log
 zallyd.log
+.claude/**
 
 # Go binary
 sdk/zallyd

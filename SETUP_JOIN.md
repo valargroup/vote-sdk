@@ -74,9 +74,10 @@ echo "New validator address: $NEW_VAL_ADDR"
 
 Edit `~/.zallyd/config/config.toml`:
 
+TODO: FIX
 ```bash
 # Set persistent peer to the genesis validator
-sed -i 's|persistent_peers = ""|persistent_peers = "daf4ff4836a8210006b59a3ad1c196e6dac3cd65@164.92.137.124:26656"|' ~/.zallyd/config/config.toml
+sed -i 's|persistent_peers = ""|persistent_peers = "1a96912d840d4886dd1039187bf246b206ea7901@164.92.137.124:26656"|' ~/.zallyd/config/config.toml
 ```
 
 ## Step 5 — Configure app.toml

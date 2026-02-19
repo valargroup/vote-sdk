@@ -7,7 +7,7 @@ import { JsonView } from "./components/JsonView";
 import { RoundEditor } from "./components/RoundEditor";
 import { RoundsList } from "./components/RoundsList";
 import { useStore } from "./store/useStore";
-import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check } from "lucide-react";
+import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck } from "lucide-react";
 import type { Proposal, RoundSettings, RoundStatus, VotingRound } from "./types";
 import {
   LIGHTWALLETD_ENDPOINTS,
@@ -21,7 +21,7 @@ import * as cosmosTx from "./api/cosmosTx";
 import { useWallet } from "./hooks/useWallet";
 import type { UseWallet } from "./hooks/useWallet";
 
-type Section = "about" | "rounds" | "builder" | "json" | "downloads" | "preview" | "settings" | "vote-status";
+type Section = "about" | "rounds" | "builder" | "json" | "downloads" | "preview" | "settings" | "vote-status" | "validators";
 
 function App() {
   const store = useStore();
@@ -335,6 +335,9 @@ function App() {
           </div>
         )}
 
+        {/* Validators */}
+        {section === "validators" && <ValidatorsView />}
+
         {/* Vote status */}
         {section === "vote-status" && <VoteStatusView />}
 
@@ -345,7 +348,7 @@ function App() {
         {publishModal && (
           <PublishModal
             round={store.rounds.find((r) => r.id === publishModal)!}
-            signerAddress={wallet.address}
+            wallet={wallet}
             status={publishStatus}
             result={publishResult}
             error={publishError}
@@ -1217,7 +1220,7 @@ function SettingsStubRow({
 
 function PublishModal({
   round,
-  signerAddress,
+  wallet,
   status,
   result,
   error,
@@ -1225,19 +1228,28 @@ function PublishModal({
   onClose,
 }: {
   round: VotingRound;
-  signerAddress: string | null;
+  wallet: UseWallet;
   status: "idle" | "publishing" | "ok" | "error";
   result: string;
   error: string;
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const [devKey, setDevKey] = useState("");
+  const [devKeyVisible, setDevKeyVisible] = useState(false);
+  const walletConnected = !!wallet.address;
+
+  const handleConnectDev = async () => {
+    await wallet.connectDev(devKey);
+    setDevKey("");
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="bg-surface-1 border border-border rounded-xl shadow-xl max-w-md w-full mx-4">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
           <h3 className="text-sm font-semibold text-text-primary">
-            Publish to chain
+            {walletConnected ? "Publish to chain" : "Connect admin wallet"}
           </h3>
           <button
             onClick={onClose}
@@ -1248,48 +1260,108 @@ function PublishModal({
         </div>
 
         <div className="px-5 py-4 space-y-3">
-          <div className="space-y-2">
-            <SettingsStubRow label="Round" value={round.name} />
-            <SettingsStubRow
-              label="Proposals"
-              value={String(round.proposals.length)}
-            />
-            <SettingsStubRow
-              label="Snapshot height"
-              value={round.settings.snapshotHeight || "0 (stub)"}
-            />
-            <SettingsStubRow
-              label="End time"
-              value={
-                round.settings.endTime
-                  ? new Date(round.settings.endTime).toLocaleString()
-                  : "7 days from now (default)"
-              }
-            />
-            <SettingsStubRow
-              label="Signer"
-              value={
-                signerAddress
-                  ? `${signerAddress.slice(0, 12)}...${signerAddress.slice(-6)}`
-                  : "No wallet connected"
-              }
-            />
-          </div>
+          {walletConnected ? (
+            <>
+              <div className="space-y-2">
+                <SettingsStubRow label="Round" value={round.name} />
+                <SettingsStubRow
+                  label="Proposals"
+                  value={String(round.proposals.length)}
+                />
+                <SettingsStubRow
+                  label="Snapshot height"
+                  value={round.settings.snapshotHeight || "0 (stub)"}
+                />
+                <SettingsStubRow
+                  label="End time"
+                  value={
+                    round.settings.endTime
+                      ? new Date(round.settings.endTime).toLocaleString()
+                      : "7 days from now (default)"
+                  }
+                />
+                <SettingsStubRow
+                  label="Signer"
+                  value={`${wallet.address!.slice(0, 12)}...${wallet.address!.slice(-6)}`}
+                />
+              </div>
 
-          {status === "ok" && (
-            <div className="bg-success/10 border border-success/30 rounded-lg p-3">
-              <p className="text-[11px] text-success font-semibold mb-1">
-                Published successfully
-              </p>
-              <p className="text-[10px] text-text-secondary font-mono break-all">
-                TX: {result}
-              </p>
-            </div>
-          )}
+              {status === "ok" && (
+                <div className="bg-success/10 border border-success/30 rounded-lg p-3">
+                  <p className="text-[11px] text-success font-semibold mb-1">
+                    Published successfully
+                  </p>
+                  <p className="text-[10px] text-text-secondary font-mono break-all">
+                    TX: {result}
+                  </p>
+                </div>
+              )}
 
-          {status === "error" && (
-            <div className="bg-danger/10 border border-danger/30 rounded-lg p-3">
-              <p className="text-[11px] text-danger">{error}</p>
+              {status === "error" && (
+                <div className="bg-danger/10 border border-danger/30 rounded-lg p-3">
+                  <p className="text-[11px] text-danger">{error}</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="space-y-3">
+              <button
+                onClick={wallet.connect}
+                disabled={wallet.connecting}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {wallet.connecting ? (
+                  <><Loader2 size={14} className="animate-spin" /> Connecting...</>
+                ) : (
+                  <><Wallet size={14} /> Connect Keplr</>
+                )}
+              </button>
+
+              {wallet.error && (
+                <div className="flex items-start gap-1.5 text-[11px] text-danger">
+                  <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                  <span>{wallet.error}</span>
+                </div>
+              )}
+
+              <details className="group">
+                <summary className="text-[11px] text-text-muted cursor-pointer hover:text-text-secondary">
+                  Paste dev private key
+                </summary>
+                <div className="mt-2 space-y-2">
+                  <div className="relative">
+                    <input
+                      type={devKeyVisible ? "text" : "password"}
+                      value={devKey}
+                      onChange={(e) => setDevKey(e.target.value.trim())}
+                      placeholder="64-character hex private key"
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="w-full px-3 py-2 pr-9 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setDevKeyVisible((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-secondary cursor-pointer"
+                      title={devKeyVisible ? "Hide" : "Show"}
+                    >
+                      {devKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                  {devKey.length > 0 && devKey.length !== 64 && (
+                    <p className="text-[10px] text-warning">
+                      Key must be exactly 64 hex characters ({devKey.length}/64)
+                    </p>
+                  )}
+                  <button
+                    onClick={handleConnectDev}
+                    disabled={devKey.length !== 64 || wallet.connecting}
+                    className="px-3 py-1.5 bg-surface-3 hover:bg-surface-2 text-text-secondary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    Connect
+                  </button>
+                </div>
+              </details>
             </div>
           )}
         </div>
@@ -1301,7 +1373,7 @@ function PublishModal({
           >
             {status === "ok" ? "Done" : "Cancel"}
           </button>
-          {status !== "ok" && (
+          {status !== "ok" && walletConnected && (
             <button
               onClick={onConfirm}
               disabled={status === "publishing"}
@@ -1321,6 +1393,299 @@ function PublishModal({
     </div>
   );
 }
+
+/* ── Validators view ─────────────────────────────────────────── */
+
+const BOND_STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  BOND_STATUS_BONDED: { label: "Active", color: "bg-success/20 text-success" },
+  BOND_STATUS_UNBONDING: { label: "Unbonding", color: "bg-warning/20 text-warning" },
+  BOND_STATUS_UNBONDED: { label: "Inactive", color: "bg-surface-3 text-text-muted" },
+};
+
+function formatTokens(raw: string | undefined): string {
+  if (!raw) return "0";
+  // Cosmos SDK tokens are typically in micro denomination (1e6).
+  // For display, show the integer with commas. Chains may vary in denomination
+  // so we show the raw value formatted with locale separators.
+  const n = BigInt(raw);
+  return n.toLocaleString();
+}
+
+function formatCommission(rate: string | undefined): string {
+  if (!rate) return "—";
+  const pct = parseFloat(rate) * 100;
+  return `${pct.toFixed(1)}%`;
+}
+
+function ValidatorsView() {
+  const [validators, setValidators] = useState<chainApi.Validator[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [sortBy, setSortBy] = useState<"power" | "commission" | "moniker">("power");
+  const [ceremony, setCeremony] = useState<chainApi.CeremonyState | null>(null);
+
+  const fetchValidators = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [valResp, ceremonyResp] = await Promise.all([
+        chainApi.getValidators(),
+        chainApi.getCeremonyState().catch(() => null),
+      ]);
+      setValidators(valResp.validators ?? []);
+      setCeremony(ceremonyResp);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchValidators();
+  }, []);
+
+  // Build a set of ceremony validator addresses for cross-referencing.
+  const ceremonyValidators = new Set(
+    ceremony?.ceremony?.validators?.map((v) => v.validator_address) ?? []
+  );
+
+  // Sort validators.
+  const sorted = [...validators].sort((a, b) => {
+    if (sortBy === "power") {
+      return Number(BigInt(b.tokens ?? "0") - BigInt(a.tokens ?? "0"));
+    }
+    if (sortBy === "commission") {
+      const aRate = parseFloat(a.commission?.commission_rates?.rate ?? "0");
+      const bRate = parseFloat(b.commission?.commission_rates?.rate ?? "0");
+      return aRate - bRate;
+    }
+    // moniker
+    const aName = (a.description?.moniker ?? "").toLowerCase();
+    const bName = (b.description?.moniker ?? "").toLowerCase();
+    return aName.localeCompare(bName);
+  });
+
+  // Compute total bonded power for percentage display.
+  const totalPower = validators
+    .filter((v) => v.status === "BOND_STATUS_BONDED")
+    .reduce((sum, v) => sum + BigInt(v.tokens ?? "0"), BigInt(0));
+
+  const bondedCount = validators.filter((v) => v.status === "BOND_STATUS_BONDED").length;
+  const jailedCount = validators.filter((v) => v.jailed).length;
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-2xl mx-auto px-6 py-12">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-accent/15 flex items-center justify-center">
+              <Users size={22} className="text-accent" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-text-primary">
+                Validators
+              </h1>
+              <p className="text-[11px] text-text-muted">
+                Active validator set on the Zally chain
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={fetchValidators}
+            className="p-2 hover:bg-surface-3 rounded-lg text-text-muted hover:text-text-secondary cursor-pointer"
+            title="Refresh"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
+
+        {/* Summary stats */}
+        {!loading && !error && validators.length > 0 && (
+          <div className="grid grid-cols-3 gap-3 mb-6">
+            <div className="bg-surface-1 border border-border-subtle rounded-xl p-4 text-center">
+              <p className="text-lg font-bold text-text-primary">{bondedCount}</p>
+              <p className="text-[10px] text-text-muted uppercase tracking-wider">Active</p>
+            </div>
+            <div className="bg-surface-1 border border-border-subtle rounded-xl p-4 text-center">
+              <p className="text-lg font-bold text-text-primary">{validators.length}</p>
+              <p className="text-[10px] text-text-muted uppercase tracking-wider">Total</p>
+            </div>
+            <div className="bg-surface-1 border border-border-subtle rounded-xl p-4 text-center">
+              <p className="text-lg font-bold text-text-primary">{jailedCount}</p>
+              <p className="text-[10px] text-text-muted uppercase tracking-wider">Jailed</p>
+            </div>
+          </div>
+        )}
+
+        {/* Ceremony participation notice */}
+        {ceremony?.ceremony?.validators && ceremony.ceremony.validators.length > 0 && (
+          <div className="bg-accent/5 border border-accent/20 rounded-xl p-4 mb-6">
+            <div className="flex items-center gap-2 mb-1">
+              <ShieldCheck size={14} className="text-accent" />
+              <span className="text-xs font-semibold text-text-primary">
+                DKG ceremony
+              </span>
+            </div>
+            <p className="text-[11px] text-text-secondary">
+              {ceremony.ceremony.validators.length} validator{ceremony.ceremony.validators.length !== 1 ? "s" : ""} are
+              participating in the distributed key generation ceremony for shielded voting.
+              Validators marked with <ShieldCheck size={10} className="text-accent inline" /> below have registered their Pallas key.
+            </p>
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 rounded-lg p-3 mb-4">
+            <AlertCircle size={14} className="text-danger shrink-0" />
+            <p className="text-[11px] text-danger">{error}</p>
+          </div>
+        )}
+
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={20} className="text-text-muted animate-spin" />
+          </div>
+        )}
+
+        {!loading && !error && validators.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-xs text-text-muted">
+              No validators found on the chain.
+            </p>
+          </div>
+        )}
+
+        {/* Sort controls */}
+        {!loading && validators.length > 0 && (
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[10px] text-text-muted uppercase tracking-wider">Sort by</span>
+            {(["power", "commission", "moniker"] as const).map((key) => (
+              <button
+                key={key}
+                onClick={() => setSortBy(key)}
+                className={`px-2 py-0.5 rounded text-[11px] transition-colors cursor-pointer ${
+                  sortBy === key
+                    ? "bg-accent/15 text-accent"
+                    : "text-text-muted hover:text-text-secondary hover:bg-surface-2"
+                }`}
+              >
+                {key === "power" ? "Voting power" : key === "commission" ? "Commission" : "Name"}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Validator list */}
+        <div className="space-y-2">
+          {sorted.map((val, i) => {
+            const moniker = val.description?.moniker || "Unknown";
+            const statusInfo = BOND_STATUS_LABELS[val.status ?? ""] ?? {
+              label: val.status ?? "Unknown",
+              color: "bg-surface-3 text-text-muted",
+            };
+            const commission = formatCommission(val.commission?.commission_rates?.rate);
+            const tokens = val.tokens ?? "0";
+            const powerPct =
+              totalPower > BigInt(0) && val.status === "BOND_STATUS_BONDED"
+                ? Number((BigInt(tokens) * BigInt(10000)) / totalPower) / 100
+                : 0;
+            const isCeremonyParticipant = ceremonyValidators.has(val.operator_address ?? "");
+
+            return (
+              <div
+                key={val.operator_address ?? i}
+                className="bg-surface-1 border border-border-subtle rounded-xl p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      {/* Rank for bonded validators */}
+                      {val.status === "BOND_STATUS_BONDED" && sortBy === "power" && (
+                        <span className="text-[10px] font-bold text-text-muted bg-surface-3 rounded px-1.5 py-0.5 shrink-0">
+                          #{i + 1}
+                        </span>
+                      )}
+                      <span className="text-xs font-semibold text-text-primary truncate">
+                        {moniker}
+                      </span>
+                      {isCeremonyParticipant && (
+                        <span title="DKG ceremony participant"><ShieldCheck size={12} className="text-accent shrink-0" /></span>
+                      )}
+                      {val.jailed && (
+                        <span title="Jailed"><ShieldAlert size={12} className="text-danger shrink-0" /></span>
+                      )}
+                      <span className={`text-[9px] px-2 py-0.5 rounded-full shrink-0 ${statusInfo.color}`}>
+                        {statusInfo.label}
+                      </span>
+                    </div>
+
+                    {/* Operator address */}
+                    <p className="text-[10px] text-text-muted font-mono mt-1 truncate">
+                      {val.operator_address}
+                    </p>
+
+                    {/* Description */}
+                    {val.description?.details && (
+                      <p className="text-[10px] text-text-secondary mt-1 line-clamp-2">
+                        {val.description.details}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Stats column */}
+                  <div className="shrink-0 text-right space-y-1">
+                    <div>
+                      <p className="text-[10px] text-text-muted">Voting power</p>
+                      <p className="text-[11px] font-mono text-text-primary">
+                        {formatTokens(tokens)}
+                        {powerPct > 0 && (
+                          <span className="text-text-muted ml-1">({powerPct.toFixed(1)}%)</span>
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-text-muted">Commission</p>
+                      <p className="text-[11px] text-text-primary">{commission}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Power bar */}
+                {val.status === "BOND_STATUS_BONDED" && powerPct > 0 && (
+                  <div className="mt-2 h-1 bg-surface-3 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-accent/60 transition-all duration-500"
+                      style={{ width: `${Math.max(1, powerPct)}%` }}
+                    />
+                  </div>
+                )}
+
+                {/* Website link */}
+                {val.description?.website && (
+                  <div className="mt-2">
+                    <a
+                      href={val.description.website.startsWith("http") ? val.description.website : `https://${val.description.website}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[10px] text-accent hover:text-accent-glow transition-colors"
+                    >
+                      <ExternalLink size={9} />
+                      {val.description.website.replace(/^https?:\/\//, "")}
+                    </a>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── On-chain rounds view ────────────────────────────────────── */
 
 const STATUS_MAP: Record<string | number, { label: string; color: string }> = {
   SESSION_STATUS_ACTIVE: { label: "Active", color: "bg-success/20 text-success" },
