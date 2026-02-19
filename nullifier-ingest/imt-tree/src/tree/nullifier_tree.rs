@@ -29,6 +29,8 @@ pub struct NullifierTree {
     /// Pre-computed empty subtree hashes for each level.
     empty_hashes: [Fp; TREE_DEPTH],
     root: Fp,
+    /// The block height the tree was built from (if known).
+    height: Option<u64>,
 }
 
 impl NullifierTree {
@@ -66,12 +68,22 @@ impl NullifierTree {
         let (root, levels) = build_levels(leaves, &empty_hashes);
         eprintln!("  Tree build ({} levels): {:.1}s", levels.len(), t1.elapsed().as_secs_f64());
 
-        Self { ranges, levels, empty_hashes, root }
+        Self { ranges, levels, empty_hashes, root, height: None }
     }
 
     /// The Merkle root of the tree as an `Fp`.
     pub fn root(&self) -> Fp {
         self.root
+    }
+
+    /// The block height the tree was built from, if known.
+    pub fn height(&self) -> Option<u64> {
+        self.height
+    }
+
+    /// Set the block height the tree was built from.
+    pub fn set_height(&mut self, height: u64) {
+        self.height = Some(height);
     }
 
     /// The gap ranges committed in the tree.
@@ -164,16 +176,16 @@ impl NullifierTree {
     /// On reload via [`load_full`](NullifierTree::load_full), zero hashing is
     /// required -- startup goes from minutes to seconds.
     pub fn save_full(&self, path: &Path) -> Result<()> {
-        save_full_tree(path, &self.ranges, &self.levels, self.root)
+        save_full_tree(path, &self.ranges, &self.levels, self.root, self.height)
     }
 
     /// Load a full tree from a binary file written by [`save_full`](NullifierTree::save_full).
     ///
     /// Zero hashing -- all data is read directly from the file.
     pub fn load_full(path: &Path) -> Result<Self> {
-        let (ranges, levels, root) = load_full_tree(path)?;
+        let (ranges, levels, root, height) = load_full_tree(path)?;
         let empty_hashes = precompute_empty_hashes();
-        Ok(Self { ranges, levels, empty_hashes, root })
+        Ok(Self { ranges, levels, empty_hashes, root, height })
     }
 }
 
