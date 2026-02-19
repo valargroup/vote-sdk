@@ -69,11 +69,6 @@
 		9E41FFB02CB2814500783CFD /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 9E2F1C8B280ED6A7004E65FE /* LaunchScreen.storyboard */; };
 		9E41FFB12CB2814500783CFD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9E90751D2A269BE300269308 /* Assets.xcassets */; };
 		9E41FFB22CB2814500783CFD /* PartnerKeys.plist in Resources */ = {isa = PBXBuildFile; fileRef = 9E599F312C3EEEF3000E4997 /* PartnerKeys.plist */; };
-		AA00000227FE0000A0B1C2D3 /* voting-config-local.json in Resources */ = {isa = PBXBuildFile; fileRef = AA00000127FE0000A0B1C2D3 /* voting-config-local.json */; };
-		AA00000327FE0000A0B1C2D3 /* voting-config-local.json in Resources */ = {isa = PBXBuildFile; fileRef = AA00000127FE0000A0B1C2D3 /* voting-config-local.json */; };
-		AA00000427FE0000A0B1C2D3 /* voting-config-local.json in Resources */ = {isa = PBXBuildFile; fileRef = AA00000127FE0000A0B1C2D3 /* voting-config-local.json */; };
-		AA00000527FE0000A0B1C2D3 /* voting-config-local.json in Resources */ = {isa = PBXBuildFile; fileRef = AA00000127FE0000A0B1C2D3 /* voting-config-local.json */; };
-		AA00000627FE0000A0B1C2D3 /* voting-config-local.json in Resources */ = {isa = PBXBuildFile; fileRef = AA00000127FE0000A0B1C2D3 /* voting-config-local.json */; };
 		9E41FFB32CB2814500783CFD /* whatsNew.json in Resources */ = {isa = PBXBuildFile; fileRef = 9E6C98472BF4C65F00EACDCB /* whatsNew.json */; };
 		9E41FFB52CB2814500783CFD /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9EDDAF6C2BA2D71700A69A07 /* PrivacyInfo.xcprivacy */; };
 		9E41FFB62CB2814500783CFD /* Colors.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9E5AAEBF2A67CEC4003F283D /* Colors.xcassets */; };
@@ -232,7 +227,6 @@
 		9E6713F02897F81B00A6796F /* MultiLineTextFieldTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiLineTextFieldTests.swift; sourceTree = "<group>"; };
 		9E683E462B0377F0002E7B5D /* WalletNukeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletNukeTests.swift; sourceTree = "<group>"; };
 		9E6C98472BF4C65F00EACDCB /* whatsNew.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = whatsNew.json; sourceTree = "<group>"; };
-		AA00000127FE0000A0B1C2D3 /* voting-config-local.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "voting-config-local.json"; sourceTree = "<group>"; };
 		9E7225F02889539300DF7F17 /* SettingsSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSnapshotTests.swift; sourceTree = "<group>"; };
 		9E74CCCF29DC0628003D6E32 /* ReviewRequestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewRequestTests.swift; sourceTree = "<group>"; };
 		9E7CB6112869882D00A02233 /* TransactionListSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionListSnapshotTests.swift; sourceTree = "<group>"; };
@@ -674,7 +668,6 @@
 				9E2706652AFF99F5000DA6EC /* ReadTransactionsStorageModel.xcdatamodeld */,
 				9EDDAF6C2BA2D71700A69A07 /* PrivacyInfo.xcprivacy */,
 				9E599F312C3EEEF3000E4997 /* PartnerKeys.plist */,
-				AA00000127FE0000A0B1C2D3 /* voting-config-local.json */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -792,6 +785,7 @@
 				0D26AE9A299E8196005260EE /* Sources */,
 				0D26AF70299E8196005260EE /* Frameworks */,
 				0D26AF78299E8196005260EE /* Resources */,
+				AA00000727FE0000A0B1C2D3 /* Copy Voting Config Override */,
 			);
 			buildRules = (
 			);
@@ -821,6 +815,7 @@
 				0D4E7A0126B364170058B01E /* Sources */,
 				0D4E7A0226B364170058B01E /* Frameworks */,
 				0D4E7A0326B364170058B01E /* Resources */,
+				AA00000727FE0000A0B1C2D3 /* Copy Voting Config Override */,
 			);
 			buildRules = (
 			);
@@ -886,6 +881,7 @@
 				9E41FFA52CB2814500783CFD /* Sources */,
 				9E41FFA92CB2814500783CFD /* Frameworks */,
 				9E41FFAE2CB2814500783CFD /* Resources */,
+				AA00000727FE0000A0B1C2D3 /* Copy Voting Config Override */,
 			);
 			buildRules = (
 			);
@@ -913,6 +909,7 @@
 				9E4AB2A12BA1BEE900F5D6DB /* Sources */,
 				9E4AB2A52BA1BEE900F5D6DB /* Frameworks */,
 				9E4AB2AC2BA1BEE900F5D6DB /* Resources */,
+				AA00000727FE0000A0B1C2D3 /* Copy Voting Config Override */,
 			);
 			buildRules = (
 			);
@@ -942,6 +939,7 @@
 				9E5AB46C2C94777800065483 /* Sources */,
 				9E5AB4702C94777800065483 /* Frameworks */,
 				9E5AB4752C94777800065483 /* Resources */,
+				AA00000727FE0000A0B1C2D3 /* Copy Voting Config Override */,
 			);
 			buildRules = (
 			);
@@ -1018,7 +1016,6 @@
 				9E89DF732CD27344002E5317 /* whatsNew_es.json in Resources */,
 				9E90751F2A269BE300269308 /* Assets.xcassets in Resources */,
 				9E599F332C3EEEF3000E4997 /* PartnerKeys.plist in Resources */,
-				AA00000227FE0000A0B1C2D3 /* voting-config-local.json in Resources */,
 				9E6C984A2BF4C65F00EACDCB /* whatsNew.json in Resources */,
 				9E5CFD132CE61B7200C95713 /* sending.json in Resources */,
 				9E5CFD182CE6215500C95713 /* sending-dark.json in Resources */,
@@ -1038,7 +1035,6 @@
 				9E89DF742CD27344002E5317 /* whatsNew_es.json in Resources */,
 				9E90751E2A269BE300269308 /* Assets.xcassets in Resources */,
 				9E599F322C3EEEF3000E4997 /* PartnerKeys.plist in Resources */,
-				AA00000327FE0000A0B1C2D3 /* voting-config-local.json in Resources */,
 				9E6C98492BF4C65F00EACDCB /* whatsNew.json in Resources */,
 				9E5CFD102CE61B7200C95713 /* sending.json in Resources */,
 				9E5CFD162CE6215500C95713 /* sending-dark.json in Resources */,
@@ -1072,7 +1068,6 @@
 				9E89DF702CD27344002E5317 /* whatsNew_es.json in Resources */,
 				9E41FFB12CB2814500783CFD /* Assets.xcassets in Resources */,
 				9E41FFB22CB2814500783CFD /* PartnerKeys.plist in Resources */,
-				AA00000427FE0000A0B1C2D3 /* voting-config-local.json in Resources */,
 				9E41FFB32CB2814500783CFD /* whatsNew.json in Resources */,
 				9E5CFD122CE61B7200C95713 /* sending.json in Resources */,
 				9E5CFD152CE6215500C95713 /* sending-dark.json in Resources */,
@@ -1092,7 +1087,6 @@
 				9E89DF712CD27344002E5317 /* whatsNew_es.json in Resources */,
 				9E4AB2B12BA1BEE900F5D6DB /* Assets.xcassets in Resources */,
 				9E599F342C3EEEF3000E4997 /* PartnerKeys.plist in Resources */,
-				AA00000527FE0000A0B1C2D3 /* voting-config-local.json in Resources */,
 				9E6C984B2BF4C65F00EACDCB /* whatsNew.json in Resources */,
 				9E5CFD112CE61B7200C95713 /* sending.json in Resources */,
 				9E5CFD192CE6215500C95713 /* sending-dark.json in Resources */,
@@ -1112,7 +1106,6 @@
 				9E89DF722CD27344002E5317 /* whatsNew_es.json in Resources */,
 				9E5AB4782C94777800065483 /* Assets.xcassets in Resources */,
 				9E5AB4792C94777800065483 /* PartnerKeys.plist in Resources */,
-				AA00000627FE0000A0B1C2D3 /* voting-config-local.json in Resources */,
 				9E5AB47A2C94777800065483 /* whatsNew.json in Resources */,
 				9E5CFD0F2CE61B7200C95713 /* sending.json in Resources */,
 				9E5CFD172CE6215500C95713 /* sending-dark.json in Resources */,
@@ -1126,6 +1119,24 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		AA00000727FE0000A0B1C2D3 /* Copy Voting Config Override */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Voting Config Override";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/zsh;
+			shellScript = "# Copy optional local voting config override into the app bundle (DEBUG only).\n# If the file is missing, the app falls back to CDN then hardcoded defaults.\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n  LOCAL_CFG=\"${SRCROOT}/secant/Resources/voting-config-local.json\"\n  if [ -f \"$LOCAL_CFG\" ]; then\n    echo \"Copying voting-config-local.json into bundle\"\n    cp \"$LOCAL_CFG\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/\"\n  fi\nfi\n";
+		};
 		0D26AE99299E8196005260EE /* SwiftLint */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
