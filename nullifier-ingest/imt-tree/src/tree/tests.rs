@@ -132,7 +132,8 @@ fn test_save_load_round_trip() {
 
 #[test]
 fn test_save_load_full_round_trip() {
-    let tree = NullifierTree::build(four_nullifiers());
+    let mut tree = NullifierTree::build(four_nullifiers());
+    tree.set_height(2_000_000);
     let dir = std::env::temp_dir().join("imt_tree_test_full");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("full_tree.bin");
@@ -143,6 +144,7 @@ fn test_save_load_full_round_trip() {
     assert_eq!(tree.root(), loaded.root());
     assert_eq!(tree.ranges(), loaded.ranges());
     assert_eq!(tree.len(), loaded.len());
+    assert_eq!(loaded.height(), Some(2_000_000));
 
     // Verify all level hashes match
     let original_leaves = tree.leaves();
@@ -153,6 +155,23 @@ fn test_save_load_full_round_trip() {
     let value = fp(15);
     let proof = loaded.prove(value).unwrap();
     assert!(proof.verify(value));
+
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn test_save_load_full_no_height() {
+    let tree = NullifierTree::build(four_nullifiers());
+    assert_eq!(tree.height(), None);
+
+    let dir = std::env::temp_dir().join("imt_tree_test_full_no_height");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("full_tree.bin");
+
+    tree.save_full(&path).unwrap();
+    let loaded = NullifierTree::load_full(&path).unwrap();
+    assert_eq!(loaded.height(), None);
+    assert_eq!(tree.root(), loaded.root());
 
     std::fs::remove_file(&path).unwrap();
 }

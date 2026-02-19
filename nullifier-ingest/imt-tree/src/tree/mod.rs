@@ -234,7 +234,7 @@ pub fn load_tree(path: &Path) -> Result<Vec<Range>> {
     Ok(ranges)
 }
 
-/// Serialize a full Merkle tree (ranges + all levels + root) to a binary file.
+/// Serialize a full Merkle tree (ranges + all levels + root + height) to a binary file.
 ///
 /// Format:
 /// ```text
@@ -245,6 +245,7 @@ pub fn load_tree(path: &Path) -> Result<Vec<Range>> {
 ///     [level_len x 32-byte Fp]           -- node hashes at this level
 /// ]
 /// [32-byte Fp root]
+/// [8-byte LE height]                     -- optional trailer (0 = unknown)
 /// ```
 ///
 /// On reload via [`load_full_tree`], zero hashing is required -- all data is
@@ -254,6 +255,7 @@ pub fn save_full_tree(
     ranges: &[Range],
     levels: &[Vec<Fp>],
     root: Fp,
+    height: Option<u64>,
 ) -> Result<()> {
     let t0 = Instant::now();
     let mut f = std::fs::File::create(path)?;
@@ -278,10 +280,14 @@ pub fn save_full_tree(
     // Root
     f.write_all(&root.to_repr())?;
 
+    // Height trailer (0 means unknown)
+    f.write_all(&height.unwrap_or(0).to_le_bytes())?;
+
     eprintln!(
-        "  Full tree saved: {} ranges, {} levels in {:.1}s",
+        "  Full tree saved: {} ranges, {} levels, height={:?} in {:.1}s",
         ranges.len(),
         levels.len(),
+        height,
         t0.elapsed().as_secs_f64(),
     );
     Ok(())
@@ -289,9 +295,11 @@ pub fn save_full_tree(
 
 /// Deserialize a full Merkle tree from a binary file written by [`save_full_tree`].
 ///
-/// Returns `(ranges, levels, root)` with zero hashing -- all data is read
-/// directly from the file using bulk I/O and parallel parsing.
-pub fn load_full_tree(path: &Path) -> Result<(Vec<Range>, Vec<Vec<Fp>>, Fp)> {
+/// Returns `(ranges, levels, root, height)` with zero hashing -- all data is
+/// read directly from the file using bulk I/O and parallel parsing.
+///
+/// Backwards-compatible: files written without the height trailer return `None`.
+pub fn load_full_tree(path: &Path) -> Result<(Vec<Range>, Vec<Vec<Fp>>, Fp, Option<u64>)> {
     let t0 = Instant::now();
     let buf = std::fs::read(path)?;
     eprintln!(
@@ -344,13 +352,23 @@ pub fn load_full_tree(path: &Path) -> Result<(Vec<Range>, Vec<Vec<Fp>>, Fp)> {
     let root_bytes: [u8; 32] = buf[pos..pos + 32].try_into()
         .map_err(|_| anyhow::anyhow!("unexpected EOF reading root"))?;
     let root = Fp::from_repr(root_bytes).unwrap();
+    pos += 32;
+
+    // Height trailer (optional, backwards-compatible with old files)
+    let height = if pos + 8 <= buf.len() {
+        let h = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
+        if h > 0 { Some(h) } else { None }
+    } else {
+        None
+    };
 
     eprintln!(
-        "  Full tree parsed: {} ranges, {} levels in {:.1}s",
+        "  Full tree parsed: {} ranges, {} levels, height={:?} in {:.1}s",
         ranges.len(),
         levels.len(),
+        height,
         t1.elapsed().as_secs_f64()
     );
 
-    Ok((ranges, levels, root))
+    Ok((ranges, levels, root, height))
 }

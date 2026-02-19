@@ -40,6 +40,7 @@ struct ImtProofJson {
 #[derive(Serialize)]
 struct RootJson {
     root: String,
+    latest_height: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -151,6 +152,7 @@ async fn exclusion_proof(
 async fn root(State(state): State<Arc<AppState>>) -> Json<RootJson> {
     Json(RootJson {
         root: fp_hex(&state.tree.root()),
+        latest_height: state.tree.height(),
     })
 }
 
