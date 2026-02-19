@@ -165,6 +165,15 @@ export async function getHelperStatus(): Promise<HelperStatus> {
   return fetchJson<HelperStatus>("/api/v1/status");
 }
 
+export interface NullifierStatus {
+  latest_height: number | null;
+  nullifier_count: number;
+}
+
+export async function getNullifierStatus(): Promise<NullifierStatus> {
+  return fetchJson<NullifierStatus>("/nullifier/status");
+}
+
 // setVoteManager was removed: MsgSetVoteManager is now a standard Cosmos SDK
 // transaction signed client-side. See cosmosTx.ts.
 

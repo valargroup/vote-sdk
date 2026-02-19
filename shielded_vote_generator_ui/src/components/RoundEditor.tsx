@@ -5,7 +5,7 @@ import {
   useChainInfo,
   estimateTimestamp,
 } from "../store/rpc";
-import { getHelperStatus } from "../api/chain";
+import { getNullifierStatus } from "../api/chain";
 
 interface RoundEditorProps {
   round: VotingRound;
@@ -117,8 +117,8 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings }: RoundEdit
     setImtLoading(true);
     setImtError(null);
     try {
-      const status = await getHelperStatus();
-      const height = status.tree?.anchor_height;
+      const status = await getNullifierStatus();
+      const height = status.latest_height;
       if (height == null) throw new Error("IMT height unavailable");
       onUpdateSettings({ snapshotHeight: String(height) });
     } catch (err) {
