@@ -15,5 +15,5 @@
 		reverse_proxy localhost:3000
 	}
 
-	reverse_proxy localhost:1318
+	reverse_proxy localhost:1418
 }

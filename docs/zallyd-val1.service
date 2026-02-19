@@ -1,0 +1,13 @@
+[Unit]
+Description=Zally SDK chain - Validator 1 (zallyd-val1)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/zally-chain
+ExecStart=/opt/zally-chain/zallyd start --home /opt/zally-chain/.zallyd-val1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

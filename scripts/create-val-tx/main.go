@@ -1,35 +1,33 @@
-// Command create-val-tx constructs a MsgCreateValidatorWithPallasKey and
-// POSTs it to the Zally REST API. Used by init_multi.sh to register
-// post-genesis validators that join an already-running chain.
+// Command create-val-tx constructs a MsgCreateValidatorWithPallasKey,
+// signs it via `zallyd tx sign`, and broadcasts it via `zallyd tx broadcast`.
+// Used by init_multi_ci.sh to register post-genesis validators that join an
+// already-running chain.
 //
 // Usage:
 //
-//	go run ./scripts/create-val-tx \
+//	create-val-tx \
 //	  --home ~/.zallyd-val2 \
 //	  --moniker val2 \
 //	  --amount 10000000stake \
-//	  --api-url http://localhost:1318
+//	  --rpc-url tcp://localhost:26157
 package main
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"cosmossdk.io/math"
 
+	cmtjson "github.com/cometbft/cometbft/libs/json"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-
-	cmtjson "github.com/cometbft/cometbft/libs/json"
 )
 
 func main() {
@@ -73,10 +71,7 @@ func run() error {
 
 	edPk := &ed25519.PubKey{Key: consPubKeyBytes}
 
-	// Load the validator account address from the keyring.
-	// The keyring stores the address in <home>/keyring-test/<key_name>.info.
-	// We use `zallyd keys show` output instead — but since this is a simple
-	// helper, we read the address from a file the init script writes for us.
+	// Read the validator account address written by the init script.
 	valAccAddr, err := readFileString(filepath.Join(args.home, "validator_address.txt"))
 	if err != nil {
 		return fmt.Errorf("read validator_address.txt: %w", err)
@@ -97,7 +92,6 @@ func run() error {
 	}
 
 	// Build the MsgCreateValidator using the SDK constructor.
-	// DelegatorAddress is deprecated in v0.53+; the constructor omits it.
 	description := stakingtypes.Description{Moniker: args.moniker}
 	commission := stakingtypes.CommissionRates{
 		Rate:          math.LegacyNewDecWithPrec(1, 1), // 10%
@@ -111,7 +105,8 @@ func run() error {
 		return fmt.Errorf("build MsgCreateValidator: %w", err)
 	}
 
-	// Marshal to gogoproto binary (same format the keeper expects).
+	// Marshal to gogoproto binary (the format the keeper expects).
+	// The server unpacks the Any-wrapped pubkey itself via UnpackInterfaces.
 	stakingMsgBytes, err := stakingMsg.Marshal()
 	if err != nil {
 		return fmt.Errorf("marshal MsgCreateValidator: %w", err)
@@ -123,58 +118,115 @@ func run() error {
 		return fmt.Errorf("read pallas.pk: %w", err)
 	}
 
-	// Build the JSON payload. The REST handler uses encoding/json to decode,
-	// so []byte fields are base64-encoded automatically.
-	payload := struct {
-		StakingMsg []byte `json:"staking_msg"`
-		PallasPk   []byte `json:"pallas_pk"`
-	}{
-		StakingMsg: stakingMsgBytes,
-		PallasPk:   pallasPkBytes,
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal JSON payload: %w", err)
-	}
-
-	// POST to the REST API.
-	url := args.apiURL + "/zally/v1/create-validator-with-pallas"
-	fmt.Printf("POST %s\n", url)
+	fmt.Printf("Building MsgCreateValidatorWithPallasKey:\n")
 	fmt.Printf("  moniker:    %s\n", args.moniker)
 	fmt.Printf("  validator:  %s\n", valOperAddr)
 	fmt.Printf("  amount:     %s\n", coin)
 	fmt.Printf("  pallas_pk:  %s\n", base64.StdEncoding.EncodeToString(pallasPkBytes))
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+	// Build the unsigned Cosmos SDK tx JSON.
+	unsignedTx := buildUnsignedTx(stakingMsgBytes, pallasPkBytes)
+	unsignedJSON, err := json.MarshalIndent(unsignedTx, "", "  ")
 	if err != nil {
-		return fmt.Errorf("POST failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	fmt.Printf("  status:     %d\n", resp.StatusCode)
-	fmt.Printf("  response:   %s\n", string(respBody))
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("marshal unsigned tx: %w", err)
 	}
 
+	// Write to temp file.
+	ts := time.Now().UnixNano()
+	tmpDir := os.TempDir()
+	unsignedPath := filepath.Join(tmpDir, fmt.Sprintf("zally_unsigned_%d.json", ts))
+	signedPath := filepath.Join(tmpDir, fmt.Sprintf("zally_signed_%d.json", ts))
+
+	if err := os.WriteFile(unsignedPath, unsignedJSON, 0600); err != nil {
+		return fmt.Errorf("write unsigned tx: %w", err)
+	}
+	defer os.Remove(unsignedPath) //nolint:errcheck
+
+	// Sign via zallyd tx sign.
+	fmt.Printf("Signing with key %q from %s ...\n", args.keyName, args.home)
+	signCmd := exec.Command("zallyd",
+		"tx", "sign", unsignedPath,
+		"--from", args.keyName,
+		"--keyring-backend", "test",
+		"--chain-id", args.chainID,
+		"--home", args.home,
+		"--node", args.rpcURL,
+		"--output-document", signedPath,
+		"--yes",
+	)
+	signCmd.Stdout = os.Stdout
+	signCmd.Stderr = os.Stderr
+	if err := signCmd.Run(); err != nil {
+		return fmt.Errorf("zallyd tx sign failed: %w", err)
+	}
+	defer os.Remove(signedPath) //nolint:errcheck
+
+	// Broadcast via zallyd tx broadcast.
+	fmt.Printf("Broadcasting to %s ...\n", args.rpcURL)
+	broadcastCmd := exec.Command("zallyd",
+		"tx", "broadcast", signedPath,
+		"--node", args.rpcURL,
+		"--output", "json",
+	)
+	broadcastOut, err := broadcastCmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("zallyd tx broadcast failed: %s", string(exitErr.Stderr))
+		}
+		return fmt.Errorf("zallyd tx broadcast failed: %w", err)
+	}
+
+	fmt.Printf("Broadcast result: %s\n", strings.TrimSpace(string(broadcastOut)))
 	return nil
+}
+
+// buildUnsignedTx returns the standard Cosmos SDK unsigned tx JSON envelope
+// for a MsgCreateValidatorWithPallasKey.
+func buildUnsignedTx(stakingMsgBytes, pallasPkBytes []byte) map[string]interface{} {
+	return map[string]interface{}{
+		"body": map[string]interface{}{
+			"messages": []map[string]interface{}{
+				{
+					"@type":       "/zvote.v1.MsgCreateValidatorWithPallasKey",
+					"staking_msg": base64.StdEncoding.EncodeToString(stakingMsgBytes),
+					"pallas_pk":   base64.StdEncoding.EncodeToString(pallasPkBytes),
+				},
+			},
+			"memo":                            "",
+			"timeout_height":                  "0",
+			"extension_options":               []interface{}{},
+			"non_critical_extension_options":  []interface{}{},
+		},
+		"auth_info": map[string]interface{}{
+			"signer_infos": []interface{}{},
+			"fee": map[string]interface{}{
+				"amount":    []interface{}{},
+				"gas_limit": "200000",
+				"payer":     "",
+				"granter":   "",
+			},
+		},
+		"signatures": []interface{}{},
+	}
 }
 
 type cliArgs struct {
 	home    string
 	moniker string
 	amount  string
+	// apiURL is accepted but ignored (kept for backward compatibility).
 	apiURL  string
+	rpcURL  string
+	chainID string
+	keyName string
 }
 
 func parseArgs() cliArgs {
 	args := cliArgs{
-		amount: "10000000stake",
-		apiURL: "http://localhost:1318",
+		amount:  "10000000stake",
+		rpcURL:  "tcp://localhost:26157",
+		chainID: "zvote-1",
+		keyName: "validator",
 	}
 
 	for i := 1; i < len(os.Args); i++ {
@@ -191,6 +243,15 @@ func parseArgs() cliArgs {
 		case "--api-url":
 			i++
 			args.apiURL = os.Args[i]
+		case "--rpc-url":
+			i++
+			args.rpcURL = os.Args[i]
+		case "--chain-id":
+			i++
+			args.chainID = os.Args[i]
+		case "--key-name":
+			i++
+			args.keyName = os.Args[i]
 		}
 	}
 
