@@ -71,12 +71,18 @@ func run() error {
 
 	edPk := &ed25519.PubKey{Key: consPubKeyBytes}
 
-	// Read the validator account address written by the init script.
-	valAccAddr, err := readFileString(filepath.Join(args.home, "validator_address.txt"))
+	// Derive the validator account address from the keyring.
+	addrOut, err := exec.Command("zallyd",
+		"keys", "show", args.keyName,
+		"--keyring-backend", "test",
+		"--home", args.home,
+		"--bech", "acc",
+		"-a",
+	).Output()
 	if err != nil {
-		return fmt.Errorf("read validator_address.txt: %w", err)
+		return fmt.Errorf("zallyd keys show failed: %w", err)
 	}
-	valAccAddr = strings.TrimSpace(valAccAddr)
+	valAccAddr := strings.TrimSpace(string(addrOut))
 
 	// Derive the validator operator address (valoper) from the account address.
 	accAddr, err := sdk.AccAddressFromBech32(valAccAddr)
@@ -222,7 +228,13 @@ type cliArgs struct {
 }
 
 func parseArgs() cliArgs {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = os.Getenv("HOME")
+	}
+
 	args := cliArgs{
+		home:    filepath.Join(homeDir, ".zallyd"),
 		amount:  "10000000stake",
 		rpcURL:  "tcp://localhost:26157",
 		chainID: "zvote-1",
@@ -255,22 +267,10 @@ func parseArgs() cliArgs {
 		}
 	}
 
-	if args.home == "" {
-		fmt.Fprintln(os.Stderr, "error: --home is required")
-		os.Exit(1)
-	}
 	if args.moniker == "" {
 		fmt.Fprintln(os.Stderr, "error: --moniker is required")
 		os.Exit(1)
 	}
 
 	return args
-}
-
-func readFileString(path string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }
