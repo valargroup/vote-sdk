@@ -1,5 +1,3 @@
-//go:build halo2
-
 package ante_test
 
 import (

@@ -1,11 +1,5 @@
-//go:build redpallas
-
 // This file provides CGo bindings to the RedPallas signature verification
 // function exported by the zally-circuits Rust static library.
-//
-// Only compiled when the "redpallas" build tag is set:
-//
-//	go test -tags redpallas ./crypto/redpallas/...
 //
 // It requires the Rust static library to be built first:
 //

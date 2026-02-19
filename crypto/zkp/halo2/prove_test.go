@@ -1,5 +1,3 @@
-//go:build halo2
-
 package halo2
 
 import (

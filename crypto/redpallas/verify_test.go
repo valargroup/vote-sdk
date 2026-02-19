@@ -1,5 +1,3 @@
-//go:build redpallas
-
 package redpallas
 
 import (

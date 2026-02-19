@@ -3,26 +3,18 @@ HOME_DIR = $(HOME)/.zallyd
 
 export PATH := $(HOME)/go/bin:$(PATH)
 
-.PHONY: install install-ffi init start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi status-multi clean-multi caddy
+.PHONY: install init start clean build fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi status-multi clean-multi caddy
 
-## install: Build and install the zallyd binary to $GOPATH/bin
-install:
+## install: Build and install the zallyd binary to $GOPATH/bin (requires: make circuits)
+install: circuits
 	go install ./cmd/zallyd
 
-## install-ffi: Build and install zallyd with real RedPallas + Halo2 verification (requires: make circuits)
-install-ffi: circuits
-	go install -tags "halo2,redpallas" ./cmd/zallyd
-
-## build: Build the zallyd binary locally
-build:
+## build: Build the zallyd binary locally (requires: make circuits)
+build: circuits
 	go build -o $(BINARY) ./cmd/zallyd
 
-## build-ffi: Build zallyd with real RedPallas + Halo2 (requires: make circuits). Use this or run "make circuits" before go build -tags halo2,redpallas.
-build-ffi: circuits
-	go build -tags "halo2,redpallas" -o $(BINARY) ./cmd/zallyd
-
 ## init: Initialize a single-validator chain with real RedPallas + Halo2 verification (wipes existing data)
-init: install-ffi
+init: install
 	bash scripts/init.sh
 
 ## start: Start the chain
@@ -99,18 +91,18 @@ lint:
 	go vet ./...
 
 ## test-unit: Keeper, validation, codec, module unit tests (fast, parallel)
-test-unit:
+test-unit: circuits
 	go test -count=1 -race -parallel=4 ./x/vote/... ./api/...
 
 ## test-integration: Full ABCI pipeline integration tests (in-process chain)
-test-integration:
+test-integration: circuits
 	go test -count=1 -race -timeout 5m ./app/...
 
 ## test-helper: Helper server unit tests (SQLite store, API, processor)
-test-helper:
+test-helper: circuits
 	go test -count=1 -race ./internal/helper/...
 
-## test: Run all tests (Go only, no Rust dependency)
+## test: Run all tests
 test: test-unit test-integration test-helper
 
 ## ceremony: Bootstrap the EA key ceremony on a running chain (requires: make init && make start)
@@ -156,25 +148,25 @@ circuits-test:
 fixtures: circuits
 	cargo test --release --manifest-path circuits/Cargo.toml -- generate_fixtures --ignored --nocapture
 
-## test-halo2: Run Go tests that use real Halo2 verification via CGo (requires circuits)
+## test-halo2: Run Halo2 verification tests via CGo (requires circuits)
 test-halo2: circuits
-	go test -tags halo2 -count=1 -v ./crypto/zkp/halo2/... ./x/vote/ante/...
+	go test -count=1 -v ./crypto/zkp/halo2/... ./x/vote/ante/...
 
-## test-halo2-ante: Run ante handler tests with real Halo2 verification
+## test-halo2-ante: Run ante handler tests with Halo2 verification
 test-halo2-ante: circuits
-	go test -tags halo2 -count=1 -v ./x/vote/ante/... -run TestHalo2
+	go test -count=1 -v ./x/vote/ante/... -run TestHalo2
 
-## test-redpallas: Run Go tests with real RedPallas signature verification via CGo (requires circuits)
+## test-redpallas: Run RedPallas signature verification tests via CGo (requires circuits)
 test-redpallas: circuits
-	go test -tags redpallas -count=1 -v ./crypto/redpallas/... ./x/vote/ante/...
+	go test -count=1 -v ./crypto/redpallas/... ./x/vote/ante/...
 
-## test-redpallas-ante: Run ante handler tests with real RedPallas verification
+## test-redpallas-ante: Run ante handler tests with RedPallas verification
 test-redpallas-ante: circuits
-	go test -tags redpallas -count=1 -v ./x/vote/ante/... -run TestRedPallas
+	go test -count=1 -v ./x/vote/ante/... -run TestRedPallas
 
 ## test-all-ffi: Run all FFI-backed tests (Halo2 + RedPallas) (requires circuits)
 test-all-ffi: circuits
-	go test -tags "halo2 redpallas" -count=1 -v ./crypto/zkp/halo2/... ./crypto/redpallas/... ./x/vote/ante/...
+	go test -count=1 -v ./crypto/zkp/halo2/... ./crypto/redpallas/... ./x/vote/ante/...
 
 # ---------------------------------------------------------------------------
 # Deployment targets

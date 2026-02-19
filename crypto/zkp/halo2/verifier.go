@@ -1,5 +1,3 @@
-//go:build halo2
-
 package halo2
 
 import "github.com/z-cale/zally/crypto/zkp"
@@ -11,7 +9,6 @@ import "github.com/z-cale/zally/crypto/zkp"
 type Halo2Verifier struct{}
 
 // NewVerifier returns a Halo2Verifier backed by the Rust FFI library.
-// This function is only available when built with the "halo2" build tag.
 func NewVerifier() zkp.Verifier { return Halo2Verifier{} }
 
 // VerifyDelegation verifies ZKP #1 using the real delegation circuit.

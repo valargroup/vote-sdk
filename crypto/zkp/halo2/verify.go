@@ -1,19 +1,11 @@
-//go:build halo2
-
 // Package halo2 provides CGo bindings to the Halo2 Rust proof verifier.
-//
-// This package is only compiled when the "halo2" build tag is set:
-//
-//	go test -tags halo2 ./crypto/zkp/halo2/...
 //
 // It requires the Rust static library to be built first:
 //
 //	cargo build --release --manifest-path sdk/circuits/Cargo.toml
 //
 // The library provides real ZKP verification on the Pallas curve using
-// the zcash/halo2 proof system. Currently exposes a toy circuit verifier;
-// real circuit verifiers (delegation, vote commitment, vote share) will
-// be added as the circuits are implemented.
+// the zcash/halo2 proof system.
 package halo2
 
 /*

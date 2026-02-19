@@ -1,5 +1,3 @@
-//go:build halo2
-
 package cmd
 
 import "github.com/z-cale/zally/crypto/zkp/halo2"

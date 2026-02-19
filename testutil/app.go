@@ -373,6 +373,13 @@ func (ta *TestApp) ValidatorOperAddr() string {
 	return vals[0].OperatorAddress
 }
 
+// ValidatorAccAddr returns the account (bech32) address of the genesis
+// validator's signing key. This is derived from ValPrivKey and uses the
+// "zvote" prefix expected by MsgRegisterPallasKey and related messages.
+func (ta *TestApp) ValidatorAccAddr() string {
+	return sdk.AccAddress(ta.ValPrivKey.PubKey().Address()).String()
+}
+
 // NextBlock commits an empty block, advancing height and time by 5 seconds.
 // Triggers EndBlocker (commitment tree root computation).
 func (ta *TestApp) NextBlock() {
