@@ -205,31 +205,3 @@ grep pallas_sk_path ~/.zallyd/config/app.toml
 zallyd q vote ceremony-state
 # status: CEREMONY_STATUS_CONFIRMED
 ```
-
-### Troubleshooting: ceremony resets to REGISTERING
-
-If the ceremony reverts from `DEALT` back to `REGISTERING`, the 30-second ack window expired with fewer than 2/3 of validators acknowledging. Common causes:
-
-- `vote.pallas_sk_path` not set or pointing to the wrong file
-- `pallas.sk` on disk doesn't match the `pallas.pk` that was registered
-- Node was not yet running the binary with the ceremony handler (restart required after `make install`)
-
-Check the node log for the diagnostic banners:
-
-```bash
-grep -E "FAILED TO LOAD|FAILED TO PARSE|ECIES DECRYPTION|ea_sk \* G|AUTO-ACK|EA SECRET" ~/.zallyd/node.log | tail -20
-```
-
-To retry, re-register and re-deal (no `re-initialize` needed since the state is already back to `REGISTERING`):
-
-```bash
-zallyd tx vote register-pallas-key \
-  --from validator --keyring-backend test \
-  --chain-id zvote-1 --node tcp://localhost:26657 --yes
-
-# Wait ~6s, then:
-zallyd encrypt-ea-key ~/.zallyd/ea.sk --output /tmp/payloads.json
-zallyd tx vote deal-ea-key "$(xxd -p ~/.zallyd/ea.pk | tr -d '\n')" /tmp/payloads.json \
-  --from validator --keyring-backend test \
-  --chain-id zvote-1 --node tcp://localhost:26657 --yes
-```
