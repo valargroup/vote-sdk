@@ -12,12 +12,23 @@ interface RoundEditorProps {
   onUpdateSettings: (patch: Partial<RoundSettings>) => void;
 }
 
-const DURATION_PRESETS = [
+type DurationPreset =
+  | { label: string; minutes: number; days?: undefined }
+  | { label: string; days: number; minutes?: undefined };
+
+const DURATION_PRESETS: DurationPreset[] = [
+  { label: "10 min", minutes: 10 },
   { label: "1 week", days: 7 },
   { label: "2 weeks", days: 14 },
   { label: "1 month", days: 30 },
   { label: "3 months", days: 90 },
-] as const;
+];
+
+function addMinutes(minutes: number): string {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() + minutes, 0, 0);
+  return d.toISOString();
+}
 
 function addDays(days: number): string {
   const d = new Date();
@@ -229,9 +240,13 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings }: RoundEdit
           <div className="flex flex-wrap gap-1.5 mb-2">
             {DURATION_PRESETS.map((preset) => (
               <button
-                key={preset.days}
+                key={preset.label}
                 onClick={() => {
-                  onUpdateSettings({ endTime: addDays(preset.days) });
+                  const endTime =
+                    preset.minutes !== undefined
+                      ? addMinutes(preset.minutes)
+                      : addDays(preset.days);
+                  onUpdateSettings({ endTime });
                   setShowCustom(false);
                 }}
                 className="px-2.5 py-1 bg-surface-2 border border-border-subtle hover:border-accent/40 hover:text-accent-glow text-text-secondary rounded-md text-[11px] transition-colors cursor-pointer"
