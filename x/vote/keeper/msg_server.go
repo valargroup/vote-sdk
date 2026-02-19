@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 
@@ -61,6 +62,10 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		return nil, fmt.Errorf("%w", types.ErrCeremonyNotReady)
 	}
 
+	ms.k.Logger().Info("CreateVotingSession roots",
+		"nullifier_imt_root", hex.EncodeToString(msg.NullifierImtRoot),
+		"nc_root", hex.EncodeToString(msg.NcRoot),
+	)
 	round := &types.VoteRound{
 		VoteRoundId:       roundID,
 		SnapshotHeight:    msg.SnapshotHeight,

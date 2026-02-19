@@ -16,6 +16,7 @@ package ante
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/z-cale/zally/crypto/redpallas"
@@ -156,6 +157,21 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k keeper.
 	}
 
 	// ZKP #1: delegation proof.
+	govNullifiersHex := make([]string, len(msg.GovNullifiers))
+	for i, n := range msg.GovNullifiers {
+		govNullifiersHex[i] = hex.EncodeToString(n)
+	}
+	k.Logger().Info("VerifyDelegation inputs",
+		"rk", hex.EncodeToString(msg.Rk),
+		"signed_note_nullifier", hex.EncodeToString(msg.SignedNoteNullifier),
+		"cmx_new", hex.EncodeToString(msg.CmxNew),
+		"enc_memo", hex.EncodeToString(msg.EncMemo),
+		"van_cmx", hex.EncodeToString(msg.VanCmx),
+		"gov_nullifiers", govNullifiersHex,
+		"vote_round_id", hex.EncodeToString(msg.VoteRoundId),
+		"nc_root", hex.EncodeToString(round.NcRoot),
+		"nullifier_imt_root", hex.EncodeToString(round.NullifierImtRoot),
+	)
 	if err := opts.ZKPVerifier.VerifyDelegation(msg.Proof, zkp.DelegationInputs{
 		Rk:                  msg.Rk,
 		SignedNoteNullifier: msg.SignedNoteNullifier,
