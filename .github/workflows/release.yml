@@ -203,11 +203,13 @@ jobs:
           use_https = True
           EOF
           s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" s3://vote/ --acl-public --force
+          echo "${VERSION}" > /tmp/version.txt
+          s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force
 
       - name: Set up SSH key
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.CEREMONY_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.CEREMONY_SSH_KEY }}" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           cat >> ~/.ssh/config <<EOF
           Host deploy-target

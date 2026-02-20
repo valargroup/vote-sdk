@@ -15,7 +15,6 @@
 
 set -euo pipefail
 
-REPO="z-cale/Shielded-Vote"
 CHAIN_ID="zvote-1"
 INSTALL_DIR="${ZALLY_INSTALL_DIR:-/usr/local/bin}"
 HOME_DIR="${ZALLY_HOME:-$HOME/.zallyd}"
@@ -62,23 +61,14 @@ fi
 echo ""
 echo "=== Downloading binaries ==="
 
-# Build auth header if GITHUB_TOKEN is set (required for private repos).
-AUTH_HEADER=""
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-  AUTH_HEADER="Authorization: token ${GITHUB_TOKEN}"
-fi
-
-RELEASE_JSON=$(curl -fsSL ${AUTH_HEADER:+-H "$AUTH_HEADER"} "https://api.github.com/repos/${REPO}/releases/latest")
-ASSET_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .url')
-VERSION=$(echo "$RELEASE_JSON" | jq -r '.tag_name')
-
-if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
-  echo "ERROR: No release tarball found. Check https://github.com/${REPO}/releases"
+VERSION=$(curl -fsSL "${DO_BASE}/version.txt" | tr -d '[:space:]')
+if [ -z "$VERSION" ]; then
+  echo "ERROR: Could not fetch version from ${DO_BASE}/version.txt"
   exit 1
 fi
 
 echo "Version: ${VERSION}"
-curl -fsSL ${AUTH_HEADER:+-H "$AUTH_HEADER"} -H "Accept: application/octet-stream" -o /tmp/zally-release.tar.gz "$ASSET_URL"
+curl -fsSL -o /tmp/zally-release.tar.gz "${DO_BASE}/zally-${VERSION}-linux-amd64.tar.gz"
 
 # Extract just the binaries we need.
 TARBALL_DIR="zally-${VERSION}-linux-amd64"
