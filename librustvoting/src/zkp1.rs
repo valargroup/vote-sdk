@@ -434,11 +434,21 @@ pub fn build_and_prove_delegation(
         let nf = note.nullifier(&note_fvk);
         imt_cache.insert(nf.to_bytes(), imt_proof.clone());
 
+        let scope = match full_notes[i].scope {
+            0 => Scope::External,
+            1 => Scope::Internal,
+            _ => {
+                return Err(VotingError::Internal {
+                    message: format!("unexpected scope code: {}", full_notes[i].scope),
+                })
+            }
+        };
         real_inputs.push(RealNoteInput {
             note,
             fvk: note_fvk,
             merkle_path,
             imt_proof,
+            scope,
         });
     }
 

@@ -231,6 +231,9 @@ pub struct Config {
     // Enforces: is_note_real is boolean, padded notes have v=0,
     // real notes' Merkle root matches nc_root, IMT root matches nf_imt_root.
     q_per_note: Selector,
+    // Per-note scope selection gate (condition 11).
+    // Muxes between ivk (external) and ivk_internal based on is_internal flag.
+    q_scope_select: Selector,
     // IMT non-membership gates (condition 13): conditional swap + interval check.
     imt_config: ImtNonMembershipConfig,
 }
@@ -318,6 +321,9 @@ pub struct NoteSlotWitness {
     pub(crate) imt_high: Value<pallas::Base>,
     pub(crate) imt_leaf_pos: Value<u32>,
     pub(crate) imt_path: Value<[pallas::Base; IMT_DEPTH]>,
+    /// Whether this note uses the internal (change) scope.
+    /// When true, `ivk_internal` is used for Condition 11 instead of `ivk`.
+    pub(crate) is_internal: Value<bool>,
 }
 
 // ================================================================
@@ -337,6 +343,7 @@ pub struct Circuit {
     ak: Value<SpendValidatingKey>,
     alpha: Value<pallas::Scalar>,
     rivk: Value<CommitIvkRandomness>,
+    rivk_internal: Value<CommitIvkRandomness>,
     rcm_signed: Value<NoteCommitTrapdoor>,
     g_d_signed: Value<NonIdentityPallasPoint>,
     pk_d_signed: Value<DiversifiedTransmissionKey>,
@@ -371,6 +378,7 @@ impl Circuit {
             ak: Value::known(fvk.clone().into()),
             alpha: Value::known(alpha),
             rivk: Value::known(fvk.rivk(Scope::External)),
+            rivk_internal: Value::known(fvk.rivk(Scope::Internal)),
             rcm_signed: Value::known(rcm_signed),
             g_d_signed: Value::known(sender_address.g_d()),
             pk_d_signed: Value::known(*sender_address.pk_d()),
@@ -518,6 +526,24 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             )
         });
 
+        // Scope selection gate (condition 11): muxes between external and internal ivk.
+        // Per-note, selects ivk or ivk_internal based on the is_internal flag, so that
+        // internal (change) notes use ivk_internal for the pk_d ownership check.
+        let q_scope_select = meta.selector();
+        meta.create_gate("scope ivk select", |meta| {
+            let q = meta.query_selector(q_scope_select);
+            let is_internal = meta.query_advice(advices[0], Rotation::cur());
+            let ivk = meta.query_advice(advices[1], Rotation::cur());
+            let ivk_internal = meta.query_advice(advices[2], Rotation::cur());
+            let selected_ivk = meta.query_advice(advices[3], Rotation::cur());
+            // selected_ivk = ivk + is_internal * (ivk_internal - ivk)
+            let expected = ivk.clone() + is_internal.clone() * (ivk_internal - ivk);
+            Constraints::with_selector(q, [
+                ("bool_check is_internal", bool_check(is_internal)),
+                ("scope select", selected_ivk - expected),
+            ])
+        });
+
         // IMT non-membership gates (condition 13): conditional swap + interval check.
         let imt_config = ImtNonMembershipConfig::configure(meta, &advices);
 
@@ -598,6 +624,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             merkle_config_1,
             merkle_config_2,
             q_per_note,
+            q_scope_select,
             imt_config,
         }
     }
@@ -751,7 +778,11 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // Diversified address integrity via shared address_ownership gadget.
         // ivk = ⊥ or pk_d_signed = [ivk] * g_d_signed where ivk = CommitIvk_rivk(ExtractP(ak_P), nk).
         // The ⊥ case is handled internally by CommitDomain::short_commit.
+        //
+        // Save ak cell before prove_address_ownership consumes it — we need it
+        // again below for deriving ivk_internal.
         let ak = ak_P.extract_p().inner().clone();
+        let ak_for_internal = ak.clone();
         let rivk = ScalarFixed::new(
             ecc_chip.clone(),
             layouter.namespace(|| "rivk"),
@@ -769,6 +800,29 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             &g_d_signed,
             &pk_d_signed,
         )?;
+
+        // ---------------------------------------------------------------
+        // Derive ivk_internal = CommitIvk(ak, nk, rivk_internal).
+        // Used by Condition 11 for notes with internal (change) scope.
+        // ---------------------------------------------------------------
+        let ivk_internal_cell = {
+            use crate::circuit::commit_ivk::gadgets::commit_ivk;
+            let rivk_internal = ScalarFixed::new(
+                ecc_chip.clone(),
+                layouter.namespace(|| "rivk_internal"),
+                self.rivk_internal.map(|rivk| rivk.inner()),
+            )?;
+            let ivk_internal = commit_ivk(
+                config.sinsemilla_chip_1(),
+                ecc_chip.clone(),
+                config.commit_ivk_chip(),
+                layouter.namespace(|| "commit_ivk_internal"),
+                ak_for_internal,
+                nk.clone(),
+                rivk_internal,
+            )?;
+            ivk_internal.inner().clone()
+        };
 
         // ---------------------------------------------------------------
         // Condition 1: Signed note commitment integrity.
@@ -925,6 +979,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 &mut layouter,
                 ecc_chip.clone(),
                 &ivk_cell,
+                &ivk_internal_cell,
                 &nk,
                 &vote_round_id_cell,
                 &nc_root_cell,
@@ -1303,6 +1358,7 @@ fn synthesize_note_slot(
     layouter: &mut impl Layouter<pallas::Base>,
     ecc_chip: EccChip<OrchardFixedBases>,
     ivk_cell: &AssignedCell<pallas::Base, pallas::Base>,
+    ivk_internal_cell: &AssignedCell<pallas::Base, pallas::Base>,
     nk_cell: &AssignedCell<pallas::Base, pallas::Base>,
     vote_round_id_cell: &AssignedCell<pallas::Base, pallas::Base>,
     nc_root_cell: &AssignedCell<pallas::Base, pallas::Base>,
@@ -1408,24 +1464,53 @@ fn synthesize_note_slot(
     )?;
 
     // ---------------------------------------------------------------
-    // Condition 11: Diversified address integrity.
-    // pk_d = [ivk] * g_d
+    // Condition 11: Diversified address integrity (scope-aware).
+    // pk_d = [selected_ivk] * g_d
+    // where selected_ivk = ivk (external) or ivk_internal, based on is_internal.
     // ---------------------------------------------------------------
 
-    // Proves this note belongs to the prover's key. ivk (incoming viewing key)
-    // was derived from ak and nk in condition 5. If pk_d != [ivk] * g_d, the
-    // note was addressed to someone else and the prover can't claim it.
+    // Proves this note belongs to the prover's key. External notes use ivk
+    // (derived from rivk in condition 5); internal (change) notes use
+    // ivk_internal (derived from rivk_internal). The q_scope_select gate
+    // constrains the mux: selected_ivk = ivk + is_internal * (ivk_internal - ivk).
 
-    // Convert ivk from a base field element to a scalar for ECC multiplication.
-    let ivk_scalar = ScalarVar::from_base(
-        ecc_chip.clone(),
-        layouter.namespace(|| format!("note {s} ivk to scalar")),
-        ivk_cell,
+    // Witness the is_internal flag for this note.
+    let is_internal = assign_free_advice(
+        layouter.namespace(|| format!("note {s} witness is_internal")),
+        config.advices[0],
+        note.is_internal.map(|b| pallas::Base::from(b as u64)),
     )?;
 
-    // Compute [ivk] * g_d and check it matches the witnessed pk_d.
+    // Mux between ivk and ivk_internal using the q_scope_select custom gate.
+    let selected_ivk = layouter.assign_region(
+        || format!("note {s} scope ivk select"),
+        |mut region| {
+            config.q_scope_select.enable(&mut region, 0)?;
+
+            is_internal.copy_advice(|| "is_internal", &mut region, config.advices[0], 0)?;
+            ivk_cell.copy_advice(|| "ivk", &mut region, config.advices[1], 0)?;
+            ivk_internal_cell.copy_advice(|| "ivk_internal", &mut region, config.advices[2], 0)?;
+
+            // Compute the muxed value: ivk + is_internal * (ivk_internal - ivk)
+            let selected = ivk_cell.value().zip(ivk_internal_cell.value()).zip(is_internal.value()).map(
+                |((ivk, ivk_int), flag)| {
+                    if *flag == pallas::Base::one() { *ivk_int } else { *ivk }
+                },
+            );
+            region.assign_advice(|| "selected_ivk", config.advices[3], 0, || selected)
+        },
+    )?;
+
+    // Convert selected_ivk to a scalar for ECC multiplication.
+    let ivk_scalar = ScalarVar::from_base(
+        ecc_chip.clone(),
+        layouter.namespace(|| format!("note {s} selected_ivk to scalar")),
+        &selected_ivk,
+    )?;
+
+    // Compute [selected_ivk] * g_d and check it matches the witnessed pk_d.
     let (derived_pk_d, _ivk) = g_d.mul(
-        layouter.namespace(|| format!("note {s} [ivk] g_d")),
+        layouter.namespace(|| format!("note {s} [selected_ivk] g_d")),
         ivk_scalar,
     )?;
 
@@ -1697,6 +1782,7 @@ mod tests {
         pos: u32,
         imt: &ImtProofData,
         is_real: bool,
+        is_internal: bool,
     ) -> NoteSlotWitness {
         let rho = note.rho();
         let psi = note.rseed().psi(&rho);
@@ -1721,6 +1807,7 @@ mod tests {
             imt_high: Value::known(imt.high),
             imt_leaf_pos: Value::known(imt.leaf_pos),
             imt_path: Value::known(imt.path),
+            is_internal: Value::known(is_internal),
         }
     }
 
@@ -1792,7 +1879,7 @@ mod tests {
         let imt_0 = imt_provider.non_membership_proof(real_nf.0).unwrap();
         let gov_null_0 = gov_null_hash(nk_val, vote_round_id, real_nf.0);
 
-        let slot_0 = make_note_slot(&real_note, &auth_path_0, 0u32, &imt_0, true);
+        let slot_0 = make_note_slot(&real_note, &auth_path_0, 0u32, &imt_0, true, false);
 
         // Padded notes (slots 1-3): zero-value notes with addresses from the real ivk.
         let mut note_slots = vec![slot_0];
@@ -1822,6 +1909,7 @@ mod tests {
                 &dummy_auth_path,
                 0u32,
                 &pad_imt,
+                false,
                 false,
             ));
             cmx_values.push(pad_cmx);

@@ -52,7 +52,7 @@ pub fn get_wallet_notes_at_snapshot(
                AND t_recv.mined_height <= :snapshot_height
                AND rn.nf IS NOT NULL
                AND rn.commitment_tree_position IS NOT NULL
-               AND rn.recipient_key_scope = 0
+               AND rn.recipient_key_scope IN (0, 1)
                AND accounts.ufvk IS NOT NULL
                AND rn.id NOT IN (
                    SELECT rns.orchard_received_note_id

@@ -537,6 +537,7 @@ fn make_real_note_inputs(
             fvk: fvk.clone(),
             merkle_path,
             imt_proof,
+            scope: Scope::External,
         });
     }
 

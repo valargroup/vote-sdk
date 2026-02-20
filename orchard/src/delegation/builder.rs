@@ -35,6 +35,8 @@ pub struct RealNoteInput {
     pub merkle_path: MerklePath,
     /// IMT non-membership proof for this note's nullifier.
     pub imt_proof: ImtProofData,
+    /// Whether this note uses the internal (change) or external scope.
+    pub scope: Scope,
 }
 
 /// Complete delegation bundle: a single circuit proving all 15 conditions.
@@ -152,6 +154,7 @@ pub fn build_delegation_bundle(
             imt_high: Value::known(input.imt_proof.high),
             imt_leaf_pos: Value::known(input.imt_proof.leaf_pos),
             imt_path: Value::known(input.imt_proof.path),
+            is_internal: Value::known(matches!(input.scope, Scope::Internal)),
         };
 
         note_slots.push(slot);
@@ -207,6 +210,7 @@ pub fn build_delegation_bundle(
             imt_high: Value::known(imt_proof.high),
             imt_leaf_pos: Value::known(imt_proof.leaf_pos),
             imt_path: Value::known(imt_proof.path),
+            is_internal: Value::known(false),
         };
 
         note_slots.push(slot);
@@ -338,9 +342,13 @@ mod tests {
     ///
     /// Notes are placed at positions 0..n in the commitment tree. Returns
     /// `(inputs, nc_root)` where `nc_root` is the shared anchor.
+    ///
+    /// `scopes` specifies the scope for each note. If `None`, all notes use
+    /// `Scope::External`.
     fn make_real_note_inputs(
         fvk: &FullViewingKey,
         values: &[u64],
+        scopes: Option<&[Scope]>,
         imt_provider: &impl ImtProvider,
         rng: &mut impl RngCore,
     ) -> (Vec<RealNoteInput>, pallas::Base) {
@@ -349,8 +357,10 @@ mod tests {
 
         // Create notes.
         let mut notes = Vec::with_capacity(n);
-        for &v in values {
-            let recipient = fvk.address_at(0u32, Scope::External);
+        let mut note_scopes = Vec::with_capacity(n);
+        for (idx, &v) in values.iter().enumerate() {
+            let scope = scopes.map_or(Scope::External, |s| s[idx]);
+            let recipient = fvk.address_at(0u32, scope);
             let note_value = NoteValue::from_raw(v);
             let (_, _, dummy_parent) = Note::dummy(&mut *rng, None);
             let note = Note::new(
@@ -360,6 +370,7 @@ mod tests {
                 &mut *rng,
             );
             notes.push(note);
+            note_scopes.push(scope);
         }
 
         // Extract leaf hashes, padding to 4 with empty leaves.
@@ -403,6 +414,7 @@ mod tests {
                 fvk: fvk.clone(),
                 merkle_path,
                 imt_proof,
+                scope: note_scopes[i],
             });
         }
 
@@ -420,7 +432,7 @@ mod tests {
         let alpha = pallas::Scalar::random(&mut rng);
 
         let imt = SpacedLeafImtProvider::new();
-        let (inputs, nc_root) = make_real_note_inputs(&fvk, values, &imt, &mut rng);
+        let (inputs, nc_root) = make_real_note_inputs(&fvk, values, None, &imt, &mut rng);
 
         let bundle = build_delegation_bundle(
             inputs,
@@ -478,7 +490,7 @@ mod tests {
         let alpha = pallas::Scalar::random(&mut rng);
 
         let imt = SpacedLeafImtProvider::new();
-        let (inputs, nc_root) = make_real_note_inputs(&fvk, &[12_499_999], &imt, &mut rng);
+        let (inputs, nc_root) = make_real_note_inputs(&fvk, &[12_499_999], None, &imt, &mut rng);
 
         let bundle = build_delegation_bundle(
             inputs,
@@ -541,12 +553,13 @@ mod tests {
         let (inputs, _) = make_real_note_inputs(
             &fvk,
             &[3_000_000, 3_000_000, 3_000_000, 3_000_000],
+            None,
             &imt,
             &mut rng,
         );
         // Add a 5th note by extending.
         let mut inputs = inputs;
-        let (extra, _) = make_real_note_inputs(&fvk, &[3_000_000], &imt, &mut rng);
+        let (extra, _) = make_real_note_inputs(&fvk, &[3_000_000], None, &imt, &mut rng);
         inputs.extend(extra);
 
         let result = build_delegation_bundle(
@@ -565,5 +578,62 @@ mod tests {
             result,
             Err(DelegationBuildError::InvalidNoteCount(5))
         ));
+    }
+
+    /// Helper: build a bundle with explicit scopes and verify with MockProver.
+    fn build_and_verify_with_scopes(values: &[u64], scopes: &[Scope]) -> DelegationBundle {
+        assert_eq!(values.len(), scopes.len());
+        let mut rng = OsRng;
+        let sk = SpendingKey::random(&mut rng);
+        let fvk: FullViewingKey = (&sk).into();
+        let output_recipient = fvk.address_at(1u32, Scope::External);
+        let vote_round_id = pallas::Base::random(&mut rng);
+        let van_comm_rand = pallas::Base::random(&mut rng);
+        let alpha = pallas::Scalar::random(&mut rng);
+
+        let imt = SpacedLeafImtProvider::new();
+        let (inputs, nc_root) =
+            make_real_note_inputs(&fvk, values, Some(scopes), &imt, &mut rng);
+
+        let bundle = build_delegation_bundle(
+            inputs,
+            &fvk,
+            alpha,
+            output_recipient,
+            vote_round_id,
+            nc_root,
+            van_comm_rand,
+            &imt,
+            &mut rng,
+        )
+        .unwrap();
+
+        // Verify merged circuit.
+        let pi = bundle.instance.to_halo2_instance();
+        let prover = MockProver::run(K, &bundle.circuit, vec![pi]).unwrap();
+        assert_eq!(prover.verify(), Ok(()), "merged circuit failed");
+
+        bundle
+    }
+
+    #[test]
+    fn test_single_internal_note() {
+        build_and_verify_with_scopes(&[13_000_000], &[Scope::Internal]);
+    }
+
+    #[test]
+    fn test_mixed_scope_notes() {
+        build_and_verify_with_scopes(
+            &[4_000_000, 4_000_000, 3_000_000, 2_000_000],
+            &[Scope::External, Scope::Internal, Scope::External, Scope::Internal],
+        );
+    }
+
+    #[test]
+    fn test_all_internal_notes() {
+        build_and_verify_with_scopes(
+            &[4_000_000, 4_000_000, 3_000_000, 2_000_000],
+            &[Scope::Internal, Scope::Internal, Scope::Internal, Scope::Internal],
+        );
     }
 }

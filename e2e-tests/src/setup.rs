@@ -95,21 +95,35 @@ pub fn build_delegation_bundle_for_test(
     let alpha = pallas::Scalar::random(&mut rng);
     let van_comm_rand = pallas::Base::random(&mut rng);
 
-    let note_value = 15_000_000u64;
-    let recipient = fvk.address_at(0u32, Scope::External);
+    // Two notes with mixed scopes to exercise both External and Internal paths.
+    let note_value_ext = 8_000_000u64;
+    let note_value_int = 7_000_000u64;
+    let total_note_value = note_value_ext + note_value_int;
+
+    let recipient_ext = fvk.address_at(0u32, Scope::External);
+    let recipient_int = fvk.address_at(0u32, Scope::Internal);
+
     let (_, _, dummy_parent) = Note::dummy(&mut rng, None);
-    let note = Note::new(
-        recipient,
-        NoteValue::from_raw(note_value),
+    let note_ext = Note::new(
+        recipient_ext,
+        NoteValue::from_raw(note_value_ext),
         Rho::from_nf_old(dummy_parent.nullifier(&fvk)),
+        &mut rng,
+    );
+    let (_, _, dummy_parent2) = Note::dummy(&mut rng, None);
+    let note_int = Note::new(
+        recipient_int,
+        NoteValue::from_raw(note_value_int),
+        Rho::from_nf_old(dummy_parent2.nullifier(&fvk)),
         &mut rng,
     );
 
     let empty_leaf = MerkleHashOrchard::empty_leaf();
-    let cmx = ExtractedNoteCommitment::from(note.commitment());
+    let cmx_ext = ExtractedNoteCommitment::from(note_ext.commitment());
+    let cmx_int = ExtractedNoteCommitment::from(note_int.commitment());
     let leaves = [
-        MerkleHashOrchard::from_cmx(&cmx),
-        empty_leaf,
+        MerkleHashOrchard::from_cmx(&cmx_ext),
+        MerkleHashOrchard::from_cmx(&cmx_int),
         empty_leaf,
         empty_leaf,
     ];
@@ -124,26 +138,51 @@ pub fn build_delegation_bundle_for_test(
     let nc_root_bytes = current.to_bytes();
     let nc_root: pallas::Base = pallas::Base::from_repr(nc_root_bytes).unwrap();
 
-    let mut auth_path = [MerkleHashOrchard::empty_leaf(); NOTE_COMMITMENT_TREE_DEPTH];
-    auth_path[0] = leaves[1];
-    auth_path[1] = l1_1;
-    for level in 2..NOTE_COMMITMENT_TREE_DEPTH {
-        auth_path[level] = MerkleHashOrchard::empty_root(Level::from(level as u8));
-    }
-    let merkle_path = MerklePath::from_parts(0u32, auth_path);
-
     let imt = SpacedLeafImtProvider::new();
     let nf_imt_root = imt.root();
-    let real_nf = note.nullifier(&fvk);
-    let nf_fp: pallas::Base = pallas::Base::from_repr(real_nf.to_bytes()).unwrap();
-    let imt_proof = imt.non_membership_proof(nf_fp)?;
 
-    let note_input = RealNoteInput {
-        note,
-        fvk: fvk.clone(),
-        merkle_path,
-        imt_proof,
-    };
+    // Note 0 (External) at position 0: sibling is leaves[1], parent sibling is l1_1
+    let mut auth_path_0 = [MerkleHashOrchard::empty_leaf(); NOTE_COMMITMENT_TREE_DEPTH];
+    auth_path_0[0] = leaves[1];
+    auth_path_0[1] = l1_1;
+    for level in 2..NOTE_COMMITMENT_TREE_DEPTH {
+        auth_path_0[level] = MerkleHashOrchard::empty_root(Level::from(level as u8));
+    }
+    let merkle_path_0 = MerklePath::from_parts(0u32, auth_path_0);
+
+    let nf_ext = note_ext.nullifier(&fvk);
+    let nf_ext_fp: pallas::Base = pallas::Base::from_repr(nf_ext.to_bytes()).unwrap();
+    let imt_proof_0 = imt.non_membership_proof(nf_ext_fp)?;
+
+    // Note 1 (Internal) at position 1: sibling is leaves[0], parent sibling is l1_1
+    let mut auth_path_1 = [MerkleHashOrchard::empty_leaf(); NOTE_COMMITMENT_TREE_DEPTH];
+    auth_path_1[0] = leaves[0];
+    auth_path_1[1] = l1_1;
+    for level in 2..NOTE_COMMITMENT_TREE_DEPTH {
+        auth_path_1[level] = MerkleHashOrchard::empty_root(Level::from(level as u8));
+    }
+    let merkle_path_1 = MerklePath::from_parts(1u32, auth_path_1);
+
+    let nf_int = note_int.nullifier(&fvk);
+    let nf_int_fp: pallas::Base = pallas::Base::from_repr(nf_int.to_bytes()).unwrap();
+    let imt_proof_1 = imt.non_membership_proof(nf_int_fp)?;
+
+    let note_inputs = vec![
+        RealNoteInput {
+            note: note_ext,
+            fvk: fvk.clone(),
+            merkle_path: merkle_path_0,
+            imt_proof: imt_proof_0,
+            scope: Scope::External,
+        },
+        RealNoteInput {
+            note: note_int,
+            fvk: fvk.clone(),
+            merkle_path: merkle_path_1,
+            imt_proof: imt_proof_1,
+            scope: Scope::Internal,
+        },
+    ];
 
     let snapshot_blockhash = [0xAAu8; 32];
     let proposals_hash = [0xBBu8; 32];
@@ -179,7 +218,7 @@ pub fn build_delegation_bundle_for_test(
     }
 
     let bundle = build_delegation_bundle(
-        vec![note_input],
+        note_inputs,
         &fvk,
         alpha,
         output_recipient,
@@ -262,7 +301,7 @@ pub fn build_delegation_bundle_for_test(
         sk,
         van_comm_rand,
         vote_round_id,
-        total_note_value: note_value,
+        total_note_value: total_note_value,
         van_comm: bundle.instance.van_comm,
         cmx_new: bundle.instance.cmx_new,
     };

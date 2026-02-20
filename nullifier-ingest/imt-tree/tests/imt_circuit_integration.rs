@@ -72,6 +72,7 @@ const K: u32 = 14;
 fn make_real_note_inputs(
     fvk: &FullViewingKey,
     values: &[u64],
+    scopes: Option<&[Scope]>,
     imt_provider: &impl ImtProvider,
     rng: &mut impl rand::RngCore,
 ) -> (Vec<RealNoteInput>, pallas::Base) {
@@ -80,8 +81,10 @@ fn make_real_note_inputs(
 
     // Create notes.
     let mut notes = Vec::with_capacity(n);
-    for &v in values {
-        let recipient = fvk.address_at(0u32, Scope::External);
+    let mut note_scopes = Vec::with_capacity(n);
+    for (idx, &v) in values.iter().enumerate() {
+        let scope = scopes.map_or(Scope::External, |s| s[idx]);
+        let recipient = fvk.address_at(0u32, scope);
         let note_value = NoteValue::from_raw(v);
         let (_, _, dummy_parent) = Note::dummy(&mut *rng, None);
         let note = Note::new(
@@ -91,6 +94,7 @@ fn make_real_note_inputs(
             &mut *rng,
         );
         notes.push(note);
+        note_scopes.push(scope);
     }
 
     // Extract leaf hashes, padding to 4 with empty leaves.
@@ -141,6 +145,7 @@ fn make_real_note_inputs(
             fvk: fvk.clone(),
             merkle_path,
             imt_proof,
+            scope: note_scopes[i],
         });
     }
 
@@ -173,7 +178,7 @@ fn imt_proof_from_nullifier_tree_verifies_in_circuit() {
     let alpha = pallas::Scalar::random(&mut rng);
 
     // 3. Build a single real note with value >= 12,500,000 (the min weight).
-    let (inputs, nc_root) = make_real_note_inputs(&fvk, &[13_000_000], &adapter, &mut rng);
+    let (inputs, nc_root) = make_real_note_inputs(&fvk, &[13_000_000], None, &adapter, &mut rng);
 
     // 4. Build the delegation bundle.
     let bundle = build_delegation_bundle(
@@ -220,9 +225,11 @@ fn four_notes_with_nullifier_tree_verify_in_circuit() {
     let alpha = pallas::Scalar::random(&mut rng);
 
     // 4 notes x 3,200,000 = 12,800,000 >= 12,500,000.
+    // Mix External and Internal scopes to exercise the scope mux gate.
     let (inputs, nc_root) = make_real_note_inputs(
         &fvk,
         &[3_200_000, 3_200_000, 3_200_000, 3_200_000],
+        Some(&[Scope::External, Scope::Internal, Scope::Internal, Scope::External]),
         &adapter,
         &mut rng,
     );
