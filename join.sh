@@ -186,6 +186,7 @@ set -euo pipefail
 HOME_DIR="${HOME_DIR}"
 INSTALL_DIR="${INSTALL_DIR}"
 MONIKER="${MONIKER}"
+VALIDATOR_ADDR="${VALIDATOR_ADDR}"
 LOG_FILE="\${HOME_DIR}/node.log"
 
 # Ensure binaries are on PATH.
@@ -232,6 +233,19 @@ IS_VALIDATOR=\$(zallyd query staking validators --home "\${HOME_DIR}" --output j
 if [ -n "\$IS_VALIDATOR" ]; then
   echo "Already registered as validator: \${IS_VALIDATOR}"
 else
+  # Wait for the account to be funded before attempting registration.
+  echo "Waiting for account \${VALIDATOR_ADDR} to be funded..."
+  echo "  (trigger the 'Fund validator' GitHub Action if you haven't already)"
+  while true; do
+    BALANCE=\$(zallyd query bank balances "\${VALIDATOR_ADDR}" --home "\${HOME_DIR}" --output json 2>/dev/null \
+      | jq -r '.balances[] | select(.denom == "stake") | .amount' 2>/dev/null || echo "")
+    if [ -n "\$BALANCE" ] && [ "\$BALANCE" != "0" ]; then
+      echo "  Account funded (\${BALANCE} stake)."
+      break
+    fi
+    sleep 5
+  done
+
   echo "Registering as validator..."
   create-val-tx --moniker "\${MONIKER}" --amount 5stake --home "\${HOME_DIR}" --rpc-url tcp://localhost:26657
   echo "Validator registered."
