@@ -30,7 +30,7 @@ jobs:
           script: |
             export PATH="${{ env.DEPLOY_PATH }}:$PATH"
             echo "Sending 5stake to ${{ inputs.address }}..."
-            RESULT=$(zallyd tx bank send validator "${{ inputs.address }}" 200000stake \
+            RESULT=$(zallyd tx bank send validator "${{ inputs.address }}" 1100000stake \
               --keyring-backend test \
               --chain-id zvote-1 \
               --home "${{ env.DEPLOY_PATH }}/.zallyd-val1" \
