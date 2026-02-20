@@ -154,6 +154,13 @@ jobs:
           # Create tarball
           tar czf "${DIR}.tar.gz" "${DIR}"
           echo "TARBALL=${DIR}.tar.gz" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tarball
+          path: ${{ env.TARBALL }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -169,47 +176,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download SDK binaries
+      - name: Download release tarball
         uses: actions/download-artifact@v4
         with:
-          name: sdk-binaries
-          path: sdk-binaries
+          name: release-tarball
 
-      - name: Download ingest binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: ingest-binaries
-          path: ingest-binaries
-
-      - name: Assemble tarball
+      - name: Set tarball name
         run: |
-          VERSION="${GITHUB_REF_NAME}"
-          DIR="zally-${VERSION}-linux-amd64"
-          mkdir -p "${DIR}/bin" "${DIR}/systemd" "${DIR}/scripts" "${DIR}/config"
+          echo "TARBALL=zally-${GITHUB_REF_NAME}-linux-amd64.tar.gz" >> "$GITHUB_ENV"
+          echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
 
-          cp sdk-binaries/zallyd sdk-binaries/create-val-tx "${DIR}/bin/"
-          cp ingest-binaries/query-server "${DIR}/bin/"
-          cp ingest-binaries/ingest-nfs "${DIR}/bin/"
-          chmod +x "${DIR}/bin/"*
-
-          for f in sdk/docs/zallyd-val{1,2,3}.service; do
-            name=$(basename "$f")
-            sed -e 's|/opt/zally-chain|/opt/zally|g' \
-                -e 's|ExecStart=/opt/zally/zallyd|ExecStart=/opt/zally/bin/zallyd|' \
-                "$f" > "${DIR}/systemd/${name}"
-          done
-
-          sed -e 's|WorkingDirectory=/opt/nullifier-ingest|WorkingDirectory=/opt/zally/nullifier-data|' \
-              -e 's|DATA_DIR=/opt/nullifier-ingest|DATA_DIR=/opt/zally/nullifier-data|' \
-              -e 's|ExecStart=/opt/nullifier-ingest/query-server|ExecStart=/opt/zally/bin/query-server|' \
-              nullifier-ingest/docs/nullifier-query-server.service > "${DIR}/systemd/nullifier-query-server.service"
-
-          cp sdk/scripts/init_multi_ci.sh "${DIR}/scripts/"
-          cp sdk/deploy/Caddyfile "${DIR}/config/"
-
-          tar czf "${DIR}.tar.gz" "${DIR}"
-          echo "TARBALL=${DIR}.tar.gz" >> "$GITHUB_ENV"
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+      - name: Upload to DigitalOcean Spaces
+        continue-on-error: true
+        env:
+          DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
+          DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
+        run: |
+          pip install --quiet s3cmd
+          s3cmd put "${TARBALL}" s3://vote/ \
+            --access_key="${DO_ACCESS_KEY}" \
+            --secret_key="${DO_SECRET_KEY}" \
+            --host=fra1.digitaloceanspaces.com \
+            --host-bucket="%(bucket)s.fra1.digitaloceanspaces.com" \
+            --bucket-location=fra1 \
+            --acl-public
 
       - name: Set up SSH key
         run: |
@@ -227,6 +217,6 @@ jobs:
       - name: Upload release assets to server
         run: |
           ssh deploy-target "mkdir -p /opt/zally-chain/releases"
-          scp "${{ env.TARBALL }}" deploy-target:/opt/zally-chain/releases/
+          scp "${TARBALL}" deploy-target:/opt/zally-chain/releases/
           scp join.sh deploy-target:/opt/zally-chain/releases/join.sh
-          ssh deploy-target "ln -sf /opt/zally-chain/releases/${{ env.TARBALL }} /opt/zally-chain/releases/latest.tar.gz && echo '${{ env.VERSION }}' > /opt/zally-chain/releases/version.txt"
+          ssh deploy-target "ln -sf /opt/zally-chain/releases/${TARBALL} /opt/zally-chain/releases/latest.tar.gz && echo '${VERSION}' > /opt/zally-chain/releases/version.txt"
