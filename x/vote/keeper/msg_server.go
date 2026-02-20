@@ -82,6 +82,8 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		VkZkp3:            msg.VkZkp3,
 		Proposals:         msg.Proposals,
 		Description:       msg.Description,
+		CreatedAtHeight:   uint64(ctx.BlockHeight()),
+		Title:             msg.Title,
 	}
 
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {

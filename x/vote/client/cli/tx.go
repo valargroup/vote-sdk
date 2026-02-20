@@ -364,6 +364,8 @@ Example:
 				VkZkp1           string `json:"vk_zkp1"`
 				VkZkp2           string `json:"vk_zkp2"`
 				VkZkp3           string `json:"vk_zkp3"`
+				Description      string `json:"description"`
+				Title            string `json:"title"`
 				Proposals        []struct {
 					Id      uint32 `json:"id"`
 					Title   string `json:"title"`
@@ -442,6 +444,8 @@ Example:
 				VkZkp2:            vkZkp2,
 				VkZkp3:            vkZkp3,
 				Proposals:         proposals,
+				Description:       input.Description,
+				Title:             input.Title,
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)

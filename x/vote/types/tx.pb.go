@@ -39,6 +39,7 @@ type MsgCreateVotingSession struct {
 	VkZkp3            []byte                 `protobuf:"bytes,10,opt,name=vk_zkp3,json=vkZkp3,proto3" json:"vk_zkp3,omitempty"` // Verification key for ZKP #3
 	Proposals         []*Proposal            `protobuf:"bytes,11,rep,name=proposals,proto3" json:"proposals,omitempty"`
 	Description       string                 `protobuf:"bytes,12,opt,name=description,proto3" json:"description,omitempty"` // Human-readable round description
+	Title             string                 `protobuf:"bytes,13,opt,name=title,proto3" json:"title,omitempty"`             // Short human-readable round title
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -153,6 +154,13 @@ func (x *MsgCreateVotingSession) GetProposals() []*Proposal {
 func (x *MsgCreateVotingSession) GetDescription() string {
 	if x != nil {
 		return x.Description
+	}
+	return ""
+}
+
+func (x *MsgCreateVotingSession) GetTitle() string {
+	if x != nil {
+		return x.Title
 	}
 	return ""
 }
@@ -1374,7 +1382,7 @@ var File_zvote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\n" +
-	"\x11zvote/v1/tx.proto\x12\bzvote.v1\x1a\x17cosmos/msg/v1/msg.proto\x1a\x14zvote/v1/types.proto\"\xbb\x03\n" +
+	"\x11zvote/v1/tx.proto\x12\bzvote.v1\x1a\x17cosmos/msg/v1/msg.proto\x1a\x14zvote/v1/types.proto\"\xd1\x03\n" +
 	"\x16MsgCreateVotingSession\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -1388,7 +1396,8 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\avk_zkp3\x18\n" +
 	" \x01(\fR\x06vkZkp3\x120\n" +
 	"\tproposals\x18\v \x03(\v2\x12.zvote.v1.ProposalR\tproposals\x12 \n" +
-	"\vdescription\x18\f \x01(\tR\vdescription\"D\n" +
+	"\vdescription\x18\f \x01(\tR\vdescription\x12\x14\n" +
+	"\x05title\x18\r \x01(\tR\x05title\"D\n" +
 	"\x1eMsgCreateVotingSessionResponse\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xc3\x02\n" +
 	"\x0fMsgDelegateVote\x12\x0e\n" +

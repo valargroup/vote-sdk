@@ -266,7 +266,9 @@ type VoteRound struct {
 	VkZkp2            []byte                 `protobuf:"bytes,12,opt,name=vk_zkp2,json=vkZkp2,proto3" json:"vk_zkp2,omitempty"` // Verification key for ZKP #2
 	VkZkp3            []byte                 `protobuf:"bytes,13,opt,name=vk_zkp3,json=vkZkp3,proto3" json:"vk_zkp3,omitempty"` // Verification key for ZKP #3
 	Proposals         []*Proposal            `protobuf:"bytes,14,rep,name=proposals,proto3" json:"proposals,omitempty"`
-	Description       string                 `protobuf:"bytes,15,opt,name=description,proto3" json:"description,omitempty"` // Human-readable round description
+	Description       string                 `protobuf:"bytes,15,opt,name=description,proto3" json:"description,omitempty"`                                   // Human-readable round description
+	CreatedAtHeight   uint64                 `protobuf:"varint,16,opt,name=created_at_height,json=createdAtHeight,proto3" json:"created_at_height,omitempty"` // Block height at which this round was registered on-chain
+	Title             string                 `protobuf:"bytes,17,opt,name=title,proto3" json:"title,omitempty"`                                               // Short human-readable round title
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -402,6 +404,20 @@ func (x *VoteRound) GetProposals() []*Proposal {
 func (x *VoteRound) GetDescription() string {
 	if x != nil {
 		return x.Description
+	}
+	return ""
+}
+
+func (x *VoteRound) GetCreatedAtHeight() uint64 {
+	if x != nil {
+		return x.CreatedAtHeight
+	}
+	return 0
+}
+
+func (x *VoteRound) GetTitle() string {
+	if x != nil {
+		return x.Title
 	}
 	return ""
 }
@@ -1271,7 +1287,7 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12.\n" +
-	"\aoptions\x18\x04 \x03(\v2\x14.zvote.v1.VoteOptionR\aoptions\"\x98\x04\n" +
+	"\aoptions\x18\x04 \x03(\v2\x14.zvote.v1.VoteOptionR\aoptions\"\xda\x04\n" +
 	"\tVoteRound\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -1288,7 +1304,9 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\avk_zkp2\x18\f \x01(\fR\x06vkZkp2\x12\x17\n" +
 	"\avk_zkp3\x18\r \x01(\fR\x06vkZkp3\x120\n" +
 	"\tproposals\x18\x0e \x03(\v2\x12.zvote.v1.ProposalR\tproposals\x12 \n" +
-	"\vdescription\x18\x0f \x01(\tR\vdescription\",\n" +
+	"\vdescription\x18\x0f \x01(\tR\vdescription\x12*\n" +
+	"\x11created_at_height\x18\x10 \x01(\x04R\x0fcreatedAtHeight\x12\x14\n" +
+	"\x05title\x18\x11 \x01(\tR\x05title\",\n" +
 	"\x10VoteManagerState\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x8d\x01\n" +
 	"\x13CommitmentTreeState\x12\x1d\n" +

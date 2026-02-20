@@ -42,6 +42,8 @@ message VoteRound {
   bytes  vk_zkp3                    = 13; // Verification key for ZKP #3
   repeated Proposal proposals       = 14;
   string            description     = 15; // Human-readable round description
+  uint64            created_at_height = 16; // Block height at which this round was registered on-chain
+  string            title           = 17; // Short human-readable round title
 }
 
 // VoteManagerState stores the singleton vote manager address.
