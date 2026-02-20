@@ -82,7 +82,7 @@ func initAppConfig() (string, interface{}) {
 		Vote: VoteConfig{
 			EASkPath:     "$HOME/.zallyd/ea.sk",
 			PallasSkPath: "$HOME/.zallyd/pallas.sk",
-			CometRPC:     "http://localhost:26257",
+			CometRPC:     "http://localhost:26657",
 		},
 	}
 
