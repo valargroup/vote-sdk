@@ -6,8 +6,6 @@ import (
 	"strings"
 	"sync/atomic"
 
-	sdkmath "cosmossdk.io/math"
-
 	dbm "github.com/cosmos/cosmos-db"
 
 	clienthelpers "cosmossdk.io/client/v2/helpers"
@@ -24,7 +22,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/server/api"
 	"github.com/cosmos/cosmos-sdk/server/config"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
@@ -83,10 +80,6 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-
-	// Set power reduction to 1 so that 1 stake token = 1 unit of consensus power
-	// (instead of the Cosmos SDK default of 10^6).
-	sdk.DefaultPowerReduction = sdkmath.NewIntFromUint64(1)
 }
 
 // NewZallyApp returns a reference to an initialized ZallyApp.
