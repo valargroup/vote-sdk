@@ -15,5 +15,10 @@
 		reverse_proxy localhost:3000
 	}
 
+	handle_path /releases/* {
+		root * /opt/zally-chain/releases
+		file_server
+	}
+
 	reverse_proxy localhost:1418
 }
