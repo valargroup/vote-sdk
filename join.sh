@@ -11,7 +11,7 @@
 #   4. Configures the node to connect to the existing network
 #   5. Generates a start.sh script that handles sync + validator registration
 #
-# Requirements: Linux amd64, curl, jq
+# Requirements: Linux or macOS (amd64 or arm64), curl, jq
 
 set -euo pipefail
 
@@ -25,16 +25,28 @@ DO_BASE="https://vote.fra1.digitaloceanspaces.com"
 echo "=== Zally validator join ==="
 echo ""
 
-ARCH=$(uname -m)
-if [ "$ARCH" != "x86_64" ]; then
-  echo "ERROR: Only amd64 (x86_64) is supported. Detected: $ARCH"
-  exit 1
-fi
+OS_RAW=$(uname -s)
+ARCH_RAW=$(uname -m)
 
-if [ "$(uname -s)" != "Linux" ]; then
-  echo "ERROR: Only Linux is supported. Detected: $(uname -s)"
-  exit 1
-fi
+case "$OS_RAW" in
+  Linux)  OS="linux" ;;
+  Darwin) OS="darwin" ;;
+  *)
+    echo "ERROR: Unsupported OS: ${OS_RAW}. Supported: Linux, Darwin (macOS)."
+    exit 1
+    ;;
+esac
+
+case "$ARCH_RAW" in
+  x86_64)          ARCH="amd64" ;;
+  aarch64|arm64)   ARCH="arm64" ;;
+  *)
+    echo "ERROR: Unsupported architecture: ${ARCH_RAW}. Supported: x86_64, arm64/aarch64."
+    exit 1
+    ;;
+esac
+
+PLATFORM="${OS}-${ARCH}"
 
 for cmd in curl jq; do
   if ! command -v "$cmd" > /dev/null 2>&1; then
@@ -68,10 +80,11 @@ if [ -z "$VERSION" ]; then
 fi
 
 echo "Version: ${VERSION}"
-curl -fsSL -o /tmp/zally-release.tar.gz "${DO_BASE}/zally-${VERSION}-linux-amd64.tar.gz"
+echo "Platform: ${PLATFORM}"
+curl -fsSL -o /tmp/zally-release.tar.gz "${DO_BASE}/zally-${VERSION}-${PLATFORM}.tar.gz"
 
 # Extract just the binaries we need.
-TARBALL_DIR="zally-${VERSION}-linux-amd64"
+TARBALL_DIR="zally-${VERSION}-${PLATFORM}"
 tar xzf /tmp/zally-release.tar.gz -C /tmp "${TARBALL_DIR}/bin/zallyd" "${TARBALL_DIR}/bin/create-val-tx"
 
 cp "/tmp/${TARBALL_DIR}/bin/zallyd" "${INSTALL_DIR}/zallyd"

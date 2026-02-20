@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Linux amd64
+- Linux or macOS (amd64 or arm64)
 - `curl` and `jq` installed
 - Funded validator account (see Step 2)
 
@@ -11,14 +11,14 @@
 Run the setup script. It downloads pre-built binaries, fetches the genesis and network config, initialises your node, generates cryptographic keys, and produces a ready-to-run `start.sh`.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/z-cale/zally/main/join.sh | bash
+curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
 ```
 
 You will be prompted for a **moniker** (a display name for your validator). To run non-interactively, set it as an env var:
 
 ```bash
 ZALLY_MONIKER=my-validator \
-  curl -fsSL https://raw.githubusercontent.com/z-cale/zally/main/join.sh | bash
+  curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
 ```
 
 ### Optional env vars
