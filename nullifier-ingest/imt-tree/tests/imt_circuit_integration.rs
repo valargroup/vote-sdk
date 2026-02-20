@@ -72,19 +72,18 @@ const K: u32 = 14;
 fn make_real_note_inputs(
     fvk: &FullViewingKey,
     values: &[u64],
-    scopes: Option<&[Scope]>,
+    scopes: &[Scope],
     imt_provider: &impl ImtProvider,
     rng: &mut impl rand::RngCore,
 ) -> (Vec<RealNoteInput>, pallas::Base) {
     let n = values.len();
     assert!(n >= 1 && n <= 4);
+    assert_eq!(n, scopes.len());
 
     // Create notes.
     let mut notes = Vec::with_capacity(n);
-    let mut note_scopes = Vec::with_capacity(n);
     for (idx, &v) in values.iter().enumerate() {
-        let scope = scopes.map_or(Scope::External, |s| s[idx]);
-        let recipient = fvk.address_at(0u32, scope);
+        let recipient = fvk.address_at(0u32, scopes[idx]);
         let note_value = NoteValue::from_raw(v);
         let (_, _, dummy_parent) = Note::dummy(&mut *rng, None);
         let note = Note::new(
@@ -94,7 +93,6 @@ fn make_real_note_inputs(
             &mut *rng,
         );
         notes.push(note);
-        note_scopes.push(scope);
     }
 
     // Extract leaf hashes, padding to 4 with empty leaves.
@@ -145,7 +143,7 @@ fn make_real_note_inputs(
             fvk: fvk.clone(),
             merkle_path,
             imt_proof,
-            scope: note_scopes[i],
+            scope: scopes[i],
         });
     }
 
@@ -178,7 +176,7 @@ fn imt_proof_from_nullifier_tree_verifies_in_circuit() {
     let alpha = pallas::Scalar::random(&mut rng);
 
     // 3. Build a single real note with value >= 12,500,000 (the min weight).
-    let (inputs, nc_root) = make_real_note_inputs(&fvk, &[13_000_000], None, &adapter, &mut rng);
+    let (inputs, nc_root) = make_real_note_inputs(&fvk, &[13_000_000], &[Scope::External], &adapter, &mut rng);
 
     // 4. Build the delegation bundle.
     let bundle = build_delegation_bundle(
@@ -229,7 +227,7 @@ fn four_notes_with_nullifier_tree_verify_in_circuit() {
     let (inputs, nc_root) = make_real_note_inputs(
         &fvk,
         &[3_200_000, 3_200_000, 3_200_000, 3_200_000],
-        Some(&[Scope::External, Scope::Internal, Scope::Internal, Scope::External]),
+        &[Scope::External, Scope::Internal, Scope::Internal, Scope::External],
         &adapter,
         &mut rng,
     );

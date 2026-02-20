@@ -343,24 +343,21 @@ mod tests {
     /// Notes are placed at positions 0..n in the commitment tree. Returns
     /// `(inputs, nc_root)` where `nc_root` is the shared anchor.
     ///
-    /// `scopes` specifies the scope for each note. If `None`, all notes use
-    /// `Scope::External`.
     fn make_real_note_inputs(
         fvk: &FullViewingKey,
         values: &[u64],
-        scopes: Option<&[Scope]>,
+        scopes: &[Scope],
         imt_provider: &impl ImtProvider,
         rng: &mut impl RngCore,
     ) -> (Vec<RealNoteInput>, pallas::Base) {
         let n = values.len();
         assert!(n >= 1 && n <= 4);
+        assert_eq!(n, scopes.len());
 
         // Create notes.
         let mut notes = Vec::with_capacity(n);
-        let mut note_scopes = Vec::with_capacity(n);
         for (idx, &v) in values.iter().enumerate() {
-            let scope = scopes.map_or(Scope::External, |s| s[idx]);
-            let recipient = fvk.address_at(0u32, scope);
+            let recipient = fvk.address_at(0u32, scopes[idx]);
             let note_value = NoteValue::from_raw(v);
             let (_, _, dummy_parent) = Note::dummy(&mut *rng, None);
             let note = Note::new(
@@ -370,7 +367,6 @@ mod tests {
                 &mut *rng,
             );
             notes.push(note);
-            note_scopes.push(scope);
         }
 
         // Extract leaf hashes, padding to 4 with empty leaves.
@@ -414,15 +410,16 @@ mod tests {
                 fvk: fvk.clone(),
                 merkle_path,
                 imt_proof,
-                scope: note_scopes[i],
+                scope: scopes[i],
             });
         }
 
         (inputs, nc_root)
     }
 
-    /// Helper: build a bundle from values and verify the merged circuit with MockProver.
-    fn build_and_verify(values: &[u64]) -> DelegationBundle {
+    /// Helper: build a bundle with explicit scopes and verify with MockProver.
+    fn build_and_verify(values: &[u64], scopes: &[Scope]) -> DelegationBundle {
+        assert_eq!(values.len(), scopes.len());
         let mut rng = OsRng;
         let sk = SpendingKey::random(&mut rng);
         let fvk: FullViewingKey = (&sk).into();
@@ -432,7 +429,8 @@ mod tests {
         let alpha = pallas::Scalar::random(&mut rng);
 
         let imt = SpacedLeafImtProvider::new();
-        let (inputs, nc_root) = make_real_note_inputs(&fvk, values, None, &imt, &mut rng);
+        let (inputs, nc_root) =
+            make_real_note_inputs(&fvk, values, scopes, &imt, &mut rng);
 
         let bundle = build_delegation_bundle(
             inputs,
@@ -457,24 +455,27 @@ mod tests {
 
     #[test]
     fn test_single_real_note() {
-        build_and_verify(&[13_000_000]);
+        build_and_verify(&[13_000_000], &[Scope::External]);
     }
 
     #[test]
     fn test_four_real_notes() {
         // 3,200,000 x 4 = 12,800,000 → num_ballots = 1, remainder = 300,000.
-        build_and_verify(&[3_200_000, 3_200_000, 3_200_000, 3_200_000]);
+        build_and_verify(
+            &[3_200_000, 3_200_000, 3_200_000, 3_200_000],
+            &[Scope::External, Scope::External, Scope::External, Scope::External],
+        );
     }
 
     #[test]
     fn test_two_real_notes() {
-        build_and_verify(&[7_000_000, 7_000_000]);
+        build_and_verify(&[7_000_000, 7_000_000], &[Scope::External, Scope::External]);
     }
 
     #[test]
     fn test_min_weight_boundary() {
         // v_total = 12,500,000 exactly → num_ballots = 1, remainder = 0. Should pass.
-        build_and_verify(&[12_500_000]);
+        build_and_verify(&[12_500_000], &[Scope::External]);
     }
 
     #[test]
@@ -490,7 +491,7 @@ mod tests {
         let alpha = pallas::Scalar::random(&mut rng);
 
         let imt = SpacedLeafImtProvider::new();
-        let (inputs, nc_root) = make_real_note_inputs(&fvk, &[12_499_999], None, &imt, &mut rng);
+        let (inputs, nc_root) = make_real_note_inputs(&fvk, &[12_499_999], &[Scope::External], &imt, &mut rng);
 
         let bundle = build_delegation_bundle(
             inputs,
@@ -513,7 +514,10 @@ mod tests {
     #[test]
     fn test_three_ballots() {
         // 3 notes × 12,500,000 = 37,500,000 → num_ballots = 3, remainder = 0.
-        build_and_verify(&[12_500_000, 12_500_000, 12_500_000]);
+        build_and_verify(
+            &[12_500_000, 12_500_000, 12_500_000],
+            &[Scope::External, Scope::External, Scope::External],
+        );
     }
 
     #[test]
@@ -553,13 +557,13 @@ mod tests {
         let (inputs, _) = make_real_note_inputs(
             &fvk,
             &[3_000_000, 3_000_000, 3_000_000, 3_000_000],
-            None,
+            &[Scope::External, Scope::External, Scope::External, Scope::External],
             &imt,
             &mut rng,
         );
         // Add a 5th note by extending.
         let mut inputs = inputs;
-        let (extra, _) = make_real_note_inputs(&fvk, &[3_000_000], None, &imt, &mut rng);
+        let (extra, _) = make_real_note_inputs(&fvk, &[3_000_000], &[Scope::External], &imt, &mut rng);
         inputs.extend(extra);
 
         let result = build_delegation_bundle(
@@ -580,50 +584,14 @@ mod tests {
         ));
     }
 
-    /// Helper: build a bundle with explicit scopes and verify with MockProver.
-    fn build_and_verify_with_scopes(values: &[u64], scopes: &[Scope]) -> DelegationBundle {
-        assert_eq!(values.len(), scopes.len());
-        let mut rng = OsRng;
-        let sk = SpendingKey::random(&mut rng);
-        let fvk: FullViewingKey = (&sk).into();
-        let output_recipient = fvk.address_at(1u32, Scope::External);
-        let vote_round_id = pallas::Base::random(&mut rng);
-        let van_comm_rand = pallas::Base::random(&mut rng);
-        let alpha = pallas::Scalar::random(&mut rng);
-
-        let imt = SpacedLeafImtProvider::new();
-        let (inputs, nc_root) =
-            make_real_note_inputs(&fvk, values, Some(scopes), &imt, &mut rng);
-
-        let bundle = build_delegation_bundle(
-            inputs,
-            &fvk,
-            alpha,
-            output_recipient,
-            vote_round_id,
-            nc_root,
-            van_comm_rand,
-            &imt,
-            &mut rng,
-        )
-        .unwrap();
-
-        // Verify merged circuit.
-        let pi = bundle.instance.to_halo2_instance();
-        let prover = MockProver::run(K, &bundle.circuit, vec![pi]).unwrap();
-        assert_eq!(prover.verify(), Ok(()), "merged circuit failed");
-
-        bundle
-    }
-
     #[test]
     fn test_single_internal_note() {
-        build_and_verify_with_scopes(&[13_000_000], &[Scope::Internal]);
+        build_and_verify(&[13_000_000], &[Scope::Internal]);
     }
 
     #[test]
     fn test_mixed_scope_notes() {
-        build_and_verify_with_scopes(
+        build_and_verify(
             &[4_000_000, 4_000_000, 3_000_000, 2_000_000],
             &[Scope::External, Scope::Internal, Scope::External, Scope::Internal],
         );
@@ -631,7 +599,7 @@ mod tests {
 
     #[test]
     fn test_all_internal_notes() {
-        build_and_verify_with_scopes(
+        build_and_verify(
             &[4_000_000, 4_000_000, 3_000_000, 2_000_000],
             &[Scope::Internal, Scope::Internal, Scope::Internal, Scope::Internal],
         );
