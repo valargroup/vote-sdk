@@ -288,14 +288,13 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 			errContains: "creator",
 		},
 		{
-			name: "invalid: empty entries",
+			name: "valid: empty entries (zero-vote round)",
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
 				Creator:     "zvote1admin",
 				Entries:     nil,
 			},
-			expectErr:   true,
-			errContains: "entries cannot be empty",
+			expectErr: false,
 		},
 		{
 			name: "invalid: duplicate (proposal_id, vote_decision) pair",

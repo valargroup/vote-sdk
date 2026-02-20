@@ -155,10 +155,6 @@ func TallyPrepareProposalHandler(
 				"round", tallyRound.VoteRoundId, "err", err)
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
-		if len(entries) == 0 {
-			return &abci.ResponsePrepareProposal{Txs: txs}, nil
-		}
-
 		msg := &types.MsgSubmitTally{
 			VoteRoundId: tallyRound.VoteRoundId,
 			Creator:     proposerValAddr,
