@@ -29,7 +29,7 @@ set -euo pipefail
 
 HOME_DIR="${ZALLY_HOME:-$HOME/.zallyd}"
 CHAIN_ID="${ZALLY_CHAIN_ID:-zvote-1}"
-NODE_RPC="${ZALLY_NODE_RPC:-tcp://localhost:26657}"
+NODE_RPC="${ZALLY_NODE_RPC:-tcp://localhost:26157}"
 REST_API="${ZALLY_REST_API:-http://localhost:1318}"
 FROM="${ZALLY_FROM:-validator}"
 KEYRING="${ZALLY_KEYRING:-test}"
@@ -147,6 +147,7 @@ cmd_deal() {
     vote deal-ea-key "${EA_PK_HEX}" "${PAYLOADS}" \
     --from "${FROM}" \
     --keyring-backend "${KEYRING}" \
+    --home "${HOME_DIR}" \
     --chain-id "${CHAIN_ID}" \
     --node "${NODE_RPC}"
 
@@ -207,6 +208,7 @@ cmd_reset() {
     vote reinitialize-election-authority \
     --from "${FROM}" \
     --keyring-backend "${KEYRING}" \
+    --home "${HOME_DIR}" \
     --chain-id "${CHAIN_ID}" \
     --node "${NODE_RPC}"
 
@@ -233,8 +235,17 @@ cmd_run() {
     --home "${HOME_DIR}")
   log "Dealer address: ${MY_ADDR}"
 
+  # Capture the account address (not valoper) for sequence polling.
+  MY_ACCT=$(zallyd keys show "${FROM}" -a \
+    --keyring-backend "${KEYRING}" \
+    --home "${HOME_DIR}")
+
   # ── Step 1/4: Register Pallas key ────────────────────────────────────────
   step "Step 1/4 — Register Pallas key"
+  # Snapshot sequence before submitting so we can detect when it increments.
+  PRE_REG_SEQ=$(zallyd q auth account "${MY_ACCT}" \
+    --node "${NODE_RPC}" --output json 2>/dev/null \
+    | jq -r '.account.value.sequence // 0' 2>/dev/null || echo "0")
   submit_tx_checked "Submitting register-pallas-key" \
     vote register-pallas-key \
     --from "${FROM}" \
@@ -260,9 +271,25 @@ cmd_run() {
     if [ "${FOUND}" = "1" ]; then
       COUNT=$(validator_count)
       log "Our key is on-chain. Total registered: ${COUNT}"
-      # Brief pause so the node's account sequence reflects the committed block
-      # before we submit the next tx from the same account.
-      sleep 3
+      # Poll until the node's account sequence has incremented past PRE_REG_SEQ,
+      # ensuring deal-ea-key is constructed with the correct sequence number.
+      SEQ_TIMEOUT=30
+      SEQ_ELAPSED=0
+      while true; do
+        CURRENT_SEQ=$(zallyd q auth account "${MY_ACCT}" \
+          --node "${NODE_RPC}" --output json 2>/dev/null \
+          | jq -r '.account.value.sequence // 0' 2>/dev/null || echo "0")
+        if [ "${CURRENT_SEQ}" -gt "${PRE_REG_SEQ}" ]; then
+          log "Account sequence updated: ${CURRENT_SEQ}"
+          break
+        fi
+        if [ "${SEQ_ELAPSED}" -ge "${SEQ_TIMEOUT}" ]; then
+          log "WARN: sequence did not update after ${SEQ_TIMEOUT}s, proceeding anyway"
+          break
+        fi
+        sleep 2
+        SEQ_ELAPSED=$((SEQ_ELAPSED + 2))
+      done
       break
     fi
     if [ "${ELAPSED}" -ge "${TIMEOUT}" ]; then
@@ -289,6 +316,7 @@ cmd_run() {
     vote deal-ea-key "${EA_PK_HEX}" "${PAYLOADS}" \
     --from "${FROM}" \
     --keyring-backend "${KEYRING}" \
+    --home "${HOME_DIR}" \
     --chain-id "${CHAIN_ID}" \
     --node "${NODE_RPC}"
 
