@@ -111,11 +111,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: sdk-binaries
+          path: sdk-binaries
 
       - name: Download ingest binaries
         uses: actions/download-artifact@v4
         with:
           name: ingest-binaries
+          path: ingest-binaries
 
       - name: Assemble tarball
         run: |
@@ -123,10 +125,10 @@ jobs:
           DIR="zally-${VERSION}-linux-amd64"
           mkdir -p "${DIR}/bin" "${DIR}/systemd" "${DIR}/scripts" "${DIR}/config"
 
-          # Binaries
-          cp sdk/zallyd sdk/create-val-tx "${DIR}/bin/"
-          cp nullifier-ingest/service/target/release/query-server "${DIR}/bin/"
-          cp nullifier-ingest/service/target/release/ingest-nfs "${DIR}/bin/"
+          # Binaries (artifact downloads flatten the common path prefix)
+          cp sdk-binaries/zallyd sdk-binaries/create-val-tx "${DIR}/bin/"
+          cp ingest-binaries/query-server "${DIR}/bin/"
+          cp ingest-binaries/ingest-nfs "${DIR}/bin/"
           chmod +x "${DIR}/bin/"*
 
           # Systemd service files — transform paths for /opt/zally layout
