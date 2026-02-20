@@ -1459,7 +1459,7 @@ function PublishModal({
                   value={
                     round.settings.endTime
                       ? new Date(round.settings.endTime).toLocaleString()
-                      : "7 days from now (default)"
+                      : "10 min from now (default)"
                   }
                 />
                 <SettingsStubRow

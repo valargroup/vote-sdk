@@ -59,6 +59,7 @@ public struct Voting {
     public struct State: Equatable {
         public enum Screen: Equatable {
             case loading
+            case roundsList
             case delegationSigning
             case proposalList
             case proposalDetail(id: UInt32)
@@ -68,6 +69,18 @@ public struct Voting {
             case results
             case error(String)
             case walletSyncing
+        }
+
+        public enum RoundTab: Equatable {
+            case active
+            case completed
+        }
+
+        public struct RoundListItem: Equatable, Identifiable {
+            public var id: String { session.voteRoundId.hexString }
+            public let roundNumber: Int
+            public let session: VotingSession
+            public var title: String { "Round \(roundNumber)" }
         }
 
         public struct PendingVote: Equatable {
@@ -109,6 +122,30 @@ public struct Voting {
             case balanceTooLow
         }
 
+        public enum VoteSubmissionStep: Equatable {
+            case preparingProof     // syncVoteTree + generateVanWitness + buildVoteCommitment + signCastVote + submitVoteCommitment
+            case confirming         // awaitCommitmentTreeGrowth
+            case sendingShares      // buildSharePayloads + delegateShares
+
+            public var label: String {
+                switch self {
+                case .preparingProof: return "Building vote proof..."
+                case .confirming: return "Waiting for confirmation..."
+                case .sendingShares: return "Sending to vote servers..."
+                }
+            }
+
+            public var stepNumber: Int {
+                switch self {
+                case .preparingProof: return 1
+                case .confirming: return 2
+                case .sendingShares: return 3
+                }
+            }
+
+            public static let totalSteps = 3
+        }
+
         public var screenStack: [Screen] = [.loading]
         public var votingRound: VotingRound
         public var votes: [UInt32: VoteChoice] = [:]
@@ -116,6 +153,29 @@ public struct Voting {
         public var isKeystoneUser: Bool
         public var roundId: String
         public var activeSession: VotingSession?
+
+        /// All rounds fetched from the server, sorted by snapshot height and numbered.
+        public var allRounds: [RoundListItem] = []
+        /// Currently selected tab on the rounds list screen.
+        public var selectedTab: RoundTab = .active
+
+        /// Computed: rounds that are active or tallying.
+        public var activeRounds: [RoundListItem] {
+            allRounds.filter { $0.session.status == .active || $0.session.status == .tallying }
+        }
+
+        /// Computed: rounds that are finalized.
+        public var completedRounds: [RoundListItem] {
+            allRounds.filter { $0.session.status == .finalized }
+        }
+
+        /// Computed: rounds visible for the current tab.
+        public var visibleRounds: [RoundListItem] {
+            switch selectedTab {
+            case .active: return activeRounds
+            case .completed: return completedRounds
+            }
+        }
 
         /// Resolved service config from CDN or local override.
         public var serviceConfig: VotingServiceConfig?
@@ -173,6 +233,8 @@ public struct Voting {
 
         /// Whether a vote commitment is being built and submitted to chain.
         public var isSubmittingVote: Bool = false
+        /// Current step in the vote submission pipeline.
+        public var voteSubmissionStep: VoteSubmissionStep?
         /// Error from the last vote submission attempt.
         public var voteSubmissionError: String?
 
@@ -254,6 +316,12 @@ public struct Voting {
         // Navigation
         case dismissFlow
         case goBack
+        case backToRoundsList
+
+        // Rounds list
+        case allRoundsLoaded([VotingSession])
+        case selectTab(State.RoundTab)
+        case roundTapped(String)
 
         // Initialization (DB, wallet notes, hotkey)
         case initialize
@@ -264,6 +332,7 @@ public struct Voting {
         case initializeFailed(String)
         case walletNotSynced(scannedHeight: UInt64, snapshotHeight: UInt64)
         case hotkeyLoaded(String)
+        case startActiveRoundPipeline
 
         // DB state stream (single source of truth)
         case votingDbStateChanged(VotingDbState)
@@ -305,7 +374,8 @@ public struct Voting {
         case voteCommitmentBuilt(VoteCommitmentBundle)
         case voteCommitmentSubmitted(String)
         case voteSubmissionFailed(proposalId: UInt32, error: String)
-        case advanceAfterVote(nextId: UInt32?)
+        case voteSubmissionStepUpdated(State.VoteSubmissionStep)
+        case advanceAfterVote
         case backToList
         case nextProposalDetail
         case previousProposalDetail
@@ -346,10 +416,90 @@ public struct Voting {
                 }
                 return .none
 
+            case .backToRoundsList:
+                // Cancel per-round effects and pop back to the rounds list
+                state.screenStack = [.roundsList]
+                // Reset per-round state
+                state.activeSession = nil
+                state.votes = [:]
+                state.votingWeight = 0
+                state.walletNotes = []
+                state.noteWitnessResults = []
+                state.cachedWitnesses = []
+                state.witnessTiming = nil
+                state.witnessStatus = .notStarted
+                state.delegationProofStatus = .notStarted
+                state.hotkeyAddress = nil
+                state.pendingVote = nil
+                state.isSubmittingVote = false
+                state.voteSubmissionStep = nil
+                state.voteSubmissionError = nil
+                state.tallyResults = [:]
+                state.isLoadingTallyResults = false
+                state.ineligibilityReason = nil
+                // Refresh the rounds list
+                return .merge(
+                    .cancel(id: cancelStateStreamId),
+                    .cancel(id: cancelStatusPollingId),
+                    .cancel(id: cancelSharePollingId),
+                    .run { [votingAPI] send in
+                        let allRounds = try await votingAPI.fetchAllRounds()
+                        await send(.allRoundsLoaded(allRounds))
+                    } catch: { error, _ in
+                        print("[Voting] Failed to refresh rounds list: \(error)")
+                    }
+                )
+
+            // MARK: - Rounds List
+
+            case .allRoundsLoaded(let sessions):
+                // Sort by vote end time ascending to approximate creation order
+                let sorted = sessions.sorted { $0.voteEndTime < $1.voteEndTime }
+                state.allRounds = sorted.enumerated().map { index, session in
+                    State.RoundListItem(roundNumber: index + 1, session: session)
+                }
+                // Auto-select the best tab based on available rounds
+                if !state.activeRounds.isEmpty {
+                    state.selectedTab = .active
+                } else if !state.completedRounds.isEmpty {
+                    state.selectedTab = .completed
+                }
+                return .none
+
+            case .selectTab(let tab):
+                state.selectedTab = tab
+                return .none
+
+            case .roundTapped(let roundId):
+                guard let item = state.allRounds.first(where: { $0.id == roundId }) else { return .none }
+                let session = item.session
+                state.activeSession = session
+                state.roundId = session.voteRoundId.hexString
+                state.votingRound = sessionBackedRound(from: session, title: item.title, fallback: state.votingRound)
+                reconcileProposalState(&state)
+
+                switch session.status {
+                case .active:
+                    // Show loading while the active round pipeline runs
+                    state.screenStack = [.roundsList, .loading]
+                    return .merge(
+                        .send(.startRoundStatusPolling),
+                        .send(.startActiveRoundPipeline)
+                    )
+                case .tallying:
+                    state.screenStack = [.roundsList, .tallying]
+                    return .send(.startRoundStatusPolling)
+                case .finalized:
+                    state.screenStack = [.roundsList, .results]
+                    return .send(.fetchTallyResults)
+                case .unspecified:
+                    return .none
+                }
+
             // MARK: - Initialization
 
             case .initialize:
-                state.screenStack = [.loading]
+                state.screenStack = [.roundsList]
                 return .run { [votingAPI] send in
                     // 1. Fetch service config (local override → CDN → deployed dev server fallback)
                     let config = try await votingAPI.fetchServiceConfig()
@@ -361,11 +511,7 @@ public struct Voting {
 
             case .serviceConfigLoaded(let config):
                 state.serviceConfig = config
-                let network = zcashSDKEnvironment.network
-                let walletDbPath = databaseFiles.dataDbURLFor(network).path
-                let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
-                let isKeystoneUser = state.isKeystoneUser
-                return .run { [votingAPI, votingCrypto, mnemonic, walletStorage, sdkSynchronizer] send in
+                return .run { [votingAPI, votingCrypto] send in
                     // 2. Configure API client URLs
                     await votingAPI.configureURLs(config)
 
@@ -375,37 +521,28 @@ public struct Voting {
                         .appendingPathComponent("voting.sqlite3").path
                     try await votingCrypto.openDatabase(dbPath)
 
-                    // 4. Fetch all rounds and pick the most relevant one
+                    // 4. Fetch all rounds and populate the list
                     let allRounds = try await votingAPI.fetchAllRounds()
-                    let activeRounds = allRounds.filter { $0.status == .active }
-                    let tallyingRounds = allRounds.filter { $0.status == .tallying }
-                    let finalizedRounds = allRounds.filter { $0.status == .finalized }
-
-                    let selectedSession: VotingSession?
-                    if let active = activeRounds.max(by: { $0.snapshotHeight < $1.snapshotHeight }) {
-                        selectedSession = active
-                    } else if let tallying = tallyingRounds.max(by: { $0.snapshotHeight < $1.snapshotHeight }) {
-                        selectedSession = tallying
-                    } else if let finalized = finalizedRounds.max(by: { $0.snapshotHeight < $1.snapshotHeight }) {
-                        selectedSession = finalized
-                    } else {
-                        selectedSession = nil
+                    print("[Voting] Fetched \(allRounds.count) rounds:")
+                    for r in allRounds {
+                        print("[Voting]   round=\(r.voteRoundId.hexString.prefix(16))... status=\(r.status) snapshot=\(r.snapshotHeight)")
                     }
 
-                    guard let session = selectedSession else {
-                        await send(.noActiveRound)
-                        return
-                    }
+                    await send(.allRoundsLoaded(allRounds))
+                } catch: { error, send in
+                    print("[Voting] Initialization failed: \(error)")
+                    await send(.initializeFailed(error.localizedDescription))
+                }
 
-                    await send(.activeSessionLoaded(session))
-
-                    // For ACTIVE rounds, load wallet notes and hotkey
-                    guard session.status == .active else { return }
-
-                    let snapshotHeight = session.snapshotHeight
-                    let roundId = session.voteRoundId.hexString
-
-                    // 5. Check wallet sync progress before querying notes
+            case .startActiveRoundPipeline:
+                guard let session = state.activeSession, session.status == .active else { return .none }
+                let network = zcashSDKEnvironment.network
+                let walletDbPath = databaseFiles.dataDbURLFor(network).path
+                let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
+                let snapshotHeight = session.snapshotHeight
+                let roundId = session.voteRoundId.hexString
+                return .run { [votingCrypto, mnemonic, walletStorage, sdkSynchronizer] send in
+                    // Check wallet sync progress before querying notes
                     let walletScannedHeight = UInt64(sdkSynchronizer.latestState().latestBlockHeight)
                     if walletScannedHeight < snapshotHeight {
                         print("[Voting] Wallet scanned to \(walletScannedHeight), snapshot at \(snapshotHeight) — not synced yet")
@@ -437,37 +574,21 @@ public struct Voting {
                         print("[Voting] Failed to generate hotkey: \(error)")
                     }
                 } catch: { error, send in
-                    print("[Voting] Initialization failed: \(error)")
+                    print("[Voting] Active round pipeline failed: \(error)")
                     await send(.initializeFailed(error.localizedDescription))
                 }
 
             case .activeSessionLoaded(let session):
                 state.activeSession = session
                 state.roundId = session.voteRoundId.hexString
-                state.votingRound = sessionBackedRound(from: session, fallback: state.votingRound)
+                state.votingRound = sessionBackedRound(from: session, title: state.votingRound.title, fallback: state.votingRound)
                 reconcileProposalState(&state)
-
-                // Route based on session status
-                switch session.status {
-                case .active:
-                    // Non-Keystone users skip the delegation signing screen
-                    if !state.isKeystoneUser {
-                        state.screenStack = [.proposalList]
-                    }
-                    return .send(.startRoundStatusPolling)
-                case .tallying:
-                    state.screenStack = [.tallying]
-                    return .send(.startRoundStatusPolling)
-                case .finalized:
-                    state.screenStack = [.results]
-                    return .send(.fetchTallyResults)
-                case .unspecified:
-                    return .none
-                }
+                print("[Voting] activeSessionLoaded: status=\(session.status) round=\(session.voteRoundId.hexString.prefix(16))... proposals=\(session.proposals.count)")
+                return .none
 
             case .noActiveRound:
                 state.activeSession = nil
-                state.screenStack = [.proposalList]
+                state.screenStack = [.roundsList]
                 return .none
 
             case .votingWeightLoaded(let weight, let notes):
@@ -475,11 +596,11 @@ public struct Voting {
                 state.walletNotes = notes
                 if notes.isEmpty {
                     state.ineligibilityReason = .noNotes
-                    state.screenStack = [.ineligible]
+                    state.screenStack = [.roundsList, .ineligible]
                     return .none
                 } else if weight < 12_500_000 {
                     state.ineligibilityReason = .balanceTooLow
-                    state.screenStack = [.ineligible]
+                    state.screenStack = [.roundsList, .ineligible]
                     return .none
                 }
                 return .send(.verifyWitnesses)
@@ -491,7 +612,7 @@ public struct Voting {
 
             case .walletNotSynced(let scannedHeight, _):
                 state.walletScannedHeight = scannedHeight
-                state.screenStack = [.walletSyncing]
+                state.screenStack = [.roundsList, .walletSyncing]
                 return .none
 
             case .hotkeyLoaded(let address):
@@ -517,10 +638,11 @@ public struct Voting {
             case .roundStatusUpdated(let newStatus):
                 guard let session = state.activeSession else { return .none }
                 // Only react to actual transitions
+                print("[Voting] roundStatusUpdated: old=\(session.status) new=\(newStatus)")
                 guard newStatus != session.status else { return .none }
 
                 // Update session status
-                state.activeSession = VotingSession(
+                let updatedSession = VotingSession(
                     voteRoundId: session.voteRoundId,
                     snapshotHeight: session.snapshotHeight,
                     snapshotBlockhash: session.snapshotBlockhash,
@@ -537,13 +659,22 @@ public struct Voting {
                     proposals: session.proposals,
                     status: newStatus
                 )
+                state.activeSession = updatedSession
+
+                // Also update the corresponding entry in allRounds so the list stays consistent
+                if let idx = state.allRounds.firstIndex(where: { $0.session.voteRoundId == session.voteRoundId }) {
+                    state.allRounds[idx] = State.RoundListItem(
+                        roundNumber: state.allRounds[idx].roundNumber,
+                        session: updatedSession
+                    )
+                }
 
                 switch newStatus {
                 case .tallying:
-                    state.screenStack = [.tallying]
+                    state.screenStack = [.roundsList, .tallying]
                     return .none
                 case .finalized:
-                    state.screenStack = [.results]
+                    state.screenStack = [.roundsList, .results]
                     return .merge(
                         .cancel(id: cancelStatusPollingId),
                         .send(.fetchTallyResults)
@@ -699,7 +830,7 @@ public struct Voting {
                 state.witnessStatus = .completed
                 // Non-Keystone users skip the delegation signing screen entirely
                 if !state.isKeystoneUser {
-                    state.screenStack = [.proposalList]
+                    state.screenStack = [.roundsList, .proposalList]
                     return .merge(
                         .publisher {
                             votingCrypto.stateStream()
@@ -711,7 +842,7 @@ public struct Voting {
                     )
                 }
                 // Keystone fresh round: now show the delegation signing screen
-                state.screenStack = [.delegationSigning]
+                state.screenStack = [.roundsList, .delegationSigning]
                 return .none
 
             case .witnessVerificationFailed(let error):
@@ -723,15 +854,23 @@ public struct Voting {
             case .roundResumeChecked(let alreadyAuthorized):
                 if alreadyAuthorized {
                     state.delegationProofStatus = .complete
-                    state.screenStack = [.proposalList]
+                    state.screenStack = [.roundsList, .proposalList]
                     state.witnessStatus = .completed
-                    // Start state stream to sync votes and hotkey from the existing round
-                    return .publisher {
-                        votingCrypto.stateStream()
-                            .receive(on: DispatchQueue.main)
-                            .map(Action.votingDbStateChanged)
-                    }
-                    .cancellable(id: cancelStateStreamId, cancelInFlight: true)
+                    // Start state stream to sync votes and hotkey from the existing round,
+                    // then trigger a refresh so the current DB state is published
+                    // (stateStream uses dropFirst, so without this the existing value is lost).
+                    let roundId = state.activeSession?.voteRoundId.hexString ?? ""
+                    return .merge(
+                        .publisher {
+                            votingCrypto.stateStream()
+                                .receive(on: DispatchQueue.main)
+                                .map(Action.votingDbStateChanged)
+                        }
+                        .cancellable(id: cancelStateStreamId, cancelInFlight: true),
+                        .run { _ in
+                            await votingCrypto.refreshState(roundId)
+                        }
+                    )
                 }
                 return .none
 
@@ -762,7 +901,7 @@ public struct Voting {
 
             case .delegationApproved:
                 if !state.isKeystoneUser {
-                    state.screenStack = [.proposalList]
+                    state.screenStack = [.roundsList, .proposalList]
                     return .send(.startDelegationProof)
                 }
                 return .send(.startDelegationProof)
@@ -933,7 +1072,7 @@ public struct Voting {
                 state.pendingGovernancePczt = nil
                 state.pendingUnsignedDelegationPczt = nil
                 state.keystoneSigningStatus = .idle
-                state.screenStack = [.proposalList]
+                state.screenStack = [.roundsList, .proposalList]
                 state.delegationProofStatus = .generating(progress: 0)
 
                 let roundId = activeSession.voteRoundId.hexString
@@ -1039,23 +1178,19 @@ public struct Voting {
                 let roundId = state.roundId
                 let network = zcashSDKEnvironment.network
                 let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
-                let nextId = nextUnvotedId(after: proposalId, in: state)
                 let chainNodeUrl = state.serviceConfig?.voteServers.first?.url ?? "https://46-101-255-48.sslip.io"
 
                 return .run { [votingAPI, votingCrypto, mnemonic, walletStorage] send in
-                    // Derive hotkey seed (same seed used during delegation)
+                    // Step 1: Build vote proof
+                    await send(.voteSubmissionStepUpdated(.preparingProof))
+
                     let hotkeyPhrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
                     let hotkeySeed = try mnemonic.toSeed(hotkeyPhrase)
 
-                    // Sync vote commitment tree from chain and generate VAN witness.
-                    // Requires storeVanPosition to have been called after delegation TX.
                     let anchorHeight = try await votingCrypto.syncVoteTree(roundId, chainNodeUrl)
                     let vanWitness = try await votingCrypto.generateVanWitness(roundId, anchorHeight)
                     print("[Voting] VAN witness: position=\(vanWitness.position), anchor=\(vanWitness.anchorHeight)")
 
-                    // Build vote commitment + ZKP #2 (stored in DB).
-                    // The builder internally decomposes weight, encrypts shares under EA pk,
-                    // and returns encrypted shares in the bundle.
                     var builtBundle: VoteCommitmentBundle?
                     for try await event in votingCrypto.buildVoteCommitment(
                         roundId, hotkeySeed, networkId, proposalId, choice, numOptions,
@@ -1070,19 +1205,18 @@ public struct Voting {
                         throw VotingFlowError.missingVoteCommitmentBundle
                     }
 
-                    // Sign the cast-vote TX (sighash + spend auth signature)
+                    // Sign and submit to chain (still part of step 1 visually)
                     let castVoteSig = try await votingCrypto.signCastVote(
                         hotkeySeed, networkId, builtBundle
                     )
 
-                    // Submit cast-vote TX to chain, polling for tree growth
                     let preVCTree = try await votingAPI.fetchLatestCommitmentTree()
                     let txResult = try await votingAPI.submitVoteCommitment(builtBundle, castVoteSig)
                     await send(.voteCommitmentSubmitted(txResult.txHash))
 
-                    // Wait for the cast-vote TX to land and read the new tree position.
-                    // The chain appends vote_authority_note_new first, then vote_commitment,
-                    // so the new VAN is at nextIndex-2 and the VC is at nextIndex-1.
+                    // Step 2: Wait for confirmation
+                    await send(.voteSubmissionStepUpdated(.confirming))
+
                     let postVCTree = try await votingAPI.awaitCommitmentTreeGrowth(preVCTree.nextIndex, 30)
                     let newVanPosition = UInt32(postVCTree.nextIndex) - 2
                     let vcTreePosition = postVCTree.nextIndex - 1
@@ -1090,16 +1224,34 @@ public struct Voting {
                     // Update VAN position so the next vote uses the new VAN leaf
                     try await votingCrypto.storeVanPosition(roundId, newVanPosition)
 
+                    // Step 3: Send shares to vote servers
+                    await send(.voteSubmissionStepUpdated(.sendingShares))
+
                     let payloads = try await votingCrypto.buildSharePayloads(
                         builtBundle.encShares, builtBundle, choice, numOptions, vcTreePosition
                     )
-                    try await votingAPI.delegateShares(payloads, roundId)
+                    // Retry share delegation up to 3 times — helper servers may return 503 transiently
+                    var lastShareError: Error?
+                    for attempt in 1...3 {
+                        do {
+                            try await votingAPI.delegateShares(payloads, roundId)
+                            lastShareError = nil
+                            break
+                        } catch {
+                            lastShareError = error
+                            print("[Voting] delegateShares attempt \(attempt)/3 failed: \(error)")
+                            if attempt < 3 {
+                                try await Task.sleep(for: .seconds(2))
+                            }
+                        }
+                    }
+                    if let lastShareError { throw lastShareError }
 
                     // Mark vote submitted in DB
                     try await votingCrypto.markVoteSubmitted(roundId, proposalId)
 
-                    // Vote is on chain — advance to next proposal
-                    await send(.advanceAfterVote(nextId: nextId))
+                    // Vote is on chain — return to proposal list
+                    await send(.advanceAfterVote)
                 } catch: { error, send in
                     print("[Voting] vote submission failed: \(error)")
                     await send(.voteSubmissionFailed(proposalId: proposalId, error: error.localizedDescription))
@@ -1115,23 +1267,23 @@ public struct Voting {
 
             case .voteSubmissionFailed(let proposalId, let error):
                 state.isSubmittingVote = false
+                state.voteSubmissionStep = nil
                 state.voteSubmissionError = error
                 // Remove the optimistic vote since it didn't land on chain
                 state.votes.removeValue(forKey: proposalId)
                 return .none
 
-            case .advanceAfterVote(let nextId):
+            case .voteSubmissionStepUpdated(let step):
+                state.voteSubmissionStep = step
+                return .none
+
+            case .advanceAfterVote:
                 state.isSubmittingVote = false
+                state.voteSubmissionStep = nil
                 state.voteSubmissionError = nil
+                // Return to proposal list so the user can pick their next vote freely.
                 if case .proposalDetail = state.currentScreen {
-                    if let nextId {
-                        state.selectedProposalId = nextId
-                        state.screenStack.removeLast()
-                        state.screenStack.append(.proposalDetail(id: nextId))
-                    } else {
-                        // All proposals voted — go to completion
-                        state.screenStack = [.complete]
-                    }
+                    state.screenStack.removeLast()
                 }
                 return .none
 
@@ -1166,7 +1318,8 @@ public struct Voting {
             // MARK: - Complete
 
             case .doneTapped:
-                return .send(.dismissFlow)
+                state.screenStack = [.roundsList, .proposalList]
+                return .none
             }
         }
         .ifLet(\.$keystoneScan, action: \.keystoneScan) {
@@ -1174,21 +1327,11 @@ public struct Voting {
         }
     }
 
-    // Find the next unvoted proposal after the given one (wrapping around)
-    private func nextUnvotedId(after proposalId: UInt32, in state: State) -> UInt32? {
-        let proposals = state.votingRound.proposals
-        guard let currentIndex = proposals.firstIndex(where: { $0.id == proposalId }) else { return nil }
-
-        // Look forward first, then wrap
-        return proposals[(currentIndex + 1)...].first { state.votes[$0.id] == nil }?.id
-            ?? proposals[..<currentIndex].first { state.votes[$0.id] == nil }?.id
-    }
-
-    private func sessionBackedRound(from session: VotingSession, fallback: VotingRound) -> VotingRound {
+    private func sessionBackedRound(from session: VotingSession, title: String, fallback: VotingRound) -> VotingRound {
         let proposals = session.proposals.isEmpty ? fallback.proposals : session.proposals
         return VotingRound(
             id: session.voteRoundId.hexString,
-            title: fallback.title,
+            title: title.isEmpty ? fallback.title : title,
             description: session.description.isEmpty ? fallback.description : session.description,
             snapshotHeight: session.snapshotHeight,
             snapshotDate: fallback.snapshotDate,

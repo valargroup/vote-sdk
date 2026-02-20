@@ -49,19 +49,6 @@ struct ProposalDetailView: View {
                             // Vote section
                             voteSection()
 
-                            // Share confirmation progress
-                            if store.votes[proposal.id] != nil {
-                                shareConfirmationProgress()
-                            }
-
-                            if let bundle = store.lastVoteCommitmentBundle,
-                               bundle.proposalId == proposal.id {
-                                VoteCommitmentStubCard(
-                                    bundle: bundle,
-                                    txHash: store.lastVoteCommitmentTxHash
-                                )
-                            }
-
                             Spacer()
                         }
                         .padding(.horizontal, 24)
@@ -225,16 +212,36 @@ struct ProposalDetailView: View {
 
     @ViewBuilder
     private func submittingBanner(choice: VoteChoice) -> some View {
-        HStack(spacing: 10) {
-            ProgressView()
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Submitting vote...")
-                    .zFont(.semiBold, size: 15, style: Design.Text.primary)
-                Text(choice.label)
-                    .zFont(.medium, size: 14, style: Design.Text.secondary)
+        let step = store.voteSubmissionStep
+        let stepNum = step?.stepNumber ?? 1
+        let totalSteps = Voting.State.VoteSubmissionStep.totalSteps
+        let stepLabel = step?.label ?? "Submitting vote..."
+
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                ProgressView()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stepLabel)
+                        .zFont(.semiBold, size: 15, style: Design.Text.primary)
+                    Text("Step \(stepNum) of \(totalSteps)")
+                        .zFont(.regular, size: 12, style: Design.Text.tertiary)
+                }
+                Spacer()
+                VoteChip(choice: choice)
             }
-            Spacer()
-            VoteChip(choice: choice)
+
+            // Step progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(voteColor(choice).opacity(0.15))
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(voteColor(choice))
+                        .frame(width: geo.size.width * Double(stepNum) / Double(totalSteps))
+                        .animation(.easeInOut(duration: 0.3), value: stepNum)
+                }
+            }
+            .frame(height: 3)
         }
         .padding(16)
         .background(voteColor(choice).opacity(0.08))
@@ -371,63 +378,6 @@ struct ProposalDetailView: View {
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.2), value: store.pendingVote)
         }
-    }
-
-    // MARK: - Share Confirmation Progress
-
-    @ViewBuilder
-    private func shareConfirmationProgress() -> some View {
-        let confirmed = store.shareConfirmations[proposal.id] ?? 0
-        let allConfirmed = confirmed >= 4
-
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Share Confirmations")
-                .zFont(.semiBold, size: 14, style: Design.Text.primary)
-
-            // Status circles
-            HStack(spacing: 6) {
-                ForEach(0..<4, id: \.self) { i in
-                    Circle()
-                        .fill(i < confirmed ? Color.green : Design.Surfaces.strokeSecondary.color(colorScheme))
-                        .frame(width: 8, height: 8)
-                }
-
-                if allConfirmed {
-                    Text("All shares confirmed")
-                        .zFont(.medium, size: 13, style: Design.Text.primary)
-                        .foregroundStyle(.green)
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.green)
-                } else {
-                    Text("\(confirmed) of 4 shares confirmed")
-                        .zFont(.medium, size: 13, style: Design.Text.secondary)
-                }
-            }
-
-            // Progress bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Design.Surfaces.strokeSecondary.color(colorScheme))
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.green)
-                        .frame(width: geo.size.width * Double(confirmed) / 4.0)
-                }
-            }
-            .frame(height: 4)
-
-            if !allConfirmed {
-                Text("Shares are being submitted by vote servers. This may take a few minutes.")
-                    .zFont(.regular, size: 12, style: Design.Text.tertiary)
-            } else {
-                Text("Your vote is fully counted.")
-                    .zFont(.regular, size: 12, style: Design.Text.tertiary)
-            }
-        }
-        .padding(14)
-        .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: - Components

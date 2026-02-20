@@ -43,9 +43,12 @@ struct ProposalListView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
-                        store.send(.dismissFlow)
+                        store.send(.backToRoundsList)
                     } label: {
-                        Image(systemName: "xmark")
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text("Rounds")
+                        }
                     }
                 }
                 if store.activeSession != nil {
@@ -140,8 +143,9 @@ struct ProposalListView: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 16)
         .background(Design.Surfaces.bgPrimary.color(colorScheme))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(

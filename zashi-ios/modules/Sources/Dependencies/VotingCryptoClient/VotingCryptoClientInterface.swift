@@ -16,6 +16,9 @@ public struct VotingCryptoClient {
     public var stateStream: @Sendable () -> AnyPublisher<VotingDbState, Never>
         = { Empty().eraseToAnyPublisher() }
 
+    /// Re-publish the current DB state for the given round, triggering stateStream subscribers.
+    public var refreshState: @Sendable (_ roundId: String) async -> Void = { _ in }
+
     // --- Database lifecycle ---
     public var openDatabase: @Sendable (_ path: String) async throws -> Void
     public var initRound: @Sendable (_ params: VotingRoundParams, _ sessionJson: String?) async throws -> Void

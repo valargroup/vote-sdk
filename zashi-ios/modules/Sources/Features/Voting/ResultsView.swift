@@ -53,9 +53,12 @@ struct ResultsView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
-                        store.send(.dismissFlow)
+                        store.send(.backToRoundsList)
                     } label: {
-                        Image(systemName: "xmark")
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text("Rounds")
+                        }
                     }
                 }
             }
@@ -85,8 +88,8 @@ struct ResultsView: View {
     @ViewBuilder
     private func roundHeaderCard() -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Title: "Round 1"
-            Text("Round 1")
+            // Title
+            Text(store.votingRound.title)
                 .zFont(.semiBold, size: 18, style: Design.Text.primary)
 
             // Round description
@@ -217,7 +220,7 @@ struct ResultsView: View {
 
             // Total
             if totalAmount > 0 {
-                Text("Total: \(totalAmount) (\(tallyToZEC(totalAmount)))")
+                Text("Total: \(tallyToZEC(totalAmount))")
                     .zFont(.medium, size: 12, style: Design.Text.tertiary)
             }
         }

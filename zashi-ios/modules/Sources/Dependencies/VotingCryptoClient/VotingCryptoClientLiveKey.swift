@@ -63,6 +63,10 @@ extension VotingCryptoClient: DependencyKey {
                     .dropFirst() // Skip initial empty state
                     .eraseToAnyPublisher()
             },
+            refreshState: { roundId in
+                guard let db = try? await dbActor.database() else { return }
+                publishState(db: db, roundId: roundId)
+            },
             openDatabase: { path in
                 try await dbActor.open(path: path)
             },

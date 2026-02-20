@@ -32,6 +32,7 @@ public struct VotingView: View {
     private func screenId(_ screen: Voting.State.Screen) -> String {
         switch screen {
         case .loading: return "loading"
+        case .roundsList: return "roundsList"
         case .delegationSigning: return "delegationSigning"
         case .proposalList: return "proposalList"
         case .proposalDetail(let id): return "detail-\(id)"
@@ -49,6 +50,8 @@ public struct VotingView: View {
         switch screen {
         case .loading:
             ProgressView()
+        case .roundsList:
+            RoundsListView(store: store)
         case .delegationSigning:
             DelegationSigningView(store: store)
         case .proposalList:

@@ -54,9 +54,12 @@ struct TallyingView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
-                        store.send(.dismissFlow)
+                        store.send(.backToRoundsList)
                     } label: {
-                        Image(systemName: "xmark")
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                            Text("Rounds")
+                        }
                     }
                 }
             }

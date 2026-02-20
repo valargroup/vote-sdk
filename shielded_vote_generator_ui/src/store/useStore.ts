@@ -122,6 +122,12 @@ function createDefaultProposal(): Proposal {
   };
 }
 
+function defaultEndTime(): string {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() + 10, 0, 0);
+  return d.toISOString();
+}
+
 function createDefaultRound(name: string): VotingRound {
   const now = new Date().toISOString();
   return {
@@ -132,7 +138,7 @@ function createDefaultRound(name: string): VotingRound {
     settings: {
       description: "",
       snapshotHeight: "",
-      endTime: "",
+      endTime: defaultEndTime(),
       openUntilClosed: true,
       defaultProposalType: "binary",
       defaultLabels: ["Support", "Oppose"],
