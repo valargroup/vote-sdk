@@ -35,10 +35,11 @@ gh release view v0.0.1
 
 ### Step 1 — Run the join script
 
-On a fresh Ubuntu server:
+On a fresh Ubuntu server (requires a GitHub PAT with `repo` scope since the repo is private):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/z-cale/zally/main/join.sh | bash
+export GITHUB_TOKEN=ghp_xxx
+curl -fsSL -H "Authorization: token $GITHUB_TOKEN" https://raw.githubusercontent.com/z-cale/zally/main/join.sh | bash
 ```
 
 Prompts for a validator name, then downloads binaries, genesis, and configures everything. At the end it prints the validator address and path to `start.sh`.
