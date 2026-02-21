@@ -89,6 +89,7 @@ struct ZIPBadge: View {
 
 struct ZKPStatusBanner: View {
     let proofStatus: ProofStatus
+    var isPreparingWitnesses: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -98,8 +99,13 @@ struct ZKPStatusBanner: View {
             case .generating(let progress):
                 ProgressView()
                     .scaleEffect(0.8)
-                Text("Preparing voting authorization... \(Int(progress * 100))%")
-                    .font(.caption)
+                if isPreparingWitnesses {
+                    Text("Preparing note witnesses...")
+                        .font(.caption)
+                } else {
+                    Text("Preparing voting authorization... \(Int(progress * 100))%")
+                        .font(.caption)
+                }
             case .complete:
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)

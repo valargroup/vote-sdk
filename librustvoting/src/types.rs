@@ -332,6 +332,256 @@ pub fn validate_round_params(params: &VotingRoundParams) -> Result<(), VotingErr
     Ok(())
 }
 
+/// Validate any number of notes for a round (>0). Checks commitments/nullifiers.
+/// Unlike `validate_notes` (which enforces 1-4 per bundle), this allows any count.
+pub fn validate_notes_for_round(notes: &[NoteInfo]) -> Result<(), VotingError> {
+    if notes.is_empty() {
+        return Err(VotingError::InvalidInput {
+            message: "notes must not be empty".to_string(),
+        });
+    }
+    for (i, note) in notes.iter().enumerate() {
+        validate_32_bytes(&note.commitment, &format!("notes[{}].commitment", i))?;
+        validate_32_bytes(&note.nullifier, &format!("notes[{}].nullifier", i))?;
+    }
+    Ok(())
+}
+
+/// Result of value-aware note bundling.
+#[derive(Clone, Debug)]
+pub struct ChunkResult {
+    /// Surviving bundles (each with total >= BALLOT_DIVISOR, max 4 notes).
+    pub bundles: Vec<Vec<NoteInfo>>,
+    /// Effective voting weight after per-bundle VAN quantization
+    /// (each bundle contributes floor(total/BALLOT_DIVISOR) * BALLOT_DIVISOR).
+    pub eligible_weight: u64,
+    /// Number of notes that were dropped (in bundles below BALLOT_DIVISOR).
+    pub dropped_count: usize,
+}
+
+/// Split notes into value-aware bundles of up to 4 using sequential packing.
+///
+/// Algorithm:
+/// 1. Sort notes by value DESC, then position ASC as tiebreaker
+/// 2. Fill bundles sequentially to capacity (4 notes each)
+/// 3. Drop bundles with total < BALLOT_DIVISOR
+/// 4. Re-sort notes within each surviving bundle by position
+/// 5. Sort surviving bundles by their minimum note position
+///
+/// Sequential packing concentrates high-value notes in early bundles, maximizing
+/// per-bundle VAN weight and minimizing quantization loss. Dust notes naturally
+/// end up in the last (smallest) bundle which gets dropped if below threshold.
+pub fn chunk_notes(notes: &[NoteInfo]) -> ChunkResult {
+    use crate::governance::BALLOT_DIVISOR;
+
+    if notes.is_empty() {
+        return ChunkResult {
+            bundles: vec![],
+            eligible_weight: 0,
+            dropped_count: 0,
+        };
+    }
+
+    // Step 1: Sort by value DESC, then position ASC as tiebreaker
+    let mut sorted = notes.to_vec();
+    sorted.sort_by(|a, b| b.value.cmp(&a.value).then(a.position.cmp(&b.position)));
+
+    // Step 2: Fill bundles sequentially to capacity (4 notes each)
+    let mut bundle_notes: Vec<Vec<NoteInfo>> = Vec::new();
+    let mut bundle_totals: Vec<u64> = Vec::new();
+
+    for note in &sorted {
+        // Start a new bundle if the current one is full or none exist
+        if bundle_notes.is_empty() || bundle_notes.last().unwrap().len() >= 4 {
+            bundle_notes.push(Vec::new());
+            bundle_totals.push(0);
+        }
+        let last = bundle_notes.len() - 1;
+        bundle_totals[last] += note.value;
+        bundle_notes[last].push(note.clone());
+    }
+
+    // Step 3: Drop bundles with total < BALLOT_DIVISOR
+    let total_notes: usize = bundle_notes.iter().map(|b| b.len()).sum();
+    let mut surviving: Vec<Vec<NoteInfo>> = Vec::new();
+    let mut eligible_weight: u64 = 0;
+    let mut surviving_notes: usize = 0;
+
+    for (i, bundle) in bundle_notes.into_iter().enumerate() {
+        if bundle_totals[i] >= BALLOT_DIVISOR {
+            surviving_notes += bundle.len();
+            // Quantize per bundle: VAN weight = floor(total / BALLOT_DIVISOR) * BALLOT_DIVISOR
+            eligible_weight += (bundle_totals[i] / BALLOT_DIVISOR) * BALLOT_DIVISOR;
+            surviving.push(bundle);
+        }
+    }
+    let dropped_count = total_notes - surviving_notes;
+
+    // Step 5: Re-sort notes within each surviving bundle by position
+    for bundle in &mut surviving {
+        bundle.sort_by_key(|n| n.position);
+    }
+
+    // Step 6: Sort surviving bundles by their minimum note position
+    surviving.sort_by_key(|bundle| bundle.first().map(|n| n.position).unwrap_or(u64::MAX));
+
+    ChunkResult {
+        bundles: surviving,
+        eligible_weight,
+        dropped_count,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_note(value: u64, position: u64) -> NoteInfo {
+        NoteInfo {
+            commitment: vec![0x01; 32],
+            nullifier: vec![0x02; 32],
+            value,
+            position,
+            diversifier: vec![0; 11],
+            rho: vec![0; 32],
+            rseed: vec![0; 32],
+            scope: 0,
+            ufvk_str: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_chunk_notes_all_valid() {
+        // 5 notes each with 13M — sequential: first 4 in bundle 0, last in bundle 1
+        let notes: Vec<NoteInfo> = (0..5).map(|i| make_note(13_000_000, i)).collect();
+        let result = chunk_notes(&notes);
+        assert_eq!(result.bundles.len(), 2);
+        assert_eq!(result.dropped_count, 0);
+        // Quantized: bundle 0 (52M → 4×12.5M=50M) + bundle 1 (13M → 1×12.5M=12.5M) = 62.5M
+        assert_eq!(result.eligible_weight, 62_500_000);
+        // Bundle 0 has 4 notes, bundle 1 has 1
+        assert_eq!(result.bundles[0].len(), 4);
+        assert_eq!(result.bundles[1].len(), 1);
+    }
+
+    #[test]
+    fn test_chunk_notes_dust_dropped() {
+        // 1 good note (13M) + 4 dust notes → sequential fill packs first 4 together.
+        // Sorted DESC: 13M first, then 4 dust. Bundle 0 = [13M, 100, 100, 100], bundle 1 = [100].
+        // Bundle 0 survives (13M+300 ≥ 12.5M), bundle 1 dropped (100 < 12.5M).
+        let notes = vec![
+            make_note(13_000_000, 0),
+            make_note(100, 1),
+            make_note(100, 2),
+            make_note(100, 3),
+            make_note(100, 4),
+        ];
+        let result = chunk_notes(&notes);
+        assert_eq!(result.bundles.len(), 1);
+        assert_eq!(result.dropped_count, 1);
+        // Quantized: 13,000,300 → 1×12.5M = 12.5M
+        assert_eq!(result.eligible_weight, 12_500_000);
+        // Surviving bundle contains good note + 3 dust
+        assert_eq!(result.bundles[0].len(), 4);
+    }
+
+    #[test]
+    fn test_chunk_notes_all_dust_empty() {
+        // All notes below threshold — no valid bundles
+        let notes = vec![
+            make_note(100, 0),
+            make_note(200, 1),
+            make_note(300, 2),
+        ];
+        let result = chunk_notes(&notes);
+        assert!(result.bundles.is_empty());
+        assert_eq!(result.eligible_weight, 0);
+        assert_eq!(result.dropped_count, 3);
+    }
+
+    #[test]
+    fn test_chunk_notes_exact_threshold() {
+        // Single note at exactly BALLOT_DIVISOR
+        let notes = vec![make_note(12_500_000, 0)];
+        let result = chunk_notes(&notes);
+        assert_eq!(result.bundles.len(), 1);
+        assert_eq!(result.eligible_weight, 12_500_000);
+        assert_eq!(result.dropped_count, 0);
+    }
+
+    #[test]
+    fn test_chunk_notes_single_note() {
+        let notes = vec![make_note(50_000_000, 42)];
+        let result = chunk_notes(&notes);
+        assert_eq!(result.bundles.len(), 1);
+        assert_eq!(result.bundles[0].len(), 1);
+        assert_eq!(result.bundles[0][0].position, 42);
+        assert_eq!(result.eligible_weight, 50_000_000);
+    }
+
+    #[test]
+    fn test_chunk_notes_deterministic() {
+        let notes: Vec<NoteInfo> = (0..7).map(|i| make_note(15_000_000 + i * 1_000_000, i)).collect();
+        let r1 = chunk_notes(&notes);
+        let r2 = chunk_notes(&notes);
+        assert_eq!(r1.bundles.len(), r2.bundles.len());
+        for (b1, b2) in r1.bundles.iter().zip(r2.bundles.iter()) {
+            let p1: Vec<u64> = b1.iter().map(|n| n.position).collect();
+            let p2: Vec<u64> = b2.iter().map(|n| n.position).collect();
+            assert_eq!(p1, p2, "bundle positions must be deterministic");
+        }
+    }
+
+    #[test]
+    fn test_chunk_notes_position_ordering_within_bundles() {
+        // Notes added in random order should still have position-sorted bundles
+        let notes = vec![
+            make_note(20_000_000, 5),
+            make_note(20_000_000, 1),
+            make_note(20_000_000, 3),
+            make_note(20_000_000, 7),
+            make_note(20_000_000, 2),
+        ];
+        let result = chunk_notes(&notes);
+        for bundle in &result.bundles {
+            for window in bundle.windows(2) {
+                assert!(window[0].position < window[1].position,
+                    "notes within bundle must be sorted by position");
+            }
+        }
+    }
+
+    #[test]
+    fn test_chunk_notes_bundles_sorted_by_min_position() {
+        let notes: Vec<NoteInfo> = (0..8).map(|i| make_note(15_000_000, i)).collect();
+        let result = chunk_notes(&notes);
+        let min_positions: Vec<u64> = result.bundles.iter()
+            .map(|b| b.first().unwrap().position)
+            .collect();
+        for window in min_positions.windows(2) {
+            assert!(window[0] < window[1],
+                "bundles must be sorted by minimum position");
+        }
+    }
+
+    #[test]
+    fn test_chunk_notes_empty() {
+        let result = chunk_notes(&[]);
+        assert!(result.bundles.is_empty());
+        assert_eq!(result.eligible_weight, 0);
+        assert_eq!(result.dropped_count, 0);
+    }
+
+    #[test]
+    fn test_chunk_notes_max_4_per_bundle() {
+        let notes: Vec<NoteInfo> = (0..12).map(|i| make_note(15_000_000, i)).collect();
+        let result = chunk_notes(&notes);
+        for bundle in &result.bundles {
+            assert!(bundle.len() <= 4, "bundle has {} notes, max is 4", bundle.len());
+        }
+    }
+}
+
 pub fn validate_encrypted_shares(shares: &[EncryptedShare]) -> Result<(), VotingError> {
     for (i, share) in shares.iter().enumerate() {
         validate_32_bytes(&share.c1, &format!("enc_shares[{}].c1", i))?;

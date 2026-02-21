@@ -201,14 +201,17 @@ fn voting_flow_librustvoting_path() {
     )
     .expect("init_round");
 
-    // Store the fields ZKP #2 needs: gov_comm_rand, total_note_value, address_index.
+    // Create a single bundle (bundle_index = 0) and store ZKP #2 fields.
     // Other store_delegation_data fields (rho_signed, alpha, etc.) are only needed
     // for delegation proof reconstruction, not ZKP #2.
     {
         let conn = db.conn();
+        librustvoting::storage::queries::insert_bundle(&conn, &round_id_hex, 0, &[])
+            .expect("insert_bundle");
         librustvoting::storage::queries::store_delegation_data(
             &conn,
             &round_id_hex,
+            0, // bundle_index
             vote_proof_data.van_comm_rand.to_repr().as_ref(),
             &[],        // dummy_nullifiers (not needed for ZKP #2)
             &[0u8; 32], // rho_signed
@@ -228,6 +231,7 @@ fn voting_flow_librustvoting_path() {
     // VAN position is global tree index captured before delegation.
     db.store_van_position(
         &round_id_hex,
+        0, // bundle_index
         u32::try_from(van_position).expect("van_position fits in u32"),
     )
     .expect("store_van_position");
@@ -302,6 +306,7 @@ fn voting_flow_librustvoting_path() {
     let bundle = db
         .build_vote_commitment(
             &round_id_hex,
+            0, // bundle_index
             &seed,
             1, // network_id (testnet)
             1, // proposal_id

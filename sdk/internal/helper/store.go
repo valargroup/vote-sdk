@@ -22,7 +22,7 @@ import (
 type ShareStore struct {
 	db             *sql.DB
 	mu             sync.Mutex
-	schedule       map[string]time.Time // key: "round_id:share_index:proposal_id"
+	schedule       map[string]time.Time // key: "round_id:share_index:proposal_id:tree_position"
 	meanDelay      time.Duration
 	roundCache     map[string]uint64 // roundID → vote_end_time (unix seconds)
 	fetchRoundInfo RoundInfoFetcher  // queries the chain; may be nil in tests
@@ -90,10 +90,19 @@ func migrate(db *sql.DB) error {
 			state           INTEGER NOT NULL DEFAULT 0,
 			attempts        INTEGER NOT NULL DEFAULT 0,
 			vote_end_time   INTEGER NOT NULL DEFAULT 0,
-			PRIMARY KEY (round_id, share_index, proposal_id)
+			PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
 		)
 	`); err != nil {
 		return fmt.Errorf("create shares table: %w", err)
+	}
+
+	// Migrate: add tree_position to PK if the table was created with the old 3-column PK.
+	if needsMigration, err := columnNotInPK(db, "shares", "tree_position"); err != nil {
+		return fmt.Errorf("check shares PK: %w", err)
+	} else if needsMigration {
+		if err := migrateSharesPK(db); err != nil {
+			return fmt.Errorf("migrate shares PK: %w", err)
+		}
 	}
 
 	hasVoteEndTime, err := tableHasColumn(db, "shares", "vote_end_time")
@@ -145,8 +154,88 @@ func tableHasColumn(db *sql.DB, tableName, columnName string) (bool, error) {
 	return false, nil
 }
 
-func schedKey(roundID string, shareIndex, proposalID uint32) string {
-	return fmt.Sprintf("%s:%d:%d", roundID, shareIndex, proposalID)
+// columnNotInPK returns true if the named column exists in the table but is
+// NOT part of its primary key. Returns false (no migration needed) if the
+// column is already in the PK or doesn't exist at all (fresh table).
+func columnNotInPK(db *sql.DB, tableName, columnName string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", tableName))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == columnName {
+			return pk == 0, nil // pk=0 means not in primary key
+		}
+	}
+	return false, rows.Err()
+}
+
+// migrateSharesPK recreates the shares table with the new 4-column primary key
+// (round_id, share_index, proposal_id, tree_position). Handles old schemas
+// that may lack the vote_end_time column.
+func migrateSharesPK(db *sql.DB) error {
+	// Ensure vote_end_time exists before copying (old schemas may lack it).
+	hasVET, _ := tableHasColumn(db, "shares", "vote_end_time")
+	if !hasVET {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN vote_end_time INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add vote_end_time: %w", err)
+		}
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`CREATE TABLE shares_new (
+		round_id        TEXT NOT NULL,
+		share_index     INTEGER NOT NULL,
+		shares_hash     TEXT NOT NULL,
+		proposal_id     INTEGER NOT NULL,
+		vote_decision   INTEGER NOT NULL,
+		enc_share_c1    TEXT NOT NULL,
+		enc_share_c2    TEXT NOT NULL,
+		tree_position   INTEGER NOT NULL,
+		all_enc_shares  TEXT NOT NULL,
+		state           INTEGER NOT NULL DEFAULT 0,
+		attempts        INTEGER NOT NULL DEFAULT 0,
+		vote_end_time   INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
+	)`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`INSERT INTO shares_new SELECT
+		round_id, share_index, shares_hash, proposal_id, vote_decision,
+		enc_share_c1, enc_share_c2, tree_position, all_enc_shares,
+		state, attempts, vote_end_time
+	FROM shares`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec("DROP TABLE shares"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("ALTER TABLE shares_new RENAME TO shares"); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func schedKey(roundID string, shareIndex, proposalID uint32, treePosition uint64) string {
+	return fmt.Sprintf("%s:%d:%d:%d", roundID, shareIndex, proposalID, treePosition)
 }
 
 // Enqueue adds a share payload with an exponential random submission delay,
@@ -174,7 +263,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
 		  enc_share_c1, enc_share_c2, tree_position, all_enc_shares, state, attempts, vote_end_time)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
-		 ON CONFLICT(round_id, share_index, proposal_id) DO NOTHING`,
+		 ON CONFLICT(round_id, share_index, proposal_id, tree_position) DO NOTHING`,
 		payload.VoteRoundID,
 		payload.EncShare.ShareIndex,
 		payload.SharesHash,
@@ -194,7 +283,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	affected, _ := res.RowsAffected()
 	if affected > 0 {
 		delay := s.cappedExponentialDelay(voteEndTime)
-		key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID)
+		key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
 		s.schedule[key] = time.Now().Add(delay)
 		if s.logInfo != nil {
 			s.logInfo("share scheduled",
@@ -208,7 +297,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	}
 
 	// Conflict path: row already exists, classify as idempotent duplicate vs conflict.
-	existing, ok := s.loadShare(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID)
+	existing, ok := s.loadShare(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
 	if !ok {
 		return EnqueueConflict, fmt.Errorf(
 			"load existing share after conflict: round_id=%s share_index=%d proposal_id=%d",
@@ -246,9 +335,9 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 
 	var result []QueuedShare
 	for _, key := range readyKeys {
-		// Parse round_id, share_index, and proposal_id from key.
-		parts := strings.SplitN(key, ":", 3)
-		if len(parts) != 3 {
+		// Parse round_id, share_index, proposal_id, and tree_position from key.
+		parts := strings.SplitN(key, ":", 4)
+		if len(parts) != 4 {
 			delete(s.schedule, key)
 			continue
 		}
@@ -257,11 +346,12 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 		shareIndex := uint32(idx64)
 		pid64, _ := strconv.ParseUint(parts[2], 10, 32)
 		proposalID := uint32(pid64)
+		treePos, _ := strconv.ParseUint(parts[3], 10, 64)
 
 		// Only take shares in Received state (0).
 		res, err := s.db.Exec(
-			"UPDATE shares SET state = 1 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND state = 0",
-			roundID, shareIndex, proposalID,
+			"UPDATE shares SET state = 1 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 0",
+			roundID, shareIndex, proposalID, treePos,
 		)
 		if err != nil {
 			continue
@@ -274,7 +364,7 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 		}
 
 		// Load the payload.
-		if share, ok := s.loadShare(roundID, shareIndex, proposalID); ok {
+		if share, ok := s.loadShare(roundID, shareIndex, proposalID, treePos); ok {
 			result = append(result, share)
 		}
 		delete(s.schedule, key)
@@ -284,22 +374,22 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 }
 
 // MarkSubmitted marks a share as successfully submitted to the chain.
-func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32) {
+func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if _, err := s.db.Exec(
-		"UPDATE shares SET state = 2 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND state = 1",
-		roundID, shareIndex, proposalID,
+		"UPDATE shares SET state = 2 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
+		roundID, shareIndex, proposalID, treePosition,
 	); err != nil {
-		s.logError("MarkSubmitted: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "error", err)
+		s.logError("MarkSubmitted: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
 	}
-	delete(s.schedule, schedKey(roundID, shareIndex, proposalID))
+	delete(s.schedule, schedKey(roundID, shareIndex, proposalID, treePosition))
 }
 
 // MarkFailed marks a share processing attempt as failed, with retry or
 // permanent failure after max attempts.
-func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32) {
+func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
 	const maxAttempts = 5
 
 	s.mu.Lock()
@@ -307,21 +397,21 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32) {
 
 	var attempts int
 	if err := s.db.QueryRow(
-		"SELECT attempts FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ?",
-		roundID, shareIndex, proposalID,
+		"SELECT attempts FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		roundID, shareIndex, proposalID, treePosition,
 	).Scan(&attempts); err != nil {
-		s.logError("MarkFailed: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "error", err)
+		s.logError("MarkFailed: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
 		return
 	}
 
 	newAttempts := attempts + 1
-	key := schedKey(roundID, shareIndex, proposalID)
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 
 	if newAttempts >= maxAttempts {
 		// Permanently failed.
 		if _, err := s.db.Exec(
-			"UPDATE shares SET state = 3, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ?",
-			newAttempts, roundID, shareIndex, proposalID,
+			"UPDATE shares SET state = 3, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+			newAttempts, roundID, shareIndex, proposalID, treePosition,
 		); err != nil {
 			s.logError("MarkFailed: db update (permanent) failed", "error", err)
 		}
@@ -329,8 +419,8 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32) {
 	} else {
 		// Re-schedule with exponential backoff.
 		if _, err := s.db.Exec(
-			"UPDATE shares SET state = 0, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ?",
-			newAttempts, roundID, shareIndex, proposalID,
+			"UPDATE shares SET state = 0, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+			newAttempts, roundID, shareIndex, proposalID, treePosition,
 		); err != nil {
 			s.logError("MarkFailed: db update (retry) failed", "error", err)
 		}
@@ -409,7 +499,7 @@ func (s *ShareStore) recover() error {
 	}
 
 	// Load all non-terminal shares with their denormalized vote_end_time.
-	rows, err := s.db.Query("SELECT round_id, share_index, proposal_id, vote_end_time FROM shares WHERE state = 0")
+	rows, err := s.db.Query("SELECT round_id, share_index, proposal_id, tree_position, vote_end_time FROM shares WHERE state = 0")
 	if err != nil {
 		return fmt.Errorf("query recoverable shares: %w", err)
 	}
@@ -418,8 +508,8 @@ func (s *ShareStore) recover() error {
 	for rows.Next() {
 		var roundID string
 		var shareIndex, proposalID uint32
-		var voteEndTime uint64
-		if err := rows.Scan(&roundID, &shareIndex, &proposalID, &voteEndTime); err != nil {
+		var treePosition, voteEndTime uint64
+		if err := rows.Scan(&roundID, &shareIndex, &proposalID, &treePosition, &voteEndTime); err != nil {
 			continue
 		}
 		// Heal rows with vote_end_time=0 (transient fetch failure at enqueue
@@ -428,18 +518,18 @@ func (s *ShareStore) recover() error {
 			if cached, ok := s.roundCache[roundID]; ok && cached != 0 {
 				voteEndTime = cached
 				_, _ = s.db.Exec(
-					"UPDATE shares SET vote_end_time = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ?",
-					voteEndTime, roundID, shareIndex, proposalID,
+					"UPDATE shares SET vote_end_time = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+					voteEndTime, roundID, shareIndex, proposalID, treePosition,
 				)
 			}
 		}
 		delay := s.cappedExponentialDelay(voteEndTime)
-		s.schedule[schedKey(roundID, shareIndex, proposalID)] = time.Now().Add(delay)
+		s.schedule[schedKey(roundID, shareIndex, proposalID, treePosition)] = time.Now().Add(delay)
 	}
 	return nil
 }
 
-func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32) (QueuedShare, bool) {
+func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, treePosition uint64) (QueuedShare, bool) {
 	var q QueuedShare
 	var allEncJSON string
 	var state, attempts int
@@ -447,8 +537,8 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32) (Q
 	err := s.db.QueryRow(
 		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
 		        tree_position, all_enc_shares, state, attempts
-		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ?`,
-		roundID, shareIndex, proposalID,
+		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
 		&q.Payload.SharesHash,
 		&q.Payload.ProposalID,

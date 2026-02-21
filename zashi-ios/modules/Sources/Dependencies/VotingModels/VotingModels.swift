@@ -146,11 +146,13 @@ public struct RoundSummaryInfo: Equatable, Sendable {
 
 public struct VoteRecord: Equatable, Sendable {
     public let proposalId: UInt32
+    public let bundleIndex: UInt32
     public let choice: VoteChoice
     public let submitted: Bool
 
-    public init(proposalId: UInt32, choice: VoteChoice, submitted: Bool) {
+    public init(proposalId: UInt32, bundleIndex: UInt32, choice: VoteChoice, submitted: Bool) {
         self.proposalId = proposalId
+        self.bundleIndex = bundleIndex
         self.choice = choice
         self.submitted = submitted
     }
@@ -167,8 +169,22 @@ public struct VotingDbState: Equatable, Sendable {
     }
 
     /// Convenience: build the votes dictionary the UI needs.
+    /// With multi-bundle, multiple VoteRecords may exist per proposal (one per bundle).
+    /// A proposal is only considered "voted" when ALL of its bundle votes are submitted.
     public var votesByProposal: [UInt32: VoteChoice] {
-        Dictionary(uniqueKeysWithValues: votes.map { ($0.proposalId, $0.choice) })
+        // Group vote records by proposal
+        var byProposal: [UInt32: [VoteRecord]] = [:]
+        for vote in votes {
+            byProposal[vote.proposalId, default: []].append(vote)
+        }
+        // Only include proposals where every bundle's vote has been submitted
+        var result: [UInt32: VoteChoice] = [:]
+        for (proposalId, records) in byProposal {
+            if records.allSatisfy(\.submitted) {
+                result[proposalId] = records.first?.choice
+            }
+        }
+        return result
     }
 
     public static let initial = VotingDbState(
@@ -540,6 +556,21 @@ public struct TallyResult: Equatable, Sendable {
 
     public init(entries: [Entry]) {
         self.entries = entries
+    }
+}
+
+// MARK: - Bundle Setup
+
+/// Result of value-aware note bundling.
+/// Only bundles meeting the ballot-divisor threshold are created;
+/// eligible_weight reflects the total of surviving bundles.
+public struct BundleSetupResult: Equatable, Sendable {
+    public let bundleCount: UInt32
+    public let eligibleWeight: UInt64
+
+    public init(bundleCount: UInt32, eligibleWeight: UInt64) {
+        self.bundleCount = bundleCount
+        self.eligibleWeight = eligibleWeight
     }
 }
 

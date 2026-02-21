@@ -553,36 +553,39 @@ public protocol VotingDatabaseProtocol: AnyObject, Sendable {
      * - `network_id`: 0 = mainnet, 1 = testnet.
      * - `progress`: Progress callback (0.0 → 1.0).
      */
-    func buildAndProveDelegation(roundId: String, walletDbPath: String, hotkeyRawAddress: Data, imtServerUrl: String, networkId: UInt32, progress: ProofProgressReporter) throws  -> DelegationProofResult
+    func buildAndProveDelegation(roundId: String, bundleIndex: UInt32, walletDbPath: String, hotkeyRawAddress: Data, imtServerUrl: String, networkId: UInt32, progress: ProofProgressReporter) throws  -> DelegationProofResult
 
-    func buildGovernancePczt(roundId: String, notes: [NoteInfo], fvkBytes: Data, hotkeyRawAddress: Data, consensusBranchId: UInt32, coinType: UInt32, seedFingerprint: Data, accountIndex: UInt32, roundName: String, addressIndex: UInt32) throws  -> GovernancePczt
+    func buildGovernancePczt(roundId: String, bundleIndex: UInt32, notes: [NoteInfo], fvkBytes: Data, hotkeyRawAddress: Data, consensusBranchId: UInt32, coinType: UInt32, seedFingerprint: Data, accountIndex: UInt32, roundName: String, addressIndex: UInt32) throws  -> GovernancePczt
 
     func buildSharePayloads(encShares: [EncryptedShare], commitment: VoteCommitmentBundle, voteDecision: UInt32, numOptions: UInt32, vcTreePosition: UInt64) throws  -> [SharePayload]
 
-    func buildVoteCommitment(roundId: String, hotkeySeed: Data, networkId: UInt32, proposalId: UInt32, choice: UInt32, numOptions: UInt32, vanAuthPath: [Data], vanPosition: UInt32, anchorHeight: UInt32, progress: ProofProgressReporter) throws  -> VoteCommitmentBundle
+    func buildVoteCommitment(roundId: String, bundleIndex: UInt32, hotkeySeed: Data, networkId: UInt32, proposalId: UInt32, choice: UInt32, numOptions: UInt32, vanAuthPath: [Data], vanPosition: UInt32, anchorHeight: UInt32, progress: ProofProgressReporter) throws  -> VoteCommitmentBundle
 
     func clearRound(roundId: String) throws
 
-    func constructDelegationAction(roundId: String, notes: [NoteInfo], fvkBytes: Data, gDNewX: Data, pkDNewX: Data, hotkeyRawAddress: Data, addressIndex: UInt32) throws  -> DelegationAction
+    func constructDelegationAction(roundId: String, bundleIndex: UInt32, notes: [NoteInfo], fvkBytes: Data, gDNewX: Data, pkDNewX: Data, hotkeyRawAddress: Data, addressIndex: UInt32) throws  -> DelegationAction
 
     func encryptShares(roundId: String, shares: [UInt64]) throws  -> [EncryptedShare]
 
     func generateHotkey(roundId: String, seed: Data) throws  -> VotingHotkey
 
     /**
-     * Generate Merkle inclusion witnesses for notes in a round.
+     * Generate Merkle inclusion witnesses for notes in a bundle.
      * Requires store_tree_state to have been called first.
      * Results are cached — subsequent calls return cached data.
      */
-    func generateNoteWitnesses(roundId: String, walletDbPath: String, notes: [NoteInfo]) throws  -> [WitnessData]
+    func generateNoteWitnesses(roundId: String, bundleIndex: UInt32, walletDbPath: String, notes: [NoteInfo]) throws  -> [WitnessData]
 
     /**
      * Generate a VAN Merkle witness for ZKP #2.
      *
      * Requires `sync_vote_tree` to have been called first. Loads the VAN
-     * position from the DB and generates a witness at the given anchor height.
+     * position for the specified bundle and generates a witness at the given
+     * anchor height.
      */
-    func generateVanWitness(roundId: String, anchorHeight: UInt32) throws  -> VanWitness
+    func generateVanWitness(roundId: String, bundleIndex: UInt32, anchorHeight: UInt32) throws  -> VanWitness
+
+    func getBundleCount(roundId: String) throws  -> UInt32
 
     /**
      * Reconstruct the full chain-ready delegation TX payload from DB + seed.
@@ -591,7 +594,7 @@ public protocol VotingDatabaseProtocol: AnyObject, Sendable {
      * delegation payload for submission. Derives the sender's SpendingKey from
      * seed, computes the canonical sighash, and signs it.
      */
-    func getDelegationSubmission(roundId: String, senderSeed: Data, networkId: UInt32, accountIndex: UInt32) throws  -> DelegationSubmission
+    func getDelegationSubmission(roundId: String, bundleIndex: UInt32, senderSeed: Data, networkId: UInt32, accountIndex: UInt32) throws  -> DelegationSubmission
 
     func getRoundState(roundId: String) throws  -> RoundState
 
@@ -603,21 +606,23 @@ public protocol VotingDatabaseProtocol: AnyObject, Sendable {
 
     func listRounds() throws  -> [RoundSummary]
 
-    func markVoteSubmitted(roundId: String, proposalId: UInt32) throws
+    func markVoteSubmitted(roundId: String, bundleIndex: UInt32, proposalId: UInt32) throws
+
+    func setupBundles(roundId: String, notes: [NoteInfo]) throws  -> BundleSetupResult
 
     func storeTreeState(roundId: String, treeStateBytes: Data) throws
 
     /**
      * Store the VAN leaf position after delegation TX is confirmed on chain.
      */
-    func storeVanPosition(roundId: String, position: UInt32) throws
+    func storeVanPosition(roundId: String, bundleIndex: UInt32, position: UInt32) throws
 
     /**
      * Sync the vote commitment tree from a chain node.
      *
      * Creates a TreeClient on first call, then syncs incrementally on
-     * subsequent calls. The VAN position from the DB is automatically marked
-     * for witness generation before syncing.
+     * subsequent calls. VAN positions from ALL bundles are automatically
+     * marked for witness generation before syncing.
      *
      * Returns the latest synced block height.
      */
@@ -698,10 +703,11 @@ public static func `open`(path: String)throws  -> VotingDatabase  {
      * - `network_id`: 0 = mainnet, 1 = testnet.
      * - `progress`: Progress callback (0.0 → 1.0).
      */
-open func buildAndProveDelegation(roundId: String, walletDbPath: String, hotkeyRawAddress: Data, imtServerUrl: String, networkId: UInt32, progress: ProofProgressReporter)throws  -> DelegationProofResult  {
+open func buildAndProveDelegation(roundId: String, bundleIndex: UInt32, walletDbPath: String, hotkeyRawAddress: Data, imtServerUrl: String, networkId: UInt32, progress: ProofProgressReporter)throws  -> DelegationProofResult  {
     return try  FfiConverterTypeDelegationProofResult_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_build_and_prove_delegation(self.uniffiClonePointer(),
         FfiConverterString.lower(roundId),
+        FfiConverterUInt32.lower(bundleIndex),
         FfiConverterString.lower(walletDbPath),
         FfiConverterData.lower(hotkeyRawAddress),
         FfiConverterString.lower(imtServerUrl),
@@ -711,10 +717,11 @@ open func buildAndProveDelegation(roundId: String, walletDbPath: String, hotkeyR
 })
 }
 
-open func buildGovernancePczt(roundId: String, notes: [NoteInfo], fvkBytes: Data, hotkeyRawAddress: Data, consensusBranchId: UInt32, coinType: UInt32, seedFingerprint: Data, accountIndex: UInt32, roundName: String, addressIndex: UInt32)throws  -> GovernancePczt  {
+open func buildGovernancePczt(roundId: String, bundleIndex: UInt32, notes: [NoteInfo], fvkBytes: Data, hotkeyRawAddress: Data, consensusBranchId: UInt32, coinType: UInt32, seedFingerprint: Data, accountIndex: UInt32, roundName: String, addressIndex: UInt32)throws  -> GovernancePczt  {
     return try  FfiConverterTypeGovernancePczt_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_build_governance_pczt(self.uniffiClonePointer(),
         FfiConverterString.lower(roundId),
+        FfiConverterUInt32.lower(bundleIndex),
         FfiConverterSequenceTypeNoteInfo.lower(notes),
         FfiConverterData.lower(fvkBytes),
         FfiConverterData.lower(hotkeyRawAddress),
@@ -740,10 +747,11 @@ open func buildSharePayloads(encShares: [EncryptedShare], commitment: VoteCommit
 })
 }
 
-open func buildVoteCommitment(roundId: String, hotkeySeed: Data, networkId: UInt32, proposalId: UInt32, choice: UInt32, numOptions: UInt32, vanAuthPath: [Data], vanPosition: UInt32, anchorHeight: UInt32, progress: ProofProgressReporter)throws  -> VoteCommitmentBundle  {
+open func buildVoteCommitment(roundId: String, bundleIndex: UInt32, hotkeySeed: Data, networkId: UInt32, proposalId: UInt32, choice: UInt32, numOptions: UInt32, vanAuthPath: [Data], vanPosition: UInt32, anchorHeight: UInt32, progress: ProofProgressReporter)throws  -> VoteCommitmentBundle  {
     return try  FfiConverterTypeVoteCommitmentBundle_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_build_vote_commitment(self.uniffiClonePointer(),
         FfiConverterString.lower(roundId),
+        FfiConverterUInt32.lower(bundleIndex),
         FfiConverterData.lower(hotkeySeed),
         FfiConverterUInt32.lower(networkId),
         FfiConverterUInt32.lower(proposalId),
@@ -764,10 +772,11 @@ open func clearRound(roundId: String)throws   {try rustCallWithError(FfiConverte
 }
 }
 
-open func constructDelegationAction(roundId: String, notes: [NoteInfo], fvkBytes: Data, gDNewX: Data, pkDNewX: Data, hotkeyRawAddress: Data, addressIndex: UInt32)throws  -> DelegationAction  {
+open func constructDelegationAction(roundId: String, bundleIndex: UInt32, notes: [NoteInfo], fvkBytes: Data, gDNewX: Data, pkDNewX: Data, hotkeyRawAddress: Data, addressIndex: UInt32)throws  -> DelegationAction  {
     return try  FfiConverterTypeDelegationAction_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_construct_delegation_action(self.uniffiClonePointer(),
         FfiConverterString.lower(roundId),
+        FfiConverterUInt32.lower(bundleIndex),
         FfiConverterSequenceTypeNoteInfo.lower(notes),
         FfiConverterData.lower(fvkBytes),
         FfiConverterData.lower(gDNewX),
@@ -797,14 +806,15 @@ open func generateHotkey(roundId: String, seed: Data)throws  -> VotingHotkey  {
 }
 
     /**
-     * Generate Merkle inclusion witnesses for notes in a round.
+     * Generate Merkle inclusion witnesses for notes in a bundle.
      * Requires store_tree_state to have been called first.
      * Results are cached — subsequent calls return cached data.
      */
-open func generateNoteWitnesses(roundId: String, walletDbPath: String, notes: [NoteInfo])throws  -> [WitnessData]  {
+open func generateNoteWitnesses(roundId: String, bundleIndex: UInt32, walletDbPath: String, notes: [NoteInfo])throws  -> [WitnessData]  {
     return try  FfiConverterSequenceTypeWitnessData.lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_generate_note_witnesses(self.uniffiClonePointer(),
         FfiConverterString.lower(roundId),
+        FfiConverterUInt32.lower(bundleIndex),
         FfiConverterString.lower(walletDbPath),
         FfiConverterSequenceTypeNoteInfo.lower(notes),$0
     )
@@ -815,13 +825,23 @@ open func generateNoteWitnesses(roundId: String, walletDbPath: String, notes: [N
      * Generate a VAN Merkle witness for ZKP #2.
      *
      * Requires `sync_vote_tree` to have been called first. Loads the VAN
-     * position from the DB and generates a witness at the given anchor height.
+     * position for the specified bundle and generates a witness at the given
+     * anchor height.
      */
-open func generateVanWitness(roundId: String, anchorHeight: UInt32)throws  -> VanWitness  {
+open func generateVanWitness(roundId: String, bundleIndex: UInt32, anchorHeight: UInt32)throws  -> VanWitness  {
     return try  FfiConverterTypeVanWitness_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_generate_van_witness(self.uniffiClonePointer(),
         FfiConverterString.lower(roundId),
+        FfiConverterUInt32.lower(bundleIndex),
         FfiConverterUInt32.lower(anchorHeight),$0
+    )
+})
+}
+
+open func getBundleCount(roundId: String)throws  -> UInt32  {
+    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
+    uniffi_zcash_voting_ffi_fn_method_votingdatabase_get_bundle_count(self.uniffiClonePointer(),
+        FfiConverterString.lower(roundId),$0
     )
 })
 }
@@ -833,10 +853,11 @@ open func generateVanWitness(roundId: String, anchorHeight: UInt32)throws  -> Va
      * delegation payload for submission. Derives the sender's SpendingKey from
      * seed, computes the canonical sighash, and signs it.
      */
-open func getDelegationSubmission(roundId: String, senderSeed: Data, networkId: UInt32, accountIndex: UInt32)throws  -> DelegationSubmission  {
+open func getDelegationSubmission(roundId: String, bundleIndex: UInt32, senderSeed: Data, networkId: UInt32, accountIndex: UInt32)throws  -> DelegationSubmission  {
     return try  FfiConverterTypeDelegationSubmission_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_get_delegation_submission(self.uniffiClonePointer(),
         FfiConverterString.lower(roundId),
+        FfiConverterUInt32.lower(bundleIndex),
         FfiConverterData.lower(senderSeed),
         FfiConverterUInt32.lower(networkId),
         FfiConverterUInt32.lower(accountIndex),$0
@@ -885,12 +906,22 @@ open func listRounds()throws  -> [RoundSummary]  {
 })
 }
 
-open func markVoteSubmitted(roundId: String, proposalId: UInt32)throws   {try rustCallWithError(FfiConverterTypeVotingError_lift) {
+open func markVoteSubmitted(roundId: String, bundleIndex: UInt32, proposalId: UInt32)throws   {try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_mark_vote_submitted(self.uniffiClonePointer(),
         FfiConverterString.lower(roundId),
+        FfiConverterUInt32.lower(bundleIndex),
         FfiConverterUInt32.lower(proposalId),$0
     )
 }
+}
+
+open func setupBundles(roundId: String, notes: [NoteInfo])throws  -> BundleSetupResult  {
+    return try  FfiConverterTypeBundleSetupResult_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
+    uniffi_zcash_voting_ffi_fn_method_votingdatabase_setup_bundles(self.uniffiClonePointer(),
+        FfiConverterString.lower(roundId),
+        FfiConverterSequenceTypeNoteInfo.lower(notes),$0
+    )
+})
 }
 
 open func storeTreeState(roundId: String, treeStateBytes: Data)throws   {try rustCallWithError(FfiConverterTypeVotingError_lift) {
@@ -904,9 +935,10 @@ open func storeTreeState(roundId: String, treeStateBytes: Data)throws   {try rus
     /**
      * Store the VAN leaf position after delegation TX is confirmed on chain.
      */
-open func storeVanPosition(roundId: String, position: UInt32)throws   {try rustCallWithError(FfiConverterTypeVotingError_lift) {
+open func storeVanPosition(roundId: String, bundleIndex: UInt32, position: UInt32)throws   {try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_store_van_position(self.uniffiClonePointer(),
         FfiConverterString.lower(roundId),
+        FfiConverterUInt32.lower(bundleIndex),
         FfiConverterUInt32.lower(position),$0
     )
 }
@@ -916,8 +948,8 @@ open func storeVanPosition(roundId: String, position: UInt32)throws   {try rustC
      * Sync the vote commitment tree from a chain node.
      *
      * Creates a TreeClient on first call, then syncs incrementally on
-     * subsequent calls. The VAN position from the DB is automatically marked
-     * for witness generation before syncing.
+     * subsequent calls. VAN positions from ALL bundles are automatically
+     * marked for witness generation before syncing.
      *
      * Returns the latest synced block height.
      */
@@ -984,6 +1016,81 @@ public func FfiConverterTypeVotingDatabase_lower(_ value: VotingDatabase) -> Uns
 }
 
 
+
+
+/**
+ * Result of value-aware bundle setup.
+ * Returns the number of viable bundles and the total eligible weight
+ * (excluding notes in sub-threshold bundles).
+ */
+public struct BundleSetupResult {
+    public var bundleCount: UInt32
+    public var eligibleWeight: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(bundleCount: UInt32, eligibleWeight: UInt64) {
+        self.bundleCount = bundleCount
+        self.eligibleWeight = eligibleWeight
+    }
+}
+
+#if compiler(>=6)
+extension BundleSetupResult: Sendable {}
+#endif
+
+
+extension BundleSetupResult: Equatable, Hashable {
+    public static func ==(lhs: BundleSetupResult, rhs: BundleSetupResult) -> Bool {
+        if lhs.bundleCount != rhs.bundleCount {
+            return false
+        }
+        if lhs.eligibleWeight != rhs.eligibleWeight {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(bundleCount)
+        hasher.combine(eligibleWeight)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBundleSetupResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleSetupResult {
+        return
+            try BundleSetupResult(
+                bundleCount: FfiConverterUInt32.read(from: &buf),
+                eligibleWeight: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BundleSetupResult, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.bundleCount, into: &buf)
+        FfiConverterUInt64.write(value.eligibleWeight, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleSetupResult_lift(_ buf: RustBuffer) throws -> BundleSetupResult {
+    return try FfiConverterTypeBundleSetupResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleSetupResult_lower(_ value: BundleSetupResult) -> RustBuffer {
+    return FfiConverterTypeBundleSetupResult.lower(value)
+}
 
 
 /**
@@ -2616,13 +2723,15 @@ public func FfiConverterTypeVoteCommitmentBundle_lower(_ value: VoteCommitmentBu
 
 public struct VoteRecord {
     public var proposalId: UInt32
+    public var bundleIndex: UInt32
     public var choice: UInt32
     public var submitted: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(proposalId: UInt32, choice: UInt32, submitted: Bool) {
+    public init(proposalId: UInt32, bundleIndex: UInt32, choice: UInt32, submitted: Bool) {
         self.proposalId = proposalId
+        self.bundleIndex = bundleIndex
         self.choice = choice
         self.submitted = submitted
     }
@@ -2638,6 +2747,9 @@ extension VoteRecord: Equatable, Hashable {
         if lhs.proposalId != rhs.proposalId {
             return false
         }
+        if lhs.bundleIndex != rhs.bundleIndex {
+            return false
+        }
         if lhs.choice != rhs.choice {
             return false
         }
@@ -2649,6 +2761,7 @@ extension VoteRecord: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(proposalId)
+        hasher.combine(bundleIndex)
         hasher.combine(choice)
         hasher.combine(submitted)
     }
@@ -2664,6 +2777,7 @@ public struct FfiConverterTypeVoteRecord: FfiConverterRustBuffer {
         return
             try VoteRecord(
                 proposalId: FfiConverterUInt32.read(from: &buf),
+                bundleIndex: FfiConverterUInt32.read(from: &buf),
                 choice: FfiConverterUInt32.read(from: &buf),
                 submitted: FfiConverterBool.read(from: &buf)
         )
@@ -2671,6 +2785,7 @@ public struct FfiConverterTypeVoteRecord: FfiConverterRustBuffer {
 
     public static func write(_ value: VoteRecord, into buf: inout [UInt8]) {
         FfiConverterUInt32.write(value.proposalId, into: &buf)
+        FfiConverterUInt32.write(value.bundleIndex, into: &buf)
         FfiConverterUInt32.write(value.choice, into: &buf)
         FfiConverterBool.write(value.submitted, into: &buf)
     }
@@ -3739,22 +3854,22 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zcash_voting_ffi_checksum_func_voting_ffi_version() != 33187) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_and_prove_delegation() != 23036) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_and_prove_delegation() != 35078) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_governance_pczt() != 14517) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_governance_pczt() != 33405) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_share_payloads() != 40058) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_vote_commitment() != 54938) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_vote_commitment() != 8385) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_clear_round() != 15915) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_construct_delegation_action() != 55280) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_construct_delegation_action() != 52251) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_encrypt_shares() != 46668) {
@@ -3763,13 +3878,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_generate_hotkey() != 38599) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_generate_note_witnesses() != 50700) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_generate_note_witnesses() != 59439) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_generate_van_witness() != 39855) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_generate_van_witness() != 7195) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_get_delegation_submission() != 18464) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_get_bundle_count() != 15411) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_get_delegation_submission() != 39403) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_get_round_state() != 4975) {
@@ -3787,16 +3905,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_list_rounds() != 56485) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_mark_vote_submitted() != 37139) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_mark_vote_submitted() != 34095) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_setup_bundles() != 31031) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_store_tree_state() != 61084) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_store_van_position() != 8510) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_store_van_position() != 54439) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_sync_vote_tree() != 55362) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_sync_vote_tree() != 4286) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_constructor_votingdatabase_open() != 54854) {

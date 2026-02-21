@@ -34,9 +34,14 @@ public struct VotingCryptoClient {
         _ networkId: UInt32
     ) async throws -> [NoteInfo]
 
+    // --- Bundle management ---
+    public var setupBundles: @Sendable (_ roundId: String, _ notes: [NoteInfo]) async throws -> BundleSetupResult
+    public var getBundleCount: @Sendable (_ roundId: String) async throws -> UInt32
+
     // --- Witness generation & verification ---
     public var generateNoteWitnesses: @Sendable (
         _ roundId: String,
+        _ bundleIndex: UInt32,
         _ walletDbPath: String,
         _ notes: [NoteInfo]
     ) async throws -> [WitnessData]
@@ -48,6 +53,7 @@ public struct VotingCryptoClient {
     /// derives delegation inputs from seeds and constructs a valid delegation action.
     public var buildDelegationSignAction: @Sendable (
         _ roundId: String,
+        _ bundleIndex: UInt32,
         _ notes: [NoteInfo],
         _ senderSeed: [UInt8],
         _ hotkeySeed: [UInt8],
@@ -59,6 +65,7 @@ public struct VotingCryptoClient {
     /// SpendAuth signature will be over the governance-bound ZIP-244 sighash.
     public var buildGovernancePczt: @Sendable (
         _ roundId: String,
+        _ bundleIndex: UInt32,
         _ notes: [NoteInfo],
         _ senderSeed: [UInt8],
         _ hotkeySeed: [UInt8],
@@ -76,6 +83,8 @@ public struct VotingCryptoClient {
     /// generates a real Halo2 proof, and reports progress.
     public var buildAndProveDelegation: @Sendable (
         _ roundId: String,
+        _ bundleIndex: UInt32,
+        _ bundleNotes: [NoteInfo],
         _ walletDbPath: String,
         _ senderSeed: [UInt8],
         _ hotkeySeed: [UInt8],
@@ -83,7 +92,7 @@ public struct VotingCryptoClient {
         _ accountIndex: UInt32,
         _ imtServerUrl: String
     ) -> AsyncThrowingStream<ProofEvent, Error>
-        = { _, _, _, _, _, _, _ in AsyncThrowingStream { $0.finish() } }
+        = { _, _, _, _, _, _, _, _, _ in AsyncThrowingStream { $0.finish() } }
     public var decomposeWeight: @Sendable (_ weight: UInt64) -> [UInt64] = { _ in [] }
     public var encryptShares: @Sendable (
         _ roundId: String,
@@ -91,6 +100,7 @@ public struct VotingCryptoClient {
     ) async throws -> [EncryptedShare]
     public var buildVoteCommitment: @Sendable (
         _ roundId: String,
+        _ bundleIndex: UInt32,
         _ hotkeySeed: [UInt8],
         _ networkId: UInt32,
         _ proposalId: UInt32,
@@ -100,7 +110,7 @@ public struct VotingCryptoClient {
         _ vanPosition: UInt32,
         _ anchorHeight: UInt32
     ) -> AsyncThrowingStream<VoteCommitmentBuildEvent, Error>
-        = { _, _, _, _, _, _, _, _, _ in AsyncThrowingStream { $0.finish() } }
+        = { _, _, _, _, _, _, _, _, _, _ in AsyncThrowingStream { $0.finish() } }
     public var buildSharePayloads: @Sendable (
         _ encShares: [EncryptedShare],
         _ commitment: VoteCommitmentBundle,
@@ -112,14 +122,15 @@ public struct VotingCryptoClient {
     /// Call after `buildAndProveDelegation` completes.
     public var getDelegationSubmission: @Sendable (
         _ roundId: String,
+        _ bundleIndex: UInt32,
         _ senderSeed: [UInt8],
         _ networkId: UInt32,
         _ accountIndex: UInt32
     ) async throws -> DelegationRegistration
-    public var storeVanPosition: @Sendable (_ roundId: String, _ position: UInt32) async throws -> Void
+    public var storeVanPosition: @Sendable (_ roundId: String, _ bundleIndex: UInt32, _ position: UInt32) async throws -> Void
     public var syncVoteTree: @Sendable (_ roundId: String, _ nodeUrl: String) async throws -> UInt32
-    public var generateVanWitness: @Sendable (_ roundId: String, _ anchorHeight: UInt32) async throws -> VanWitness
-    public var markVoteSubmitted: @Sendable (_ roundId: String, _ proposalId: UInt32) async throws -> Void
+    public var generateVanWitness: @Sendable (_ roundId: String, _ bundleIndex: UInt32, _ anchorHeight: UInt32) async throws -> VanWitness
+    public var markVoteSubmitted: @Sendable (_ roundId: String, _ bundleIndex: UInt32, _ proposalId: UInt32) async throws -> Void
     /// Compute canonical cast-vote sighash, decompress r_vpk, and sign.
     /// Call after `buildVoteCommitment` completes, before `submitVoteCommitment`.
     public var signCastVote: @Sendable (

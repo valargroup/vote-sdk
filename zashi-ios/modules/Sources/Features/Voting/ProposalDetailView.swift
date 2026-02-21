@@ -11,52 +11,68 @@ struct ProposalDetailView: View {
     let proposal: Proposal
 
     private let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+    @State private var now = Date()
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var timeRemainingText: String {
+        let end = store.votingRound.votingEnd
+        let remaining = end.timeIntervalSince(now)
+        guard remaining > 0 else { return "Ended" }
+
+        let days = Int(remaining) / 86400
+        let hours = (Int(remaining) % 86400) / 3600
+        let minutes = (Int(remaining) % 3600) / 60
+        let seconds = Int(remaining) % 60
+
+        if days > 0 {
+            return "\(days)d \(hours)h \(minutes)m"
+        } else if hours > 0 {
+            return "\(hours)h \(minutes)m \(seconds)s"
+        } else {
+            return "\(minutes)m \(seconds)s"
+        }
+    }
 
     var body: some View {
         WithPerceptionTracking {
             ZStack {
-                VStack(spacing: 0) {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            // Header
-                            VStack(alignment: .leading, spacing: 8) {
-                                if let zip = proposal.zipNumber {
-                                    ZIPBadge(zipNumber: zip)
-                                }
-
-                                Text(proposal.title)
-                                    .zFont(.semiBold, size: 22, style: Design.Text.primary)
-
-                                Text(proposal.description)
-                                    .zFont(.regular, size: 15, style: Design.Text.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Header
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let zip = proposal.zipNumber {
+                                ZIPBadge(zipNumber: zip)
                             }
 
-                            // Forum link
-                            if let url = proposal.forumURL {
-                                Link(destination: url) {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "bubble.left.and.text.bubble.right")
-                                            .font(.caption)
-                                        Text("View Forum Discussion")
-                                            .zFont(.medium, size: 14, style: Design.Text.link)
-                                    }
-                                }
-                            }
+                            Text(proposal.title)
+                                .zFont(.semiBold, size: 22, style: Design.Text.primary)
 
-                            Spacer().frame(height: 8)
-
-                            // Vote section
-                            voteSection()
-
-                            Spacer()
+                            Text(proposal.description)
+                                .zFont(.regular, size: 15, style: Design.Text.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 16)
-                    }
 
-                    // Bottom prev/next navigation
-                    proposalNavigationBar()
+                        // Forum link
+                        if let url = proposal.forumURL {
+                            Link(destination: url) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "bubble.left.and.text.bubble.right")
+                                        .font(.caption)
+                                    Text("View Forum Discussion")
+                                        .zFont(.medium, size: 14, style: Design.Text.link)
+                                }
+                            }
+                        }
+
+                        Spacer().frame(height: 8)
+
+                        // Vote section
+                        voteSection()
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 16)
                 }
 
                 // Confirmation overlay
@@ -76,7 +92,15 @@ struct ProposalDetailView: View {
                         }
                     }
                 }
+                if store.activeSession != nil {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Text(timeRemainingText)
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(store.votingRound.votingEnd > now ? .green : .secondary)
+                    }
+                }
             }
+            .onReceive(timer) { self.now = $0 }
         }
     }
 
@@ -85,51 +109,6 @@ struct ProposalDetailView: View {
             return "\(index + 1) of \(store.totalProposals)"
         }
         return "Proposal"
-    }
-
-    @ViewBuilder
-    private func proposalNavigationBar() -> some View {
-        let index = store.detailProposalIndex
-        let hasPrev = (index ?? 0) > 0
-        let hasNext = (index ?? 0) < store.totalProposals - 1
-
-        VStack(spacing: 0) {
-            Divider()
-
-            HStack {
-                Button {
-                    store.send(.previousProposalDetail)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                        Text("Prev")
-                    }
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(minWidth: 44, minHeight: 44)
-                }
-                .disabled(!hasPrev)
-                .opacity(hasPrev ? 1 : 0.3)
-                .accessibilityLabel("Previous proposal")
-
-                Spacer()
-
-                Button {
-                    store.send(.nextProposalDetail)
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Next")
-                        Image(systemName: "chevron.right")
-                    }
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(minWidth: 44, minHeight: 44)
-                }
-                .disabled(!hasNext)
-                .opacity(hasNext ? 1 : 0.3)
-                .accessibilityLabel("Next proposal")
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-        }
     }
 
     // MARK: - Vote Section
@@ -157,7 +136,22 @@ struct ProposalDetailView: View {
                 if !store.isDelegationReady {
                     HStack(spacing: 8) {
                         ProgressView()
-                        Text("Preparing voting credentials...")
+                        if store.witnessStatus == .inProgress {
+                            Text("Preparing note witnesses...")
+                                .zFont(.regular, size: 13, style: Design.Text.secondary)
+                        } else if case .generating(let progress) = store.delegationProofStatus {
+                            Text("Preparing voting authorization... \(Int(progress * 100))%")
+                                .zFont(.regular, size: 13, style: Design.Text.secondary)
+                        } else {
+                            Text("Preparing voting credentials...")
+                                .zFont(.regular, size: 13, style: Design.Text.secondary)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                } else if store.isSubmittingVote {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Submitting vote on another proposal...")
                             .zFont(.regular, size: 13, style: Design.Text.secondary)
                     }
                     .padding(.bottom, 4)
@@ -215,7 +209,7 @@ struct ProposalDetailView: View {
         let step = store.voteSubmissionStep
         let stepNum = step?.stepNumber ?? 1
         let totalSteps = Voting.State.VoteSubmissionStep.totalSteps
-        let stepLabel = step?.label ?? "Submitting vote..."
+        let stepLabel = store.voteSubmissionStepLabel ?? "Submitting vote..."
 
         VStack(spacing: 10) {
             HStack(spacing: 10) {

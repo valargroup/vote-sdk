@@ -135,23 +135,25 @@ extension VotingCryptoClient: DependencyKey {
                     )
                 }
             },
-            generateNoteWitnesses: { roundId, walletDbPath, notes in
+            setupBundles: { roundId, notes in
                 let db = try await dbActor.database()
-                let ffiNotes = notes.map {
-                    ZcashVotingFFI.NoteInfo(
-                        commitment: $0.commitment,
-                        nullifier: $0.nullifier,
-                        value: $0.value,
-                        position: $0.position,
-                        diversifier: $0.diversifier,
-                        rho: $0.rho,
-                        rseed: $0.rseed,
-                        scope: $0.scope,
-                        ufvkStr: $0.ufvkStr
-                    )
-                }
+                let ffiNotes = notes.map { $0.toFFI() }
+                let ffiResult = try db.setupBundles(roundId: roundId, notes: ffiNotes)
+                return BundleSetupResult(
+                    bundleCount: ffiResult.bundleCount,
+                    eligibleWeight: ffiResult.eligibleWeight
+                )
+            },
+            getBundleCount: { roundId in
+                let db = try await dbActor.database()
+                return try db.getBundleCount(roundId: roundId)
+            },
+            generateNoteWitnesses: { roundId, bundleIndex, walletDbPath, notes in
+                let db = try await dbActor.database()
+                let ffiNotes = notes.map { $0.toFFI() }
                 let ffiWitnesses = try db.generateNoteWitnesses(
                     roundId: roundId,
+                    bundleIndex: bundleIndex,
                     walletDbPath: walletDbPath,
                     notes: ffiNotes
                 )
@@ -182,7 +184,7 @@ extension VotingCryptoClient: DependencyKey {
                     address: hotkey.address
                 )
             },
-            buildDelegationSignAction: { roundId, notes, senderSeed, hotkeySeed, networkId, accountIndex in
+            buildDelegationSignAction: { roundId, bundleIndex, notes, senderSeed, hotkeySeed, networkId, accountIndex in
                 let db = try await dbActor.database()
                 let ffiHotkey = try db.generateHotkey(roundId: roundId, seed: Data(hotkeySeed))
                 let hotkey = VotingModels.VotingHotkey(
@@ -201,21 +203,10 @@ extension VotingCryptoClient: DependencyKey {
                 else {
                     throw VotingCryptoError.hotkeySeedBindingMismatch
                 }
-                let ffiNotes = notes.map {
-                    ZcashVotingFFI.NoteInfo(
-                        commitment: $0.commitment,
-                        nullifier: $0.nullifier,
-                        value: $0.value,
-                        position: $0.position,
-                        diversifier: $0.diversifier,
-                        rho: $0.rho,
-                        rseed: $0.rseed,
-                        scope: $0.scope,
-                        ufvkStr: $0.ufvkStr
-                    )
-                }
+                let ffiNotes = notes.map { $0.toFFI() }
                 let result = try db.constructDelegationAction(
                     roundId: roundId,
+                    bundleIndex: bundleIndex,
                     notes: ffiNotes,
                     fvkBytes: ffiInputs.fvkBytes,
                     gDNewX: ffiInputs.gDNewX,
@@ -240,7 +231,7 @@ extension VotingCryptoClient: DependencyKey {
                     spendAuthSig: nil
                 )
             },
-            buildGovernancePczt: { roundId, notes, senderSeed, hotkeySeed, networkId, accountIndex, roundName in
+            buildGovernancePczt: { roundId, bundleIndex, notes, senderSeed, hotkeySeed, networkId, accountIndex, roundName in
                 let db = try await dbActor.database()
                 _ = try db.generateHotkey(roundId: roundId, seed: Data(hotkeySeed))
                 let ffiInputs = try ZcashVotingFFI.generateDelegationInputs(
@@ -249,25 +240,14 @@ extension VotingCryptoClient: DependencyKey {
                     networkId: networkId,
                     accountIndex: accountIndex
                 )
-                let ffiNotes = notes.map {
-                    ZcashVotingFFI.NoteInfo(
-                        commitment: $0.commitment,
-                        nullifier: $0.nullifier,
-                        value: $0.value,
-                        position: $0.position,
-                        diversifier: $0.diversifier,
-                        rho: $0.rho,
-                        rseed: $0.rseed,
-                        scope: $0.scope,
-                        ufvkStr: $0.ufvkStr
-                    )
-                }
+                let ffiNotes = notes.map { $0.toFFI() }
                 // NU6 consensus branch ID; coin_type 133 = mainnet, 1 = testnet
                 let consensusBranchId: UInt32 = 0xC8E7_1055
                 let coinType: UInt32 = networkId == 0 ? 133 : 1
                 // Round params are loaded from DB internally by build_governance_pczt
                 let result = try db.buildGovernancePczt(
                     roundId: roundId,
+                    bundleIndex: bundleIndex,
                     notes: ffiNotes,
                     fvkBytes: ffiInputs.fvkBytes,
                     hotkeyRawAddress: ffiInputs.hotkeyRawAddress,
@@ -308,7 +288,7 @@ extension VotingCryptoClient: DependencyKey {
                 )
                 return sigBytes
             },
-            buildAndProveDelegation: { roundId, walletDbPath, senderSeed, hotkeySeed, networkId, accountIndex, imtServerUrl in
+            buildAndProveDelegation: { roundId, bundleIndex, bundleNotes, walletDbPath, senderSeed, hotkeySeed, networkId, accountIndex, imtServerUrl in
                 AsyncThrowingStream { continuation in
                     Task.detached {
                         do {
@@ -321,17 +301,12 @@ extension VotingCryptoClient: DependencyKey {
                                 networkId: networkId,
                                 accountIndex: accountIndex
                             )
-                            // Construct delegation action to generate and store alpha
-                            // before proof generation (mirrors buildGovernancePczt in Keystone path)
-                            let roundState = try db.getRoundState(roundId: roundId)
-                            let notes = try db.getWalletNotes(
-                                walletDbPath: walletDbPath,
-                                snapshotHeight: roundState.snapshotHeight,
-                                networkId: networkId
-                            )
+                            // Construct delegation action for this bundle's notes
+                            let ffiNotes = bundleNotes.map { $0.toFFI() }
                             _ = try db.constructDelegationAction(
                                 roundId: roundId,
-                                notes: notes,
+                                bundleIndex: bundleIndex,
+                                notes: ffiNotes,
                                 fvkBytes: ffiInputs.fvkBytes,
                                 gDNewX: ffiInputs.gDNewX,
                                 pkDNewX: ffiInputs.pkDNewX,
@@ -340,6 +315,7 @@ extension VotingCryptoClient: DependencyKey {
                             )
                             let result = try db.buildAndProveDelegation(
                                 roundId: roundId,
+                                bundleIndex: bundleIndex,
                                 walletDbPath: walletDbPath,
                                 hotkeyRawAddress: ffiInputs.hotkeyRawAddress,
                                 imtServerUrl: imtServerUrl,
@@ -371,7 +347,7 @@ extension VotingCryptoClient: DependencyKey {
                     )
                 }
             },
-            buildVoteCommitment: { roundId, hotkeySeed, networkId, proposalId, choice, numOptions, vanAuthPath, vanPosition, anchorHeight in
+            buildVoteCommitment: { roundId, bundleIndex, hotkeySeed, networkId, proposalId, choice, numOptions, vanAuthPath, vanPosition, anchorHeight in
                 AsyncThrowingStream { continuation in
                     Task.detached {
                         do {
@@ -379,6 +355,7 @@ extension VotingCryptoClient: DependencyKey {
                             let reporter = VoteCommitmentProgressReporter(continuation)
                             let result = try db.buildVoteCommitment(
                                 roundId: roundId,
+                                bundleIndex: bundleIndex,
                                 hotkeySeed: Data(hotkeySeed),
                                 networkId: networkId,
                                 proposalId: proposalId,
@@ -474,10 +451,11 @@ extension VotingCryptoClient: DependencyKey {
                     )
                 }
             },
-            getDelegationSubmission: { roundId, senderSeed, networkId, accountIndex in
+            getDelegationSubmission: { roundId, bundleIndex, senderSeed, networkId, accountIndex in
                 let db = try await dbActor.database()
                 let ffi = try db.getDelegationSubmission(
                     roundId: roundId,
+                    bundleIndex: bundleIndex,
                     senderSeed: Data(senderSeed),
                     networkId: networkId,
                     accountIndex: accountIndex
@@ -498,26 +476,26 @@ extension VotingCryptoClient: DependencyKey {
                     sighash: ffi.sighash
                 )
             },
-            storeVanPosition: { roundId, position in
+            storeVanPosition: { roundId, bundleIndex, position in
                 let db = try await dbActor.database()
-                try db.storeVanPosition(roundId: roundId, position: position)
+                try db.storeVanPosition(roundId: roundId, bundleIndex: bundleIndex, position: position)
             },
             syncVoteTree: { roundId, nodeUrl in
                 let db = try await dbActor.database()
                 return try db.syncVoteTree(roundId: roundId, nodeUrl: nodeUrl)
             },
-            generateVanWitness: { roundId, anchorHeight in
+            generateVanWitness: { roundId, bundleIndex, anchorHeight in
                 let db = try await dbActor.database()
-                let ffiWitness = try db.generateVanWitness(roundId: roundId, anchorHeight: anchorHeight)
+                let ffiWitness = try db.generateVanWitness(roundId: roundId, bundleIndex: bundleIndex, anchorHeight: anchorHeight)
                 return VanWitness(
                     authPath: ffiWitness.authPath,
                     position: ffiWitness.position,
                     anchorHeight: ffiWitness.anchorHeight
                 )
             },
-            markVoteSubmitted: { roundId, proposalId in
+            markVoteSubmitted: { roundId, bundleIndex, proposalId in
                 let db = try await dbActor.database()
-                try db.markVoteSubmitted(roundId: roundId, proposalId: proposalId)
+                try db.markVoteSubmitted(roundId: roundId, bundleIndex: bundleIndex, proposalId: proposalId)
                 publishState(db: db, roundId: roundId)
             },
             signCastVote: { hotkeySeed, networkId, bundle in
@@ -626,6 +604,22 @@ public extension Data {
     }
 }
 
+private extension VotingModels.NoteInfo {
+    func toFFI() -> ZcashVotingFFI.NoteInfo {
+        ZcashVotingFFI.NoteInfo(
+            commitment: commitment,
+            nullifier: nullifier,
+            value: value,
+            position: position,
+            diversifier: diversifier,
+            rho: rho,
+            rseed: rseed,
+            scope: scope,
+            ufvkStr: ufvkStr
+        )
+    }
+}
+
 private extension ZcashVotingFFI.RoundPhase {
     func toModel() -> RoundPhaseInfo {
         switch self {
@@ -642,6 +636,7 @@ private extension ZcashVotingFFI.VoteRecord {
     func toModel() -> VotingModels.VoteRecord {
         VotingModels.VoteRecord(
             proposalId: proposalId,
+            bundleIndex: bundleIndex,
             choice: VoteChoice.fromFFI(choice),
             submitted: submitted
         )

@@ -199,6 +199,9 @@ public struct Voting {
         /// Cached wallet notes from the snapshot query, used by delegation proof.
         public var walletNotes: [NoteInfo] = []
 
+        /// Number of note bundles (groups of up to 4 notes). Set by setupBundles.
+        public var bundleCount: UInt32 = 0
+
         /// Hotkey address derived from keychain mnemonic, shown on delegation signing screen.
         public var hotkeyAddress: String?
 
@@ -221,6 +224,9 @@ public struct Voting {
         public var delegationProofStatus: ProofStatus = .notStarted
         public var keystoneSigningStatus: KeystoneSigningStatus = .idle
 
+        /// Which bundle the Keystone signing loop is currently processing (0-based).
+        public var currentKeystoneBundleIndex: UInt32 = 0
+
         /// Governance PCZT result for Keystone signing flow (contains metadata + pczt_bytes).
         public var pendingGovernancePczt: GovernancePcztResult?
         /// Unsigned delegation PCZT request shown as QR and used for signature extraction.
@@ -239,6 +245,24 @@ public struct Voting {
         public var voteSubmissionStep: VoteSubmissionStep?
         /// Error from the last vote submission attempt.
         public var voteSubmissionError: String?
+        /// Which bundle is currently being voted (0-based), nil when not submitting.
+        public var currentVoteBundleIndex: UInt32?
+        /// Which proposal is currently being submitted, nil when idle.
+        public var submittingProposalId: UInt32?
+
+        /// Label for the current vote submission step, with bundle progress when applicable.
+        public var voteSubmissionStepLabel: String? {
+            guard let step = voteSubmissionStep else { return nil }
+            if bundleCount > 1, let idx = currentVoteBundleIndex {
+                let bundleLabel = "(\(idx + 1)/\(bundleCount))"
+                switch step {
+                case .preparingProof: return "Building vote proof \(bundleLabel)..."
+                case .confirming: return "Waiting for confirmation \(bundleLabel)..."
+                case .sendingShares: return "Sending to vote servers \(bundleLabel)..."
+                }
+            }
+            return step.label
+        }
 
         public var currentScreen: Screen {
             screenStack.last ?? .proposalList
@@ -265,10 +289,11 @@ public struct Voting {
             delegationProofStatus == .complete
         }
 
-        /// Whether the user can confirm a vote: delegation proof must be complete
-        /// and no other vote can be in-flight (each vote needs the previous VAN committed).
+        /// Whether the user can confirm a vote: delegation proof must be complete,
+        /// bundle count must be known (restored from DB on resume), and no other
+        /// vote can be in-flight (each vote needs the previous VAN committed).
         public var canConfirmVote: Bool {
-            isDelegationReady && !isSubmittingVote
+            isDelegationReady && bundleCount > 0 && !isSubmittingVote
         }
 
         public var nextUnvotedProposalId: UInt32? {
@@ -334,6 +359,7 @@ public struct Voting {
         case votingWeightLoaded(UInt64, [NoteInfo])
         case initializeFailed(String)
         case walletNotSynced(scannedHeight: UInt64, snapshotHeight: UInt64)
+        case walletSyncProgressUpdated(UInt64)
         case hotkeyLoaded(String)
         case startActiveRoundPipeline
 
@@ -342,12 +368,14 @@ public struct Voting {
 
         // Witness verification
         case verifyWitnesses
+        case witnessPreparationStarted
         case rerunWitnessVerification
-        case witnessVerificationCompleted([State.NoteWitnessResult], [WitnessData], State.WitnessTiming)
+        case witnessVerificationCompleted([State.NoteWitnessResult], [WitnessData], State.WitnessTiming, UInt32)
         case witnessVerificationFailed(String)
 
         // Round resume check (skip delegation screen if already authorized)
         case roundResumeChecked(alreadyAuthorized: Bool)
+        case bundleCountRestored(UInt32)
 
         // Delegation signing
         case copyHotkeyAddress
@@ -359,6 +387,7 @@ public struct Voting {
         case retryKeystoneSigning
         case spendAuthSignatureExtracted(Data)
         case spendAuthSignatureExtractionFailed(String)
+        case keystoneBundleAdvance
         case keystoneScan(PresentationAction<Scan.Action>)
 
         // Background ZKP delegation
@@ -377,6 +406,7 @@ public struct Voting {
         case voteCommitmentBuilt(VoteCommitmentBundle)
         case voteCommitmentSubmitted(String)
         case voteSubmissionFailed(proposalId: UInt32, error: String)
+        case voteSubmissionBundleStarted(UInt32)
         case voteSubmissionStepUpdated(State.VoteSubmissionStep)
         case advanceAfterVote
         case backToList
@@ -436,8 +466,10 @@ public struct Voting {
                 state.hotkeyAddress = nil
                 state.pendingVote = nil
                 state.isSubmittingVote = false
+                state.submittingProposalId = nil
                 state.voteSubmissionStep = nil
                 state.voteSubmissionError = nil
+                state.currentVoteBundleIndex = nil
                 state.tallyResults = [:]
                 state.isLoadingTallyResults = false
                 state.ineligibilityReason = nil
@@ -485,11 +517,14 @@ public struct Voting {
 
                 switch session.status {
                 case .active:
-                    // Show loading while the active round pipeline runs
-                    state.screenStack = [.roundsList, .loading]
+                    // Go straight to proposal list — the witness/proof pipeline
+                    // runs in the background once voting weight is loaded.
+                    state.screenStack = [.roundsList, .proposalList]
                     return .merge(
                         .send(.startRoundStatusPolling),
-                        .send(.startActiveRoundPipeline)
+                        // Defer pipeline start so SwiftUI renders the navigation
+                        // transition before the reducer processes the pipeline action.
+                        .run { send in await send(.startActiveRoundPipeline) }
                     )
                 case .tallying:
                     state.screenStack = [.roundsList, .tallying]
@@ -598,27 +633,64 @@ public struct Voting {
                 return .none
 
             case .votingWeightLoaded(let weight, let notes):
-                state.votingWeight = weight
                 state.walletNotes = notes
                 if notes.isEmpty {
+                    state.votingWeight = 0
                     state.ineligibilityReason = .noNotes
                     state.screenStack = [.roundsList, .ineligible]
                     return .none
-                } else if weight < 12_500_000 {
+                }
+                // Use smart bundling to determine eligible weight (excluding dust bundles)
+                let bundleResult = notes.smartBundles()
+                let eligibleWeight = bundleResult.eligibleWeight
+                state.votingWeight = eligibleWeight
+                if bundleResult.droppedCount > 0 {
+                    print("[Voting] Smart bundling: dropped \(bundleResult.droppedCount) notes in sub-threshold bundles (eligible: \(eligibleWeight) of \(weight) total)")
+                }
+                if eligibleWeight < 12_500_000 {
                     state.ineligibilityReason = .balanceTooLow
                     state.screenStack = [.roundsList, .ineligible]
                     return .none
                 }
-                return .send(.verifyWitnesses)
+                // Show proposals immediately while witnesses load in the background.
+                // This avoids a 10–20s blank spinner waiting for the tree state fetch.
+                // Don't set delegationProofStatus here — verifyWitnesses will set it
+                // only for fresh rounds, avoiding a brief flash for cached rounds.
+                state.screenStack = [.roundsList, .proposalList]
+                return .merge(
+                    .publisher {
+                        votingCrypto.stateStream()
+                            .receive(on: DispatchQueue.main)
+                            .map(Action.votingDbStateChanged)
+                    }
+                    .cancellable(id: cancelStateStreamId, cancelInFlight: true),
+                    .send(.verifyWitnesses)
+                )
 
             case .initializeFailed(let error):
                 print("[Voting] Initialization error: \(error)")
                 state.screenStack = [.error(error)]
                 return .none
 
-            case .walletNotSynced(let scannedHeight, _):
+            case .walletNotSynced(let scannedHeight, let snapshotHeight):
                 state.walletScannedHeight = scannedHeight
                 state.screenStack = [.roundsList, .walletSyncing]
+                // Poll sync progress and auto-retry the pipeline once caught up
+                return .run { [sdkSynchronizer] send in
+                    while !Task.isCancelled {
+                        try await Task.sleep(for: .seconds(2))
+                        let height = UInt64(sdkSynchronizer.latestState().latestBlockHeight)
+                        await send(.walletSyncProgressUpdated(height))
+                        if height >= snapshotHeight {
+                            await send(.startActiveRoundPipeline)
+                            return
+                        }
+                    }
+                } catch: { _, _ in }
+                .cancellable(id: cancelPipelineId, cancelInFlight: true)
+
+            case .walletSyncProgressUpdated(let height):
+                state.walletScannedHeight = height
                 return .none
 
             case .hotkeyLoaded(let address):
@@ -756,7 +828,6 @@ public struct Voting {
                     state.witnessStatus = .failed("missing active session")
                     return .none
                 }
-                state.witnessStatus = .inProgress
                 state.witnessTiming = nil
                 let roundId = activeSession.voteRoundId.hexString
                 let snapshotHeight = activeSession.snapshotHeight
@@ -764,8 +835,7 @@ public struct Voting {
                 let network = zcashSDKEnvironment.network
                 let walletDbPath = databaseFiles.dataDbURLFor(network).path
                 return .run { [sdkSynchronizer, votingCrypto] send in
-                    // Check if this round already exists and delegation is fully complete
-                    // (proof generated AND VAN position stored on chain)
+                    // Check if this round already exists and ALL bundles have proofs
                     let existingState = try? await votingCrypto.getRoundState(roundId)
                     let alreadyAuthorized = existingState?.proofGenerated ?? false
 
@@ -773,6 +843,9 @@ public struct Voting {
                         await send(.roundResumeChecked(alreadyAuthorized: true))
                         return
                     }
+
+                    // Fresh round — show witness preparation status
+                    await send(.witnessPreparationStarted)
 
                     // Fresh round — clear and initialize
                     try? await votingCrypto.clearRound(roundId)
@@ -789,9 +862,14 @@ public struct Voting {
                     guard !notes.isEmpty else {
                         await send(.witnessVerificationCompleted([], [], Voting.State.WitnessTiming(
                             treeStateFetchMs: 0, witnessGenerationMs: 0, verificationMs: 0
-                        )))
+                        ), 0))
                         return
                     }
+
+                    // Setup bundles (value-aware split into groups of up to 4)
+                    let setupResult = try await votingCrypto.setupBundles(roundId, notes)
+                    let bundleCount = setupResult.bundleCount
+                    print("[Voting] Setup \(bundleCount) bundle(s) for \(notes.count) notes (eligible weight: \(setupResult.eligibleWeight))")
 
                     // Phase 1: Fetch tree state from lightwalletd
                     let t0 = ContinuousClock.now
@@ -802,18 +880,27 @@ public struct Voting {
                         + UInt64(t0.duration(to: t1).components.attoseconds / 1_000_000_000_000_000)
                     print("[Voting] Tree state fetch: \(fetchMs)ms")
 
-                    // Phase 2: Generate witnesses (includes Rust-side verification)
-                    let witnesses = try await votingCrypto.generateNoteWitnesses(roundId, walletDbPath, notes)
+                    // Phase 2: Generate witnesses per-bundle (includes Rust-side verification)
+                    let noteChunks = notes.smartBundles().bundles
+                    var allWitnesses: [WitnessData] = []
+                    for bundleIndex in 0..<bundleCount {
+                        let chunkNotes = noteChunks[Int(bundleIndex)]
+                        let witnesses = try await votingCrypto.generateNoteWitnesses(
+                            roundId, bundleIndex, walletDbPath, chunkNotes
+                        )
+                        allWitnesses.append(contentsOf: witnesses)
+                    }
                     let t2 = ContinuousClock.now
                     let genMs = UInt64(t1.duration(to: t2).components.seconds * 1000)
                         + UInt64(t1.duration(to: t2).components.attoseconds / 1_000_000_000_000_000)
-                    print("[Voting] Witness generation: \(genMs)ms (\(witnesses.count) notes)")
+                    print("[Voting] Witness generation: \(genMs)ms (\(allWitnesses.count) notes)")
 
                     // Phase 3: Verify each witness on Swift side for UI display
+                    let sortedNotes = noteChunks.flatMap { $0 }
                     var results: [Voting.State.NoteWitnessResult] = []
-                    for (i, witness) in witnesses.enumerated() {
+                    for (i, witness) in allWitnesses.enumerated() {
                         let verified = (try? await votingCrypto.verifyWitness(witness)) ?? false
-                        let note = notes[i]
+                        let note = sortedNotes[i]
                         results.append(.init(position: note.position, value: note.value, verified: verified))
                         print("[Voting] Note pos=\(note.position) value=\(note.value) verified=\(verified)")
                     }
@@ -828,11 +915,18 @@ public struct Voting {
                         witnessGenerationMs: genMs,
                         verificationMs: verifyMs
                     )
-                    await send(.witnessVerificationCompleted(results, witnesses, timing))
+                    await send(.witnessVerificationCompleted(results, allWitnesses, timing, bundleCount))
                 } catch: { error, send in
                     print("[Voting] Witness verification failed: \(error)")
                     await send(.witnessVerificationFailed(error.localizedDescription))
                 }
+
+            case .witnessPreparationStarted:
+                // Only shown for fresh rounds (not cached). This avoids a brief
+                // flash of "Preparing note witnesses..." when resuming a round.
+                state.witnessStatus = .inProgress
+                state.delegationProofStatus = .generating(progress: 0)
+                return .none
 
             case .rerunWitnessVerification:
                 // Invalidate cached witnesses and re-run from scratch
@@ -841,23 +935,16 @@ public struct Voting {
                 state.witnessTiming = nil
                 return .send(.verifyWitnesses)
 
-            case .witnessVerificationCompleted(let results, let witnesses, let timing):
+            case .witnessVerificationCompleted(let results, let witnesses, let timing, let bundleCount):
                 state.noteWitnessResults = results
                 state.cachedWitnesses = witnesses
                 state.witnessTiming = timing
                 state.witnessStatus = .completed
-                // Non-Keystone users skip the delegation signing screen entirely
+                state.bundleCount = bundleCount
+                // Non-Keystone users skip the delegation signing screen entirely.
+                // Screen is already on .proposalList (set early in .votingWeightLoaded).
                 if !state.isKeystoneUser {
-                    state.screenStack = [.roundsList, .proposalList]
-                    return .merge(
-                        .publisher {
-                            votingCrypto.stateStream()
-                                .receive(on: DispatchQueue.main)
-                                .map(Action.votingDbStateChanged)
-                        }
-                        .cancellable(id: cancelStateStreamId, cancelInFlight: true),
-                        .send(.startDelegationProof)
-                    )
+                    return .send(.startDelegationProof)
                 }
                 // Keystone fresh round: now show the delegation signing screen
                 state.screenStack = [.roundsList, .delegationSigning]
@@ -874,11 +961,19 @@ public struct Voting {
                     state.delegationProofStatus = .complete
                     state.screenStack = [.roundsList, .proposalList]
                     state.witnessStatus = .completed
+                    // Restore bundleCount from the DB so vote casting knows how many bundles to iterate.
                     // Start state stream to sync votes and hotkey from the existing round,
                     // then trigger a refresh so the current DB state is published
                     // (stateStream uses dropFirst, so without this the existing value is lost).
-                    let roundId = state.activeSession?.voteRoundId.hexString ?? ""
+                    let roundId = state.roundId
                     return .merge(
+                        .run { [votingCrypto] send in
+                            let count = try await votingCrypto.getBundleCount(roundId)
+                            await send(.bundleCountRestored(count))
+                        } catch: { error, send in
+                            print("[Voting] Failed to restore bundle count: \(error)")
+                            await send(.witnessVerificationFailed("Failed to restore voting state: \(error.localizedDescription)"))
+                        },
                         .publisher {
                             votingCrypto.stateStream()
                                 .receive(on: DispatchQueue.main)
@@ -892,11 +987,21 @@ public struct Voting {
                 }
                 return .none
 
+            case .bundleCountRestored(let count):
+                state.bundleCount = count
+                return .none
+
             // MARK: - DB State Stream
 
             case .votingDbStateChanged(let dbState):
-                // Votes: DB is source of truth, overwrite in-memory dict
-                state.votes = dbState.votesByProposal
+                // Votes: DB is source of truth, but preserve optimistic vote during submission
+                var mergedVotes = dbState.votesByProposal
+                if state.isSubmittingVote {
+                    for (proposalId, choice) in state.votes where mergedVotes[proposalId] == nil {
+                        mergedVotes[proposalId] = choice
+                    }
+                }
+                state.votes = mergedVotes
                 // Proof status: if DB says proof succeeded and we're not actively generating, sync it
                 if dbState.roundState.proofGenerated && state.delegationProofStatus != .complete {
                     state.delegationProofStatus = .complete
@@ -936,6 +1041,7 @@ public struct Voting {
                 state.pendingGovernancePczt = nil
                 state.pendingUnsignedDelegationPczt = nil
                 state.keystoneSigningStatus = .idle
+                state.currentKeystoneBundleIndex = 0
                 return .send(.startDelegationProof)
 
             // MARK: - Background ZKP Delegation
@@ -961,6 +1067,8 @@ public struct Voting {
                 let roundName = state.votingRound.title
                 // IMT server URL from resolved service config
                 let imtServerUrl = state.serviceConfig?.nullifierProviders.first?.url ?? "https://46-101-255-48.sslip.io/nullifier"
+                let keystoneBundleIndex = state.currentKeystoneBundleIndex
+                let bundleCount = state.bundleCount
                 return .merge(
                     // Subscribe to DB state stream (follows SDKSynchronizer pattern)
                     .publisher {
@@ -978,12 +1086,20 @@ public struct Voting {
                         let hotkeyPhrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
                         let hotkeySeed = try mnemonic.toSeed(hotkeyPhrase)
                         if isKeystoneUser {
-                            // Build governance PCZT — its single Orchard action IS the governance
-                            // dummy action, so Keystone's SpendAuth signature will verify against
-                            // the PCZT's ZIP-244 sighash (which binds to the governance values).
+                            guard bundleCount > 0 else {
+                                await send(.delegationProofCompleted)
+                                return
+                            }
+                            // Build governance PCZT for the current bundle — its single Orchard
+                            // action IS the governance dummy action, so Keystone's SpendAuth
+                            // signature will verify against the PCZT's ZIP-244 sighash.
+                            let noteChunks = cachedNotes.smartBundles().bundles
+                            let bundleNotes = noteChunks[Int(keystoneBundleIndex)]
+                            print("[Voting] Keystone: preparing PCZT for bundle \(keystoneBundleIndex + 1)/\(bundleCount)")
                             let govPczt = try await votingCrypto.buildGovernancePczt(
                                 roundId,
-                                cachedNotes,
+                                keystoneBundleIndex,
+                                bundleNotes,
                                 senderSeed,
                                 hotkeySeed,
                                 networkId,
@@ -996,33 +1112,43 @@ public struct Voting {
                             return
                         }
 
-                        // Non-Keystone path: build and prove delegation in one step
-                        for try await event in votingCrypto.buildAndProveDelegation(
-                            roundId, walletDbPath, senderSeed, hotkeySeed,
-                            networkId, accountIndex, imtServerUrl
-                        ) {
-                            switch event {
-                            case .progress(let p):
-                                print("[Voting] ZKP #1 progress: \(Int(p * 100))%")
-                                await send(.delegationProofProgress(p))
-                            case .completed(let proof):
-                                print("[Voting] ZKP #1 COMPLETE — proof size: \(proof.count) bytes (real=5216, mock=32)")
+                        // Non-Keystone path: iterate bundles, build and prove delegation for each
+                        let noteChunks = cachedNotes.smartBundles().bundles
+                        let bundleCount = UInt32(noteChunks.count)
+
+                        for bundleIndex: UInt32 in 0..<bundleCount {
+                            let bundleNotes = noteChunks[Int(bundleIndex)]
+                            print("[Voting] Delegation bundle \(bundleIndex + 1)/\(bundleCount) (\(bundleNotes.count) notes)")
+
+                            for try await event in votingCrypto.buildAndProveDelegation(
+                                roundId, bundleIndex, bundleNotes, walletDbPath, senderSeed, hotkeySeed,
+                                networkId, accountIndex, imtServerUrl
+                            ) {
+                                switch event {
+                                case .progress(let p):
+                                    // Scale progress: each bundle contributes 1/bundleCount of total
+                                    let overallProgress = (Double(bundleIndex) + p) / Double(bundleCount)
+                                    print("[Voting] ZKP #1 bundle \(bundleIndex) progress: \(Int(p * 100))%")
+                                    await send(.delegationProofProgress(overallProgress))
+                                case .completed(let proof):
+                                    print("[Voting] ZKP #1 bundle \(bundleIndex) COMPLETE — proof size: \(proof.count) bytes")
+                                }
                             }
+
+                            // Submit delegation TX for this bundle
+                            let registration = try await votingCrypto.getDelegationSubmission(
+                                roundId, bundleIndex, senderSeed, networkId, accountIndex
+                            )
+                            let preTree = try await votingAPI.fetchLatestCommitmentTree()
+                            let delegTxResult = try await votingAPI.submitDelegation(registration)
+                            print("[Voting] Delegation TX \(bundleIndex) submitted: \(delegTxResult.txHash)")
+
+                            // Poll until the delegation TX lands and the tree grows
+                            let postTree = try await votingAPI.awaitCommitmentTreeGrowth(preTree.nextIndex, 30)
+                            let vanPosition = UInt32(postTree.nextIndex) - 1
+                            try await votingCrypto.storeVanPosition(roundId, bundleIndex, vanPosition)
+                            print("[Voting] VAN position stored for bundle \(bundleIndex): \(vanPosition)")
                         }
-
-                        // After proof completes, submit delegation TX to chain
-                        let registration = try await votingCrypto.getDelegationSubmission(
-                            roundId, senderSeed, networkId, accountIndex
-                        )
-                        let preTree = try await votingAPI.fetchLatestCommitmentTree()
-                        let delegTxResult = try await votingAPI.submitDelegation(registration)
-                        print("[Voting] Delegation TX submitted: \(delegTxResult.txHash)")
-
-                        // Poll until the delegation TX lands and the tree grows
-                        let postTree = try await votingAPI.awaitCommitmentTreeGrowth(preTree.nextIndex, 30)
-                        let vanPosition = UInt32(postTree.nextIndex) - 1
-                        try await votingCrypto.storeVanPosition(roundId, vanPosition)
-                        print("[Voting] VAN position stored: \(vanPosition)")
 
                         await send(.delegationProofCompleted)
                     } catch: { error, send in
@@ -1094,49 +1220,69 @@ public struct Voting {
                 state.delegationProofStatus = .generating(progress: 0)
 
                 let roundId = activeSession.voteRoundId.hexString
+                let cachedNotes = state.walletNotes
                 let network = zcashSDKEnvironment.network
                 let walletDbPath = databaseFiles.dataDbURLFor(network).path
                 let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
                 let accountIndex: UInt32 = 0
                 // IMT server URL from resolved service config
                 let imtServerUrl = state.serviceConfig?.nullifierProviders.first?.url ?? "https://46-101-255-48.sslip.io/nullifier"
+                let keystoneBundleIndex = state.currentKeystoneBundleIndex
+                let bundleCount = state.bundleCount
                 return .run { [votingCrypto, votingAPI, mnemonic, walletStorage] send in
                     let senderPhrase = try walletStorage.exportWallet().seedPhrase.value()
                     let senderSeed = try mnemonic.toSeed(senderPhrase)
                     let hotkeyPhrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
                     let hotkeySeed = try mnemonic.toSeed(hotkeyPhrase)
 
+                    // Use cached wallet notes for the current bundle
+                    let noteChunks = cachedNotes.smartBundles().bundles
+                    let bundleNotes = noteChunks[Int(keystoneBundleIndex)]
+
+                    print("[Voting] Keystone: proving bundle \(keystoneBundleIndex + 1)/\(bundleCount)")
                     for try await event in votingCrypto.buildAndProveDelegation(
-                        roundId, walletDbPath, senderSeed, hotkeySeed,
+                        roundId, keystoneBundleIndex, bundleNotes, walletDbPath, senderSeed, hotkeySeed,
                         networkId, accountIndex, imtServerUrl
                     ) {
                         switch event {
                         case .progress(let p):
-                            print("[Voting] ZKP #1 progress: \(Int(p * 100))%")
-                            await send(.delegationProofProgress(p))
+                            // Scale progress: each bundle contributes 1/bundleCount of total
+                            let overallProgress = (Double(keystoneBundleIndex) + p) / Double(bundleCount)
+                            print("[Voting] ZKP #1 bundle \(keystoneBundleIndex) progress: \(Int(p * 100))%")
+                            await send(.delegationProofProgress(overallProgress))
                         case .completed(let proof):
-                            print("[Voting] ZKP #1 COMPLETE — proof size: \(proof.count) bytes (real=5216, mock=32)")
+                            print("[Voting] ZKP #1 bundle \(keystoneBundleIndex) COMPLETE — proof size: \(proof.count) bytes")
                         }
                     }
 
-                    // After proof completes, submit delegation TX to chain
+                    // Submit delegation TX for this bundle
                     let registration = try await votingCrypto.getDelegationSubmission(
-                        roundId, senderSeed, networkId, accountIndex
+                        roundId, keystoneBundleIndex, senderSeed, networkId, accountIndex
                     )
                     let preTree = try await votingAPI.fetchLatestCommitmentTree()
                     let delegTxResult = try await votingAPI.submitDelegation(registration)
-                    print("[Voting] Delegation TX submitted: \(delegTxResult.txHash)")
+                    print("[Voting] Delegation TX \(keystoneBundleIndex) submitted: \(delegTxResult.txHash)")
 
                     // Poll until the delegation TX lands and the tree grows
                     let postTree = try await votingAPI.awaitCommitmentTreeGrowth(preTree.nextIndex, 30)
                     let vanPosition = UInt32(postTree.nextIndex) - 1
-                    try await votingCrypto.storeVanPosition(roundId, vanPosition)
-                    print("[Voting] VAN position stored: \(vanPosition)")
+                    try await votingCrypto.storeVanPosition(roundId, keystoneBundleIndex, vanPosition)
+                    print("[Voting] VAN position stored for bundle \(keystoneBundleIndex): \(vanPosition)")
 
-                    await send(.delegationProofCompleted)
+                    // If more bundles remain, advance to next; otherwise complete
+                    if keystoneBundleIndex + 1 < bundleCount {
+                        await send(.keystoneBundleAdvance)
+                    } else {
+                        await send(.delegationProofCompleted)
+                    }
                 } catch: { error, send in
                     await send(.delegationProofFailed(error.localizedDescription))
                 }
+
+            case .keystoneBundleAdvance:
+                // Move to the next bundle and loop back into the Keystone signing flow
+                state.currentKeystoneBundleIndex += 1
+                return .send(.startDelegationProof)
 
             case .spendAuthSignatureExtractionFailed(let error):
                 state.keystoneSigningStatus = .failed(error)
@@ -1148,9 +1294,11 @@ public struct Voting {
 
             case .delegationProofCompleted:
                 state.delegationProofStatus = .complete
+                state.currentKeystoneBundleIndex = 0
                 return .none
 
             case .delegationProofFailed(let error):
+                state.currentKeystoneBundleIndex = 0
                 let userMessage: String
                 if error.contains("total_weight must yield at least 1 ballot") {
                     let weightStr = Zatoshi(Int64(state.votingWeight)).decimalString()
@@ -1172,8 +1320,8 @@ public struct Voting {
             // MARK: - Proposal Detail
 
             case .castVote(let proposalId, let choice):
-                // If already confirmed for this proposal, ignore
-                guard state.votes[proposalId] == nil else { return .none }
+                // If already confirmed or a submission is in-flight, ignore
+                guard state.votes[proposalId] == nil, !state.isSubmittingVote else { return .none }
                 state.pendingVote = .init(proposalId: proposalId, choice: choice)
                 return .none
 
@@ -1187,6 +1335,7 @@ public struct Voting {
                 state.votes[pending.proposalId] = pending.choice
                 state.pendingVote = nil
                 state.isSubmittingVote = true
+                state.submittingProposalId = pending.proposalId
                 state.voteSubmissionError = nil
                 state.lastVoteCommitmentTxHash = nil
 
@@ -1198,77 +1347,99 @@ public struct Voting {
                 let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
                 let chainNodeUrl = state.serviceConfig?.voteServers.first?.url ?? "https://46-101-255-48.sslip.io"
 
+                let bundleCount = state.bundleCount
                 return .run { [votingAPI, votingCrypto, mnemonic, walletStorage] send in
-                    // Step 1: Build vote proof
-                    await send(.voteSubmissionStepUpdated(.preparingProof))
-
                     let hotkeyPhrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
                     let hotkeySeed = try mnemonic.toSeed(hotkeyPhrase)
 
-                    let anchorHeight = try await votingCrypto.syncVoteTree(roundId, chainNodeUrl)
-                    let vanWitness = try await votingCrypto.generateVanWitness(roundId, anchorHeight)
-                    print("[Voting] VAN witness: position=\(vanWitness.position), anchor=\(vanWitness.anchorHeight)")
-
-                    var builtBundle: VoteCommitmentBundle?
-                    for try await event in votingCrypto.buildVoteCommitment(
-                        roundId, hotkeySeed, networkId, proposalId, choice, numOptions,
-                        vanWitness.authPath, vanWitness.position, vanWitness.anchorHeight
-                    ) {
-                        if case .completed(let bundle) = event {
-                            builtBundle = bundle
-                            await send(.voteCommitmentBuilt(bundle))
+                    // Iterate bundles: each bundle has its own VAN and casts its own vote.
+                    // Skip already-submitted bundles (enables retry after partial failure).
+                    let existingVotes = try await votingCrypto.getVotes(roundId)
+                    let submittedBundles = Set(
+                        existingVotes
+                            .filter { $0.proposalId == proposalId && $0.submitted }
+                            .map(\.bundleIndex)
+                    )
+                    for bundleIndex: UInt32 in 0..<bundleCount {
+                        if submittedBundles.contains(bundleIndex) {
+                            print("[Voting] Vote bundle \(bundleIndex + 1)/\(bundleCount) already submitted, skipping")
+                            continue
                         }
-                    }
-                    guard let builtBundle else {
-                        throw VotingFlowError.missingVoteCommitmentBundle
-                    }
+                        print("[Voting] Vote bundle \(bundleIndex + 1)/\(bundleCount) for proposal \(proposalId)")
 
-                    // Sign and submit to chain (still part of step 1 visually)
-                    let castVoteSig = try await votingCrypto.signCastVote(
-                        hotkeySeed, networkId, builtBundle
-                    )
+                        // Update progress per-bundle so the UI shows which bundle is being processed
+                        await send(.voteSubmissionBundleStarted(bundleIndex))
 
-                    let preVCTree = try await votingAPI.fetchLatestCommitmentTree()
-                    let txResult = try await votingAPI.submitVoteCommitment(builtBundle, castVoteSig)
-                    await send(.voteCommitmentSubmitted(txResult.txHash))
+                        // Sync vote commitment tree from chain and generate VAN witness.
+                        // Requires storeVanPosition to have been called after delegation TX.
+                        let anchorHeight = try await votingCrypto.syncVoteTree(roundId, chainNodeUrl)
+                        let vanWitness = try await votingCrypto.generateVanWitness(roundId, bundleIndex, anchorHeight)
+                        print("[Voting] VAN witness: position=\(vanWitness.position), anchor=\(vanWitness.anchorHeight)")
 
-                    // Step 2: Wait for confirmation
-                    await send(.voteSubmissionStepUpdated(.confirming))
-
-                    let postVCTree = try await votingAPI.awaitCommitmentTreeGrowth(preVCTree.nextIndex, 30)
-                    let newVanPosition = UInt32(postVCTree.nextIndex) - 2
-                    let vcTreePosition = postVCTree.nextIndex - 1
-
-                    // Update VAN position so the next vote uses the new VAN leaf
-                    try await votingCrypto.storeVanPosition(roundId, newVanPosition)
-
-                    // Step 3: Send shares to vote servers
-                    await send(.voteSubmissionStepUpdated(.sendingShares))
-
-                    let payloads = try await votingCrypto.buildSharePayloads(
-                        builtBundle.encShares, builtBundle, choice, numOptions, vcTreePosition
-                    )
-                    // Retry share delegation up to 3 times — helper servers may return 503 transiently
-                    var lastShareError: Error?
-                    for attempt in 1...3 {
-                        do {
-                            try await votingAPI.delegateShares(payloads, roundId)
-                            lastShareError = nil
-                            break
-                        } catch {
-                            lastShareError = error
-                            print("[Voting] delegateShares attempt \(attempt)/3 failed: \(error)")
-                            if attempt < 3 {
-                                try await Task.sleep(for: .seconds(2))
+                        // Build vote commitment + ZKP #2 (stored in DB).
+                        // The builder internally decomposes weight, encrypts shares under EA pk,
+                        // and returns encrypted shares in the bundle.
+                        var builtBundle: VoteCommitmentBundle?
+                        for try await event in votingCrypto.buildVoteCommitment(
+                            roundId, bundleIndex, hotkeySeed, networkId, proposalId, choice,
+                            numOptions, vanWitness.authPath, vanWitness.position, vanWitness.anchorHeight
+                        ) {
+                            if case .completed(let bundle) = event {
+                                builtBundle = bundle
+                                await send(.voteCommitmentBuilt(bundle))
                             }
                         }
+                        guard let builtBundle else {
+                            throw VotingFlowError.missingVoteCommitmentBundle
+                        }
+
+                        // Sign the cast-vote TX (sighash + spend auth signature)
+                        let castVoteSig = try await votingCrypto.signCastVote(
+                            hotkeySeed, networkId, builtBundle
+                        )
+
+                        // Submit cast-vote TX to chain, polling for tree growth
+                        await send(.voteSubmissionStepUpdated(.confirming))
+                        let preVCTree = try await votingAPI.fetchLatestCommitmentTree()
+                        let txResult = try await votingAPI.submitVoteCommitment(builtBundle, castVoteSig)
+                        await send(.voteCommitmentSubmitted(txResult.txHash))
+
+                        // Wait for the cast-vote TX to land and read the new tree position.
+                        // The chain appends vote_authority_note_new first, then vote_commitment,
+                        // so the new VAN is at nextIndex-2 and the VC is at nextIndex-1.
+                        let postVCTree = try await votingAPI.awaitCommitmentTreeGrowth(preVCTree.nextIndex, 30)
+                        let newVanPosition = UInt32(postVCTree.nextIndex) - 2
+                        let vcTreePosition = postVCTree.nextIndex - 1
+
+                        // Update VAN position so the next vote on this bundle uses the new VAN leaf
+                        try await votingCrypto.storeVanPosition(roundId, bundleIndex, newVanPosition)
+
+                        await send(.voteSubmissionStepUpdated(.sendingShares))
+                        let payloads = try await votingCrypto.buildSharePayloads(
+                            builtBundle.encShares, builtBundle, choice, numOptions, vcTreePosition
+                        )
+                        // Retry share delegation up to 3 times — helper servers may return 503 transiently
+                        var lastShareError: Error?
+                        for attempt in 1...3 {
+                            do {
+                                try await votingAPI.delegateShares(payloads, roundId)
+                                lastShareError = nil
+                                break
+                            } catch {
+                                lastShareError = error
+                                print("[Voting] delegateShares attempt \(attempt)/3 failed: \(error)")
+                                if attempt < 3 {
+                                    try await Task.sleep(for: .seconds(2))
+                                }
+                            }
+                        }
+                        if let lastShareError { throw lastShareError }
+
+                        // Mark vote submitted in DB for this bundle
+                        try await votingCrypto.markVoteSubmitted(roundId, bundleIndex, proposalId)
                     }
-                    if let lastShareError { throw lastShareError }
 
-                    // Mark vote submitted in DB
-                    try await votingCrypto.markVoteSubmitted(roundId, proposalId)
-
-                    // Vote is on chain — return to proposal list
+                    // All bundles voted — advance to proposal list
                     await send(.advanceAfterVote)
                 } catch: { error, send in
                     print("[Voting] vote submission failed: \(error)")
@@ -1285,10 +1456,17 @@ public struct Voting {
 
             case .voteSubmissionFailed(let proposalId, let error):
                 state.isSubmittingVote = false
+                state.submittingProposalId = nil
                 state.voteSubmissionStep = nil
                 state.voteSubmissionError = error
+                state.currentVoteBundleIndex = nil
                 // Remove the optimistic vote since it didn't land on chain
                 state.votes.removeValue(forKey: proposalId)
+                return .none
+
+            case .voteSubmissionBundleStarted(let index):
+                state.currentVoteBundleIndex = index
+                state.voteSubmissionStep = .preparingProof
                 return .none
 
             case .voteSubmissionStepUpdated(let step):
@@ -1297,8 +1475,10 @@ public struct Voting {
 
             case .advanceAfterVote:
                 state.isSubmittingVote = false
+                state.submittingProposalId = nil
                 state.voteSubmissionStep = nil
                 state.voteSubmissionError = nil
+                state.currentVoteBundleIndex = nil
                 // Return to proposal list so the user can pick their next vote freely.
                 if case .proposalDetail = state.currentScreen {
                     state.screenStack.removeLast()
@@ -1382,6 +1562,80 @@ public struct Voting {
             }
             state.screenStack.append(.proposalList)
         }
+    }
+}
+
+// MARK: - Note Bundling
+
+/// Result of value-aware note bundling on the Swift side.
+private struct BundleResult {
+    let bundles: [[NoteInfo]]
+    let eligibleWeight: UInt64
+    let droppedCount: Int
+}
+
+private extension Array where Element == NoteInfo {
+    /// Ballot divisor — must match `librustvoting::governance::BALLOT_DIVISOR`.
+    static var ballotDivisor: UInt64 { 12_500_000 }
+
+    /// Value-aware bundling using greedy min-total assignment.
+    ///
+    /// Algorithm mirrors the Rust `chunk_notes` for client-side use:
+    /// 1. Sort notes by value DESC, then position ASC as tiebreaker
+    /// 2. Fill bundles sequentially to capacity (4 notes each)
+    /// 3. Drop bundles with total < ballotDivisor
+    /// 4. Re-sort notes within each surviving bundle by position
+    /// 5. Sort surviving bundles by their minimum note position
+    func smartBundles() -> BundleResult {
+        guard !isEmpty else {
+            return BundleResult(bundles: [], eligibleWeight: 0, droppedCount: 0)
+        }
+
+        // Step 1: Sort by value DESC, then position ASC
+        let sorted = self.sorted { lhs, rhs in
+            if lhs.value != rhs.value { return lhs.value > rhs.value }
+            return lhs.position < rhs.position
+        }
+
+        // Step 2: Fill bundles sequentially to capacity (4 notes each)
+        var bundleNotes: [[NoteInfo]] = []
+        var bundleTotals: [UInt64] = []
+
+        for note in sorted {
+            if bundleNotes.isEmpty || bundleNotes.last!.count >= 4 {
+                bundleNotes.append([])
+                bundleTotals.append(0)
+            }
+            let last = bundleNotes.count - 1
+            bundleTotals[last] += note.value
+            bundleNotes[last].append(note)
+        }
+
+        // Step 3: Drop bundles with total < ballotDivisor
+        let numBundles = bundleNotes.count
+        var surviving: [[NoteInfo]] = []
+        var eligibleWeight: UInt64 = 0
+        var survivingNoteCount = 0
+
+        for i in 0..<numBundles {
+            if bundleTotals[i] >= Self.ballotDivisor {
+                surviving.append(bundleNotes[i])
+                // Quantize per bundle: VAN weight = floor(total / ballotDivisor) * ballotDivisor
+                eligibleWeight += (bundleTotals[i] / Self.ballotDivisor) * Self.ballotDivisor
+                survivingNoteCount += bundleNotes[i].count
+            }
+        }
+        let droppedCount = count - survivingNoteCount
+
+        // Step 5: Re-sort notes within each surviving bundle by position
+        for i in 0..<surviving.count {
+            surviving[i].sort { $0.position < $1.position }
+        }
+
+        // Step 6: Sort surviving bundles by their minimum note position
+        surviving.sort { ($0.first?.position ?? .max) < ($1.first?.position ?? .max) }
+
+        return BundleResult(bundles: surviving, eligibleWeight: eligibleWeight, droppedCount: droppedCount)
     }
 }
 

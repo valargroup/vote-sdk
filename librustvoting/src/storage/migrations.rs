@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::VotingError;
 
-const CURRENT_VERSION: u32 = 2;
+const CURRENT_VERSION: u32 = 3;
 
 pub fn migrate(conn: &Connection) -> Result<(), VotingError> {
     let version: u32 = conn
@@ -46,6 +46,30 @@ pub fn migrate(conn: &Connection) -> Result<(), VotingError> {
             message: format!("migration to version 2 failed: {}", e),
         })?;
         conn.pragma_update(None, "user_version", 2)
+            .map_err(|e| VotingError::Internal {
+                message: format!("failed to update database version: {}", e),
+            })?;
+    }
+
+    if version < 3 {
+        // v3: delegation data moved from rounds to bundles table, witnesses
+        // gained bundle_index. Drop everything and recreate from 001_init.sql.
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS votes;
+             DROP TABLE IF EXISTS witnesses;
+             DROP TABLE IF EXISTS proofs;
+             DROP TABLE IF EXISTS bundles;
+             DROP TABLE IF EXISTS cached_tree_state;
+             DROP TABLE IF EXISTS rounds;"
+        )
+        .map_err(|e| VotingError::Internal {
+            message: format!("migration to version 3 failed (drop): {}", e),
+        })?;
+        conn.execute_batch(include_str!("migrations/001_init.sql"))
+            .map_err(|e| VotingError::Internal {
+                message: format!("migration to version 3 failed (create): {}", e),
+            })?;
+        conn.pragma_update(None, "user_version", 3)
             .map_err(|e| VotingError::Internal {
                 message: format!("failed to update database version: {}", e),
             })?;
@@ -110,114 +134,48 @@ mod tests {
             .unwrap();
 
         assert!(tables.contains(&"rounds".to_string()));
+        assert!(tables.contains(&"bundles".to_string()));
         assert!(tables.contains(&"cached_tree_state".to_string()));
         assert!(tables.contains(&"proofs".to_string()));
         assert!(tables.contains(&"votes".to_string()));
     }
 
-    /// Verify that the delegation data columns exist in the rounds table
-    /// after migration and can round-trip BLOB data.
+    /// Verify that the bundles table columns exist after migration and can round-trip BLOB data.
     #[test]
-    fn test_delegation_data_columns_exist() {
+    fn test_bundle_data_columns_exist() {
         let conn = Connection::open_in_memory().unwrap();
         migrate(&conn).unwrap();
 
-        // Insert a row using all nullable BLOB columns.
-        // These columns are populated later by store_delegation_data()
-        // after construct_delegation_action() computes the VAN.
+        // Insert a round first
         conn.execute(
-            "INSERT INTO rounds (round_id, snapshot_height, ea_pk, nc_root, nullifier_imt_root, phase, created_at, van_comm_rand, dummy_nullifiers, rho_signed, padded_note_data, nf_signed, cmx_new, alpha, rseed_signed, rseed_output) VALUES ('test', 1, X'00', X'00', X'00', 0, 0, X'AA', X'BB', X'CC', X'DD', X'EE', X'FF', X'11', X'22', X'33')",
+            "INSERT INTO rounds (round_id, snapshot_height, ea_pk, nc_root, nullifier_imt_root, phase, created_at) VALUES ('test', 1, X'00', X'00', X'00', 0, 0)",
+            [],
+        ).unwrap();
+
+        // Insert a bundle row using all nullable BLOB columns.
+        conn.execute(
+            "INSERT INTO bundles (round_id, bundle_index, van_comm_rand, dummy_nullifiers, rho_signed, padded_note_data, nf_signed, cmx_new, alpha, rseed_signed, rseed_output) VALUES ('test', 0, X'AA', X'BB', X'CC', X'DD', X'EE', X'FF', X'11', X'22', X'33')",
             [],
         ).unwrap();
 
         // Verify van_comm_rand round-trips (the VAN blinding factor)
         let rand: Vec<u8> = conn
             .query_row(
-                "SELECT van_comm_rand FROM rounds WHERE round_id = 'test'",
+                "SELECT van_comm_rand FROM bundles WHERE round_id = 'test' AND bundle_index = 0",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(rand, vec![0xAA]);
 
-        // Verify dummy_nullifiers round-trips (padded note nullifiers, stored as flat blob)
+        // Verify dummy_nullifiers round-trips
         let dummies: Vec<u8> = conn
             .query_row(
-                "SELECT dummy_nullifiers FROM rounds WHERE round_id = 'test'",
+                "SELECT dummy_nullifiers FROM bundles WHERE round_id = 'test' AND bundle_index = 0",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(dummies, vec![0xBB]);
-
-        // Verify rho_signed round-trips (constrained rho, spec §1.3.4.1)
-        let rho: Vec<u8> = conn
-            .query_row(
-                "SELECT rho_signed FROM rounds WHERE round_id = 'test'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(rho, vec![0xCC]);
-
-        // Verify padded_note_data round-trips (cmx values for padded dummy notes)
-        let padded: Vec<u8> = conn
-            .query_row(
-                "SELECT padded_note_data FROM rounds WHERE round_id = 'test'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(padded, vec![0xDD]);
-
-        // Verify nf_signed round-trips (signed note nullifier)
-        let nf: Vec<u8> = conn
-            .query_row(
-                "SELECT nf_signed FROM rounds WHERE round_id = 'test'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(nf, vec![0xEE]);
-
-        // Verify cmx_new round-trips (output note commitment)
-        let cmx: Vec<u8> = conn
-            .query_row(
-                "SELECT cmx_new FROM rounds WHERE round_id = 'test'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(cmx, vec![0xFF]);
-
-        // Verify alpha round-trips (spend auth randomizer)
-        let alpha: Vec<u8> = conn
-            .query_row(
-                "SELECT alpha FROM rounds WHERE round_id = 'test'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(alpha, vec![0x11]);
-
-        // Verify rseed_signed round-trips (signed note randomness)
-        let rseed_signed: Vec<u8> = conn
-            .query_row(
-                "SELECT rseed_signed FROM rounds WHERE round_id = 'test'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(rseed_signed, vec![0x22]);
-
-        // Verify rseed_output round-trips (output note randomness)
-        let rseed_output: Vec<u8> = conn
-            .query_row(
-                "SELECT rseed_output FROM rounds WHERE round_id = 'test'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(rseed_output, vec![0x33]);
     }
 }

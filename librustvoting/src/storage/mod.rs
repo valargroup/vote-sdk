@@ -47,6 +47,7 @@ pub struct RoundState {
 #[derive(Clone, Debug)]
 pub struct VoteRecord {
     pub proposal_id: u32,
+    pub bundle_index: u32,
     pub choice: u32,
     pub submitted: bool,
 }
@@ -122,7 +123,7 @@ mod tests {
         let version: u32 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     }
 
     #[test]
@@ -165,15 +166,16 @@ mod tests {
         let db = test_db();
         let conn = db.conn();
         queries::insert_round(&conn, &test_params(), None).unwrap();
-        queries::store_proof(&conn, "test-round-1", &vec![0xAB; 256]).unwrap();
+        queries::insert_bundle(&conn, "test-round-1", 0, &[]).unwrap();
+        queries::store_proof(&conn, "test-round-1", 0, &vec![0xAB; 256]).unwrap();
 
-        // proof_generated requires both proof AND van_leaf_position
+        // proof_generated requires both proof AND VAN position
         let state = queries::get_round_state(&conn, "test-round-1").unwrap();
-        assert!(!state.proof_generated, "proof alone is not enough — VAN position required");
+        assert!(!state.proof_generated, "proof alone should not be enough");
 
-        queries::store_van_position(&conn, "test-round-1", 42).unwrap();
+        queries::store_van_position(&conn, "test-round-1", 0, 42).unwrap();
         let state = queries::get_round_state(&conn, "test-round-1").unwrap();
-        assert!(state.proof_generated);
+        assert!(state.proof_generated, "proof + VAN position should be enough");
     }
 
     #[test]
@@ -181,12 +183,13 @@ mod tests {
         let db = test_db();
         let conn = db.conn();
         queries::insert_round(&conn, &test_params(), None).unwrap();
+        queries::insert_bundle(&conn, "test-round-1", 0, &[]).unwrap();
 
         let commitment = vec![0xCC; 128];
-        queries::store_vote(&conn, "test-round-1", 0, 0, &commitment).unwrap();
-        queries::store_vote(&conn, "test-round-1", 1, 1, &commitment).unwrap();
+        queries::store_vote(&conn, "test-round-1", 0, 0, 0, &commitment).unwrap();
+        queries::store_vote(&conn, "test-round-1", 0, 1, 1, &commitment).unwrap();
 
-        queries::mark_vote_submitted(&conn, "test-round-1", 0).unwrap();
+        queries::mark_vote_submitted(&conn, "test-round-1", 0, 0).unwrap();
     }
 
     #[test]
@@ -194,6 +197,7 @@ mod tests {
         let db = test_db();
         let conn = db.conn();
         queries::insert_round(&conn, &test_params(), None).unwrap();
+        queries::insert_bundle(&conn, "test-round-1", 0, &[]).unwrap();
 
         // No votes initially
         let votes = queries::get_votes(&conn, "test-round-1").unwrap();
@@ -201,8 +205,8 @@ mod tests {
 
         // Store two votes with different choices
         let commitment = vec![0xCC; 128];
-        queries::store_vote(&conn, "test-round-1", 0, 0, &commitment).unwrap();
-        queries::store_vote(&conn, "test-round-1", 1, 2, &commitment).unwrap();
+        queries::store_vote(&conn, "test-round-1", 0, 0, 0, &commitment).unwrap();
+        queries::store_vote(&conn, "test-round-1", 0, 1, 2, &commitment).unwrap();
 
         let votes = queries::get_votes(&conn, "test-round-1").unwrap();
         assert_eq!(votes.len(), 2);
@@ -213,7 +217,7 @@ mod tests {
         assert_eq!(votes[1].choice, 2);
 
         // Mark first vote submitted and verify
-        queries::mark_vote_submitted(&conn, "test-round-1", 0).unwrap();
+        queries::mark_vote_submitted(&conn, "test-round-1", 0, 0).unwrap();
         let votes = queries::get_votes(&conn, "test-round-1").unwrap();
         assert!(votes[0].submitted);
         assert!(!votes[1].submitted);

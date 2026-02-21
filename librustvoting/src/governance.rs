@@ -10,7 +10,7 @@ use crate::types::VotingError;
 pub(crate) const MAX_PROPOSAL_AUTHORITY: u64 = 65535;
 
 /// Ballot divisor — must match `delegation::circuit::BALLOT_DIVISOR`.
-const BALLOT_DIVISOR: u64 = 12_500_000;
+pub(crate) const BALLOT_DIVISOR: u64 = 12_500_000;
 
 /// Domain tag for Vote Authority Notes.
 /// Prepended as the first Poseidon input in van_comm for domain separation.

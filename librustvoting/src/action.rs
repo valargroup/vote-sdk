@@ -265,7 +265,7 @@ pub fn construct_delegation_action(
         }
     }
 
-    // Compute total weight from note values (checked to prevent silent overflow)
+    // Compute per-bundle weight from note values (checked to prevent silent overflow)
     let total_weight: u64 = notes
         .iter()
         .try_fold(0u64, |acc, n| acc.checked_add(n.value))
@@ -480,7 +480,7 @@ pub fn build_governance_pczt(
         }
     }
 
-    // Total weight
+    // Per-bundle weight
     let total_weight: u64 = notes
         .iter()
         .try_fold(0u64, |acc, n| acc.checked_add(n.value))

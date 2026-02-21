@@ -41,14 +41,14 @@ final class VotingStoreTests: XCTestCase {
         store.dependencies.walletStorage = .noOp
         store.dependencies.mnemonic = .noOp
         store.dependencies.databaseFiles = .noOp
-        store.dependencies.votingCrypto.buildAndProveDelegation = { _, _, _, _, _, _, _ in
+        store.dependencies.votingCrypto.buildAndProveDelegation = { _, _, _, _, _, _, _, _, _ in
             AsyncThrowingStream { continuation in
                 continuation.yield(.progress(1.0))
                 continuation.yield(.completed(Data(repeating: 0xFF, count: 32)))
                 continuation.finish()
             }
         }
-        store.dependencies.votingCrypto.getDelegationSubmission = { _, _, _, _ in
+        store.dependencies.votingCrypto.getDelegationSubmission = { _, _, _, _, _ in
             DelegationRegistration(
                 rk: Data(repeating: 0x01, count: 32),
                 spendAuthSig: Data(repeating: 0x02, count: 64),
@@ -62,7 +62,7 @@ final class VotingStoreTests: XCTestCase {
                 sighash: Data(repeating: 0x08, count: 32)
             )
         }
-        store.dependencies.votingCrypto.storeVanPosition = { _, _ in }
+        store.dependencies.votingCrypto.storeVanPosition = { _, _, _ in }
         store.dependencies.votingAPI.fetchLatestCommitmentTree = {
             CommitmentTreeState(nextIndex: 0, root: Data(repeating: 0, count: 32), height: 0)
         }
@@ -133,7 +133,7 @@ final class VotingStoreTests: XCTestCase {
             Voting()
         }
 
-        store.dependencies.votingCrypto.buildAndProveDelegation = { _, _, _, _, _, _, _ in
+        store.dependencies.votingCrypto.buildAndProveDelegation = { _, _, _, _, _, _, _, _, _ in
             AsyncThrowingStream { continuation in
                 continuation.yield(.progress(1.0))
                 continuation.yield(.completed(Data(repeating: 0xFF, count: 32)))

@@ -117,6 +117,7 @@ impl From<voting::storage::RoundSummary> for RoundSummary {
 #[derive(Clone, uniffi::Record)]
 pub struct VoteRecord {
     pub proposal_id: u32,
+    pub bundle_index: u32,
     pub choice: u32,
     pub submitted: bool,
 }
@@ -125,6 +126,7 @@ impl From<voting::storage::VoteRecord> for VoteRecord {
     fn from(v: voting::storage::VoteRecord) -> Self {
         Self {
             proposal_id: v.proposal_id,
+            bundle_index: v.bundle_index,
             choice: v.choice,
             submitted: v.submitted,
         }
@@ -353,6 +355,15 @@ pub struct WitnessData {
     pub position: u64,
     pub root: Vec<u8>,
     pub auth_path: Vec<Vec<u8>>,
+}
+
+/// Result of value-aware bundle setup.
+/// Returns the number of viable bundles and the total eligible weight
+/// (excluding notes in sub-threshold bundles).
+#[derive(Clone, uniffi::Record)]
+pub struct BundleSetupResult {
+    pub bundle_count: u32,
+    pub eligible_weight: u64,
 }
 
 /// VAN Merkle witness for ZKP #2.
@@ -686,9 +697,30 @@ impl VotingDatabase {
         Ok(self.db.generate_hotkey(&round_id, &seed)?.into())
     }
 
+    pub fn setup_bundles(
+        &self,
+        round_id: String,
+        notes: Vec<NoteInfo>,
+    ) -> Result<BundleSetupResult, VotingError> {
+        let core_notes: Vec<voting::NoteInfo> = notes.into_iter().map(Into::into).collect();
+        let (count, weight) = self.db.setup_bundles(&round_id, &core_notes)?;
+        Ok(BundleSetupResult {
+            bundle_count: count,
+            eligible_weight: weight,
+        })
+    }
+
+    pub fn get_bundle_count(
+        &self,
+        round_id: String,
+    ) -> Result<u32, VotingError> {
+        Ok(self.db.get_bundle_count(&round_id)?)
+    }
+
     pub fn construct_delegation_action(
         &self,
         round_id: String,
+        bundle_index: u32,
         notes: Vec<NoteInfo>,
         fvk_bytes: Vec<u8>,
         g_d_new_x: Vec<u8>,
@@ -701,6 +733,7 @@ impl VotingDatabase {
             .db
             .construct_delegation_action(
                 &round_id,
+                bundle_index,
                 &core_notes,
                 &fvk_bytes,
                 &g_d_new_x,
@@ -714,6 +747,7 @@ impl VotingDatabase {
     pub fn build_governance_pczt(
         &self,
         round_id: String,
+        bundle_index: u32,
         notes: Vec<NoteInfo>,
         fvk_bytes: Vec<u8>,
         hotkey_raw_address: Vec<u8>,
@@ -735,6 +769,7 @@ impl VotingDatabase {
             .db
             .build_governance_pczt(
                 &round_id,
+                bundle_index,
                 &core_notes,
                 &fvk_bytes,
                 &hotkey_raw_address,
@@ -756,19 +791,20 @@ impl VotingDatabase {
         Ok(self.db.store_tree_state(&round_id, &tree_state_bytes)?)
     }
 
-    /// Generate Merkle inclusion witnesses for notes in a round.
+    /// Generate Merkle inclusion witnesses for notes in a bundle.
     /// Requires store_tree_state to have been called first.
     /// Results are cached — subsequent calls return cached data.
     pub fn generate_note_witnesses(
         &self,
         round_id: String,
+        bundle_index: u32,
         wallet_db_path: String,
         notes: Vec<NoteInfo>,
     ) -> Result<Vec<WitnessData>, VotingError> {
         let core_notes: Vec<voting::NoteInfo> = notes.into_iter().map(Into::into).collect();
         Ok(self
             .db
-            .generate_note_witnesses(&round_id, &wallet_db_path, &core_notes)?
+            .generate_note_witnesses(&round_id, bundle_index, &wallet_db_path, &core_notes)?
             .into_iter()
             .map(Into::into)
             .collect())
@@ -791,6 +827,7 @@ impl VotingDatabase {
     pub fn build_and_prove_delegation(
         &self,
         round_id: String,
+        bundle_index: u32,
         wallet_db_path: String,
         hotkey_raw_address: Vec<u8>,
         imt_server_url: String,
@@ -802,6 +839,7 @@ impl VotingDatabase {
             .db
             .build_and_prove_delegation(
                 &round_id,
+                bundle_index,
                 &wallet_db_path,
                 &hotkey_raw_address,
                 &imt_server_url,
@@ -829,6 +867,7 @@ impl VotingDatabase {
     pub fn build_vote_commitment(
         &self,
         round_id: String,
+        bundle_index: u32,
         hotkey_seed: Vec<u8>,
         network_id: u32,
         proposal_id: u32,
@@ -853,6 +892,7 @@ impl VotingDatabase {
             .db
             .build_vote_commitment(
                 &round_id,
+                bundle_index,
                 &hotkey_seed,
                 network_id,
                 proposal_id,
@@ -892,13 +932,14 @@ impl VotingDatabase {
     pub fn get_delegation_submission(
         &self,
         round_id: String,
+        bundle_index: u32,
         sender_seed: Vec<u8>,
         network_id: u32,
         account_index: u32,
     ) -> Result<DelegationSubmission, VotingError> {
         Ok(self
             .db
-            .get_delegation_submission(&round_id, &sender_seed, network_id, account_index)?
+            .get_delegation_submission(&round_id, bundle_index, &sender_seed, network_id, account_index)?
             .into())
     }
 
@@ -906,9 +947,10 @@ impl VotingDatabase {
     pub fn store_van_position(
         &self,
         round_id: String,
+        bundle_index: u32,
         position: u32,
     ) -> Result<(), VotingError> {
-        Ok(self.db.store_van_position(&round_id, position)?)
+        Ok(self.db.store_van_position(&round_id, bundle_index, position)?)
     }
 
     // --- Vote commitment tree sync ---
@@ -916,8 +958,8 @@ impl VotingDatabase {
     /// Sync the vote commitment tree from a chain node.
     ///
     /// Creates a TreeClient on first call, then syncs incrementally on
-    /// subsequent calls. The VAN position from the DB is automatically marked
-    /// for witness generation before syncing.
+    /// subsequent calls. VAN positions from ALL bundles are automatically
+    /// marked for witness generation before syncing.
     ///
     /// Returns the latest synced block height.
     pub fn sync_vote_tree(
@@ -925,14 +967,21 @@ impl VotingDatabase {
         round_id: String,
         node_url: String,
     ) -> Result<u32, VotingError> {
-        let van_position = self.db.load_van_position(&round_id)?;
+        // Mark VAN positions for ALL bundles so witnesses can be generated for any bundle.
+        let bundle_count = self.db.get_bundle_count(&round_id)?;
 
         let mut guard = self.tree_client.lock().map_err(|e| VotingError::Internal {
             message: format!("tree client lock poisoned: {}", e),
         })?;
 
         let client = guard.get_or_insert_with(TreeClient::empty);
-        client.mark_position(van_position as u64);
+
+        for bi in 0..bundle_count {
+            // load_van_position may fail if VAN hasn't been stored yet for a bundle — skip it.
+            if let Ok(pos) = self.db.load_van_position(&round_id, bi) {
+                client.mark_position(pos as u64);
+            }
+        }
 
         let api = HttpTreeSyncApi::new(node_url);
         client.sync(&api).map_err(|e| VotingError::Internal {
@@ -947,13 +996,15 @@ impl VotingDatabase {
     /// Generate a VAN Merkle witness for ZKP #2.
     ///
     /// Requires `sync_vote_tree` to have been called first. Loads the VAN
-    /// position from the DB and generates a witness at the given anchor height.
+    /// position for the specified bundle and generates a witness at the given
+    /// anchor height.
     pub fn generate_van_witness(
         &self,
         round_id: String,
+        bundle_index: u32,
         anchor_height: u32,
     ) -> Result<VanWitness, VotingError> {
-        let van_position = self.db.load_van_position(&round_id)?;
+        let van_position = self.db.load_van_position(&round_id, bundle_index)?;
 
         let guard = self.tree_client.lock().map_err(|e| VotingError::Internal {
             message: format!("tree client lock poisoned: {}", e),
@@ -978,9 +1029,10 @@ impl VotingDatabase {
     pub fn mark_vote_submitted(
         &self,
         round_id: String,
+        bundle_index: u32,
         proposal_id: u32,
     ) -> Result<(), VotingError> {
-        Ok(self.db.mark_vote_submitted(&round_id, proposal_id)?)
+        Ok(self.db.mark_vote_submitted(&round_id, bundle_index, proposal_id)?)
     }
 }
 
