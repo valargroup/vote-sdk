@@ -90,7 +90,7 @@ func TestSubmitShare_ValidationErrors(t *testing.T) {
 		},
 		{
 			name:    "vote_decision out of range",
-			modify:  func(p *SharePayload) { p.VoteDecision = 5 },
+			modify:  func(p *SharePayload) { p.VoteDecision = 8 },
 			errPart: "vote_decision",
 		},
 		{
