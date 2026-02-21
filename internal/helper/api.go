@@ -162,8 +162,10 @@ func validatePayload(p *SharePayload) error {
 	if p.ShareIndex != p.EncShare.ShareIndex {
 		return fmt.Errorf("share_index must match enc_share.share_index")
 	}
-	if p.VoteDecision > 2 {
-		return fmt.Errorf("vote_decision must be 0..2")
+	// Protocol allows up to 8 options per proposal (indices 0-7).
+	// The chain keeper validates the exact range per-proposal.
+	if p.VoteDecision >= 8 {
+		return fmt.Errorf("vote_decision must be 0..7")
 	}
 
 	// vote_round_id: hex, 32 bytes.
