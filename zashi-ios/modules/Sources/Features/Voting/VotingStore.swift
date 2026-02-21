@@ -59,6 +59,7 @@ public struct Voting {
     public struct State: Equatable {
         public enum Screen: Equatable {
             case loading
+            case noRounds
             case roundsList
             case delegationSigning
             case proposalList
@@ -69,11 +70,6 @@ public struct Voting {
             case results
             case error(String)
             case walletSyncing
-        }
-
-        public enum RoundTab: Equatable {
-            case active
-            case completed
         }
 
         public struct RoundListItem: Equatable, Identifiable {
@@ -158,9 +154,6 @@ public struct Voting {
 
         /// All rounds fetched from the server, sorted by snapshot height and numbered.
         public var allRounds: [RoundListItem] = []
-        /// Currently selected tab on the rounds list screen.
-        public var selectedTab: RoundTab = .active
-
         /// Computed: rounds that are active or tallying (newest first).
         public var activeRounds: [RoundListItem] {
             allRounds.filter { $0.session.status == .active || $0.session.status == .tallying }.reversed()
@@ -169,14 +162,6 @@ public struct Voting {
         /// Computed: rounds that are finalized (newest first).
         public var completedRounds: [RoundListItem] {
             allRounds.filter { $0.session.status == .finalized }.reversed()
-        }
-
-        /// Computed: rounds visible for the current tab.
-        public var visibleRounds: [RoundListItem] {
-            switch selectedTab {
-            case .active: return activeRounds
-            case .completed: return completedRounds
-            }
         }
 
         /// Resolved service config from CDN or local override.
@@ -339,6 +324,7 @@ public struct Voting {
     let cancelStatusPollingId = UUID()
     let cancelSharePollingId = UUID()
     let cancelPipelineId = UUID()
+    let cancelNewRoundPollingId = UUID()
 
     public enum Action: Equatable {
         // Navigation
@@ -348,8 +334,8 @@ public struct Voting {
 
         // Rounds list
         case allRoundsLoaded([VotingSession])
-        case selectTab(State.RoundTab)
         case roundTapped(String)
+        case startNewRoundPolling
 
         // Initialization (DB, wallet notes, hotkey)
         case initialize
@@ -441,7 +427,8 @@ public struct Voting {
                     .cancel(id: cancelStateStreamId),
                     .cancel(id: cancelStatusPollingId),
                     .cancel(id: cancelSharePollingId),
-                    .cancel(id: cancelPipelineId)
+                    .cancel(id: cancelPipelineId),
+                    .cancel(id: cancelNewRoundPollingId)
                 )
 
             case .goBack:
@@ -451,8 +438,8 @@ public struct Voting {
                 return .none
 
             case .backToRoundsList:
-                // Cancel per-round effects and pop back to the rounds list
-                state.screenStack = [.roundsList]
+                // Cancel per-round effects and re-fetch rounds (auto-navigates via allRoundsLoaded)
+                state.screenStack = [.loading]
                 // Reset per-round state
                 state.activeSession = nil
                 state.votes = [:]
@@ -479,6 +466,7 @@ public struct Voting {
                     .cancel(id: cancelStatusPollingId),
                     .cancel(id: cancelSharePollingId),
                     .cancel(id: cancelPipelineId),
+                    .cancel(id: cancelNewRoundPollingId),
                     .run { [votingAPI] send in
                         let allRounds = try await votingAPI.fetchAllRounds()
                         await send(.allRoundsLoaded(allRounds))
@@ -495,17 +483,25 @@ public struct Voting {
                 state.allRounds = sorted.enumerated().map { index, session in
                     State.RoundListItem(roundNumber: index + 1, session: session)
                 }
-                // Auto-select the best tab based on available rounds
-                if !state.activeRounds.isEmpty {
-                    state.selectedTab = .active
-                } else if !state.completedRounds.isEmpty {
-                    state.selectedTab = .completed
-                }
-                return .none
 
-            case .selectTab(let tab):
-                state.selectedTab = tab
-                return .none
+                // Auto-navigate: active round takes priority, else latest completed.
+                // Skip if the user is already viewing the same round (guards against
+                // onAppear re-firing .initialize and restarting the pipeline mid-vote).
+                if let activeItem = state.activeRounds.first {
+                    guard activeItem.id != state.activeSession?.voteRoundId.hexString else {
+                        return .none
+                    }
+                    return .send(.roundTapped(activeItem.id))
+                } else if let completedItem = state.completedRounds.first {
+                    guard completedItem.id != state.activeSession?.voteRoundId.hexString else {
+                        return .none
+                    }
+                    return .send(.roundTapped(completedItem.id))
+                } else {
+                    // No rounds — show empty state
+                    state.screenStack = [.noRounds]
+                    return .none
+                }
 
             case .roundTapped(let roundId):
                 guard let item = state.allRounds.first(where: { $0.id == roundId }) else { return .none }
@@ -519,19 +515,23 @@ public struct Voting {
                 case .active:
                     // Go straight to proposal list — the witness/proof pipeline
                     // runs in the background once voting weight is loaded.
-                    state.screenStack = [.roundsList, .proposalList]
+                    state.screenStack = [.proposalList]
                     return .merge(
+                        .cancel(id: cancelNewRoundPollingId),
                         .send(.startRoundStatusPolling),
                         // Defer pipeline start so SwiftUI renders the navigation
                         // transition before the reducer processes the pipeline action.
                         .run { send in await send(.startActiveRoundPipeline) }
                     )
                 case .tallying:
-                    state.screenStack = [.roundsList, .tallying]
+                    state.screenStack = [.tallying]
                     return .send(.startRoundStatusPolling)
                 case .finalized:
-                    state.screenStack = [.roundsList, .results]
-                    return .send(.fetchTallyResults)
+                    state.screenStack = [.results]
+                    return .merge(
+                        .send(.fetchTallyResults),
+                        .send(.startNewRoundPolling)
+                    )
                 case .unspecified:
                     return .none
                 }
@@ -539,7 +539,8 @@ public struct Voting {
             // MARK: - Initialization
 
             case .initialize:
-                state.screenStack = [.roundsList]
+                // Guard against onAppear re-firing while already initialized
+                guard state.currentScreen == .loading else { return .none }
                 return .run { [votingAPI] send in
                     // 1. Fetch service config (local override → CDN → deployed dev server fallback)
                     let config = try await votingAPI.fetchServiceConfig()
@@ -629,7 +630,7 @@ public struct Voting {
 
             case .noActiveRound:
                 state.activeSession = nil
-                state.screenStack = [.roundsList]
+                state.screenStack = [.noRounds]
                 return .none
 
             case .votingWeightLoaded(let weight, let notes):
@@ -637,7 +638,7 @@ public struct Voting {
                 if notes.isEmpty {
                     state.votingWeight = 0
                     state.ineligibilityReason = .noNotes
-                    state.screenStack = [.roundsList, .ineligible]
+                    state.screenStack = [.ineligible]
                     return .none
                 }
                 // Use smart bundling to determine eligible weight (excluding dust bundles)
@@ -649,14 +650,14 @@ public struct Voting {
                 }
                 if eligibleWeight < 12_500_000 {
                     state.ineligibilityReason = .balanceTooLow
-                    state.screenStack = [.roundsList, .ineligible]
+                    state.screenStack = [.ineligible]
                     return .none
                 }
                 // Show proposals immediately while witnesses load in the background.
                 // This avoids a 10–20s blank spinner waiting for the tree state fetch.
                 // Don't set delegationProofStatus here — verifyWitnesses will set it
                 // only for fresh rounds, avoiding a brief flash for cached rounds.
-                state.screenStack = [.roundsList, .proposalList]
+                state.screenStack = [.proposalList]
                 return .merge(
                     .publisher {
                         votingCrypto.stateStream()
@@ -674,7 +675,7 @@ public struct Voting {
 
             case .walletNotSynced(let scannedHeight, let snapshotHeight):
                 state.walletScannedHeight = scannedHeight
-                state.screenStack = [.roundsList, .walletSyncing]
+                state.screenStack = [.walletSyncing]
                 // Poll sync progress and auto-retry the pipeline once caught up
                 return .run { [sdkSynchronizer] send in
                     while !Task.isCancelled {
@@ -761,17 +762,33 @@ public struct Voting {
 
                 switch newStatus {
                 case .tallying:
-                    state.screenStack = [.roundsList, .tallying]
+                    state.screenStack = [.tallying]
                     return .none
                 case .finalized:
-                    state.screenStack = [.roundsList, .results]
+                    state.screenStack = [.results]
                     return .merge(
                         .cancel(id: cancelStatusPollingId),
-                        .send(.fetchTallyResults)
+                        .send(.fetchTallyResults),
+                        .send(.startNewRoundPolling)
                     )
                 default:
                     return .none
                 }
+
+            // MARK: - New Round Polling (after finalization)
+
+            case .startNewRoundPolling:
+                return .run { [votingAPI] send in
+                    while !Task.isCancelled {
+                        try await Task.sleep(for: .seconds(30))
+                        let allRounds = try await votingAPI.fetchAllRounds()
+                        let hasActive = allRounds.contains { $0.status == .active || $0.status == .tallying }
+                        if hasActive {
+                            await send(.allRoundsLoaded(allRounds))
+                        }
+                    }
+                } catch: { _, _ in }
+                .cancellable(id: cancelNewRoundPollingId, cancelInFlight: true)
 
             // MARK: - Tally Results
 
@@ -947,7 +964,7 @@ public struct Voting {
                     return .send(.startDelegationProof)
                 }
                 // Keystone fresh round: now show the delegation signing screen
-                state.screenStack = [.roundsList, .delegationSigning]
+                state.screenStack = [.delegationSigning]
                 return .none
 
             case .witnessVerificationFailed(let error):
@@ -959,7 +976,7 @@ public struct Voting {
             case .roundResumeChecked(let alreadyAuthorized):
                 if alreadyAuthorized {
                     state.delegationProofStatus = .complete
-                    state.screenStack = [.roundsList, .proposalList]
+                    state.screenStack = [.proposalList]
                     state.witnessStatus = .completed
                     // Restore bundleCount from the DB so vote casting knows how many bundles to iterate.
                     // Start state stream to sync votes and hotkey from the existing round,
@@ -1024,7 +1041,7 @@ public struct Voting {
 
             case .delegationApproved:
                 if !state.isKeystoneUser {
-                    state.screenStack = [.roundsList, .proposalList]
+                    state.screenStack = [.proposalList]
                     return .send(.startDelegationProof)
                 }
                 return .send(.startDelegationProof)
@@ -1216,7 +1233,7 @@ public struct Voting {
                 state.pendingGovernancePczt = nil
                 state.pendingUnsignedDelegationPczt = nil
                 state.keystoneSigningStatus = .idle
-                state.screenStack = [.roundsList, .proposalList]
+                state.screenStack = [.proposalList]
                 state.delegationProofStatus = .generating(progress: 0)
 
                 let roundId = activeSession.voteRoundId.hexString
@@ -1516,7 +1533,7 @@ public struct Voting {
             // MARK: - Complete
 
             case .doneTapped:
-                state.screenStack = [.roundsList, .proposalList]
+                state.screenStack = [.proposalList]
                 return .none
             }
         }

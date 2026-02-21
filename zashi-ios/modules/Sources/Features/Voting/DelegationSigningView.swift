@@ -110,7 +110,9 @@ struct DelegationSigningView: View {
 
     @ViewBuilder
     private func memoSection() -> some View {
-        let zec = Double(store.votingWeight) / 100_000_000.0
+        // Use raw note sum (not quantized votingWeight) to match the Rust-side memo
+        let rawWeight = store.walletNotes.reduce(UInt64(0)) { $0 + $1.value }
+        let zec = Double(rawWeight) / 100_000_000.0
         let memoAmount = String(format: "%.8f", zec)
 
         VStack(alignment: .leading, spacing: 6) {

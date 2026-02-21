@@ -41,9 +41,8 @@ struct IneligibleView: View {
                     .padding(.horizontal, 24)
                 }
 
-                // Back to rounds button
-                ZashiButton("Back to Rounds", type: .ghost) {
-                    store.send(.backToRoundsList)
+                ZashiButton("Close", type: .ghost) {
+                    store.send(.dismissFlow)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
@@ -53,12 +52,9 @@ struct IneligibleView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
-                        store.send(.backToRoundsList)
+                        store.send(.dismissFlow)
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                            Text("Rounds")
-                        }
+                        Image(systemName: "xmark")
                     }
                 }
             }

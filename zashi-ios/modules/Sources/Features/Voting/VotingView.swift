@@ -32,7 +32,8 @@ public struct VotingView: View {
     private func screenId(_ screen: Voting.State.Screen) -> String {
         switch screen {
         case .loading: return "loading"
-        case .roundsList: return "roundsList"
+        case .noRounds: return "noRounds"
+        case .roundsList: return "roundsList"  // Dead — kept for exhaustive switch
         case .delegationSigning: return "delegationSigning"
         case .proposalList: return "proposalList"
         case .proposalDetail(let id): return "detail-\(id)"
@@ -50,8 +51,10 @@ public struct VotingView: View {
         switch screen {
         case .loading:
             ProgressView()
+        case .noRounds:
+            NoRoundsView(store: store)
         case .roundsList:
-            RoundsListView(store: store)
+            NoRoundsView(store: store)  // Dead — kept for exhaustive switch
         case .delegationSigning:
             DelegationSigningView(store: store)
         case .proposalList:
@@ -74,6 +77,38 @@ public struct VotingView: View {
             VotingErrorView(store: store, errorMessage: message)
         case .walletSyncing:
             WalletSyncingView(store: store)
+        }
+    }
+}
+
+// MARK: - No Rounds
+
+struct NoRoundsView: View {
+    let store: StoreOf<Voting>
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "rectangle.slash")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+            Text("No Voting Rounds")
+                .font(.headline)
+            Text("There are no voting rounds available right now.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Spacer()
+        }
+        .navigationTitle("Governance")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button { store.send(.dismissFlow) } label: {
+                    Image(systemName: "xmark")
+                }
+            }
         }
     }
 }
