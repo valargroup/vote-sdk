@@ -70,7 +70,7 @@ func TestMarkSubmitted(t *testing.T) {
 	ready := s.TakeReady()
 	require.Len(t, ready, 1)
 
-	s.MarkSubmitted("round1", 0, 1)
+	s.MarkSubmitted("round1", 0, 1, 0)
 
 	status := s.Status()
 	assert.Equal(t, 1, status["round1"].Submitted)
@@ -86,17 +86,17 @@ func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	for i := range 4 {
 		ready := s.TakeReady()
 		require.Len(t, ready, 1, "attempt %d", i)
-		s.MarkFailed("round1", 0, 1)
+		s.MarkFailed("round1", 0, 1, 0)
 		// Fast-forward schedule so it's immediately ready again.
 		s.mu.Lock()
-		s.schedule[schedKey("round1", 0, 1)] = time.Now().Add(-time.Second)
+		s.schedule[schedKey("round1", 0, 1, 0)] = time.Now().Add(-time.Second)
 		s.mu.Unlock()
 	}
 
 	// After 4 failures (attempts = 4), take once more.
 	ready := s.TakeReady()
 	require.Len(t, ready, 1)
-	s.MarkFailed("round1", 0, 1) // 5th attempt = permanent failure
+	s.MarkFailed("round1", 0, 1, 0) // 5th attempt = permanent failure
 
 	// Now it should be permanently failed.
 	status := s.Status()
@@ -169,8 +169,35 @@ func TestSameShareIndexDifferentProposals(t *testing.T) {
 	ready := s.TakeReady()
 	assert.Len(t, ready, 2)
 
-	s.MarkSubmitted("round1", 0, 1)
-	s.MarkSubmitted("round1", 0, 2)
+	s.MarkSubmitted("round1", 0, 1, 0)
+	s.MarkSubmitted("round1", 0, 2, 0)
+
+	status = s.Status()
+	assert.Equal(t, 2, status["round1"].Submitted)
+}
+
+func TestSameShareIndexDifferentTreePositions(t *testing.T) {
+	s := newTestStore(t)
+
+	// Two shares with the same (round_id, share_index, proposal_id) but different
+	// tree_position — the multi-bundle scenario. Both must be accepted.
+	p1 := testPayload("round1", 0)
+	p1.TreePosition = 10
+	enqueueAndRequireInserted(t, s, p1)
+
+	p2 := testPayload("round1", 0)
+	p2.TreePosition = 20
+	enqueueAndRequireInserted(t, s, p2)
+
+	status := s.Status()
+	assert.Equal(t, 2, status["round1"].Total)
+
+	// Both should be independently takeable and submittable.
+	ready := s.TakeReady()
+	assert.Len(t, ready, 2)
+
+	s.MarkSubmitted("round1", 0, 1, 10)
+	s.MarkSubmitted("round1", 0, 1, 20)
 
 	status = s.Status()
 	assert.Equal(t, 2, status["round1"].Submitted)
@@ -288,7 +315,7 @@ func TestGetVoteEndTime_NilFetcher(t *testing.T) {
 func TestMigrateOldSchema(t *testing.T) {
 	dbPath := t.TempDir() + "/old_helper.db"
 
-	// Simulate a database without vote_end_time column.
+	// Simulate a database with old 3-column PK and without vote_end_time.
 	oldDB, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
 
@@ -311,7 +338,7 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, oldDB.Close())
 
-	// Opening with current code should migrate in place (no startup crash).
+	// Opening with current code should migrate PK and add vote_end_time.
 	s, err := NewShareStore(dbPath, 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
@@ -321,6 +348,11 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, hasVoteEndTime)
 
+	// tree_position should now be part of the primary key.
+	notInPK, err := columnNotInPK(s.db, "shares", "tree_position")
+	require.NoError(t, err)
+	assert.False(t, notInPK, "tree_position should be in the PK after migration")
+
 	// rounds table should exist.
 	var roundsTableCount int
 	err = s.db.QueryRow(
@@ -329,8 +361,16 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, roundsTableCount)
 
-	// Enqueue path should also work on migrated DB.
+	// Enqueue path should work on migrated DB.
 	result, err := s.Enqueue(testPayload("round1", 0))
+	require.NoError(t, err)
+	assert.Equal(t, EnqueueInserted, result)
+
+	// Multi-bundle scenario should work on migrated DB: same share_index
+	// and proposal_id but different tree_position.
+	p2 := testPayload("round1", 0)
+	p2.TreePosition = 42
+	result, err = s.Enqueue(p2)
 	require.NoError(t, err)
 	assert.Equal(t, EnqueueInserted, result)
 }
