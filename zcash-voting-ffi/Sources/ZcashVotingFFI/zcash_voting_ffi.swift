@@ -596,6 +596,14 @@ public protocol VotingDatabaseProtocol: AnyObject, Sendable {
      */
     func getDelegationSubmission(roundId: String, bundleIndex: UInt32, senderSeed: Data, networkId: UInt32, accountIndex: UInt32) throws  -> DelegationSubmission
 
+    /**
+     * Reconstruct the delegation TX payload using a Keystone-provided signature.
+     *
+     * Unlike `get_delegation_submission`, this does NOT derive `ask` from a seed.
+     * It uses the externally-provided Keystone signature and the ZIP-244 sighash.
+     */
+    func getDelegationSubmissionWithKeystoneSig(roundId: String, bundleIndex: UInt32, keystoneSig: Data, keystoneSighash: Data) throws  -> DelegationSubmission
+
     func getRoundState(roundId: String) throws  -> RoundState
 
     func getVotes(roundId: String) throws  -> [VoteRecord]
@@ -861,6 +869,23 @@ open func getDelegationSubmission(roundId: String, bundleIndex: UInt32, senderSe
         FfiConverterData.lower(senderSeed),
         FfiConverterUInt32.lower(networkId),
         FfiConverterUInt32.lower(accountIndex),$0
+    )
+})
+}
+
+    /**
+     * Reconstruct the delegation TX payload using a Keystone-provided signature.
+     *
+     * Unlike `get_delegation_submission`, this does NOT derive `ask` from a seed.
+     * It uses the externally-provided Keystone signature and the ZIP-244 sighash.
+     */
+open func getDelegationSubmissionWithKeystoneSig(roundId: String, bundleIndex: UInt32, keystoneSig: Data, keystoneSighash: Data)throws  -> DelegationSubmission  {
+    return try  FfiConverterTypeDelegationSubmission_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
+    uniffi_zcash_voting_ffi_fn_method_votingdatabase_get_delegation_submission_with_keystone_sig(self.uniffiClonePointer(),
+        FfiConverterString.lower(roundId),
+        FfiConverterUInt32.lower(bundleIndex),
+        FfiConverterData.lower(keystoneSig),
+        FfiConverterData.lower(keystoneSighash),$0
     )
 })
 }
@@ -3727,6 +3752,35 @@ public func extractNcRoot(treeStateBytes: Data)throws  -> Data  {
     )
 })
 }
+/**
+ * Extract the 96-byte Orchard FVK from a UFVK string.
+ *
+ * Decodes a Bech32-encoded Unified Full Viewing Key string and returns the
+ * raw 96-byte Orchard component (ak[32] || nk[32] || rivk[32]).
+ * Used for Keystone accounts where the FVK must come from the note's UFVK
+ * rather than being derived from the app's seed.
+ */
+public func extractOrchardFvkFromUfvk(ufvkStr: String, networkId: UInt32)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
+    uniffi_zcash_voting_ffi_fn_func_extract_orchard_fvk_from_ufvk(
+        FfiConverterString.lower(ufvkStr),
+        FfiConverterUInt32.lower(networkId),$0
+    )
+})
+}
+/**
+ * Extract the ZIP-244 shielded sighash from finalized PCZT bytes.
+ *
+ * Returns the 32-byte sighash that Keystone signs internally. Used to construct
+ * the delegation submission with the correct sighash for chain verification.
+ */
+public func extractPcztSighash(pcztBytes: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
+    uniffi_zcash_voting_ffi_fn_func_extract_pczt_sighash(
+        FfiConverterData.lower(pcztBytes),$0
+    )
+})
+}
 public func extractSpendAuthSig(signedPcztBytes: Data, actionIndex: UInt32)throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_func_extract_spend_auth_sig(
@@ -3742,6 +3796,25 @@ public func generateDelegationInputs(senderSeed: Data, hotkeySeed: Data, network
         FfiConverterData.lower(hotkeySeed),
         FfiConverterUInt32.lower(networkId),
         FfiConverterUInt32.lower(accountIndex),$0
+    )
+})
+}
+/**
+ * Derive delegation inputs using an explicit FVK instead of deriving from sender seed.
+ *
+ * For Keystone accounts, the notes carry the Keystone's UFVK in the wallet DB.
+ * This function uses the provided FVK bytes directly (from the note's `ufvk_str`)
+ * instead of deriving from a seed, ensuring the prover and PCZT builder use the
+ * same `ak`.
+ */
+public func generateDelegationInputsWithFvk(fvkBytes: Data, hotkeySeed: Data, networkId: UInt32, accountIndex: UInt32, seedFingerprint: Data)throws  -> DelegationInputs  {
+    return try  FfiConverterTypeDelegationInputs_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
+    uniffi_zcash_voting_ffi_fn_func_generate_delegation_inputs_with_fvk(
+        FfiConverterData.lower(fvkBytes),
+        FfiConverterData.lower(hotkeySeed),
+        FfiConverterUInt32.lower(networkId),
+        FfiConverterUInt32.lower(accountIndex),
+        FfiConverterData.lower(seedFingerprint),$0
     )
 })
 }
@@ -3833,10 +3906,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zcash_voting_ffi_checksum_func_extract_nc_root() != 12696) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_zcash_voting_ffi_checksum_func_extract_orchard_fvk_from_ufvk() != 5903) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zcash_voting_ffi_checksum_func_extract_pczt_sighash() != 42430) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_zcash_voting_ffi_checksum_func_extract_spend_auth_sig() != 27072) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_func_generate_delegation_inputs() != 38782) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zcash_voting_ffi_checksum_func_generate_delegation_inputs_with_fvk() != 43650) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_func_generate_hotkey() != 8015) {
@@ -3888,6 +3970,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_get_delegation_submission() != 39403) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_get_delegation_submission_with_keystone_sig() != 20622) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_get_round_state() != 4975) {

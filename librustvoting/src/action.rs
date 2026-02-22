@@ -722,6 +722,21 @@ pub fn build_governance_pczt(
     })
 }
 
+/// Extract the ZIP-244 shielded sighash from finalized PCZT bytes.
+///
+/// Creates a Signer from the PCZT to compute the v5 signature hash, then
+/// returns it. This is the sighash that Keystone signs internally.
+pub fn extract_pczt_sighash(pczt_bytes: &[u8]) -> Result<[u8; 32], VotingError> {
+    let pczt = pczt::Pczt::parse(pczt_bytes).map_err(|e| VotingError::Internal {
+        message: format!("Failed to parse PCZT: {:?}", e),
+    })?;
+    let signer =
+        pczt::roles::signer::Signer::new(pczt).map_err(|e| VotingError::Internal {
+            message: format!("Failed to create Signer from PCZT: {:?}", e),
+        })?;
+    Ok(signer.shielded_sighash())
+}
+
 /// Extract the spend_auth_sig from a signed PCZT.
 ///
 /// Keystone redacts sensitive fields (alpha, rseed, zip32_derivation, etc.) after signing,

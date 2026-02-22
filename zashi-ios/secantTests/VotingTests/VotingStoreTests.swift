@@ -133,15 +133,48 @@ final class VotingStoreTests: XCTestCase {
             Voting()
         }
 
-        store.dependencies.votingCrypto.buildAndProveDelegation = { _, _, _, _, _, _, _, _, _ in
+        store.dependencies.walletStorage = .noOp
+        store.dependencies.mnemonic = .noOp
+        store.dependencies.databaseFiles = .noOp
+        store.dependencies.votingCrypto.extractPcztSighash = { _ in
+            Data(repeating: 0x77, count: 32)
+        }
+        store.dependencies.votingCrypto.buildAndProveDelegationKeystone = { _, _, _, _, _, _, _, _ in
             AsyncThrowingStream { continuation in
                 continuation.yield(.progress(1.0))
                 continuation.yield(.completed(Data(repeating: 0xFF, count: 32)))
                 continuation.finish()
             }
         }
+        store.dependencies.votingCrypto.getDelegationSubmissionWithKeystoneSig = { _, _, sig, sighash in
+            DelegationRegistration(
+                rk: Data(repeating: 0x11, count: 32),
+                spendAuthSig: sig,
+                signedNoteNullifier: Data(repeating: 0x03, count: 32),
+                cmxNew: Data(repeating: 0x04, count: 32),
+                encMemo: Data(repeating: 0x05, count: 64),
+                vanCmx: Data(repeating: 0x06, count: 32),
+                govNullifiers: [],
+                proof: Data(repeating: 0x07, count: 32),
+                voteRoundId: Data(repeating: 0xAA, count: 32),
+                sighash: sighash
+            )
+        }
+        store.dependencies.votingCrypto.storeVanPosition = { _, _, _ in }
+        store.dependencies.votingAPI.fetchLatestCommitmentTree = {
+            CommitmentTreeState(nextIndex: 0, root: Data(repeating: 0, count: 32), height: 0)
+        }
+        store.dependencies.votingAPI.submitDelegation = { _ in
+            TxResult(txHash: "mock-hash", code: 0)
+        }
+        store.dependencies.votingAPI.awaitCommitmentTreeGrowth = { _, _ in
+            CommitmentTreeState(nextIndex: 1, root: Data(repeating: 0, count: 32), height: 1)
+        }
 
-        await store.send(.spendAuthSignatureExtracted(Data(repeating: 0x44, count: 64))) { state in
+        await store.send(.spendAuthSignatureExtracted(
+            Data(repeating: 0x44, count: 64),
+            Data(repeating: 0xAB, count: 128)
+        )) { state in
             state.pendingGovernancePczt = nil
             state.pendingUnsignedDelegationPczt = nil
             state.keystoneSigningStatus = .idle

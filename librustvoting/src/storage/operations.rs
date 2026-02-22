@@ -727,6 +727,56 @@ impl VotingDb {
         })
     }
 
+    /// Reconstruct the delegation TX payload using a Keystone-provided signature.
+    ///
+    /// Unlike `get_delegation_submission`, this does NOT derive `ask` from a seed
+    /// or re-sign. Instead, it uses the externally-provided Keystone signature
+    /// and the ZIP-244 sighash that Keystone signed.
+    pub fn get_delegation_submission_with_keystone_sig(
+        &self,
+        round_id: &str,
+        bundle_index: u32,
+        keystone_sig: &[u8],
+        keystone_sighash: &[u8],
+    ) -> Result<DelegationSubmissionData, VotingError> {
+        if keystone_sig.len() != 64 {
+            return Err(VotingError::InvalidInput {
+                message: format!(
+                    "keystone_sig must be 64 bytes, got {}",
+                    keystone_sig.len()
+                ),
+            });
+        }
+        if keystone_sighash.len() != 32 {
+            return Err(VotingError::InvalidInput {
+                message: format!(
+                    "keystone_sighash must be 32 bytes, got {}",
+                    keystone_sighash.len()
+                ),
+            });
+        }
+
+        let conn = self.conn();
+        let data = queries::load_delegation_submission_data(&conn, round_id, bundle_index)?;
+
+        // enc_memo = [0x05; 64] (mock, matches e2e test and chain expectations)
+        let enc_memo = [0x05u8; 64];
+
+        Ok(DelegationSubmissionData {
+            proof: data.proof,
+            rk: data.rk,
+            nf_signed: data.nf_signed,
+            cmx_new: data.cmx_new,
+            gov_comm: data.gov_comm,
+            gov_nullifiers: data.gov_nullifiers,
+            alpha: data.alpha,
+            vote_round_id: data.vote_round_id,
+            spend_auth_sig: keystone_sig.to_vec(),
+            sighash: keystone_sighash.to_vec(),
+            enc_memo: enc_memo.to_vec(),
+        })
+    }
+
     /// Mark a vote as submitted to the vote chain.
     pub fn mark_vote_submitted(
         &self,

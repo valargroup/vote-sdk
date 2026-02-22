@@ -233,7 +233,10 @@ function App() {
     [setSection]
   );
 
-  const sampleRound = store.rounds.find((r) => r.name.includes("(SAMPLE)"));
+  const handleCreateSampleRound = useCallback(() => {
+    store.createSampleRound();
+    setSection("builder");
+  }, [store]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface-0">
@@ -262,11 +265,7 @@ function App() {
         {section === "about" && (
           <AboutPage
             onCreateRound={handleCreateRound}
-            onOpenSample={
-              sampleRound
-                ? () => handleSelectRound(sampleRound.id)
-                : undefined
-            }
+            onOpenSample={handleCreateSampleRound}
           />
         )}
 
@@ -681,7 +680,7 @@ function AboutPage({
   onOpenSample,
 }: {
   onCreateRound: () => void;
-  onOpenSample?: () => void;
+  onOpenSample: () => void;
 }) {
   return (
     <div className="flex-1 overflow-y-auto">
@@ -716,25 +715,23 @@ function AboutPage({
           Getting started
         </h2>
         <div className="space-y-3 mb-8">
-          {onOpenSample && (
-            <button
-              onClick={onOpenSample}
-              className="w-full flex items-start gap-3 bg-surface-1 border border-border-subtle hover:border-accent/30 rounded-xl p-4 text-left transition-colors cursor-pointer group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0 mt-0.5">
-                <FileText size={16} className="text-accent" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-text-primary group-hover:text-accent-glow transition-colors">
-                  Open the sample round
-                </p>
-                <p className="text-[11px] text-text-muted mt-0.5">
-                  Explore a pre-loaded draft based on NU7 Sentiment Polling
-                  with 11 proposals to see how the builder works.
-                </p>
-              </div>
-            </button>
-          )}
+          <button
+            onClick={onOpenSample}
+            className="w-full flex items-start gap-3 bg-surface-1 border border-border-subtle hover:border-accent/30 rounded-xl p-4 text-left transition-colors cursor-pointer group"
+          >
+            <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0 mt-0.5">
+              <FileText size={16} className="text-accent" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-text-primary group-hover:text-accent-glow transition-colors">
+                Start from a sample round
+              </p>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                Create a new draft pre-loaded with 3 sample NU7 proposals
+                to see how the builder works.
+              </p>
+            </div>
+          </button>
 
           <button
             onClick={onCreateRound}

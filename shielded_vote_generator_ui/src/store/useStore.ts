@@ -20,61 +20,46 @@ function makeBinaryProposal(title: string, description: string): Proposal {
   };
 }
 
+function makeMultiChoiceProposal(title: string, description: string, labels: string[]): Proposal {
+  return {
+    id: uuidv4(),
+    title,
+    description,
+    type: "multi-choice",
+    options: labels.map((label) => ({ id: uuidv4(), label })),
+    allowAbstain: false,
+    metadata: [],
+  };
+}
+
+function createSampleProposals(): Proposal[] {
+  return [
+    makeBinaryProposal(
+      "Network Sustainability Mechanism (NSM)",
+      "What is your general sentiment toward adding protocol support for the Network Sustainability Mechanism (NSM), including smoothing the issuance curve, which allows ZEC to be removed from circulation and later reissued as future block rewards to help sustain network security while preserving the 21 million ZEC supply cap?"
+    ),
+    makeBinaryProposal(
+      "Fee Burning via NSM",
+      "What is your general sentiment toward burning 60% of transaction fees via the Network Sustainability Mechanism (NSM)? The goals are to demonstrate Zcash's commitment to long-term sustainability, to burn ZEC so that it can be re-issued in the future without exceeding the 21M supply cap, and in the context of dynamic fees, to prevent miners from manipulating fees.\n\nReference: ZIP-235"
+    ),
+    makeMultiChoiceProposal(
+      "Project Tachyon",
+      "What is your general sentiment toward deploying a new shielded protocol or pool to address scalability challenges as part of Project Tachyon?",
+      ["Hell yeah", "Yes", "No"]
+    ),
+  ];
+}
+
 function createSeedRound(): VotingRound {
   const now = new Date().toISOString();
   return {
     id: uuidv4(),
     name: "(SAMPLE) NU7 Sentiment Polling",
     status: "draft",
-    proposals: [
-      makeBinaryProposal(
-        "Zcash Shielded Assets (ZSAs)",
-        "What is your general sentiment toward including Zcash Shielded Assets (ZSAs) as a protocol feature?\n\nReference: ZIP-227"
-      ),
-      makeBinaryProposal(
-        "Network Sustainability Mechanism (NSM)",
-        "What is your general sentiment toward adding protocol support for the Network Sustainability Mechanism (NSM), including smoothing the issuance curve, which allows ZEC to be removed from circulation and later reissued as future block rewards to help sustain network security while preserving the 21 million ZEC supply cap?"
-      ),
-      makeBinaryProposal(
-        "Fee Burning via NSM",
-        "What is your general sentiment toward burning 60% of transaction fees via the Network Sustainability Mechanism (NSM)? The goals are to demonstrate Zcash's commitment to long-term sustainability, to burn ZEC so that it can be re-issued in the future without exceeding the 21M supply cap, and in the context of dynamic fees, to prevent miners from manipulating fees.\n\nReference: ZIP-235"
-      ),
-      makeBinaryProposal(
-        "Memo Bundles",
-        "What is your general sentiment toward including Memo Bundles, which let transactions include memos larger than 512 bytes and share a memo across multiple recipients, and also permits inclusion of authenticated reply-to addresses, as a protocol feature?\n\nReference: ZIP-231"
-      ),
-      makeBinaryProposal(
-        "Explicit Fees",
-        "What is your general sentiment toward adding protocol support to enable Explicit Fees, allowing transaction fees to be clearly specified and committed to in the transaction?\n\nReference: ZIP-2002"
-      ),
-      makeBinaryProposal(
-        "Disallowing v4 Transactions",
-        "What is your general sentiment toward reducing the complexity and attack surface of the Zcash protocol by disallowing v4 transactions? This would disable the ability to spend Sprout funds, for which there will be no wallet support in any case after the prior deprecation of zcashd.\n\nReference: ZIP-2003"
-      ),
-      makeBinaryProposal(
-        "Project Tachyon",
-        "What is your general sentiment toward deploying a new shielded protocol or pool to address scalability challenges as part of Project Tachyon?"
-      ),
-      makeBinaryProposal(
-        "STARK Proof Verification via TZEs",
-        "What is your general sentiment toward adding protocol support for STARK proof verification via Transparent Zcash Extensions (TZEs) to enable Layer-2 designs on Zcash?"
-      ),
-      makeBinaryProposal(
-        "Dynamic Fee Mechanism",
-        "What is your general sentiment toward adding protocol support for a comparable-based, dynamic fee mechanism?"
-      ),
-      makeBinaryProposal(
-        "Consensus Accounts",
-        "What is your general sentiment toward adding protocol support for consensus accounts, which generalize the functionality of the dev fund lockbox and reduce the operational expense of collecting ZCG funds and miner rewards?"
-      ),
-      makeBinaryProposal(
-        "Orchard Quantum Recoverability",
-        "What is your general sentiment toward Orchard quantum recoverability, which aims to ensure that if the security of elliptic curve-based cryptography came into doubt (due to the emergence of a cryptographically relevant quantum computer or otherwise), then new Orchard funds could remain recoverable by a later protocol — as opposed to having to be burnt in order to avoid an unbounded balance violation?\n\nReference: ZIP-2005"
-      ),
-    ],
+    proposals: createSampleProposals(),
     settings: {
       description:
-        "Sentiment polling for Zcash Network Upgrade 7 (NU7) feature candidates. Each proposal is a binary Support/Oppose question on whether a feature should be included in NU7.",
+        "Sentiment polling for Zcash Network Upgrade 7 (NU7) feature candidates.",
       snapshotHeight: "",
       endTime: "",
       openUntilClosed: true,
@@ -180,6 +165,14 @@ export function useStore() {
 
   const createRound = useCallback((name?: string) => {
     const round = createDefaultRound(name ?? "Untitled Round");
+    setRounds((prev) => [round, ...prev]);
+    setActiveRoundId(round.id);
+    setActiveProposalId(round.proposals[0]?.id ?? null);
+    return round;
+  }, []);
+
+  const createSampleRound = useCallback(() => {
+    const round = createSeedRound();
     setRounds((prev) => [round, ...prev]);
     setActiveRoundId(round.id);
     setActiveProposalId(round.proposals[0]?.id ?? null);
@@ -349,6 +342,7 @@ export function useStore() {
     setActiveRoundId,
     setActiveProposalId,
     createRound,
+    createSampleRound,
     updateRound,
     deleteRound,
     duplicateRound,

@@ -37,7 +37,7 @@ private enum VotingFlowError: LocalizedError {
         case .missingPendingUnsignedPczt:
             return "missing pending unsigned delegation PCZT"
         case .invalidDelegationSignature:
-            return "Keystone signed the PCZT shielded sighash, which does not match the delegation action sighash required by ZKP #1."
+            return "Keystone delegation signature tuple (rk, sighash, sig) is inconsistent with the payload being submitted."
         case .missingVoteCommitmentBundle:
             return "vote commitment build completed without a commitment bundle"
         }
@@ -190,6 +190,7 @@ public struct Voting {
         /// Hotkey address derived from keychain mnemonic, shown on delegation signing screen.
         public var hotkeyAddress: String?
 
+        @Shared(.inMemory(.selectedWalletAccount)) public var selectedWalletAccount: WalletAccount? = nil
         @Shared(.inMemory(.toast)) public var toast: Toast.Edge? = nil
 
         public var selectedProposalId: UInt32?
@@ -371,7 +372,7 @@ public struct Voting {
         case keystoneSigningFailed(String)
         case openKeystoneSignatureScan
         case retryKeystoneSigning
-        case spendAuthSignatureExtracted(Data)
+        case spendAuthSignatureExtracted(Data, Data)
         case spendAuthSignatureExtractionFailed(String)
         case keystoneBundleAdvance
         case keystoneScan(PresentationAction<Scan.Action>)
@@ -1069,6 +1070,28 @@ public struct Voting {
                         VotingFlowError.missingActiveSession.localizedDescription
                     ))
                 }
+                let keystoneMetadata: (seedFingerprint: Data, accountIndex: UInt32)?
+                if state.isKeystoneUser {
+                    guard
+                        let account = state.selectedWalletAccount,
+                        let zip32AccountIndex = account.zip32AccountIndex
+                    else {
+                        return .send(.delegationProofFailed(
+                            VotingFlowError.missingSigningAccount.localizedDescription
+                        ))
+                    }
+                    guard
+                        let seedFingerprint = account.seedFingerprint,
+                        seedFingerprint.count == 32
+                    else {
+                        return .send(.delegationProofFailed(
+                            VotingFlowError.missingSigningAccount.localizedDescription
+                        ))
+                    }
+                    keystoneMetadata = (Data(seedFingerprint), UInt32(zip32AccountIndex.index))
+                } else {
+                    keystoneMetadata = nil
+                }
                 if state.isKeystoneUser {
                     state.keystoneSigningStatus = .preparingRequest
                 } else {
@@ -1079,7 +1102,8 @@ public struct Voting {
                 let network = zcashSDKEnvironment.network
                 let walletDbPath = databaseFiles.dataDbURLFor(network).path
                 let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
-                let accountIndex: UInt32 = 0
+                let accountIndex: UInt32 = keystoneMetadata?.accountIndex ?? 0
+                let keystoneSeedFingerprint = keystoneMetadata?.seedFingerprint
                 let isKeystoneUser = state.isKeystoneUser
                 let roundName = state.votingRound.title
                 // IMT server URL from resolved service config
@@ -1112,6 +1136,13 @@ public struct Voting {
                             // signature will verify against the PCZT's ZIP-244 sighash.
                             let noteChunks = cachedNotes.smartBundles().bundles
                             let bundleNotes = noteChunks[Int(keystoneBundleIndex)]
+                            // Extract Orchard FVK from the note's UFVK so the PCZT uses
+                            // Keystone's ak (matching what the ZKP prover derives from the
+                            // note's ufvk_str). Without this, rk in the PCZT would be
+                            // derived from the app's ak, causing a mismatch (Bug 3 fix).
+                            let orchardFvk = try votingCrypto.extractOrchardFvkFromUfvk(
+                                bundleNotes[0].ufvkStr, networkId
+                            )
                             print("[Voting] Keystone: preparing PCZT for bundle \(keystoneBundleIndex + 1)/\(bundleCount)")
                             let govPczt = try await votingCrypto.buildGovernancePczt(
                                 roundId,
@@ -1121,7 +1152,9 @@ public struct Voting {
                                 hotkeySeed,
                                 networkId,
                                 accountIndex,
-                                roundName
+                                roundName,
+                                orchardFvk,
+                                keystoneSeedFingerprint
                             )
                             let redactedPczt = try await sdkSynchronizer
                                 .redactPCZTForSigner(govPczt.pcztBytes)
@@ -1210,7 +1243,7 @@ public struct Voting {
                         signedPczt,
                         actionIndex
                     )
-                    await send(.spendAuthSignatureExtracted(spendAuthSig))
+                    await send(.spendAuthSignatureExtracted(spendAuthSig, signedPczt))
                 } catch: { error, send in
                     await send(.spendAuthSignatureExtractionFailed(error.localizedDescription))
                 }
@@ -1223,12 +1256,15 @@ public struct Voting {
             case .keystoneScan:
                 return .none
 
-            case .spendAuthSignatureExtracted:
+            case .spendAuthSignatureExtracted(let keystoneSig, let signedPczt):
                 guard let activeSession = state.activeSession else {
                     return .send(.delegationProofFailed(
                         VotingFlowError.missingActiveSession.localizedDescription
                     ))
                 }
+
+                // Capture expected rk before clearing state for a local consistency check.
+                let expectedRk = state.pendingGovernancePczt?.rk
 
                 state.pendingGovernancePczt = nil
                 state.pendingUnsignedDelegationPczt = nil
@@ -1241,25 +1277,32 @@ public struct Voting {
                 let network = zcashSDKEnvironment.network
                 let walletDbPath = databaseFiles.dataDbURLFor(network).path
                 let networkId: UInt32 = network.networkType == .mainnet ? 0 : 1
-                let accountIndex: UInt32 = 0
+                let accountIndex: UInt32 = state.selectedWalletAccount.flatMap(\.zip32AccountIndex).map { UInt32($0.index) } ?? 0
                 // IMT server URL from resolved service config
                 let imtServerUrl = state.serviceConfig?.nullifierProviders.first?.url ?? "https://46-101-255-48.sslip.io/nullifier"
                 let keystoneBundleIndex = state.currentKeystoneBundleIndex
                 let bundleCount = state.bundleCount
                 return .run { [votingCrypto, votingAPI, mnemonic, walletStorage] send in
-                    let senderPhrase = try walletStorage.exportWallet().seedPhrase.value()
-                    let senderSeed = try mnemonic.toSeed(senderPhrase)
+                    guard let expectedRk = expectedRk else {
+                        throw VotingFlowError.missingPendingUnsignedPczt
+                    }
                     let hotkeyPhrase = try walletStorage.exportVotingHotkey().seedPhrase.value()
                     let hotkeySeed = try mnemonic.toSeed(hotkeyPhrase)
+
+                    // Extract ZIP-244 sighash from the signed PCZT — this is what
+                    // Keystone actually signed internally.
+                    let keystoneSighash = try votingCrypto.extractPcztSighash(signedPczt)
 
                     // Use cached wallet notes for the current bundle
                     let noteChunks = cachedNotes.smartBundles().bundles
                     let bundleNotes = noteChunks[Int(keystoneBundleIndex)]
 
                     print("[Voting] Keystone: proving bundle \(keystoneBundleIndex + 1)/\(bundleCount)")
-                    for try await event in votingCrypto.buildAndProveDelegation(
-                        roundId, keystoneBundleIndex, bundleNotes, walletDbPath, senderSeed, hotkeySeed,
-                        networkId, accountIndex, imtServerUrl
+                    // Use Keystone-specific prover that skips constructDelegationAction
+                    // to preserve the alpha stored by buildGovernancePczt (Bug 2 fix).
+                    for try await event in votingCrypto.buildAndProveDelegationKeystone(
+                        roundId, keystoneBundleIndex, bundleNotes, walletDbPath,
+                        hotkeySeed, networkId, accountIndex, imtServerUrl
                     ) {
                         switch event {
                         case .progress(let p):
@@ -1272,9 +1315,23 @@ public struct Voting {
                         }
                     }
 
-                    // Submit delegation TX for this bundle
-                    let registration = try await votingCrypto.getDelegationSubmission(
-                        roundId, keystoneBundleIndex, senderSeed, networkId, accountIndex
+                    // Submit delegation TX using Keystone's signature and ZIP-244 sighash
+                    // instead of re-deriving ask from seed (Bug 1 fix).
+                    let registration = try await votingCrypto.getDelegationSubmissionWithKeystoneSig(
+                        roundId, keystoneBundleIndex, keystoneSig, keystoneSighash
+                    )
+                    if registration.rk != expectedRk ||
+                        registration.spendAuthSig != keystoneSig ||
+                        registration.sighash != keystoneSighash {
+                        throw VotingFlowError.invalidDelegationSignature
+                    }
+                    print(
+                        """
+                        [Voting] Keystone delegation tuple \
+                        rk=\(Data(registration.rk.prefix(8)).hexString) \
+                        sighash=\(Data(keystoneSighash.prefix(8)).hexString) \
+                        sig=\(Data(keystoneSig.prefix(8)).hexString)
+                        """
                     )
                     let preTree = try await votingAPI.fetchLatestCommitmentTree()
                     let delegTxResult = try await votingAPI.submitDelegation(registration)

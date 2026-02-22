@@ -924,6 +924,28 @@ impl VotingDatabase {
             .collect())
     }
 
+    /// Reconstruct the delegation TX payload using a Keystone-provided signature.
+    ///
+    /// Unlike `get_delegation_submission`, this does NOT derive `ask` from a seed.
+    /// It uses the externally-provided Keystone signature and the ZIP-244 sighash.
+    pub fn get_delegation_submission_with_keystone_sig(
+        &self,
+        round_id: String,
+        bundle_index: u32,
+        keystone_sig: Vec<u8>,
+        keystone_sighash: Vec<u8>,
+    ) -> Result<DelegationSubmission, VotingError> {
+        Ok(self
+            .db
+            .get_delegation_submission_with_keystone_sig(
+                &round_id,
+                bundle_index,
+                &keystone_sig,
+                &keystone_sighash,
+            )?
+            .into())
+    }
+
     /// Reconstruct the full chain-ready delegation TX payload from DB + seed.
     ///
     /// After `build_and_prove_delegation` completes, call this to get the signed
@@ -1241,6 +1263,103 @@ pub fn verify_witness(witness: WitnessData) -> Result<bool, VotingError> {
     Ok(voting::witness::verify_witness(&witness.into())?)
 }
 
+/// Extract the ZIP-244 shielded sighash from finalized PCZT bytes.
+///
+/// Returns the 32-byte sighash that Keystone signs internally. Used to construct
+/// the delegation submission with the correct sighash for chain verification.
+#[uniffi::export]
+pub fn extract_pczt_sighash(pczt_bytes: Vec<u8>) -> Result<Vec<u8>, VotingError> {
+    Ok(voting::action::extract_pczt_sighash(&pczt_bytes)?.to_vec())
+}
+
+/// Derive delegation inputs using an explicit FVK instead of deriving from sender seed.
+///
+/// For Keystone accounts, the notes carry the Keystone's UFVK in the wallet DB.
+/// This function uses the provided FVK bytes directly (from the note's `ufvk_str`)
+/// instead of deriving from a seed, ensuring the prover and PCZT builder use the
+/// same `ak`.
+#[uniffi::export]
+pub fn generate_delegation_inputs_with_fvk(
+    fvk_bytes: Vec<u8>,
+    hotkey_seed: Vec<u8>,
+    network_id: u32,
+    account_index: u32,
+    seed_fingerprint: Vec<u8>,
+) -> Result<DelegationInputs, VotingError> {
+    if fvk_bytes.len() != 96 {
+        return Err(VotingError::InvalidInput {
+            message: format!(
+                "fvk_bytes must be 96 bytes, got {}",
+                fvk_bytes.len()
+            ),
+        });
+    }
+    if hotkey_seed.len() < 32 {
+        return Err(VotingError::InvalidInput {
+            message: format!(
+                "hotkey_seed must be at least 32 bytes, got {}",
+                hotkey_seed.len()
+            ),
+        });
+    }
+    if seed_fingerprint.len() != 32 {
+        return Err(VotingError::InvalidInput {
+            message: format!(
+                "seed_fingerprint must be 32 bytes, got {}",
+                seed_fingerprint.len()
+            ),
+        });
+    }
+
+    let account = AccountId::try_from(account_index).map_err(|_| VotingError::InvalidInput {
+        message: format!("account_index must be < 2^31, got {}", account_index),
+    })?;
+
+    // Derive hotkey-side Orchard material
+    let hotkey_usk = match network_id {
+        0 => UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &hotkey_seed, account),
+        1 => UnifiedSpendingKey::from_seed(&TEST_NETWORK, &hotkey_seed, account),
+        _ => {
+            return Err(VotingError::InvalidInput {
+                message: format!(
+                    "invalid network_id {}, expected 0 (mainnet) or 1 (testnet)",
+                    network_id
+                ),
+            });
+        }
+    }
+    .map_err(|e| VotingError::InvalidInput {
+        message: format!("failed to derive hotkey UnifiedSpendingKey: {}", e),
+    })?;
+    let hotkey_ufvk = hotkey_usk.to_unified_full_viewing_key();
+    let hotkey_orchard_fvk = hotkey_ufvk
+        .orchard()
+        .ok_or_else(|| VotingError::InvalidInput {
+            message: "hotkey UFVK is missing Orchard component".to_string(),
+        })?;
+
+    let app_hotkey = voting::hotkey::generate_hotkey(&hotkey_seed)?;
+    let hotkey_addr = hotkey_orchard_fvk.address_at(0u32, Scope::External);
+    let hotkey_raw_address = hotkey_addr.to_raw_address_bytes().to_vec();
+
+    let hotkey_addr_43: [u8; 43] = hotkey_raw_address
+        .as_slice()
+        .try_into()
+        .expect("address serialization must be 43 bytes");
+    let (g_d_new_x, pk_d_new_x) =
+        voting::action::derive_hotkey_x_coords_from_raw_address(&hotkey_addr_43)?;
+
+    Ok(DelegationInputs {
+        fvk_bytes,
+        g_d_new_x: g_d_new_x.to_vec(),
+        pk_d_new_x: pk_d_new_x.to_vec(),
+        hotkey_raw_address,
+        hotkey_public_key: app_hotkey.public_key,
+        hotkey_address: app_hotkey.address,
+        seed_fingerprint,
+    })
+}
+
 #[uniffi::export]
 pub fn extract_spend_auth_sig(
     signed_pczt_bytes: Vec<u8>,
@@ -1351,6 +1470,39 @@ pub fn sign_cast_vote(
         &alpha_v,
     )?
     .into())
+}
+
+/// Extract the 96-byte Orchard FVK from a UFVK string.
+///
+/// Decodes a Bech32-encoded Unified Full Viewing Key string and returns the
+/// raw 96-byte Orchard component (ak[32] || nk[32] || rivk[32]).
+/// Used for Keystone accounts where the FVK must come from the note's UFVK
+/// rather than being derived from the app's seed.
+#[uniffi::export]
+pub fn extract_orchard_fvk_from_ufvk(
+    ufvk_str: String,
+    network_id: u32,
+) -> Result<Vec<u8>, VotingError> {
+    use zcash_keys::keys::UnifiedFullViewingKey;
+    let ufvk = match network_id {
+        0 => UnifiedFullViewingKey::decode(&MAIN_NETWORK, &ufvk_str),
+        1 => UnifiedFullViewingKey::decode(&TEST_NETWORK, &ufvk_str),
+        _ => {
+            return Err(VotingError::InvalidInput {
+                message: format!(
+                    "invalid network_id {}, expected 0 (mainnet) or 1 (testnet)",
+                    network_id
+                ),
+            });
+        }
+    }
+    .map_err(|e| VotingError::InvalidInput {
+        message: format!("failed to decode UFVK string: {}", e),
+    })?;
+    let orchard_fvk = ufvk.orchard().ok_or_else(|| VotingError::InvalidInput {
+        message: "UFVK has no Orchard component".to_string(),
+    })?;
+    Ok(orchard_fvk.to_bytes().to_vec())
 }
 
 /// Extract the Orchard note commitment tree root from a protobuf-encoded TreeState.

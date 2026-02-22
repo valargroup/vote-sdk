@@ -243,6 +243,14 @@ impl Signer {
         Ok(())
     }
 
+    /// Returns the cached shielded sighash (ZIP-244 v5 signature hash).
+    ///
+    /// Useful for extracting the sighash that a hardware wallet (e.g. Keystone)
+    /// will sign, without needing to run the full Signer flow.
+    pub fn shielded_sighash(&self) -> [u8; 32] {
+        self.shielded_sighash
+    }
+
     /// Finishes the Signer role, returning the updated PCZT.
     pub fn finish(self) -> Pczt {
         Pczt {

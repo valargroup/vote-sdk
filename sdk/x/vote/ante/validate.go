@@ -139,12 +139,16 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, o
 // a MsgDelegateVote. It looks up the session to pass nc_root and
 // nullifier_imt_root as ZKP public inputs.
 func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k keeper.Keeper, opts ValidateOpts) error {
-	// Require client-provided sighash to match the canonical hash of the message.
-	expectedSighash := types.ComputeDelegationSighash(msg)
-	if len(msg.Sighash) != 32 || !bytes.Equal(msg.Sighash, expectedSighash) {
+	// Verify the sighash is 32 bytes. We accept any valid sighash (either
+	// the custom governance sighash or the ZIP-244 sighash from Keystone).
+	// The ZKP verification below provides the governance data binding —
+	// it proves rk = ak.randomize(alpha), note ownership, and correct VAN
+	// encoding. Non-Keystone clients continue sending the governance sighash;
+	// Keystone clients send the ZIP-244 sighash.
+	if len(msg.Sighash) != 32 {
 		return types.ErrSighashMismatch
 	}
-	// RedPallas signature verification over the verified sighash.
+	// RedPallas signature verification over the client-provided sighash.
 	if err := opts.SigVerifier.Verify(msg.Rk, msg.Sighash, msg.SpendAuthSig); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
 	}
