@@ -136,19 +136,19 @@ int32_t zally_vote_tree_path(
 /*
  * Verify a real delegation circuit proof (ZKP #1, 15 conditions, K=14).
  *
- * The public inputs are passed as a flat byte array of 11 x 32-byte
- * chunks (352 bytes total), in order:
+ * The public inputs are passed as a flat byte array of 12 x 32-byte
+ * chunks (384 bytes total), in order:
  *   [nf_signed, rk_compressed, cmx_new, van_comm, vote_round_id,
- *    nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4]
+ *    nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4, gov_null_5]
  *
  * rk_compressed is a 32-byte compressed Pallas curve point. The FFI
- * decompresses it into (rk_x, rk_y) for the circuit's 12 field elements.
+ * decompresses it into (rk_x, rk_y) for the circuit's 13 field elements.
  *
  * Parameters:
  *   proof_ptr         - Pointer to serialized Halo2 proof bytes.
  *   proof_len         - Length of the proof byte array.
- *   public_inputs_ptr - Pointer to 352 bytes (11 x 32-byte chunks).
- *   public_inputs_len - Length of the public inputs byte array (must be 352).
+ *   public_inputs_ptr - Pointer to 384 bytes (12 x 32-byte chunks).
+ *   public_inputs_len - Length of the public inputs byte array (must be 384).
  *
  * Returns:
  *    0  on successful verification.
@@ -244,10 +244,10 @@ int32_t zally_verify_share_reveal_proof(
  *   merkle_path_ptr       - Pointer to 772-byte serialized Merkle path
  *                           (from zally_vote_tree_path: 4 bytes position + 24*32 siblings).
  *   merkle_path_len       - Length (must be 772).
- *   all_enc_shares_ptr    - Pointer to 256 bytes: 4 shares x (C1 + C2) x 32 bytes.
- *                           Order: C1_0, C2_0, C1_1, C2_1, C1_2, C2_2, C1_3, C2_3.
- *   all_enc_shares_len    - Length (must be 256).
- *   share_index           - Which of the 4 shares (0..3).
+ *   all_enc_shares_ptr    - Pointer to 320 bytes: 5 shares x (C1 + C2) x 32 bytes.
+ *                           Order: C1_0, C2_0, C1_1, C2_1, C1_2, C2_2, C1_3, C2_3, C1_4, C2_4.
+ *   all_enc_shares_len    - Length (must be 320).
+ *   share_index           - Which of the 5 shares (0..4).
  *   proposal_id           - Proposal being voted on.
  *   vote_decision         - Vote choice.
  *   round_id_ptr          - Pointer to 32-byte raw Blake2b-256 round ID.

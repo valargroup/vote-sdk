@@ -23,7 +23,7 @@ const DelegationSighashDomain = "ZALLY_DELEGATION_SIGHASH_V0"
 //   - cmx_new: 32 bytes
 //   - enc_memo: 64 bytes (pad with zeros if shorter)
 //   - van_cmx: 32 bytes
-//   - gov_nullifiers: exactly 4 × 32 bytes (pad with zeros if fewer than 4)
+//   - gov_nullifiers: exactly 5 × 32 bytes (pad with zeros if fewer than 5)
 func ComputeDelegationSighash(msg *MsgDelegateVote) []byte {
 	h, _ := blake2b.New256(nil)
 	h.Write([]byte(DelegationSighashDomain))
@@ -33,8 +33,8 @@ func ComputeDelegationSighash(msg *MsgDelegateVote) []byte {
 	write32(h, msg.CmxNew)
 	write64(h, msg.EncMemo)
 	write32(h, msg.VanCmx)
-	// Exactly 4 × 32 bytes for gov_nullifiers (pad with zeros if fewer than 4).
-	for i := 0; i < 4; i++ {
+	// Exactly 5 × 32 bytes for gov_nullifiers (pad with zeros if fewer than 5).
+	for i := 0; i < 5; i++ {
 		var slot [32]byte
 		if i < len(msg.GovNullifiers) && len(msg.GovNullifiers[i]) > 0 {
 			if len(msg.GovNullifiers[i]) >= 32 {

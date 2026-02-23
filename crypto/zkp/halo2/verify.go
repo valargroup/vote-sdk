@@ -111,12 +111,12 @@ func VerifyToyProof(proof, publicInput []byte) error {
 // VerifyDelegationProof verifies a real delegation circuit proof (ZKP #1)
 // using the Rust verifier via CGo.
 //
-// The inputs are serialized as 11 × 32-byte chunks (352 bytes):
+// The inputs are serialized as 12 × 32-byte chunks (384 bytes):
 //
 //	[nf_signed, rk_compressed, cmx_new, van_cmx, vote_round_id,
-//	 nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4]
+//	 nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4, gov_null_5]
 //
-// The Rust FFI decompresses rk into (rk_x, rk_y) for the circuit's 12 field elements.
+// The Rust FFI decompresses rk into (rk_x, rk_y) for the circuit's 13 field elements.
 //
 // Returns nil on success, or an error describing the failure.
 func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
@@ -124,10 +124,10 @@ func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 		return fmt.Errorf("delegation proof is empty")
 	}
 
-	// Serialize the DelegationInputs into 11 × 32-byte flat buffer.
+	// Serialize the DelegationInputs into 12 × 32-byte flat buffer.
 	// Order must match the Rust FFI expectation.
 	const chunkSize = 32
-	const numChunks = 11
+	const numChunks = 12
 	buf := make([]byte, numChunks*chunkSize)
 
 	// Helper: copy exactly 32 bytes from src into buf at offset, zero-padding if shorter.
@@ -167,8 +167,8 @@ func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 	if err := copyChunk(6*chunkSize, inputs.NullifierImtRoot); err != nil {
 		return fmt.Errorf("nf_imt_root: %w", err)
 	}
-	// Slots 7–10: gov_nullifiers (pad to 4 with zeros)
-	for i := 0; i < 4; i++ {
+	// Slots 7–11: gov_nullifiers (pad to 5 with zeros)
+	for i := 0; i < 5; i++ {
 		offset := (7 + i) * chunkSize
 		if i < len(inputs.GovNullifiers) && len(inputs.GovNullifiers[i]) == chunkSize {
 			copy(buf[offset:offset+chunkSize], inputs.GovNullifiers[i])

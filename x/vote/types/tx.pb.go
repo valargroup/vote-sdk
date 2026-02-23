@@ -218,7 +218,7 @@ type MsgDelegateVote struct {
 	CmxNew              []byte                 `protobuf:"bytes,4,opt,name=cmx_new,json=cmxNew,proto3" json:"cmx_new,omitempty"`                                          // Output note commitment
 	EncMemo             []byte                 `protobuf:"bytes,5,opt,name=enc_memo,json=encMemo,proto3" json:"enc_memo,omitempty"`                                       // Encrypted memo
 	VanCmx              []byte                 `protobuf:"bytes,6,opt,name=van_cmx,json=vanCmx,proto3" json:"van_cmx,omitempty"`                                          // Vote authority note commitment
-	GovNullifiers       [][]byte               `protobuf:"bytes,7,rep,name=gov_nullifiers,json=govNullifiers,proto3" json:"gov_nullifiers,omitempty"`                     // Up to 4 governance nullifiers
+	GovNullifiers       [][]byte               `protobuf:"bytes,7,rep,name=gov_nullifiers,json=govNullifiers,proto3" json:"gov_nullifiers,omitempty"`                     // Up to 5 governance nullifiers
 	Proof               []byte                 `protobuf:"bytes,8,opt,name=proof,proto3" json:"proof,omitempty"`                                                          // Halo2 ZKP #1
 	VoteRoundId         []byte                 `protobuf:"bytes,9,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
 	Sighash             []byte                 `protobuf:"bytes,10,opt,name=sighash,proto3" json:"sighash,omitempty"` // Client-provided sighash for RedPallas signature verification (32 bytes)

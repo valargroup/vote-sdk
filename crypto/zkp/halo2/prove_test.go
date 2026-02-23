@@ -24,34 +24,34 @@ import (
 // Proof generation takes ~30-60s in release mode.
 func TestGenerateShareRevealRoundTrip(t *testing.T) {
 	// Read fixture file.
-	// Format (1104 bytes):
+	// Format (1168 bytes):
 	//   [0..772)      merkle_path
-	//   [772..1028)   all_enc_shares (256 bytes)
-	//   [1028..1032)  share_index (u32 LE)
-	//   [1032..1036)  proposal_id (u32 LE)
-	//   [1036..1040)  vote_decision (u32 LE)
-	//   [1040..1072)  round_id (32 bytes)
-	//   [1072..1104)  shares_hash (32 bytes)
+	//   [772..1092)   all_enc_shares (320 bytes)
+	//   [1092..1096)  share_index (u32 LE)
+	//   [1096..1100)  proposal_id (u32 LE)
+	//   [1100..1104)  vote_decision (u32 LE)
+	//   [1104..1136)  round_id (32 bytes)
+	//   [1136..1168)  shares_hash (32 bytes)
 	fixture, err := os.ReadFile("../testdata/share_reveal_inputs.bin")
 	require.NoError(t, err, "fixture file missing — run: make fixtures")
-	require.Len(t, fixture, 1104, "unexpected fixture size")
+	require.Len(t, fixture, 1168, "unexpected fixture size")
 
 	merklePath := fixture[0:772]
 
-	var allEncShares [8][32]byte
-	for i := 0; i < 8; i++ {
+	var allEncShares [10][32]byte
+	for i := 0; i < 10; i++ {
 		copy(allEncShares[i][:], fixture[772+i*32:772+(i+1)*32])
 	}
 
-	shareIndex := binary.LittleEndian.Uint32(fixture[1028:1032])
-	proposalID := binary.LittleEndian.Uint32(fixture[1032:1036])
-	voteDecision := binary.LittleEndian.Uint32(fixture[1036:1040])
+	shareIndex := binary.LittleEndian.Uint32(fixture[1092:1096])
+	proposalID := binary.LittleEndian.Uint32(fixture[1096:1100])
+	voteDecision := binary.LittleEndian.Uint32(fixture[1100:1104])
 
 	var roundID [32]byte
-	copy(roundID[:], fixture[1040:1072])
+	copy(roundID[:], fixture[1104:1136])
 
 	var sharesHash [32]byte
-	copy(sharesHash[:], fixture[1072:1104])
+	copy(sharesHash[:], fixture[1136:1168])
 
 	// Generate proof.
 	t.Log("generating share reveal proof (this takes ~30-60s)...")

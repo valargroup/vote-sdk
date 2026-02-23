@@ -83,8 +83,8 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 	if len(msg.GovNullifiers) == 0 {
 		return fmt.Errorf("%w: gov_nullifiers cannot be empty", ErrInvalidField)
 	}
-	if len(msg.GovNullifiers) > 4 {
-		return fmt.Errorf("%w: gov_nullifiers cannot exceed 4, got %d", ErrInvalidField, len(msg.GovNullifiers))
+	if len(msg.GovNullifiers) > 5 {
+		return fmt.Errorf("%w: gov_nullifiers cannot exceed 5, got %d", ErrInvalidField, len(msg.GovNullifiers))
 	}
 	for i, n := range msg.GovNullifiers {
 		if len(n) == 0 {

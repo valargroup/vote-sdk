@@ -8,7 +8,7 @@ import "fmt"
 // the "halo2" build tag. Use `go build -tags halo2` for real proof generation.
 func GenerateShareRevealProof(
 	merklePath []byte,
-	allEncShares [8][32]byte,
+	allEncShares [10][32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,

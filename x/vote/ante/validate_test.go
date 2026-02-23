@@ -488,7 +488,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			errContains: "gov_nullifiers",
 		},
 		{
-			name: "invalid: too many gov_nullifiers (>4)",
+			name: "invalid: too many gov_nullifiers (>5)",
 			msg: func() types.VoteMessage {
 				m := newValidMsgDelegateVote()
 				m.GovNullifiers = [][]byte{
@@ -496,14 +496,15 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 					bytes.Repeat([]byte{0x02}, 32),
 					bytes.Repeat([]byte{0x03}, 32),
 					bytes.Repeat([]byte{0x04}, 32),
-					bytes.Repeat([]byte{0x05}, 32), // 5th one
+					bytes.Repeat([]byte{0x05}, 32),
+					bytes.Repeat([]byte{0x06}, 32), // 6th one
 				}
 				return m
 			},
 			opts:        mockOpts(),
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
-			errContains: "gov_nullifiers cannot exceed 4",
+			errContains: "gov_nullifiers cannot exceed 5",
 		},
 		{
 			name: "invalid: empty proof",

@@ -135,10 +135,10 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		return fmt.Errorf("compute merkle path: %w", err)
 	}
 
-	// Decode all_enc_shares into 8 × 32-byte array.
-	var allEncShares [8][32]byte
-	if len(share.Payload.AllEncShares) != 4 {
-		return fmt.Errorf("expected 4 all_enc_shares, got %d", len(share.Payload.AllEncShares))
+	// Decode all_enc_shares into 10 × 32-byte array.
+	var allEncShares [10][32]byte
+	if len(share.Payload.AllEncShares) != 5 {
+		return fmt.Errorf("expected 5 all_enc_shares, got %d", len(share.Payload.AllEncShares))
 	}
 	for i, es := range share.Payload.AllEncShares {
 		c1Bytes, err := base64.StdEncoding.DecodeString(es.C1)

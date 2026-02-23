@@ -296,20 +296,20 @@ pub unsafe extern "C" fn zally_vote_tree_path(
 
 /// Verify a real delegation circuit proof (ZKP #1).
 ///
-/// The public inputs are passed as a flat byte array of 11 × 32-byte
-/// chunks (352 bytes total), in the order:
+/// The public inputs are passed as a flat byte array of 12 × 32-byte
+/// chunks (384 bytes total), in the order:
 ///   [nf_signed, rk_compressed, cmx_new, van_comm, vote_round_id,
-///    nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4]
+///    nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4, gov_null_5]
 ///
 /// The `rk_compressed` is a 32-byte compressed Pallas curve point. The FFI
-/// decompresses it into (rk_x, rk_y) to produce the 12 field elements that
+/// decompresses it into (rk_x, rk_y) to produce the 13 field elements that
 /// the circuit expects.
 ///
 /// # Arguments
 /// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
 /// * `proof_len`         - Length of the proof byte slice.
-/// * `public_inputs_ptr` - Pointer to 352 bytes (11 × 32-byte chunks).
-/// * `public_inputs_len` - Length of the public inputs byte slice (must be 352).
+/// * `public_inputs_ptr` - Pointer to 384 bytes (12 × 32-byte chunks).
+/// * `public_inputs_len` - Length of the public inputs byte slice (must be 384).
 ///
 /// # Returns
 /// * `0`  on successful verification.
@@ -333,7 +333,7 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
     if proof_ptr.is_null() || public_inputs_ptr.is_null() {
         return -1;
     }
-    if public_inputs_len != 11 * 32 {
+    if public_inputs_len != 12 * 32 {
         return -1;
     }
     if proof_len == 0 {
@@ -377,7 +377,7 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
     let rk_x: pallas::Base = *rk_coords.x();
     let rk_y: pallas::Base = *rk_coords.y();
 
-    // Slots 2–10: the remaining 9 field elements.
+    // Slots 2–11: the remaining 10 field elements.
     let cmx_new = match deserialize_fp(chunk(2)) {
         Some(f) => f,
         None => return -3,
@@ -415,8 +415,12 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
         Some(f) => f,
         None => return -3,
     };
+    let gov_null_5 = match deserialize_fp(chunk(11)) {
+        Some(f) => f,
+        None => return -3,
+    };
 
-    // Build the 12-element public input vector (matches circuit instance order).
+    // Build the 13-element public input vector (matches circuit instance order).
     let public_inputs = vec![
         nf_signed,
         rk_x,
@@ -430,9 +434,10 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
         gov_null_2,
         gov_null_3,
         gov_null_4,
+        gov_null_5,
     ];
 
-    // Debug: dump all 12 field elements so we can compare with prover side.
+    // Debug: dump all 13 field elements so we can compare with prover side.
     {
         fn bytes_to_hex(b: &[u8]) -> String {
             b.iter().map(|byte| format!("{:02x}", byte)).collect()
@@ -440,9 +445,9 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
         let names = [
             "nf_signed", "rk_x", "rk_y", "cmx_new", "van_comm",
             "vote_round_id", "nc_root", "nf_imt_root",
-            "gov_null_1", "gov_null_2", "gov_null_3", "gov_null_4",
+            "gov_null_1", "gov_null_2", "gov_null_3", "gov_null_4", "gov_null_5",
         ];
-        eprintln!("[zkp1-verify] 12 public inputs (post-deser, hex LE):");
+        eprintln!("[zkp1-verify] 13 public inputs (post-deser, hex LE):");
         for (i, (fe, name)) in public_inputs.iter().zip(names.iter()).enumerate() {
             let bytes: [u8; 32] = fe.to_repr();
             eprintln!("[zkp1-verify]   [{:>2}] {:<14} {}", i, name, bytes_to_hex(&bytes));
@@ -780,9 +785,9 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
 ///
 /// # Arguments
 /// * `merkle_path_ptr/len`       - 772-byte serialized Merkle path (from `zally_vote_tree_path`)
-/// * `all_enc_shares_ptr/len`    - 256 bytes: 4 shares × (C1 + C2) × 32 bytes each
-///                                 Order: C1_0, C2_0, C1_1, C2_1, C1_2, C2_2, C1_3, C2_3
-/// * `share_index`               - Which of the 4 shares (0..3)
+/// * `all_enc_shares_ptr/len`    - 320 bytes: 5 shares × (C1 + C2) × 32 bytes each
+///                                 Order: C1_0, C2_0, C1_1, C2_1, C1_2, C2_2, C1_3, C2_3, C1_4, C2_4
+/// * `share_index`               - Which of the 5 shares (0..4)
 /// * `proposal_id`               - Proposal being voted on
 /// * `vote_decision`             - Vote choice (0=support, 1=oppose, 2=skip)
 /// * `round_id_ptr/len`          - 32-byte raw Blake2b-256 round ID
@@ -835,14 +840,14 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     if merkle_path_len != votetree::MERKLE_PATH_BYTES {
         return -1;
     }
-    // 4 shares × 2 points (C1+C2) × 32 bytes = 256
-    if all_enc_shares_len != 256 {
+    // 5 shares × 2 points (C1+C2) × 32 bytes = 320
+    if all_enc_shares_len != 320 {
         return -1;
     }
     if round_id_len != 32 {
         return -1;
     }
-    if share_index > 3 {
+    if share_index > 4 {
         return -1;
     }
 
@@ -870,14 +875,14 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
         }
     }
 
-    // --- Step 2: Decode all 8 encrypted share x-coordinates ---
-    // Layout: C1_0(32) C2_0(32) C1_1(32) C2_1(32) C1_2(32) C2_2(32) C1_3(32) C2_3(32)
+    // --- Step 2: Decode all 10 encrypted share x-coordinates ---
+    // Layout: C1_0(32) C2_0(32) C1_1(32) C2_1(32) C1_2(32) C2_2(32) C1_3(32) C2_3(32) C1_4(32) C2_4(32)
     let enc_shares_raw = std::slice::from_raw_parts(all_enc_shares_ptr, all_enc_shares_len);
 
-    let mut all_c1_x = [pallas::Base::zero(); 4];
-    let mut all_c2_x = [pallas::Base::zero(); 4];
+    let mut all_c1_x = [pallas::Base::zero(); 5];
+    let mut all_c2_x = [pallas::Base::zero(); 5];
 
-    for i in 0..4usize {
+    for i in 0..5usize {
         let c1_offset = i * 64;
         let c2_offset = c1_offset + 32;
 
@@ -983,7 +988,7 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
 /// Returns (merkle_path, all_enc_shares_flat, share_index, proposal_id,
 ///          vote_decision, round_id, shares_hash).
 pub fn build_share_reveal_test_data()
-    -> (Vec<u8>, [u8; 256], u32, u32, u32, [u8; 32], [u8; 32])
+    -> (Vec<u8>, [u8; 320], u32, u32, u32, [u8; 32], [u8; 32])
 {
     use pasta_curves::group::ff::PrimeField;
     use pasta_curves::pallas;
@@ -993,9 +998,9 @@ pub fn build_share_reveal_test_data()
     let round_id = [0u8; 32]; // simple zero round ID
 
     // Synthetic x-coordinates for encrypted shares.
-    let mut all_c1_x = [pallas::Base::zero(); 4];
-    let mut all_c2_x = [pallas::Base::zero(); 4];
-    for i in 0..4u64 {
+    let mut all_c1_x = [pallas::Base::zero(); 5];
+    let mut all_c2_x = [pallas::Base::zero(); 5];
+    for i in 0..5u64 {
         all_c1_x[i as usize] = pallas::Base::from(100 + i);
         all_c2_x[i as usize] = pallas::Base::from(200 + i);
     }
@@ -1027,8 +1032,8 @@ pub fn build_share_reveal_test_data()
     }
 
     // Flatten enc_shares: C1_0(32) C2_0(32) C1_1(32) C2_1(32) ...
-    let mut enc_shares_flat = [0u8; 256];
-    for i in 0..4 {
+    let mut enc_shares_flat = [0u8; 320];
+    for i in 0..5 {
         let c1_bytes = all_c1_x[i].to_repr();
         let c2_bytes = all_c2_x[i].to_repr();
         enc_shares_flat[i * 64..i * 64 + 32].copy_from_slice(&c1_bytes);

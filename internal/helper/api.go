@@ -156,8 +156,8 @@ func validatePayload(p *SharePayload) error {
 	if err := validateB64Field(p.EncShare.C2, 32, "enc_share.c2"); err != nil {
 		return err
 	}
-	if p.EncShare.ShareIndex > 3 {
-		return fmt.Errorf("enc_share.share_index must be 0..3")
+	if p.EncShare.ShareIndex > 4 {
+		return fmt.Errorf("enc_share.share_index must be 0..4")
 	}
 	if p.ShareIndex != p.EncShare.ShareIndex {
 		return fmt.Errorf("share_index must match enc_share.share_index")
@@ -177,9 +177,9 @@ func validatePayload(p *SharePayload) error {
 		return fmt.Errorf("vote_round_id: expected 32 bytes, got %d", len(roundBytes))
 	}
 
-	// all_enc_shares: exactly 4 entries.
-	if len(p.AllEncShares) != 4 {
-		return fmt.Errorf("all_enc_shares: expected 4 entries, got %d", len(p.AllEncShares))
+	// all_enc_shares: exactly 5 entries.
+	if len(p.AllEncShares) != 5 {
+		return fmt.Errorf("all_enc_shares: expected 5 entries, got %d", len(p.AllEncShares))
 	}
 	for i, es := range p.AllEncShares {
 		if err := validateB64Field(es.C1, 32, fmt.Sprintf("all_enc_shares[%d].c1", i)); err != nil {

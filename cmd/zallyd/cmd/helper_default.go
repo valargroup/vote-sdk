@@ -10,7 +10,7 @@ func helperHalo2Available() bool {
 
 func halo2GenerateShareRevealProof(
 	merklePath []byte,
-	allEncShares [8][32]byte,
+	allEncShares [10][32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,

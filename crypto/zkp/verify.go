@@ -16,7 +16,7 @@ type DelegationInputs struct {
 	CmxNew              []byte   // Output note commitment
 	EncMemo             []byte   // Encrypted memo
 	VanCmx              []byte   // Vote authority note commitment
-	GovNullifiers       [][]byte // Up to 4 governance nullifiers
+	GovNullifiers       [][]byte // Up to 5 governance nullifiers
 	VoteRoundId         []byte   // The vote round this delegation belongs to
 	NcRoot              []byte   // Note commitment tree root from session state
 	NullifierImtRoot    []byte   // Nullifier IMT root from session state

@@ -19,8 +19,8 @@ import (
 //
 // Parameters:
 //   - merklePath: 772-byte serialized Merkle path (from votetree.ComputeMerklePath)
-//   - allEncShares: 8 compressed Pallas points (C1_0, C2_0, ..., C1_3, C2_3), 32 bytes each
-//   - shareIndex: which of the 4 shares (0..3)
+//   - allEncShares: 10 compressed Pallas points (C1_0, C2_0, ..., C1_4, C2_4), 32 bytes each
+//   - shareIndex: which of the 5 shares (0..4)
 //   - proposalID: proposal being voted on
 //   - voteDecision: vote choice
 //   - roundID: 32-byte raw Blake2b-256 round identifier
@@ -29,7 +29,7 @@ import (
 // Returns the proof bytes, share nullifier (32 bytes), tree root (32 bytes), or error.
 func GenerateShareRevealProof(
 	merklePath []byte,
-	allEncShares [8][32]byte,
+	allEncShares [10][32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
@@ -38,14 +38,14 @@ func GenerateShareRevealProof(
 	if len(merklePath) != 772 {
 		return nil, nullifier, treeRoot, fmt.Errorf("merklePath must be 772 bytes, got %d", len(merklePath))
 	}
-	if shareIndex > 3 {
-		return nil, nullifier, treeRoot, fmt.Errorf("shareIndex must be 0..3, got %d", shareIndex)
+	if shareIndex > 4 {
+		return nil, nullifier, treeRoot, fmt.Errorf("shareIndex must be 0..4, got %d", shareIndex)
 	}
 
-	// Flatten allEncShares into 256 contiguous bytes:
-	// C1_0(32) C2_0(32) C1_1(32) C2_1(32) C1_2(32) C2_2(32) C1_3(32) C2_3(32)
-	var encSharesBuf [256]byte
-	for i := 0; i < 8; i++ {
+	// Flatten allEncShares into 320 contiguous bytes:
+	// C1_0(32) C2_0(32) C1_1(32) C2_1(32) C1_2(32) C2_2(32) C1_3(32) C2_3(32) C1_4(32) C2_4(32)
+	var encSharesBuf [320]byte
+	for i := 0; i < 10; i++ {
 		copy(encSharesBuf[i*32:(i+1)*32], allEncShares[i][:])
 	}
 
@@ -58,7 +58,7 @@ func GenerateShareRevealProof(
 		(*C.uint8_t)(unsafe.Pointer(&merklePath[0])),
 		C.size_t(len(merklePath)),
 		(*C.uint8_t)(unsafe.Pointer(&encSharesBuf[0])),
-		C.size_t(256),
+		C.size_t(320),
 		C.uint32_t(shareIndex),
 		C.uint32_t(proposalID),
 		C.uint32_t(voteDecision),

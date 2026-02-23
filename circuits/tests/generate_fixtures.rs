@@ -104,10 +104,10 @@ const DELEGATION_SIGHASH_DOMAIN: &[u8] = b"ZALLY_DELEGATION_SIGHASH_V0";
 
 /// Build the canonical signable payload for the RedPallas test message used in
 /// validate_redpallas_test.go: vote_round_id = 32×0x01, rk = given, rest zeros,
-/// gov_nullifiers = 4×32 zero bytes.
+/// gov_nullifiers = 5×32 zero bytes.
 fn canonical_delegation_payload_for_fixture(rk_bytes: &[u8; 32]) -> Vec<u8> {
     let mut out =
-        Vec::with_capacity(DELEGATION_SIGHASH_DOMAIN.len() + 32 + 32 + 32 + 32 + 64 + 32 + 4 * 32);
+        Vec::with_capacity(DELEGATION_SIGHASH_DOMAIN.len() + 32 + 32 + 32 + 32 + 64 + 32 + 5 * 32);
     out.extend_from_slice(DELEGATION_SIGHASH_DOMAIN);
     out.extend_from_slice(&[0x01u8; 32]); // testRoundID in Go
     out.extend_from_slice(rk_bytes);
@@ -115,8 +115,8 @@ fn canonical_delegation_payload_for_fixture(rk_bytes: &[u8; 32]) -> Vec<u8> {
     out.extend_from_slice(&[0u8; 32]); // cmx_new
     out.extend_from_slice(&[0u8; 64]); // enc_memo
     out.extend_from_slice(&[0u8; 32]); // van_comm
-    for _ in 0..4 {
-        out.extend_from_slice(&[0u8; 32]); // gov_nullifiers (4 slots)
+    for _ in 0..5 {
+        out.extend_from_slice(&[0u8; 32]); // gov_nullifiers (5 slots)
     }
     out
 }
@@ -345,14 +345,14 @@ fn generate_cast_vote_redpallas_fixtures(
 /// binary file so the Go test can call generate + verify without needing Poseidon
 /// in Go.
 ///
-/// Format (1104 bytes total):
+/// Format (1168 bytes total):
 ///   [0..772)      merkle_path (772 bytes)
-///   [772..1028)   all_enc_shares (256 bytes: C1_0, C2_0, ..., C1_3, C2_3)
-///   [1028..1032)  share_index (u32 LE)
-///   [1032..1036)  proposal_id (u32 LE)
-///   [1036..1040)  vote_decision (u32 LE)
-///   [1040..1072)  round_id (32 bytes)
-///   [1072..1104)  shares_hash (32 bytes)
+///   [772..1092)   all_enc_shares (320 bytes: C1_0, C2_0, ..., C1_4, C2_4)
+///   [1092..1096)  share_index (u32 LE)
+///   [1096..1100)  proposal_id (u32 LE)
+///   [1100..1104)  vote_decision (u32 LE)
+///   [1104..1136)  round_id (32 bytes)
+///   [1136..1168)  shares_hash (32 bytes)
 fn generate_share_reveal_fixtures() {
     use zally_circuits::ffi::build_share_reveal_test_data;
 
@@ -366,15 +366,15 @@ fn generate_share_reveal_fixtures() {
     let (merkle_path, enc_shares, share_index, proposal_id, vote_decision, round_id, shares_hash) =
         build_share_reveal_test_data();
 
-    let mut fixture: Vec<u8> = Vec::with_capacity(1104);
+    let mut fixture: Vec<u8> = Vec::with_capacity(1168);
     fixture.extend_from_slice(&merkle_path); // 772 bytes
-    fixture.extend_from_slice(&enc_shares); // 256 bytes
+    fixture.extend_from_slice(&enc_shares); // 320 bytes
     fixture.extend_from_slice(&(share_index as u32).to_le_bytes()); // 4 bytes
     fixture.extend_from_slice(&(proposal_id as u32).to_le_bytes()); // 4 bytes
     fixture.extend_from_slice(&(vote_decision as u32).to_le_bytes()); // 4 bytes
     fixture.extend_from_slice(&round_id); // 32 bytes
     fixture.extend_from_slice(&shares_hash); // 32 bytes
-    assert_eq!(fixture.len(), 1104);
+    assert_eq!(fixture.len(), 1168);
 
     let fixture_path = testdata_dir.join("share_reveal_inputs.bin");
     fs::write(&fixture_path, &fixture).expect("failed to write share reveal fixture");
