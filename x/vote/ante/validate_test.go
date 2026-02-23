@@ -155,9 +155,8 @@ func newValidMsgDelegateVote() *types.MsgDelegateVote {
 		},
 		Proof:       bytes.Repeat([]byte{0x22}, 192),
 		VoteRoundId: testRoundID,
-		Sighash:     make([]byte, 32), // overwritten below
+		Sighash:     bytes.Repeat([]byte{0x99}, 32), // any 32 bytes; chain only checks length + sig
 	}
-	msg.Sighash = types.ComputeDelegationSighash(msg)
 	return msg
 }
 

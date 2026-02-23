@@ -139,12 +139,10 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, o
 // a MsgDelegateVote. It looks up the session to pass nc_root and
 // nullifier_imt_root as ZKP public inputs.
 func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k keeper.Keeper, opts ValidateOpts) error {
-	// Verify the sighash is 32 bytes. We accept any valid sighash (either
-	// the custom governance sighash or the ZIP-244 sighash from Keystone).
-	// The ZKP verification below provides the governance data binding —
-	// it proves rk = ak.randomize(alpha), note ownership, and correct VAN
-	// encoding. Non-Keystone clients continue sending the governance sighash;
-	// Keystone clients send the ZIP-244 sighash.
+	// Verify the sighash is 32 bytes. All clients send the ZIP-244 sighash
+	// extracted from the governance PCZT. The ZKP verification below provides
+	// the governance data binding — it proves rk = ak.randomize(alpha), note
+	// ownership, and correct VAN encoding.
 	if len(msg.Sighash) != 32 {
 		return types.ErrSighashMismatch
 	}

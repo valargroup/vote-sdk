@@ -41,10 +41,8 @@ func rpMustReadFixture(t *testing.T, name string) []byte {
 // real RedPallas SpendAuth signature. The ZKP verifier is mocked since only the
 // signature verification is under test here.
 //
-// The message layout must match the canonical encoding in sdk/circuits/tests/generate_fixtures.rs
-// (canonical_delegation_payload_for_fixture) so that types.ComputeDelegationSighash(msg) equals
-// the fixture sighash. Fields: testRoundID (32×0x01), rk from fixture, rest zeros, gov_nullifiers
-// one element of 32 zeros (chain pads to 4×32 when computing sighash).
+// The sighash is loaded from fixture (arbitrary 32 bytes); the chain only checks
+// len(sighash)==32 and verifies the RedPallas sig over it.
 func TestRedPallasDelegationValidSig(t *testing.T) {
 	rk := rpMustReadFixture(t, "valid_rk.bin")
 	sighash := rpMustReadFixture(t, "valid_sighash.bin")
@@ -87,7 +85,7 @@ func TestRedPallasDelegationValidSig(t *testing.T) {
 // TestRedPallasDelegationWrongSig verifies that a real RedPallas signature
 // over the wrong message fails verification when run through the full ante
 // pipeline (i.e. returns ErrInvalidSignature).
-// Message layout matches the canonical encoding so sighash check passes; only the sig is wrong.
+// Same sighash fixture, but wrong signature — should fail verification.
 func TestRedPallasDelegationWrongSig(t *testing.T) {
 	rk := rpMustReadFixture(t, "valid_rk.bin")
 	sighash := rpMustReadFixture(t, "valid_sighash.bin")
