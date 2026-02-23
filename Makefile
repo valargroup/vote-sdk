@@ -1,7 +1,8 @@
 BINARY = zallyd
 HOME_DIR = $(HOME)/.zallyd
 
-export PATH := $(HOME)/go/bin:$(PATH)
+export GOBIN := $(HOME)/go/bin
+export PATH := $(GOBIN):$(PATH)
 
 .PHONY: install install-ffi init start clean build build-ffi fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi init-multi stop-multi status-multi clean-multi caddy
 
@@ -25,9 +26,9 @@ build-ffi: circuits
 init: install-ffi
 	bash scripts/init.sh
 
-## start: Start the chain
+## start: Start the chain (set ZALLY_IMT_URL for local nullifier service)
 start:
-	$(BINARY) start --home $(HOME_DIR)
+	ZALLY_IMT_URL=$${ZALLY_IMT_URL:-http://localhost:3000} $(BINARY) start --home $(HOME_DIR)
 
 ## clean: Remove chain data directory
 clean:
