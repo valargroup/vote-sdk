@@ -322,15 +322,24 @@ impl PirClient {
             pqr.len() * 8,
             pp.len() * 8,
         );
-        let response_bytes = self
+        let send_result = self
             .http
             .post(&url)
             .body(payload)
             .send()
-            .await?
-            .error_for_status()?
-            .bytes()
-            .await?;
+            .await;
+        let resp = match send_result {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("  YPIR tier2 send error: {:?}", e);
+                return Err(e.into());
+            }
+        };
+        let status = resp.status();
+        let response_bytes = resp.bytes().await?;
+        if !status.is_success() {
+            anyhow::bail!("tier2 query failed: HTTP {} body={}", status, String::from_utf8_lossy(&response_bytes));
+        }
         eprintln!(
             "  YPIR tier2 response: {} bytes in {:.1}s",
             response_bytes.len(),

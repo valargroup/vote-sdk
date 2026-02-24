@@ -33,14 +33,14 @@ type SnapshotConfig struct {
 
 // SnapshotData holds the Zcash mainnet data needed for MsgCreateVotingSession.
 type SnapshotData struct {
-	NullifierIMTRoot  []byte // 32-byte Poseidon IMT root from the nullifier service
+	NullifierIMTRoot  []byte // 32-byte Poseidon IMT root from the PIR service
 	SnapshotBlockhash []byte // 32-byte block hash at snapshot height
 	NcRoot            []byte // 32-byte note commitment tree root (see below)
 }
 
 // fetchSnapshotData fetches all required snapshot data for session creation.
 //
-// The nullifier IMT root is the real value from the running IMT service.
+// The nullifier IMT root is the real value from the running PIR service.
 // The snapshot blockhash is the real block hash from lightwalletd.
 // The nc_root is computed via Rust FFI (Sinsemilla hash of the orchard frontier).
 func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (*SnapshotData, error) {

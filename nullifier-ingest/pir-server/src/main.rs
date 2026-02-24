@@ -53,18 +53,20 @@ async fn main() -> Result<()> {
 
     let tier1_data = std::fs::read(data_dir.join("tier1.bin"))?;
     eprintln!("  Tier 1: {} bytes ({} rows)", tier1_data.len(), tier1_data.len() / TIER1_ROW_BYTES);
-    assert_eq!(tier1_data.len(), TIER1_ROWS * TIER1_ROW_BYTES);
+    anyhow::ensure!(tier1_data.len() == TIER1_ROWS * TIER1_ROW_BYTES,
+        "tier1.bin size mismatch: got {} bytes, expected {}", tier1_data.len(), TIER1_ROWS * TIER1_ROW_BYTES);
 
     let tier2_data = std::fs::read(data_dir.join("tier2.bin"))?;
     eprintln!("  Tier 2: {} bytes ({} rows)", tier2_data.len(), tier2_data.len() / TIER2_ROW_BYTES);
-    assert_eq!(tier2_data.len(), TIER2_ROWS * TIER2_ROW_BYTES);
+    anyhow::ensure!(tier2_data.len() == TIER2_ROWS * TIER2_ROW_BYTES,
+        "tier2.bin size mismatch: got {} bytes, expected {}", tier2_data.len(), TIER2_ROWS * TIER2_ROW_BYTES);
 
     let metadata: PirMetadata =
         serde_json::from_str(&std::fs::read_to_string(data_dir.join("pir_root.json"))?)?;
     eprintln!(
         "  Metadata: {} ranges, root29={}...",
         metadata.num_ranges,
-        &metadata.root29[..16]
+        metadata.root29.get(..16).unwrap_or(&metadata.root29)
     );
 
     // Initialize YPIR servers

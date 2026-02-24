@@ -9,7 +9,7 @@ use std::time::Instant;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
 
 use ypir::params::{params_for_scenario_simplepir, DbRowsCols, PtModulusBits};
 use ypir::serialize::{FilePtIter, OfflinePrecomputedValues};
@@ -26,6 +26,9 @@ impl Aligned64 {
     fn new(len: usize) -> Self {
         let layout = Layout::from_size_align(len * 8, 64).unwrap();
         let ptr = unsafe { alloc_zeroed(layout) as *mut u64 };
+        if ptr.is_null() {
+            handle_alloc_error(layout);
+        }
         Self { ptr, len, layout }
     }
 

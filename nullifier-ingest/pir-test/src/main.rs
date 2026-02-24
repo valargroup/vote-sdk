@@ -490,7 +490,7 @@ fn load_nullifiers(path: &std::path::Path) -> Result<Vec<Fp>> {
         .map(|chunk| {
             let mut arr = [0u8; 32];
             arr.copy_from_slice(chunk);
-            Fp::from_repr(arr).unwrap()
+            Fp::from_repr(arr).expect("non-canonical Fp in nullifiers.bin")
         })
         .collect();
     Ok(nfs)
