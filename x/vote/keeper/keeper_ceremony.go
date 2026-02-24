@@ -1,11 +1,7 @@
 package keeper
 
 import (
-	"context"
-	"fmt"
-
 	"cosmossdk.io/core/store"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -186,23 +182,3 @@ func StripNonAckers(state *types.CeremonyState) {
 	state.Payloads = keptPayloads
 }
 
-// JailValidator resolves a validator operator address to its consensus address
-// and jails the validator via the staking module.
-func (k Keeper) JailValidator(ctx context.Context, operatorAddr string) error {
-	valAddr, err := sdk.ValAddressFromBech32(operatorAddr)
-	if err != nil {
-		return fmt.Errorf("invalid operator address %s: %w", operatorAddr, err)
-	}
-
-	validator, err := k.stakingKeeper.GetValidator(ctx, valAddr)
-	if err != nil {
-		return fmt.Errorf("validator %s not found: %w", operatorAddr, err)
-	}
-
-	consAddr, err := validator.GetConsAddr()
-	if err != nil {
-		return fmt.Errorf("failed to get consensus address for %s: %w", operatorAddr, err)
-	}
-
-	return k.stakingKeeper.Jail(ctx, consAddr)
-}

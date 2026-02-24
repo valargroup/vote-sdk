@@ -13,8 +13,6 @@ const (
 	EventTypeDealExecutiveAuthorityKey    = "deal_executive_authority_key"
 	EventTypeAckExecutiveAuthorityKey     = "ack_executive_authority_key"
 	EventTypeCeremonyStatusChange             = "ceremony_status_change"
-	EventTypeCeremonyValidatorJailed          = "ceremony_validator_jailed"
-	EventTypeReInitializeElectionAuthority    = "reinitialize_election_authority"
 	EventTypeSetVoteManager                   = "set_vote_manager"
 )
 

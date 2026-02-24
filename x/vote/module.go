@@ -447,64 +447,79 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		))
 	}
 
-	// --- 3. Ceremony DEALT phase timeout ---
+	// --- 3. Per-round ceremony DEALT phase timeout ---
 	// Only the DEALT phase has a timeout. REGISTERING persists indefinitely
-	// until a deal is submitted or the ceremony is re-initialized.
-	// On DEALT timeout: if >= 2/3 validators acked, transition to CONFIRMED,
-	// strip non-ackers from ceremony state, and jail them via staking module.
-	// If < 2/3 acked, full reset to REGISTERING (ceremony failed).
-	ceremony, err := am.keeper.GetCeremonyState(kvStore)
-	if err != nil {
+	// until a deal is injected by a proposer.
+	// On DEALT timeout with >= 1/3 acks: strip non-ackers, confirm ceremony,
+	// transition round to ACTIVE.
+	// On DEALT timeout with < 1/3 acks: reset ceremony to REGISTERING for re-deal.
+	// Collect round IDs with expired ceremony deadlines (avoid mutating store during iteration).
+	var ceremonyTimeoutIDs [][]byte
+	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
+		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_DEALT &&
+			round.CeremonyPhaseTimeout > 0 &&
+			blockTime >= round.CeremonyPhaseStart+round.CeremonyPhaseTimeout {
+			id := make([]byte, len(round.VoteRoundId))
+			copy(id, round.VoteRoundId)
+			ceremonyTimeoutIDs = append(ceremonyTimeoutIDs, id)
+		}
+		return false // continue iterating
+	}); err != nil {
 		return err
 	}
-	if ceremony != nil && ceremony.PhaseTimeout > 0 &&
-		ceremony.Status == types.CeremonyStatus_CEREMONY_STATUS_DEALT {
-		deadline := ceremony.PhaseStart + ceremony.PhaseTimeout
-		if blockTime >= deadline {
-			oldStatus := ceremony.Status
 
-			if keeper.TwoThirdsAcked(ceremony) {
-				// >= 2/3 acked: strip non-ackers, confirm, and jail non-participants.
-				nonAckers := keeper.NonAckingValidators(ceremony)
-				keeper.StripNonAckers(ceremony)
-				ceremony.Status = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+	for _, roundID := range ceremonyTimeoutIDs {
+		round, err := am.keeper.GetVoteRound(kvStore, roundID)
+		if err != nil {
+			return err
+		}
+		if round == nil {
+			continue
+		}
+		oldCeremonyStatus := round.CeremonyStatus
 
-				if err := am.keeper.SetCeremonyState(kvStore, ceremony); err != nil {
-					return err
-				}
+		if keeper.OneThirdAcked(round) {
+			// >= 1/3 acked: strip non-ackers, confirm ceremony, activate round.
+			keeper.StripNonAckersFromRound(round)
+			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+			round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
 
-				// Jail each non-acking validator via the staking module.
-				for _, addr := range nonAckers {
-					if err := am.keeper.JailValidator(goCtx, addr); err != nil {
-						am.keeper.Logger().Error("failed to jail non-acking validator", "addr", addr, "err", err)
-					}
-					ctx.EventManager().EmitEvent(sdk.NewEvent(
-						types.EventTypeCeremonyValidatorJailed,
-						sdk.NewAttribute(types.AttributeKeyValidatorAddress, addr),
-					))
-				}
-
-				ctx.EventManager().EmitEvent(sdk.NewEvent(
-					types.EventTypeCeremonyStatusChange,
-					sdk.NewAttribute(types.AttributeKeyOldStatus, oldStatus.String()),
-					sdk.NewAttribute(types.AttributeKeyNewStatus, ceremony.Status.String()),
-				))
-			} else {
-				// DEALT with < 2/3 acks: full reset.
-				resetState := &types.CeremonyState{
-					Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-				}
-
-				if err := am.keeper.SetCeremonyState(kvStore, resetState); err != nil {
-					return err
-				}
-
-				ctx.EventManager().EmitEvent(sdk.NewEvent(
-					types.EventTypeCeremonyStatusChange,
-					sdk.NewAttribute(types.AttributeKeyOldStatus, oldStatus.String()),
-					sdk.NewAttribute(types.AttributeKeyNewStatus, resetState.Status.String()),
-				))
+			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+				return err
 			}
+
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeCeremonyStatusChange,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+			))
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeRoundStatusChange,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_PENDING.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_ACTIVE.String()),
+			))
+		} else {
+			// < 1/3 acks: reset ceremony for re-deal by next proposer.
+			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
+			round.CeremonyPayloads = nil
+			round.CeremonyAcks = nil
+			round.CeremonyDealer = ""
+			round.CeremonyPhaseStart = 0
+			round.CeremonyPhaseTimeout = 0
+			round.EaPk = nil
+
+			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+				return err
+			}
+
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeCeremonyStatusChange,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+			))
 		}
 	}
 
