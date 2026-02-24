@@ -55,7 +55,7 @@ fn construct_proof(
     // Tier 1: direct row lookup
     let t1_offset = s1 * TIER1_ROW_BYTES;
     let tier1_row = &tier1_data[t1_offset..t1_offset + TIER1_ROW_BYTES];
-    let tier1 = Tier1Row::from_bytes(tier1_row);
+    let tier1 = Tier1Row::from_bytes(tier1_row).ok()?;
 
     let s2 = tier1.find_sub_subtree(value)?;
 
@@ -68,7 +68,7 @@ fn construct_proof(
     let t2_row_idx = s1 * TIER1_LEAVES + s2;
     let t2_offset = t2_row_idx * TIER2_ROW_BYTES;
     let tier2_row = &tier2_data[t2_offset..t2_offset + TIER2_ROW_BYTES];
-    let tier2 = Tier2Row::from_bytes(tier2_row);
+    let tier2 = Tier2Row::from_bytes(tier2_row).ok()?;
     let valid_leaves = num_ranges.saturating_sub(t2_row_idx * TIER2_LEAVES).min(TIER2_LEAVES);
 
     let leaf_idx = tier2.find_leaf(value, valid_leaves)?;

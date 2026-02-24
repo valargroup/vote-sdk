@@ -247,6 +247,24 @@ pub fn read_fp(buf: &[u8]) -> Fp {
     Fp::from_repr(arr).unwrap()
 }
 
+/// Validate that a 32-byte slice is a canonical Fp encoding.
+#[inline]
+pub fn validate_fp_bytes(buf: &[u8]) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        buf.len() == 32,
+        "invalid field element byte length: got {}, expected 32",
+        buf.len()
+    );
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(buf);
+    let fp = Fp::from_repr(arr);
+    anyhow::ensure!(
+        bool::from(fp.is_some()),
+        "non-canonical field element encoding"
+    );
+    Ok(())
+}
+
 /// Get a node hash from the tree levels, returning empty_hash if out of bounds.
 #[inline]
 pub fn node_or_empty(levels: &[Vec<Fp>], level: usize, index: usize, empty_hashes: &[Fp]) -> Fp {

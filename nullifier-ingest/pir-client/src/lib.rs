@@ -157,7 +157,7 @@ impl PirClient {
 
         // ── Tier 1: YPIR query for row s1 ────────────────────────────────
         let tier1_row = self.ypir_query_tier1(s1).await?;
-        let tier1 = Tier1Row::from_bytes(&tier1_row);
+        let tier1 = Tier1Row::from_bytes(&tier1_row)?;
 
         let s2 = tier1
             .find_sub_subtree(nullifier)
@@ -172,7 +172,7 @@ impl PirClient {
         // ── Tier 2: YPIR query for row (s1 * 256 + s2) ──────────────────
         let t2_row_idx = s1 * TIER1_LEAVES + s2;
         let tier2_row = self.ypir_query_tier2(t2_row_idx).await?;
-        let tier2 = Tier2Row::from_bytes(&tier2_row);
+        let tier2 = Tier2Row::from_bytes(&tier2_row)?;
         let valid_leaves = valid_leaves_for_row(self.num_ranges, t2_row_idx);
 
         let leaf_local_idx = tier2
@@ -407,7 +407,7 @@ pub fn fetch_proof_local(
     // ── Tier 1: direct row lookup (no YPIR in local mode) ────────────────
     let t1_offset = s1 * TIER1_ROW_BYTES;
     let tier1_row = &tier1_data[t1_offset..t1_offset + TIER1_ROW_BYTES];
-    let tier1 = Tier1Row::from_bytes(tier1_row);
+    let tier1 = Tier1Row::from_bytes(tier1_row)?;
 
     let s2 = tier1
         .find_sub_subtree(nullifier)
@@ -422,7 +422,7 @@ pub fn fetch_proof_local(
     let t2_row_idx = s1 * TIER1_LEAVES + s2;
     let t2_offset = t2_row_idx * TIER2_ROW_BYTES;
     let tier2_row = &tier2_data[t2_offset..t2_offset + TIER2_ROW_BYTES];
-    let tier2 = Tier2Row::from_bytes(tier2_row);
+    let tier2 = Tier2Row::from_bytes(tier2_row)?;
     let valid_leaves = valid_leaves_for_row(num_ranges, t2_row_idx);
 
     let leaf_local_idx = tier2

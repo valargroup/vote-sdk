@@ -121,9 +121,19 @@ pub struct Tier2Row<'a> {
 }
 
 impl<'a> Tier2Row<'a> {
-    pub fn from_bytes(data: &'a [u8]) -> Self {
-        debug_assert_eq!(data.len(), TIER2_ROW_BYTES);
-        Self { data }
+    pub fn from_bytes(data: &'a [u8]) -> Result<Self> {
+        anyhow::ensure!(
+            data.len() == TIER2_ROW_BYTES,
+            "Tier 2 row size mismatch: got {} bytes, expected {}",
+            data.len(),
+            TIER2_ROW_BYTES
+        );
+        for (i, chunk) in data.chunks_exact(32).enumerate() {
+            crate::validate_fp_bytes(chunk).map_err(|e| {
+                anyhow::anyhow!("Tier 2 row invalid field element at 32-byte chunk {}: {}", i, e)
+            })?;
+        }
+        Ok(Self { data })
     }
 
     /// Internal node at relative depth d (1..6), position p (0..2^d - 1).
@@ -226,6 +236,19 @@ mod tests {
     use imt_tree::hasher::PoseidonHasher;
 
     #[test]
+    fn from_bytes_rejects_non_canonical_field_element() {
+        let mut row = vec![0u8; TIER2_ROW_BYTES];
+        row[0..32].fill(0xFF);
+        let err = Tier2Row::from_bytes(&row)
+            .err()
+            .expect("row should be rejected");
+        assert!(
+            err.to_string().contains("invalid field element"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn partial_row_handles_p_minus_one_leaf_without_padding_collision() {
         let mut row = vec![0u8; TIER2_ROW_BYTES];
         let base = TIER2_INTERNAL_NODES * 32;
@@ -238,7 +261,7 @@ mod tests {
         crate::write_fp(&mut row[base + 64..base + 96], -Fp::one());
         crate::write_fp(&mut row[base + 96..base + 128], Fp::zero());
 
-        let tier2 = Tier2Row::from_bytes(&row);
+        let tier2 = Tier2Row::from_bytes(&row).expect("valid synthetic Tier 2 row");
         let hasher = PoseidonHasher::new();
         let empty_leaf_hash = hasher.hash(Fp::zero(), Fp::zero());
         let p_minus_one_leaf_hash = hasher.hash(-Fp::one(), Fp::zero());

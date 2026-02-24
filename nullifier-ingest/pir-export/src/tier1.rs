@@ -115,9 +115,19 @@ pub struct Tier1Row<'a> {
 }
 
 impl<'a> Tier1Row<'a> {
-    pub fn from_bytes(data: &'a [u8]) -> Self {
-        debug_assert_eq!(data.len(), TIER1_ROW_BYTES);
-        Self { data }
+    pub fn from_bytes(data: &'a [u8]) -> Result<Self> {
+        anyhow::ensure!(
+            data.len() == TIER1_ROW_BYTES,
+            "Tier 1 row size mismatch: got {} bytes, expected {}",
+            data.len(),
+            TIER1_ROW_BYTES
+        );
+        for (i, chunk) in data.chunks_exact(32).enumerate() {
+            crate::validate_fp_bytes(chunk).map_err(|e| {
+                anyhow::anyhow!("Tier 1 row invalid field element at 32-byte chunk {}: {}", i, e)
+            })?;
+        }
+        Ok(Self { data })
     }
 
     /// Internal node at relative depth d (1..7), position p (0..2^d - 1).
@@ -180,5 +190,23 @@ impl<'a> Tier1Row<'a> {
         }
 
         siblings
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_bytes_rejects_non_canonical_field_element() {
+        let mut row = vec![0u8; TIER1_ROW_BYTES];
+        row[0..32].fill(0xFF);
+        let err = Tier1Row::from_bytes(&row)
+            .err()
+            .expect("row should be rejected");
+        assert!(
+            err.to_string().contains("invalid field element"),
+            "unexpected error: {err}"
+        );
     }
 }

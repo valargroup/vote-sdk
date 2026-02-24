@@ -97,6 +97,11 @@ impl Tier0Data {
             data.len(),
             TIER0_BYTES
         );
+        for (i, chunk) in data.chunks_exact(32).enumerate() {
+            crate::validate_fp_bytes(chunk).map_err(|e| {
+                anyhow::anyhow!("Tier 0 invalid field element at 32-byte chunk {}: {}", i, e)
+            })?;
+        }
         Ok(Self { data })
     }
 
