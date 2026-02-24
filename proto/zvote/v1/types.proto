@@ -9,6 +9,7 @@ enum SessionStatus {
   SESSION_STATUS_ACTIVE      = 1;
   SESSION_STATUS_TALLYING    = 2;
   SESSION_STATUS_FINALIZED   = 3;
+  SESSION_STATUS_PENDING     = 4; // Ceremony in progress, not yet active
 }
 
 // VoteOption represents a named choice within a proposal.
@@ -44,6 +45,15 @@ message VoteRound {
   string            description     = 15; // Human-readable round description
   uint64            created_at_height = 16; // Block height at which this round was registered on-chain
   string            title           = 17; // Short human-readable round title
+
+  // Per-round ceremony fields (populated when status = PENDING).
+  CeremonyStatus              ceremony_status     = 18;
+  repeated ValidatorPallasKey ceremony_validators = 19;
+  repeated DealerPayload      ceremony_payloads   = 20;
+  repeated AckEntry           ceremony_acks       = 21;
+  string                      ceremony_dealer     = 22;
+  uint64                      ceremony_phase_start   = 23;
+  uint64                      ceremony_phase_timeout = 24;
 }
 
 // VoteManagerState stores the singleton vote manager address.

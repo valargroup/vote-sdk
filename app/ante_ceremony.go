@@ -63,8 +63,6 @@ func ceremonyValidatorRequired(msg sdk.Msg) (string, bool) {
 		return m.Creator, true
 	case *types.MsgDealExecutiveAuthorityKey:
 		return m.Creator, true
-	case *types.MsgReInitializeElectionAuthority:
-		return m.Creator, true
 	default:
 		return "", false
 	}
@@ -111,7 +109,6 @@ func isCeremonyMsg(msg sdk.Msg) bool {
 	case *types.MsgRegisterPallasKey,
 		*types.MsgDealExecutiveAuthorityKey,
 		*types.MsgCreateValidatorWithPallasKey,
-		*types.MsgReInitializeElectionAuthority,
 		*types.MsgSetVoteManager,
 		*types.MsgCreateVotingSession:
 		return true
