@@ -412,6 +412,8 @@ pub fn fetch_proof_local(
 
     // ── Tier 1: direct row lookup (no YPIR in local mode) ────────────────
     let t1_offset = s1 * TIER1_ROW_BYTES;
+    anyhow::ensure!(t1_offset + TIER1_ROW_BYTES <= tier1_data.len(),
+        "tier1 data too short: need {} bytes at offset {}, have {}", TIER1_ROW_BYTES, t1_offset, tier1_data.len());
     let tier1_row = &tier1_data[t1_offset..t1_offset + TIER1_ROW_BYTES];
     let tier1 = Tier1Row::from_bytes(tier1_row)?;
 
@@ -427,6 +429,8 @@ pub fn fetch_proof_local(
     // ── Tier 2: direct row lookup (no YPIR in local mode) ────────────────
     let t2_row_idx = s1 * TIER1_LEAVES + s2;
     let t2_offset = t2_row_idx * TIER2_ROW_BYTES;
+    anyhow::ensure!(t2_offset + TIER2_ROW_BYTES <= tier2_data.len(),
+        "tier2 data too short: need {} bytes at offset {}, have {}", TIER2_ROW_BYTES, t2_offset, tier2_data.len());
     let tier2_row = &tier2_data[t2_offset..t2_offset + TIER2_ROW_BYTES];
     let tier2 = Tier2Row::from_bytes(tier2_row)?;
     let valid_leaves = valid_leaves_for_row(num_ranges, t2_row_idx);

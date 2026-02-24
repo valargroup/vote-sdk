@@ -104,7 +104,7 @@ fn test_small_tree_round_trip() {
 
     eprintln!("  Ranges: {}", ranges.len());
 
-    let tree = build_pir_tree(ranges.clone());
+    let tree = build_pir_tree(ranges.clone()).unwrap();
     eprintln!("  Root26: {}", hex::encode(tree.root26.to_repr()));
     eprintln!("  Root29: {}", hex::encode(tree.root29.to_repr()));
 
@@ -180,7 +180,7 @@ fn test_root_extension_matches_depth29() {
 
     // Depth-26 PIR tree with root extension
     let ranges = build_ranges_with_sentinels(&raw_nfs);
-    let tree26 = build_pir_tree(ranges);
+    let tree26 = build_pir_tree(ranges).unwrap();
     let root29_extended = tree26.root29;
 
     eprintln!(
@@ -207,7 +207,7 @@ fn test_pir_proof_matches_existing_prove() {
     let tree29 = build_sentinel_tree(&raw_nfs).unwrap();
 
     let ranges = build_ranges_with_sentinels(&raw_nfs);
-    let tree = build_pir_tree(ranges.clone());
+    let tree = build_pir_tree(ranges.clone()).unwrap();
 
     let tier0_data =
         pir_export::tier0::export(&tree.root26, &tree.levels, &tree.ranges, &tree.empty_hashes);
@@ -243,7 +243,7 @@ fn test_pir_proof_matches_existing_prove() {
 fn test_tier0_binary_search() {
     let raw_nfs: Vec<Fp> = (1u64..=50).map(|i| Fp::from(i * 1000)).collect();
     let ranges = build_ranges_with_sentinels(&raw_nfs);
-    let tree = build_pir_tree(ranges.clone());
+    let tree = build_pir_tree(ranges.clone()).unwrap();
 
     let tier0_data =
         pir_export::tier0::export(&tree.root26, &tree.levels, &tree.ranges, &tree.empty_hashes);

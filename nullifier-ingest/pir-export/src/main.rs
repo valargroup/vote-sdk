@@ -82,7 +82,7 @@ fn main() -> Result<()> {
 
     // Build PIR tree
     eprintln!("Building depth-{} PIR tree...", pir_export::PIR_DEPTH);
-    let tree = pir_export::build_pir_tree(ranges);
+    let tree = pir_export::build_pir_tree(ranges)?;
     eprintln!(
         "  Root-{}: {}",
         pir_export::PIR_DEPTH,

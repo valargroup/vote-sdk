@@ -122,8 +122,8 @@ pub struct PirTree {
 /// The ranges must already be constructed (e.g., via `imt_tree::build_nf_ranges`).
 /// This function hashes them into leaf commitments and builds the depth-26 Merkle
 /// tree, then extends the root to depth 29 for circuit compatibility.
-pub fn build_pir_tree(ranges: Vec<Range>) -> PirTree {
-    assert!(
+pub fn build_pir_tree(ranges: Vec<Range>) -> Result<PirTree> {
+    anyhow::ensure!(
         ranges.len() <= 1 << PIR_DEPTH,
         "too many ranges ({}) for PIR depth {} (max {})",
         ranges.len(), PIR_DEPTH, 1 << PIR_DEPTH
@@ -149,13 +149,13 @@ pub fn build_pir_tree(ranges: Vec<Range>) -> PirTree {
     let root29 = extend_root(root26, &empty_hashes);
     eprintln!("  Depth-29 root: {}", hex::encode(root29.to_repr()));
 
-    PirTree {
+    Ok(PirTree {
         root26,
         root29,
         levels,
         ranges,
         empty_hashes,
-    }
+    })
 }
 
 /// Build Merkle tree levels bottom-up with a specified depth.

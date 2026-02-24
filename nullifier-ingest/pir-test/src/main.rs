@@ -160,7 +160,7 @@ fn run_local_inner(raw_nfs: &[Fp], num_proofs: usize) -> Result<()> {
 
     // Build PIR tree
     let t1 = Instant::now();
-    let tree = build_pir_tree(ranges.clone());
+    let tree = build_pir_tree(ranges.clone())?;
     eprintln!(
         "  PIR tree built in {:.1}s (root26={}, root29={})",
         t1.elapsed().as_secs_f64(),
@@ -365,7 +365,7 @@ fn run_compare(nullifiers_path: PathBuf, num_proofs: usize) -> Result<()> {
     let ranges = build_nf_ranges(all_nfs.iter().copied());
 
     let t1 = Instant::now();
-    let pir_tree = build_pir_tree(ranges.clone());
+    let pir_tree = build_pir_tree(ranges.clone())?;
     eprintln!(
         "  Depth-26 PIR tree built in {:.1}s (root26={}, root29={})",
         t1.elapsed().as_secs_f64(),
