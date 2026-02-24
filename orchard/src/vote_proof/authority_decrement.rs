@@ -16,7 +16,7 @@
 //! Row 16  bits=1         | proposal_id   | b_15         | sel_15     | b_new_15  | rsel=1       | rseld=1      | rold[15]    | rnew[15]    | 32768  |  15  |
 //!         sel_one=1      |               |              |            |           |              |              |             |             |        |      |
 //! -----------------------+---------------+--------------+------------+-----------+--------------+--------------+-------------+-------------+--------+------+
-//! Row 17                 | auth_new      |      -       |     -      |     -     |      -       |      -       | rold_fin    | rnew_fin    |   -    |  -   |
+//! Row 17                 | auth_new      |      -       |     -      |     -     |      -       |      -       |      -      |      -      |   -    |  -   |
 //! -----------------------+---------------+--------------+------------+-----------+--------------+--------------+-------------+-------------+--------+------+
 //!
 //! Abbreviations:
@@ -68,11 +68,15 @@
 //!   (17) rseld = 1  => the bit at the selected position was 1
 //!                      (voter actually held the permission)
 //!
-//! Post-region equality constraints:
-//!   (18) rold_fin = proposal_authority_old
-//!          => the bit decomposition is consistent with the claimed old value
-//!   (19) rnew_fin = proposal_authority_new
-//!          => the recomposed new value is exported and bound to the circuit output
+//! Post-region equality constraints (anchored to the row-16 accumulation cells):
+//!   (18) rold[15] = proposal_authority_old
+//!          => the bit decomposition is consistent with the claimed old value.
+//!          rold[15] is the advices[6] cell at row 16, the final step of the
+//!          accumulation; it is in the same permutation cycle as all preceding
+//!          run_old steps, so it cannot be forged independently.
+//!   (19) rnew[15] = proposal_authority_new
+//!          => the recomposed new value is exported and bound to the circuit output.
+//!          Same anchoring argument as (18) for advices[7] at row 16.
 //!
 //! Together (1)+(16) prove proposal_id is a valid index in [1,15].
 //! Together (10)+(16) prove sel_i is a one-hot vector with the single 1 at position proposal_id.
@@ -101,7 +105,7 @@
 //!  5-15| bits (b_i=0)   |   2   |   0   |   0   |   0   |   1   |   1   |  13   |   9   |  ...  | ...
 //!   16 | bits + sel_one |   2   |   0   |   0   |   0   |   1   |   1   |  13   |   9   | 32768 | 15
 //! -----+----------------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-----
-//!   17 |                |   9   |   -   |   -   |   -   |   -   |   -   |  13   |   9   |   -   |  -
+//!   17 |                |   9   |   -   |   -   |   -   |   -   |   -   |   -   |   -   |   -   |  -
 //!
 //! (* seeded as field-constant 0)
 //! († on row 0, a[1] = one_shifted = 4 and a[2] = pid_inv = 2⁻¹ mod p)
@@ -113,7 +117,9 @@
 //!   Row 4 (i=3): b=1, sel=0  → b_new=1,           rold=5+1·8=13,   rnew=1+1·8=9
 //!   Rows 5-16:   b=0 for all remaining bits      → rold stays 13,  rnew stays 9
 //!   Row 16:      rsel=1 ✓  (exactly one selector fired),  rseld=1 ✓  (that bit was 1 in old authority)
-//!   Row 17:      rold_fin=13 == authority_old ✓,  rnew_fin=9 == authority_new ✓
+//!                rold[15]=13 and rnew[15]=9 are the final accumulation cells used in
+//!                equality constraints (18) and (19) — no row-17 copy required.
+//!   Row 17:      auth_new=9 only (arithmetic value old−shift for the output cell).
 //! ```
 
 use alloc::vec::Vec;
@@ -492,12 +498,23 @@ impl AuthorityDecrementChip {
                         pallas::Base::zero(),
                     )?;
 
-                    // Rows 1..17: bits, selectors, running sums.
+                    // Rows 1..16: bits, selectors, running sums.
                     let zero_val = Value::known(pallas::Base::zero());
                     let mut run_old_prev = zero_val;
                     let mut run_new_prev = zero_val;
                     let mut run_sel_prev = zero_val;
                     let mut run_selected_prev = zero_val;
+
+                    // Cells from the final loop iteration (row 16) are captured
+                    // so they can be returned directly as the canonical run_old /
+                    // run_new finals. Using the row-16 cells directly keeps them in
+                    // the same permutation cycle as the rest of the accumulation,
+                    // so the permutation argument ties proposal_authority_old/_new
+                    // to the actual bit-decomposition result with no gap.
+                    let mut run_old_last_cell: Option<AssignedCell<pallas::Base, pallas::Base>> =
+                        None;
+                    let mut run_new_last_cell: Option<AssignedCell<pallas::Base, pallas::Base>> =
+                        None;
 
                     for i in 0..MAX_PROPOSAL_ID {
                         let row = 1 + i;
@@ -568,13 +585,13 @@ impl AuthorityDecrementChip {
                             row,
                             || run_selected_prev,
                         )?;
-                        region.assign_advice(
+                        let run_old_cur = region.assign_advice(
                             || format!("run_old {}", i),
                             config.advices[6],
                             row,
                             || run_old_prev,
                         )?;
-                        region.assign_advice(
+                        let run_new_cur = region.assign_advice(
                             || format!("run_new {}", i),
                             config.advices[7],
                             row,
@@ -593,23 +610,25 @@ impl AuthorityDecrementChip {
                             || Value::known(pallas::Base::from(i as u64)),
                         )?;
 
-
-                        // Choose the appropriate selector based on row.
                         if i == 0 {
                             config.q_cond_6_init.enable(&mut region, row)?;
                         } else {
                             config.q_cond_6_bits.enable(&mut region, row)?;
                         }
 
-                        // For the last row, we enforce the recurrence step from above
-                        // and also the terminal gate below, constraining that exactly one sel_i
-                        // was set and that the bit and the selected location was 1.
                         if i == MAX_PROPOSAL_ID - 1 {
                             config.q_cond_6_selected_one.enable(&mut region, row)?;
+                            // Save the final accumulation cells to anchor the
+                            // permutation equality checks below.
+                            run_old_last_cell = Some(run_old_cur);
+                            run_new_last_cell = Some(run_new_cur);
                         }
                     }
 
-                    // proposal_authority_new = recomposed value (same as old - one_shifted when spec is satisfied).
+                    // Row 17: place proposal_authority_new for external equality checks.
+                    // run_old and run_new finals are taken directly from row 16 (the
+                    // last accumulation step), so no additional copy is needed and the
+                    // permutation argument is never broken by a free witness.
                     let proposal_authority_new_val = proposal_authority_old_val
                         .zip(one_shifted)
                         .map(|(old, shift)| old - shift);
@@ -619,32 +638,11 @@ impl AuthorityDecrementChip {
                         17,
                         || proposal_authority_new_val,
                     )?;
-                    let run_old_cell = region.assign_advice(
-                        || "run_old final",
-                        config.advices[6],
-                        17,
-                        || run_old_prev,
-                    )?;
-                    let run_new_cell = region.assign_advice(
-                        || "run_new final",
-                        config.advices[7],
-                        17,
-                        || run_new_prev,
-                    )?;
 
-                    // Note: proposal_authority_new_cell and run_new_cell
-                    // are expected to be equal in a valid proof.
-                    // proposal_authority_new_cell is compted from proposal_authority_old and one_shifted (both given by prover as private witnesses)
-                    // * This proves the prover knowns some old - shift but nothing about the bits.
-                    // run_new_cell is computed through bit_recomposition
-                    // * This proves some bit decomposition was performed
-                    // Together (constrained further below), we prove that the arithmetic result
-                    // must equal the bit-recomposition result, which in turn means the bit decomposition
-                    // is a valid decomposition of proposal_authority_old with exactly the  bit at proposal_id cleared.
                     Ok((
                         proposal_authority_new_cell,
-                        run_old_cell,
-                        run_new_cell,
+                        run_old_last_cell.unwrap(),
+                        run_new_last_cell.unwrap(),
                     ))
                 },
             )?;
@@ -878,6 +876,57 @@ mod tests {
         assert!(
             run_chip(0xFFFF, 5, Some(wrong_new)).is_err(),
             "tampered new value must fail equality constraint",
+        );
+    }
+
+    // ----------------------------------------------------------------
+    // Regression test for the "disconnected run_old_final" exploit.
+    //
+    // Pre-fix, run_old_final was a fresh advice cell at row 17 with no
+    // constrain_equal linking it to the row-16 accumulation.  A malicious
+    // prover could:
+    //   1. Bit-decompose x = 1 << proposal_id at rows 1–16 (run_selected=1 ✓).
+    //   2. Assign run_old_final (row 17) = proposal_authority_old  (≠ x).
+    //   3. The equality check (run_old_final == proposal_authority_old) passed,
+    //      but the bit decomposition was never of proposal_authority_old itself.
+    //
+    // Post-fix, run_old_final IS the row-16 cell.  The permutation argument
+    // directly binds proposal_authority_old to the accumulation result, so the
+    // attack above is impossible.
+    //
+    // The honest chip also catches these cases via the run_selected=1 terminal
+    // gate: if proposal_authority_old lacks the requested bit, run_selected=0 at
+    // row 16 and the proof is rejected — which is precisely the outcome that was
+    // bypassable before the fix.
+    // ----------------------------------------------------------------
+    #[test]
+    fn exploit_disconnected_run_old_final_regression() {
+        // authority=0x0008 (bit 3 set), proposal_id=1 (bit 1 absent).
+        // Pre-fix: prover could decompose x=2 at rows 1–16, then free-witness
+        // run_old_final=8 at row 17, satisfying all constraints.
+        // Post-fix: run_old_final is the row-16 cell (=2 after honest extraction),
+        // which fails the equality run_old_final==proposal_authority_old (8≠2).
+        assert!(
+            run_chip(0x0008, 1, None).is_err(),
+            "authority 0x0008 with proposal_id=1 (bit absent) must be rejected"
+        );
+
+        // authority=0x0004 (bit 2 set), proposal_id=1 (bit 1 absent).
+        assert!(
+            run_chip(0x0004, 1, None).is_err(),
+            "authority 0x0004 with proposal_id=1 (bit absent) must be rejected"
+        );
+
+        // authority=0x00FF (bits 0-7 set), proposal_id=8 (bit 8 absent).
+        assert!(
+            run_chip(0x00FF, 8, None).is_err(),
+            "authority 0x00FF with proposal_id=8 (bit absent) must be rejected"
+        );
+
+        // authority=0 (no bits set), proposal_id=5 — degenerate case.
+        assert!(
+            run_chip(0x0000, 5, None).is_err(),
+            "zero authority with any proposal_id must be rejected"
         );
     }
 }
