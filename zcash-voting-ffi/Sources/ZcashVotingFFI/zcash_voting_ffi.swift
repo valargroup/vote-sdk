@@ -2199,6 +2199,10 @@ public struct SharePayload {
      * TODO: This is a temp hack
      */
     public var allEncShares: [EncryptedShare]
+    /**
+     * Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
+     */
+    public var shareBlinds: [Data]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -2206,13 +2210,17 @@ public struct SharePayload {
         /**
          * All 5 encrypted shares (needed for ZKP #3 shares_hash witness).
          * TODO: This is a temp hack
-         */allEncShares: [EncryptedShare]) {
+         */allEncShares: [EncryptedShare],
+        /**
+         * Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
+         */shareBlinds: [Data]) {
         self.sharesHash = sharesHash
         self.proposalId = proposalId
         self.voteDecision = voteDecision
         self.encShare = encShare
         self.treePosition = treePosition
         self.allEncShares = allEncShares
+        self.shareBlinds = shareBlinds
     }
 }
 
@@ -2241,6 +2249,9 @@ extension SharePayload: Equatable, Hashable {
         if lhs.allEncShares != rhs.allEncShares {
             return false
         }
+        if lhs.shareBlinds != rhs.shareBlinds {
+            return false
+        }
         return true
     }
 
@@ -2251,6 +2262,7 @@ extension SharePayload: Equatable, Hashable {
         hasher.combine(encShare)
         hasher.combine(treePosition)
         hasher.combine(allEncShares)
+        hasher.combine(shareBlinds)
     }
 }
 
@@ -2268,7 +2280,8 @@ public struct FfiConverterTypeSharePayload: FfiConverterRustBuffer {
                 voteDecision: FfiConverterUInt32.read(from: &buf),
                 encShare: FfiConverterTypeEncryptedShare.read(from: &buf),
                 treePosition: FfiConverterUInt64.read(from: &buf),
-                allEncShares: FfiConverterSequenceTypeEncryptedShare.read(from: &buf)
+                allEncShares: FfiConverterSequenceTypeEncryptedShare.read(from: &buf),
+                shareBlinds: FfiConverterSequenceData.read(from: &buf)
         )
     }
 
@@ -2279,6 +2292,7 @@ public struct FfiConverterTypeSharePayload: FfiConverterRustBuffer {
         FfiConverterTypeEncryptedShare.write(value.encShare, into: &buf)
         FfiConverterUInt64.write(value.treePosition, into: &buf)
         FfiConverterSequenceTypeEncryptedShare.write(value.allEncShares, into: &buf)
+        FfiConverterSequenceData.write(value.shareBlinds, into: &buf)
     }
 }
 
@@ -2424,6 +2438,10 @@ public struct VoteCommitmentBundle {
      */
     public var sharesHash: Data
     /**
+     * Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
+     */
+    public var shareBlinds: [Data]
+    /**
      * Compressed r_vpk (32 bytes) for sighash computation and signature verification.
      */
     public var rVpkBytes: Data
@@ -2448,6 +2466,9 @@ public struct VoteCommitmentBundle {
          * Poseidon hash of encrypted share x-coordinates (32 bytes).
          */sharesHash: Data,
         /**
+         * Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
+         */shareBlinds: [Data],
+        /**
          * Compressed r_vpk (32 bytes) for sighash computation and signature verification.
          */rVpkBytes: Data,
         /**
@@ -2462,6 +2483,7 @@ public struct VoteCommitmentBundle {
         self.anchorHeight = anchorHeight
         self.voteRoundId = voteRoundId
         self.sharesHash = sharesHash
+        self.shareBlinds = shareBlinds
         self.rVpkBytes = rVpkBytes
         self.alphaV = alphaV
     }
@@ -2501,6 +2523,9 @@ extension VoteCommitmentBundle: Equatable, Hashable {
         if lhs.sharesHash != rhs.sharesHash {
             return false
         }
+        if lhs.shareBlinds != rhs.shareBlinds {
+            return false
+        }
         if lhs.rVpkBytes != rhs.rVpkBytes {
             return false
         }
@@ -2520,6 +2545,7 @@ extension VoteCommitmentBundle: Equatable, Hashable {
         hasher.combine(anchorHeight)
         hasher.combine(voteRoundId)
         hasher.combine(sharesHash)
+        hasher.combine(shareBlinds)
         hasher.combine(rVpkBytes)
         hasher.combine(alphaV)
     }
@@ -2543,6 +2569,7 @@ public struct FfiConverterTypeVoteCommitmentBundle: FfiConverterRustBuffer {
                 anchorHeight: FfiConverterUInt32.read(from: &buf),
                 voteRoundId: FfiConverterString.read(from: &buf),
                 sharesHash: FfiConverterData.read(from: &buf),
+                shareBlinds: FfiConverterSequenceData.read(from: &buf),
                 rVpkBytes: FfiConverterData.read(from: &buf),
                 alphaV: FfiConverterData.read(from: &buf)
         )
@@ -2558,6 +2585,7 @@ public struct FfiConverterTypeVoteCommitmentBundle: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.anchorHeight, into: &buf)
         FfiConverterString.write(value.voteRoundId, into: &buf)
         FfiConverterData.write(value.sharesHash, into: &buf)
+        FfiConverterSequenceData.write(value.shareBlinds, into: &buf)
         FfiConverterData.write(value.rVpkBytes, into: &buf)
         FfiConverterData.write(value.alphaV, into: &buf)
     }

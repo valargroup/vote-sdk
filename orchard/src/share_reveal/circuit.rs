@@ -180,7 +180,9 @@ pub struct Circuit {
     /// Preimage component: hash of all 5 encrypted shares.
     pub(crate) shares_hash: Value<pallas::Base>,
 
-    // === Condition 3: Shares Hash Integrity ===
+    // === Condition 3: Shares Hash Integrity (blinded commitments) ===
+    /// Per-share blind factors: share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x).
+    pub(crate) share_blinds: [Value<pallas::Base>; 5],
     /// X-coordinates of C1_i = r_i * G for each share (via ExtractP).
     pub(crate) enc_share_c1_x: [Value<pallas::Base>; 5],
     /// X-coordinates of C2_i = shares_i * G + r_i * ea_pk for each share.
@@ -478,28 +480,100 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             core::array::from_fn(|i| enc_c2[i].clone());
 
         // ---------------------------------------------------------------
-        // Condition 3: Shares Hash Integrity.
+        // Condition 3: Shares Hash Integrity (blinded commitments).
         //
-        // shares_hash = Poseidon(c1_0, c2_0, c1_1, c2_1,
-        //                        c1_2, c2_2, c1_3, c2_3,
-        //                        c1_4, c2_4)
+        // share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x)   for i in 0..5
+        // shares_hash  = Poseidon(share_comm_0, ..., share_comm_4)
         //
-        // Same hash order as vote_proof::shares_hash and ZKP #2
-        // condition 10.
+        // Same hash structure as vote_proof condition 10 (ZKP #2).
         // ---------------------------------------------------------------
+
+        // Witness the 5 blind factors.
+        let blinds: [AssignedCell<pallas::Base, pallas::Base>; 5] = {
+            let mut cells = Vec::with_capacity(5);
+            for i in 0..5 {
+                cells.push(assign_free_advice(
+                    layouter.namespace(|| alloc::format!("witness share_blind[{i}]")),
+                    config.advices[0],
+                    self.share_blinds[i],
+                )?);
+            }
+            cells.try_into().unwrap()
+        };
 
         let derived_shares_hash = {
             let [c1_0, c1_1, c1_2, c1_3, c1_4] = enc_c1;
             let [c2_0, c2_1, c2_2, c2_3, c2_4] = enc_c2;
-            let message = [
-                c1_0, c2_0, c1_1, c2_1, c1_2, c2_2, c1_3, c2_3,
-                c1_4, c2_4,
-            ];
+            let [b0, b1, b2, b3, b4] = blinds;
+
+            // Per-share blinded commitments: share_comm_i = Poseidon(blind_i, c1_i, c2_i)
+            let share_comm_0 = {
+                let hasher = PoseidonHash::<
+                    pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
+                >::init(
+                    config.poseidon_chip(),
+                    layouter.namespace(|| "cond3: share_comm_0 init"),
+                )?;
+                hasher.hash(
+                    layouter.namespace(|| "cond3: share_comm_0 = Poseidon(b0, c1_0, c2_0)"),
+                    [b0, c1_0, c2_0],
+                )?
+            };
+            let share_comm_1 = {
+                let hasher = PoseidonHash::<
+                    pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
+                >::init(
+                    config.poseidon_chip(),
+                    layouter.namespace(|| "cond3: share_comm_1 init"),
+                )?;
+                hasher.hash(
+                    layouter.namespace(|| "cond3: share_comm_1 = Poseidon(b1, c1_1, c2_1)"),
+                    [b1, c1_1, c2_1],
+                )?
+            };
+            let share_comm_2 = {
+                let hasher = PoseidonHash::<
+                    pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
+                >::init(
+                    config.poseidon_chip(),
+                    layouter.namespace(|| "cond3: share_comm_2 init"),
+                )?;
+                hasher.hash(
+                    layouter.namespace(|| "cond3: share_comm_2 = Poseidon(b2, c1_2, c2_2)"),
+                    [b2, c1_2, c2_2],
+                )?
+            };
+            let share_comm_3 = {
+                let hasher = PoseidonHash::<
+                    pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
+                >::init(
+                    config.poseidon_chip(),
+                    layouter.namespace(|| "cond3: share_comm_3 init"),
+                )?;
+                hasher.hash(
+                    layouter.namespace(|| "cond3: share_comm_3 = Poseidon(b3, c1_3, c2_3)"),
+                    [b3, c1_3, c2_3],
+                )?
+            };
+            let share_comm_4 = {
+                let hasher = PoseidonHash::<
+                    pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
+                >::init(
+                    config.poseidon_chip(),
+                    layouter.namespace(|| "cond3: share_comm_4 init"),
+                )?;
+                hasher.hash(
+                    layouter.namespace(|| "cond3: share_comm_4 = Poseidon(b4, c1_4, c2_4)"),
+                    [b4, c1_4, c2_4],
+                )?
+            };
+
+            // shares_hash = Poseidon(share_comm_0, ..., share_comm_4)
             let hasher = PoseidonHash::<
                 pallas::Base,
                 _,
                 poseidon::P128Pow5T3,
-                ConstantLength<10>,
+                ConstantLength<5>,
                 3, // WIDTH
                 2, // RATE
             >::init(
@@ -507,8 +581,8 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 layouter.namespace(|| "cond3: shares hash Poseidon init"),
             )?;
             hasher.hash(
-                layouter.namespace(|| "cond3: shares_hash = Poseidon(enc_shares)"),
-                message,
+                layouter.namespace(|| "cond3: shares_hash = Poseidon(share_comms)"),
+                [share_comm_0, share_comm_1, share_comm_2, share_comm_3, share_comm_4],
             )?
         };
 
@@ -1014,11 +1088,11 @@ mod tests {
 
     /// Computes real El Gamal encryptions for 5 shares.
     ///
-    /// Returns `(c1_x, c2_x, shares_hash_value)`.
+    /// Returns `(c1_x, c2_x, share_blinds, shares_hash_value)`.
     fn encrypt_shares(
         shares: [u64; 5],
         ea_pk: pallas::Point,
-    ) -> ([pallas::Base; 5], [pallas::Base; 5], pallas::Base) {
+    ) -> ([pallas::Base; 5], [pallas::Base; 5], [pallas::Base; 5], pallas::Base) {
         let mut c1_x = [pallas::Base::zero(); 5];
         let mut c2_x = [pallas::Base::zero(); 5];
         let randomness: [pallas::Base; 5] = [
@@ -1027,6 +1101,13 @@ mod tests {
             pallas::Base::from(303u64),
             pallas::Base::from(404u64),
             pallas::Base::from(505u64),
+        ];
+        let share_blinds: [pallas::Base; 5] = [
+            pallas::Base::from(1001u64),
+            pallas::Base::from(1002u64),
+            pallas::Base::from(1003u64),
+            pallas::Base::from(1004u64),
+            pallas::Base::from(1005u64),
         ];
         for i in 0..5 {
             let (c1, c2) = elgamal_encrypt(
@@ -1037,8 +1118,8 @@ mod tests {
             c1_x[i] = c1;
             c2_x[i] = c2;
         }
-        let hash = compute_shares_hash(c1_x, c2_x);
-        (c1_x, c2_x, hash)
+        let hash = compute_shares_hash(share_blinds, c1_x, c2_x);
+        (c1_x, c2_x, share_blinds, hash)
     }
 
     /// Build valid test data for all 5 conditions.
@@ -1056,7 +1137,7 @@ mod tests {
         // Encrypt 5 shares.
         let (_ea_sk, ea_pk_point, _ea_pk_affine) = generate_ea_keypair();
         let shares_u64: [u64; 5] = [1_000, 2_000, 3_000, 2_500, 1_500];
-        let (enc_c1_x, enc_c2_x, shares_hash_val) =
+        let (enc_c1_x, enc_c2_x, share_blinds, shares_hash_val) =
             encrypt_shares(shares_u64, ea_pk_point);
 
         // Compute vote commitment.
@@ -1081,6 +1162,7 @@ mod tests {
             vote_comm_tree_path: Value::known(auth_path),
             vote_comm_tree_position: Value::known(position),
             shares_hash: Value::known(shares_hash_val),
+            share_blinds: share_blinds.map(Value::known),
             enc_share_c1_x: enc_c1_x.map(Value::known),
             enc_share_c2_x: enc_c2_x.map(Value::known),
             share_index: Value::known(share_index_fp),

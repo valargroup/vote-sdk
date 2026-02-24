@@ -62,6 +62,10 @@ pub struct VoteProofBundle {
     /// Intermediate value: vote_commitment = H(DOMAIN_VC, shares_hash, proposal_id, vote_decision).
     /// Needed by the helper server to verify share payloads.
     pub shares_hash: pallas::Base,
+    /// Per-share blind factors for blinded commitments.
+    /// share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x).
+    /// Sent to the helper server alongside shares so it can build ZKP #3.
+    pub share_blinds: [pallas::Base; 5],
 }
 
 /// Errors that can occur during vote proof construction.
@@ -314,7 +318,8 @@ pub fn build_vote_proof_from_delegation(
         enc_share_outputs[i].randomness = r.to_repr();
     }
 
-    let shares_hash_val = shares_hash(enc_c1_x, enc_c2_x);
+    let share_blinds: [pallas::Base; 5] = core::array::from_fn(|_| random_valid_base_as_scalar(rng));
+    let shares_hash_val = shares_hash(share_blinds, enc_c1_x, enc_c2_x);
 
     // ---- Condition 4: r_vpk = ak + [alpha_v] * G ----
     // alpha_v is now provided by the caller so they can sign with rsk_v.
@@ -375,6 +380,7 @@ pub fn build_vote_proof_from_delegation(
     ];
     circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
     circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
+    circuit.share_blinds = share_blinds.map(Value::known);
     circuit.share_randomness = share_randomness.map(Value::known);
     circuit.ea_pk = Value::known(ea_pk);
     circuit.vote_decision = Value::known(vote_decision_base);
@@ -428,5 +434,6 @@ pub fn build_vote_proof_from_delegation(
         r_vpk_bytes,
         encrypted_shares: enc_share_outputs,
         shares_hash: shares_hash_val,
+        share_blinds,
     })
 }

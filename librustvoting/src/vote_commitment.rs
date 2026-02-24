@@ -36,6 +36,7 @@ pub fn build_share_payloads(
             enc_share: share.clone(),
             tree_position: vc_tree_position,
             all_enc_shares: all_enc_shares.clone(),
+            share_blinds: commitment.share_blinds.clone(),
         });
     }
 
@@ -189,6 +190,7 @@ mod tests {
             anchor_height: 0,
             vote_round_id: String::new(),
             shares_hash: vec![0xDD; 32],
+            share_blinds: (0..5).map(|_| vec![0x11; 32]).collect(),
             r_vpk_bytes: vec![0xEE; 32],
             alpha_v: vec![0xFF; 32],
         }

@@ -204,14 +204,19 @@ mod tests {
             c2_x[i] = pallas::Base::from_repr(arr).unwrap();
         }
 
+        // Use synthetic blinds for testing.
+        let blinds: [pallas::Base; 5] = core::array::from_fn(|i| {
+            pallas::Base::from(1001u64 + i as u64)
+        });
+
         // Compute shares_hash using the circuit helper.
-        let hash = orchard::vote_proof::shares_hash(c1_x, c2_x);
+        let hash = orchard::vote_proof::shares_hash(blinds, c1_x, c2_x);
 
         // Verify it's not zero (sanity).
         assert_ne!(hash, pallas::Base::zero());
 
         // Verify determinism: same inputs → same hash.
-        let hash2 = orchard::vote_proof::shares_hash(c1_x, c2_x);
+        let hash2 = orchard::vote_proof::shares_hash(blinds, c1_x, c2_x);
         assert_eq!(hash, hash2);
     }
 

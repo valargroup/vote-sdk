@@ -30,6 +30,7 @@ pub struct ShareRevealBundle {
 ///
 /// - `merkle_auth_path`: The 24 sibling hashes from the vote commitment tree.
 /// - `merkle_position`: Leaf position in the vote commitment tree.
+/// - `share_blinds`: Per-share blind factors for blinded commitments.
 /// - `all_enc_c1_x`: X-coordinates of C1 for all 5 encrypted shares.
 /// - `all_enc_c2_x`: X-coordinates of C2 for all 5 encrypted shares.
 /// - `share_index`: Which of the 5 shares is being revealed (0..4).
@@ -40,6 +41,7 @@ pub struct ShareRevealBundle {
 pub fn build_share_reveal(
     merkle_auth_path: [pallas::Base; VOTE_COMM_TREE_DEPTH],
     merkle_position: u32,
+    share_blinds: [pallas::Base; 5],
     all_enc_c1_x: [pallas::Base; 5],
     all_enc_c2_x: [pallas::Base; 5],
     share_index: u32,
@@ -47,8 +49,8 @@ pub fn build_share_reveal(
     vote_decision: pallas::Base,
     voting_round_id: pallas::Base,
 ) -> ShareRevealBundle {
-    // Compute shares_hash = Poseidon(c1_0, c2_0, c1_1, c2_1, c1_2, c2_2, c1_3, c2_3, c1_4, c2_4).
-    let shares_hash = compute_shares_hash(all_enc_c1_x, all_enc_c2_x);
+    // Compute shares_hash using blinded per-share commitments.
+    let shares_hash = compute_shares_hash(share_blinds, all_enc_c1_x, all_enc_c2_x);
 
     // Compute vote_commitment = Poseidon(DOMAIN_VC, shares_hash, proposal_id, vote_decision).
     let vote_commitment = compute_vote_commitment_hash(shares_hash, proposal_id, vote_decision);
@@ -82,6 +84,7 @@ pub fn build_share_reveal(
         vote_comm_tree_path: Value::known(merkle_auth_path),
         vote_comm_tree_position: Value::known(merkle_position),
         shares_hash: Value::known(shares_hash),
+        share_blinds: share_blinds.map(Value::known),
         enc_share_c1_x: all_enc_c1_x.map(Value::known),
         enc_share_c2_x: all_enc_c2_x.map(Value::known),
         share_index: Value::known(share_index_fp),
@@ -128,6 +131,13 @@ mod tests {
             pallas::Base::from(404u64),
             pallas::Base::from(505u64),
         ];
+        let share_blinds: [pallas::Base; 5] = [
+            pallas::Base::from(1001u64),
+            pallas::Base::from(1002u64),
+            pallas::Base::from(1003u64),
+            pallas::Base::from(1004u64),
+            pallas::Base::from(1005u64),
+        ];
         let mut c1_x = [pallas::Base::zero(); 5];
         let mut c2_x = [pallas::Base::zero(); 5];
         for i in 0..5 {
@@ -146,6 +156,7 @@ mod tests {
         let bundle = build_share_reveal(
             empty_roots,
             0, // position
+            share_blinds,
             c1_x,
             c2_x,
             2, // share_index

@@ -210,13 +210,14 @@ type halo2Prover struct{}
 func (p *halo2Prover) GenerateShareRevealProof(
 	merklePath []byte,
 	allEncShares [10][32]byte,
+	shareBlinds [5][32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
 	sharesHash [32]byte,
 ) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error) {
 	return halo2GenerateShareRevealProof(
-		merklePath, allEncShares, shareIndex,
+		merklePath, allEncShares, shareBlinds, shareIndex,
 		proposalID, voteDecision, roundID, sharesHash,
 	)
 }

@@ -170,6 +170,7 @@ pub fn build_vote_commitment(
         anchor_height,
         vote_round_id: hex::encode(voting_round_id),
         shares_hash: vote_bundle.shares_hash.to_repr().to_vec(),
+        share_blinds: vote_bundle.share_blinds.iter().map(|b| b.to_repr().to_vec()).collect(),
         r_vpk_bytes: vote_bundle.r_vpk_bytes.to_vec(),
         alpha_v: alpha_v.to_repr().to_vec(),
     })

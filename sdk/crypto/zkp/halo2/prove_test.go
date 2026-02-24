@@ -24,17 +24,18 @@ import (
 // Proof generation takes ~30-60s in release mode.
 func TestGenerateShareRevealRoundTrip(t *testing.T) {
 	// Read fixture file.
-	// Format (1168 bytes):
-	//   [0..772)      merkle_path
-	//   [772..1092)   all_enc_shares (320 bytes)
-	//   [1092..1096)  share_index (u32 LE)
-	//   [1096..1100)  proposal_id (u32 LE)
-	//   [1100..1104)  vote_decision (u32 LE)
-	//   [1104..1136)  round_id (32 bytes)
-	//   [1136..1168)  shares_hash (32 bytes)
+	// Format (1328 bytes):
+	//   [0..772)       merkle_path
+	//   [772..1092)    all_enc_shares (320 bytes)
+	//   [1092..1252)   share_blinds (160 bytes: 5 × 32-byte blind factors)
+	//   [1252..1256)   share_index (u32 LE)
+	//   [1256..1260)   proposal_id (u32 LE)
+	//   [1260..1264)   vote_decision (u32 LE)
+	//   [1264..1296)   round_id (32 bytes)
+	//   [1296..1328)   shares_hash (32 bytes)
 	fixture, err := os.ReadFile("../testdata/share_reveal_inputs.bin")
 	require.NoError(t, err, "fixture file missing — run: make fixtures")
-	require.Len(t, fixture, 1168, "unexpected fixture size")
+	require.Len(t, fixture, 1328, "unexpected fixture size")
 
 	merklePath := fixture[0:772]
 
@@ -43,21 +44,27 @@ func TestGenerateShareRevealRoundTrip(t *testing.T) {
 		copy(allEncShares[i][:], fixture[772+i*32:772+(i+1)*32])
 	}
 
-	shareIndex := binary.LittleEndian.Uint32(fixture[1092:1096])
-	proposalID := binary.LittleEndian.Uint32(fixture[1096:1100])
-	voteDecision := binary.LittleEndian.Uint32(fixture[1100:1104])
+	var shareBlinds [5][32]byte
+	for i := 0; i < 5; i++ {
+		copy(shareBlinds[i][:], fixture[1092+i*32:1092+(i+1)*32])
+	}
+
+	shareIndex := binary.LittleEndian.Uint32(fixture[1252:1256])
+	proposalID := binary.LittleEndian.Uint32(fixture[1256:1260])
+	voteDecision := binary.LittleEndian.Uint32(fixture[1260:1264])
 
 	var roundID [32]byte
-	copy(roundID[:], fixture[1104:1136])
+	copy(roundID[:], fixture[1264:1296])
 
 	var sharesHash [32]byte
-	copy(sharesHash[:], fixture[1136:1168])
+	copy(sharesHash[:], fixture[1296:1328])
 
 	// Generate proof.
 	t.Log("generating share reveal proof (this takes ~30-60s)...")
 	proof, nullifier, treeRoot, err := GenerateShareRevealProof(
 		merklePath,
 		allEncShares,
+		shareBlinds,
 		shareIndex,
 		proposalID, voteDecision,
 		roundID,

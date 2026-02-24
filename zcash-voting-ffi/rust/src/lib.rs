@@ -251,6 +251,8 @@ pub struct VoteCommitmentBundle {
     pub vote_round_id: String,
     /// Poseidon hash of encrypted share x-coordinates (32 bytes).
     pub shares_hash: Vec<u8>,
+    /// Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
+    pub share_blinds: Vec<Vec<u8>>,
     /// Compressed r_vpk (32 bytes) for sighash computation and signature verification.
     pub r_vpk_bytes: Vec<u8>,
     /// Spend-auth randomizer alpha_v (32 bytes, LE scalar repr).
@@ -267,9 +269,9 @@ pub struct SharePayload {
     /// All 5 encrypted shares (needed for ZKP #3 shares_hash witness).
     /// TODO: This is a temp hack
     pub all_enc_shares: Vec<EncryptedShare>,
+    /// Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
+    pub share_blinds: Vec<Vec<u8>>,
 }
-
-
 
 /// Computed signature fields for cast-vote TX submission.
 #[derive(Clone, uniffi::Record)]
@@ -488,6 +490,7 @@ impl From<voting::VoteCommitmentBundle> for VoteCommitmentBundle {
             anchor_height: b.anchor_height,
             vote_round_id: b.vote_round_id,
             shares_hash: b.shares_hash,
+            share_blinds: b.share_blinds,
             r_vpk_bytes: b.r_vpk_bytes,
             alpha_v: b.alpha_v,
         }
@@ -506,6 +509,7 @@ impl From<VoteCommitmentBundle> for voting::VoteCommitmentBundle {
             anchor_height: b.anchor_height,
             vote_round_id: b.vote_round_id,
             shares_hash: b.shares_hash,
+            share_blinds: b.share_blinds,
             r_vpk_bytes: b.r_vpk_bytes,
             alpha_v: b.alpha_v,
         }
@@ -521,6 +525,7 @@ impl From<voting::SharePayload> for SharePayload {
             enc_share: p.enc_share.into(),
             tree_position: p.tree_position,
             all_enc_shares: p.all_enc_shares.into_iter().map(|s| s.into()).collect(),
+            share_blinds: p.share_blinds,
         }
     }
 }
@@ -658,10 +663,7 @@ impl VotingDatabase {
         })
     }
 
-    pub fn get_bundle_count(
-        &self,
-        round_id: String,
-    ) -> Result<u32, VotingError> {
+    pub fn get_bundle_count(&self, round_id: String) -> Result<u32, VotingError> {
         Ok(self.db.get_bundle_count(&round_id)?)
     }
 
@@ -839,7 +841,13 @@ impl VotingDatabase {
             enc_shares.into_iter().map(Into::into).collect();
         Ok(self
             .db
-            .build_share_payloads(&core_shares, &commitment.into(), vote_decision, num_options, vc_tree_position)?
+            .build_share_payloads(
+                &core_shares,
+                &commitment.into(),
+                vote_decision,
+                num_options,
+                vc_tree_position,
+            )?
             .into_iter()
             .map(Into::into)
             .collect())
@@ -882,7 +890,13 @@ impl VotingDatabase {
     ) -> Result<DelegationSubmission, VotingError> {
         Ok(self
             .db
-            .get_delegation_submission(&round_id, bundle_index, &sender_seed, network_id, account_index)?
+            .get_delegation_submission(
+                &round_id,
+                bundle_index,
+                &sender_seed,
+                network_id,
+                account_index,
+            )?
             .into())
     }
 
@@ -893,7 +907,9 @@ impl VotingDatabase {
         bundle_index: u32,
         position: u32,
     ) -> Result<(), VotingError> {
-        Ok(self.db.store_van_position(&round_id, bundle_index, position)?)
+        Ok(self
+            .db
+            .store_van_position(&round_id, bundle_index, position)?)
     }
 
     // --- Vote commitment tree sync ---
@@ -905,11 +921,7 @@ impl VotingDatabase {
     /// marked for witness generation before syncing.
     ///
     /// Returns the latest synced block height.
-    pub fn sync_vote_tree(
-        &self,
-        round_id: String,
-        node_url: String,
-    ) -> Result<u32, VotingError> {
+    pub fn sync_vote_tree(&self, round_id: String, node_url: String) -> Result<u32, VotingError> {
         // Mark VAN positions for ALL bundles so witnesses can be generated for any bundle.
         let bundle_count = self.db.get_bundle_count(&round_id)?;
 
@@ -931,9 +943,11 @@ impl VotingDatabase {
             message: format!("vote tree sync failed: {}", e),
         })?;
 
-        client.last_synced_height().ok_or_else(|| VotingError::Internal {
-            message: "tree has no synced height after sync".to_string(),
-        })
+        client
+            .last_synced_height()
+            .ok_or_else(|| VotingError::Internal {
+                message: "tree has no synced height after sync".to_string(),
+            })
     }
 
     /// Generate a VAN Merkle witness for ZKP #2.
@@ -957,14 +971,14 @@ impl VotingDatabase {
             message: "must call sync_vote_tree before generate_van_witness".to_string(),
         })?;
 
-        let path = client.witness(van_position as u64, anchor_height).ok_or_else(|| {
-            VotingError::Internal {
+        let path = client
+            .witness(van_position as u64, anchor_height)
+            .ok_or_else(|| VotingError::Internal {
                 message: format!(
                     "failed to generate witness for position {} at height {}",
                     van_position, anchor_height
                 ),
-            }
-        })?;
+            })?;
 
         Ok(VanWitness::from((path, anchor_height)))
     }
@@ -975,7 +989,9 @@ impl VotingDatabase {
         bundle_index: u32,
         proposal_id: u32,
     ) -> Result<(), VotingError> {
-        Ok(self.db.mark_vote_submitted(&round_id, bundle_index, proposal_id)?)
+        Ok(self
+            .db
+            .mark_vote_submitted(&round_id, bundle_index, proposal_id)?)
     }
 }
 
@@ -1188,10 +1204,7 @@ pub fn generate_delegation_inputs_with_fvk(
 ) -> Result<DelegationInputs, VotingError> {
     if fvk_bytes.len() != 96 {
         return Err(VotingError::InvalidInput {
-            message: format!(
-                "fvk_bytes must be 96 bytes, got {}",
-                fvk_bytes.len()
-            ),
+            message: format!("fvk_bytes must be 96 bytes, got {}", fvk_bytes.len()),
         });
     }
     if hotkey_seed.len() < 32 {
@@ -1326,18 +1339,16 @@ pub fn build_share_payloads(
     vc_tree_position: u64,
 ) -> Result<Vec<SharePayload>, VotingError> {
     let core_shares: Vec<voting::EncryptedShare> = enc_shares.into_iter().map(Into::into).collect();
-    Ok(
-        voting::vote_commitment::build_share_payloads(
-            &core_shares,
-            &commitment.into(),
-            vote_decision,
-            num_options,
-            vc_tree_position,
-        )?
-        .into_iter()
-        .map(Into::into)
-        .collect(),
-    )
+    Ok(voting::vote_commitment::build_share_payloads(
+        &core_shares,
+        &commitment.into(),
+        vote_decision,
+        num_options,
+        vc_tree_position,
+    )?
+    .into_iter()
+    .map(Into::into)
+    .collect())
 }
 
 /// Compute the canonical cast-vote sighash, decompress r_vpk, and sign.

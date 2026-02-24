@@ -174,6 +174,10 @@ pub struct VoteCommitmentBundle {
     /// Poseidon hash of encrypted share x-coordinates (32 bytes).
     /// Intermediate value: vote_commitment = H(DOMAIN_VC, shares_hash, proposal_id, vote_decision).
     pub shares_hash: Vec<u8>,
+    /// Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
+    /// share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x).
+    /// Sent to the helper server alongside shares so it can build ZKP #3.
+    pub share_blinds: Vec<Vec<u8>>,
     /// Compressed r_vpk (32 bytes) for sighash computation and signature verification.
     pub r_vpk_bytes: Vec<u8>,
     /// Spend-auth randomizer alpha_v (32 bytes, LE scalar repr).
@@ -192,8 +196,10 @@ pub struct SharePayload {
     /// All 5 encrypted shares (needed for ZKP #3 shares_hash witness).
     /// TODO: This is a temp hack
     pub all_enc_shares: Vec<EncryptedShare>,
+    /// Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
+    /// Needed for ZKP #3 blinded share commitment witness.
+    pub share_blinds: Vec<Vec<u8>>,
 }
-
 
 /// Computed signature fields for cast-vote TX submission.
 /// Returned by `sign_cast_vote` after ZKP #2 builds the vote commitment bundle.
@@ -479,11 +485,7 @@ mod tests {
     #[test]
     fn test_chunk_notes_all_dust_empty() {
         // All notes below threshold — no valid bundles
-        let notes = vec![
-            make_note(100, 0),
-            make_note(200, 1),
-            make_note(300, 2),
-        ];
+        let notes = vec![make_note(100, 0), make_note(200, 1), make_note(300, 2)];
         let result = chunk_notes(&notes);
         assert!(result.bundles.is_empty());
         assert_eq!(result.eligible_weight, 0);
@@ -512,7 +514,9 @@ mod tests {
 
     #[test]
     fn test_chunk_notes_deterministic() {
-        let notes: Vec<NoteInfo> = (0..7).map(|i| make_note(15_000_000 + i * 1_000_000, i)).collect();
+        let notes: Vec<NoteInfo> = (0..7)
+            .map(|i| make_note(15_000_000 + i * 1_000_000, i))
+            .collect();
         let r1 = chunk_notes(&notes);
         let r2 = chunk_notes(&notes);
         assert_eq!(r1.bundles.len(), r2.bundles.len());
@@ -536,8 +540,10 @@ mod tests {
         let result = chunk_notes(&notes);
         for bundle in &result.bundles {
             for window in bundle.windows(2) {
-                assert!(window[0].position < window[1].position,
-                    "notes within bundle must be sorted by position");
+                assert!(
+                    window[0].position < window[1].position,
+                    "notes within bundle must be sorted by position"
+                );
             }
         }
     }
@@ -546,12 +552,16 @@ mod tests {
     fn test_chunk_notes_bundles_sorted_by_min_position() {
         let notes: Vec<NoteInfo> = (0..8).map(|i| make_note(15_000_000, i)).collect();
         let result = chunk_notes(&notes);
-        let min_positions: Vec<u64> = result.bundles.iter()
+        let min_positions: Vec<u64> = result
+            .bundles
+            .iter()
             .map(|b| b.first().unwrap().position)
             .collect();
         for window in min_positions.windows(2) {
-            assert!(window[0] < window[1],
-                "bundles must be sorted by minimum position");
+            assert!(
+                window[0] < window[1],
+                "bundles must be sorted by minimum position"
+            );
         }
     }
 
@@ -568,7 +578,11 @@ mod tests {
         let notes: Vec<NoteInfo> = (0..12).map(|i| make_note(15_000_000, i)).collect();
         let result = chunk_notes(&notes);
         for bundle in &result.bundles {
-            assert!(bundle.len() <= 5, "bundle has {} notes, max is 5", bundle.len());
+            assert!(
+                bundle.len() <= 5,
+                "bundle has {} notes, max is 5",
+                bundle.len()
+            );
         }
     }
 }
