@@ -29,7 +29,9 @@ func NewMsgServerImpl(keeper Keeper) types.MsgServer {
 // CreateVotingSession handles MsgCreateVotingSession.
 // Computes vote_round_id = Blake2b-256(snapshot_height || snapshot_blockhash ||
 // proposals_hash || vote_end_time || nullifier_imt_root || nc_root),
-// stores the VoteRound, and emits an event.
+// stores the VoteRound in PENDING status with a ceremony validator snapshot,
+// and emits an event. The round transitions to ACTIVE when its per-round
+// ceremony confirms (auto-deal + auto-ack via PrepareProposal).
 func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
@@ -53,18 +55,29 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		return nil, fmt.Errorf("%w: %x", types.ErrRoundAlreadyExists, roundID)
 	}
 
-	// Read ea_pk from confirmed ceremony state.
-	ceremony, err := ms.k.GetCeremonyState(kvStore)
+	// Reject if another round is already PENDING (one active ceremony at a time).
+	hasPending, err := ms.k.HasPendingRound(kvStore)
 	if err != nil {
 		return nil, err
 	}
-	if ceremony == nil || ceremony.Status != types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED {
-		return nil, fmt.Errorf("%w", types.ErrCeremonyNotReady)
+	if hasPending {
+		return nil, fmt.Errorf("%w: another round ceremony is already in progress", types.ErrCeremonySessionActive)
 	}
 
-	ms.k.Logger().Info("CreateVotingSession roots",
+	// Snapshot eligible validators (bonded + have Pallas PK).
+	eligible, err := ms.k.GetEligibleValidators(goCtx, kvStore)
+	if err != nil {
+		return nil, err
+	}
+	if len(eligible) == 0 {
+		return nil, fmt.Errorf("no validators have registered Pallas keys")
+	}
+
+	ms.k.Logger().Info("CreateVotingSession",
+		"round_id", hex.EncodeToString(roundID),
 		"nullifier_imt_root", hex.EncodeToString(msg.NullifierImtRoot),
 		"nc_root", hex.EncodeToString(msg.NcRoot),
+		"ceremony_validators", len(eligible),
 	)
 	round := &types.VoteRound{
 		VoteRoundId:       roundID,
@@ -75,15 +88,18 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		NullifierImtRoot:  msg.NullifierImtRoot,
 		NcRoot:            msg.NcRoot,
 		Creator:           msg.Creator,
-		Status:            types.SessionStatus_SESSION_STATUS_ACTIVE,
-		EaPk:              ceremony.EaPk,
-		VkZkp1:            msg.VkZkp1,
-		VkZkp2:            msg.VkZkp2,
-		VkZkp3:            msg.VkZkp3,
-		Proposals:         msg.Proposals,
-		Description:       msg.Description,
-		CreatedAtHeight:   uint64(ctx.BlockHeight()),
-		Title:             msg.Title,
+		Status:            types.SessionStatus_SESSION_STATUS_PENDING,
+		// EaPk left empty — set when ceremony confirms.
+		VkZkp1:      msg.VkZkp1,
+		VkZkp2:      msg.VkZkp2,
+		VkZkp3:      msg.VkZkp3,
+		Proposals:    msg.Proposals,
+		Description:  msg.Description,
+		CreatedAtHeight: uint64(ctx.BlockHeight()),
+		Title:        msg.Title,
+		// Per-round ceremony fields.
+		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		CeremonyValidators: eligible,
 	}
 
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {

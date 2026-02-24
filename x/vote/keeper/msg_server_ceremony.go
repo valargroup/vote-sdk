@@ -64,28 +64,29 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 }
 
 // DealExecutiveAuthorityKey handles MsgDealExecutiveAuthorityKey.
-// The dealer distributes encrypted ea_sk shares to all registered validators
-// and publishes the ea_pk. Ceremony transitions REGISTERING -> DEALT.
+// The dealer distributes encrypted ea_sk shares to all validators in the
+// round's ceremony. Per-round ceremony: REGISTERING -> DEALT.
 func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.MsgDealExecutiveAuthorityKey) (*types.MsgDealExecutiveAuthorityKeyResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
-	state, err := ms.k.GetCeremonyState(kvStore)
+	// Load round by vote_round_id.
+	round, err := ms.k.GetVoteRound(kvStore, msg.VoteRoundId)
 	if err != nil {
 		return nil, err
 	}
-	if state == nil {
-		return nil, fmt.Errorf("%w: no ceremony exists", types.ErrCeremonyWrongStatus)
-	}
 
-	// Only accept deals while REGISTERING.
-	if state.Status != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
-		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, state.Status)
+	// Round must be PENDING with ceremony in REGISTERING.
+	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
+		return nil, fmt.Errorf("%w: round is %s", types.ErrCeremonyWrongStatus, round.Status)
+	}
+	if round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
+		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, round.CeremonyStatus)
 	}
 
 	// Need at least one registered validator.
-	if len(state.Validators) == 0 {
-		return nil, fmt.Errorf("%w: no validators registered", types.ErrCeremonyWrongStatus)
+	if len(round.CeremonyValidators) == 0 {
+		return nil, fmt.Errorf("%w: no validators in round ceremony", types.ErrCeremonyWrongStatus)
 	}
 
 	// Validate ea_pk is a valid Pallas point.
@@ -94,15 +95,15 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	}
 
 	// Validate payload count matches validator count.
-	if len(msg.Payloads) != len(state.Validators) {
+	if len(msg.Payloads) != len(round.CeremonyValidators) {
 		return nil, fmt.Errorf("%w: got %d payloads, expected %d",
-			types.ErrPayloadMismatch, len(msg.Payloads), len(state.Validators))
+			types.ErrPayloadMismatch, len(msg.Payloads), len(round.CeremonyValidators))
 	}
 
-	// Validate each payload maps 1:1 to a registered validator.
-	covered := make(map[string]bool, len(state.Validators))
+	// Validate each payload maps 1:1 to a round ceremony validator.
+	covered := make(map[string]bool, len(round.CeremonyValidators))
 	for _, p := range msg.Payloads {
-		if _, found := FindValidatorInCeremony(state, p.ValidatorAddress); !found {
+		if _, found := FindValidatorInRoundCeremony(round, p.ValidatorAddress); !found {
 			return nil, fmt.Errorf("%w: payload references unknown validator %s",
 				types.ErrNotRegisteredValidator, p.ValidatorAddress)
 		}
@@ -119,23 +120,24 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 		}
 	}
 
-	// Store deal data and transition to DEALT.
-	state.EaPk = msg.EaPk
-	state.Payloads = msg.Payloads
-	state.Dealer = msg.Creator
-	state.PhaseStart = uint64(ctx.BlockTime().Unix())
-	state.PhaseTimeout = types.DefaultDealTimeout
-	state.Status = types.CeremonyStatus_CEREMONY_STATUS_DEALT
+	// Store deal data on the round and transition ceremony to DEALT.
+	round.EaPk = msg.EaPk
+	round.CeremonyPayloads = msg.Payloads
+	round.CeremonyDealer = msg.Creator
+	round.CeremonyPhaseStart = uint64(ctx.BlockTime().Unix())
+	round.CeremonyPhaseTimeout = types.DefaultDealTimeout
+	round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_DEALT
 
-	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {
+	if err := ms.k.SetVoteRound(kvStore, round); err != nil {
 		return nil, err
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeDealExecutiveAuthorityKey,
+		sdk.NewAttribute(types.AttributeKeyRoundID, hex.EncodeToString(msg.VoteRoundId)),
 		sdk.NewAttribute(types.AttributeKeyValidatorAddress, msg.Creator),
 		sdk.NewAttribute(types.AttributeKeyEAPK, hex.EncodeToString(msg.EaPk)),
-		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, state.Status.String()),
+		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, round.CeremonyStatus.String()),
 	))
 
 	return &types.MsgDealExecutiveAuthorityKeyResponse{}, nil
@@ -143,7 +145,8 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 
 // AckExecutiveAuthorityKey handles MsgAckExecutiveAuthorityKey.
 // A registered validator acknowledges receipt of their ea_sk share.
-// When all validators have acked, ceremony transitions DEALT -> CONFIRMED.
+// When >= 1/3 validators have acked, ceremony transitions DEALT -> CONFIRMED
+// and the round transitions PENDING -> ACTIVE.
 //
 // This message can only be injected by the block proposer via PrepareProposal;
 // direct submission through the mempool is rejected by ValidateAckSubmitter.
@@ -156,49 +159,53 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
-	state, err := ms.k.GetCeremonyState(kvStore)
+	// Load round by vote_round_id.
+	round, err := ms.k.GetVoteRound(kvStore, msg.VoteRoundId)
 	if err != nil {
 		return nil, err
 	}
-	if state == nil {
-		return nil, fmt.Errorf("%w: no ceremony exists", types.ErrCeremonyWrongStatus)
-	}
 
-	// Only accept acks while DEALT.
-	if state.Status != types.CeremonyStatus_CEREMONY_STATUS_DEALT {
-		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, state.Status)
+	// Round must be PENDING with ceremony in DEALT.
+	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
+		return nil, fmt.Errorf("%w: round is %s", types.ErrCeremonyWrongStatus, round.Status)
+	}
+	if round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_DEALT {
+		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, round.CeremonyStatus)
 	}
 
 	// Validate creator is a registered validator.
-	if _, found := FindValidatorInCeremony(state, msg.Creator); !found {
+	if _, found := FindValidatorInRoundCeremony(round, msg.Creator); !found {
 		return nil, fmt.Errorf("%w: %s", types.ErrNotRegisteredValidator, msg.Creator)
 	}
 
 	// Reject duplicate ack.
-	if _, found := FindAckForValidator(state, msg.Creator); found {
+	if _, found := FindAckInRoundCeremony(round, msg.Creator); found {
 		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateAck, msg.Creator)
 	}
 
 	// Record ack.
-	state.Acks = append(state.Acks, &types.AckEntry{
+	round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
 		ValidatorAddress: msg.Creator,
 		AckSignature:     msg.AckSignature,
 		AckHeight:        uint64(ctx.BlockHeight()),
 	})
 
-	// Check if all validators have acked -> transition to CONFIRMED.
-	if AllValidatorsAcked(state) {
-		state.Status = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+	// Check if >= 1/3 validators acked -> transition to CONFIRMED + ACTIVE.
+	if OneThirdAcked(round) {
+		StripNonAckersFromRound(round)
+		round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+		round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
 	}
 
-	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {
+	if err := ms.k.SetVoteRound(kvStore, round); err != nil {
 		return nil, err
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeAckExecutiveAuthorityKey,
+		sdk.NewAttribute(types.AttributeKeyRoundID, hex.EncodeToString(msg.VoteRoundId)),
 		sdk.NewAttribute(types.AttributeKeyValidatorAddress, msg.Creator),
-		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, state.Status.String()),
+		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, round.CeremonyStatus.String()),
 	))
 
 	return &types.MsgAckExecutiveAuthorityKeyResponse{}, nil

@@ -34,7 +34,10 @@ type mockStakingKeeper struct {
 func newMockStakingKeeper(valAddrs ...string) *mockStakingKeeper {
 	mk := &mockStakingKeeper{validators: make(map[string]stakingtypes.Validator)}
 	for _, addr := range valAddrs {
-		mk.validators[addr] = stakingtypes.Validator{OperatorAddress: addr}
+		mk.validators[addr] = stakingtypes.Validator{
+			OperatorAddress: addr,
+			Status:          stakingtypes.Bonded,
+		}
 	}
 	return mk
 }
@@ -266,7 +269,7 @@ func (s *MsgServerTestSuite) TestSetVoteManager_EmitsEvent() {
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWithNoVoteManager() {
 	s.SetupTest()
-	s.seedConfirmedCeremony()
+	s.seedEligibleValidators(1)
 
 	msg := validSetupMsg()
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
@@ -276,7 +279,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWithNoVoteManager()
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotVoteManager() {
 	s.SetupTest()
-	s.seedConfirmedCeremony()
+	s.seedEligibleValidators(1)
 	s.seedVoteManager("the_real_manager")
 
 	msg := validSetupMsg()
@@ -288,7 +291,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotVoteM
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsWithVoteManager() {
 	s.SetupTest()
-	s.seedConfirmedCeremony()
+	s.seedEligibleValidators(1)
 	s.seedVoteManager("zvote1admin")
 
 	msg := validSetupMsg()
@@ -300,7 +303,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsWithVoteManager() {
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	s.SetupTest()
-	s.seedConfirmedCeremony()
+	s.seedEligibleValidators(1)
 	s.seedVoteManager("zvote1admin")
 
 	msg := validSetupMsg()

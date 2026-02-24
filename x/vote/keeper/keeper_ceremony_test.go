@@ -677,7 +677,179 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_GlobalRegistry() {
 }
 
 // ===========================================================================
-// MsgDealExecutiveAuthorityKey handler tests (Step 5)
+// Per-round ceremony helper tests
+// ===========================================================================
+
+func (s *KeeperTestSuite) TestOneThirdAcked() {
+	tests := []struct {
+		name   string
+		round  *types.VoteRound
+		expect bool
+	}{
+		{
+			name: "all acked (3/3)",
+			round: &types.VoteRound{
+				CeremonyValidators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"}, {ValidatorAddress: "val3"},
+				},
+				CeremonyAcks: []*types.AckEntry{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"}, {ValidatorAddress: "val3"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "exactly 1/3 (1 of 3)",
+			round: &types.VoteRound{
+				CeremonyValidators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"}, {ValidatorAddress: "val3"},
+				},
+				CeremonyAcks: []*types.AckEntry{
+					{ValidatorAddress: "val1"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "below 1/3 (1 of 4)",
+			round: &types.VoteRound{
+				CeremonyValidators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"}, {ValidatorAddress: "val4"},
+				},
+				CeremonyAcks: []*types.AckEntry{
+					{ValidatorAddress: "val1"},
+				},
+			},
+			expect: false,
+		},
+		{
+			name: "2 of 4 (50% >= 33%)",
+			round: &types.VoteRound{
+				CeremonyValidators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"}, {ValidatorAddress: "val4"},
+				},
+				CeremonyAcks: []*types.AckEntry{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "no acks",
+			round: &types.VoteRound{
+				CeremonyValidators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
+				},
+			},
+			expect: false,
+		},
+		{
+			name:   "no validators",
+			round:  &types.VoteRound{},
+			expect: false,
+		},
+		{
+			name: "single validator acked (1/1 >= 1/3)",
+			round: &types.VoteRound{
+				CeremonyValidators: []*types.ValidatorPallasKey{{ValidatorAddress: "val1"}},
+				CeremonyAcks:       []*types.AckEntry{{ValidatorAddress: "val1"}},
+			},
+			expect: true,
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.Require().Equal(tc.expect, keeper.OneThirdAcked(tc.round))
+		})
+	}
+}
+
+func (s *KeeperTestSuite) TestFindValidatorInRoundCeremony() {
+	round := &types.VoteRound{
+		CeremonyValidators: []*types.ValidatorPallasKey{
+			{ValidatorAddress: "val_alpha"}, {ValidatorAddress: "val_beta"}, {ValidatorAddress: "val_gamma"},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		valAddr   string
+		wantIndex int
+		wantFound bool
+	}{
+		{"first", "val_alpha", 0, true},
+		{"middle", "val_beta", 1, true},
+		{"last", "val_gamma", 2, true},
+		{"unknown", "val_delta", -1, false},
+		{"empty", "", -1, false},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			idx, found := keeper.FindValidatorInRoundCeremony(round, tc.valAddr)
+			s.Require().Equal(tc.wantFound, found)
+			s.Require().Equal(tc.wantIndex, idx)
+		})
+	}
+}
+
+func (s *KeeperTestSuite) TestFindAckInRoundCeremony() {
+	round := &types.VoteRound{
+		CeremonyAcks: []*types.AckEntry{
+			{ValidatorAddress: "val_alpha", AckHeight: 10},
+			{ValidatorAddress: "val_beta", AckHeight: 11},
+		},
+	}
+
+	idx, found := keeper.FindAckInRoundCeremony(round, "val_alpha")
+	s.Require().True(found)
+	s.Require().Equal(0, idx)
+
+	idx, found = keeper.FindAckInRoundCeremony(round, "val_beta")
+	s.Require().True(found)
+	s.Require().Equal(1, idx)
+
+	idx, found = keeper.FindAckInRoundCeremony(round, "val_gamma")
+	s.Require().False(found)
+	s.Require().Equal(-1, idx)
+}
+
+func (s *KeeperTestSuite) TestStripNonAckersFromRound() {
+	round := &types.VoteRound{
+		CeremonyValidators: []*types.ValidatorPallasKey{
+			{ValidatorAddress: "val1", PallasPk: []byte{0x01}},
+			{ValidatorAddress: "val2", PallasPk: []byte{0x02}},
+			{ValidatorAddress: "val3", PallasPk: []byte{0x03}},
+		},
+		CeremonyPayloads: []*types.DealerPayload{
+			{ValidatorAddress: "val1", Ciphertext: []byte{0x10}},
+			{ValidatorAddress: "val2", Ciphertext: []byte{0x20}},
+			{ValidatorAddress: "val3", Ciphertext: []byte{0x30}},
+		},
+		CeremonyAcks: []*types.AckEntry{
+			{ValidatorAddress: "val1"},
+			{ValidatorAddress: "val3"},
+		},
+	}
+
+	keeper.StripNonAckersFromRound(round)
+
+	s.Require().Len(round.CeremonyValidators, 2)
+	s.Require().Equal("val1", round.CeremonyValidators[0].ValidatorAddress)
+	s.Require().Equal("val3", round.CeremonyValidators[1].ValidatorAddress)
+
+	s.Require().Len(round.CeremonyPayloads, 2)
+	s.Require().Equal("val1", round.CeremonyPayloads[0].ValidatorAddress)
+	s.Require().Equal("val3", round.CeremonyPayloads[1].ValidatorAddress)
+
+	s.Require().Len(round.CeremonyAcks, 2)
+}
+
+// ===========================================================================
+// MsgDealExecutiveAuthorityKey handler tests
 // ===========================================================================
 
 // registerValidators is a test helper that registers N validators and returns
@@ -713,31 +885,76 @@ func makePayloads(addrs []string) []*types.DealerPayload {
 	return payloads
 }
 
+// createPendingRound creates a PENDING VoteRound with the given ceremony
+// validators directly in the store, bypassing CreateVotingSession (which
+// requires a staking keeper). Returns the round ID.
+func (s *MsgServerTestSuite) createPendingRound(validators []*types.ValidatorPallasKey) []byte {
+	roundID := make([]byte, 32)
+	rand.Read(roundID)
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round := &types.VoteRound{
+		VoteRoundId:        roundID,
+		VoteEndTime:        2_000_000,
+		Creator:            "zvote1creator",
+		Status:             types.SessionStatus_SESSION_STATUS_PENDING,
+		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		CeremonyValidators: validators,
+		NullifierImtRoot:   bytes.Repeat([]byte{0x03}, 32),
+		NcRoot:             bytes.Repeat([]byte{0x04}, 32),
+		VkZkp1:             bytes.Repeat([]byte{0x06}, 64),
+		VkZkp2:             bytes.Repeat([]byte{0x07}, 64),
+		VkZkp3:             bytes.Repeat([]byte{0x08}, 64),
+		Proposals: []*types.Proposal{
+			{Id: 1, Title: "A", Description: "A", Options: zallytest.DefaultOptions()},
+		},
+	}
+	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+	return roundID
+}
+
+// createPendingRoundWithValidators registers n validators in the global registry
+// and creates a PENDING round with them as ceremony validators.
+// Returns (roundID, valoper addresses, pallas PKs).
+func (s *MsgServerTestSuite) createPendingRoundWithValidators(n int) (roundID []byte, addrs []string, pks [][]byte) {
+	addrs, pks = s.registerValidators(n)
+	validators := make([]*types.ValidatorPallasKey, n)
+	for i := range addrs {
+		validators[i] = &types.ValidatorPallasKey{
+			ValidatorAddress: addrs[i],
+			PallasPk:         pks[i],
+		}
+	}
+	roundID = s.createPendingRound(validators)
+	return
+}
+
 func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 	s.SetupTest()
 
-	addrs, _ := s.registerValidators(3)
+	roundID, addrs, _ := s.createPendingRoundWithValidators(3)
 	eaPk := testPallasPK()
 	payloads := makePayloads(addrs)
 
 	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
-		Creator:  "dealer1",
-		EaPk:     eaPk,
-		Payloads: payloads,
+		Creator:     "dealer1",
+		VoteRoundId: roundID,
+		EaPk:        eaPk,
+		Payloads:    payloads,
 	})
 	s.Require().NoError(err)
 
-	// Verify state transitioned to DEALT with all fields set.
+	// Verify round's ceremony transitioned to DEALT with all fields set.
 	kv := s.keeper.OpenKVStore(s.ctx)
-	state, err := s.keeper.GetCeremonyState(kv)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
-	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
-	s.Require().Equal(eaPk, state.EaPk)
-	s.Require().Equal("dealer1", state.Dealer)
-	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), state.PhaseStart)
-	s.Require().Equal(types.DefaultDealTimeout, state.PhaseTimeout)
-	s.Require().Len(state.Payloads, 3)
-	for i, p := range state.Payloads {
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
+	s.Require().Equal(eaPk, round.EaPk)
+	s.Require().Equal("dealer1", round.CeremonyDealer)
+	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), round.CeremonyPhaseStart)
+	s.Require().Equal(types.DefaultDealTimeout, round.CeremonyPhaseTimeout)
+	s.Require().Len(round.CeremonyPayloads, 3)
+	for i, p := range round.CeremonyPayloads {
 		s.Require().Equal(addrs[i], p.ValidatorAddress)
 	}
 
@@ -759,140 +976,164 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 	tests := []struct {
 		name        string
-		setup       func() (addrs []string) // register validators, return addrs
-		msg         func(addrs []string) *types.MsgDealExecutiveAuthorityKey
+		setup       func() (roundID []byte, addrs []string)
+		msg         func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey
 		errContains string
 	}{
 		{
-			name: "no ceremony exists",
-			setup: func() []string {
-				return nil
+			name: "round not found",
+			setup: func() ([]byte, []string) {
+				return bytes.Repeat([]byte{0xDE}, 32), nil
 			},
-			msg: func(_ []string) *types.MsgDealExecutiveAuthorityKey {
+			msg: func(roundID []byte, _ []string) *types.MsgDealExecutiveAuthorityKey {
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:  "dealer1",
-					EaPk:     testPallasPK(),
-					Payloads: []*types.DealerPayload{},
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        testPallasPK(),
+					Payloads:    []*types.DealerPayload{},
 				}
 			},
-			errContains: "no ceremony exists",
+			errContains: "vote round not found",
 		},
 		{
 			name: "ceremony already DEALT",
-			setup: func() []string {
-				addrs, _ := s.registerValidators(2)
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
 				// Force ceremony to DEALT.
 				kv := s.keeper.OpenKVStore(s.ctx)
-				state, _ := s.keeper.GetCeremonyState(kv)
-				state.Status = types.CeremonyStatus_CEREMONY_STATUS_DEALT
-				s.Require().NoError(s.keeper.SetCeremonyState(kv, state))
-				return addrs
+				round, _ := s.keeper.GetVoteRound(kv, roundID)
+				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_DEALT
+				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+				return roundID, addrs
 			},
-			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:  "dealer1",
-					EaPk:     testPallasPK(),
-					Payloads: makePayloads(addrs),
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        testPallasPK(),
+					Payloads:    makePayloads(addrs),
 				}
 			},
-			errContains: "operation invalid for current ceremony status",
+			errContains: "ceremony is CEREMONY_STATUS_DEALT",
 		},
 		{
-			name: "no validators registered",
-			setup: func() []string {
-				// Seed empty REGISTERING ceremony with no validators.
+			name: "round is ACTIVE (not PENDING)",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
 				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
-					Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-				}))
-				return nil
+				round, _ := s.keeper.GetVoteRound(kv, roundID)
+				round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
+				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+				return roundID, addrs
 			},
-			msg: func(_ []string) *types.MsgDealExecutiveAuthorityKey {
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:  "dealer1",
-					EaPk:     testPallasPK(),
-					Payloads: []*types.DealerPayload{},
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        testPallasPK(),
+					Payloads:    makePayloads(addrs),
 				}
 			},
-			errContains: "no validators registered",
+			errContains: "round is SESSION_STATUS_ACTIVE",
+		},
+		{
+			name: "no validators in round ceremony",
+			setup: func() ([]byte, []string) {
+				roundID := s.createPendingRound(nil)
+				return roundID, nil
+			},
+			msg: func(roundID []byte, _ []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        testPallasPK(),
+					Payloads:    []*types.DealerPayload{},
+				}
+			},
+			errContains: "no validators in round ceremony",
 		},
 		{
 			name: "invalid ea_pk",
-			setup: func() []string {
-				addrs, _ := s.registerValidators(2)
-				return addrs
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
 			},
-			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:  "dealer1",
-					EaPk:     bytes.Repeat([]byte{0xFF}, 32), // off-curve
-					Payloads: makePayloads(addrs),
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        bytes.Repeat([]byte{0xFF}, 32), // off-curve
+					Payloads:    makePayloads(addrs),
 				}
 			},
 			errContains: "invalid pallas point",
 		},
 		{
 			name: "payload count mismatch (too few)",
-			setup: func() []string {
-				addrs, _ := s.registerValidators(3)
-				return addrs
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(3)
+				return roundID, addrs
 			},
-			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:  "dealer1",
-					EaPk:     testPallasPK(),
-					Payloads: makePayloads(addrs[:2]), // only 2 of 3
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        testPallasPK(),
+					Payloads:    makePayloads(addrs[:2]),
 				}
 			},
 			errContains: "payload count does not match",
 		},
 		{
 			name: "payload references unknown validator",
-			setup: func() []string {
-				addrs, _ := s.registerValidators(2)
-				return addrs
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
 			},
-			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
 				payloads := makePayloads(addrs)
 				payloads[1].ValidatorAddress = "unknown_val"
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:  "dealer1",
-					EaPk:     testPallasPK(),
-					Payloads: payloads,
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        testPallasPK(),
+					Payloads:    payloads,
 				}
 			},
 			errContains: "unknown validator",
 		},
 		{
 			name: "duplicate validator in payloads",
-			setup: func() []string {
-				addrs, _ := s.registerValidators(2)
-				return addrs
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
 			},
-			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
 				payloads := makePayloads(addrs)
 				payloads[1].ValidatorAddress = addrs[0] // duplicate
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:  "dealer1",
-					EaPk:     testPallasPK(),
-					Payloads: payloads,
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        testPallasPK(),
+					Payloads:    payloads,
 				}
 			},
 			errContains: "duplicate payload",
 		},
 		{
 			name: "invalid ephemeral_pk in payload",
-			setup: func() []string {
-				addrs, _ := s.registerValidators(2)
-				return addrs
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
 			},
-			msg: func(addrs []string) *types.MsgDealExecutiveAuthorityKey {
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
 				payloads := makePayloads(addrs)
 				payloads[0].EphemeralPk = make([]byte, 32) // identity point
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:  "dealer1",
-					EaPk:     testPallasPK(),
-					Payloads: payloads,
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        testPallasPK(),
+					Payloads:    payloads,
 				}
 			},
 			errContains: "invalid pallas point",
@@ -902,8 +1143,8 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
 			s.SetupTest()
-			addrs := tc.setup()
-			_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, tc.msg(addrs))
+			roundID, addrs := tc.setup()
+			_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, tc.msg(roundID, addrs))
 			s.Require().Error(err)
 			s.Require().Contains(err.Error(), tc.errContains)
 		})
@@ -914,126 +1155,157 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 // MsgAckExecutiveAuthorityKey handler tests (Step 6)
 // ===========================================================================
 
-// dealCeremony registers n validators and deals, leaving the ceremony in DEALT.
-// Returns the validator addresses used.
-func (s *MsgServerTestSuite) dealCeremony(n int) []string {
-	addrs, _ := s.registerValidators(n)
+// dealPendingRound creates a PENDING round with n validators, deals, and
+// returns (roundID, validator addrs). The round is left in DEALT status.
+func (s *MsgServerTestSuite) dealPendingRound(n int) (roundID []byte, addrs []string) {
+	roundID, addrs, _ = s.createPendingRoundWithValidators(n)
 	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
-		Creator:  "dealer",
-		EaPk:     testPallasPK(),
-		Payloads: makePayloads(addrs),
+		Creator:     "dealer",
+		VoteRoundId: roundID,
+		EaPk:        testPallasPK(),
+		Payloads:    makePayloads(addrs),
 	})
 	s.Require().NoError(err)
-	return addrs
+	return
 }
 
 func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_HappyPath() {
 	s.SetupTest()
-	addrs := s.dealCeremony(3)
+	roundID, addrs := s.dealPendingRound(3)
 
-	// First two acks: status stays DEALT.
-	for _, addr := range addrs[:2] {
-		_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
-			Creator:      addr,
-			AckSignature: bytes.Repeat([]byte{0xAC}, 64),
-		})
-		s.Require().NoError(err)
-
-		kv := s.keeper.OpenKVStore(s.ctx)
-		state, err := s.keeper.GetCeremonyState(kv)
-		s.Require().NoError(err)
-		s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status,
-			"should remain DEALT after %d of %d acks", len(state.Acks), len(state.Validators))
-	}
-
-	// Third (final) ack: triggers CONFIRMED.
+	// First ack: with 3 validators, 1/3 is already met (1*3 >= 3).
+	// So the first ack triggers CONFIRMED + ACTIVE.
 	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
-		Creator:      addrs[2],
+		Creator:      addrs[0],
+		VoteRoundId:  roundID,
 		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
 	})
 	s.Require().NoError(err)
 
 	kv := s.keeper.OpenKVStore(s.ctx)
-	state, err := s.keeper.GetCeremonyState(kv)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
-	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status)
-	s.Require().Len(state.Acks, 3)
-	for i, ack := range state.Acks {
-		s.Require().Equal(addrs[i], ack.ValidatorAddress)
-		s.Require().Equal(uint64(s.ctx.BlockHeight()), ack.AckHeight)
-	}
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
+	// StripNonAckers keeps only the one who acked.
+	s.Require().Len(round.CeremonyAcks, 1)
+	s.Require().Equal(addrs[0], round.CeremonyAcks[0].ValidatorAddress)
+	s.Require().Equal(uint64(s.ctx.BlockHeight()), round.CeremonyAcks[0].AckHeight)
 
-	// Verify event emission: one per ack.
+	// Verify event emission.
 	var ackEvents int
 	for _, e := range s.ctx.EventManager().Events() {
 		if e.Type == types.EventTypeAckExecutiveAuthorityKey {
 			ackEvents++
 		}
 	}
-	s.Require().Equal(3, ackEvents, "expected one event per ack")
+	s.Require().Equal(1, ackEvents)
+}
+
+// TestAckExecutiveAuthorityKey_MultipleAcks tests a scenario where 1/3
+// threshold requires more than 1 ack (4 validators, need 2).
+func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_MultipleAcks() {
+	s.SetupTest()
+	roundID, addrs := s.dealPendingRound(4)
+
+	// First ack: 1 of 4 → 1*3=3 < 4, stays DEALT.
+	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+		Creator:      addrs[0],
+		VoteRoundId:  roundID,
+		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
+
+	// Second ack: 2 of 4 → 2*3=6 >= 4, triggers CONFIRMED + ACTIVE.
+	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+		Creator:      addrs[1],
+		VoteRoundId:  roundID,
+		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+	})
+	s.Require().NoError(err)
+
+	round, err = s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
+	// StripNonAckers: only addrs[0] and addrs[1] remain.
+	s.Require().Len(round.CeremonyValidators, 2)
+	s.Require().Len(round.CeremonyPayloads, 2)
+	s.Require().Len(round.CeremonyAcks, 2)
 }
 
 func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 	tests := []struct {
 		name        string
-		setup       func() []string // returns validator addrs from deal
-		msg         func(addrs []string) *types.MsgAckExecutiveAuthorityKey
+		setup       func() (roundID []byte, addrs []string)
+		msg         func(roundID []byte, addrs []string) *types.MsgAckExecutiveAuthorityKey
 		errContains string
 	}{
 		{
-			name: "no ceremony exists",
-			setup: func() []string {
-				return nil
+			name: "round not found",
+			setup: func() ([]byte, []string) {
+				return bytes.Repeat([]byte{0xDE}, 32), nil
 			},
-			msg: func(_ []string) *types.MsgAckExecutiveAuthorityKey {
+			msg: func(roundID []byte, _ []string) *types.MsgAckExecutiveAuthorityKey {
 				return &types.MsgAckExecutiveAuthorityKey{
 					Creator:      "val1",
+					VoteRoundId:  roundID,
 					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
 				}
 			},
-			errContains: "no ceremony exists",
+			errContains: "vote round not found",
 		},
 		{
 			name: "ceremony still REGISTERING",
-			setup: func() []string {
-				addrs, _ := s.registerValidators(2)
-				return addrs
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
 			},
-			msg: func(addrs []string) *types.MsgAckExecutiveAuthorityKey {
+			msg: func(roundID []byte, addrs []string) *types.MsgAckExecutiveAuthorityKey {
 				return &types.MsgAckExecutiveAuthorityKey{
 					Creator:      addrs[0],
+					VoteRoundId:  roundID,
 					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
 				}
 			},
-			errContains: "operation invalid for current ceremony status",
+			errContains: "ceremony is CEREMONY_STATUS_REGISTERING",
 		},
 		{
-			name: "ceremony already CONFIRMED",
-			setup: func() []string {
-				addrs := s.dealCeremony(1)
-				// Force to CONFIRMED.
+			name: "ceremony already CONFIRMED (round ACTIVE)",
+			setup: func() ([]byte, []string) {
+				roundID, addrs := s.dealPendingRound(1)
+				// Force to CONFIRMED + ACTIVE.
 				kv := s.keeper.OpenKVStore(s.ctx)
-				state, _ := s.keeper.GetCeremonyState(kv)
-				state.Status = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
-				s.Require().NoError(s.keeper.SetCeremonyState(kv, state))
-				return addrs
+				round, _ := s.keeper.GetVoteRound(kv, roundID)
+				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+				round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
+				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+				return roundID, addrs
 			},
-			msg: func(addrs []string) *types.MsgAckExecutiveAuthorityKey {
+			msg: func(roundID []byte, addrs []string) *types.MsgAckExecutiveAuthorityKey {
 				return &types.MsgAckExecutiveAuthorityKey{
 					Creator:      addrs[0],
+					VoteRoundId:  roundID,
 					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
 				}
 			},
-			errContains: "operation invalid for current ceremony status",
+			errContains: "round is SESSION_STATUS_ACTIVE",
 		},
 		{
 			name: "non-registered validator",
-			setup: func() []string {
-				return s.dealCeremony(2)
+			setup: func() ([]byte, []string) {
+				return s.dealPendingRound(2)
 			},
-			msg: func(_ []string) *types.MsgAckExecutiveAuthorityKey {
+			msg: func(roundID []byte, _ []string) *types.MsgAckExecutiveAuthorityKey {
 				return &types.MsgAckExecutiveAuthorityKey{
 					Creator:      "outsider",
+					VoteRoundId:  roundID,
 					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
 				}
 			},
@@ -1041,18 +1313,21 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 		},
 		{
 			name: "duplicate ack",
-			setup: func() []string {
-				addrs := s.dealCeremony(2)
+			setup: func() ([]byte, []string) {
+				// Use 4 validators so 1 ack doesn't trigger confirmation.
+				roundID, addrs := s.dealPendingRound(4)
 				_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 					Creator:      addrs[0],
+					VoteRoundId:  roundID,
 					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
 				})
 				s.Require().NoError(err)
-				return addrs
+				return roundID, addrs
 			},
-			msg: func(addrs []string) *types.MsgAckExecutiveAuthorityKey {
+			msg: func(roundID []byte, addrs []string) *types.MsgAckExecutiveAuthorityKey {
 				return &types.MsgAckExecutiveAuthorityKey{
 					Creator:      addrs[0], // same validator again
+					VoteRoundId:  roundID,
 					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
 				}
 			},
@@ -1063,8 +1338,8 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
 			s.SetupTest()
-			addrs := tc.setup()
-			_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, tc.msg(addrs))
+			roundID, addrs := tc.setup()
+			_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, tc.msg(roundID, addrs))
 			s.Require().Error(err)
 			s.Require().Contains(err.Error(), tc.errContains)
 		})
@@ -1086,21 +1361,20 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 		pk *elgamal.PublicKey
 	}
 	validators := make([]validatorKeys, numValidators)
-	addrs := make([]string, numValidators) // valoper addresses stored in state
+	addrs := make([]string, numValidators)
+	ceremonyVals := make([]*types.ValidatorPallasKey, numValidators)
 	for i := range validators {
 		sk, pk := elgamal.KeyGen(rand.Reader)
 		validators[i] = validatorKeys{sk: sk, pk: pk}
 		addrs[i] = testValoperAddr(byte(i + 1))
+		ceremonyVals[i] = &types.ValidatorPallasKey{
+			ValidatorAddress: addrs[i],
+			PallasPk:         pk.Point.ToAffineCompressed(),
+		}
 	}
 
-	// 2. Register all 3 pk_i via MsgRegisterPallasKey.
-	for i, v := range validators {
-		_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
-			Creator:  testAccAddr(byte(i + 1)),
-			PallasPk: v.pk.Point.ToAffineCompressed(),
-		})
-		s.Require().NoError(err, "register validator %d", i)
-	}
+	// 2. Create a PENDING round with these validators.
+	roundID := s.createPendingRound(ceremonyVals)
 
 	// 3. Generate ea_sk, ea_pk.
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
@@ -1121,24 +1395,25 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 		}
 	}
 
-	// 5. Submit MsgDealExecutiveAuthorityKey.
+	// 5. Submit MsgDealExecutiveAuthorityKey with VoteRoundId.
 	_, err = s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
-		Creator:  "dealer",
-		EaPk:     eaPkBytes,
-		Payloads: payloads,
+		Creator:     "dealer",
+		VoteRoundId: roundID,
+		EaPk:        eaPkBytes,
+		Payloads:    payloads,
 	})
 	s.Require().NoError(err)
 
-	// Verify DEALT status.
+	// Verify DEALT status on the round.
 	kv := s.keeper.OpenKVStore(s.ctx)
-	state, err := s.keeper.GetCeremonyState(kv)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
-	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
 
-	// 6. For each validator: decrypt, verify, ack.
+	// 6. For each validator: decrypt and verify they can recover ea_sk.
 	for i, v := range validators {
-		// 6a. Grab their (E_i, ct_i) from ceremony state.
-		payload := state.Payloads[i]
+		payload := round.CeremonyPayloads[i]
 		s.Require().Equal(addrs[i], payload.ValidatorAddress)
 
 		// Reconstruct the ECIES envelope from on-chain bytes.
@@ -1150,63 +1425,37 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 			Ciphertext: payload.Ciphertext,
 		}
 
-		// 6b. Decrypt using sk_i.
+		// Decrypt using sk_i.
 		decryptedEaSk, err := ecies.Decrypt(v.sk.Scalar, env)
 		s.Require().NoError(err, "ECIES decrypt for validator %d", i)
 
-		// 6c. Verify decrypted bytes == ea_sk bytes.
+		// Verify decrypted bytes == ea_sk bytes.
 		s.Require().Equal(eaSkBytes, decryptedEaSk,
 			"decrypted ea_sk mismatch for validator %d", i)
 
-		// 6d. Verify ea_sk * G == ea_pk.
+		// Verify ea_sk * G == ea_pk.
 		recoveredSk, err := elgamal.UnmarshalSecretKey(decryptedEaSk)
 		s.Require().NoError(err)
 		recoveredPk := G.Mul(recoveredSk.Scalar)
 		s.Require().Equal(eaPkBytes, recoveredPk.ToAffineCompressed(),
 			"recovered ea_pk mismatch for validator %d", i)
-
-		// 6e. Submit MsgAckExecutiveAuthorityKey.
-		_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
-			Creator:      addrs[i],
-			AckSignature: bytes.Repeat([]byte{0xAC}, 64),
-		})
-		s.Require().NoError(err, "ack for validator %d", i)
 	}
 
-	// 7. Verify ceremony is CONFIRMED.
-	state, err = s.keeper.GetCeremonyState(kv)
+	// 7. Submit ack from first validator — with 3 validators and 1/3
+	// threshold, one ack is enough to confirm.
+	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+		Creator:      addrs[0],
+		VoteRoundId:  roundID,
+		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+	})
 	s.Require().NoError(err)
-	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status)
-	s.Require().Len(state.Acks, numValidators)
-	s.Require().Equal(eaPkBytes, state.EaPk)
 
-	// 8. Create a voting session, verify round.EaPk == ea_pk.
-	s.seedVoteManager("zvote1admin")
-	msg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
-		SnapshotHeight:    100,
-		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
-		VoteEndTime:       2_000_000,
-		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
-		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
-		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
-			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
-		},
-	}
-	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	// 8. Verify round ceremony is CONFIRMED and round is ACTIVE.
+	round, err = s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
-	s.Require().NotEmpty(resp.VoteRoundId)
-
-	// Read the round back and verify ea_pk matches the ceremony's.
-	round, err := s.keeper.GetVoteRound(kv, resp.VoteRoundId)
-	s.Require().NoError(err)
-	s.Require().Equal(eaPkBytes, round.EaPk,
-		"round.EaPk should match the ceremony's confirmed ea_pk")
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
+	s.Require().Equal(eaPkBytes, round.EaPk)
 }
 
 // ===========================================================================

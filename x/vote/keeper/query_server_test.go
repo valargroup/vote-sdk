@@ -148,26 +148,17 @@ func (s *QueryServerTestSuite) TestVoteRound_NotFound() {
 }
 
 func (s *QueryServerTestSuite) TestVoteRound_Found() {
-	// Seed a confirmed ceremony and vote manager so CreateVotingSession is allowed.
+	roundID := bytes.Repeat([]byte{0x42}, 32)
 	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
-		Status: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
-		EaPk:   bytes.Repeat([]byte{0xEA}, 32),
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId:      roundID,
+		SnapshotHeight:   100,
+		VoteEndTime:      2_000_000,
+		Creator:          "zvote1creator",
+		Status:           types.SessionStatus_SESSION_STATUS_PENDING,
+		NullifierImtRoot: bytes.Repeat([]byte{0x03}, 32),
+		NcRoot:           bytes.Repeat([]byte{0x04}, 32),
 	}))
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "zvote1creator"}))
-
-	// Create a vote round via MsgServer.
-	resp, err := s.msgServer.CreateVotingSession(s.ctx, &types.MsgCreateVotingSession{
-		Creator:           "zvote1creator",
-		SnapshotHeight:    100,
-		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
-		VoteEndTime:       2_000_000,
-		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
-		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-	})
-	s.Require().NoError(err)
-	roundID := resp.VoteRoundId
 
 	// Query it.
 	qResp, err := s.queryServer.VoteRound(s.ctx, &types.QueryVoteRoundRequest{
