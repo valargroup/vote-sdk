@@ -155,9 +155,8 @@ func newValidMsgDelegateVote() *types.MsgDelegateVote {
 		},
 		Proof:       bytes.Repeat([]byte{0x22}, 192),
 		VoteRoundId: testRoundID,
-		Sighash:     make([]byte, 32), // overwritten below
+		Sighash:     bytes.Repeat([]byte{0x99}, 32), // any 32 bytes; chain only checks length + sig
 	}
-	msg.Sighash = types.ComputeDelegationSighash(msg)
 	return msg
 }
 
@@ -450,6 +449,16 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			opts:  mockOpts(),
 			setup: func() { s.setupActiveRound() },
 		},
+		{
+			name: "valid: non-canonical 32-byte sighash accepted when signature verifies",
+			msg: func() types.VoteMessage {
+				m := newValidMsgDelegateVote()
+				m.Sighash = bytes.Repeat([]byte{0x99}, 32)
+				return m
+			},
+			opts:  mockOpts(),
+			setup: func() { s.setupActiveRound() },
+		},
 		// --- ValidateBasic failures ---
 		{
 			name: "invalid: rk wrong length (not 32 bytes)",
@@ -519,16 +528,16 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			errContains: "proof",
 		},
 		{
-			name: "invalid: sighash does not match message",
+			name: "invalid: sighash wrong length",
 			msg: func() types.VoteMessage {
 				m := newValidMsgDelegateVote()
-				m.Sighash = bytes.Repeat([]byte{0x99}, 32) // wrong; must equal ComputeDelegationSighash(m)
+				m.Sighash = bytes.Repeat([]byte{0x99}, 31) // 31 bytes, must be 32
 				return m
 			},
 			opts:        mockOpts(),
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
-			errContains: "sighash does not match",
+			errContains: "sighash must be 32 bytes",
 		},
 		// --- Round state failures ---
 		{

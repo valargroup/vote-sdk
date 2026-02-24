@@ -541,7 +541,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 // ---------------------------------------------------------------------------
 
 func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
-	// Create a session with 2 proposals (IDs 0 and 1).
+	// Create a session with 2 proposals (ProposalIds 1 and 2; 1-indexed).
 	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
 	roundID := s.app.SeedVotingSession(setupMsg)
 
@@ -552,7 +552,7 @@ func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
 
 	anchorHeight := uint64(s.app.Height)
 
-	// CastVote with valid proposal_id (0) should succeed.
+	// CastVote with valid proposal_id (1) should succeed.
 	castVote := testutil.ValidCastVote(roundID, anchorHeight, 0x30)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
 	s.Require().Equal(uint32(0), result.Code, "cast vote with valid proposal_id should succeed, got: %s", result.Log)
@@ -571,7 +571,7 @@ func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
 	s.Require().NotEqual(uint32(0), result.Code, "cast vote with invalid proposal_id should fail")
 	s.Require().Contains(result.Log, "invalid proposal ID")
 
-	// RevealShare with valid proposal_id (0) should succeed.
+	// RevealShare with valid proposal_id (1) should succeed.
 	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
 	s.Require().Equal(uint32(0), result.Code, "reveal share with valid proposal_id should succeed, got: %s", result.Log)

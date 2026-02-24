@@ -32,8 +32,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
 
 	voteapi "github.com/z-cale/zally/api"
-	"github.com/z-cale/zally/crypto/redpallas"
-	"github.com/z-cale/zally/crypto/zkp/halo2"
 	"github.com/z-cale/zally/internal/helper"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
 )
@@ -185,6 +183,7 @@ func NewZallyApp(
 //   - Vote transactions (VoteTxWrapper): ZKP/RedPallas validation with infinite gas
 //   - Standard Cosmos transactions: standard SDK ante chain (sig verify, fees, etc.)
 func (app *ZallyApp) setAnteHandler(txConfig client.TxConfig) {
+	cryptoOpts := ProductionOpts()
 	anteHandler, err := NewDualAnteHandler(DualAnteHandlerOptions{
 		HandlerOptions: ante.HandlerOptions{
 			AccountKeeper:   app.AccountKeeper,
@@ -193,8 +192,8 @@ func (app *ZallyApp) setAnteHandler(txConfig client.TxConfig) {
 			SigGasConsumer:  ante.DefaultSigVerificationGasConsumer,
 		},
 		VoteKeeper:  app.VoteKeeper,
-		SigVerifier: redpallas.NewVerifier(),
-		ZKPVerifier: halo2.NewVerifier(),
+		SigVerifier: cryptoOpts.SigVerifier,
+		ZKPVerifier: cryptoOpts.ZKPVerifier,
 	})
 	if err != nil {
 		panic(err)
@@ -271,7 +270,8 @@ func (app *ZallyApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 	voteHandler := voteapi.NewHandler(voteapi.HandlerConfig{
 		CometRPCEndpoint: cometRPC,
 		Snapshot: voteapi.SnapshotConfig{
-			PIRServiceURL: "http://157.180.63.235:3001",
+			PIRServiceURL:   os.Getenv("ZALLY_IMT_URL"),
+			LightwalletdURL: os.Getenv("ZALLY_LWD_URL"),
 		},
 	})
 	voteHandler.RegisterTxRoutes(apiSvr.Router)
