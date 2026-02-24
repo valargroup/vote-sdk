@@ -147,10 +147,11 @@ impl<'a> TierServer<'a> {
         anyhow::ensure!(query_bytes.len() >= 8, "query too short: {} bytes", query_bytes.len());
         let pqr_byte_len =
             u64::from_le_bytes(query_bytes[..8].try_into().unwrap()) as usize;
+        let payload_len = query_bytes.len() - 8; // safe: checked >= 8
         anyhow::ensure!(pqr_byte_len % 8 == 0, "pqr_byte_len {} not a multiple of 8", pqr_byte_len);
-        anyhow::ensure!(8 + pqr_byte_len <= query_bytes.len(),
-            "pqr_byte_len {} exceeds payload ({})", pqr_byte_len, query_bytes.len() - 8);
-        let remaining = query_bytes.len() - 8 - pqr_byte_len;
+        anyhow::ensure!(pqr_byte_len <= payload_len,
+            "pqr_byte_len {} exceeds payload ({})", pqr_byte_len, payload_len);
+        let remaining = payload_len - pqr_byte_len; // safe: checked above
         anyhow::ensure!(remaining % 8 == 0, "pub_params section {} bytes not a multiple of 8", remaining);
 
         let pqr_u64_len = pqr_byte_len / 8;

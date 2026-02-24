@@ -194,7 +194,12 @@ impl<'a> Tier2Row<'a> {
         // Sibling at the leaf level (bottom-up 0): compute hash from raw (low, width)
         let sibling_leaf_idx = leaf_idx ^ 1;
         let (sib_low, sib_width) = self.leaf_record(sibling_leaf_idx);
-        siblings[0] = hasher.hash(sib_low, sib_width); // path[0] in the full proof
+        siblings[0] = if sib_low == -Fp::one() && sib_width == Fp::zero() {
+            // Padding leaf — use empty leaf hash to match tree construction
+            hasher.hash(Fp::zero(), Fp::zero())
+        } else {
+            hasher.hash(sib_low, sib_width)
+        };
 
         // Siblings at relative depths 6..=1 (bottom-up levels 1..=6)
         let mut pos = leaf_idx;

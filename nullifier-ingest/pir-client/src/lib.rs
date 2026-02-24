@@ -107,6 +107,8 @@ impl PirClient {
             .json()
             .await?;
         let root29_bytes = hex::decode(&root_info.root29)?;
+        anyhow::ensure!(root29_bytes.len() == 32,
+            "root29 hex decoded to {} bytes, expected 32", root29_bytes.len());
         let mut root29_arr = [0u8; 32];
         root29_arr.copy_from_slice(&root29_bytes);
         let root29 = Option::from(Fp::from_repr(root29_arr))
