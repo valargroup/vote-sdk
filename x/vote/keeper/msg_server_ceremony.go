@@ -16,30 +16,12 @@ import (
 )
 
 // RegisterPallasKey handles MsgRegisterPallasKey.
-// On first call (state nil or REGISTERING with no validators), creates the
-// ceremony state. Then appends the validator's Pallas public key to the
-// ceremony's validator list. REGISTERING has no timeout — it persists until
-// a deal is submitted or the ceremony is re-initialized.
+// Registers the validator's Pallas public key in the global registry (prefix 0x0C).
+// This is decoupled from ceremony state — keys persist across rounds and are
+// snapshotted into each round's ceremony_validators when a round is created.
 func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegisterPallasKey) (*types.MsgRegisterPallasKeyResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
-
-	state, err := ms.k.GetCeremonyState(kvStore)
-	if err != nil {
-		return nil, err
-	}
-
-	// First registration or post-reset: create ceremony state.
-	if state == nil || (state.Status == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING && len(state.Validators) == 0) {
-		state = &types.CeremonyState{
-			Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-		}
-	}
-
-	// Only accept registrations while REGISTERING.
-	if state.Status != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
-		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, state.Status)
-	}
 
 	// Validate pallas_pk: 32 bytes, valid Pallas point, not identity.
 	if _, err := elgamal.UnmarshalPublicKey(msg.PallasPk); err != nil {
@@ -48,7 +30,7 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 
 	// Derive the validator operator address from the sender's account address.
 	// PrepareProposal identifies the proposer by val.OperatorAddress (valoper
-	// bech32), so the ceremony state must use the same format for lookups.
+	// bech32), so the registry must use the same format for lookups.
 	accAddr, err := sdk.AccAddressFromBech32(msg.Creator)
 	if err != nil {
 		return nil, fmt.Errorf("invalid creator address %q: %w", msg.Creator, err)
@@ -56,24 +38,26 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 	valAddr := sdk.ValAddress(accAddr).String()
 
 	// Reject duplicate registration.
-	if _, found := FindValidatorInCeremony(state, valAddr); found {
+	has, err := ms.k.HasPallasKey(kvStore, valAddr)
+	if err != nil {
+		return nil, err
+	}
+	if has {
 		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateRegistration, valAddr)
 	}
 
-	// Append validator key.
-	state.Validators = append(state.Validators, &types.ValidatorPallasKey{
+	// Store in global registry.
+	vpk := &types.ValidatorPallasKey{
 		ValidatorAddress: valAddr,
 		PallasPk:         msg.PallasPk,
-	})
-
-	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {
+	}
+	if err := ms.k.SetPallasKey(kvStore, vpk); err != nil {
 		return nil, err
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeRegisterPallasKey,
 		sdk.NewAttribute(types.AttributeKeyValidatorAddress, valAddr),
-		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, state.Status.String()),
 	))
 
 	return &types.MsgRegisterPallasKeyResponse{}, nil
@@ -222,7 +206,7 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 
 // CreateValidatorWithPallasKey handles MsgCreateValidatorWithPallasKey.
 // It atomically creates a validator via the staking module and registers
-// the validator's Pallas public key in the ceremony state. This replaces
+// the validator's Pallas public key in the global registry. This replaces
 // the two-step flow of MsgCreateValidator + MsgRegisterPallasKey for
 // post-genesis validators.
 func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *types.MsgCreateValidatorWithPallasKey) (*types.MsgCreateValidatorWithPallasKeyResponse, error) {
@@ -262,46 +246,30 @@ func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *typ
 		return nil, fmt.Errorf("staking CreateValidator failed: %w", err)
 	}
 
-	// Register the Pallas key in ceremony state (same logic as RegisterPallasKey).
-	state, err := ms.k.GetCeremonyState(kvStore)
-	if err != nil {
-		return nil, err
-	}
-
-	// First registration or post-reset: create ceremony state.
-	if state == nil || (state.Status == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING && len(state.Validators) == 0) {
-		state = &types.CeremonyState{
-			Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-		}
-	}
-
-	// Only accept registrations while REGISTERING.
-	if state.Status != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
-		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, state.Status)
-	}
-
 	// Use the validator operator address from the staking message as the key.
 	validatorAddr := stakingMsg.ValidatorAddress
 
 	// Reject duplicate registration.
-	if _, found := FindValidatorInCeremony(state, validatorAddr); found {
+	has, err := ms.k.HasPallasKey(kvStore, validatorAddr)
+	if err != nil {
+		return nil, err
+	}
+	if has {
 		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateRegistration, validatorAddr)
 	}
 
-	// Append validator key.
-	state.Validators = append(state.Validators, &types.ValidatorPallasKey{
+	// Store in global registry.
+	vpk := &types.ValidatorPallasKey{
 		ValidatorAddress: validatorAddr,
 		PallasPk:         msg.PallasPk,
-	})
-
-	if err := ms.k.SetCeremonyState(kvStore, state); err != nil {
+	}
+	if err := ms.k.SetPallasKey(kvStore, vpk); err != nil {
 		return nil, err
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeRegisterPallasKey,
 		sdk.NewAttribute(types.AttributeKeyValidatorAddress, validatorAddr),
-		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, state.Status.String()),
 	))
 
 	return &types.MsgCreateValidatorWithPallasKeyResponse{}, nil

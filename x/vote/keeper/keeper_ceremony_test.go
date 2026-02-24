@@ -545,7 +545,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_HappyPath() {
 
 	pks := []struct {
 		creator    string // account address sent as msg.Creator
-		storedAddr string // valoper address stored in ceremony state after conversion
+		storedAddr string // valoper address stored in global registry after conversion
 		pk         []byte
 	}{
 		{testAccAddr(1), testValoperAddr(1), testPallasPK()},
@@ -560,14 +560,13 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_HappyPath() {
 		})
 		s.Require().NoError(err, "registration %d", i)
 
+		// Verify entry in global Pallas PK registry.
 		kv := s.keeper.OpenKVStore(s.ctx)
-		state, err := s.keeper.GetCeremonyState(kv)
+		vpk, err := s.keeper.GetPallasKey(kv, tc.storedAddr)
 		s.Require().NoError(err)
-		s.Require().NotNil(state)
-		s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
-		s.Require().Len(state.Validators, i+1)
-		s.Require().Equal(tc.storedAddr, state.Validators[i].ValidatorAddress)
-		s.Require().Equal(tc.pk, state.Validators[i].PallasPk)
+		s.Require().NotNil(vpk)
+		s.Require().Equal(tc.storedAddr, vpk.ValidatorAddress)
+		s.Require().Equal(tc.pk, vpk.PallasPk)
 	}
 
 	// Verify event was emitted for each registration.
@@ -642,37 +641,6 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 			},
 			errContains: "already registered",
 		},
-		{
-			name: "wrong ceremony status (DEALT)",
-			setup: func() {
-				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
-					Status: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
-					Validators: []*types.ValidatorPallasKey{
-						{ValidatorAddress: testValoperAddr(1), PallasPk: testPallasPK()},
-					},
-				}))
-			},
-			msg: &types.MsgRegisterPallasKey{
-				Creator:  testAccAddr(2),
-				PallasPk: testPallasPK(),
-			},
-			errContains: "operation invalid for current ceremony status",
-		},
-		{
-			name: "wrong ceremony status (CONFIRMED)",
-			setup: func() {
-				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
-					Status: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
-				}))
-			},
-			msg: &types.MsgRegisterPallasKey{
-				Creator:  testAccAddr(1),
-				PallasPk: testPallasPK(),
-			},
-			errContains: "operation invalid for current ceremony status",
-		},
 	}
 
 	for _, tc := range tests {
@@ -688,35 +656,11 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_Rejects() {
 	}
 }
 
-// TestRegisterPallasKey_NoPhaseTimeout verifies that the REGISTERING phase
-// does not set a phase timeout (it persists until deal or reinit).
-func (s *MsgServerTestSuite) TestRegisterPallasKey_NoPhaseTimeout() {
+// TestRegisterPallasKey_GlobalRegistry verifies that registration goes to the
+// global Pallas PK registry and is independent of any ceremony state.
+func (s *MsgServerTestSuite) TestRegisterPallasKey_GlobalRegistry() {
 	s.SetupTest()
 
-	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
-		Creator:  testAccAddr(1),
-		PallasPk: testPallasPK(),
-	})
-	s.Require().NoError(err)
-
-	kv := s.keeper.OpenKVStore(s.ctx)
-	state, err := s.keeper.GetCeremonyState(kv)
-	s.Require().NoError(err)
-	s.Require().Equal(uint64(0), state.PhaseTimeout, "REGISTERING should have no timeout")
-}
-
-// TestRegisterPallasKey_AfterReset verifies that registration works after the
-// ceremony was reset to REGISTERING (e.g., after a DEALT timeout or reinit).
-func (s *MsgServerTestSuite) TestRegisterPallasKey_AfterReset() {
-	s.SetupTest()
-
-	// Seed empty REGISTERING state (simulating post-reset).
-	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetCeremonyState(kv, &types.CeremonyState{
-		Status: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-	}))
-
-	// Registration should succeed.
 	pk := testPallasPK()
 	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
 		Creator:  testAccAddr(1),
@@ -724,13 +668,12 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_AfterReset() {
 	})
 	s.Require().NoError(err)
 
-	state, err := s.keeper.GetCeremonyState(kv)
+	kv := s.keeper.OpenKVStore(s.ctx)
+	vpk, err := s.keeper.GetPallasKey(kv, testValoperAddr(1))
 	s.Require().NoError(err)
-	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, state.Status)
-	s.Require().Len(state.Validators, 1)
-	s.Require().Equal(testValoperAddr(1), state.Validators[0].ValidatorAddress)
-	s.Require().Equal(pk, state.Validators[0].PallasPk)
-	s.Require().Equal(uint64(0), state.PhaseTimeout, "REGISTERING should have no timeout")
+	s.Require().NotNil(vpk)
+	s.Require().Equal(testValoperAddr(1), vpk.ValidatorAddress)
+	s.Require().Equal(pk, vpk.PallasPk)
 }
 
 // ===========================================================================

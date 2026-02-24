@@ -64,6 +64,10 @@ var (
 	// ShareCountPrefix stores share reveal counts per (round, proposal, decision):
 	//   0x0B || round_id || big-endian uint32 proposal_id || big-endian uint32 decision -> uint64 BE
 	ShareCountPrefix = []byte{0x0B}
+
+	// PallasKeyPrefix stores the global Pallas PK registry (decoupled from ceremony):
+	//   0x0C || valoper_address_bytes -> ValidatorPallasKey (protobuf)
+	PallasKeyPrefix = []byte{0x0C}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -194,6 +198,12 @@ func ShareCountKey(roundID []byte, proposalID uint32, decision uint32) []byte {
 	key = appendUint32BE(key, proposalID)
 	key = appendUint32BE(key, decision)
 	return key
+}
+
+// PallasKeyKey returns the store key for a validator's Pallas PK in the global registry.
+// Format: 0x0C || valoper_address_bytes
+func PallasKeyKey(valoperAddr string) []byte {
+	return append(PallasKeyPrefix, []byte(valoperAddr)...)
 }
 
 // TallyResultPrefixForRound returns the KV prefix for all tally results
