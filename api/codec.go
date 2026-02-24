@@ -12,10 +12,9 @@ import (
 
 // Vote transaction type tags. The first byte of the wire format identifies
 // the message type. Tags 0x02–0x05 are vote-round transactions that use
-// ZKP/RedPallas authentication. Tag 0x08 is the only ceremony tag that
-// still uses the custom wire format (auto-injected by PrepareProposal).
-// MsgCreateVotingSession (0x01) and other ceremony messages now flow
-// through standard Cosmos SDK transactions with signature verification.
+// ZKP/RedPallas authentication. Tags 0x07–0x08 are ceremony tags auto-injected
+// by PrepareProposal (deal + ack). MsgCreateVotingSession (0x01) and other
+// ceremony messages flow through standard Cosmos SDK transactions.
 const (
 	TagCreateVotingSession byte = 0x01
 	TagDelegateVote        byte = 0x02
@@ -23,8 +22,8 @@ const (
 	TagRevealShare         byte = 0x04
 	TagSubmitTally         byte = 0x05
 
-	// Ceremony tags — only TagAckExecutiveAuthorityKey uses custom wire format.
-	// The others are retained as constants for reference / migration.
+	// Ceremony tags — Deal (0x07) and Ack (0x08) use custom wire format
+	// (auto-injected by PrepareProposal). Others are standard Cosmos txs.
 	TagRegisterPallasKey              byte = 0x06
 	TagDealExecutiveAuthorityKey      byte = 0x07
 	TagAckExecutiveAuthorityKey       byte = 0x08
@@ -34,8 +33,8 @@ const (
 )
 
 // IsCustomTag returns true if b is a valid custom transaction type tag
-// (vote-round 0x01–0x05 or ceremony ack 0x08). Other ceremony messages
-// now use standard Cosmos SDK transactions.
+// (vote-round 0x02–0x05 or ceremony 0x07–0x08). Other ceremony messages
+// use standard Cosmos SDK transactions.
 func IsCustomTag(b byte) bool {
 	return IsVoteTag(b) || IsCeremonyTag(b)
 }
@@ -47,12 +46,12 @@ func IsVoteTag(b byte) bool {
 }
 
 // IsCeremonyTag returns true if b is a ceremony transaction type tag that
-// uses the custom wire format. Only MsgAckExecutiveAuthorityKey (0x08)
-// remains on the custom path — it is auto-injected by PrepareProposal and
-// never client-signed. All other ceremony messages now flow through standard
+// uses the custom wire format. MsgDealExecutiveAuthorityKey (0x07) and
+// MsgAckExecutiveAuthorityKey (0x08) are auto-injected by PrepareProposal
+// and never client-signed. All other ceremony messages flow through standard
 // Cosmos SDK transactions with proper signature verification.
 func IsCeremonyTag(b byte) bool {
-	return b == TagAckExecutiveAuthorityKey
+	return b == TagDealExecutiveAuthorityKey || b == TagAckExecutiveAuthorityKey
 }
 
 // TagForMessage returns the wire-format tag for a VoteMessage.
@@ -132,11 +131,11 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 //
 //	[1 byte: msg_type_tag] [N bytes: protobuf-encoded message]
 //
-// Only MsgAckExecutiveAuthorityKey (tag 0x08) uses the custom wire format.
-// All other ceremony messages are sent as standard Cosmos SDK transactions.
+// Tags 0x07 (Deal) and 0x08 (Ack) use the custom wire format — both are
+// auto-injected by PrepareProposal and never client-signed.
 func EncodeCeremonyTx(msg proto.Message, tag byte) ([]byte, error) {
 	if !IsCeremonyTag(tag) {
-		return nil, fmt.Errorf("invalid ceremony tag: 0x%02x (only 0x08 uses custom wire format)", tag)
+		return nil, fmt.Errorf("invalid ceremony tag: 0x%02x (only 0x07-0x08 use custom wire format)", tag)
 	}
 
 	body, err := proto.Marshal(msg)
@@ -151,8 +150,8 @@ func EncodeCeremonyTx(msg proto.Message, tag byte) ([]byte, error) {
 }
 
 // DecodeCeremonyTx decodes raw wire-format bytes into a tag and a ceremony
-// message (proto.Message). Only MsgAckExecutiveAuthorityKey (0x08) uses
-// the custom wire format; all other ceremony messages are standard Cosmos txs.
+// message (proto.Message). Tags 0x07 (Deal) and 0x08 (Ack) use the custom
+// wire format; all other ceremony messages are standard Cosmos txs.
 func DecodeCeremonyTx(raw []byte) (byte, proto.Message, error) {
 	if len(raw) < 2 {
 		return 0, nil, fmt.Errorf("ceremony tx too short: %d bytes", len(raw))
@@ -163,10 +162,12 @@ func DecodeCeremonyTx(raw []byte) (byte, proto.Message, error) {
 
 	var msg proto.Message
 	switch tag {
+	case TagDealExecutiveAuthorityKey:
+		msg = &types.MsgDealExecutiveAuthorityKey{}
 	case TagAckExecutiveAuthorityKey:
 		msg = &types.MsgAckExecutiveAuthorityKey{}
 	default:
-		return 0, nil, fmt.Errorf("invalid ceremony tx tag: 0x%02x (only 0x08 uses custom wire format)", tag)
+		return 0, nil, fmt.Errorf("invalid ceremony tx tag: 0x%02x (only 0x07-0x08 use custom wire format)", tag)
 	}
 
 	if err := proto.Unmarshal(body, msg); err != nil {
