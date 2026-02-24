@@ -2,6 +2,9 @@
 
 package redpallas
 
+// IsMock is false when built with the "redpallas" tag — the real FFI verifier is active.
+const IsMock = false
+
 // RedPallasVerifier implements Verifier using real RedPallas signature
 // verification via CGo bindings to the Rust reddsa crate. Only available
 // when built with the "redpallas" build tag.

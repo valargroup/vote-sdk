@@ -31,7 +31,7 @@ Proves that a registered voter is casting a valid vote, without revealing which 
    * **vote_comm_tree_position**: leaf position in the vote commitment tree.
    * **vsk**: voting spending key (scalar for ECC multiplication). Used in condition 3 for `[vsk] * SpendAuthG`.
    * **rivk_v**: CommitIvk randomness (scalar). Blinding factor for `CommitIvk(ak, nk, rivk_v)` in condition 3.
-   * **vsk_nk**: nullifier deriving key derived from `vsk`. Shared between condition 3 (CommitIvk `nk` input) and condition 5 (VAN nullifier keying).
+   * **vsk_nk**: nullifier deriving key. Concretely `fvk.nk().inner()` — the standard Orchard `NullifierDerivingKey` derived from the spending key via `PRF_expand_nk(sk)`. The "vsk" prefix reflects its role in the voting key hierarchy (shared between condition 3's CommitIvk and condition 5's nullifier), not distinct key material. It is structurally identical to the `nk` used in ZKP 1's governance nullifier; cross-circuit uniqueness is ensured by the differing domain tags (see Condition 5).
 
 - Private (vote commitment — conditions 8–12)
    * **shares_1..5**: the voting share vector (each in `[0, 2^24)`).
@@ -179,8 +179,8 @@ van_nullifier = Poseidon(vsk_nk, domain_van_nullifier, voting_round_id, vote_aut
 
 Single `ConstantLength<4>` call matching ZKP 1 condition 14's governance nullifier pattern (`gov_null = Poseidon(nk, domain_tag, vote_round_id, real_nf)`):
 
-- **`vsk_nk`**: nullifier deriving key (private witness, base field element). The same cell is shared with condition 3 (CommitIvk), binding the nullifier to the authenticated key hierarchy.
-- **`domain_van_nullifier`**: `"vote authority spend"` (20 bytes) zero-padded to 32 and interpreted as a little-endian Pallas field element. Assigned via `assign_advice_from_constant` so the value is baked into the verification key, providing domain separation from other Poseidon uses in the protocol.
+- **`vsk_nk`**: nullifier deriving key (private witness, base field element). Concretely `fvk.nk().inner()` — structurally the same value as the `nk` used in ZKP 1. The same cell is shared with condition 3 (CommitIvk), binding the nullifier to the authenticated key hierarchy.
+- **`domain_van_nullifier`**: `"vote authority spend"` (20 bytes) zero-padded to 32 and interpreted as a little-endian Pallas field element. Assigned via `assign_advice_from_constant` so the value is **baked into the verification key** — a prover cannot substitute a different value. This tag is the sole cross-circuit separator between this nullifier and ZKP 1's governance nullifier, which uses `"governance authorization"` under the same key. The two tags produce distinct field elements, so a collision would require breaking Poseidon.
 - **`voting_round_id`**: cell-equality-linked to condition 2's instance copy, scoping the nullifier to this round.
 - **`vote_authority_note_old`**: cell-equality-linked to condition 2's derived VAN hash, binding conditions 2 and 5 together.
 
