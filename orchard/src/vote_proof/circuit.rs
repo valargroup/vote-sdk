@@ -677,7 +677,8 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 
         // Condition 6: (proposal_id, one_shifted) lookup table for
         // one_shifted = 2^proposal_id. When q_cond5 = 0 the lookup input
-        // is (0, 1) so it passes; when q_cond5 = 1 we enforce (proposal_id,
+        // is (0, 1) so it passes. It passes because 2^0 = 1.
+        // When q_cond5 = 1, we enforce (proposal_id,
         // one_shifted) in {(0,1), (1,2), ..., (15, 32768)}.
         // Must be complex_selector because we use it in (one - q) in the lookup.
         let q_cond5 = meta.complex_selector();
@@ -690,7 +691,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             // When q=0: (0, 1); when q=1: (proposal_id, one_shifted).
             let input_0 = q.clone() * proposal_id;
             let one = Expression::Constant(pallas::Base::one());
-            let input_1 = q.clone() * one_shifted + (one.clone() - q) * one;
+            let input_1 = q.clone() * one_shifted + (one.clone() - q);
             vec![
                 (input_0, table_proposal_id),
                 (input_1, table_one_shifted),
@@ -1336,11 +1337,11 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                             .zip(two_pow_i_val)
                             .map(|((r, b), t)| r + b * t);
 
-                        region.assign_advice(
+                        proposal_id_cell.copy_advice(
                             || format!("proposal_id copy {}", i),
+                            &mut region,
                             config.advices[0],
                             row,
-                            || proposal_id_cell.value().copied(),
                         )?;
                         region.assign_advice(
                             || format!("b_{}", i),
