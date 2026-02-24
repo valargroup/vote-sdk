@@ -76,8 +76,8 @@ Starting all services for local development: `make up` from the repo root. This 
 
 The correct sequence to start everything from scratch:
 
-1. `make up` (from repo root) — inits chain, bootstraps + ingests nullifiers, exports PIR tier files, starts zallyd + PIR server
-2. `make ceremony` (from `sdk/`) — runs EA key ceremony (required before creating voting rounds)
+1. `make up` (from repo root) — inits chain, bootstraps + ingests nullifiers, starts zallyd + IMT query server
+2. `make ceremony` (from `sdk/`) — registers Pallas key + creates a round + waits for it to become ACTIVE (auto-ceremony)
 3. `npm run dev` (from `shielded_vote_generator_ui/`) — starts admin UI on port 5173
 4. Rebuild iOS app in Xcode and run
 
@@ -93,9 +93,11 @@ To override the PIR server URL: `ZALLY_PIR_URL=http://host:port make start`
 
 The Makefiles set `export GOBIN := $(HOME)/go/bin` so that `go install` puts the binary in `~/go/bin`, matching the `PATH` they export. If you use a Go version manager like mise that overrides `GOBIN` to its own directory, the Makefile's explicit `GOBIN` takes precedence, preventing stale binaries in `~/go/bin` from shadowing the freshly built one.
 
-### Ceremony requirement
+### Ceremony
 
-Before creating a voting round, the EA key ceremony must be in CONFIRMED status. Run `make ceremony` from `sdk/` after `make up`. Check status: `curl -s http://localhost:1318/zally/v1/ceremony`.
+The EA key ceremony is automatic per voting round. When a round is created, eligible validators are snapshotted and the ceremony proceeds via PrepareProposal (auto-deal + auto-ack). The only manual prerequisite is Pallas key registration (done by `make ceremony`). Validators who fail to ack in 3 consecutive ceremonies are jailed.
+
+To bootstrap the first round locally: `make ceremony` from `sdk/` after `make up`.
 
 ## Protocol Documentation
 

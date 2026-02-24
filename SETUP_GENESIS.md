@@ -117,9 +117,15 @@ Share the following with joining validators:
 - The `persistent_peers` string above
 - The `genesis.json` file at `~/.zallyd/config/genesis.json`
 
-## Step 6 — Bootstrap the EA Key Ceremony
+## Step 6 — EA Key Ceremony
 
-See [SETUP_CEREMONY.md](SETUP_CEREMONY.md) for the full ceremony procedure.
+The EA key ceremony is now **automatic per voting round**. When a round is created, eligible validators (bonded + registered Pallas key) are snapshotted. The block proposer auto-deals and auto-acks via `PrepareProposal`. No manual ceremony steps are needed.
+
+To register the genesis validator's Pallas key and create the first round:
+
+```bash
+cd sdk && make ceremony
+```
 
 ## Useful Commands
 

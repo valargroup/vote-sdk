@@ -74,6 +74,12 @@ Once `start.sh` reports "Validator registered", confirm you appear in the valida
 zallyd query staking validators --node tcp://localhost:26657
 ```
 
+## Ceremony Participation
+
+The EA key ceremony is automatic. When a new voting round is created, your validator is included in the ceremony if it is bonded and has a registered Pallas key (done automatically by `join.sh`). The block proposer handles dealing and acking via `PrepareProposal` — no manual steps required.
+
+If your validator fails to ack in 3 consecutive ceremonies, it will be jailed. Check status with `./ceremony.sh status`.
+
 ## Useful commands
 
 ```bash
