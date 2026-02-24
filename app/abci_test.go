@@ -592,9 +592,9 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 	// Generate a real EA keypair for DLEQ proof generation/verification.
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
 
-	// Re-seed the ceremony with this test's EA public key so the vote round
-	// stores the matching ea_pk (needed for DLEQ verification).
-	s.app.SeedConfirmedCeremony(eaPk.Point.ToAffineCompressed())
+	// Set EA public key so SeedVotingSession stores the matching ea_pk
+	// on the round (needed for DLEQ verification).
+	s.app.EaPk = eaPk.Point.ToAffineCompressed()
 
 	// Create a session expiring 30 seconds from now.
 	voteEndTime := s.app.Time.Add(30 * time.Second)
@@ -777,7 +777,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyRejectsActiveRound() {
 // ---------------------------------------------------------------------------
 
 func TestPrepareProposalAutoTally(t *testing.T) {
-	app, pk := testutil.SetupTestAppWithEAKey(t)
+	app, pk, eaSkBytes := testutil.SetupTestAppWithEAKey(t)
 
 	// Step 1: Create voting session expiring 30s from now.
 	voteEndTime := app.Time.Add(30 * time.Second)
@@ -795,6 +795,7 @@ func TestPrepareProposalAutoTally(t *testing.T) {
 		Proposals:         testutil.SampleProposals(),
 	}
 	roundID := app.SeedVotingSession(setupMsg)
+	app.WriteEaSkForRound(roundID, eaSkBytes)
 
 	// Step 2: Delegate to populate the commitment tree.
 	delegation := testutil.ValidDelegation(roundID, 0x10)
@@ -883,15 +884,15 @@ func TestPrepareProposalAutoAck(t *testing.T) {
 			Ciphertext:       env.Ciphertext,
 		},
 	}
-	app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+	roundID := app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 
-	// Verify ceremony is DEALT before PrepareProposal.
+	// Verify round ceremony is DEALT before PrepareProposal.
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	state, err := app.VoteKeeper().GetCeremonyState(kvStore)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, state.Status)
-	require.Len(t, state.Acks, 0)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	require.Len(t, round.CeremonyAcks, 0)
 
 	// Run a block with PrepareProposal — should inject MsgAckExecutiveAuthorityKey.
 	app.NextBlockWithPrepareProposal()
@@ -899,12 +900,12 @@ func TestPrepareProposalAutoAck(t *testing.T) {
 	// Verify ceremony is now CONFIRMED (single validator, so one ack = all acked).
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	state, err = app.VoteKeeper().GetCeremonyState(kvStore)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status,
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus,
 		"ceremony should be CONFIRMED after auto-ack")
-	require.Len(t, state.Acks, 1)
-	require.Equal(t, valAddr, state.Acks[0].ValidatorAddress)
+	require.Len(t, round.CeremonyAcks, 1)
+	require.Equal(t, valAddr, round.CeremonyAcks[0].ValidatorAddress)
 }
 
 // ---------------------------------------------------------------------------

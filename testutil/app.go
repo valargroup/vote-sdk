@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -64,6 +65,14 @@ type TestApp struct {
 	// ValPrivKey is the secp256k1 private key of the genesis validator's
 	// operator account. Used for signing ceremony messages in tests.
 	ValPrivKey *secp256k1.PrivKey
+
+	// EaSkDir is the directory for per-round ea_sk files, derived from
+	// the "vote.ea_sk_path" app option. Empty when no EA key is configured.
+	EaSkDir string
+
+	// EaPk is the EA public key (compressed Pallas point). When set, SeedVotingSession
+	// uses this instead of a zero placeholder.
+	EaPk []byte
 }
 
 // SetupTestApp creates a fresh ZallyApp backed by an in-memory database,
@@ -88,7 +97,7 @@ func SetupTestApp(t *testing.T) *TestApp {
 // EA (Election Authority). The secret key is written to a temp file and passed
 // via the "vote.ea_sk_path" app option so that PrepareProposal can decrypt
 // tallies. Returns both the TestApp and the public key for encrypting shares.
-func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey) {
+func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey, []byte) {
 	t.Helper()
 
 	sk, pk := elgamal.KeyGen(rand.Reader)
@@ -96,7 +105,8 @@ func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey) {
 	skBytes, err := elgamal.MarshalSecretKey(sk)
 	require.NoError(t, err)
 
-	skPath := filepath.Join(t.TempDir(), "ea.sk")
+	tmpDir := t.TempDir()
+	skPath := filepath.Join(tmpDir, "ea.sk")
 	require.NoError(t, os.WriteFile(skPath, skBytes, 0600))
 
 	appOpts := simtestutil.AppOptionsMap{
@@ -104,10 +114,22 @@ func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey) {
 	}
 
 	ta := setupTestApp(t, appOpts)
-	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
+	ta.EaSkDir = tmpDir
+	ta.EaPk = pk.Point.ToAffineCompressed()
 	ta.SeedVoteManager("zvote1admin")
 
-	return ta, pk
+	return ta, pk, skBytes
+}
+
+// WriteEaSkForRound writes the ea_sk bytes to the per-round file path so the
+// tally PrepareProposal handler can load it. Call after creating a round.
+func (ta *TestApp) WriteEaSkForRound(roundID []byte, eaSkBytes []byte) {
+	ta.t.Helper()
+	if ta.EaSkDir == "" {
+		ta.t.Fatal("EaSkDir not set — use SetupTestAppWithEAKey")
+	}
+	path := filepath.Join(ta.EaSkDir, "ea_sk."+hex.EncodeToString(roundID))
+	require.NoError(ta.t, os.WriteFile(path, eaSkBytes, 0600))
 }
 
 // setupTestApp is the shared implementation for SetupTestApp and SetupTestAppWithEAKey.
@@ -269,9 +291,11 @@ func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
 
-	// Use a placeholder ea_pk. In the per-round model, ea_pk is set during
-	// the ceremony deal phase, but tests seeding ACTIVE rounds need a value.
-	eaPk := make([]byte, 32)
+	// Use the configured ea_pk if available, otherwise a zero placeholder.
+	eaPk := ta.EaPk
+	if len(eaPk) == 0 {
+		eaPk = make([]byte, 32)
+	}
 
 	roundID := deriveRoundID(msg)
 

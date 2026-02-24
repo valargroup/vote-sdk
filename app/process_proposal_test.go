@@ -51,7 +51,10 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		},
 	}
 
-	// Helper to build a valid ack tx.
+	// Track the current round ID (set by each test's setup func).
+	var currentRoundID []byte
+
+	// Helper to build a valid ack tx targeting the current round.
 	validAckTx := func() []byte {
 		h := sha256.New()
 		h.Write([]byte("ack"))
@@ -62,6 +65,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		msg := &types.MsgAckExecutiveAuthorityKey{
 			Creator:      valAddr,
 			AckSignature: sig,
+			VoteRoundId:  currentRoundID,
 		}
 		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagAckExecutiveAuthorityKey)
 		require.NoError(t, err)
@@ -77,7 +81,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "valid ack tx in DEALT state",
 			setup: func() {
-				app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{validAckTx()}
@@ -85,9 +89,11 @@ func TestProcessProposalAckValidation(t *testing.T) {
 			wantAccept: true,
 		},
 		{
-			name: "ack tx when ceremony is CONFIRMED (not DEALT) → reject",
+			name: "ack tx with no matching PENDING round → reject",
 			setup: func() {
+				// SeedConfirmedCeremony is a no-op; no PENDING round exists.
 				app.SeedConfirmedCeremony(eaPkBytes)
+				currentRoundID = bytes.Repeat([]byte{0xFF}, 32) // non-existent
 			},
 			txs: func() [][]byte {
 				return [][]byte{validAckTx()}
@@ -108,7 +114,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 						Ciphertext:       env.Ciphertext,
 					},
 				}
-				app.SeedDealtCeremony(eaPkBytes, eaPkBytes, fakePayloads, fakeValidators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, fakePayloads, fakeValidators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{validAckTx()}
@@ -118,7 +124,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "duplicate ack from same validator → reject",
 			setup: func() {
-				app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 				// Run PrepareProposal → FinalizeBlock to process the first ack.
 				app.NextBlockWithPrepareProposal()
 			},
@@ -131,7 +137,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "malformed ack tx (corrupted protobuf) → reject",
 			setup: func() {
-				app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagAckExecutiveAuthorityKey, 0xFF, 0xFF, 0xFF}}
@@ -141,7 +147,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "short tx (only tag byte) skipped → accept",
 			setup: func() {
-				app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagAckExecutiveAuthorityKey}}
@@ -151,7 +157,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "non-custom tx bytes pass through → accept",
 			setup: func() {
-				app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{bytes.Repeat([]byte{0xAA}, 100)}
@@ -161,7 +167,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "valid ack mixed with non-custom tx → accept",
 			setup: func() {
-				app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{
@@ -174,7 +180,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "empty tx list → accept",
 			setup: func() {
-				app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 			},
 			txs: func() [][]byte {
 				return nil
@@ -330,7 +336,7 @@ func TestPrepareProposalThenProcessProposalAck(t *testing.T) {
 			Ciphertext:       env.Ciphertext,
 		},
 	}
-	app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+	roundID := app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 
 	// Step 1: PrepareProposal should inject an ack tx.
 	ppResp := app.CallPrepareProposal()
@@ -350,16 +356,16 @@ func TestPrepareProposalThenProcessProposalAck(t *testing.T) {
 
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	state, err := app.VoteKeeper().GetCeremonyState(kvStore)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status,
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus,
 		"ceremony should be CONFIRMED after ack pipeline")
 }
 
 // TestPrepareProposalThenProcessProposalTally verifies that the tally tx
 // produced by PrepareProposal is accepted by ProcessProposal.
 func TestPrepareProposalThenProcessProposalTally(t *testing.T) {
-	app, pk := testutil.SetupTestAppWithEAKey(t)
+	app, pk, eaSkBytes := testutil.SetupTestAppWithEAKey(t)
 
 	// Create a voting session expiring soon.
 	voteEndTime := app.Time.Add(30 * time.Second)
@@ -377,6 +383,7 @@ func TestPrepareProposalThenProcessProposalTally(t *testing.T) {
 		Proposals:         testutil.SampleProposals(),
 	}
 	roundID := app.SeedVotingSession(setupMsg)
+	app.WriteEaSkForRound(roundID, eaSkBytes)
 
 	// Delegate and reveal a share so there is tally data.
 	delegation := testutil.ValidDelegation(roundID, 0x10)
@@ -480,16 +487,16 @@ func TestPrepareProposalSkipsWhenAlreadyAcked(t *testing.T) {
 			Ciphertext:       env.Ciphertext,
 		},
 	}
-	app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+	roundID := app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 
 	// First block: auto-ack fires and moves ceremony to CONFIRMED.
 	app.NextBlockWithPrepareProposal()
 
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	state, err := app.VoteKeeper().GetCeremonyState(kvStore)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, state.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus)
 
 	// Second block: PrepareProposal should NOT inject anything (already acked / CONFIRMED).
 	ppResp := app.CallPrepareProposal()

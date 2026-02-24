@@ -137,12 +137,12 @@ func TestEncodeDecodeSubmitTally(t *testing.T) {
 }
 
 func TestIsCeremonyTag(t *testing.T) {
-	// Only MsgAckExecutiveAuthorityKey (0x08) uses the custom wire format.
+	// Deal (0x07) and Ack (0x08) use the custom wire format.
+	require.True(t, IsCeremonyTag(TagDealExecutiveAuthorityKey))
 	require.True(t, IsCeremonyTag(TagAckExecutiveAuthorityKey))
 
 	// All other ceremony tags now use standard Cosmos SDK transactions.
 	require.False(t, IsCeremonyTag(TagRegisterPallasKey))
-	require.False(t, IsCeremonyTag(TagDealExecutiveAuthorityKey))
 	require.False(t, IsCeremonyTag(TagCreateValidatorWithPallasKey))
 	require.False(t, IsCeremonyTag(TagSetVoteManager))
 	require.False(t, IsCeremonyTag(0x00))
@@ -179,7 +179,7 @@ func TestEncodeCeremonyTx_RejectsNonAckTags(t *testing.T) {
 	// Non-ack ceremony tags should be rejected since they now use standard Cosmos txs.
 	_, err := EncodeCeremonyTx(msg, TagSetVoteManager)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "only 0x08 uses custom wire format")
+	require.Contains(t, err.Error(), "only 0x07-0x08 use custom wire format")
 }
 
 func TestDecodeVoteTx_TooShort(t *testing.T) {
