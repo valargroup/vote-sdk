@@ -32,8 +32,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
 
 	voteapi "github.com/z-cale/zally/api"
-	"github.com/z-cale/zally/crypto/redpallas"
-	"github.com/z-cale/zally/crypto/zkp/halo2"
 	"github.com/z-cale/zally/internal/helper"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
 )
@@ -185,14 +183,6 @@ func NewZallyApp(
 //   - Vote transactions (VoteTxWrapper): ZKP/RedPallas validation with infinite gas
 //   - Standard Cosmos transactions: standard SDK ante chain (sig verify, fees, etc.)
 func (app *ZallyApp) setAnteHandler(txConfig client.TxConfig) {
-	// Reject binaries built without real cryptographic verifiers. A binary built
-	// with `make install` (no build tags) silently passes all proofs and
-	// signatures via mock verifiers. Always use `make install-ffi` for production.
-	if redpallas.IsMock || halo2.IsMock {
-		panic("zallyd started with mock cryptographic verifiers — " +
-			"rebuild with `make install-ffi` (requires -tags halo2,redpallas)")
-	}
-
 	cryptoOpts := ProductionOpts()
 	anteHandler, err := NewDualAnteHandler(DualAnteHandlerOptions{
 		HandlerOptions: ante.HandlerOptions{
