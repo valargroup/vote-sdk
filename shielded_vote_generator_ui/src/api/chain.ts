@@ -80,6 +80,15 @@ export interface ChainRound {
   }>;
   proposals_hash?: string;
   ea_pk?: string;
+  // Per-round ceremony fields (populated when status = PENDING).
+  ceremony_status?: string | number;
+  ceremony_validators?: Array<{
+    validator_address: string;
+    pallas_pk: string;
+  }>;
+  ceremony_dealer?: string;
+  ceremony_phase_start?: string;
+  ceremony_phase_timeout?: string;
 }
 
 export interface TallyResult {
