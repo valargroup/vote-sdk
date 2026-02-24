@@ -78,6 +78,42 @@
 //! Together (10)+(16) prove sel_i is a one-hot vector with the single 1 at position proposal_id.
 //! Together (11)+(17) prove the old authority had that bit set.
 //! Together (14)+(15)+(18)+(19) prove auth_new = auth_old - 2^proposal_id.
+//!
+//! ## Worked Example
+//!
+//! Inputs:  authority_old = 13 = 0b0000_0000_0000_1101  (permission bits 0, 2, 3 are set)
+//!          proposal_id   = 2   →  one_shifted = 4 = 2^2
+//! Output:  authority_new = 9  = 0b0000_0000_0000_1001  (bit 2 cleared)
+//!
+//! Column headers match the cell layout above.
+//! Note: on row 0 the a[1] and a[2] slots are repurposed for one_shifted and pid_inv respectively;
+//! they revert to b_i / sel_i from row 1 onward.
+//!
+//!  Row | gate           | a[0]  | a[1]  | a[2]  | a[3]  | a[4]  | a[5]  | a[6]  | a[7]  | a[8]  | a[9]
+//!      |                |  pid  | b_i   | sel_i |b_new_i| rsel  | rseld | rold  | rnew  |  2^i  | idx
+//! -----+----------------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-----
+//!    0 | q_cond_6       |   2   |  4†   | 2⁻¹†  |   -   |  0*   |  0*   |  0*   |  0*   |   -   |  -
+//! -----+----------------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-----
+//!    1 | init           |   2   |   1   |   0   |   1   |   0   |   0   |   1   |   1   |   1   |  0
+//!    2 | bits           |   2   |   0   |   0   |   0   |   0   |   0   |   1   |   1   |   2   |  1
+//!    3 | bits  ◄ sel=1  |   2   |   1   |   1   |   0   |   1   |   1   |   5   |   1   |   4   |  2
+//!    4 | bits           |   2   |   1   |   0   |   1   |   1   |   1   |  13   |   9   |   8   |  3
+//!  5-15| bits (b_i=0)   |   2   |   0   |   0   |   0   |   1   |   1   |  13   |   9   |  ...  | ...
+//!   16 | bits + sel_one |   2   |   0   |   0   |   0   |   1   |   1   |  13   |   9   | 32768 | 15
+//! -----+----------------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-----
+//!   17 |                |   9   |   -   |   -   |   -   |   -   |   -   |  13   |   9   |   -   |  -
+//!
+//! (* seeded as field-constant 0)
+//! († on row 0, a[1] = one_shifted = 4 and a[2] = pid_inv = 2⁻¹ mod p)
+//!
+//! Accumulator trace:
+//!   Row 1 (i=0): b=1, sel=0  → b_new=1·(1-0)=1,  rold=0+1·1=1,    rnew=0+1·1=1
+//!   Row 2 (i=1): b=0, sel=0  → b_new=0,           rold=1+0·2=1,    rnew=1+0·2=1
+//!   Row 3 (i=2): b=1, sel=1  → b_new=1·(1-1)=0,  rold=1+1·4=5,    rnew=1+0·4=1   ← bit 2 cleared
+//!   Row 4 (i=3): b=1, sel=0  → b_new=1,           rold=5+1·8=13,   rnew=1+1·8=9
+//!   Rows 5-16:   b=0 for all remaining bits      → rold stays 13,  rnew stays 9
+//!   Row 16:      rsel=1 ✓  (exactly one selector fired),  rseld=1 ✓  (that bit was 1 in old authority)
+//!   Row 17:      rold_fin=13 == authority_old ✓,  rnew_fin=9 == authority_new ✓
 //! ```
 
 use alloc::vec::Vec;
