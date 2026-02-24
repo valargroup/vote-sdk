@@ -23,6 +23,7 @@ type mockProver struct {
 func (m *mockProver) GenerateShareRevealProof(
 	merklePath []byte,
 	allEncShares [10][32]byte,
+	shareBlinds [5][32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
@@ -50,6 +51,7 @@ type trackingProver struct {
 func (p *trackingProver) GenerateShareRevealProof(
 	merklePath []byte,
 	allEncShares [10][32]byte,
+	shareBlinds [5][32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
@@ -319,6 +321,7 @@ func TestValidatePayload(t *testing.T) {
 			{C1: b64_32, C2: b64_32, ShareIndex: 3},
 			{C1: b64_32, C2: b64_32, ShareIndex: 4},
 		},
+		ShareBlinds: []string{b64_32, b64_32, b64_32, b64_32, b64_32},
 	}
 
 	t.Run("valid", func(t *testing.T) {

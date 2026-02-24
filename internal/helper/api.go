@@ -200,6 +200,16 @@ func validatePayload(p *SharePayload) error {
 		return fmt.Errorf("enc_share c1/c2 must match all_enc_shares[%d]", idx)
 	}
 
+	// share_blinds: exactly 5 entries, each base64-decodable to 32 bytes.
+	if len(p.ShareBlinds) != 5 {
+		return fmt.Errorf("share_blinds: expected 5 entries, got %d", len(p.ShareBlinds))
+	}
+	for i, b := range p.ShareBlinds {
+		if err := validateB64Field(b, 32, fmt.Sprintf("share_blinds[%d]", i)); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

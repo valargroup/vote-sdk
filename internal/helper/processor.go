@@ -178,10 +178,27 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	}
 	copy(sharesHash[:], shBytes)
 
+	// Decode share_blinds.
+	var shareBlinds [5][32]byte
+	if len(share.Payload.ShareBlinds) != 5 {
+		return fmt.Errorf("expected 5 share_blinds, got %d", len(share.Payload.ShareBlinds))
+	}
+	for i, b := range share.Payload.ShareBlinds {
+		bBytes, err := base64.StdEncoding.DecodeString(b)
+		if err != nil {
+			return fmt.Errorf("decode share_blinds[%d]: %w", i, err)
+		}
+		if len(bBytes) != 32 {
+			return fmt.Errorf("share_blinds[%d] must be 32 bytes, got %d", i, len(bBytes))
+		}
+		copy(shareBlinds[i][:], bBytes)
+	}
+
 	// Generate ZKP #3 proof.
 	proof, nullifier, _, err := p.prover.GenerateShareRevealProof(
 		merklePath,
 		allEncShares,
+		shareBlinds,
 		share.Payload.EncShare.ShareIndex,
 		share.Payload.ProposalID,
 		share.Payload.VoteDecision,

@@ -271,6 +271,8 @@ int32_t zally_generate_share_reveal(
     size_t merkle_path_len,
     const uint8_t* all_enc_shares_ptr,
     size_t all_enc_shares_len,
+    const uint8_t* share_blinds_ptr,
+    size_t share_blinds_len,
     uint32_t share_index,
     uint32_t proposal_id,
     uint32_t vote_decision,

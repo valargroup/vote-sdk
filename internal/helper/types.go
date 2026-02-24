@@ -68,6 +68,7 @@ type SharePayload struct {
 	TreePosition uint64               `json:"tree_position"`  // VC leaf index
 	VoteRoundID  string               `json:"vote_round_id"`  // hex, 32 bytes
 	AllEncShares []EncryptedShareWire `json:"all_enc_shares"` // all 5 shares
+	ShareBlinds  []string             `json:"share_blinds"`   // base64, 5 × 32 bytes
 }
 
 // ShareState represents the processing state of a queued share.
@@ -100,10 +101,12 @@ type ProofGenerator interface {
 	// GenerateShareRevealProof generates a share reveal proof.
 	// merklePath: 772 bytes from votetree.ComputeMerklePath
 	// allEncShares: 10 compressed points (C1_0, C2_0, ..., C1_4, C2_4)
+	// shareBlinds: 5 × 32-byte per-share blind factors
 	// Returns proof bytes, nullifier (32 bytes), tree root (32 bytes).
 	GenerateShareRevealProof(
 		merklePath []byte,
 		allEncShares [10][32]byte,
+		shareBlinds [5][32]byte,
 		shareIndex uint32,
 		proposalID, voteDecision uint32,
 		roundID [32]byte,

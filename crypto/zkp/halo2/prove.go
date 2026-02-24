@@ -20,6 +20,7 @@ import (
 // Parameters:
 //   - merklePath: 772-byte serialized Merkle path (from votetree.ComputeMerklePath)
 //   - allEncShares: 10 compressed Pallas points (C1_0, C2_0, ..., C1_4, C2_4), 32 bytes each
+//   - shareBlinds: 5 per-share blind factors, 32 bytes each
 //   - shareIndex: which of the 5 shares (0..4)
 //   - proposalID: proposal being voted on
 //   - voteDecision: vote choice
@@ -30,6 +31,7 @@ import (
 func GenerateShareRevealProof(
 	merklePath []byte,
 	allEncShares [10][32]byte,
+	shareBlinds [5][32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
@@ -49,6 +51,12 @@ func GenerateShareRevealProof(
 		copy(encSharesBuf[i*32:(i+1)*32], allEncShares[i][:])
 	}
 
+	// Flatten shareBlinds into 160 contiguous bytes.
+	var blindsBuf [160]byte
+	for i := 0; i < 5; i++ {
+		copy(blindsBuf[i*32:(i+1)*32], shareBlinds[i][:])
+	}
+
 	// Allocate proof output buffer (8 KiB is generous for Halo2 IPA proofs).
 	const proofCapacity = 8192
 	var proofBuf [proofCapacity]byte
@@ -59,6 +67,8 @@ func GenerateShareRevealProof(
 		C.size_t(len(merklePath)),
 		(*C.uint8_t)(unsafe.Pointer(&encSharesBuf[0])),
 		C.size_t(320),
+		(*C.uint8_t)(unsafe.Pointer(&blindsBuf[0])),
+		C.size_t(160),
 		C.uint32_t(shareIndex),
 		C.uint32_t(proposalID),
 		C.uint32_t(voteDecision),

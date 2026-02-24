@@ -811,6 +811,8 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     merkle_path_len: usize,
     all_enc_shares_ptr: *const u8,
     all_enc_shares_len: usize,
+    share_blinds_ptr: *const u8,
+    share_blinds_len: usize,
     share_index: u32,
     proposal_id: u32,
     vote_decision: u32,
@@ -828,6 +830,7 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     // --- Input validation ---
     if merkle_path_ptr.is_null()
         || all_enc_shares_ptr.is_null()
+        || share_blinds_ptr.is_null()
         || round_id_ptr.is_null()
         || expected_shares_hash_ptr.is_null()
         || proof_out.is_null()
@@ -842,6 +845,10 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     }
     // 5 shares × 2 points (C1+C2) × 32 bytes = 320
     if all_enc_shares_len != 320 {
+        return -1;
+    }
+    // 5 blind factors × 32 bytes = 160
+    if share_blinds_len != 160 {
         return -1;
     }
     if round_id_len != 32 {
@@ -904,8 +911,21 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
         }
     }
 
+    // --- Step 2b: Decode share blind factors ---
+    let share_blinds_raw = std::slice::from_raw_parts(share_blinds_ptr, share_blinds_len);
+    let mut share_blinds = [pallas::Base::zero(); 5];
+    for i in 0..5usize {
+        let offset = i * 32;
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(&share_blinds_raw[offset..offset + 32]);
+        match Option::from(pallas::Base::from_repr(bytes)) {
+            Some(fp) => share_blinds[i] = fp,
+            None => return -3,
+        }
+    }
+
     // --- Step 3: Compute shares_hash and verify against expected ---
-    let computed_shares_hash = orchard::vote_proof::shares_hash(all_c1_x, all_c2_x);
+    let computed_shares_hash = orchard::vote_proof::shares_hash(share_blinds, all_c1_x, all_c2_x);
 
     let expected_hash_raw = std::slice::from_raw_parts(expected_shares_hash_ptr, 32);
     let mut expected_hash_bytes = [0u8; 32];
@@ -939,6 +959,7 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     let bundle = share_reveal::builder::build_share_reveal(
         auth_path,
         position,
+        share_blinds,
         all_c1_x,
         all_c2_x,
         share_index,
@@ -985,10 +1006,10 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
 /// have the sign bit set (modulus < 2^255), the FFI's sign-bit clearing is
 /// a no-op and the round-trip is clean.
 ///
-/// Returns (merkle_path, all_enc_shares_flat, share_index, proposal_id,
-///          vote_decision, round_id, shares_hash).
+/// Returns (merkle_path, all_enc_shares_flat, share_blinds_flat, share_index,
+///          proposal_id, vote_decision, round_id, shares_hash).
 pub fn build_share_reveal_test_data()
-    -> (Vec<u8>, [u8; 320], u32, u32, u32, [u8; 32], [u8; 32])
+    -> (Vec<u8>, [u8; 320], [u8; 160], u32, u32, u32, [u8; 32], [u8; 32])
 {
     use pasta_curves::group::ff::PrimeField;
     use pasta_curves::pallas;
@@ -996,6 +1017,11 @@ pub fn build_share_reveal_test_data()
     let proposal_id: u32 = 3;
     let vote_decision: u32 = 1;
     let round_id = [0u8; 32]; // simple zero round ID
+
+    // Synthetic blind factors.
+    let share_blinds: [pallas::Base; 5] = core::array::from_fn(|i| {
+        pallas::Base::from(1001u64 + i as u64)
+    });
 
     // Synthetic x-coordinates for encrypted shares.
     let mut all_c1_x = [pallas::Base::zero(); 5];
@@ -1005,8 +1031,8 @@ pub fn build_share_reveal_test_data()
         all_c2_x[i as usize] = pallas::Base::from(200 + i);
     }
 
-    // Compute shares_hash.
-    let shares_hash_fp = orchard::vote_proof::shares_hash(all_c1_x, all_c2_x);
+    // Compute shares_hash with blinded commitments.
+    let shares_hash_fp = orchard::vote_proof::shares_hash(share_blinds, all_c1_x, all_c2_x);
     let shares_hash_bytes: [u8; 32] = shares_hash_fp.to_repr();
 
     // Compute vote_commitment.
@@ -1040,9 +1066,17 @@ pub fn build_share_reveal_test_data()
         enc_shares_flat[i * 64 + 32..i * 64 + 64].copy_from_slice(&c2_bytes);
     }
 
+    // Flatten share_blinds: 5 × 32 bytes.
+    let mut blinds_flat = [0u8; 160];
+    for i in 0..5 {
+        let bytes = share_blinds[i].to_repr();
+        blinds_flat[i * 32..(i + 1) * 32].copy_from_slice(&bytes);
+    }
+
     (
         path_buf.to_vec(),
         enc_shares_flat,
+        blinds_flat,
         0,
         proposal_id,
         vote_decision,
@@ -1112,6 +1146,7 @@ mod tests {
         let (
             merkle_path,
             enc_shares,
+            share_blinds,
             share_index,
             proposal_id,
             vote_decision,
@@ -1130,6 +1165,8 @@ mod tests {
                 merkle_path.len(),
                 enc_shares.as_ptr(),
                 enc_shares.len(),
+                share_blinds.as_ptr(),
+                share_blinds.len(),
                 share_index,
                 proposal_id,
                 vote_decision,
