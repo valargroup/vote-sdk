@@ -3,7 +3,7 @@
 //! Proves that a voter held a permission bit for a specific proposal and
 //! produces the decremented authority value with that bit cleared.
 //!
-//! ## Cell Layout (18 rows x 10 advice columns)
+//! ## Cell Layout (17 rows x 10 advice columns)
 //!
 //! ```text
 //!                        | a[0]          | a[1]         | a[2]       | a[3]      | a[4]         | a[5]         | a[6]        | a[7]        | a[8]   | a[9] |
@@ -16,8 +16,6 @@
 //! Row 16  bits=1         | proposal_id   | b_15         | sel_15     | b_new_15  | rsel=1       | rseld=1      | rold[15]    | rnew[15]    | 32768  |  15  |
 //!         sel_one=1      |               |              |            |           |              |              |             |             |        |      |
 //! -----------------------+---------------+--------------+------------+-----------+--------------+--------------+-------------+-------------+--------+------+
-//! Row 17                 | auth_new      |      -       |     -      |     -     |      -       |      -       |      -      |      -      |   -    |  -   |
-//! -----------------------+---------------+--------------+------------+-----------+--------------+--------------+-------------+-------------+--------+------+
 //!
 //! Abbreviations:
 //!   b_i       = i-th bit of the old authority value (authority old). b_i ∈ {0, 1}
@@ -28,8 +26,7 @@
 //!   rseld[i]  = Sum sel_j*b_j   (j=0..i)   running sum of selected bit
 //!   rold[i]   = Sum b_j*2^j     (j=0..i)   running recomposition of authority_old
 //!   rnew[i]   = Sum b_new_j*2^j (j=0..i)   running recomposition of authority_new
-//!   auth_new  = proposal_authority_new
-//! 
+//!   rnew[15]  is returned directly as the new authority value (no separate output row needed)
 //!
 //! ## Constraints and Invariants
 //!
@@ -68,20 +65,21 @@
 //!   (17) rseld = 1  => the bit at the selected position was 1
 //!                      (voter actually held the permission)
 //!
-//! Post-region equality constraints (anchored to the row-16 accumulation cells):
+//! Post-region equality constraint (anchored to the row-16 accumulation cell):
 //!   (18) rold[15] = proposal_authority_old
 //!          => the bit decomposition is consistent with the claimed old value.
 //!          rold[15] is the advices[6] cell at row 16, the final step of the
 //!          accumulation; it is in the same permutation cycle as all preceding
 //!          run_old steps, so it cannot be forged independently.
-//!   (19) rnew[15] = proposal_authority_new
-//!          => the recomposed new value is exported and bound to the circuit output.
-//!          Same anchoring argument as (18) for advices[7] at row 16.
+//!
+//! rnew[15] (advices[7] at row 16) is returned directly as the circuit output.
+//! No separate output row or equality constraint is needed — the accumulation gates
+//! already fully constrain its value.
 //!
 //! Together (1)+(16) prove proposal_id is a valid index in [1,15].
 //! Together (10)+(16) prove sel_i is a one-hot vector with the single 1 at position proposal_id.
 //! Together (11)+(17) prove the old authority had that bit set.
-//! Together (14)+(15)+(18)+(19) prove auth_new = auth_old - 2^proposal_id.
+//! Together (14)+(15)+(18) prove auth_new = auth_old - 2^proposal_id.
 //!
 //! ## Worked Example
 //!
@@ -105,7 +103,6 @@
 //!  5-15| bits (b_i=0)   |   2   |   0   |   0   |   0   |   1   |   1   |  13   |   9   |  ...  | ...
 //!   16 | bits + sel_one |   2   |   0   |   0   |   0   |   1   |   1   |  13   |   9   | 32768 | 15
 //! -----+----------------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-----
-//!   17 |                |   9   |   -   |   -   |   -   |   -   |   -   |   -   |   -   |   -   |  -
 //!
 //! (* seeded as field-constant 0)
 //! († on row 0, a[1] = one_shifted = 4 and a[2] = pid_inv = 2⁻¹ mod p)
@@ -117,9 +114,7 @@
 //!   Row 4 (i=3): b=1, sel=0  → b_new=1,           rold=5+1·8=13,   rnew=1+1·8=9
 //!   Rows 5-16:   b=0 for all remaining bits      → rold stays 13,  rnew stays 9
 //!   Row 16:      rsel=1 ✓  (exactly one selector fired),  rseld=1 ✓  (that bit was 1 in old authority)
-//!                rold[15]=13 and rnew[15]=9 are the final accumulation cells used in
-//!                equality constraints (18) and (19) — no row-17 copy required.
-//!   Row 17:      auth_new=9 only (arithmetic value old−shift for the output cell).
+//!                rnew[15]=9 is returned directly as the circuit output.
 //! ```
 
 use alloc::vec::Vec;
@@ -418,8 +413,8 @@ impl AuthorityDecrementChip {
         )
     }
 
-    /// Assigns the 18-row bit-decomposition region and enforces equality of
-    /// the recomposed old/new values.
+    /// Assigns the 17-row bit-decomposition region (rows 0–16) and enforces equality of
+    /// the recomposed old value against the provided `proposal_authority_old` cell.
     ///
     /// # Arguments
     ///
@@ -440,7 +435,7 @@ impl AuthorityDecrementChip {
         proposal_authority_old: AssignedCell<pallas::Base, pallas::Base>,
         one_shifted: Value<pallas::Base>,
     ) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error> {
-        let (proposal_authority_new, run_old_final, run_new_final) =
+        let (run_old_final, run_new_final) =
             layouter.assign_region(
                 || "cond6 proposal authority decrement",
                 |mut region| {
@@ -625,29 +620,11 @@ impl AuthorityDecrementChip {
                         }
                     }
 
-                    // Row 17: place proposal_authority_new for external equality checks.
-                    // run_old and run_new finals are taken directly from row 16 (the
-                    // last accumulation step), so no additional copy is needed and the
-                    // permutation argument is never broken by a free witness.
-                    let proposal_authority_new_val = proposal_authority_old_val
-                        .zip(one_shifted)
-                        .map(|(old, shift)| old - shift);
-                    let proposal_authority_new_cell = region.assign_advice(
-                        || "proposal_authority_new",
-                        config.advices[0],
-                        17,
-                        || proposal_authority_new_val,
-                    )?;
-
-                    Ok((
-                        proposal_authority_new_cell,
-                        run_old_last_cell.unwrap(),
-                        run_new_last_cell.unwrap(),
-                    ))
+                    Ok((run_old_last_cell.unwrap(), run_new_last_cell.unwrap()))
                 },
             )?;
 
-        // Constrain recomposed run_old == proposal_authority_old, run_new == proposal_authority_new.
+        // Constrain recomposed run_old == proposal_authority_old.
         layouter.assign_region(
             || "cond6 authority equality",
             |mut region| {
@@ -667,29 +644,9 @@ impl AuthorityDecrementChip {
             },
         )?;
 
-        // Constrain equality:
-        //  * proposal_authority_new (computed as old - shift)
-        // * run_new_final (computed from bit decomposition)
-        layouter.assign_region(
-            || "cond6 new authority equality",
-            |mut region| {
-                let a = proposal_authority_new.copy_advice(
-                    || "copy proposal_authority_new",
-                    &mut region,
-                    config.advices[0],
-                    0,
-                )?;
-                let b = run_new_final.copy_advice(
-                    || "copy run_new",
-                    &mut region,
-                    config.advices[1],
-                    0,
-                )?;
-                region.constrain_equal(a.cell(), b.cell())
-            },
-        )?;
-
-        Ok(proposal_authority_new)
+        // run_new_final is the fully constrained recomposition of the new authority bits;
+        // return it directly as the circuit output.
+        Ok(run_new_final)
     }
 }
 
