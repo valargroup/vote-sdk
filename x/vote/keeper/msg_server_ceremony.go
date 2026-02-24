@@ -193,6 +193,11 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 		AckHeight:        uint64(ctx.BlockHeight()),
 	})
 
+	// Reset consecutive miss counter on successful ack.
+	if err := ms.k.ResetCeremonyMiss(kvStore, msg.Creator); err != nil {
+		return nil, err
+	}
+
 	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 		fmt.Sprintf("ack from %s (%d/%d acked)", msg.Creator, len(round.CeremonyAcks), len(round.CeremonyValidators)))
 

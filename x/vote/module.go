@@ -481,6 +481,31 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		nAcks := len(round.CeremonyAcks)
 		nVals := len(round.CeremonyValidators)
 
+		// Identify non-ackers for miss tracking.
+		acked := make(map[string]bool, nAcks)
+		for _, a := range round.CeremonyAcks {
+			acked[a.ValidatorAddress] = true
+		}
+		for _, v := range round.CeremonyValidators {
+			if acked[v.ValidatorAddress] {
+				continue
+			}
+			// Non-acker: increment miss counter, jail if threshold reached.
+			missCount, err := am.keeper.IncrementCeremonyMiss(kvStore, v.ValidatorAddress)
+			if err != nil {
+				return err
+			}
+			if missCount >= keeper.DefaultCeremonyMissJailThreshold {
+				if err := am.keeper.JailValidator(goCtx, v.ValidatorAddress); err != nil {
+					am.keeper.Logger().Error("failed to jail validator for ceremony misses",
+						"validator", v.ValidatorAddress, "misses", missCount, "error", err)
+				} else {
+					keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+						fmt.Sprintf("validator %s jailed after %d consecutive ceremony misses", v.ValidatorAddress, missCount))
+				}
+			}
+		}
+
 		if keeper.OneThirdAcked(round) {
 			// >= 1/3 acked: strip non-ackers, confirm ceremony, activate round.
 			stripped := nVals - nAcks
