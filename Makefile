@@ -114,20 +114,16 @@ test-helper:
 ## test: Run all tests (Go only, no Rust dependency)
 test: test-unit test-integration test-helper
 
-## ceremony: Bootstrap the EA key ceremony on a running chain (requires: make init && make start)
+## ceremony: Register Pallas key + create round + wait for ACTIVE (per-round auto-ceremony)
 ceremony:
 	ZALLY_API_URL=http://localhost:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml ceremony_bootstrap -- --nocapture --ignored
 
 ## test-api: Rust E2E API tests against a running chain (requires: make init && make start)
 test-api:
-	ZALLY_API_URL=http://localhost:1318 ZALLY_EA_PK_PATH=$(HOME)/.zallyd/ea.pk HELPER_SERVER_URL=http://127.0.0.1:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml -- --nocapture --ignored --skip ceremony_lifecycle_multi_validator
+	ZALLY_API_URL=http://localhost:1318 HELPER_SERVER_URL=http://127.0.0.1:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml -- --nocapture --ignored
 
 ## test-e2e: Alias for test-api (Rust E2E tests)
 test-e2e: test-api
-
-## test-ceremony-e2e: Rust E2E ceremony lifecycle test against a running 3-validator chain (requires: make init-multi)
-test-ceremony-e2e:
-	ZALLY_API_URL=http://localhost:1418 cargo test --release --manifest-path ../e2e-tests/Cargo.toml ceremony_lifecycle_multi_validator -- --nocapture --ignored
 
 ## test-api-restart: init + test-api (full API test cycle; chain must be stopped first)
 test-api-restart: init test-api
