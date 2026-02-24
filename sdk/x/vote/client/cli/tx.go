@@ -32,7 +32,6 @@ func GetTxCmd() *cobra.Command {
 		// Ceremony commands — require standard Cosmos SDK signing by a validator.
 		CmdRegisterPallasKey(),
 		CmdDealExecutiveAuthorityKey(),
-		CmdReInitializeElectionAuthority(),
 		CmdCreateValidatorWithPallasKey(),
 		// Vote-manager commands — signed by the designated vote manager address.
 		CmdSetVoteManager(),
@@ -157,38 +156,6 @@ Example payloads.json:
 				Creator:  clientCtx.GetFromAddress().String(),
 				EaPk:     eaPk,
 				Payloads: payloads,
-			}
-
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
-		},
-	}
-
-	flags.AddTxFlagsToCmd(cmd)
-	return cmd
-}
-
-// CmdReInitializeElectionAuthority broadcasts MsgReInitializeElectionAuthority.
-// Resets the ceremony back to REGISTERING so a fresh key ceremony can begin.
-// Rejected when ceremony is DEALT or any vote round is active/tallying.
-func CmdReInitializeElectionAuthority() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "reinitialize-election-authority",
-		Short: "Reset the EA key ceremony back to REGISTERING",
-		Long: `Broadcast an MsgReInitializeElectionAuthority transaction.
-
-Clears the current ceremony state and resets it to REGISTERING so validators
-can register fresh Pallas keys.  Rejected when:
-  - The ceremony is in DEALT state (awaiting acks).
-  - Any voting round is ACTIVE or TALLYING.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			clientCtx, err := client.GetClientTxContext(cmd)
-			if err != nil {
-				return err
-			}
-
-			msg := &types.MsgReInitializeElectionAuthority{
-				Creator: clientCtx.GetFromAddress().String(),
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)

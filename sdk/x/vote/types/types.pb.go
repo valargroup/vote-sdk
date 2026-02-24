@@ -29,6 +29,7 @@ const (
 	SessionStatus_SESSION_STATUS_ACTIVE      SessionStatus = 1
 	SessionStatus_SESSION_STATUS_TALLYING    SessionStatus = 2
 	SessionStatus_SESSION_STATUS_FINALIZED   SessionStatus = 3
+	SessionStatus_SESSION_STATUS_PENDING     SessionStatus = 4 // Ceremony in progress, not yet active
 )
 
 // Enum value maps for SessionStatus.
@@ -38,12 +39,14 @@ var (
 		1: "SESSION_STATUS_ACTIVE",
 		2: "SESSION_STATUS_TALLYING",
 		3: "SESSION_STATUS_FINALIZED",
+		4: "SESSION_STATUS_PENDING",
 	}
 	SessionStatus_value = map[string]int32{
 		"SESSION_STATUS_UNSPECIFIED": 0,
 		"SESSION_STATUS_ACTIVE":      1,
 		"SESSION_STATUS_TALLYING":    2,
 		"SESSION_STATUS_FINALIZED":   3,
+		"SESSION_STATUS_PENDING":     4,
 	}
 )
 
@@ -269,8 +272,16 @@ type VoteRound struct {
 	Description       string                 `protobuf:"bytes,15,opt,name=description,proto3" json:"description,omitempty"`                                   // Human-readable round description
 	CreatedAtHeight   uint64                 `protobuf:"varint,16,opt,name=created_at_height,json=createdAtHeight,proto3" json:"created_at_height,omitempty"` // Block height at which this round was registered on-chain
 	Title             string                 `protobuf:"bytes,17,opt,name=title,proto3" json:"title,omitempty"`                                               // Short human-readable round title
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Per-round ceremony fields (populated when status = PENDING).
+	CeremonyStatus       CeremonyStatus        `protobuf:"varint,18,opt,name=ceremony_status,json=ceremonyStatus,proto3,enum=zvote.v1.CeremonyStatus" json:"ceremony_status,omitempty"`
+	CeremonyValidators   []*ValidatorPallasKey `protobuf:"bytes,19,rep,name=ceremony_validators,json=ceremonyValidators,proto3" json:"ceremony_validators,omitempty"`
+	CeremonyPayloads     []*DealerPayload      `protobuf:"bytes,20,rep,name=ceremony_payloads,json=ceremonyPayloads,proto3" json:"ceremony_payloads,omitempty"`
+	CeremonyAcks         []*AckEntry           `protobuf:"bytes,21,rep,name=ceremony_acks,json=ceremonyAcks,proto3" json:"ceremony_acks,omitempty"`
+	CeremonyDealer       string                `protobuf:"bytes,22,opt,name=ceremony_dealer,json=ceremonyDealer,proto3" json:"ceremony_dealer,omitempty"`
+	CeremonyPhaseStart   uint64                `protobuf:"varint,23,opt,name=ceremony_phase_start,json=ceremonyPhaseStart,proto3" json:"ceremony_phase_start,omitempty"`
+	CeremonyPhaseTimeout uint64                `protobuf:"varint,24,opt,name=ceremony_phase_timeout,json=ceremonyPhaseTimeout,proto3" json:"ceremony_phase_timeout,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *VoteRound) Reset() {
@@ -420,6 +431,55 @@ func (x *VoteRound) GetTitle() string {
 		return x.Title
 	}
 	return ""
+}
+
+func (x *VoteRound) GetCeremonyStatus() CeremonyStatus {
+	if x != nil {
+		return x.CeremonyStatus
+	}
+	return CeremonyStatus_CEREMONY_STATUS_UNSPECIFIED
+}
+
+func (x *VoteRound) GetCeremonyValidators() []*ValidatorPallasKey {
+	if x != nil {
+		return x.CeremonyValidators
+	}
+	return nil
+}
+
+func (x *VoteRound) GetCeremonyPayloads() []*DealerPayload {
+	if x != nil {
+		return x.CeremonyPayloads
+	}
+	return nil
+}
+
+func (x *VoteRound) GetCeremonyAcks() []*AckEntry {
+	if x != nil {
+		return x.CeremonyAcks
+	}
+	return nil
+}
+
+func (x *VoteRound) GetCeremonyDealer() string {
+	if x != nil {
+		return x.CeremonyDealer
+	}
+	return ""
+}
+
+func (x *VoteRound) GetCeremonyPhaseStart() uint64 {
+	if x != nil {
+		return x.CeremonyPhaseStart
+	}
+	return 0
+}
+
+func (x *VoteRound) GetCeremonyPhaseTimeout() uint64 {
+	if x != nil {
+		return x.CeremonyPhaseTimeout
+	}
+	return 0
 }
 
 // VoteManagerState stores the singleton vote manager address.
@@ -1287,7 +1347,7 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12.\n" +
-	"\aoptions\x18\x04 \x03(\v2\x14.zvote.v1.VoteOptionR\aoptions\"\xda\x04\n" +
+	"\aoptions\x18\x04 \x03(\v2\x14.zvote.v1.VoteOptionR\aoptions\"\xfc\a\n" +
 	"\tVoteRound\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -1306,7 +1366,14 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\tproposals\x18\x0e \x03(\v2\x12.zvote.v1.ProposalR\tproposals\x12 \n" +
 	"\vdescription\x18\x0f \x01(\tR\vdescription\x12*\n" +
 	"\x11created_at_height\x18\x10 \x01(\x04R\x0fcreatedAtHeight\x12\x14\n" +
-	"\x05title\x18\x11 \x01(\tR\x05title\",\n" +
+	"\x05title\x18\x11 \x01(\tR\x05title\x12A\n" +
+	"\x0fceremony_status\x18\x12 \x01(\x0e2\x18.zvote.v1.CeremonyStatusR\x0eceremonyStatus\x12M\n" +
+	"\x13ceremony_validators\x18\x13 \x03(\v2\x1c.zvote.v1.ValidatorPallasKeyR\x12ceremonyValidators\x12D\n" +
+	"\x11ceremony_payloads\x18\x14 \x03(\v2\x17.zvote.v1.DealerPayloadR\x10ceremonyPayloads\x127\n" +
+	"\rceremony_acks\x18\x15 \x03(\v2\x12.zvote.v1.AckEntryR\fceremonyAcks\x12'\n" +
+	"\x0fceremony_dealer\x18\x16 \x01(\tR\x0eceremonyDealer\x120\n" +
+	"\x14ceremony_phase_start\x18\x17 \x01(\x04R\x12ceremonyPhaseStart\x124\n" +
+	"\x16ceremony_phase_timeout\x18\x18 \x01(\x04R\x14ceremonyPhaseTimeout\",\n" +
 	"\x10VoteManagerState\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x8d\x01\n" +
 	"\x13CommitmentTreeState\x12\x1d\n" +
@@ -1379,12 +1446,13 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12#\n" +
 	"\rack_signature\x18\x02 \x01(\fR\fackSignature\x12\x1d\n" +
 	"\n" +
-	"ack_height\x18\x03 \x01(\x04R\tackHeight*\x85\x01\n" +
+	"ack_height\x18\x03 \x01(\x04R\tackHeight*\xa1\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
 	"\x17SESSION_STATUS_TALLYING\x10\x02\x12\x1c\n" +
-	"\x18SESSION_STATUS_FINALIZED\x10\x03*\x8c\x01\n" +
+	"\x18SESSION_STATUS_FINALIZED\x10\x03\x12\x1a\n" +
+	"\x16SESSION_STATUS_PENDING\x10\x04*\x8c\x01\n" +
 	"\x0eCeremonyStatus\x12\x1f\n" +
 	"\x1bCEREMONY_STATUS_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bCEREMONY_STATUS_REGISTERING\x10\x01\x12\x19\n" +
@@ -1429,20 +1497,24 @@ var file_zvote_v1_types_proto_depIdxs = []int32{
 	2,  // 0: zvote.v1.Proposal.options:type_name -> zvote.v1.VoteOption
 	0,  // 1: zvote.v1.VoteRound.status:type_name -> zvote.v1.SessionStatus
 	3,  // 2: zvote.v1.VoteRound.proposals:type_name -> zvote.v1.Proposal
-	4,  // 3: zvote.v1.GenesisState.rounds:type_name -> zvote.v1.VoteRound
-	6,  // 4: zvote.v1.GenesisState.tree_state:type_name -> zvote.v1.CommitmentTreeState
-	8,  // 5: zvote.v1.GenesisState.commitment_leaves:type_name -> zvote.v1.CommitmentLeaf
-	9,  // 6: zvote.v1.GenesisState.nullifiers:type_name -> zvote.v1.NullifierEntry
-	13, // 7: zvote.v1.ProposalSummary.options:type_name -> zvote.v1.OptionSummary
-	1,  // 8: zvote.v1.CeremonyState.status:type_name -> zvote.v1.CeremonyStatus
-	15, // 9: zvote.v1.CeremonyState.validators:type_name -> zvote.v1.ValidatorPallasKey
-	16, // 10: zvote.v1.CeremonyState.payloads:type_name -> zvote.v1.DealerPayload
-	17, // 11: zvote.v1.CeremonyState.acks:type_name -> zvote.v1.AckEntry
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	1,  // 3: zvote.v1.VoteRound.ceremony_status:type_name -> zvote.v1.CeremonyStatus
+	15, // 4: zvote.v1.VoteRound.ceremony_validators:type_name -> zvote.v1.ValidatorPallasKey
+	16, // 5: zvote.v1.VoteRound.ceremony_payloads:type_name -> zvote.v1.DealerPayload
+	17, // 6: zvote.v1.VoteRound.ceremony_acks:type_name -> zvote.v1.AckEntry
+	4,  // 7: zvote.v1.GenesisState.rounds:type_name -> zvote.v1.VoteRound
+	6,  // 8: zvote.v1.GenesisState.tree_state:type_name -> zvote.v1.CommitmentTreeState
+	8,  // 9: zvote.v1.GenesisState.commitment_leaves:type_name -> zvote.v1.CommitmentLeaf
+	9,  // 10: zvote.v1.GenesisState.nullifiers:type_name -> zvote.v1.NullifierEntry
+	13, // 11: zvote.v1.ProposalSummary.options:type_name -> zvote.v1.OptionSummary
+	1,  // 12: zvote.v1.CeremonyState.status:type_name -> zvote.v1.CeremonyStatus
+	15, // 13: zvote.v1.CeremonyState.validators:type_name -> zvote.v1.ValidatorPallasKey
+	16, // 14: zvote.v1.CeremonyState.payloads:type_name -> zvote.v1.DealerPayload
+	17, // 15: zvote.v1.CeremonyState.acks:type_name -> zvote.v1.AckEntry
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_zvote_v1_types_proto_init() }
