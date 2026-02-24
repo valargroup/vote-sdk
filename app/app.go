@@ -270,6 +270,9 @@ func (app *ZallyApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 	}
 	voteHandler := voteapi.NewHandler(voteapi.HandlerConfig{
 		CometRPCEndpoint: cometRPC,
+		Snapshot: voteapi.SnapshotConfig{
+			PIRServiceURL: "http://157.180.63.235:3001",
+		},
 	})
 	voteHandler.RegisterTxRoutes(apiSvr.Router)
 	voteHandler.RegisterQueryRoutes(apiSvr.Router, apiSvr.ClientCtx)
