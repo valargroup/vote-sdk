@@ -22,9 +22,9 @@ import (
 
 // SnapshotConfig holds service URLs for fetching Zcash snapshot data.
 type SnapshotConfig struct {
-	// IMTServiceURL is the URL of the nullifier IMT query service.
-	// Default: "http://localhost:3000"
-	IMTServiceURL string
+	// PIRServiceURL is the URL of the PIR server that serves nullifier tree roots.
+	// Default: "http://157.180.63.235:3001"
+	PIRServiceURL string
 
 	// LightwalletdURL is the gRPC address of a lightwalletd server.
 	// Default: "https://zec.rocks:443"
@@ -45,15 +45,15 @@ type SnapshotData struct {
 // The nc_root is computed via Rust FFI (Sinsemilla hash of the orchard frontier).
 func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (*SnapshotData, error) {
 	// Apply defaults.
-	if cfg.IMTServiceURL == "" {
-		cfg.IMTServiceURL = "http://46.101.255.48:3000"
+	if cfg.PIRServiceURL == "" {
+		cfg.PIRServiceURL = "http://157.180.63.235:3001"
 	}
 	if cfg.LightwalletdURL == "" {
 		cfg.LightwalletdURL = "https://us.zec.stardust.rest:443"
 	}
 
-	// Fetch IMT root and tree state in parallel.
-	type imtResult struct {
+	// Fetch PIR root and tree state in parallel.
+	type pirResult struct {
 		root []byte
 		err  error
 	}
@@ -62,21 +62,21 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 		err error
 	}
 
-	imtCh := make(chan imtResult, 1)
+	pirCh := make(chan pirResult, 1)
 	tsCh := make(chan tsResult, 1)
 
 	go func() {
-		root, err := fetchNullifierIMTRoot(ctx, cfg.IMTServiceURL, height)
-		imtCh <- imtResult{root, err}
+		root, err := fetchNullifierRoot(ctx, cfg.PIRServiceURL, height)
+		pirCh <- pirResult{root, err}
 	}()
 	go func() {
 		ts, err := fetchTreeState(ctx, cfg.LightwalletdURL, height)
 		tsCh <- tsResult{ts, err}
 	}()
 
-	imtRes := <-imtCh
-	if imtRes.err != nil {
-		return nil, fmt.Errorf("fetch IMT root: %w", imtRes.err)
+	pirRes := <-pirCh
+	if pirRes.err != nil {
+		return nil, fmt.Errorf("fetch PIR root: %w", pirRes.err)
 	}
 
 	tsRes := <-tsCh
@@ -97,23 +97,23 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 		return nil, fmt.Errorf("compute nc_root from orchard frontier: %w", err)
 	}
 
-	log.Printf("[zally-api] snapshot data fetched: height=%d blockhash=%s imt_root=%x nc_root=%x",
-		ts.Height, ts.Hash[:min(16, len(ts.Hash))]+"...", imtRes.root[:8], ncRoot[:8])
+	log.Printf("[zally-api] snapshot data fetched: height=%d blockhash=%s pir_root=%x nc_root=%x",
+		ts.Height, ts.Hash[:min(16, len(ts.Hash))]+"...", pirRes.root[:8], ncRoot[:8])
 
 	return &SnapshotData{
-		NullifierIMTRoot:  imtRes.root,
+		NullifierIMTRoot:  pirRes.root,
 		SnapshotBlockhash: blockhash,
 		NcRoot:            ncRoot[:],
 	}, nil
 }
 
-// --- Nullifier IMT service client ---
+// --- PIR server client ---
 
-// fetchNullifierIMTRoot queries the IMT service GET /root endpoint and
+// fetchNullifierRoot queries the PIR server GET /root endpoint and
 // validates that the tree was built to exactly the expected snapshot height.
-// Returns the 32-byte Poseidon tree root.
-func fetchNullifierIMTRoot(ctx context.Context, imtURL string, expectedHeight uint64) ([]byte, error) {
-	url := strings.TrimRight(imtURL, "/") + "/root"
+// Returns the 32-byte Poseidon tree root (depth-29, matching the circuit).
+func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint64) ([]byte, error) {
+	url := strings.TrimRight(pirURL, "/") + "/root"
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -128,33 +128,32 @@ func fetchNullifierIMTRoot(ctx context.Context, imtURL string, expectedHeight ui
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("IMT service returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("PIR service returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
-		Root         string  `json:"root"`
-		LatestHeight *uint64 `json:"latest_height"`
+		Root29 string  `json:"root29"`
+		Height *uint64 `json:"height"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode IMT response: %w", err)
+		return nil, fmt.Errorf("decode PIR response: %w", err)
 	}
 
-	// Validate that the IMT tree height matches the requested snapshot height.
-	if result.LatestHeight == nil {
-		return nil, fmt.Errorf("IMT service has no checkpoint height (tree not synced)")
+	// Validate that the PIR tree height matches the requested snapshot height.
+	if result.Height == nil {
+		return nil, fmt.Errorf("PIR service has no checkpoint height (tree not synced)")
 	}
-	if *result.LatestHeight != expectedHeight {
-		return nil, fmt.Errorf("IMT service tree height %d does not match requested snapshot height %d", *result.LatestHeight, expectedHeight)
+	if *result.Height != expectedHeight {
+		return nil, fmt.Errorf("PIR service tree height %d does not match requested snapshot height %d", *result.Height, expectedHeight)
 	}
 
-	// The IMT service returns "0x"-prefixed hex of a Pallas Fp element (32 bytes LE).
-	hexStr := strings.TrimPrefix(result.Root, "0x")
-	rootBytes, err := hex.DecodeString(hexStr)
+	// The PIR service returns raw hex (no 0x prefix) of a Pallas Fp element (32 bytes LE).
+	rootBytes, err := hex.DecodeString(result.Root29)
 	if err != nil {
-		return nil, fmt.Errorf("decode IMT root hex: %w", err)
+		return nil, fmt.Errorf("decode PIR root hex: %w", err)
 	}
 	if len(rootBytes) != 32 {
-		return nil, fmt.Errorf("IMT root is %d bytes, expected 32", len(rootBytes))
+		return nil, fmt.Errorf("PIR root is %d bytes, expected 32", len(rootBytes))
 	}
 
 	return rootBytes, nil
