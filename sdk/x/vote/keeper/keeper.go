@@ -18,6 +18,7 @@ import (
 type StakingKeeper interface {
 	GetValidator(ctx context.Context, addr sdk.ValAddress) (stakingtypes.Validator, error)
 	GetValidatorByConsAddr(ctx context.Context, consAddr sdk.ConsAddress) (stakingtypes.Validator, error)
+	Jail(ctx context.Context, consAddr sdk.ConsAddress) error
 }
 
 // Keeper of the vote module store.

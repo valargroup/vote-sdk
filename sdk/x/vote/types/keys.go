@@ -65,6 +65,10 @@ var (
 	// PallasKeyPrefix stores the global Pallas PK registry (decoupled from ceremony):
 	//   0x0C || valoper_address_bytes -> ValidatorPallasKey (protobuf)
 	PallasKeyPrefix = []byte{0x0C}
+
+	// CeremonyMissPrefix stores consecutive ceremony miss counters per validator:
+	//   0x0D || valoper_address_bytes -> uint64 BE (miss count)
+	CeremonyMissPrefix = []byte{0x0D}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -201,6 +205,12 @@ func ShareCountKey(roundID []byte, proposalID uint32, decision uint32) []byte {
 // Format: 0x0C || valoper_address_bytes
 func PallasKeyKey(valoperAddr string) []byte {
 	return append(PallasKeyPrefix, []byte(valoperAddr)...)
+}
+
+// CeremonyMissKey returns the store key for a validator's consecutive ceremony miss counter.
+// Format: 0x0D || valoper_address_bytes
+func CeremonyMissKey(valoperAddr string) []byte {
+	return append(CeremonyMissPrefix, []byte(valoperAddr)...)
 }
 
 // TallyResultPrefixForRound returns the KV prefix for all tally results

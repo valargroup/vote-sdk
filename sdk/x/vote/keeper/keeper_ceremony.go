@@ -1,10 +1,18 @@
 package keeper
 
 import (
+	"context"
 	"fmt"
+
+	"cosmossdk.io/core/store"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/z-cale/zally/x/vote/types"
 )
+
+// DefaultCeremonyMissJailThreshold is the number of consecutive ceremony
+// misses after which a validator is jailed.
+const DefaultCeremonyMissJailThreshold = 3
 
 // AppendCeremonyLog appends a timestamped entry to the round's ceremony log.
 // The entry is prefixed with the block height for chronological context.
@@ -73,4 +81,63 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 		}
 	}
 	round.CeremonyPayloads = keptPayloads
+}
+
+// ---------------------------------------------------------------------------
+// Ceremony miss counter (consecutive misses per validator)
+// ---------------------------------------------------------------------------
+
+// JailValidator jails a validator by its operator address.
+// Resolves the valoper → consensus address via the staking keeper.
+func (k Keeper) JailValidator(ctx context.Context, valoperAddr string) (err error) {
+	// Recover from panics in GetConsAddr (happens when consensus pubkey is nil).
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic resolving consensus address for %s: %v", valoperAddr, r)
+		}
+	}()
+
+	valAddr, err := sdk.ValAddressFromBech32(valoperAddr)
+	if err != nil {
+		return fmt.Errorf("invalid valoper address %q: %w", valoperAddr, err)
+	}
+	val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get validator %s: %w", valoperAddr, err)
+	}
+	consAddr, err := val.GetConsAddr()
+	if err != nil {
+		return fmt.Errorf("failed to get consensus address for %s: %w", valoperAddr, err)
+	}
+	return k.stakingKeeper.Jail(ctx, consAddr)
+}
+
+// GetCeremonyMissCount returns the consecutive ceremony miss count for a validator.
+func (k Keeper) GetCeremonyMissCount(kvStore store.KVStore, valoperAddr string) (uint64, error) {
+	bz, err := kvStore.Get(types.CeremonyMissKey(valoperAddr))
+	if err != nil {
+		return 0, err
+	}
+	if len(bz) < 8 {
+		return 0, nil
+	}
+	return getUint64BE(bz), nil
+}
+
+// IncrementCeremonyMiss increments the consecutive miss counter for a validator
+// and returns the new count.
+func (k Keeper) IncrementCeremonyMiss(kvStore store.KVStore, valoperAddr string) (uint64, error) {
+	count, err := k.GetCeremonyMissCount(kvStore, valoperAddr)
+	if err != nil {
+		return 0, err
+	}
+	count++
+	val := make([]byte, 8)
+	putUint64BE(val, count)
+	return count, kvStore.Set(types.CeremonyMissKey(valoperAddr), val)
+}
+
+// ResetCeremonyMiss resets the consecutive miss counter for a validator to zero.
+func (k Keeper) ResetCeremonyMiss(kvStore store.KVStore, valoperAddr string) error {
+	return kvStore.Delete(types.CeremonyMissKey(valoperAddr))
 }
