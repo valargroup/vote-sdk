@@ -838,6 +838,77 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 }
 
 // ===========================================================================
+// Ceremony log tests
+// ===========================================================================
+
+func (s *MsgServerTestSuite) TestCeremonyLog_DealAndAck() {
+	s.SetupTest()
+	roundID, addrs := s.dealPendingRound(3)
+
+	// After deal: round should have 2 log entries (create + deal).
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	// createPendingRound bypasses CreateVotingSession, so only the deal log entry exists.
+	s.Require().Len(round.CeremonyLog, 1, "expected 1 log entry after deal")
+	s.Require().Contains(round.CeremonyLog[0], "deal from")
+	s.Require().Contains(round.CeremonyLog[0], "ea_pk=")
+
+	// Ack from first validator (1/3 met with 3 validators → confirms).
+	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+		Creator:      addrs[0],
+		VoteRoundId:  roundID,
+		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+	})
+	s.Require().NoError(err)
+
+	round, err = s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	// Should have: deal + ack + confirmed = 3 entries.
+	s.Require().Len(round.CeremonyLog, 3, "expected 3 log entries after deal+ack+confirm")
+	s.Require().Contains(round.CeremonyLog[1], "ack from")
+	s.Require().Contains(round.CeremonyLog[1], "1/3 acked")
+	s.Require().Contains(round.CeremonyLog[2], "ceremony confirmed")
+	s.Require().Contains(round.CeremonyLog[2], "round ACTIVE")
+}
+
+func (s *MsgServerTestSuite) TestCeremonyLog_MultipleAcksBeforeConfirm() {
+	s.SetupTest()
+	roundID, addrs := s.dealPendingRound(4)
+
+	// First ack: 1/4 — below 1/3, no confirmation yet.
+	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+		Creator:      addrs[0],
+		VoteRoundId:  roundID,
+		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	// deal + ack = 2 entries (no confirm yet).
+	s.Require().Len(round.CeremonyLog, 2)
+	s.Require().Contains(round.CeremonyLog[1], "1/4 acked")
+
+	// Second ack: 2/4 → confirms.
+	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+		Creator:      addrs[1],
+		VoteRoundId:  roundID,
+		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+	})
+	s.Require().NoError(err)
+
+	round, err = s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	// deal + ack1 + ack2 + confirmed = 4 entries.
+	s.Require().Len(round.CeremonyLog, 4)
+	s.Require().Contains(round.CeremonyLog[2], "2/4 acked")
+	s.Require().Contains(round.CeremonyLog[3], "ceremony confirmed")
+	s.Require().Contains(round.CeremonyLog[3], "2 non-ackers stripped")
+}
+
+// ===========================================================================
 // Full ceremony integration test with real ECIES (Step 10)
 // ===========================================================================
 

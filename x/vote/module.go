@@ -478,11 +478,18 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		}
 		oldCeremonyStatus := round.CeremonyStatus
 
+		nAcks := len(round.CeremonyAcks)
+		nVals := len(round.CeremonyValidators)
+
 		if keeper.OneThirdAcked(round) {
 			// >= 1/3 acked: strip non-ackers, confirm ceremony, activate round.
+			stripped := nVals - nAcks
 			keeper.StripNonAckersFromRound(round)
 			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 			round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
+
+			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+				fmt.Sprintf("DEALT timeout: confirmed with %d/%d acks, %d stripped", nAcks, nVals, stripped))
 
 			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 				return err
@@ -502,6 +509,9 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			))
 		} else {
 			// < 1/3 acks: reset ceremony for re-deal by next proposer.
+			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+				fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, below threshold)", nAcks, nVals))
+
 			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
 			round.CeremonyPayloads = nil
 			round.CeremonyAcks = nil

@@ -54,6 +54,7 @@ message VoteRound {
   string                      ceremony_dealer     = 22;
   uint64                      ceremony_phase_start   = 23;
   uint64                      ceremony_phase_timeout = 24;
+  repeated string             ceremony_log           = 25; // Timestamped human-readable ceremony log entries
 }
 
 // VoteManagerState stores the singleton vote manager address.

@@ -1,8 +1,17 @@
 package keeper
 
 import (
+	"fmt"
+
 	"github.com/z-cale/zally/x/vote/types"
 )
+
+// AppendCeremonyLog appends a timestamped entry to the round's ceremony log.
+// The entry is prefixed with the block height for chronological context.
+func AppendCeremonyLog(round *types.VoteRound, blockHeight uint64, msg string) {
+	entry := fmt.Sprintf("[height=%d] %s", blockHeight, msg)
+	round.CeremonyLog = append(round.CeremonyLog, entry)
+}
 
 // ---------------------------------------------------------------------------
 // Per-round ceremony helpers (operate on VoteRound ceremony fields)

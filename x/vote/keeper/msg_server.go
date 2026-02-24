@@ -102,6 +102,9 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		CeremonyValidators: eligible,
 	}
 
+	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+		fmt.Sprintf("round created with %d ceremony validators", len(eligible)))
+
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {
 		return nil, err
 	}

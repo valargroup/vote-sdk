@@ -128,6 +128,9 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	round.CeremonyPhaseTimeout = types.DefaultDealTimeout
 	round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_DEALT
 
+	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+		fmt.Sprintf("deal from %s, ea_pk=%s", msg.Creator, hex.EncodeToString(msg.EaPk)[:16]))
+
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {
 		return nil, err
 	}
@@ -190,11 +193,17 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 		AckHeight:        uint64(ctx.BlockHeight()),
 	})
 
+	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+		fmt.Sprintf("ack from %s (%d/%d acked)", msg.Creator, len(round.CeremonyAcks), len(round.CeremonyValidators)))
+
 	// Check if >= 1/3 validators acked -> transition to CONFIRMED + ACTIVE.
 	if OneThirdAcked(round) {
+		stripped := len(round.CeremonyValidators) - len(round.CeremonyAcks)
 		StripNonAckersFromRound(round)
 		round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 		round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
+		AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+			fmt.Sprintf("ceremony confirmed, %d non-ackers stripped, round ACTIVE", stripped))
 	}
 
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {

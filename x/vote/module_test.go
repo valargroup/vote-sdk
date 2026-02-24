@@ -296,6 +296,72 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 }
 
 // ---------------------------------------------------------------------------
+// Ceremony log tests for EndBlocker timeout paths
+// ---------------------------------------------------------------------------
+
+func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
+	roundID := bytes.Repeat([]byte{0xDD}, 32)
+
+	s.Run("timeout+confirm logs entry", func() {
+		s.SetupTest()
+		kv := s.keeper.OpenKVStore(s.ctx)
+		round := &types.VoteRound{
+			VoteRoundId:    roundID,
+			Status:         types.SessionStatus_SESSION_STATUS_PENDING,
+			EaPk:           make([]byte, 32),
+			CeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+			CeremonyValidators: []*types.ValidatorPallasKey{
+				{ValidatorAddress: "val1", PallasPk: make([]byte, 32)},
+				{ValidatorAddress: "val2", PallasPk: make([]byte, 32)},
+				{ValidatorAddress: "val3", PallasPk: make([]byte, 32)},
+			},
+			CeremonyDealer:       "val1",
+			CeremonyPhaseStart:   999_400,
+			CeremonyPhaseTimeout: 600,
+			CeremonyAcks: []*types.AckEntry{
+				{ValidatorAddress: "val1", AckHeight: 9},
+			},
+		}
+		s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+		s.Require().NoError(s.module.EndBlock(s.ctx))
+
+		round, err := s.keeper.GetVoteRound(kv, roundID)
+		s.Require().NoError(err)
+		s.Require().Len(round.CeremonyLog, 1)
+		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: confirmed")
+		s.Require().Contains(round.CeremonyLog[0], "1/3 acks")
+		s.Require().Contains(round.CeremonyLog[0], "2 stripped")
+	})
+
+	s.Run("timeout+reset logs entry", func() {
+		s.SetupTest()
+		kv := s.keeper.OpenKVStore(s.ctx)
+		round := &types.VoteRound{
+			VoteRoundId:    roundID,
+			Status:         types.SessionStatus_SESSION_STATUS_PENDING,
+			EaPk:           make([]byte, 32),
+			CeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+			CeremonyValidators: []*types.ValidatorPallasKey{
+				{ValidatorAddress: "val1", PallasPk: make([]byte, 32)},
+				{ValidatorAddress: "val2", PallasPk: make([]byte, 32)},
+				{ValidatorAddress: "val3", PallasPk: make([]byte, 32)},
+			},
+			CeremonyDealer:       "val1",
+			CeremonyPhaseStart:   999_400,
+			CeremonyPhaseTimeout: 600,
+		}
+		s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+		s.Require().NoError(s.module.EndBlock(s.ctx))
+
+		round, err := s.keeper.GetVoteRound(kv, roundID)
+		s.Require().NoError(err)
+		s.Require().Len(round.CeremonyLog, 1)
+		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: reset to REGISTERING")
+		s.Require().Contains(round.CeremonyLog[0], "0/3 acks")
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Ceremony signer provider tests (Step 9 wiring)
 // ---------------------------------------------------------------------------
 
