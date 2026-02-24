@@ -53,10 +53,9 @@ use alloc::vec::Vec;
 
 use ff::{Field, PrimeField};
 use halo2_proofs::{
-    circuit::{floor_planner, AssignedCell, Layouter, Value},
+    circuit::{AssignedCell, Layouter, Value, floor_planner},
     plonk::{
-        self, Advice, Column, Constraints, ConstraintSystem, Expression, Fixed,
-        Instance as InstanceColumn, Selector, TableColumn,
+        self, Advice, Column, ConstraintSystem, Constraints, Expression, Fixed, Instance as InstanceColumn, Selector, TableColumn, VirtualCells
     },
     poly::Rotation,
 };
@@ -556,6 +555,105 @@ fn assign_free_advice(
     )
 }
 
+/// Queried advice cells for one row of the cond6 bit-decomposition region.
+///
+/// Both the init gate (index=0) and the recurrence gate (index>0) read the same
+/// 14 columns. The two extra `.prev()` reads that are unique to the recurrence gate
+/// (`two_pow_i_prev`, `index_prev`) are queried inline inside that gate.
+struct Cond6Row {
+    /// advices[0] cur — proposal index; copied to every row so the locality
+    /// constraint `(proposal_id - index) * sel_i = 0` can be checked locally.
+    proposal_id: Expression<pallas::Base>,
+    /// advices[1] cur — i-th bit of `proposal_authority_old`
+    /// must be boolean.
+    b_i: Expression<pallas::Base>,
+    /// advices[2] cur — 1 if `i == proposal_id`, else 0
+    /// the one-hot selector.
+    sel_i: Expression<pallas::Base>,
+    /// advices[3] cur — `b_i * (1 - sel_i)`
+    /// the bit after clearing.
+    b_new_i: Expression<pallas::Base>,
+    /// advices[4] cur — running `∑ sel_i`
+    /// must equal 1 at the last row.
+    run_sel: Expression<pallas::Base>,
+    /// advices[4] prev
+    run_sel_prev: Expression<pallas::Base>,
+    /// advices[5] cur — running `∑ sel_i * b_i`
+    /// must equal 1 at the last row.
+    run_selected: Expression<pallas::Base>,
+    /// advices[5] prev
+    run_selected_prev: Expression<pallas::Base>,
+    /// advices[6] cur — running `∑ b_i * 2^i`
+    /// must equal `proposal_authority_old` at the last row.
+    run_old: Expression<pallas::Base>,
+    /// advices[6] prev
+    run_old_prev: Expression<pallas::Base>,
+    /// advices[7] cur — running `∑ b_new_i * 2^i`
+    /// must equal `proposal_authority_new` at the last row.
+    run_new: Expression<pallas::Base>,
+    /// advices[7] prev
+    run_new_prev: Expression<pallas::Base>,
+    /// advices[8] cur — positional weight `2^i`
+    /// used to recompose old and new values from bits.
+    two_pow_i: Expression<pallas::Base>,
+    /// advices[9] cur — row counter `i`
+    /// proves `sel_i` is at the right position
+    /// and that `two_pow_i` doubles correctly each row.
+    index: Expression<pallas::Base>,
+}
+
+fn query_cond6_row(
+    meta: &mut VirtualCells<pallas::Base>,
+    advices: &[Column<Advice>],
+) -> Cond6Row {
+    Cond6Row {
+        proposal_id:       meta.query_advice(advices[0], Rotation::cur()),
+        b_i:               meta.query_advice(advices[1], Rotation::cur()),
+        sel_i:             meta.query_advice(advices[2], Rotation::cur()),
+        b_new_i:           meta.query_advice(advices[3], Rotation::cur()),
+        run_sel:           meta.query_advice(advices[4], Rotation::cur()),
+        run_sel_prev:      meta.query_advice(advices[4], Rotation::prev()),
+        run_selected:      meta.query_advice(advices[5], Rotation::cur()),
+        run_selected_prev: meta.query_advice(advices[5], Rotation::prev()),
+        run_old:           meta.query_advice(advices[6], Rotation::cur()),
+        run_old_prev:      meta.query_advice(advices[6], Rotation::prev()),
+        run_new:           meta.query_advice(advices[7], Rotation::cur()),
+        run_new_prev:      meta.query_advice(advices[7], Rotation::prev()),
+        two_pow_i:         meta.query_advice(advices[8], Rotation::cur()),
+        index:             meta.query_advice(advices[9], Rotation::cur()),
+    }
+}
+
+/// The 8 constraints shared by both cond6 gates (init and recurrence).
+fn cond6_shared_constraints(
+    r: &Cond6Row,
+) -> Vec<(&'static str, Expression<pallas::Base>)> {
+    vec![
+        // run_sel increments by sel_i each row
+        ("run_sel",
+            r.run_sel.clone() - r.run_sel_prev.clone() - r.sel_i.clone()),
+        // run_selected increments by sel_i * b_i each row
+        ("run_selected",
+            r.run_selected.clone() - r.run_selected_prev.clone() - r.sel_i.clone() * r.b_i.clone()),
+        // run_old accumulates the old value bit by bit
+        ("run_old",
+            r.run_old.clone() - r.run_old_prev.clone() - r.b_i.clone() * r.two_pow_i.clone()),
+        // run_new accumulates the new value bit by bit
+        ("run_new",
+            r.run_new.clone() - r.run_new_prev.clone() - r.b_new_i.clone() * r.two_pow_i.clone()),
+        // (proposal_id - index) * sel_i = 0: sel_i can only be 1 at the selected position
+        ("(proposal_id - index)*sel_i",
+            (r.proposal_id.clone() - r.index.clone()) * r.sel_i.clone()),
+        // b_new_i = b_i * (1 - sel_i): new bit equals old bit, except zero it out when selected
+        ("b_new_i = b_i*(1-sel_i)",
+            r.b_new_i.clone() - r.b_i.clone() + r.b_i.clone() * r.sel_i.clone()),
+        // enforce b_i in {0, 1}
+        ("bool b_i",  bool_check(r.b_i.clone())),
+        // enforce sel_i in {0, 1}
+        ("bool sel_i", bool_check(r.sel_i.clone())),
+    ]
+}
+
 impl plonk::Circuit<pallas::Base> for Circuit {
     type Config = Config;
     type FloorPlanner = floor_planner::V1;
@@ -735,134 +833,31 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         let one_expr = Expression::Constant(pallas::Base::one());
         let two_expr = Expression::Constant(pallas::Base::from(2u64));
 
+        // The init gate enforces index=0 and two_pow_i=1 in addition to the shared running-sum
+        // recurrence. The prover fills the zero-padding row above with zeros so the same
+        // recurrence formula (increment by delta) handles initialization without a special case.
         meta.create_gate("cond6 init: index=0, two_pow_i=1, running sums", |meta| {
             let q = meta.query_selector(q_cond_6_init);
-            // The public proposal index being voted on
-            // Copied to every row so the selector constraint (proposal_id - index) * sel_i = 0 can be checked locally
-            let proposal_id = meta.query_advice(advices[0], Rotation::cur());
-            // The i-th bit of proposal_authority_old
-            // The actual bit-decomposition — must be boolean
-            let b_i = meta.query_advice(advices[1], Rotation::cur());
-            // 1 if i == proposal_id, else 0
-            // The one-hot "which bit are we clearing?" marker
-            let sel_i = meta.query_advice(advices[2], Rotation::cur());
-            // b_i * (1 - sel_i) — the bit after clearing
-            // The cleared version; must equal b_i everywhere except the selected position
-            let b_new_i = meta.query_advice(advices[3], Rotation::cur());
-            // ∑ sel_i
-            // At the end, must equal exactly 1 — proves exactly one bit position was selected
-            let run_sel = meta.query_advice(advices[4], Rotation::cur());
-            // ∑ sel_i * b_i
-            // At the end, must equal 1 — proves the selected bit was actually set (voter had authority)
-            let run_selected = meta.query_advice(advices[5], Rotation::cur());
-            // ∑ b_i * 2^i
-            // At the end, must equal proposal_authority_old — proves the decomposition was honest
-            let run_old = meta.query_advice(advices[6], Rotation::cur());
-            // ∑ b_new_i * 2^i
-            // At the end, must equal proposal_authority_new — proves only one bit was cleared
-            let run_new = meta.query_advice(advices[7], Rotation::cur());
-            
-            // advices[8] = two_pow_i
-            // 	2^i for this row
-            // The positional weight; used to recompose both old and new values from bits
-            let two_pow_i = meta.query_advice(advices[8], Rotation::cur());
-            // advices[9] = index
-            // The row counter i
-            // Needed to prove sel_i is only set at the right position, and that two_pow_i doubles correctly each row
-            let index = meta.query_advice(advices[9], Rotation::cur());
-            
-            // Previous running sums.
-            // Since this is row 0 of the condition, the prover sets the previous
-            // values to 0 (i.e. zero padding row)
-            // This achieves initialization without needing a special-cased constraint
-            // like run_sel = sel_i - it reuses the same recurrence formula as other
-            // q_cond_6_bits rows. The init and recurrence gates are structurally identical
-            // except the init gate also enforces index = 0 and two_pow_i = 1.
-            let run_sel_prev = meta.query_advice(advices[4], Rotation::prev());
-            let run_selected_prev = meta.query_advice(advices[5], Rotation::prev());
-            let run_old_prev = meta.query_advice(advices[6], Rotation::prev());
-            let run_new_prev = meta.query_advice(advices[7], Rotation::prev());
-
-            Constraints::with_selector(
-                q,
-                [
-                    // The value 2^i = 1
-                    ("two_pow_i = 1", two_pow_i.clone() - one_expr.clone()),
-                    // Current row = 0
-                    ("index = 0", index.clone() - zero.clone()),
-                    // Running sum increments by sel_i
-                    ("run_sel", run_sel - run_sel_prev - sel_i.clone()),
-                    // run_selected increments by sel_i
-                    ("run_selected", run_selected - run_selected_prev - sel_i.clone() * b_i.clone()),
-                    // run_old - run_old_prev - b_i * 2^i = 0
-                    // accumulates the old value bit by bit
-                    ("run_old", run_old - run_old_prev - b_i.clone() * two_pow_i.clone()),
-                    // run_new - run_new_prev - b_new_i * 2^i = 0
-                    // same for new value
-                    ("run_new", run_new - run_new_prev - b_new_i.clone() * two_pow_i),
-                    // (proposal_id - index) * sel_i = 0
-                    // can only be 1 when index == proposal_id (gate-enforced locality)
-                    ("(proposal_id - index)*sel_i", (proposal_id - index) * sel_i.clone()),
-                    // b_new_i - b_i + b_i * sel_i = 0
-                    // rearranges to b_new_i = b_i * (1 - sel_i)
-                    // new bit equals old bit, except zero it out when selected
-                    ("b_new_i = b_i*(1-sel_i)", b_new_i - b_i.clone() + b_i.clone() * sel_i.clone()),
-                    // enforce b_i in {0, 1}
-                    ("bool b_i", bool_check(b_i)),
-                    // enforce sel_i in {0, 1}
-                    ("bool sel_i", bool_check(sel_i)),
-                ],
-            )
+            let r = query_cond6_row(meta, &advices);
+            let mut constraints = vec![
+                ("two_pow_i = 1", r.two_pow_i.clone() - one_expr.clone()),
+                ("index = 0",     r.index.clone() - zero.clone()),
+            ];
+            constraints.extend(cond6_shared_constraints(&r));
+            Constraints::with_selector(q, constraints)
         });
 
         meta.create_gate("cond6 bits: index++, two_pow_i*=2, running sums", |meta| {
             let q = meta.query_selector(q_cond_6_bits);
-            let proposal_id = meta.query_advice(advices[0], Rotation::cur());
-            let b_i = meta.query_advice(advices[1], Rotation::cur());
-            let sel_i = meta.query_advice(advices[2], Rotation::cur());
-            let b_new_i = meta.query_advice(advices[3], Rotation::cur());
-            let run_sel = meta.query_advice(advices[4], Rotation::cur());
-            let run_selected = meta.query_advice(advices[5], Rotation::cur());
-            let run_old = meta.query_advice(advices[6], Rotation::cur());
-            let run_new = meta.query_advice(advices[7], Rotation::cur());
-            let two_pow_i = meta.query_advice(advices[8], Rotation::cur());
-            let index = meta.query_advice(advices[9], Rotation::cur());
+            let r = query_cond6_row(meta, &advices);
             let two_pow_i_prev = meta.query_advice(advices[8], Rotation::prev());
-            let index_prev = meta.query_advice(advices[9], Rotation::prev());
-            let run_sel_prev = meta.query_advice(advices[4], Rotation::prev());
-            let run_selected_prev = meta.query_advice(advices[5], Rotation::prev());
-            let run_old_prev = meta.query_advice(advices[6], Rotation::prev());
-            let run_new_prev = meta.query_advice(advices[7], Rotation::prev());
-
-            Constraints::with_selector(
-                q,
-                [
-                    // NOTE: 2 constraints below are the only 2 that differ from index=0.
-                    ("two_pow_i = 2*prev", two_pow_i.clone() - two_expr.clone() * two_pow_i_prev),
-                    ("index = prev+1", index.clone() - index_prev - one_expr.clone()),
-                    
-                    // NOTE: the constraints below are the same as index=0.
-                    // run_sel differs fom run_sel_prev by sel_i
-                    ("run_sel", run_sel - run_sel_prev - sel_i.clone()),
-                    // run_selected differs from run_selected_prev by sel_i * b_i
-                    ("run_selected", run_selected - run_selected_prev - sel_i.clone() * b_i.clone()),
-                    // run_old differs from run_old_prev by b_i * 2^i
-                    ("run_old", run_old - run_old_prev - b_i.clone() * two_pow_i.clone()),
-                    // run_new differs from run_new_prev by b_new_i * 2^i
-                    ("run_new", run_new - run_new_prev - b_new_i.clone() * two_pow_i),
-                    // (proposal_id - index) * sel_i = 0
-                    // can only be 1 when index == proposal_id (gate-enforced locality)
-                    ("(proposal_id - index)*sel_i", (proposal_id - index) * sel_i.clone()),
-                    // b_new_i - b_i + b_i * sel_i = 0
-                    // rearranges to b_new_i = b_i * (1 - sel_i)
-                    // new bit equals old bit, except zero it out when selected
-                    ("b_new_i = b_i*(1-sel_i)", b_new_i - b_i.clone() + b_i.clone() * sel_i.clone()),
-                    // enforce b_i in {0, 1}
-                    ("bool b_i", bool_check(b_i)),
-                    // enforce sel_i in {0, 1}
-                    ("bool sel_i", bool_check(sel_i)),
-                ],
-            )
+            let index_prev     = meta.query_advice(advices[9], Rotation::prev());
+            let mut constraints = vec![
+                ("two_pow_i = 2*prev", r.two_pow_i.clone() - two_expr.clone() * two_pow_i_prev),
+                ("index = prev+1",     r.index.clone() - index_prev - one_expr.clone()),
+            ];
+            constraints.extend(cond6_shared_constraints(&r));
+            Constraints::with_selector(q, constraints)
         });
 
         // At the last bit row (row 16): run_sel = 1 (exactly one selector active) and run_selected = 1 (that bit was set).
