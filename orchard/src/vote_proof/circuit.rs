@@ -333,22 +333,22 @@ pub struct Config {
     /// Selector for condition 6 (Proposal Authority Decrement) lookup row.
     /// When 1, the (proposal_id, one_shifted) lookup is enforced; when 0,
     /// the lookup input is (0, 1) so it passes without constraining.
-    q_cond5: Selector,
+    q_cond_6: Selector,
     /// Lookup table column for proposal_id in (proposal_id, 2^proposal_id).
     /// Table rows: (0, 1), (1, 2), (2, 4), ..., (15, 32768).
     table_proposal_id: TableColumn,
     /// Lookup table column for one_shifted = 2^proposal_id.
     table_one_shifted: TableColumn,
     /// Selector for condition 6 init row (index=0, two_pow_i=1).
-    q_cond5_init: Selector,
+    q_cond_6_init: Selector,
     /// Selector for condition 6 bit rows 2..17 (recurrence).
-    q_cond5_bits: Selector,
+    q_cond_6_bits: Selector,
     /// Selector for condition 6 last bit row: run_sel = 1 and run_selected = 1.
-    q_cond5_selected_one: Selector,
+    q_cond_6_selected_one: Selector,
     /// Witness column for proposal_id⁻¹ on the cond6 lookup row.
     ///
     /// Used in the `proposal_id != 0` gate:
-    /// `q_cond5 * (1 - proposal_id * proposal_id_inv) = 0`.
+    /// `q_cond_6 * (1 - proposal_id * proposal_id_inv) = 0`.
     /// Placed in advices[2] on row 0 of the cond6 region, which is otherwise
     /// unused on that row (sel_i occupies advices[2] only on rows 1–16).
     proposal_id_inv: Column<Advice>,
@@ -686,16 +686,16 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // "Prove you had permission to vote on this proposal and prove you have relaxed
         // exactly that permission"
         // (proposal_id, one_shifted) lookup table for
-        // one_shifted = 2^proposal_id. When q_cond5 = 0 the lookup input
+        // one_shifted = 2^proposal_id. When q_cond_6 = 0 the lookup input
         // is (0, 1) so it passes. It passes because 2^0 = 1.
-        // When q_cond5 = 1, we enforce (proposal_id,
+        // When q_cond_6 = 1, we enforce (proposal_id,
         // one_shifted) in {(0,1), (1,2), ..., (15, 32768)}.
         // Must be complex_selector because we use it in (one - q) in the lookup.
-        let q_cond5 = meta.complex_selector();
+        let q_cond_6 = meta.complex_selector();
         let table_proposal_id = meta.lookup_table_column();
         let table_one_shifted = meta.lookup_table_column();
         meta.lookup(|meta| {
-            let q = meta.query_selector(q_cond5);
+            let q = meta.query_selector(q_cond_6);
             let proposal_id = meta.query_advice(advices[0], Rotation::cur());
             let one_shifted = meta.query_advice(advices[1], Rotation::cur());
             // When q=0: (0, 1); when q=1: (proposal_id, one_shifted).
@@ -714,11 +714,11 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // check alone does not exclude it. This gate closes that gap by requiring
         // a valid field inverse, which exists if and only if proposal_id ≠ 0.
         //
-        // Gate: q_cond5 * (1 - proposal_id * proposal_id_inv) = 0
+        // Gate: q_cond_6 * (1 - proposal_id * proposal_id_inv) = 0
         // advices[2] on row 0 of the cond6 region is otherwise unused (sel_i
-        // occupies advices[2] only on rows 1–16 where q_cond5 = 0).
+        // occupies advices[2] only on rows 1–16 where q_cond_6 = 0).
         meta.create_gate("proposal_id != 0", |meta| {
-            let q = meta.query_selector(q_cond5);
+            let q = meta.query_selector(q_cond_6);
             let proposal_id = meta.query_advice(advices[0], Rotation::cur());
             let proposal_id_inv = meta.query_advice(advices[2], Rotation::cur());
             let one = Expression::Constant(pallas::Base::one());
@@ -727,16 +727,16 @@ impl plonk::Circuit<pallas::Base> for Circuit {
 
         // Condition 6 (Proposal Authority Decrement) bit-decomposition gates.
         // Row 1: init (index=0, two_pow_i=1, running sums from first bit).
-        let q_cond5_init = meta.selector();
+        let q_cond_6_init = meta.selector();
         // Rows 2..17: recurrence (index++, two_pow_i *= 2, running sums).
-        let q_cond5_bits = meta.selector();
+        let q_cond_6_bits = meta.selector();
 
         let zero = Expression::Constant(pallas::Base::zero());
         let one_expr = Expression::Constant(pallas::Base::one());
         let two_expr = Expression::Constant(pallas::Base::from(2u64));
 
         meta.create_gate("cond6 init: index=0, two_pow_i=1, running sums", |meta| {
-            let q = meta.query_selector(q_cond5_init);
+            let q = meta.query_selector(q_cond_6_init);
             // The public proposal index being voted on
             // Copied to every row so the selector constraint (proposal_id - index) * sel_i = 0 can be checked locally
             let proposal_id = meta.query_advice(advices[0], Rotation::cur());
@@ -776,7 +776,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             // values to 0 (i.e. zero padding row)
             // This achieves initialization without needing a special-cased constraint
             // like run_sel = sel_i - it reuses the same recurrence formula as other
-            // q_cond5_bits rows. The init and recurrence gates are structurally identical
+            // q_cond_6_bits rows. The init and recurrence gates are structurally identical
             // except the init gate also enforces index = 0 and two_pow_i = 1.
             let run_sel_prev = meta.query_advice(advices[4], Rotation::prev());
             let run_selected_prev = meta.query_advice(advices[5], Rotation::prev());
@@ -816,7 +816,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         });
 
         meta.create_gate("cond6 bits: index++, two_pow_i*=2, running sums", |meta| {
-            let q = meta.query_selector(q_cond5_bits);
+            let q = meta.query_selector(q_cond_6_bits);
             let proposal_id = meta.query_advice(advices[0], Rotation::cur());
             let b_i = meta.query_advice(advices[1], Rotation::cur());
             let sel_i = meta.query_advice(advices[2], Rotation::cur());
@@ -852,9 +852,9 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         });
 
         // At the last bit row (row 16): run_sel = 1 (exactly one selector active) and run_selected = 1 (that bit was set).
-        let q_cond5_selected_one = meta.selector();
+        let q_cond_6_selected_one = meta.selector();
         meta.create_gate("cond6 run_sel = 1 and run_selected = 1", |meta| {
-            let q = meta.query_selector(q_cond5_selected_one);
+            let q = meta.query_selector(q_cond_6_selected_one);
             let run_sel = meta.query_advice(advices[4], Rotation::cur());
             let run_selected = meta.query_advice(advices[5], Rotation::cur());
             Constraints::with_selector(
@@ -876,12 +876,12 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             commit_ivk_config,
             range_check,
             q_merkle_swap,
-            q_cond5,
+            q_cond_6,
             table_proposal_id,
             table_one_shifted,
-            q_cond5_init,
-            q_cond5_bits,
-            q_cond5_selected_one,
+            q_cond_6_init,
+            q_cond_6_bits,
+            q_cond_6_selected_one,
             proposal_id_inv: advices[2],
         }
     }
@@ -1332,7 +1332,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                     let proposal_authority_old_val = self.proposal_authority_old;
 
                     // Row 0: (proposal_id, one_shifted) for lookup; init running sums to 0.
-                    config.q_cond5.enable(&mut region, 0)?;
+                    config.q_cond_6.enable(&mut region, 0)?;
                     let proposal_id_cell = region.assign_advice_from_instance(
                         || "proposal_id",
                         config.primary,
@@ -1486,12 +1486,12 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                         )?;
 
                         if i == 0 {
-                            config.q_cond5_init.enable(&mut region, row)?;
+                            config.q_cond_6_init.enable(&mut region, row)?;
                         } else {
-                            config.q_cond5_bits.enable(&mut region, row)?;
+                            config.q_cond_6_bits.enable(&mut region, row)?;
                         }
                         if i == MAX_PROPOSAL_ID - 1 {
-                            config.q_cond5_selected_one.enable(&mut region, row)?;
+                            config.q_cond_6_selected_one.enable(&mut region, row)?;
                         }
                     }
 
