@@ -34,16 +34,20 @@ type ValidateOpts struct {
 	IsRecheck bool
 
 	// SigVerifier is the RedPallas signature verifier.
-	// Use redpallas.NewMockVerifier() during development.
+	// Production: redpallas.NewVerifier() (requires -tags redpallas build).
+	// Tests: redpallas.NewMockVerifier() (always succeeds, no FFI needed).
 	SigVerifier redpallas.Verifier
 
 	// ZKPVerifier is the zero-knowledge proof verifier.
-	// Use zkp.NewMockVerifier() during development.
+	// Production: halo2.NewVerifier() (requires -tags halo2 build).
+	// Tests: zkp.NewMockVerifier() (always succeeds, no FFI needed).
 	ZKPVerifier zkp.Verifier
 }
 
-// DefaultOpts returns ValidateOpts with mock verifiers for development/testing.
-func DefaultOpts() ValidateOpts {
+// MockOpts returns ValidateOpts with mock verifiers for use in tests ONLY.
+// Never use in production — all proofs and signatures will be accepted
+// without cryptographic verification.
+func MockOpts() ValidateOpts {
 	return ValidateOpts{
 		SigVerifier: redpallas.NewMockVerifier(),
 		ZKPVerifier: zkp.NewMockVerifier(),

@@ -4,6 +4,9 @@ package halo2
 
 import "github.com/z-cale/zally/crypto/zkp"
 
+// IsMock is false when built with the "halo2" tag — the real FFI verifier is active.
+const IsMock = false
+
 // Halo2Verifier implements zkp.Verifier using real Halo2 proof verification
 // via CGo bindings to the Rust verifier. VerifyDelegation uses the real
 // 15-condition delegation circuit (K=14, 13 public inputs). VerifyVoteCommitment

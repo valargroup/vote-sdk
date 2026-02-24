@@ -13,6 +13,7 @@ import (
 	voteapi "github.com/z-cale/zally/api"
 	"github.com/z-cale/zally/crypto/redpallas"
 	"github.com/z-cale/zally/crypto/zkp"
+	"github.com/z-cale/zally/crypto/zkp/halo2"
 	voteante "github.com/z-cale/zally/x/vote/ante"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
 )
@@ -27,11 +28,24 @@ type DualAnteHandlerOptions struct {
 	// Vote module keeper for stateful validation.
 	VoteKeeper votekeeper.Keeper
 
-	// RedPallas signature verifier (mock during development).
+	// RedPallas signature verifier. Use ProductionOpts().SigVerifier in production,
+	// redpallas.NewMockVerifier() in tests.
 	SigVerifier redpallas.Verifier
 
-	// ZKP verifier (mock during development).
+	// ZKP verifier. Use ProductionOpts().ZKPVerifier in production,
+	// zkp.NewMockVerifier() in tests.
 	ZKPVerifier zkp.Verifier
+}
+
+// ProductionOpts returns ValidateOpts wired with real cryptographic verifiers
+// (RedPallas via FFI, Halo2 via FFI). Only use in production binaries built
+// with `make install-ffi` (-tags halo2,redpallas). Tests should use
+// voteante.MockOpts() instead.
+func ProductionOpts() voteante.ValidateOpts {
+	return voteante.ValidateOpts{
+		SigVerifier: redpallas.NewVerifier(),
+		ZKPVerifier: halo2.NewVerifier(),
+	}
 }
 
 // NewDualAnteHandler returns an AnteHandler that detects the tx type and routes
