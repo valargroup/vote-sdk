@@ -763,6 +763,22 @@ function AboutPage({
           <Step n={3} text="Export the round as JSON or submit it to the shielded vote chain (coming soon)." />
         </div>
 
+        {/* Resources */}
+        <h2 className="text-xs font-semibold text-text-primary mb-3">
+          Resources
+        </h2>
+        <div className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-2 mb-8">
+          <a
+            href="https://valargroup.gitbook.io/shielded-vote-docs/chain/building-from-source"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-[11px] text-accent hover:underline"
+          >
+            <ExternalLink size={12} />
+            Building from Source
+          </a>
+        </div>
+
         {/* Footer note */}
         <p className="text-[10px] text-text-muted text-center">
           All data is stored locally in your browser. Nothing is sent to a
