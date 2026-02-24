@@ -161,6 +161,10 @@ func (qs queryServer) CommitmentLeaves(goCtx context.Context, req *types.QueryCo
 }
 
 // CeremonyState returns the current EA key ceremony lifecycle state.
+// Ceremony state now lives inside VoteRound, so this query synthesizes a
+// legacy CeremonyState response from per-round ceremony fields.
+// Priority: first PENDING round (active ceremony), then most recently
+// confirmed round (latest completed ceremony).
 func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCeremonyStateRequest) (*types.QueryCeremonyStateResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
@@ -169,9 +173,37 @@ func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCerem
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)
 
-	state, err := qs.k.GetCeremonyState(kvStore)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get ceremony state: %v", err)
+	// Look for an in-progress ceremony (PENDING round) first, then fall back
+	// to the most recently confirmed round.
+	var source *types.VoteRound
+	if err := qs.k.IterateAllRounds(kvStore, func(round *types.VoteRound) bool {
+		if round.Status == types.SessionStatus_SESSION_STATUS_PENDING {
+			source = round
+			return true // PENDING takes priority, stop
+		}
+		// Track the latest ACTIVE/TALLIED round with a confirmed ceremony as fallback.
+		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED {
+			source = round
+		}
+		return false
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to iterate rounds: %v", err)
+	}
+
+	if source == nil {
+		return &types.QueryCeremonyStateResponse{}, nil
+	}
+
+	// Map per-round ceremony fields to legacy CeremonyState shape.
+	state := &types.CeremonyState{
+		Status:       source.CeremonyStatus,
+		EaPk:         source.EaPk,
+		Validators:   source.CeremonyValidators,
+		Payloads:     source.CeremonyPayloads,
+		Acks:         source.CeremonyAcks,
+		Dealer:       source.CeremonyDealer,
+		PhaseStart:   source.CeremonyPhaseStart,
+		PhaseTimeout: source.CeremonyPhaseTimeout,
 	}
 
 	return &types.QueryCeremonyStateResponse{Ceremony: state}, nil
