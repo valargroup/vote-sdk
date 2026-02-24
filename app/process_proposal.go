@@ -13,10 +13,11 @@ import (
 )
 
 // ProcessProposalHandler returns a handler that validates injected txs
-// proposed by the block proposer. For ack messages: verifies the creator
-// is a registered validator, the ceremony is DEALT, and no duplicate ack
-// exists. For tally messages: verifies the round is TALLYING. All other
-// txs pass through (ACCEPT).
+// proposed by the block proposer. For deal messages: verifies the round is
+// PENDING with ceremony REGISTERING and payload count matches. For ack
+// messages: verifies the round is PENDING with ceremony DEALT, creator is a
+// ceremony validator, and no duplicate ack. For tally messages: verifies the
+// round is TALLYING. All other txs pass through (ACCEPT).
 func ProcessProposalHandler(
 	voteKeeper votekeeper.Keeper,
 	logger log.Logger,
@@ -28,6 +29,15 @@ func ProcessProposalHandler(
 			}
 
 			tag := txBytes[0]
+
+			// Validate injected ceremony deal txs.
+			if tag == voteapi.TagDealExecutiveAuthorityKey {
+				if err := validateInjectedDeal(ctx, voteKeeper, txBytes, logger); err != nil {
+					logger.Error("ProcessProposal: rejecting block — invalid deal tx", "err", err)
+					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+				}
+				continue
+			}
 
 			// Validate injected ceremony ack txs.
 			if tag == voteapi.TagAckExecutiveAuthorityKey {
@@ -54,9 +64,42 @@ func ProcessProposalHandler(
 	}
 }
 
+// validateInjectedDeal checks that an injected MsgDealExecutiveAuthorityKey
+// is valid: the round is PENDING with ceremony in REGISTERING, and the
+// payload count matches the ceremony validator count.
+func validateInjectedDeal(ctx sdk.Context, voteKeeper votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
+	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
+	if err != nil {
+		return err
+	}
+
+	dealMsg, ok := msg.(*types.MsgDealExecutiveAuthorityKey)
+	if !ok {
+		return errInvalidInjectedTx("expected MsgDealExecutiveAuthorityKey")
+	}
+
+	kvStore := voteKeeper.OpenKVStore(ctx)
+	round, err := voteKeeper.GetVoteRound(kvStore, dealMsg.VoteRoundId)
+	if err != nil {
+		return err
+	}
+
+	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
+		return errInvalidInjectedTx("round is not PENDING")
+	}
+	if round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
+		return errInvalidInjectedTx("ceremony is not REGISTERING")
+	}
+	if len(dealMsg.Payloads) != len(round.CeremonyValidators) {
+		return errInvalidInjectedTx("payload count does not match validator count")
+	}
+
+	return nil
+}
+
 // validateInjectedAck checks that an injected MsgAckExecutiveAuthorityKey is
-// valid: the ceremony is DEALT, the creator is a registered validator, and
-// the creator has not already acked.
+// valid: the round is PENDING with ceremony in DEALT, the creator is a
+// ceremony validator, and the creator has not already acked.
 func validateInjectedAck(ctx sdk.Context, voteKeeper votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
 	if err != nil {
@@ -69,21 +112,25 @@ func validateInjectedAck(ctx sdk.Context, voteKeeper votekeeper.Keeper, txBytes 
 	}
 
 	kvStore := voteKeeper.OpenKVStore(ctx)
-	state, err := voteKeeper.GetCeremonyState(kvStore)
+	round, err := voteKeeper.GetVoteRound(kvStore, ackMsg.VoteRoundId)
 	if err != nil {
 		return err
 	}
-	if state == nil || state.Status != types.CeremonyStatus_CEREMONY_STATUS_DEALT {
-		return errInvalidInjectedTx("ceremony is not in DEALT state")
+
+	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
+		return errInvalidInjectedTx("round is not PENDING")
+	}
+	if round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_DEALT {
+		return errInvalidInjectedTx("ceremony is not DEALT")
 	}
 
-	// Verify creator is a registered validator.
-	if _, found := votekeeper.FindValidatorInCeremony(state, ackMsg.Creator); !found {
-		return errInvalidInjectedTx("creator is not a registered validator")
+	// Verify creator is a ceremony validator.
+	if _, found := votekeeper.FindValidatorInRoundCeremony(round, ackMsg.Creator); !found {
+		return errInvalidInjectedTx("creator is not a ceremony validator")
 	}
 
 	// Verify no duplicate ack.
-	if _, found := votekeeper.FindAckForValidator(state, ackMsg.Creator); found {
+	if _, found := votekeeper.FindAckInRoundCeremony(round, ackMsg.Creator); found {
 		return errInvalidInjectedTx("creator has already acked")
 	}
 

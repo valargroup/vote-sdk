@@ -148,23 +148,34 @@ func NewZallyApp(
 		"vote.pallas_sk_path", pallasSkPath,
 		"vote.comet_rpc", app.cometRPC)
 
+	// Derive per-round ea_sk directory from legacy ea_sk_path.
+	eaSkDir := eaSkDirFromPath(eaSkPath)
+
 	// Install composed PrepareProposal handler:
-	// 1. Ceremony ack injection: auto-ack when ceremony is DEALT
-	// 2. Tally injection: auto-tally when a round is TALLYING
+	// 1. Ceremony deal injection: auto-deal when a PENDING round needs it
+	// 2. Ceremony ack injection: auto-ack when ceremony is DEALT
+	// 3. Tally injection: auto-tally when a round is TALLYING
+	ceremonyDealHandler := CeremonyDealPrepareProposalHandler(
+		app.VoteKeeper,
+		app.StakingKeeper,
+		pallasSkPath,
+		eaSkDir,
+		logger,
+	)
 	ceremonyAckHandler := CeremonyAckPrepareProposalHandler(
 		app.VoteKeeper,
 		app.StakingKeeper,
 		pallasSkPath,
-		eaSkPath,
+		eaSkDir,
 		logger,
 	)
 	tallyHandler := TallyPrepareProposalHandler(
 		app.VoteKeeper,
 		app.StakingKeeper,
-		eaSkPath,
+		eaSkDir,
 		logger,
 	)
-	app.SetPrepareProposal(ComposedPrepareProposalHandler(ceremonyAckHandler, tallyHandler))
+	app.SetPrepareProposal(ComposedPrepareProposalHandler(ceremonyDealHandler, ceremonyAckHandler, tallyHandler))
 
 	// Install ProcessProposal handler that validates injected ack and tally txs.
 	app.SetProcessProposal(ProcessProposalHandler(

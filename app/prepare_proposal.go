@@ -1,8 +1,8 @@
 package app
 
 import (
+	"encoding/hex"
 	"fmt"
-	"os"
 	"sync"
 
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -28,19 +28,23 @@ const bsgsDefaultBound = 1 << 28
 // tx list. Injectors should prepend their txs before the existing ones.
 type PrepareProposalInjector = func(ctx sdk.Context, req *abci.RequestPrepareProposal, txs [][]byte) [][]byte
 
-// ComposedPrepareProposalHandler composes multiple PrepareProposalInjectors
-// into a single sdk.PrepareProposalHandler. Injectors run sequentially;
-// each receives the tx list produced by the previous one.
+// ComposedPrepareProposalHandler composes ceremony deal, ceremony ack, and
+// tally injection into a single sdk.PrepareProposalHandler. Injectors run
+// sequentially: deal → ack → tally.
 func ComposedPrepareProposalHandler(
-	ceremonyInjector PrepareProposalInjector,
+	dealInjector PrepareProposalInjector,
+	ackInjector PrepareProposalInjector,
 	tallyHandler sdk.PrepareProposalHandler,
 ) sdk.PrepareProposalHandler {
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
 		// Start with the mempool txs from CometBFT.
 		txs := req.Txs
 
+		// Run ceremony deal injection (may prepend MsgDealExecutiveAuthorityKey).
+		txs = dealInjector(ctx, req, txs)
+
 		// Run ceremony ack injection (may prepend MsgAckExecutiveAuthorityKey).
-		txs = ceremonyInjector(ctx, req, txs)
+		txs = ackInjector(ctx, req, txs)
 
 		// Run tally injection by creating a modified request with the updated txs.
 		modifiedReq := *req
@@ -54,51 +58,39 @@ func ComposedPrepareProposalHandler(
 // MsgSubmitTally transactions for any rounds in TALLYING state.
 //
 // The block proposer decrypts the on-chain ElGamal accumulators using the EA
-// secret key loaded from eaSkPath. If the key file is absent or empty, the
-// handler passes through transactions unchanged (allowing non-EA validators
-// to skip tally injection).
+// secret key loaded from <eaSkDir>/ea_sk.<hex(round_id)>. If the key file is
+// absent, the handler passes through transactions unchanged.
 func TallyPrepareProposalHandler(
 	voteKeeper votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
-	eaSkPath string,
+	eaSkDir string,
 	logger log.Logger,
 ) sdk.PrepareProposalHandler {
 	var (
-		skOnce  sync.Once
-		sk      *elgamal.SecretKey
-		skErr   error
+		// Per-round ea_sk cache: round_id_hex -> secret key.
+		skCache   = make(map[string]*elgamal.SecretKey)
+		skCacheMu sync.Mutex
+
 		bsgOnce sync.Once
 		bsgs    *elgamal.BSGSTable
 	)
 
-	loadSk := func() (*elgamal.SecretKey, error) {
-		skOnce.Do(func() {
-			if eaSkPath == "" {
-				logger.Warn("PrepareProposal: vote.ea_sk_path is empty — auto-tally disabled")
-				skErr = os.ErrNotExist
-				return
-			}
-			logger.Info("PrepareProposal: loading EA secret key", "path", eaSkPath)
-			raw, err := os.ReadFile(eaSkPath)
-			if err != nil {
-				skErr = err
-				logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-				logger.Error("!! FAILED TO LOAD EA SECRET KEY — AUTO-TALLY IS DISABLED !!")
-				logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-				logger.Error("EA secret key load error", "path", eaSkPath, "err", err)
-				return
-			}
-			sk, skErr = elgamal.UnmarshalSecretKey(raw)
-			if skErr != nil {
-				logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-				logger.Error("!! FAILED TO PARSE EA SECRET KEY — AUTO-TALLY IS DISABLED !!")
-				logger.Error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-				logger.Error("EA secret key parse error", "path", eaSkPath, "err", skErr)
-			} else {
-				logger.Info("PrepareProposal: EA secret key loaded successfully", "path", eaSkPath)
-			}
-		})
-		return sk, skErr
+	loadSkForRound := func(roundID []byte) (*elgamal.SecretKey, error) {
+		roundHex := hex.EncodeToString(roundID)
+
+		skCacheMu.Lock()
+		defer skCacheMu.Unlock()
+
+		if sk, ok := skCache[roundHex]; ok {
+			return sk, nil
+		}
+
+		sk, err := loadEaSkForRound(eaSkDir, roundID)
+		if err != nil {
+			return nil, err
+		}
+		skCache[roundHex] = sk
+		return sk, nil
 	}
 
 	loadBSGS := func() *elgamal.BSGSTable {
@@ -114,14 +106,9 @@ func TallyPrepareProposalHandler(
 		// Start with the transactions from CometBFT (NoOpMempool passes them through).
 		txs := req.Txs
 
-		eaSk, err := loadSk()
-		if err != nil {
-			// No EA key available — pass through without injecting tally txs.
-			logger.Warn("PrepareProposal: no EA key found, tally will not be possible", "err", err)
+		if eaSkDir == "" {
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
-
-		table := loadBSGS()
 
 		// Resolve proposer consensus address to validator operator address.
 		consAddr := sdk.ConsAddress(req.ProposerAddress)
@@ -149,7 +136,14 @@ func TallyPrepareProposalHandler(
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 
-		entries, err := decryptRoundTallies(kvStore, voteKeeper, tallyRound, eaSk, table)
+		eaSk, err := loadSkForRound(tallyRound.VoteRoundId)
+		if err != nil {
+			logger.Warn("PrepareProposal: no EA key for round, skipping tally",
+				"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
+			return &abci.ResponsePrepareProposal{Txs: txs}, nil
+		}
+
+		entries, err := decryptRoundTallies(kvStore, voteKeeper, tallyRound, eaSk, loadBSGS())
 		if err != nil {
 			logger.Error("PrepareProposal: failed to decrypt tally",
 				"round", tallyRound.VoteRoundId, "err", err)
