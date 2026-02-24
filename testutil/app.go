@@ -246,25 +246,12 @@ func (ta *TestApp) SeedVoteManager(addr string) {
 	ta.NextBlock()
 }
 
-// SeedConfirmedCeremony writes a confirmed ceremony state (with ea_pk) directly
-// into the module's KV store and commits it via an empty block. This must be
-// called before any CreateVotingSession call, since that handler now requires
-// a confirmed ceremony.
-func (ta *TestApp) SeedConfirmedCeremony(eaPk []byte) {
+// SeedConfirmedCeremony is a no-op retained for test compatibility.
+// Ceremony state is now embedded per-round; rounds start PENDING and
+// auto-confirm via deal/ack. Tests that need an ACTIVE round with ea_pk
+// should use SeedVotingSession directly (which sets ea_pk on the round).
+func (ta *TestApp) SeedConfirmedCeremony(_ []byte) {
 	ta.t.Helper()
-
-	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
-	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
-
-	state := &types.CeremonyState{
-		Status: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
-		EaPk:   eaPk,
-	}
-	err := ta.VoteKeeper().SetCeremonyState(kvStore, state)
-	require.NoError(ta.t, err)
-
-	// Commit via an empty block so the IAVL working set changes are persisted.
-	ta.NextBlock()
 }
 
 // SeedVotingSession creates a VoteRound directly in the KV store from a
@@ -282,14 +269,9 @@ func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
 
-	// Read ea_pk from confirmed ceremony state (if present).
-	var eaPk []byte
-	ceremony, err := ta.VoteKeeper().GetCeremonyState(kvStore)
-	if err == nil && ceremony != nil && len(ceremony.EaPk) > 0 {
-		eaPk = ceremony.EaPk
-	} else {
-		eaPk = make([]byte, 32)
-	}
+	// Use a placeholder ea_pk. In the per-round model, ea_pk is set during
+	// the ceremony deal phase, but tests seeding ACTIVE rounds need a value.
+	eaPk := make([]byte, 32)
 
 	roundID := deriveRoundID(msg)
 
@@ -311,7 +293,7 @@ func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {
 		Description:       msg.Description,
 	}
 
-	err = ta.VoteKeeper().SetVoteRound(kvStore, round)
+	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
 
 	ta.NextBlock()
@@ -336,29 +318,36 @@ func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
 	return h.Sum(nil)
 }
 
-// SeedDealtCeremony writes a DEALT ceremony state into the KV store. The
-// ceremony includes a single validator (the genesis validator) with an ECIES
-// payload encrypting eaSkBytes under pallasPk. Commits via an empty block.
-func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads []*types.DealerPayload, validators []*types.ValidatorPallasKey) {
+// SeedDealtCeremony creates a PENDING round with DEALT ceremony fields.
+// The round includes the given validators and ECIES payloads. Commits via
+// an empty block. Returns the round ID.
+func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads []*types.DealerPayload, validators []*types.ValidatorPallasKey) []byte {
 	ta.t.Helper()
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
 
-	state := &types.CeremonyState{
-		Status:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
-		EaPk:         eaPkBytes,
-		Dealer:       "dealer",
-		Validators:   validators,
-		Payloads:     payloads,
-		PhaseStart:   uint64(ta.Time.Unix()),
-		PhaseTimeout: types.DefaultDealTimeout,
+	// Use a deterministic round ID based on the ea_pk.
+	h, _ := blake2b.New256(nil)
+	h.Write(eaPkBytes)
+	roundID := h.Sum(nil)
+
+	round := &types.VoteRound{
+		VoteRoundId:          roundID,
+		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
+		EaPk:                 eaPkBytes,
+		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+		CeremonyDealer:       "dealer",
+		CeremonyValidators:   validators,
+		CeremonyPayloads:     payloads,
+		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
+		CeremonyPhaseTimeout: types.DefaultDealTimeout,
 	}
-	err := ta.VoteKeeper().SetCeremonyState(kvStore, state)
+	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
 
-	// Commit via an empty block so the IAVL working set changes are persisted.
 	ta.NextBlock()
+	return roundID
 }
 
 // ValidatorOperAddr returns the operator (valoper) address of the genesis

@@ -55,9 +55,6 @@ var (
 	// Written by EndBlocker when tree root changes. Used by the CommitmentLeaves query.
 	BlockLeafIndexPrefix = []byte{0x08}
 
-	// CeremonyStateKey stores the singleton EA key ceremony state: single key -> CeremonyState (protobuf)
-	CeremonyStateKey = []byte{0x09}
-
 	// VoteManagerKey stores the singleton vote manager address: single key -> VoteManagerState (protobuf)
 	VoteManagerKey = []byte{0x0A}
 

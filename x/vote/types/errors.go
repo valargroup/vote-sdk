@@ -20,7 +20,6 @@ var (
 	ErrTallyMismatch         = errors.Register(ModuleName, 14, "tally entry does not match on-chain accumulator")
 
 	// EA key ceremony errors.
-	ErrCeremonyNotReady       = errors.Register(ModuleName, 20, "ceremony not in confirmed status")
 	ErrCeremonyWrongStatus    = errors.Register(ModuleName, 21, "operation invalid for current ceremony status")
 	ErrDuplicateRegistration  = errors.Register(ModuleName, 22, "validator already registered pallas key")
 	ErrInvalidPallasPoint     = errors.Register(ModuleName, 23, "invalid pallas point")
@@ -28,7 +27,6 @@ var (
 	ErrDuplicateAck           = errors.Register(ModuleName, 25, "validator already acknowledged")
 	ErrNotRegisteredValidator  = errors.Register(ModuleName, 26, "validator not in ceremony validator list")
 	ErrCeremonySessionActive   = errors.Register(ModuleName, 27, "ceremony session is in progress")
-	ErrVotingSessionActive     = errors.Register(ModuleName, 28, "voting session is active or tallying")
 
 	// Vote manager errors.
 	ErrNotAuthorized  = errors.Register(ModuleName, 30, "sender is not authorized")

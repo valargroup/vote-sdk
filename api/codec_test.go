@@ -144,7 +144,6 @@ func TestIsCeremonyTag(t *testing.T) {
 	require.False(t, IsCeremonyTag(TagRegisterPallasKey))
 	require.False(t, IsCeremonyTag(TagDealExecutiveAuthorityKey))
 	require.False(t, IsCeremonyTag(TagCreateValidatorWithPallasKey))
-	require.False(t, IsCeremonyTag(TagReInitializeElectionAuthority))
 	require.False(t, IsCeremonyTag(TagSetVoteManager))
 	require.False(t, IsCeremonyTag(0x00))
 	require.False(t, IsCeremonyTag(0x0A)) // reserved: collides with Cosmos Tx protobuf

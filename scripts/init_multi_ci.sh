@@ -235,8 +235,7 @@ $BINARY genesis gentx validator "$SELF_DELEGATION" \
 $BINARY genesis collect-gentxs --home "$HOME_VAL1"
 $BINARY genesis validate-genesis --home "$HOME_VAL1"
 
-# Generate EA and Pallas keypairs for val1.
-$BINARY ea-keygen --home "$HOME_VAL1"
+# Generate Pallas keypair for val1 (EA key is generated per-round by auto-deal).
 $BINARY pallas-keygen --home "$HOME_VAL1"
 
 # Configure ports and vote module for val1.
@@ -265,11 +264,8 @@ for i in 2 3; do
     # Copy the finalized genesis.json from val1.
     cp "$HOME_VAL1/config/genesis.json" "$home/config/genesis.json"
 
-    # Generate Pallas keypair.
+    # Generate Pallas keypair (EA key is generated per-round by auto-deal).
     $BINARY pallas-keygen --home "$home"
-
-    # Generate EA keypair (needed for PrepareProposal auto-ack/tally).
-    $BINARY ea-keygen --home "$home"
 
     # Configure ports.
     configure_config_toml "$home" "${P2P_PORTS[$idx]}" "${RPC_PORTS[$idx]}" "${PPROF_PORTS[$idx]}"

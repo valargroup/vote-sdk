@@ -28,7 +28,6 @@ const (
 	TagDealExecutiveAuthorityKey      byte = 0x07
 	TagAckExecutiveAuthorityKey       byte = 0x08
 	TagCreateValidatorWithPallasKey         byte = 0x09
-	TagReInitializeElectionAuthority       byte = 0x0B
 	TagSetVoteManager                      byte = 0x0C
 )
 
