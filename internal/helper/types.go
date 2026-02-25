@@ -55,7 +55,7 @@ type RoundInfoFetcher func(roundID string) (voteEndTime uint64, err error)
 type EncryptedShareWire struct {
 	C1         string `json:"c1"`          // base64, 32 bytes
 	C2         string `json:"c2"`          // base64, 32 bytes
-	ShareIndex uint32 `json:"share_index"` // 0..4
+	ShareIndex uint32 `json:"share_index"` // 0..15
 }
 
 // SharePayload is the wire format sent by wallets to the helper server.
@@ -67,8 +67,8 @@ type SharePayload struct {
 	ShareIndex   uint32               `json:"share_index"`    // redundant with enc_share.share_index
 	TreePosition uint64               `json:"tree_position"`  // VC leaf index
 	VoteRoundID  string               `json:"vote_round_id"`  // hex, 32 bytes
-	AllEncShares []EncryptedShareWire `json:"all_enc_shares"` // all 5 shares
-	ShareBlinds  []string             `json:"share_blinds"`   // base64, 5 × 32 bytes
+	AllEncShares []EncryptedShareWire `json:"all_enc_shares"` // all 16 shares
+	ShareBlinds  []string             `json:"share_blinds"`   // base64, 16 × 32 bytes
 }
 
 // ShareState represents the processing state of a queued share.
@@ -100,13 +100,13 @@ type QueueStatus struct {
 type ProofGenerator interface {
 	// GenerateShareRevealProof generates a share reveal proof.
 	// merklePath: 772 bytes from votetree.ComputeMerklePath
-	// allEncShares: 10 compressed points (C1_0, C2_0, ..., C1_4, C2_4)
-	// shareBlinds: 5 × 32-byte per-share blind factors
+	// allEncShares: 32 compressed points (C1_0, C2_0, ..., C1_15, C2_15)
+	// shareBlinds: 16 × 32-byte per-share blind factors
 	// Returns proof bytes, nullifier (32 bytes), tree root (32 bytes).
 	GenerateShareRevealProof(
 		merklePath []byte,
-		allEncShares [10][32]byte,
-		shareBlinds [5][32]byte,
+		allEncShares [32][32]byte,
+		shareBlinds [16][32]byte,
 		shareIndex uint32,
 		proposalID, voteDecision uint32,
 		roundID [32]byte,

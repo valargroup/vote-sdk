@@ -5,7 +5,12 @@
 //!   -1 = invalid input (null pointer, wrong length, etc.)
 //!   -2 = verification failed (proof/signature is invalid) / position out of range (tree path)
 //!   -3 = internal error (deserialization, etc.)
+//!
+//! On any non-zero return, a human-readable description is stored in a
+//! thread-local buffer. Call `zally_last_error()` immediately after a
+//! failing call to retrieve the message before the next FFI call clears it.
 
+use std::ffi::CString;
 use std::sync::OnceLock;
 
 use halo2_proofs::pasta::{EqAffine, Fp};
@@ -19,6 +24,54 @@ use crate::share_reveal;
 use crate::toy;
 use crate::vote_proof;
 use crate::votetree;
+
+// ---------------------------------------------------------------------------
+// Thread-local last-error store
+// ---------------------------------------------------------------------------
+
+// Each thread keeps its own CString so that the pointer returned by
+// `zally_last_error()` is stable until the next FFI call on that thread.
+thread_local! {
+    static LAST_ERROR: std::cell::RefCell<CString> =
+        std::cell::RefCell::new(CString::new("").unwrap());
+}
+
+/// Store a human-readable error message in the thread-local buffer.
+///
+/// Called internally by every FFI function before returning a non-zero code.
+/// The message is retrievable via `zally_last_error()`.
+fn set_ffi_error(msg: impl AsRef<str>) {
+    let s = msg.as_ref();
+    let cstr = CString::new(s)
+        .unwrap_or_else(|_| CString::new("<error message contained NUL byte>").unwrap());
+    LAST_ERROR.with(|cell| *cell.borrow_mut() = cstr);
+}
+
+/// Return a pointer to the last error message for the current thread.
+///
+/// The returned pointer points into a thread-local buffer. It is valid until
+/// the next FFI call on this thread (which may overwrite the buffer). Copy
+/// the string immediately — e.g. via `C.GoString()` in CGo — before making
+/// another FFI call.
+///
+/// Returns a pointer to an empty string (never NULL) when no error has been set.
+///
+/// The caller MUST NOT free the returned pointer.
+#[no_mangle]
+pub extern "C" fn zally_last_error() -> *const std::os::raw::c_char {
+    LAST_ERROR.with(|cell| cell.borrow().as_ptr())
+}
+
+/// Clear the thread-local error message.
+///
+/// Optional housekeeping; all FFI functions overwrite the buffer on entry
+/// so an explicit clear is rarely needed.
+#[no_mangle]
+pub extern "C" fn zally_clear_error() {
+    LAST_ERROR.with(|cell| {
+        *cell.borrow_mut() = CString::new("").unwrap();
+    });
+}
 
 /// Convert a 32-byte hash (e.g. Blake2b-256 output) to a canonical Pallas Fp
 /// element via wide reduction.
@@ -112,13 +165,19 @@ pub unsafe extern "C" fn zally_verify_toy_proof(
     let fp_opt: Option<Fp> = Fp::from_repr(repr).into();
     let fp = match fp_opt {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error("toy: public input is not a canonical Pallas Fp element");
+            return -3;
+        }
     };
 
     // Run verification.
     match toy::verify_toy(proof, &fp) {
         Ok(()) => 0,
-        Err(_) => -2,
+        Err(e) => {
+            set_ffi_error(format!("toy: verify_proof failed: {:?}", e));
+            -2
+        }
     }
 }
 
@@ -358,21 +417,33 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
     // Slot 0: nf_signed
     let nf_signed = match deserialize_fp(chunk(0)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error("delegation: slot 0 (nf_signed) is not a canonical Pallas Fp element");
+            return -3;
+        }
     };
 
     // Slot 1: rk (compressed Pallas point) — decompress to (x, y).
     let rk_bytes = chunk(1);
     let rk_point: pallas::Point = match pallas::Point::from_bytes(&rk_bytes).into() {
         Some(p) => p,
-        None => return -3,
+        None => {
+            set_ffi_error(format!(
+                "delegation: slot 1 (rk) is not a valid compressed Pallas point: {:02x?}",
+                &rk_bytes[..4]
+            ));
+            return -3;
+        }
     };
     let rk_affine = rk_point.to_affine();
     let rk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
         rk_affine.coordinates().into();
     let rk_coords = match rk_coords {
         Some(c) => c,
-        None => return -3, // identity point
+        None => {
+            set_ffi_error("delegation: slot 1 (rk) decompressed to the identity point");
+            return -3;
+        }
     };
     let rk_x: pallas::Base = *rk_coords.x();
     let rk_y: pallas::Base = *rk_coords.y();
@@ -380,11 +451,17 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
     // Slots 2–11: the remaining 10 field elements.
     let cmx_new = match deserialize_fp(chunk(2)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error("delegation: slot 2 (cmx_new) is not a canonical Pallas Fp element");
+            return -3;
+        }
     };
     let van_comm = match deserialize_fp(chunk(3)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error("delegation: slot 3 (van_comm) is not a canonical Pallas Fp element");
+            return -3;
+        }
     };
     // vote_round_id is a Blake2b-256 hash and may be non-canonical as a raw
     // Fp encoding. Use wide reduction to get a canonical field element.
@@ -393,31 +470,64 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
     let vote_round_id = hash_bytes_to_fp(chunk(4));
     let nc_root = match deserialize_fp(chunk(5)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error("delegation: slot 5 (nc_root) is not a canonical Pallas Fp element");
+            return -3;
+        }
     };
     let nf_imt_root = match deserialize_fp(chunk(6)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error(
+                "delegation: slot 6 (nf_imt_root) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
     };
     let gov_null_1 = match deserialize_fp(chunk(7)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error(
+                "delegation: slot 7 (gov_null_1) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
     };
     let gov_null_2 = match deserialize_fp(chunk(8)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error(
+                "delegation: slot 8 (gov_null_2) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
     };
     let gov_null_3 = match deserialize_fp(chunk(9)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error(
+                "delegation: slot 9 (gov_null_3) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
     };
     let gov_null_4 = match deserialize_fp(chunk(10)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error(
+                "delegation: slot 10 (gov_null_4) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
     };
     let gov_null_5 = match deserialize_fp(chunk(11)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error(
+                "delegation: slot 11 (gov_null_5) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
     };
 
     // Build the 13-element public input vector (matches circuit instance order).
@@ -436,27 +546,6 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
         gov_null_4,
         gov_null_5,
     ];
-
-    // Debug: dump all 13 field elements so we can compare with prover side.
-    {
-        fn bytes_to_hex(b: &[u8]) -> String {
-            b.iter().map(|byte| format!("{:02x}", byte)).collect()
-        }
-        let names = [
-            "nf_signed", "rk_x", "rk_y", "cmx_new", "van_comm",
-            "vote_round_id", "nc_root", "nf_imt_root",
-            "gov_null_1", "gov_null_2", "gov_null_3", "gov_null_4", "gov_null_5",
-        ];
-        eprintln!("[zkp1-verify] 13 public inputs (post-deser, hex LE):");
-        for (i, (fe, name)) in public_inputs.iter().zip(names.iter()).enumerate() {
-            let bytes: [u8; 32] = fe.to_repr();
-            eprintln!("[zkp1-verify]   [{:>2}] {:<14} {}", i, name, bytes_to_hex(&bytes));
-        }
-        // Also dump raw input chunks for slot 4 (vote_round_id before wide reduction)
-        let raw_vrid = chunk(4);
-        eprintln!("[zkp1-verify] raw vote_round_id (slot 4, before wide reduction): {}", bytes_to_hex(&raw_vrid));
-        eprintln!("[zkp1-verify] proof_len={}", proof_len);
-    }
 
     // Run verification using cached params and VK.
     // First call initializes the cache (~10-30s); subsequent calls are fast.
@@ -477,7 +566,10 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
         &mut transcript,
     ) {
         Ok(()) => 0,
-        Err(_) => -2,
+        Err(e) => {
+            set_ffi_error(format!("delegation: verify_proof failed: {:?}", e));
+            -2
+        }
     }
 }
 
@@ -551,35 +643,61 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
     // Slot 0: van_nullifier (Fp)
     let van_nullifier = match deserialize_fp(chunk(0)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error(
+                "vote: slot 0 (van_nullifier) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
     };
 
     // Slots 1–2: r_vpk_x, r_vpk_y (condition 4: Spend Authority)
     let r_vpk_x = match deserialize_fp(chunk(1)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error("vote: slot 1 (r_vpk_x) is not a canonical Pallas Fp element");
+            return -3;
+        }
     };
     let r_vpk_y = match deserialize_fp(chunk(2)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error("vote: slot 2 (r_vpk_y) is not a canonical Pallas Fp element");
+            return -3;
+        }
     };
 
     // Slot 3: vote_authority_note_new (Fp)
     let vote_authority_note_new = match deserialize_fp(chunk(3)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error(
+                "vote: slot 3 (vote_authority_note_new) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
     };
 
     // Slot 4: vote_commitment (Fp)
     let vote_commitment = match deserialize_fp(chunk(4)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error(
+                "vote: slot 4 (vote_commitment) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
     };
 
     // Slot 5: vote_comm_tree_root (Fp)
     let vote_comm_tree_root = match deserialize_fp(chunk(5)) {
         Some(f) => f,
-        None => return -3,
+        None => {
+            set_ffi_error(
+                "vote: slot 5 (vote_comm_tree_root) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
     };
 
     // Slot 6: anchor_height (uint64 LE zero-padded to 32 bytes → Fp)
@@ -601,14 +719,23 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
     let ea_pk_bytes = chunk(9);
     let ea_pk_point: pallas::Point = match pallas::Point::from_bytes(&ea_pk_bytes).into() {
         Some(p) => p,
-        None => return -3,
+        None => {
+            set_ffi_error(format!(
+                "vote: slot 9 (ea_pk) is not a valid compressed Pallas point: {:02x?}",
+                &ea_pk_bytes[..4]
+            ));
+            return -3;
+        }
     };
     let ea_pk_affine = ea_pk_point.to_affine();
     let ea_pk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
         ea_pk_affine.coordinates().into();
     let ea_pk_coords = match ea_pk_coords {
         Some(c) => c,
-        None => return -3, // identity point
+        None => {
+            set_ffi_error("vote: slot 9 (ea_pk) decompressed to the identity point");
+            return -3;
+        }
     };
     let ea_pk_x: pallas::Base = *ea_pk_coords.x();
     let ea_pk_y: pallas::Base = *ea_pk_coords.y();
@@ -646,7 +773,10 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
         &mut transcript,
     ) {
         Ok(()) => 0,
-        Err(_) => -2,
+        Err(e) => {
+            set_ffi_error(format!("vote: verify_proof failed: {:?}", e));
+            -2
+        }
     }
 }
 
@@ -726,6 +856,17 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
     let deserialize_fp =
         |bytes: [u8; 32]| -> Option<pallas::Base> { pallas::Base::from_repr(bytes).into() };
 
+    // Slot names for error messages (indexed 0..6).
+    const SLOT_NAMES: [&str; 7] = [
+        "share_nullifier",
+        "enc_share_c1_x",
+        "enc_share_c2_x",
+        "proposal_id",
+        "vote_decision",
+        "vote_comm_tree_root",
+        "voting_round_id",
+    ];
+
     // Deserialize each 32-byte chunk as a Pallas Fp element.
     // Slot 6 (voting_round_id) uses wide reduction because it is a
     // Blake2b-256 hash that may be non-canonical as a raw Fp encoding.
@@ -737,7 +878,13 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
         } else {
             match deserialize_fp(chunk(i)) {
                 Some(f) => public_inputs.push(f),
-                None => return -3,
+                None => {
+                    set_ffi_error(format!(
+                        "share_reveal: slot {} ({}) is not a canonical Pallas Fp element",
+                        i, SLOT_NAMES[i]
+                    ));
+                    return -3;
+                }
             }
         }
     }
@@ -760,7 +907,10 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
         &mut transcript,
     ) {
         Ok(()) => 0,
-        Err(_) => -2,
+        Err(e) => {
+            set_ffi_error(format!("share_reveal: verify_proof failed: {:?}", e));
+            -2
+        }
     }
 }
 
@@ -785,9 +935,9 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
 ///
 /// # Arguments
 /// * `merkle_path_ptr/len`       - 772-byte serialized Merkle path (from `zally_vote_tree_path`)
-/// * `all_enc_shares_ptr/len`    - 320 bytes: 5 shares × (C1 + C2) × 32 bytes each
-///                                 Order: C1_0, C2_0, C1_1, C2_1, C1_2, C2_2, C1_3, C2_3, C1_4, C2_4
-/// * `share_index`               - Which of the 5 shares (0..4)
+/// * `all_enc_shares_ptr/len`    - 1024 bytes: 16 shares × (C1 + C2) × 32 bytes each
+///                                 Order: C1_0, C2_0, C1_1, C2_1, ..., C1_15, C2_15
+/// * `share_index`               - Which of the 16 shares (0..15)
 /// * `proposal_id`               - Proposal being voted on
 /// * `vote_decision`             - Vote choice (0=support, 1=oppose, 2=skip)
 /// * `round_id_ptr/len`          - 32-byte raw Blake2b-256 round ID
@@ -843,18 +993,18 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     if merkle_path_len != votetree::MERKLE_PATH_BYTES {
         return -1;
     }
-    // 5 shares × 2 points (C1+C2) × 32 bytes = 320
-    if all_enc_shares_len != 320 {
+    // 16 shares × 2 points (C1+C2) × 32 bytes = 1024
+    if all_enc_shares_len != 1024 {
         return -1;
     }
-    // 5 blind factors × 32 bytes = 160
-    if share_blinds_len != 160 {
+    // 16 blind factors × 32 bytes = 512
+    if share_blinds_len != 512 {
         return -1;
     }
     if round_id_len != 32 {
         return -1;
     }
-    if share_index > 4 {
+    if share_index > 15 {
         return -1;
     }
 
@@ -882,14 +1032,14 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
         }
     }
 
-    // --- Step 2: Decode all 10 encrypted share x-coordinates ---
-    // Layout: C1_0(32) C2_0(32) C1_1(32) C2_1(32) C1_2(32) C2_2(32) C1_3(32) C2_3(32) C1_4(32) C2_4(32)
+    // --- Step 2: Decode all 32 encrypted share x-coordinates ---
+    // Layout: C1_0(32) C2_0(32) C1_1(32) C2_1(32) ... C1_15(32) C2_15(32)
     let enc_shares_raw = std::slice::from_raw_parts(all_enc_shares_ptr, all_enc_shares_len);
 
-    let mut all_c1_x = [pallas::Base::zero(); 5];
-    let mut all_c2_x = [pallas::Base::zero(); 5];
+    let mut all_c1_x = [pallas::Base::zero(); 16];
+    let mut all_c2_x = [pallas::Base::zero(); 16];
 
-    for i in 0..5usize {
+    for i in 0..16usize {
         let c1_offset = i * 64;
         let c2_offset = c1_offset + 32;
 
@@ -913,8 +1063,8 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
 
     // --- Step 2b: Decode share blind factors ---
     let share_blinds_raw = std::slice::from_raw_parts(share_blinds_ptr, share_blinds_len);
-    let mut share_blinds = [pallas::Base::zero(); 5];
-    for i in 0..5usize {
+    let mut share_blinds = [pallas::Base::zero(); 16];
+    for i in 0..16usize {
         let offset = i * 32;
         let mut bytes = [0u8; 32];
         bytes.copy_from_slice(&share_blinds_raw[offset..offset + 32]);
@@ -1009,7 +1159,7 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
 /// Returns (merkle_path, all_enc_shares_flat, share_blinds_flat, share_index,
 ///          proposal_id, vote_decision, round_id, shares_hash).
 pub fn build_share_reveal_test_data()
-    -> (Vec<u8>, [u8; 320], [u8; 160], u32, u32, u32, [u8; 32], [u8; 32])
+    -> (Vec<u8>, [u8; 1024], [u8; 512], u32, u32, u32, [u8; 32], [u8; 32])
 {
     use pasta_curves::group::ff::PrimeField;
     use pasta_curves::pallas;
@@ -1019,14 +1169,14 @@ pub fn build_share_reveal_test_data()
     let round_id = [0u8; 32]; // simple zero round ID
 
     // Synthetic blind factors.
-    let share_blinds: [pallas::Base; 5] = core::array::from_fn(|i| {
+    let share_blinds: [pallas::Base; 16] = core::array::from_fn(|i| {
         pallas::Base::from(1001u64 + i as u64)
     });
 
     // Synthetic x-coordinates for encrypted shares.
-    let mut all_c1_x = [pallas::Base::zero(); 5];
-    let mut all_c2_x = [pallas::Base::zero(); 5];
-    for i in 0..5u64 {
+    let mut all_c1_x = [pallas::Base::zero(); 16];
+    let mut all_c2_x = [pallas::Base::zero(); 16];
+    for i in 0..16u64 {
         all_c1_x[i as usize] = pallas::Base::from(100 + i);
         all_c2_x[i as usize] = pallas::Base::from(200 + i);
     }
@@ -1057,18 +1207,18 @@ pub fn build_share_reveal_test_data()
         assert_eq!(rc, 0, "zally_vote_tree_path failed");
     }
 
-    // Flatten enc_shares: C1_0(32) C2_0(32) C1_1(32) C2_1(32) ...
-    let mut enc_shares_flat = [0u8; 320];
-    for i in 0..5 {
+    // Flatten enc_shares: C1_0(32) C2_0(32) ... C1_15(32) C2_15(32) = 1024 bytes.
+    let mut enc_shares_flat = [0u8; 1024];
+    for i in 0..16 {
         let c1_bytes = all_c1_x[i].to_repr();
         let c2_bytes = all_c2_x[i].to_repr();
         enc_shares_flat[i * 64..i * 64 + 32].copy_from_slice(&c1_bytes);
         enc_shares_flat[i * 64 + 32..i * 64 + 64].copy_from_slice(&c2_bytes);
     }
 
-    // Flatten share_blinds: 5 × 32 bytes.
-    let mut blinds_flat = [0u8; 160];
-    for i in 0..5 {
+    // Flatten share_blinds: 16 × 32 bytes = 512 bytes.
+    let mut blinds_flat = [0u8; 512];
+    for i in 0..16 {
         let bytes = share_blinds[i].to_repr();
         blinds_flat[i * 32..(i + 1) * 32].copy_from_slice(&bytes);
     }

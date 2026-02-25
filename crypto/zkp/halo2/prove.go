@@ -19,9 +19,9 @@ import (
 //
 // Parameters:
 //   - merklePath: 772-byte serialized Merkle path (from votetree.ComputeMerklePath)
-//   - allEncShares: 10 compressed Pallas points (C1_0, C2_0, ..., C1_4, C2_4), 32 bytes each
-//   - shareBlinds: 5 per-share blind factors, 32 bytes each
-//   - shareIndex: which of the 5 shares (0..4)
+//   - allEncShares: 32 compressed Pallas points (C1_0, C2_0, ..., C1_15, C2_15), 32 bytes each
+//   - shareBlinds: 16 per-share blind factors, 32 bytes each
+//   - shareIndex: which of the 16 shares (0..15)
 //   - proposalID: proposal being voted on
 //   - voteDecision: vote choice
 //   - roundID: 32-byte raw Blake2b-256 round identifier
@@ -30,8 +30,8 @@ import (
 // Returns the proof bytes, share nullifier (32 bytes), tree root (32 bytes), or error.
 func GenerateShareRevealProof(
 	merklePath []byte,
-	allEncShares [10][32]byte,
-	shareBlinds [5][32]byte,
+	allEncShares [32][32]byte,
+	shareBlinds [16][32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
@@ -40,20 +40,20 @@ func GenerateShareRevealProof(
 	if len(merklePath) != 772 {
 		return nil, nullifier, treeRoot, fmt.Errorf("merklePath must be 772 bytes, got %d", len(merklePath))
 	}
-	if shareIndex > 4 {
-		return nil, nullifier, treeRoot, fmt.Errorf("shareIndex must be 0..4, got %d", shareIndex)
+	if shareIndex > 15 {
+		return nil, nullifier, treeRoot, fmt.Errorf("shareIndex must be 0..15, got %d", shareIndex)
 	}
 
-	// Flatten allEncShares into 320 contiguous bytes:
-	// C1_0(32) C2_0(32) C1_1(32) C2_1(32) C1_2(32) C2_2(32) C1_3(32) C2_3(32) C1_4(32) C2_4(32)
-	var encSharesBuf [320]byte
-	for i := 0; i < 10; i++ {
+	// Flatten allEncShares into 1024 contiguous bytes:
+	// C1_0(32) C2_0(32) C1_1(32) C2_1(32) ... C1_15(32) C2_15(32)
+	var encSharesBuf [1024]byte
+	for i := 0; i < 32; i++ {
 		copy(encSharesBuf[i*32:(i+1)*32], allEncShares[i][:])
 	}
 
-	// Flatten shareBlinds into 160 contiguous bytes.
-	var blindsBuf [160]byte
-	for i := 0; i < 5; i++ {
+	// Flatten shareBlinds into 512 contiguous bytes.
+	var blindsBuf [512]byte
+	for i := 0; i < 16; i++ {
 		copy(blindsBuf[i*32:(i+1)*32], shareBlinds[i][:])
 	}
 
@@ -66,9 +66,9 @@ func GenerateShareRevealProof(
 		(*C.uint8_t)(unsafe.Pointer(&merklePath[0])),
 		C.size_t(len(merklePath)),
 		(*C.uint8_t)(unsafe.Pointer(&encSharesBuf[0])),
-		C.size_t(320),
+		C.size_t(1024),
 		(*C.uint8_t)(unsafe.Pointer(&blindsBuf[0])),
-		C.size_t(160),
+		C.size_t(512),
 		C.uint32_t(shareIndex),
 		C.uint32_t(proposalID),
 		C.uint32_t(voteDecision),

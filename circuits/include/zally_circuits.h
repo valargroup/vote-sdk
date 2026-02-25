@@ -18,6 +18,35 @@ extern "C" {
 #endif
 
 /* -----------------------------------------------------------------------
+ * Thread-local error reporting
+ *
+ * Every FFI function stores a human-readable description of the last
+ * failure in a thread-local buffer before returning a non-zero code.
+ * Call zally_last_error() immediately after a failed call to retrieve it;
+ * the pointer is valid until the next FFI call on the same thread.
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Return a pointer to the last error message for the current thread.
+ *
+ * The returned pointer is owned by the library; the caller MUST NOT free it.
+ * It remains valid until the next FFI call on this thread overwrites the
+ * buffer. Copy the string (e.g. via C.GoString() in CGo) before making
+ * another FFI call.
+ *
+ * Returns a pointer to an empty string (never NULL) when no error is set.
+ */
+const char* zally_last_error(void);
+
+/*
+ * Clear the thread-local error message.
+ *
+ * Optional housekeeping; all FFI functions overwrite the buffer on every
+ * call so an explicit clear is rarely necessary.
+ */
+void zally_clear_error(void);
+
+/* -----------------------------------------------------------------------
  * Halo2 toy circuit verification
  * ----------------------------------------------------------------------- */
 
@@ -244,10 +273,10 @@ int32_t zally_verify_share_reveal_proof(
  *   merkle_path_ptr       - Pointer to 772-byte serialized Merkle path
  *                           (from zally_vote_tree_path: 4 bytes position + 24*32 siblings).
  *   merkle_path_len       - Length (must be 772).
- *   all_enc_shares_ptr    - Pointer to 320 bytes: 5 shares x (C1 + C2) x 32 bytes.
- *                           Order: C1_0, C2_0, C1_1, C2_1, C1_2, C2_2, C1_3, C2_3, C1_4, C2_4.
- *   all_enc_shares_len    - Length (must be 320).
- *   share_index           - Which of the 5 shares (0..4).
+ *   all_enc_shares_ptr    - Pointer to 1024 bytes: 16 shares x (C1 + C2) x 32 bytes.
+ *                           Order: C1_0, C2_0, C1_1, C2_1, ..., C1_15, C2_15.
+ *   all_enc_shares_len    - Length (must be 1024).
+ *   share_index           - Which of the 16 shares (0..15).
  *   proposal_id           - Proposal being voted on.
  *   vote_decision         - Vote choice.
  *   round_id_ptr          - Pointer to 32-byte raw Blake2b-256 round ID.
