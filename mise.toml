@@ -74,16 +74,19 @@ description = "Show status of all services + round state"
 quiet = true
 run = '''
 #!/usr/bin/env bash
+
+# ── Detect mode: multi-validator vs single ───────────────────────
+
+MULTI=false
 API="http://localhost:1318"
-
-# ── Services ──────────────────────────────────────────────────────
-
-printf "chain          "
 CHAIN_UP=false
-STATUS=$(zallyd status --home ~/.zallyd 2>/dev/null) || true
-if [ -n "$STATUS" ]; then
-    CHAIN_UP=true
-    INFO=$(echo "$STATUS" | python3 -c "
+
+if pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1; then
+    MULTI=true
+fi
+
+format_chain_status() {
+    python3 -c "
 import sys,json,time,datetime
 d=json.load(sys.stdin); s=d.get('sync_info',{})
 h=s.get('latest_block_height','?')
@@ -97,11 +100,41 @@ if t:
     else: age=f'{secs//3600}h ago'
 syncing=' (syncing)' if s.get('catching_up') else ''
 print(f'block {h}  {age}{syncing}')
-")
-    printf '\033[32m● running\033[0m   %s\n' "$INFO"
+"
+}
+
+# ── Chain ─────────────────────────────────────────────────────────
+
+if [ "$MULTI" = true ]; then
+    printf '\033[2m(multi-validator mode)\033[0m\n'
+    API="http://localhost:1418"
+    for i in 1 2 3; do
+        home="$HOME/.zallyd-val$i"
+        rpc_port=$((26057 + i * 100))
+        api_port=$((1318 + i * 100))
+        printf "  val%-11s" "$i"
+        STATUS=$(zallyd status --home "$home" --node "tcp://127.0.0.1:$rpc_port" 2>/dev/null) || true
+        if [ -n "$STATUS" ]; then
+            [ "$CHAIN_UP" = false ] && CHAIN_UP=true
+            INFO=$(echo "$STATUS" | format_chain_status)
+            printf '\033[32m● running\033[0m   %s  (:%s)\n' "$INFO" "$api_port"
+        else
+            printf '\033[31m○ stopped\033[0m\n'
+        fi
+    done
 else
-    printf '\033[31m○ stopped\033[0m\n'
+    printf "chain          "
+    STATUS=$(zallyd status --home ~/.zallyd 2>/dev/null) || true
+    if [ -n "$STATUS" ]; then
+        CHAIN_UP=true
+        INFO=$(echo "$STATUS" | format_chain_status)
+        printf '\033[32m● running\033[0m   %s\n' "$INFO"
+    else
+        printf '\033[31m○ stopped\033[0m\n'
+    fi
 fi
+
+# ── nf-server ────────────────────────────────────────────────────
 
 printf "nf-server      "
 if pgrep -f 'nf-server.*serve' > /dev/null 2>&1; then
@@ -111,6 +144,8 @@ elif pgrep -f 'cargo.*nf-server' > /dev/null 2>&1; then
 else
     printf '\033[31m○ stopped\033[0m\n'
 fi
+
+# ── Nullifier data ───────────────────────────────────────────────
 
 printf "nullifiers     "
 CP="nullifier-ingest/nullifiers.checkpoint"
@@ -138,6 +173,8 @@ if [ "$CHAIN_UP" = true ]; then
     if [ -n "$ROUNDS_JSON" ]; then
         echo "$ROUNDS_JSON" | python3 -c "
 import sys,json
+SESSION={0:'unspecified',1:'active',2:'tallying',3:'finalized',4:'pending'}
+CEREMONY={0:'',1:'registering',2:'dealt',3:'confirmed'}
 data=json.load(sys.stdin)
 rounds=data.get('rounds') or []
 if not rounds:
@@ -145,11 +182,12 @@ if not rounds:
 else:
     for r in rounds:
         sid=r.get('vote_round_id','')[:16]
-        status=r.get('status','?').replace('SESSION_STATUS_','').lower()
+        raw=r.get('status','?')
+        status=SESSION.get(raw,str(raw).replace('SESSION_STATUS_','').lower()) if isinstance(raw,int) else str(raw).replace('SESSION_STATUS_','').lower()
         title=r.get('title','')
         props=len(r.get('proposals') or [])
-        cs=r.get('ceremony_status','')
-        if isinstance(cs,str): cs=cs.replace('CEREMONY_STATUS_','').lower()
+        raw_cs=r.get('ceremony_status',0)
+        cs=CEREMONY.get(raw_cs,str(raw_cs).replace('CEREMONY_STATUS_','').lower()) if isinstance(raw_cs,int) else str(raw_cs).replace('CEREMONY_STATUS_','').lower()
         line=f'round {sid}..  {status}'
         if status=='pending' and cs: line+=f'  ceremony: {cs}'
         if props: line+=f'  {props} proposal{\"s\" if props!=1 else \"\"}'
@@ -163,9 +201,15 @@ fi
 
 echo ""
 printf '\033[2m'
-echo "Chain data     ~/.zallyd/"
-echo "Chain log      ./zallyd.log"
-echo "EA keys        ~/.zallyd/ea_sk.*"
+if [ "$MULTI" = true ]; then
+    echo "Chain data     ~/.zallyd-val{1,2,3}/"
+    echo "Chain logs     ./sdk/multi-val{1,2,3}.log"
+    echo "EA keys        ~/.zallyd-val*/ea_sk.*"
+else
+    echo "Chain data     ~/.zallyd/"
+    echo "Chain log      ./zallyd.log"
+    echo "EA keys        ~/.zallyd/ea_sk.*"
+fi
 echo "Nullifier data ./nullifier-ingest/nullifiers.{bin,checkpoint}"
 echo "PIR data       ./nullifier-ingest/pir-data/"
 echo "nf-server log  ./nf-serve.log"
