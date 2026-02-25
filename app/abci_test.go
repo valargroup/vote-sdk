@@ -1067,6 +1067,212 @@ func TestFullCeremonyCycle_DealThenAck(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 6.2.21: Multi-Validator Ceremony — Deal, Ack, Immediate Confirm
+// ---------------------------------------------------------------------------
+
+// TestMultiValidatorCeremony_DealAckConfirm uses 3 validators (1 real + 2
+// phantom) to exercise the auto-deal and auto-ack flow through the full ABCI
+// pipeline. With 3 validators, 1 ack satisfies the 1/3 threshold (1*3 >= 3),
+// so the ack handler confirms the ceremony immediately without waiting for
+// the EndBlocker timeout.
+func TestMultiValidatorCeremony_DealAckConfirm(t *testing.T) {
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	valAddr := app.ValidatorOperAddr()
+
+	// Register the real validator's Pallas key (required for auto-deal to
+	// consider this node a ceremony participant).
+	regMsg := &types.MsgRegisterPallasKey{
+		Creator:  app.ValidatorAccAddr(),
+		PallasPk: pallasPk.Point.ToAffineCompressed(),
+	}
+	regTx := app.MustBuildSignedCeremonyTx(regMsg)
+	result := app.DeliverVoteTx(regTx)
+	require.Equal(t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
+
+	// Generate 2 phantom validators with random Pallas keypairs. These are
+	// not registered in the staking keeper — they just have valid PKs so the
+	// deal handler can encrypt to them.
+	_, phantomPk1 := elgamal.KeyGen(rand.Reader)
+	_, phantomPk2 := elgamal.KeyGen(rand.Reader)
+	phantom1Addr := sdk.ValAddress(bytes.Repeat([]byte{0xA1}, 20)).String()
+	phantom2Addr := sdk.ValAddress(bytes.Repeat([]byte{0xA2}, 20)).String()
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: phantom1Addr, PallasPk: phantomPk1.Point.ToAffineCompressed()},
+		{ValidatorAddress: phantom2Addr, PallasPk: phantomPk2.Point.ToAffineCompressed()},
+	}
+	roundID := app.SeedRegisteringCeremony(validators)
+
+	// Block 1: PrepareProposal fires auto-deal → DEALT with 3 payloads.
+	app.NextBlockWithPrepareProposal()
+
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
+		"ceremony should be DEALT after auto-deal")
+	require.Len(t, round.CeremonyPayloads, 3, "should have 3 ECIES payloads (one per validator)")
+	require.Equal(t, valAddr, round.CeremonyDealer, "dealer should be the real validator")
+
+	// Verify each payload has non-empty ephemeral_pk and ciphertext.
+	for _, p := range round.CeremonyPayloads {
+		require.NotEmpty(t, p.EphemeralPk, "payload ephemeral_pk should be set for %s", p.ValidatorAddress)
+		require.NotEmpty(t, p.Ciphertext, "payload ciphertext should be set for %s", p.ValidatorAddress)
+	}
+
+	// Block 2: PrepareProposal fires auto-ack → 1/3 met → immediate confirm.
+	app.NextBlockWithPrepareProposal()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus,
+		"ceremony should be CONFIRMED (1 ack of 3 validators meets 1/3 threshold)")
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
+		"round should be ACTIVE after ceremony confirmation")
+	require.Len(t, round.CeremonyAcks, 1, "should have exactly 1 ack (from real validator)")
+	require.Equal(t, valAddr, round.CeremonyAcks[0].ValidatorAddress)
+
+	// Non-acking phantom validators should be stripped from CeremonyValidators.
+	require.Len(t, round.CeremonyValidators, 1, "only the acking validator should remain")
+	require.Equal(t, valAddr, round.CeremonyValidators[0].ValidatorAddress)
+
+	// EA public key should be set.
+	require.NotEmpty(t, round.EaPk, "ea_pk should be set on the round")
+
+	// Verify ea_sk was written to disk.
+	skFile := app.EaSkDir + "/ea_sk." + fmt.Sprintf("%x", roundID)
+	_, err = os.Stat(skFile)
+	require.NoError(t, err, "ea_sk file should exist on disk after ack")
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.22: Multi-Validator Ceremony — Timeout, Miss Tracking, Re-Deal
+// ---------------------------------------------------------------------------
+
+// TestMultiValidatorCeremony_TimeoutMissTracking uses 4 validators (1 real +
+// 3 phantom) to exercise the timeout path where acks fall below the 1/3
+// threshold. With 4 validators, 1 ack gives 1*3=3 < 4 — below threshold.
+// The EndBlocker resets the ceremony to REGISTERING and increments miss
+// counters for non-acking validators. Repeats 3 cycles to verify miss
+// accumulation across rounds.
+func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	valAddr := app.ValidatorOperAddr()
+
+	// Register the real validator's Pallas key.
+	regMsg := &types.MsgRegisterPallasKey{
+		Creator:  app.ValidatorAccAddr(),
+		PallasPk: pallasPk.Point.ToAffineCompressed(),
+	}
+	regTx := app.MustBuildSignedCeremonyTx(regMsg)
+	result := app.DeliverVoteTx(regTx)
+	require.Equal(t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
+
+	// Generate 3 phantom validators (4 total).
+	_, phantomPk1 := elgamal.KeyGen(rand.Reader)
+	_, phantomPk2 := elgamal.KeyGen(rand.Reader)
+	_, phantomPk3 := elgamal.KeyGen(rand.Reader)
+	phantom1Addr := sdk.ValAddress(bytes.Repeat([]byte{0xB1}, 20)).String()
+	phantom2Addr := sdk.ValAddress(bytes.Repeat([]byte{0xB2}, 20)).String()
+	phantom3Addr := sdk.ValAddress(bytes.Repeat([]byte{0xB3}, 20)).String()
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: phantom1Addr, PallasPk: phantomPk1.Point.ToAffineCompressed()},
+		{ValidatorAddress: phantom2Addr, PallasPk: phantomPk2.Point.ToAffineCompressed()},
+		{ValidatorAddress: phantom3Addr, PallasPk: phantomPk3.Point.ToAffineCompressed()},
+	}
+	roundID := app.SeedRegisteringCeremony(validators)
+
+	phantomAddrs := []string{phantom1Addr, phantom2Addr, phantom3Addr}
+
+	for cycle := 1; cycle <= 3; cycle++ {
+		// Step 1: PrepareProposal fires auto-deal → DEALT with 4 payloads.
+		app.NextBlockWithPrepareProposal()
+
+		ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+		kvStore := app.VoteKeeper().OpenKVStore(ctx)
+		round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
+		require.NoError(t, err)
+		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
+			"cycle %d: ceremony should be DEALT after auto-deal", cycle)
+		require.Len(t, round.CeremonyPayloads, 4,
+			"cycle %d: should have 4 ECIES payloads", cycle)
+
+		// Step 2: PrepareProposal fires auto-ack → 1/4 < 1/3 → stays DEALT.
+		app.NextBlockWithPrepareProposal()
+
+		ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+		kvStore = app.VoteKeeper().OpenKVStore(ctx)
+		round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+		require.NoError(t, err)
+		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
+			"cycle %d: ceremony should still be DEALT (1/4 below threshold)", cycle)
+		require.Len(t, round.CeremonyAcks, 1,
+			"cycle %d: should have 1 ack from real validator", cycle)
+
+		// Step 3: Advance 31 minutes past deal time → EndBlocker timeout.
+		// CeremonyPhaseStart was set when the deal was processed.
+		timeoutTime := time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
+		app.NextBlockAtTime(timeoutTime)
+
+		ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+		kvStore = app.VoteKeeper().OpenKVStore(ctx)
+		round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+		require.NoError(t, err)
+		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
+			"cycle %d: ceremony should reset to REGISTERING after timeout", cycle)
+		require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, round.Status,
+			"cycle %d: round should stay PENDING after timeout reset", cycle)
+		require.Nil(t, round.CeremonyPayloads,
+			"cycle %d: payloads should be cleared after timeout reset", cycle)
+		require.Nil(t, round.CeremonyAcks,
+			"cycle %d: acks should be cleared after timeout reset", cycle)
+
+		// Verify miss counters: phantom validators should have cycle misses,
+		// real validator should have 0 (ack resets miss counter).
+		for _, addr := range phantomAddrs {
+			missCount, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, addr)
+			require.NoError(t, err)
+			require.Equal(t, uint64(cycle), missCount,
+				"cycle %d: phantom %s should have %d misses", cycle, addr, cycle)
+		}
+
+		realMiss, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, valAddr)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), realMiss,
+			"cycle %d: real validator should have 0 misses (ack resets counter)", cycle)
+
+		// Verify ceremony log entries for the timeout reset.
+		require.NotEmpty(t, round.CeremonyLog,
+			"cycle %d: ceremony log should not be empty", cycle)
+	}
+
+	// After 3 cycles, verify final state.
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+
+	for _, addr := range phantomAddrs {
+		missCount, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, addr)
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), missCount,
+			"phantom %s should have 3 misses after 3 cycles", addr)
+	}
+
+	// The round should still be PENDING/REGISTERING — ready for another deal attempt.
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
