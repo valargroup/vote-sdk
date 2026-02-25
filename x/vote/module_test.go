@@ -16,6 +16,7 @@ import (
 	"cosmossdk.io/x/tx/signing"
 
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -325,8 +326,9 @@ func (jk *jailTrackingStakingKeeper) Jail(_ context.Context, consAddr sdk.ConsAd
 	return nil
 }
 
-func (s *EndBlockerTestSuite) TestEndBlock_CeremonyMissJailing() {
-	// Setup: create a keeper with a jail-tracking staking mock.
+// setupJailTest creates a keeper with a jail-tracking staking mock and a
+// validator with a real consensus pubkey so JailValidator → GetConsAddr succeeds.
+func (s *EndBlockerTestSuite) setupJailTest() (sdk.Context, keeper.Keeper, vote.AppModule, *jailTrackingStakingKeeper, sdk.ValAddress) {
 	key := storetypes.NewKVStoreKey(types.StoreKey)
 	tkey := storetypes.NewTransientStoreKey("transient_test_jail")
 	testCtx := testutil.DefaultContextWithDB(s.T(), key, tkey)
@@ -339,28 +341,30 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyMissJailing() {
 		validators: make(map[string]stakingtypes.Validator),
 	}
 
-	// Create a real validator so GetValidator works.
-	// We use the test address pattern from the keeper tests.
 	valAddr := sdk.ValAddress([]byte{0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
-	// Create a validator with a known consensus pubkey.
+
+	// Create validator with a real ed25519 consensus pubkey so GetConsAddr succeeds.
+	privKey := ed25519.GenPrivKey()
+	pubKey := privKey.PubKey()
+	pkAny, err := codectypes.NewAnyWithValue(pubKey)
+	s.Require().NoError(err)
+
 	val := stakingtypes.Validator{
 		OperatorAddress: valAddr.String(),
+		ConsensusPubkey: pkAny,
 	}
 	jailKeeper.validators[valAddr.String()] = val
 
 	k := keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), jailKeeper)
 	m := vote.NewAppModule(k, nil)
 
+	return ctx, k, m, jailKeeper, valAddr
+}
+
+// seedDealtRoundForValidator creates a DEALT round with a single non-acking
+// validator that has already timed out (deadline == block_time).
+func (s *EndBlockerTestSuite) seedDealtRoundForValidator(k keeper.Keeper, ctx sdk.Context, valAddr sdk.ValAddress, roundID []byte) {
 	kvStore := k.OpenKVStore(ctx)
-	roundID := bytes.Repeat([]byte{0xEE}, 32)
-
-	// Pre-seed miss counter to 2 (one below jail threshold).
-	_, err := k.IncrementCeremonyMiss(kvStore, valAddr.String())
-	s.Require().NoError(err)
-	_, err = k.IncrementCeremonyMiss(kvStore, valAddr.String())
-	s.Require().NoError(err)
-
-	// Create a DEALT round with a single non-acking validator, already timed out.
 	round := &types.VoteRound{
 		VoteRoundId:    roundID,
 		Status:         types.SessionStatus_SESSION_STATUS_PENDING,
@@ -372,9 +376,23 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyMissJailing() {
 		CeremonyDealer:       valAddr.String(),
 		CeremonyPhaseStart:   999_400,
 		CeremonyPhaseTimeout: 600,
-		// No acks — single validator didn't ack.
 	}
 	s.Require().NoError(k.SetVoteRound(kvStore, round))
+}
+
+func (s *EndBlockerTestSuite) TestEndBlock_CeremonyMissJailing() {
+	ctx, k, m, jailKeeper, valAddr := s.setupJailTest()
+	kvStore := k.OpenKVStore(ctx)
+	roundID := bytes.Repeat([]byte{0xEE}, 32)
+
+	// Pre-seed miss counter to 2 (one below jail threshold).
+	_, err := k.IncrementCeremonyMiss(kvStore, valAddr.String())
+	s.Require().NoError(err)
+	_, err = k.IncrementCeremonyMiss(kvStore, valAddr.String())
+	s.Require().NoError(err)
+
+	// Create a DEALT round with a single non-acking validator, already timed out.
+	s.seedDealtRoundForValidator(k, ctx, valAddr, roundID)
 
 	// Run EndBlocker.
 	s.Require().NoError(m.EndBlock(ctx))
@@ -384,11 +402,81 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyMissJailing() {
 	s.Require().NoError(err)
 	s.Require().Equal(uint64(3), missCount)
 
-	// However, jailing requires GetConsAddr which uses the pubkey — since
-	// our mock validator has no pubkey, the Jail call may error and be
-	// logged rather than panicking. Let's just verify the miss counter was
-	// incremented correctly. The actual Jail integration is tested at the
-	// unit level via JailValidator when a real validator is available.
+	// Validator should have been jailed via the staking keeper mock.
+	s.Require().Len(jailKeeper.jailedConsAddrs, 1)
+}
+
+// ---------------------------------------------------------------------------
+// Multi-round miss accumulation test
+// ---------------------------------------------------------------------------
+
+func (s *EndBlockerTestSuite) TestEndBlock_CeremonyMissAccumulatesAcrossRounds() {
+	ctx, k, m, jailKeeper, valAddr := s.setupJailTest()
+
+	// Helper: create a new DEALT round with a unique ID that has already timed out,
+	// run EndBlocker to trigger the timeout, then reset the round to REGISTERING
+	// to simulate the next cycle. Each call returns the updated context for store reads.
+	timeoutRound := func(roundSeed byte) {
+		roundID := bytes.Repeat([]byte{roundSeed}, 32)
+		s.seedDealtRoundForValidator(k, ctx, valAddr, roundID)
+		s.Require().NoError(m.EndBlock(ctx))
+	}
+
+	s.Run("3 consecutive misses → jailed", func() {
+		// Round 1: miss=1
+		timeoutRound(0xA1)
+		kvStore := k.OpenKVStore(ctx)
+		missCount, err := k.GetCeremonyMissCount(kvStore, valAddr.String())
+		s.Require().NoError(err)
+		s.Require().Equal(uint64(1), missCount)
+		s.Require().Len(jailKeeper.jailedConsAddrs, 0, "not jailed after 1 miss")
+
+		// Round 2: miss=2
+		timeoutRound(0xA2)
+		missCount, err = k.GetCeremonyMissCount(kvStore, valAddr.String())
+		s.Require().NoError(err)
+		s.Require().Equal(uint64(2), missCount)
+		s.Require().Len(jailKeeper.jailedConsAddrs, 0, "not jailed after 2 misses")
+
+		// Round 3: miss=3 → jailed
+		timeoutRound(0xA3)
+		missCount, err = k.GetCeremonyMissCount(kvStore, valAddr.String())
+		s.Require().NoError(err)
+		s.Require().Equal(uint64(3), missCount)
+		s.Require().Len(jailKeeper.jailedConsAddrs, 1, "jailed after 3 misses")
+	})
+
+	s.Run("ack resets counter so validator is not jailed", func() {
+		// Fresh setup to avoid state from previous sub-test.
+		ctx2, k2, m2, jailKeeper2, valAddr2 := s.setupJailTest()
+
+		// Round 1: miss=1
+		round1ID := bytes.Repeat([]byte{0xB1}, 32)
+		s.seedDealtRoundForValidator(k2, ctx2, valAddr2, round1ID)
+		s.Require().NoError(m2.EndBlock(ctx2))
+
+		kvStore2 := k2.OpenKVStore(ctx2)
+		missCount, err := k2.GetCeremonyMissCount(kvStore2, valAddr2.String())
+		s.Require().NoError(err)
+		s.Require().Equal(uint64(1), missCount)
+
+		// Simulate ack in round 2 by resetting miss counter (mimics what
+		// AckExecutiveAuthorityKey handler does on successful ack).
+		s.Require().NoError(k2.ResetCeremonyMiss(kvStore2, valAddr2.String()))
+		missCount, err = k2.GetCeremonyMissCount(kvStore2, valAddr2.String())
+		s.Require().NoError(err)
+		s.Require().Equal(uint64(0), missCount)
+
+		// Round 3: miss=1 (not 2, because the ack reset it)
+		round3ID := bytes.Repeat([]byte{0xB3}, 32)
+		s.seedDealtRoundForValidator(k2, ctx2, valAddr2, round3ID)
+		s.Require().NoError(m2.EndBlock(ctx2))
+
+		missCount, err = k2.GetCeremonyMissCount(kvStore2, valAddr2.String())
+		s.Require().NoError(err)
+		s.Require().Equal(uint64(1), missCount)
+		s.Require().Len(jailKeeper2.jailedConsAddrs, 0, "should not be jailed — ack reset the counter")
+	})
 }
 
 // ---------------------------------------------------------------------------

@@ -244,6 +244,7 @@ func SetupTestAppWithPallasKey(t *testing.T) (ta *TestApp, pallasSk *elgamal.Sec
 	}
 
 	ta = setupTestApp(t, appOpts)
+	ta.EaSkDir = tmpDir
 	return ta, pallasSk, pallasPk, eaSk, eaPk
 }
 
@@ -366,6 +367,38 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 		CeremonyPayloads:     payloads,
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
+	}
+	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
+	require.NoError(ta.t, err)
+
+	ta.NextBlock()
+	return roundID
+}
+
+// SeedRegisteringCeremony creates a PENDING round with REGISTERING ceremony
+// status and the given validators. Commits via an empty block. Returns the
+// round ID. Used for testing auto-deal and full ceremony cycle flows.
+func (ta *TestApp) SeedRegisteringCeremony(validators []*types.ValidatorPallasKey) []byte {
+	ta.t.Helper()
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	// Use a deterministic round ID based on the validator addresses.
+	h, _ := blake2b.New256(nil)
+	for _, v := range validators {
+		h.Write([]byte(v.ValidatorAddress))
+	}
+	roundID := h.Sum(nil)
+
+	round := &types.VoteRound{
+		VoteRoundId:        roundID,
+		Status:             types.SessionStatus_SESSION_STATUS_PENDING,
+		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		CeremonyValidators: validators,
+		// Set VoteEndTime far in the future so EndBlocker doesn't immediately
+		// transition the round from ACTIVE to TALLYING once ceremony completes.
+		VoteEndTime: uint64(ta.Time.Add(24 * time.Hour).Unix()),
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)

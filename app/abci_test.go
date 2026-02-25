@@ -3,6 +3,8 @@ package app_test
 import (
 	"bytes"
 	"crypto/rand"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -944,6 +946,124 @@ func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
 	checkResp := app.CheckTxSync(txBytes)
 	require.NotEqual(t, uint32(0), checkResp.Code, "CheckTx should reject MsgAckExecutiveAuthorityKey")
 	require.Contains(t, checkResp.Log, "cannot be submitted via mempool")
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.19: PrepareProposal Auto-Deal Ceremony
+// ---------------------------------------------------------------------------
+
+func TestPrepareProposalAutoDeal(t *testing.T) {
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	valAddr := app.ValidatorOperAddr()
+
+	// Step 1: Register the genesis validator's Pallas key.
+	regMsg := &types.MsgRegisterPallasKey{
+		Creator: app.ValidatorAccAddr(),
+		PallasPk: pallasPk.Point.ToAffineCompressed(),
+	}
+	regTx := app.MustBuildSignedCeremonyTx(regMsg)
+	result := app.DeliverVoteTx(regTx)
+	require.Equal(t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
+
+	// Step 2: Seed a PENDING round with REGISTERING ceremony and the genesis validator.
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+	}
+	roundID := app.SeedRegisteringCeremony(validators)
+
+	// Step 3: Call PrepareProposal — should inject MsgDealExecutiveAuthorityKey.
+	ppResp := app.CallPrepareProposal()
+	require.GreaterOrEqual(t, len(ppResp.Txs), 1, "PrepareProposal should inject at least 1 tx")
+
+	// Step 4: Verify the first tx is a deal message.
+	require.Equal(t, voteapi.TagDealExecutiveAuthorityKey, ppResp.Txs[0][0],
+		"first injected tx should be a deal")
+
+	// Decode and verify the deal contents.
+	_, decoded, err := voteapi.DecodeCeremonyTx(ppResp.Txs[0])
+	require.NoError(t, err)
+	dealMsg, ok := decoded.(*types.MsgDealExecutiveAuthorityKey)
+	require.True(t, ok, "decoded message should be MsgDealExecutiveAuthorityKey")
+	require.Equal(t, valAddr, dealMsg.Creator)
+	require.Len(t, dealMsg.Payloads, 1)
+	require.Equal(t, valAddr, dealMsg.Payloads[0].ValidatorAddress)
+	require.NotEmpty(t, dealMsg.EaPk)
+
+	// Step 5: Feed the PrepareProposal txs into FinalizeBlock + Commit.
+	app.NextBlockWithPrepareProposal()
+
+	// Step 6: Verify round transitioned to DEALT with ceremony fields populated.
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
+		"ceremony should be DEALT after auto-deal")
+	require.NotEmpty(t, round.EaPk)
+	require.Equal(t, valAddr, round.CeremonyDealer)
+	require.Len(t, round.CeremonyPayloads, 1)
+	require.True(t, round.CeremonyPhaseTimeout > 0, "phase timeout should be set")
+}
+
+// ---------------------------------------------------------------------------
+// 6.2.20: Full Ceremony Cycle (REGISTERING → deal → DEALT → ack → CONFIRMED)
+// ---------------------------------------------------------------------------
+
+func TestFullCeremonyCycle_DealThenAck(t *testing.T) {
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	valAddr := app.ValidatorOperAddr()
+
+	// Step 1: Register the genesis validator's Pallas key.
+	regMsg := &types.MsgRegisterPallasKey{
+		Creator:  app.ValidatorAccAddr(),
+		PallasPk: pallasPk.Point.ToAffineCompressed(),
+	}
+	regTx := app.MustBuildSignedCeremonyTx(regMsg)
+	result := app.DeliverVoteTx(regTx)
+	require.Equal(t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
+
+	// Step 2: Seed a PENDING round with REGISTERING ceremony.
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+	}
+	roundID := app.SeedRegisteringCeremony(validators)
+
+	// Step 3: First PrepareProposal block → auto-deal fires, round becomes DEALT.
+	app.NextBlockWithPrepareProposal()
+
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
+		"ceremony should be DEALT after auto-deal block")
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, round.Status,
+		"round should still be PENDING during DEALT phase")
+
+	// Step 4: Second PrepareProposal block → auto-ack fires, round becomes CONFIRMED + ACTIVE.
+	app.NextBlockWithPrepareProposal()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus,
+		"ceremony should be CONFIRMED after auto-ack")
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
+		"round should be ACTIVE after ceremony confirmation")
+	require.NotEmpty(t, round.EaPk, "ea_pk should be set")
+	require.Len(t, round.CeremonyAcks, 1, "should have 1 ack")
+	require.Equal(t, valAddr, round.CeremonyAcks[0].ValidatorAddress)
+
+	// Step 5: Verify ea_sk was written to disk by the ack handler.
+	eaSkPath := app.EaSkDir
+	if eaSkPath != "" {
+		skFile := eaSkPath + "/ea_sk." + fmt.Sprintf("%x", roundID)
+		_, err := os.Stat(skFile)
+		require.NoError(t, err, "ea_sk file should exist on disk after ack")
+	}
 }
 
 // ---------------------------------------------------------------------------
