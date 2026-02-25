@@ -635,20 +635,40 @@ pub fn key_account_address(key_name: &str, home_dir: &str) -> Option<String> {
 /// Import a hex-encoded secp256k1 private key into the zallyd test keyring.
 ///
 /// Runs `zallyd keys import-hex <name> <hex> --keyring-backend test --home <home>`.
+/// When `ZALLY_SSH_HOST` is set, the command is executed on the remote host via SSH.
 /// Silently succeeds if the key already exists (duplicate import).
 pub fn import_hex_key(name: &str, hex_privkey: &str, home_dir: &str) {
     use std::process::Command;
 
-    let output = Command::new("zallyd")
-        .args([
-            "keys", "import-hex",
-            name,
-            hex_privkey,
-            "--keyring-backend", "test",
-            "--home", home_dir,
-        ])
-        .output()
-        .expect("failed to run zallyd keys import-hex");
+    let ssh_host = std::env::var("ZALLY_SSH_HOST").ok();
+    let output = if let Some(ref host) = ssh_host {
+        let remote_zallyd = std::env::var("ZALLY_REMOTE_ZALLYD")
+            .unwrap_or_else(|_| "zallyd".to_string());
+        Command::new("ssh")
+            .args([
+                host.as_str(),
+                &format!(
+                    "{zallyd} keys import-hex {name} {hex} --keyring-backend test --home {home}",
+                    zallyd = remote_zallyd,
+                    name = name,
+                    hex = hex_privkey,
+                    home = home_dir,
+                ),
+            ])
+            .output()
+            .expect("failed to run zallyd keys import-hex via SSH")
+    } else {
+        Command::new("zallyd")
+            .args([
+                "keys", "import-hex",
+                name,
+                hex_privkey,
+                "--keyring-backend", "test",
+                "--home", home_dir,
+            ])
+            .output()
+            .expect("failed to run zallyd keys import-hex")
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
