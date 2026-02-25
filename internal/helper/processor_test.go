@@ -306,6 +306,15 @@ func TestValidatePayload(t *testing.T) {
 	roundID := hex.EncodeToString(make([]byte, 32))
 	b64_32 := base64.StdEncoding.EncodeToString(make([]byte, 32))
 
+	allEnc := make([]EncryptedShareWire, 16)
+	for i := range allEnc {
+		allEnc[i] = EncryptedShareWire{C1: b64_32, C2: b64_32, ShareIndex: uint32(i)}
+	}
+	blinds := make([]string, 16)
+	for i := range blinds {
+		blinds[i] = b64_32
+	}
+
 	valid := SharePayload{
 		SharesHash:   b64_32,
 		ProposalID:   1,
@@ -314,14 +323,8 @@ func TestValidatePayload(t *testing.T) {
 		ShareIndex:   0,
 		TreePosition: 0,
 		VoteRoundID:  roundID,
-		AllEncShares: []EncryptedShareWire{
-			{C1: b64_32, C2: b64_32, ShareIndex: 0},
-			{C1: b64_32, C2: b64_32, ShareIndex: 1},
-			{C1: b64_32, C2: b64_32, ShareIndex: 2},
-			{C1: b64_32, C2: b64_32, ShareIndex: 3},
-			{C1: b64_32, C2: b64_32, ShareIndex: 4},
-		},
-		ShareBlinds: []string{b64_32, b64_32, b64_32, b64_32, b64_32},
+		AllEncShares: allEnc,
+		ShareBlinds:  blinds,
 	}
 
 	t.Run("valid", func(t *testing.T) {
