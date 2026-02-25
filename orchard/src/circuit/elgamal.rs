@@ -1,6 +1,6 @@
 //! El Gamal encryption integrity gadget for vote proof (ZKP #2).
 //!
-//! Proves that five ciphertext pairs (enc_share_c1_x[i], enc_share_c2_x[i]) are
+//! Proves that sixteen ciphertext pairs (enc_share_c1_x[i], enc_share_c2_x[i]) are
 //! valid El Gamal encryptions of the corresponding plaintext shares under the
 //! election authority public key: C1_i = [r_i]*G, C2_i = [v_i]*G + [r_i]*ea_pk.
 //!
@@ -110,7 +110,7 @@ pub fn elgamal_encrypt(
 ///   `r_i` is a 255-bit scalar, so the full decomposition is required.
 /// - **C2's [v_i]*G**: uses `FixedPointShort::mul` (22-window, 64-bit signed scalar).
 ///   `v_i` is range-checked to [0, 2^30) by condition 9; the short-scalar path
-///   saves 63 windows per share (×5 = 315 rows) vs the full 85-window path.
+///   saves 63 windows per share (×16 = 1008 rows) vs the full 85-window path.
 ///   Sign is always +1 (constant-constrained via `assign_advice_from_constant`).
 ///
 /// ## Soundness
@@ -133,10 +133,10 @@ pub(in crate::circuit) fn prove_elgamal_encryptions(
     ea_pk: halo2_proofs::circuit::Value<pallas::Affine>,
     ea_pk_loc: EaPkInstanceLoc,
     advice_col: Column<Advice>,
-    share_cells: [AssignedCell<pallas::Base, pallas::Base>; 5],
-    r_cells: [AssignedCell<pallas::Base, pallas::Base>; 5],
-    enc_c1_cells: [AssignedCell<pallas::Base, pallas::Base>; 5],
-    enc_c2_cells: [AssignedCell<pallas::Base, pallas::Base>; 5],
+    share_cells: [AssignedCell<pallas::Base, pallas::Base>; 16],
+    r_cells: [AssignedCell<pallas::Base, pallas::Base>; 16],
+    enc_c1_cells: [AssignedCell<pallas::Base, pallas::Base>; 16],
+    enc_c2_cells: [AssignedCell<pallas::Base, pallas::Base>; 16],
 ) -> Result<(), Error> {
     // Election Authority's public key as a Pallas curve point, wrapped in Value.
     // ea_pk must be witnessed into advice cells to compute [r_i] * ea_pk.
@@ -172,13 +172,13 @@ pub(in crate::circuit) fn prove_elgamal_encryptions(
 
     // SpendAuthG fixed-base descriptor for C2's [v_i]*G (short 22-window path).
     // v_i is range-checked to [0, 2^30) by condition 9; the short path saves
-    // 63 window rows per share (×5 = 315 rows total) vs the full BaseField path.
+    // 63 window rows per share (×16 = 1008 rows total) vs the full BaseField path.
     let spend_auth_g_short = FixedPointShort::from_inner(
         ecc_chip.clone(),
         OrchardShortScalarBases::SpendAuthGShort,
     );
 
-    for i in 0..5 {
+    for i in 0..16 {
         // --- C1_i = [r_i] * G ---
         //
         // G is baked into the fixed-base lookup table; no NonIdentityPoint

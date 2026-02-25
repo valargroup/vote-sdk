@@ -38,3 +38,9 @@ orchard = { path = "../../orchard" }
 
 # Keep this crate as a standalone workspace
 [workspace]
+
+# Speed up dev builds: parallel codegen + thin LTO.
+# Full fat-LTO (the default) adds minutes with no benefit for a dev build.
+[profile.release]
+codegen-units = 16
+lto = "thin"

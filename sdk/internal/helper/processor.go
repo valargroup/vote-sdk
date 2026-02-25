@@ -135,10 +135,10 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		return fmt.Errorf("compute merkle path: %w", err)
 	}
 
-	// Decode all_enc_shares into 10 × 32-byte array.
-	var allEncShares [10][32]byte
-	if len(share.Payload.AllEncShares) != 5 {
-		return fmt.Errorf("expected 5 all_enc_shares, got %d", len(share.Payload.AllEncShares))
+	// Decode all_enc_shares into 32 × 32-byte array (C1_0, C2_0, ..., C1_15, C2_15).
+	var allEncShares [32][32]byte
+	if len(share.Payload.AllEncShares) != 16 {
+		return fmt.Errorf("expected 16 all_enc_shares, got %d", len(share.Payload.AllEncShares))
 	}
 	for i, es := range share.Payload.AllEncShares {
 		c1Bytes, err := base64.StdEncoding.DecodeString(es.C1)
@@ -179,9 +179,9 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	copy(sharesHash[:], shBytes)
 
 	// Decode share_blinds.
-	var shareBlinds [5][32]byte
-	if len(share.Payload.ShareBlinds) != 5 {
-		return fmt.Errorf("expected 5 share_blinds, got %d", len(share.Payload.ShareBlinds))
+	var shareBlinds [16][32]byte
+	if len(share.Payload.ShareBlinds) != 16 {
+		return fmt.Errorf("expected 16 share_blinds, got %d", len(share.Payload.ShareBlinds))
 	}
 	for i, b := range share.Payload.ShareBlinds {
 		bBytes, err := base64.StdEncoding.DecodeString(b)

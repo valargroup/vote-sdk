@@ -32,6 +32,12 @@ import (
 	"github.com/z-cale/zally/crypto/zkp"
 )
 
+// rustLastError retrieves the thread-local error message stored by the most
+// recent failing Rust FFI call. Returns an empty string if none was set.
+func rustLastError() string {
+	return C.GoString(C.zally_last_error())
+}
+
 // pallasFpModulus is the Pallas base field modulus in big-endian byte order:
 // p = 0x40000000000000000000000000000000224698fc094cf91b992d30ed00000001
 var pallasFpModulus = [32]byte{
@@ -98,13 +104,13 @@ func VerifyToyProof(proof, publicInput []byte) error {
 	case 0:
 		return nil
 	case -1:
-		return fmt.Errorf("halo2: invalid inputs")
+		return fmt.Errorf("halo2: invalid inputs: %s", rustLastError())
 	case -2:
-		return fmt.Errorf("halo2: proof verification failed")
+		return fmt.Errorf("halo2: proof verification failed: %s", rustLastError())
 	case -3:
-		return fmt.Errorf("halo2: internal deserialization error")
+		return fmt.Errorf("halo2: internal deserialization error: %s", rustLastError())
 	default:
-		return fmt.Errorf("halo2: unknown error code %d", rc)
+		return fmt.Errorf("halo2: unknown error code %d: %s", rc, rustLastError())
 	}
 }
 
@@ -213,13 +219,13 @@ func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 	case 0:
 		return nil
 	case -1:
-		return fmt.Errorf("delegation halo2: invalid inputs")
+		return fmt.Errorf("delegation halo2: invalid inputs: %s", rustLastError())
 	case -2:
-		return fmt.Errorf("delegation halo2: proof verification failed")
+		return fmt.Errorf("delegation halo2: proof verification failed: %s", rustLastError())
 	case -3:
-		return fmt.Errorf("delegation halo2: internal deserialization error")
+		return fmt.Errorf("delegation halo2: internal deserialization error: %s", rustLastError())
 	default:
-		return fmt.Errorf("delegation halo2: unknown error code %d", rc)
+		return fmt.Errorf("delegation halo2: unknown error code %d: %s", rc, rustLastError())
 	}
 }
 
@@ -320,13 +326,13 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 	case 0:
 		return nil
 	case -1:
-		return fmt.Errorf("vote proof halo2: invalid inputs")
+		return fmt.Errorf("vote proof halo2: invalid inputs: %s", rustLastError())
 	case -2:
-		return fmt.Errorf("vote proof halo2: proof verification failed")
+		return fmt.Errorf("vote proof halo2: proof verification failed: %s", rustLastError())
 	case -3:
-		return fmt.Errorf("vote proof halo2: internal deserialization error")
+		return fmt.Errorf("vote proof halo2: internal deserialization error: %s", rustLastError())
 	default:
-		return fmt.Errorf("vote proof halo2: unknown error code %d", rc)
+		return fmt.Errorf("vote proof halo2: unknown error code %d: %s", rc, rustLastError())
 	}
 }
 
@@ -416,12 +422,12 @@ func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
 	case 0:
 		return nil
 	case -1:
-		return fmt.Errorf("share reveal halo2: invalid inputs")
+		return fmt.Errorf("share reveal halo2: invalid inputs: %s", rustLastError())
 	case -2:
-		return fmt.Errorf("share reveal halo2: proof verification failed")
+		return fmt.Errorf("share reveal halo2: proof verification failed: %s", rustLastError())
 	case -3:
-		return fmt.Errorf("share reveal halo2: internal deserialization error")
+		return fmt.Errorf("share reveal halo2: internal deserialization error: %s", rustLastError())
 	default:
-		return fmt.Errorf("share reveal halo2: unknown error code %d", rc)
+		return fmt.Errorf("share reveal halo2: unknown error code %d: %s", rc, rustLastError())
 	}
 }

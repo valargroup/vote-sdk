@@ -289,9 +289,9 @@ pub fn validate_32_bytes(v: &[u8], name: &str) -> Result<(), VotingError> {
 }
 
 pub fn validate_share_index(index: u32) -> Result<(), VotingError> {
-    if index > 4 {
+    if index > 15 {
         return Err(VotingError::InvalidInput {
-            message: format!("share_index must be 0..4, got {}", index),
+            message: format!("share_index must be 0..15, got {}", index),
         });
     }
     Ok(())

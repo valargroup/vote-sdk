@@ -37,7 +37,7 @@ pub struct EncryptedShareOutput {
     pub c1: [u8; 32],
     /// Compressed El Gamal C2 point (32 bytes).
     pub c2: [u8; 32],
-    /// Share index (0-4).
+    /// Share index (0-15).
     pub share_index: u32,
     /// Plaintext share value.
     pub plaintext_value: u64,
@@ -57,7 +57,7 @@ pub struct VoteProofBundle {
     /// Encrypted shares generated during proof construction.
     /// These are the exact ciphertexts committed in the vote commitment hash
     /// and must be used for reveal-share payloads.
-    pub encrypted_shares: [EncryptedShareOutput; 5],
+    pub encrypted_shares: [EncryptedShareOutput; 16],
     /// Poseidon hash of all encrypted share x-coordinates.
     /// Intermediate value: vote_commitment = H(DOMAIN_VC, shares_hash, proposal_id, vote_decision).
     /// Needed by the helper server to verify share payloads.
@@ -65,7 +65,7 @@ pub struct VoteProofBundle {
     /// Per-share blind factors for blinded commitments.
     /// share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x).
     /// Sent to the helper server alongside shares so it can build ZKP #3.
-    pub share_blinds: [pallas::Base; 5],
+    pub share_blinds: [pallas::Base; 16],
 }
 
 /// Errors that can occur during vote proof construction.
@@ -252,13 +252,14 @@ pub fn build_vote_proof_from_delegation(
         van_comm_rand,
     );
 
-    // ---- Shares (split num_ballots into 5 parts) ----
+    // ---- Shares (split num_ballots into 16 parts) ----
     // Each share must be in [0, 2^30) for the range check.
     // Shares sum to num_ballots (ballot count), not raw zatoshi.
 
-    let fifth = num_ballots / 5;
-    let remainder = num_ballots - fifth * 4;
-    let shares_u64: [u64; 5] = [fifth, fifth, fifth, fifth, remainder];
+    let sixteenth = num_ballots / 16;
+    let remainder = num_ballots - sixteenth * 15;
+    let mut shares_u64: [u64; 16] = [sixteenth; 16];
+    shares_u64[15] = remainder;
 
     // Verify all shares are in range
     for (i, &s) in shares_u64.iter().enumerate() {
@@ -270,13 +271,8 @@ pub fn build_vote_proof_from_delegation(
         }
     }
 
-    let shares_base: [pallas::Base; 5] = [
-        pallas::Base::from(shares_u64[0]),
-        pallas::Base::from(shares_u64[1]),
-        pallas::Base::from(shares_u64[2]),
-        pallas::Base::from(shares_u64[3]),
-        pallas::Base::from(shares_u64[4]),
-    ];
+    let shares_base: [pallas::Base; 16] =
+        core::array::from_fn(|i| pallas::Base::from(shares_u64[i]));
 
     // ---- El Gamal encryption of shares ----
     //
@@ -288,10 +284,10 @@ pub fn build_vote_proof_from_delegation(
     let ea_pk_y = *ea_pk.coordinates().unwrap().y();
 
     let g = pallas::Point::from(spend_auth_g_affine());
-    let mut enc_c1_x = [pallas::Base::zero(); 5];
-    let mut enc_c2_x = [pallas::Base::zero(); 5];
-    let mut share_randomness = [pallas::Base::zero(); 5];
-    let mut enc_share_outputs: [EncryptedShareOutput; 5] = core::array::from_fn(|i| {
+    let mut enc_c1_x = [pallas::Base::zero(); 16];
+    let mut enc_c2_x = [pallas::Base::zero(); 16];
+    let mut share_randomness = [pallas::Base::zero(); 16];
+    let mut enc_share_outputs: [EncryptedShareOutput; 16] = core::array::from_fn(|i| {
         EncryptedShareOutput {
             c1: [0u8; 32],
             c2: [0u8; 32],
@@ -301,7 +297,7 @@ pub fn build_vote_proof_from_delegation(
         }
     });
 
-    for i in 0..5 {
+    for i in 0..16 {
         let r = random_valid_base_as_scalar(rng);
         share_randomness[i] = r;
         let r_scalar = base_to_scalar(r).expect("validated by random_valid_base_as_scalar");
@@ -318,7 +314,7 @@ pub fn build_vote_proof_from_delegation(
         enc_share_outputs[i].randomness = r.to_repr();
     }
 
-    let share_blinds: [pallas::Base; 5] = core::array::from_fn(|_| random_valid_base_as_scalar(rng));
+    let share_blinds: [pallas::Base; 16] = core::array::from_fn(|_| random_valid_base_as_scalar(rng));
     let shares_hash_val = shares_hash(share_blinds, enc_c1_x, enc_c2_x);
 
     // ---- Condition 4: r_vpk = ak + [alpha_v] * G ----
@@ -371,13 +367,7 @@ pub fn build_vote_proof_from_delegation(
         Value::known(alpha_v),
     );
     circuit.one_shifted = Value::known(one_shifted);
-    circuit.shares = [
-        Value::known(shares_base[0]),
-        Value::known(shares_base[1]),
-        Value::known(shares_base[2]),
-        Value::known(shares_base[3]),
-        Value::known(shares_base[4]),
-    ];
+    circuit.shares = shares_base.map(Value::known);
     circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
     circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
     circuit.share_blinds = share_blinds.map(Value::known);

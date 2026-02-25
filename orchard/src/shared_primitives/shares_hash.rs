@@ -2,11 +2,11 @@
 //!
 //! Both the vote-proof circuit (ZKP #2, condition 10) and the share-reveal
 //! circuit (ZKP #3, condition 3) compute exactly the same two-level Poseidon
-//! hash over the five encrypted shares:
+//! hash over the sixteen encrypted shares:
 //!
 //! ```text
-//! share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x)   for i ∈ 0..5
-//! shares_hash  = Poseidon(share_comm_0, …, share_comm_4)
+//! share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x)   for i ∈ 0..16
+//! shares_hash  = Poseidon(share_comm_0, …, share_comm_15)
 //! ```
 //!
 //! This module extracts those constraints into a single, auditable gadget so
@@ -55,30 +55,30 @@ pub(crate) fn hash_share_commitment_in_circuit(
 /// Computes the two-level shares hash in-circuit:
 ///
 /// ```text
-/// share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x)   for i ∈ 0..5
-/// shares_hash  = Poseidon(share_comm_0, …, share_comm_4)
+/// share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x)   for i ∈ 0..16
+/// shares_hash  = Poseidon(share_comm_0, …, share_comm_15)
 /// ```
 ///
 /// # Arguments
 ///
 /// * `poseidon_chip` — A closure that returns a fresh `PoseidonChip` each time
-///   it is called. It is called six times: once per per-share hash and once for
+///   it is called. It is called 17 times: once per per-share hash and once for
 ///   the outer hash. Typically `|| config.poseidon_chip()`.
 /// * `layouter` — The circuit layouter.
-/// * `blinds` — The five per-share blind factors.
-/// * `enc_c1` — The five El Gamal `C1` x-coordinates.
-/// * `enc_c2` — The five El Gamal `C2` x-coordinates.
+/// * `blinds` — The 16 per-share blind factors.
+/// * `enc_c1` — The 16 El Gamal `C1` x-coordinates.
+/// * `enc_c2` — The 16 El Gamal `C2` x-coordinates.
 ///
 /// Returns the `shares_hash` cell.
 pub(crate) fn compute_shares_hash_in_circuit(
     poseidon_chip: impl Fn() -> PoseidonChip<pallas::Base, 3, 2>,
     mut layouter: impl Layouter<pallas::Base>,
-    blinds: [AssignedCell<pallas::Base, pallas::Base>; 5],
-    enc_c1: [AssignedCell<pallas::Base, pallas::Base>; 5],
-    enc_c2: [AssignedCell<pallas::Base, pallas::Base>; 5],
+    blinds: [AssignedCell<pallas::Base, pallas::Base>; 16],
+    enc_c1: [AssignedCell<pallas::Base, pallas::Base>; 16],
+    enc_c2: [AssignedCell<pallas::Base, pallas::Base>; 16],
 ) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error> {
     // Per-share blinded commitments: share_comm_i = Poseidon(blind_i, c1_i, c2_i)
-    let share_comms: [_; 5] = blinds
+    let share_comms: [_; 16] = blinds
         .into_iter()
         .zip(enc_c1)
         .zip(enc_c2)
@@ -92,14 +92,14 @@ pub(crate) fn compute_shares_hash_in_circuit(
         })
         .collect::<Result<alloc::vec::Vec<_>, _>>()?
         .try_into()
-        .expect("always 5 elements");
+        .expect("always 16 elements");
 
-    // Outer hash: shares_hash = Poseidon(share_comm_0, …, share_comm_4)
+    // Outer hash: shares_hash = Poseidon(share_comm_0, …, share_comm_15)
     let hasher = PoseidonHash::<
         pallas::Base,
         _,
         poseidon::P128Pow5T3,
-        ConstantLength<5>,
+        ConstantLength<16>,
         3, // WIDTH
         2, // RATE
     >::init(
@@ -124,7 +124,7 @@ mod tests {
     };
     use rand::rngs::OsRng;
 
-    use crate::vote_proof::circuit::{share_commitment, shares_hash};
+    use crate::circuit::vote_proof::circuit::{share_commitment, shares_hash};
 
     // ---------------------------------------------------------------
     // Shared minimal circuit config (Poseidon only, no ECC).
@@ -257,21 +257,21 @@ mod tests {
     // compute_shares_hash_in_circuit
     // ================================================================
 
-    /// Minimal circuit: computes `compute_shares_hash_in_circuit` over 5
+    /// Minimal circuit: computes `compute_shares_hash_in_circuit` over 16
     /// shares and constrains the result to instance row 0.
     #[derive(Clone)]
     struct ComputeSharesHashCircuit {
-        blinds: [pallas::Base; 5],
-        enc_c1: [pallas::Base; 5],
-        enc_c2: [pallas::Base; 5],
+        blinds: [pallas::Base; 16],
+        enc_c1: [pallas::Base; 16],
+        enc_c2: [pallas::Base; 16],
     }
 
     impl Default for ComputeSharesHashCircuit {
         fn default() -> Self {
             Self {
-                blinds: [pallas::Base::zero(); 5],
-                enc_c1: [pallas::Base::zero(); 5],
-                enc_c2: [pallas::Base::zero(); 5],
+                blinds: [pallas::Base::zero(); 16],
+                enc_c1: [pallas::Base::zero(); 16],
+                enc_c2: [pallas::Base::zero(); 16],
             }
         }
     }
@@ -291,17 +291,17 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<pallas::Base>,
         ) -> Result<(), plonk::Error> {
-            let mut blind_cells = alloc::vec::Vec::with_capacity(5);
-            let mut c1_cells    = alloc::vec::Vec::with_capacity(5);
-            let mut c2_cells    = alloc::vec::Vec::with_capacity(5);
-            for i in 0..5 {
+            let mut blind_cells = alloc::vec::Vec::with_capacity(16);
+            let mut c1_cells    = alloc::vec::Vec::with_capacity(16);
+            let mut c2_cells    = alloc::vec::Vec::with_capacity(16);
+            for i in 0..16 {
                 blind_cells.push(witness(layouter.namespace(|| alloc::format!("blind_{i}")), config.advice, Value::known(self.blinds[i]))?);
                 c1_cells.push(witness(layouter.namespace(|| alloc::format!("c1_{i}")),    config.advice, Value::known(self.enc_c1[i]))?);
                 c2_cells.push(witness(layouter.namespace(|| alloc::format!("c2_{i}")),    config.advice, Value::known(self.enc_c2[i]))?);
             }
-            let blinds: [AssignedCell<pallas::Base, pallas::Base>; 5] = blind_cells.try_into().unwrap();
-            let enc_c1: [AssignedCell<pallas::Base, pallas::Base>; 5] = c1_cells.try_into().unwrap();
-            let enc_c2: [AssignedCell<pallas::Base, pallas::Base>; 5] = c2_cells.try_into().unwrap();
+            let blinds: [AssignedCell<pallas::Base, pallas::Base>; 16] = blind_cells.try_into().unwrap();
+            let enc_c1: [AssignedCell<pallas::Base, pallas::Base>; 16] = c1_cells.try_into().unwrap();
+            let enc_c2: [AssignedCell<pallas::Base, pallas::Base>; 16] = c2_cells.try_into().unwrap();
 
             let result = compute_shares_hash_in_circuit(
                 || config.poseidon_chip(),
@@ -318,14 +318,14 @@ mod tests {
     #[test]
     fn compute_shares_hash_matches_native() {
         let mut rng = OsRng;
-        let blinds: [pallas::Base; 5] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
-        let enc_c1: [pallas::Base; 5] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
-        let enc_c2: [pallas::Base; 5] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let blinds: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let enc_c1: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let enc_c2: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
 
         let expected = shares_hash(blinds, enc_c1, enc_c2);
         let circuit = ComputeSharesHashCircuit { blinds, enc_c1, enc_c2 };
-        // K=11 (2048 rows) comfortably fits 6 chained Poseidon regions.
-        let prover = MockProver::run(11, &circuit, vec![vec![expected]])
+        // K=12 (4096 rows) comfortably fits 17 chained Poseidon regions.
+        let prover = MockProver::run(12, &circuit, vec![vec![expected]])
             .expect("MockProver::run failed");
         assert_eq!(prover.verify(), Ok(()));
     }
@@ -334,9 +334,9 @@ mod tests {
     #[test]
     fn compute_shares_hash_wrong_enc_c1_fails() {
         let mut rng = OsRng;
-        let blinds: [pallas::Base; 5] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
-        let enc_c1: [pallas::Base; 5] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
-        let enc_c2: [pallas::Base; 5] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let blinds: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let enc_c1: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let enc_c2: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
 
         let correct = shares_hash(blinds, enc_c1, enc_c2);
 
@@ -344,18 +344,45 @@ mod tests {
         let mut circuit = ComputeSharesHashCircuit { blinds, enc_c1, enc_c2 };
         circuit.enc_c1[2] = pallas::Base::random(&mut rng);
 
-        let prover = MockProver::run(11, &circuit, vec![vec![correct]])
+        let prover = MockProver::run(12, &circuit, vec![vec![correct]])
             .expect("MockProver::run failed");
         assert!(prover.verify().is_err());
+    }
+
+    /// Every one of the 16 share positions contributes to the output hash.
+    ///
+    /// For each position `i` in `0..16`, the circuit with `enc_c1[i]` corrupted
+    /// must fail to verify against the hash computed from the original inputs.
+    /// This confirms that no share slot is silently ignored.
+    #[test]
+    fn all_16_share_positions_are_hashed() {
+        let mut rng = OsRng;
+        let blinds: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let enc_c1: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let enc_c2: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+
+        let correct = shares_hash(blinds, enc_c1, enc_c2);
+
+        for i in 0..16 {
+            let mut circuit = ComputeSharesHashCircuit { blinds, enc_c1, enc_c2 };
+            circuit.enc_c1[i] = pallas::Base::random(&mut rng);
+
+            let prover = MockProver::run(12, &circuit, vec![vec![correct]])
+                .unwrap_or_else(|e| panic!("MockProver::run failed at position {i}: {e}"));
+            assert!(
+                prover.verify().is_err(),
+                "corrupting enc_c1[{i}] did not change the shares_hash — position is not hashed"
+            );
+        }
     }
 
     /// Corrupting a blind factor changes the output.
     #[test]
     fn compute_shares_hash_wrong_blind_fails() {
         let mut rng = OsRng;
-        let blinds: [pallas::Base; 5] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
-        let enc_c1: [pallas::Base; 5] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
-        let enc_c2: [pallas::Base; 5] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let blinds: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let enc_c1: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let enc_c2: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
 
         let correct = shares_hash(blinds, enc_c1, enc_c2);
 
@@ -363,7 +390,7 @@ mod tests {
         let mut circuit = ComputeSharesHashCircuit { blinds, enc_c1, enc_c2 };
         circuit.blinds[0] = pallas::Base::random(&mut rng);
 
-        let prover = MockProver::run(11, &circuit, vec![vec![correct]])
+        let prover = MockProver::run(12, &circuit, vec![vec![correct]])
             .expect("MockProver::run failed");
         assert!(prover.verify().is_err());
     }

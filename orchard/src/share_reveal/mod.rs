@@ -7,7 +7,7 @@
 //! - **Condition 1**: VC Membership (Poseidon Merkle path).
 //! - **Condition 2**: Vote Commitment Integrity (ConstantLength<4> Poseidon).
 //! - **Condition 3**: Shares Hash Integrity (blinded per-share commitments,
-//!   then ConstantLength<5> Poseidon over the 5 commitments).
+//!   then ConstantLength<16> Poseidon over the 16 commitments).
 //! - **Condition 4**: Share Membership (custom mux gate).
 //! - **Condition 5**: Share Nullifier Integrity (4-layer Poseidon chain with
 //!   `voting_round_id` binding).

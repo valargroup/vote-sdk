@@ -12,7 +12,7 @@
 //! - **Condition 6**: New VAN Integrity (Poseidon hash, `constrain_instance`).
 //! - **Condition 7**: Shares Sum Correctness (AddChip, `constrain_equal`).
 //! - **Condition 8**: Shares Range (LookupRangeCheck, `[0, 2^30)`).
-//! - **Condition 9**: Shares Hash Integrity (Poseidon `ConstantLength<10>`, `constrain_instance`).
+//! - **Condition 9**: Shares Hash Integrity (Poseidon `ConstantLength<16>` over 16 blinded share commitments, `constrain_instance`).
 //! - **Condition 10**: Encryption Integrity (ECC variable-base mul, `constrain_equal`).
 //! - **Condition 11**: Vote Commitment Integrity (Poseidon `ConstantLength<4>`, `constrain_instance`).
 //!

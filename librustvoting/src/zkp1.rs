@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use ff::PrimeField;
 use halo2_proofs::{
@@ -31,6 +32,24 @@ use crate::types::{
 
 /// Circuit size parameter. Matches the value used in delegation builder/circuit tests.
 const K: u32 = 14;
+
+// Cached proving key — keygen is deterministic and expensive (~5 min on simulator,
+// ~30s on device). Compute once per process and reuse for all subsequent proofs.
+static DELEGATION_PK_CACHE: OnceLock<(
+    Params<vesta::Affine>,
+    plonk::ProvingKey<vesta::Affine>,
+)> = OnceLock::new();
+
+fn get_delegation_proving_key() -> &'static (Params<vesta::Affine>, plonk::ProvingKey<vesta::Affine>) {
+    DELEGATION_PK_CACHE.get_or_init(|| {
+        let params = Params::new(K);
+        let vk = plonk::keygen_vk(&params, &DelegationCircuit::default())
+            .expect("delegation keygen_vk: circuit is valid");
+        let pk = plonk::keygen_pk(&params, vk, &DelegationCircuit::default())
+            .expect("delegation keygen_pk: circuit is valid");
+        (params, pk)
+    })
+}
 
 // ================================================================
 // PIR-backed IMT Provider
@@ -420,21 +439,8 @@ pub fn build_and_prove_delegation(
 
     progress.on_progress(0.1);
 
-    // Generate proving key.
-    // TODO: Cache proving key on disk for production. Keygen is deterministic —
-    // same circuit shape always produces the same key. Pre-computing and
-    // shipping the key with the app would eliminate this cost entirely.
-    let params: Params<vesta::Affine> = Params::new(K);
-    let vk = plonk::keygen_vk(&params, &DelegationCircuit::default()).map_err(|e| {
-        VotingError::ProofFailed {
-            message: format!("keygen_vk failed: {e}"),
-        }
-    })?;
-    let pk = plonk::keygen_pk(&params, vk.clone(), &DelegationCircuit::default()).map_err(|e| {
-        VotingError::ProofFailed {
-            message: format!("keygen_pk failed: {e}"),
-        }
-    })?;
+    // Use the process-lifetime cached proving key (keygen runs once, then is reused).
+    let (params, pk) = get_delegation_proving_key();
 
     progress.on_progress(0.5);
 

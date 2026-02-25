@@ -24,40 +24,40 @@ import (
 // Proof generation takes ~30-60s in release mode.
 func TestGenerateShareRevealRoundTrip(t *testing.T) {
 	// Read fixture file.
-	// Format (1328 bytes):
+	// Format (2384 bytes):
 	//   [0..772)       merkle_path
-	//   [772..1092)    all_enc_shares (320 bytes)
-	//   [1092..1252)   share_blinds (160 bytes: 5 × 32-byte blind factors)
-	//   [1252..1256)   share_index (u32 LE)
-	//   [1256..1260)   proposal_id (u32 LE)
-	//   [1260..1264)   vote_decision (u32 LE)
-	//   [1264..1296)   round_id (32 bytes)
-	//   [1296..1328)   shares_hash (32 bytes)
+	//   [772..1796)    all_enc_shares (1024 bytes: 16 × (C1+C2) × 32 bytes)
+	//   [1796..2308)   share_blinds (512 bytes: 16 × 32-byte blind factors)
+	//   [2308..2312)   share_index (u32 LE)
+	//   [2312..2316)   proposal_id (u32 LE)
+	//   [2316..2320)   vote_decision (u32 LE)
+	//   [2320..2352)   round_id (32 bytes)
+	//   [2352..2384)   shares_hash (32 bytes)
 	fixture, err := os.ReadFile("../testdata/share_reveal_inputs.bin")
 	require.NoError(t, err, "fixture file missing — run: make fixtures")
-	require.Len(t, fixture, 1328, "unexpected fixture size")
+	require.Len(t, fixture, 2384, "unexpected fixture size")
 
 	merklePath := fixture[0:772]
 
-	var allEncShares [10][32]byte
-	for i := 0; i < 10; i++ {
+	var allEncShares [32][32]byte
+	for i := 0; i < 32; i++ {
 		copy(allEncShares[i][:], fixture[772+i*32:772+(i+1)*32])
 	}
 
-	var shareBlinds [5][32]byte
-	for i := 0; i < 5; i++ {
-		copy(shareBlinds[i][:], fixture[1092+i*32:1092+(i+1)*32])
+	var shareBlinds [16][32]byte
+	for i := 0; i < 16; i++ {
+		copy(shareBlinds[i][:], fixture[1796+i*32:1796+(i+1)*32])
 	}
 
-	shareIndex := binary.LittleEndian.Uint32(fixture[1252:1256])
-	proposalID := binary.LittleEndian.Uint32(fixture[1256:1260])
-	voteDecision := binary.LittleEndian.Uint32(fixture[1260:1264])
+	shareIndex := binary.LittleEndian.Uint32(fixture[2308:2312])
+	proposalID := binary.LittleEndian.Uint32(fixture[2312:2316])
+	voteDecision := binary.LittleEndian.Uint32(fixture[2316:2320])
 
 	var roundID [32]byte
-	copy(roundID[:], fixture[1264:1296])
+	copy(roundID[:], fixture[2320:2352])
 
 	var sharesHash [32]byte
-	copy(sharesHash[:], fixture[1296:1328])
+	copy(sharesHash[:], fixture[2352:2384])
 
 	// Generate proof.
 	t.Log("generating share reveal proof (this takes ~30-60s)...")

@@ -1,9 +1,9 @@
-/// Decompose voting weight into exactly 5 shares.
+/// Decompose voting weight into exactly 16 shares.
 ///
-/// Per the protocol spec (§3.3.1), votes are split into exactly 5 shares
-/// that are each encrypted as El Gamal ciphertexts. We first do a binary
-/// decomposition, then distribute the resulting powers-of-2 across 5 buckets
-/// using round-robin assignment, summing within each bucket.
+/// Votes are split into exactly 16 shares that are each encrypted as El Gamal
+/// ciphertexts. We first do a binary decomposition, then distribute the
+/// resulting powers-of-2 across 16 buckets using round-robin assignment,
+/// summing within each bucket.
 ///
 /// Returns empty vec for weight=0.
 pub fn decompose_weight(weight: u64) -> Vec<u64> {
@@ -24,16 +24,16 @@ pub fn decompose_weight(weight: u64) -> Vec<u64> {
         bit_position += 1;
     }
 
-    // If 5 or fewer bits set, pad with zeros to exactly 5
-    if bits.len() <= 5 {
-        bits.resize(5, 0);
+    // If 16 or fewer bits set, pad with zeros to exactly 16
+    if bits.len() <= 16 {
+        bits.resize(16, 0);
         return bits;
     }
 
-    // More than 5 bits set: distribute round-robin into 5 buckets
-    let mut shares = vec![0u64; 5];
+    // More than 16 bits set: distribute round-robin into 16 buckets
+    let mut shares = vec![0u64; 16];
     for (i, &value) in bits.iter().enumerate() {
-        shares[i % 5] += value;
+        shares[i % 16] += value;
     }
 
     shares
@@ -51,58 +51,74 @@ mod tests {
     #[test]
     fn test_power_of_two() {
         let shares = decompose_weight(1);
-        assert_eq!(shares.len(), 5);
+        assert_eq!(shares.len(), 16);
         assert_eq!(shares.iter().sum::<u64>(), 1);
     }
 
     #[test]
     fn test_composite() {
-        // 5 = 1 + 4 → [1, 4, 0, 0, 0]
+        // 5 = 1 + 4 → [1, 4, 0, ..., 0]
         let shares = decompose_weight(5);
-        assert_eq!(shares.len(), 5);
+        assert_eq!(shares.len(), 16);
         assert_eq!(shares.iter().sum::<u64>(), 5);
     }
 
     #[test]
-    fn test_five_bits() {
-        // 31 = 1 + 2 + 4 + 8 + 16 → exactly 5 shares
-        let shares = decompose_weight(31);
-        assert_eq!(shares, vec![1, 2, 4, 8, 16]);
+    fn test_sixteen_bits() {
+        // 2^16 - 1 = 65535, exactly 16 bits set
+        let shares = decompose_weight(65535);
+        assert_eq!(shares.len(), 16);
+        assert_eq!(shares.iter().sum::<u64>(), 65535);
+        // Each share holds one power of 2: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
+        assert_eq!(shares, (0..16).map(|i| 1u64 << i).collect::<Vec<_>>());
     }
 
     #[test]
-    fn test_more_than_five_bits() {
-        // 63 = 1 + 2 + 4 + 8 + 16 + 32 → 6 bits, bucketed into 5
-        let shares = decompose_weight(63);
-        assert_eq!(shares.len(), 5);
-        assert_eq!(shares.iter().sum::<u64>(), 63);
-        // Round-robin: bucket[0]=1+32=33, bucket[1]=2, bucket[2]=4, bucket[3]=8, bucket[4]=16
-        assert_eq!(shares, vec![33, 2, 4, 8, 16]);
+    fn test_more_than_sixteen_bits() {
+        // 2^17 - 1 = 131071, 17 bits set → bucketed into 16
+        let shares = decompose_weight(131071);
+        assert_eq!(shares.len(), 16);
+        assert_eq!(shares.iter().sum::<u64>(), 131071);
+        // Round-robin: bucket[0] gets bit_0 (1) + bit_16 (65536) = 65537
+        assert_eq!(shares[0], 1 + 65536);
+        assert_eq!(shares[1], 2);
     }
 
     #[test]
     fn test_voting_weight() {
-        // 142.50 ZEC = 14_250_000_000 zatoshi
+        // 142.50 ZEC = 14_250_000_000 zatoshi.
+        //
+        // NOTE: this weight produces shares that may exceed the circuit's
+        // per-share range check bound of [0, 2^30) ≈ 1.07B. The round-robin
+        // decomposition distributes high-order powers-of-2 into single buckets
+        // (e.g. bit 33 → bucket 1 alone = 8.59B >> 2^30). The production
+        // builder (vote_proof/builder.rs) uses a safe equal-split strategy
+        // instead of this function. decompose_weight is for pre-encryption
+        // share generation where the caller is responsible for range validation.
         let weight = 14_250_000_000u64;
         let shares = decompose_weight(weight);
-        assert_eq!(shares.len(), 5);
+        assert_eq!(shares.len(), 16);
         assert_eq!(shares.iter().sum::<u64>(), weight);
     }
 
     #[test]
     fn test_real_balance() {
-        // The balance from the simulator: 101768753
+        // The balance from the simulator: 101768753 (well within 16 × 2^30).
         let weight = 101_768_753u64;
         let shares = decompose_weight(weight);
-        assert_eq!(shares.len(), 5);
+        assert_eq!(shares.len(), 16);
         assert_eq!(shares.iter().sum::<u64>(), weight);
+        // All shares fit in the circuit's [0, 2^30) range check.
+        assert!(shares.iter().all(|&s| s < (1u64 << 30)));
     }
 
     #[test]
     fn test_large_value() {
+        // u64::MAX is far beyond 16 × 2^30 — this tests sum correctness only.
+        // Shares will exceed the circuit range bound.
         let weight = u64::MAX;
         let shares = decompose_weight(weight);
-        assert_eq!(shares.len(), 5);
+        assert_eq!(shares.len(), 16);
         assert_eq!(shares.iter().sum::<u64>(), weight);
     }
 }

@@ -12,7 +12,7 @@
 //! - **Condition 7**: New VAN Integrity (Poseidon hash, `constrain_instance`).
 //! - **Condition 8**: Shares Sum Correctness (AddChip, `constrain_equal`).
 //! - **Condition 9**: Shares Range (LookupRangeCheck, `[0, 2^30)`).
-//! - **Condition 10**: Shares Hash Integrity (Poseidon `ConstantLength<10>`; output flows to condition 12).
+//! - **Condition 10**: Shares Hash Integrity (Poseidon `ConstantLength<16>` over 16 blinded share commitments; output flows to condition 12).
 //! - **Condition 11**: Encryption Integrity (ECC variable-base mul, `constrain_equal`).
 //! - **Condition 12**: Vote Commitment Integrity (Poseidon `ConstantLength<4>`, `constrain_instance`).
 //!
@@ -38,11 +38,11 @@
 //!   but with decremented authority. *(implemented)*
 //!
 //! Vote commitment construction:
-//! - **Condition 8**: Shares Sum Correctness — `sum(shares_1..5) = total_note_value`.
+//! - **Condition 8**: Shares Sum Correctness — `sum(shares_1..16) = total_note_value`.
 //!   *(implemented)*
 //! - **Condition 9**: Shares Range — each `shares_j` in `[0, 2^30)`.
 //!   *(implemented)*
-//! - **Condition 10**: Shares Hash Integrity — `shares_hash = H(enc_share_1..5)`.
+//! - **Condition 10**: Shares Hash Integrity — `shares_hash = H(enc_share_1..16)`.
 //!   *(implemented)*
 //! - **Condition 11**: Encryption Integrity — each `enc_share_i = ElGamal(shares_i, r_i, ea_pk)`.
 //!   *(implemented)*
@@ -238,8 +238,8 @@ pub fn share_commitment(blind: pallas::Base, c1_x: pallas::Base, c2_x: pallas::B
 ///
 /// Computes blinded per-share commitments and hashes them together:
 /// ```text
-/// share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x)   for i in 0..5
-/// shares_hash  = Poseidon(share_comm_0, ..., share_comm_4)
+/// share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x)   for i in 0..16
+/// shares_hash  = Poseidon(share_comm_0, ..., share_comm_15)
 /// ```
 ///
 /// The blind factors prevent anyone who sees the encrypted shares on-chain
@@ -247,14 +247,14 @@ pub fn share_commitment(blind: pallas::Base, c1_x: pallas::Base, c2_x: pallas::B
 ///
 /// Used by the builder and tests to compute the expected shares hash.
 pub fn shares_hash(
-    share_blinds: [pallas::Base; 5],
-    enc_share_c1_x: [pallas::Base; 5],
-    enc_share_c2_x: [pallas::Base; 5],
+    share_blinds: [pallas::Base; 16],
+    enc_share_c1_x: [pallas::Base; 16],
+    enc_share_c2_x: [pallas::Base; 16],
 ) -> pallas::Base {
-    let comms: [pallas::Base; 5] = core::array::from_fn(|i| {
+    let comms: [pallas::Base; 16] = core::array::from_fn(|i| {
         share_commitment(share_blinds[i], enc_share_c1_x[i], enc_share_c2_x[i])
     });
-    poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<5>, 3, 2>::init().hash(comms)
+    poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<16>, 3, 2>::init().hash(comms)
 }
 
 /// Out-of-circuit vote commitment hash (condition 12).
@@ -471,28 +471,30 @@ pub struct Circuit {
 
     // === Vote commitment construction (conditions 8–12) ===
 
-    // Condition 8 (Shares Sum): sum(shares_1..5) = total_note_value.
+    // Condition 8 (Shares Sum): sum(shares_1..16) = total_note_value.
     // Condition 9 (Shares Range): each share in [0, 2^30).
-    /// Voting share vector (5 shares that sum to total_note_value).
-    pub(crate) shares: [Value<pallas::Base>; 5],
+    /// Voting share vector (16 random shares that sum to total_note_value).
+    /// The decomposition is chosen by the prover for amount privacy: the
+    /// on-chain El Gamal ciphertexts reveal no weight fingerprint.
+    pub(crate) shares: [Value<pallas::Base>; 16],
 
     // Condition 10 (Shares Hash Integrity): El Gamal ciphertext x-coordinates.
     // These are the x-coordinates of the curve points comprising each
     // El Gamal ciphertext. Condition 11 constrains these to be correct
     // encryptions; condition 10 hashes them.
     /// X-coordinates of C1_i = r_i * G for each share (via ExtractP).
-    pub(crate) enc_share_c1_x: [Value<pallas::Base>; 5],
+    pub(crate) enc_share_c1_x: [Value<pallas::Base>; 16],
     /// X-coordinates of C2_i = shares_i * G + r_i * ea_pk for each share (via ExtractP).
-    pub(crate) enc_share_c2_x: [Value<pallas::Base>; 5],
+    pub(crate) enc_share_c2_x: [Value<pallas::Base>; 16],
 
     // Condition 10 (Shares Hash Integrity): per-share blind factors for blinded commitments.
     /// Random blind factors: share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x).
-    pub(crate) share_blinds: [Value<pallas::Base>; 5],
+    pub(crate) share_blinds: [Value<pallas::Base>; 16],
 
     // Condition 11 (Encryption Integrity): El Gamal randomness and public key.
     /// El Gamal encryption randomness for each share (base field element,
     /// converted to scalar via ScalarVar::from_base in-circuit).
-    pub(crate) share_randomness: [Value<pallas::Base>; 5],
+    pub(crate) share_randomness: [Value<pallas::Base>; 16],
     /// Election authority public key (Pallas curve point).
     /// The El Gamal encryption key — published as a round parameter.
     /// Both coordinates are public inputs (EA_PK_X, EA_PK_Y).
@@ -1188,21 +1190,21 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // ---------------------------------------------------------------
         // Condition 8: Shares Sum Correctness.
         //
-        // sum(share_0, share_1, share_2, share_3, share_4) = total_note_value
+        // sum(share_0, ..., share_15) = total_note_value
         //
         // Proves the voting share decomposition is consistent with the
-        // total delegated weight. Uses four chained AddChip additions:
-        //   partial_1 = share_0 + share_1
-        //   partial_2 = partial_1 + share_2
-        //   partial_3 = partial_2 + share_3
-        //   sum       = partial_3 + share_4
-        // Then constrains sum == total_note_value (from condition 2).
+        // total delegated weight. Uses 15 chained AddChip additions:
+        //   partial_1  = share_0  + share_1
+        //   partial_2  = partial_1  + share_2
+        //   ...
+        //   shares_sum = partial_14 + share_15
+        // Then constrains shares_sum == total_note_value (from condition 2).
         // ---------------------------------------------------------------
 
-        // Witness the 5 plaintext shares. These cells are also used
+        // Witness the 16 plaintext shares. These cells are also used
         // by condition 9 (range check) and condition 11 (El Gamal
         // encryption inputs).
-        let share_cells: [_; 5] = (0..5usize)
+        let share_cells: [_; 16] = (0..16usize)
             .map(|i| assign_free_advice(
                 layouter.namespace(|| alloc::format!("witness share_{i}")),
                 config.advices[0],
@@ -1210,9 +1212,9 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             ))
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
-            .expect("always 5 elements");
+            .expect("always 16 elements");
 
-        // Chain 4 additions: share_0 + share_1 + share_2 + share_3 + share_4.
+        // Chain 15 additions: share_0 + share_1 + ... + share_15.
         let partial_1 = config.add_chip().add(
             layouter.namespace(|| "share_0 + share_1"),
             &share_cells[0],
@@ -1228,14 +1230,69 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             &partial_2,
             &share_cells[3],
         )?;
-        let shares_sum = config.add_chip().add(
+        let partial_4 = config.add_chip().add(
             layouter.namespace(|| "partial_3 + share_4"),
             &partial_3,
             &share_cells[4],
         )?;
+        let partial_5 = config.add_chip().add(
+            layouter.namespace(|| "partial_4 + share_5"),
+            &partial_4,
+            &share_cells[5],
+        )?;
+        let partial_6 = config.add_chip().add(
+            layouter.namespace(|| "partial_5 + share_6"),
+            &partial_5,
+            &share_cells[6],
+        )?;
+        let partial_7 = config.add_chip().add(
+            layouter.namespace(|| "partial_6 + share_7"),
+            &partial_6,
+            &share_cells[7],
+        )?;
+        let partial_8 = config.add_chip().add(
+            layouter.namespace(|| "partial_7 + share_8"),
+            &partial_7,
+            &share_cells[8],
+        )?;
+        let partial_9 = config.add_chip().add(
+            layouter.namespace(|| "partial_8 + share_9"),
+            &partial_8,
+            &share_cells[9],
+        )?;
+        let partial_10 = config.add_chip().add(
+            layouter.namespace(|| "partial_9 + share_10"),
+            &partial_9,
+            &share_cells[10],
+        )?;
+        let partial_11 = config.add_chip().add(
+            layouter.namespace(|| "partial_10 + share_11"),
+            &partial_10,
+            &share_cells[11],
+        )?;
+        let partial_12 = config.add_chip().add(
+            layouter.namespace(|| "partial_11 + share_12"),
+            &partial_11,
+            &share_cells[12],
+        )?;
+        let partial_13 = config.add_chip().add(
+            layouter.namespace(|| "partial_12 + share_13"),
+            &partial_12,
+            &share_cells[13],
+        )?;
+        let partial_14 = config.add_chip().add(
+            layouter.namespace(|| "partial_13 + share_14"),
+            &partial_13,
+            &share_cells[14],
+        )?;
+        let shares_sum = config.add_chip().add(
+            layouter.namespace(|| "partial_14 + share_15"),
+            &partial_14,
+            &share_cells[15],
+        )?;
 
         // Constrain: shares_sum == total_note_value.
-        // This ensures the 5 shares decompose the voter's total delegated
+        // This ensures the 16 shares decompose the voter's total delegated
         // weight without creating or destroying value.
         layouter.assign_region(
             || "shares sum == total_note_value",
@@ -1254,7 +1311,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // giving [0, 2^30). The protocol spec targets [0, 2^24), but
         // halo2_gadgets v0.3's `short_range_check` is private, so we
         // use the next available 10-bit-aligned bound. 30 bits (~1B per
-        // share) is still secure: max sum of 5 shares ≈ 5B, well within
+        // share) is still secure: max sum of 16 shares ≈ 17.2B, well within
         // the Pallas field, and the homomorphic tally accumulates over
         // far fewer voters than 2^30.
         //
@@ -1277,8 +1334,8 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // ---------------------------------------------------------------
         // Condition 10: Shares Hash Integrity (blinded commitments).
         //
-        // share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x)   for i in 0..5
-        // shares_hash  = Poseidon(share_comm_0, ..., share_comm_4)
+        // share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x)   for i in 0..16
+        // shares_hash  = Poseidon(share_comm_0, ..., share_comm_15)
         //
         // The blind factors prevent anyone who sees the encrypted shares
         // on-chain from recomputing shares_hash and linking it to a
@@ -1290,8 +1347,8 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // binds that value to the VOTE_COMMITMENT public input.
         // ---------------------------------------------------------------
 
-        // Witness the 5 blind factors and 10 El Gamal ciphertext x-coordinates.
-        let blinds: [AssignedCell<pallas::Base, pallas::Base>; 5] = (0..5)
+        // Witness the 16 blind factors and 32 El Gamal ciphertext x-coordinates.
+        let blinds: [AssignedCell<pallas::Base, pallas::Base>; 16] = (0..16)
             .map(|i| {
                 assign_free_advice(
                     layouter.namespace(|| alloc::format!("witness share_blind[{i}]")),
@@ -1301,10 +1358,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             })
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
-            .expect("always 5 elements");
+            .expect("always 16 elements");
 
-        // Witness the 5 El Gamal c1 ciphertext x-coordinates.
-        let enc_c1: [AssignedCell<pallas::Base, pallas::Base>; 5] = (0..5)
+        // Witness the 16 El Gamal c1 ciphertext x-coordinates.
+        let enc_c1: [AssignedCell<pallas::Base, pallas::Base>; 16] = (0..16)
             .map(|i| assign_free_advice(
                 layouter.namespace(|| alloc::format!("witness enc_c1_x[{i}]")),
                 config.advices[0],
@@ -1312,10 +1369,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             ))
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
-            .expect("always 5 elements");
+            .expect("always 16 elements");
 
-        // Witness the 5 El Gamal c2 ciphertext x-coordinates.
-        let enc_c2: [AssignedCell<pallas::Base, pallas::Base>; 5] = (0..5)
+        // Witness the 16 El Gamal c2 ciphertext x-coordinates.
+        let enc_c2: [AssignedCell<pallas::Base, pallas::Base>; 16] = (0..16)
             .map(|i| assign_free_advice(
                 layouter.namespace(|| alloc::format!("witness enc_c2_x[{i}]")),
                 config.advices[0],
@@ -1323,16 +1380,16 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             ))
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
-            .expect("always 5 elements");
+            .expect("always 16 elements");
 
         // Clone for Condition 11 before compute_shares_hash_in_circuit takes ownership.
-        let enc_c1_cond11: [AssignedCell<pallas::Base, pallas::Base>; 5] =
+        let enc_c1_cond11: [AssignedCell<pallas::Base, pallas::Base>; 16] =
             core::array::from_fn(|i| enc_c1[i].clone());
-        let enc_c2_cond11: [AssignedCell<pallas::Base, pallas::Base>; 5] =
+        let enc_c2_cond11: [AssignedCell<pallas::Base, pallas::Base>; 16] =
             core::array::from_fn(|i| enc_c2[i].clone());
 
         // Compute share_comm_i = Poseidon(blind_i, c1_i, c2_i) for each share,
-        // then shares_hash = Poseidon(share_comm_0, ..., share_comm_4).
+        // then shares_hash = Poseidon(share_comm_0, ..., share_comm_15).
         let shares_hash = compute_shares_hash_in_circuit(
             || config.poseidon_chip(),
             layouter.namespace(|| "cond10: shares hash"),
@@ -1350,7 +1407,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // circuit::elgamal::prove_elgamal_encryptions gadget.
         // ---------------------------------------------------------------
         {
-            let r_cells: [_; 5] = (0..5usize)
+            let r_cells: [_; 16] = (0..16usize)
                 .map(|i| assign_free_advice(
                     layouter.namespace(|| alloc::format!("witness r[{i}]")),
                     config.advices[0],
@@ -1358,7 +1415,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 ))
                 .collect::<Result<Vec<_>, _>>()?
                 .try_into()
-                .expect("always 5 elements");
+                .expect("always 16 elements");
 
             prove_elgamal_encryptions(
                 ecc_chip.clone(),
@@ -1567,7 +1624,7 @@ mod tests {
         (ea_sk, ea_pk, ea_pk_affine)
     }
 
-    /// Computes real El Gamal encryptions for 5 shares.
+    /// Computes real El Gamal encryptions for 16 shares.
     ///
     /// Returns `(c1_x, c2_x, randomness, share_blinds, shares_hash_value)` where:
     /// - `c1_x[i]` and `c2_x[i]` are correct ciphertext x-coordinates
@@ -1575,28 +1632,20 @@ mod tests {
     /// - `share_blinds[i]` is the blind factor for each share commitment
     /// - `shares_hash_value` is the blinded Poseidon hash of all shares
     fn encrypt_shares(
-        shares: [u64; 5],
+        shares: [u64; 16],
         ea_pk: pallas::Point,
-    ) -> ([pallas::Base; 5], [pallas::Base; 5], [pallas::Base; 5], [pallas::Base; 5], pallas::Base) {
-        let mut c1_x = [pallas::Base::zero(); 5];
-        let mut c2_x = [pallas::Base::zero(); 5];
+    ) -> ([pallas::Base; 16], [pallas::Base; 16], [pallas::Base; 16], [pallas::Base; 16], pallas::Base) {
+        let mut c1_x = [pallas::Base::zero(); 16];
+        let mut c2_x = [pallas::Base::zero(); 16];
         // Use small deterministic randomness (fits in both Base and Scalar).
-        let randomness: [pallas::Base; 5] = [
-            pallas::Base::from(101u64),
-            pallas::Base::from(202u64),
-            pallas::Base::from(303u64),
-            pallas::Base::from(404u64),
-            pallas::Base::from(505u64),
-        ];
+        let randomness: [pallas::Base; 16] = core::array::from_fn(|i| {
+            pallas::Base::from((i as u64 + 1) * 101)
+        });
         // Deterministic blind factors for tests.
-        let share_blinds: [pallas::Base; 5] = [
-            pallas::Base::from(1001u64),
-            pallas::Base::from(1002u64),
-            pallas::Base::from(1003u64),
-            pallas::Base::from(1004u64),
-            pallas::Base::from(1005u64),
-        ];
-        for i in 0..5 {
+        let share_blinds: [pallas::Base; 16] = core::array::from_fn(|i| {
+            pallas::Base::from(1001u64 + i as u64)
+        });
+        for i in 0..16 {
             let (c1, c2) = elgamal_encrypt(
                 pallas::Base::from(shares[i]),
                 randomness[i],
@@ -1727,7 +1776,7 @@ mod tests {
         let vpk_g_d_x = *vpk_g_d_affine.coordinates().unwrap().x();
         let vpk_pk_d_x = *vpk_pk_d_affine.coordinates().unwrap().x();
 
-        // total_note_value must be small enough that all 5 shares
+        // total_note_value must be small enough that all 16 shares
         // fit in [0, 2^30) for condition 9's range check.
         let total_note_value = pallas::Base::from(10_000u64);
         let voting_round_id = pallas::Base::random(&mut rng);
@@ -1758,12 +1807,7 @@ mod tests {
 
         // Create shares that sum to total_note_value (conditions 8 + 9).
         // Each share must be in [0, 2^30) for condition 9's range check.
-        let shares_u64: [u64; 5] = [1_000, 2_000, 3_000, 2_500, 1_500]; // sum = 10000
-        let s0 = pallas::Base::from(shares_u64[0]);
-        let s1 = pallas::Base::from(shares_u64[1]);
-        let s2 = pallas::Base::from(shares_u64[2]);
-        let s3 = pallas::Base::from(shares_u64[3]);
-        let s4 = pallas::Base::from(shares_u64[4]);
+        let shares_u64: [u64; 16] = [625; 16]; // sum = 10000
 
         // Condition 11: El Gamal encryption of shares under ea_pk.
         let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
@@ -1787,13 +1831,7 @@ mod tests {
             Value::known(alpha_v),
         );
         circuit.one_shifted = Value::known(one_shifted);
-        circuit.shares = [
-            Value::known(s0),
-            Value::known(s1),
-            Value::known(s2),
-            Value::known(s3),
-            Value::known(s4),
-        ];
+        circuit.shares = shares_u64.map(|s| Value::known(pallas::Base::from(s)));
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
         circuit.share_blinds = share_blinds.map(Value::known);
@@ -1865,7 +1903,7 @@ mod tests {
         instance.r_vpk_x = *r_vpk.coordinates().unwrap().x();
         instance.r_vpk_y = *r_vpk.coordinates().unwrap().y();
 
-        let shares_u64: [u64; 5] = [1_000, 2_000, 3_000, 2_500, 1_500];
+        let shares_u64: [u64; 16] = [625; 16];
         let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
         let (enc_c1_x, enc_c2_x, randomness, share_blinds, shares_hash_val) =
             encrypt_shares(shares_u64, ea_pk_point);
@@ -1989,7 +2027,7 @@ mod tests {
             proposal_authority_new, van_comm_rand,
         );
 
-        let shares_u64: [u64; 5] = [1_000, 2_000, 3_000, 2_500, 1_500];
+        let shares_u64: [u64; 16] = [625; 16];
         let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
         let (enc_c1_x, enc_c2_x, randomness, share_blinds, shares_hash_val) =
             encrypt_shares(shares_u64, ea_pk_point);
@@ -2088,7 +2126,7 @@ mod tests {
             van_comm_rand,
         );
 
-        let shares_u64: [u64; 5] = [1_000, 2_000, 3_000, 2_500, 1_500];
+        let shares_u64: [u64; 16] = [625; 16];
         let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
         let (enc_c1_x, enc_c2_x, randomness, share_blinds, shares_hash_val) =
             encrypt_shares(shares_u64, ea_pk_point);
@@ -2219,7 +2257,7 @@ mod tests {
         let r_vpk_y = *r_vpk.coordinates().unwrap().y();
 
         // Shares that sum to total_note_value (conditions 8 + 9).
-        let shares_u64: [u64; 5] = [1_000, 2_000, 3_000, 2_500, 1_500];
+        let shares_u64: [u64; 16] = [625; 16];
 
         // Condition 11: real El Gamal encryption.
         let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
@@ -2390,7 +2428,7 @@ mod tests {
     }
 
     // ================================================================
-    // Condition 6 (New VAN Integrity) tests
+    // Condition 7 (New VAN Integrity) tests
     // ================================================================
 
     /// Wrong vote_authority_note_new public input should fail condition 7.
@@ -2492,7 +2530,7 @@ mod tests {
         let r_vpk_y = *r_vpk.coordinates().unwrap().y();
 
         // Shares that sum to total_note_value (conditions 8 + 9).
-        let shares_u64: [u64; 5] = [1_000, 2_000, 3_000, 2_500, 1_500];
+        let shares_u64: [u64; 16] = [625; 16];
 
         // Condition 11: real El Gamal encryption.
         let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
@@ -2553,7 +2591,7 @@ mod tests {
     }
 
     // ================================================================
-    // Condition 7 (Shares Sum Correctness) tests
+    // Condition 8 (Shares Sum Correctness) tests
     // ================================================================
 
     /// Shares that do NOT sum to total_note_value should fail condition 8.
@@ -2572,14 +2610,14 @@ mod tests {
     }
 
     // ================================================================
-    // Condition 8 (Shares Range) tests
+    // Condition 9 (Shares Range) tests
     // ================================================================
 
     /// A share at the maximum valid value (2^30 - 1) should pass.
     #[test]
     fn shares_range_max_valid() {
         let max_share = pallas::Base::from((1u64 << 30) - 1); // 1,073,741,823
-        let total = max_share + max_share + max_share + max_share + max_share;
+        let total = (0..16).fold(pallas::Base::zero(), |acc, _| acc + max_share);
 
         let mut rng = OsRng;
         // Derive proper voting key hierarchy.
@@ -2612,7 +2650,7 @@ mod tests {
 
         // Condition 11: real El Gamal encryption with max-value shares.
         let max_share_u64 = (1u64 << 30) - 1;
-        let shares_u64: [u64; 5] = [max_share_u64; 5];
+        let shares_u64: [u64; 16] = [max_share_u64; 16];
         let (_ea_sk, ea_pk_point, ea_pk_affine) = generate_ea_keypair();
         let (enc_c1_x, enc_c2_x, randomness, share_blinds, shares_hash_val) =
             encrypt_shares(shares_u64, ea_pk_point);
@@ -2638,7 +2676,7 @@ mod tests {
             Value::known(alpha_v),
         );
         circuit.one_shifted = Value::known(one_shifted);
-        circuit.shares = [Value::known(max_share); 5];
+        circuit.shares = [Value::known(max_share); 16];
         circuit.enc_share_c1_x = enc_c1_x.map(Value::known);
         circuit.enc_share_c2_x = enc_c2_x.map(Value::known);
         circuit.share_blinds = share_blinds.map(Value::known);
@@ -2693,7 +2731,7 @@ mod tests {
     }
 
     // ================================================================
-    // Condition 9 (Shares Hash Integrity) tests
+    // Condition 10 (Shares Hash Integrity) tests
     // ================================================================
 
     /// Valid enc_share witnesses with matching shares_hash should pass.
@@ -2737,11 +2775,11 @@ mod tests {
     fn shares_hash_deterministic() {
         let mut rng = OsRng;
 
-        let blinds: [pallas::Base; 5] =
+        let blinds: [pallas::Base; 16] =
             core::array::from_fn(|_| pallas::Base::random(&mut rng));
-        let c1_x: [pallas::Base; 5] =
+        let c1_x: [pallas::Base; 16] =
             core::array::from_fn(|_| pallas::Base::random(&mut rng));
-        let c2_x: [pallas::Base; 5] =
+        let c2_x: [pallas::Base; 16] =
             core::array::from_fn(|_| pallas::Base::random(&mut rng));
 
         let h1 = shares_hash(blinds, c1_x, c2_x);
@@ -2759,7 +2797,7 @@ mod tests {
         assert_ne!(h1, h4);
 
         // Different blinds produce different hash.
-        let blinds_alt: [pallas::Base; 5] =
+        let blinds_alt: [pallas::Base; 16] =
             core::array::from_fn(|_| pallas::Base::random(&mut rng));
         let h5 = shares_hash(blinds_alt, c1_x, c2_x);
         assert_ne!(h1, h5);
@@ -2995,8 +3033,8 @@ mod tests {
         assert!(base_to_scalar(pallas::Base::from(1_000u64)).is_some());
         assert!(base_to_scalar(pallas::Base::from(404u64)).is_some()); // encrypt_shares randomness
 
-        // Encrypt_shares uses 101, 202, 303, 404, 505 as r_i — all must convert.
-        for r in [101u64, 202, 303, 404, 505] {
+        // encrypt_shares uses (i+1)*101 for i in 0..16 → 101, 202, ..., 1616.
+        for r in (1u64..=16).map(|i| i * 101) {
             assert!(
                 base_to_scalar(pallas::Base::from(r)).is_some(),
                 "r = {} must convert for El Gamal",
@@ -3006,7 +3044,7 @@ mod tests {
     }
 
     // ================================================================
-    // Condition 11 (Vote Commitment Integrity) tests
+    // Condition 12 (Vote Commitment Integrity) tests
     // ================================================================
 
     /// Valid vote commitment (full Poseidon chain) should pass.
