@@ -1,32 +1,153 @@
+# https://mise.jdx.dev
+# Install: curl https://mise.run | sh
+# Then: mise install && mise start
+
 [tools]
 go = "1.24.0"
+rust = "stable"
 node = "22"
 
-[tasks.up]
-description = "Init chain + bootstrap nullifiers + start everything"
-run = "make up"
+[env]
+GOBIN = "{{env.HOME}}/go/bin"
+_.path = ["{{env.HOME}}/go/bin", "/usr/local/go/bin"]
 
-[tasks.down]
+# ── Workflow ───────────────────────────────────────────────────────
+
+[tasks.start]
+description = "Init chain + bootstrap nullifiers + start everything"
+run = '''
+#!/usr/bin/env bash
+set -e
+PROCS=""
+pgrep zallyd       > /dev/null 2>&1 && PROCS="$PROCS zallyd"
+pgrep query-server > /dev/null 2>&1 && PROCS="$PROCS query-server"
+pgrep ingest-nfs   > /dev/null 2>&1 && PROCS="$PROCS ingest-nfs"
+if [ -n "$PROCS" ]; then
+    printf '\033[33mAlready running:%s\033[0m\n' "$PROCS"
+    exit 0
+fi
+make -C sdk init
+make -C nullifier-ingest bootstrap
+make -C nullifier-ingest ingest
+rm -f nullifier-ingest/nullifiers.tree
+nohup make -C nullifier-ingest serve > ingest-serve.log 2>&1 &
+nohup make -C sdk start > zallyd.log 2>&1 &
+printf '\033[32mStarted: ingest-serve → ingest-serve.log | zallyd → zallyd.log\033[0m\n'
+'''
+
+[tasks.stop]
 description = "Stop all services"
-run = "make down"
+run = '''
+#!/usr/bin/env bash
+KILLED=""
+pkill zallyd       2>/dev/null && KILLED="$KILLED zallyd"       || true
+pkill query-server 2>/dev/null && KILLED="$KILLED query-server" || true
+pkill ingest-nfs   2>/dev/null && KILLED="$KILLED ingest-nfs"   || true
+if [ -n "$KILLED" ]; then
+    printf '\033[32mStopped:%s\033[0m\n' "$KILLED"
+else
+    echo "No running processes found."
+fi
+'''
 
 [tasks.status]
-description = "Show chain + nullifier status"
-run = "make status"
+description = "Show status of all services"
+run = '''
+#!/usr/bin/env bash
+API="http://localhost:1318"
 
-[tasks.test]
-description = "Run all Go tests"
-run = "make -C sdk test"
+# ── Services ──────────────────────────────────────────────────────
 
-[tasks.test-e2e]
-description = "Run Rust E2E tests"
-run = "make test-e2e"
+printf "chain          "
+CHAIN_UP=false
+STATUS=$(~/go/bin/zallyd status --home ~/.zallyd 2>/dev/null) || true
+if [ -n "$STATUS" ]; then
+    CHAIN_UP=true
+    INFO=$(echo "$STATUS" | python3 -c "
+import sys,json,time,datetime
+d=json.load(sys.stdin); s=d.get('sync_info',{})
+h=s.get('latest_block_height','?')
+t=s.get('latest_block_time','')
+age=''
+if t:
+    dt=datetime.datetime.fromisoformat(t.replace('Z','+00:00'))
+    secs=int(time.time()-dt.timestamp())
+    if secs<60: age=f'{secs}s ago'
+    elif secs<3600: age=f'{secs//60}m ago'
+    else: age=f'{secs//3600}h ago'
+syncing=' (syncing)' if s.get('catching_up') else ''
+print(f'block {h}  {age}{syncing}')
+")
+    printf '\033[32m● running\033[0m   %s\n' "$INFO"
+else
+    printf '\033[31m○ stopped\033[0m\n'
+fi
 
-[tasks.ceremony]
-description = "Register + create round + wait for ACTIVE"
-run = "make -C sdk ceremony"
+printf "query-server   "
+if pgrep -x query-server > /dev/null 2>&1; then
+    printf '\033[32m● running\033[0m   port 3000\n'
+else
+    printf '\033[31m○ stopped\033[0m\n'
+fi
+
+printf "nullifiers     "
+CP="nullifier-ingest/nullifiers.checkpoint"
+if [ -f "$CP" ]; then
+    HEIGHT=$(od -An -t u8 -j 0 -N 8 "$CP" | tr -d ' ')
+    BYTES=$(wc -c < "nullifier-ingest/nullifiers.bin" 2>/dev/null | tr -d ' ')
+    COUNT=$((BYTES / 32))
+    printf '\033[32m✓ synced\033[0m    height %s  %sM nullifiers\n' "$HEIGHT" "$((COUNT / 1000000))"
+else
+    printf '\033[31m✗ no data\033[0m   run: mise start\n'
+fi
+
+# ── Voting rounds (only if chain is up) ──────────────────────────
+
+if [ "$CHAIN_UP" = true ]; then
+    echo ""
+    ROUNDS_JSON=$(curl -sf "$API/zally/v1/rounds" 2>/dev/null) || true
+    if [ -n "$ROUNDS_JSON" ]; then
+        echo "$ROUNDS_JSON" | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+rounds=data.get('rounds') or []
+if not rounds:
+    print('No voting rounds')
+else:
+    for r in rounds:
+        sid=r.get('vote_round_id','')[:16]
+        status=r.get('status','?').replace('SESSION_STATUS_','').lower()
+        title=r.get('title','')
+        props=len(r.get('proposals') or [])
+        cs=r.get('ceremony_status','')
+        if isinstance(cs,str): cs=cs.replace('CEREMONY_STATUS_','').lower()
+        line=f'round {sid}..  {status}'
+        if status=='pending' and cs: line+=f'  ceremony: {cs}'
+        if props: line+=f'  {props} proposal{\"s\" if props!=1 else \"\"}'
+        if title: line+=f'  \"{title}\"'
+        print(line)
+" 2>/dev/null || true
+    fi
+fi
+
+# ── Paths ─────────────────────────────────────────────────────────
+
+echo ""
+printf '\033[2m'
+echo "Chain data     ~/.zallyd/"
+echo "Chain log      ./zallyd.log"
+echo "EA keys        ~/.zallyd/ea_sk.*"
+echo "Nullifier data ./nullifier-ingest/nullifiers.{bin,checkpoint,tree}"
+echo "Ingest log     ./ingest-serve.log"
+echo "Admin UI       ./shielded_vote_generator_ui/"
+printf '\033[0m'
+'''
 
 [tasks.ui]
 description = "Start admin UI dev server"
 dir = "shielded_vote_generator_ui"
 run = "npm run dev"
+
+[tasks.test]
+description = "End-to-end tests against running chain (requires: mise start)"
+run = "cargo test --release --manifest-path e2e-tests/Cargo.toml -- --nocapture --ignored"

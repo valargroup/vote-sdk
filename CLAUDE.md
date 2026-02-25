@@ -47,57 +47,45 @@ There are two xcframework build targets in `zcash-voting-ffi/`:
 
 After modifying the FFI public API, you **must** run `make dev` and commit the regenerated Swift file and xcframework binaries alongside the Rust changes.
 
-## Nullifier Ingest (`nf-server`)
+## Local Development
 
-The unified `nf-server` binary lives in `nullifier-ingest/nf-server/` and has three subcommands: `ingest`, `export`, and `serve`. The `serve` subcommand requires `--features serve` (enabled automatically by `make serve`). For production AVX-512 acceleration, the deploy workflow additionally enables `--features avx512`.
+All top-level workflow commands go through [mise](https://mise.jdx.dev). See `mise.toml` for the full task list.
 
-Data files (`nullifiers.bin`, `nullifiers.checkpoint`) are stored at the `nullifier-ingest/` root, not in subdirectories.
+### Setup and daily workflow
 
-### Common operations (run from `nullifier-ingest/`):
+```
+mise install        # pin Go 1.24.0, Node 22
+mise start          # init chain + bootstrap nullifiers + start everything
+mise status         # check service health + voting round state
+mise ui             # admin UI dev server (port 5173, separate terminal)
+mise stop           # stop all services
+mise test           # end-to-end tests against running chain
+```
 
-- **Check status:** `make status`
-- **Ingest to a specific height:** `make ingest SYNC_HEIGHT=<height>` (must be a multiple of 10)
-- **Ingest to chain tip:** `make ingest`
-- **Export PIR tier files:** `make export-nf`
-- **Start PIR server:** `make serve` (runs on port 3000)
-- **Bootstrap from CDN:** `make bootstrap` (downloads pre-built snapshot files if not present)
+### Full local sequence
 
-### Key notes:
-
-- `SYNC_HEIGHT` must be a **multiple of 10**
-- The full pipeline is **ingest → export → serve**. After re-ingesting nullifiers, you must re-export before the server sees the new data: `make ingest-resync SYNC_HEIGHT=<height>` (deletes stale sidecar/tier files), then `make export-nf`, then `make serve`
-- `eprintln!` from Rust code shows up in the Xcode debug console when testing the iOS app
-
-## Local Chain Setup
-
-Starting all services for local development: `make up` from the repo root. This starts the chain (`zallyd`), bootstraps + ingests nullifiers, exports PIR tier files, and starts the PIR server.
-
-### Full local setup sequence
-
-The correct sequence to start everything from scratch:
-
-1. `make up` (from repo root) — inits chain, bootstraps + ingests nullifiers, starts zallyd + IMT query server
-2. `make ceremony` (from `sdk/`) — registers Pallas key + creates a round + waits for it to become ACTIVE (auto-ceremony)
-3. `npm run dev` (from `shielded_vote_generator_ui/`) — starts admin UI on port 5173
+1. `mise start` — inits chain, bootstraps + ingests nullifiers, starts zallyd + IMT query server
+2. `mise ui` (separate terminal) — starts admin UI on port 5173
+3. Create and publish a round in the admin UI → ceremony runs automatically (PENDING → ACTIVE)
 4. Rebuild iOS app in Xcode and run
 
-To override the PIR server URL: `ZALLY_PIR_URL=http://host:port make start`
+### Nullifier ingest details
 
-### Important: `make install-ffi` vs `make install`
+The IMT service lives in `nullifier-ingest/`. Data files are stored at the `nullifier-ingest/` root. For manual operations use `make -C nullifier-ingest`:
 
-- **`make install`** builds `zallyd` **without** halo2/redpallas support. The embedded helper server will be **disabled** (logs: "helper server disabled: binary built without halo2 support"). Votes submitted from the iOS app will fail with **HTTP 503 "helper unavailable"**.
-- **`make install-ffi`** builds `zallyd` **with** halo2 and redpallas build tags. This is required for the helper server to run. **Always use `make install-ffi`** when rebuilding `zallyd` for local testing.
-- `make init` already calls `install-ffi`, so a fresh `make up` is fine. The issue arises when you manually run `make install` to pick up a Go code change — this silently downgrades the binary.
+- `SYNC_HEIGHT` must be a **multiple of 10**
+- If the IMT query server returns HTTP 502, the tree sidecar is stale. Fix: `mise stop && rm nullifier-ingest/nullifiers.tree && mise start`
+- `eprintln!` from Rust code shows up in the Xcode debug console when testing the iOS app
 
-### GOBIN and version managers (mise, asdf, etc.)
+### Important: `make -C sdk install-ffi` vs `make -C sdk install`
 
-The Makefiles set `export GOBIN := $(HOME)/go/bin` so that `go install` puts the binary in `~/go/bin`, matching the `PATH` they export. If you use a Go version manager like mise that overrides `GOBIN` to its own directory, the Makefile's explicit `GOBIN` takes precedence, preventing stale binaries in `~/go/bin` from shadowing the freshly built one.
+- **`install-ffi`** builds with halo2 + redpallas. The helper server is **functional**. Always use this.
+- **`install`** builds without FFI. Votes from the iOS app fail with HTTP 503.
+- `mise start` calls `make -C sdk init` which uses `install-ffi`, so fresh starts are fine. The issue arises when you manually run `make -C sdk install` for a quick Go rebuild — this silently downgrades the binary.
 
 ### Ceremony
 
-The EA key ceremony is automatic per voting round. When a round is created, eligible validators are snapshotted and the ceremony proceeds via PrepareProposal (auto-deal + auto-ack). The only manual prerequisite is Pallas key registration (done by `make ceremony`). Validators who fail to ack in 3 consecutive ceremonies are jailed.
-
-To bootstrap the first round locally: `make ceremony` from `sdk/` after `make up`.
+The EA key ceremony is automatic per voting round. When a round is published, eligible validators are snapshotted and the ceremony proceeds via PrepareProposal (auto-deal + auto-ack). Pallas key registration happens at validator join time. Validators who fail to ack in 3 consecutive ceremonies are jailed.
 
 ## Protocol Documentation
 
