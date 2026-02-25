@@ -1,5 +1,7 @@
 # Nullifier Service Setup
 
+> **Developer shortcut:** If you have the full repo and mise, `mise start` handles nullifier bootstrap + ingestion + query server automatically. This guide is for standalone or manual setup.
+
 The nullifier service ingests Orchard nullifiers from the Zcash chain and serves exclusion proofs to voters. It must be running before any votes can be constructed — the voting UI and e2e tests query it to generate non-inclusion proofs that prevent double-voting.
 
 ## What it does
@@ -96,13 +98,15 @@ Prints:
 After the initial bootstrap the snapshot may be behind the chain tip. To sync new nullifiers incrementally (safe to run while the server is stopped):
 
 ```bash
-make ingest
+mise run nullifier:ingest
+# or: make -C nullifier-ingest ingest
 ```
 
 Or with a specific upper bound (must be a multiple of 10):
 
 ```bash
-make ingest SYNC_HEIGHT=2600000
+SYNC_HEIGHT=2600000 mise run nullifier:ingest
+# or: make -C nullifier-ingest ingest SYNC_HEIGHT=2600000
 ```
 
 After ingesting, restart the server so it picks up the new data:
@@ -132,17 +136,21 @@ LWD_URL=https://my-node:443 DATA_DIR=/data/nullifiers ./nullifier.sh run
 
 ```bash
 # Check how many nullifiers have been ingested
-./nullifier.sh status
+mise run nullifier:status
+# or: make -C nullifier-ingest status
 
 # Run unit tests for the nullifier-tree and service crates
-make ingest-test
+mise run test:nullifier
+# or: make -C nullifier-ingest test
 
 # Verify exclusion proofs against the ingested data
-make ingest-proof
+mise run test:proof
+# or: make -C nullifier-ingest test-proof
 
 # Stop the query server
 pkill query-server
 
 # Remove all build artifacts and data files (destructive)
-make ingest-clean
+mise run nullifier:clean
+# or: make -C nullifier-ingest clean
 ```
