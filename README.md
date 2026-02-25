@@ -58,3 +58,55 @@ mise stop       # stop all services
 mise ui         # start admin UI dev server (port 5173)
 mise test       # end-to-end tests against running chain
 ```
+
+Run `mise tasks` for the full list. Key namespaces: `build:*`, `chain:*`, `multi:*`, `nullifier:*`, `test:*`.
+
+<!-- mise-tasks -->
+
+| Task | Description |
+|---|---|
+| **Daily** | |
+| `start` | Init chain + bootstrap nullifiers + start everything |
+| `stop` | Stop all services |
+| `status` | Show service health + voting round state |
+| `ui` | Start admin UI dev server (port 5173) |
+| `test` | E2E tests against running chain |
+| **build:\*** | |
+| `build` | Build zallyd with FFI (Halo2 + RedPallas) |
+| `build:quick` | Build zallyd without FFI (Go only) |
+| `build:install` | Install zallyd with FFI to $GOBIN |
+| `build:circuits` | Build Rust circuit static library |
+| `build:ui` | Build admin UI for production |
+| **chain:\*** | |
+| `chain:init` | Wipe and reinitialize a single-validator chain |
+| `chain:start` | Start chain daemon (foreground) |
+| `chain:clean` | Remove chain data directory |
+| `chain:ceremony` | Register Pallas key + create round + wait ACTIVE |
+| **multi:\*** | |
+| `multi:init` | Initialize a 3-validator chain on localhost |
+| `multi:stop` | Stop all multi-validator processes |
+| `multi:status` | Show running status of all 3 validators |
+| `multi:clean` | Remove all multi-validator data directories |
+| **nullifier:\*** | |
+| `nullifier:bootstrap` | Download nullifier snapshot from DO Spaces |
+| `nullifier:ingest` | Sync nullifiers to SYNC_HEIGHT or chain tip |
+| `nullifier:serve` | Build and start query server (port 3000) |
+| `nullifier:status` | Show nullifier ingestion progress |
+| `nullifier:clean` | Remove nullifier data + build artifacts |
+| **test:\*** | |
+| `test:unit` | Go unit tests (keeper, validation, codec) |
+| `test:integration` | Go ABCI pipeline integration tests |
+| `test:helper` | Helper server unit tests (SQLite, API, processor) |
+| `test:go` | All Go tests (unit + integration + helper) |
+| `test:circuits` | Rust circuit unit tests |
+| `test:ffi` | All FFI-backed tests (Halo2 + RedPallas) |
+| `test:nullifier` | Nullifier crate unit tests |
+| `test:proof` | Verify exclusion proofs against ingested data |
+| **Other** | |
+| `validator:join` | Build from source and join network as validator |
+| `fmt` | Format Go code |
+| `lint` | Run Go vet |
+| `fixtures` | Regenerate all fixture files |
+| `proto` | Regenerate protobuf code |
+
+<!-- /mise-tasks -->
