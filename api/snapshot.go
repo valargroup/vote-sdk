@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -109,9 +110,17 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 
 // --- PIR server client ---
 
+// ErrPIRRebuilding is returned when the PIR server is rebuilding its snapshot.
+// Callers can check with errors.Is(err, ErrPIRRebuilding) to distinguish this
+// from other PIR errors and show an appropriate message to the user.
+var ErrPIRRebuilding = errors.New("PIR server is rebuilding")
+
 // fetchNullifierRoot queries the PIR server GET /root endpoint and
 // validates that the tree was built to exactly the expected snapshot height.
 // Returns the 32-byte Poseidon tree root (depth-29, matching the circuit).
+//
+// If the PIR server returns 503 during a snapshot rebuild, the error wraps
+// ErrPIRRebuilding so callers can detect this case.
 func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint64) ([]byte, error) {
 	url := strings.TrimRight(pirURL, "/") + "/root"
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -125,6 +134,18 @@ func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint6
 		return nil, fmt.Errorf("HTTP GET %s: %w", url, err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		body, _ := io.ReadAll(resp.Body)
+		// Check if this is a rebuilding response
+		var status struct {
+			Phase string `json:"phase"`
+		}
+		if json.Unmarshal(body, &status) == nil && status.Phase == "rebuilding" {
+			return nil, fmt.Errorf("%w: snapshot rebuild in progress", ErrPIRRebuilding)
+		}
+		return nil, fmt.Errorf("PIR service returned 503: %s", string(body))
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
