@@ -6,6 +6,8 @@
 go = "1.24.0"
 rust = "stable"
 node = "22"
+buf = "latest"
+jq = "latest"
 
 [env]
 GOBIN = "{{env.HOME}}/go/bin"
