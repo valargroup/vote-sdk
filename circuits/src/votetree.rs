@@ -126,6 +126,76 @@ pub unsafe fn compute_path_from_raw(
 }
 
 // ---------------------------------------------------------------------------
+// Stateful tree handle
+// ---------------------------------------------------------------------------
+
+/// Stateful Poseidon Merkle tree handle for incremental append across blocks.
+///
+/// Wraps a [`TreeServer`] that persists for the lifetime of the process.
+/// The Go keeper holds one instance and appends only new leaves each block,
+/// reducing EndBlocker root computation from O(n) to O(k) where k is the
+/// number of new leaves in the current block.
+///
+/// KV store is the source of truth; this is a derived cache. On mismatch
+/// (crash, rollback) the Go side detects `size() != next_index` and
+/// recreates via [`TreeHandle::new`] + [`TreeHandle::append_batch`].
+pub struct TreeHandle {
+    tree: TreeServer,
+}
+
+impl TreeHandle {
+    /// Create an empty tree handle.
+    pub fn new() -> Box<TreeHandle> {
+        Box::new(TreeHandle {
+            tree: TreeServer::empty(),
+        })
+    }
+
+    /// Append a batch of leaves (each 32-byte canonical LE `Fp`).
+    ///
+    /// # Safety
+    /// `ptr` must be valid for `count * 32` bytes.
+    pub unsafe fn append_batch_raw(&mut self, ptr: *const u8, count: usize) -> Result<(), FfiError> {
+        if count == 0 {
+            return Ok(());
+        }
+        if ptr.is_null() {
+            return Err(FfiError::InvalidInput);
+        }
+        let leaves = deserialize_leaves(ptr, count)?;
+        for leaf in leaves {
+            self.tree.append(leaf);
+        }
+        Ok(())
+    }
+
+    /// Snapshot the current tree state at `height` (block height).
+    pub fn checkpoint(&mut self, height: u32) {
+        self.tree.checkpoint(height);
+    }
+
+    /// Return the 32-byte Merkle root at the latest checkpoint.
+    pub fn root(&self) -> [u8; 32] {
+        self.tree.root().to_repr()
+    }
+
+    /// Return the number of leaves appended so far.
+    pub fn size(&self) -> u64 {
+        self.tree.size()
+    }
+
+    /// Return the serialized Merkle authentication path for `position` at
+    /// `height`. Returns `None` if position is out of range or height has no
+    /// checkpoint.
+    pub fn path(&self, position: u64, height: u32) -> Option<Vec<u8>> {
+        let path = self.tree.path(position, height)?;
+        let bytes = path.to_bytes();
+        debug_assert_eq!(bytes.len(), MERKLE_PATH_BYTES);
+        Some(bytes)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Rust-side FFI round-trip tests
 // ---------------------------------------------------------------------------
 

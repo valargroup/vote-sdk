@@ -26,7 +26,7 @@ type DualAnteHandlerOptions struct {
 	ante.HandlerOptions
 
 	// Vote module keeper for stateful validation.
-	VoteKeeper votekeeper.Keeper
+	VoteKeeper *votekeeper.Keeper
 
 	// RedPallas signature verifier. Use ProductionOpts().SigVerifier in production,
 	// redpallas.NewMockVerifier() in tests.
@@ -103,7 +103,7 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 func handleVoteAnte(
 	ctx sdk.Context,
 	vtx *voteapi.VoteTxWrapper,
-	k votekeeper.Keeper,
+	k *votekeeper.Keeper,
 	sigVerifier redpallas.Verifier,
 	zkpVerifier zkp.Verifier,
 ) (sdk.Context, error) {
@@ -147,7 +147,7 @@ func handleVoteAnte(
 // buildStandardAnteHandler creates the standard Cosmos SDK ante handler chain
 // for non-vote transactions (staking operations, bank transfers, ceremony
 // messages, etc.). Ceremony messages get fee exemption and a validator gate.
-func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper votekeeper.Keeper) (sdk.AnteHandler, error) {
+func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper *votekeeper.Keeper) (sdk.AnteHandler, error) {
 	anteDecorators := []sdk.AnteDecorator{
 		ante.NewSetUpContextDecorator(),
 		NewCeremonyFeeExemptDecorator(),

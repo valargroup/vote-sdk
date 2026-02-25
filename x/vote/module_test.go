@@ -43,7 +43,7 @@ func fpLE(v uint64) []byte {
 type EndBlockerTestSuite struct {
 	suite.Suite
 	ctx    sdk.Context
-	keeper keeper.Keeper
+	keeper *keeper.Keeper
 	module vote.AppModule
 }
 

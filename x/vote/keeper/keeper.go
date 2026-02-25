@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/z-cale/zally/crypto/votetree"
 	"github.com/z-cale/zally/x/vote/types"
 )
 
@@ -38,6 +39,21 @@ type Keeper struct {
 	authority     string
 	logger        log.Logger
 	stakingKeeper StakingKeeper
+
+	// treeHandle and treeCursor are an in-memory cache of the vote commitment
+	// tree. They are the only non-KV state on this Keeper, which is an
+	// intentional deviation from the Cosmos SDK "stateless keeper" convention.
+	//
+	// The underlying invariant the convention protects — KV is the canonical
+	// source of truth and must survive process restart — is preserved:
+	//   - treeHandle is nil on startup and rebuilt from KV on first use.
+	//   - treeCursor tracks KV nextIndex; any mismatch triggers a rebuild.
+	//   - These fields are never written to the KV store.
+	//
+	// Concurrency: only EndBlocker (via ComputeTreeRoot) mutates these fields.
+	// Ante handler and query handlers read KV directly and never touch them.
+	treeHandle *votetree.TreeHandle // lazy-initialized; nil until first EndBlock
+	treeCursor uint64               // leaves appended to treeHandle; mirrors KV nextIndex
 }
 
 // NewKeeper creates a new vote module keeper.
@@ -46,13 +62,76 @@ func NewKeeper(
 	authority string,
 	logger log.Logger,
 	stakingKeeper StakingKeeper,
-) Keeper {
-	return Keeper{
+) *Keeper {
+	return &Keeper{
 		storeService:  storeService,
 		authority:     authority,
 		logger:        logger.With("module", "x/"+types.ModuleName),
 		stakingKeeper: stakingKeeper,
 	}
+}
+
+// ensureTreeLoaded brings treeHandle up to date with nextIndex leaves from KV.
+//
+// Cases:
+//   - treeHandle == nil: cold-start. Create handle, load all [0, nextIndex) leaves, checkpoint.
+//   - treeCursor == nextIndex: already up to date, no-op.
+//   - treeCursor < nextIndex: append only the delta [treeCursor, nextIndex) from KV.
+//   - treeCursor > nextIndex: rollback detected. Recreate handle and rebuild from scratch.
+//
+// Not safe for concurrent use. Must only be called from the single-threaded
+// EndBlocker path (via ComputeTreeRoot). The ante handler and query handlers
+// never touch treeHandle or treeCursor.
+func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) error {
+	// Detect rollback or uninitialized handle.
+	if k.treeHandle == nil || k.treeCursor > nextIndex {
+		if k.treeHandle != nil {
+			k.treeHandle.Close()
+		}
+		k.treeHandle = votetree.NewTreeHandle()
+		k.treeCursor = 0
+	}
+
+	if k.treeCursor == nextIndex {
+		return nil
+	}
+
+	// Append only the new leaves [treeCursor, nextIndex) from KV.
+	newLeaves := make([][]byte, nextIndex-k.treeCursor)
+	for i := k.treeCursor; i < nextIndex; i++ {
+		leaf, err := kvStore.Get(types.CommitmentLeafKey(i))
+		if err != nil {
+			return err
+		}
+		newLeaves[i-k.treeCursor] = leaf
+	}
+
+	if err := k.treeHandle.AppendBatch(newLeaves); err != nil {
+		return err
+	}
+	k.treeCursor = nextIndex
+	return nil
+}
+
+// CheckpointTree snapshots the stateful tree handle at height. Available for
+// callers that need to mark the tree at an explicit block height outside of
+// ComputeTreeRoot.
+func (k *Keeper) CheckpointTree(height uint32) error {
+	if k.treeHandle == nil {
+		return nil
+	}
+	return k.treeHandle.Checkpoint(height)
+}
+
+// TreeCursorForTest exposes the internal treeCursor for testing.
+func (k *Keeper) TreeCursorForTest() uint64 {
+	return k.treeCursor
+}
+
+// StoreServiceForTest exposes the store service so tests can create a second
+// Keeper backed by the same underlying store (simulating node restart).
+func (k *Keeper) StoreServiceForTest() store.KVStoreService {
+	return k.storeService
 }
 
 // SetStakingKeeper replaces the staking keeper. Used in tests.
@@ -61,7 +140,7 @@ func (k *Keeper) SetStakingKeeper(sk StakingKeeper) {
 }
 
 // OpenKVStore opens the module's KV store from a context.
-func (k Keeper) OpenKVStore(ctx context.Context) store.KVStore {
+func (k *Keeper) OpenKVStore(ctx context.Context) store.KVStore {
 	return k.storeService.OpenKVStore(ctx)
 }
 
@@ -76,29 +155,29 @@ func unmarshal(bz []byte, m proto.Message) error {
 }
 
 // GetAuthority returns the module's authority address.
-func (k Keeper) GetAuthority() string {
+func (k *Keeper) GetAuthority() string {
 	return k.authority
 }
 
 // Logger returns a module-specific logger.
-func (k Keeper) Logger() log.Logger {
+func (k *Keeper) Logger() log.Logger {
 	return k.logger
 }
 
 // HasNullifier checks if a nullifier has already been recorded in the given
 // type-scoped, round-scoped nullifier set.
-func (k Keeper) HasNullifier(ctx store.KVStore, nfType types.NullifierType, roundID, nullifier []byte) (bool, error) {
+func (k *Keeper) HasNullifier(ctx store.KVStore, nfType types.NullifierType, roundID, nullifier []byte) (bool, error) {
 	return ctx.Has(types.NullifierKey(nfType, roundID, nullifier))
 }
 
 // SetNullifier records a nullifier as spent in the given type-scoped,
 // round-scoped nullifier set.
-func (k Keeper) SetNullifier(ctx store.KVStore, nfType types.NullifierType, roundID, nullifier []byte) error {
+func (k *Keeper) SetNullifier(ctx store.KVStore, nfType types.NullifierType, roundID, nullifier []byte) error {
 	return ctx.Set(types.NullifierKey(nfType, roundID, nullifier), []byte{1})
 }
 
 // GetVoteRound retrieves a vote round by its ID.
-func (k Keeper) GetVoteRound(kvStore store.KVStore, roundID []byte) (*types.VoteRound, error) {
+func (k *Keeper) GetVoteRound(kvStore store.KVStore, roundID []byte) (*types.VoteRound, error) {
 	bz, err := kvStore.Get(types.VoteRoundKey(roundID))
 	if err != nil {
 		return nil, err
@@ -115,7 +194,7 @@ func (k Keeper) GetVoteRound(kvStore store.KVStore, roundID []byte) (*types.Vote
 }
 
 // SetVoteRound stores a vote round.
-func (k Keeper) SetVoteRound(kvStore store.KVStore, round *types.VoteRound) error {
+func (k *Keeper) SetVoteRound(kvStore store.KVStore, round *types.VoteRound) error {
 	bz, err := marshal(round)
 	if err != nil {
 		return err
@@ -124,7 +203,7 @@ func (k Keeper) SetVoteRound(kvStore store.KVStore, round *types.VoteRound) erro
 }
 
 // GetCommitmentTreeState returns the current state of the commitment tree.
-func (k Keeper) GetCommitmentTreeState(kvStore store.KVStore) (*types.CommitmentTreeState, error) {
+func (k *Keeper) GetCommitmentTreeState(kvStore store.KVStore) (*types.CommitmentTreeState, error) {
 	bz, err := kvStore.Get(types.TreeStateKey)
 	if err != nil {
 		return nil, err
@@ -142,7 +221,7 @@ func (k Keeper) GetCommitmentTreeState(kvStore store.KVStore) (*types.Commitment
 }
 
 // SetCommitmentTreeState stores the commitment tree state.
-func (k Keeper) SetCommitmentTreeState(kvStore store.KVStore, state *types.CommitmentTreeState) error {
+func (k *Keeper) SetCommitmentTreeState(kvStore store.KVStore, state *types.CommitmentTreeState) error {
 	bz, err := marshal(state)
 	if err != nil {
 		return err
@@ -151,7 +230,7 @@ func (k Keeper) SetCommitmentTreeState(kvStore store.KVStore, state *types.Commi
 }
 
 // AppendCommitment appends a commitment to the tree and returns its index.
-func (k Keeper) AppendCommitment(kvStore store.KVStore, commitment []byte) (uint64, error) {
+func (k *Keeper) AppendCommitment(kvStore store.KVStore, commitment []byte) (uint64, error) {
 	state, err := k.GetCommitmentTreeState(kvStore)
 	if err != nil {
 		return 0, err
@@ -177,7 +256,7 @@ func (k Keeper) AppendCommitment(kvStore store.KVStore, commitment []byte) (uint
 
 // SetBlockLeafIndex records the range of commitment leaves that were appended
 // during a specific block height. Value format: start_index (uint64 BE) || count (uint64 BE).
-func (k Keeper) SetBlockLeafIndex(kvStore store.KVStore, height, startIndex, count uint64) error {
+func (k *Keeper) SetBlockLeafIndex(kvStore store.KVStore, height, startIndex, count uint64) error {
 	val := make([]byte, 16)
 	putUint64BE(val[0:8], startIndex)
 	putUint64BE(val[8:16], count)
@@ -186,7 +265,7 @@ func (k Keeper) SetBlockLeafIndex(kvStore store.KVStore, height, startIndex, cou
 
 // GetBlockLeafIndex returns the (start_index, count) for leaves appended at
 // the given block height. Returns (0, 0, false) if no mapping exists.
-func (k Keeper) GetBlockLeafIndex(kvStore store.KVStore, height uint64) (startIndex, count uint64, found bool, err error) {
+func (k *Keeper) GetBlockLeafIndex(kvStore store.KVStore, height uint64) (startIndex, count uint64, found bool, err error) {
 	val, err := kvStore.Get(types.BlockLeafIndexKey(height))
 	if err != nil {
 		return 0, 0, false, err
@@ -202,7 +281,7 @@ func (k Keeper) GetBlockLeafIndex(kvStore store.KVStore, height uint64) (startIn
 // GetCommitmentLeaves returns the commitment leaves that were appended during
 // blocks from fromHeight to toHeight (inclusive). Each entry contains the block
 // height, the starting leaf index, and the leaves themselves.
-func (k Keeper) GetCommitmentLeaves(kvStore store.KVStore, fromHeight, toHeight uint64) ([]*types.BlockCommitments, error) {
+func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, fromHeight, toHeight uint64) ([]*types.BlockCommitments, error) {
 	// Iterate over the BlockLeafIndex prefix for the requested height range.
 	startKey := types.BlockLeafIndexKey(fromHeight)
 	// End key is exclusive: the key just after toHeight.
@@ -248,18 +327,18 @@ func (k Keeper) GetCommitmentLeaves(kvStore store.KVStore, fromHeight, toHeight 
 }
 
 // GetCommitmentRootAtHeight returns the commitment tree root stored at a specific height.
-func (k Keeper) GetCommitmentRootAtHeight(kvStore store.KVStore, height uint64) ([]byte, error) {
+func (k *Keeper) GetCommitmentRootAtHeight(kvStore store.KVStore, height uint64) ([]byte, error) {
 	return kvStore.Get(types.CommitmentRootKey(height))
 }
 
 // SetCommitmentRootAtHeight stores the commitment tree root for a specific height.
-func (k Keeper) SetCommitmentRootAtHeight(kvStore store.KVStore, height uint64, root []byte) error {
+func (k *Keeper) SetCommitmentRootAtHeight(kvStore store.KVStore, height uint64, root []byte) error {
 	return kvStore.Set(types.CommitmentRootKey(height), root)
 }
 
 // GetTally returns the accumulated ciphertext tally for a (round, proposal, decision) tuple.
 // Returns nil if no tally exists for this tuple.
-func (k Keeper) GetTally(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) ([]byte, error) {
+func (k *Keeper) GetTally(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) ([]byte, error) {
 	bz, err := kvStore.Get(types.TallyKey(roundID, proposalID, decision))
 	if err != nil {
 		return nil, err
@@ -269,7 +348,7 @@ func (k Keeper) GetTally(kvStore store.KVStore, roundID []byte, proposalID, deci
 
 // AddToTally accumulates an ElGamal ciphertext (encShareBytes, 64 bytes) into
 // the tally for a (round, proposal, decision) tuple using HomomorphicAdd.
-func (k Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, decision uint32, encShareBytes []byte) error {
+func (k *Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, decision uint32, encShareBytes []byte) error {
 	key := types.TallyKey(roundID, proposalID, decision)
 	existing, err := kvStore.Get(key)
 	if err != nil {
@@ -301,7 +380,7 @@ func (k Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, de
 // GetProposalTally returns all tallied ciphertexts for a (round, proposal) pair,
 // keyed by decision ID. Iterates over the tally prefix
 // 0x05 || round_id || proposal_id to collect all decision → ciphertext entries.
-func (k Keeper) GetProposalTally(kvStore store.KVStore, roundID []byte, proposalID uint32) (map[uint32][]byte, error) {
+func (k *Keeper) GetProposalTally(kvStore store.KVStore, roundID []byte, proposalID uint32) (map[uint32][]byte, error) {
 	prefix := types.TallyPrefixForProposal(roundID, proposalID)
 	end := types.PrefixEndBytes(prefix)
 
@@ -336,7 +415,7 @@ func (k Keeper) GetProposalTally(kvStore store.KVStore, roundID []byte, proposal
 
 // IncrementShareCount atomically increments the share reveal count for a
 // (round, proposal, decision) tuple. If no count exists yet, writes 1.
-func (k Keeper) IncrementShareCount(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) error {
+func (k *Keeper) IncrementShareCount(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) error {
 	key := types.ShareCountKey(roundID, proposalID, decision)
 	bz, err := kvStore.Get(key)
 	if err != nil {
@@ -354,7 +433,7 @@ func (k Keeper) IncrementShareCount(kvStore store.KVStore, roundID []byte, propo
 
 // GetShareCount returns the number of shares revealed for a (round, proposal, decision) tuple.
 // Returns 0 if no shares have been revealed.
-func (k Keeper) GetShareCount(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) (uint64, error) {
+func (k *Keeper) GetShareCount(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) (uint64, error) {
 	bz, err := kvStore.Get(types.ShareCountKey(roundID, proposalID, decision))
 	if err != nil {
 		return 0, err
@@ -367,7 +446,7 @@ func (k Keeper) GetShareCount(kvStore store.KVStore, roundID []byte, proposalID,
 
 // GetVoteSummary builds a denormalized QueryVoteSummaryResponse for a vote round,
 // including proposals with option labels, ballot counts, and (if finalized) totals.
-func (k Keeper) GetVoteSummary(kvStore store.KVStore, roundID []byte) (*types.QueryVoteSummaryResponse, error) {
+func (k *Keeper) GetVoteSummary(kvStore store.KVStore, roundID []byte) (*types.QueryVoteSummaryResponse, error) {
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
 		return nil, err
@@ -436,7 +515,7 @@ func getUint32BE(b []byte) uint32 {
 // ---------------------------------------------------------------------------
 
 // ValidateProposalId checks that proposalId is valid for the round (1-indexed).
-func (k Keeper) ValidateProposalId(kvStore store.KVStore, roundID []byte, proposalId uint32) error {
+func (k *Keeper) ValidateProposalId(kvStore store.KVStore, roundID []byte, proposalId uint32) error {
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
 		return err
@@ -450,7 +529,7 @@ func (k Keeper) ValidateProposalId(kvStore store.KVStore, roundID []byte, propos
 // ValidateVoteDecision checks that voteDecision is a valid option index for the
 // given proposal within the round. Proposals are 1-indexed; vote decisions are
 // 0-indexed into the proposal's options list.
-func (k Keeper) ValidateVoteDecision(kvStore store.KVStore, roundID []byte, proposalId, voteDecision uint32) error {
+func (k *Keeper) ValidateVoteDecision(kvStore store.KVStore, roundID []byte, proposalId, voteDecision uint32) error {
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
 		return err
@@ -471,7 +550,7 @@ func (k Keeper) ValidateVoteDecision(kvStore store.KVStore, roundID []byte, prop
 // ---------------------------------------------------------------------------
 
 // UpdateVoteRoundStatus reads a vote round, sets its status, and writes it back.
-func (k Keeper) UpdateVoteRoundStatus(kvStore store.KVStore, roundID []byte, newStatus types.SessionStatus) error {
+func (k *Keeper) UpdateVoteRoundStatus(kvStore store.KVStore, roundID []byte, newStatus types.SessionStatus) error {
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
 		return err
@@ -486,7 +565,7 @@ func (k Keeper) UpdateVoteRoundStatus(kvStore store.KVStore, roundID []byte, new
 //
 // This performs a full prefix scan of VoteRoundPrefix. This is acceptable
 // because the expected cardinality is low (a handful of rounds).
-func (k Keeper) IterateAllRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
+func (k *Keeper) IterateAllRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
 	prefix := types.VoteRoundPrefix
 	end := types.PrefixEndBytes(prefix)
 
@@ -541,7 +620,7 @@ func (k Keeper) IteratePendingRounds(kvStore store.KVStore, cb func(round *types
 
 // This performs a full prefix scan of VoteRoundPrefix. This is acceptable
 // because the expected cardinality is a few concurrent rounds at most.
-func (k Keeper) IterateActiveRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
+func (k *Keeper) IterateActiveRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
 	prefix := types.VoteRoundPrefix
 	end := types.PrefixEndBytes(prefix)
 
@@ -568,7 +647,7 @@ func (k Keeper) IterateActiveRounds(kvStore store.KVStore, cb func(round *types.
 // IterateTallyingRounds iterates over all stored VoteRounds and calls the
 // callback for each round whose status is SESSION_STATUS_TALLYING.
 // The callback receives a pointer to the round; returning true stops iteration.
-func (k Keeper) IterateTallyingRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
+func (k *Keeper) IterateTallyingRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
 	prefix := types.VoteRoundPrefix
 	end := types.PrefixEndBytes(prefix)
 
@@ -594,7 +673,7 @@ func (k Keeper) IterateTallyingRounds(kvStore store.KVStore, cb func(round *type
 
 // HasPendingRound returns true if any stored VoteRound has status PENDING.
 // Used to enforce one active ceremony at a time.
-func (k Keeper) HasPendingRound(kvStore store.KVStore) (bool, error) {
+func (k *Keeper) HasPendingRound(kvStore store.KVStore) (bool, error) {
 	prefix := types.VoteRoundPrefix
 	end := types.PrefixEndBytes(prefix)
 
@@ -648,7 +727,7 @@ func (k Keeper) FindFirstPendingRound(kvStore store.KVStore, ceremonyStatus type
 // ValidateRoundForVoting checks that a vote round exists, has ACTIVE status,
 // and has not expired (belt-and-suspenders: EndBlocker may not have run yet
 // this block).
-func (k Keeper) ValidateRoundForVoting(ctx context.Context, roundID []byte) error {
+func (k *Keeper) ValidateRoundForVoting(ctx context.Context, roundID []byte) error {
 	kvStore := k.OpenKVStore(ctx)
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
@@ -672,7 +751,7 @@ func (k Keeper) ValidateRoundForVoting(ctx context.Context, roundID []byte) erro
 // ValidateRoundForShares checks that a vote round exists and is in a state
 // that accepts MsgRevealShare. Shares are accepted when the round is ACTIVE
 // (with time check) or TALLYING (unconditionally).
-func (k Keeper) ValidateRoundForShares(ctx context.Context, roundID []byte) error {
+func (k *Keeper) ValidateRoundForShares(ctx context.Context, roundID []byte) error {
 	kvStore := k.OpenKVStore(ctx)
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
@@ -701,7 +780,7 @@ func (k Keeper) ValidateRoundForShares(ctx context.Context, roundID []byte) erro
 }
 
 // ValidateRoundForTally checks that a vote round exists and is in TALLYING state.
-func (k Keeper) ValidateRoundForTally(ctx context.Context, roundID []byte) error {
+func (k *Keeper) ValidateRoundForTally(ctx context.Context, roundID []byte) error {
 	kvStore := k.OpenKVStore(ctx)
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
@@ -719,7 +798,7 @@ func (k Keeper) ValidateRoundForTally(ctx context.Context, roundID []byte) error
 // block execution (not via mempool) and that the Creator matches the current
 // block proposer. This ensures only the block proposer can inject tally txs
 // (via PrepareProposal), preventing forged tally submissions.
-func (k Keeper) ValidateTallySubmitter(ctx context.Context, creator string) error {
+func (k *Keeper) ValidateTallySubmitter(ctx context.Context, creator string) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	// MsgSubmitTally must never enter the mempool — it can only be injected
@@ -745,7 +824,7 @@ func (k Keeper) ValidateTallySubmitter(ctx context.Context, creator string) erro
 // submitted during block execution (not via mempool). This ensures acks
 // can only be injected by the block proposer via PrepareProposal,
 // mirroring the pattern used by ValidateTallySubmitter.
-func (k Keeper) ValidateAckSubmitter(ctx context.Context) error {
+func (k *Keeper) ValidateAckSubmitter(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	// MsgAckExecutiveAuthorityKey must never enter the mempool — it can only
@@ -760,7 +839,7 @@ func (k Keeper) ValidateAckSubmitter(ctx context.Context) error {
 // ValidateRoundActive checks that a vote round exists and has not expired.
 // Deprecated: Use ValidateRoundForVoting or ValidateRoundForShares instead.
 // Kept as a thin wrapper to minimize churn in existing callers.
-func (k Keeper) ValidateRoundActive(ctx context.Context, roundID []byte) error {
+func (k *Keeper) ValidateRoundActive(ctx context.Context, roundID []byte) error {
 	return k.ValidateRoundForVoting(ctx, roundID)
 }
 
@@ -768,7 +847,7 @@ func (k Keeper) ValidateRoundActive(ctx context.Context, roundID []byte) error {
 // already been recorded in the type-scoped, round-scoped nullifier set.
 // This runs on every check including RecheckTx, because nullifiers may have
 // been consumed by the newly committed block.
-func (k Keeper) CheckNullifiersUnique(ctx context.Context, nfType types.NullifierType, roundID []byte, nullifiers [][]byte) error {
+func (k *Keeper) CheckNullifiersUnique(ctx context.Context, nfType types.NullifierType, roundID []byte, nullifiers [][]byte) error {
 	kvStore := k.OpenKVStore(ctx)
 	for _, nf := range nullifiers {
 		has, err := k.HasNullifier(kvStore, nfType, roundID, nf)
@@ -805,7 +884,7 @@ func getUint64BE(b []byte) uint64 {
 // ---------------------------------------------------------------------------
 
 // SetTallyResult stores a finalized tally result for one (round, proposal, decision) tuple.
-func (k Keeper) SetTallyResult(kvStore store.KVStore, result *types.TallyResult) error {
+func (k *Keeper) SetTallyResult(kvStore store.KVStore, result *types.TallyResult) error {
 	bz, err := marshal(result)
 	if err != nil {
 		return err
@@ -814,7 +893,7 @@ func (k Keeper) SetTallyResult(kvStore store.KVStore, result *types.TallyResult)
 }
 
 // GetTallyResult retrieves a finalized tally result for one (round, proposal, decision) tuple.
-func (k Keeper) GetTallyResult(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) (*types.TallyResult, error) {
+func (k *Keeper) GetTallyResult(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) (*types.TallyResult, error) {
 	bz, err := kvStore.Get(types.TallyResultKey(roundID, proposalID, decision))
 	if err != nil {
 		return nil, err
@@ -831,7 +910,7 @@ func (k Keeper) GetTallyResult(kvStore store.KVStore, roundID []byte, proposalID
 
 // GetAllTallyResults retrieves all finalized tally results for a vote round.
 // Results are returned in key order (proposal_id, then decision).
-func (k Keeper) GetAllTallyResults(kvStore store.KVStore, roundID []byte) ([]*types.TallyResult, error) {
+func (k *Keeper) GetAllTallyResults(kvStore store.KVStore, roundID []byte) ([]*types.TallyResult, error) {
 	prefix := types.TallyResultPrefixForRound(roundID)
 	end := types.PrefixEndBytes(prefix)
 

@@ -1236,6 +1236,170 @@ pub fn build_share_reveal_test_data()
 }
 
 // ---------------------------------------------------------------------------
+// Vote commitment tree — stateful handle (incremental per-block appends)
+// ---------------------------------------------------------------------------
+
+/// Create a new, empty stateful vote commitment tree handle.
+///
+/// The caller owns the returned pointer and **must** free it with
+/// [`zally_vote_tree_free`] when done.
+///
+/// # Returns
+/// A non-null opaque pointer to a `TreeHandle` on success, or null on
+/// allocation failure (should not happen in practice).
+///
+/// # Safety
+/// The returned pointer must only be passed to other `zally_vote_tree_*`
+/// functions and must be freed exactly once via [`zally_vote_tree_free`].
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_create() -> *mut votetree::TreeHandle {
+    let handle = votetree::TreeHandle::new();
+    Box::into_raw(handle)
+}
+
+/// Free a tree handle previously created by [`zally_vote_tree_create`].
+///
+/// # Safety
+/// `handle` must be a pointer returned by [`zally_vote_tree_create`] and
+/// must not have been freed before.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_free(handle: *mut votetree::TreeHandle) {
+    if !handle.is_null() {
+        drop(Box::from_raw(handle));
+    }
+}
+
+/// Append a batch of leaves to a stateful tree handle.
+///
+/// # Arguments
+/// * `handle`      - Pointer returned by [`zally_vote_tree_create`].
+/// * `leaves_ptr`  - Pointer to a flat byte array of leaves (each 32 bytes LE Fp).
+/// * `leaf_count`  - Number of leaves.
+///
+/// # Returns
+/// * `0`  on success.
+/// * `-1` if `handle` is null, or `leaf_count > 0` and `leaves_ptr` is null.
+/// * `-3` if a leaf contains a non-canonical field element encoding.
+///
+/// # Safety
+/// Caller must ensure `handle` is valid and `leaves_ptr` is valid for
+/// `leaf_count * 32` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_append_batch(
+    handle: *mut votetree::TreeHandle,
+    leaves_ptr: *const u8,
+    leaf_count: usize,
+) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    let h = &mut *handle;
+    match h.append_batch_raw(leaves_ptr, leaf_count) {
+        Ok(()) => 0,
+        Err(votetree::FfiError::InvalidInput) => -1,
+        Err(votetree::FfiError::Deserialization) => -3,
+        Err(votetree::FfiError::PositionOutOfRange) => -2,
+    }
+}
+
+/// Snapshot the current tree state at `height` (block height).
+///
+/// Must be called after appending all leaves for a block so that
+/// `root_stateful` and `path_stateful` queries work for that height.
+///
+/// # Returns
+/// * `0`  on success.
+/// * `-1` if `handle` is null.
+///
+/// # Safety
+/// `handle` must be a valid pointer returned by [`zally_vote_tree_create`].
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_checkpoint(
+    handle: *mut votetree::TreeHandle,
+    height: u32,
+) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    (*handle).checkpoint(height);
+    0
+}
+
+/// Return the 32-byte Merkle root at the latest checkpoint.
+///
+/// # Arguments
+/// * `handle`   - Pointer returned by [`zally_vote_tree_create`].
+/// * `root_out` - Pointer to a 32-byte output buffer.
+///
+/// # Returns
+/// * `0`  on success (root written to `root_out`).
+/// * `-1` if `handle` or `root_out` is null.
+///
+/// # Safety
+/// Caller must ensure `handle` is valid and `root_out` has room for 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_root_stateful(
+    handle: *const votetree::TreeHandle,
+    root_out: *mut u8,
+) -> i32 {
+    if handle.is_null() || root_out.is_null() {
+        return -1;
+    }
+    let root = (*handle).root();
+    std::ptr::copy_nonoverlapping(root.as_ptr(), root_out, 32);
+    0
+}
+
+/// Return the number of leaves appended to the stateful handle so far.
+///
+/// # Safety
+/// `handle` must be a valid pointer returned by [`zally_vote_tree_create`].
+/// Returns 0 for a null pointer.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_size(handle: *const votetree::TreeHandle) -> u64 {
+    if handle.is_null() {
+        return 0;
+    }
+    (*handle).size()
+}
+
+/// Compute the Poseidon Merkle authentication path for `position` at `height`
+/// using the stateful tree handle.
+///
+/// # Arguments
+/// * `handle`   - Pointer returned by [`zally_vote_tree_create`].
+/// * `position` - Leaf index for which to generate the path.
+/// * `height`   - Checkpoint height to use as anchor.
+/// * `path_out` - Pointer to a [`MERKLE_PATH_BYTES`]-byte output buffer.
+///
+/// # Returns
+/// * `0`  on success (path written to `path_out`).
+/// * `-1` if `handle` or `path_out` is null.
+/// * `-2` if `position` is out of range or `height` has no checkpoint.
+///
+/// # Safety
+/// Caller must ensure `handle` is valid and `path_out` has room for
+/// [`votetree::MERKLE_PATH_BYTES`] bytes.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_path_stateful(
+    handle: *const votetree::TreeHandle,
+    position: u64,
+    height: u32,
+    path_out: *mut u8,
+) -> i32 {
+    if handle.is_null() || path_out.is_null() {
+        return -1;
+    }
+    match (*handle).path(position, height) {
+        Some(bytes) => {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), path_out, bytes.len());
+            0
+        }
+        None => -2,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // nc_root extraction — Sinsemilla-based Orchard commitment tree root
 // ---------------------------------------------------------------------------
 

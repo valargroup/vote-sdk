@@ -63,7 +63,7 @@ type ZallyApp struct {
 	ConsensusParamsKeeper consensuskeeper.Keeper
 
 	// Vote module keeper.
-	VoteKeeper votekeeper.Keeper
+	VoteKeeper *votekeeper.Keeper
 
 	// CometBFT RPC endpoint for the vote API handler (read from app.toml vote.comet_rpc).
 	cometRPC string

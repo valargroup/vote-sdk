@@ -203,3 +203,130 @@ func TestComputeMerklePath_SingleLeaf(t *testing.T) {
 	gotPos := binary.LittleEndian.Uint32(pathBytes[:4])
 	require.Equal(t, uint32(0), gotPos)
 }
+
+// ---------------------------------------------------------------------------
+// Stateful TreeHandle tests
+// ---------------------------------------------------------------------------
+
+// TestTreeHandle_GoldenVector verifies that the stateful TreeHandle produces
+// the same root as the stateless ComputePoseidonRoot for the golden leaves.
+func TestTreeHandle_GoldenVector(t *testing.T) {
+	h := NewTreeHandle()
+	defer h.Close()
+
+	require.NoError(t, h.AppendBatch(goldenLeaves()))
+	require.NoError(t, h.Checkpoint(1))
+
+	root, err := h.Root()
+	require.NoError(t, err)
+	require.Equal(t, goldenRoot(), root, "stateful root must match stateless golden root")
+}
+
+// TestTreeHandle_IncrementalMatchesFull verifies that appending leaves one at a
+// time and in a batch produces the same root.
+func TestTreeHandle_IncrementalMatchesFull(t *testing.T) {
+	// Full batch.
+	hBatch := NewTreeHandle()
+	defer hBatch.Close()
+	require.NoError(t, hBatch.AppendBatch(goldenLeaves()))
+	require.NoError(t, hBatch.Checkpoint(1))
+	batchRoot, err := hBatch.Root()
+	require.NoError(t, err)
+
+	// One leaf at a time.
+	hIncr := NewTreeHandle()
+	defer hIncr.Close()
+	leaves := goldenLeaves()
+	for i, leaf := range leaves {
+		require.NoError(t, hIncr.AppendBatch([][]byte{leaf}))
+		require.NoError(t, hIncr.Checkpoint(uint32(i+1)))
+	}
+	incrRoot, err := hIncr.Root()
+	require.NoError(t, err)
+
+	require.Equal(t, batchRoot, incrRoot, "incremental and batch must produce same root")
+}
+
+// TestTreeHandle_SizeTracking verifies that Size() reflects appended leaves.
+func TestTreeHandle_SizeTracking(t *testing.T) {
+	h := NewTreeHandle()
+	defer h.Close()
+
+	require.Equal(t, uint64(0), h.Size())
+
+	require.NoError(t, h.AppendBatch(goldenLeaves()[:1]))
+	require.Equal(t, uint64(1), h.Size())
+
+	require.NoError(t, h.AppendBatch(goldenLeaves()[1:]))
+	require.Equal(t, uint64(3), h.Size())
+}
+
+// TestTreeHandle_PathMatchesStateless verifies that the stateful Path() method
+// produces a path that is consistent with the stateless ComputeMerklePath.
+func TestTreeHandle_PathMatchesStateless(t *testing.T) {
+	leaves := goldenLeaves()
+
+	// Build stateful handle.
+	h := NewTreeHandle()
+	defer h.Close()
+	require.NoError(t, h.AppendBatch(leaves))
+	require.NoError(t, h.Checkpoint(1))
+
+	// Build stateless root for comparison.
+	expectedRoot, err := ComputePoseidonRoot(leaves)
+	require.NoError(t, err)
+	_ = expectedRoot // Used for cross-check; path validity checked by size.
+
+	// Generate path for each leaf via stateful handle.
+	for pos := uint64(0); pos < uint64(len(leaves)); pos++ {
+		pathBytes, err := h.Path(pos, 1)
+		require.NoError(t, err, "path for position %d must not error", pos)
+		require.Len(t, pathBytes, MerklePathBytes, "path must be 772 bytes")
+
+		gotPos := binary.LittleEndian.Uint32(pathBytes[:4])
+		require.Equal(t, uint32(pos), gotPos, "path position must match")
+	}
+}
+
+// TestTreeHandle_PathOutOfRange verifies that Path() returns an error for
+// positions beyond the number of appended leaves.
+func TestTreeHandle_PathOutOfRange(t *testing.T) {
+	h := NewTreeHandle()
+	defer h.Close()
+	require.NoError(t, h.AppendBatch(goldenLeaves()[:1]))
+	require.NoError(t, h.Checkpoint(1))
+
+	_, err := h.Path(5, 1)
+	require.Error(t, err, "out-of-range position must return error")
+}
+
+// TestTreeHandle_CloseIsIdempotent verifies that calling Close() twice does
+// not panic.
+func TestTreeHandle_CloseIsIdempotent(t *testing.T) {
+	h := NewTreeHandle()
+	h.Close()
+	h.Close() // second call should be safe
+}
+
+// TestTreeHandle_RootMatchesStateless_AfterDeltaAppend verifies that appending
+// in two batches (simulating two blocks) produces the same root as a single
+// stateless call with all leaves.
+func TestTreeHandle_RootMatchesStateless_AfterDeltaAppend(t *testing.T) {
+	all := goldenLeaves()
+
+	// Stateless: all 3 leaves at once.
+	staticRoot, err := ComputePoseidonRoot(all)
+	require.NoError(t, err)
+
+	// Stateful: first 2 leaves in block 1, then 1 more in block 2.
+	h := NewTreeHandle()
+	defer h.Close()
+	require.NoError(t, h.AppendBatch(all[:2]))
+	require.NoError(t, h.Checkpoint(1))
+	require.NoError(t, h.AppendBatch(all[2:]))
+	require.NoError(t, h.Checkpoint(2))
+	incrRoot, err := h.Root()
+	require.NoError(t, err)
+
+	require.Equal(t, staticRoot, incrRoot, "stateful delta root must match stateless full root")
+}

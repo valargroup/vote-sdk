@@ -7,7 +7,7 @@ import (
 )
 
 // InitGenesis initializes the vote module state from a genesis state.
-func (k Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState) error {
+func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState) error {
 	if genesis == nil {
 		return nil
 	}
@@ -54,7 +54,7 @@ func (k Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState) 
 // ExportGenesis returns the current vote module genesis state.
 // NOTE: Full export (iterating all KV entries) will be implemented when needed.
 // For now, this returns a minimal genesis state.
-func (k Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, error) {
+func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, error) {
 	state, err := k.GetCommitmentTreeState(kvStore)
 	if err != nil {
 		return nil, err

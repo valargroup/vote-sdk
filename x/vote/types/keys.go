@@ -69,6 +69,9 @@ var (
 	// CeremonyMissPrefix stores consecutive ceremony miss counters per validator:
 	//   0x0D || valoper_address_bytes -> uint64 BE (miss count)
 	CeremonyMissPrefix = []byte{0x0D}
+
+	// CeremonyStateKey stores the singleton ceremony state: single key -> CeremonyState (protobuf)
+	CeremonyStateKey = []byte{0x0E}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.

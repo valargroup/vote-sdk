@@ -216,7 +216,7 @@ type ModuleOutputs struct {
 	depinject.Out
 
 	Module appmodule.AppModule
-	Keeper keeper.Keeper
+	Keeper *keeper.Keeper
 }
 
 // ProvideModule is called by depinject to construct the vote module and keeper.
@@ -242,12 +242,12 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 
 // AppModule implements the Cosmos SDK AppModule interface for the vote module.
 type AppModule struct {
-	keeper keeper.Keeper
+	keeper *keeper.Keeper
 	cdc    codec.Codec
 }
 
 // NewAppModule creates a new AppModule.
-func NewAppModule(keeper keeper.Keeper, cdc codec.Codec) AppModule {
+func NewAppModule(keeper *keeper.Keeper, cdc codec.Codec) AppModule {
 	return AppModule{keeper: keeper, cdc: cdc}
 }
 
@@ -379,15 +379,14 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	}
 
 	if state.NextIndex > 0 {
-		root, err := am.keeper.ComputeTreeRoot(kvStore, state.NextIndex)
+		blockHeight := uint64(ctx.BlockHeight())
+		root, err := am.keeper.ComputeTreeRoot(kvStore, state.NextIndex, blockHeight)
 		if err != nil {
 			return err
 		}
 
 		// Only write a new root when the tree has changed (new leaves appended).
 		if !bytes.Equal(root, state.Root) {
-			blockHeight := uint64(ctx.BlockHeight())
-
 			if err := am.keeper.SetCommitmentRootAtHeight(kvStore, blockHeight, root); err != nil {
 				return err
 			}

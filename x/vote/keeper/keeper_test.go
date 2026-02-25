@@ -45,7 +45,7 @@ var (
 type KeeperTestSuite struct {
 	suite.Suite
 	ctx    sdk.Context
-	keeper keeper.Keeper
+	keeper *keeper.Keeper
 }
 
 func TestKeeperTestSuite(t *testing.T) {
@@ -891,7 +891,7 @@ func (s *KeeperTestSuite) TestComputeTreeRoot() {
 				s.Require().NoError(err)
 			}
 
-			root, err := s.keeper.ComputeTreeRoot(kv, uint64(len(tc.leaves)))
+			root, err := s.keeper.ComputeTreeRoot(kv, uint64(len(tc.leaves)), 1)
 			s.Require().NoError(err)
 			if tc.expectNil {
 				s.Require().Nil(root)
@@ -909,11 +909,11 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeterministicAndDistinct() {
 	_, err := s.keeper.AppendCommitment(kv, fpLE(1))
 	s.Require().NoError(err)
 
-	root1, err := s.keeper.ComputeTreeRoot(kv, 1)
+	root1, err := s.keeper.ComputeTreeRoot(kv, 1, 1)
 	s.Require().NoError(err)
 
 	// Same state produces same root.
-	root1Again, err := s.keeper.ComputeTreeRoot(kv, 1)
+	root1Again, err := s.keeper.ComputeTreeRoot(kv, 1, 1)
 	s.Require().NoError(err)
 	s.Require().Equal(root1, root1Again)
 
@@ -921,9 +921,136 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeterministicAndDistinct() {
 	_, err = s.keeper.AppendCommitment(kv, fpLE(2))
 	s.Require().NoError(err)
 
-	root2, err := s.keeper.ComputeTreeRoot(kv, 2)
+	root2, err := s.keeper.ComputeTreeRoot(kv, 2, 2)
 	s.Require().NoError(err)
 	s.Require().NotEqual(root1, root2)
+}
+
+// ---------------------------------------------------------------------------
+// Incremental tree handle tests
+// ---------------------------------------------------------------------------
+
+// TestComputeTreeRoot_Incremental verifies that the stateful tree produces the
+// same root as a fresh full rebuild when leaves are appended incrementally.
+func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	// Append 3 leaves across 3 simulated blocks.
+	_, err := s.keeper.AppendCommitment(kv, fpLE(1))
+	s.Require().NoError(err)
+	root1, err := s.keeper.ComputeTreeRoot(kv, 1, 1)
+	s.Require().NoError(err)
+
+	_, err = s.keeper.AppendCommitment(kv, fpLE(2))
+	s.Require().NoError(err)
+	root2, err := s.keeper.ComputeTreeRoot(kv, 2, 2)
+	s.Require().NoError(err)
+
+	_, err = s.keeper.AppendCommitment(kv, fpLE(3))
+	s.Require().NoError(err)
+	root3, err := s.keeper.ComputeTreeRoot(kv, 3, 3)
+	s.Require().NoError(err)
+
+	// All roots are distinct.
+	s.Require().NotEqual(root1, root2)
+	s.Require().NotEqual(root2, root3)
+
+	// root3 must match what a cold-start fresh rebuild produces.
+	freshKeeper := keeper.NewKeeper(
+		s.keeper.StoreServiceForTest(),
+		"zvote1authority",
+		log.NewNopLogger(),
+		nil,
+	)
+	freshRoot, err := freshKeeper.ComputeTreeRoot(kv, 3, 3)
+	s.Require().NoError(err)
+	s.Require().Equal(root3, freshRoot, "incremental root must match cold-start root")
+}
+
+// TestComputeTreeRoot_DeltaAppend verifies that calling ComputeTreeRoot with a
+// new nextIndex only reads and appends the delta leaves (cursor behavior).
+func (s *KeeperTestSuite) TestComputeTreeRoot_DeltaAppend() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	// Add 5 leaves.
+	for i := uint64(1); i <= 5; i++ {
+		_, err := s.keeper.AppendCommitment(kv, fpLE(i))
+		s.Require().NoError(err)
+	}
+
+	// First call: cold-start loads all 5 leaves.
+	root5, err := s.keeper.ComputeTreeRoot(kv, 5, 5)
+	s.Require().NoError(err)
+	s.Require().Len(root5, 32)
+	s.Require().Equal(uint64(5), s.keeper.TreeCursorForTest())
+
+	// Add 3 more leaves.
+	for i := uint64(6); i <= 8; i++ {
+		_, err := s.keeper.AppendCommitment(kv, fpLE(i))
+		s.Require().NoError(err)
+	}
+
+	// Second call: should only append leaves [5,8).
+	root8, err := s.keeper.ComputeTreeRoot(kv, 8, 8)
+	s.Require().NoError(err)
+	s.Require().Len(root8, 32)
+	s.Require().NotEqual(root5, root8)
+	s.Require().Equal(uint64(8), s.keeper.TreeCursorForTest())
+}
+
+// TestComputeTreeRoot_RollbackRebuild verifies that a cursor > nextIndex
+// (rollback scenario) triggers a full rebuild and produces the correct root.
+func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackRebuild() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	// Append 5 leaves and compute root.
+	for i := uint64(1); i <= 5; i++ {
+		_, err := s.keeper.AppendCommitment(kv, fpLE(i))
+		s.Require().NoError(err)
+	}
+	root5, err := s.keeper.ComputeTreeRoot(kv, 5, 5)
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(5), s.keeper.TreeCursorForTest())
+
+	// Simulate rollback: nextIndex goes back to 3 (cursor > nextIndex).
+	root3Rollback, err := s.keeper.ComputeTreeRoot(kv, 3, 3)
+	s.Require().NoError(err)
+	s.Require().Len(root3Rollback, 32)
+	s.Require().NotEqual(root5, root3Rollback)
+	// After rollback, cursor is reset to 3.
+	s.Require().Equal(uint64(3), s.keeper.TreeCursorForTest())
+
+	// root3Rollback must match a fresh rebuild from 3 leaves.
+	freshKeeper := keeper.NewKeeper(
+		s.keeper.StoreServiceForTest(),
+		"zvote1authority",
+		log.NewNopLogger(),
+		nil,
+	)
+	freshRoot3, err := freshKeeper.ComputeTreeRoot(kv, 3, 3)
+	s.Require().NoError(err)
+	s.Require().Equal(root3Rollback, freshRoot3, "post-rollback root must match fresh rebuild")
+}
+
+// TestComputeTreeRoot_IdempotentSameBlock verifies that calling ComputeTreeRoot
+// twice at the same block height (same nextIndex) returns the same root.
+func (s *KeeperTestSuite) TestComputeTreeRoot_IdempotentSameBlock() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	_, err := s.keeper.AppendCommitment(kv, fpLE(42))
+	s.Require().NoError(err)
+
+	root1, err := s.keeper.ComputeTreeRoot(kv, 1, 10)
+	s.Require().NoError(err)
+
+	// Call again at same height, same nextIndex — should return same root.
+	root2, err := s.keeper.ComputeTreeRoot(kv, 1, 10)
+	s.Require().NoError(err)
+	s.Require().Equal(root1, root2, "same block, same leaves must produce same root")
 }
 
 // ---------------------------------------------------------------------------

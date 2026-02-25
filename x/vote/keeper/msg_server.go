@@ -18,11 +18,11 @@ var _ types.MsgServer = msgServer{}
 
 type msgServer struct {
 	types.UnimplementedMsgServer
-	k Keeper
+	k *Keeper
 }
 
 // NewMsgServerImpl returns an implementation of the vote MsgServer interface.
-func NewMsgServerImpl(keeper Keeper) types.MsgServer {
+func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 	return &msgServer{k: keeper}
 }
 

@@ -159,6 +159,113 @@ int32_t zally_vote_tree_path(
 );
 
 /* -----------------------------------------------------------------------
+ * Vote commitment tree — stateful handle (incremental per-block appends)
+ * ----------------------------------------------------------------------- */
+
+/* Opaque type for the stateful vote commitment tree handle. */
+typedef struct ZallyTreeHandle ZallyTreeHandle;
+
+/*
+ * Create a new, empty stateful vote commitment tree handle.
+ *
+ * The caller owns the returned pointer and must free it with
+ * zally_vote_tree_free when done.
+ *
+ * Returns a non-null opaque pointer on success, or null on allocation failure.
+ */
+ZallyTreeHandle* zally_vote_tree_create(void);
+
+/*
+ * Free a tree handle previously created by zally_vote_tree_create.
+ *
+ * Parameters:
+ *   handle - Pointer returned by zally_vote_tree_create.
+ */
+void zally_vote_tree_free(ZallyTreeHandle* handle);
+
+/*
+ * Append a batch of leaves to a stateful tree handle.
+ *
+ * Parameters:
+ *   handle     - Pointer returned by zally_vote_tree_create.
+ *   leaves_ptr - Pointer to flat byte array of leaves (each 32 bytes LE Fp).
+ *   leaf_count - Number of leaves.
+ *
+ * Returns:
+ *    0  on success.
+ *   -1  if handle is null, or leaf_count > 0 and leaves_ptr is null.
+ *   -3  if a leaf contains a non-canonical field element encoding.
+ */
+int32_t zally_vote_tree_append_batch(
+    ZallyTreeHandle* handle,
+    const uint8_t* leaves_ptr,
+    size_t leaf_count
+);
+
+/*
+ * Snapshot the current tree state at height (block height).
+ *
+ * Must be called after appending all leaves for a block so that
+ * root_stateful and path_stateful queries work for that height.
+ *
+ * Parameters:
+ *   handle - Pointer returned by zally_vote_tree_create.
+ *   height - Block height to associate with this checkpoint.
+ *
+ * Returns:
+ *    0  on success.
+ *   -1  if handle is null.
+ */
+int32_t zally_vote_tree_checkpoint(ZallyTreeHandle* handle, uint32_t height);
+
+/*
+ * Return the 32-byte Merkle root at the latest checkpoint.
+ *
+ * Parameters:
+ *   handle   - Pointer returned by zally_vote_tree_create.
+ *   root_out - Pointer to a 32-byte output buffer.
+ *
+ * Returns:
+ *    0  on success (root written to root_out).
+ *   -1  if handle or root_out is null.
+ */
+int32_t zally_vote_tree_root_stateful(
+    const ZallyTreeHandle* handle,
+    uint8_t* root_out
+);
+
+/*
+ * Return the number of leaves appended to the stateful handle so far.
+ *
+ * Parameters:
+ *   handle - Pointer returned by zally_vote_tree_create.
+ *
+ * Returns 0 if handle is null.
+ */
+uint64_t zally_vote_tree_size(const ZallyTreeHandle* handle);
+
+/*
+ * Compute the Poseidon Merkle authentication path using the stateful handle.
+ *
+ * Parameters:
+ *   handle   - Pointer returned by zally_vote_tree_create.
+ *   position - Leaf index for which to generate the path.
+ *   height   - Checkpoint height to use as anchor.
+ *   path_out - Pointer to a 772-byte output buffer.
+ *
+ * Returns:
+ *    0  on success (path written to path_out).
+ *   -1  if handle or path_out is null.
+ *   -2  if position is out of range or height has no checkpoint.
+ */
+int32_t zally_vote_tree_path_stateful(
+    const ZallyTreeHandle* handle,
+    uint64_t position,
+    uint32_t height,
+    uint8_t* path_out
+);
+
+/* -----------------------------------------------------------------------
  * Delegation circuit (ZKP #1) — real Halo2 proof verification
  * ----------------------------------------------------------------------- */
 
