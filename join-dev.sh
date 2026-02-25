@@ -160,6 +160,40 @@ sed -i.bak "s|\\\$HOME/.zallyd|${HOME_DIR}|g" "${APP_TOML}"
 
 rm -f "${APP_TOML}.bak"
 
+# Append [helper] section (not in the default template).
+cat >> "${APP_TOML}" <<HELPERCFG
+
+###############################################################################
+###                         Helper Server                                   ###
+###############################################################################
+
+[helper]
+
+# Set to true to disable the helper server.
+disable = false
+
+# Optional auth token for POST /api/v1/shares (sent via X-Helper-Token header).
+# Empty disables token auth.
+api_token = ""
+
+# Path to the SQLite database file. Empty = default (\$HOME/.zallyd/helper.db).
+db_path = ""
+
+# Mean of the exponential delay distribution (seconds).
+# Shares are delayed by Exp(1/mean) for temporal unlinkability, capped at vote end time.
+# Use a short value for testing; production default is 43200 (12 hours).
+mean_delay = 60
+
+# How often to check for shares ready to submit (seconds).
+process_interval = 5
+
+# Port of the chain's REST API (used for MsgRevealShare submission).
+chain_api_port = 1317
+
+# Maximum concurrent proof generation goroutines.
+max_concurrent_proofs = 2
+HELPERCFG
+
 echo "Node configured."
 
 # ─── Generate start.sh ───────────────────────────────────────────────────────
