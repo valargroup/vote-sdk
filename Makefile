@@ -26,9 +26,9 @@ build-ffi: circuits
 init: install-ffi
 	bash scripts/init.sh
 
-## start: Start the chain (set ZALLY_IMT_URL for local nullifier service)
+## start: Start the chain (set ZALLY_PIR_URL to override nullifier PIR server)
 start:
-	ZALLY_IMT_URL=$${ZALLY_IMT_URL:-http://localhost:3000} $(BINARY) start --home $(HOME_DIR)
+	ZALLY_PIR_URL=$${ZALLY_PIR_URL:-http://157.180.63.235:3000} $(BINARY) start --home $(HOME_DIR)
 
 ## clean: Remove chain data directory
 clean:
