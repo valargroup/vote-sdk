@@ -42,6 +42,6 @@ public struct VotingServiceConfig: Codable, Equatable, Sendable {
     public static let fallback = VotingServiceConfig(
         version: 1,
         voteServers: [ServiceEndpoint(url: "https://46-101-255-48.sslip.io", label: "Primary")],
-        pirServers: [ServiceEndpoint(url: "http://157.180.63.235:3001", label: "Primary")]
+        pirServers: [ServiceEndpoint(url: "http://157.180.63.235:3000", label: "PIR Server")]
     )
 }
