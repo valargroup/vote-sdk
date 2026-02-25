@@ -222,3 +222,141 @@ jobs:
           name: chain-log
           path: sdk/chain.log
           retention-days: 7
+
+  test-multi-validator:
+    name: Multi-Validator Ceremony
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust build (circuits + e2e-tests)
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdk/circuits/target
+            e2e-tests/target
+          key: ${{ runner.os }}-multi-rust-${{ hashFiles('sdk/circuits/Cargo.lock', 'e2e-tests/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-multi-rust-
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: sdk/.cache/go-build
+          key: ${{ runner.os }}-multi-go-${{ hashFiles('sdk/go.sum', 'sdk/circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-multi-go-
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Start 3-validator chain
+        run: mise run multi:start-chain
+        env:
+          GOCACHE: ${{ github.workspace }}/sdk/.cache/go-build
+          ZALLY_PIR_URL: "disabled"
+      - name: Wait for helper server readiness
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:1418/api/v1/status > /dev/null 2>&1; then
+              echo "Helper server is ready on val1"
+              exit 0
+            fi
+            echo "Waiting for helper server... ($i/30)"
+            sleep 2
+          done
+          echo "Helper server failed to start"
+          tail -50 sdk/multi-val1.log
+          exit 1
+      - name: Set multi-validator env
+        run: |
+          echo "ZALLY_HOME=$HOME/.zallyd-val1" >> $GITHUB_ENV
+          echo "ZALLY_NODE_URL=tcp://localhost:26157" >> $GITHUB_ENV
+          echo "ZALLY_PALLAS_PK_PATH=$HOME/.zallyd-val1/pallas.pk" >> $GITHUB_ENV
+      - name: Run E2E test (round_activation)
+        run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test round_activation -- --nocapture --ignored --test-threads=1
+        env:
+          ZALLY_API_URL: http://localhost:1418
+      - name: Upload validator logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-validator-logs
+          path: |
+            sdk/multi-val1.log
+            sdk/multi-val2.log
+            sdk/multi-val3.log
+          retention-days: 7
+
+  test-join:
+    name: Validator Join Flow
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust build (circuits)
+        uses: actions/cache@v4
+        with:
+          path: sdk/circuits/target
+          key: ${{ runner.os }}-join-rust-${{ hashFiles('sdk/circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-join-rust-
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: sdk/.cache/go-build
+          key: ${{ runner.os }}-join-go-${{ hashFiles('sdk/go.sum', 'sdk/circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-join-go-
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Build and install zallyd + create-val-tx
+        run: |
+          make install-ffi
+          go build -o ~/go/bin/create-val-tx ./scripts/create-val-tx
+        env:
+          GOCACHE: ${{ github.workspace }}/sdk/.cache/go-build
+      - name: Initialize chain
+        run: bash scripts/init.sh
+      - name: Start chain in background
+        run: |
+          zallyd start --home ~/.zallyd > chain.log 2>&1 &
+          echo "Chain PID: $!"
+      - name: Wait for chain readiness
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:1318/cosmos/base/tendermint/v1beta1/blocks/latest > /dev/null 2>&1; then
+              echo "Chain is producing blocks"
+              exit 0
+            fi
+            echo "Waiting for chain to start... ($i/60)"
+            sleep 2
+          done
+          echo "Chain failed to start within 120s"
+          cat chain.log
+          exit 1
+      - name: Run validator join smoke test
+        run: mise run test:join
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: join-test-logs
+          path: |
+            sdk/chain.log
+            joiner.log
+          retention-days: 7

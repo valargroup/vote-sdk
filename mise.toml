@@ -280,8 +280,8 @@ make -C sdk install-ffi
 bash sdk/scripts/init_multi.sh
 '''
 
-[tasks."multi:start"]
-description = "Init + nullifiers + PIR + start 3-validator chain"
+[tasks."multi:start-chain"]
+description = "Build + init + start 3-validator chain (no nullifiers/PIR)"
 quiet = true
 run = '''
 #!/usr/bin/env bash
@@ -289,11 +289,8 @@ set -e
 PID_FILE="$HOME/.zallyd-multi-pids"
 
 # ── Guard: already running? ──────────────────────────────────────
-PROCS=""
-pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1 && PROCS="$PROCS zallyd"
-pgrep -f 'nf-server.*serve'        > /dev/null 2>&1 && PROCS="$PROCS nf-server"
-if [ -n "$PROCS" ]; then
-    printf '\033[33mAlready running:%s\033[0m\n' "$PROCS"
+if pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1; then
+    printf '\033[33mAlready running: zallyd\033[0m\n'
     exit 0
 fi
 
@@ -301,21 +298,10 @@ fi
 make -C sdk install-ffi
 bash sdk/scripts/init_multi.sh
 
-# ── Nullifier pipeline (shared data at nullifier-ingest/) ────────
-make -C nullifier-ingest bootstrap
-make -C nullifier-ingest ingest
-make -C nullifier-ingest export-nf
-
-# ── Start PIR server ────────────────────────────────────────────
-if ! pgrep -f 'nf-server.*serve' > /dev/null 2>&1; then
-    nohup make -C nullifier-ingest serve > nf-serve.log 2>&1 &
-    printf '\033[32mStarted nf-server → nf-serve.log\033[0m\n'
-fi
-
 # ── Start 3 validators ──────────────────────────────────────────
 rm -f "$PID_FILE"
 
-ZALLY_PIR_URL=http://localhost:3000 nohup zallyd start --home "$HOME/.zallyd-val1" > sdk/multi-val1.log 2>&1 &
+ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup zallyd start --home "$HOME/.zallyd-val1" > sdk/multi-val1.log 2>&1 &
 echo "$!" >> "$PID_FILE"
 printf '\033[32mStarted val1 → sdk/multi-val1.log\033[0m\n'
 
@@ -335,9 +321,8 @@ for i in $(seq 1 30); do
 done
 
 for i in 2 3; do
-    port=$((26057 + i * 100))
     home="$HOME/.zallyd-val$i"
-    ZALLY_PIR_URL=http://localhost:3000 nohup zallyd start --home "$home" > "sdk/multi-val$i.log" 2>&1 &
+    ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup zallyd start --home "$home" > "sdk/multi-val$i.log" 2>&1 &
     echo "$!" >> "$PID_FILE"
     printf '\033[32mStarted val%s → sdk/multi-val%s.log\033[0m\n' "$i" "$i"
 done
@@ -368,6 +353,37 @@ done
 printf '\n\033[32mMulti-validator chain running.\033[0m PIDs in %s\n' "$PID_FILE"
 printf 'Status: mise run multi:status\n'
 printf 'Stop:   mise run multi:stop\n'
+'''
+
+[tasks."multi:start"]
+description = "Init + nullifiers + PIR + start 3-validator chain"
+quiet = true
+run = '''
+#!/usr/bin/env bash
+set -e
+
+# ── Guard: already running? ──────────────────────────────────────
+PROCS=""
+pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1 && PROCS="$PROCS zallyd"
+pgrep -f 'nf-server.*serve'        > /dev/null 2>&1 && PROCS="$PROCS nf-server"
+if [ -n "$PROCS" ]; then
+    printf '\033[33mAlready running:%s\033[0m\n' "$PROCS"
+    exit 0
+fi
+
+# ── Chain (build + init + start 3 validators + register) ─────────
+mise run multi:start-chain
+
+# ── Nullifier pipeline (shared data at nullifier-ingest/) ────────
+make -C nullifier-ingest bootstrap
+make -C nullifier-ingest ingest
+make -C nullifier-ingest export-nf
+
+# ── Start PIR server ────────────────────────────────────────────
+if ! pgrep -f 'nf-server.*serve' > /dev/null 2>&1; then
+    nohup make -C nullifier-ingest serve > nf-serve.log 2>&1 &
+    printf '\033[32mStarted nf-server → nf-serve.log\033[0m\n'
+fi
 '''
 
 [tasks."multi:stop"]
@@ -531,6 +547,10 @@ run = "make -C nullifier-ingest test"
 [tasks."test:proof"]
 description = "Verify exclusion proofs against ingested data"
 run = "make -C nullifier-ingest test-proof"
+
+[tasks."test:join"]
+description = "Smoke test: validator join flow against running chain"
+run = "bash sdk/scripts/test_join_ci.sh"
 
 # ── validator:* ─────────────────────────────────────────────────────
 
