@@ -164,71 +164,6 @@ pub const SESSION_STATUS_TALLYING: i64 = 2;
 pub const SESSION_STATUS_FINALIZED: i64 = 3;
 pub const SESSION_STATUS_PENDING: i64 = 4;
 
-/// Ceremony status enum (protobuf int32, matching CeremonyStatus in types.proto).
-pub const CEREMONY_STATUS_UNSPECIFIED: i64 = 0;
-pub const CEREMONY_STATUS_REGISTERING: i64 = 1;
-pub const CEREMONY_STATUS_DEALT: i64 = 2;
-pub const CEREMONY_STATUS_CONFIRMED: i64 = 3;
-
-/// Returns the ceremony status from GET /zally/v1/ceremony.
-/// Returns None if the ceremony doesn't exist or the request fails.
-pub fn get_ceremony_status() -> Option<i64> {
-    let (status, json) = get_json("/zally/v1/ceremony").ok()?;
-    if status != 200 {
-        return None;
-    }
-    json.get("ceremony")?.get("status")?.as_i64()
-}
-
-/// Poll GET /zally/v1/ceremony until status equals CONFIRMED or timeout.
-pub fn wait_for_ceremony_confirmed(
-    timeout_ms: u64,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    wait_for_ceremony_status(CEREMONY_STATUS_CONFIRMED, timeout_ms)
-}
-
-/// Returns the full ceremony state JSON object from GET /zally/v1/ceremony.
-/// Returns None if the ceremony doesn't exist or the request fails.
-pub fn get_ceremony_state_json() -> Option<Value> {
-    let (status, json) = get_json("/zally/v1/ceremony").ok()?;
-    if status != 200 {
-        return None;
-    }
-    json.get("ceremony").cloned()
-}
-
-/// Poll GET /zally/v1/ceremony until status equals `expected` or timeout.
-pub fn wait_for_ceremony_status(
-    expected: i64,
-    timeout_ms: u64,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
-    let mut polls = 0u32;
-    while std::time::Instant::now() < deadline {
-        let status = get_ceremony_status().unwrap_or(CEREMONY_STATUS_UNSPECIFIED);
-        polls += 1;
-        if status == expected {
-            eprintln!(
-                "[E2E] Ceremony reached status {} after {} poll(s)",
-                expected, polls
-            );
-            return Ok(());
-        }
-        if polls == 1 || polls % 10 == 0 {
-            eprintln!(
-                "[E2E] Ceremony status={} (waiting for {}), poll #{}",
-                status, expected, polls
-            );
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2000));
-    }
-    Err(format!(
-        "timeout waiting for ceremony status {} after {} polls",
-        expected, polls
-    )
-    .into())
-}
-
 /// Returns the first validator's operator address from the staking module.
 /// Queries the standard Cosmos SDK endpoint at the same base URL.
 pub fn get_validator_operator_address() -> Option<String> {
@@ -275,37 +210,6 @@ pub fn get_validator_operator_address() -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Returns all validators registered in the ceremony state as
-/// `(operator_address, pallas_pk_bytes)` pairs.
-pub fn get_ceremony_validators() -> Option<Vec<(String, Vec<u8>)>> {
-    use base64::engine::general_purpose::STANDARD as B64;
-    use base64::Engine;
-
-    let (status, json) = get_json("/zally/v1/ceremony").ok()?;
-    if status != 200 {
-        return None;
-    }
-    let validators = json
-        .get("ceremony")?
-        .get("validators")?
-        .as_array()?;
-
-    let result: Vec<(String, Vec<u8>)> = validators
-        .iter()
-        .filter_map(|v| {
-            let addr = v.get("validator_address")?.as_str()?.to_string();
-            let pk_b64 = v.get("pallas_pk")?.as_str()?;
-            let pk_bytes = B64.decode(pk_b64).ok()?;
-            Some((addr, pk_bytes))
-        })
-        .collect();
-
-    if result.is_empty() {
-        None
-    } else {
-        Some(result)
-    }
-}
 
 /// Returns ALL validator operator addresses from the staking module.
 pub fn get_all_validator_operator_addresses() -> Option<Vec<String>> {
