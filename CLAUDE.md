@@ -78,6 +78,10 @@ mise test           # end-to-end tests against running chain
 3. Create and publish a round in the admin UI → ceremony runs automatically (PENDING → ACTIVE)
 4. Rebuild iOS app in Xcode and run
 
+### Architecture: PIR server owns all nullifier endpoints
+
+The PIR server (`nf-server serve`, port 3000 locally) is the **sole provider** of nullifier data — snapshot status, tree root, rebuild triggers, and PIR queries all live on the PIR server. Clients (admin UI, iOS wallet) talk to the PIR server directly. The chain node (zallyd) does **not** proxy nullifier endpoints — it only uses the PIR server internally when fetching snapshot data for session creation (`/zally/v1/snapshot-data/{height}`). In local dev, the admin UI's Vite proxy routes `/nullifier/*` to the PIR server (stripping the prefix).
+
 ### Nullifier ingest (`nf-server`)
 
 The unified `nf-server` binary lives in `nullifier-ingest/nf-server/` and has three subcommands: `ingest`, `export`, and `serve`. The `serve` subcommand requires `--features serve` (enabled automatically by `make serve`). For production AVX-512 acceleration, the deploy workflow additionally enables `--features avx512`.

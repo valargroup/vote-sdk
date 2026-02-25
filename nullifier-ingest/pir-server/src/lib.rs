@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
 
+use spiral_rs::params::Params;
 use ypir::params::{params_for_scenario_simplepir, DbRowsCols, PtModulusBits};
 use ypir::serialize::{FilePtIter, OfflinePrecomputedValues};
 use ypir::server::YServer;
@@ -86,9 +87,14 @@ pub fn tier2_scenario() -> YpirScenario {
 ///
 /// Wraps the YPIR `YServer` and its offline precomputed values. Answers
 /// individual queries via `answer_query`.
+///
+/// Owns the YPIR `Params` via a heap allocation. The `server` and `offline`
+/// fields hold `&'a Params` references into this allocation. `ManuallyDrop`
+/// ensures they are dropped before `_params` is freed.
 pub struct TierServer<'a> {
-    server: YServer<'a, u16>,
-    offline: OfflinePrecomputedValues<'a>,
+    server: std::mem::ManuallyDrop<YServer<'a, u16>>,
+    offline: std::mem::ManuallyDrop<OfflinePrecomputedValues<'a>>,
+    _params: Box<Params>,
     scenario: YpirScenario,
 }
 
@@ -116,11 +122,18 @@ impl<'a> TierServer<'a> {
     /// This performs the expensive offline precomputation.
     pub fn new(data: &'a [u8], scenario: YpirScenario) -> Self {
         let t0 = Instant::now();
-        // Leak params so they live as long as 'a (process lifetime).
-        let params: &'a _ = Box::leak(Box::new(params_for_scenario_simplepir(
+        let params_box = Box::new(params_for_scenario_simplepir(
             scenario.num_items as u64,
             scenario.item_size_bits as u64,
-        )));
+        ));
+
+        // SAFETY: We extend the reference lifetime to 'a. This is sound because:
+        // 1. params_box is a heap allocation with a stable address
+        // 2. server and offline are ManuallyDrop, dropped before _params in our Drop impl
+        // 3. The reference remains valid for the entire lifetime of this struct
+        let params: &'a Params = unsafe {
+            std::mem::transmute::<&Params, &'a Params>(params_box.as_ref())
+        };
 
         eprintln!(
             "  YPIR server init: {} items × {} bits",
@@ -153,8 +166,9 @@ impl<'a> TierServer<'a> {
         );
 
         Self {
-            server,
-            offline,
+            server: std::mem::ManuallyDrop::new(server),
+            offline: std::mem::ManuallyDrop::new(offline),
+            _params: params_box,
             scenario,
         }
     }
@@ -253,6 +267,17 @@ impl<'a> TierServer<'a> {
     }
 }
 
+impl Drop for TierServer<'_> {
+    fn drop(&mut self) {
+        // Drop server and offline first (they hold &Params references into _params).
+        // Then _params drops naturally, freeing the heap allocation.
+        unsafe {
+            std::mem::ManuallyDrop::drop(&mut self.server);
+            std::mem::ManuallyDrop::drop(&mut self.offline);
+        }
+    }
+}
+
 // ── Root info ────────────────────────────────────────────────────────────────
 
 /// Root and metadata returned by GET /root.
@@ -274,3 +299,66 @@ pub struct HealthInfo {
     pub tier1_row_bytes: usize,
     pub tier2_row_bytes: usize,
 }
+
+// ── OwnedTierState ────────────────────────────────────────────────────────────
+
+/// Owns the tier data and the `TierServer`, avoiding `Box::leak` accumulation.
+///
+/// On drop, the server is dropped first (via `ManuallyDrop`), then the data
+/// `Vec<u8>` is freed — reclaiming ~6 GB on each rebuild instead of leaking.
+pub struct OwnedTierState {
+    server: std::mem::ManuallyDrop<TierServer<'static>>,
+    // Actual owner of the bytes; kept alive as long as the server is alive.
+    _data: Vec<u8>,
+}
+
+impl OwnedTierState {
+    /// Construct a new `OwnedTierState` from owned tier data and a YPIR scenario.
+    ///
+    /// # Safety
+    ///
+    /// We extend the lifetime of the data reference to `'static`. This is sound
+    /// because:
+    /// 1. `_data` lives in this struct and outlives `server` (ManuallyDrop + Drop order)
+    /// 2. YPIR's `FilePtIter` is consumed during `YServer::new()` — after construction,
+    ///    the server holds precomputed values, not references to the original data.
+    /// 3. In-flight requests must be drained before dropping this struct.
+    pub fn new(data: Vec<u8>, scenario: YpirScenario) -> Self {
+        let data_ref: &'static [u8] = unsafe {
+            std::mem::transmute::<&[u8], &'static [u8]>(data.as_slice())
+        };
+        let server = TierServer::new(data_ref, scenario);
+        Self {
+            server: std::mem::ManuallyDrop::new(server),
+            _data: data,
+        }
+    }
+
+    pub fn server(&self) -> &TierServer<'static> {
+        &self.server
+    }
+
+    /// Return the YPIR hint bytes for this tier.
+    pub fn hint_bytes(&self) -> Vec<u8> {
+        self.server.hint_bytes()
+    }
+
+    /// Access the raw tier data for direct row reads.
+    pub fn data(&self) -> &[u8] {
+        &self._data
+    }
+}
+
+impl Drop for OwnedTierState {
+    fn drop(&mut self) {
+        // Drop server first (releases any internal YPIR state).
+        unsafe { std::mem::ManuallyDrop::drop(&mut self.server); }
+        // Then self._data drops naturally, freeing the tier bytes.
+    }
+}
+
+// Allow sending OwnedTierState between threads (needed for tokio spawn_blocking).
+// This is safe because TierServer is only accessed via &self references through
+// the AppState RwLock.
+unsafe impl Send for OwnedTierState {}
+unsafe impl Sync for OwnedTierState {}

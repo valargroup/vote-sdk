@@ -279,5 +279,39 @@ export async function getValidators(): Promise<{ validators: Validator[]; pagina
   return { validators: all };
 }
 
+// -- Snapshot management --
+
+export interface SnapshotStatus {
+  phase: "serving" | "rebuilding" | "error";
+  height: number | null;
+  num_ranges: number | null;
+  zcash_tip?: number | null;
+  target_height?: number;
+  progress?: string;
+  progress_pct?: number;
+  message?: string;
+}
+
+export async function getSnapshotStatus(): Promise<SnapshotStatus> {
+  return fetchJson<SnapshotStatus>("/nullifier/snapshot/status");
+}
+
+export async function prepareSnapshot(height: number): Promise<{ status: string; target_height: number }> {
+  return fetchJson<{ status: string; target_height: number }>("/nullifier/snapshot/prepare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ height }),
+  });
+}
+
+export async function getActiveRound(): Promise<{ round: ChainRound | null }> {
+  try {
+    const resp = await fetchJson<{ round?: ChainRound }>("/zally/v1/rounds/active");
+    return { round: resp.round ?? null };
+  } catch {
+    return { round: null };
+  }
+}
+
 // submitSession was removed: MsgCreateVotingSession is now a standard Cosmos
 // SDK transaction signed client-side. See cosmosTx.ts.

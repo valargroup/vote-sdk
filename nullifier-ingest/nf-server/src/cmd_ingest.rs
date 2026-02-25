@@ -33,6 +33,9 @@ pub struct Args {
 }
 
 pub async fn run(args: Args) -> Result<()> {
+    // Migrate legacy checkpoints to the index file format.
+    file_store::rebuild_index(&args.data_dir)?;
+
     let lwd_urls: Vec<String> = std::env::var("LWD_URLS")
         .map(|s| s.split(',').map(|u| u.trim().to_string()).collect())
         .unwrap_or_else(|_| vec![args.lwd_url.clone()]);

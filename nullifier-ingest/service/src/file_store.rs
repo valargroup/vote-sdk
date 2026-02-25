@@ -64,6 +64,7 @@ use rayon::prelude::*;
 
 const NULLIFIER_SIZE: usize = 32;
 const CHECKPOINT_SIZE: usize = 16;
+const INDEX_ENTRY_SIZE: usize = 16; // [u64 LE height][u64 LE offset]
 
 pub fn nullifiers_path(dir: &Path) -> PathBuf {
     dir.join("nullifiers.bin")
@@ -71,6 +72,10 @@ pub fn nullifiers_path(dir: &Path) -> PathBuf {
 
 pub fn checkpoint_path(dir: &Path) -> PathBuf {
     dir.join("nullifiers.checkpoint")
+}
+
+pub fn index_path(dir: &Path) -> PathBuf {
+    dir.join("nullifiers.index")
 }
 
 /// Atomically save `(height, byte_offset)` via write-to-temp + `fsync` + rename.
@@ -88,7 +93,140 @@ pub fn save_checkpoint(dir: &Path, height: u64, offset: u64) -> Result<()> {
     drop(f);
 
     fs::rename(&tmp, &cp).context("rename checkpoint")?;
+
+    // Also append to the index file so we can later binary-search for any height.
+    append_index(dir, height, offset)?;
+
     Ok(())
+}
+
+/// Append a 16-byte `[u64 LE height][u64 LE offset]` record to `nullifiers.index`.
+///
+/// Called from `save_checkpoint()` after each successful batch commit.
+/// The index file is small (one entry per batch ≈ 10K blocks), so appending
+/// without fsync is acceptable — the checkpoint file is the durability point.
+pub fn append_index(dir: &Path, height: u64, offset: u64) -> Result<()> {
+    let path = index_path(dir);
+    let mut f = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .context("open index file for append")?;
+
+    let mut buf = [0u8; INDEX_ENTRY_SIZE];
+    buf[..8].copy_from_slice(&height.to_le_bytes());
+    buf[8..].copy_from_slice(&offset.to_le_bytes());
+    f.write_all(&buf).context("write index entry")?;
+    Ok(())
+}
+
+/// Find the largest index entry with `height <= target_height`.
+///
+/// Returns `Some((height, offset))` or `None` if the index is empty or
+/// all entries are above the target.
+pub fn offset_for_height(dir: &Path, target_height: u64) -> Result<Option<(u64, u64)>> {
+    let path = index_path(dir);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = fs::read(&path).context("read index file")?;
+    if data.len() % INDEX_ENTRY_SIZE != 0 {
+        anyhow::bail!(
+            "corrupt index file: size {} is not a multiple of {}",
+            data.len(),
+            INDEX_ENTRY_SIZE
+        );
+    }
+    let n = data.len() / INDEX_ENTRY_SIZE;
+    if n == 0 {
+        return Ok(None);
+    }
+
+    // The index is append-only and heights are monotonically increasing,
+    // so we can binary search.
+    let entry = |i: usize| -> (u64, u64) {
+        let off = i * INDEX_ENTRY_SIZE;
+        let h = u64::from_le_bytes(data[off..off + 8].try_into().unwrap());
+        let o = u64::from_le_bytes(data[off + 8..off + 16].try_into().unwrap());
+        (h, o)
+    };
+
+    // Binary search: find last entry with height <= target_height
+    let mut lo = 0usize;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let (h, _) = entry(mid);
+        if h <= target_height {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    if lo == 0 {
+        return Ok(None);
+    }
+    let (h, o) = entry(lo - 1);
+    Ok(Some((h, o)))
+}
+
+/// One-time migration: create `nullifiers.index` from `nullifiers.checkpoint`
+/// if the index doesn't exist yet. Future ingests will append naturally
+/// via `save_checkpoint` → `append_index`.
+pub fn rebuild_index(dir: &Path) -> Result<()> {
+    let idx = index_path(dir);
+    if idx.exists() {
+        return Ok(());
+    }
+    // Only migrate if we have a checkpoint
+    if let Some((height, offset)) = load_checkpoint(dir)? {
+        append_index(dir, height, offset)?;
+        eprintln!(
+            "Migrated index: created nullifiers.index with single entry (height={}, offset={})",
+            height, offset
+        );
+    }
+    Ok(())
+}
+
+/// Load nullifiers up to `byte_offset` and convert to `Fp` in parallel.
+///
+/// Like `load_all_nullifiers` but reads only the first `byte_offset` bytes
+/// of the data file. Used when exporting at a target height below the
+/// current sync point.
+pub fn load_nullifiers_up_to(dir: &Path, byte_offset: u64) -> Result<Vec<Fp>> {
+    let path = nullifiers_path(dir);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let byte_offset = byte_offset as usize;
+    if byte_offset % NULLIFIER_SIZE != 0 {
+        anyhow::bail!(
+            "byte_offset {} is not a multiple of {}",
+            byte_offset,
+            NULLIFIER_SIZE
+        );
+    }
+
+    let full_data = fs::read(&path).context("read nullifiers file")?;
+    let data = if byte_offset < full_data.len() {
+        &full_data[..byte_offset]
+    } else {
+        &full_data
+    };
+
+    let nullifiers: Vec<Fp> = data
+        .par_chunks_exact(NULLIFIER_SIZE)
+        .map(|chunk| {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(chunk);
+            Fp::from_repr(arr).unwrap()
+        })
+        .collect();
+
+    Ok(nullifiers)
 }
 
 /// Load the checkpoint. Returns `Some((height, byte_offset))` or `None`.
@@ -251,6 +389,100 @@ mod tests {
 
         let loaded = load_all_nullifiers(&dir).unwrap();
         assert_eq!(loaded.len(), 2);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn index_append_and_lookup() {
+        let dir = temp_dir("idx_lookup");
+
+        // Simulate three batches with increasing heights
+        append_index(&dir, 1_700_000, 1024).unwrap();
+        append_index(&dir, 1_710_000, 2048).unwrap();
+        append_index(&dir, 1_720_000, 3072).unwrap();
+
+        // Exact match
+        let (h, o) = offset_for_height(&dir, 1_710_000).unwrap().unwrap();
+        assert_eq!(h, 1_710_000);
+        assert_eq!(o, 2048);
+
+        // Between entries — returns the floor
+        let (h, o) = offset_for_height(&dir, 1_715_000).unwrap().unwrap();
+        assert_eq!(h, 1_710_000);
+        assert_eq!(o, 2048);
+
+        // Above all entries
+        let (h, o) = offset_for_height(&dir, 2_000_000).unwrap().unwrap();
+        assert_eq!(h, 1_720_000);
+        assert_eq!(o, 3072);
+
+        // Below all entries
+        assert_eq!(offset_for_height(&dir, 1_699_999).unwrap(), None);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rebuild_index_migration() {
+        let dir = temp_dir("idx_rebuild");
+
+        // Write a checkpoint without an index file
+        let nfs = vec![(100u64, vec![1u8; 32]), (100, vec![2u8; 32])];
+        let offset = append_nullifiers(&dir, &nfs).unwrap();
+        // Manually save checkpoint without the index side-effect
+        // (simulating old code before index was added)
+        let cp = checkpoint_path(&dir);
+        let tmp = dir.join("nullifiers.checkpoint.tmp");
+        let mut buf = [0u8; CHECKPOINT_SIZE];
+        buf[..8].copy_from_slice(&1_700_000u64.to_le_bytes());
+        buf[8..].copy_from_slice(&offset.to_le_bytes());
+        let mut f = File::create(&tmp).unwrap();
+        f.write_all(&buf).unwrap();
+        f.sync_all().unwrap();
+        drop(f);
+        fs::rename(&tmp, &cp).unwrap();
+
+        // No index file yet
+        assert!(!index_path(&dir).exists());
+
+        // Migration creates it
+        rebuild_index(&dir).unwrap();
+        assert!(index_path(&dir).exists());
+
+        let (h, o) = offset_for_height(&dir, 1_700_000).unwrap().unwrap();
+        assert_eq!(h, 1_700_000);
+        assert_eq!(o, offset);
+
+        // Second call is a no-op
+        rebuild_index(&dir).unwrap();
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_nullifiers_up_to_offset() {
+        let dir = temp_dir("up_to");
+
+        let nfs = vec![
+            (100u64, vec![1u8; 32]),
+            (100, vec![2u8; 32]),
+            (200, vec![3u8; 32]),
+        ];
+
+        let _offset = append_nullifiers(&dir, &nfs).unwrap();
+
+        // Load only the first 2 nullifiers (64 bytes)
+        let loaded = load_nullifiers_up_to(&dir, 64).unwrap();
+        assert_eq!(loaded.len(), 2);
+
+        // Load all (96 bytes)
+        let loaded = load_nullifiers_up_to(&dir, 96).unwrap();
+        assert_eq!(loaded.len(), 3);
+
+        // Load with offset beyond file size — returns all
+        let loaded = load_nullifiers_up_to(&dir, 1024).unwrap();
+        assert_eq!(loaded.len(), 3);
 
         let _ = fs::remove_dir_all(&dir);
     }

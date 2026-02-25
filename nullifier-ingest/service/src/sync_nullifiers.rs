@@ -15,6 +15,18 @@ pub const NU5_ACTIVATION_HEIGHT: u64 = 1_687_104;
 /// How many blocks to request per gRPC streaming call.
 const BATCH_SIZE: u64 = 10_000;
 
+/// Fetch the current chain tip height from a lightwalletd server.
+///
+/// Connects to the given URL and calls `GetLatestBlock`. Returns the height
+/// of the chain tip as reported by the server.
+pub async fn fetch_chain_tip(lwd_url: &str) -> Result<u64> {
+    let mut client = connect_lwd(lwd_url).await?;
+    let latest = client
+        .get_latest_block(Request::new(ChainSpec {}))
+        .await?;
+    Ok(latest.into_inner().height)
+}
+
 /// Determine the block height to resume syncing from.
 ///
 /// Reads the checkpoint file and truncates any uncommitted bytes from

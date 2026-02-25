@@ -22,6 +22,7 @@ use std::io::Write;
 
 use anyhow::Result;
 use pasta_curves::Fp;
+use rayon::prelude::*;
 
 use imt_tree::tree::{Range, TREE_DEPTH};
 
@@ -32,19 +33,26 @@ use crate::{
 
 /// Export all Tier 1 rows to a writer.
 ///
-/// Each row is written as a contiguous block of `TIER1_ROW_BYTES` bytes.
-/// The total output is `TIER1_ROWS × TIER1_ROW_BYTES` bytes.
+/// Rows are computed in parallel using Rayon, then written sequentially.
 pub fn export(
     levels: &[Vec<Fp>],
     ranges: &[Range],
     empty_hashes: &[Fp; TREE_DEPTH],
     writer: &mut impl Write,
 ) -> Result<()> {
-    let mut row_buf = vec![0u8; TIER1_ROW_BYTES];
+    // Compute all rows in parallel
+    let all_rows: Vec<Vec<u8>> = (0..TIER1_ROWS)
+        .into_par_iter()
+        .map(|s| {
+            let mut buf = vec![0u8; TIER1_ROW_BYTES];
+            write_row(levels, ranges, empty_hashes, s, &mut buf);
+            buf
+        })
+        .collect();
 
-    for s in 0..TIER1_ROWS {
-        write_row(levels, ranges, empty_hashes, s, &mut row_buf);
-        writer.write_all(&row_buf)?;
+    // Write sequentially
+    for row in &all_rows {
+        writer.write_all(row)?;
     }
 
     Ok(())

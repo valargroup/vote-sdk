@@ -280,6 +280,66 @@ pub fn node_or_empty(levels: &[Vec<Fp>], level: usize, index: usize, empty_hashe
     }
 }
 
+/// Build a PIR tree from raw nullifiers (sort, sentinel injection, tree build)
+/// and export all tier files.
+///
+/// This is the high-level entry point used by both the export CLI and the
+/// serve command's rebuild logic.
+pub fn build_and_export(
+    nfs: Vec<Fp>,
+    output_dir: &std::path::Path,
+    height: Option<u64>,
+) -> Result<PirTree> {
+    build_and_export_with_progress(nfs, output_dir, height, |_, _| {})
+}
+
+/// Build the PIR tree and export tier files, calling `on_progress(message, pct)`
+/// at each major stage so callers can report progress to users.
+pub fn build_and_export_with_progress(
+    mut nfs: Vec<Fp>,
+    output_dir: &std::path::Path,
+    height: Option<u64>,
+    on_progress: impl Fn(&str, u8),
+) -> Result<PirTree> {
+    use ff::Field;
+
+    on_progress("sorting nullifiers", 0);
+    let t1 = std::time::Instant::now();
+    nfs.sort();
+    let step = Fp::from(2u64).pow([250, 0, 0, 0]);
+    let sentinels: Vec<Fp> = (0u64..=16).map(|k| step * Fp::from(k)).collect();
+    nfs.extend(sentinels);
+    nfs.sort();
+    nfs.dedup();
+    let ranges = imt_tree::tree::build_nf_ranges(nfs);
+    eprintln!(
+        "  {} ranges built in {:.1}s",
+        ranges.len(),
+        t1.elapsed().as_secs_f64()
+    );
+
+    on_progress("building Merkle tree", 15);
+    eprintln!("Building depth-{} PIR tree...", PIR_DEPTH);
+    let tree = build_pir_tree(ranges)?;
+    eprintln!(
+        "  Root-{}: {}",
+        PIR_DEPTH,
+        hex::encode(tree.root26.to_repr())
+    );
+    eprintln!(
+        "  Root-{}: {}",
+        FULL_DEPTH,
+        hex::encode(tree.root29.to_repr())
+    );
+
+    on_progress("writing tier files", 40);
+    eprintln!("Exporting tier files to {:?}...", output_dir);
+    export_all(&tree, output_dir, height)?;
+
+    on_progress("tier files written", 55);
+    Ok(tree)
+}
+
 /// Export all tier files and metadata to the given directory.
 pub fn export_all(tree: &PirTree, output_dir: &std::path::Path, height: Option<u64>) -> Result<()> {
     std::fs::create_dir_all(output_dir)?;

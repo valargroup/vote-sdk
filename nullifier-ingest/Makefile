@@ -76,7 +76,7 @@ export-nf: ## Build PIR tree and export tier files from nullifiers.bin
 	cd $(NF_DIR) && cargo run --release -- export --data-dir ../$(DATA_DIR) --output-dir ../$(PIR_DATA_DIR)
 
 serve: ## Start the PIR HTTP server
-	cd $(NF_DIR) && cargo run --release --features serve -- serve --pir-data-dir ../$(PIR_DATA_DIR) --port $(PORT)
+	cd $(NF_DIR) && cargo run --release --features serve -- serve --pir-data-dir ../$(PIR_DATA_DIR) --data-dir ../$(DATA_DIR) --port $(PORT)
 
 test-proof: ## Run exclusion proof verification against ingested data
 	cd $(SERVICE_DIR) && DATA_DIR=../$(DATA_DIR) cargo run --release --bin test-non-inclusion

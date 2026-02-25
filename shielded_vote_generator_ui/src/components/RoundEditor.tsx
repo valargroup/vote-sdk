@@ -1,16 +1,17 @@
 import { useState, useCallback, useEffect } from "react";
-import { X, Clock, RefreshCw, AlertTriangle } from "lucide-react";
+import { X, Clock, RefreshCw, AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import type { VotingRound, RoundSettings } from "../types";
 import {
   useChainInfo,
   estimateTimestamp,
 } from "../store/rpc";
-import { getNullifierStatus } from "../api/chain";
+import { getNullifierStatus, getSnapshotStatus } from "../api/chain";
 
 interface RoundEditorProps {
   round: VotingRound;
   onUpdateName: (name: string) => void;
   onUpdateSettings: (patch: Partial<RoundSettings>) => void;
+  onNavigate?: (section: string) => void;
   isReadonly?: boolean;
 }
 
@@ -105,65 +106,55 @@ function formatTimestamp(d: Date): string {
   });
 }
 
-export function RoundEditor({ round, onUpdateName, onUpdateSettings, isReadonly = false }: RoundEditorProps) {
+export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate, isReadonly = false }: RoundEditorProps) {
   const [showCustom, setShowCustom] = useState(false);
   const [nhLoading, setNhLoading] = useState(false);
   const [nhError, setNhError] = useState<string | null>(null);
-  const [nhHeight, setNhHeight] = useState<number | null>(null);
+  const [pirRebuilding, setPirRebuilding] = useState(false);
   const endTime = round.settings.endTime;
   const hasEndTime = endTime.length > 0;
 
   const chain = useChainInfo();
 
-  const fetchNh = useCallback(async () => {
-    setNhLoading(true);
-    setNhError(null);
+  // Fetch snapshot height from PIR server. Returns true if serving.
+  const fetchSnapshotHeight = useCallback(async () => {
     try {
-      const status = await getNullifierStatus();
-      const height = status.latest_height;
-      if (height == null) throw new Error("NH unavailable");
-      setNhHeight(height);
+      const status = await getSnapshotStatus();
+      if (status.phase === "rebuilding") {
+        setPirRebuilding(true);
+        return false;
+      }
+      setPirRebuilding(false);
+      const ns = await getNullifierStatus();
+      if (ns.latest_height != null) {
+        onUpdateSettings({ snapshotHeight: String(ns.latest_height) });
+      } else {
+        setNhError("PIR server has no checkpoint height");
+      }
+      return true;
     } catch (err) {
       setNhError(err instanceof Error ? err.message : "Failed to fetch");
-    } finally {
-      setNhLoading(false);
+      return true; // stop polling on hard error
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-fetch NH on mount so the mismatch warning is shown immediately.
-  // Also pre-fill snapshot height if empty.
+  // Auto-populate snapshot height from PIR server on mount.
   useEffect(() => {
-    fetchNh();
-  }, [fetchNh]);
-
-  useEffect(() => {
-    if (nhHeight != null && !round.settings.snapshotHeight && !isReadonly) {
-      onUpdateSettings({ snapshotHeight: String(nhHeight) });
-    }
-  }, [nhHeight, round.settings.snapshotHeight, isReadonly, onUpdateSettings]);
-
-  const handleUseNhHeight = useCallback(async () => {
+    if (isReadonly) return;
     setNhLoading(true);
     setNhError(null);
-    try {
-      const status = await getNullifierStatus();
-      const height = status.latest_height;
-      if (height == null) throw new Error("NH unavailable");
-      setNhHeight(height);
-      onUpdateSettings({ snapshotHeight: String(height) });
-    } catch (err) {
-      setNhError(err instanceof Error ? err.message : "Failed to fetch");
-    } finally {
-      setNhLoading(false);
-    }
-  }, [onUpdateSettings]);
+    fetchSnapshotHeight().finally(() => setNhLoading(false));
+  }, [isReadonly, fetchSnapshotHeight]);
 
-  const snapshotHeightNum = parseInt(round.settings.snapshotHeight, 10);
-  const nhMismatch =
-    nhHeight != null &&
-    !isNaN(snapshotHeightNum) &&
-    snapshotHeightNum > 0 &&
-    snapshotHeightNum !== nhHeight;
+  // Poll while PIR is rebuilding, auto-update when done.
+  useEffect(() => {
+    if (!pirRebuilding) return;
+    const interval = setInterval(async () => {
+      const done = await fetchSnapshotHeight();
+      if (done) setNhLoading(false);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [pirRebuilding, fetchSnapshotHeight]);
 
   const snapshotHeight = parseInt(round.settings.snapshotHeight, 10);
   const isValidHeight = !isNaN(snapshotHeight) && snapshotHeight > 0;
@@ -191,50 +182,33 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, isReadonly 
           />
         </div>
 
-        {/* Snapshot height */}
+        {/* Snapshot height — read-only, auto-populated from PIR server */}
         <div>
-          <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2 mb-1">
             <label className="text-[11px] text-text-secondary">
               Snapshot height
             </label>
-            {!isReadonly && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleUseNhHeight}
-                  disabled={nhLoading}
-                  className="text-[10px] text-accent hover:text-accent-glow disabled:opacity-50 cursor-pointer flex items-center gap-0.5"
-                  title="NH — Nullifier Service Snapshot Height: the latest Zcash block the nullifier service has indexed. Voters must have shielded notes at or before this height."
-                >
-                  <RefreshCw size={10} className={nhLoading ? "animate-spin" : ""} />
-                  Use NH
-                </button>
-                {chain.latestHeight && (
-                  <span className="text-[10px] text-text-muted flex items-center gap-1">
-                    tip: {chain.latestHeight.toLocaleString()}
-                    <button
-                      onClick={chain.refresh}
-                      className="p-0.5 hover:text-text-secondary cursor-pointer"
-                      title="Refresh"
-                    >
-                      <RefreshCw size={10} className={chain.loading ? "animate-spin" : ""} />
-                    </button>
-                  </span>
-                )}
-              </div>
+            {nhLoading && (
+              <Loader2 size={10} className="text-accent animate-spin" />
             )}
           </div>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={round.settings.snapshotHeight}
-            onChange={(e) => {
-              const val = e.target.value.replace(/[^0-9]/g, "");
-              onUpdateSettings({ snapshotHeight: val });
-            }}
-            placeholder="e.g. 2800000"
-            readOnly={isReadonly}
-            className={`w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono ${isReadonly ? "opacity-60 cursor-default" : ""}`}
-          />
+          <div className="relative">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={round.settings.snapshotHeight}
+              readOnly
+              className="w-full px-3 py-2 pr-24 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none font-mono opacity-60 cursor-default"
+            />
+            {onNavigate && (
+              <button
+                onClick={() => onNavigate("snapshot")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-accent hover:text-accent-glow cursor-pointer"
+              >
+                Change height
+              </button>
+            )}
+          </div>
 
           {/* Estimated timestamp */}
           {estimatedDate && (
@@ -251,23 +225,50 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, isReadonly 
             </div>
           )}
 
-          {/* NH mismatch warning — blocks submission */}
-          {nhMismatch && (
+          {/* PIR server rebuilding */}
+          {pirRebuilding && (
+            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-accent/10 border border-accent/40 rounded-md">
+              <Loader2 size={12} className="text-accent shrink-0 mt-0.5 animate-spin" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-accent font-semibold leading-snug">
+                  PIR server is rebuilding
+                </p>
+                <p className="text-[10px] text-text-muted leading-snug mt-0.5">
+                  The snapshot is being regenerated. Wait for it to complete before publishing.
+                </p>
+                {onNavigate && (
+                  <button
+                    onClick={() => onNavigate("snapshot")}
+                    className="text-[10px] text-accent hover:text-accent-glow mt-1 flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <ExternalLink size={10} />
+                    Go to Snapshot Settings
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* PIR server error */}
+          {nhError && !pirRebuilding && (
             <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-danger/10 border border-danger/40 rounded-md">
               <AlertTriangle size={12} className="text-danger shrink-0 mt-0.5" />
               <div className="min-w-0">
                 <p className="text-[10px] text-danger font-semibold leading-snug">
-                  Snapshot height doesn't match NH
+                  PIR server unavailable
                 </p>
                 <p className="text-[10px] text-danger/80 leading-snug mt-0.5">
-                  The nullifier service will need to regenerate its snapshot for height {snapshotHeightNum.toLocaleString()}. This takes approximately 10 minutes — you will have to wait before publishing.
+                  {nhError}
                 </p>
-                <p className="text-[10px] text-text-muted mt-1">
-                  Current NH:{" "}
-                  <span className="font-mono text-text-secondary">
-                    {nhHeight!.toLocaleString()}
-                  </span>
-                </p>
+                {onNavigate && (
+                  <button
+                    onClick={() => onNavigate("snapshot")}
+                    className="text-[10px] text-accent hover:text-accent-glow mt-1 flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <ExternalLink size={10} />
+                    Go to Snapshot Settings
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -279,18 +280,8 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, isReadonly 
             </p>
           )}
 
-          {/* NH fetch error */}
-          {nhError && (
-            <p className="text-[10px] text-danger mt-1">
-              NH error: {nhError}
-            </p>
-          )}
-
           <p className="text-[10px] text-text-muted mt-1">
-            The block height at which balances are captured for vote weighting.{" "}
-            <span className="text-text-muted/70">
-              NH = Nullifier Service Snapshot Height — the latest Zcash block the nullifier service has indexed.
-            </span>
+            Auto-populated from PIR server. The block height at which balances are captured for vote weighting.
           </p>
         </div>
 

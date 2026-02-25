@@ -6,6 +6,7 @@ import { TopBar } from "./components/TopBar";
 import { ProposalEditor } from "./components/ProposalEditor";
 import { JsonView } from "./components/JsonView";
 import { RoundEditor } from "./components/RoundEditor";
+import { SnapshotSettingsPage } from "./components/SnapshotSettingsPage";
 import { RoundsList } from "./components/RoundsList";
 import { useStore } from "./store/useStore";
 import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown } from "lucide-react";
@@ -41,7 +42,7 @@ function optionColor(index: number, total: number): string {
   return VOTE_OPTION_COLORS[index % VOTE_OPTION_COLORS.length];
 }
 
-type Section = "about" | "rounds" | "builder" | "json" | "downloads" | "preview" | "settings" | "vote-status" | "validators";
+type Section = "about" | "rounds" | "builder" | "json" | "downloads" | "preview" | "settings" | "vote-status" | "validators" | "snapshot";
 
 const SECTION_PATHS: Record<Section, string> = {
   about: "/",
@@ -53,6 +54,7 @@ const SECTION_PATHS: Record<Section, string> = {
   settings: "/settings",
   "vote-status": "/vote-status",
   validators: "/validators",
+  snapshot: "/snapshot",
 };
 
 const PATH_TO_SECTION: Record<string, Section> = Object.fromEntries(
@@ -155,27 +157,40 @@ function App() {
       return;
     }
 
+    // Snapshot height is auto-populated from the PIR server (read-only in the editor).
+    // Verify it's still current before publishing.
     let snapshotHeight = parseInt(round.settings.snapshotHeight, 10) || 0;
-    if (snapshotHeight === 0) {
-      setPublishStatus("error");
-      setPublishError("Snapshot height must be set to a non-zero value in Round Settings.");
-      return;
-    }
-
-    // Verify the snapshot height against the nullifier service. If they differ,
-    // auto-update to the current NH so the user doesn't hit a race condition
-    // (NH can advance between "Use NH" click and publish confirmation).
     try {
       const nhStatus = await chainApi.getNullifierStatus();
       const nhHeight = nhStatus.latest_height;
-      if (nhHeight != null && nhHeight !== snapshotHeight) {
+      if (nhHeight != null) {
         snapshotHeight = nhHeight;
-        store.updateRound(round.id, {
-          settings: { ...round.settings, snapshotHeight: String(nhHeight) },
-        });
+        if (String(nhHeight) !== round.settings.snapshotHeight) {
+          store.updateRound(round.id, {
+            settings: { ...round.settings, snapshotHeight: String(nhHeight) },
+          });
+        }
       }
     } catch {
-      // If the nullifier service is unreachable, proceed with the user-set height.
+      // PIR server may be rebuilding — check snapshot status
+      try {
+        const snapStatus = await chainApi.getSnapshotStatus();
+        if (snapStatus.phase === "rebuilding") {
+          setPublishStatus("error");
+          setPublishError(
+            "PIR server is currently rebuilding. Wait for it to complete, then try again. Go to Snapshot Settings to check progress."
+          );
+          return;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (snapshotHeight === 0) {
+      setPublishStatus("error");
+      setPublishError("Snapshot height is not available. Check the PIR server status in Snapshot Settings.");
+      return;
     }
 
     if (!round.settings.endTime) {
@@ -327,6 +342,7 @@ function App() {
                 store.reorderProposals(store.activeRound!.id, from, to)
               }
               onPublish={() => handlePublish(store.activeRound!.id)}
+              onNavigate={handleNavigate}
               isReadonly={store.activeRound.status === "published"}
             />
           </>
@@ -381,6 +397,9 @@ function App() {
         {/* Vote status */}
         {section === "vote-status" && <VoteStatusView expectRoundCount={expectedRoundCount} />}
 
+        {/* Snapshot settings */}
+        {section === "snapshot" && <SnapshotSettingsPage />}
+
         {/* Settings */}
         {section === "settings" && <SettingsPage wallet={wallet} />}
 
@@ -423,6 +442,7 @@ function BuilderView({
   onDeleteProposal,
   onReorder,
   onPublish,
+  onNavigate,
   isReadonly = false,
 }: {
   round: VotingRound;
@@ -436,6 +456,7 @@ function BuilderView({
   onDeleteProposal: (id: string) => void;
   onReorder: (from: number, to: number) => void;
   onPublish: () => void;
+  onNavigate?: (section: string) => void;
   isReadonly?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -482,6 +503,7 @@ function BuilderView({
             round={round}
             onUpdateName={onUpdateRoundName}
             onUpdateSettings={onUpdateRoundSettings}
+            onNavigate={onNavigate}
             isReadonly={isReadonly}
           />
         </section>

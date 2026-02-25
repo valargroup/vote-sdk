@@ -54,6 +54,9 @@ nullifier-ingest/service/nullifiers.tree
 nullifiers.bin
 nullifiers.checkpoint
 nullifiers.tree
+nullifiers.index
+nf-serve.log
+nullifier-ingest/pir-data/
 
 # macOS
 .DS_Store
