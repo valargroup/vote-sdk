@@ -47,6 +47,7 @@ use halo2_gadgets::{
 };
 
 use crate::vote_proof::{DOMAIN_VC, VOTE_COMM_TREE_DEPTH};
+use crate::shared_primitives::shares_hash::compute_shares_hash_in_circuit;
 
 // ================================================================
 // Constants
@@ -486,7 +487,8 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x)   for i in 0..5
         // shares_hash  = Poseidon(share_comm_0, ..., share_comm_4)
         //
-        // Same hash structure as vote_proof condition 10 (ZKP #2).
+        // Same hash structure as vote_proof condition 10 (ZKP #2), implemented
+        // via the shared shared_primitives::shares_hash gadget.
         // ---------------------------------------------------------------
 
         // Witness the 5 blind factors.
@@ -502,90 +504,13 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             cells.try_into().unwrap()
         };
 
-        let derived_shares_hash = {
-            let [c1_0, c1_1, c1_2, c1_3, c1_4] = enc_c1;
-            let [c2_0, c2_1, c2_2, c2_3, c2_4] = enc_c2;
-            let [b0, b1, b2, b3, b4] = blinds;
-
-            // Per-share blinded commitments: share_comm_i = Poseidon(blind_i, c1_i, c2_i)
-            let share_comm_0 = {
-                let hasher = PoseidonHash::<
-                    pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
-                >::init(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| "cond3: share_comm_0 init"),
-                )?;
-                hasher.hash(
-                    layouter.namespace(|| "cond3: share_comm_0 = Poseidon(b0, c1_0, c2_0)"),
-                    [b0, c1_0, c2_0],
-                )?
-            };
-            let share_comm_1 = {
-                let hasher = PoseidonHash::<
-                    pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
-                >::init(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| "cond3: share_comm_1 init"),
-                )?;
-                hasher.hash(
-                    layouter.namespace(|| "cond3: share_comm_1 = Poseidon(b1, c1_1, c2_1)"),
-                    [b1, c1_1, c2_1],
-                )?
-            };
-            let share_comm_2 = {
-                let hasher = PoseidonHash::<
-                    pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
-                >::init(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| "cond3: share_comm_2 init"),
-                )?;
-                hasher.hash(
-                    layouter.namespace(|| "cond3: share_comm_2 = Poseidon(b2, c1_2, c2_2)"),
-                    [b2, c1_2, c2_2],
-                )?
-            };
-            let share_comm_3 = {
-                let hasher = PoseidonHash::<
-                    pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
-                >::init(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| "cond3: share_comm_3 init"),
-                )?;
-                hasher.hash(
-                    layouter.namespace(|| "cond3: share_comm_3 = Poseidon(b3, c1_3, c2_3)"),
-                    [b3, c1_3, c2_3],
-                )?
-            };
-            let share_comm_4 = {
-                let hasher = PoseidonHash::<
-                    pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
-                >::init(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| "cond3: share_comm_4 init"),
-                )?;
-                hasher.hash(
-                    layouter.namespace(|| "cond3: share_comm_4 = Poseidon(b4, c1_4, c2_4)"),
-                    [b4, c1_4, c2_4],
-                )?
-            };
-
-            // shares_hash = Poseidon(share_comm_0, ..., share_comm_4)
-            let hasher = PoseidonHash::<
-                pallas::Base,
-                _,
-                poseidon::P128Pow5T3,
-                ConstantLength<5>,
-                3, // WIDTH
-                2, // RATE
-            >::init(
-                config.poseidon_chip(),
-                layouter.namespace(|| "cond3: shares hash Poseidon init"),
-            )?;
-            hasher.hash(
-                layouter.namespace(|| "cond3: shares_hash = Poseidon(share_comms)"),
-                [share_comm_0, share_comm_1, share_comm_2, share_comm_3, share_comm_4],
-            )?
-        };
+        let derived_shares_hash = compute_shares_hash_in_circuit(
+            || config.poseidon_chip(),
+            layouter.namespace(|| "cond3: shares hash"),
+            blinds,
+            enc_c1,
+            enc_c2,
+        )?;
 
         // Constrain derived shares_hash == witnessed shares_hash.
         layouter.assign_region(

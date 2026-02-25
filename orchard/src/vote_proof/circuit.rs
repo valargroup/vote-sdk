@@ -81,6 +81,9 @@ use crate::constants::{
     OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains,
 };
 use crate::circuit::van_integrity;
+use crate::shared_primitives::shares_hash::{
+    compute_shares_hash_in_circuit, hash_share_commitment_in_circuit,
+};
 use super::authority_decrement::{AuthorityDecrementChip, AuthorityDecrementConfig};
 
 // ================================================================
@@ -568,27 +571,6 @@ fn assign_free_advice(
 ///
 /// Uses the same parameters as the out-of-circuit [`share_commitment`] (P128Pow5T3,
 /// ConstantLength<3>, width 3, rate 2) so that native and in-circuit hashes match.
-fn hash_share_commitment_in_circuit(
-    chip: PoseidonChip<pallas::Base, 3, 2>,
-    mut layouter: impl Layouter<pallas::Base>,
-    blind: AssignedCell<pallas::Base, pallas::Base>,
-    enc_c1: AssignedCell<pallas::Base, pallas::Base>,
-    enc_c2: AssignedCell<pallas::Base, pallas::Base>,
-    index: usize,
-) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error> {
-    let hasher = PoseidonHash::<
-        pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<3>, 3, 2,
-    >::init(
-        chip,
-        layouter.namespace(|| alloc::format!("share_comm_{index} Poseidon init")),
-    )?;
-    hasher.hash(
-        layouter.namespace(|| {
-            alloc::format!("share_comm_{index} = Poseidon(blind_{index}, c1_{index}, c2_{index})")
-        }),
-        [blind, enc_c1, enc_c2],
-    )
-}
 
 impl plonk::Circuit<pallas::Base> for Circuit {
     type Config = Config;
@@ -1322,7 +1304,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             .expect("always 5 elements");
 
         // Witness the 5 El Gamal c1 ciphertext x-coordinates.
-        let enc_c1: [_; 5] = (0..5)
+        let enc_c1: [AssignedCell<pallas::Base, pallas::Base>; 5] = (0..5)
             .map(|i| assign_free_advice(
                 layouter.namespace(|| alloc::format!("witness enc_c1_x[{i}]")),
                 config.advices[0],
@@ -1333,7 +1315,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             .expect("always 5 elements");
 
         // Witness the 5 El Gamal c2 ciphertext x-coordinates.
-        let enc_c2: [_; 5] = (0..5)
+        let enc_c2: [AssignedCell<pallas::Base, pallas::Base>; 5] = (0..5)
             .map(|i| assign_free_advice(
                 layouter.namespace(|| alloc::format!("witness enc_c2_x[{i}]")),
                 config.advices[0],
@@ -1343,46 +1325,21 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             .try_into()
             .expect("always 5 elements");
 
-        // Compute per-share blinded commitments: share_comm_i = Poseidon(blind_i, c1_i, c2_i)
-        let share_comm: [AssignedCell<pallas::Base, pallas::Base>; 5] = (0..5)
-            .map(|i| {
-                hash_share_commitment_in_circuit(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| alloc::format!("share_comm_{i}")),
-                    blinds[i].clone(),
-                    enc_c1[i].clone(),
-                    enc_c2[i].clone(),
-                    i,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .try_into()
-            .expect("always 5 elements");
+        // Clone for Condition 11 before compute_shares_hash_in_circuit takes ownership.
+        let enc_c1_cond11: [AssignedCell<pallas::Base, pallas::Base>; 5] =
+            core::array::from_fn(|i| enc_c1[i].clone());
+        let enc_c2_cond11: [AssignedCell<pallas::Base, pallas::Base>; 5] =
+            core::array::from_fn(|i| enc_c2[i].clone());
 
-        // Compute shares_hash = Poseidon(share_comm_0, ..., share_comm_4).
-        // The result is used by condition 12 (vote commitment integrity).
-        let [share_comm_0, share_comm_1, share_comm_2, share_comm_3, share_comm_4] = share_comm;
-        let shares_hash = {
-            let hasher = PoseidonHash::<
-                pallas::Base,
-                _,
-                poseidon::P128Pow5T3,
-                ConstantLength<5>,
-                3, // WIDTH
-                2, // RATE
-            >::init(
-                config.poseidon_chip(),
-                layouter.namespace(|| "shares hash Poseidon init"),
-            )?;
-            hasher.hash(
-                layouter.namespace(|| "shares_hash = Poseidon(share_comms)"),
-                [share_comm_0, share_comm_1, share_comm_2, share_comm_3, share_comm_4],
-            )?
-        };
-
-        // Clone for Condition 11 before the per-share Poseidon hashes use the cells.
-        let enc_c1_cond11 = enc_c1.clone();
-        let enc_c2_cond11 = enc_c2.clone();
+        // Compute share_comm_i = Poseidon(blind_i, c1_i, c2_i) for each share,
+        // then shares_hash = Poseidon(share_comm_0, ..., share_comm_4).
+        let shares_hash = compute_shares_hash_in_circuit(
+            || config.poseidon_chip(),
+            layouter.namespace(|| "cond10: shares hash"),
+            blinds,
+            enc_c1,
+            enc_c2,
+        )?;
 
         // ---------------------------------------------------------------
         // Condition 11: Encryption Integrity.
