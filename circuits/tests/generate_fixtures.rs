@@ -320,15 +320,15 @@ fn generate_cast_vote_redpallas_fixtures(
 /// binary file so the Go test can call generate + verify without needing Poseidon
 /// in Go.
 ///
-/// Format (1328 bytes total):
+/// Format (2384 bytes total):
 ///   [0..772)       merkle_path (772 bytes)
-///   [772..1092)    all_enc_shares (320 bytes: C1_0, C2_0, ..., C1_4, C2_4)
-///   [1092..1252)   share_blinds (160 bytes: 5 × 32-byte blind factors)
-///   [1252..1256)   share_index (u32 LE)
-///   [1256..1260)   proposal_id (u32 LE)
-///   [1260..1264)   vote_decision (u32 LE)
-///   [1264..1296)   round_id (32 bytes)
-///   [1296..1328)   shares_hash (32 bytes)
+///   [772..1796)    all_enc_shares (1024 bytes: 16 × (C1+C2) × 32 bytes)
+///   [1796..2308)   share_blinds (512 bytes: 16 × 32-byte blind factors)
+///   [2308..2312)   share_index (u32 LE)
+///   [2312..2316)   proposal_id (u32 LE)
+///   [2316..2320)   vote_decision (u32 LE)
+///   [2320..2352)   round_id (32 bytes)
+///   [2352..2384)   shares_hash (32 bytes)
 fn generate_share_reveal_fixtures() {
     use zally_circuits::ffi::build_share_reveal_test_data;
 
@@ -342,16 +342,16 @@ fn generate_share_reveal_fixtures() {
     let (merkle_path, enc_shares, share_blinds, share_index, proposal_id, vote_decision, round_id, shares_hash) =
         build_share_reveal_test_data();
 
-    let mut fixture: Vec<u8> = Vec::with_capacity(1328);
+    let mut fixture: Vec<u8> = Vec::with_capacity(2384);
     fixture.extend_from_slice(&merkle_path); // 772 bytes
-    fixture.extend_from_slice(&enc_shares); // 320 bytes
-    fixture.extend_from_slice(&share_blinds); // 160 bytes
+    fixture.extend_from_slice(&enc_shares); // 1024 bytes
+    fixture.extend_from_slice(&share_blinds); // 512 bytes
     fixture.extend_from_slice(&(share_index as u32).to_le_bytes()); // 4 bytes
     fixture.extend_from_slice(&(proposal_id as u32).to_le_bytes()); // 4 bytes
     fixture.extend_from_slice(&(vote_decision as u32).to_le_bytes()); // 4 bytes
     fixture.extend_from_slice(&round_id); // 32 bytes
     fixture.extend_from_slice(&shares_hash); // 32 bytes
-    assert_eq!(fixture.len(), 1328);
+    assert_eq!(fixture.len(), 2384);
 
     let fixture_path = testdata_dir.join("share_reveal_inputs.bin");
     fs::write(&fixture_path, &fixture).expect("failed to write share reveal fixture");
