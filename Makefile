@@ -36,7 +36,7 @@ clean:
 	rm -f $(BINARY)
 
 ## init-multi: Initialize a 3-validator chain on localhost (wipes existing data)
-init-multi: install
+init-multi: install-ffi
 	bash scripts/init_multi.sh
 
 ## stop-multi: Stop all multi-validator processes

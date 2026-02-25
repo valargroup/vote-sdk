@@ -10,8 +10,8 @@
 #   # or: make init-multi
 set -e
 
-# Ensure Go toolchain matches go.mod (system may have a newer default).
-export GOTOOLCHAIN=go1.23.12
+# Use the Go toolchain from the environment (mise pins 1.24.1 via mise.toml).
+export GOTOOLCHAIN=auto
 
 CHAIN_ID="zvote-1"
 BINARY="zallyd"
@@ -299,8 +299,15 @@ echo "Waiting for Validators 2 and 3 to sync..."
 sleep 5
 
 # ---------------------------------------------------------------------------
-# Step 4: Register Validators 2 and 3 via CreateValidatorWithPallasKey
+# Step 4: Register val1 Pallas key + Validators 2 and 3 via CreateValidatorWithPallasKey
 # ---------------------------------------------------------------------------
+echo ""
+echo "=== Registering Pallas key for Validator 1 (genesis) ==="
+$BINARY tx vote register-pallas-key \
+    --from validator --chain-id "$CHAIN_ID" --keyring-backend test \
+    --home "$HOME_VAL1" --node "tcp://localhost:${RPC_PORTS[0]}" -y
+sleep 3
+
 echo ""
 echo "=== Registering Validators 2 and 3 ==="
 
