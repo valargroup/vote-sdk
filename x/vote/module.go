@@ -514,7 +514,8 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		}
 
 		if keeper.OneThirdAcked(round) {
-			// >= 1/3 acked: strip non-ackers, confirm ceremony, activate round.
+			// >= 1/3 acked: strip non-ackers (offline/non-responsive), confirm
+			// ceremony, activate round.
 			stripped := nVals - nAcks
 			keeper.StripNonAckersFromRound(round)
 			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED

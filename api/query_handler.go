@@ -29,6 +29,7 @@ import (
 //	GET /zally/v1/tally-results/{round_id}
 //	GET /zally/v1/vote-summary/{round_id}
 //	GET /zally/v1/ceremony
+//	GET /zally/v1/pallas-keys
 //	GET /zally/v1/vote-manager
 //	GET /zally/v1/genesis
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
@@ -46,6 +47,7 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.HandleFunc("/zally/v1/tally-results/{round_id}", qh.handleTallyResults).Methods("GET")
 	router.HandleFunc("/zally/v1/vote-summary/{round_id}", qh.handleVoteSummary).Methods("GET")
 	router.HandleFunc("/zally/v1/ceremony", qh.handleCeremonyState).Methods("GET")
+	router.HandleFunc("/zally/v1/pallas-keys", qh.handlePallasKeys).Methods("GET")
 	router.HandleFunc("/zally/v1/vote-manager", qh.handleVoteManager).Methods("GET")
 	router.HandleFunc("/zally/v1/genesis", qh.handleGenesis).Methods("GET")
 }
@@ -230,6 +232,18 @@ func (qh *queryHandler) handleCeremonyState(w http.ResponseWriter, _ *http.Reque
 	resp := &types.QueryCeremonyStateResponse{}
 
 	if err := qh.abciQuery("/zvote.v1.Query/CeremonyState", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handlePallasKeys(w http.ResponseWriter, _ *http.Request) {
+	req := &types.QueryPallasKeysRequest{}
+	resp := &types.QueryPallasKeysResponse{}
+
+	if err := qh.abciQuery("/zvote.v1.Query/PallasKeys", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
