@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -28,6 +30,7 @@ import (
 //	GET /zally/v1/vote-summary/{round_id}
 //	GET /zally/v1/ceremony
 //	GET /zally/v1/vote-manager
+//	GET /zally/v1/genesis
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
 	qh := &queryHandler{clientCtx: clientCtx}
 
@@ -44,6 +47,7 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.HandleFunc("/zally/v1/vote-summary/{round_id}", qh.handleVoteSummary).Methods("GET")
 	router.HandleFunc("/zally/v1/ceremony", qh.handleCeremonyState).Methods("GET")
 	router.HandleFunc("/zally/v1/vote-manager", qh.handleVoteManager).Methods("GET")
+	router.HandleFunc("/zally/v1/genesis", qh.handleGenesis).Methods("GET")
 }
 
 // queryHandler handles query REST endpoints by delegating to the gRPC query
@@ -243,6 +247,20 @@ func (qh *queryHandler) handleListRounds(w http.ResponseWriter, _ *http.Request)
 	}
 
 	writeProtoJSON(w, resp)
+}
+
+// handleGenesis serves the node's genesis.json directly from the home directory.
+// This allows joining validators to fetch genesis from any existing node.
+func (qh *queryHandler) handleGenesis(w http.ResponseWriter, _ *http.Request) {
+	genesisPath := filepath.Join(qh.clientCtx.HomeDir, "config", "genesis.json")
+	data, err := os.ReadFile(genesisPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("read genesis.json: %v", err))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(data) //nolint:errcheck
 }
 
 func (qh *queryHandler) handleVoteManager(w http.ResponseWriter, _ *http.Request) {
