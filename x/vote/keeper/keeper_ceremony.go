@@ -124,6 +124,9 @@ func (k *Keeper) JailValidator(ctx context.Context, operatorAddr string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get validator %s: %w", operatorAddr, err)
 	}
+	if val.ConsensusPubkey == nil {
+		return fmt.Errorf("validator %s has no consensus pubkey", operatorAddr)
+	}
 	consAddr, err := val.GetConsAddr()
 	if err != nil {
 		return fmt.Errorf("failed to get consensus address for %s: %w", operatorAddr, err)
