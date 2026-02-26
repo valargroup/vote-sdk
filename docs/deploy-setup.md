@@ -70,7 +70,7 @@ No pre-existing chain data is needed — the first deploy with `reset_chain=true
 
 ### Binary-only update (default, `reset_chain=false`)
 
-1. **Build**: Go + Rust circuits are compiled, producing `zallyd`, `create-val-tx`, and `init_multi_ci.sh`.
+1. **Build**: Go + Rust circuits are compiled, producing `zallyd`, `create-val-tx`, and `init_multi.sh`.
 2. **Deploy**: Binaries and scripts are SCP'd to `/opt/zally-chain`.
 3. **Stop**: `zallyd-val1/2/3` are stopped and ports confirmed free.
 4. **Start**: All three services are restarted with the new binary.
@@ -82,7 +82,7 @@ No pre-existing chain data is needed — the first deploy with `reset_chain=true
 Steps 1–2 are the same, then:
 
 3. **Stop**: All three services stopped.
-4. **Init**: `init_multi_ci.sh` runs with `HOME=/opt/zally-chain`, initializing fresh home directories for all three validators. Val2 and val3 get their genesis, keys, and port config; val1 also gets the helper server configured.
+4. **Init**: `init_multi.sh --ci` runs with `HOME=/opt/zally-chain`, initializing fresh home directories for all three validators. Val2 and val3 get their genesis, keys, and port config; val1 also gets the helper server configured.
 5. **Start**: All three services started.
 6. **Register**: `create-val-tx` registers val2 and val3 as post-genesis validators via val1's REST API.
 7. **Verify**: Service health + chain API + helper server checked.
@@ -108,14 +108,14 @@ The workflow has `workflow_dispatch`, so you can run it from **Actions → Deplo
 
 ## 6. Helper server configuration
 
-The helper server runs inside `zallyd` on **val1 only** and shares val1's REST API port (1418). It is configured in `/opt/zally-chain/.zallyd-val1/config/app.toml` under `[helper]` (written by `init_multi_ci.sh`):
+The helper server runs inside `zallyd` on **val1 only** and shares val1's REST API port (1418). It is configured in `/opt/zally-chain/.zallyd-val1/config/app.toml` under `[helper]` (written by `init_multi.sh --ci`):
 
 | Key                     | Default | Description                                                                                               |
 | ----------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
 | `disable`               | `false` | Set to `true` to disable the helper server entirely.                                                      |
 | `api_token`             | `""`    | Optional token for `POST /api/v1/shares` (`X-Helper-Token` header).                                       |
 | `db_path`               | `""`    | Path to SQLite database. Empty = `$HOME/.zallyd-val1/helper.db`.                                          |
-| `mean_delay`            | `60`    | Mean of exponential delay distribution (seconds). `init_multi_ci.sh` sets 60 for testing.                 |
+| `mean_delay`            | `60`    | Mean of exponential delay distribution (seconds). `init_multi.sh --ci` sets 60 for testing.                 |
 | `process_interval`      | `5`     | How often to check for ready shares (seconds).                                                            |
 | `chain_api_port`        | `1418`  | Port of val1's REST API (for `MsgRevealShare` submission).                                                 |
 | `max_concurrent_proofs` | `2`     | Maximum parallel proof generation goroutines (~500MB RAM each).                                           |
