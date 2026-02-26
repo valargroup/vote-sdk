@@ -772,7 +772,6 @@ The `witness` command outputs the Merkle path as hex (772 bytes = 4-byte positio
 - **`MerkleHashVote`** — leaf/node digest (newtype around `Fp`). Implements `Hashable`.
 - **`Anchor`** — committed tree root at a block height. Newtype around `Fp` with `from_bytes` / `to_bytes`.
 - **`MerklePath`** — authentication path with `root(leaf) -> Anchor` and `verify(leaf, root) -> bool`.
-- **`VoteCommitmentTree`** — backwards-compatible type alias for `TreeServer`.
 
 ### `TreeServer` (server-side full tree)
 

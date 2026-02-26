@@ -138,7 +138,7 @@ func zallyKvIterCreate(
 		return nil
 	}
 	iterH := cgo.NewHandle(iter)
-	return unsafe.Pointer(uintptr(iterH))
+	return unsafe.Pointer(uintptr(iterH)) //nolint:govet
 }
 
 //export zallyKvIterNext
