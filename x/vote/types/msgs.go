@@ -94,9 +94,6 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 
 	// Cheap defense-in-depth: reject duplicate gov_nullifiers within the same message
 	// since the circuit does not constrain the 5 governance nullifiers to be distinct.
-	// This is currently not an issue since the msg_server handler's SetNullifier loop
-	// inadvertently catches this, but if that were to change to batch store all nullifiers
-	// in the group and that did not error on duplicates, this would catch it.
 	seen := make(map[string]struct{}, len(msg.GovNullifiers))
 	for i, nf := range msg.GovNullifiers {
 		k := string(nf)
