@@ -5,9 +5,13 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/nullifier-ingest
-ExecStart=/opt/nullifier-ingest/nf-server serve --pir-data-dir /opt/nullifier-ingest/pir-data --port 3000
+WorkingDirectory=/root/zally-pir/nullifier-ingest
+ExecStart=/opt/nullifier-ingest/nf-server serve \
+    --pir-data-dir /root/zally-pir/nullifier-ingest/pir-data \
+    --data-dir /root/zally-pir/nullifier-ingest \
+    --port 3000
 Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
