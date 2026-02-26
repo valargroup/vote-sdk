@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
@@ -55,6 +57,10 @@ func (mk *mockStakingKeeper) GetValidatorByConsAddr(_ context.Context, _ sdk.Con
 }
 
 func (mk *mockStakingKeeper) Jail(_ context.Context, _ sdk.ConsAddress) error {
+	return nil
+}
+
+func (mk *mockStakingKeeper) Unjail(_ context.Context, _ sdk.ConsAddress) error {
 	return nil
 }
 
@@ -351,6 +357,164 @@ func (s *KeeperTestSuite) TestGenesis_EmptyVoteManagerNotSet() {
 	mgr, err := s.keeper.GetVoteManager(kv)
 	s.Require().NoError(err)
 	s.Require().Nil(mgr)
+}
+
+// ---------------------------------------------------------------------------
+// MsgUnjailValidator handler tests
+// ---------------------------------------------------------------------------
+
+// unjailTrackingStakingKeeper tracks Jail/Unjail calls for unjail tests.
+type unjailTrackingStakingKeeper struct {
+	validators      map[string]stakingtypes.Validator
+	unjailedAddrs   []sdk.ConsAddress
+}
+
+func newUnjailTrackingKeeper() *unjailTrackingStakingKeeper {
+	return &unjailTrackingStakingKeeper{
+		validators: make(map[string]stakingtypes.Validator),
+	}
+}
+
+func (uk *unjailTrackingStakingKeeper) addValidator(val stakingtypes.Validator) {
+	uk.validators[val.OperatorAddress] = val
+}
+
+func (uk *unjailTrackingStakingKeeper) GetValidator(_ context.Context, addr sdk.ValAddress) (stakingtypes.Validator, error) {
+	v, ok := uk.validators[addr.String()]
+	if !ok {
+		return stakingtypes.Validator{}, fmt.Errorf("validator %s not found", addr)
+	}
+	return v, nil
+}
+
+func (uk *unjailTrackingStakingKeeper) GetValidatorByConsAddr(_ context.Context, _ sdk.ConsAddress) (stakingtypes.Validator, error) {
+	return stakingtypes.Validator{}, fmt.Errorf("not implemented")
+}
+
+func (uk *unjailTrackingStakingKeeper) Jail(_ context.Context, _ sdk.ConsAddress) error {
+	return nil
+}
+
+func (uk *unjailTrackingStakingKeeper) Unjail(_ context.Context, consAddr sdk.ConsAddress) error {
+	uk.unjailedAddrs = append(uk.unjailedAddrs, consAddr)
+	return nil
+}
+
+func (s *MsgServerTestSuite) TestUnjailValidator_Success() {
+	s.SetupTest()
+
+	// Create a mock with a jailed validator and a bonded sender.
+	uk := newUnjailTrackingKeeper()
+
+	senderAddr := testValAddr(1)
+	targetAddr := testValAddr(2)
+
+	// Sender is bonded (not jailed).
+	uk.addValidator(stakingtypes.Validator{
+		OperatorAddress: senderAddr,
+		Status:          stakingtypes.Bonded,
+		Jailed:          false,
+	})
+
+	// Target is jailed, with a real consensus pubkey for GetConsAddr.
+	targetPk := ed25519.GenPrivKey().PubKey()
+	targetPkAny, err := codectypes.NewAnyWithValue(targetPk)
+	s.Require().NoError(err)
+	uk.addValidator(stakingtypes.Validator{
+		OperatorAddress: targetAddr,
+		ConsensusPubkey: targetPkAny,
+		Status:          stakingtypes.Bonded,
+		Jailed:          true,
+	})
+
+	s.setupWithMockStakingKeeper(uk)
+
+	// Pre-seed some ceremony misses for the jailed validator.
+	kv := s.keeper.OpenKVStore(s.ctx)
+	_, err = s.keeper.IncrementCeremonyMiss(kv, targetAddr)
+	s.Require().NoError(err)
+	_, err = s.keeper.IncrementCeremonyMiss(kv, targetAddr)
+	s.Require().NoError(err)
+
+	_, err = s.msgServer.UnjailValidator(s.ctx, &types.MsgUnjailValidator{
+		Creator:          senderAddr,
+		ValidatorAddress: targetAddr,
+	})
+	s.Require().NoError(err)
+
+	// Unjail was called on the staking keeper.
+	s.Require().Len(uk.unjailedAddrs, 1)
+
+	// Ceremony miss counter was reset.
+	missCount, err := s.keeper.GetCeremonyMissCount(kv, targetAddr)
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(0), missCount)
+
+	// Event emitted.
+	var found bool
+	for _, e := range s.ctx.EventManager().Events() {
+		if e.Type == types.EventTypeUnjailValidator {
+			found = true
+		}
+	}
+	s.Require().True(found, "expected %s event", types.EventTypeUnjailValidator)
+}
+
+func (s *MsgServerTestSuite) TestUnjailValidator_NonValidatorRejected() {
+	s.SetupTest()
+	s.setupWithMockStaking() // no validators
+
+	_, err := s.msgServer.UnjailValidator(s.ctx, &types.MsgUnjailValidator{
+		Creator:          testValAddr(1),
+		ValidatorAddress: testValAddr(2),
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not a bonded validator")
+}
+
+func (s *MsgServerTestSuite) TestUnjailValidator_NotJailedRejected() {
+	s.SetupTest()
+
+	uk := newUnjailTrackingKeeper()
+	senderAddr := testValAddr(1)
+	targetAddr := testValAddr(2)
+
+	uk.addValidator(stakingtypes.Validator{
+		OperatorAddress: senderAddr,
+		Status:          stakingtypes.Bonded,
+	})
+	// Target is NOT jailed.
+	targetPk := ed25519.GenPrivKey().PubKey()
+	targetPkAny, err := codectypes.NewAnyWithValue(targetPk)
+	s.Require().NoError(err)
+	uk.addValidator(stakingtypes.Validator{
+		OperatorAddress: targetAddr,
+		ConsensusPubkey: targetPkAny,
+		Status:          stakingtypes.Bonded,
+		Jailed:          false,
+	})
+
+	s.setupWithMockStakingKeeper(uk)
+
+	_, err = s.msgServer.UnjailValidator(s.ctx, &types.MsgUnjailValidator{
+		Creator:          senderAddr,
+		ValidatorAddress: targetAddr,
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not jailed")
+}
+
+func (s *MsgServerTestSuite) TestUnjailValidator_EmptyAddressRejected() {
+	s.SetupTest()
+	senderAddr := testValAddr(1)
+	s.setupWithMockStaking(senderAddr)
+
+	_, err := s.msgServer.UnjailValidator(s.ctx, &types.MsgUnjailValidator{
+		Creator:          senderAddr,
+		ValidatorAddress: "",
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "validator_address cannot be empty")
 }
 
 // ---------------------------------------------------------------------------

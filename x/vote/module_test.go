@@ -326,6 +326,10 @@ func (jk *jailTrackingStakingKeeper) Jail(_ context.Context, consAddr sdk.ConsAd
 	return nil
 }
 
+func (jk *jailTrackingStakingKeeper) Unjail(_ context.Context, _ sdk.ConsAddress) error {
+	return nil
+}
+
 // setupJailTest creates a keeper with a jail-tracking staking mock and a
 // validator with a real consensus pubkey so JailValidator → GetConsAddr succeeds.
 func (s *EndBlockerTestSuite) setupJailTest() (sdk.Context, keeper.Keeper, vote.AppModule, *jailTrackingStakingKeeper, sdk.ValAddress) {
@@ -633,6 +637,7 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		vote.ProvideRegisterPallasKeySigner(),
 		vote.ProvideDealExecutiveAuthorityKeySigner(),
 		vote.ProvideAckExecutiveAuthorityKeySigner(),
+		vote.ProvideUnjailValidatorSigner(),
 	}
 
 	wantMsgTypes := []protoreflect.FullName{
@@ -644,6 +649,7 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		"zvote.v1.MsgRegisterPallasKey",
 		"zvote.v1.MsgDealExecutiveAuthorityKey",
 		"zvote.v1.MsgAckExecutiveAuthorityKey",
+		"zvote.v1.MsgUnjailValidator",
 	}
 
 	signerMap := make(map[protoreflect.FullName]bool, len(allSigners))

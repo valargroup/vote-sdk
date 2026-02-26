@@ -22,6 +22,7 @@ service Msg {
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
   rpc SetVoteManager(MsgSetVoteManager) returns (MsgSetVoteManagerResponse);
+  rpc UnjailValidator(MsgUnjailValidator) returns (MsgUnjailValidatorResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -163,3 +164,12 @@ message MsgSetVoteManager {
 }
 
 message MsgSetVoteManagerResponse {}
+
+// MsgUnjailValidator unjails a jailed validator.
+// Any bonded validator can submit this message to unjail any jailed validator.
+message MsgUnjailValidator {
+  string creator           = 1; // Must be a bonded validator
+  string validator_address = 2; // Jailed validator's operator address
+}
+
+message MsgUnjailValidatorResponse {}
