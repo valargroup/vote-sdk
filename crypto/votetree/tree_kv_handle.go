@@ -38,7 +38,7 @@ func NewTreeHandleWithKV(proxy *KvStoreProxy, nextPosition uint64) *TreeHandle {
 	// Go pointers; passing a raw *KvStoreProxy to C would violate CGO pointer
 	// rules. The handle is an opaque integer — safe to pass as ctx.
 	h := cgo.NewHandle(proxy)
-	ctx := unsafe.Pointer(uintptr(h))
+	ctx := unsafe.Pointer(uintptr(h)) //nolint:govet
 	ptr := C.zally_vote_tree_create_with_kv(
 		ctx,
 		C.ZallyKvGetFn(C.zallyKvGet),

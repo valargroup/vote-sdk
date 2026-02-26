@@ -1035,6 +1035,41 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackRebuild() {
 	s.Require().Equal(root3Rollback, freshRoot3, "post-rollback root must match fresh rebuild")
 }
 
+// TestComputeTreeRoot_ColdStartNoNewLeaves verifies that a cold-start keeper
+// returns the correct root for a block that adds no new leaves. This exercises
+// the latest_checkpoint restoration path: on cold start TreeServer restores
+// latest_checkpoint from KV so Root() is correct even when appended=false
+// (no new checkpoint is created for the second call).
+func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	// Append 4 leaves and compute root at height 10.
+	for i := uint64(1); i <= 4; i++ {
+		_, err := s.keeper.AppendCommitment(kv, fpLE(i))
+		s.Require().NoError(err)
+	}
+	root1, err := s.keeper.ComputeTreeRoot(kv, 4, 10)
+	s.Require().NoError(err)
+	s.Require().Len(root1, 32)
+
+	// Simulate a node restart: new keeper with the same KV store but a nil
+	// tree handle (cold start). No leaves are appended between H1 and H2.
+	freshKeeper := keeper.NewKeeper(
+		s.keeper.StoreServiceForTest(),
+		"zvote1authority",
+		log.NewNopLogger(),
+		nil,
+	)
+
+	// Call at a later block height but with the same nextIndex. The keeper
+	// must restore latest_checkpoint from KV and return the correct root
+	// without attempting a duplicate checkpoint (which would panic).
+	root2, err := freshKeeper.ComputeTreeRoot(kv, 4, 20)
+	s.Require().NoError(err)
+	s.Require().Equal(root1, root2, "cold-start root must match original root when no new leaves added")
+}
+
 // TestComputeTreeRoot_IdempotentSameBlock verifies that calling ComputeTreeRoot
 // twice at the same block height (same nextIndex) returns the same root.
 func (s *KeeperTestSuite) TestComputeTreeRoot_IdempotentSameBlock() {
