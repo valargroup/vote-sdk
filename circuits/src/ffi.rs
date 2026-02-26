@@ -1433,13 +1433,14 @@ mod tests {
     fn test_generate_share_reveal() {
         let (
             merkle_path,
-            enc_shares,
-            share_blinds,
+            share_comms,
+            primary_blind,
+            enc_c1_x,
+            enc_c2_x,
             share_index,
             proposal_id,
             vote_decision,
             round_id,
-            shares_hash,
         ) = build_share_reveal_test_data();
 
         let mut proof_buf = [0u8; 8192];
@@ -1451,16 +1452,16 @@ mod tests {
             zally_generate_share_reveal(
                 merkle_path.as_ptr(),
                 merkle_path.len(),
-                enc_shares.as_ptr(),
-                enc_shares.len(),
-                share_blinds.as_ptr(),
-                share_blinds.len(),
+                share_comms.as_ptr(),
+                share_comms.len(),
+                primary_blind.as_ptr(),
+                enc_c1_x.as_ptr(),
+                enc_c2_x.as_ptr(),
                 share_index,
                 proposal_id,
                 vote_decision,
                 round_id.as_ptr(),
                 round_id.len(),
-                shares_hash.as_ptr(),
                 proof_buf.as_mut_ptr(),
                 proof_buf.len(),
                 &mut proof_len,
@@ -1482,13 +1483,12 @@ mod tests {
         // Slot 0: share_nullifier
         public_inputs[0..32].copy_from_slice(&nullifier);
 
-        // Slot 1: enc_share_c1_x (for share_index=0 → enc_shares[0..32])
-        let idx = share_index as usize;
-        public_inputs[32..64].copy_from_slice(&enc_shares[idx * 64..idx * 64 + 32]);
+        // Slot 1: enc_share_c1_x
+        public_inputs[32..64].copy_from_slice(&enc_c1_x);
         public_inputs[63] &= 0x7F; // clear sign bit
 
         // Slot 2: enc_share_c2_x
-        public_inputs[64..96].copy_from_slice(&enc_shares[idx * 64 + 32..idx * 64 + 64]);
+        public_inputs[64..96].copy_from_slice(&enc_c2_x);
         public_inputs[95] &= 0x7F;
 
         // Slot 3: proposal_id as Fp (small u32 → first 4 bytes LE)
