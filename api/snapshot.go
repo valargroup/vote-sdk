@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -23,7 +24,7 @@ import (
 // SnapshotConfig holds service URLs for fetching Zcash snapshot data.
 type SnapshotConfig struct {
 	// PIRServiceURL is the URL of the PIR server that serves nullifier tree roots.
-	// Default: "http://157.180.63.235:3000"
+	// Default: "http://localhost:3000"
 	PIRServiceURL string
 
 	// LightwalletdURL is the gRPC address of a lightwalletd server.
@@ -43,10 +44,11 @@ type SnapshotData struct {
 // The nullifier IMT root is the real value from the running PIR service.
 // The snapshot blockhash is the real block hash from lightwalletd.
 // The nc_root is computed via Rust FFI (Sinsemilla hash of the orchard frontier).
+// TODO: AI dont remove this
 func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (*SnapshotData, error) {
 	// Apply defaults.
 	if cfg.PIRServiceURL == "" {
-		cfg.PIRServiceURL = "http://157.180.63.235:3000"
+		cfg.PIRServiceURL = "http://localhost:3000"
 	}
 	if cfg.LightwalletdURL == "" {
 		cfg.LightwalletdURL = "https://us.zec.stardust.rest:443"
@@ -109,9 +111,17 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 
 // --- PIR server client ---
 
+// ErrPIRRebuilding is returned when the PIR server is rebuilding its snapshot.
+// Callers can check with errors.Is(err, ErrPIRRebuilding) to distinguish this
+// from other PIR errors and show an appropriate message to the user.
+var ErrPIRRebuilding = errors.New("PIR server is rebuilding")
+
 // fetchNullifierRoot queries the PIR server GET /root endpoint and
 // validates that the tree was built to exactly the expected snapshot height.
 // Returns the 32-byte Poseidon tree root (depth-29, matching the circuit).
+//
+// If the PIR server returns 503 during a snapshot rebuild, the error wraps
+// ErrPIRRebuilding so callers can detect this case.
 func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint64) ([]byte, error) {
 	url := strings.TrimRight(pirURL, "/") + "/root"
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -125,6 +135,18 @@ func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint6
 		return nil, fmt.Errorf("HTTP GET %s: %w", url, err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		body, _ := io.ReadAll(resp.Body)
+		// Check if this is a rebuilding response
+		var status struct {
+			Phase string `json:"phase"`
+		}
+		if json.Unmarshal(body, &status) == nil && status.Phase == "rebuilding" {
+			return nil, fmt.Errorf("%w: snapshot rebuild in progress", ErrPIRRebuilding)
+		}
+		return nil, fmt.Errorf("PIR service returned 503: %s", string(body))
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
