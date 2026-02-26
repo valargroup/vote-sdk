@@ -1695,6 +1695,28 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
   const [sortBy, setSortBy] = useState<"power" | "moniker">("power");
   const [ceremony, setCeremony] = useState<chainApi.CeremonyState | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [unjailing, setUnjailing] = useState<string | null>(null); // operator_address being unjailed
+  const [unjailResult, setUnjailResult] = useState<{ addr: string; ok: boolean; msg: string } | null>(null);
+
+  const handleUnjail = async (operatorAddress: string) => {
+    if (!wallet.signer) return;
+    setUnjailing(operatorAddress);
+    setUnjailResult(null);
+    try {
+      const base = chainApi.getApiBase();
+      const res = await cosmosTx.unjailValidator(base, wallet.signer, operatorAddress);
+      if (res.code === 0) {
+        setUnjailResult({ addr: operatorAddress, ok: true, msg: `Unjailed (tx ${res.tx_hash.slice(0, 12)}…)` });
+        fetchValidators(); // refresh list
+      } else {
+        setUnjailResult({ addr: operatorAddress, ok: false, msg: res.log || `tx failed (code ${res.code})` });
+      }
+    } catch (err) {
+      setUnjailResult({ addr: operatorAddress, ok: false, msg: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setUnjailing(null);
+    }
+  };
 
   const fetchValidators = async () => {
     setLoading(true);
@@ -1892,7 +1914,18 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                         <span title="Election authority"><ShieldCheck size={12} className="text-accent shrink-0" /></span>
                       )}
                       {val.jailed && (
-                        <span title="Jailed"><ShieldAlert size={12} className="text-danger shrink-0" /></span>
+                        <>
+                          <span title="Jailed"><ShieldAlert size={12} className="text-danger shrink-0" /></span>
+                          {wallet.address && (
+                            <button
+                              className="text-[9px] px-1.5 py-0.5 rounded bg-danger/20 text-danger hover:bg-danger/30 transition-colors disabled:opacity-50"
+                              disabled={unjailing === val.operator_address}
+                              onClick={() => handleUnjail(val.operator_address!)}
+                            >
+                              {unjailing === val.operator_address ? "Unjailing…" : "Unjail"}
+                            </button>
+                          )}
+                        </>
                       )}
                       <span className={`text-[9px] px-2 py-0.5 rounded-full shrink-0 ${statusInfo.color}`}>
                         {statusInfo.label}
@@ -1903,6 +1936,13 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                     <p className="text-[10px] text-text-muted font-mono mt-1 truncate">
                       {val.operator_address}
                     </p>
+
+                    {/* Unjail result */}
+                    {unjailResult && unjailResult.addr === val.operator_address && (
+                      <p className={`text-[10px] mt-1 ${unjailResult.ok ? "text-green-400" : "text-danger"}`}>
+                        {unjailResult.msg}
+                      </p>
+                    )}
 
                     {/* Description */}
                     {val.description?.details && (

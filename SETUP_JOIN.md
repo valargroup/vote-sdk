@@ -84,7 +84,7 @@ zallyd query staking validators --node tcp://localhost:26657
 
 The EA key ceremony is automatic. When a new voting round is created, your validator is included in the ceremony if it is bonded and has a registered Pallas key (done automatically by `join.sh` / `join-dev.sh`). The block proposer handles dealing and acking via `PrepareProposal` — no manual steps required.
 
-If your validator fails to ack in 3 consecutive ceremonies, it will be jailed. There is currently no unjail mechanism — the slashing module is not registered, so `tx slashing unjail` is unavailable. A jailed validator must be replaced by joining with a new identity (re-run `join.sh`).
+If your validator fails to ack in 3 consecutive ceremonies, it will be jailed. Any bonded validator can unjail a jailed validator using the admin UI (click the "Unjail" button on the jailed validator's card). Unjailing also resets the ceremony miss counter.
 
 Check ceremony status:
 

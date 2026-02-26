@@ -14,6 +14,7 @@ const (
 	EventTypeAckExecutiveAuthorityKey     = "ack_executive_authority_key"
 	EventTypeCeremonyStatusChange             = "ceremony_status_change"
 	EventTypeSetVoteManager                   = "set_vote_manager"
+	EventTypeUnjailValidator                  = "unjail_validator"
 )
 
 // Event attribute keys.

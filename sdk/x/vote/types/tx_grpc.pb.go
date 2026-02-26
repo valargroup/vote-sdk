@@ -29,6 +29,7 @@ const (
 	Msg_AckExecutiveAuthorityKey_FullMethodName     = "/zvote.v1.Msg/AckExecutiveAuthorityKey"
 	Msg_CreateValidatorWithPallasKey_FullMethodName = "/zvote.v1.Msg/CreateValidatorWithPallasKey"
 	Msg_SetVoteManager_FullMethodName               = "/zvote.v1.Msg/SetVoteManager"
+	Msg_UnjailValidator_FullMethodName              = "/zvote.v1.Msg/UnjailValidator"
 )
 
 // MsgClient is the client API for Msg service.
@@ -50,6 +51,7 @@ type MsgClient interface {
 	AckExecutiveAuthorityKey(ctx context.Context, in *MsgAckExecutiveAuthorityKey, opts ...grpc.CallOption) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(ctx context.Context, in *MsgCreateValidatorWithPallasKey, opts ...grpc.CallOption) (*MsgCreateValidatorWithPallasKeyResponse, error)
 	SetVoteManager(ctx context.Context, in *MsgSetVoteManager, opts ...grpc.CallOption) (*MsgSetVoteManagerResponse, error)
+	UnjailValidator(ctx context.Context, in *MsgUnjailValidator, opts ...grpc.CallOption) (*MsgUnjailValidatorResponse, error)
 }
 
 type msgClient struct {
@@ -160,6 +162,16 @@ func (c *msgClient) SetVoteManager(ctx context.Context, in *MsgSetVoteManager, o
 	return out, nil
 }
 
+func (c *msgClient) UnjailValidator(ctx context.Context, in *MsgUnjailValidator, opts ...grpc.CallOption) (*MsgUnjailValidatorResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgUnjailValidatorResponse)
+	err := c.cc.Invoke(ctx, Msg_UnjailValidator_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MsgServer is the server API for Msg service.
 // All implementations must embed UnimplementedMsgServer
 // for forward compatibility.
@@ -179,6 +191,7 @@ type MsgServer interface {
 	AckExecutiveAuthorityKey(context.Context, *MsgAckExecutiveAuthorityKey) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(context.Context, *MsgCreateValidatorWithPallasKey) (*MsgCreateValidatorWithPallasKeyResponse, error)
 	SetVoteManager(context.Context, *MsgSetVoteManager) (*MsgSetVoteManagerResponse, error)
+	UnjailValidator(context.Context, *MsgUnjailValidator) (*MsgUnjailValidatorResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
 
@@ -218,6 +231,9 @@ func (UnimplementedMsgServer) CreateValidatorWithPallasKey(context.Context, *Msg
 }
 func (UnimplementedMsgServer) SetVoteManager(context.Context, *MsgSetVoteManager) (*MsgSetVoteManagerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetVoteManager not implemented")
+}
+func (UnimplementedMsgServer) UnjailValidator(context.Context, *MsgUnjailValidator) (*MsgUnjailValidatorResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnjailValidator not implemented")
 }
 func (UnimplementedMsgServer) mustEmbedUnimplementedMsgServer() {}
 func (UnimplementedMsgServer) testEmbeddedByValue()             {}
@@ -420,6 +436,24 @@ func _Msg_SetVoteManager_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_UnjailValidator_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgUnjailValidator)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).UnjailValidator(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_UnjailValidator_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).UnjailValidator(ctx, req.(*MsgUnjailValidator))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Msg_ServiceDesc is the grpc.ServiceDesc for Msg service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -466,6 +500,10 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetVoteManager",
 			Handler:    _Msg_SetVoteManager_Handler,
+		},
+		{
+			MethodName: "UnjailValidator",
+			Handler:    _Msg_UnjailValidator_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

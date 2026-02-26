@@ -206,6 +206,28 @@ const MsgCreateVotingSessionProto = {
   },
 };
 
+// ── Protobuf type: MsgUnjailValidator ────────────────────────────
+
+// message MsgUnjailValidator { string creator = 1; string validator_address = 2; }
+const MsgUnjailValidatorProto = {
+  encode(
+    message: { creator: string; validatorAddress: string },
+    writer: ProtoWriter = ProtoWriter.create(),
+  ): ProtoWriter {
+    if (message.creator !== "") writer.uint32(10).string(message.creator);
+    if (message.validatorAddress !== "") writer.uint32(18).string(message.validatorAddress);
+    return writer;
+  },
+  decode(): { creator: string; validatorAddress: string } {
+    throw new Error("decode not implemented");
+  },
+  fromPartial(
+    object: Partial<{ creator: string; validatorAddress: string }>,
+  ): { creator: string; validatorAddress: string } {
+    return { creator: object.creator ?? "", validatorAddress: object.validatorAddress ?? "" };
+  },
+};
+
 // ── Protobuf type: MsgSend (cosmos.bank.v1beta1) ────────────────
 
 // message Coin { string denom = 1; string amount = 2; }
@@ -247,6 +269,8 @@ function createRegistry(): Registry {
   registry.register("/zvote.v1.MsgSetVoteManager", MsgSetVoteManagerProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/zvote.v1.MsgCreateVotingSession", MsgCreateVotingSessionProto as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registry.register("/zvote.v1.MsgUnjailValidator", MsgUnjailValidatorProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/cosmos.bank.v1beta1.MsgSend", MsgSendProto as any);
   return registry;
@@ -589,6 +613,29 @@ export async function fundValidator(
           toAddress,
           amount: [{ denom: "uzvote", amount: amountUzvote }],
         },
+      },
+    ],
+  });
+}
+
+/**
+ * Sign and broadcast a MsgUnjailValidator transaction.
+ *
+ * Any bonded validator can unjail any jailed validator.
+ */
+export async function unjailValidator(
+  apiBase: string,
+  signer: OfflineDirectSigner,
+  validatorAddress: string,
+): Promise<BroadcastResult> {
+  const [account] = await signer.getAccounts();
+  return signAndBroadcast({
+    apiBase,
+    signer,
+    messages: [
+      {
+        typeUrl: "/zvote.v1.MsgUnjailValidator",
+        value: { creator: account.address, validatorAddress },
       },
     ],
   });

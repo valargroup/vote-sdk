@@ -268,6 +268,17 @@ func (msg *MsgSubmitTally) GetNullifierType() NullifierType { return 0 }
 // AcceptsTallyingRound returns true — submitting a tally requires TALLYING status.
 func (msg *MsgSubmitTally) AcceptsTallyingRound() bool { return true }
 
+// ValidateBasic performs stateless validation for MsgUnjailValidator.
+func (msg *MsgUnjailValidator) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if msg.ValidatorAddress == "" {
+		return fmt.Errorf("%w: validator_address cannot be empty", ErrInvalidField)
+	}
+	return nil
+}
+
 // isASCII returns true if every byte in s is in the ASCII range (0x00-0x7F).
 func isASCII(s string) bool {
 	for i := 0; i < len(s); i++ {
