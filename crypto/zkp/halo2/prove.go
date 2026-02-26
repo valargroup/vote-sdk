@@ -18,7 +18,7 @@ import (
 // Rust Halo2 prover via CGo. This is a CPU-intensive operation (~30-60s).
 //
 // Parameters:
-//   - merklePath: 772-byte serialized Merkle path (from votetree.ComputeMerklePath)
+//   - merklePath: 772-byte serialized Merkle path (from votetree.TreeHandle.Path)
 //   - allEncShares: 32 compressed Pallas points (C1_0, C2_0, ..., C1_15, C2_15), 32 bytes each
 //   - shareBlinds: 16 per-share blind factors, 32 bytes each
 //   - shareIndex: which of the 16 shares (0..15)

@@ -251,111 +251,6 @@ pub unsafe extern "C" fn zally_verify_redpallas_sig(
 }
 
 // ---------------------------------------------------------------------------
-// Vote commitment tree — Poseidon Merkle root and path via FFI
-// ---------------------------------------------------------------------------
-
-/// Compute the Poseidon Merkle root of a vote commitment tree built from the
-/// given leaves.
-///
-/// This is a **stateless** call: a fresh tree is constructed from the leaf
-/// array, checkpointed, and the root is returned. O(n) in leaf count.
-///
-/// # Arguments
-/// * `leaves_ptr`  - Pointer to a flat byte array of leaves. Each leaf is
-///                   32 bytes (Pallas Fp, little-endian canonical repr).
-///                   Total size: `leaf_count * 32`.
-/// * `leaf_count`  - Number of leaves.
-/// * `root_out`    - Pointer to a 32-byte output buffer for the root.
-///
-/// # Returns
-/// * `0`  on success (root written to `root_out`).
-/// * `-1` if inputs are invalid (null pointers).
-/// * `-3` if a leaf contains a non-canonical field element encoding.
-///
-/// # Safety
-/// Caller must ensure pointers are valid and buffers are correctly sized.
-///
-/// # Note
-/// This stateless API builds a fresh in-memory tree on every call. For
-/// production use across multiple blocks, prefer the stateful
-/// `zally_vote_tree_create_with_kv` / `zally_vote_tree_root_stateful` API.
-#[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_root(
-    leaves_ptr: *const u8,
-    leaf_count: usize,
-    root_out: *mut u8,
-) -> i32 {
-    if root_out.is_null() {
-        return -1;
-    }
-    if leaf_count > 0 && leaves_ptr.is_null() {
-        return -1;
-    }
-
-    match votetree::compute_root_from_raw(leaves_ptr, leaf_count) {
-        Ok(root_bytes) => {
-            std::ptr::copy_nonoverlapping(root_bytes.as_ptr(), root_out, 32);
-            0
-        }
-        Err(votetree::FfiError::InvalidInput) => -1,
-        Err(votetree::FfiError::Deserialization) => -3,
-        Err(votetree::FfiError::PositionOutOfRange) => -2,
-        Err(votetree::FfiError::Storage) => -4,
-    }
-}
-
-/// Compute the Poseidon Merkle authentication path for a leaf at `position`
-/// in a vote commitment tree built from the given leaves.
-///
-/// The path is serialized as [`MERKLE_PATH_BYTES`] bytes:
-/// - Bytes `[0..4)`:    position (`u32` LE)
-/// - Remaining bytes:   auth path (TREE_DEPTH sibling hashes, 32 bytes each, leaf→root)
-///
-/// # Arguments
-/// * `leaves_ptr`  - Pointer to a flat byte array of leaves (each 32 bytes LE Fp).
-/// * `leaf_count`  - Number of leaves.
-/// * `position`    - Leaf index for which to generate the path.
-/// * `path_out`    - Pointer to a [`MERKLE_PATH_BYTES`]-byte output buffer.
-///
-/// # Returns
-/// * `0`  on success (path written to `path_out`).
-/// * `-1` if inputs are invalid (null pointers, zero leaves).
-/// * `-2` if `position` is out of range (>= leaf_count).
-/// * `-3` if a leaf contains a non-canonical field element encoding.
-///
-/// # Safety
-/// Caller must ensure pointers are valid and buffers are correctly sized.
-///
-/// # Note
-/// This stateless API builds a fresh in-memory tree on every call. For
-/// production use, prefer `zally_vote_tree_path_stateful`.
-#[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_path(
-    leaves_ptr: *const u8,
-    leaf_count: usize,
-    position: u64,
-    path_out: *mut u8,
-) -> i32 {
-    if leaves_ptr.is_null() || path_out.is_null() {
-        return -1;
-    }
-    if leaf_count == 0 {
-        return -1;
-    }
-
-    match votetree::compute_path_from_raw(leaves_ptr, leaf_count, position) {
-        Ok(path_bytes) => {
-            std::ptr::copy_nonoverlapping(path_bytes.as_ptr(), path_out, path_bytes.len());
-            0
-        }
-        Err(votetree::FfiError::InvalidInput) => -1,
-        Err(votetree::FfiError::PositionOutOfRange) => -2,
-        Err(votetree::FfiError::Deserialization) => -3,
-        Err(votetree::FfiError::Storage) => -4,
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Delegation circuit (ZKP #1) — real Halo2 proof verification
 // ---------------------------------------------------------------------------
 
@@ -940,7 +835,7 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
 /// 8. Generate Halo2 proof (CPU-intensive, ~30-60s in release mode)
 ///
 /// # Arguments
-/// * `merkle_path_ptr/len`       - 772-byte serialized Merkle path (from `zally_vote_tree_path`)
+/// * `merkle_path_ptr/len`       - 772-byte serialized Merkle path (from `zally_vote_tree_path_stateful`)
 /// * `all_enc_shares_ptr/len`    - 1024 bytes: 16 shares × (C1 + C2) × 32 bytes each
 ///                                 Order: C1_0, C2_0, C1_1, C2_1, ..., C1_15, C2_15
 /// * `share_index`               - Which of the 16 shares (0..15)

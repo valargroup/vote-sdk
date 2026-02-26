@@ -46,69 +46,65 @@ func fpLE(v uint64) []byte {
 	return buf
 }
 
+// treeRoot builds an ephemeral tree from leaves and returns its root.
+// Convenience helper for golden-vector tests.
+func treeRoot(t *testing.T, leaves [][]byte) []byte {
+	t.Helper()
+	h := NewTreeHandle()
+	defer h.Close()
+	if len(leaves) > 0 {
+		require.NoError(t, h.AppendBatch(leaves))
+	}
+	require.NoError(t, h.Checkpoint(1))
+	root, err := h.Root()
+	require.NoError(t, err)
+	return root
+}
+
 // ---------------------------------------------------------------------------
-// Tests
+// Root golden-vector tests (stateful API)
 // ---------------------------------------------------------------------------
 
-// TestComputePoseidonRoot_GoldenVector verifies the 3-leaf golden root matches
-// the hardcoded Rust value.
-func TestComputePoseidonRoot_GoldenVector(t *testing.T) {
-	root, err := ComputePoseidonRoot(goldenLeaves())
-	require.NoError(t, err)
+// TestTreeRoot_GoldenVector verifies the 3-leaf golden root matches the
+// hardcoded Rust value.
+func TestTreeRoot_GoldenVector(t *testing.T) {
+	root := treeRoot(t, goldenLeaves())
 	require.Equal(t, goldenRoot(), root, "golden 3-leaf root must match Rust")
 }
 
-// TestComputePoseidonRoot_MatchesRust is an alias for the golden vector test,
-// explicitly named to show cross-language parity.
-func TestComputePoseidonRoot_MatchesRust(t *testing.T) {
-	root, err := ComputePoseidonRoot(goldenLeaves())
-	require.NoError(t, err)
-	require.Equal(t, goldenRoot(), root)
-}
-
-// TestComputePoseidonRoot_Empty verifies that an empty tree returns the
-// deterministic empty-tree Poseidon root.
-func TestComputePoseidonRoot_Empty(t *testing.T) {
-	root, err := ComputePoseidonRoot(nil)
-	require.NoError(t, err)
+// TestTreeRoot_Empty verifies that an empty tree returns the deterministic
+// empty-tree Poseidon root.
+func TestTreeRoot_Empty(t *testing.T) {
+	root := treeRoot(t, nil)
 	require.Equal(t, emptyRoot(), root, "empty tree root must match Rust")
 }
 
-// TestComputePoseidonRoot_SingleLeaf verifies a single-leaf tree.
-func TestComputePoseidonRoot_SingleLeaf(t *testing.T) {
-	leaf := fpLE(42)
-	root, err := ComputePoseidonRoot([][]byte{leaf})
-	require.NoError(t, err)
+// TestTreeRoot_SingleLeaf verifies a single-leaf tree.
+func TestTreeRoot_SingleLeaf(t *testing.T) {
+	root := treeRoot(t, [][]byte{fpLE(42)})
 	require.Equal(t, singleLeaf42Root(), root, "single leaf (42) root must match Rust")
 }
 
-// TestComputePoseidonRoot_Deterministic verifies that the same leaves always
-// produce the same root.
-func TestComputePoseidonRoot_Deterministic(t *testing.T) {
+// TestTreeRoot_Deterministic verifies that the same leaves always produce the
+// same root.
+func TestTreeRoot_Deterministic(t *testing.T) {
 	leaves := goldenLeaves()
-	root1, err := ComputePoseidonRoot(leaves)
-	require.NoError(t, err)
-	root2, err := ComputePoseidonRoot(leaves)
-	require.NoError(t, err)
+	root1 := treeRoot(t, leaves)
+	root2 := treeRoot(t, leaves)
 	require.Equal(t, root1, root2)
 }
 
-// TestComputePoseidonRoot_DifferentLeaves verifies that different leaves
-// produce different roots.
-func TestComputePoseidonRoot_DifferentLeaves(t *testing.T) {
-	leaves1 := [][]byte{fpLE(1), fpLE(2)}
-	leaves2 := [][]byte{fpLE(1), fpLE(3)}
-
-	root1, err := ComputePoseidonRoot(leaves1)
-	require.NoError(t, err)
-	root2, err := ComputePoseidonRoot(leaves2)
-	require.NoError(t, err)
+// TestTreeRoot_DifferentLeaves verifies that different leaves produce
+// different roots.
+func TestTreeRoot_DifferentLeaves(t *testing.T) {
+	root1 := treeRoot(t, [][]byte{fpLE(1), fpLE(2)})
+	root2 := treeRoot(t, [][]byte{fpLE(1), fpLE(3)})
 	require.NotEqual(t, root1, root2, "different leaves must produce different roots")
 }
 
-// TestComputePoseidonRoot_BadLeafSize verifies Go-side validation rejects
-// leaves with wrong sizes before calling the FFI.
-func TestComputePoseidonRoot_BadLeafSize(t *testing.T) {
+// TestTreeRoot_BadLeafSize verifies that AppendBatch rejects leaves with
+// wrong sizes before calling the FFI.
+func TestTreeRoot_BadLeafSize(t *testing.T) {
 	tests := []struct {
 		name   string
 		leaves [][]byte
@@ -138,68 +134,79 @@ func TestComputePoseidonRoot_BadLeafSize(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ComputePoseidonRoot(tc.leaves)
+			h := NewTreeHandle()
+			defer h.Close()
+			err := h.AppendBatch(tc.leaves)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.errMsg)
 		})
 	}
 }
 
-// TestComputeMerklePath_Verifies generates a path for each leaf in the golden
-// vector and verifies it recomputes the expected root.
-func TestComputeMerklePath_Verifies(t *testing.T) {
+// ---------------------------------------------------------------------------
+// Path tests (stateful API)
+// ---------------------------------------------------------------------------
+
+// TestTreePath_Verifies generates a path for each leaf in the golden vector
+// and verifies the position field is correct.
+func TestTreePath_Verifies(t *testing.T) {
 	leaves := goldenLeaves()
-	expectedRoot := goldenRoot()
+
+	h := NewTreeHandle()
+	defer h.Close()
+	require.NoError(t, h.AppendBatch(leaves))
+	require.NoError(t, h.Checkpoint(1))
 
 	for pos := uint64(0); pos < uint64(len(leaves)); pos++ {
-		pathBytes, err := ComputeMerklePath(leaves, pos)
+		pathBytes, err := h.Path(pos, 1)
 		require.NoError(t, err)
 		require.Len(t, pathBytes, MerklePathBytes, "path must be 772 bytes")
 
-		// The path starts with a u32 LE position.
 		gotPos := binary.LittleEndian.Uint32(pathBytes[:4])
 		require.Equal(t, uint32(pos), gotPos, "path position must match")
-
-		// Verify: recompute root from path and leaf.
-		// We do this by computing the root again and comparing — the
-		// full Merkle path verification logic is in Rust. Here we just
-		// verify the FFI round-trip produces a consistent root.
-		root, err := ComputePoseidonRoot(leaves)
-		require.NoError(t, err)
-		require.Equal(t, expectedRoot, root)
 	}
 }
 
-// TestComputeMerklePath_PositionOutOfRange verifies that position >= leaf_count
-// is rejected.
-func TestComputeMerklePath_PositionOutOfRange(t *testing.T) {
+// TestTreePath_PositionOutOfRange verifies that position >= leaf_count is
+// rejected.
+func TestTreePath_PositionOutOfRange(t *testing.T) {
 	leaves := goldenLeaves()
 
-	_, err := ComputeMerklePath(leaves, 3)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "position 3 out of range")
+	h := NewTreeHandle()
+	defer h.Close()
+	require.NoError(t, h.AppendBatch(leaves))
+	require.NoError(t, h.Checkpoint(1))
 
-	_, err = ComputeMerklePath(leaves, 100)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "position 100 out of range")
+	_, err := h.Path(3, 1)
+	require.Error(t, err, "position == len(leaves) must fail")
+
+	_, err = h.Path(100, 1)
+	require.Error(t, err, "position >> len(leaves) must fail")
 }
 
-// TestComputeMerklePath_EmptyTree verifies that path computation on an empty
-// tree is rejected.
-func TestComputeMerklePath_EmptyTree(t *testing.T) {
-	_, err := ComputeMerklePath(nil, 0)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "empty tree")
+// TestTreePath_EmptyTree verifies that path computation on a tree with no
+// leaves returns an error.
+func TestTreePath_EmptyTree(t *testing.T) {
+	h := NewTreeHandle()
+	defer h.Close()
+	require.NoError(t, h.Checkpoint(1))
+
+	_, err := h.Path(0, 1)
+	require.Error(t, err, "path on empty tree must fail")
 }
 
-// TestComputeMerklePath_SingleLeaf verifies path generation for a 1-leaf tree.
-func TestComputeMerklePath_SingleLeaf(t *testing.T) {
+// TestTreePath_SingleLeaf verifies path generation for a 1-leaf tree.
+func TestTreePath_SingleLeaf(t *testing.T) {
 	leaf := fpLE(42)
-	pathBytes, err := ComputeMerklePath([][]byte{leaf}, 0)
+	h := NewTreeHandle()
+	defer h.Close()
+	require.NoError(t, h.AppendBatch([][]byte{leaf}))
+	require.NoError(t, h.Checkpoint(1))
+
+	pathBytes, err := h.Path(0, 1)
 	require.NoError(t, err)
 	require.Len(t, pathBytes, MerklePathBytes)
 
-	// Position should be 0.
 	gotPos := binary.LittleEndian.Uint32(pathBytes[:4])
 	require.Equal(t, uint32(0), gotPos)
 }
@@ -209,7 +216,7 @@ func TestComputeMerklePath_SingleLeaf(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestTreeHandle_GoldenVector verifies that the stateful TreeHandle produces
-// the same root as the stateless ComputePoseidonRoot for the golden leaves.
+// the expected golden root for the three golden leaves.
 func TestTreeHandle_GoldenVector(t *testing.T) {
 	h := NewTreeHandle()
 	defer h.Close()
@@ -219,7 +226,7 @@ func TestTreeHandle_GoldenVector(t *testing.T) {
 
 	root, err := h.Root()
 	require.NoError(t, err)
-	require.Equal(t, goldenRoot(), root, "stateful root must match stateless golden root")
+	require.Equal(t, goldenRoot(), root)
 }
 
 // TestTreeHandle_IncrementalMatchesFull verifies that appending leaves one at a
@@ -261,23 +268,16 @@ func TestTreeHandle_SizeTracking(t *testing.T) {
 	require.Equal(t, uint64(3), h.Size())
 }
 
-// TestTreeHandle_PathMatchesStateless verifies that the stateful Path() method
-// produces a path that is consistent with the stateless ComputeMerklePath.
-func TestTreeHandle_PathMatchesStateless(t *testing.T) {
+// TestTreeHandle_PathForEachLeaf verifies that Path() generates a valid
+// 772-byte path for each leaf position.
+func TestTreeHandle_PathForEachLeaf(t *testing.T) {
 	leaves := goldenLeaves()
 
-	// Build stateful handle.
 	h := NewTreeHandle()
 	defer h.Close()
 	require.NoError(t, h.AppendBatch(leaves))
 	require.NoError(t, h.Checkpoint(1))
 
-	// Build stateless root for comparison.
-	expectedRoot, err := ComputePoseidonRoot(leaves)
-	require.NoError(t, err)
-	_ = expectedRoot // Used for cross-check; path validity checked by size.
-
-	// Generate path for each leaf via stateful handle.
 	for pos := uint64(0); pos < uint64(len(leaves)); pos++ {
 		pathBytes, err := h.Path(pos, 1)
 		require.NoError(t, err, "path for position %d must not error", pos)
@@ -308,17 +308,15 @@ func TestTreeHandle_CloseIsIdempotent(t *testing.T) {
 	h.Close() // second call should be safe
 }
 
-// TestTreeHandle_RootMatchesStateless_AfterDeltaAppend verifies that appending
-// in two batches (simulating two blocks) produces the same root as a single
-// stateless call with all leaves.
-func TestTreeHandle_RootMatchesStateless_AfterDeltaAppend(t *testing.T) {
+// TestTreeHandle_DeltaAppendMatchesFull verifies that appending in two batches
+// (simulating two blocks) produces the same root as a single full-batch append.
+func TestTreeHandle_DeltaAppendMatchesFull(t *testing.T) {
 	all := goldenLeaves()
 
-	// Stateless: all 3 leaves at once.
-	staticRoot, err := ComputePoseidonRoot(all)
-	require.NoError(t, err)
+	// Full batch in one shot.
+	fullRoot := treeRoot(t, all)
 
-	// Stateful: first 2 leaves in block 1, then 1 more in block 2.
+	// Delta: first 2 leaves in block 1, then 1 more in block 2.
 	h := NewTreeHandle()
 	defer h.Close()
 	require.NoError(t, h.AppendBatch(all[:2]))
@@ -328,5 +326,5 @@ func TestTreeHandle_RootMatchesStateless_AfterDeltaAppend(t *testing.T) {
 	incrRoot, err := h.Root()
 	require.NoError(t, err)
 
-	require.Equal(t, staticRoot, incrRoot, "stateful delta root must match stateless full root")
+	require.Equal(t, fullRoot, incrRoot, "stateful delta root must match full-batch root")
 }

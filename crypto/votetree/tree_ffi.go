@@ -9,18 +9,17 @@
 // #2 (VAN membership) and ZKP #3 (VC membership). See vote-commitment-tree/
 // for the full tree implementation and protocol context.
 //
-// This package exposes two APIs:
+// # Stateful API: TreeHandle
 //
-//   - Stateless API: ComputePoseidonRoot / ComputeMerklePath — build a fresh
-//     in-memory tree from a flat leaf slice on every call. O(n) per call.
-//     Used by the helper server for proof generation and in tests.
+// TreeHandle wraps a Rust-side ShardTree<KvShardStore> that persists across
+// blocks. Rust reads and writes shards, the cap, and checkpoints directly to
+// the Cosmos KV store through Go callbacks registered at handle creation time.
+// AppendBatch appends only the delta leaves since the last call — O(k) per
+// block. Cold start is O(1): no leaf replay, no explicit restore loop.
 //
-//   - Stateful API: TreeHandle — wraps a Rust-side ShardTree<KvShardStore>
-//     that persists across blocks. Rust reads and writes shards, the cap, and
-//     checkpoints directly to the Cosmos KV store through Go callbacks
-//     registered at handle creation time. AppendBatch appends only the delta
-//     leaves since the last call — O(k) per block. Cold start is O(1): no
-//     leaf replay, no explicit restore loop.
+// For temporary use (e.g. the helper server computing a single path from a
+// flat leaf slice), use NewEphemeralTreeHandle which backs the same stateful
+// handle with an in-memory KV store.
 //
 // # Architecture
 //
@@ -97,61 +96,6 @@ const (
 	// and by ZKP #2 / ZKP #3 circuit inputs.
 	MerklePathBytes = 772
 )
-
-// ComputePoseidonRoot computes the Poseidon Merkle root from a complete slice
-// of commitment leaves. Each leaf must be exactly LeafBytes (32) bytes in
-// canonical Pallas Fp little-endian encoding.
-//
-// This is the stateless API: a fresh depth-24 ShardTree is built from
-// scratch on every call, checkpointed, and the root is returned. The cost is
-// O(n) in the number of leaves. Use TreeHandle for repeated calls across
-// blocks.
-//
-// A nil or empty slice returns the deterministic empty-tree root (the Poseidon
-// hash of the all-empty depth-24 tree).
-//
-// Returns a 32-byte root, or an error if any leaf has the wrong size or
-// contains a non-canonical Fp encoding (a bit-pattern ≥ the Pallas field
-// modulus).
-func ComputePoseidonRoot(leaves [][]byte) ([]byte, error) {
-	// Validate individual leaf sizes.
-	for i, leaf := range leaves {
-		if len(leaf) != LeafBytes {
-			return nil, fmt.Errorf("votetree: leaf %d must be %d bytes, got %d", i, LeafBytes, len(leaf))
-		}
-	}
-
-	// Flatten leaves into a contiguous byte array for the C call.
-	var flatPtr *C.uint8_t
-	leafCount := C.size_t(len(leaves))
-
-	if len(leaves) > 0 {
-		flat := make([]byte, len(leaves)*LeafBytes)
-		for i, leaf := range leaves {
-			copy(flat[i*LeafBytes:], leaf)
-		}
-		flatPtr = (*C.uint8_t)(unsafe.Pointer(&flat[0]))
-	}
-
-	// Allocate output buffer.
-	var rootBuf [LeafBytes]byte
-	rootOut := (*C.uint8_t)(unsafe.Pointer(&rootBuf[0]))
-
-	rc := C.zally_vote_tree_root(flatPtr, leafCount, rootOut)
-
-	switch rc {
-	case 0:
-		result := make([]byte, LeafBytes)
-		copy(result, rootBuf[:])
-		return result, nil
-	case -1:
-		return nil, fmt.Errorf("votetree: invalid inputs")
-	case -3:
-		return nil, fmt.Errorf("votetree: leaf deserialization error (non-canonical Fp)")
-	default:
-		return nil, fmt.Errorf("votetree: unknown error code %d", rc)
-	}
-}
 
 // TreeHandle is the stateful API: a Poseidon Merkle tree handle backed by a
 // Rust ShardTree<KvShardStore> whose shard reads/writes go directly to the
@@ -344,8 +288,8 @@ func (h *TreeHandle) Size() uint64 {
 // The path format is: 4 bytes (position u32 LE) || 24×32 bytes (sibling
 // hashes from leaf level up to the root, leaf-first).
 //
-// This is the stateful equivalent of ComputeMerklePath: it does not rebuild
-// the tree, and it can generate paths for any checkpoint height still held in
+// Unlike a fresh ephemeral tree, this does not rebuild the tree from scratch,
+// and it can generate paths for any checkpoint height still held in
 // the ShardTree's checkpoint window (up to MAX_CHECKPOINTS = 1000 blocks).
 // Returns an error if position ≥ Size() or height has no checkpoint.
 func (h *TreeHandle) Path(position uint64, height uint32) ([]byte, error) {
@@ -386,52 +330,3 @@ func (h *TreeHandle) Close() {
 	}
 }
 
-// ComputeMerklePath computes the Poseidon Merkle authentication path for the
-// leaf at position. Each leaf must be exactly LeafBytes (32) bytes.
-//
-// This is the stateless API: like ComputePoseidonRoot, it builds a fresh tree
-// from all leaves on every call (O(n)). Use TreeHandle.Path for repeated
-// calls across blocks.
-//
-// Returns a MerklePathBytes (772) byte slice:
-//   - Bytes [0..4):    leaf position (u32 LE)
-//   - Bytes [4..772):  24 sibling hashes, 32 bytes each, leaf→root order
-func ComputeMerklePath(leaves [][]byte, position uint64) ([]byte, error) {
-	if len(leaves) == 0 {
-		return nil, fmt.Errorf("votetree: cannot compute path for empty tree")
-	}
-	for i, leaf := range leaves {
-		if len(leaf) != LeafBytes {
-			return nil, fmt.Errorf("votetree: leaf %d must be %d bytes, got %d", i, LeafBytes, len(leaf))
-		}
-	}
-
-	// Flatten leaves.
-	flat := make([]byte, len(leaves)*LeafBytes)
-	for i, leaf := range leaves {
-		copy(flat[i*LeafBytes:], leaf)
-	}
-	flatPtr := (*C.uint8_t)(unsafe.Pointer(&flat[0]))
-	leafCount := C.size_t(len(leaves))
-
-	// Allocate output buffer.
-	var pathBuf [MerklePathBytes]byte
-	pathOut := (*C.uint8_t)(unsafe.Pointer(&pathBuf[0]))
-
-	rc := C.zally_vote_tree_path(flatPtr, leafCount, C.uint64_t(position), pathOut)
-
-	switch rc {
-	case 0:
-		result := make([]byte, MerklePathBytes)
-		copy(result, pathBuf[:])
-		return result, nil
-	case -1:
-		return nil, fmt.Errorf("votetree: invalid inputs")
-	case -2:
-		return nil, fmt.Errorf("votetree: position %d out of range (leaf_count=%d)", position, len(leaves))
-	case -3:
-		return nil, fmt.Errorf("votetree: leaf deserialization error (non-canonical Fp)")
-	default:
-		return nil, fmt.Errorf("votetree: unknown error code %d", rc)
-	}
-}

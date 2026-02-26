@@ -99,7 +99,7 @@ type QueueStatus struct {
 // ProofGenerator abstracts ZKP #3 proof generation for testing.
 type ProofGenerator interface {
 	// GenerateShareRevealProof generates a share reveal proof.
-	// merklePath: 772 bytes from votetree.ComputeMerklePath
+	// merklePath: 772-byte serialized Merkle path (from votetree.TreeHandle.Path)
 	// allEncShares: 32 compressed points (C1_0, C2_0, ..., C1_15, C2_15)
 	// shareBlinds: 16 × 32-byte per-share blind factors
 	// Returns proof bytes, nullifier (32 bytes), tree root (32 bytes).
@@ -131,6 +131,7 @@ type TreeReader interface {
 }
 
 // MerklePathFunc computes a Poseidon Merkle authentication path for a leaf.
-// In production this is votetree.ComputeMerklePath; injected to avoid a
-// transitive CGo dependency on libzally_circuits.a in the helper package.
+// Injected to avoid a transitive CGo dependency on libzally_circuits.a in
+// the helper package. In production, the injected implementation builds an
+// ephemeral votetree.TreeHandle from the leaf slice.
 type MerklePathFunc func(leaves [][]byte, position uint64) ([]byte, error)

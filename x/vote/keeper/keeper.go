@@ -82,9 +82,11 @@ func NewKeeper(
 //     latest_checkpoint is restored from KV, so no Checkpoint call is needed.
 //   - treeCursor == nextIndex: already up to date, no-op.
 //   - treeCursor < nextIndex (delta): append leaves [treeCursor, nextIndex) from KV.
-//   - treeCursor > nextIndex (rollback): close old handle, recreate from nextIndex.
-//     latest_checkpoint from KV points to pre-rollback height; caller must
-//     Checkpoint at the new height to fix Root().
+//   - treeCursor > nextIndex (rollback): TruncateKVData wipes all stale shard,
+//     cap, and checkpoint blobs from KV; the old handle is closed; a fresh handle
+//     is created at next_position=0 (which reads max_checkpoint_id()=None from the
+//     now-empty KV, so latest_checkpoint starts as None). ClearCheckpoint is called
+//     as belt-and-suspenders, then leaves are replayed from KV via AppendFromKV.
 //
 // Returns (needsCheckpoint, error). Caller should call Checkpoint(blockHeight)
 // when needsCheckpoint is true.
@@ -105,12 +107,13 @@ func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) (need
 	}
 
 	if k.treeCursor > nextIndex {
-		// Rollback: treeCursor is ahead of KV. Before discarding the old
-		// handle, delete all tree-related KV data (shards, cap, checkpoints)
-		// so the fresh handle starts with an empty ShardTree. Without this,
-		// ShardTree would read stale pre-rollback shard data and append new
-		// leaves at wrong positions (after the old frontier), producing an
-		// incorrect root.
+		// Rollback: treeCursor is ahead of KV. TruncateKVData deletes every
+		// shard blob, the cap blob, and every checkpoint blob from KV before
+		// the old handle is closed. Without this, ShardTree would read stale
+		// pre-rollback shard data and append new leaves after the old frontier,
+		// producing an incorrect root. After truncation the KV is empty, so
+		// the fresh handle starts with latest_checkpoint=None (max_checkpoint_id
+		// returns None). ClearCheckpoint is belt-and-suspenders.
 		if err := k.treeHandle.TruncateKVData(); err != nil {
 			return false, fmt.Errorf("tree rollback truncation failed: %w", err)
 		}
@@ -120,7 +123,7 @@ func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) (need
 			return false, fmt.Errorf("ensureTreeLoaded: rollback: %w", err)
 		}
 		k.treeHandle = h
-		k.treeHandle.ClearCheckpoint()
+		k.treeHandle.ClearCheckpoint() // belt-and-suspenders: KV already empty
 		k.treeCursor = 0
 		// Fall through to the delta-append path.
 	}

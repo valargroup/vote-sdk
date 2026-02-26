@@ -1052,8 +1052,8 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackRebuild() {
 //     TruncateKVData clears the stale shards, then AppendFromKV(0,3) builds
 //     a fresh 3-leaf tree.
 //
-// The rollback root is compared against the stateless ComputePoseidonRoot for
-// the same 3 leaves — this reference is completely independent of KV state.
+// The rollback root is compared against an ephemeral NewEphemeralTreeHandle
+// for the same 3 leaves — this reference is completely independent of KV state.
 func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackWithStaleShards() {
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
@@ -1083,13 +1083,18 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackWithStaleShards() {
 	s.Require().Len(rollbackRoot, 32)
 	s.Require().Equal(uint64(3), s.keeper.TreeCursorForTest())
 
-	// The reference root is built by the stateless API from the same 3 leaves
-	// (fpLE(1), fpLE(2), fpLE(3)) using an in-memory MemoryTreeServer.
-	// This is completely independent of KV state and serves as ground truth.
-	refRoot, err := votetree.ComputePoseidonRoot([][]byte{fpLE(1), fpLE(2), fpLE(3)})
+	// The reference root is built by an ephemeral in-memory tree from the same
+	// 3 leaves (fpLE(1), fpLE(2), fpLE(3)). This is completely independent of
+	// KV state and serves as ground truth.
+	refHandle, err := votetree.NewEphemeralTreeHandle()
+	s.Require().NoError(err)
+	defer refHandle.Close()
+	s.Require().NoError(refHandle.AppendBatch([][]byte{fpLE(1), fpLE(2), fpLE(3)}))
+	s.Require().NoError(refHandle.Checkpoint(1))
+	refRoot, err := refHandle.Root()
 	s.Require().NoError(err)
 	s.Require().Equal(refRoot, rollbackRoot,
-		"post-rollback root must match stateless reference for the same 3 leaves")
+		"post-rollback root must match ephemeral reference for the same 3 leaves")
 }
 
 // TestComputeTreeRoot_ColdStartNoNewLeaves verifies that a cold-start keeper

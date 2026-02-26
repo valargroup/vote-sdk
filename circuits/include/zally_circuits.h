@@ -103,62 +103,6 @@ int32_t zally_verify_redpallas_sig(
 );
 
 /* -----------------------------------------------------------------------
- * Vote commitment tree — Poseidon Merkle root and path
- * ----------------------------------------------------------------------- */
-
-/*
- * Compute the Poseidon Merkle root of a vote commitment tree.
- *
- * Builds a fresh tree from leaf_count leaves, checkpoints it, and
- * returns the 32-byte root. This is a stateless call matching the
- * Go keeper pattern (read all leaves from KV, compute root).
- *
- * Parameters:
- *   leaves_ptr - Pointer to flat byte array of leaves.
- *                Each leaf is 32 bytes (Pallas Fp, little-endian canonical).
- *                Total size: leaf_count * 32.
- *   leaf_count - Number of leaves. May be 0 (empty tree root returned).
- *   root_out   - Pointer to a 32-byte output buffer for the root.
- *
- * Returns:
- *    0  on success (root written to root_out).
- *   -1  if inputs are invalid (null root_out, null leaves_ptr with count>0).
- *   -3  if a leaf contains a non-canonical field element encoding.
- */
-int32_t zally_vote_tree_root(
-    const uint8_t* leaves_ptr,
-    size_t leaf_count,
-    uint8_t* root_out
-);
-
-/*
- * Compute a Poseidon Merkle authentication path for a leaf in the tree.
- *
- * Builds a fresh tree from leaf_count leaves, checkpoints it, and
- * returns the serialized authentication path (772 bytes):
- *   - Bytes [0..4):    position (u32 LE)
- *   - Bytes [4..772):  auth path (24 sibling hashes, 32 bytes each, leaf→root)
- *
- * Parameters:
- *   leaves_ptr - Pointer to flat byte array of leaves (each 32 bytes LE Fp).
- *   leaf_count - Number of leaves (must be > 0).
- *   position   - Leaf index for which to generate the path.
- *   path_out   - Pointer to a 772-byte output buffer.
- *
- * Returns:
- *    0  on success (path written to path_out).
- *   -1  if inputs are invalid (null pointers, zero leaf_count).
- *   -2  if position is out of range (>= leaf_count).
- *   -3  if a leaf contains a non-canonical field element encoding.
- */
-int32_t zally_vote_tree_path(
-    const uint8_t* leaves_ptr,
-    size_t leaf_count,
-    uint64_t position,
-    uint8_t* path_out
-);
-
-/* -----------------------------------------------------------------------
  * Vote commitment tree — stateful handle (incremental per-block appends)
  * ----------------------------------------------------------------------- */
 
@@ -473,7 +417,7 @@ int32_t zally_verify_share_reveal_proof(
  *
  * Parameters:
  *   merkle_path_ptr       - Pointer to 772-byte serialized Merkle path
- *                           (from zally_vote_tree_path: 4 bytes position + 24*32 siblings).
+ *                           (from zally_vote_tree_path_stateful: 4 bytes position + 24*32 siblings).
  *   merkle_path_len       - Length (must be 772).
  *   all_enc_shares_ptr    - Pointer to 1024 bytes: 16 shares x (C1 + C2) x 32 bytes.
  *                           Order: C1_0, C2_0, C1_1, C2_1, ..., C1_15, C2_15.

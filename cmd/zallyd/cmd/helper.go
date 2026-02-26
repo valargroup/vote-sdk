@@ -67,7 +67,7 @@ func helperPostSetup(
 		prover := &halo2Prover{}
 
 		homeDir := svrCtx.Config.RootDir
-		h, err := helper.New(cfg, treeReader, votetree.ComputeMerklePath, prover, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, merklePathViaEphemeralTree, prover, homeDir, logger)
 		if err != nil {
 			return fmt.Errorf("helper: %w", err)
 		}
@@ -119,6 +119,26 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	}
 
 	return cfg
+}
+
+// merklePathViaEphemeralTree computes a Poseidon Merkle authentication path
+// using an ephemeral in-memory TreeHandle. It builds a fresh tree from leaves,
+// checkpoints it, and returns the 772-byte serialized path for position.
+// This replaces the removed stateless votetree.ComputeMerklePath FFI function
+// and uses the stateful API path through the Rust ShardTree.
+func merklePathViaEphemeralTree(leaves [][]byte, position uint64) ([]byte, error) {
+	h, err := votetree.NewEphemeralTreeHandle()
+	if err != nil {
+		return nil, fmt.Errorf("create ephemeral tree: %w", err)
+	}
+	defer h.Close()
+	if err := h.AppendBatch(leaves); err != nil {
+		return nil, fmt.Errorf("append leaves: %w", err)
+	}
+	if err := h.Checkpoint(1); err != nil {
+		return nil, fmt.Errorf("checkpoint: %w", err)
+	}
+	return h.Path(position, 1)
 }
 
 // keeperTreeReader implements helper.TreeReader by reading directly from the
