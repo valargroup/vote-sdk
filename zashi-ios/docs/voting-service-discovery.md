@@ -32,21 +32,16 @@ The first source that succeeds wins. This means a TestFlight build works out of 
 
 ## Local testing
 
-Create `voting-config-local.json` in the Xcode project (add to the app target so it's copied into the bundle):
+`mise start` and `mise run multi:start` automatically write `secant/Resources/voting-config-local.json` with the correct ports for the mode being started. The file is gitignored and only bundled in DEBUG builds (via an Xcode build phase), taking priority over CDN.
 
-```json
-{
-  "version": 1,
-  "vote_servers": [
-    { "url": "http://localhost:1318", "label": "Localhost" }
-  ],
-  "pir_servers": [
-    { "url": "http://localhost:3000", "label": "Localhost" }
-  ]
-}
-```
+| Mode             | Chain REST port | Command                | Auto-written? |
+| ---------------- | --------------- | ---------------------- | ------------- |
+| Single validator | 1318            | `mise start`           | Yes           |
+| Multi validator  | 1418            | `mise run multi:start` | Yes           |
 
-This file is only checked in DEBUG builds and takes priority over CDN. Don't commit it — it's for local dev only.
+Whichever mode you start last wins, which is correct since you can only test against one chain at a time.
+
+To manually override, edit the file directly — it won't be overwritten until the next `mise start` or `multi:start`.
 
 ## Where the URLs flow
 

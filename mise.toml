@@ -52,6 +52,19 @@ zallyd tx vote register-pallas-key \
     --home ~/.zallyd -y > /dev/null 2>&1 \
     && printf '\033[32mPallas key registered ✓\033[0m\n' \
     || printf '\033[33mPallas key already registered (or registration skipped)\033[0m\n'
+
+# Write iOS local config pointing at single-validator ports
+IOS_CFG="zashi-ios/secant/Resources/voting-config-local.json"
+if [ -d "zashi-ios/secant/Resources" ]; then
+    cat > "$IOS_CFG" <<'EOF'
+{
+  "version": 1,
+  "vote_servers": [{ "url": "http://localhost:1318", "label": "Localhost" }],
+  "pir_servers": [{ "url": "http://localhost:3000", "label": "Localhost" }]
+}
+EOF
+    printf '\033[32miOS config → %s (port 1318)\033[0m\n' "$IOS_CFG"
+fi
 '''
 
 [tasks.stop]
@@ -383,6 +396,19 @@ make -C nullifier-ingest export-nf
 if ! pgrep -f 'nf-server.*serve' > /dev/null 2>&1; then
     nohup make -C nullifier-ingest serve > nf-serve.log 2>&1 &
     printf '\033[32mStarted nf-server → nf-serve.log\033[0m\n'
+fi
+
+# Write iOS local config pointing at multi-validator ports
+IOS_CFG="zashi-ios/secant/Resources/voting-config-local.json"
+if [ -d "zashi-ios/secant/Resources" ]; then
+    cat > "$IOS_CFG" <<'EOF'
+{
+  "version": 1,
+  "vote_servers": [{ "url": "http://localhost:1418", "label": "Localhost" }],
+  "pir_servers": [{ "url": "http://localhost:3000", "label": "Localhost" }]
+}
+EOF
+    printf '\033[32miOS config → %s (port 1418)\033[0m\n' "$IOS_CFG"
 fi
 '''
 
