@@ -28,7 +28,7 @@ use orchard::{
 use orchard::vote_proof::VOTE_COMM_TREE_DEPTH;
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
-use vote_commitment_tree::TreeServer;
+use vote_commitment_tree::MemoryTreeServer;
 
 const DEFAULT_E2E_VOTE_WINDOW_SECS: u64 = 180;
 const MIN_E2E_VOTE_WINDOW_SECS: u64 = 120;
@@ -296,9 +296,9 @@ pub fn build_van_merkle_witness(
     van_cmx: pallas::Base,
     checkpoint_height: u32,
 ) -> ([pallas::Base; VOTE_COMM_TREE_DEPTH], u32, pallas::Base) {
-    let mut tree = TreeServer::empty();
-    tree.append(van_cmx);
-    tree.checkpoint(checkpoint_height);
+    let mut tree = MemoryTreeServer::empty();
+    tree.append(van_cmx).unwrap();
+    tree.checkpoint(checkpoint_height).unwrap();
 
     let root = tree
         .root_at_height(checkpoint_height)
@@ -337,11 +337,11 @@ pub fn build_vote_commitment_merkle_witness(
     vote_commitment: pallas::Base,
     checkpoint_height: u32,
 ) -> ([pallas::Base; VOTE_COMM_TREE_DEPTH], u32, pallas::Base) {
-    let mut tree = TreeServer::empty();
-    tree.append(van_cmx); // position 0
-    tree.append(vote_authority_note_new); // position 1
-    tree.append(vote_commitment); // position 2
-    tree.checkpoint(checkpoint_height);
+    let mut tree = MemoryTreeServer::empty();
+    tree.append(van_cmx).unwrap(); // position 0
+    tree.append(vote_authority_note_new).unwrap(); // position 1
+    tree.append(vote_commitment).unwrap(); // position 2
+    tree.checkpoint(checkpoint_height).unwrap();
 
     let root = tree
         .root_at_height(checkpoint_height)

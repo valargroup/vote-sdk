@@ -894,6 +894,7 @@ dependencies = [
  "imt-tree",
  "incrementalmerkletree",
  "lazy_static",
+ "libc",
  "orchard",
  "pasta_curves",
  "rand",

@@ -3231,6 +3231,7 @@ dependencies = [
  "imt-tree",
  "incrementalmerkletree",
  "lazy_static",
+ "libc",
  "pasta_curves",
  "shardtree",
 ]

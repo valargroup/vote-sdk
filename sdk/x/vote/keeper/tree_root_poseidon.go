@@ -12,29 +12,33 @@ import (
 // ComputeTreeRoot returns the Poseidon Merkle root for the current tree state
 // at the given block height.
 //
-// On the first call (cold start) or after a rollback, ensureTreeLoaded reads
-// all leaves from KV and rebuilds the tree — O(n). On subsequent calls it
-// appends only the leaves added since the last call — O(k) per block.
+// On cold start (treeHandle == nil) a KV-backed handle is created whose
+// KvShardStore calls back into Go for every shard read/write. ShardTree
+// lazily loads only the data it needs — O(1) cold start.
 //
-// After loading new leaves (including cold-start and rollback rebuild), a
-// checkpoint is created at blockHeight so that Root() returns the correct
-// post-append root, and so that path_stateful queries anchored to this height
-// work via the stateful handle.
-// Blocks with no new leaves re-use the existing checkpoint — no-op.
+// On subsequent calls only the delta leaves added since the last call are
+// appended — O(k) per block where k = new leaves that block.
+//
+// A checkpoint is created only when delta leaves were actually appended.
+// Cold start and no-new-leaves blocks skip the checkpoint; latest_checkpoint
+// is restored from KV on handle creation so Root() is always correct.
 func (k *Keeper) ComputeTreeRoot(kvStore store.KVStore, nextIndex, blockHeight uint64) ([]byte, error) {
 	if nextIndex == 0 {
 		return nil, nil
 	}
-	prevCursor := k.treeCursor
-	if err := k.ensureTreeLoaded(kvStore, nextIndex); err != nil {
+
+	// Update the KV proxy so Rust callbacks reach the current block's store.
+	k.kvProxy.Current = kvStore
+
+	appended, err := k.ensureTreeLoaded(kvStore, nextIndex)
+	if err != nil {
 		return nil, err
 	}
-	// Checkpoint whenever the tree cursor changed — covers three cases:
-	//   1. Cold start: prevCursor=0 → treeCursor=nextIndex (normal increase)
-	//   2. Delta append: prevCursor < treeCursor (normal increase)
-	//   3. Rollback rebuild: prevCursor > nextIndex → treeCursor=nextIndex (decrease)
-	// A block with no new leaves leaves treeCursor unchanged, so no checkpoint.
-	if k.treeCursor != prevCursor {
+	// Only checkpoint when new leaves were appended. Skipping the checkpoint
+	// on cold start avoids a duplicate-checkpoint panic: TreeServer::new
+	// restores latest_checkpoint from KV, so re-checkpointing at the same
+	// height would violate the monotonicity invariant.
+	if appended {
 		if err := k.treeHandle.Checkpoint(uint32(blockHeight)); err != nil {
 			return nil, err
 		}

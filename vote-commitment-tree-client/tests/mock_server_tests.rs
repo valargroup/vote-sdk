@@ -162,14 +162,14 @@ fn full_sync_pipeline() {
     // get_root_at_height for blocks 1 and 2.
 
     // Compute the expected roots using a real TreeServer.
-    let mut tree_server = vote_commitment_tree::TreeServer::empty();
-    tree_server.append(fp(10));
-    tree_server.checkpoint(1);
+    let mut tree_server = vote_commitment_tree::MemoryTreeServer::empty();
+    tree_server.append(fp(10)).unwrap();
+    tree_server.checkpoint(1).unwrap();
     let root_at_1 = tree_server.root_at_height(1).unwrap();
 
-    tree_server.append(fp(20));
-    tree_server.append(fp(30));
-    tree_server.checkpoint(2);
+    tree_server.append(fp(20)).unwrap();
+    tree_server.append(fp(30)).unwrap();
+    tree_server.checkpoint(2).unwrap();
     let root_at_2 = tree_server.root_at_height(2).unwrap();
 
     // Mock: GET /zally/v1/commitment-tree/latest
@@ -250,9 +250,9 @@ fn incremental_sync() {
     let mut server = mockito::Server::new();
 
     // Build tree server for expected roots.
-    let mut tree_server = vote_commitment_tree::TreeServer::empty();
-    tree_server.append(fp(10));
-    tree_server.checkpoint(1);
+    let mut tree_server = vote_commitment_tree::MemoryTreeServer::empty();
+    tree_server.append(fp(10)).unwrap();
+    tree_server.checkpoint(1).unwrap();
     let root_at_1 = tree_server.root_at_height(1).unwrap();
 
     // --- First sync: only block 1 ---
@@ -308,9 +308,9 @@ fn incremental_sync() {
 
     // --- Second sync: add block 2 ---
 
-    tree_server.append(fp(20));
-    tree_server.append(fp(30));
-    tree_server.checkpoint(2);
+    tree_server.append(fp(20)).unwrap();
+    tree_server.append(fp(30)).unwrap();
+    tree_server.checkpoint(2).unwrap();
     let root_at_2 = tree_server.root_at_height(2).unwrap();
 
     let _m_latest2 = server
@@ -413,9 +413,9 @@ fn empty_tree_sync() {
 fn witness_hex_roundtrip() {
     let mut server = mockito::Server::new();
 
-    let mut tree_server = vote_commitment_tree::TreeServer::empty();
-    tree_server.append(fp(42));
-    tree_server.checkpoint(1);
+    let mut tree_server = vote_commitment_tree::MemoryTreeServer::empty();
+    tree_server.append(fp(42)).unwrap();
+    tree_server.checkpoint(1).unwrap();
     let root = tree_server.root_at_height(1).unwrap();
 
     let _m_latest = server

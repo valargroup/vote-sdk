@@ -1,110 +1,300 @@
-//! Server-side vote commitment tree.
+//! Generic and production vote commitment tree servers.
 //!
-//! [`TreeServer`] owns the authoritative full tree. It wraps a
-//! `ShardTree<MemoryShardStore, 32, 4>` and provides:
-//! - `append` / `append_two` for leaf insertion (from `MsgDelegateVote` / `MsgCastVote`)
-//! - `checkpoint` for EndBlocker root snapshots
-//! - `root_at_height` / `path` for anchor lookup and witness generation
-//! - [`TreeSyncApi`] implementation to serve data to clients
+//! [`GenericTreeServer`] is a single parameterised struct that backs both the
+//! production server ([`TreeServer`], KV-backed) and the in-memory test/POC
+//! server ([`MemoryTreeServer`]). The only difference between the two is the
+//! shard store implementation they use.
 //!
-//! In production, the Go keeper owns persistence and the Rust FFI builds the
-//! tree from KV; the POC just skips the Go layer.
-
-use std::collections::BTreeMap;
-use std::convert::Infallible;
+//! In production, [`TreeServer`] is backed by a [`KvShardStore`] so all shard
+//! reads/writes go directly to the Cosmos KV store through Go callbacks,
+//! giving `ShardTree` true lazy loading.
 
 use incrementalmerkletree::{Hashable, Level, Retention};
-use pasta_curves::Fp;
-use shardtree::{store::memory::MemoryShardStore, ShardTree};
+use pasta_curves::{group::ff::PrimeField, Fp};
+use shardtree::{error::ShardTreeError, store::{memory::MemoryShardStore, ShardStore}, ShardTree};
 
 use crate::hash::{MerkleHashVote, MAX_CHECKPOINTS, SHARD_HEIGHT, TREE_DEPTH};
+use crate::kv_shard_store::{KvCallbacks, KvError, KvShardStore};
 use crate::path::MerklePath;
-use crate::sync_api::{BlockCommitments, TreeState, TreeSyncApi};
 
 // ---------------------------------------------------------------------------
-// TreeServer
+// GenericTreeServer
 // ---------------------------------------------------------------------------
 
-/// Server-side vote commitment tree: full tree with continuous appends.
+/// An append-only Poseidon Merkle tree server backed by any [`shardtree::store::ShardStore`].
 ///
-/// Provides the same API as the original `VoteCommitmentTree`, plus block-level
-/// bookkeeping to implement [`TreeSyncApi`] for client sync.
-pub struct TreeServer {
-    inner: ShardTree<
-        MemoryShardStore<MerkleHashVote, u32>,
-        { TREE_DEPTH as u8 },
-        { SHARD_HEIGHT },
-    >,
-    /// Next leaf position (number of leaves appended).
-    next_position: u64,
+/// Use the type aliases [`TreeServer`] (KV-backed) and [`MemoryTreeServer`]
+/// (in-memory) rather than naming this type directly.
+///
+/// Methods that mutate the tree (`append`, `checkpoint`) return
+/// `Result<_, ShardTreeError<S::Error>>` so storage failures are visible to
+/// callers. For [`MemoryTreeServer`] the error type is `Infallible`, so those
+/// results can be safely `.unwrap()`-ed; for [`TreeServer`] the error type is
+/// [`crate::kv_shard_store::KvError`] and must be propagated.
+pub struct GenericTreeServer<S: shardtree::store::ShardStore<H = MerkleHashVote, CheckpointId = u32>>
+{
+    pub(crate) inner: ShardTree<S, { TREE_DEPTH as u8 }, { SHARD_HEIGHT }>,
     /// Latest checkpoint id (block height) that has been recorded.
-    latest_checkpoint: Option<u32>,
+    pub(crate) latest_checkpoint: Option<u32>,
+    /// Number of leaves appended so far.
+    pub(crate) next_position: u64,
+}
 
-    // -- Sync bookkeeping --------------------------------------------------
+/// Production vote commitment tree backed by the Cosmos KV store.
+pub type TreeServer = GenericTreeServer<KvShardStore>;
 
+/// In-memory vote commitment tree for tests and the POC helper server.
+///
+/// This is a full struct (not a type alias) because it adds block-level leaf
+/// tracking on top of `GenericTreeServer` to support the `TreeSyncApi` — used
+/// by the client to sync incrementally via `get_block_commitments`. The
+/// production `TreeServer` does not need this tracking because the REST layer
+/// reads leaves directly from the application KV store.
+pub struct MemoryTreeServer {
+    pub(crate) inner: GenericTreeServer<MemoryShardStore<MerkleHashVote, u32>>,
     /// Completed blocks: height → commitments (populated on `checkpoint`).
-    blocks: BTreeMap<u32, BlockCommitments>,
+    pub(crate) blocks: std::collections::BTreeMap<u32, crate::sync_api::BlockCommitments>,
     /// Leaves accumulated for the current (not yet checkpointed) block.
     pending_leaves: Vec<MerkleHashVote>,
     /// Start index for the pending block.
     pending_start: u64,
 }
 
+// ---------------------------------------------------------------------------
+// AppendFromKvError
+// ---------------------------------------------------------------------------
+
+/// Error returned by [`TreeServer::append_from_kv`].
+#[derive(Debug)]
+pub enum AppendFromKvError {
+    /// A KV callback failed while reading a leaf.
+    Kv(KvError),
+    /// A leaf key was missing from the application KV store.
+    MissingLeaf(u64),
+    /// A leaf blob had an unexpected length or a non-canonical Fp encoding.
+    MalformedLeaf(u64),
+    /// The underlying `ShardTree` rejected the append (e.g. tree full or
+    /// storage error).
+    Tree(ShardTreeError<KvError>),
+}
+
+impl From<KvError> for AppendFromKvError {
+    fn from(e: KvError) -> Self {
+        AppendFromKvError::Kv(e)
+    }
+}
+
+impl std::fmt::Display for AppendFromKvError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppendFromKvError::Kv(e) => write!(f, "KV error reading leaf: {}", e),
+            AppendFromKvError::MissingLeaf(i) => write!(f, "leaf at index {} is missing from KV", i),
+            AppendFromKvError::MalformedLeaf(i) => {
+                write!(f, "leaf at index {} is malformed (wrong length or non-canonical Fp)", i)
+            }
+            AppendFromKvError::Tree(e) => write!(f, "ShardTree error: {:?}", e),
+        }
+    }
+}
+
+impl std::error::Error for AppendFromKvError {}
+
+// ---------------------------------------------------------------------------
+// TreeServer constructor
+// ---------------------------------------------------------------------------
+
 impl TreeServer {
-    /// Create an empty tree.
+    /// Create a new KV-backed tree server.
+    ///
+    /// `next_position` is `CommitmentTreeState.NextIndex` from KV (0 on first
+    /// boot). On a cold start, `latest_checkpoint` is initialised from the
+    /// maximum checkpoint ID persisted in the KV store, so that `root()`
+    /// returns the correct value even before the first checkpoint after restart.
+    pub fn new(cb: KvCallbacks, next_position: u64) -> Self {
+        let store = KvShardStore::new(cb);
+        // Initialise latest_checkpoint from the KV store before handing the
+        // store to ShardTree (which takes ownership). Errors are treated as
+        // "no checkpoint" — the tree will re-checkpoint on the next append.
+        let latest_checkpoint = store.max_checkpoint_id().unwrap_or(None);
+        Self {
+            inner: ShardTree::new(store, MAX_CHECKPOINTS),
+            latest_checkpoint,
+            next_position,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TreeServer: append_from_kv (delta-append directly from KV)
+// ---------------------------------------------------------------------------
+
+impl TreeServer {
+    /// Append `count` leaves starting at `cursor` by reading them directly
+    /// from the application KV store via KV callbacks, skipping the Go-side
+    /// leaf fetch and CGO serialization round-trip.
+    ///
+    /// Each leaf is stored at `0x02 || u64 BE index` in the Cosmos KV store
+    /// (the `CommitmentLeafKey` format from `types/keys.go`). On success, the
+    /// tree's internal leaf count advances by `count`.
+    ///
+    /// This is the production delta-append path: a single CGO call to this
+    /// function replaces the `newLeaves` allocation + per-leaf KV read loop
+    /// that was previously done in `ensureTreeLoaded`.
+    pub fn append_from_kv(&mut self, cursor: u64, count: u64) -> Result<(), AppendFromKvError> {
+        for i in cursor..cursor + count {
+            let key = Self::leaf_key(i);
+            let blob = self
+                .inner
+                .store()
+                .cb
+                .get(&key)?
+                .ok_or(AppendFromKvError::MissingLeaf(i))?;
+            if blob.len() != 32 {
+                return Err(AppendFromKvError::MalformedLeaf(i));
+            }
+            let mut repr = [0u8; 32];
+            repr.copy_from_slice(&blob);
+            let fp: Option<Fp> = Fp::from_repr(repr).into();
+            let fp = fp.ok_or(AppendFromKvError::MalformedLeaf(i))?;
+            self.append(fp).map_err(AppendFromKvError::Tree)?;
+        }
+        Ok(())
+    }
+
+    /// KV key for an app-level commitment leaf: `0x02 || u64 BE index`.
+    ///
+    /// Matches `types.CommitmentLeafKey(index)` in keys.go.
+    fn leaf_key(index: u64) -> [u8; 9] {
+        let mut k = [0u8; 9];
+        k[0] = 0x02;
+        k[1..].copy_from_slice(&index.to_be_bytes());
+        k
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MemoryTreeServer constructor
+// ---------------------------------------------------------------------------
+
+impl MemoryTreeServer {
+    /// Create an empty in-memory tree.
     pub fn empty() -> Self {
         Self {
-            inner: ShardTree::new(MemoryShardStore::empty(), MAX_CHECKPOINTS),
-            next_position: 0,
-            latest_checkpoint: None,
-            blocks: BTreeMap::new(),
+            inner: GenericTreeServer {
+                inner: ShardTree::new(MemoryShardStore::empty(), MAX_CHECKPOINTS),
+                latest_checkpoint: None,
+                next_position: 0,
+            },
+            blocks: std::collections::BTreeMap::new(),
             pending_leaves: Vec::new(),
             pending_start: 0,
         }
     }
 
+    /// Append a single leaf and record it in the pending block.
+    pub fn append(&mut self, leaf: Fp) -> Result<u64, shardtree::error::ShardTreeError<std::convert::Infallible>> {
+        let hash = MerkleHashVote::from_fp(leaf);
+        let idx = self.inner.append(leaf)?;
+        self.pending_leaves.push(hash);
+        Ok(idx)
+    }
+
+    /// Append two leaves (e.g. new VAN + VC from `MsgCastVote`).
+    pub fn append_two(&mut self, first: Fp, second: Fp) -> Result<u64, shardtree::error::ShardTreeError<std::convert::Infallible>> {
+        let idx = self.append(first)?;
+        self.append(second)?;
+        Ok(idx)
+    }
+
+    /// Snapshot the current tree state and record block-level commitments.
+    pub fn checkpoint(&mut self, height: u32) -> Result<(), shardtree::error::ShardTreeError<std::convert::Infallible>> {
+        self.inner.checkpoint(height)?;
+        let commitments = crate::sync_api::BlockCommitments {
+            height,
+            start_index: self.pending_start,
+            leaves: std::mem::take(&mut self.pending_leaves),
+        };
+        self.blocks.insert(height, commitments);
+        self.pending_start = self.inner.next_position;
+        Ok(())
+    }
+
+    /// Current Merkle root (at the latest checkpoint).
+    pub fn root(&self) -> Fp {
+        self.inner.root()
+    }
+
+    /// Root at a specific checkpoint height.
+    pub fn root_at_height(&self, height: u32) -> Option<Fp> {
+        self.inner.root_at_height(height)
+    }
+
+    /// Number of leaves appended.
+    pub fn size(&self) -> u64 {
+        self.inner.size()
+    }
+
+    /// Build a Merkle path for the leaf at `position` at `anchor_height`.
+    pub fn path(&self, position: u64, anchor_height: u32) -> Option<MerklePath> {
+        self.inner.path(position, anchor_height)
+    }
+
+    /// Latest checkpoint height.
+    pub fn latest_checkpoint(&self) -> Option<u32> {
+        self.inner.latest_checkpoint
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared impl for all GenericTreeServer<S>
+// ---------------------------------------------------------------------------
+
+impl<S> GenericTreeServer<S>
+where
+    S: shardtree::store::ShardStore<H = MerkleHashVote, CheckpointId = u32>,
+    S::Error: std::fmt::Debug,
+{
     /// Append a single leaf (e.g. one VAN from `MsgDelegateVote`).
     ///
     /// The leaf is marked so witnesses can be generated for it later.
     /// Returns the leaf index.
-    pub fn append(&mut self, leaf: Fp) -> u64 {
+    pub fn append(&mut self, leaf: Fp) -> Result<u64, ShardTreeError<S::Error>> {
         let index = self.next_position;
         let hash = MerkleHashVote::from_fp(leaf);
-        self.inner
-            .append(hash, Retention::Marked)
-            .expect("append must succeed (tree not full)");
-        self.pending_leaves.push(hash);
+        self.inner.append(hash, Retention::Marked)?;
         self.next_position += 1;
-        index
+        Ok(index)
     }
 
     /// Append two leaves (e.g. new VAN + VC from `MsgCastVote`).
     ///
     /// Returns the index of the first leaf.
-    pub fn append_two(&mut self, first: Fp, second: Fp) -> u64 {
-        let index = self.append(first);
-        self.append(second);
-        index
+    pub fn append_two(&mut self, first: Fp, second: Fp) -> Result<u64, ShardTreeError<S::Error>> {
+        let index = self.append(first)?;
+        self.append(second)?;
+        Ok(index)
     }
 
     /// Snapshot the current tree state at the given block height.
     ///
     /// Called by EndBlocker after processing all transactions in a block.
     /// The root at this checkpoint becomes a valid anchor for ZKP #2 / ZKP #3.
-    pub fn checkpoint(&mut self, height: u32) {
-        self.inner
-            .checkpoint(height)
-            .expect("checkpoint must succeed");
+    ///
+    /// # Panics
+    /// Panics if `height` is not strictly greater than the previous checkpoint
+    /// height. Checkpoint IDs must increase monotonically.
+    pub fn checkpoint(&mut self, height: u32) -> Result<(), ShardTreeError<S::Error>> {
+        if let Some(prev) = self.latest_checkpoint {
+            assert!(
+                height > prev,
+                "checkpoint height must be strictly increasing: {} <= {}",
+                height,
+                prev
+            );
+        }
+        self.inner.checkpoint(height)?;
         self.latest_checkpoint = Some(height);
-
-        // Record block-level data for the sync API.
-        let commitments = BlockCommitments {
-            height,
-            start_index: self.pending_start,
-            leaves: std::mem::take(&mut self.pending_leaves),
-        };
-        self.blocks.insert(height, commitments);
-        self.pending_start = self.next_position;
+        Ok(())
     }
 
     /// Current Merkle root (at the latest checkpoint).
@@ -137,6 +327,21 @@ impl TreeServer {
         self.next_position
     }
 
+    /// Set the leaf count directly (e.g. to restore after a cold start when
+    /// `next_position` was not passed to [`TreeServer::new`]).
+    pub fn set_next_position(&mut self, pos: u64) {
+        self.next_position = pos;
+    }
+
+    /// Reset the in-memory `latest_checkpoint` to `None` without touching the
+    /// KV store. Used after handle recreation on rollback, where the KV store
+    /// may still hold checkpoint entries from the pre-rollback chain state.
+    /// Clearing this field allows the next `checkpoint(M)` call to succeed
+    /// without triggering the monotonicity assertion.
+    pub fn clear_latest_checkpoint(&mut self) {
+        self.latest_checkpoint = None;
+    }
+
     /// Build a Merkle path for the leaf at `position`, valid at the given
     /// checkpoint `anchor_height`.
     ///
@@ -148,232 +353,5 @@ impl TreeServer {
             .ok()
             .flatten()
             .map(MerklePath::from)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// TreeSyncApi implementation
-// ---------------------------------------------------------------------------
-
-impl TreeSyncApi for TreeServer {
-    type Error = Infallible;
-
-    fn get_block_commitments(
-        &self,
-        from_height: u32,
-        to_height: u32,
-    ) -> Result<Vec<BlockCommitments>, Self::Error> {
-        let blocks = self
-            .blocks
-            .range(from_height..=to_height)
-            .map(|(_, bc)| bc.clone())
-            .collect();
-        Ok(blocks)
-    }
-
-    fn get_root_at_height(&self, height: u32) -> Result<Option<Fp>, Self::Error> {
-        Ok(self.root_at_height(height))
-    }
-
-    fn get_tree_state(&self) -> Result<TreeState, Self::Error> {
-        Ok(TreeState {
-            next_index: self.next_position,
-            root: self.root(),
-            height: self.latest_checkpoint.unwrap_or(0),
-        })
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tests (migrated from the original tree.rs)
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::anchor::Anchor;
-    use crate::hash::EMPTY_ROOTS;
-
-    fn fp(x: u64) -> Fp {
-        Fp::from(x)
-    }
-
-    #[test]
-    fn empty_tree_has_deterministic_root() {
-        let t1 = TreeServer::empty();
-        let t2 = TreeServer::empty();
-        assert_eq!(t1.root(), t2.root());
-        assert_eq!(t1.size(), 0);
-    }
-
-    #[test]
-    fn empty_roots_are_consistent() {
-        let leaf = MerkleHashVote::empty_leaf();
-        assert_eq!(EMPTY_ROOTS[0], leaf);
-
-        let mut expected = leaf;
-        for level in 0..TREE_DEPTH {
-            assert_eq!(
-                EMPTY_ROOTS[level], expected,
-                "empty root mismatch at level {}",
-                level
-            );
-            expected = MerkleHashVote::combine(Level::from(level as u8), &expected, &expected);
-        }
-    }
-
-    #[test]
-    fn append_one_and_path() {
-        let mut tree = TreeServer::empty();
-        let idx = tree.append(fp(100));
-        assert_eq!(idx, 0);
-        assert_eq!(tree.size(), 1);
-
-        tree.checkpoint(1);
-        let path = tree.path(0, 1).unwrap();
-        assert!(path.verify(fp(100), tree.root()));
-    }
-
-    #[test]
-    fn append_two_leaves_paths_verify() {
-        let mut tree = TreeServer::empty();
-        tree.append(fp(1));
-        tree.append(fp(2));
-        assert_eq!(tree.size(), 2);
-
-        tree.checkpoint(1);
-        let root = tree.root();
-        for i in 0..2u64 {
-            let leaf = fp(i + 1);
-            let path = tree.path(i, 1).unwrap();
-            assert!(path.verify(leaf, root), "path for leaf {} must verify", i);
-        }
-    }
-
-    #[test]
-    fn append_two_batch() {
-        let mut tree = TreeServer::empty();
-        let idx = tree.append_two(fp(10), fp(20));
-        assert_eq!(idx, 0);
-        assert_eq!(tree.size(), 2);
-
-        tree.checkpoint(1);
-        let root = tree.root();
-        let p0 = tree.path(0, 1).unwrap();
-        let p1 = tree.path(1, 1).unwrap();
-        assert!(p0.verify(fp(10), root));
-        assert!(p1.verify(fp(20), root));
-    }
-
-    #[test]
-    fn path_reject_wrong_leaf() {
-        let mut tree = TreeServer::empty();
-        tree.append(fp(42));
-        tree.checkpoint(1);
-        let path = tree.path(0, 1).unwrap();
-        assert!(!path.verify(fp(0), tree.root()));
-        assert!(!path.verify(fp(43), tree.root()));
-    }
-
-    #[test]
-    fn path_reject_wrong_root() {
-        let mut tree = TreeServer::empty();
-        tree.append(fp(1));
-        tree.checkpoint(1);
-        let path = tree.path(0, 1).unwrap();
-        assert!(!path.verify(fp(1), Fp::zero()));
-    }
-
-    #[test]
-    fn checkpoint_preserves_root() {
-        let mut tree = TreeServer::empty();
-        tree.append(fp(1));
-        tree.append(fp(2));
-        tree.checkpoint(10);
-
-        let root_at_10 = tree.root_at_height(10).unwrap();
-
-        tree.append(fp(3));
-        tree.checkpoint(11);
-
-        assert_eq!(tree.root_at_height(10).unwrap(), root_at_10);
-        assert_ne!(tree.root_at_height(11).unwrap(), root_at_10);
-    }
-
-    #[test]
-    fn witness_at_earlier_checkpoint() {
-        let mut tree = TreeServer::empty();
-        tree.append(fp(100));
-        tree.checkpoint(5);
-
-        tree.append(fp(200));
-        tree.checkpoint(6);
-
-        let root_5 = tree.root_at_height(5).unwrap();
-        let path = tree.path(0, 5).unwrap();
-        assert!(path.verify(fp(100), root_5));
-
-        let root_6 = tree.root_at_height(6).unwrap();
-        let path = tree.path(1, 6).unwrap();
-        assert!(path.verify(fp(200), root_6));
-    }
-
-    #[test]
-    fn anchor_empty_tree() {
-        let anchor = Anchor::empty_tree();
-        let tree = TreeServer::empty();
-        assert_eq!(anchor.inner(), tree.root());
-    }
-
-    // -- TreeSyncApi tests -------------------------------------------------
-
-    #[test]
-    fn sync_api_get_tree_state() {
-        let mut server = TreeServer::empty();
-        server.append(fp(1));
-        server.checkpoint(1);
-
-        let state = server.get_tree_state().unwrap();
-        assert_eq!(state.next_index, 1);
-        assert_eq!(state.height, 1);
-        assert_eq!(state.root, server.root());
-    }
-
-    #[test]
-    fn sync_api_get_block_commitments() {
-        let mut server = TreeServer::empty();
-
-        server.append(fp(10));
-        server.checkpoint(1);
-
-        server.append(fp(20));
-        server.append(fp(30));
-        server.checkpoint(2);
-
-        let blocks = server.get_block_commitments(1, 2).unwrap();
-        assert_eq!(blocks.len(), 2);
-
-        assert_eq!(blocks[0].height, 1);
-        assert_eq!(blocks[0].start_index, 0);
-        assert_eq!(blocks[0].leaves.len(), 1);
-        assert_eq!(blocks[0].leaves[0], MerkleHashVote::from_fp(fp(10)));
-
-        assert_eq!(blocks[1].height, 2);
-        assert_eq!(blocks[1].start_index, 1);
-        assert_eq!(blocks[1].leaves.len(), 2);
-    }
-
-    #[test]
-    fn sync_api_get_root_at_height() {
-        let mut server = TreeServer::empty();
-        server.append(fp(1));
-        server.checkpoint(5);
-
-        let root = server.get_root_at_height(5).unwrap();
-        assert!(root.is_some());
-        assert_eq!(root.unwrap(), server.root_at_height(5).unwrap());
-
-        let no_root = server.get_root_at_height(99).unwrap();
-        assert!(no_root.is_none());
     }
 }

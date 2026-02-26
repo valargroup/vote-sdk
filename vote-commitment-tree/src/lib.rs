@@ -28,7 +28,10 @@
 mod anchor;
 pub mod client;
 mod hash;
+pub mod kv_shard_store;
+pub mod memory_server;
 mod path;
+pub mod serde;
 pub mod server;
 pub mod sync_api;
 
@@ -38,13 +41,8 @@ pub use anchor::Anchor;
 pub use client::{SyncError, TreeClient};
 pub use hash::{MerkleHashVote, TREE_DEPTH};
 pub use path::{MerklePath, MERKLE_PATH_BYTES};
-pub use server::TreeServer;
+pub use server::{AppendFromKvError, MemoryTreeServer, TreeServer};
 pub use sync_api::TreeSyncApi;
-
-/// Backwards-compatible alias for [`TreeServer`].
-///
-/// The original `VoteCommitmentTree` API is fully preserved on `TreeServer`.
-pub type VoteCommitmentTree = TreeServer;
 
 // -- Shared utilities ------------------------------------------------------
 
