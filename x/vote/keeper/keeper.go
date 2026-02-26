@@ -84,9 +84,8 @@ func NewKeeper(
 //   - treeCursor < nextIndex (delta): append leaves [treeCursor, nextIndex) from KV.
 //   - treeCursor > nextIndex (rollback): TruncateKVData wipes all stale shard,
 //     cap, and checkpoint blobs from KV; the old handle is closed; a fresh handle
-//     is created at next_position=0 (which reads max_checkpoint_id()=None from the
-//     now-empty KV, so latest_checkpoint starts as None). ClearCheckpoint is called
-//     as belt-and-suspenders, then leaves are replayed from KV via AppendFromKV.
+//     is created at next_position=0 (max_checkpoint_id()=None on empty KV, so
+//     latest_checkpoint starts as None); leaves are replayed via AppendFromKV.
 //
 // Returns (needsCheckpoint, error). Caller should call Checkpoint(blockHeight)
 // when needsCheckpoint is true.
@@ -107,24 +106,23 @@ func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) (need
 	}
 
 	if k.treeCursor > nextIndex {
-		// Rollback: treeCursor is ahead of KV. TruncateKVData deletes every
-		// shard blob, the cap blob, and every checkpoint blob from KV before
-		// the old handle is closed. Without this, ShardTree would read stale
-		// pre-rollback shard data and append new leaves after the old frontier,
-		// producing an incorrect root. After truncation the KV is empty, so
-		// the fresh handle starts with latest_checkpoint=None (max_checkpoint_id
-		// returns None). ClearCheckpoint is belt-and-suspenders.
-		if err := k.treeHandle.TruncateKVData(); err != nil {
-			return false, fmt.Errorf("tree rollback truncation failed: %w", err)
-		}
-		k.treeHandle.Close()
-		h, err := votetree.NewTreeHandleWithKV(k.kvProxy, 0)
-		if err != nil {
-			return false, fmt.Errorf("ensureTreeLoaded: rollback: %w", err)
-		}
-		k.treeHandle = h
-		k.treeHandle.ClearCheckpoint() // belt-and-suspenders: KV already empty
-		k.treeCursor = 0
+	// Rollback: treeCursor is ahead of KV. TruncateKVData deletes every
+	// shard blob, the cap blob, and every checkpoint blob from KV before
+	// the old handle is closed. Without this, ShardTree would read stale
+	// pre-rollback shard data and append new leaves after the old frontier,
+	// producing an incorrect root. After truncation the KV is empty, so
+	// the fresh handle starts with latest_checkpoint=None because
+	// max_checkpoint_id() returns None on an empty store.
+	if err := k.treeHandle.TruncateKVData(); err != nil {
+		return false, fmt.Errorf("tree rollback truncation failed: %w", err)
+	}
+	k.treeHandle.Close()
+	h, err := votetree.NewTreeHandleWithKV(k.kvProxy, 0)
+	if err != nil {
+		return false, fmt.Errorf("ensureTreeLoaded: rollback: %w", err)
+	}
+	k.treeHandle = h
+	k.treeCursor = 0
 		// Fall through to the delta-append path.
 	}
 

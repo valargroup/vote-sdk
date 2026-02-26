@@ -251,15 +251,6 @@ func (h *TreeHandle) Root() ([]byte, error) {
 	return result, nil
 }
 
-// ClearCheckpoint resets the in-memory latest_checkpoint to None without
-// touching the KV store. Used on rollback: after a new handle is created with
-// stale KV checkpoints from the pre-rollback state, calling ClearCheckpoint
-// allows a subsequent Checkpoint(M) call to establish the correct root for
-// the rolled-back height M without triggering the monotonicity assertion.
-func (h *TreeHandle) ClearCheckpoint() {
-	C.zally_vote_tree_clear_checkpoint((*C.ZallyTreeHandle)(h.ptr))
-}
-
 // TruncateKVData deletes all tree-related KV entries (shards, cap,
 // checkpoints) through this handle's KV callbacks. Must be called on the OLD
 // handle just before Close() on rollback, so that the fresh handle created at

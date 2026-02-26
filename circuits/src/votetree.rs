@@ -183,16 +183,6 @@ impl TreeHandle {
             .map_err(|_| FfiError::Storage)
     }
 
-    /// Reset the in-memory `latest_checkpoint` to `None` without touching the
-    /// KV store. Used after handle recreation on rollback, where the KV store
-    /// still contains checkpoints from the pre-rollback state. Clearing
-    /// `latest_checkpoint` allows a fresh `Checkpoint(M)` call to establish
-    /// the correct root for the rolled-back height M without returning a
-    /// [`CheckpointError::NotMonotonic`] error.
-    pub fn clear_checkpoint(&mut self) {
-        self.tree.clear_latest_checkpoint();
-    }
-
     /// Delete all tree-related KV data (shards, cap, checkpoints) through
     /// this handle's callbacks.
     ///

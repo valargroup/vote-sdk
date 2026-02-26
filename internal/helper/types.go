@@ -120,18 +120,14 @@ type TreeStatus struct {
 	AnchorHeight uint64 `json:"anchor_height"`
 }
 
-// TreeReader abstracts reading commitment tree leaves and state from the keeper.
+// TreeReader abstracts commitment tree access from the keeper.
 type TreeReader interface {
-	// GetAllLeaves returns all commitment leaves from height 0 up to the latest
-	// height that has a stored root.
-	GetAllLeaves() (leaves [][]byte, anchorHeight uint64, err error)
-
-	// GetTreeStatus returns lightweight tree statistics without reading leaf data.
+	// GetTreeStatus returns lightweight tree statistics (leaf count + anchor height).
 	GetTreeStatus() (TreeStatus, error)
-}
 
-// MerklePathFunc computes a Poseidon Merkle authentication path for a leaf.
-// Injected to avoid a transitive CGo dependency on libzally_circuits.a in
-// the helper package. In production, the injected implementation builds an
-// ephemeral votetree.TreeHandle from the leaf slice.
-type MerklePathFunc func(leaves [][]byte, position uint64) ([]byte, error)
+	// MerklePath returns the 772-byte serialized Poseidon Merkle authentication
+	// path for the leaf at position, anchored to the checkpoint at anchorHeight.
+	// anchorHeight must correspond to a checkpoint that exists in the persistent
+	// tree (i.e. a block height at which Checkpoint was called by EndBlocker).
+	MerklePath(position uint64, anchorHeight uint32) ([]byte, error)
+}

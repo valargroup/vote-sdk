@@ -194,18 +194,6 @@ int32_t zally_vote_tree_root_stateful(
 );
 
 /*
- * Reset the in-memory latest_checkpoint of the handle to None.
- *
- * Call this after recreating a handle on rollback so that the stale
- * checkpoint from the pre-rollback KV state does not block a fresh
- * Checkpoint call at the rolled-back height.
- *
- * Parameters:
- *   handle - Pointer returned by zally_vote_tree_create_with_kv.
- */
-void zally_vote_tree_clear_checkpoint(ZallyTreeHandle* handle);
-
-/*
  * Delete all tree-related KV data (shards, cap, checkpoints) through the
  * handle's callbacks.
  *

@@ -1356,21 +1356,6 @@ pub unsafe extern "C" fn zally_vote_tree_root_stateful(
     0
 }
 
-/// Reset the in-memory `latest_checkpoint` of the handle to `None`.
-///
-/// Called after handle recreation on rollback so that the stale KV-level
-/// checkpoint (from the pre-rollback chain state) does not interfere with
-/// the fresh `zally_vote_tree_checkpoint` call at the rolled-back height.
-///
-/// # Safety
-/// `handle` must be a valid pointer returned by [`zally_vote_tree_create_with_kv`].
-#[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_clear_checkpoint(handle: *mut votetree::TreeHandle) {
-    if !handle.is_null() {
-        (*handle).clear_checkpoint();
-    }
-}
-
 /// Delete all tree-related KV data (shards, cap, checkpoints) through the
 /// handle's callbacks.
 ///
