@@ -15,33 +15,33 @@ pub mod votetree;
 pub mod nc_root;
 pub mod ffi;
 
-/// Re-export the delegation circuit's prove/verify API from the `orchard` crate.
+/// Re-export the delegation circuit's prove/verify API from the `voting-circuits` crate.
 pub mod delegation {
-    pub use orchard::delegation::{
+    pub use voting_circuits::delegation::{
         verify_delegation_proof, verify_delegation_proof_raw,
         create_delegation_proof, delegation_params, delegation_proving_key,
         Circuit, Instance, K,
     };
-    pub use orchard::delegation::builder;
-    pub use orchard::delegation::imt;
+    pub use voting_circuits::delegation::builder;
+    pub use voting_circuits::delegation::imt;
 }
 
-/// Re-export the vote proof circuit's prove/verify API from the `orchard` crate.
+/// Re-export the vote proof circuit's prove/verify API from the `voting-circuits` crate.
 pub mod vote_proof {
-    pub use orchard::vote_proof::{
+    pub use voting_circuits::vote_proof::{
         verify_vote_proof, verify_vote_proof_raw,
         vote_proof_params, vote_proof_proving_key,
         Circuit, Instance, K,
     };
 }
 
-/// Re-export the share reveal circuit's prove/verify API from the `orchard` crate.
+/// Re-export the share reveal circuit's prove/verify API from the `voting-circuits` crate.
 pub mod share_reveal {
-    pub use orchard::share_reveal::{
+    pub use voting_circuits::share_reveal::{
         verify_share_reveal_proof, verify_share_reveal_proof_raw,
         create_share_reveal_proof, share_reveal_params, share_reveal_proving_key,
         domain_tag_share_spend, share_nullifier_hash,
         Circuit, Instance, K,
     };
-    pub use orchard::share_reveal::builder;
+    pub use voting_circuits::share_reveal::builder;
 }

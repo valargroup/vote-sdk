@@ -976,7 +976,7 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     }
 
     // --- Step 3: Compute shares_hash and verify against expected ---
-    let computed_shares_hash = orchard::vote_proof::shares_hash(share_blinds, all_c1_x, all_c2_x);
+    let computed_shares_hash = voting_circuits::vote_proof::shares_hash(share_blinds, all_c1_x, all_c2_x);
 
     let expected_hash_raw = std::slice::from_raw_parts(expected_shares_hash_ptr, 32);
     let mut expected_hash_bytes = [0u8; 32];
@@ -1083,7 +1083,7 @@ pub fn build_share_reveal_test_data()
     }
 
     // Compute shares_hash with blinded commitments.
-    let shares_hash_fp = orchard::vote_proof::shares_hash(share_blinds, all_c1_x, all_c2_x);
+    let shares_hash_fp = voting_circuits::vote_proof::shares_hash(share_blinds, all_c1_x, all_c2_x);
     let shares_hash_bytes: [u8; 32] = shares_hash_fp.to_repr();
 
     // Compute vote_commitment.
