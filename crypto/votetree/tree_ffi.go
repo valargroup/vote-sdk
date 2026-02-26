@@ -107,7 +107,7 @@ const (
 // Create once with NewTreeHandleWithKV, passing the Keeper's stable KvStoreProxy
 // and the current leaf count. Call AppendBatch for new leaves each block,
 // Checkpoint to snapshot state, Root to read the root. Call Close exactly
-// once when done (node shutdown or rollback).
+// once when done (node shutdown).
 //
 //	proxy := &votetree.KvStoreProxy{}
 //	h, err := votetree.NewTreeHandleWithKV(proxy, nextIndex)
@@ -251,24 +251,8 @@ func (h *TreeHandle) Root() ([]byte, error) {
 	return result, nil
 }
 
-// TruncateKVData deletes all tree-related KV entries (shards, cap,
-// checkpoints) through this handle's KV callbacks. Must be called on the OLD
-// handle just before Close() on rollback, so that the fresh handle created at
-// next_position=0 starts with an empty KV state. Without this, ShardTree
-// would read stale pre-rollback shard data and place new leaves at wrong
-// positions, producing an incorrect root.
-func (h *TreeHandle) TruncateKVData() error {
-	rc := C.zally_vote_tree_truncate_kv_data((*C.ZallyTreeHandle)(h.ptr))
-	if rc != 0 {
-		return fmt.Errorf("votetree: truncate_kv_data failed (rc=%d)", rc)
-	}
-	return nil
-}
-
 // Size returns the total number of leaves appended since the handle was
-// created. Used by Keeper.ensureTreeLoaded to detect rollbacks: if
-// Size() > KV nextIndex, the chain rolled back and the handle must be
-// discarded and rebuilt.
+// created.
 func (h *TreeHandle) Size() uint64 {
 	return uint64(C.zally_vote_tree_size((*C.ZallyTreeHandle)(h.ptr)))
 }

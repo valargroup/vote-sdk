@@ -183,21 +183,6 @@ impl TreeHandle {
             .map_err(|_| FfiError::Storage)
     }
 
-    /// Delete all tree-related KV data (shards, cap, checkpoints) through
-    /// this handle's callbacks.
-    ///
-    /// The Go keeper calls this on the old handle just before closing it on
-    /// rollback, so that the fresh handle created at `next_position = 0` sees
-    /// an empty KV state and does not read stale pre-rollback shard data when
-    /// `AppendFromKV` re-inserts the rolled-back leaf range.
-    ///
-    /// Returns `Err(FfiError::Storage)` if any KV callback fails.
-    pub fn truncate_kv_data(&mut self) -> Result<(), FfiError> {
-        self.tree
-            .truncate_kv_data()
-            .map_err(|_| FfiError::Storage)
-    }
-
     /// Return the 32-byte Merkle root at the latest checkpoint.
     pub fn root(&self) -> [u8; 32] {
         self.tree.root().to_repr()

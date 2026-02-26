@@ -50,8 +50,8 @@ type Keeper struct {
 	// Go for every shard read/write, giving ShardTree true lazy loading.
 	//
 	// treeHandle is lazy-initialized on the first EndBlocker call that has
-	// leaves. Its Size() tracks the number of appended leaves; a mismatch
-	// with KV nextIndex (rollback) triggers a fresh handle creation.
+	// leaves. Its Size() must equal KV nextIndex on every subsequent call;
+	// a mismatch indicates a bug and returns an error.
 	//
 	// Concurrency: only EndBlocker (via ComputeTreeRoot) mutates these fields.
 	kvProxy    *votetree.KvStoreProxy
@@ -86,10 +86,7 @@ func NewKeeper(
 //     unavoidable since the ShardTree has never been populated.
 //   - Size() == nextIndex: already up to date, no-op.
 //   - Size() < nextIndex (delta): append leaves [Size(), nextIndex) from KV.
-//   - Size() > nextIndex (rollback): TruncateKVData wipes all stale shard,
-//     cap, and checkpoint blobs from KV; the old handle is closed; a fresh handle
-//     is created at next_position=0 (max_checkpoint_id()=None on empty KV, so
-//     latest_checkpoint starts as None); leaves are replayed via AppendFromKV.
+//   - Size() > nextIndex: invariant violation — returns an error.
 //
 // Returns (needsCheckpoint, error). Caller should call Checkpoint(blockHeight)
 // when needsCheckpoint is true.
@@ -129,24 +126,7 @@ func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) (need
 	size := k.treeHandle.Size()
 
 	if size > nextIndex {
-		// Rollback: handle is ahead of KV. TruncateKVData deletes every
-		// shard blob, the cap blob, and every checkpoint blob from KV before
-		// the old handle is closed. Without this, ShardTree would read stale
-		// pre-rollback shard data and append new leaves after the old frontier,
-		// producing an incorrect root. After truncation the KV is empty, so
-		// the fresh handle starts with latest_checkpoint=None because
-		// max_checkpoint_id() returns None on an empty store.
-		if err := k.treeHandle.TruncateKVData(); err != nil {
-			return false, fmt.Errorf("tree rollback truncation failed: %w", err)
-		}
-		k.treeHandle.Close()
-		h, err := votetree.NewTreeHandleWithKV(k.kvProxy, 0)
-		if err != nil {
-			return false, fmt.Errorf("ensureTreeLoaded: rollback: %w", err)
-		}
-		k.treeHandle = h
-		size = 0
-		// Fall through to the delta-append path.
+		return false, fmt.Errorf("ensureTreeLoaded: tree size %d > nextIndex %d: invariant violated", size, nextIndex)
 	}
 
 	if size == nextIndex {

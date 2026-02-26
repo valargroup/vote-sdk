@@ -1356,32 +1356,6 @@ pub unsafe extern "C" fn zally_vote_tree_root_stateful(
     0
 }
 
-/// Delete all tree-related KV data (shards, cap, checkpoints) through the
-/// handle's callbacks.
-///
-/// Call this on the **old** handle just before closing it on rollback, so that
-/// the fresh handle created at `next_position = 0` starts with an empty KV
-/// state. Without this, `ShardTree::append` would read stale pre-rollback
-/// shard data and place new leaves at the wrong positions.
-///
-/// # Returns
-/// * `0`  on success.
-/// * `-1` if `handle` is null or any KV callback fails.
-///
-/// # Safety
-/// `handle` must be a valid pointer returned by [`zally_vote_tree_create_with_kv`].
-#[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_truncate_kv_data(
-    handle: *mut votetree::TreeHandle,
-) -> i32 {
-    if handle.is_null() {
-        return -1;
-    }
-    match (*handle).truncate_kv_data() {
-        Ok(()) => 0,
-        Err(_) => -1,
-    }
-}
 
 /// Return the number of leaves appended to the stateful handle so far.
 ///

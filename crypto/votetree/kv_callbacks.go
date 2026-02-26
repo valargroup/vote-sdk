@@ -40,11 +40,15 @@ func recoverHandle(ctx unsafe.Pointer) cgo.Handle {
 }
 
 // KvStoreProxy is a stable Go struct whose address never changes across blocks.
-// The cgo.Handle passed to Rust points here. Go updates Current before every
-// tree operation so Rust always accesses the correct block's KV store.
+// The cgo.Handle passed to Rust points here. SetStore must be called before
+// every tree operation so Rust callbacks reach the correct block's KV store.
 type KvStoreProxy struct {
 	Current store.KVStore
 }
+
+// SetStore swaps in the KV store for the current block. Called once per block
+// by the Keeper before any tree FFI call.
+func (p *KvStoreProxy) SetStore(s store.KVStore) { p.Current = s }
 
 // ---------------------------------------------------------------------------
 // Exported C callbacks

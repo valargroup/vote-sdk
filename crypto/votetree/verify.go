@@ -16,7 +16,6 @@ import (
 //     clean rebuild of the same leaves through the in-memory code path)
 //   - KV shard corruption
 //   - Append-ordering bugs
-//   - Rollback-handling bugs
 //
 // Returns nil on a matching root, a descriptive error on any mismatch or failure.
 func VerifyRootFromLeaves(leaves [][]byte, expectedRoot []byte) error {

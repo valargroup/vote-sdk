@@ -29,8 +29,8 @@ func (k *Keeper) ComputeTreeRoot(kvStore store.KVStore, nextIndex, blockHeight u
 		return nil, nil
 	}
 
-	// Update the KV proxy so Rust callbacks reach the current block's store.
-	k.kvProxy.Current = kvStore
+	// Bind the current block's store so Rust callbacks reach the right data.
+	k.kvProxy.SetStore(kvStore)
 
 	appended, err := k.ensureTreeLoaded(kvStore, nextIndex)
 	if err != nil {

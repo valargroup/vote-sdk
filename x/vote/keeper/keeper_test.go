@@ -15,7 +15,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/zally/crypto/votetree"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -957,7 +956,14 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
 	s.Require().NotEqual(root1, root2)
 	s.Require().NotEqual(root2, root3)
 
-	// root3 must match what a cold-start fresh rebuild produces.
+	// Simulate what EndBlocker does: persist state.Height so a freshKeeper
+	// takes the O(1) restart path instead of the O(N) first-boot replay.
+	treeState, err := s.keeper.GetCommitmentTreeState(kv)
+	s.Require().NoError(err)
+	treeState.Height = 3
+	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, treeState))
+
+	// root3 must match what a cold-start restart produces.
 	freshKeeper := keeper.NewKeeper(
 		s.keeper.StoreServiceForTest(),
 		"zvote1authority",
@@ -966,7 +972,7 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
 	)
 	freshRoot, err := freshKeeper.ComputeTreeRoot(kv, 3, 3)
 	s.Require().NoError(err)
-	s.Require().Equal(root3, freshRoot, "incremental root must match cold-start root")
+	s.Require().Equal(root3, freshRoot, "restart root must match incremental root")
 }
 
 // TestComputeTreeRoot_DeltaAppend verifies that calling ComputeTreeRoot with a
@@ -1001,102 +1007,6 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeltaAppend() {
 	s.Require().Equal(uint64(8), s.keeper.TreeSizeForTest())
 }
 
-// TestComputeTreeRoot_RollbackRebuild verifies that Size() > nextIndex
-// (rollback scenario) triggers a full rebuild and produces the correct root.
-func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackRebuild() {
-	s.SetupTest()
-	kv := s.keeper.OpenKVStore(s.ctx)
-
-	// Append 5 leaves and compute root.
-	for i := uint64(1); i <= 5; i++ {
-		_, err := s.keeper.AppendCommitment(kv, fpLE(i))
-		s.Require().NoError(err)
-	}
-	root5, err := s.keeper.ComputeTreeRoot(kv, 5, 5)
-	s.Require().NoError(err)
-	s.Require().Equal(uint64(5), s.keeper.TreeSizeForTest())
-
-	// Simulate rollback: nextIndex goes back to 3 (Size() > nextIndex).
-	root3Rollback, err := s.keeper.ComputeTreeRoot(kv, 3, 3)
-	s.Require().NoError(err)
-	s.Require().Len(root3Rollback, 32)
-	s.Require().NotEqual(root5, root3Rollback)
-	// After rollback, tree size is reset to 3.
-	s.Require().Equal(uint64(3), s.keeper.TreeSizeForTest())
-
-	// root3Rollback must match a fresh rebuild from 3 leaves.
-	freshKeeper := keeper.NewKeeper(
-		s.keeper.StoreServiceForTest(),
-		"zvote1authority",
-		log.NewNopLogger(),
-		nil,
-	)
-	freshRoot3, err := freshKeeper.ComputeTreeRoot(kv, 3, 3)
-	s.Require().NoError(err)
-	s.Require().Equal(root3Rollback, freshRoot3, "post-rollback root must match fresh rebuild")
-}
-
-// TestComputeTreeRoot_RollbackWithStaleShards verifies that a rollback
-// following a delta-append (which writes shard data to KV) produces the
-// correct root. This is the harder scenario: without the TruncateKVData call
-// added to the rollback path, ShardTree would read the stale pre-rollback
-// shards and place newly-appended leaves at wrong positions, producing an
-// incorrect root.
-//
-// Sequence:
-//  1. ComputeTreeRoot(kv, 1, 1) — cold start: handle created at pos 0,
-//     AppendFromKV(0,1) appends leaf 0, Checkpoint(1). Size()=1.
-//  2. ComputeTreeRoot(kv, 5, 5) — delta-append indices 1-4; Rust writes
-//     shard data for those 4 leaves to KV.  Size()=5.
-//  3. ComputeTreeRoot(kv, 3, 3) — rollback: Size()(5) > nextIndex(3).
-//     TruncateKVData clears the stale shards, then AppendFromKV(0,3) builds
-//     a fresh 3-leaf tree.
-//
-// The rollback root is compared against an ephemeral NewEphemeralTreeHandle
-// for the same 3 leaves — this reference is completely independent of KV state.
-func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackWithStaleShards() {
-	s.SetupTest()
-	kv := s.keeper.OpenKVStore(s.ctx)
-
-	// Append 5 leaves up-front (indices 0-4).
-	for i := uint64(1); i <= 5; i++ {
-		_, err := s.keeper.AppendCommitment(kv, fpLE(i))
-		s.Require().NoError(err)
-	}
-
-	// Step 1: cold start at nextIndex=1. Handle created at pos 0; AppendFromKV
-	// appends leaf 0 and a checkpoint is taken. Size() becomes 1.
-	_, err := s.keeper.ComputeTreeRoot(kv, 1, 1)
-	s.Require().NoError(err)
-	s.Require().Equal(uint64(1), s.keeper.TreeSizeForTest())
-
-	// Step 2: delta-append indices 1-4. Rust writes shard data for 4 leaves
-	// to KV. After this, Size()=5 and KV contains stale shard data.
-	_, err = s.keeper.ComputeTreeRoot(kv, 5, 5)
-	s.Require().NoError(err)
-	s.Require().Equal(uint64(5), s.keeper.TreeSizeForTest())
-
-	// Step 3: rollback — Size()(5) > nextIndex(3). TruncateKVData removes
-	// the stale shards before AppendFromKV(0,3) rebuilds the tree.
-	rollbackRoot, err := s.keeper.ComputeTreeRoot(kv, 3, 3)
-	s.Require().NoError(err)
-	s.Require().Len(rollbackRoot, 32)
-	s.Require().Equal(uint64(3), s.keeper.TreeSizeForTest())
-
-	// The reference root is built by an ephemeral in-memory tree from the same
-	// 3 leaves (fpLE(1), fpLE(2), fpLE(3)). This is completely independent of
-	// KV state and serves as ground truth.
-	refHandle, err := votetree.NewEphemeralTreeHandle()
-	s.Require().NoError(err)
-	defer refHandle.Close()
-	s.Require().NoError(refHandle.AppendBatch([][]byte{fpLE(1), fpLE(2), fpLE(3)}))
-	s.Require().NoError(refHandle.Checkpoint(1))
-	refRoot, err := refHandle.Root()
-	s.Require().NoError(err)
-	s.Require().Equal(refRoot, rollbackRoot,
-		"post-rollback root must match ephemeral reference for the same 3 leaves")
-}
-
 // TestComputeTreeRoot_ColdStartNoNewLeaves verifies that a cold-start keeper
 // returns the correct root for a block that adds no new leaves. With the
 // O(N) replay path, the fresh keeper replays all existing leaves via
@@ -1114,8 +1024,18 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 	s.Require().NoError(err)
 	s.Require().Len(root1, 32)
 
+	// Simulate what EndBlocker does: persist state.Height so a freshKeeper
+	// takes the O(1) restart path (lazy-loads shard data from KV) rather than
+	// the O(N) first-boot replay, which would conflict with existing shard data.
+	treeState, err := s.keeper.GetCommitmentTreeState(kv)
+	s.Require().NoError(err)
+	treeState.Height = 10
+	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, treeState))
+
 	// Simulate a node restart: new keeper with the same KV store but a nil
-	// tree handle (cold start). No leaves are appended between H1 and H2.
+	// tree handle. The fresh keeper takes the O(1) restart path: it creates a
+	// handle at nextIndex=4, reads max_checkpoint=10 from KV, and returns the
+	// root at checkpoint 10 without replaying any leaves.
 	freshKeeper := keeper.NewKeeper(
 		s.keeper.StoreServiceForTest(),
 		"zvote1authority",
@@ -1123,12 +1043,12 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 		nil,
 	)
 
-	// Call at a later block height but with the same nextIndex. The fresh
-	// keeper replays all 4 leaves (cold-start O(N) path) and takes a new
-	// checkpoint at height 20. Root must equal root1 (same leaf set).
+	// Call at a later block height with the same nextIndex. Since no new leaves
+	// were added, needsCheckpoint=false and root() returns the existing root at
+	// checkpoint 10. Root must equal root1.
 	root2, err := freshKeeper.ComputeTreeRoot(kv, 4, 20)
 	s.Require().NoError(err)
-	s.Require().Equal(root1, root2, "cold-start root must match original root when no new leaves added")
+	s.Require().Equal(root1, root2, "restart root must match original root when no new leaves added")
 }
 
 // TestComputeTreeRoot_IdempotentSameBlock verifies that calling ComputeTreeRoot
