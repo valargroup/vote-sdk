@@ -353,6 +353,7 @@ extension VotingCryptoClient: DependencyKey {
                                 voteRoundId: result.voteRoundId,
                                 sharesHash: result.sharesHash,
                                 shareBlindFactors: result.shareBlinds.map { Data($0) },
+                                shareComms: result.shareComms.map { Data($0) },
                                 rVpkBytes: result.rVpkBytes,
                                 alphaV: result.alphaV
                             )
@@ -386,6 +387,7 @@ extension VotingCryptoClient: DependencyKey {
                     voteRoundId: commitment.voteRoundId,
                     sharesHash: commitment.sharesHash,
                     shareBlinds: commitment.shareBlindFactors.map { Data($0) },
+                    shareComms: commitment.shareComms.map { Data($0) },
                     rVpkBytes: commitment.rVpkBytes,
                     alphaV: commitment.alphaV
                 )
@@ -418,7 +420,8 @@ extension VotingCryptoClient: DependencyKey {
                                 randomness: $0.randomness
                             )
                         },
-                        shareBlindFactors: $0.shareBlinds.map { Data($0) }
+                        shareComms: $0.shareComms.map { Data($0) },
+                        primaryBlind: Data($0.primaryBlind)
                     )
                 }
             },

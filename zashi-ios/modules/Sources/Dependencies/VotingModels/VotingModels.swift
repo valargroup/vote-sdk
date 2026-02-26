@@ -425,9 +425,10 @@ public struct VoteCommitmentBundle: Equatable, Sendable {
     public let voteRoundId: String
     /// Poseidon hash of encrypted share x-coordinates (32 bytes).
     public let sharesHash: Data
-    /// Per-share blind factors (5 x 32 bytes).
-    /// share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x).
+    /// Per-share blind factors (N x 32 bytes).
     public let shareBlindFactors: [Data]
+    /// Pre-computed per-share Poseidon commitments (N x 32 bytes).
+    public let shareComms: [Data]
     /// Compressed r_vpk (32 bytes) for sighash computation and signature verification.
     public let rVpkBytes: Data
     /// Spend-auth randomizer alpha_v (32 bytes, LE scalar repr).
@@ -445,6 +446,7 @@ public struct VoteCommitmentBundle: Equatable, Sendable {
         voteRoundId: String,
         sharesHash: Data,
         shareBlindFactors: [Data] = [],
+        shareComms: [Data] = [],
         rVpkBytes: Data = Data(),
         alphaV: Data = Data()
     ) {
@@ -458,6 +460,7 @@ public struct VoteCommitmentBundle: Equatable, Sendable {
         self.voteRoundId = voteRoundId
         self.sharesHash = sharesHash
         self.shareBlindFactors = shareBlindFactors
+        self.shareComms = shareComms
         self.rVpkBytes = rVpkBytes
         self.alphaV = alphaV
     }
@@ -470,19 +473,22 @@ public struct SharePayload: Equatable, Sendable {
     public let voteDecision: UInt32
     public let encShare: EncryptedShare
     public let treePosition: UInt64
-    /// All 5 encrypted shares (needed for ZKP #3 shares_hash witness).
+    /// All encrypted shares (needed for enc_share lookup by the helper).
     public let allEncShares: [EncryptedShare]
-    /// Per-share blind factors (5 x 32 bytes).
-    public let shareBlindFactors: [Data]
+    /// Pre-computed per-share Poseidon commitments (N x 32 bytes).
+    public let shareComms: [Data]
+    /// Blind factor for this specific share (32 bytes).
+    public let primaryBlind: Data
 
-    public init(sharesHash: Data, proposalId: UInt32, voteDecision: UInt32, encShare: EncryptedShare, treePosition: UInt64, allEncShares: [EncryptedShare], shareBlindFactors: [Data] = []) {
+    public init(sharesHash: Data, proposalId: UInt32, voteDecision: UInt32, encShare: EncryptedShare, treePosition: UInt64, allEncShares: [EncryptedShare], shareComms: [Data] = [], primaryBlind: Data = Data()) {
         self.sharesHash = sharesHash
         self.proposalId = proposalId
         self.voteDecision = voteDecision
         self.encShare = encShare
         self.treePosition = treePosition
         self.allEncShares = allEncShares
-        self.shareBlindFactors = shareBlindFactors
+        self.shareComms = shareComms
+        self.primaryBlind = primaryBlind
     }
 }
 

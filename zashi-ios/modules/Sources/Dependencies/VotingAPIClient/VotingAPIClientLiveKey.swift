@@ -413,7 +413,8 @@ extension VotingAPIClient: DependencyKey {
                         "tree_position": payload.treePosition,
                         "vote_round_id": roundIdHex,
                         "all_enc_shares": allEncSharesJSON,
-                        "share_blinds": payload.shareBlindFactors.map { $0.base64EncodedString() }
+                        "share_comms": payload.shareComms.map { $0.base64EncodedString() },
+                        "primary_blind": payload.primaryBlind.base64EncodedString()
                     ]
                     _ = try await postServerJSON(serverURL, "/api/v1/shares", body: body)
                 }

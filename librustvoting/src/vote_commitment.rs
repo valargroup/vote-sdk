@@ -28,7 +28,10 @@ pub fn build_share_payloads(
     let all_enc_shares: Vec<EncryptedShare> = enc_shares.to_vec();
 
     let mut payloads = Vec::with_capacity(enc_shares.len());
-    for share in enc_shares {
+    for (i, share) in enc_shares.iter().enumerate() {
+        let primary_blind = commitment.share_blinds.get(i)
+            .cloned()
+            .unwrap_or_default();
         payloads.push(SharePayload {
             shares_hash: commitment.shares_hash.clone(),
             proposal_id: commitment.proposal_id,
@@ -36,7 +39,8 @@ pub fn build_share_payloads(
             enc_share: share.clone(),
             tree_position: vc_tree_position,
             all_enc_shares: all_enc_shares.clone(),
-            share_blinds: commitment.share_blinds.clone(),
+            share_comms: commitment.share_comms.clone(),
+            primary_blind,
         });
     }
 
@@ -191,6 +195,7 @@ mod tests {
             vote_round_id: String::new(),
             shares_hash: vec![0xDD; 32],
             share_blinds: (0..5).map(|_| vec![0x11; 32]).collect(),
+            share_comms: (0..5).map(|_| vec![0x22; 32]).collect(),
             r_vpk_bytes: vec![0xEE; 32],
             alpha_v: vec![0xFF; 32],
         }

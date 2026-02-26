@@ -251,8 +251,10 @@ pub struct VoteCommitmentBundle {
     pub vote_round_id: String,
     /// Poseidon hash of encrypted share x-coordinates (32 bytes).
     pub shares_hash: Vec<u8>,
-    /// Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
+    /// Per-share blind factors (N x 32 bytes, LE pallas::Base repr).
     pub share_blinds: Vec<Vec<u8>>,
+    /// Pre-computed per-share Poseidon commitments (N x 32 bytes).
+    pub share_comms: Vec<Vec<u8>>,
     /// Compressed r_vpk (32 bytes) for sighash computation and signature verification.
     pub r_vpk_bytes: Vec<u8>,
     /// Spend-auth randomizer alpha_v (32 bytes, LE scalar repr).
@@ -266,11 +268,12 @@ pub struct SharePayload {
     pub vote_decision: u32,
     pub enc_share: EncryptedShare,
     pub tree_position: u64,
-    /// All 5 encrypted shares (needed for ZKP #3 shares_hash witness).
-    /// TODO: This is a temp hack
+    /// All encrypted shares (needed for enc_share lookup by the helper).
     pub all_enc_shares: Vec<EncryptedShare>,
-    /// Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
-    pub share_blinds: Vec<Vec<u8>>,
+    /// Pre-computed per-share Poseidon commitments (N x 32 bytes).
+    pub share_comms: Vec<Vec<u8>>,
+    /// Blind factor for this specific share (32 bytes).
+    pub primary_blind: Vec<u8>,
 }
 
 /// Computed signature fields for cast-vote TX submission.
@@ -491,6 +494,7 @@ impl From<voting::VoteCommitmentBundle> for VoteCommitmentBundle {
             vote_round_id: b.vote_round_id,
             shares_hash: b.shares_hash,
             share_blinds: b.share_blinds,
+            share_comms: b.share_comms,
             r_vpk_bytes: b.r_vpk_bytes,
             alpha_v: b.alpha_v,
         }
@@ -510,6 +514,7 @@ impl From<VoteCommitmentBundle> for voting::VoteCommitmentBundle {
             vote_round_id: b.vote_round_id,
             shares_hash: b.shares_hash,
             share_blinds: b.share_blinds,
+            share_comms: b.share_comms,
             r_vpk_bytes: b.r_vpk_bytes,
             alpha_v: b.alpha_v,
         }
@@ -525,7 +530,8 @@ impl From<voting::SharePayload> for SharePayload {
             enc_share: p.enc_share.into(),
             tree_position: p.tree_position,
             all_enc_shares: p.all_enc_shares.into_iter().map(|s| s.into()).collect(),
-            share_blinds: p.share_blinds,
+            share_comms: p.share_comms,
+            primary_blind: p.primary_blind,
         }
     }
 }

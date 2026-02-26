@@ -112,6 +112,45 @@ pub(crate) fn compute_shares_hash_in_circuit(
     )
 }
 
+/// Computes the shares hash in-circuit from pre-computed share commitments:
+///
+/// ```text
+/// shares_hash = Poseidon(share_comm_0, …, share_comm_15)
+/// ```
+///
+/// Unlike [`compute_shares_hash_in_circuit`], this skips the per-share
+/// blind hashing (level 1) because the caller already provides the 16
+/// `share_comm` values — e.g. as public inputs copied from the instance
+/// column in ZKP #3.
+pub(crate) fn compute_shares_hash_from_comms_in_circuit(
+    poseidon_chip: PoseidonChip<pallas::Base, 3, 2>,
+    mut layouter: impl Layouter<pallas::Base>,
+    share_comms: [AssignedCell<pallas::Base, pallas::Base>; 16],
+) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error> {
+    let hasher = PoseidonHash::<
+        pallas::Base,
+        _,
+        poseidon::P128Pow5T3,
+        ConstantLength<16>,
+        3, // WIDTH
+        2, // RATE
+    >::init(
+        poseidon_chip,
+        layouter.namespace(|| "shares_hash Poseidon init"),
+    )?;
+    hasher.hash(
+        layouter.namespace(|| "shares_hash = Poseidon(share_comms)"),
+        share_comms,
+    )
+}
+
+/// Native counterpart of [`compute_shares_hash_from_comms_in_circuit`].
+///
+/// Computes `Poseidon(share_comm_0, …, share_comm_15)` outside the circuit.
+pub fn shares_hash_from_comms(share_comms: [pallas::Base; 16]) -> pallas::Base {
+    poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<16>, 3, 2>::init().hash(share_comms)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,6 +430,94 @@ mod tests {
         circuit.blinds[0] = pallas::Base::random(&mut rng);
 
         let prover = MockProver::run(12, &circuit, vec![vec![correct]])
+            .expect("MockProver::run failed");
+        assert!(prover.verify().is_err());
+    }
+
+    // ================================================================
+    // compute_shares_hash_from_comms_in_circuit
+    // ================================================================
+
+    /// Minimal circuit: computes `compute_shares_hash_from_comms_in_circuit`
+    /// from 16 pre-computed share_comms and constrains to instance row 0.
+    #[derive(Clone)]
+    struct ComputeSharesHashFromCommsCircuit {
+        share_comms: [pallas::Base; 16],
+    }
+
+    impl Default for ComputeSharesHashFromCommsCircuit {
+        fn default() -> Self {
+            Self { share_comms: [pallas::Base::zero(); 16] }
+        }
+    }
+
+    impl plonk::Circuit<pallas::Base> for ComputeSharesHashFromCommsCircuit {
+        type Config = TestConfig;
+        type FloorPlanner = floor_planner::V1;
+
+        fn without_witnesses(&self) -> Self { Self::default() }
+
+        fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
+            TestConfig::configure(meta)
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl Layouter<pallas::Base>,
+        ) -> Result<(), plonk::Error> {
+            let mut comm_cells = alloc::vec::Vec::with_capacity(16);
+            for i in 0..16 {
+                comm_cells.push(witness(
+                    layouter.namespace(|| alloc::format!("comm_{i}")),
+                    config.advice,
+                    Value::known(self.share_comms[i]),
+                )?);
+            }
+            let comms: [AssignedCell<pallas::Base, pallas::Base>; 16] =
+                comm_cells.try_into().unwrap();
+
+            let result = super::compute_shares_hash_from_comms_in_circuit(
+                config.poseidon_chip(),
+                layouter.namespace(|| "hash_from_comms"),
+                comms,
+            )?;
+            layouter.constrain_instance(result.cell(), config.primary, 0)
+        }
+    }
+
+    /// The from-comms gadget matches the two-level native computation.
+    #[test]
+    fn shares_hash_from_comms_matches_native() {
+        let mut rng = OsRng;
+        let blinds: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let enc_c1: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let enc_c2: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+
+        let comms: [pallas::Base; 16] =
+            core::array::from_fn(|i| share_commitment(blinds[i], enc_c1[i], enc_c2[i]));
+        let expected = super::shares_hash_from_comms(comms);
+
+        // Sanity: must equal the full two-level native hash.
+        assert_eq!(expected, shares_hash(blinds, enc_c1, enc_c2));
+
+        let circuit = ComputeSharesHashFromCommsCircuit { share_comms: comms };
+        let prover = MockProver::run(12, &circuit, vec![vec![expected]])
+            .expect("MockProver::run failed");
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    /// Corrupting any single share_comm changes the output.
+    #[test]
+    fn shares_hash_from_comms_wrong_comm_fails() {
+        let mut rng = OsRng;
+        let comms: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
+        let expected = super::shares_hash_from_comms(comms);
+
+        let mut bad_comms = comms;
+        bad_comms[7] = pallas::Base::random(&mut rng);
+        let circuit = ComputeSharesHashFromCommsCircuit { share_comms: bad_comms };
+        let prover = MockProver::run(12, &circuit, vec![vec![expected]])
             .expect("MockProver::run failed");
         assert!(prover.verify().is_err());
     }

@@ -134,27 +134,6 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		return fmt.Errorf("compute merkle path: %w", err)
 	}
 
-	// Decode all_enc_shares into 32 × 32-byte array (C1_0, C2_0, ..., C1_15, C2_15).
-	var allEncShares [32][32]byte
-	if len(share.Payload.AllEncShares) != 16 {
-		return fmt.Errorf("expected 16 all_enc_shares, got %d", len(share.Payload.AllEncShares))
-	}
-	for i, es := range share.Payload.AllEncShares {
-		c1Bytes, err := base64.StdEncoding.DecodeString(es.C1)
-		if err != nil {
-			return fmt.Errorf("decode all_enc_shares[%d].c1: %w", i, err)
-		}
-		c2Bytes, err := base64.StdEncoding.DecodeString(es.C2)
-		if err != nil {
-			return fmt.Errorf("decode all_enc_shares[%d].c2: %w", i, err)
-		}
-		if len(c1Bytes) != 32 || len(c2Bytes) != 32 {
-			return fmt.Errorf("all_enc_shares[%d] c1/c2 must be 32 bytes", i)
-		}
-		copy(allEncShares[i*2][:], c1Bytes)
-		copy(allEncShares[i*2+1][:], c2Bytes)
-	}
-
 	// Decode round_id from hex to raw 32 bytes.
 	var roundID [32]byte
 	roundBytes, err := hex.DecodeString(share.Payload.VoteRoundID)
@@ -166,43 +145,51 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	}
 	copy(roundID[:], roundBytes)
 
-	// Decode shares_hash.
-	var sharesHash [32]byte
-	shBytes, err := base64.StdEncoding.DecodeString(share.Payload.SharesHash)
-	if err != nil {
-		return fmt.Errorf("decode shares_hash: %w", err)
+	// Decode share_comms.
+	var shareComms [16][32]byte
+	if len(share.Payload.ShareComms) != 16 {
+		return fmt.Errorf("expected 16 share_comms, got %d", len(share.Payload.ShareComms))
 	}
-	if len(shBytes) != 32 {
-		return fmt.Errorf("shares_hash must be 32 bytes, got %d", len(shBytes))
-	}
-	copy(sharesHash[:], shBytes)
-
-	// Decode share_blinds.
-	var shareBlinds [16][32]byte
-	if len(share.Payload.ShareBlinds) != 16 {
-		return fmt.Errorf("expected 16 share_blinds, got %d", len(share.Payload.ShareBlinds))
-	}
-	for i, b := range share.Payload.ShareBlinds {
-		bBytes, err := base64.StdEncoding.DecodeString(b)
+	for i, c := range share.Payload.ShareComms {
+		cBytes, err := base64.StdEncoding.DecodeString(c)
 		if err != nil {
-			return fmt.Errorf("decode share_blinds[%d]: %w", i, err)
+			return fmt.Errorf("decode share_comms[%d]: %w", i, err)
 		}
-		if len(bBytes) != 32 {
-			return fmt.Errorf("share_blinds[%d] must be 32 bytes, got %d", i, len(bBytes))
+		if len(cBytes) != 32 {
+			return fmt.Errorf("share_comms[%d] must be 32 bytes, got %d", i, len(cBytes))
 		}
-		copy(shareBlinds[i][:], bBytes)
+		copy(shareComms[i][:], cBytes)
 	}
+
+	// Decode primary_blind.
+	var primaryBlind [32]byte
+	pbBytes, err := base64.StdEncoding.DecodeString(share.Payload.PrimaryBlind)
+	if err != nil {
+		return fmt.Errorf("decode primary_blind: %w", err)
+	}
+	if len(pbBytes) != 32 {
+		return fmt.Errorf("primary_blind must be 32 bytes, got %d", len(pbBytes))
+	}
+	copy(primaryBlind[:], pbBytes)
+
+	// Decode the revealed share's C1/C2 for the prover.
+	c1Decoded, _ := base64.StdEncoding.DecodeString(share.Payload.EncShare.C1)
+	c2Decoded, _ := base64.StdEncoding.DecodeString(share.Payload.EncShare.C2)
+	var encC1X, encC2X [32]byte
+	copy(encC1X[:], c1Decoded)
+	copy(encC2X[:], c2Decoded)
 
 	// Generate ZKP #3 proof.
 	proof, nullifier, _, err := p.prover.GenerateShareRevealProof(
 		merklePath,
-		allEncShares,
-		shareBlinds,
+		shareComms,
+		primaryBlind,
+		encC1X,
+		encC2X,
 		share.Payload.EncShare.ShareIndex,
 		share.Payload.ProposalID,
 		share.Payload.VoteDecision,
 		roundID,
-		sharesHash,
 	)
 	if err != nil {
 		return fmt.Errorf("generate proof: %w", err)

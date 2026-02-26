@@ -384,22 +384,23 @@ int32_t zally_verify_share_reveal_proof(
 /*
  * Generate a share reveal proof (ZKP #3) in a single call.
  *
- * Performs the entire crypto pipeline: decode inputs, compute shares_hash,
- * verify consistency, derive nullifier, build circuit, generate Halo2 proof.
+ * Performs the entire crypto pipeline: decode inputs, compute shares_hash
+ * from share_comms, derive nullifier, build circuit, generate Halo2 proof.
  *
  * Parameters:
  *   merkle_path_ptr       - Pointer to 772-byte serialized Merkle path
  *                           (from zally_vote_tree_path_stateful: 4 bytes position + 24*32 siblings).
  *   merkle_path_len       - Length (must be 772).
- *   all_enc_shares_ptr    - Pointer to 1024 bytes: 16 shares x (C1 + C2) x 32 bytes.
- *                           Order: C1_0, C2_0, C1_1, C2_1, ..., C1_15, C2_15.
- *   all_enc_shares_len    - Length (must be 1024).
+ *   share_comms_ptr       - Pointer to 512 bytes: 16 share commitments x 32 bytes (Fp LE).
+ *   share_comms_len       - Length (must be 512).
+ *   primary_blind_ptr     - Pointer to 32-byte blind factor for the revealed share (Fp LE).
+ *   enc_c1_x_ptr          - Pointer to 32-byte x-coord of revealed share's C1 (compressed, sign cleared).
+ *   enc_c2_x_ptr          - Pointer to 32-byte x-coord of revealed share's C2 (compressed, sign cleared).
  *   share_index           - Which of the 16 shares (0..15).
  *   proposal_id           - Proposal being voted on.
  *   vote_decision         - Vote choice.
  *   round_id_ptr          - Pointer to 32-byte raw Blake2b-256 round ID.
  *   round_id_len          - Length (must be 32).
- *   expected_shares_hash_ptr - Pointer to 32-byte expected shares_hash (Fp LE).
  *   proof_out             - Output buffer for proof bytes.
  *   proof_out_capacity    - Size of proof_out buffer (recommend 8192).
  *   proof_len_out         - On success, receives actual proof length.
@@ -410,22 +411,21 @@ int32_t zally_verify_share_reveal_proof(
  *    0  on success.
  *   -1  invalid input (null pointers, wrong lengths).
  *   -3  deserialization error (non-canonical Fp).
- *   -4  shares_hash mismatch.
  *   -5  proof generation failure.
  */
 int32_t zally_generate_share_reveal(
     const uint8_t* merkle_path_ptr,
     size_t merkle_path_len,
-    const uint8_t* all_enc_shares_ptr,
-    size_t all_enc_shares_len,
-    const uint8_t* share_blinds_ptr,
-    size_t share_blinds_len,
+    const uint8_t* share_comms_ptr,
+    size_t share_comms_len,
+    const uint8_t* primary_blind_ptr,
+    const uint8_t* enc_c1_x_ptr,
+    const uint8_t* enc_c2_x_ptr,
     uint32_t share_index,
     uint32_t proposal_id,
     uint32_t vote_decision,
     const uint8_t* round_id_ptr,
     size_t round_id_len,
-    const uint8_t* expected_shares_hash_ptr,
     uint8_t* proof_out,
     size_t proof_out_capacity,
     size_t* proof_len_out,

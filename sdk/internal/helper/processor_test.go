@@ -22,12 +22,13 @@ type mockProver struct {
 
 func (m *mockProver) GenerateShareRevealProof(
 	merklePath []byte,
-	allEncShares [32][32]byte,
-	shareBlinds [16][32]byte,
+	shareComms [16][32]byte,
+	primaryBlind [32]byte,
+	encC1X [32]byte,
+	encC2X [32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
-	sharesHash [32]byte,
 ) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error) {
 	m.callCount.Add(1)
 	if m.err != nil {
@@ -50,12 +51,13 @@ type trackingProver struct {
 
 func (p *trackingProver) GenerateShareRevealProof(
 	merklePath []byte,
-	allEncShares [32][32]byte,
-	shareBlinds [16][32]byte,
+	shareComms [16][32]byte,
+	primaryBlind [32]byte,
+	encC1X [32]byte,
+	encC2X [32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
-	sharesHash [32]byte,
 ) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error) {
 	current := p.inFlight.Add(1)
 	defer p.inFlight.Add(-1)
@@ -302,9 +304,9 @@ func TestValidatePayload(t *testing.T) {
 	for i := range allEnc {
 		allEnc[i] = EncryptedShareWire{C1: b64_32, C2: b64_32, ShareIndex: uint32(i)}
 	}
-	blinds := make([]string, 16)
-	for i := range blinds {
-		blinds[i] = b64_32
+	comms := make([]string, 16)
+	for i := range comms {
+		comms[i] = b64_32
 	}
 
 	valid := SharePayload{
@@ -316,7 +318,8 @@ func TestValidatePayload(t *testing.T) {
 		TreePosition: 0,
 		VoteRoundID:  roundID,
 		AllEncShares: allEnc,
-		ShareBlinds:  blinds,
+		ShareComms:   comms,
+		PrimaryBlind: b64_32,
 	}
 
 	t.Run("valid", func(t *testing.T) {

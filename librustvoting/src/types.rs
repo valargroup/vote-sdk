@@ -174,10 +174,12 @@ pub struct VoteCommitmentBundle {
     /// Poseidon hash of encrypted share x-coordinates (32 bytes).
     /// Intermediate value: vote_commitment = H(DOMAIN_VC, shares_hash, proposal_id, vote_decision).
     pub shares_hash: Vec<u8>,
-    /// Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
-    /// share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x).
-    /// Sent to the helper server alongside shares so it can build ZKP #3.
+    /// Per-share blind factors (N x 32 bytes, LE pallas::Base repr).
     pub share_blinds: Vec<Vec<u8>>,
+    /// Pre-computed per-share Poseidon commitments (N x 32 bytes, LE pallas::Base repr).
+    /// share_comm_i = Poseidon(blind_i, c1_i_x, c2_i_x).
+    /// Sent as public inputs to ZKP #3; the helper only needs the primary blind.
+    pub share_comms: Vec<Vec<u8>>,
     /// Compressed r_vpk (32 bytes) for sighash computation and signature verification.
     pub r_vpk_bytes: Vec<u8>,
     /// Spend-auth randomizer alpha_v (32 bytes, LE scalar repr).
@@ -193,12 +195,14 @@ pub struct SharePayload {
     pub vote_decision: u32,
     pub enc_share: EncryptedShare,
     pub tree_position: u64,
-    /// All 5 encrypted shares (needed for ZKP #3 shares_hash witness).
-    /// TODO: This is a temp hack
+    /// All encrypted shares (needed for enc_share lookup by the helper).
     pub all_enc_shares: Vec<EncryptedShare>,
-    /// Per-share blind factors (5 x 32 bytes, LE pallas::Base repr).
-    /// Needed for ZKP #3 blinded share commitment witness.
-    pub share_blinds: Vec<Vec<u8>>,
+    /// Pre-computed per-share Poseidon commitments (N x 32 bytes).
+    /// Provided as public inputs to ZKP #3.
+    pub share_comms: Vec<Vec<u8>>,
+    /// Blind factor for this specific share (32 bytes, LE pallas::Base repr).
+    /// Only the revealed share's blind is needed for ZKP #3.
+    pub primary_blind: Vec<u8>,
 }
 
 /// Computed signature fields for cast-vote TX submission.

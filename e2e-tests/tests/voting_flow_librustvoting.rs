@@ -540,7 +540,8 @@ fn voting_flow_librustvoting_path() {
             p.enc_share.share_index,
             p.tree_position,
             &all_enc,
-            &p.share_blinds,
+            &p.share_comms,
+            &p.primary_blind,
         );
         let (status, json) = post_helper_json("/api/v1/shares", &body)
             .unwrap_or_else(|e| panic!("POST helper share {}: {}", i, e));
