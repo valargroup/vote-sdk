@@ -95,7 +95,11 @@ func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) (need
 	if k.treeHandle == nil {
 		// True cold start: create handle; latest_checkpoint is restored from KV
 		// inside TreeServer::new, so Root() is correct without a new checkpoint.
-		k.treeHandle = votetree.NewTreeHandleWithKV(k.kvProxy, nextIndex)
+		h, err := votetree.NewTreeHandleWithKV(k.kvProxy, nextIndex)
+		if err != nil {
+			return false, fmt.Errorf("ensureTreeLoaded: cold start: %w", err)
+		}
+		k.treeHandle = h
 		k.treeCursor = nextIndex
 		return false, nil
 	}
@@ -111,7 +115,11 @@ func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) (need
 			return false, fmt.Errorf("tree rollback truncation failed: %w", err)
 		}
 		k.treeHandle.Close()
-		k.treeHandle = votetree.NewTreeHandleWithKV(k.kvProxy, 0)
+		h, err := votetree.NewTreeHandleWithKV(k.kvProxy, 0)
+		if err != nil {
+			return false, fmt.Errorf("ensureTreeLoaded: rollback: %w", err)
+		}
+		k.treeHandle = h
 		k.treeHandle.ClearCheckpoint()
 		k.treeCursor = 0
 		// Fall through to the delta-append path.

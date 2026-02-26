@@ -21,6 +21,7 @@ extern void    zallyKvFreeBuf(uint8_t*, size_t);
 import "C"
 
 import (
+	"fmt"
 	"runtime/cgo"
 	"unsafe"
 )
@@ -33,7 +34,7 @@ import (
 // Go updates proxy.Current before each tree call so Rust always accesses the
 // correct block's store.KVStore.
 // nextPosition is CommitmentTreeState.NextIndex (0 on first boot).
-func NewTreeHandleWithKV(proxy *KvStoreProxy, nextPosition uint64) *TreeHandle {
+func NewTreeHandleWithKV(proxy *KvStoreProxy, nextPosition uint64) (*TreeHandle, error) {
 	// Wrap proxy in a cgo.Handle so it can be passed through the CGO boundary
 	// safely. KvStoreProxy contains a Go interface (store.KVStore) which holds
 	// Go pointers; passing a raw *KvStoreProxy to C would violate CGO pointer
@@ -58,5 +59,10 @@ func NewTreeHandleWithKV(proxy *KvStoreProxy, nextPosition uint64) *TreeHandle {
 		C.ZallyKvFreeBufFn(C.zallyKvFreeBuf),
 		C.uint64_t(nextPosition),
 	)
-	return &TreeHandle{ptr: unsafe.Pointer(ptr), proxyHandle: h, ctxPtr: unsafe.Pointer(ctxPtr)}
+	if ptr == nil {
+		C.free(unsafe.Pointer(ctxPtr))
+		h.Delete()
+		return nil, fmt.Errorf("votetree: Rust tree creation failed (null ptr returned)")
+	}
+	return &TreeHandle{ptr: unsafe.Pointer(ptr), proxyHandle: h, ctxPtr: unsafe.Pointer(ctxPtr)}, nil
 }

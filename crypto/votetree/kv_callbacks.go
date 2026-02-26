@@ -25,6 +25,7 @@ package votetree
 import "C"
 
 import (
+	"log"
 	"runtime/cgo"
 	"unsafe"
 
@@ -63,6 +64,7 @@ func zallyKvGet(
 	key := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
 	val, err := proxy.Current.Get(key)
 	if err != nil {
+		log.Printf("votetree: zallyKvGet: store error (key len=%d): %v", len(key), err)
 		return -1 // hard error: store corruption, closed store, etc.
 	}
 	if val == nil {
@@ -71,6 +73,7 @@ func zallyKvGet(
 	// Allocate C buffer and copy value in.
 	ptr := C.malloc(C.size_t(len(val)))
 	if ptr == nil {
+		log.Printf("votetree: zallyKvGet: C.malloc failed (val len=%d)", len(val))
 		return -1
 	}
 	C.memcpy(ptr, unsafe.Pointer(&val[0]), C.size_t(len(val)))
@@ -93,6 +96,7 @@ func zallyKvSet(
 	key := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
 	val := C.GoBytes(unsafe.Pointer(valPtr), C.int(valLen))
 	if err := proxy.Current.Set(key, val); err != nil {
+		log.Printf("votetree: zallyKvSet: store error (key len=%d, val len=%d): %v", len(key), len(val), err)
 		return -1
 	}
 	return 0
@@ -107,6 +111,7 @@ func zallyKvDelete(ctx unsafe.Pointer, keyPtr *C.uint8_t, keyLen C.size_t) C.int
 	}
 	key := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
 	if err := proxy.Current.Delete(key); err != nil {
+		log.Printf("votetree: zallyKvDelete: store error (key len=%d): %v", len(key), err)
 		return -1
 	}
 	return 0
@@ -145,7 +150,12 @@ func zallyKvIterCreate(
 	} else {
 		iter, err = proxy.Current.Iterator(prefix, end)
 	}
-	if err != nil || iter == nil {
+	if err != nil {
+		log.Printf("votetree: zallyKvIterCreate: store error (prefix len=%d, reverse=%v): %v", len(prefix), reverse != 0, err)
+		return nil
+	}
+	if iter == nil {
+		log.Printf("votetree: zallyKvIterCreate: store returned nil iterator (prefix len=%d)", len(prefix))
 		return nil
 	}
 	iterH := cgo.NewHandle(iter)
@@ -174,6 +184,7 @@ func zallyKvIterNext(
 
 	kPtr := C.malloc(C.size_t(len(key)))
 	if kPtr == nil {
+		log.Printf("votetree: zallyKvIterNext: C.malloc failed for key (len=%d)", len(key))
 		return -1
 	}
 	C.memcpy(kPtr, unsafe.Pointer(&key[0]), C.size_t(len(key)))
@@ -182,6 +193,7 @@ func zallyKvIterNext(
 
 	vPtr := C.malloc(C.size_t(len(val)))
 	if vPtr == nil {
+		log.Printf("votetree: zallyKvIterNext: C.malloc failed for value (len=%d)", len(val))
 		C.free(kPtr)
 		return -1
 	}

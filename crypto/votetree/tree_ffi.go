@@ -166,7 +166,8 @@ func ComputePoseidonRoot(leaves [][]byte) ([]byte, error) {
 // once when done (node shutdown or rollback).
 //
 //	proxy := &votetree.KvStoreProxy{}
-//	h := votetree.NewTreeHandleWithKV(proxy, nextIndex)
+//	h, err := votetree.NewTreeHandleWithKV(proxy, nextIndex)
+//	if err != nil { ... }
 //	defer h.Close()
 //
 //	// Each block:

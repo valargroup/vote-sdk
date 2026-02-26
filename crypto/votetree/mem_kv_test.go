@@ -175,5 +175,9 @@ func (it *memIterator) Close() error { return nil }
 // Use this in unit tests; production code uses NewTreeHandleWithKV.
 func NewTreeHandle() *TreeHandle {
 	proxy := &KvStoreProxy{Current: newMemKVStore()}
-	return NewTreeHandleWithKV(proxy, 0)
+	h, err := NewTreeHandleWithKV(proxy, 0)
+	if err != nil {
+		panic("NewTreeHandle: " + err.Error())
+	}
+	return h
 }

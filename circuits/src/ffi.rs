@@ -1418,7 +1418,7 @@ pub unsafe extern "C" fn zally_vote_tree_append_from_kv(
 /// # Returns
 /// * `0`  on success.
 /// * `-1` if `handle` is null.
-/// * `-4` if the KV store returned a storage error during the checkpoint write.
+/// * `-4` if the checkpoint failed (non-monotonic height or KV storage error).
 ///
 /// # Safety
 /// `handle` must be a valid pointer returned by [`zally_vote_tree_create_with_kv`].
