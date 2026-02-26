@@ -2,9 +2,13 @@ package keeper
 
 import "cosmossdk.io/core/store"
 
-// TreeCursorForTest exposes the internal treeCursor for testing.
-func (k *Keeper) TreeCursorForTest() uint64 {
-	return k.treeCursor
+// TreeSizeForTest exposes treeHandle.Size() for testing. Returns 0 if the
+// handle has not been initialized yet.
+func (k *Keeper) TreeSizeForTest() uint64 {
+	if k.treeHandle == nil {
+		return 0
+	}
+	return k.treeHandle.Size()
 }
 
 // StoreServiceForTest exposes the store service so tests can create a second

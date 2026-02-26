@@ -12,9 +12,11 @@ import (
 // ComputeTreeRoot returns the Poseidon Merkle root for the current tree state
 // at the given block height.
 //
-// On cold start (treeHandle == nil) a KV-backed handle is created whose
-// KvShardStore calls back into Go for every shard read/write. ShardTree
-// lazily loads only the data it needs — O(1) cold start.
+// On cold start (treeHandle == nil) the behaviour depends on state.Height:
+//   - Height > 0 (restart): shard data exists in KV. Handle is created at
+//     nextIndex and ShardTree restores lazily from KV — O(1).
+//   - Height == 0 (first boot): no shard data yet. Handle is created at 0
+//     and all leaves are replayed via AppendFromKV — O(N) but unavoidable.
 //
 // On subsequent calls only the delta leaves added since the last call are
 // appended — O(k) per block where k = new leaves that block.
@@ -34,10 +36,9 @@ func (k *Keeper) ComputeTreeRoot(kvStore store.KVStore, nextIndex, blockHeight u
 	if err != nil {
 		return nil, err
 	}
-	// Only checkpoint when new leaves were appended. Skipping the checkpoint
-	// on cold start avoids a duplicate-checkpoint panic: TreeServer::new
-	// restores latest_checkpoint from KV, so re-checkpointing at the same
-	// height would violate the monotonicity invariant.
+	// Checkpoint only when new leaves were appended (appended=true). For
+	// no-new-leaves blocks (Size() == nextIndex) appended is false and we
+	// skip the checkpoint, returning the root from the last existing checkpoint.
 	if appended {
 		if err := k.treeHandle.Checkpoint(uint32(blockHeight)); err != nil {
 			return nil, err

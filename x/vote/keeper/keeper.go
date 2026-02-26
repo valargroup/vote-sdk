@@ -41,22 +41,21 @@ type Keeper struct {
 	logger        log.Logger
 	stakingKeeper StakingKeeper
 
-	// treeHandle, treeCursor, and kvProxy are the in-process vote commitment
-	// tree state. They are the only non-KV fields on the Keeper.
+	// treeHandle and kvProxy are the in-process vote commitment tree state.
+	// They are the only non-KV fields on the Keeper.
 	//
 	// kvProxy is a stable object whose address never changes. Go updates
 	// kvProxy.Current to the current block's KVStore before each tree call.
 	// Rust's KvShardStore holds a raw pointer to kvProxy and calls back into
 	// Go for every shard read/write, giving ShardTree true lazy loading.
 	//
-	// treeCursor mirrors KV nextIndex. A mismatch (rollback) triggers a
-	// fresh handle creation. The handle itself is lazy-initialized on the
-	// first EndBlocker call that has leaves.
+	// treeHandle is lazy-initialized on the first EndBlocker call that has
+	// leaves. Its Size() tracks the number of appended leaves; a mismatch
+	// with KV nextIndex (rollback) triggers a fresh handle creation.
 	//
 	// Concurrency: only EndBlocker (via ComputeTreeRoot) mutates these fields.
 	kvProxy    *votetree.KvStoreProxy
 	treeHandle *votetree.TreeHandle // lazy-initialized; nil until first EndBlock
-	treeCursor uint64               // leaves appended to treeHandle; mirrors KV nextIndex
 }
 
 // NewKeeper creates a new vote module keeper.
@@ -78,12 +77,16 @@ func NewKeeper(
 // ensureTreeLoaded brings treeHandle up to date with nextIndex leaves from KV.
 //
 // Cases:
-//   - treeHandle == nil (true cold start): create a KV-backed handle.
-//     ShardTree reads only the frontier shard + cap + checkpoints (O(1)).
-//     latest_checkpoint is restored from KV, so no Checkpoint call is needed.
-//   - treeCursor == nextIndex: already up to date, no-op.
-//   - treeCursor < nextIndex (delta): append leaves [treeCursor, nextIndex) from KV.
-//   - treeCursor > nextIndex (rollback): TruncateKVData wipes all stale shard,
+//   - treeHandle == nil, Height > 0 (restart): shard/cap/checkpoint blobs
+//     exist in KV from the previous process. Create handle at nextIndex;
+//     ShardTree restores lazily from KV — O(1) cold start.
+//   - treeHandle == nil, Height == 0 (first boot): no shard data in KV yet.
+//     Create handle at position 0 and fall through to the delta-append path
+//     so all leaves [0, nextIndex) are replayed via AppendFromKV. O(N) but
+//     unavoidable since the ShardTree has never been populated.
+//   - Size() == nextIndex: already up to date, no-op.
+//   - Size() < nextIndex (delta): append leaves [Size(), nextIndex) from KV.
+//   - Size() > nextIndex (rollback): TruncateKVData wipes all stale shard,
 //     cap, and checkpoint blobs from KV; the old handle is closed; a fresh handle
 //     is created at next_position=0 (max_checkpoint_id()=None on empty KV, so
 //     latest_checkpoint starts as None); leaves are replayed via AppendFromKV.
@@ -95,19 +98,38 @@ func NewKeeper(
 // EndBlocker path (via ComputeTreeRoot).
 func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) (needsCheckpoint bool, err error) {
 	if k.treeHandle == nil {
-		// True cold start: create handle; latest_checkpoint is restored from KV
-		// inside TreeServer::new, so Root() is correct without a new checkpoint.
-		h, err := votetree.NewTreeHandleWithKV(k.kvProxy, nextIndex)
+		state, err := k.GetCommitmentTreeState(kvStore)
 		if err != nil {
-			return false, fmt.Errorf("ensureTreeLoaded: cold start: %w", err)
+			return false, fmt.Errorf("ensureTreeLoaded: read tree state: %w", err)
+		}
+
+		if state.Height > 0 {
+			// Restart: shard/cap/checkpoint blobs exist from a previous
+			// process lifetime (committed atomically with state.Height).
+			// ShardTree restores lazily from KV — O(1).
+			h, err := votetree.NewTreeHandleWithKV(k.kvProxy, nextIndex)
+			if err != nil {
+				return false, fmt.Errorf("ensureTreeLoaded: restart: %w", err)
+			}
+			k.treeHandle = h
+			return false, nil
+		}
+
+		// First boot: no shard data in KV. Create at position 0 and fall
+		// through to replay all leaves via AppendFromKV. O(N) on the first
+		// block that has leaves; subsequent blocks use the delta path.
+		h, err := votetree.NewTreeHandleWithKV(k.kvProxy, 0)
+		if err != nil {
+			return false, fmt.Errorf("ensureTreeLoaded: first boot: %w", err)
 		}
 		k.treeHandle = h
-		k.treeCursor = nextIndex
-		return false, nil
+		// Fall through to the delta-append / no-op checks below.
 	}
 
-	if k.treeCursor > nextIndex {
-		// Rollback: treeCursor is ahead of KV. TruncateKVData deletes every
+	size := k.treeHandle.Size()
+
+	if size > nextIndex {
+		// Rollback: handle is ahead of KV. TruncateKVData deletes every
 		// shard blob, the cap blob, and every checkpoint blob from KV before
 		// the old handle is closed. Without this, ShardTree would read stale
 		// pre-rollback shard data and append new leaves after the old frontier,
@@ -123,20 +145,19 @@ func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) (need
 			return false, fmt.Errorf("ensureTreeLoaded: rollback: %w", err)
 		}
 		k.treeHandle = h
-		k.treeCursor = 0
+		size = 0
 		// Fall through to the delta-append path.
 	}
 
-	if k.treeCursor == nextIndex {
+	if size == nextIndex {
 		return false, nil
 	}
 
-	// Delta append: [treeCursor, nextIndex) via Rust KV callbacks — one CGO
+	// Delta append: [size, nextIndex) via Rust KV callbacks — one CGO
 	// call, no Go-side leaf allocation. Rust validates each leaf.
-	if err := k.treeHandle.AppendFromKV(k.treeCursor, nextIndex-k.treeCursor); err != nil {
+	if err := k.treeHandle.AppendFromKV(size, nextIndex-size); err != nil {
 		return false, err
 	}
-	k.treeCursor = nextIndex
 	return true, nil
 }
 

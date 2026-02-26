@@ -970,7 +970,7 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
 }
 
 // TestComputeTreeRoot_DeltaAppend verifies that calling ComputeTreeRoot with a
-// new nextIndex only reads and appends the delta leaves (cursor behavior).
+// new nextIndex only reads and appends the delta leaves.
 func (s *KeeperTestSuite) TestComputeTreeRoot_DeltaAppend() {
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
@@ -985,7 +985,7 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeltaAppend() {
 	root5, err := s.keeper.ComputeTreeRoot(kv, 5, 5)
 	s.Require().NoError(err)
 	s.Require().Len(root5, 32)
-	s.Require().Equal(uint64(5), s.keeper.TreeCursorForTest())
+	s.Require().Equal(uint64(5), s.keeper.TreeSizeForTest())
 
 	// Add 3 more leaves.
 	for i := uint64(6); i <= 8; i++ {
@@ -998,10 +998,10 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeltaAppend() {
 	s.Require().NoError(err)
 	s.Require().Len(root8, 32)
 	s.Require().NotEqual(root5, root8)
-	s.Require().Equal(uint64(8), s.keeper.TreeCursorForTest())
+	s.Require().Equal(uint64(8), s.keeper.TreeSizeForTest())
 }
 
-// TestComputeTreeRoot_RollbackRebuild verifies that a cursor > nextIndex
+// TestComputeTreeRoot_RollbackRebuild verifies that Size() > nextIndex
 // (rollback scenario) triggers a full rebuild and produces the correct root.
 func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackRebuild() {
 	s.SetupTest()
@@ -1014,15 +1014,15 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackRebuild() {
 	}
 	root5, err := s.keeper.ComputeTreeRoot(kv, 5, 5)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(5), s.keeper.TreeCursorForTest())
+	s.Require().Equal(uint64(5), s.keeper.TreeSizeForTest())
 
-	// Simulate rollback: nextIndex goes back to 3 (cursor > nextIndex).
+	// Simulate rollback: nextIndex goes back to 3 (Size() > nextIndex).
 	root3Rollback, err := s.keeper.ComputeTreeRoot(kv, 3, 3)
 	s.Require().NoError(err)
 	s.Require().Len(root3Rollback, 32)
 	s.Require().NotEqual(root5, root3Rollback)
-	// After rollback, cursor is reset to 3.
-	s.Require().Equal(uint64(3), s.keeper.TreeCursorForTest())
+	// After rollback, tree size is reset to 3.
+	s.Require().Equal(uint64(3), s.keeper.TreeSizeForTest())
 
 	// root3Rollback must match a fresh rebuild from 3 leaves.
 	freshKeeper := keeper.NewKeeper(
@@ -1044,11 +1044,11 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackRebuild() {
 // incorrect root.
 //
 // Sequence:
-//  1. ComputeTreeRoot(kv, 1, 1) — cold start, treeCursor=1, no delta,
-//     no shard data written to KV.
+//  1. ComputeTreeRoot(kv, 1, 1) — cold start: handle created at pos 0,
+//     AppendFromKV(0,1) appends leaf 0, Checkpoint(1). Size()=1.
 //  2. ComputeTreeRoot(kv, 5, 5) — delta-append indices 1-4; Rust writes
-//     shard data for those 4 leaves to KV.  treeCursor=5.
-//  3. ComputeTreeRoot(kv, 3, 3) — rollback: treeCursor(5) > nextIndex(3).
+//     shard data for those 4 leaves to KV.  Size()=5.
+//  3. ComputeTreeRoot(kv, 3, 3) — rollback: Size()(5) > nextIndex(3).
 //     TruncateKVData clears the stale shards, then AppendFromKV(0,3) builds
 //     a fresh 3-leaf tree.
 //
@@ -1064,24 +1064,24 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackWithStaleShards() {
 		s.Require().NoError(err)
 	}
 
-	// Step 1: cold start at nextIndex=1. treeCursor becomes 1; no delta is
-	// performed so no shard data is written.
+	// Step 1: cold start at nextIndex=1. Handle created at pos 0; AppendFromKV
+	// appends leaf 0 and a checkpoint is taken. Size() becomes 1.
 	_, err := s.keeper.ComputeTreeRoot(kv, 1, 1)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(1), s.keeper.TreeCursorForTest())
+	s.Require().Equal(uint64(1), s.keeper.TreeSizeForTest())
 
 	// Step 2: delta-append indices 1-4. Rust writes shard data for 4 leaves
-	// to KV. After this, treeCursor=5 and KV contains stale shard data.
+	// to KV. After this, Size()=5 and KV contains stale shard data.
 	_, err = s.keeper.ComputeTreeRoot(kv, 5, 5)
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(5), s.keeper.TreeCursorForTest())
+	s.Require().Equal(uint64(5), s.keeper.TreeSizeForTest())
 
-	// Step 3: rollback — treeCursor(5) > nextIndex(3). TruncateKVData removes
+	// Step 3: rollback — Size()(5) > nextIndex(3). TruncateKVData removes
 	// the stale shards before AppendFromKV(0,3) rebuilds the tree.
 	rollbackRoot, err := s.keeper.ComputeTreeRoot(kv, 3, 3)
 	s.Require().NoError(err)
 	s.Require().Len(rollbackRoot, 32)
-	s.Require().Equal(uint64(3), s.keeper.TreeCursorForTest())
+	s.Require().Equal(uint64(3), s.keeper.TreeSizeForTest())
 
 	// The reference root is built by an ephemeral in-memory tree from the same
 	// 3 leaves (fpLE(1), fpLE(2), fpLE(3)). This is completely independent of
@@ -1098,10 +1098,9 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackWithStaleShards() {
 }
 
 // TestComputeTreeRoot_ColdStartNoNewLeaves verifies that a cold-start keeper
-// returns the correct root for a block that adds no new leaves. This exercises
-// the latest_checkpoint restoration path: on cold start TreeServer restores
-// latest_checkpoint from KV so Root() is correct even when appended=false
-// (no new checkpoint is created for the second call).
+// returns the correct root for a block that adds no new leaves. With the
+// O(N) replay path, the fresh keeper replays all existing leaves via
+// AppendFromKV and checkpoints them, producing the same root as the original.
 func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
@@ -1124,9 +1123,9 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 		nil,
 	)
 
-	// Call at a later block height but with the same nextIndex. The keeper
-	// must restore latest_checkpoint from KV and return the correct root
-	// without attempting a duplicate checkpoint (which would panic).
+	// Call at a later block height but with the same nextIndex. The fresh
+	// keeper replays all 4 leaves (cold-start O(N) path) and takes a new
+	// checkpoint at height 20. Root must equal root1 (same leaf set).
 	root2, err := freshKeeper.ComputeTreeRoot(kv, 4, 20)
 	s.Require().NoError(err)
 	s.Require().Equal(root1, root2, "cold-start root must match original root when no new leaves added")
