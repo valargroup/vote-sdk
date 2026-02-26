@@ -33,10 +33,16 @@ interface KeplrChainInfo {
   features?: string[];
 }
 
+interface KeplrSignArbitraryResult {
+  pub_key: { type: string; value: string };
+  signature: string;
+}
+
 interface Keplr {
   experimentalSuggestChain(chainInfo: KeplrChainInfo): Promise<void>;
   enable(chainId: string): Promise<void>;
   getOfflineSigner(chainId: string): OfflineDirectSigner;
+  signArbitrary(chainId: string, signer: string, data: string): Promise<KeplrSignArbitraryResult>;
 }
 
 declare global {

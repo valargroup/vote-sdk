@@ -1,7 +1,7 @@
 #!/bin/bash
 # test_join_ci.sh — Smoke test for the validator join flow.
 #
-# Exercises the core join-dev.sh path without DO Spaces downloads:
+# Exercises the core join path without DO Spaces downloads or Vercel discovery:
 #   1. init-validator-keys (generates Cosmos key + Pallas + EA keypairs)
 #   2. Node syncing from scratch
 #   3. create-val-tx with MsgCreateValidatorWithPallasKey

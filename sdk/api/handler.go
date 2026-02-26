@@ -80,6 +80,10 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	// Snapshot data endpoint: fetches real nc_root and nullifier_imt_root
 	// for session creation. Used by the admin UI to replace stub values.
 	router.HandleFunc("/zally/v1/snapshot-data/{height}", h.handleSnapshotData).Methods("GET")
+
+	// TX confirmation endpoint: checks whether a TX has been included in a block.
+	// Used by iOS app to verify vote commitment TXs landed after tree growth timeout.
+	router.HandleFunc("/zally/v1/tx/{hash}", h.handleTxStatus).Methods("GET")
 }
 
 // --- Tx submission handlers ---
@@ -141,6 +145,89 @@ func (h *Handler) handleSnapshotData(w http.ResponseWriter, r *http.Request) {
 		"nc_root":            hex.EncodeToString(data.NcRoot),
 		"nullifier_imt_root": hex.EncodeToString(data.NullifierIMTRoot),
 		"snapshot_blockhash": hex.EncodeToString(data.SnapshotBlockhash),
+	})
+}
+
+// --- TX status ---
+
+// handleTxStatus queries CometBFT for a confirmed transaction by hash.
+// Returns { "height": "...", "code": 0 } if the TX is in a block, or 404 if not yet included.
+func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	txHash := vars["hash"]
+	if txHash == "" {
+		writeError(w, http.StatusBadRequest, "missing tx hash")
+		return
+	}
+
+	reqBody := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tx",
+		"params": map[string]interface{}{
+			"hash": txHash,
+			"prove": false,
+		},
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("marshal request: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", h.cometRPC, bytes.NewReader(bodyBytes))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("create request: %v", err))
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("CometBFT request failed: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	var rpcResp struct {
+		Result *struct {
+			Height string `json:"height"`
+			TxResult struct {
+				Code uint32 `json:"code"`
+			} `json:"tx_result"`
+		} `json:"result"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Data    string `json:"data"`
+		} `json:"error"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("decode CometBFT response: %v", err))
+		return
+	}
+
+	// CometBFT returns an error when the TX is not found
+	if rpcResp.Error != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "tx not found"}) //nolint:errcheck
+		return
+	}
+
+	if rpcResp.Result == nil {
+		writeError(w, http.StatusBadGateway, "unexpected empty result from CometBFT")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"height": rpcResp.Result.Height,
+		"code":   rpcResp.Result.TxResult.Code,
 	})
 }
 

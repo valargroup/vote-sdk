@@ -1,18 +1,23 @@
 #!/bin/bash
-# join.sh — Join the Zally chain as a validator without needing Go or Rust.
+# join.sh — Join the Zally chain as a validator.
 #
-# Usage:
+# Binary-only (no repo):
 #   curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
 #
-# What it does:
-#   1. Downloads pre-built zallyd + create-val-tx binaries
-#   2. Downloads genesis.json and network config from DO
-#   3. Initializes a node, generates cryptographic keys
-#   4. Configures the node to connect to the existing network
-#   5. Generates a start.sh script that handles sync + validator registration
+# Source developer (has repo + mise):
+#   mise run build:install   # builds zallyd + create-val-tx → $HOME/go/bin
+#   ./join.sh                # detects local binaries, skips download
 #
-# Requirements: Linux or macOS (amd64 or arm64), curl, jq
-# Dependency: release.yml must have run to upload binaries to DO Spaces.
+# What it does:
+#   1. Acquires zallyd + create-val-tx (downloads if not in PATH, else uses local)
+#   2. Discovers the network via the Vercel API (voting-config endpoint)
+#   3. Fetches genesis.json + node identity from a live validator
+#   4. Initializes a node, generates cryptographic keys
+#   5. Configures the node to connect to the existing network
+#   6. Generates a start.sh script that handles sync + validator registration
+#
+# Requirements: curl, jq
+# Dependency (binary path): release.yml must have run to upload binaries to DO Spaces.
 
 set -euo pipefail
 
@@ -20,42 +25,12 @@ CHAIN_ID="zvote-1"
 INSTALL_DIR="${ZALLY_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${ZALLY_HOME:-$HOME/.zallyd}"
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
+VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://zally-phi.vercel.app}"
 
 # ─── Preflight ────────────────────────────────────────────────────────────────
 
 echo "=== Zally validator join ==="
 echo ""
-
-OS_RAW=$(uname -s)
-ARCH_RAW=$(uname -m)
-
-case "$OS_RAW" in
-  Linux)  OS="linux" ;;
-  Darwin) OS="darwin" ;;
-  *)
-    echo "ERROR: Unsupported OS: ${OS_RAW}. Supported: Linux, Darwin (macOS)."
-    exit 1
-    ;;
-esac
-
-case "$ARCH_RAW" in
-  x86_64)          ARCH="amd64" ;;
-  aarch64|arm64)   ARCH="arm64" ;;
-  *)
-    echo "ERROR: Unsupported architecture: ${ARCH_RAW}. Supported: x86_64, arm64/aarch64."
-    exit 1
-    ;;
-esac
-
-PLATFORM="${OS}-${ARCH}"
-
-mkdir -p "${INSTALL_DIR}"
-
-# Ensure install dir is on PATH for this session and the generated start.sh.
-case ":${PATH}:" in
-  *":${INSTALL_DIR}:"*) ;;
-  *) export PATH="${INSTALL_DIR}:${PATH}" ;;
-esac
 
 for cmd in curl jq; do
   if ! command -v "$cmd" > /dev/null 2>&1; then
@@ -77,42 +52,129 @@ else
   fi
 fi
 
-# ─── Download binaries ────────────────────────────────────────────────────────
+# ─── Acquire binaries ────────────────────────────────────────────────────────
+# If zallyd and create-val-tx are already in PATH (e.g. from `mise run build:install`),
+# skip the download. Otherwise fetch pre-built binaries from DO Spaces.
+
+if command -v zallyd > /dev/null 2>&1 && command -v create-val-tx > /dev/null 2>&1; then
+  echo "Using local binaries:"
+  echo "  zallyd:         $(command -v zallyd)"
+  echo "  create-val-tx:  $(command -v create-val-tx)"
+else
+  echo "=== Downloading binaries ==="
+
+  OS_RAW=$(uname -s)
+  ARCH_RAW=$(uname -m)
+
+  case "$OS_RAW" in
+    Linux)  OS="linux" ;;
+    Darwin) OS="darwin" ;;
+    *)
+      echo "ERROR: Unsupported OS: ${OS_RAW}. Supported: Linux, Darwin (macOS)."
+      exit 1
+      ;;
+  esac
+
+  case "$ARCH_RAW" in
+    x86_64)          ARCH="amd64" ;;
+    aarch64|arm64)   ARCH="arm64" ;;
+    *)
+      echo "ERROR: Unsupported architecture: ${ARCH_RAW}. Supported: x86_64, arm64/aarch64."
+      exit 1
+      ;;
+  esac
+
+  PLATFORM="${OS}-${ARCH}"
+
+  mkdir -p "${INSTALL_DIR}"
+
+  VERSION=$(curl -fsSL "${DO_BASE}/version.txt" | tr -d '[:space:]')
+  if [ -z "$VERSION" ]; then
+    echo "ERROR: Could not fetch version from ${DO_BASE}/version.txt"
+    exit 1
+  fi
+
+  echo "Version: ${VERSION}"
+  echo "Platform: ${PLATFORM}"
+  curl -fsSL -o /tmp/zally-release.tar.gz "${DO_BASE}/zally-${VERSION}-${PLATFORM}.tar.gz"
+
+  # Verify tarball integrity via SHA-256 checksum.
+  CHECKSUM_URL="${DO_BASE}/zally-${VERSION}-${PLATFORM}.tar.gz.sha256"
+  if curl -fsSL -o /tmp/zally-release.tar.gz.sha256 "${CHECKSUM_URL}" 2>/dev/null; then
+    EXPECTED=$(awk '{print $1}' /tmp/zally-release.tar.gz.sha256)
+    if command -v sha256sum > /dev/null 2>&1; then
+      ACTUAL=$(sha256sum /tmp/zally-release.tar.gz | awk '{print $1}')
+    elif command -v shasum > /dev/null 2>&1; then
+      ACTUAL=$(shasum -a 256 /tmp/zally-release.tar.gz | awk '{print $1}')
+    else
+      echo "WARNING: Neither sha256sum nor shasum found — skipping checksum verification."
+      ACTUAL="$EXPECTED"
+    fi
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+      echo "ERROR: Checksum mismatch!"
+      echo "  Expected: ${EXPECTED}"
+      echo "  Actual:   ${ACTUAL}"
+      echo "  The downloaded tarball may be corrupted or tampered with."
+      rm -f /tmp/zally-release.tar.gz /tmp/zally-release.tar.gz.sha256
+      exit 1
+    fi
+    echo "Checksum verified."
+    rm -f /tmp/zally-release.tar.gz.sha256
+  else
+    echo "WARNING: Checksum file not available — skipping verification."
+  fi
+
+  TARBALL_DIR="zally-${VERSION}-${PLATFORM}"
+  tar xzf /tmp/zally-release.tar.gz -C /tmp "${TARBALL_DIR}/bin/zallyd" "${TARBALL_DIR}/bin/create-val-tx"
+
+  cp "/tmp/${TARBALL_DIR}/bin/zallyd" "${INSTALL_DIR}/zallyd"
+  cp "/tmp/${TARBALL_DIR}/bin/create-val-tx" "${INSTALL_DIR}/create-val-tx"
+  chmod +x "${INSTALL_DIR}/zallyd" "${INSTALL_DIR}/create-val-tx"
+  rm -rf /tmp/zally-release.tar.gz "/tmp/${TARBALL_DIR}"
+
+  hash -r
+  echo "Installed: ${INSTALL_DIR}/zallyd, ${INSTALL_DIR}/create-val-tx"
+fi
+
+# Ensure install dir is on PATH for this session and the generated start.sh.
+case ":${PATH}:" in
+  *":${INSTALL_DIR}:"*) ;;
+  *) export PATH="${INSTALL_DIR}:${PATH}" ;;
+esac
+
+# ─── Discover network via Vercel API ─────────────────────────────────────────
+# The voting-config endpoint returns the same data iOS clients use for service
+# discovery. We pick a vote_server, fetch its node identity, and use it as our
+# initial peer. CometBFT's PEX handles further peer discovery.
 
 echo ""
-echo "=== Downloading binaries ==="
+echo "=== Discovering network ==="
 
-VERSION=$(curl -fsSL "${DO_BASE}/version.txt" | tr -d '[:space:]')
-if [ -z "$VERSION" ]; then
-  echo "ERROR: Could not fetch version from ${DO_BASE}/version.txt"
+VOTING_CONFIG=$(curl -fsSL "${VOTING_CONFIG_URL}/api/voting-config")
+SEED_URL=$(echo "$VOTING_CONFIG" | jq -r '.vote_servers[0].url')
+
+if [ -z "$SEED_URL" ] || [ "$SEED_URL" = "null" ]; then
+  echo "ERROR: No vote_servers found in voting-config at ${VOTING_CONFIG_URL}/api/voting-config"
+  echo "  The bootstrap operator needs to register at least one validator URL in the admin UI."
   exit 1
 fi
 
-echo "Version: ${VERSION}"
-echo "Platform: ${PLATFORM}"
-curl -fsSL -o /tmp/zally-release.tar.gz "${DO_BASE}/zally-${VERSION}-${PLATFORM}.tar.gz"
+echo "Seed node: ${SEED_URL}"
 
-# Extract just the binaries we need.
-TARBALL_DIR="zally-${VERSION}-${PLATFORM}"
-tar xzf /tmp/zally-release.tar.gz -C /tmp "${TARBALL_DIR}/bin/zallyd" "${TARBALL_DIR}/bin/create-val-tx"
+# Fetch the node's P2P identity.
+NODE_INFO=$(curl -fsSL "${SEED_URL}/cosmos/base/tendermint/v1beta1/node_info")
+NODE_ID=$(echo "$NODE_INFO" | jq -r '.default_node_info.default_node_id // .default_node_info.id // empty')
+LISTEN_ADDR=$(echo "$NODE_INFO" | jq -r '.default_node_info.listen_addr // empty')
 
-cp "/tmp/${TARBALL_DIR}/bin/zallyd" "${INSTALL_DIR}/zallyd"
-cp "/tmp/${TARBALL_DIR}/bin/create-val-tx" "${INSTALL_DIR}/create-val-tx"
-chmod +x "${INSTALL_DIR}/zallyd" "${INSTALL_DIR}/create-val-tx"
-rm -rf /tmp/zally-release.tar.gz "/tmp/${TARBALL_DIR}"
+if [ -z "$NODE_ID" ]; then
+  echo "ERROR: Could not fetch node_id from ${SEED_URL}"
+  exit 1
+fi
 
-# Clear bash's command cache so the newly installed binaries are found immediately.
-hash -r
-
-echo "Installed: ${INSTALL_DIR}/zallyd, ${INSTALL_DIR}/create-val-tx"
-
-# ─── Download network config ─────────────────────────────────────────────────
-
-echo ""
-echo "=== Downloading network config ==="
-
-NETWORK_JSON=$(curl -fsSL "${DO_BASE}/network.json")
-PERSISTENT_PEERS=$(echo "$NETWORK_JSON" | jq -r '.persistent_peers')
+# Extract the host from the seed URL for the P2P address.
+# The REST API URL has a host; P2P uses port 26656.
+SEED_HOST=$(echo "$SEED_URL" | sed -E 's|^https?://||; s|:[0-9]+$||; s|/.*||')
+PERSISTENT_PEERS="${NODE_ID}@${SEED_HOST}:26656"
 echo "Peers: ${PERSISTENT_PEERS}"
 
 # ─── Initialize node ─────────────────────────────────────────────────────────
@@ -126,13 +188,13 @@ if [ -d "${HOME_DIR}" ]; then
   rm -rf "${HOME_DIR}"
 fi
 
-"${INSTALL_DIR}/zallyd" init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}" > /dev/null 2>&1
+zallyd init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}" > /dev/null 2>&1
 
-# ─── Download and place genesis ───────────────────────────────────────────────
+# ─── Fetch genesis from the seed node ────────────────────────────────────────
 
-echo "Downloading genesis.json..."
-curl -fsSL -o "${HOME_DIR}/config/genesis.json" "${DO_BASE}/genesis.json"
-"${INSTALL_DIR}/zallyd" genesis validate-genesis --home "${HOME_DIR}" > /dev/null 2>&1
+echo "Fetching genesis.json from ${SEED_URL}..."
+curl -fsSL -o "${HOME_DIR}/config/genesis.json" "${SEED_URL}/zally/v1/genesis"
+zallyd genesis validate-genesis --home "${HOME_DIR}" > /dev/null 2>&1
 echo "Genesis validated."
 
 # ─── Generate keys ────────────────────────────────────────────────────────────
@@ -140,9 +202,9 @@ echo "Genesis validated."
 echo ""
 echo "=== Generating cryptographic keys ==="
 
-"${INSTALL_DIR}/zallyd" init-validator-keys --home "${HOME_DIR}"
+zallyd init-validator-keys --home "${HOME_DIR}"
 
-VALIDATOR_ADDR=$("${INSTALL_DIR}/zallyd" keys show validator -a --keyring-backend test --home "${HOME_DIR}")
+VALIDATOR_ADDR=$(zallyd keys show validator -a --keyring-backend test --home "${HOME_DIR}")
 
 # ─── Configure config.toml ───────────────────────────────────────────────────
 
@@ -269,7 +331,7 @@ if [ -n "\$IS_VALIDATOR" ]; then
 else
   # Wait for the account to be funded before attempting registration.
   echo "Waiting for account \${VALIDATOR_ADDR} to be funded..."
-  echo "  (trigger the 'Fund validator' GitHub Action if you haven't already)"
+  echo "  (ask the bootstrap operator to fund your address in the admin UI)"
   while true; do
     BALANCE=\$(zallyd query bank balances "\${VALIDATOR_ADDR}" --home "\${HOME_DIR}" --output json 2>/dev/null \
       | jq -r '.balances[] | select(.denom == "stake") | .amount' 2>/dev/null || echo "")
@@ -341,8 +403,8 @@ fi
 
 echo "=== Next steps ==="
 echo ""
-echo "1. Fund your account. Ask a teammate to trigger the"
-echo "   'Fund validator' GitHub Action with your address:"
+echo "1. Fund your account. Ask the bootstrap operator to use the"
+echo "   admin UI to send stake to your address:"
 echo "   ${VALIDATOR_ADDR}"
 echo ""
 echo "2. Once funded, start your node (syncs and registers automatically):"

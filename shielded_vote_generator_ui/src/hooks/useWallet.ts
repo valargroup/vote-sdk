@@ -1,6 +1,12 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { OfflineDirectSigner } from "@cosmjs/proto-signing";
-import { connectKeplr, connectWithPrivateKey } from "../api/wallet";
+import {
+  connectKeplr,
+  connectWithPrivateKey,
+  signArbitraryWithKey,
+  signArbitraryWithKeplr,
+} from "../api/wallet";
+import type { ArbitrarySignature } from "../api/wallet";
 import * as chainApi from "../api/chain";
 
 type WalletSource = "keplr" | "privkey";
@@ -30,6 +36,8 @@ export interface UseWallet {
   connect: () => Promise<void>;
   connectDev: (privateKeyHex: string) => Promise<void>;
   disconnect: () => void;
+  /** Sign arbitrary data using the connected wallet (Keplr or dev key). */
+  signPayload: (data: string) => Promise<ArbitrarySignature>;
 }
 
 export function useWallet(): UseWallet {
@@ -38,6 +46,8 @@ export function useWallet(): UseWallet {
   const [source, setSource] = useState<WalletSource | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Store the raw private key hex for dev-mode signArbitrary support.
+  const privKeyRef = useRef<string | null>(null);
 
   const applyConnection = useCallback(
     (conn: { signer: OfflineDirectSigner; address: string }, src: WalletSource) => {
@@ -72,6 +82,7 @@ export function useWallet(): UseWallet {
       setError(null);
       try {
         const conn = await connectWithPrivateKey(privateKeyHex);
+        privKeyRef.current = privateKeyHex;
         applyConnection(conn, "privkey");
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -87,8 +98,21 @@ export function useWallet(): UseWallet {
     setAddress(null);
     setSource(null);
     setError(null);
+    privKeyRef.current = null;
     localStorage.removeItem(SOURCE_KEY);
   }, []);
+
+  // Sign arbitrary data for authenticated API calls (e.g. Edge Config updates).
+  const signPayload = useCallback(
+    async (data: string): Promise<ArbitrarySignature> => {
+      if (!address) throw new Error("Wallet not connected");
+      if (source === "privkey" && privKeyRef.current) {
+        return signArbitraryWithKey(privKeyRef.current, address, data);
+      }
+      return signArbitraryWithKeplr(address, data);
+    },
+    [address, source],
+  );
 
   // Auto-reconnect on page load: Keplr if previously used, otherwise default dev key.
   useEffect(() => {
@@ -118,5 +142,6 @@ export function useWallet(): UseWallet {
     connect,
     connectDev,
     disconnect,
+    signPayload,
   };
 }

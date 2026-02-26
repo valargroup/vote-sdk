@@ -313,5 +313,44 @@ export async function getActiveRound(): Promise<{ round: ChainRound | null }> {
   }
 }
 
+// -- Edge Config management --
+
+export interface VotingConfig {
+  version: number;
+  vote_servers: Array<{ url: string; label: string }>;
+  pir_servers: Array<{ url: string; label: string }>;
+}
+
+/**
+ * Fetch the current voting-config from the Vercel API.
+ * Works in both dev (proxied) and production (direct) mode.
+ */
+export async function getVotingConfig(): Promise<VotingConfig | null> {
+  try {
+    return await fetchJson<VotingConfig>("/api/voting-config");
+  } catch {
+    return null;
+  }
+}
+
+export interface UpdateVotingConfigParams {
+  payload: VotingConfig;
+  signature: string;
+  pubKey: string;
+  signerAddress: string;
+}
+
+/**
+ * Update the voting-config in Edge Config via the authenticated Vercel API route.
+ * Requires a wallet signature for vote-manager authorization.
+ */
+export async function updateVotingConfig(params: UpdateVotingConfigParams): Promise<{ status: string }> {
+  return fetchJson<{ status: string }>("/api/update-voting-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+}
+
 // submitSession was removed: MsgCreateVotingSession is now a standard Cosmos
 // SDK transaction signed client-side. See cosmosTx.ts.

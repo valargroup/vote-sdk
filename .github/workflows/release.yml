@@ -4,7 +4,7 @@
 #   zally-<version>-<platform>/
 #     bin/zallyd, create-val-tx, nf-server
 #     systemd/zallyd-val{1,2,3}.service, nullifier-query-server.service  (Linux only)
-#     scripts/init_multi_ci.sh
+#     scripts/init_multi.sh
 #     config/Caddyfile
 #
 # Platforms: linux-amd64, linux-arm64, darwin-amd64, darwin-arm64
@@ -37,23 +37,16 @@ jobs:
             cross: true
             rust_target: x86_64-apple-darwin
             goarch: amd64
-    defaults:
-      run:
-        working-directory: sdk
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-          cache-dependency-path: sdk/go.sum
+      - name: Install mise
+        uses: jdx/mise-action@v2
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target || '' }}
+      - name: Add Rust cross target
+        if: matrix.cross
+        run: rustup target add ${{ matrix.rust_target }}
 
       - name: Cache Rust build
         uses: actions/cache@v4
@@ -66,37 +59,26 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.platform }}-sdk-circuits-
 
-      - name: Build Rust circuits library
+      - name: Build SDK binaries
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
-            cargo build --release --manifest-path circuits/Cargo.toml --target ${{ matrix.rust_target }}
-            # Symlink cross-compiled lib into the expected location for CGo
-            mkdir -p circuits/target/release
-            ln -sf $(pwd)/circuits/target/${{ matrix.rust_target }}/release/libzally_circuits.a \
-                   circuits/target/release/libzally_circuits.a
-          else
-            make circuits
-          fi
-
-      - name: Build zallyd with FFI
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            # Cross-compile Go+CGo for x86_64 from ARM64 macOS
+            # Cross-compile circuits for x86_64 from ARM64 macOS
+            cargo build --release --manifest-path sdk/circuits/Cargo.toml --target ${{ matrix.rust_target }}
+            mkdir -p sdk/circuits/target/release
+            ln -sf $(pwd)/sdk/circuits/target/${{ matrix.rust_target }}/release/libzally_circuits.a \
+                   sdk/circuits/target/release/libzally_circuits.a
+            # Cross-compile zallyd (Go+CGo)
+            cd sdk
             CC="clang -target x86_64-apple-macosx" \
             CGO_CFLAGS="-target x86_64-apple-macosx" \
             CGO_LDFLAGS="-target x86_64-apple-macosx" \
             CGO_ENABLED=1 GOOS=darwin GOARCH=${{ matrix.goarch }} \
               go build -tags "halo2,redpallas" -o zallyd ./cmd/zallyd
-          else
-            make build-ffi
-          fi
-
-      - name: Build create-val-tx helper
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
+            # Cross-compile create-val-tx (pure Go)
             CGO_ENABLED=0 GOOS=darwin GOARCH=${{ matrix.goarch }} go build -o create-val-tx ./scripts/create-val-tx
           else
-            go build -o create-val-tx ./scripts/create-val-tx
+            mise run build
+            mise run build:create-val-tx
           fi
 
       - name: Upload artifacts
@@ -239,23 +221,26 @@ jobs:
           fi
 
           # Scripts
-          cp sdk/scripts/init_multi_ci.sh "${DIR}/scripts/"
+          cp sdk/scripts/init_multi.sh "${DIR}/scripts/"
 
           # Config
           cp sdk/deploy/Caddyfile "${DIR}/config/"
 
-          # Create tarball
+          # Create tarball + checksum
           tar czf "${DIR}.tar.gz" "${DIR}"
+          sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
           echo "TARBALL=${DIR}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Upload tarball artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-tarball-${{ matrix.platform }}
-          path: ${{ env.TARBALL }}
+          path: |
+            ${{ env.TARBALL }}
+            ${{ env.TARBALL }}.sha256
 
       - name: Attach to GitHub Release
-        run: gh release upload "${GITHUB_REF_NAME}" "${TARBALL}" --clobber
+        run: gh release upload "${GITHUB_REF_NAME}" "${TARBALL}" "${TARBALL}.sha256" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -309,6 +294,7 @@ jobs:
           for PLATFORM in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
             TARBALL="zally-${VERSION}-${PLATFORM}.tar.gz"
             s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" s3://vote/ --acl-public --force
+            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}.sha256" s3://vote/ --acl-public --force
           done
           echo "${VERSION}" > /tmp/version.txt
           s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force
@@ -332,7 +318,7 @@ jobs:
           ssh deploy-target "mkdir -p /opt/zally-chain/releases"
           for PLATFORM in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
             TARBALL="zally-${VERSION}-${PLATFORM}.tar.gz"
-            scp "${TARBALL}" deploy-target:/opt/zally-chain/releases/
+            scp "${TARBALL}" "${TARBALL}.sha256" deploy-target:/opt/zally-chain/releases/
           done
           scp join.sh deploy-target:/opt/zally-chain/releases/join.sh
           ssh deploy-target "echo '${VERSION}' > /opt/zally-chain/releases/version.txt"

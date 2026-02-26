@@ -30,4 +30,6 @@ public struct VotingAPIClient {
     public var delegateShares: @Sendable (_ payloads: [SharePayload], _ roundIdHex: String) async throws -> Void
     public var fetchProposalTally: @Sendable (_ roundId: Data, _ proposalId: UInt32) async throws -> TallyResult
     public var awaitCommitmentTreeGrowth: @Sendable (_ previousNextIndex: UInt64, _ timeoutSeconds: TimeInterval) async throws -> CommitmentTreeState
+    /// Check whether a TX has been included in a block. Returns nil if not yet confirmed (404 or network error).
+    public var checkTxConfirmed: @Sendable (_ txHash: String) async throws -> TxConfirmation?
 }

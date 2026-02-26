@@ -126,21 +126,17 @@ watch -n2 'zallyd status --home ~/.zallyd 2>/dev/null | python3 -c \
    print(\"height:\", s[\"latest_block_height\"], \"catching_up:\", s[\"catching_up\"])"'
 ```
 
-## Step 5 — Record the Node Identity
+## Step 5 — Register in Edge Config
 
-Validators who want to join the chain (see SETUP_JOIN.md) need the node ID and public IP. Print both now:
+Every node serves its own `genesis.json` at `/zally/v1/genesis`, so manual upload is no longer needed. Instead, register the genesis node's public URL in Edge Config so that joining validators can discover it.
 
-```bash
-# Node ID (derived from priv_validator_key.json)
-zallyd tendermint show-node-id --home ~/.zallyd
+1. Open the admin UI (`mise ui` or `https://zally-phi.vercel.app`)
+2. Navigate to **Validators**
+3. On the genesis validator's card, click **Register public URL**
+4. Enter the validator's public HTTPS endpoint (e.g. `https://46-101-255-48.sslip.io`)
+5. Optionally check "Also register as PIR server" if this node runs the nullifier PIR server
 
-# Confirm the P2P address they should use
-echo "persistent_peers = \"$(zallyd tendermint show-node-id --home ~/.zallyd)@$(curl -s ifconfig.me):26656\""
-```
-
-Share the following with joining validators:
-- The `persistent_peers` string above
-- The `genesis.json` file at `~/.zallyd/config/genesis.json`
+This writes to the `voting-config` Edge Config key, which iOS clients and `join.sh` use for service discovery.
 
 ## Step 6 — EA Key Ceremony
 

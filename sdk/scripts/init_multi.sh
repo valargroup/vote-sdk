@@ -2,16 +2,35 @@
 # init_multi.sh — Initialize a 3-validator Zally chain on localhost.
 #
 # Init-only: creates home dirs, genesis, keys, config for all 3 validators.
-# Does NOT start processes or register validators — that's handled by mise.
+# Does NOT start processes or register validators — that's handled externally.
 #
 # Each validator uses a separate home directory and unique port set.
 # Usage:
-#   bash sdk/scripts/init_multi.sh
-#   # or: mise run multi:init
+#   bash sdk/scripts/init_multi.sh          # local dev (mise)
+#   bash sdk/scripts/init_multi.sh --ci     # CI/remote deployment
+#
+# --ci mode differences:
+#   - Val1 self-delegation is 10M (uniform) instead of 20M (2/3 tolerance)
+#   - Helper server is configured on val1 only (not all 3)
+#   - No pkill cleanup (processes managed by systemd)
+#   - Summary prints systemd + create-val-tx instructions
 set -e
 
+# ---------------------------------------------------------------------------
+# Parse flags
+# ---------------------------------------------------------------------------
+CI_MODE=false
+for arg in "$@"; do
+    case "$arg" in
+        --ci) CI_MODE=true ;;
+        *) echo "Unknown argument: $arg"; exit 1 ;;
+    esac
+done
+
 # Use the Go toolchain from the environment (mise pins 1.24.1 via mise.toml).
-export GOTOOLCHAIN=auto
+if [ "$CI_MODE" = false ]; then
+    export GOTOOLCHAIN=auto
+fi
 
 CHAIN_ID="zvote-1"
 BINARY="zallyd"
@@ -40,10 +59,14 @@ GRPC_WEB_PORTS=(9391 9491 9591)
 API_PORTS=(1418 1518 1618)
 PPROF_PORTS=(6160 6260 6360)
 
-# Self-delegation amounts. Val1 gets extra stake so that any 2 validators
-# hold >2/3 of total power — the chain keeps producing blocks if one node
-# goes down (required for the restart test).
-VAL1_SELF_DELEGATION="20000000${DENOM}"
+# Self-delegation amounts. In local mode, val1 gets extra stake so that any 2
+# validators hold >2/3 of total power — the chain keeps producing blocks if one
+# node goes down (required for the restart test). CI mode uses uniform stakes.
+if [ "$CI_MODE" = true ]; then
+    VAL1_SELF_DELEGATION="10000000${DENOM}"
+else
+    VAL1_SELF_DELEGATION="20000000${DENOM}"
+fi
 SELF_DELEGATION="10000000${DENOM}"
 
 # Genesis account balance (enough for self-delegation + gas).
@@ -54,11 +77,14 @@ GENESIS_BALANCE="100000000${DENOM}"
 # ---------------------------------------------------------------------------
 echo "=== Cleaning up previous multi-validator data ==="
 
-# Kill any running zallyd processes for these home directories.
-for home in "${HOMES[@]}"; do
-    pkill -f "zallyd start --home ${home}" 2>/dev/null || true
-done
-sleep 1
+# Kill any running zallyd processes for these home directories (local dev only;
+# CI uses systemd which stops services before running this script).
+if [ "$CI_MODE" = false ]; then
+    for home in "${HOMES[@]}"; do
+        pkill -f "zallyd start --home ${home}" 2>/dev/null || true
+    done
+    sleep 1
+fi
 
 for home in "${HOMES[@]}"; do
     rm -rf "$home"
@@ -223,7 +249,7 @@ for i in 2 3; do
     ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$home")
     echo "Val${i} address: $ADDR"
 
-    # Save the address for the Go helper to read later.
+    # Save the address for later use (create-val-tx in CI, Go helper locally).
     echo "$ADDR" > "$home/validator_address.txt"
 done
 
@@ -260,6 +286,8 @@ $BINARY pallas-keygen --home "$HOME_VAL1"
 # Configure ports.
 configure_config_toml "$HOME_VAL1" "${P2P_PORTS[0]}" "${RPC_PORTS[0]}" "${PPROF_PORTS[0]}"
 configure_app_toml "$HOME_VAL1" "${API_PORTS[0]}" "${GRPC_PORTS[0]}" "${GRPC_WEB_PORTS[0]}" "${RPC_PORTS[0]}"
+
+# Helper server: val1 always gets it; val2/val3 get it in local mode only (see below).
 configure_helper "$HOME_VAL1" "${API_PORTS[0]}"
 
 # ---------------------------------------------------------------------------
@@ -287,7 +315,12 @@ for i in 2 3; do
     # Configure ports.
     configure_config_toml "$home" "${P2P_PORTS[$idx]}" "${RPC_PORTS[$idx]}" "${PPROF_PORTS[$idx]}"
     configure_app_toml "$home" "${API_PORTS[$idx]}" "${GRPC_PORTS[$idx]}" "${GRPC_WEB_PORTS[$idx]}" "${RPC_PORTS[$idx]}"
-    configure_helper "$home" "${API_PORTS[$idx]}"
+
+    # In local mode, all validators run helper servers for testing convenience.
+    # In CI mode, only val1 runs the helper server (production-like).
+    if [ "$CI_MODE" = false ]; then
+        configure_helper "$home" "${API_PORTS[$idx]}"
+    fi
 
     # Set persistent_peers to val1.
     set_persistent_peers "$home" "$VAL1_PEER"
@@ -301,7 +334,13 @@ echo "============================================="
 echo "=== Multi-Validator Chain Initialized OK  ==="
 echo "============================================="
 echo ""
-echo "Validators:"
+
+if [ "$CI_MODE" = true ]; then
+    echo "Validators (start via systemd: zallyd-val1/2/3):"
+else
+    echo "Validators:"
+fi
+
 for i in 1 2 3; do
     idx=$((i - 1))
     echo "  Val${i}:"
@@ -311,4 +350,11 @@ for i in 1 2 3; do
     echo "    P2P:   ${P2P_PORTS[$idx]}"
 done
 echo ""
-echo "Start with: mise run multi:start"
+
+if [ "$CI_MODE" = true ]; then
+    echo "After chain start, register val2 and val3:"
+    echo "  create-val-tx --home $HOME_VAL2 --moniker val2 --amount $SELF_DELEGATION --rpc-url tcp://localhost:${RPC_PORTS[0]}"
+    echo "  create-val-tx --home $HOME_VAL3 --moniker val3 --amount $SELF_DELEGATION --rpc-url tcp://localhost:${RPC_PORTS[0]}"
+else
+    echo "Start with: mise run multi:start"
+fi

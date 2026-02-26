@@ -263,9 +263,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-join-go-
       - name: Build and install zallyd + create-val-tx
-        run: |
-          mise run build:install
-          cd sdk && go build -o ~/go/bin/create-val-tx ./scripts/create-val-tx
+        run: mise run build:install
         env:
           GOCACHE: ${{ github.workspace }}/sdk/.cache/go-build
       - name: Initialize chain

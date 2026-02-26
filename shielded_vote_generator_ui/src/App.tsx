@@ -1698,6 +1698,14 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
   const [unjailing, setUnjailing] = useState<string | null>(null); // operator_address being unjailed
   const [unjailResult, setUnjailResult] = useState<{ addr: string; ok: boolean; msg: string } | null>(null);
 
+  // Edge Config network management state.
+  const [votingConfig, setVotingConfig] = useState<chainApi.VotingConfig | null>(null);
+  const [urlInputFor, setUrlInputFor] = useState<string | null>(null); // moniker being edited
+  const [urlInput, setUrlInput] = useState("");
+  const [includePir, setIncludePir] = useState(false);
+  const [networkUpdating, setNetworkUpdating] = useState(false);
+  const [networkResult, setNetworkResult] = useState<{ moniker: string; ok: boolean; msg: string } | null>(null);
+
   const handleUnjail = async (operatorAddress: string) => {
     if (!wallet.signer) return;
     setUnjailing(operatorAddress);
@@ -1722,16 +1730,74 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
     setLoading(true);
     setError("");
     try {
-      const [valResp, ceremonyResp] = await Promise.all([
+      const [valResp, ceremonyResp, vcResp] = await Promise.all([
         chainApi.getValidators(),
         chainApi.getCeremonyState().catch(() => null),
+        chainApi.getVotingConfig().catch(() => null),
       ]);
       setValidators(valResp.validators ?? []);
       setCeremony(ceremonyResp);
+      setVotingConfig(vcResp);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Register or remove a validator's public URL in Edge Config.
+  const updateNetwork = async (action: "add" | "remove", moniker: string, url?: string) => {
+    if (!wallet.address) return;
+    setNetworkUpdating(true);
+    setNetworkResult(null);
+    try {
+      const current = votingConfig ?? { version: 1, vote_servers: [], pir_servers: [] };
+      let updated: chainApi.VotingConfig;
+
+      if (action === "add" && url) {
+        const label = moniker;
+        // Add to vote_servers if not already present.
+        const existing = current.vote_servers.find((s) => s.url === url);
+        if (!existing) {
+          updated = {
+            ...current,
+            vote_servers: [...current.vote_servers, { url, label }],
+            pir_servers: includePir
+              ? [...current.pir_servers, { url, label }]
+              : current.pir_servers,
+          };
+        } else {
+          updated = current;
+        }
+      } else if (action === "remove") {
+        // Remove all entries with this label from both server lists.
+        updated = {
+          ...current,
+          vote_servers: current.vote_servers.filter((s) => s.label !== moniker),
+          pir_servers: current.pir_servers.filter((s) => s.label !== moniker),
+        };
+      } else {
+        return;
+      }
+
+      const payloadStr = JSON.stringify(updated);
+      const sig = await wallet.signPayload(payloadStr);
+      await chainApi.updateVotingConfig({
+        payload: updated,
+        signature: sig.signature,
+        pubKey: sig.pubKey,
+        signerAddress: wallet.address,
+      });
+
+      setVotingConfig(updated);
+      setUrlInputFor(null);
+      setUrlInput("");
+      setIncludePir(false);
+      setNetworkResult({ moniker, ok: true, msg: action === "add" ? "Registered" : "Removed" });
+    } catch (err) {
+      setNetworkResult({ moniker, ok: false, msg: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setNetworkUpdating(false);
     }
   };
 
@@ -1990,6 +2056,102 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                     </a>
                   </div>
                 )}
+
+                {/* Network URL (Edge Config) */}
+                {(() => {
+                  const registeredUrl = votingConfig?.vote_servers.find(
+                    (s) => s.label === moniker
+                  )?.url;
+                  const isPir = votingConfig?.pir_servers.some(
+                    (s) => s.label === moniker
+                  );
+
+                  if (registeredUrl) {
+                    return (
+                      <div className="mt-2 flex items-center gap-2">
+                        <Server size={10} className="text-success shrink-0" />
+                        <span className="text-[10px] text-text-secondary truncate">{registeredUrl}</span>
+                        {isPir && (
+                          <span className="text-[8px] bg-accent/15 text-accent px-1.5 py-0.5 rounded-full shrink-0">PIR</span>
+                        )}
+                        {wallet.address && (
+                          <button
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-danger/15 text-danger hover:bg-danger/25 transition-colors shrink-0 disabled:opacity-50"
+                            disabled={networkUpdating}
+                            onClick={() => updateNetwork("remove", moniker)}
+                          >
+                            Remove
+                          </button>
+                        )}
+                        {networkResult?.moniker === moniker && (
+                          <span className={`text-[9px] ${networkResult.ok ? "text-success" : "text-danger"}`}>
+                            {networkResult.msg}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  if (urlInputFor === moniker) {
+                    return (
+                      <div className="mt-2 space-y-1.5">
+                        <input
+                          type="text"
+                          value={urlInput}
+                          onChange={(e) => setUrlInput(e.target.value.trim())}
+                          placeholder="https://validator.example.com"
+                          spellCheck={false}
+                          autoComplete="off"
+                          className="w-full px-2 py-1 bg-surface-2 border border-border-subtle rounded text-[10px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+                        />
+                        <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-1 text-[10px] text-text-secondary cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={includePir}
+                              onChange={(e) => setIncludePir(e.target.checked)}
+                              className="rounded"
+                            />
+                            Also register as PIR server
+                          </label>
+                          <div className="flex-1" />
+                          <button
+                            className="text-[10px] text-text-muted hover:text-text-secondary cursor-pointer"
+                            onClick={() => { setUrlInputFor(null); setUrlInput(""); setIncludePir(false); }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            className="text-[10px] px-2 py-0.5 rounded bg-accent/90 text-surface-0 hover:bg-accent transition-colors disabled:opacity-50 cursor-pointer"
+                            disabled={!urlInput.startsWith("http") || networkUpdating}
+                            onClick={() => updateNetwork("add", moniker, urlInput)}
+                          >
+                            {networkUpdating ? "Saving…" : "Save"}
+                          </button>
+                        </div>
+                        {networkResult?.moniker === moniker && !networkResult.ok && (
+                          <p className="text-[9px] text-danger">{networkResult.msg}</p>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  if (wallet.address) {
+                    return (
+                      <div className="mt-2">
+                        <button
+                          className="inline-flex items-center gap-1 text-[10px] text-text-muted hover:text-accent transition-colors cursor-pointer"
+                          onClick={() => { setUrlInputFor(moniker); setNetworkResult(null); }}
+                        >
+                          <Server size={9} />
+                          Register public URL
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return null;
+                })()}
               </div>
             );
           })}
