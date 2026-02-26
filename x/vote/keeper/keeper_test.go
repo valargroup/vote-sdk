@@ -15,6 +15,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/z-cale/zally/crypto/votetree"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -1033,6 +1034,62 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackRebuild() {
 	freshRoot3, err := freshKeeper.ComputeTreeRoot(kv, 3, 3)
 	s.Require().NoError(err)
 	s.Require().Equal(root3Rollback, freshRoot3, "post-rollback root must match fresh rebuild")
+}
+
+// TestComputeTreeRoot_RollbackWithStaleShards verifies that a rollback
+// following a delta-append (which writes shard data to KV) produces the
+// correct root. This is the harder scenario: without the TruncateKVData call
+// added to the rollback path, ShardTree would read the stale pre-rollback
+// shards and place newly-appended leaves at wrong positions, producing an
+// incorrect root.
+//
+// Sequence:
+//  1. ComputeTreeRoot(kv, 1, 1) — cold start, treeCursor=1, no delta,
+//     no shard data written to KV.
+//  2. ComputeTreeRoot(kv, 5, 5) — delta-append indices 1-4; Rust writes
+//     shard data for those 4 leaves to KV.  treeCursor=5.
+//  3. ComputeTreeRoot(kv, 3, 3) — rollback: treeCursor(5) > nextIndex(3).
+//     TruncateKVData clears the stale shards, then AppendFromKV(0,3) builds
+//     a fresh 3-leaf tree.
+//
+// The rollback root is compared against the stateless ComputePoseidonRoot for
+// the same 3 leaves — this reference is completely independent of KV state.
+func (s *KeeperTestSuite) TestComputeTreeRoot_RollbackWithStaleShards() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	// Append 5 leaves up-front (indices 0-4).
+	for i := uint64(1); i <= 5; i++ {
+		_, err := s.keeper.AppendCommitment(kv, fpLE(i))
+		s.Require().NoError(err)
+	}
+
+	// Step 1: cold start at nextIndex=1. treeCursor becomes 1; no delta is
+	// performed so no shard data is written.
+	_, err := s.keeper.ComputeTreeRoot(kv, 1, 1)
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(1), s.keeper.TreeCursorForTest())
+
+	// Step 2: delta-append indices 1-4. Rust writes shard data for 4 leaves
+	// to KV. After this, treeCursor=5 and KV contains stale shard data.
+	_, err = s.keeper.ComputeTreeRoot(kv, 5, 5)
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(5), s.keeper.TreeCursorForTest())
+
+	// Step 3: rollback — treeCursor(5) > nextIndex(3). TruncateKVData removes
+	// the stale shards before AppendFromKV(0,3) rebuilds the tree.
+	rollbackRoot, err := s.keeper.ComputeTreeRoot(kv, 3, 3)
+	s.Require().NoError(err)
+	s.Require().Len(rollbackRoot, 32)
+	s.Require().Equal(uint64(3), s.keeper.TreeCursorForTest())
+
+	// The reference root is built by the stateless API from the same 3 leaves
+	// (fpLE(1), fpLE(2), fpLE(3)) using an in-memory MemoryTreeServer.
+	// This is completely independent of KV state and serves as ground truth.
+	refRoot, err := votetree.ComputePoseidonRoot([][]byte{fpLE(1), fpLE(2), fpLE(3)})
+	s.Require().NoError(err)
+	s.Require().Equal(refRoot, rollbackRoot,
+		"post-rollback root must match stateless reference for the same 3 leaves")
 }
 
 // TestComputeTreeRoot_ColdStartNoNewLeaves verifies that a cold-start keeper

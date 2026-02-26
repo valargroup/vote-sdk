@@ -101,12 +101,15 @@ func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) (need
 	}
 
 	if k.treeCursor > nextIndex {
-		// Rollback: treeCursor is ahead of KV. Create a fresh handle at
-		// next_position=0, clear the stale latest_checkpoint (KV may still
-		// hold checkpoints from the pre-rollback state), and reset treeCursor
-		// to 0 so the delta-append path below reloads all nextIndex leaves.
-		// This ensures ShardTree::checkpoint() records the correct frontier
-		// position for the rolled-back leaf count.
+		// Rollback: treeCursor is ahead of KV. Before discarding the old
+		// handle, delete all tree-related KV data (shards, cap, checkpoints)
+		// so the fresh handle starts with an empty ShardTree. Without this,
+		// ShardTree would read stale pre-rollback shard data and append new
+		// leaves at wrong positions (after the old frontier), producing an
+		// incorrect root.
+		if err := k.treeHandle.TruncateKVData(); err != nil {
+			return false, fmt.Errorf("tree rollback truncation failed: %w", err)
+		}
 		k.treeHandle.Close()
 		k.treeHandle = votetree.NewTreeHandleWithKV(k.kvProxy, 0)
 		k.treeHandle.ClearCheckpoint()

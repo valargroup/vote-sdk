@@ -188,6 +188,7 @@ func ComputePoseidonRoot(leaves [][]byte) ([]byte, error) {
 type TreeHandle struct {
 	ptr         unsafe.Pointer // *C.ZallyTreeHandle — Rust heap allocation, not GC-tracked
 	proxyHandle cgo.Handle     // keeps the KvStoreProxy reachable and lets callbacks recover it
+	ctxPtr      unsafe.Pointer // C-malloc'd uintptr_t holding proxyHandle; freed in Close
 }
 
 
@@ -314,6 +315,20 @@ func (h *TreeHandle) ClearCheckpoint() {
 	C.zally_vote_tree_clear_checkpoint((*C.ZallyTreeHandle)(h.ptr))
 }
 
+// TruncateKVData deletes all tree-related KV entries (shards, cap,
+// checkpoints) through this handle's KV callbacks. Must be called on the OLD
+// handle just before Close() on rollback, so that the fresh handle created at
+// next_position=0 starts with an empty KV state. Without this, ShardTree
+// would read stale pre-rollback shard data and place new leaves at wrong
+// positions, producing an incorrect root.
+func (h *TreeHandle) TruncateKVData() error {
+	rc := C.zally_vote_tree_truncate_kv_data((*C.ZallyTreeHandle)(h.ptr))
+	if rc != 0 {
+		return fmt.Errorf("votetree: truncate_kv_data failed (rc=%d)", rc)
+	}
+	return nil
+}
+
 // Size returns the total number of leaves appended since the handle was
 // created. Used by Keeper.ensureTreeLoaded to detect rollbacks: if
 // Size() > KV nextIndex, the chain rolled back and the handle must be
@@ -363,6 +378,10 @@ func (h *TreeHandle) Close() {
 		C.zally_vote_tree_free((*C.ZallyTreeHandle)(h.ptr))
 		h.ptr = nil
 		h.proxyHandle.Delete()
+		if h.ctxPtr != nil {
+			C.free(h.ctxPtr)
+			h.ctxPtr = nil
+		}
 	}
 }
 

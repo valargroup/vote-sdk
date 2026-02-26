@@ -262,6 +262,23 @@ int32_t zally_vote_tree_root_stateful(
 void zally_vote_tree_clear_checkpoint(ZallyTreeHandle* handle);
 
 /*
+ * Delete all tree-related KV data (shards, cap, checkpoints) through the
+ * handle's callbacks.
+ *
+ * Call this on the OLD handle just before closing it on rollback so that the
+ * fresh handle created at next_position=0 sees an empty KV state and does not
+ * read stale pre-rollback shard data during AppendFromKV.
+ *
+ * Parameters:
+ *   handle - Pointer returned by zally_vote_tree_create_with_kv.
+ *
+ * Returns:
+ *    0  on success.
+ *   -1  if handle is null or any KV callback fails.
+ */
+int32_t zally_vote_tree_truncate_kv_data(ZallyTreeHandle* handle);
+
+/*
  * Return the number of leaves appended to the stateful handle so far.
  *
  * Parameters:

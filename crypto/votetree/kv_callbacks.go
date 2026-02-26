@@ -20,6 +20,7 @@ package votetree
 #include "../../circuits/include/zally_circuits.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 */
 import "C"
 
@@ -29,6 +30,13 @@ import (
 
 	"cosmossdk.io/core/store"
 )
+
+// recoverHandle dereferences a C-malloc'd uintptr_t to recover the cgo.Handle
+// stored there. Used by all KV callbacks to recover the KvStoreProxy from the
+// void* ctx that Rust passes back.
+func recoverHandle(ctx unsafe.Pointer) cgo.Handle {
+	return cgo.Handle(*(*C.uint64_t)(ctx))
+}
 
 // KvStoreProxy is a stable Go struct whose address never changes across blocks.
 // The cgo.Handle passed to Rust points here. Go updates Current before every
@@ -47,14 +55,17 @@ func zallyKvGet(
 	keyPtr *C.uint8_t, keyLen C.size_t,
 	outVal **C.uint8_t, outValLen *C.size_t,
 ) C.int32_t {
-	h := cgo.Handle(uintptr(ctx))
+	h := recoverHandle(ctx)
 	proxy, ok := h.Value().(*KvStoreProxy)
 	if !ok {
 		return -1
 	}
 	key := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
 	val, err := proxy.Current.Get(key)
-	if err != nil || val == nil {
+	if err != nil {
+		return -1 // hard error: store corruption, closed store, etc.
+	}
+	if val == nil {
 		return 1 // not found
 	}
 	// Allocate C buffer and copy value in.
@@ -74,7 +85,7 @@ func zallyKvSet(
 	keyPtr *C.uint8_t, keyLen C.size_t,
 	valPtr *C.uint8_t, valLen C.size_t,
 ) C.int32_t {
-	h := cgo.Handle(uintptr(ctx))
+	h := recoverHandle(ctx)
 	proxy, ok := h.Value().(*KvStoreProxy)
 	if !ok {
 		return -1
@@ -89,7 +100,7 @@ func zallyKvSet(
 
 //export zallyKvDelete
 func zallyKvDelete(ctx unsafe.Pointer, keyPtr *C.uint8_t, keyLen C.size_t) C.int32_t {
-	h := cgo.Handle(uintptr(ctx))
+	h := recoverHandle(ctx)
 	proxy, ok := h.Value().(*KvStoreProxy)
 	if !ok {
 		return -1
@@ -107,7 +118,7 @@ func zallyKvIterCreate(
 	prefixPtr *C.uint8_t, prefixLen C.size_t,
 	reverse C.uint8_t,
 ) unsafe.Pointer {
-	proxyH := cgo.Handle(uintptr(ctx))
+	proxyH := recoverHandle(ctx)
 	proxy, ok := proxyH.Value().(*KvStoreProxy)
 	if !ok {
 		return nil
@@ -138,7 +149,9 @@ func zallyKvIterCreate(
 		return nil
 	}
 	iterH := cgo.NewHandle(iter)
-	return unsafe.Pointer(uintptr(iterH)) //nolint:govet
+	iterPtr := (*C.uint64_t)(C.malloc(C.size_t(unsafe.Sizeof(C.uint64_t(0)))))
+	*iterPtr = C.uint64_t(iterH)
+	return unsafe.Pointer(iterPtr)
 }
 
 //export zallyKvIterNext
@@ -147,7 +160,7 @@ func zallyKvIterNext(
 	outKey **C.uint8_t, outKeyLen *C.size_t,
 	outVal **C.uint8_t, outValLen *C.size_t,
 ) C.int32_t {
-	h := cgo.Handle(uintptr(iterPtr))
+	h := cgo.Handle(*(*C.uint64_t)(iterPtr))
 	iter, ok := h.Value().(store.Iterator)
 	if !ok {
 		return -1 // corrupted handle: not a store.Iterator
@@ -180,14 +193,16 @@ func zallyKvIterNext(
 
 //export zallyKvIterFree
 func zallyKvIterFree(iterPtr unsafe.Pointer) {
-	h := cgo.Handle(uintptr(iterPtr))
+	h := cgo.Handle(*(*C.uint64_t)(iterPtr))
 	iter, ok := h.Value().(store.Iterator)
 	if !ok {
-		h.Delete() // still need to free the handle to avoid leak
+		h.Delete()
+		C.free(iterPtr)
 		return
 	}
 	iter.Close()
 	h.Delete()
+	C.free(iterPtr)
 }
 
 //export zallyKvFreeBuf
