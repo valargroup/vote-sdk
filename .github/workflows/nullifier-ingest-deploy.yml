@@ -78,8 +78,8 @@ jobs:
 
       - name: Flatten artifacts
         run: |
-          mv nullifier-ingest/nf-server/target/x86_64-unknown-linux-gnu/release/nf-server .
-          mv nullifier-ingest/docs/nullifier-query-server.service .
+          mv nf-server/target/x86_64-unknown-linux-gnu/release/nf-server .
+          mv docs/nullifier-query-server.service .
 
       - name: Deploy via SSH
         uses: appleboy/scp-action@v0.1.7
