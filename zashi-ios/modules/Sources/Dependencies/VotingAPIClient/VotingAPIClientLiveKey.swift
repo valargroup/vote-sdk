@@ -449,6 +449,17 @@ extension VotingAPIClient: DependencyKey {
                     try await Task.sleep(for: .seconds(1))
                 }
                 throw ZallyAPIError.commitmentTreeTimeout(seconds: timeoutSeconds)
+            },
+            checkTxConfirmed: { txHash in
+                do {
+                    let json = try await getJSON("/zally/v1/tx/\(txHash)")
+                    let height = parseUInt64(json["height"])
+                    let code = parseUInt32(json["code"])
+                    return TxConfirmation(height: height, code: code)
+                } catch {
+                    // TX not yet confirmed (404 or network error)
+                    return nil
+                }
             }
         )
     }

@@ -534,6 +534,18 @@ public struct CastVoteSignature: Equatable, Sendable {
     }
 }
 
+/// Result of checking whether a TX has been included in a block.
+/// Returned by the /zally/v1/tx/{hash} endpoint.
+public struct TxConfirmation: Equatable, Sendable {
+    public let height: UInt64
+    public let code: UInt32
+
+    public init(height: UInt64, code: UInt32) {
+        self.height = height
+        self.code = code
+    }
+}
+
 /// Maps to BroadcastResult from the REST API (api/handler.go).
 public struct TxResult: Equatable, Sendable {
     public let txHash: String

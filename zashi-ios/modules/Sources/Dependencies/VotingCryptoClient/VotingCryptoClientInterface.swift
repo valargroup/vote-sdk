@@ -138,6 +138,9 @@ public struct VotingCryptoClient {
     public var syncVoteTree: @Sendable (_ roundId: String, _ nodeUrl: String) async throws -> UInt32
     public var generateVanWitness: @Sendable (_ roundId: String, _ bundleIndex: UInt32, _ anchorHeight: UInt32) async throws -> VanWitness
     public var markVoteSubmitted: @Sendable (_ roundId: String, _ bundleIndex: UInt32, _ proposalId: UInt32) async throws -> Void
+    /// Drop the in-memory TreeClient so the next `syncVoteTree` starts fresh.
+    /// Recovers from stale state after commitment tree timeout.
+    public var resetTreeClient: @Sendable () async throws -> Void
     /// Compute canonical cast-vote sighash, decompress r_vpk, and sign.
     /// Call after `buildVoteCommitment` completes, before `submitVoteCommitment`.
     public var signCastVote: @Sendable (

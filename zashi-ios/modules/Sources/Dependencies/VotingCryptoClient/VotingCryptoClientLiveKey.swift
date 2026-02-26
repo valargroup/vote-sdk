@@ -491,6 +491,10 @@ extension VotingCryptoClient: DependencyKey {
                 try db.markVoteSubmitted(roundId: roundId, bundleIndex: bundleIndex, proposalId: proposalId)
                 publishState(db: db, roundId: roundId)
             },
+            resetTreeClient: {
+                let db = try await dbActor.database()
+                try db.resetTreeClient()
+            },
             signCastVote: { hotkeySeed, networkId, bundle in
                 let ffiSig = try ZcashVotingFFI.signCastVote(
                     hotkeySeed: Data(hotkeySeed),

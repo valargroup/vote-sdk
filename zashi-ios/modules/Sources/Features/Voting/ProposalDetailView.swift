@@ -263,14 +263,21 @@ struct ProposalDetailView: View {
                 }
                 Spacer()
             }
-            .padding(16)
-            .background(Color.orange.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color.orange.opacity(0.2), lineWidth: 1)
-            )
+
+            Button {
+                store.send(.dismissVoteError)
+            } label: {
+                Text("Dismiss")
+                    .zFont(.medium, size: 13, style: Design.Text.primary)
+            }
         }
+        .padding(16)
+        .background(Color.orange.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+        )
     }
 
     // MARK: - Confirmation Overlay

@@ -993,6 +993,18 @@ impl VotingDatabase {
             .db
             .mark_vote_submitted(&round_id, bundle_index, proposal_id)?)
     }
+
+    /// Drop the in-memory TreeClient so the next `sync_vote_tree()` call
+    /// creates a fresh one and does a full resync from genesis. This recovers
+    /// from stale state that would otherwise cause `StartIndexMismatch` or
+    /// `RootMismatch` errors.
+    pub fn reset_tree_client(&self) -> Result<(), VotingError> {
+        let mut guard = self.tree_client.lock().map_err(|e| VotingError::Internal {
+            message: format!("tree client lock poisoned: {}", e),
+        })?;
+        *guard = None;
+        Ok(())
+    }
 }
 
 // =============================================================================
