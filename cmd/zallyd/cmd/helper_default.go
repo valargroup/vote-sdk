@@ -10,12 +10,13 @@ func helperHalo2Available() bool {
 
 func halo2GenerateShareRevealProof(
 	merklePath []byte,
-	allEncShares [32][32]byte,
-	shareBlinds [16][32]byte,
+	shareComms [16][32]byte,
+	primaryBlind [32]byte,
+	encC1X [32]byte,
+	encC2X [32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
-	sharesHash [32]byte,
 ) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error) {
 	return nil, nullifier, treeRoot, fmt.Errorf("share reveal proof generation requires the 'halo2' build tag")
 }

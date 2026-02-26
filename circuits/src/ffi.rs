@@ -757,7 +757,6 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
     let deserialize_fp =
         |bytes: [u8; 32]| -> Option<pallas::Base> { pallas::Base::from_repr(bytes).into() };
 
-    // Slot names for error messages (indexed 0..6).
     const SLOT_NAMES: [&str; 7] = [
         "share_nullifier",
         "enc_share_c1_x",
@@ -822,36 +821,33 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
 /// Generate a share reveal proof (ZKP #3) from raw inputs.
 ///
 /// This composite function performs the entire crypto pipeline in a single
-/// CGo call, avoiding the need to expose 6+ individual Poseidon/field-arithmetic
-/// functions to Go:
+/// CGo call:
 ///
 /// 1. Decode Merkle auth path from serialized bytes
-/// 2. Decode 8 compressed Pallas points (all_enc_shares), clear sign bits → x-coords
-/// 3. Compute shares_hash and verify against expected value
+/// 2. Decode 16 share commitments (public inputs to the circuit)
+/// 3. Decode primary blind and revealed share coordinates
 /// 4. Convert round_id via wide reduction to canonical Fp
-/// 5. Compute vote_commitment via Poseidon hash
-/// 6. Derive share_nullifier via Poseidon hash
-/// 7. Build share reveal circuit with all witnesses
-/// 8. Generate Halo2 proof (CPU-intensive, ~30-60s in release mode)
+/// 5. Build share reveal circuit with all witnesses + public share_comms
+/// 6. Generate Halo2 proof (CPU-intensive, ~30-60s in release mode)
 ///
 /// # Arguments
-/// * `merkle_path_ptr/len`       - 772-byte serialized Merkle path (from `zally_vote_tree_path_stateful`)
-/// * `all_enc_shares_ptr/len`    - 1024 bytes: 16 shares × (C1 + C2) × 32 bytes each
-///                                 Order: C1_0, C2_0, C1_1, C2_1, ..., C1_15, C2_15
-/// * `share_index`               - Which of the 16 shares (0..15)
-/// * `proposal_id`               - Proposal being voted on
-/// * `vote_decision`             - Vote choice (0=support, 1=oppose, 2=skip)
-/// * `round_id_ptr/len`          - 32-byte raw Blake2b-256 round ID
-/// * `expected_shares_hash_ptr`  - 32-byte expected shares_hash (Fp, canonical LE)
+/// * `merkle_path_ptr/len`   - 772-byte serialized Merkle path
+/// * `share_comms_ptr/len`   - 512 bytes: 16 × 32-byte Poseidon commitments
+/// * `primary_blind_ptr`     - 32-byte blind factor for the revealed share
+/// * `enc_c1_x_ptr`          - 32-byte x-coord of revealed share's C1 (compressed)
+/// * `enc_c2_x_ptr`          - 32-byte x-coord of revealed share's C2 (compressed)
+/// * `share_index`           - Which of the 16 shares (0..15)
+/// * `proposal_id`           - Proposal being voted on
+/// * `vote_decision`         - Vote choice (0=support, 1=oppose, 2=skip)
+/// * `round_id_ptr/len`      - 32-byte raw Blake2b-256 round ID
 /// * `proof_out/capacity/len_out` - Output buffer for the proof bytes
-/// * `nullifier_out`             - 32-byte output buffer for share nullifier
-/// * `tree_root_out`             - 32-byte output buffer for commitment tree root
+/// * `nullifier_out`         - 32-byte output buffer for share nullifier
+/// * `tree_root_out`         - 32-byte output buffer for commitment tree root
 ///
 /// # Returns
 /// *  `0` on success (proof, nullifier, tree_root written to output buffers)
 /// * `-1` invalid input (null pointers, wrong lengths)
-/// * `-3` deserialization error (non-canonical Fp, invalid point)
-/// * `-4` shares_hash mismatch (all_enc_shares don't match expected_shares_hash)
+/// * `-3` deserialization error (non-canonical Fp)
 /// * `-5` proof generation failure
 ///
 /// # Safety
@@ -860,16 +856,16 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
 pub unsafe extern "C" fn zally_generate_share_reveal(
     merkle_path_ptr: *const u8,
     merkle_path_len: usize,
-    all_enc_shares_ptr: *const u8,
-    all_enc_shares_len: usize,
-    share_blinds_ptr: *const u8,
-    share_blinds_len: usize,
+    share_comms_ptr: *const u8,
+    share_comms_len: usize,
+    primary_blind_ptr: *const u8,
+    enc_c1_x_ptr: *const u8,
+    enc_c2_x_ptr: *const u8,
     share_index: u32,
     proposal_id: u32,
     vote_decision: u32,
     round_id_ptr: *const u8,
     round_id_len: usize,
-    expected_shares_hash_ptr: *const u8,
     proof_out: *mut u8,
     proof_out_capacity: usize,
     proof_len_out: *mut usize,
@@ -880,10 +876,11 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
 
     // --- Input validation ---
     if merkle_path_ptr.is_null()
-        || all_enc_shares_ptr.is_null()
-        || share_blinds_ptr.is_null()
+        || share_comms_ptr.is_null()
+        || primary_blind_ptr.is_null()
+        || enc_c1_x_ptr.is_null()
+        || enc_c2_x_ptr.is_null()
         || round_id_ptr.is_null()
-        || expected_shares_hash_ptr.is_null()
         || proof_out.is_null()
         || proof_len_out.is_null()
         || nullifier_out.is_null()
@@ -894,12 +891,8 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     if merkle_path_len != votetree::MERKLE_PATH_BYTES {
         return -1;
     }
-    // 16 shares × 2 points (C1+C2) × 32 bytes = 1024
-    if all_enc_shares_len != 1024 {
-        return -1;
-    }
-    // 16 blind factors × 32 bytes = 512
-    if share_blinds_len != 512 {
+    // 16 share commitments × 32 bytes = 512
+    if share_comms_len != 512 {
         return -1;
     }
     if round_id_len != 32 {
@@ -912,7 +905,6 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     // --- Step 1: Decode Merkle auth path ---
     let merkle_path_raw = std::slice::from_raw_parts(merkle_path_ptr, merkle_path_len);
 
-    // Position is first 4 bytes (u32 LE).
     let position = u32::from_le_bytes([
         merkle_path_raw[0],
         merkle_path_raw[1],
@@ -920,7 +912,6 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
         merkle_path_raw[3],
     ]);
 
-    // Auth path: TREE_DEPTH sibling hashes, 32 bytes each, starting at offset 4.
     const TREE_DEPTH: usize = vote_commitment_tree::TREE_DEPTH;
     let mut auth_path = [pallas::Base::zero(); TREE_DEPTH];
     for i in 0..TREE_DEPTH {
@@ -933,86 +924,64 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
         }
     }
 
-    // --- Step 2: Decode all 32 encrypted share x-coordinates ---
-    // Layout: C1_0(32) C2_0(32) C1_1(32) C2_1(32) ... C1_15(32) C2_15(32)
-    let enc_shares_raw = std::slice::from_raw_parts(all_enc_shares_ptr, all_enc_shares_len);
-
-    let mut all_c1_x = [pallas::Base::zero(); 16];
-    let mut all_c2_x = [pallas::Base::zero(); 16];
-
-    for i in 0..16usize {
-        let c1_offset = i * 64;
-        let c2_offset = c1_offset + 32;
-
-        let mut c1_bytes = [0u8; 32];
-        c1_bytes.copy_from_slice(&enc_shares_raw[c1_offset..c1_offset + 32]);
-        // Clear sign bit to get raw x-coordinate.
-        c1_bytes[31] &= 0x7F;
-        match Option::from(pallas::Base::from_repr(c1_bytes)) {
-            Some(fp) => all_c1_x[i] = fp,
-            None => return -3,
-        }
-
-        let mut c2_bytes = [0u8; 32];
-        c2_bytes.copy_from_slice(&enc_shares_raw[c2_offset..c2_offset + 32]);
-        c2_bytes[31] &= 0x7F;
-        match Option::from(pallas::Base::from_repr(c2_bytes)) {
-            Some(fp) => all_c2_x[i] = fp,
-            None => return -3,
-        }
-    }
-
-    // --- Step 2b: Decode share blind factors ---
-    let share_blinds_raw = std::slice::from_raw_parts(share_blinds_ptr, share_blinds_len);
-    let mut share_blinds = [pallas::Base::zero(); 16];
+    // --- Step 2: Decode share commitments ---
+    let share_comms_raw = std::slice::from_raw_parts(share_comms_ptr, share_comms_len);
+    let mut share_comms = [pallas::Base::zero(); 16];
     for i in 0..16usize {
         let offset = i * 32;
         let mut bytes = [0u8; 32];
-        bytes.copy_from_slice(&share_blinds_raw[offset..offset + 32]);
+        bytes.copy_from_slice(&share_comms_raw[offset..offset + 32]);
         match Option::from(pallas::Base::from_repr(bytes)) {
-            Some(fp) => share_blinds[i] = fp,
+            Some(fp) => share_comms[i] = fp,
             None => return -3,
         }
     }
 
-    // --- Step 3: Compute shares_hash and verify against expected ---
-    let computed_shares_hash = orchard::vote_proof::shares_hash(share_blinds, all_c1_x, all_c2_x);
-
-    let expected_hash_raw = std::slice::from_raw_parts(expected_shares_hash_ptr, 32);
-    let mut expected_hash_bytes = [0u8; 32];
-    expected_hash_bytes.copy_from_slice(expected_hash_raw);
-    let expected_shares_hash = match Option::from(pallas::Base::from_repr(expected_hash_bytes)) {
+    // --- Step 3: Decode primary blind ---
+    let blind_raw = std::slice::from_raw_parts(primary_blind_ptr, 32);
+    let mut blind_bytes = [0u8; 32];
+    blind_bytes.copy_from_slice(blind_raw);
+    let primary_blind = match Option::from(pallas::Base::from_repr(blind_bytes)) {
         Some(fp) => fp,
         None => return -3,
     };
-    if computed_shares_hash != expected_shares_hash {
-        return -4;
-    }
 
-    // --- Step 4: Convert round_id to Fp via wide reduction ---
+    // --- Step 4: Decode revealed share coordinates ---
+    let c1_raw = std::slice::from_raw_parts(enc_c1_x_ptr, 32);
+    let mut c1_bytes = [0u8; 32];
+    c1_bytes.copy_from_slice(c1_raw);
+    c1_bytes[31] &= 0x7F; // clear sign bit
+    let enc_c1_x = match Option::from(pallas::Base::from_repr(c1_bytes)) {
+        Some(fp) => fp,
+        None => return -3,
+    };
+
+    let c2_raw = std::slice::from_raw_parts(enc_c2_x_ptr, 32);
+    let mut c2_bytes = [0u8; 32];
+    c2_bytes.copy_from_slice(c2_raw);
+    c2_bytes[31] &= 0x7F;
+    let enc_c2_x = match Option::from(pallas::Base::from_repr(c2_bytes)) {
+        Some(fp) => fp,
+        None => return -3,
+    };
+
+    // --- Step 5: Convert round_id to Fp via wide reduction ---
     let round_id_raw = std::slice::from_raw_parts(round_id_ptr, 32);
     let mut round_id_bytes = [0u8; 32];
     round_id_bytes.copy_from_slice(round_id_raw);
     let voting_round_id = hash_bytes_to_fp(round_id_bytes);
 
-    // --- Step 5: Compute vote_commitment ---
+    // --- Step 6: Build circuit and instance ---
     let proposal_id_fp = pallas::Base::from(u64::from(proposal_id));
     let vote_decision_fp = pallas::Base::from(u64::from(vote_decision));
-    let _vote_commitment = vote_commitment_tree::vote_commitment_hash(
-        computed_shares_hash,
-        proposal_id_fp,
-        vote_decision_fp,
-    );
 
-    // --- Step 6: Build circuit and instance ---
-    // build_share_reveal internally computes the nullifier, tree root, and
-    // populates all circuit witnesses.
     let bundle = share_reveal::builder::build_share_reveal(
         auth_path,
         position,
-        share_blinds,
-        all_c1_x,
-        all_c2_x,
+        share_comms,
+        primary_blind,
+        enc_c1_x,
+        enc_c2_x,
         share_index,
         proposal_id_fp,
         vote_decision_fp,
@@ -1057,17 +1026,18 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
 /// have the sign bit set (modulus < 2^255), the FFI's sign-bit clearing is
 /// a no-op and the round-trip is clean.
 ///
-/// Returns (merkle_path, all_enc_shares_flat, share_blinds_flat, share_index,
-///          proposal_id, vote_decision, round_id, shares_hash).
+/// Returns (merkle_path, share_comms_flat, primary_blind, enc_c1_x, enc_c2_x,
+///          share_index, proposal_id, vote_decision, round_id).
 pub fn build_share_reveal_test_data()
-    -> (Vec<u8>, [u8; 1024], [u8; 512], u32, u32, u32, [u8; 32], [u8; 32])
+    -> (Vec<u8>, [u8; 512], [u8; 32], [u8; 32], [u8; 32], u32, u32, u32, [u8; 32])
 {
     use pasta_curves::group::ff::PrimeField;
     use pasta_curves::pallas;
 
     let proposal_id: u32 = 3;
     let vote_decision: u32 = 1;
-    let round_id = [0u8; 32]; // simple zero round ID
+    let share_index: u32 = 0;
+    let round_id = [0u8; 32];
 
     // Synthetic blind factors.
     let share_blinds: [pallas::Base; 16] = core::array::from_fn(|i| {
@@ -1082,9 +1052,11 @@ pub fn build_share_reveal_test_data()
         all_c2_x[i as usize] = pallas::Base::from(200 + i);
     }
 
-    // Compute shares_hash with blinded commitments.
-    let shares_hash_fp = orchard::vote_proof::shares_hash(share_blinds, all_c1_x, all_c2_x);
-    let shares_hash_bytes: [u8; 32] = shares_hash_fp.to_repr();
+    // Compute share commitments and shares_hash.
+    let share_comms: [pallas::Base; 16] = core::array::from_fn(|i| {
+        orchard::vote_proof::share_commitment(share_blinds[i], all_c1_x[i], all_c2_x[i])
+    });
+    let shares_hash_fp = orchard::shared_primitives::shares_hash::shares_hash_from_comms(share_comms);
 
     // Compute vote_commitment.
     let proposal_id_fp = pallas::Base::from(u64::from(proposal_id));
@@ -1096,7 +1068,6 @@ pub fn build_share_reveal_test_data()
     );
 
     // Build single-leaf Merkle tree with vote_commitment as the leaf.
-    // Use the Rust helper directly instead of the stateless C FFI.
     let vc_bytes = vote_commitment.to_repr();
     let path_vec = unsafe {
         votetree::compute_path_from_raw(vc_bytes.as_ptr(), 1, 0)
@@ -1106,31 +1077,27 @@ pub fn build_share_reveal_test_data()
     let mut path_buf = [0u8; votetree::MERKLE_PATH_BYTES];
     path_buf.copy_from_slice(&path_vec);
 
-    // Flatten enc_shares: C1_0(32) C2_0(32) ... C1_15(32) C2_15(32) = 1024 bytes.
-    let mut enc_shares_flat = [0u8; 1024];
+    // Flatten share_comms: 16 × 32 bytes = 512 bytes.
+    let mut comms_flat = [0u8; 512];
     for i in 0..16 {
-        let c1_bytes = all_c1_x[i].to_repr();
-        let c2_bytes = all_c2_x[i].to_repr();
-        enc_shares_flat[i * 64..i * 64 + 32].copy_from_slice(&c1_bytes);
-        enc_shares_flat[i * 64 + 32..i * 64 + 64].copy_from_slice(&c2_bytes);
+        let bytes = share_comms[i].to_repr();
+        comms_flat[i * 32..(i + 1) * 32].copy_from_slice(&bytes);
     }
 
-    // Flatten share_blinds: 16 × 32 bytes = 512 bytes.
-    let mut blinds_flat = [0u8; 512];
-    for i in 0..16 {
-        let bytes = share_blinds[i].to_repr();
-        blinds_flat[i * 32..(i + 1) * 32].copy_from_slice(&bytes);
-    }
+    let primary_blind_bytes: [u8; 32] = share_blinds[share_index as usize].to_repr();
+    let enc_c1_x_bytes: [u8; 32] = all_c1_x[share_index as usize].to_repr();
+    let enc_c2_x_bytes: [u8; 32] = all_c2_x[share_index as usize].to_repr();
 
     (
         path_buf.to_vec(),
-        enc_shares_flat,
-        blinds_flat,
-        0,
+        comms_flat,
+        primary_blind_bytes,
+        enc_c1_x_bytes,
+        enc_c2_x_bytes,
+        share_index,
         proposal_id,
         vote_decision,
         round_id,
-        shares_hash_bytes,
     )
 }
 

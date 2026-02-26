@@ -364,23 +364,19 @@ func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
 	copy(buf[0:32], inputs.ShareNullifier)
 
 	// Slots 1-2: enc_share_c1_x, enc_share_c2_x
-	// EncShare is 64 bytes: C1 (32 bytes) || C2 (32 bytes), as compressed Pallas points.
-	// Extract x-coordinates by clearing the sign bit (bit 7 of byte 31).
 	if len(inputs.EncShare) != 64 {
 		return fmt.Errorf("enc_share must be 64 bytes, got %d", len(inputs.EncShare))
 	}
 	copy(buf[32:64], inputs.EncShare[:32])
-	buf[63] &= 0x7F // clear sign bit for c1_x
+	buf[63] &= 0x7F
 	copy(buf[64:96], inputs.EncShare[32:64])
-	buf[95] &= 0x7F // clear sign bit for c2_x
+	buf[95] &= 0x7F
 
 	// Slot 3: proposal_id (encode as 32-byte LE Fp)
 	binary.LittleEndian.PutUint64(buf[96:104], uint64(inputs.ProposalId))
-	// bytes 104..128 already zero
 
 	// Slot 4: vote_decision (encode as 32-byte LE Fp)
 	binary.LittleEndian.PutUint64(buf[128:136], uint64(inputs.VoteDecision))
-	// bytes 136..160 already zero
 
 	// Slot 5: vote_comm_tree_root
 	if len(inputs.VoteCommTreeRoot) != chunkSize {
@@ -395,12 +391,9 @@ func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
 	copy(buf[192:224], inputs.VoteRoundId)
 
 	// Validate Fp fields before the FFI call.
-	// Slots skipped: proposal_id (slot 3, small uint), vote_decision (slot 4, small uint),
-	// voting_round_id (slot 6, wide-reduced in Rust).
 	if err := validatePallasFp("share_nullifier", inputs.ShareNullifier); err != nil {
 		return err
 	}
-	// enc_share c1_x and c2_x are already in the buffer with sign bits cleared.
 	if err := validatePallasFp("enc_share_c1_x", buf[32:64]); err != nil {
 		return err
 	}
