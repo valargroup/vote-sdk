@@ -199,9 +199,9 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 	seedDealtRound := func(ackCount int) {
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
-			VoteRoundId: roundID,
-			Status:      types.SessionStatus_SESSION_STATUS_PENDING,
-			EaPk:        make([]byte, 32),
+			VoteRoundId:    roundID,
+			Status:         types.SessionStatus_SESSION_STATUS_PENDING,
+			EaPk:           make([]byte, 32),
 			CeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 			CeremonyValidators: []*types.ValidatorPallasKey{
 				{ValidatorAddress: "val1", PallasPk: make([]byte, 32)},
@@ -637,7 +637,6 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		vote.ProvideRegisterPallasKeySigner(),
 		vote.ProvideDealExecutiveAuthorityKeySigner(),
 		vote.ProvideAckExecutiveAuthorityKeySigner(),
-		vote.ProvideUnjailValidatorSigner(),
 	}
 
 	wantMsgTypes := []protoreflect.FullName{
@@ -649,7 +648,6 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		"zvote.v1.MsgRegisterPallasKey",
 		"zvote.v1.MsgDealExecutiveAuthorityKey",
 		"zvote.v1.MsgAckExecutiveAuthorityKey",
-		"zvote.v1.MsgUnjailValidator",
 	}
 
 	signerMap := make(map[protoreflect.FullName]bool, len(allSigners))
