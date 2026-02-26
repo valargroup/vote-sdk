@@ -614,6 +614,14 @@ public protocol VotingDatabaseProtocol: AnyObject, Sendable {
 
     func markVoteSubmitted(roundId: String, bundleIndex: UInt32, proposalId: UInt32) throws
 
+    /**
+     * Drop the in-memory TreeClient so the next `sync_vote_tree()` call
+     * creates a fresh one and does a full resync from genesis. This recovers
+     * from stale state that would otherwise cause `StartIndexMismatch` or
+     * `RootMismatch` errors.
+     */
+    func resetTreeClient() throws
+
     func setupBundles(roundId: String, notes: [NoteInfo]) throws  -> BundleSetupResult
 
     func storeTreeState(roundId: String, treeStateBytes: Data) throws
@@ -919,6 +927,18 @@ open func markVoteSubmitted(roundId: String, bundleIndex: UInt32, proposalId: UI
         FfiConverterString.lower(roundId),
         FfiConverterUInt32.lower(bundleIndex),
         FfiConverterUInt32.lower(proposalId),$0
+    )
+}
+}
+
+    /**
+     * Drop the in-memory TreeClient so the next `sync_vote_tree()` call
+     * creates a fresh one and does a full resync from genesis. This recovers
+     * from stale state that would otherwise cause `StartIndexMismatch` or
+     * `RootMismatch` errors.
+     */
+open func resetTreeClient()throws   {try rustCallWithError(FfiConverterTypeVotingError_lift) {
+    uniffi_zcash_voting_ffi_fn_method_votingdatabase_reset_tree_client(self.uniffiClonePointer(),$0
     )
 }
 }
@@ -3835,6 +3855,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_mark_vote_submitted() != 34095) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_reset_tree_client() != 37307) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_setup_bundles() != 31031) {
