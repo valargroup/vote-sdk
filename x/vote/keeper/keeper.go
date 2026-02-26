@@ -140,32 +140,6 @@ func (k *Keeper) ensureTreeLoaded(kvStore store.KVStore, nextIndex uint64) (need
 	return true, nil
 }
 
-// CheckpointTree snapshots the stateful tree handle at height. Available for
-// callers that need to mark the tree at an explicit block height outside of
-// ComputeTreeRoot.
-func (k *Keeper) CheckpointTree(height uint32) error {
-	if k.treeHandle == nil {
-		return nil
-	}
-	return k.treeHandle.Checkpoint(height)
-}
-
-// TreeCursorForTest exposes the internal treeCursor for testing.
-func (k *Keeper) TreeCursorForTest() uint64 {
-	return k.treeCursor
-}
-
-// StoreServiceForTest exposes the store service so tests can create a second
-// Keeper backed by the same underlying store (simulating node restart).
-func (k *Keeper) StoreServiceForTest() store.KVStoreService {
-	return k.storeService
-}
-
-// SetStakingKeeper replaces the staking keeper. Used in tests.
-func (k *Keeper) SetStakingKeeper(sk StakingKeeper) {
-	k.stakingKeeper = sk
-}
-
 // OpenKVStore opens the module's KV store from a context.
 func (k *Keeper) OpenKVStore(ctx context.Context) store.KVStore {
 	return k.storeService.OpenKVStore(ctx)
