@@ -12,51 +12,59 @@
 // This package exposes two APIs:
 //
 //   - Stateless API: ComputePoseidonRoot / ComputeMerklePath — build a fresh
-//     tree from a flat leaf slice on every call. Simple, but O(n) per call.
-//     Used in tests and for backward-compatible callers.
+//     in-memory tree from a flat leaf slice on every call. O(n) per call.
+//     Used by the helper server for proof generation and in tests.
 //
-//   - Stateful API: TreeHandle — wraps a Rust-side ShardTree that persists
-//     across calls. AppendBatch adds only the delta leaves since the last call;
-//     Checkpoint + Root return the correct root for that block height. Reduces
-//     EndBlocker from O(n) per block to O(k) where k = new leaves that block.
+//   - Stateful API: TreeHandle — wraps a Rust-side ShardTree<KvShardStore>
+//     that persists across blocks. Rust reads and writes shards, the cap, and
+//     checkpoints directly to the Cosmos KV store through Go callbacks
+//     registered at handle creation time. AppendBatch appends only the delta
+//     leaves since the last call — O(k) per block. Cold start is O(1): no
+//     leaf replay, no explicit restore loop.
 //
-// # Memory layout
+// # Architecture
 //
-// The Rust static library owns the tree data. TreeHandle holds an opaque C
-// pointer (*ZallyTreeHandle) into Rust-managed heap memory. The Go GC does not
-// manage this memory; callers must call Close() to free it.
+// The stateful path uses reverse FFI: Rust calls back into Go for KV I/O.
 //
 //	Go Keeper
-//	  └─ *votetree.TreeHandle (Go struct on Go heap)
-//	       └─ ptr unsafe.Pointer ──► ZallyTreeHandle (Rust Box<TreeHandle> on Rust heap)
-//	                                     └─ TreeServer (ShardTree<MemoryShardStore, 32, 4>)
+//	  ├─ kvProxy *KvStoreProxy  ← stable pointer; Current updated each block
+//	  └─ treeHandle *TreeHandle
+//	       └─ ptr ──────────► ZallyTreeHandle  (Rust Box<T>, Rust heap)
+//	                               └─ TreeServer
+//	                                    └─ ShardTree<KvShardStore, 24, 4>
+//	                                         └─ KvCallbacks { ctx=kvProxy, ... }
+//	                                              └─ zallyKv* //export functions
+//	                                                   └─ kvProxy.Current (KVStore)
 //
-// # CGO boundary
+// # KV key schema
 //
-// Leaves cross the CGO boundary as a flat byte array: all leaves are
-// concatenated into a single []byte before the C call. This avoids per-leaf
-// CGO overhead (CGO calls have ~50–100 ns overhead each; batching amortises it
-// to one call per block regardless of how many leaves were appended).
+// ShardTree state occupies three key prefixes (same byte values as keys.go):
+//
+//	0x0F || u64 BE shard_index  →  shard blob   (written on every put_shard)
+//	0x10                        →  cap blob      (written when cap changes)
+//	0x11 || u32 BE checkpoint_id → checkpoint blob (written on Checkpoint)
+//
+// # CGO boundary for leaf batches
+//
+// Leaf appends cross the CGO boundary as a single flat byte array regardless
+// of batch size. CGO calls carry ~50–100 ns overhead each; batching amortises
+// that to one call per block.
 //
 // # Leaf encoding
 //
 // All leaves and roots are 32-byte little-endian canonical Pallas Fp values
 // (the same encoding the Go KV store uses: 0x02 || index → 32-byte leaf).
-// Non-canonical encodings (byte patterns that exceed the Pallas field modulus)
-// are rejected by the Rust deserializer with error code -3.
+// Non-canonical encodings are rejected with error code -3.
 //
 // # Checkpoint semantics
 //
-// ShardTree (from Zcash's incrementalmerkletree crate) only materializes
-// Merkle roots at checkpoint boundaries. After AppendBatch, the tree has the
-// leaves but no root is accessible until Checkpoint(height) is called. Root()
-// returns the root at the most recent checkpoint; Path(pos, height) returns the
-// Merkle authentication path for a leaf anchored to a specific checkpoint
-// height. Callers must always call Checkpoint before calling Root or Path.
+// ShardTree only materializes Merkle roots at checkpoint boundaries. After
+// AppendBatch the tree has the new leaves internally but no root is accessible
+// until Checkpoint(height) is called. Root() returns the root at the most
+// recent checkpoint; Path(pos, height) returns a witness anchored to a
+// specific checkpoint height.
 //
 // # Build requirement
-//
-// The Rust static library must be built before any CGO linking:
 //
 //	cargo build --release --manifest-path sdk/circuits/Cargo.toml
 package votetree
@@ -71,6 +79,7 @@ import "C"
 
 import (
 	"fmt"
+	"runtime/cgo"
 	"unsafe"
 )
 
@@ -145,50 +154,42 @@ func ComputePoseidonRoot(leaves [][]byte) ([]byte, error) {
 }
 
 // TreeHandle is the stateful API: a Poseidon Merkle tree handle backed by a
-// Rust ShardTree that lives across multiple blocks. The Go Keeper holds one
+// Rust ShardTree<KvShardStore> whose shard reads/writes go directly to the
+// Cosmos KV store through reverse-FFI callbacks. The Go Keeper holds one
 // instance for the lifetime of the process.
 //
 // # Lifecycle
 //
-// Create once with NewTreeHandle, load existing leaves with AppendBatch,
-// snapshot each block with Checkpoint, read the root with Root. Call Close
-// exactly once when done (node shutdown or explicit teardown).
+// Create once with NewTreeHandleWithKV, passing the Keeper's stable KvStoreProxy
+// and the current leaf count. Call AppendBatch for new leaves each block,
+// Checkpoint to snapshot state, Root to read the root. Call Close exactly
+// once when done (node shutdown or rollback).
 //
-//	h := NewTreeHandle()
+//	proxy := &votetree.KvStoreProxy{}
+//	h := votetree.NewTreeHandleWithKV(proxy, nextIndex)
 //	defer h.Close()
-//	h.AppendBatch(existingLeaves)   // cold-start load from KV
+//
+//	// Each block:
+//	proxy.Current = kvStore
+//	h.AppendBatch(deltaLeaves)
 //	h.Checkpoint(blockHeight)
 //	root, _ := h.Root()
 //
-// # Incremental update pattern (used by Keeper.ensureTreeLoaded)
-//
-//	// Each block: only the delta leaves [cursor, nextIndex) are fetched.
-//	h.AppendBatch(deltaLeaves)
-//	h.Checkpoint(blockHeight)    // called inside ComputeTreeRoot
-//	root, _ := h.Root()          // root at latest checkpoint
-//
 // # Memory ownership
 //
-// ptr is an opaque pointer into Rust-managed heap memory (a Box<TreeHandle>
-// allocated by zally_vote_tree_create). The Go GC does not track this memory.
-// Close must be called to free it; failing to do so leaks the Rust allocation.
-// Close is idempotent: a second call after the first is a no-op.
+// ptr is an opaque pointer into Rust-managed heap memory (a Box<ZallyTreeHandle>
+// allocated by zally_vote_tree_create_with_kv). The Go GC does not track this
+// memory. Close must be called to free it. Close is idempotent.
 //
 // # Concurrency
 //
 // TreeHandle is NOT safe for concurrent use. The Keeper holds it under
 // single-threaded EndBlocker execution; no external locking is needed.
 type TreeHandle struct {
-	ptr unsafe.Pointer // *C.ZallyTreeHandle — Rust heap allocation, not GC-tracked
+	ptr         unsafe.Pointer // *C.ZallyTreeHandle — Rust heap allocation, not GC-tracked
+	proxyHandle cgo.Handle     // keeps the KvStoreProxy reachable and lets callbacks recover it
 }
 
-// NewTreeHandle allocates a new, empty Rust-side tree handle. The returned
-// handle contains zero leaves and no checkpoints. Call AppendBatch to load
-// existing leaves before using Root or Path.
-func NewTreeHandle() *TreeHandle {
-	ptr := C.zally_vote_tree_create()
-	return &TreeHandle{ptr: unsafe.Pointer(ptr)}
-}
 
 // AppendBatch appends leaves to the tree in a single CGO call. Each leaf must
 // be exactly LeafBytes (32) bytes in canonical Pallas Fp little-endian
@@ -227,8 +228,41 @@ func (h *TreeHandle) AppendBatch(leaves [][]byte) error {
 		return fmt.Errorf("votetree: invalid inputs to append_batch")
 	case -3:
 		return fmt.Errorf("votetree: leaf deserialization error (non-canonical Fp)")
+	case -4:
+		return fmt.Errorf("votetree: KV store or ShardTree storage error in append_batch")
 	default:
 		return fmt.Errorf("votetree: append_batch returned error code %d", rc)
+	}
+}
+
+// AppendFromKV appends count leaves starting at cursor directly from the
+// Cosmos KV store via the KV callbacks registered at handle creation time.
+//
+// This is the optimised delta-append path for ensureTreeLoaded: instead of
+// reading each leaf individually in Go, serializing them, and passing them
+// over CGO, the Rust side reads the leaves directly using the reverse-FFI KV
+// callbacks. One CGO call regardless of how many leaves were added.
+//
+// Each leaf is stored at CommitmentLeafKey(cursor+i) = 0x02 || (cursor+i as
+// uint64 big-endian) in the Cosmos KV store.
+func (h *TreeHandle) AppendFromKV(cursor, count uint64) error {
+	if count == 0 {
+		return nil
+	}
+	rc := C.zally_vote_tree_append_from_kv(
+		(*C.ZallyTreeHandle)(h.ptr),
+		C.uint64_t(cursor),
+		C.uint64_t(count),
+	)
+	switch rc {
+	case 0:
+		return nil
+	case -1:
+		return fmt.Errorf("votetree: null handle in append_from_kv")
+	case -4:
+		return fmt.Errorf("votetree: leaf missing, malformed, or KV error in append_from_kv (cursor=%d count=%d)", cursor, count)
+	default:
+		return fmt.Errorf("votetree: append_from_kv returned error code %d", rc)
 	}
 }
 
@@ -243,10 +277,14 @@ func (h *TreeHandle) AppendBatch(leaves [][]byte) error {
 // Path before any Checkpoint returns the empty-tree root or an error.
 func (h *TreeHandle) Checkpoint(height uint32) error {
 	rc := C.zally_vote_tree_checkpoint((*C.ZallyTreeHandle)(h.ptr), C.uint32_t(height))
-	if rc != 0 {
+	switch rc {
+	case 0:
+		return nil
+	case -4:
+		return fmt.Errorf("votetree: KV store storage error during checkpoint at height %d", height)
+	default:
 		return fmt.Errorf("votetree: checkpoint returned error code %d", rc)
 	}
-	return nil
 }
 
 // Root returns the 32-byte Poseidon Merkle root at the most recently created
@@ -265,6 +303,15 @@ func (h *TreeHandle) Root() ([]byte, error) {
 	result := make([]byte, LeafBytes)
 	copy(result, rootBuf[:])
 	return result, nil
+}
+
+// ClearCheckpoint resets the in-memory latest_checkpoint to None without
+// touching the KV store. Used on rollback: after a new handle is created with
+// stale KV checkpoints from the pre-rollback state, calling ClearCheckpoint
+// allows a subsequent Checkpoint(M) call to establish the correct root for
+// the rolled-back height M without triggering the monotonicity assertion.
+func (h *TreeHandle) ClearCheckpoint() {
+	C.zally_vote_tree_clear_checkpoint((*C.ZallyTreeHandle)(h.ptr))
 }
 
 // Size returns the total number of leaves appended since the handle was
@@ -315,6 +362,7 @@ func (h *TreeHandle) Close() {
 	if h.ptr != nil {
 		C.zally_vote_tree_free((*C.ZallyTreeHandle)(h.ptr))
 		h.ptr = nil
+		h.proxyHandle.Delete()
 	}
 }
 

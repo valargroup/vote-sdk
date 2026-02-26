@@ -39,7 +39,7 @@ func eaSkPathForRound(dir string, roundID []byte) string {
 // generated ea_sk is written to <eaSkDir>/ea_sk.<hex(round_id)> for the
 // auto-tally system to pick up later.
 func CeremonyDealPrepareProposalHandler(
-	voteKeeper votekeeper.Keeper,
+	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	pallasSkPath string,
 	eaSkDir string,

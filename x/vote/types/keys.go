@@ -72,6 +72,18 @@ var (
 
 	// CeremonyStateKey stores the singleton ceremony state: single key -> CeremonyState (protobuf)
 	CeremonyStateKey = []byte{0x0E}
+
+	// ShardPrefix stores vote commitment tree shards persisted by EndBlocker:
+	//   0x0F || uint64 BE shard_index -> shard blob (WorkingSetShardStore format)
+	ShardPrefix = []byte{0x0F}
+
+	// ShardCapKey stores the vote commitment tree cap (nodes above shard level):
+	//   single key -> cap blob (WorkingSetShardStore format)
+	ShardCapKey = []byte{0x10}
+
+	// ShardCheckpointPrefix stores per-block tree checkpoints:
+	//   0x11 || uint32 BE checkpoint_id -> checkpoint blob (WorkingSetShardStore format)
+	ShardCheckpointPrefix = []byte{0x11}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -156,6 +168,12 @@ func PrefixEndBytes(prefix []byte) []byte {
 	return nil // overflow: prefix is all 0xFF
 }
 
+// getUint64BE reads a uint64 from big-endian bytes.
+func getUint64BE(b []byte) uint64 {
+	return uint64(b[0])<<56 | uint64(b[1])<<48 | uint64(b[2])<<40 | uint64(b[3])<<32 |
+		uint64(b[4])<<24 | uint64(b[5])<<16 | uint64(b[6])<<8 | uint64(b[7])
+}
+
 // putUint64BE writes a uint64 in big-endian byte order.
 func putUint64BE(b []byte, v uint64) {
 	b[0] = byte(v >> 56)
@@ -171,6 +189,19 @@ func putUint64BE(b []byte, v uint64) {
 // appendUint32BE appends a uint32 in big-endian byte order.
 func appendUint32BE(b []byte, v uint32) []byte {
 	return append(b, byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
+}
+
+// putUint32BE writes a uint32 in big-endian byte order.
+func putUint32BE(b []byte, v uint32) {
+	b[0] = byte(v >> 24)
+	b[1] = byte(v >> 16)
+	b[2] = byte(v >> 8)
+	b[3] = byte(v)
+}
+
+// getUint32BE reads a uint32 from big-endian bytes.
+func getUint32BE(b []byte) uint32 {
+	return uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
 }
 
 // BlockLeafIndexKey returns the store key for a block-to-leaf-index mapping.
@@ -214,6 +245,34 @@ func PallasKeyKey(valoperAddr string) []byte {
 // Format: 0x0D || valoper_address_bytes
 func CeremonyMissKey(valoperAddr string) []byte {
 	return append(CeremonyMissPrefix, []byte(valoperAddr)...)
+}
+
+// ShardKey returns the store key for a vote commitment tree shard.
+// Format: 0x0F || uint64 BE shard_index
+func ShardKey(index uint64) []byte {
+	key := make([]byte, len(ShardPrefix)+8)
+	copy(key, ShardPrefix)
+	putUint64BE(key[len(ShardPrefix):], index)
+	return key
+}
+
+// ShardIndexFromKey extracts the shard index from a ShardKey.
+func ShardIndexFromKey(key []byte) uint64 {
+	return getUint64BE(key[len(ShardPrefix):])
+}
+
+// ShardCheckpointKey returns the store key for a vote commitment tree checkpoint.
+// Format: 0x11 || uint32 BE checkpoint_id
+func ShardCheckpointKey(id uint32) []byte {
+	key := make([]byte, len(ShardCheckpointPrefix)+4)
+	copy(key, ShardCheckpointPrefix)
+	putUint32BE(key[len(ShardCheckpointPrefix):], id)
+	return key
+}
+
+// ShardCheckpointIDFromKey extracts the checkpoint ID from a ShardCheckpointKey.
+func ShardCheckpointIDFromKey(key []byte) uint32 {
+	return getUint32BE(key[len(ShardCheckpointPrefix):])
 }
 
 // TallyResultPrefixForRound returns the KV prefix for all tally results
