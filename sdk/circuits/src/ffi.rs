@@ -251,105 +251,6 @@ pub unsafe extern "C" fn zally_verify_redpallas_sig(
 }
 
 // ---------------------------------------------------------------------------
-// Vote commitment tree — Poseidon Merkle root and path via FFI
-// ---------------------------------------------------------------------------
-
-/// Compute the Poseidon Merkle root of a vote commitment tree built from the
-/// given leaves.
-///
-/// This is a **stateless** call: a fresh tree is constructed from the leaf
-/// array, checkpointed, and the root is returned. This matches the current
-/// Go keeper pattern (read all leaves from KV, compute root).
-///
-/// # Arguments
-/// * `leaves_ptr`  - Pointer to a flat byte array of leaves. Each leaf is
-///                   32 bytes (Pallas Fp, little-endian canonical repr).
-///                   Total size: `leaf_count * 32`.
-/// * `leaf_count`  - Number of leaves.
-/// * `root_out`    - Pointer to a 32-byte output buffer for the root.
-///
-/// # Returns
-/// * `0`  on success (root written to `root_out`).
-/// * `-1` if inputs are invalid (null pointers).
-/// * `-3` if a leaf contains a non-canonical field element encoding.
-///
-/// # Safety
-/// Caller must ensure pointers are valid and buffers are correctly sized.
-#[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_root(
-    leaves_ptr: *const u8,
-    leaf_count: usize,
-    root_out: *mut u8,
-) -> i32 {
-    // Validate pointers.
-    if root_out.is_null() {
-        return -1;
-    }
-    if leaf_count > 0 && leaves_ptr.is_null() {
-        return -1;
-    }
-
-    // Build tree and compute root.
-    match votetree::compute_root_from_raw(leaves_ptr, leaf_count) {
-        Ok(root_bytes) => {
-            std::ptr::copy_nonoverlapping(root_bytes.as_ptr(), root_out, 32);
-            0
-        }
-        Err(votetree::FfiError::InvalidInput) => -1,
-        Err(votetree::FfiError::Deserialization) => -3,
-        Err(votetree::FfiError::PositionOutOfRange) => -2, // should not happen for root
-    }
-}
-
-/// Compute the Poseidon Merkle authentication path for a leaf at `position`
-/// in a vote commitment tree built from the given leaves.
-///
-/// The path is serialized as [`MERKLE_PATH_BYTES`] bytes:
-/// - Bytes `[0..4)`:    position (`u32` LE)
-/// - Remaining bytes:   auth path (TREE_DEPTH sibling hashes, 32 bytes each, leaf→root)
-///
-/// # Arguments
-/// * `leaves_ptr`  - Pointer to a flat byte array of leaves (each 32 bytes LE Fp).
-/// * `leaf_count`  - Number of leaves.
-/// * `position`    - Leaf index for which to generate the path.
-/// * `path_out`    - Pointer to a [`MERKLE_PATH_BYTES`]-byte output buffer.
-///
-/// # Returns
-/// * `0`  on success (path written to `path_out`).
-/// * `-1` if inputs are invalid (null pointers, zero leaves).
-/// * `-2` if `position` is out of range (>= leaf_count).
-/// * `-3` if a leaf contains a non-canonical field element encoding.
-///
-/// # Safety
-/// Caller must ensure pointers are valid and buffers are correctly sized.
-#[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_path(
-    leaves_ptr: *const u8,
-    leaf_count: usize,
-    position: u64,
-    path_out: *mut u8,
-) -> i32 {
-    // Validate pointers.
-    if leaves_ptr.is_null() || path_out.is_null() {
-        return -1;
-    }
-    if leaf_count == 0 {
-        return -1;
-    }
-
-    // Build tree and compute path.
-    match votetree::compute_path_from_raw(leaves_ptr, leaf_count, position) {
-        Ok(path_bytes) => {
-            std::ptr::copy_nonoverlapping(path_bytes.as_ptr(), path_out, path_bytes.len());
-            0
-        }
-        Err(votetree::FfiError::InvalidInput) => -1,
-        Err(votetree::FfiError::PositionOutOfRange) => -2,
-        Err(votetree::FfiError::Deserialization) => -3,
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Delegation circuit (ZKP #1) — real Halo2 proof verification
 // ---------------------------------------------------------------------------
 
@@ -934,7 +835,7 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
 /// 8. Generate Halo2 proof (CPU-intensive, ~30-60s in release mode)
 ///
 /// # Arguments
-/// * `merkle_path_ptr/len`       - 772-byte serialized Merkle path (from `zally_vote_tree_path`)
+/// * `merkle_path_ptr/len`       - 772-byte serialized Merkle path (from `zally_vote_tree_path_stateful`)
 /// * `all_enc_shares_ptr/len`    - 1024 bytes: 16 shares × (C1 + C2) × 32 bytes each
 ///                                 Order: C1_0, C2_0, C1_1, C2_1, ..., C1_15, C2_15
 /// * `share_index`               - Which of the 16 shares (0..15)
@@ -1195,17 +1096,15 @@ pub fn build_share_reveal_test_data()
     );
 
     // Build single-leaf Merkle tree with vote_commitment as the leaf.
+    // Use the Rust helper directly instead of the stateless C FFI.
     let vc_bytes = vote_commitment.to_repr();
+    let path_vec = unsafe {
+        votetree::compute_path_from_raw(vc_bytes.as_ptr(), 1, 0)
+            .expect("path for single-leaf tree must succeed")
+    };
+    assert_eq!(path_vec.len(), votetree::MERKLE_PATH_BYTES);
     let mut path_buf = [0u8; votetree::MERKLE_PATH_BYTES];
-    unsafe {
-        let rc = zally_vote_tree_path(
-            vc_bytes.as_ptr(),
-            1, // leaf_count
-            0, // position
-            path_buf.as_mut_ptr(),
-        );
-        assert_eq!(rc, 0, "zally_vote_tree_path failed");
-    }
+    path_buf.copy_from_slice(&path_vec);
 
     // Flatten enc_shares: C1_0(32) C2_0(32) ... C1_15(32) C2_15(32) = 1024 bytes.
     let mut enc_shares_flat = [0u8; 1024];
@@ -1233,6 +1132,278 @@ pub fn build_share_reveal_test_data()
         round_id,
         shares_hash_bytes,
     )
+}
+
+// ---------------------------------------------------------------------------
+// Vote commitment tree — stateful handle (incremental per-block appends)
+// ---------------------------------------------------------------------------
+
+/// C function pointer types for the KV store callbacks.
+pub type ZallyKvGetFn = unsafe extern "C" fn(
+    ctx: *mut std::os::raw::c_void,
+    key: *const u8,
+    key_len: usize,
+    out_val: *mut *mut u8,
+    out_val_len: *mut usize,
+) -> i32;
+
+pub type ZallyKvSetFn = unsafe extern "C" fn(
+    ctx: *mut std::os::raw::c_void,
+    key: *const u8,
+    key_len: usize,
+    val: *const u8,
+    val_len: usize,
+) -> i32;
+
+pub type ZallyKvDeleteFn = unsafe extern "C" fn(
+    ctx: *mut std::os::raw::c_void,
+    key: *const u8,
+    key_len: usize,
+) -> i32;
+
+pub type ZallyKvIterCreateFn = unsafe extern "C" fn(
+    ctx: *mut std::os::raw::c_void,
+    prefix: *const u8,
+    prefix_len: usize,
+    reverse: u8,
+) -> *mut std::os::raw::c_void;
+
+pub type ZallyKvIterNextFn = unsafe extern "C" fn(
+    iter: *mut std::os::raw::c_void,
+    out_key: *mut *mut u8,
+    out_key_len: *mut usize,
+    out_val: *mut *mut u8,
+    out_val_len: *mut usize,
+) -> i32;
+
+pub type ZallyKvIterFreeFn =
+    unsafe extern "C" fn(iter: *mut std::os::raw::c_void);
+
+pub type ZallyKvFreeBufFn = unsafe extern "C" fn(ptr: *mut u8, len: usize);
+
+/// Create a KV-backed stateful vote commitment tree handle.
+///
+/// The handle reads and writes shards, the cap, and checkpoints directly
+/// through the provided Go KV callbacks. No leaf replay on cold start —
+/// `ShardTree` lazily loads only the data it needs.
+///
+/// `next_position` must be `CommitmentTreeState.NextIndex` (0 on first boot).
+///
+/// The caller owns the returned pointer and must free it with
+/// [`zally_vote_tree_free`].
+///
+/// # Safety
+/// All function pointers must remain valid for the lifetime of the handle.
+/// `ctx` must point to a stable Go `KvStoreProxy`; it is updated each block
+/// by Go before any tree call.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_create_with_kv(
+    ctx: *mut std::os::raw::c_void,
+    get_fn: ZallyKvGetFn,
+    set_fn: ZallyKvSetFn,
+    delete_fn: ZallyKvDeleteFn,
+    iter_create_fn: ZallyKvIterCreateFn,
+    iter_next_fn: ZallyKvIterNextFn,
+    iter_free_fn: ZallyKvIterFreeFn,
+    free_buf_fn: ZallyKvFreeBufFn,
+    next_position: u64,
+) -> *mut votetree::TreeHandle {
+    use vote_commitment_tree::kv_shard_store::KvCallbacks;
+    let cb = KvCallbacks {
+        ctx,
+        get: get_fn,
+        set: set_fn,
+        delete: delete_fn,
+        iter_create: iter_create_fn,
+        iter_next: iter_next_fn,
+        iter_free: iter_free_fn,
+        free_buf: free_buf_fn,
+    };
+    let handle = votetree::TreeHandle::new_with_kv(cb, next_position);
+    Box::into_raw(handle)
+}
+
+/// Free a tree handle previously created by [`zally_vote_tree_create`].
+///
+/// # Safety
+/// `handle` must be a pointer returned by [`zally_vote_tree_create`] and
+/// must not have been freed before.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_free(handle: *mut votetree::TreeHandle) {
+    if !handle.is_null() {
+        drop(Box::from_raw(handle));
+    }
+}
+
+/// Append a batch of leaves to a stateful tree handle.
+///
+/// # Arguments
+/// * `handle`      - Pointer returned by [`zally_vote_tree_create_with_kv`].
+/// * `leaves_ptr`  - Pointer to a flat byte array of leaves (each 32 bytes LE Fp).
+/// * `leaf_count`  - Number of leaves.
+///
+/// # Returns
+/// * `0`  on success.
+/// * `-1` if `handle` is null, or `leaf_count > 0` and `leaves_ptr` is null.
+/// * `-3` if a leaf contains a non-canonical field element encoding.
+/// * `-4` if the KV store or ShardTree returned a storage error.
+///
+/// # Safety
+/// Caller must ensure `handle` is valid and `leaves_ptr` is valid for
+/// `leaf_count * 32` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_append_batch(
+    handle: *mut votetree::TreeHandle,
+    leaves_ptr: *const u8,
+    leaf_count: usize,
+) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    let h = &mut *handle;
+    match h.append_batch_raw(leaves_ptr, leaf_count) {
+        Ok(()) => 0,
+        Err(votetree::FfiError::InvalidInput) => -1,
+        Err(votetree::FfiError::PositionOutOfRange) => -2,
+        Err(votetree::FfiError::Deserialization) => -3,
+        Err(votetree::FfiError::Storage) => -4,
+    }
+}
+
+/// Append `count` leaves starting at `cursor` directly from the Cosmos KV
+/// store, skipping the Go-side leaf fetch loop.
+///
+/// Each leaf is read from key `0x02 || cursor+i as u64 BE` (the
+/// `CommitmentLeafKey` format from `types/keys.go`). This eliminates the
+/// `newLeaves` allocation and per-leaf KV read loop previously performed in
+/// Go's `ensureTreeLoaded`.
+///
+/// # Arguments
+/// * `handle` - Pointer returned by [`zally_vote_tree_create_with_kv`].
+/// * `cursor` - Index of the first leaf to append (= current `treeCursor`).
+/// * `count`  - Number of leaves to append (= `nextIndex - treeCursor`).
+///
+/// # Returns
+/// * `0`  on success.
+/// * `-1` if `handle` is null.
+/// * `-4` if a leaf is missing, malformed, or the KV store returned an error.
+///
+/// # Safety
+/// `handle` must be a valid pointer returned by [`zally_vote_tree_create_with_kv`].
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_append_from_kv(
+    handle: *mut votetree::TreeHandle,
+    cursor: u64,
+    count: u64,
+) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    match (*handle).append_from_kv(cursor, count) {
+        Ok(()) => 0,
+        Err(_) => -4,
+    }
+}
+
+/// Snapshot the current tree state at `height` (block height).
+///
+/// Must be called after appending all leaves for a block so that
+/// `root_stateful` and `path_stateful` queries work for that height.
+///
+/// # Returns
+/// * `0`  on success.
+/// * `-1` if `handle` is null.
+/// * `-4` if the checkpoint failed (non-monotonic height or KV storage error).
+///
+/// # Safety
+/// `handle` must be a valid pointer returned by [`zally_vote_tree_create_with_kv`].
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_checkpoint(
+    handle: *mut votetree::TreeHandle,
+    height: u32,
+) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    match (*handle).checkpoint(height) {
+        Ok(()) => 0,
+        Err(_) => -4,
+    }
+}
+
+/// Return the 32-byte Merkle root at the latest checkpoint.
+///
+/// # Arguments
+/// * `handle`   - Pointer returned by [`zally_vote_tree_create`].
+/// * `root_out` - Pointer to a 32-byte output buffer.
+///
+/// # Returns
+/// * `0`  on success (root written to `root_out`).
+/// * `-1` if `handle` or `root_out` is null.
+///
+/// # Safety
+/// Caller must ensure `handle` is valid and `root_out` has room for 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_root_stateful(
+    handle: *const votetree::TreeHandle,
+    root_out: *mut u8,
+) -> i32 {
+    if handle.is_null() || root_out.is_null() {
+        return -1;
+    }
+    let root = (*handle).root();
+    std::ptr::copy_nonoverlapping(root.as_ptr(), root_out, 32);
+    0
+}
+
+
+/// Return the number of leaves appended to the stateful handle so far.
+///
+/// # Safety
+/// `handle` must be a valid pointer returned by [`zally_vote_tree_create`].
+/// Returns 0 for a null pointer.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_size(handle: *const votetree::TreeHandle) -> u64 {
+    if handle.is_null() {
+        return 0;
+    }
+    (*handle).size()
+}
+
+/// Compute the Poseidon Merkle authentication path for `position` at `height`
+/// using the stateful tree handle.
+///
+/// # Arguments
+/// * `handle`   - Pointer returned by [`zally_vote_tree_create`].
+/// * `position` - Leaf index for which to generate the path.
+/// * `height`   - Checkpoint height to use as anchor.
+/// * `path_out` - Pointer to a [`MERKLE_PATH_BYTES`]-byte output buffer.
+///
+/// # Returns
+/// * `0`  on success (path written to `path_out`).
+/// * `-1` if `handle` or `path_out` is null.
+/// * `-2` if `position` is out of range or `height` has no checkpoint.
+///
+/// # Safety
+/// Caller must ensure `handle` is valid and `path_out` has room for
+/// [`votetree::MERKLE_PATH_BYTES`] bytes.
+#[no_mangle]
+pub unsafe extern "C" fn zally_vote_tree_path_stateful(
+    handle: *const votetree::TreeHandle,
+    position: u64,
+    height: u32,
+    path_out: *mut u8,
+) -> i32 {
+    if handle.is_null() || path_out.is_null() {
+        return -1;
+    }
+    match (*handle).path(position, height) {
+        Some(bytes) => {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), path_out, bytes.len());
+            0
+        }
+        None => -2,
+    }
 }
 
 // ---------------------------------------------------------------------------

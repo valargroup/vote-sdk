@@ -11,7 +11,7 @@
 use pasta_curves::Fp;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use vote_commitment_tree::{MerklePath, TreeClient, TreeServer, TreeSyncApi};
+use vote_commitment_tree::{MemoryTreeServer, MerklePath, TreeClient, TreeSyncApi};
 
 fn fp(x: u64) -> Fp {
     Fp::from(x)
@@ -31,7 +31,7 @@ fn server_append_client_sync_witness_roundtrip() {
     // ---------------------------------------------------------------
     // 1. Create TreeServer (empty)
     // ---------------------------------------------------------------
-    let mut server = TreeServer::empty();
+    let mut server = MemoryTreeServer::empty();
     let mut client = TreeClient::empty();
 
     // ---------------------------------------------------------------
@@ -39,9 +39,9 @@ fn server_append_client_sync_witness_roundtrip() {
     //    EndBlocker: checkpoint at height 1
     // ---------------------------------------------------------------
     let van_alice = fp(100);
-    let van_idx = server.append(van_alice);
+    let van_idx = server.append(van_alice).unwrap();
     assert_eq!(van_idx, 0, "first leaf should be at index 0");
-    server.checkpoint(1);
+    server.checkpoint(1).unwrap();
 
     // ---------------------------------------------------------------
     // 3. Client syncs from server (gets block 1)
@@ -86,10 +86,10 @@ fn server_append_client_sync_witness_roundtrip() {
     // ---------------------------------------------------------------
     let new_van_alice = fp(200); // New VAN (decremented proposal authority)
     let vc_alice = fp(300); // Vote commitment
-    let cast_idx = server.append_two(new_van_alice, vc_alice);
+    let cast_idx = server.append_two(new_van_alice, vc_alice).unwrap();
     assert_eq!(cast_idx, 1, "MsgCastVote first leaf at index 1");
     assert_eq!(server.size(), 3, "server has 3 leaves total");
-    server.checkpoint(2);
+    server.checkpoint(2).unwrap();
 
     // ---------------------------------------------------------------
     // 5. Client syncs block 2 (incremental — only new data)
@@ -158,20 +158,20 @@ fn server_append_client_sync_witness_roundtrip() {
 /// original anchor (height 1) even after the tree has grown.
 #[test]
 fn historical_witness_survives_growth() {
-    let mut server = TreeServer::empty();
+    let mut server = MemoryTreeServer::empty();
 
     // Block 1: one VAN.
-    server.append(fp(1));
-    server.checkpoint(1);
+    server.append(fp(1)).unwrap();
+    server.checkpoint(1).unwrap();
     let root_1 = server.root_at_height(1).unwrap();
 
     // Block 2: two more leaves.
-    server.append_two(fp(2), fp(3));
-    server.checkpoint(2);
+    server.append_two(fp(2), fp(3)).unwrap();
+    server.checkpoint(2).unwrap();
 
     // Block 3: one more.
-    server.append(fp(4));
-    server.checkpoint(3);
+    server.append(fp(4)).unwrap();
+    server.checkpoint(3).unwrap();
 
     // Client syncs the full history. Mark position 0 before sync.
     let mut client = TreeClient::empty();
@@ -191,14 +191,14 @@ fn historical_witness_survives_growth() {
 /// and get_root_at_height return consistent data.
 #[test]
 fn sync_api_consistency() {
-    let mut server = TreeServer::empty();
+    let mut server = MemoryTreeServer::empty();
 
     // Append across multiple blocks.
     for height in 1..=5u32 {
         for i in 0..height {
-            server.append(fp((height * 100 + i) as u64));
+            server.append(fp((height * 100 + i) as u64)).unwrap();
         }
-        server.checkpoint(height);
+        server.checkpoint(height).unwrap();
     }
 
     // get_tree_state reflects the tip.
@@ -228,13 +228,13 @@ fn sync_api_consistency() {
 /// Test that a fresh client can sync all blocks at once (full sync).
 #[test]
 fn full_sync_from_genesis() {
-    let mut server = TreeServer::empty();
+    let mut server = MemoryTreeServer::empty();
 
     // 10 blocks, 2 leaves each.
     for h in 1..=10u32 {
-        server.append(fp(h as u64 * 10));
-        server.append(fp(h as u64 * 10 + 1));
-        server.checkpoint(h);
+        server.append(fp(h as u64 * 10)).unwrap();
+        server.append(fp(h as u64 * 10 + 1)).unwrap();
+        server.checkpoint(h).unwrap();
     }
 
     // Mark specific positions before syncing.
@@ -282,11 +282,11 @@ fn full_sync_from_genesis() {
 /// own VAN cannot generate witnesses for other participants' leaves.
 #[test]
 fn unmarked_position_returns_none() {
-    let mut server = TreeServer::empty();
-    server.append(fp(10)); // position 0
-    server.append(fp(20)); // position 1
-    server.append(fp(30)); // position 2
-    server.checkpoint(1);
+    let mut server = MemoryTreeServer::empty();
+    server.append(fp(10)).unwrap(); // position 0
+    server.append(fp(20)).unwrap(); // position 1
+    server.append(fp(30)).unwrap(); // position 2
+    server.checkpoint(1).unwrap();
 
     // Client marks only position 1 (its own VAN).
     let mut client = TreeClient::empty();
@@ -319,9 +319,9 @@ fn unmarked_position_returns_none() {
 /// Test idempotent sync — calling sync when already up-to-date is a no-op.
 #[test]
 fn sync_idempotent_when_up_to_date() {
-    let mut server = TreeServer::empty();
-    server.append(fp(1));
-    server.checkpoint(1);
+    let mut server = MemoryTreeServer::empty();
+    server.append(fp(1)).unwrap();
+    server.checkpoint(1).unwrap();
 
     let mut client = TreeClient::empty();
     client.sync(&server).unwrap();
@@ -336,10 +336,10 @@ fn sync_idempotent_when_up_to_date() {
 /// Test that server and client produce byte-identical auth paths.
 #[test]
 fn server_and_client_paths_are_identical() {
-    let mut server = TreeServer::empty();
-    server.append(fp(42));
-    server.append(fp(43));
-    server.checkpoint(1);
+    let mut server = MemoryTreeServer::empty();
+    server.append(fp(42)).unwrap();
+    server.append(fp(43)).unwrap();
+    server.checkpoint(1).unwrap();
 
     let mut client = TreeClient::empty();
     client.mark_position(0);
@@ -361,29 +361,29 @@ fn server_and_client_paths_are_identical() {
 /// - Both produce correct witnesses without interfering with each other
 #[test]
 fn two_clients_wallet_and_helper_server() {
-    let mut server = TreeServer::empty();
+    let mut server = MemoryTreeServer::empty();
 
     // -- Block 1: Alice delegates (MsgDelegateVote) -----------------------
     let van_alice = fp(100); // Alice's VAN (van_comm)
-    server.append(van_alice); // index 0
-    server.checkpoint(1);
+    server.append(van_alice).unwrap(); // index 0
+    server.checkpoint(1).unwrap();
 
     // -- Block 2: Bob delegates (MsgDelegateVote) -------------------------
     let van_bob = fp(200); // Bob's VAN
-    server.append(van_bob); // index 1
-    server.checkpoint(2);
+    server.append(van_bob).unwrap(); // index 1
+    server.checkpoint(2).unwrap();
 
     // -- Block 3: Alice votes (MsgCastVote) -------------------------------
     let new_van_alice = fp(300); // Alice's new VAN (decremented authority)
     let vc_alice = fp(400); // Alice's vote commitment
-    server.append_two(new_van_alice, vc_alice); // indices 2, 3
-    server.checkpoint(3);
+    server.append_two(new_van_alice, vc_alice).unwrap(); // indices 2, 3
+    server.checkpoint(3).unwrap();
 
     // -- Block 4: Bob votes (MsgCastVote) ---------------------------------
     let new_van_bob = fp(500);
     let vc_bob = fp(600);
-    server.append_two(new_van_bob, vc_bob); // indices 4, 5
-    server.checkpoint(4);
+    server.append_two(new_van_bob, vc_bob).unwrap(); // indices 4, 5
+    server.checkpoint(4).unwrap();
 
     assert_eq!(server.size(), 6);
 
@@ -468,16 +468,16 @@ fn two_clients_wallet_and_helper_server() {
 /// from adjacent shards — this is where subtle bugs tend to hide.
 #[test]
 fn shard_boundary_crossing() {
-    let mut server = TreeServer::empty();
+    let mut server = MemoryTreeServer::empty();
 
     // Append 40 leaves across 10 blocks (4 leaves per block).
     // Shard 0: leaves [0..15], Shard 1: leaves [16..31], Shard 2: leaves [32..39]
     for block_h in 1..=10u32 {
         for i in 0..4u64 {
             let leaf_idx = (block_h as u64 - 1) * 4 + i;
-            server.append(fp(leaf_idx * 7 + 1)); // deterministic distinct values
+            server.append(fp(leaf_idx * 7 + 1)).unwrap(); // deterministic distinct values
         }
-        server.checkpoint(block_h);
+        server.checkpoint(block_h).unwrap();
     }
 
     assert_eq!(server.size(), 40);
@@ -556,11 +556,11 @@ fn shard_boundary_crossing() {
 /// Test MerklePath serialization roundtrip.
 #[test]
 fn merkle_path_serialization_roundtrip() {
-    let mut server = TreeServer::empty();
-    server.append(fp(10));
-    server.append(fp(20));
-    server.append(fp(30));
-    server.checkpoint(1);
+    let mut server = MemoryTreeServer::empty();
+    server.append(fp(10)).unwrap();
+    server.append(fp(20)).unwrap();
+    server.append(fp(30)).unwrap();
+    server.checkpoint(1).unwrap();
 
     let path = server.path(1, 1).unwrap();
     let bytes = path.to_bytes();
@@ -603,7 +603,7 @@ fn merkle_path_serialization_roundtrip() {
 fn stress_persistent_vs_flaky_client() {
     let mut rng = StdRng::seed_from_u64(0x2A11_0000_0001);
 
-    let mut server = TreeServer::empty();
+    let mut server = MemoryTreeServer::empty();
 
     let num_waves = 10;
     let blocks_per_wave = 5;
@@ -649,11 +649,11 @@ fn stress_persistent_vs_flaky_client() {
 
             for _ in 0..num_leaves {
                 let val = fp(rng.gen::<u64>());
-                server.append(val);
+                server.append(val).unwrap();
                 leaf_values.push(val);
             }
 
-            server.checkpoint(next_height);
+            server.checkpoint(next_height).unwrap();
             next_height += 1;
         }
 

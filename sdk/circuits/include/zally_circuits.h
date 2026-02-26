@@ -103,59 +103,177 @@ int32_t zally_verify_redpallas_sig(
 );
 
 /* -----------------------------------------------------------------------
- * Vote commitment tree — Poseidon Merkle root and path
+ * Vote commitment tree — stateful handle (incremental per-block appends)
  * ----------------------------------------------------------------------- */
 
+/* Opaque type for the stateful vote commitment tree handle. */
+typedef struct ZallyTreeHandle ZallyTreeHandle;
+
 /*
- * Compute the Poseidon Merkle root of a vote commitment tree.
- *
- * Builds a fresh tree from leaf_count leaves, checkpoints it, and
- * returns the 32-byte root. This is a stateless call matching the
- * Go keeper pattern (read all leaves from KV, compute root).
+ * Free a tree handle previously created by zally_vote_tree_create.
  *
  * Parameters:
- *   leaves_ptr - Pointer to flat byte array of leaves.
- *                Each leaf is 32 bytes (Pallas Fp, little-endian canonical).
- *                Total size: leaf_count * 32.
- *   leaf_count - Number of leaves. May be 0 (empty tree root returned).
- *   root_out   - Pointer to a 32-byte output buffer for the root.
+ *   handle - Pointer returned by zally_vote_tree_create.
+ */
+void zally_vote_tree_free(ZallyTreeHandle* handle);
+
+/*
+ * Append a batch of leaves to a stateful tree handle.
+ *
+ * Parameters:
+ *   handle     - Pointer returned by zally_vote_tree_create_with_kv.
+ *   leaves_ptr - Pointer to flat byte array of leaves (each 32 bytes LE Fp).
+ *   leaf_count - Number of leaves.
  *
  * Returns:
- *    0  on success (root written to root_out).
- *   -1  if inputs are invalid (null root_out, null leaves_ptr with count>0).
+ *    0  on success.
+ *   -1  if handle is null, or leaf_count > 0 and leaves_ptr is null.
  *   -3  if a leaf contains a non-canonical field element encoding.
+ *   -4  if the KV store or ShardTree returned a storage error.
  */
-int32_t zally_vote_tree_root(
+int32_t zally_vote_tree_append_batch(
+    ZallyTreeHandle* handle,
     const uint8_t* leaves_ptr,
-    size_t leaf_count,
-    uint8_t* root_out
+    size_t leaf_count
 );
 
 /*
- * Compute a Poseidon Merkle authentication path for a leaf in the tree.
+ * Append count leaves starting at cursor directly from the Cosmos KV store.
  *
- * Builds a fresh tree from leaf_count leaves, checkpoints it, and
- * returns the serialized authentication path (772 bytes):
- *   - Bytes [0..4):    position (u32 LE)
- *   - Bytes [4..772):  auth path (24 sibling hashes, 32 bytes each, leaf→root)
+ * Reads each leaf from key 0x02 || (cursor+i as uint64 big-endian) via the
+ * KV callbacks registered at handle creation. This is the optimised delta-
+ * append path: one CGO call regardless of batch size, no Go-side allocation.
  *
  * Parameters:
- *   leaves_ptr - Pointer to flat byte array of leaves (each 32 bytes LE Fp).
- *   leaf_count - Number of leaves (must be > 0).
- *   position   - Leaf index for which to generate the path.
- *   path_out   - Pointer to a 772-byte output buffer.
+ *   handle - Pointer returned by zally_vote_tree_create_with_kv.
+ *   cursor - Index of the first leaf to append (current treeCursor in Go).
+ *   count  - Number of leaves to append (nextIndex - treeCursor).
+ *
+ * Returns:
+ *    0  on success.
+ *   -1  if handle is null.
+ *   -4  if a leaf is missing/malformed or the KV store returned an error.
+ */
+int32_t zally_vote_tree_append_from_kv(
+    ZallyTreeHandle* handle,
+    uint64_t cursor,
+    uint64_t count
+);
+
+/*
+ * Snapshot the current tree state at height (block height).
+ *
+ * Must be called after appending all leaves for a block so that
+ * root_stateful and path_stateful queries work for that height.
+ *
+ * Parameters:
+ *   handle - Pointer returned by zally_vote_tree_create_with_kv.
+ *   height - Block height to associate with this checkpoint.
+ *
+ * Returns:
+ *    0  on success.
+ *   -1  if handle is null.
+ *   -4  if the KV store returned a storage error during the checkpoint write.
+ */
+int32_t zally_vote_tree_checkpoint(ZallyTreeHandle* handle, uint32_t height);
+
+/*
+ * Return the 32-byte Merkle root at the latest checkpoint.
+ *
+ * Parameters:
+ *   handle   - Pointer returned by zally_vote_tree_create.
+ *   root_out - Pointer to a 32-byte output buffer.
+ *
+ * Returns:
+ *    0  on success (root written to root_out).
+ *   -1  if handle or root_out is null.
+ */
+int32_t zally_vote_tree_root_stateful(
+    const ZallyTreeHandle* handle,
+    uint8_t* root_out
+);
+
+
+/*
+ * Return the number of leaves appended to the stateful handle so far.
+ *
+ * Parameters:
+ *   handle - Pointer returned by zally_vote_tree_create.
+ *
+ * Returns 0 if handle is null.
+ */
+uint64_t zally_vote_tree_size(const ZallyTreeHandle* handle);
+
+/*
+ * Compute the Poseidon Merkle authentication path using the stateful handle.
+ *
+ * Parameters:
+ *   handle   - Pointer returned by zally_vote_tree_create.
+ *   position - Leaf index for which to generate the path.
+ *   height   - Checkpoint height to use as anchor.
+ *   path_out - Pointer to a 772-byte output buffer.
  *
  * Returns:
  *    0  on success (path written to path_out).
- *   -1  if inputs are invalid (null pointers, zero leaf_count).
- *   -2  if position is out of range (>= leaf_count).
- *   -3  if a leaf contains a non-canonical field element encoding.
+ *   -1  if handle or path_out is null.
+ *   -2  if position is out of range or height has no checkpoint.
  */
-int32_t zally_vote_tree_path(
-    const uint8_t* leaves_ptr,
-    size_t leaf_count,
+int32_t zally_vote_tree_path_stateful(
+    const ZallyTreeHandle* handle,
     uint64_t position,
+    uint32_t height,
     uint8_t* path_out
+);
+
+/* -----------------------------------------------------------------------
+ * Stateful vote tree — KV-backed handle creation
+ * ----------------------------------------------------------------------- */
+
+/*
+ * C function pointer types for the Go KV store callbacks.
+ * ctx is a stable pointer to the Go KvStoreProxy (updated each block by Go).
+ *
+ * get_fn:         reads a value; writes C-malloc'd buffer to *out_val / *out_val_len.
+ *                 Returns 0 (found), 1 (not found), -1 (error).
+ * set_fn:         writes a key-value pair. Returns 0 on success.
+ * delete_fn:      deletes a key. Returns 0 on success.
+ * iter_create_fn: creates an iterator over prefix; reverse=1 for descending.
+ *                 Returns opaque handle or NULL on error.
+ * iter_next_fn:   advances iterator; writes C-malloc'd key+val to out pointers.
+ *                 Returns 0 (valid), 1 (exhausted), -1 (error).
+ * iter_free_fn:   closes and frees an iterator handle.
+ * free_buf_fn:    frees a C-malloc'd buffer returned by get_fn or iter_next_fn.
+ */
+typedef int32_t (*ZallyKvGetFn)(void* ctx, const uint8_t* key, size_t key_len, uint8_t** out_val, size_t* out_val_len);
+typedef int32_t (*ZallyKvSetFn)(void* ctx, const uint8_t* key, size_t key_len, const uint8_t* val, size_t val_len);
+typedef int32_t (*ZallyKvDeleteFn)(void* ctx, const uint8_t* key, size_t key_len);
+typedef void*   (*ZallyKvIterCreateFn)(void* ctx, const uint8_t* prefix, size_t prefix_len, uint8_t reverse);
+typedef int32_t (*ZallyKvIterNextFn)(void* iter, uint8_t** out_key, size_t* out_key_len, uint8_t** out_val, size_t* out_val_len);
+typedef void    (*ZallyKvIterFreeFn)(void* iter);
+typedef void    (*ZallyKvFreeBufFn)(uint8_t* ptr, size_t len);
+
+/*
+ * Create a KV-backed stateful tree handle.
+ *
+ * Shards, the cap, and checkpoints are read/written directly through the Go
+ * KV callbacks. ShardTree lazily loads only the data it accesses (O(1) cold
+ * start).
+ *
+ * next_position: CommitmentTreeState.NextIndex from KV (0 on first boot).
+ * ctx:           pointer to a stable Go KvStoreProxy; updated each block.
+ *
+ * Returns a non-null pointer on success; free with zally_vote_tree_free.
+ */
+ZallyTreeHandle* zally_vote_tree_create_with_kv(
+    void*              ctx,
+    ZallyKvGetFn       get_fn,
+    ZallyKvSetFn       set_fn,
+    ZallyKvDeleteFn    delete_fn,
+    ZallyKvIterCreateFn iter_create_fn,
+    ZallyKvIterNextFn  iter_next_fn,
+    ZallyKvIterFreeFn  iter_free_fn,
+    ZallyKvFreeBufFn   free_buf_fn,
+    uint64_t           next_position
 );
 
 /* -----------------------------------------------------------------------
@@ -271,7 +389,7 @@ int32_t zally_verify_share_reveal_proof(
  *
  * Parameters:
  *   merkle_path_ptr       - Pointer to 772-byte serialized Merkle path
- *                           (from zally_vote_tree_path: 4 bytes position + 24*32 siblings).
+ *                           (from zally_vote_tree_path_stateful: 4 bytes position + 24*32 siblings).
  *   merkle_path_len       - Length (must be 772).
  *   all_enc_shares_ptr    - Pointer to 1024 bytes: 16 shares x (C1 + C2) x 32 bytes.
  *                           Order: C1_0, C2_0, C1_1, C2_1, ..., C1_15, C2_15.

@@ -14,11 +14,37 @@ import (
 // misses after which a validator is jailed.
 const DefaultCeremonyMissJailThreshold = 3
 
+// GetCeremonyState retrieves the singleton ceremony state from the KV store.
+// Returns nil, nil if no ceremony has been initialized yet.
+func (k *Keeper) GetCeremonyState(kvStore store.KVStore) (*types.CeremonyState, error) {
+	bz, err := kvStore.Get(types.CeremonyStateKey)
+	if err != nil {
+		return nil, err
+	}
+	if bz == nil {
+		return nil, nil
+	}
+	var state types.CeremonyState
+	if err := unmarshal(bz, &state); err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
 // AppendCeremonyLog appends a timestamped entry to the round's ceremony log.
 // The entry is prefixed with the block height for chronological context.
 func AppendCeremonyLog(round *types.VoteRound, blockHeight uint64, msg string) {
 	entry := fmt.Sprintf("[height=%d] %s", blockHeight, msg)
 	round.CeremonyLog = append(round.CeremonyLog, entry)
+}
+
+// SetCeremonyState stores the singleton ceremony state in the KV store.
+func (k *Keeper) SetCeremonyState(kvStore store.KVStore, state *types.CeremonyState) error {
+	bz, err := marshal(state)
+	if err != nil {
+		return err
+	}
+	return kvStore.Set(types.CeremonyStateKey, bz)
 }
 
 // ---------------------------------------------------------------------------
@@ -87,27 +113,23 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 // Ceremony miss counter (consecutive misses per validator)
 // ---------------------------------------------------------------------------
 
-// JailValidator jails a validator by its operator address.
-// Resolves the valoper → consensus address via the staking keeper.
-func (k Keeper) JailValidator(ctx context.Context, valoperAddr string) (err error) {
-	// Recover from panics in GetConsAddr (happens when consensus pubkey is nil).
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic resolving consensus address for %s: %v", valoperAddr, r)
-		}
-	}()
-
-	valAddr, err := sdk.ValAddressFromBech32(valoperAddr)
+// JailValidator resolves a validator operator address to its consensus address
+// and jails the validator via the staking module.
+func (k *Keeper) JailValidator(ctx context.Context, operatorAddr string) error {
+	valAddr, err := sdk.ValAddressFromBech32(operatorAddr)
 	if err != nil {
-		return fmt.Errorf("invalid valoper address %q: %w", valoperAddr, err)
+		return fmt.Errorf("invalid operator address %s: %w", operatorAddr, err)
 	}
 	val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
 	if err != nil {
-		return fmt.Errorf("failed to get validator %s: %w", valoperAddr, err)
+		return fmt.Errorf("failed to get validator %s: %w", operatorAddr, err)
+	}
+	if val.ConsensusPubkey == nil {
+		return fmt.Errorf("validator %s has no consensus pubkey", operatorAddr)
 	}
 	consAddr, err := val.GetConsAddr()
 	if err != nil {
-		return fmt.Errorf("failed to get consensus address for %s: %w", valoperAddr, err)
+		return fmt.Errorf("failed to get consensus address for %s: %w", operatorAddr, err)
 	}
 	return k.stakingKeeper.Jail(ctx, consAddr)
 }

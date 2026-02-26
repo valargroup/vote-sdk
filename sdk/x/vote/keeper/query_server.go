@@ -14,11 +14,11 @@ var _ types.QueryServer = queryServer{}
 
 type queryServer struct {
 	types.UnimplementedQueryServer
-	k Keeper
+	k *Keeper
 }
 
 // NewQueryServerImpl returns an implementation of the vote QueryServer interface.
-func NewQueryServerImpl(keeper Keeper) types.QueryServer {
+func NewQueryServerImpl(keeper *Keeper) types.QueryServer {
 	return &queryServer{k: keeper}
 }
 

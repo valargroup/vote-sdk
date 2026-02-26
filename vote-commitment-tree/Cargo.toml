@@ -13,6 +13,7 @@ anyhow = "1.0"
 incrementalmerkletree = "0.8.1"
 shardtree = "0.6"
 lazy_static = "1"
+libc = "0.2"
 
 [dev-dependencies]
 rand = "0.8"

@@ -99,7 +99,7 @@ type QueueStatus struct {
 // ProofGenerator abstracts ZKP #3 proof generation for testing.
 type ProofGenerator interface {
 	// GenerateShareRevealProof generates a share reveal proof.
-	// merklePath: 772 bytes from votetree.ComputeMerklePath
+	// merklePath: 772-byte serialized Merkle path (from votetree.TreeHandle.Path)
 	// allEncShares: 32 compressed points (C1_0, C2_0, ..., C1_15, C2_15)
 	// shareBlinds: 16 × 32-byte per-share blind factors
 	// Returns proof bytes, nullifier (32 bytes), tree root (32 bytes).
@@ -120,17 +120,14 @@ type TreeStatus struct {
 	AnchorHeight uint64 `json:"anchor_height"`
 }
 
-// TreeReader abstracts reading commitment tree leaves and state from the keeper.
+// TreeReader abstracts commitment tree access from the keeper.
 type TreeReader interface {
-	// GetAllLeaves returns all commitment leaves from height 0 up to the latest
-	// height that has a stored root.
-	GetAllLeaves() (leaves [][]byte, anchorHeight uint64, err error)
-
-	// GetTreeStatus returns lightweight tree statistics without reading leaf data.
+	// GetTreeStatus returns lightweight tree statistics (leaf count + anchor height).
 	GetTreeStatus() (TreeStatus, error)
-}
 
-// MerklePathFunc computes a Poseidon Merkle authentication path for a leaf.
-// In production this is votetree.ComputeMerklePath; injected to avoid a
-// transitive CGo dependency on libzally_circuits.a in the helper package.
-type MerklePathFunc func(leaves [][]byte, position uint64) ([]byte, error)
+	// MerklePath returns the 772-byte serialized Poseidon Merkle authentication
+	// path for the leaf at position, anchored to the checkpoint at anchorHeight.
+	// anchorHeight must correspond to a checkpoint that exists in the persistent
+	// tree (i.e. a block height at which Checkpoint was called by EndBlocker).
+	MerklePath(position uint64, anchorHeight uint32) ([]byte, error)
+}

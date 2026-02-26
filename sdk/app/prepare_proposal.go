@@ -61,7 +61,7 @@ func ComposedPrepareProposalHandler(
 // secret key loaded from <eaSkDir>/ea_sk.<hex(round_id)>. If the key file is
 // absent, the handler passes through transactions unchanged.
 func TallyPrepareProposalHandler(
-	voteKeeper votekeeper.Keeper,
+	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	eaSkDir string,
 	logger log.Logger,
@@ -175,7 +175,7 @@ func TallyPrepareProposalHandler(
 // returns the corresponding TallyEntry slice.
 func decryptRoundTallies(
 	kvStore store.KVStore,
-	voteKeeper votekeeper.Keeper,
+	voteKeeper *votekeeper.Keeper,
 	round *types.VoteRound,
 	sk *elgamal.SecretKey,
 	bsgs *elgamal.BSGSTable,

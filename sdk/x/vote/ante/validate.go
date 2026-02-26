@@ -61,7 +61,7 @@ func MockOpts() ValidateOpts {
 //   - RecheckTx: lightweight re-validation (basic + round + nullifiers only)
 //   - FinalizeBlock: full validation before keeper execution
 //
-func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, opts ValidateOpts) error {
+func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, opts ValidateOpts) error {
 	// 1. Basic field validation (stateless).
 	if err := msg.ValidateBasic(); err != nil {
 		return fmt.Errorf("basic validation failed: %w", err)
@@ -114,7 +114,7 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k keeper.Keeper,
 
 // verifyProofs dispatches to the appropriate signature and ZKP verifier
 // based on the concrete message type.
-func verifyProofs(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, opts ValidateOpts) error {
+func verifyProofs(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, opts ValidateOpts) error {
 	switch m := msg.(type) {
 	case *types.MsgCreateVotingSession:
 		// No cryptographic verification needed for session setup.
@@ -142,7 +142,7 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k keeper.Keeper, o
 // verifyDelegation verifies both the RedPallas signature and ZKP #1 for
 // a MsgDelegateVote. It looks up the session to pass nc_root and
 // nullifier_imt_root as ZKP public inputs.
-func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k keeper.Keeper, opts ValidateOpts) error {
+func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper.Keeper, opts ValidateOpts) error {
 	// Verify the sighash is 32 bytes. All clients send the ZIP-244 sighash
 	// extracted from the governance PCZT. The ZKP verification below provides
 	// the governance data binding — it proves rk = ak.randomize(alpha), note
@@ -198,7 +198,7 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k keeper.
 // verifyCastVote verifies the RedPallas signature and ZKP #2 for a MsgCastVote.
 // It looks up the session to get ea_pk and the commitment tree root at the
 // anchor height, mirroring how verifyDelegation fetches nc_root and nf_imt_root.
-func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k keeper.Keeper, opts ValidateOpts) error {
+func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keeper, opts ValidateOpts) error {
 	// Require client-provided sighash to match the canonical hash of the message.
 	expectedSighash := types.ComputeCastVoteSighash(msg)
 	if len(msg.Sighash) != 32 || !bytes.Equal(msg.Sighash, expectedSighash) {
@@ -250,7 +250,7 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k keeper.Keeper
 // verifyRevealShare verifies ZKP #3 for a MsgRevealShare.
 // It looks up the vote commitment tree root at the anchor height specified
 // in the message and includes it as a public input to the ZKP verifier.
-func verifyRevealShare(ctx context.Context, msg *types.MsgRevealShare, k keeper.Keeper, opts ValidateOpts) error {
+func verifyRevealShare(ctx context.Context, msg *types.MsgRevealShare, k *keeper.Keeper, opts ValidateOpts) error {
 	// Look up the commitment tree root at the specified anchor height.
 	kvStore := k.OpenKVStore(ctx)
 	treeRoot, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteCommTreeAnchorHeight)

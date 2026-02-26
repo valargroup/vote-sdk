@@ -27,7 +27,7 @@ import (
 type QueryServerTestSuite struct {
 	suite.Suite
 	ctx         sdk.Context
-	keeper      keeper.Keeper
+	keeper      *keeper.Keeper
 	queryServer types.QueryServer
 	msgServer   types.MsgServer
 }
@@ -109,7 +109,7 @@ func (s *QueryServerTestSuite) TestLatestCommitmentTree_WithCommitments() {
 	// Compute and store root (simulating EndBlocker).
 	state, err := s.keeper.GetCommitmentTreeState(kvStore)
 	s.Require().NoError(err)
-	root, err := s.keeper.ComputeTreeRoot(kvStore, state.NextIndex)
+	root, err := s.keeper.ComputeTreeRoot(kvStore, state.NextIndex, 10)
 	s.Require().NoError(err)
 	state.Root = root
 	state.Height = 10

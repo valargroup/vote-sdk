@@ -23,15 +23,6 @@ pub struct BlockCommitments {
     pub leaves: Vec<MerkleHashVote>,
 }
 
-/// A batch of sequential leaves (alternative to block-level granularity).
-#[derive(Clone, Debug)]
-pub struct LeafBatch {
-    /// Index of the first leaf in the batch.
-    pub start_index: u64,
-    /// Sequential leaves.
-    pub leaves: Vec<MerkleHashVote>,
-}
-
 /// Current state of the server tree.
 #[derive(Clone, Debug)]
 pub struct TreeState {

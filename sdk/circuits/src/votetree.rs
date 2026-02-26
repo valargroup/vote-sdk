@@ -1,13 +1,17 @@
 //! Vote commitment tree helpers for FFI.
 //!
-//! Provides stateless functions that build a `TreeServer` from a flat byte
-//! array of leaves and return the root or an authentication path. These are
-//! called by the `extern "C"` functions in [`crate::ffi`].
+//! Provides stateless functions that build a `MemoryTreeServer` from a flat
+//! byte array of leaves and return the root or an authentication path. These
+//! are called by the `extern "C"` functions in [`crate::ffi`] (test-only).
+//!
+//! The stateful [`TreeHandle`] wraps a [`TreeServer`] backed by a
+//! [`KvShardStore`] with live Go KV callbacks.
 
 use pasta_curves::group::ff::PrimeField;
 use pasta_curves::Fp;
 pub use vote_commitment_tree::MERKLE_PATH_BYTES;
-use vote_commitment_tree::TreeServer;
+use vote_commitment_tree::{MemoryTreeServer, TreeServer};
+pub use vote_commitment_tree::kv_shard_store::KvCallbacks;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -22,6 +26,8 @@ pub enum FfiError {
     PositionOutOfRange,
     /// Non-canonical Fp encoding in a leaf.
     Deserialization,
+    /// KV store or ShardTree storage failure.
+    Storage,
 }
 
 // ---------------------------------------------------------------------------
@@ -30,49 +36,43 @@ pub enum FfiError {
 
 /// Deserialize `leaf_count` leaves from a raw byte pointer.
 ///
-/// Each leaf is 32 bytes in canonical little-endian `Fp::to_repr()` format —
-/// this is the same encoding the Go keeper stores in KV (`0x02 || index -> bytes`).
-///
 /// # Safety
 /// Caller must ensure `ptr` is valid for `leaf_count * 32` bytes.
 unsafe fn deserialize_leaves(ptr: *const u8, leaf_count: usize) -> Result<Vec<Fp>, FfiError> {
     let bytes = std::slice::from_raw_parts(ptr, leaf_count * 32);
     let mut leaves = Vec::with_capacity(leaf_count);
-
     for i in 0..leaf_count {
         let start = i * 32;
         let mut repr = [0u8; 32];
         repr.copy_from_slice(&bytes[start..start + 32]);
-
         let fp_opt: Option<Fp> = Fp::from_repr(repr).into();
         match fp_opt {
             Some(fp) => leaves.push(fp),
             None => return Err(FfiError::Deserialization),
         }
     }
-
     Ok(leaves)
 }
 
-/// Build a `TreeServer` from a slice of field elements, checkpoint it, and
+/// Build an in-memory tree from a slice of field elements, checkpoint it, and
 /// return it ready for root / path queries.
-fn build_tree(leaves: &[Fp]) -> TreeServer {
-    let mut tree = TreeServer::empty();
+fn build_tree(leaves: &[Fp]) -> MemoryTreeServer {
+    let mut tree = MemoryTreeServer::empty();
     for &leaf in leaves {
-        tree.append(leaf);
+        tree.append(leaf).expect("append to in-memory tree must succeed");
     }
-    // Checkpoint at height 1 so root() and path(_, 1) work.
-    tree.checkpoint(1);
+    tree.checkpoint(1).expect("checkpoint of in-memory tree must succeed");
     tree
 }
 
 // ---------------------------------------------------------------------------
-// Public helpers (called by ffi.rs)
+// Public helpers (called by ffi.rs, test-only)
 // ---------------------------------------------------------------------------
 
 /// Compute the Poseidon Merkle root from raw leaf bytes.
 ///
-/// Returns the 32-byte root in `Fp::to_repr()` canonical LE format.
+/// Stateless helper: builds a fresh in-memory tree on every call (O(n)).
+/// For repeated calls across blocks use the stateful [`TreeHandle`] API.
 ///
 /// # Safety
 /// `leaves_ptr` must be valid for `leaf_count * 32` bytes.
@@ -80,15 +80,11 @@ pub unsafe fn compute_root_from_raw(
     leaves_ptr: *const u8,
     leaf_count: usize,
 ) -> Result<[u8; 32], FfiError> {
-    // Empty tree: return the empty-tree root.
     if leaf_count == 0 {
-        let tree = TreeServer::empty();
-        // Checkpoint the empty tree so root() returns the deterministic empty root.
-        let mut tree = tree;
-        tree.checkpoint(1);
+        let mut tree = MemoryTreeServer::empty();
+        tree.checkpoint(1).expect("checkpoint must succeed");
         return Ok(tree.root().to_repr());
     }
-
     let leaves = deserialize_leaves(leaves_ptr, leaf_count)?;
     let tree = build_tree(&leaves);
     Ok(tree.root().to_repr())
@@ -96,7 +92,8 @@ pub unsafe fn compute_root_from_raw(
 
 /// Compute the Poseidon Merkle auth path from raw leaf bytes.
 ///
-/// Returns the serialized `MerklePath` ([`MERKLE_PATH_BYTES`] bytes).
+/// Stateless helper: builds a fresh in-memory tree on every call (O(n)).
+/// For repeated calls across blocks use the stateful [`TreeHandle::path`] API.
 ///
 /// # Safety
 /// `leaves_ptr` must be valid for `leaf_count * 32` bytes.
@@ -111,10 +108,8 @@ pub unsafe fn compute_path_from_raw(
     if position >= leaf_count as u64 {
         return Err(FfiError::PositionOutOfRange);
     }
-
     let leaves = deserialize_leaves(leaves_ptr, leaf_count)?;
     let tree = build_tree(&leaves);
-
     match tree.path(position, 1) {
         Some(path) => {
             let bytes = path.to_bytes();
@@ -122,6 +117,96 @@ pub unsafe fn compute_path_from_raw(
             Ok(bytes)
         }
         None => Err(FfiError::PositionOutOfRange),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stateful tree handle
+// ---------------------------------------------------------------------------
+
+/// Stateful Poseidon Merkle tree handle backed by the Cosmos KV store.
+///
+/// Wraps a [`TreeServer`] with a [`KvShardStore`] that calls back into Go for
+/// every shard read/write, giving `ShardTree` true lazy loading. The Go keeper
+/// holds one instance per process and calls `new_with_kv` once per cold start
+/// (or rollback), passing the current block's KV proxy and leaf count.
+pub struct TreeHandle {
+    tree: TreeServer,
+}
+
+impl TreeHandle {
+    /// Create a KV-backed tree handle.
+    ///
+    /// `cb` holds C function pointers to the Go KV store proxy.
+    /// `next_position` is `CommitmentTreeState.NextIndex` from KV (0 on first boot).
+    /// `latest_checkpoint` is initialised from the KV store's maximum checkpoint ID
+    /// so that `root()` is correct even before the first checkpoint after restart.
+    pub fn new_with_kv(cb: KvCallbacks, next_position: u64) -> Box<TreeHandle> {
+        Box::new(TreeHandle {
+            tree: TreeServer::new(cb, next_position),
+        })
+    }
+
+    /// Append a batch of leaves (each 32-byte canonical LE `Fp`).
+    ///
+    /// # Safety
+    /// `ptr` must be valid for `count * 32` bytes.
+    pub unsafe fn append_batch_raw(&mut self, ptr: *const u8, count: usize) -> Result<(), FfiError> {
+        if count == 0 {
+            return Ok(());
+        }
+        if ptr.is_null() {
+            return Err(FfiError::InvalidInput);
+        }
+        let leaves = deserialize_leaves(ptr, count)?;
+        for leaf in leaves {
+            self.tree.append(leaf).map_err(|_| FfiError::Storage)?;
+        }
+        Ok(())
+    }
+
+    /// Append `count` leaves starting at `cursor` by reading them directly
+    /// from the Cosmos KV store via KV callbacks.
+    ///
+    /// This skips the Go-side leaf fetch loop and CGO serialization, replacing
+    /// the `newLeaves` allocation in `ensureTreeLoaded` with a single CGO call.
+    pub fn append_from_kv(&mut self, cursor: u64, count: u64) -> Result<(), FfiError> {
+        self.tree
+            .append_from_kv(cursor, count)
+            .map_err(|_| FfiError::Storage)
+    }
+
+    /// Snapshot the current tree state at `height` (block height).
+    pub fn checkpoint(&mut self, height: u32) -> Result<(), FfiError> {
+        self.tree
+            .checkpoint(height)
+            .map_err(|_| FfiError::Storage)
+    }
+
+    /// Return the 32-byte Merkle root at the latest checkpoint.
+    pub fn root(&self) -> [u8; 32] {
+        self.tree.root().to_repr()
+    }
+
+    /// Return the number of leaves appended so far.
+    pub fn size(&self) -> u64 {
+        self.tree.size()
+    }
+
+    /// Return the serialized Merkle authentication path for `position` at
+    /// `height`. Returns `None` if position is out of range or height has no
+    /// checkpoint.
+    pub fn path(&self, position: u64, height: u32) -> Option<Vec<u8>> {
+        let path = self.tree.path(position, height)?;
+        let bytes = path.to_bytes();
+        debug_assert_eq!(bytes.len(), MERKLE_PATH_BYTES);
+        Some(bytes)
+    }
+
+    /// Set the leaf count directly (used if `next_position` was not passed at
+    /// construction time).
+    pub fn set_next_position(&mut self, pos: u64) {
+        self.tree.set_next_position(pos);
     }
 }
 
@@ -138,7 +223,6 @@ mod tests {
         Fp::from(x)
     }
 
-    /// Helper: serialize a slice of Fp values to flat 32-byte-per-leaf bytes.
     fn leaves_to_bytes(leaves: &[Fp]) -> Vec<u8> {
         let mut buf = Vec::with_capacity(leaves.len() * 32);
         for leaf in leaves {
@@ -149,16 +233,14 @@ mod tests {
 
     #[test]
     fn test_vote_tree_root_ffi_roundtrip() {
-        // Build tree the "normal" way.
         let leaves = vec![fp(1), fp(2), fp(3)];
-        let mut tree = TreeServer::empty();
+        let mut tree = MemoryTreeServer::empty();
         for &l in &leaves {
-            tree.append(l);
+            tree.append(l).unwrap();
         }
-        tree.checkpoint(1);
+        tree.checkpoint(1).unwrap();
         let expected_root = tree.root();
 
-        // Build tree via FFI helpers.
         let bytes = leaves_to_bytes(&leaves);
         let root_bytes = unsafe { compute_root_from_raw(bytes.as_ptr(), leaves.len()) }.unwrap();
 
@@ -168,37 +250,29 @@ mod tests {
     #[test]
     fn test_vote_tree_path_ffi_roundtrip() {
         let leaves = vec![fp(10), fp(20), fp(30)];
-        let mut tree = TreeServer::empty();
+        let mut tree = MemoryTreeServer::empty();
         for &l in &leaves {
-            tree.append(l);
+            tree.append(l).unwrap();
         }
-        tree.checkpoint(1);
+        tree.checkpoint(1).unwrap();
         let expected_root = tree.root();
 
         let bytes = leaves_to_bytes(&leaves);
-
-        // Verify path for each position.
         for pos in 0..leaves.len() as u64 {
             let path_bytes =
                 unsafe { compute_path_from_raw(bytes.as_ptr(), leaves.len(), pos) }.unwrap();
             let path = MerklePath::from_bytes(&path_bytes).unwrap();
-            assert!(
-                path.verify(leaves[pos as usize], expected_root),
-                "path for position {} must verify",
-                pos
-            );
+            assert!(path.verify(leaves[pos as usize], expected_root));
         }
     }
 
     #[test]
     fn test_ffi_empty_leaves() {
-        // Empty tree should return the deterministic empty root.
         let empty_tree_root = {
-            let mut t = TreeServer::empty();
-            t.checkpoint(1);
+            let mut t = MemoryTreeServer::empty();
+            t.checkpoint(1).unwrap();
             t.root().to_repr()
         };
-
         let root_bytes =
             unsafe { compute_root_from_raw(std::ptr::null(), 0) }.unwrap();
         assert_eq!(root_bytes, empty_tree_root);
@@ -206,33 +280,27 @@ mod tests {
 
     #[test]
     fn test_ffi_position_out_of_range() {
-        // Position >= leaf_count must be caught.
         let leaves = leaves_to_bytes(&[fp(1)]);
         let result = unsafe { compute_path_from_raw(leaves.as_ptr(), 1, 5) };
         assert!(matches!(result, Err(FfiError::PositionOutOfRange)));
-
-        // Position == leaf_count (exactly at boundary) is also out of range.
         let result = unsafe { compute_path_from_raw(leaves.as_ptr(), 1, 1) };
         assert!(matches!(result, Err(FfiError::PositionOutOfRange)));
     }
 
     #[test]
     fn test_ffi_encoding_parity() {
-        // Verify that Fp::to_repr() produces 32-byte LE that round-trips.
         let val = fp(12345678);
         let repr = val.to_repr();
         assert_eq!(repr.len(), 32);
-
         let recovered: Option<Fp> = Fp::from_repr(repr).into();
         assert_eq!(recovered.unwrap(), val);
 
-        // Build a single-leaf tree both ways and confirm roots match.
         let bytes = leaves_to_bytes(&[val]);
         let ffi_root = unsafe { compute_root_from_raw(bytes.as_ptr(), 1) }.unwrap();
 
-        let mut tree = TreeServer::empty();
-        tree.append(val);
-        tree.checkpoint(1);
+        let mut tree = MemoryTreeServer::empty();
+        tree.append(val).unwrap();
+        tree.checkpoint(1).unwrap();
         assert_eq!(ffi_root, tree.root().to_repr());
     }
 
@@ -247,38 +315,28 @@ mod tests {
         let leaf = fp(42);
         let bytes = leaves_to_bytes(&[leaf]);
 
-        // Root
         let root_bytes = unsafe { compute_root_from_raw(bytes.as_ptr(), 1) }.unwrap();
-        let mut tree = TreeServer::empty();
-        tree.append(leaf);
-        tree.checkpoint(1);
+        let mut tree = MemoryTreeServer::empty();
+        tree.append(leaf).unwrap();
+        tree.checkpoint(1).unwrap();
         assert_eq!(root_bytes, tree.root().to_repr());
 
-        // Path
         let path_bytes = unsafe { compute_path_from_raw(bytes.as_ptr(), 1, 0) }.unwrap();
         let path = MerklePath::from_bytes(&path_bytes).unwrap();
         assert!(path.verify(leaf, tree.root()));
     }
 
-    // -- Golden test vectors -----------------------------------------------
-    // These exact values are also asserted in the Go-side tests to catch
-    // encoding mismatches between the Go KV layer and Rust Fp representation.
-
-    /// Golden vector: 3 leaves [Fp(1), Fp(2), Fp(3)] -> expected root.
-    ///
-    /// This root is computed once and hardcoded. Both Rust and Go tests assert
-    /// against it.
     pub fn golden_leaves() -> Vec<Fp> {
         vec![fp(1), fp(2), fp(3)]
     }
 
     pub fn golden_root() -> [u8; 32] {
         let leaves = golden_leaves();
-        let mut tree = TreeServer::empty();
+        let mut tree = MemoryTreeServer::empty();
         for &l in &leaves {
-            tree.append(l);
+            tree.append(l).unwrap();
         }
-        tree.checkpoint(1);
+        tree.checkpoint(1).unwrap();
         tree.root().to_repr()
     }
 
@@ -288,7 +346,7 @@ mod tests {
         let bytes = leaves_to_bytes(&leaves);
         let root = unsafe { compute_root_from_raw(bytes.as_ptr(), leaves.len()) }.unwrap();
         let expected = golden_root();
-        assert_eq!(root, expected, "golden vector root must match");
+        assert_eq!(root, expected);
     }
 
     #[test]
@@ -296,15 +354,13 @@ mod tests {
         let leaves = golden_leaves();
         let bytes = leaves_to_bytes(&leaves);
         let root = unsafe { compute_root_from_raw(bytes.as_ptr(), leaves.len()) }.unwrap();
-
         for pos in 0..leaves.len() as u64 {
             let path_bytes =
                 unsafe { compute_path_from_raw(bytes.as_ptr(), leaves.len(), pos) }.unwrap();
             let path = MerklePath::from_bytes(&path_bytes).unwrap();
             assert!(
                 path.verify(leaves[pos as usize], Fp::from_repr(root).unwrap()),
-                "golden path at position {} must verify",
-                pos
+                "golden path at position {pos} must verify"
             );
         }
     }

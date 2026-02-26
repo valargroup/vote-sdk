@@ -44,7 +44,7 @@ func fpLE(v uint64) []byte {
 type EndBlockerTestSuite struct {
 	suite.Suite
 	ctx    sdk.Context
-	keeper keeper.Keeper
+	keeper *keeper.Keeper
 	module vote.AppModule
 }
 
@@ -199,9 +199,9 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 	seedDealtRound := func(ackCount int) {
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
-			VoteRoundId: roundID,
-			Status:      types.SessionStatus_SESSION_STATUS_PENDING,
-			EaPk:        make([]byte, 32),
+			VoteRoundId:    roundID,
+			Status:         types.SessionStatus_SESSION_STATUS_PENDING,
+			EaPk:           make([]byte, 32),
 			CeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 			CeremonyValidators: []*types.ValidatorPallasKey{
 				{ValidatorAddress: "val1", PallasPk: make([]byte, 32)},
@@ -332,7 +332,7 @@ func (jk *jailTrackingStakingKeeper) Unjail(_ context.Context, _ sdk.ConsAddress
 
 // setupJailTest creates a keeper with a jail-tracking staking mock and a
 // validator with a real consensus pubkey so JailValidator → GetConsAddr succeeds.
-func (s *EndBlockerTestSuite) setupJailTest() (sdk.Context, keeper.Keeper, vote.AppModule, *jailTrackingStakingKeeper, sdk.ValAddress) {
+func (s *EndBlockerTestSuite) setupJailTest() (sdk.Context, *keeper.Keeper, vote.AppModule, *jailTrackingStakingKeeper, sdk.ValAddress) {
 	key := storetypes.NewKVStoreKey(types.StoreKey)
 	tkey := storetypes.NewTransientStoreKey("transient_test_jail")
 	testCtx := testutil.DefaultContextWithDB(s.T(), key, tkey)
@@ -367,7 +367,7 @@ func (s *EndBlockerTestSuite) setupJailTest() (sdk.Context, keeper.Keeper, vote.
 
 // seedDealtRoundForValidator creates a DEALT round with a single non-acking
 // validator that has already timed out (deadline == block_time).
-func (s *EndBlockerTestSuite) seedDealtRoundForValidator(k keeper.Keeper, ctx sdk.Context, valAddr sdk.ValAddress, roundID []byte) {
+func (s *EndBlockerTestSuite) seedDealtRoundForValidator(k *keeper.Keeper, ctx sdk.Context, valAddr sdk.ValAddress, roundID []byte) {
 	kvStore := k.OpenKVStore(ctx)
 	round := &types.VoteRound{
 		VoteRoundId:    roundID,
@@ -637,7 +637,6 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		vote.ProvideRegisterPallasKeySigner(),
 		vote.ProvideDealExecutiveAuthorityKeySigner(),
 		vote.ProvideAckExecutiveAuthorityKeySigner(),
-		vote.ProvideUnjailValidatorSigner(),
 	}
 
 	wantMsgTypes := []protoreflect.FullName{
@@ -649,7 +648,6 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		"zvote.v1.MsgRegisterPallasKey",
 		"zvote.v1.MsgDealExecutiveAuthorityKey",
 		"zvote.v1.MsgAckExecutiveAuthorityKey",
-		"zvote.v1.MsgUnjailValidator",
 	}
 
 	signerMap := make(map[protoreflect.FullName]bool, len(allSigners))

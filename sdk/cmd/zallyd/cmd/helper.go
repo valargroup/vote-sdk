@@ -56,7 +56,7 @@ func helperPostSetup(
 			cfg.DBPath = dbPath
 		}
 
-		// Create the tree reader that accesses the keeper's KV store.
+		// Create the tree accessor that reads directly from the keeper's KV store.
 		treeReader := &keeperTreeReader{
 			app:    *zallyApp,
 			logger: logger,
@@ -67,7 +67,7 @@ func helperPostSetup(
 		prover := &halo2Prover{}
 
 		homeDir := svrCtx.Config.RootDir
-		h, err := helper.New(cfg, treeReader, votetree.ComputeMerklePath, prover, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, prover, homeDir, logger)
 		if err != nil {
 			return fmt.Errorf("helper: %w", err)
 		}
@@ -157,51 +157,33 @@ func (r *keeperTreeReader) GetTreeStatus() (helper.TreeStatus, error) {
 	}, nil
 }
 
-// GetAllLeaves returns all commitment leaves up to the latest stored root.
-func (r *keeperTreeReader) GetAllLeaves() ([][]byte, uint64, error) {
+// MerklePath returns the 772-byte Poseidon Merkle authentication path for the
+// leaf at position, anchored to the checkpoint at anchorHeight.
+//
+// Instead of loading all leaves and rebuilding an ephemeral tree (O(n)), this
+// opens a fresh KV-backed TreeHandle that reads only the frontier shard, cap,
+// and checkpoints (O(1)), then calls Path() which traverses O(depth) shards.
+// The handle is created from a snapshot KV store separate from the EndBlocker's
+// kvProxy, so there is no concurrency conflict.
+func (r *keeperTreeReader) MerklePath(position uint64, anchorHeight uint32) ([]byte, error) {
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
 
-	// Get tree state to know total leaf count.
 	treeState, err := r.app.VoteKeeper.GetCommitmentTreeState(kvStore)
 	if err != nil {
-		return nil, 0, fmt.Errorf("get tree state: %w", err)
-	}
-	if treeState.NextIndex == 0 {
-		return nil, 0, nil
+		return nil, fmt.Errorf("get tree state: %w", err)
 	}
 
-	// Find the latest height with a stored root by scanning backwards
-	// from the current block height.
-	latestHeight := uint64(r.app.LastBlockHeight())
-	var anchorHeight uint64
-	for h := latestHeight; h > 0; h-- {
-		root, err := r.app.VoteKeeper.GetCommitmentRootAtHeight(kvStore, h)
-		if err != nil {
-			continue
-		}
-		if root != nil {
-			anchorHeight = h
-			break
-		}
-	}
-
-	if anchorHeight == 0 {
-		return nil, 0, fmt.Errorf("no commitment tree root found")
-	}
-
-	// Read all leaves from height 0 to anchor height.
-	blocks, err := r.app.VoteKeeper.GetCommitmentLeaves(kvStore, 0, anchorHeight)
+	// Create a KV-backed handle from the snapshot store. ShardTree reads only
+	// the frontier shard + cap + checkpoints on creation — no leaf replay.
+	proxy := &votetree.KvStoreProxy{Current: kvStore}
+	h, err := votetree.NewTreeHandleWithKV(proxy, treeState.NextIndex)
 	if err != nil {
-		return nil, 0, fmt.Errorf("get commitment leaves: %w", err)
+		return nil, fmt.Errorf("create kv tree handle: %w", err)
 	}
+	defer h.Close()
 
-	var leaves [][]byte
-	for _, block := range blocks {
-		leaves = append(leaves, block.Leaves...)
-	}
-
-	return leaves, anchorHeight, nil
+	return h.Path(position, anchorHeight)
 }
 
 // halo2Prover wraps the CGo proof generation function.

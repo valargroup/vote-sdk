@@ -22,11 +22,11 @@ type Helper struct {
 //
 // Parameters:
 //   - cfg: helper configuration (from app.toml [helper] section)
-//   - tree: reads commitment tree leaves from the keeper's KV store
+//   - tree: accesses the commitment tree (status + merkle paths) from the keeper's KV store
 //   - prover: generates ZKP #3 proofs (real FFI or mock)
 //   - homeDir: the chain's home directory (for default DB path)
 //   - logger: module logger
-func New(cfg Config, tree TreeReader, merklePath MerklePathFunc, prover ProofGenerator, homeDir string, logger log.Logger) (*Helper, error) {
+func New(cfg Config, tree TreeReader, prover ProofGenerator, homeDir string, logger log.Logger) (*Helper, error) {
 	logger = logger.With("module", "helper")
 
 	if cfg.Disable {
@@ -70,7 +70,6 @@ func New(cfg Config, tree TreeReader, merklePath MerklePathFunc, prover ProofGen
 	processor := NewProcessor(
 		store,
 		tree,
-		merklePath,
 		prover,
 		submitter,
 		logger,

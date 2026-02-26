@@ -19,7 +19,7 @@ import (
 // ceremony validator, and no duplicate ack. For tally messages: verifies the
 // round is TALLYING. All other txs pass through (ACCEPT).
 func ProcessProposalHandler(
-	voteKeeper votekeeper.Keeper,
+	voteKeeper *votekeeper.Keeper,
 	logger log.Logger,
 ) sdk.ProcessProposalHandler {
 	return func(ctx sdk.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
@@ -67,7 +67,7 @@ func ProcessProposalHandler(
 // validateInjectedDeal checks that an injected MsgDealExecutiveAuthorityKey
 // is valid: the round is PENDING with ceremony in REGISTERING, and the
 // payload count matches the ceremony validator count.
-func validateInjectedDeal(ctx sdk.Context, voteKeeper votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
+func validateInjectedDeal(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
 	if err != nil {
 		return err
@@ -100,7 +100,7 @@ func validateInjectedDeal(ctx sdk.Context, voteKeeper votekeeper.Keeper, txBytes
 // validateInjectedAck checks that an injected MsgAckExecutiveAuthorityKey is
 // valid: the round is PENDING with ceremony in DEALT, the creator is a
 // ceremony validator, and the creator has not already acked.
-func validateInjectedAck(ctx sdk.Context, voteKeeper votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
+func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
 	if err != nil {
 		return err
@@ -139,7 +139,7 @@ func validateInjectedAck(ctx sdk.Context, voteKeeper votekeeper.Keeper, txBytes 
 
 // validateInjectedTally checks that an injected MsgSubmitTally is valid:
 // the round exists and is in TALLYING state.
-func validateInjectedTally(ctx sdk.Context, voteKeeper votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
+func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, voteMsg, err := voteapi.DecodeVoteTx(txBytes)
 	if err != nil {
 		return err

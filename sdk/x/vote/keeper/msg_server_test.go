@@ -31,7 +31,7 @@ import (
 type MsgServerTestSuite struct {
 	suite.Suite
 	ctx       sdk.Context
-	keeper    keeper.Keeper
+	keeper    *keeper.Keeper
 	msgServer types.MsgServer
 }
 

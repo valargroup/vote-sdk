@@ -772,7 +772,6 @@ The `witness` command outputs the Merkle path as hex (772 bytes = 4-byte positio
 - **`MerkleHashVote`** — leaf/node digest (newtype around `Fp`). Implements `Hashable`.
 - **`Anchor`** — committed tree root at a block height. Newtype around `Fp` with `from_bytes` / `to_bytes`.
 - **`MerklePath`** — authentication path with `root(leaf) -> Anchor` and `verify(leaf, root) -> bool`.
-- **`VoteCommitmentTree`** — backwards-compatible type alias for `TreeServer`.
 
 ### `TreeServer` (server-side full tree)
 
@@ -804,7 +803,6 @@ Supporting types:
 | Type | Fields | Purpose |
 |---|---|---|
 | `BlockCommitments` | `height`, `start_index`, `leaves` | Leaves appended in one block |
-| `LeafBatch` | `start_index`, `leaves` | Flat batch of sequential leaves |
 | `TreeState` | `next_index`, `root`, `height` | Current server tree tip |
 
 ### `TreeClient` (client-side sparse tree)
@@ -990,7 +988,7 @@ Tests run automatically via GitHub Actions (`.github/workflows/`):
 | **Tree core** | `vote-commitment-tree` | `src/{hash,anchor,path}.rs` | Shared types: `MerkleHashVote`, `Anchor`, `MerklePath`, `poseidon_hash` |
 | **Server** | `vote-commitment-tree` | `src/server.rs` | Full tree: append, checkpoint, root, path. Implements `TreeSyncApi` in-process |
 | **Client** | `vote-commitment-tree` | `src/client.rs` | Sparse tree: sync, mark, witness. Consumes `TreeSyncApi` |
-| **Sync protocol** | `vote-commitment-tree` | `src/sync_api.rs` | `TreeSyncApi` trait, `BlockCommitments`, `LeafBatch`, `TreeState` |
+| **Sync protocol** | `vote-commitment-tree` | `src/sync_api.rs` | `TreeSyncApi` trait, `BlockCommitments`, `TreeState` |
 | **HTTP sync** | `vote-commitment-tree-client` | `src/http_sync_api.rs` | `HttpTreeSyncApi`: HTTP impl of `TreeSyncApi` |
 | **Wire types** | `vote-commitment-tree-client` | `src/types.rs` | JSON deserialization for chain REST responses |
 | **CLI** | `vote-commitment-tree-client` | `src/main.rs` | `vote-tree-cli`: sync, witness, verify, status commands |
@@ -1012,7 +1010,7 @@ vote-commitment-tree/
     hash.rs         MerkleHashVote, Hashable impl, EMPTY_ROOTS, constants
     anchor.rs       Anchor type (committed tree root)
     path.rs         MerklePath type (authentication path)
-    sync_api.rs     TreeSyncApi trait, BlockCommitments, LeafBatch, TreeState
+    sync_api.rs     TreeSyncApi trait, BlockCommitments, TreeState
     server.rs       TreeServer: full tree, append, checkpoint, implements TreeSyncApi
     client.rs       TreeClient: sparse ShardTree, sync, mark, witness
   tests/

@@ -1,33 +1,55 @@
 package keeper
 
-// This file provides the ComputeTreeRoot implementation using the Poseidon
-// Merkle tree via Rust FFI. Requires the Rust static library:
+// This file provides the ComputeTreeRoot implementation using the stateful
+// Poseidon Merkle tree via Rust FFI. Requires the Rust static library:
 //
 //	cargo build --release --manifest-path sdk/circuits/Cargo.toml
 
 import (
 	"cosmossdk.io/core/store"
-
-	"github.com/z-cale/zally/crypto/votetree"
-	"github.com/z-cale/zally/x/vote/types"
 )
 
-// ComputeTreeRoot computes the Poseidon Merkle root over all leaves in the
-// commitment tree via Rust FFI. The root matches what ZKP circuits expect.
-func (k Keeper) ComputeTreeRoot(kvStore store.KVStore, nextIndex uint64) ([]byte, error) {
+// ComputeTreeRoot returns the Poseidon Merkle root for the current tree state
+// at the given block height.
+//
+// On cold start (treeHandle == nil) the behaviour depends on state.Height:
+//   - Height > 0 (restart): shard data exists in KV. Handle is created at
+//     nextIndex and ShardTree restores lazily from KV — O(1).
+//   - Height == 0 (first boot): no shard data yet. Handle is created at 0
+//     and all leaves are replayed via AppendFromKV — O(N) but unavoidable.
+//
+// On subsequent calls only the delta leaves added since the last call are
+// appended — O(k) per block where k = new leaves that block.
+//
+// A checkpoint is created only when delta leaves were actually appended.
+// Cold start and no-new-leaves blocks skip the checkpoint; latest_checkpoint
+// is restored from KV on handle creation so Root() is always correct.
+func (k *Keeper) ComputeTreeRoot(kvStore store.KVStore, nextIndex, blockHeight uint64) ([]byte, error) {
 	if nextIndex == 0 {
 		return nil, nil
 	}
 
-	// Read all leaves from KV into a slice.
-	leaves := make([][]byte, nextIndex)
-	for i := uint64(0); i < nextIndex; i++ {
-		leaf, err := kvStore.Get(types.CommitmentLeafKey(i))
-		if err != nil {
+	// Bind the current block's store so Rust callbacks reach the right data.
+	k.kvProxy.SetStore(kvStore)
+
+	appended, err := k.ensureTreeLoaded(kvStore, nextIndex)
+	if err != nil {
+		return nil, err
+	}
+	// Checkpoint only when new leaves were appended (appended=true). For
+	// no-new-leaves blocks (Size() == nextIndex) appended is false and we
+	// skip the checkpoint, returning the root from the last existing checkpoint.
+	if appended {
+		if err := k.treeHandle.Checkpoint(uint32(blockHeight)); err != nil {
 			return nil, err
 		}
-		leaves[i] = leaf
 	}
-
-	return votetree.ComputePoseidonRoot(leaves)
+	root, err := k.treeHandle.Root()
+	if err != nil {
+		return nil, err
+	}
+	if err := k.debugVerifyConsistency(kvStore, nextIndex, root); err != nil {
+		return nil, err
+	}
+	return root, nil
 }

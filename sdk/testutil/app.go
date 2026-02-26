@@ -249,7 +249,7 @@ func SetupTestAppWithPallasKey(t *testing.T) (ta *TestApp, pallasSk *elgamal.Sec
 }
 
 // VoteKeeper returns the vote module keeper for querying state in tests.
-func (ta *TestApp) VoteKeeper() votekeeper.Keeper {
+func (ta *TestApp) VoteKeeper() *votekeeper.Keeper {
 	return ta.ZallyApp.VoteKeeper
 }
 

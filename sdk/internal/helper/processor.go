@@ -15,13 +15,12 @@ import (
 // share queue for shares whose delay has elapsed, generates Merkle paths and ZKP #3
 // proofs, and submits MsgRevealShare to the chain.
 type Processor struct {
-	store      *ShareStore
-	tree       TreeReader
-	merklePath MerklePathFunc
-	prover     ProofGenerator
-	submitter  *ChainSubmitter
-	logger     log.Logger
-	interval   time.Duration
+	store         *ShareStore
+	tree          TreeReader
+	prover        ProofGenerator
+	submitter     *ChainSubmitter
+	logger        log.Logger
+	interval      time.Duration
 	// maxConcurrent bounds the number of shares processed in parallel.
 	maxConcurrent int
 }
@@ -30,7 +29,6 @@ type Processor struct {
 func NewProcessor(
 	store *ShareStore,
 	tree TreeReader,
-	merklePath MerklePathFunc,
 	prover ProofGenerator,
 	submitter *ChainSubmitter,
 	logger log.Logger,
@@ -42,13 +40,12 @@ func NewProcessor(
 	}
 
 	return &Processor{
-		store:      store,
-		tree:       tree,
-		merklePath: merklePath,
-		prover:     prover,
-		submitter:  submitter,
-		logger:     logger,
-		interval:   interval,
+		store:         store,
+		tree:          tree,
+		prover:        prover,
+		submitter:     submitter,
+		logger:        logger,
+		interval:      interval,
 		maxConcurrent: maxConcurrent,
 	}
 }
@@ -116,21 +113,23 @@ func (p *Processor) processBatch(ctx context.Context) {
 
 // processShare handles a single share: Merkle path → proof → submit.
 func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
-	// Read all commitment leaves from the keeper and find anchor height.
-	leaves, anchorHeight, err := p.tree.GetAllLeaves()
+	// Read tree status (leaf count + anchor height) without loading leaf data.
+	status, err := p.tree.GetTreeStatus()
 	if err != nil {
-		return fmt.Errorf("read tree leaves: %w", err)
+		return fmt.Errorf("read tree status: %w", err)
 	}
-	if len(leaves) == 0 {
+	if status.LeafCount == 0 {
 		return fmt.Errorf("commitment tree is empty")
 	}
-	if share.Payload.TreePosition >= uint64(len(leaves)) {
+	if share.Payload.TreePosition >= status.LeafCount {
 		return fmt.Errorf("tree_position %d out of range (tree has %d leaves)",
-			share.Payload.TreePosition, len(leaves))
+			share.Payload.TreePosition, status.LeafCount)
 	}
+	anchorHeight := status.AnchorHeight
 
-	// Compute Merkle authentication path.
-	merklePath, err := p.merklePath(leaves, share.Payload.TreePosition)
+	// Compute Merkle authentication path via the persistent KV-backed tree.
+	// O(depth) shard reads — no leaf replay.
+	merklePath, err := p.tree.MerklePath(share.Payload.TreePosition, uint32(anchorHeight))
 	if err != nil {
 		return fmt.Errorf("compute merkle path: %w", err)
 	}

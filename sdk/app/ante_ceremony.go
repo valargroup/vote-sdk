@@ -19,10 +19,10 @@ import (
 // handler already implements its own authorization check (vote manager OR
 // validator).
 type CeremonyValidatorDecorator struct {
-	voteKeeper votekeeper.Keeper
+	voteKeeper *votekeeper.Keeper
 }
 
-func NewCeremonyValidatorDecorator(k votekeeper.Keeper) CeremonyValidatorDecorator {
+func NewCeremonyValidatorDecorator(k *votekeeper.Keeper) CeremonyValidatorDecorator {
 	return CeremonyValidatorDecorator{voteKeeper: k}
 }
 

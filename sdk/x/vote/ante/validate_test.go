@@ -245,7 +245,7 @@ func failZKPOpts() ante.ValidateOpts {
 type ValidateTestSuite struct {
 	suite.Suite
 	ctx    sdk.Context
-	keeper keeper.Keeper
+	keeper *keeper.Keeper
 }
 
 func TestValidateTestSuite(t *testing.T) {
