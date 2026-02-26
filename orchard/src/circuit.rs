@@ -58,23 +58,12 @@ use halo2_gadgets::{
     utilities::lookup_range_check::LookupRangeCheckConfig,
 };
 
-mod address_ownership;
-mod commit_ivk;
-mod elgamal;
-#[cfg(feature = "delegation")]
-#[path = "delegation/mod.rs"]
-pub mod delegation;
-
-#[cfg(feature = "vote-proof")]
-#[path = "vote_proof/mod.rs"]
-pub mod vote_proof;
-
-#[cfg(feature = "share-reveal")]
-#[path = "share_reveal/mod.rs"]
-pub mod share_reveal;
+#[allow(missing_docs)]
+pub mod commit_ivk;
+#[allow(missing_docs)]
 pub mod gadget;
-mod note_commit;
-pub mod van_integrity;
+#[allow(missing_docs)]
+pub mod note_commit;
 
 pub use crate::Proof;
 

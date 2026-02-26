@@ -11,7 +11,7 @@ use halo2_proofs::circuit::Value;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
 use rand::RngCore;
 
-use crate::{
+use orchard::{
     keys::{FullViewingKey, Scope, SpendValidatingKey},
     note::{commitment::ExtractedNoteCommitment, nullifier::Nullifier, Note, RandomSeed, Rho},
     spec::NonIdentityPallasPoint,
@@ -118,7 +118,7 @@ pub fn build_delegation_bundle(
     real_notes: Vec<RealNoteInput>,
     fvk: &FullViewingKey,
     alpha: pallas::Scalar,
-    output_recipient: crate::Address,
+    output_recipient: orchard::Address,
     vote_round_id: pallas::Base,
     nc_root: pallas::Base,
     van_comm_rand: pallas::Base,
@@ -376,9 +376,9 @@ pub fn build_delegation_bundle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
+    use crate::delegation::imt::SpacedLeafImtProvider;
+    use orchard::{
         constants::MERKLE_DEPTH_ORCHARD,
-        delegation::imt::SpacedLeafImtProvider,
         keys::{FullViewingKey, Scope, SpendingKey},
         note::{commitment::ExtractedNoteCommitment, Note, Rho},
         tree::{MerkleHashOrchard, MerklePath},

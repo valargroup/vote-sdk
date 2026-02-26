@@ -1501,6 +1501,7 @@ dependencies = [
  "shardtree",
  "subtle",
  "thiserror 2.0.18",
+ "voting-circuits",
  "zcash_client_backend",
  "zcash_client_sqlite",
  "zcash_keys",
@@ -3200,6 +3201,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "voting-circuits"
+version = "0.1.0"
+dependencies = [
+ "ff",
+ "group",
+ "halo2_gadgets",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "incrementalmerkletree",
+ "lazy_static",
+ "orchard",
+ "pasta_curves",
+ "rand",
+ "sinsemilla",
 ]
 
 [[package]]

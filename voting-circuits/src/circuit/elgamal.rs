@@ -21,7 +21,7 @@ use halo2_proofs::{
 use pasta_curves::arithmetic::CurveAffine;
 use pasta_curves::pallas;
 
-use crate::constants::{OrchardBaseFieldBases, OrchardFixedBases, OrchardShortScalarBases};
+use orchard::constants::{OrchardBaseFieldBases, OrchardFixedBases, OrchardShortScalarBases};
 use halo2_gadgets::ecc::{
     chip::EccChip,
     FixedPointBaseField, FixedPointShort, NonIdentityPoint, ScalarFixedShort, ScalarVar,
@@ -36,7 +36,7 @@ use halo2_gadgets::ecc::{
 /// The gadget uses this to call `layouter.constrain_instance` directly
 /// on the witnessed NonIdentityPoint cells, removing the need for the
 /// caller to pre-allocate advice-from-instance cells and pass them down.
-pub(in crate::circuit) struct EaPkInstanceLoc {
+pub(crate) struct EaPkInstanceLoc {
     /// The instance column that holds the public inputs.
     pub instance: Column<InstanceColumn>,
     /// Row of the ea_pk x-coordinate in the instance column.
@@ -58,7 +58,7 @@ pub(in crate::circuit) struct EaPkInstanceLoc {
 /// share the same generator as the full-scalar SpendAuthG.
 pub fn spend_auth_g_affine() -> pallas::Affine {
     use group::Curve;
-    let g = crate::constants::fixed_bases::spend_auth_g::generator();
+    let g = orchard::constants::fixed_bases::spend_auth_g::generator();
     pallas::Point::from(g).to_affine()
 }
 
@@ -126,7 +126,7 @@ pub fn elgamal_encrypt(
 /// The gadget witnesses ea_pk internally as a `NonIdentityPoint` and pins both
 /// coordinates to the public instance column. The caller need only supply the
 /// four varying arrays and the ea_pk value.
-pub(in crate::circuit) fn prove_elgamal_encryptions(
+pub(crate) fn prove_elgamal_encryptions(
     ecc_chip: EccChip<OrchardFixedBases>,
     mut layouter: impl Layouter<pallas::Base>,
     namespace: &str,

@@ -24,8 +24,8 @@ use halo2_proofs::{
     plonk::{self, Advice, Assigned, Column},
 };
 
-pub(crate) mod add_chip;
-pub(crate) mod mul_chip;
+pub mod add_chip;
+pub mod mul_chip;
 
 impl super::Config {
     pub(super) fn add_chip(&self) -> add_chip::AddChip {
@@ -78,7 +78,7 @@ impl super::Config {
 }
 
 /// An instruction set for adding two circuit words (field elements).
-pub(crate) trait AddInstruction<F: Field>: Chip<F> {
+pub trait AddInstruction<F: Field>: Chip<F> {
     /// Constraints `a + b` and returns the sum.
     fn add(
         &self,
@@ -89,7 +89,7 @@ pub(crate) trait AddInstruction<F: Field>: Chip<F> {
 }
 
 /// An instruction set for multiplying two circuit words (field elements).
-pub(crate) trait MulInstruction<F: Field>: Chip<F> {
+pub trait MulInstruction<F: Field>: Chip<F> {
     /// Constraints `a * b` and returns the product.
     fn mul(
         &self,
@@ -104,7 +104,7 @@ pub(crate) trait MulInstruction<F: Field>: Chip<F> {
 /// Usages of this helper are technically superfluous, as the single-cell region is only
 /// ever used in equality constraints. We could eliminate them with a
 /// [write-on-copy abstraction](https://github.com/zcash/halo2/issues/334).
-pub(in crate::circuit) fn assign_free_advice<F: Field, V: Copy>(
+pub fn assign_free_advice<F: Field, V: Copy>(
     mut layouter: impl Layouter<F>,
     column: Column<Advice>,
     value: Value<V>,
@@ -120,7 +120,7 @@ where
 
 /// Assigns a constant value in a standalone region, constrained by the
 /// verification key (the prover cannot alter it).
-pub(crate) fn assign_constant<F: Field>(
+pub fn assign_constant<F: Field>(
     mut layouter: impl Layouter<F>,
     column: Column<Advice>,
     constant: F,
@@ -134,7 +134,7 @@ pub(crate) fn assign_constant<F: Field>(
 /// `ValueCommit^Orchard` from [Section 5.4.8.3 Homomorphic Pedersen commitments (Sapling and Orchard)].
 ///
 /// [Section 5.4.8.3 Homomorphic Pedersen commitments (Sapling and Orchard)]: https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
-pub(in crate::circuit) fn value_commit_orchard<
+pub fn value_commit_orchard<
     EccChip: EccInstructions<
         pallas::Affine,
         FixedPoints = OrchardFixedBases,
@@ -170,7 +170,7 @@ pub(in crate::circuit) fn value_commit_orchard<
 ///
 /// [Section 4.16: Note Commitments and Nullifiers]: https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers
 #[allow(clippy::too_many_arguments)]
-pub(in crate::circuit) fn derive_nullifier<
+pub fn derive_nullifier<
     PoseidonChip: PoseidonSpongeInstructions<pallas::Base, poseidon::P128Pow5T3, ConstantLength<2>, 3, 2>,
     AddChip: AddInstruction<pallas::Base>,
     EccChip: EccInstructions<
@@ -224,5 +224,5 @@ pub(in crate::circuit) fn derive_nullifier<
         .map(|res| res.extract_p())
 }
 
-pub(in crate::circuit) use crate::circuit::commit_ivk::gadgets::commit_ivk;
-pub(in crate::circuit) use crate::circuit::note_commit::gadgets::note_commit;
+pub use crate::circuit::commit_ivk::gadgets::commit_ivk;
+pub use crate::circuit::note_commit::gadgets::note_commit;

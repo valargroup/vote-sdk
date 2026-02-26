@@ -34,7 +34,8 @@ thiserror = "2"
 # Zcash / Orchard note reconstruction
 # Uses orchard 0.11 to match the wallet stack (zcash_keys, zcash_client_sqlite).
 subtle = "2.6"
-orchard = { version = "0.11", features = ["delegation", "vote-proof"] }
+orchard = { version = "0.11" }
+voting-circuits = { path = "../voting-circuits", features = ["delegation", "vote-proof"] }
 zcash_keys = { version = "0.12", features = ["orchard"] }
 zcash_protocol = "0.7"
 nonempty = "0.11"

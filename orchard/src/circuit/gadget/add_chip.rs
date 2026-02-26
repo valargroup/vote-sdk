@@ -7,8 +7,9 @@ use pasta_curves::pallas;
 
 use super::AddInstruction;
 
+/// Configuration for the addition chip.
 #[derive(Clone, Debug)]
-pub(crate) struct AddConfig {
+pub struct AddConfig {
     a: Column<Advice>,
     b: Column<Advice>,
     c: Column<Advice>,
@@ -16,7 +17,8 @@ pub(crate) struct AddConfig {
 }
 
 /// A chip implementing a single addition constraint `c = a + b` on a single row.
-pub(crate) struct AddChip {
+#[derive(Debug)]
+pub struct AddChip {
     config: AddConfig,
 }
 
@@ -34,7 +36,8 @@ impl Chip<pallas::Base> for AddChip {
 }
 
 impl AddChip {
-    pub(crate) fn configure(
+    /// Configures the addition chip with the given advice columns.
+    pub fn configure(
         meta: &mut ConstraintSystem<pallas::Base>,
         a: Column<Advice>,
         b: Column<Advice>,
@@ -53,7 +56,8 @@ impl AddChip {
         AddConfig { a, b, c, q_add }
     }
 
-    pub(crate) fn construct(config: AddConfig) -> Self {
+    /// Constructs an addition chip from the given config.
+    pub fn construct(config: AddConfig) -> Self {
         Self { config }
     }
 }

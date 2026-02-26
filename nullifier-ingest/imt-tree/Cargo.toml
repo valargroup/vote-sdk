@@ -12,7 +12,8 @@ halo2_gadgets = { version = "0.3", default-features = false }
 rayon = "1"
 
 [dev-dependencies]
-orchard = { path = "../../orchard", features = ["delegation"] }
+orchard = { path = "../../orchard" }
+voting-circuits = { path = "../../voting-circuits", features = ["delegation"] }
 halo2_proofs = { version = "0.3" }
 rand = "0.8"
 incrementalmerkletree = "0.8.1"

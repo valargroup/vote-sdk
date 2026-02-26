@@ -17,14 +17,14 @@ use halo2_proofs::{
 };
 use pasta_curves::pallas;
 
-use crate::constants::{OrchardFixedBases, OrchardFixedBasesFull};
-use crate::circuit::commit_ivk::CommitIvkChip;
+use orchard::constants::{OrchardFixedBases, OrchardFixedBasesFull};
+use orchard::circuit::commit_ivk::CommitIvkChip;
 use halo2_gadgets::ecc::{
     chip::EccChip,
     NonIdentityPoint, Point, ScalarFixed, ScalarVar,
 };
 
-use crate::constants::{OrchardCommitDomains, OrchardHashDomains};
+use orchard::constants::{OrchardCommitDomains, OrchardHashDomains};
 use halo2_gadgets::sinsemilla::chip::SinsemillaChip;
 
 // ================================================================
@@ -33,13 +33,13 @@ use halo2_gadgets::sinsemilla::chip::SinsemillaChip;
 
 /// Computes `[scalar] * SpendAuthG` using the Orchard fixed base.
 ///
-/// Thin wrapper around the shared gadget in `crate::shared_primitives` –
-/// see [`crate::shared_primitives::spend_authority`] for the upstream reference.
+/// Thin wrapper around the shared gadget in `orchard::shared_primitives` –
+/// see [`orchard::shared_primitives::spend_authority`] for the upstream reference.
 ///
 /// Used by delegation (condition 4: alpha), vote proof (condition 3: vsk).
 /// Returns the resulting curve point so the caller can e.g. add `ak_P` for rk
 /// (delegation) or call `extract_p()` for ak (vote proof).
-pub(in crate::circuit) fn spend_auth_g_mul(
+pub fn spend_auth_g_mul(
     ecc_chip: EccChip<OrchardFixedBases>,
     layouter: impl Layouter<pallas::Base>,
     _label: &str,
@@ -83,7 +83,7 @@ pub(in crate::circuit) fn spend_auth_g_mul(
 /// Returns the ivk cell so callers (e.g. delegation) can reuse it for per-note
 /// diversified address checks.
 #[allow(clippy::type_complexity)]
-pub(in crate::circuit) fn prove_address_ownership(
+pub fn prove_address_ownership(
     sinsemilla_chip: SinsemillaChip<
         OrchardHashDomains,
         OrchardCommitDomains,
@@ -99,7 +99,7 @@ pub(in crate::circuit) fn prove_address_ownership(
     g_d: &NonIdentityPoint<pallas::Affine, EccChip<OrchardFixedBases>>,
     pk_d_claimed: &NonIdentityPoint<pallas::Affine, EccChip<OrchardFixedBases>>,
 ) -> Result<AssignedCell<pallas::Base, pallas::Base>, Error> {
-    use crate::circuit::commit_ivk::gadgets::commit_ivk;
+    use orchard::circuit::commit_ivk::gadgets::commit_ivk;
 
     let ivk = commit_ivk(
         sinsemilla_chip,

@@ -17,9 +17,10 @@ use crate::{
 
 /// Note commitment types.
 pub mod commitment;
-pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
+pub use self::commitment::{ExtractedNoteCommitment, NoteCommitTrapdoor, NoteCommitment};
 
-pub(crate) mod nullifier;
+/// Nullifier types and derivation.
+pub mod nullifier;
 pub use self::nullifier::Nullifier;
 
 /// The randomness used to construct a note.
@@ -55,7 +56,8 @@ impl Rho {
         Rho(nf.0)
     }
 
-    pub(crate) fn into_inner(self) -> pallas::Base {
+    /// Consumes `self` and returns the inner field element.
+    pub fn into_inner(self) -> pallas::Base {
         self.0
     }
 }
@@ -93,7 +95,8 @@ impl RandomSeed {
     /// Defined in [Zcash Protocol Spec § 4.7.3: Sending Notes (Orchard)][orchardsend].
     ///
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
-    pub(crate) fn psi(&self, rho: &Rho) -> pallas::Base {
+    /// Derives the psi value for this random seed and rho.
+    pub fn psi(&self, rho: &Rho) -> pallas::Base {
         to_base(PrfExpand::PSI.with(&self.0, &rho.to_bytes()))
     }
 
@@ -117,7 +120,8 @@ impl RandomSeed {
     /// Defined in [Zcash Protocol Spec § 4.7.3: Sending Notes (Orchard)][orchardsend].
     ///
     /// [orchardsend]: https://zips.z.cash/protocol/nu5.pdf#orchardsend
-    pub(crate) fn rcm(&self, rho: &Rho) -> commitment::NoteCommitTrapdoor {
+    /// Derives the note commitment trapdoor for this random seed and rho.
+    pub fn rcm(&self, rho: &Rho) -> commitment::NoteCommitTrapdoor {
         commitment::NoteCommitTrapdoor(to_scalar(
             PrfExpand::ORCHARD_RCM.with(&self.0, &rho.to_bytes()),
         ))

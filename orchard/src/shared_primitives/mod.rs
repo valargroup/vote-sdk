@@ -6,5 +6,4 @@
 //!
 //! [`zcash/orchard`]: https://github.com/zcash/orchard
 
-pub mod shares_hash;
 pub mod spend_authority;

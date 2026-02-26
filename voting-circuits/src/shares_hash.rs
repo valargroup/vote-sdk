@@ -30,7 +30,7 @@ use pasta_curves::pallas;
 ///
 /// The `index` is used only for namespace labels and has no effect on the
 /// constraint system.
-pub(crate) fn hash_share_commitment_in_circuit(
+pub fn hash_share_commitment_in_circuit(
     chip: PoseidonChip<pallas::Base, 3, 2>,
     mut layouter: impl Layouter<pallas::Base>,
     blind: AssignedCell<pallas::Base, pallas::Base>,
@@ -70,7 +70,7 @@ pub(crate) fn hash_share_commitment_in_circuit(
 /// * `enc_c2` — The 16 El Gamal `C2` x-coordinates.
 ///
 /// Returns the `shares_hash` cell.
-pub(crate) fn compute_shares_hash_in_circuit(
+pub fn compute_shares_hash_in_circuit(
     poseidon_chip: impl Fn() -> PoseidonChip<pallas::Base, 3, 2>,
     mut layouter: impl Layouter<pallas::Base>,
     blinds: [AssignedCell<pallas::Base, pallas::Base>; 16],
@@ -118,13 +118,14 @@ mod tests {
 
     use ff::Field;
     use halo2_proofs::{
-        circuit::floor_planner,
+        circuit::{floor_planner, Value},
         dev::MockProver,
         plonk::{Advice, Column, ConstraintSystem, Fixed, Instance as InstanceColumn},
     };
+    use halo2_gadgets::poseidon::Pow5Config as PoseidonConfig;
     use rand::rngs::OsRng;
 
-    use crate::circuit::vote_proof::circuit::{share_commitment, shares_hash};
+    use crate::vote_proof::circuit::{share_commitment, shares_hash};
 
     // ---------------------------------------------------------------
     // Shared minimal circuit config (Poseidon only, no ECC).

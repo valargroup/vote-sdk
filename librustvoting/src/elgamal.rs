@@ -36,7 +36,7 @@ pub fn encrypt_shares(shares: &[u64], ea_pk: &[u8]) -> Result<Vec<EncryptedShare
     let pk_point = decode_pallas_point(ea_pk, "ea_pk")?;
 
     // SpendAuthG — the generator hardcoded in the ZKP #2 circuit.
-    let g = pallas::Point::from(orchard::vote_proof::spend_auth_g_affine());
+    let g = pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
 
     let mut encrypted = Vec::with_capacity(shares.len());
     for (i, &value) in shares.iter().enumerate() {
@@ -95,7 +95,7 @@ mod tests {
 
     /// Generate a random El Gamal keypair: (sk, pk) where pk = sk * G.
     fn keygen() -> (pallas::Scalar, pallas::Point) {
-        let g = pallas::Point::from(orchard::vote_proof::spend_auth_g_affine());
+        let g = pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
         let sk = pallas::Scalar::random(OsRng);
         let pk = g * sk;
         (sk, pk)
@@ -112,7 +112,7 @@ mod tests {
     fn test_roundtrip_encrypt_decrypt() {
         let (sk, pk) = keygen();
         let pk_bytes = pk.to_bytes().to_vec();
-        let g = pallas::Point::from(orchard::vote_proof::spend_auth_g_affine());
+        let g = pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
 
         for &value in &[0u64, 1, 42, 1000, u64::MAX >> 1] {
             let result = encrypt_shares(&[value], &pk_bytes).unwrap();
@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn test_spend_auth_g_consistency() {
-        let g_affine = orchard::vote_proof::spend_auth_g_affine();
+        let g_affine = voting_circuits::vote_proof::spend_auth_g_affine();
         let g = pallas::Point::from(g_affine);
 
         // SpendAuthG must not be the identity.
@@ -144,7 +144,7 @@ mod tests {
             let r = pallas::Base::one();
             let v = pallas::Base::one();
             let pk = pallas::Point::identity(); // pk=0 simplifies C2
-            let (c1_x, _c2_x) = orchard::vote_proof::elgamal_encrypt(v, r, pk);
+            let (c1_x, _c2_x) = voting_circuits::vote_proof::elgamal_encrypt(v, r, pk);
             c1_x
         };
 
@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn test_cross_validation_with_circuit_helper() {
         // Use deterministic "randomness" by manually encrypting with known scalar.
-        let g = pallas::Point::from(orchard::vote_proof::spend_auth_g_affine());
+        let g = pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
         let (_, pk) = keygen();
 
         let share_value = 42u64;
@@ -174,7 +174,7 @@ mod tests {
         let r_base = pallas::Base::from(7u64);
         let v_base = pallas::Base::from(share_value);
         let (circuit_c1_x, circuit_c2_x) =
-            orchard::vote_proof::elgamal_encrypt(v_base, r_base, pk);
+            voting_circuits::vote_proof::elgamal_encrypt(v_base, r_base, pk);
 
         assert_eq!(c1_x, circuit_c1_x, "C1.x must match circuit helper");
         assert_eq!(c2_x, circuit_c2_x, "C2.x must match circuit helper");
@@ -211,13 +211,13 @@ mod tests {
         });
 
         // Compute shares_hash using the circuit helper.
-        let hash = orchard::vote_proof::shares_hash(blinds, c1_x, c2_x);
+        let hash = voting_circuits::vote_proof::shares_hash(blinds, c1_x, c2_x);
 
         // Verify it's not zero (sanity).
         assert_ne!(hash, pallas::Base::zero());
 
         // Verify determinism: same inputs → same hash.
-        let hash2 = orchard::vote_proof::shares_hash(blinds, c1_x, c2_x);
+        let hash2 = voting_circuits::vote_proof::shares_hash(blinds, c1_x, c2_x);
         assert_eq!(hash, hash2);
     }
 

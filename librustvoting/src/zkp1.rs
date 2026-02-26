@@ -8,12 +8,12 @@ use halo2_proofs::{
     transcript::{Blake2bWrite, Challenge255},
 };
 use incrementalmerkletree::Hashable;
+use voting_circuits::delegation::{
+    builder::{build_delegation_bundle, PrecomputedRandomness, RealNoteInput},
+    circuit::Circuit as DelegationCircuit,
+    imt::{ImtError, ImtProofData, ImtProvider},
+};
 use orchard::{
-    delegation::{
-        builder::{build_delegation_bundle, PrecomputedRandomness, RealNoteInput},
-        circuit::Circuit as DelegationCircuit,
-        imt::{ImtError, ImtProofData, ImtProvider},
-    },
     keys::{Diversifier, FullViewingKey, Scope},
     note::{RandomSeed, Rho},
     tree::{MerkleHashOrchard, MerklePath},

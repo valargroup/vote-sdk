@@ -361,7 +361,7 @@ fn voting_flow_librustvoting_path() {
         let ea_pk_affine = ea_pk_point.to_affine();
         let ea_coords = ea_pk_affine.coordinates().unwrap();
 
-        let instance = orchard::vote_proof::Instance::from_parts(
+        let instance = voting_circuits::vote_proof::Instance::from_parts(
             van_nf,
             *r_vpk_coords.x(),
             *r_vpk_coords.y(),
@@ -374,7 +374,7 @@ fn voting_flow_librustvoting_path() {
             *ea_coords.x(),
             *ea_coords.y(),
         );
-        orchard::vote_proof::verify_vote_proof(&bundle.proof, &instance)
+        voting_circuits::vote_proof::verify_vote_proof(&bundle.proof, &instance)
             .expect("LOCAL vote proof verification must pass");
         log_step("Step 7b", "local verification PASSED");
     }

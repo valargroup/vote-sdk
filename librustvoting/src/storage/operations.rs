@@ -406,7 +406,7 @@ impl VotingDb {
         // If padded_note_secrets is empty (e.g. test data with no PCZT),
         // we fall back to None and the builder will sample fresh randomness.
         let precomputed = if !padded_secrets.is_empty() || !rseed_signed.is_empty() {
-            use orchard::delegation::builder::PaddedNoteData;
+            use voting_circuits::delegation::builder::PaddedNoteData;
             let padded_notes: Vec<PaddedNoteData> = padded_secrets
                 .iter()
                 .map(|(rho, rseed)| {
@@ -424,7 +424,7 @@ impl VotingDb {
             rseed_signed_arr.copy_from_slice(&rseed_signed);
             let mut rseed_output_arr = [0u8; 32];
             rseed_output_arr.copy_from_slice(&rseed_output);
-            Some(orchard::delegation::builder::PrecomputedRandomness {
+            Some(voting_circuits::delegation::builder::PrecomputedRandomness {
                 padded_notes,
                 rseed_signed: rseed_signed_arr,
                 rseed_output: rseed_output_arr,
@@ -763,7 +763,7 @@ mod tests {
     fn test_params() -> VotingRoundParams {
         // Use SpendAuthG as a valid Pallas point for ea_pk in tests.
         use group::GroupEncoding;
-        let ea_pk = pasta_curves::pallas::Point::from(orchard::vote_proof::spend_auth_g_affine());
+        let ea_pk = pasta_curves::pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
         VotingRoundParams {
             vote_round_id: ROUND_ID.to_string(),
             snapshot_height: 1000,

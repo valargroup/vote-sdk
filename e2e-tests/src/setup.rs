@@ -14,18 +14,20 @@ use blake2b_simd::Params as Blake2bParams;
 use ff::{Field, PrimeField};
 use incrementalmerkletree::{Hashable, Level};
 use orchard::{
-    delegation::{
-        builder::{build_delegation_bundle, RealNoteInput},
-        imt::{ImtProvider, SpacedLeafImtProvider},
-        prove::{create_delegation_proof, verify_delegation_proof},
-    },
     keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey},
     note::{ExtractedNoteCommitment, Note, Rho},
     tree::{MerkleHashOrchard, MerklePath},
     value::NoteValue,
     NOTE_COMMITMENT_TREE_DEPTH,
 };
-use orchard::vote_proof::VOTE_COMM_TREE_DEPTH;
+use voting_circuits::{
+    delegation::{
+        builder::{build_delegation_bundle, RealNoteInput},
+        imt::{ImtProvider, SpacedLeafImtProvider},
+        prove::{create_delegation_proof, verify_delegation_proof},
+    },
+    vote_proof::VOTE_COMM_TREE_DEPTH,
+};
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
 use vote_commitment_tree::MemoryTreeServer;

@@ -12,7 +12,7 @@ use crate::{
 
 /// A unique nullifier for a note.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Nullifier(pub(crate) pallas::Base);
+pub struct Nullifier(pub pallas::Base);
 
 // We know that `pallas::Base` doesn't allocate internally.
 memuse::impl_no_dynamic_usage!(Nullifier);
@@ -30,7 +30,8 @@ impl Nullifier {
     ///
     /// Instead of explicitly sampling for a unique nullifier, we rely here on the size of
     /// the base field to make the chance of sampling a colliding nullifier negligible.
-    pub(crate) fn dummy(rng: &mut impl RngCore) -> Self {
+    /// Generates a random dummy nullifier.
+    pub fn dummy(rng: &mut impl RngCore) -> Self {
         Nullifier(extract_p(&pallas::Point::random(rng)))
     }
 

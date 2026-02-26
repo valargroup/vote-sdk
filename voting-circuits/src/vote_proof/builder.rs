@@ -14,7 +14,7 @@ use halo2_proofs::circuit::Value;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
 use rand::RngCore;
 
-use crate::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey};
+use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey};
 
 use super::circuit::{
     shares_hash, van_integrity_hash, van_nullifier_hash, vote_commitment_hash, Circuit, Instance,
@@ -178,7 +178,7 @@ pub fn build_vote_proof_from_delegation(
 
     // ---- Fast key-chain consistency checks (instant, no circuit) ----
     {
-        use crate::constants::{fixed_bases::COMMIT_IVK_PERSONALIZATION, L_ORCHARD_BASE};
+        use orchard::constants::{fixed_bases::COMMIT_IVK_PERSONALIZATION, L_ORCHARD_BASE};
         use core::iter;
         use group::ff::PrimeFieldBits;
         use halo2_gadgets::sinsemilla::primitives::CommitDomain;

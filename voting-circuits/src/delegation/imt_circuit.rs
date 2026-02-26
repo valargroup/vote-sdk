@@ -22,7 +22,7 @@ use halo2_gadgets::{
     utilities::bool_check,
 };
 
-use crate::constants::OrchardFixedBases;
+use orchard::constants::OrchardFixedBases;
 
 use super::imt::IMT_DEPTH;
 
@@ -348,7 +348,7 @@ pub(crate) fn synthesize_imt_non_membership(
 
     // Witness low and width explicitly.
     let imt_low_cell = {
-        use crate::circuit::gadget::assign_free_advice;
+        use orchard::circuit::gadget::assign_free_advice;
         assign_free_advice(
             layouter.namespace(|| format!("note {s} imt_low")),
             imt_config.advice_0,
@@ -357,7 +357,7 @@ pub(crate) fn synthesize_imt_non_membership(
     };
 
     let imt_width_cell = {
-        use crate::circuit::gadget::assign_free_advice;
+        use orchard::circuit::gadget::assign_free_advice;
         assign_free_advice(
             layouter.namespace(|| format!("note {s} imt_width")),
             imt_config.advice_0,
@@ -391,7 +391,7 @@ pub(crate) fn synthesize_imt_non_membership(
 
     for i in 0..IMT_DEPTH {
         let pos_bit = {
-            use crate::circuit::gadget::assign_free_advice;
+            use orchard::circuit::gadget::assign_free_advice;
             assign_free_advice(
                 layouter.namespace(|| format!("note {s} imt pos_bit {i}")),
                 imt_config.advice_0,
@@ -401,7 +401,7 @@ pub(crate) fn synthesize_imt_non_membership(
         };
 
         let sibling = {
-            use crate::circuit::gadget::assign_free_advice;
+            use orchard::circuit::gadget::assign_free_advice;
             assign_free_advice(
                 layouter.namespace(|| format!("note {s} imt sibling {i}")),
                 imt_config.advice_0,

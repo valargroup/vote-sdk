@@ -3,7 +3,7 @@ use group::{Curve, GroupEncoding};
 use pasta_curves::pallas;
 
 use orchard::keys::SpendingKey;
-use orchard::vote_proof::{build_vote_proof_from_delegation, VOTE_COMM_TREE_DEPTH};
+use voting_circuits::vote_proof::{build_vote_proof_from_delegation, VOTE_COMM_TREE_DEPTH};
 
 use crate::types::{
     ct_option_to_result, validate_vote_decision, EncryptedShare, ProofProgressReporter,

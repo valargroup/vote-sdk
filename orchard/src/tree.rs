@@ -68,7 +68,8 @@ impl Anchor {
         Anchor(MerkleHashOrchard::empty_root(Level::from(MERKLE_DEPTH_ORCHARD as u8)).0)
     }
 
-    pub(crate) fn inner(&self) -> pallas::Base {
+    /// Returns the inner base field element.
+    pub fn inner(&self) -> pallas::Base {
         self.0
     }
 
@@ -115,7 +116,8 @@ impl From<incrementalmerkletree::MerklePath<MerkleHashOrchard, 32>> for MerklePa
 
 impl MerklePath {
     /// Generates a dummy Merkle path for use in dummy spent notes.
-    pub(crate) fn dummy(mut rng: &mut impl RngCore) -> Self {
+    /// Generates a dummy Merkle path for use in padded note slots.
+    pub fn dummy(mut rng: &mut impl RngCore) -> Self {
         MerklePath {
             position: rng.next_u32(),
             auth_path: [(); MERKLE_DEPTH_ORCHARD]
@@ -182,8 +184,8 @@ impl MerkleHashOrchard {
         MerkleHashOrchard(value.inner())
     }
 
-    /// Only used in the circuit.
-    pub(crate) fn inner(&self) -> pallas::Base {
+    /// Returns the inner base field element.
+    pub fn inner(&self) -> pallas::Base {
         self.0
     }
 

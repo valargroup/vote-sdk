@@ -14,15 +14,15 @@ use rand::rngs::OsRng;
 use imt_tree::{build_sentinel_tree, NullifierTree};
 
 use orchard::{
-    delegation::{
-        builder::{build_delegation_bundle, RealNoteInput},
-        imt::{ImtProofData as OrchardImtProofData, ImtProvider},
-    },
     keys::{FullViewingKey, Scope, SpendingKey},
     note::{ExtractedNoteCommitment, Note, Nullifier, Rho},
     tree::{MerkleHashOrchard, MerklePath},
     value::NoteValue,
     NOTE_COMMITMENT_TREE_DEPTH,
+};
+use voting_circuits::delegation::{
+    builder::{build_delegation_bundle, RealNoteInput},
+    imt::{ImtProofData as OrchardImtProofData, ImtProvider},
 };
 
 // ── Adapter: bridges NullifierTree to orchard's ImtProvider trait ──────
@@ -36,7 +36,7 @@ impl ImtProvider for NullifierTreeAdapter<'_> {
         self.0.root()
     }
 
-    fn non_membership_proof(&self, nf: pallas::Base) -> Result<OrchardImtProofData, orchard::delegation::imt::ImtError> {
+    fn non_membership_proof(&self, nf: pallas::Base) -> Result<OrchardImtProofData, voting_circuits::delegation::imt::ImtError> {
         let proof = self.0.prove(nf).expect("nullifier should be in a gap range");
         Ok(OrchardImtProofData {
             root: proof.root,

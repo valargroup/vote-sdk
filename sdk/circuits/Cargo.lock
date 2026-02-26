@@ -919,6 +919,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "voting-circuits"
+version = "0.1.0"
+dependencies = [
+ "ff",
+ "group",
+ "halo2_gadgets",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "incrementalmerkletree",
+ "lazy_static",
+ "orchard",
+ "pasta_curves",
+ "rand",
+ "sinsemilla",
+]
+
+[[package]]
 name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -950,6 +967,7 @@ dependencies = [
  "reddsa",
  "serde_json",
  "vote-commitment-tree",
+ "voting-circuits",
 ]
 
 [[package]]

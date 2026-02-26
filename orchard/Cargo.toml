@@ -88,10 +88,6 @@ unstable-frost = []
 multicore = ["halo2_proofs?/multicore"]
 dev-graph = ["halo2_proofs?/dev-graph", "image", "plotters"]
 test-dependencies = ["proptest"]
-delegation = ["circuit", "std"]
-vote-proof = ["circuit", "std"]
-share-reveal = ["circuit", "std", "vote-proof"]
-
 [[bench]]
 name = "note_decryption"
 harness = false
@@ -103,11 +99,6 @@ harness = false
 [[bench]]
 name = "circuit"
 harness = false
-
-[[bench]]
-name = "delegation"
-harness = false
-required-features = ["delegation", "test-dependencies"]
 
 [profile.dev]
 opt-level = 1       # Faster runtime for ZK circuits without full release optimization cost

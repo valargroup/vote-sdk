@@ -17,4 +17,5 @@ libc = "0.2"
 
 [dev-dependencies]
 rand = "0.8"
-orchard = { path = "../orchard", features = ["delegation", "vote-proof"] }
+orchard = { path = "../orchard" }
+voting-circuits = { path = "../voting-circuits", features = ["vote-proof"] }

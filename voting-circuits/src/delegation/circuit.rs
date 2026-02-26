@@ -27,9 +27,9 @@ use halo2_proofs::{
 };
 use pasta_curves::{arithmetic::CurveAffine, pallas, vesta};
 
-use crate::{
+use crate::circuit::address_ownership::prove_address_ownership;
+use orchard::{
     circuit::{
-        address_ownership::prove_address_ownership,
         commit_ivk::{CommitIvkChip, CommitIvkConfig},
         gadget::{
             add_chip::{AddChip, AddConfig},
@@ -78,7 +78,7 @@ use halo2_gadgets::{
 use super::imt::IMT_DEPTH;
 use super::imt_circuit::{ImtNonMembershipConfig, synthesize_imt_non_membership};
 use crate::circuit::van_integrity;
-use crate::constants::MERKLE_DEPTH_ORCHARD;
+use orchard::constants::MERKLE_DEPTH_ORCHARD;
 
 // ================================================================
 // Circuit size
@@ -758,11 +758,11 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // The out-of-circuit verifier checks that the keystone signature is valid under rk,
         // so this links the ZKP to the signature without revealing ak.
         //
-        // Uses the shared gadget from crate::shared_primitives – a 1:1 copy of
+        // Uses the shared gadget from orchard::shared_primitives – a 1:1 copy of
         // the upstream Orchard spend authority check:
         //   https://github.com/zcash/orchard/blob/main/src/circuit.rs#L542-L558
         // Note: RK_X and RK_Y are public inputs.ß
-        crate::shared_primitives::spend_authority::prove_spend_authority(
+        orchard::shared_primitives::spend_authority::prove_spend_authority(
             ecc_chip.clone(),
             layouter.namespace(|| "cond4 spend authority"),
             self.alpha,
@@ -808,7 +808,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // Used by Condition 11 for notes with internal (change) scope.
         // ---------------------------------------------------------------
         let ivk_internal_cell = {
-            use crate::circuit::commit_ivk::gadgets::commit_ivk;
+            use orchard::circuit::commit_ivk::gadgets::commit_ivk;
             let rivk_internal = ScalarFixed::new(
                 ecc_chip.clone(),
                 layouter.namespace(|| "rivk_internal"),
@@ -1770,8 +1770,8 @@ impl Instance {
 mod tests {
     use alloc::string::{String, ToString};
     use super::*;
-    use crate::{
-        delegation::imt::{gov_null_hash, ImtProofData, ImtProvider, SpacedLeafImtProvider},
+    use crate::delegation::imt::{gov_null_hash, ImtProofData, ImtProvider, SpacedLeafImtProvider};
+    use orchard::{
         keys::{FullViewingKey, Scope, SpendValidatingKey, SpendingKey},
         note::{commitment::ExtractedNoteCommitment, Note, Rho},
     };

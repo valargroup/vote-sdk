@@ -7,8 +7,9 @@ use pasta_curves::pallas;
 
 use super::MulInstruction;
 
+/// Configuration for the multiplication chip.
 #[derive(Clone, Debug)]
-pub(crate) struct MulConfig {
+pub struct MulConfig {
     a: Column<Advice>,
     b: Column<Advice>,
     c: Column<Advice>,
@@ -16,7 +17,8 @@ pub(crate) struct MulConfig {
 }
 
 /// A chip implementing a single multiplication constraint `c = a * b` on a single row.
-pub(crate) struct MulChip {
+#[derive(Debug)]
+pub struct MulChip {
     config: MulConfig,
 }
 
@@ -34,7 +36,8 @@ impl Chip<pallas::Base> for MulChip {
 }
 
 impl MulChip {
-    pub(crate) fn configure(
+    /// Configures the multiplication chip with the given advice columns.
+    pub fn configure(
         meta: &mut ConstraintSystem<pallas::Base>,
         a: Column<Advice>,
         b: Column<Advice>,
@@ -53,7 +56,8 @@ impl MulChip {
         MulConfig { a, b, c, q_mul }
     }
 
-    pub(crate) fn construct(config: MulConfig) -> Self {
+    /// Constructs a multiplication chip from the given config.
+    pub fn construct(config: MulConfig) -> Self {
         Self { config }
     }
 }

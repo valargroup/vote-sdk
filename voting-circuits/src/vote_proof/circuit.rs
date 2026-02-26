@@ -75,15 +75,13 @@ use halo2_gadgets::{
 };
 use crate::circuit::address_ownership::{prove_address_ownership, spend_auth_g_mul};
 use crate::circuit::elgamal::{EaPkInstanceLoc, prove_elgamal_encryptions};
-use crate::circuit::commit_ivk::{CommitIvkChip, CommitIvkConfig};
-use crate::circuit::gadget::{add_chip::{AddChip, AddConfig}, AddInstruction};
-use crate::constants::{
+use orchard::circuit::commit_ivk::{CommitIvkChip, CommitIvkConfig};
+use orchard::circuit::gadget::{add_chip::{AddChip, AddConfig}, AddInstruction};
+use orchard::constants::{
     OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains,
 };
 use crate::circuit::van_integrity;
-use crate::shared_primitives::shares_hash::{
-    compute_shares_hash_in_circuit, hash_share_commitment_in_circuit,
-};
+use crate::shares_hash::compute_shares_hash_in_circuit;
 use super::authority_decrement::{AuthorityDecrementChip, AuthorityDecrementConfig};
 
 // ================================================================
@@ -920,10 +918,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // The out-of-circuit verifier checks that the vote signature is valid under r_vpk,
         // so this links the ZKP to the signature without revealing ak.
         //
-        // Uses the shared gadget from crate::shared_primitives – a 1:1 copy of
+        // Uses the shared gadget from orchard::shared_primitives – a 1:1 copy of
         // the upstream Orchard spend authority check:
         //   https://github.com/zcash/orchard/blob/main/src/circuit.rs#L542-L558
-        crate::shared_primitives::spend_authority::prove_spend_authority(
+        orchard::shared_primitives::spend_authority::prove_spend_authority(
             ecc_chip.clone(),
             layouter.namespace(|| "cond4 spend authority"),
             self.alpha_v,
@@ -1599,6 +1597,7 @@ impl Instance {
 mod tests {
     use super::*;
     use crate::circuit::elgamal::{base_to_scalar, elgamal_encrypt, spend_auth_g_affine};
+    use crate::shares_hash::hash_share_commitment_in_circuit;
     use core::iter;
     use ff::Field;
     use group::ff::PrimeFieldBits;
@@ -1609,7 +1608,7 @@ mod tests {
     use pasta_curves::pallas;
     use rand::rngs::OsRng;
 
-    use crate::constants::{
+    use orchard::constants::{
         fixed_bases::COMMIT_IVK_PERSONALIZATION,
         L_ORCHARD_BASE,
     };

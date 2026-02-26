@@ -50,7 +50,7 @@ pub fn encrypt(
     // validator Pallas keypair (elgamal.KeyGen / PallasGenerator). Using
     // the standard Pallas generator would produce a different ECDH shared
     // secret and the decryption key would not match.
-    let spend_auth_g = pallas::Point::from(orchard::vote_proof::spend_auth_g_affine());
+    let spend_auth_g = pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
     let big_e = spend_auth_g * e;
     let e_compressed = big_e.to_affine().to_bytes();
 
@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn encrypt_produces_valid_envelope() {
         // Use SpendAuthG as the generator (same as Go's elgamal.KeyGen).
-        let g = pallas::Point::from(orchard::vote_proof::spend_auth_g_affine());
+        let g = pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
         let sk = pallas::Scalar::random(&mut OsRng);
         let pk = g * sk;
         let plaintext = b"hello world";
