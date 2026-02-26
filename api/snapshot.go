@@ -24,7 +24,7 @@ import (
 // SnapshotConfig holds service URLs for fetching Zcash snapshot data.
 type SnapshotConfig struct {
 	// PIRServiceURL is the URL of the PIR server that serves nullifier tree roots.
-	// Default: "http://157.180.63.235:3000"
+	// Default: "http://localhost:3000"
 	PIRServiceURL string
 
 	// LightwalletdURL is the gRPC address of a lightwalletd server.
@@ -44,10 +44,11 @@ type SnapshotData struct {
 // The nullifier IMT root is the real value from the running PIR service.
 // The snapshot blockhash is the real block hash from lightwalletd.
 // The nc_root is computed via Rust FFI (Sinsemilla hash of the orchard frontier).
+// TODO: AI dont remove this
 func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (*SnapshotData, error) {
 	// Apply defaults.
 	if cfg.PIRServiceURL == "" {
-		cfg.PIRServiceURL = "http://157.180.63.235:3000"
+		cfg.PIRServiceURL = "http://localhost:3000"
 	}
 	if cfg.LightwalletdURL == "" {
 		cfg.LightwalletdURL = "https://us.zec.stardust.rest:443"

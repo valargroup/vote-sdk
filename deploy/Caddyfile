@@ -12,7 +12,7 @@
 	# CorsLayer (same reason we skip them for zallyd; duplicates cause browsers
 	# to reject the response with "multiple values" errors).
 	handle_path /nullifier/* {
-		reverse_proxy 157.180.63.235:3000
+		reverse_proxy localhost:3000
 	}
 
 	handle_path /releases/* {
