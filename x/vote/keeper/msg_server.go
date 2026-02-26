@@ -2,15 +2,14 @@ package keeper
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strconv"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"golang.org/x/crypto/blake2b"
 
 	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/z-cale/zally/crypto/roundid"
 	"github.com/z-cale/zally/x/vote/types"
 )
 
@@ -27,8 +26,9 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 }
 
 // CreateVotingSession handles MsgCreateVotingSession.
-// Computes vote_round_id = Blake2b-256(snapshot_height || snapshot_blockhash ||
-// proposals_hash || vote_end_time || nullifier_imt_root || nc_root),
+// Computes vote_round_id = Poseidon(snapshot_height, snapshot_blockhash_lo,
+// snapshot_blockhash_hi, proposals_hash_lo, proposals_hash_hi, vote_end_time,
+// nullifier_imt_root, nc_root) via FFI,
 // stores the VoteRound in PENDING status with a ceremony validator snapshot,
 // and emits an event. The round transitions to ACTIVE when its per-round
 // ceremony confirms (auto-deal + auto-ack via PrepareProposal).
@@ -43,7 +43,10 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 	kvStore := ms.k.OpenKVStore(ctx)
 
 	// Derive vote_round_id deterministically.
-	roundID := deriveRoundID(msg)
+	roundID, err := deriveRoundID(msg)
+	if err != nil {
+		return nil, err
+	}
 
 	// Reject if round already exists.
 	existing, err := ms.k.GetVoteRound(kvStore, roundID)
@@ -90,13 +93,13 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		Creator:           msg.Creator,
 		Status:            types.SessionStatus_SESSION_STATUS_PENDING,
 		// EaPk left empty — set when ceremony confirms.
-		VkZkp1:      msg.VkZkp1,
-		VkZkp2:      msg.VkZkp2,
-		VkZkp3:      msg.VkZkp3,
-		Proposals:    msg.Proposals,
-		Description:  msg.Description,
+		VkZkp1:          msg.VkZkp1,
+		VkZkp2:          msg.VkZkp2,
+		VkZkp3:          msg.VkZkp3,
+		Proposals:       msg.Proposals,
+		Description:     msg.Description,
 		CreatedAtHeight: uint64(ctx.BlockHeight()),
-		Title:        msg.Title,
+		Title:           msg.Title,
 		// Per-round ceremony fields.
 		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		CeremonyValidators: eligible,
@@ -352,24 +355,20 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 	}, nil
 }
 
-// deriveRoundID computes a deterministic vote_round_id from the setup fields.
-// Blake2b-256(snapshot_height || snapshot_blockhash || proposals_hash ||
-//
-//	vote_end_time || nullifier_imt_root || nc_root)
-//
-// uint64 fields are encoded as 8 bytes big-endian.
-func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
-	h, _ := blake2b.New256(nil) // nil key = unkeyed; never errors
-	var buf [8]byte
-
-	binary.BigEndian.PutUint64(buf[:], msg.SnapshotHeight)
-	h.Write(buf[:])
-	h.Write(msg.SnapshotBlockhash)
-	h.Write(msg.ProposalsHash)
-	binary.BigEndian.PutUint64(buf[:], msg.VoteEndTime)
-	h.Write(buf[:])
-	h.Write(msg.NullifierImtRoot)
-	h.Write(msg.NcRoot)
-
-	return h.Sum(nil)
+// deriveRoundID computes a deterministic vote_round_id from the setup fields
+// via Poseidon hash (FFI call to Rust). The output is a canonical 32-byte
+// Pallas Fp element.
+func deriveRoundID(msg *types.MsgCreateVotingSession) ([]byte, error) {
+	rid, err := roundid.DeriveRoundID(
+		msg.SnapshotHeight,
+		msg.SnapshotBlockhash,
+		msg.ProposalsHash,
+		msg.VoteEndTime,
+		msg.NullifierImtRoot,
+		msg.NcRoot,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return rid[:], nil
 }

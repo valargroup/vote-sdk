@@ -3,7 +3,6 @@ package testutil
 import (
 	"context"
 	"crypto/rand"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -41,6 +40,7 @@ import (
 
 	"github.com/z-cale/zally/app"
 	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/z-cale/zally/crypto/roundid"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -325,22 +325,20 @@ func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {
 	return roundID
 }
 
-// deriveRoundID computes Blake2b-256(snapshot_height || snapshot_blockhash ||
-// proposals_hash || vote_end_time || nullifier_imt_root || nc_root).
+// deriveRoundID computes vote_round_id via Poseidon hash (FFI call to Rust).
 func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
-	h, _ := blake2b.New256(nil)
-	var buf [8]byte
-
-	binary.BigEndian.PutUint64(buf[:], msg.SnapshotHeight)
-	h.Write(buf[:])
-	h.Write(msg.SnapshotBlockhash)
-	h.Write(msg.ProposalsHash)
-	binary.BigEndian.PutUint64(buf[:], msg.VoteEndTime)
-	h.Write(buf[:])
-	h.Write(msg.NullifierImtRoot)
-	h.Write(msg.NcRoot)
-
-	return h.Sum(nil)
+	rid, err := roundid.DeriveRoundID(
+		msg.SnapshotHeight,
+		msg.SnapshotBlockhash,
+		msg.ProposalsHash,
+		msg.VoteEndTime,
+		msg.NullifierImtRoot,
+		msg.NcRoot,
+	)
+	if err != nil {
+		panic(fmt.Sprintf("deriveRoundID: %v", err))
+	}
+	return rid[:]
 }
 
 // SeedDealtCeremony creates a PENDING round with DEALT ceremony fields.

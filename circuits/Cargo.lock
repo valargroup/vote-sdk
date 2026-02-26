@@ -940,6 +940,7 @@ dependencies = [
  "blake2b_simd",
  "ff",
  "group",
+ "halo2_gadgets",
  "halo2_proofs",
  "hex",
  "incrementalmerkletree",
