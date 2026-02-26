@@ -1,6 +1,6 @@
 // Command create-val-tx constructs a MsgCreateValidatorWithPallasKey,
 // signs it via `zallyd tx sign`, and broadcasts it via `zallyd tx broadcast`.
-// Used by init_multi_ci.sh to register post-genesis validators that join an
+// Used by init_multi.sh --ci to register post-genesis validators that join an
 // already-running chain.
 //
 // Usage:
