@@ -308,6 +308,51 @@ func TestTreeHandle_CloseIsIdempotent(t *testing.T) {
 	h.Close() // second call should be safe
 }
 
+// TestVerifyRootFromLeaves_Match verifies that VerifyRootFromLeaves returns nil
+// when the ephemeral rebuild matches the golden root.
+func TestVerifyRootFromLeaves_Match(t *testing.T) {
+	require.NoError(t, VerifyRootFromLeaves(goldenLeaves(), goldenRoot()))
+}
+
+// TestVerifyRootFromLeaves_Empty verifies that an empty leaf slice is a no-op.
+func TestVerifyRootFromLeaves_Empty(t *testing.T) {
+	require.NoError(t, VerifyRootFromLeaves(nil, nil))
+	require.NoError(t, VerifyRootFromLeaves([][]byte{}, []byte{}))
+}
+
+// TestVerifyRootFromLeaves_Mismatch verifies that a wrong expectedRoot returns
+// a descriptive error.
+func TestVerifyRootFromLeaves_Mismatch(t *testing.T) {
+	wrongRoot := make([]byte, LeafBytes) // all-zero root, never a valid tree root
+	err := VerifyRootFromLeaves(goldenLeaves(), wrongRoot)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "root mismatch")
+}
+
+// TestVerifyRootFromLeaves_WrongLeafCount verifies that using a subset of
+// leaves produces a different root and is caught as a mismatch.
+func TestVerifyRootFromLeaves_WrongLeafCount(t *testing.T) {
+	fullRoot := goldenRoot()
+	// Build root from only the first two leaves — must differ from the three-leaf root.
+	err := VerifyRootFromLeaves(goldenLeaves()[:2], fullRoot)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "root mismatch")
+}
+
+// TestVerifyRootFromLeaves_CorruptLeaf verifies that a single bit-flip in one
+// leaf is caught as a mismatch against the true golden root.
+func TestVerifyRootFromLeaves_CorruptLeaf(t *testing.T) {
+	leaves := goldenLeaves()
+	corrupt := make([]byte, LeafBytes)
+	copy(corrupt, leaves[1])
+	corrupt[0] ^= 0xFF // flip all bits of the first byte
+	corrupted := [][]byte{leaves[0], corrupt, leaves[2]}
+
+	err := VerifyRootFromLeaves(corrupted, goldenRoot())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "root mismatch")
+}
+
 // TestTreeHandle_DeltaAppendMatchesFull verifies that appending in two batches
 // (simulating two blocks) produces the same root as a single full-batch append.
 func TestTreeHandle_DeltaAppendMatchesFull(t *testing.T) {

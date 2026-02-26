@@ -43,5 +43,12 @@ func (k *Keeper) ComputeTreeRoot(kvStore store.KVStore, nextIndex, blockHeight u
 			return nil, err
 		}
 	}
-	return k.treeHandle.Root()
+	root, err := k.treeHandle.Root()
+	if err != nil {
+		return nil, err
+	}
+	if err := k.debugVerifyConsistency(kvStore, nextIndex, root); err != nil {
+		return nil, err
+	}
+	return root, nil
 }
