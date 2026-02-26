@@ -134,6 +134,36 @@ func (k *Keeper) JailValidator(ctx context.Context, operatorAddr string) error {
 	return k.stakingKeeper.Jail(ctx, consAddr)
 }
 
+// UnjailValidator unjails a validator by its operator address.
+// Resolves the valoper → consensus address via the staking keeper, calls
+// Unjail, and resets the ceremony miss counter.
+func (k Keeper) UnjailValidator(ctx context.Context, valoperAddr string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic resolving consensus address for %s: %v", valoperAddr, r)
+		}
+	}()
+
+	valAddr, err := sdk.ValAddressFromBech32(valoperAddr)
+	if err != nil {
+		return fmt.Errorf("invalid valoper address %q: %w", valoperAddr, err)
+	}
+	val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get validator %s: %w", valoperAddr, err)
+	}
+	consAddr, err := val.GetConsAddr()
+	if err != nil {
+		return fmt.Errorf("failed to get consensus address for %s: %w", valoperAddr, err)
+	}
+	if err := k.stakingKeeper.Unjail(ctx, consAddr); err != nil {
+		return err
+	}
+
+	kvStore := k.OpenKVStore(ctx)
+	return k.ResetCeremonyMiss(kvStore, valoperAddr)
+}
+
 // GetCeremonyMissCount returns the consecutive ceremony miss count for a validator.
 func (k Keeper) GetCeremonyMissCount(kvStore store.KVStore, valoperAddr string) (uint64, error) {
 	bz, err := kvStore.Get(types.CeremonyMissKey(valoperAddr))

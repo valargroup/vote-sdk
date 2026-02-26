@@ -60,7 +60,7 @@ test: test-unit test-integration test-helper
 
 ## ceremony: Register Pallas key + create round + wait for ACTIVE (per-round auto-ceremony)
 ceremony:
-	ZALLY_API_URL=http://localhost:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml ceremony_bootstrap -- --nocapture --ignored
+	ZALLY_API_URL=http://localhost:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml round_activation -- --nocapture --ignored
 
 ## test-api: Rust E2E API tests against a running chain (requires: make init && make start)
 test-api:

@@ -57,6 +57,7 @@ func init() {
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
 			ProvideSetVoteManagerSigner,
+			ProvideUnjailValidatorSigner,
 		),
 	)
 }
@@ -196,6 +197,13 @@ func ProvideCreateValidatorWithPallasKeySigner() signing.CustomGetSigner {
 func ProvideSetVoteManagerSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgSetVoteManager"),
+		Fn:      ceremonyCreatorSignerFn,
+	}
+}
+
+func ProvideUnjailValidatorSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("zvote.v1.MsgUnjailValidator"),
 		Fn:      ceremonyCreatorSignerFn,
 	}
 }

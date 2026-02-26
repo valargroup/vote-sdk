@@ -40,7 +40,10 @@ GRPC_WEB_PORTS=(9391 9491 9591)
 API_PORTS=(1418 1518 1618)
 PPROF_PORTS=(6160 6260 6360)
 
-# Self-delegation amount for each validator.
+# Self-delegation amounts. Val1 gets extra stake so that any 2 validators
+# hold >2/3 of total power — the chain keeps producing blocks if one node
+# goes down (required for the restart test).
+VAL1_SELF_DELEGATION="20000000${DENOM}"
 SELF_DELEGATION="10000000${DENOM}"
 
 # Genesis account balance (enough for self-delegation + gas).
@@ -242,7 +245,7 @@ for i in 2 3; do
 done
 
 # Create genesis transaction for val1 (self-delegation).
-$BINARY genesis gentx validator "$SELF_DELEGATION" \
+$BINARY genesis gentx validator "$VAL1_SELF_DELEGATION" \
     --chain-id "$CHAIN_ID" \
     --keyring-backend test \
     --home "$HOME_VAL1"
