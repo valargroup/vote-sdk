@@ -1130,6 +1130,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tower-http 0.4.4",
+ "voting-circuits",
 ]
 
 [[package]]
@@ -2221,6 +2222,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.115",
+]
+
+[[package]]
+name = "voting-circuits"
+version = "0.1.0"
+dependencies = [
+ "ff",
+ "group",
+ "halo2_gadgets",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "incrementalmerkletree",
+ "lazy_static",
+ "orchard",
+ "pasta_curves",
+ "rand",
+ "sinsemilla",
 ]
 
 [[package]]

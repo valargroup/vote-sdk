@@ -32,15 +32,15 @@ use incrementalmerkletree::{Hashable, Level};
 use rand::rngs::OsRng;
 
 use orchard::{
-    delegation::{
-        builder::{build_delegation_bundle, RealNoteInput},
-        imt::{ImtError, ImtProofData as OrchardImtProofData, ImtProvider, IMT_DEPTH},
-    },
     keys::{FullViewingKey, Scope, SpendingKey},
     note::{ExtractedNoteCommitment, Note, Rho},
     tree::{MerkleHashOrchard, MerklePath},
     value::NoteValue,
     NOTE_COMMITMENT_TREE_DEPTH,
+};
+use voting_circuits::delegation::{
+    builder::{build_delegation_bundle, RealNoteInput},
+    imt::{ImtError, ImtProofData as OrchardImtProofData, ImtProvider, IMT_DEPTH},
 };
 
 // ── JSON response types (mirrors server.rs) ─────────────────────────
