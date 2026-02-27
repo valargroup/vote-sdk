@@ -24,16 +24,17 @@ VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend 
 echo "Validator address: $VALIDATOR_ADDR"
 echo "Validator valoper: $VALIDATOR_VALOPER"
 
-# Import the deterministic vote-manager key (matches E2E test constant).
+# Import the deterministic bootstrap admin key (matches E2E test constant).
+# In dev mode this account is also set as the vote-manager for convenience.
 VM_PRIVKEY="b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee"
 $BINARY keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_DIR"
 MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_DIR")
-echo "Manager address:   $MANAGER_ADDR"
+echo "Admin address:     $MANAGER_ADDR"
 
 # Add genesis accounts with tokens
-$BINARY genesis add-genesis-account "$VALIDATOR_ADDR" "100000000${DENOM}" \
+$BINARY genesis add-genesis-account "$VALIDATOR_ADDR" "10000000${DENOM}" \
     --keyring-backend test --home "$HOME_DIR"
-$BINARY genesis add-genesis-account "$MANAGER_ADDR" "10000000${DENOM}" \
+$BINARY genesis add-genesis-account "$MANAGER_ADDR" "1000000000${DENOM}" \
     --keyring-backend test --home "$HOME_DIR"
 
 # Create genesis transaction (self-delegation)

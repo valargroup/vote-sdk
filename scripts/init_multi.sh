@@ -10,7 +10,6 @@
 #   bash sdk/scripts/init_multi.sh --ci     # CI/remote deployment
 #
 # --ci mode differences:
-#   - Val1 self-delegation is 10M (uniform) instead of 20M (2/3 tolerance)
 #   - Helper server is configured on val1 only (not all 3)
 #   - No pkill cleanup (processes managed by systemd)
 #   - Summary prints systemd + create-val-tx instructions
@@ -62,15 +61,13 @@ PPROF_PORTS=(6160 6260 6360)
 # Self-delegation amounts. In local mode, val1 gets extra stake so that any 2
 # validators hold >2/3 of total power — the chain keeps producing blocks if one
 # node goes down (required for the restart test). CI mode uses uniform stakes.
-if [ "$CI_MODE" = true ]; then
-    VAL1_SELF_DELEGATION="10000000${DENOM}"
-else
-    VAL1_SELF_DELEGATION="20000000${DENOM}"
-fi
+VAL1_SELF_DELEGATION="10000000${DENOM}"
 SELF_DELEGATION="10000000${DENOM}"
 
-# Genesis account balance (enough for self-delegation + gas).
-GENESIS_BALANCE="100000000${DENOM}"
+# Validator genesis balance (covers the 10M self-delegation).
+GENESIS_BALANCE="10000000${DENOM}"
+# Bootstrap admin balance (enough to fund up to 100 validators at 10M each).
+ADMIN_BALANCE="1000000000${DENOM}"
 
 # ---------------------------------------------------------------------------
 # Cleanup
@@ -225,8 +222,8 @@ $BINARY keys add validator --keyring-backend test --home "$HOME_VAL1"
 VAL1_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_VAL1")
 echo "Val1 address: $VAL1_ADDR"
 
-# Import the deterministic vote-manager key (matches E2E test constant).
-# This key must be funded in genesis so MsgCreateVotingSession can be signed.
+# Import the deterministic bootstrap admin key (matches E2E test constant).
+# In dev mode this account is also set as the vote-manager for convenience.
 VM_PRIVKEY="b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee"
 $BINARY keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_VAL1"
 MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_VAL1")
@@ -256,10 +253,10 @@ done
 # Save val1 address too.
 echo "$VAL1_ADDR" > "$HOME_VAL1/validator_address.txt"
 
-# Add genesis accounts for all 3 validators and the vote manager.
+# Add genesis accounts for all 3 validators and the bootstrap admin.
 $BINARY genesis add-genesis-account "$VAL1_ADDR" "$GENESIS_BALANCE" \
     --keyring-backend test --home "$HOME_VAL1"
-$BINARY genesis add-genesis-account "$MANAGER_ADDR" "10000000${DENOM}" \
+$BINARY genesis add-genesis-account "$MANAGER_ADDR" "$ADMIN_BALANCE" \
     --keyring-backend test --home "$HOME_VAL1"
 
 for i in 2 3; do
