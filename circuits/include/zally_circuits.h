@@ -399,7 +399,7 @@ int32_t zally_verify_share_reveal_proof(
  *   share_index           - Which of the 16 shares (0..15).
  *   proposal_id           - Proposal being voted on.
  *   vote_decision         - Vote choice.
- *   round_id_ptr          - Pointer to 32-byte raw Blake2b-256 round ID.
+ *   round_id_ptr          - Pointer to 32-byte round ID (canonical Pallas Fp).
  *   round_id_len          - Length (must be 32).
  *   proof_out             - Output buffer for proof bytes.
  *   proof_out_capacity    - Size of proof_out buffer (recommend 8192).
@@ -458,6 +458,41 @@ int32_t zally_extract_nc_root(
     const uint8_t* hex_ptr,
     size_t hex_len,
     uint8_t* root_out
+);
+
+/* -----------------------------------------------------------------------
+ * Round ID derivation (Poseidon)
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Derive vote_round_id from session fields via Poseidon hash.
+ *
+ * Encodes the 6 inputs into 8 Fp elements and hashes with
+ * Poseidon::<ConstantLength<8>> (P128Pow5T3). The output is a canonical
+ * 32-byte Pallas Fp element.
+ *
+ * Parameters:
+ *   snapshot_height      - Block height for the snapshot.
+ *   snapshot_blockhash   - Pointer to 32-byte block hash.
+ *   proposals_hash       - Pointer to 32-byte proposals hash.
+ *   vote_end_time        - Unix timestamp when voting ends.
+ *   nullifier_imt_root   - Pointer to 32-byte canonical Fp (IMT root).
+ *   nc_root              - Pointer to 32-byte canonical Fp (NC root).
+ *   round_id_out         - Pointer to 32-byte output buffer.
+ *
+ * Returns:
+ *    0  on success (round_id written to round_id_out).
+ *   -1  if any pointer is null.
+ *   -3  if nullifier_imt_root or nc_root is not a canonical Pallas Fp.
+ */
+int32_t zally_derive_round_id(
+    uint64_t snapshot_height,
+    const uint8_t* snapshot_blockhash,
+    const uint8_t* proposals_hash,
+    uint64_t vote_end_time,
+    const uint8_t* nullifier_imt_root,
+    const uint8_t* nc_root,
+    uint8_t* round_id_out
 );
 
 #ifdef __cplusplus

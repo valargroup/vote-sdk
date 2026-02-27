@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 use halo2_proofs::pasta::{EqAffine, Fp};
 use halo2_proofs::plonk::VerifyingKey;
 use halo2_proofs::poly::commitment::Params;
-use pasta_curves::group::ff::{FromUniformBytes, PrimeField};
+use pasta_curves::group::ff::PrimeField;
 
 use crate::delegation;
 use crate::redpallas;
@@ -73,21 +73,59 @@ pub extern "C" fn zally_clear_error() {
     });
 }
 
-/// Convert a 32-byte hash (e.g. Blake2b-256 output) to a canonical Pallas Fp
-/// element via wide reduction.
+/// Derive vote_round_id as a canonical Pallas Fp element via Poseidon hash.
 ///
-/// Raw 32-byte hashes are frequently non-canonical (the Pallas modulus is
-/// ~2^254, so ~75% of random 32-byte values exceed it). This function
-/// zero-extends the input to 64 bytes and calls `from_uniform_bytes`, which
-/// performs a modular reduction that always yields a valid, canonical Fp.
+/// Encodes the 6 session fields into 8 Fp elements and hashes them with
+/// `Poseidon::<ConstantLength<8>>` (P128Pow5T3, same params as circuit hashes).
 ///
-/// Used for `voting_round_id` (Blake2b-256 derived) in ZKP #1, #2, and #3.
+/// Input encoding:
+///   snapshot_height (u64)        → Fp::from(u64)
+///   snapshot_blockhash (32 bytes)→ 2 Fp: from_u128(lo), from_u128(hi)
+///   proposals_hash (32 bytes)    → 2 Fp: from_u128(lo), from_u128(hi)
+///   vote_end_time (u64)          → Fp::from(u64)
+///   nullifier_imt_root (32 bytes)→ Fp::from_repr() (already canonical)
+///   nc_root (32 bytes)           → Fp::from_repr() (already canonical)
 ///
-/// TODO: Once we move vote round to a field element we can delete this.
-fn hash_bytes_to_fp(bytes: [u8; 32]) -> pasta_curves::pallas::Base {
-    let mut wide = [0u8; 64];
-    wide[..32].copy_from_slice(&bytes);
-    pasta_curves::pallas::Base::from_uniform_bytes(&wide)
+/// Total: 8 Fp elements.
+fn derive_round_id_poseidon(
+    snapshot_height: u64,
+    snapshot_blockhash: [u8; 32],
+    proposals_hash: [u8; 32],
+    vote_end_time: u64,
+    nullifier_imt_root: [u8; 32],
+    nc_root: [u8; 32],
+) -> Result<pasta_curves::pallas::Base, &'static str> {
+    use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
+    use pasta_curves::pallas;
+
+    // Helper: split a 32-byte value into two 128-bit limbs (lo, hi) as Fp elements.
+    let split_to_limbs = |bytes: &[u8; 32]| -> (pallas::Base, pallas::Base) {
+        let lo = u128::from_le_bytes(bytes[..16].try_into().unwrap());
+        let hi = u128::from_le_bytes(bytes[16..32].try_into().unwrap());
+        (pallas::Base::from_u128(lo), pallas::Base::from_u128(hi))
+    };
+
+    let (bh_lo, bh_hi) = split_to_limbs(&snapshot_blockhash);
+    let (ph_lo, ph_hi) = split_to_limbs(&proposals_hash);
+
+    let nf_root: pallas::Base = Option::from(pallas::Base::from_repr(nullifier_imt_root))
+        .ok_or("nullifier_imt_root is not a canonical Pallas Fp element")?;
+    let nc: pallas::Base = Option::from(pallas::Base::from_repr(nc_root))
+        .ok_or("nc_root is not a canonical Pallas Fp element")?;
+
+    let inputs = [
+        pallas::Base::from(snapshot_height),
+        bh_lo,
+        bh_hi,
+        ph_lo,
+        ph_hi,
+        pallas::Base::from(vote_end_time),
+        nf_root,
+        nc,
+    ];
+
+    let hash = poseidon::Hash::<_, P128Pow5T3, ConstantLength<8>, 3, 2>::init().hash(inputs);
+    Ok(hash)
 }
 
 /// Cached delegation circuit params and verifying key.
@@ -364,11 +402,15 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
             return -3;
         }
     };
-    // vote_round_id is a Blake2b-256 hash and may be non-canonical as a raw
-    // Fp encoding. Use wide reduction to get a canonical field element.
-    //
-    // TODO: Once we move vote round to a field element we can use deserialize_fp directly.
-    let vote_round_id = hash_bytes_to_fp(chunk(4));
+    let vote_round_id = match deserialize_fp(chunk(4)) {
+        Some(f) => f,
+        None => {
+            set_ffi_error(
+                "delegation: slot 4 (vote_round_id) is not a canonical Pallas Fp element",
+            );
+            return -3;
+        }
+    };
     let nc_root = match deserialize_fp(chunk(5)) {
         Some(f) => f,
         None => {
@@ -379,54 +421,42 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
     let nf_imt_root = match deserialize_fp(chunk(6)) {
         Some(f) => f,
         None => {
-            set_ffi_error(
-                "delegation: slot 6 (nf_imt_root) is not a canonical Pallas Fp element",
-            );
+            set_ffi_error("delegation: slot 6 (nf_imt_root) is not a canonical Pallas Fp element");
             return -3;
         }
     };
     let gov_null_1 = match deserialize_fp(chunk(7)) {
         Some(f) => f,
         None => {
-            set_ffi_error(
-                "delegation: slot 7 (gov_null_1) is not a canonical Pallas Fp element",
-            );
+            set_ffi_error("delegation: slot 7 (gov_null_1) is not a canonical Pallas Fp element");
             return -3;
         }
     };
     let gov_null_2 = match deserialize_fp(chunk(8)) {
         Some(f) => f,
         None => {
-            set_ffi_error(
-                "delegation: slot 8 (gov_null_2) is not a canonical Pallas Fp element",
-            );
+            set_ffi_error("delegation: slot 8 (gov_null_2) is not a canonical Pallas Fp element");
             return -3;
         }
     };
     let gov_null_3 = match deserialize_fp(chunk(9)) {
         Some(f) => f,
         None => {
-            set_ffi_error(
-                "delegation: slot 9 (gov_null_3) is not a canonical Pallas Fp element",
-            );
+            set_ffi_error("delegation: slot 9 (gov_null_3) is not a canonical Pallas Fp element");
             return -3;
         }
     };
     let gov_null_4 = match deserialize_fp(chunk(10)) {
         Some(f) => f,
         None => {
-            set_ffi_error(
-                "delegation: slot 10 (gov_null_4) is not a canonical Pallas Fp element",
-            );
+            set_ffi_error("delegation: slot 10 (gov_null_4) is not a canonical Pallas Fp element");
             return -3;
         }
     };
     let gov_null_5 = match deserialize_fp(chunk(11)) {
         Some(f) => f,
         None => {
-            set_ffi_error(
-                "delegation: slot 11 (gov_null_5) is not a canonical Pallas Fp element",
-            );
+            set_ffi_error("delegation: slot 11 (gov_null_5) is not a canonical Pallas Fp element");
             return -3;
         }
     };
@@ -545,9 +575,7 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
     let van_nullifier = match deserialize_fp(chunk(0)) {
         Some(f) => f,
         None => {
-            set_ffi_error(
-                "vote: slot 0 (van_nullifier) is not a canonical Pallas Fp element",
-            );
+            set_ffi_error("vote: slot 0 (van_nullifier) is not a canonical Pallas Fp element");
             return -3;
         }
     };
@@ -583,9 +611,7 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
     let vote_commitment = match deserialize_fp(chunk(4)) {
         Some(f) => f,
         None => {
-            set_ffi_error(
-                "vote: slot 4 (vote_commitment) is not a canonical Pallas Fp element",
-            );
+            set_ffi_error("vote: slot 4 (vote_commitment) is not a canonical Pallas Fp element");
             return -3;
         }
     };
@@ -611,10 +637,14 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
     let proposal_id_u32 = u32::from_le_bytes(proposal_id_bytes[..4].try_into().unwrap());
     let proposal_id = pallas::Base::from(u64::from(proposal_id_u32));
 
-    // Slot 8: voting_round_id (Blake2b-256 hash — use wide reduction like ZKP #1 and #3)
-    //
-    // TODO: Once we move vote round to a field element we can use deserialize_fp directly.
-    let voting_round_id = hash_bytes_to_fp(chunk(8));
+    // Slot 8: voting_round_id (canonical Pallas Fp element)
+    let voting_round_id = match deserialize_fp(chunk(8)) {
+        Some(f) => f,
+        None => {
+            set_ffi_error("vote: slot 8 (voting_round_id) is not a canonical Pallas Fp element");
+            return -3;
+        }
+    };
 
     // Slot 9: ea_pk (compressed Pallas point) — decompress to (x, y).
     let ea_pk_bytes = chunk(9);
@@ -768,23 +798,16 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
     ];
 
     // Deserialize each 32-byte chunk as a Pallas Fp element.
-    // Slot 6 (voting_round_id) uses wide reduction because it is a
-    // Blake2b-256 hash that may be non-canonical as a raw Fp encoding.
     let mut public_inputs: Vec<pallas::Base> = Vec::with_capacity(NUM_PUBLIC_INPUTS);
     for i in 0..NUM_PUBLIC_INPUTS {
-        if i == 6 {
-            // voting_round_id: wide reduction for Blake2b-256 output.
-            public_inputs.push(hash_bytes_to_fp(chunk(i)));
-        } else {
-            match deserialize_fp(chunk(i)) {
-                Some(f) => public_inputs.push(f),
-                None => {
-                    set_ffi_error(format!(
-                        "share_reveal: slot {} ({}) is not a canonical Pallas Fp element",
-                        i, SLOT_NAMES[i]
-                    ));
-                    return -3;
-                }
+        match deserialize_fp(chunk(i)) {
+            Some(f) => public_inputs.push(f),
+            None => {
+                set_ffi_error(format!(
+                    "share_reveal: slot {} ({}) is not a canonical Pallas Fp element",
+                    i, SLOT_NAMES[i]
+                ));
+                return -3;
             }
         }
     }
@@ -826,7 +849,7 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
 /// 1. Decode Merkle auth path from serialized bytes
 /// 2. Decode 16 share commitments (public inputs to the circuit)
 /// 3. Decode primary blind and revealed share coordinates
-/// 4. Convert round_id via wide reduction to canonical Fp
+/// 4. Deserialize round_id as canonical Fp
 /// 5. Build share reveal circuit with all witnesses + public share_comms
 /// 6. Generate Halo2 proof (CPU-intensive, ~30-60s in release mode)
 ///
@@ -839,7 +862,7 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
 /// * `share_index`           - Which of the 16 shares (0..15)
 /// * `proposal_id`           - Proposal being voted on
 /// * `vote_decision`         - Vote choice (0=support, 1=oppose, 2=skip)
-/// * `round_id_ptr/len`      - 32-byte raw Blake2b-256 round ID
+/// * `round_id_ptr/len`      - 32-byte round ID (canonical Pallas Fp)
 /// * `proof_out/capacity/len_out` - Output buffer for the proof bytes
 /// * `nullifier_out`         - 32-byte output buffer for share nullifier
 /// * `tree_root_out`         - 32-byte output buffer for commitment tree root
@@ -965,11 +988,14 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
         None => return -3,
     };
 
-    // --- Step 5: Convert round_id to Fp via wide reduction ---
+    // --- Step 5: Deserialize round_id as canonical Fp ---
     let round_id_raw = std::slice::from_raw_parts(round_id_ptr, 32);
     let mut round_id_bytes = [0u8; 32];
     round_id_bytes.copy_from_slice(round_id_raw);
-    let voting_round_id = hash_bytes_to_fp(round_id_bytes);
+    let voting_round_id = match Option::from(pallas::Base::from_repr(round_id_bytes)) {
+        Some(fp) => fp,
+        None => return -3,
+    };
 
     // --- Step 6: Build circuit and instance ---
     let proposal_id_fp = pallas::Base::from(u64::from(proposal_id));
@@ -1040,9 +1066,8 @@ pub fn build_share_reveal_test_data()
     let round_id = [0u8; 32];
 
     // Synthetic blind factors.
-    let share_blinds: [pallas::Base; 16] = core::array::from_fn(|i| {
-        pallas::Base::from(1001u64 + i as u64)
-    });
+    let share_blinds: [pallas::Base; 16] =
+        core::array::from_fn(|i| pallas::Base::from(1001u64 + i as u64));
 
     // Synthetic x-coordinates for encrypted shares.
     let mut all_c1_x = [pallas::Base::zero(); 16];
@@ -1059,9 +1084,12 @@ pub fn build_share_reveal_test_data()
     let shares_hash_fp = voting_circuits::shares_hash::shares_hash_from_comms(share_comms);
 
     // Compute vote_commitment.
+    let voting_round_id = Option::from(pallas::Base::from_repr(round_id))
+        .expect("test round_id must be canonical Fp");
     let proposal_id_fp = pallas::Base::from(u64::from(proposal_id));
     let vote_decision_fp = pallas::Base::from(u64::from(vote_decision));
     let vote_commitment = vote_commitment_tree::vote_commitment_hash(
+        voting_round_id,
         shares_hash_fp,
         proposal_id_fp,
         vote_decision_fp,
@@ -1122,11 +1150,8 @@ pub type ZallyKvSetFn = unsafe extern "C" fn(
     val_len: usize,
 ) -> i32;
 
-pub type ZallyKvDeleteFn = unsafe extern "C" fn(
-    ctx: *mut std::os::raw::c_void,
-    key: *const u8,
-    key_len: usize,
-) -> i32;
+pub type ZallyKvDeleteFn =
+    unsafe extern "C" fn(ctx: *mut std::os::raw::c_void, key: *const u8, key_len: usize) -> i32;
 
 pub type ZallyKvIterCreateFn = unsafe extern "C" fn(
     ctx: *mut std::os::raw::c_void,
@@ -1143,8 +1168,7 @@ pub type ZallyKvIterNextFn = unsafe extern "C" fn(
     out_val_len: *mut usize,
 ) -> i32;
 
-pub type ZallyKvIterFreeFn =
-    unsafe extern "C" fn(iter: *mut std::os::raw::c_void);
+pub type ZallyKvIterFreeFn = unsafe extern "C" fn(iter: *mut std::os::raw::c_void);
 
 pub type ZallyKvFreeBufFn = unsafe extern "C" fn(ptr: *mut u8, len: usize);
 
@@ -1323,7 +1347,6 @@ pub unsafe extern "C" fn zally_vote_tree_root_stateful(
     0
 }
 
-
 /// Return the number of leaves appended to the stateful handle so far.
 ///
 /// # Safety
@@ -1421,6 +1444,74 @@ pub unsafe extern "C" fn zally_extract_nc_root(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Round ID derivation (Poseidon)
+// ---------------------------------------------------------------------------
+
+/// Derive vote_round_id from session fields via Poseidon hash.
+///
+/// Encodes the 6 inputs into 8 Fp elements and hashes with
+/// Poseidon::<ConstantLength<8>> (P128Pow5T3). The output is a canonical
+/// 32-byte Pallas Fp element written to `round_id_out`.
+///
+/// # Arguments
+/// * `snapshot_height`      - Block height for the snapshot.
+/// * `snapshot_blockhash`   - 32-byte block hash at snapshot_height.
+/// * `proposals_hash`       - 32-byte hash of the proposals.
+/// * `vote_end_time`        - Unix timestamp when voting ends.
+/// * `nullifier_imt_root`   - 32-byte canonical Fp (IMT root).
+/// * `nc_root`              - 32-byte canonical Fp (Orchard NC root).
+/// * `round_id_out`         - 32-byte output buffer for the round ID.
+///
+/// # Returns
+/// * `0`  on success (round_id written to round_id_out).
+/// * `-1` if any pointer is null.
+/// * `-3` if nullifier_imt_root or nc_root is not a canonical Pallas Fp element.
+///
+/// # Safety
+/// All pointers must be valid and point to buffers of at least 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn zally_derive_round_id(
+    snapshot_height: u64,
+    snapshot_blockhash: *const u8,
+    proposals_hash: *const u8,
+    vote_end_time: u64,
+    nullifier_imt_root: *const u8,
+    nc_root: *const u8,
+    round_id_out: *mut u8,
+) -> i32 {
+    if snapshot_blockhash.is_null()
+        || proposals_hash.is_null()
+        || nullifier_imt_root.is_null()
+        || nc_root.is_null()
+        || round_id_out.is_null()
+    {
+        set_ffi_error("derive_round_id: null pointer argument");
+        return -1;
+    }
+
+    let mut bh = [0u8; 32];
+    bh.copy_from_slice(std::slice::from_raw_parts(snapshot_blockhash, 32));
+    let mut ph = [0u8; 32];
+    ph.copy_from_slice(std::slice::from_raw_parts(proposals_hash, 32));
+    let mut nf_root = [0u8; 32];
+    nf_root.copy_from_slice(std::slice::from_raw_parts(nullifier_imt_root, 32));
+    let mut nc = [0u8; 32];
+    nc.copy_from_slice(std::slice::from_raw_parts(nc_root, 32));
+
+    match derive_round_id_poseidon(snapshot_height, bh, ph, vote_end_time, nf_root, nc) {
+        Ok(fp) => {
+            let bytes = fp.to_repr();
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), round_id_out, 32);
+            0
+        }
+        Err(msg) => {
+            set_ffi_error(format!("derive_round_id: {}", msg));
+            -3
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1500,7 +1591,7 @@ mod tests {
         // Slot 5: vote_comm_tree_root
         public_inputs[160..192].copy_from_slice(&tree_root);
 
-        // Slot 6: voting_round_id (raw bytes; verifier applies wide reduction)
+        // Slot 6: voting_round_id (canonical Fp)
         public_inputs[192..224].copy_from_slice(&round_id);
 
         let verify_rc = unsafe {
@@ -1513,5 +1604,87 @@ mod tests {
         };
 
         assert_eq!(verify_rc, 0, "verification failed with code {}", verify_rc);
+    }
+
+    #[test]
+    fn test_derive_round_id_poseidon_deterministic() {
+        let bh = [0xaa; 32];
+        let ph = [0xbb; 32];
+        let nf_root = [0x01; 32]; // canonical Fp (MSB < 0x40)
+        let nc = [0x02; 32]; // canonical Fp
+
+        let r1 = derive_round_id_poseidon(1000, bh, ph, 2_000_000, nf_root, nc).unwrap();
+        let r2 = derive_round_id_poseidon(1000, bh, ph, 2_000_000, nf_root, nc).unwrap();
+        assert_eq!(r1, r2, "round_id must be deterministic");
+        assert_ne!(
+            r1,
+            pasta_curves::pallas::Base::zero(),
+            "round_id must not be zero"
+        );
+    }
+
+    #[test]
+    fn test_derive_round_id_poseidon_different_inputs() {
+        let bh = [0xaa; 32];
+        let ph = [0xbb; 32];
+        let nf_root = [0x01; 32];
+        let nc = [0x02; 32];
+
+        let r1 = derive_round_id_poseidon(1000, bh, ph, 2_000_000, nf_root, nc).unwrap();
+        let r2 = derive_round_id_poseidon(1001, bh, ph, 2_000_000, nf_root, nc).unwrap();
+        assert_ne!(
+            r1, r2,
+            "different snapshot_height must produce different round_id"
+        );
+
+        let r3 = derive_round_id_poseidon(1000, bh, ph, 3_000_000, nf_root, nc).unwrap();
+        assert_ne!(
+            r1, r3,
+            "different vote_end_time must produce different round_id"
+        );
+    }
+
+    #[test]
+    fn test_derive_round_id_ffi_matches_rust() {
+        let bh = [0xaa; 32];
+        let ph = [0xbb; 32];
+        let nf_root = [0x01; 32];
+        let nc = [0x02; 32];
+
+        let rust_result = derive_round_id_poseidon(1000, bh, ph, 2_000_000, nf_root, nc).unwrap();
+
+        let mut ffi_out = [0u8; 32];
+        let rc = unsafe {
+            zally_derive_round_id(
+                1000,
+                bh.as_ptr(),
+                ph.as_ptr(),
+                2_000_000,
+                nf_root.as_ptr(),
+                nc.as_ptr(),
+                ffi_out.as_mut_ptr(),
+            )
+        };
+        assert_eq!(rc, 0, "FFI call should succeed");
+        assert_eq!(
+            ffi_out,
+            rust_result.to_repr(),
+            "FFI and Rust must produce identical output"
+        );
+    }
+
+    #[test]
+    fn test_derive_round_id_rejects_non_canonical() {
+        let bh = [0xaa; 32];
+        let ph = [0xbb; 32];
+        let nc = [0x02; 32];
+        // Non-canonical: byte 31 = 0xFF > 0x40 (Pallas modulus MSB)
+        let bad_root = [0xFF; 32];
+
+        let result = derive_round_id_poseidon(1000, bh, ph, 2_000_000, bad_root, nc);
+        assert!(
+            result.is_err(),
+            "should reject non-canonical nullifier_imt_root"
+        );
     }
 }

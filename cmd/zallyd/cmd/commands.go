@@ -124,6 +124,7 @@ func initRootCmd(
 		PallasKeygenCmd(),
 		EncryptEAKeyCmd(),
 		InitValidatorKeysCmd(),
+		SignArbitraryCmd(),
 	)
 
 	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newAppFn, appExport, server.StartCmdOptions{

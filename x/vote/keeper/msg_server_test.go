@@ -3,13 +3,11 @@ package keeper_test
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/binary"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"golang.org/x/crypto/blake2b"
 
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
@@ -19,6 +17,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/z-cale/zally/crypto/roundid"
 	zallytest "github.com/z-cale/zally/testutil"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
@@ -84,19 +83,18 @@ func (s *MsgServerTestSuite) setupRootAtHeight(height uint64) {
 
 // computeExpectedRoundID mirrors the deriveRoundID function for test verification.
 func computeExpectedRoundID(msg *types.MsgCreateVotingSession) []byte {
-	h, _ := blake2b.New256(nil)
-	var buf [8]byte
-
-	binary.BigEndian.PutUint64(buf[:], msg.SnapshotHeight)
-	h.Write(buf[:])
-	h.Write(msg.SnapshotBlockhash)
-	h.Write(msg.ProposalsHash)
-	binary.BigEndian.PutUint64(buf[:], msg.VoteEndTime)
-	h.Write(buf[:])
-	h.Write(msg.NullifierImtRoot)
-	h.Write(msg.NcRoot)
-
-	return h.Sum(nil)
+	rid, err := roundid.DeriveRoundID(
+		msg.SnapshotHeight,
+		msg.SnapshotBlockhash,
+		msg.ProposalsHash,
+		msg.VoteEndTime,
+		msg.NullifierImtRoot,
+		msg.NcRoot,
+	)
+	if err != nil {
+		panic(fmt.Sprintf("computeExpectedRoundID: %v", err))
+	}
+	return rid[:]
 }
 
 // validSetupMsg returns a valid MsgCreateVotingSession for tests.
