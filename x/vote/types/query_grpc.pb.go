@@ -30,6 +30,7 @@ const (
 	Query_VoteManager_FullMethodName            = "/zvote.v1.Query/VoteManager"
 	Query_VoteSummary_FullMethodName            = "/zvote.v1.Query/VoteSummary"
 	Query_ListRounds_FullMethodName             = "/zvote.v1.Query/ListRounds"
+	Query_PallasKeys_FullMethodName             = "/zvote.v1.Query/PallasKeys"
 )
 
 // QueryClient is the client API for Query service.
@@ -63,6 +64,8 @@ type QueryClient interface {
 	VoteSummary(ctx context.Context, in *QueryVoteSummaryRequest, opts ...grpc.CallOption) (*QueryVoteSummaryResponse, error)
 	// ListRounds returns all stored vote rounds.
 	ListRounds(ctx context.Context, in *QueryListRoundsRequest, opts ...grpc.CallOption) (*QueryListRoundsResponse, error)
+	// PallasKeys returns all registered Pallas public keys from the global registry.
+	PallasKeys(ctx context.Context, in *QueryPallasKeysRequest, opts ...grpc.CallOption) (*QueryPallasKeysResponse, error)
 }
 
 type queryClient struct {
@@ -183,6 +186,16 @@ func (c *queryClient) ListRounds(ctx context.Context, in *QueryListRoundsRequest
 	return out, nil
 }
 
+func (c *queryClient) PallasKeys(ctx context.Context, in *QueryPallasKeysRequest, opts ...grpc.CallOption) (*QueryPallasKeysResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryPallasKeysResponse)
+	err := c.cc.Invoke(ctx, Query_PallasKeys_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
@@ -214,6 +227,8 @@ type QueryServer interface {
 	VoteSummary(context.Context, *QueryVoteSummaryRequest) (*QueryVoteSummaryResponse, error)
 	// ListRounds returns all stored vote rounds.
 	ListRounds(context.Context, *QueryListRoundsRequest) (*QueryListRoundsResponse, error)
+	// PallasKeys returns all registered Pallas public keys from the global registry.
+	PallasKeys(context.Context, *QueryPallasKeysRequest) (*QueryPallasKeysResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -256,6 +271,9 @@ func (UnimplementedQueryServer) VoteSummary(context.Context, *QueryVoteSummaryRe
 }
 func (UnimplementedQueryServer) ListRounds(context.Context, *QueryListRoundsRequest) (*QueryListRoundsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListRounds not implemented")
+}
+func (UnimplementedQueryServer) PallasKeys(context.Context, *QueryPallasKeysRequest) (*QueryPallasKeysResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PallasKeys not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -476,6 +494,24 @@ func _Query_ListRounds_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_PallasKeys_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryPallasKeysRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).PallasKeys(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_PallasKeys_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).PallasKeys(ctx, req.(*QueryPallasKeysRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -526,6 +562,10 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListRounds",
 			Handler:    _Query_ListRounds_Handler,
+		},
+		{
+			MethodName: "PallasKeys",
+			Handler:    _Query_PallasKeys_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

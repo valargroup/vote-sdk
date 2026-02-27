@@ -42,6 +42,9 @@ service Query {
 
   // ListRounds returns all stored vote rounds.
   rpc ListRounds(QueryListRoundsRequest) returns (QueryListRoundsResponse);
+
+  // PallasKeys returns all registered Pallas public keys from the global registry.
+  rpc PallasKeys(QueryPallasKeysRequest) returns (QueryPallasKeysResponse);
 }
 
 message QueryCommitmentTreeRequest {
@@ -127,4 +130,10 @@ message QueryListRoundsRequest {}
 
 message QueryListRoundsResponse {
   repeated VoteRound rounds = 1;
+}
+
+message QueryPallasKeysRequest {}
+
+message QueryPallasKeysResponse {
+  repeated ValidatorPallasKey validators = 1;
 }

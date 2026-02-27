@@ -272,6 +272,26 @@ func (qs queryServer) VoteSummary(goCtx context.Context, req *types.QueryVoteSum
 	return resp, nil
 }
 
+// PallasKeys returns all registered Pallas public keys from the global registry.
+func (qs queryServer) PallasKeys(goCtx context.Context, req *types.QueryPallasKeysRequest) (*types.QueryPallasKeysResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	var keys []*types.ValidatorPallasKey
+	if err := qs.k.IterateAllPallasKeys(kvStore, func(vpk *types.ValidatorPallasKey) bool {
+		keys = append(keys, vpk)
+		return false // collect all
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to iterate pallas keys: %v", err)
+	}
+
+	return &types.QueryPallasKeysResponse{Validators: keys}, nil
+}
+
 // ActiveRound returns the first active voting round, if any.
 // Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
 func (qs queryServer) ActiveRound(goCtx context.Context, req *types.QueryActiveRoundRequest) (*types.QueryActiveRoundResponse, error) {

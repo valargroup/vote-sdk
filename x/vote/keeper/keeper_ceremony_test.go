@@ -664,42 +664,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_HappyPath() {
 	s.SetupTest()
 	roundID, addrs := s.dealPendingRound(3)
 
-	// First ack: with 3 validators, 1/3 is already met (1*3 >= 3).
-	// So the first ack triggers CONFIRMED + ACTIVE.
-	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
-		Creator:      addrs[0],
-		VoteRoundId:  roundID,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
-	})
-	s.Require().NoError(err)
-
-	kv := s.keeper.OpenKVStore(s.ctx)
-	round, err := s.keeper.GetVoteRound(kv, roundID)
-	s.Require().NoError(err)
-	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus)
-	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
-	// StripNonAckers keeps only the one who acked.
-	s.Require().Len(round.CeremonyAcks, 1)
-	s.Require().Equal(addrs[0], round.CeremonyAcks[0].ValidatorAddress)
-	s.Require().Equal(uint64(s.ctx.BlockHeight()), round.CeremonyAcks[0].AckHeight)
-
-	// Verify event emission.
-	var ackEvents int
-	for _, e := range s.ctx.EventManager().Events() {
-		if e.Type == types.EventTypeAckExecutiveAuthorityKey {
-			ackEvents++
-		}
-	}
-	s.Require().Equal(1, ackEvents)
-}
-
-// TestAckExecutiveAuthorityKey_MultipleAcks tests a scenario where 1/3
-// threshold requires more than 1 ack (4 validators, need 2).
-func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_MultipleAcks() {
-	s.SetupTest()
-	roundID, addrs := s.dealPendingRound(4)
-
-	// First ack: 1 of 4 → 1*3=3 < 4, stays DEALT.
+	// First ack: fast path requires ALL validators, so 1/3 stays DEALT.
 	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
@@ -713,7 +678,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_MultipleAcks() {
 	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
 
-	// Second ack: 2 of 4 → 2*3=6 >= 4, triggers CONFIRMED + ACTIVE.
+	// Second ack: 2/3 — still not all, stays DEALT.
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[1],
 		VoteRoundId:  roundID,
@@ -723,11 +688,70 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_MultipleAcks() {
 
 	round, err = s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+
+	// Third ack: 3/3 — all acked, triggers CONFIRMED + ACTIVE.
+	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+		Creator:      addrs[2],
+		VoteRoundId:  roundID,
+		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+	})
+	s.Require().NoError(err)
+
+	round, err = s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
 	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
-	// StripNonAckers: only addrs[0] and addrs[1] remain.
-	s.Require().Len(round.CeremonyValidators, 2)
-	s.Require().Len(round.CeremonyPayloads, 2)
+	// No stripping — all validators remain.
+	s.Require().Len(round.CeremonyValidators, 3)
+	s.Require().Len(round.CeremonyAcks, 3)
+	s.Require().Equal(addrs[0], round.CeremonyAcks[0].ValidatorAddress)
+	s.Require().Equal(uint64(s.ctx.BlockHeight()), round.CeremonyAcks[0].AckHeight)
+
+	// Verify event emission.
+	var ackEvents int
+	for _, e := range s.ctx.EventManager().Events() {
+		if e.Type == types.EventTypeAckExecutiveAuthorityKey {
+			ackEvents++
+		}
+	}
+	s.Require().Equal(3, ackEvents)
+}
+
+// TestAckExecutiveAuthorityKey_PartialAcks tests that partial acks don't
+// trigger the fast path — confirmation requires all validators.
+func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_PartialAcks() {
+	s.SetupTest()
+	roundID, addrs := s.dealPendingRound(4)
+
+	// First ack: 1 of 4 → stays DEALT.
+	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+		Creator:      addrs[0],
+		VoteRoundId:  roundID,
+		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
+
+	// Second ack: 2 of 4 → still DEALT (>= 1/3 but not all).
+	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+		Creator:      addrs[1],
+		VoteRoundId:  roundID,
+		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+	})
+	s.Require().NoError(err)
+
+	round, err = s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
+	// All 4 validators still present (no stripping).
+	s.Require().Len(round.CeremonyValidators, 4)
 	s.Require().Len(round.CeremonyAcks, 2)
 }
 
@@ -845,7 +869,7 @@ func (s *MsgServerTestSuite) TestCeremonyLog_DealAndAck() {
 	s.SetupTest()
 	roundID, addrs := s.dealPendingRound(3)
 
-	// After deal: round should have 2 log entries (create + deal).
+	// After deal: round should have 1 log entry (deal).
 	kv := s.keeper.OpenKVStore(s.ctx)
 	round, err := s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
@@ -854,7 +878,7 @@ func (s *MsgServerTestSuite) TestCeremonyLog_DealAndAck() {
 	s.Require().Contains(round.CeremonyLog[0], "deal from")
 	s.Require().Contains(round.CeremonyLog[0], "ea_pk=")
 
-	// Ack from first validator (1/3 met with 3 validators → confirms).
+	// Ack from first validator: 1/3 — fast path requires all, stays DEALT.
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
@@ -864,19 +888,35 @@ func (s *MsgServerTestSuite) TestCeremonyLog_DealAndAck() {
 
 	round, err = s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
-	// Should have: deal + ack + confirmed = 3 entries.
-	s.Require().Len(round.CeremonyLog, 3, "expected 3 log entries after deal+ack+confirm")
+	// deal + ack = 2 entries (no confirm yet).
+	s.Require().Len(round.CeremonyLog, 2, "expected 2 log entries after deal+ack")
 	s.Require().Contains(round.CeremonyLog[1], "ack from")
 	s.Require().Contains(round.CeremonyLog[1], "1/3 acked")
-	s.Require().Contains(round.CeremonyLog[2], "ceremony confirmed")
-	s.Require().Contains(round.CeremonyLog[2], "round ACTIVE")
+
+	// Ack all remaining validators to trigger confirm.
+	for _, addr := range addrs[1:] {
+		_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+			Creator:      addr,
+			VoteRoundId:  roundID,
+			AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		})
+		s.Require().NoError(err)
+	}
+
+	round, err = s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	// deal + 3 acks + confirmed = 5 entries.
+	s.Require().Len(round.CeremonyLog, 5, "expected 5 log entries after deal+3acks+confirm")
+	s.Require().Contains(round.CeremonyLog[3], "3/3 acked")
+	s.Require().Contains(round.CeremonyLog[4], "ceremony confirmed")
+	s.Require().Contains(round.CeremonyLog[4], "round ACTIVE")
 }
 
-func (s *MsgServerTestSuite) TestCeremonyLog_MultipleAcksBeforeConfirm() {
+func (s *MsgServerTestSuite) TestCeremonyLog_PartialAcksNoConfirm() {
 	s.SetupTest()
 	roundID, addrs := s.dealPendingRound(4)
 
-	// First ack: 1/4 — below 1/3, no confirmation yet.
+	// First ack: 1/4 — stays DEALT.
 	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
@@ -887,11 +927,11 @@ func (s *MsgServerTestSuite) TestCeremonyLog_MultipleAcksBeforeConfirm() {
 	kv := s.keeper.OpenKVStore(s.ctx)
 	round, err := s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
-	// deal + ack = 2 entries (no confirm yet).
+	// deal + ack = 2 entries (no confirm).
 	s.Require().Len(round.CeremonyLog, 2)
 	s.Require().Contains(round.CeremonyLog[1], "1/4 acked")
 
-	// Second ack: 2/4 → confirms.
+	// Second ack: 2/4 — still no confirm (fast path needs all 4).
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[1],
 		VoteRoundId:  roundID,
@@ -901,11 +941,10 @@ func (s *MsgServerTestSuite) TestCeremonyLog_MultipleAcksBeforeConfirm() {
 
 	round, err = s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
-	// deal + ack1 + ack2 + confirmed = 4 entries.
-	s.Require().Len(round.CeremonyLog, 4)
+	// deal + ack1 + ack2 = 3 entries (no confirm).
+	s.Require().Len(round.CeremonyLog, 3)
 	s.Require().Contains(round.CeremonyLog[2], "2/4 acked")
-	s.Require().Contains(round.CeremonyLog[3], "ceremony confirmed")
-	s.Require().Contains(round.CeremonyLog[3], "2 non-ackers stripped")
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 }
 
 // ===========================================================================
@@ -1069,14 +1108,15 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 			"recovered ea_pk mismatch for validator %d", i)
 	}
 
-	// 7. Submit ack from first validator — with 3 validators and 1/3
-	// threshold, one ack is enough to confirm.
-	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
-		Creator:      addrs[0],
-		VoteRoundId:  roundID,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
-	})
-	s.Require().NoError(err)
+	// 7. Submit acks from all validators — fast path requires all to ack.
+	for _, addr := range addrs {
+		_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+			Creator:      addr,
+			VoteRoundId:  roundID,
+			AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		})
+		s.Require().NoError(err)
+	}
 
 	// 8. Verify round ceremony is CONFIRMED and round is ACTIVE.
 	round, err = s.keeper.GetVoteRound(kv, roundID)
