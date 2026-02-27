@@ -24,8 +24,8 @@ type ShareStore struct {
 	mu             sync.Mutex
 	schedule       map[string]time.Time // key: "round_id:share_index:proposal_id:tree_position"
 	meanDelay      time.Duration
-	roundCache     map[string]uint64 // roundID → vote_end_time (unix seconds)
-	fetchRoundInfo RoundInfoFetcher  // queries the chain; may be nil in tests
+	roundCache     map[string]uint64                // roundID → vote_end_time (unix seconds)
+	fetchRoundInfo RoundInfoFetcher                 // queries the chain; may be nil in tests
 	logger         func(msg string, keyvals ...any) // optional error logger
 	logInfo        func(msg string, keyvals ...any) // optional info logger
 }
@@ -86,8 +86,8 @@ func migrate(db *sql.DB) error {
 			enc_share_c1    TEXT NOT NULL,
 			enc_share_c2    TEXT NOT NULL,
 			tree_position   INTEGER NOT NULL,
-			all_enc_shares  TEXT NOT NULL,
-			share_blinds    TEXT NOT NULL DEFAULT '[]',
+			share_comms     TEXT NOT NULL DEFAULT '[]',
+			primary_blind   TEXT NOT NULL DEFAULT '',
 			state           INTEGER NOT NULL DEFAULT 0,
 			attempts        INTEGER NOT NULL DEFAULT 0,
 			vote_end_time   INTEGER NOT NULL DEFAULT 0,
@@ -106,13 +106,23 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
-	hasShareBlinds, err := tableHasColumn(db, "shares", "share_blinds")
+	hasShareComms, err := tableHasColumn(db, "shares", "share_comms")
 	if err != nil {
 		return fmt.Errorf("check shares schema: %w", err)
 	}
-	if !hasShareBlinds {
-		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN share_blinds TEXT NOT NULL DEFAULT '[]'"); err != nil {
-			return fmt.Errorf("add shares.share_blinds: %w", err)
+	if !hasShareComms {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN share_comms TEXT NOT NULL DEFAULT '[]'"); err != nil {
+			return fmt.Errorf("add shares.share_comms: %w", err)
+		}
+	}
+
+	hasPrimaryBlind, err := tableHasColumn(db, "shares", "primary_blind")
+	if err != nil {
+		return fmt.Errorf("check shares schema: %w", err)
+	}
+	if !hasPrimaryBlind {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN primary_blind TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("add shares.primary_blind: %w", err)
 		}
 	}
 
@@ -209,11 +219,17 @@ func migrateSharesPK(db *sql.DB) error {
 	}
 	defer tx.Rollback()
 
-	// Check if share_blinds column exists in old table before migration.
-	hasBlinds, _ := tableHasColumn(db, "shares", "share_blinds")
-	if !hasBlinds {
-		if _, errA := db.Exec("ALTER TABLE shares ADD COLUMN share_blinds TEXT NOT NULL DEFAULT '[]'"); errA != nil {
-			return fmt.Errorf("add share_blinds before PK migration: %w", errA)
+	// Ensure share_comms and primary_blind columns exist before migration.
+	hasComms, _ := tableHasColumn(db, "shares", "share_comms")
+	if !hasComms {
+		if _, errA := db.Exec("ALTER TABLE shares ADD COLUMN share_comms TEXT NOT NULL DEFAULT '[]'"); errA != nil {
+			return fmt.Errorf("add share_comms before PK migration: %w", errA)
+		}
+	}
+	hasBlind, _ := tableHasColumn(db, "shares", "primary_blind")
+	if !hasBlind {
+		if _, errA := db.Exec("ALTER TABLE shares ADD COLUMN primary_blind TEXT NOT NULL DEFAULT ''"); errA != nil {
+			return fmt.Errorf("add primary_blind before PK migration: %w", errA)
 		}
 	}
 
@@ -226,8 +242,8 @@ func migrateSharesPK(db *sql.DB) error {
 		enc_share_c1    TEXT NOT NULL,
 		enc_share_c2    TEXT NOT NULL,
 		tree_position   INTEGER NOT NULL,
-		all_enc_shares  TEXT NOT NULL,
-		share_blinds    TEXT NOT NULL DEFAULT '[]',
+		share_comms     TEXT NOT NULL DEFAULT '[]',
+		primary_blind   TEXT NOT NULL DEFAULT '',
 		state           INTEGER NOT NULL DEFAULT 0,
 		attempts        INTEGER NOT NULL DEFAULT 0,
 		vote_end_time   INTEGER NOT NULL DEFAULT 0,
@@ -238,8 +254,8 @@ func migrateSharesPK(db *sql.DB) error {
 
 	if _, err := tx.Exec(`INSERT INTO shares_new SELECT
 		round_id, share_index, shares_hash, proposal_id, vote_decision,
-		enc_share_c1, enc_share_c2, tree_position, all_enc_shares, share_blinds,
-		state, attempts, vote_end_time
+		enc_share_c1, enc_share_c2, tree_position, share_comms,
+		primary_blind, state, attempts, vote_end_time
 	FROM shares`); err != nil {
 		return err
 	}
@@ -267,13 +283,9 @@ func schedKey(roundID string, shareIndex, proposalID uint32, treePosition uint64
 //   - EnqueueConflict when an entry exists for (round_id, share_index) but
 //     with different payload content.
 func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
-	allEncJSON, err := json.Marshal(payload.AllEncShares)
+	commsJSON, err := json.Marshal(payload.ShareComms)
 	if err != nil {
-		return EnqueueConflict, fmt.Errorf("marshal all_enc_shares: %w", err)
-	}
-	blindsJSON, err := json.Marshal(payload.ShareBlinds)
-	if err != nil {
-		return EnqueueConflict, fmt.Errorf("marshal share_blinds: %w", err)
+		return EnqueueConflict, fmt.Errorf("marshal share_comms: %w", err)
 	}
 
 	// Fetch vote_end_time before acquiring the lock (may do HTTP).
@@ -285,7 +297,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO shares
 		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
-		  enc_share_c1, enc_share_c2, tree_position, all_enc_shares, share_blinds, state, attempts, vote_end_time)
+		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind, state, attempts, vote_end_time)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
 		 ON CONFLICT(round_id, share_index, proposal_id, tree_position) DO NOTHING`,
 		payload.VoteRoundID,
@@ -296,8 +308,8 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		payload.EncShare.C1,
 		payload.EncShare.C2,
 		payload.TreePosition,
-		string(allEncJSON),
-		string(blindsJSON),
+		string(commsJSON),
+		payload.PrimaryBlind,
 		voteEndTime,
 	)
 	if err != nil {
@@ -556,12 +568,12 @@ func (s *ShareStore) recover() error {
 
 func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, treePosition uint64) (QueuedShare, bool) {
 	var q QueuedShare
-	var allEncJSON, blindsJSON string
+	var commsJSON string
 	var state, attempts int
 
 	err := s.db.QueryRow(
 		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
-		        tree_position, all_enc_shares, share_blinds, state, attempts
+		        tree_position, share_comms, primary_blind, state, attempts
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
@@ -571,8 +583,8 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 		&q.Payload.EncShare.C1,
 		&q.Payload.EncShare.C2,
 		&q.Payload.TreePosition,
-		&allEncJSON,
-		&blindsJSON,
+		&commsJSON,
+		&q.Payload.PrimaryBlind,
 		&state,
 		&attempts,
 	)
@@ -586,10 +598,7 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 	q.State = ShareState(state)
 	q.Attempts = attempts
 
-	if err := json.Unmarshal([]byte(allEncJSON), &q.Payload.AllEncShares); err != nil {
-		return q, false
-	}
-	if err := json.Unmarshal([]byte(blindsJSON), &q.Payload.ShareBlinds); err != nil {
+	if err := json.Unmarshal([]byte(commsJSON), &q.Payload.ShareComms); err != nil {
 		return q, false
 	}
 
@@ -606,22 +615,19 @@ func payloadEqual(existing, incoming SharePayload) bool {
 		existing.TreePosition != incoming.TreePosition {
 		return false
 	}
-	if len(existing.AllEncShares) != len(incoming.AllEncShares) {
+	if len(existing.ShareComms) != len(incoming.ShareComms) {
 		return false
 	}
-	for i := range existing.AllEncShares {
-		if existing.AllEncShares[i] != incoming.AllEncShares[i] {
+	for i := range existing.ShareComms {
+		if existing.ShareComms[i] != incoming.ShareComms[i] {
 			return false
 		}
 	}
-	if len(existing.ShareBlinds) != len(incoming.ShareBlinds) {
+
+	if existing.PrimaryBlind != incoming.PrimaryBlind {
 		return false
 	}
-	for i := range existing.ShareBlinds {
-		if existing.ShareBlinds[i] != incoming.ShareBlinds[i] {
-			return false
-		}
-	}
+
 	return true
 }
 

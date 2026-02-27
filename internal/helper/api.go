@@ -177,37 +177,19 @@ func validatePayload(p *SharePayload) error {
 		return fmt.Errorf("vote_round_id: expected 32 bytes, got %d", len(roundBytes))
 	}
 
-	// all_enc_shares: exactly 16 entries.
-	if len(p.AllEncShares) != 16 {
-		return fmt.Errorf("all_enc_shares: expected 16 entries, got %d", len(p.AllEncShares))
+	// share_comms: exactly 16 entries, each base64-decodable to 32 bytes.
+	if len(p.ShareComms) != 16 {
+		return fmt.Errorf("share_comms: expected 16 entries, got %d", len(p.ShareComms))
 	}
-	for i, es := range p.AllEncShares {
-		if err := validateB64Field(es.C1, 32, fmt.Sprintf("all_enc_shares[%d].c1", i)); err != nil {
+	for i, c := range p.ShareComms {
+		if err := validateB64Field(c, 32, fmt.Sprintf("share_comms[%d]", i)); err != nil {
 			return err
-		}
-		if err := validateB64Field(es.C2, 32, fmt.Sprintf("all_enc_shares[%d].c2", i)); err != nil {
-			return err
-		}
-		if es.ShareIndex != uint32(i) {
-			return fmt.Errorf("all_enc_shares[%d].share_index: expected %d, got %d", i, i, es.ShareIndex)
 		}
 	}
 
-	// enc_share must match all_enc_shares[share_index].
-	idx := p.EncShare.ShareIndex
-	expected := p.AllEncShares[idx]
-	if p.EncShare.C1 != expected.C1 || p.EncShare.C2 != expected.C2 {
-		return fmt.Errorf("enc_share c1/c2 must match all_enc_shares[%d]", idx)
-	}
-
-	// share_blinds: exactly 16 entries, each base64-decodable to 32 bytes.
-	if len(p.ShareBlinds) != 16 {
-		return fmt.Errorf("share_blinds: expected 16 entries, got %d", len(p.ShareBlinds))
-	}
-	for i, b := range p.ShareBlinds {
-		if err := validateB64Field(b, 32, fmt.Sprintf("share_blinds[%d]", i)); err != nil {
-			return err
-		}
+	// primary_blind: base64-decodable to 32 bytes.
+	if err := validateB64Field(p.PrimaryBlind, 32, "primary_blind"); err != nil {
+		return err
 	}
 
 	return nil

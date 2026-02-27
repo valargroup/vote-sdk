@@ -23,52 +23,54 @@ import (
 // generator (cargo test --release -- generate_fixtures --ignored).
 // Proof generation takes ~30-60s in release mode.
 func TestGenerateShareRevealRoundTrip(t *testing.T) {
-	// Read fixture file.
-	// Format (2384 bytes):
+	// Format (1424 bytes):
 	//   [0..772)       merkle_path
-	//   [772..1796)    all_enc_shares (1024 bytes: 16 × (C1+C2) × 32 bytes)
-	//   [1796..2308)   share_blinds (512 bytes: 16 × 32-byte blind factors)
-	//   [2308..2312)   share_index (u32 LE)
-	//   [2312..2316)   proposal_id (u32 LE)
-	//   [2316..2320)   vote_decision (u32 LE)
-	//   [2320..2352)   round_id (32 bytes)
-	//   [2352..2384)   shares_hash (32 bytes)
+	//   [772..1284)    share_comms (512 bytes: 16 × 32)
+	//   [1284..1316)   primary_blind (32 bytes)
+	//   [1316..1348)   enc_c1_x (32 bytes)
+	//   [1348..1380)   enc_c2_x (32 bytes)
+	//   [1380..1384)   share_index (u32 LE)
+	//   [1384..1388)   proposal_id (u32 LE)
+	//   [1388..1392)   vote_decision (u32 LE)
+	//   [1392..1424)   round_id (32 bytes)
 	fixture, err := os.ReadFile("../testdata/share_reveal_inputs.bin")
 	require.NoError(t, err, "fixture file missing — run: make fixtures")
-	require.Len(t, fixture, 2384, "unexpected fixture size")
+	require.Len(t, fixture, 1424, "unexpected fixture size")
 
 	merklePath := fixture[0:772]
 
-	var allEncShares [32][32]byte
-	for i := 0; i < 32; i++ {
-		copy(allEncShares[i][:], fixture[772+i*32:772+(i+1)*32])
-	}
-
-	var shareBlinds [16][32]byte
+	var shareComms [16][32]byte
 	for i := 0; i < 16; i++ {
-		copy(shareBlinds[i][:], fixture[1796+i*32:1796+(i+1)*32])
+		copy(shareComms[i][:], fixture[772+i*32:772+(i+1)*32])
 	}
 
-	shareIndex := binary.LittleEndian.Uint32(fixture[2308:2312])
-	proposalID := binary.LittleEndian.Uint32(fixture[2312:2316])
-	voteDecision := binary.LittleEndian.Uint32(fixture[2316:2320])
+	var primaryBlind [32]byte
+	copy(primaryBlind[:], fixture[1284:1316])
+
+	var encC1X [32]byte
+	copy(encC1X[:], fixture[1316:1348])
+
+	var encC2X [32]byte
+	copy(encC2X[:], fixture[1348:1380])
+
+	shareIndex := binary.LittleEndian.Uint32(fixture[1380:1384])
+	proposalID := binary.LittleEndian.Uint32(fixture[1384:1388])
+	voteDecision := binary.LittleEndian.Uint32(fixture[1388:1392])
 
 	var roundID [32]byte
-	copy(roundID[:], fixture[2320:2352])
-
-	var sharesHash [32]byte
-	copy(sharesHash[:], fixture[2352:2384])
+	copy(roundID[:], fixture[1392:1424])
 
 	// Generate proof.
 	t.Log("generating share reveal proof (this takes ~30-60s)...")
 	proof, nullifier, treeRoot, err := GenerateShareRevealProof(
 		merklePath,
-		allEncShares,
-		shareBlinds,
+		shareComms,
+		primaryBlind,
+		encC1X,
+		encC2X,
 		shareIndex,
 		proposalID, voteDecision,
 		roundID,
-		sharesHash,
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, proof)
@@ -76,12 +78,10 @@ func TestGenerateShareRevealRoundTrip(t *testing.T) {
 	t.Logf("proof: %d bytes, nullifier: %x..., treeRoot: %x...",
 		len(proof), nullifier[:4], treeRoot[:4])
 
-	// Verify the generated proof using the verify FFI.
-	// Build EncShare: C1 || C2 from allEncShares at shareIndex.
-	idx := int(shareIndex)
+	// Build EncShare: C1 || C2 for the revealed share.
 	encShare := make([]byte, 64)
-	copy(encShare[:32], allEncShares[idx*2][:])
-	copy(encShare[32:], allEncShares[idx*2+1][:])
+	copy(encShare[:32], encC1X[:])
+	copy(encShare[32:], encC2X[:])
 
 	inputs := zkp.VoteShareInputs{
 		ShareNullifier:   nullifier[:],

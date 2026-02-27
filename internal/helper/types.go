@@ -63,12 +63,12 @@ type SharePayload struct {
 	SharesHash   string               `json:"shares_hash"`    // base64, 32 bytes
 	ProposalID   uint32               `json:"proposal_id"`    // proposal being voted on
 	VoteDecision uint32               `json:"vote_decision"`  // 0=support, 1=oppose, 2=skip
-	EncShare     EncryptedShareWire   `json:"enc_share"`      // the share to relay
-	ShareIndex   uint32               `json:"share_index"`    // redundant with enc_share.share_index
-	TreePosition uint64               `json:"tree_position"`  // VC leaf index
-	VoteRoundID  string               `json:"vote_round_id"`  // hex, 32 bytes
-	AllEncShares []EncryptedShareWire `json:"all_enc_shares"` // all 16 shares
-	ShareBlinds  []string             `json:"share_blinds"`   // base64, 16 × 32 bytes
+	EncShare     EncryptedShareWire `json:"enc_share"`      // the share to relay
+	ShareIndex   uint32             `json:"share_index"`    // redundant with enc_share.share_index
+	TreePosition uint64             `json:"tree_position"`  // VC leaf index
+	VoteRoundID  string             `json:"vote_round_id"`  // hex, 32 bytes
+	ShareComms   []string           `json:"share_comms"`    // base64, 16 × 32-byte Poseidon commitments
+	PrimaryBlind string               `json:"primary_blind"`  // base64, 32 bytes
 }
 
 // ShareState represents the processing state of a queued share.
@@ -100,17 +100,19 @@ type QueueStatus struct {
 type ProofGenerator interface {
 	// GenerateShareRevealProof generates a share reveal proof.
 	// merklePath: 772-byte serialized Merkle path (from votetree.TreeHandle.Path)
-	// allEncShares: 32 compressed points (C1_0, C2_0, ..., C1_15, C2_15)
-	// shareBlinds: 16 × 32-byte per-share blind factors
+	// shareComms: 16 × 32-byte per-share Poseidon commitments
+	// primaryBlind: 32-byte blind factor for the revealed share
+	// encC1X, encC2X: 32-byte x-coordinates of the revealed share
 	// Returns proof bytes, nullifier (32 bytes), tree root (32 bytes).
 	GenerateShareRevealProof(
 		merklePath []byte,
-		allEncShares [32][32]byte,
-		shareBlinds [16][32]byte,
+		shareComms [16][32]byte,
+		primaryBlind [32]byte,
+		encC1X [32]byte,
+		encC2X [32]byte,
 		shareIndex uint32,
 		proposalID, voteDecision uint32,
 		roundID [32]byte,
-		sharesHash [32]byte,
 	) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error)
 }
 
