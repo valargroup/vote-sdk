@@ -145,9 +145,8 @@ fi
 # ─── Step 5: Fund the joiner account ─────────────────────────────────────────
 
 echo "Funding joiner account..."
-zallyd tx bank send validator "$JOINER_ADDR" 200000uzvote \
-    --home "$VAL1_HOME" --keyring-backend test --chain-id "$CHAIN_ID" -y \
-    > /dev/null 2>&1
+zallyd tx bank send manager "$JOINER_ADDR" 200000uzvote \
+    --home "$VAL1_HOME" --keyring-backend test --chain-id "$CHAIN_ID" -y
 
 # Wait for the transfer to commit.
 echo "Waiting for balance..."
