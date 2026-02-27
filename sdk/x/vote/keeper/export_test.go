@@ -21,8 +21,3 @@ func (k *Keeper) StoreServiceForTest() store.KVStoreService {
 func (k *Keeper) SetStakingKeeper(sk StakingKeeper) {
 	k.stakingKeeper = sk
 }
-
-// SetSlashingKeeper replaces the slashing keeper. Used in tests.
-func (k *Keeper) SetSlashingKeeper(sk SlashingKeeper) {
-	k.slashingKeeper = sk
-}
