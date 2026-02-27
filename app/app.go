@@ -27,6 +27,7 @@ import (
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
+	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
@@ -60,6 +61,7 @@ type ZallyApp struct {
 	BankKeeper            bankkeeper.BaseKeeper
 	StakingKeeper         *stakingkeeper.Keeper
 	DistrKeeper           distrkeeper.Keeper
+	SlashingKeeper        slashingkeeper.Keeper
 	ConsensusParamsKeeper consensuskeeper.Keeper
 
 	// Vote module keeper.
@@ -113,6 +115,7 @@ func NewZallyApp(
 		&app.BankKeeper,
 		&app.StakingKeeper,
 		&app.DistrKeeper,
+		&app.SlashingKeeper,
 		&app.ConsensusParamsKeeper,
 		&app.VoteKeeper,
 	); err != nil {

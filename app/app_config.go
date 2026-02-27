@@ -8,6 +8,7 @@ import (
 	consensusmodulev1 "cosmossdk.io/api/cosmos/consensus/module/v1"
 	distrmodulev1 "cosmossdk.io/api/cosmos/distribution/module/v1"
 	genutilmodulev1 "cosmossdk.io/api/cosmos/genutil/module/v1"
+	slashingmodulev1 "cosmossdk.io/api/cosmos/slashing/module/v1"
 	stakingmodulev1 "cosmossdk.io/api/cosmos/staking/module/v1"
 	txconfigv1 "cosmossdk.io/api/cosmos/tx/config/v1"
 	"cosmossdk.io/core/appconfig"
@@ -25,6 +26,8 @@ import (
 	consensustypes "github.com/cosmos/cosmos-sdk/x/consensus/types"
 	_ "github.com/cosmos/cosmos-sdk/x/distribution" // import for side-effects
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
+	_ "github.com/cosmos/cosmos-sdk/x/slashing" // import for side-effects
+	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	_ "github.com/cosmos/cosmos-sdk/x/staking" // import for side-effects
@@ -82,6 +85,7 @@ var (
 				// validator fee pool is empty before staking updates.
 				BeginBlockers: []string{
 					distrtypes.ModuleName,
+					slashingtypes.ModuleName,
 					stakingtypes.ModuleName,
 				},
 				EndBlockers: []string{
@@ -105,6 +109,7 @@ var (
 					banktypes.ModuleName,
 					distrtypes.ModuleName,
 					stakingtypes.ModuleName,
+					slashingtypes.ModuleName,
 					genutiltypes.ModuleName,
 					votetypes.ModuleName,
 				},
@@ -114,6 +119,7 @@ var (
 					banktypes.ModuleName,
 					distrtypes.ModuleName,
 					stakingtypes.ModuleName,
+					slashingtypes.ModuleName,
 					genutiltypes.ModuleName,
 					votetypes.ModuleName,
 				},
@@ -142,6 +148,10 @@ var (
 		{
 			Name: distrtypes.ModuleName,
 			Config: appconfig.WrapAny(&distrmodulev1.Module{}),
+		},
+		{
+			Name:   slashingtypes.ModuleName,
+			Config: appconfig.WrapAny(&slashingmodulev1.Module{}),
 		},
 		{
 			Name: consensustypes.ModuleName,
