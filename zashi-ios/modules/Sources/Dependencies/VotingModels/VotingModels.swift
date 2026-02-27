@@ -3,7 +3,8 @@ import Foundation
 // MARK: - Session & Round
 
 /// Full on-chain representation from VoteRound proto (zvote/v1/types.proto).
-/// vote_round_id is a 32-byte Blake2b hash derived on-chain from session setup fields.
+/// vote_round_id is a canonical 32-byte Pallas Fp value derived on-chain from
+/// session setup fields via Poseidon hash.
 public struct VotingSession: Equatable, Sendable {
     public let voteRoundId: Data
     public let snapshotHeight: UInt64

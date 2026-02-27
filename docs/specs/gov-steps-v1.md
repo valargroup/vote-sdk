@@ -63,7 +63,7 @@ Snapshot height **must** align with an anchor height that ZCash maintains. We in
 
 **Step 0.3: Build vote_round_id**
 
-We make `vote_round_id = Blake2b(snapshot_height, snapshot_blockhash, proposals_hash, vote_end_time, nullifier_imt_root, nc_root)`.
+We make `vote_round_id = Poseidon(snapshot_height, snapshot_blockhash_lo, snapshot_blockhash_hi, proposals_hash_lo, proposals_hash_hi, vote_end_time, nullifier_imt_root, nc_root)`, yielding a canonical 32-byte Pallas Fp value.
 
 This will be used to make signatures and votes un-replayable across distinct polling sessions.
 
