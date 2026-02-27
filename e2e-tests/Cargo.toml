@@ -8,7 +8,7 @@ description = "Rust E2E API tests for Zally voting flow (replaces TypeScript sui
 # Path deps (relative to repo root; e2e-tests is at root)
 zally-circuits = { path = "../sdk/circuits" }
 orchard = { path = "../orchard" }
-voting-circuits = { path = "../voting-circuits", features = ["delegation", "vote-proof", "share-reveal"] }
+voting-circuits = { path = "../voting-circuits", features = ["share-reveal"] }
 vote-commitment-tree = { path = "../vote-commitment-tree" }
 vote-commitment-tree-client = { path = "../vote-commitment-tree-client" }
 librustvoting = { path = "../librustvoting" }

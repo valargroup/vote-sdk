@@ -25,7 +25,7 @@ incrementalmerkletree = { version = "0.8.1", features = ["legacy-api"] }
 reqwest = { version = "0.11", features = ["json", "blocking"] }
 halo2_proofs = "0.3"
 rand = "0.8"
-voting-circuits = { path = "../../voting-circuits", features = ["delegation"] }
+voting-circuits = { path = "../../voting-circuits" }
 
 [[bin]]
 name = "ingest-nfs"

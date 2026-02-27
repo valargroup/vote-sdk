@@ -18,10 +18,8 @@ extern crate std;
 pub mod circuit;
 pub mod shares_hash;
 
-#[cfg(feature = "delegation")]
 pub mod delegation;
 
-#[cfg(feature = "vote-proof")]
 pub mod vote_proof;
 
 #[cfg(feature = "share-reveal")]

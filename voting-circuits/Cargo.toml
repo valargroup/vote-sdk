@@ -24,9 +24,7 @@ rand = "0.8"
 [features]
 default = ["std"]
 std = []
-delegation = []
-vote-proof = []
-share-reveal = ["vote-proof"]
+share-reveal = []
 
 [lib]
 bench = false
@@ -34,4 +32,3 @@ bench = false
 [[bench]]
 name = "delegation"
 harness = false
-required-features = ["delegation"]
