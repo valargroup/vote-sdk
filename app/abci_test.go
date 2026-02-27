@@ -1216,8 +1216,6 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 	}
 	roundID := app.SeedRegisteringCeremony(validators)
 
-	phantomAddrs := []string{phantom1Addr, phantom2Addr, phantom3Addr}
-
 	for cycle := 1; cycle <= 3; cycle++ {
 		// Step 1: PrepareProposal fires auto-deal → DEALT with 4 payloads.
 		app.NextBlockWithPrepareProposal()
@@ -1261,20 +1259,6 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 		require.Nil(t, round.CeremonyAcks,
 			"cycle %d: acks should be cleared after timeout reset", cycle)
 
-		// Verify miss counters: phantom validators should have cycle misses,
-		// real validator should have 0 (ack resets miss counter).
-		for _, addr := range phantomAddrs {
-			missCount, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, addr)
-			require.NoError(t, err)
-			require.Equal(t, uint64(cycle), missCount,
-				"cycle %d: phantom %s should have %d misses", cycle, addr, cycle)
-		}
-
-		realMiss, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, valAddr)
-		require.NoError(t, err)
-		require.Equal(t, uint64(0), realMiss,
-			"cycle %d: real validator should have 0 misses (ack resets counter)", cycle)
-
 		// Verify ceremony log entries for the timeout reset.
 		require.NotEmpty(t, round.CeremonyLog,
 			"cycle %d: ceremony log should not be empty", cycle)
@@ -1283,13 +1267,6 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 	// After 3 cycles, verify final state.
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-
-	for _, addr := range phantomAddrs {
-		missCount, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, addr)
-		require.NoError(t, err)
-		require.Equal(t, uint64(3), missCount,
-			"phantom %s should have 3 misses after 3 cycles", addr)
-	}
 
 	// The round should still be PENDING/REGISTERING — ready for another deal attempt.
 	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
@@ -1379,17 +1356,6 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
 		"cycle 1: ceremony should reset to REGISTERING after timeout")
 
-	// Verify cycle 1 miss counters: phantoms=1, real=0.
-	for _, addr := range []string{phantom1Addr, phantom2Addr, phantom3Addr} {
-		missCount, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, addr)
-		require.NoError(t, err)
-		require.Equal(t, uint64(1), missCount,
-			"cycle 1: phantom %s should have 1 miss", addr)
-	}
-	realMiss, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, valAddr)
-	require.NoError(t, err)
-	require.Equal(t, uint64(0), realMiss, "cycle 1: real validator should have 0 misses")
-
 	// -----------------------------------------------------------------------
 	// Cycle 2 — Recovery: phantom1 acks manually, ceremony confirms.
 	// -----------------------------------------------------------------------
@@ -1463,28 +1429,6 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	require.Len(t, round.CeremonyValidators, 2,
 		"CeremonyValidators should have 2 entries (non-ackers stripped)")
 
-	// phantom1 miss counter: 0 (reset by successful ack).
-	phantom1Miss, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, phantom1Addr)
-	require.NoError(t, err)
-	require.Equal(t, uint64(0), phantom1Miss,
-		"phantom1 miss counter should be 0 after recovery ack")
-
-	// phantom2 and phantom3 miss counters: 2 (cycle 1 timeout + cycle 2 timeout).
-	phantom2Miss, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, phantom2Addr)
-	require.NoError(t, err)
-	require.Equal(t, uint64(2), phantom2Miss,
-		"phantom2 miss counter should be 2 (cycle 1 + cycle 2 timeouts)")
-
-	phantom3Miss, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, phantom3Addr)
-	require.NoError(t, err)
-	require.Equal(t, uint64(2), phantom3Miss,
-		"phantom3 miss counter should be 2 (cycle 1 + cycle 2 timeouts)")
-
-	// Real validator miss counter: still 0.
-	realMiss, err = app.VoteKeeper().GetCeremonyMissCount(kvStore, valAddr)
-	require.NoError(t, err)
-	require.Equal(t, uint64(0), realMiss,
-		"real validator should have 0 misses throughout")
 }
 
 // ---------------------------------------------------------------------------

@@ -66,10 +66,6 @@ var (
 	//   0x0C || valoper_address_bytes -> ValidatorPallasKey (protobuf)
 	PallasKeyPrefix = []byte{0x0C}
 
-	// CeremonyMissPrefix stores consecutive ceremony miss counters per validator:
-	//   0x0D || valoper_address_bytes -> uint64 BE (miss count)
-	CeremonyMissPrefix = []byte{0x0D}
-
 	// CeremonyStateKey stores the singleton ceremony state: single key -> CeremonyState (protobuf)
 	CeremonyStateKey = []byte{0x0E}
 
@@ -239,12 +235,6 @@ func ShareCountKey(roundID []byte, proposalID uint32, decision uint32) []byte {
 // Format: 0x0C || valoper_address_bytes
 func PallasKeyKey(valoperAddr string) []byte {
 	return append(PallasKeyPrefix, []byte(valoperAddr)...)
-}
-
-// CeremonyMissKey returns the store key for a validator's consecutive ceremony miss counter.
-// Format: 0x0D || valoper_address_bytes
-func CeremonyMissKey(valoperAddr string) []byte {
-	return append(CeremonyMissPrefix, []byte(valoperAddr)...)
 }
 
 // ShardKey returns the store key for a vote commitment tree shard.

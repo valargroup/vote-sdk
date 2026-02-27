@@ -275,6 +275,13 @@ $BINARY genesis gentx validator "$VAL1_SELF_DELEGATION" \
 
 # Collect genesis transactions and validate.
 $BINARY genesis collect-gentxs --home "$HOME_VAL1"
+
+# Patch slashing genesis: zero out slash fractions (no token burn).
+GENESIS="$HOME_VAL1/config/genesis.json"
+jq '.app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
+  | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
+  "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"
+
 $BINARY genesis validate-genesis --home "$HOME_VAL1"
 
 # Generate Pallas keypair for val1 (EA key is generated per-round by auto-deal).

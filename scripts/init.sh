@@ -46,6 +46,14 @@ $BINARY genesis gentx validator "10000000${DENOM}" \
 # Collect genesis transactions
 $BINARY genesis collect-gentxs --home "$HOME_DIR"
 
+# Patch slashing genesis: zero out slash fractions (no token burn).
+# Defaults for signed_blocks_window (100), min_signed_per_window (0.5),
+# and downtime_jail_duration (600s) are acceptable.
+GENESIS="$HOME_DIR/config/genesis.json"
+jq '.app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
+  | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
+  "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"
+
 # Validate genesis
 $BINARY genesis validate-genesis --home "$HOME_DIR"
 

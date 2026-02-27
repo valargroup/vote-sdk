@@ -38,6 +38,7 @@ require (
 	github.com/DataDog/zstd v1.5.7 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bgentry/speakeasy v0.2.0 // indirect
+	github.com/bits-and-blooms/bitset v1.24.3 // indirect
 	github.com/btcsuite/btcd v0.21.0-beta.0.20201114000516-e9c7a5ac6401 // indirect
 	github.com/bwesterb/go-ristretto v1.2.3 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect

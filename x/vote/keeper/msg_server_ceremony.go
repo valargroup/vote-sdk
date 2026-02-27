@@ -193,11 +193,6 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 		AckHeight:        uint64(ctx.BlockHeight()),
 	})
 
-	// Reset consecutive miss counter on successful ack.
-	if err := ms.k.ResetCeremonyMiss(kvStore, msg.Creator); err != nil {
-		return nil, err
-	}
-
 	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 		fmt.Sprintf("ack from %s (%d/%d acked)", msg.Creator, len(round.CeremonyAcks), len(round.CeremonyValidators)))
 
@@ -297,45 +292,4 @@ func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *typ
 	return &types.MsgCreateValidatorWithPallasKeyResponse{}, nil
 }
 
-// UnjailValidator handles MsgUnjailValidator.
-// Any bonded validator can unjail any jailed validator. The target validator's
-// ceremony miss counter is reset on unjail.
-func (ms msgServer) UnjailValidator(goCtx context.Context, msg *types.MsgUnjailValidator) (*types.MsgUnjailValidatorResponse, error) {
-	ctx := sdk.UnwrapSDKContext(goCtx)
-
-	if msg.ValidatorAddress == "" {
-		return nil, fmt.Errorf("%w: validator_address cannot be empty", types.ErrInvalidField)
-	}
-
-	// Authorize: creator must be a bonded validator.
-	if !ms.k.IsValidator(goCtx, msg.Creator) {
-		return nil, fmt.Errorf("%w: sender %s is not a bonded validator", types.ErrNotAuthorized, msg.Creator)
-	}
-
-	// Verify target is actually jailed.
-	targetValAddr, err := sdk.ValAddressFromBech32(msg.ValidatorAddress)
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid validator_address: %v", types.ErrInvalidField, err)
-	}
-	targetVal, err := ms.k.stakingKeeper.GetValidator(goCtx, targetValAddr)
-	if err != nil {
-		return nil, fmt.Errorf("validator %s not found: %w", msg.ValidatorAddress, err)
-	}
-	if !targetVal.IsJailed() {
-		return nil, fmt.Errorf("%w: validator %s is not jailed", types.ErrInvalidField, msg.ValidatorAddress)
-	}
-
-	// Unjail + reset miss counter.
-	if err := ms.k.UnjailValidator(goCtx, msg.ValidatorAddress); err != nil {
-		return nil, err
-	}
-
-	ctx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeUnjailValidator,
-		sdk.NewAttribute(types.AttributeKeyValidatorAddress, msg.ValidatorAddress),
-		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
-	))
-
-	return &types.MsgUnjailValidatorResponse{}, nil
-}
 
