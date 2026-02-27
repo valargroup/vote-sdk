@@ -45,7 +45,7 @@ func (s *MsgServerTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC())
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
+	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil, nil)
 	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }
 

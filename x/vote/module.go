@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
@@ -57,7 +58,6 @@ func init() {
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
 			ProvideSetVoteManagerSigner,
-			ProvideUnjailValidatorSigner,
 		),
 	)
 }
@@ -201,22 +201,16 @@ func ProvideSetVoteManagerSigner() signing.CustomGetSigner {
 	}
 }
 
-func ProvideUnjailValidatorSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgUnjailValidator"),
-		Fn:      ceremonyCreatorSignerFn,
-	}
-}
-
 // ModuleInputs defines the inputs needed to create the vote module.
 type ModuleInputs struct {
 	depinject.In
 
-	StoreService  store.KVStoreService
-	Cdc           codec.Codec
-	Logger        log.Logger
-	Config        *modulev1.Module
-	StakingKeeper *stakingkeeper.Keeper
+	StoreService   store.KVStoreService
+	Cdc            codec.Codec
+	Logger         log.Logger
+	Config         *modulev1.Module
+	StakingKeeper  *stakingkeeper.Keeper
+	SlashingKeeper slashingkeeper.Keeper
 }
 
 // ModuleOutputs defines the outputs produced by the vote module.
@@ -234,6 +228,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.Config.Authority,
 		in.Logger,
 		in.StakingKeeper,
+		in.SlashingKeeper,
 	)
 
 	m := NewAppModule(k, in.Cdc)

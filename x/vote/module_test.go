@@ -61,7 +61,7 @@ func (s *EndBlockerTestSuite) SetupTest() {
 		WithBlockTime(time.Unix(1_000_000, 0).UTC()).
 		WithBlockHeight(10)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
+	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil, nil)
 	s.module = vote.NewAppModule(s.keeper, nil) // codec unused by EndBlock
 }
 
@@ -330,6 +330,23 @@ func (jk *jailTrackingStakingKeeper) Unjail(_ context.Context, _ sdk.ConsAddress
 	return nil
 }
 
+// noopSlashingKeeper is a mock that satisfies the SlashingKeeper interface.
+type noopSlashingKeeper struct {
+	jailedUntil map[string]time.Time // consAddr → jail time
+}
+
+func (sk *noopSlashingKeeper) JailUntil(_ context.Context, consAddr sdk.ConsAddress, jailTime time.Time) error {
+	if sk.jailedUntil == nil {
+		sk.jailedUntil = make(map[string]time.Time)
+	}
+	sk.jailedUntil[consAddr.String()] = jailTime
+	return nil
+}
+
+func (sk *noopSlashingKeeper) DowntimeJailDuration(_ context.Context) (time.Duration, error) {
+	return 10 * time.Minute, nil
+}
+
 // setupJailTest creates a keeper with a jail-tracking staking mock and a
 // validator with a real consensus pubkey so JailValidator → GetConsAddr succeeds.
 func (s *EndBlockerTestSuite) setupJailTest() (sdk.Context, *keeper.Keeper, vote.AppModule, *jailTrackingStakingKeeper, sdk.ValAddress) {
@@ -359,7 +376,8 @@ func (s *EndBlockerTestSuite) setupJailTest() (sdk.Context, *keeper.Keeper, vote
 	}
 	jailKeeper.validators[valAddr.String()] = val
 
-	k := keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), jailKeeper)
+	slashKeeper := &noopSlashingKeeper{}
+	k := keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), jailKeeper, slashKeeper)
 	m := vote.NewAppModule(k, nil)
 
 	return ctx, k, m, jailKeeper, valAddr
@@ -401,10 +419,10 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyMissJailing() {
 	// Run EndBlocker.
 	s.Require().NoError(m.EndBlock(ctx))
 
-	// Miss counter should be 3 now.
+	// Miss counter is reset to 0 after jailing (clean slate for unjail).
 	missCount, err := k.GetCeremonyMissCount(kvStore, valAddr.String())
 	s.Require().NoError(err)
-	s.Require().Equal(uint64(3), missCount)
+	s.Require().Equal(uint64(0), missCount)
 
 	// Validator should have been jailed via the staking keeper mock.
 	s.Require().Len(jailKeeper.jailedConsAddrs, 1)
@@ -442,11 +460,11 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyMissAccumulatesAcrossRounds()
 		s.Require().Equal(uint64(2), missCount)
 		s.Require().Len(jailKeeper.jailedConsAddrs, 0, "not jailed after 2 misses")
 
-		// Round 3: miss=3 → jailed
+		// Round 3: miss=3 → jailed, counter reset to 0
 		timeoutRound(0xA3)
 		missCount, err = k.GetCeremonyMissCount(kvStore, valAddr.String())
 		s.Require().NoError(err)
-		s.Require().Equal(uint64(3), missCount)
+		s.Require().Equal(uint64(0), missCount, "counter reset after jailing")
 		s.Require().Len(jailKeeper.jailedConsAddrs, 1, "jailed after 3 misses")
 	})
 

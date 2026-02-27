@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"cosmossdk.io/core/store"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -113,8 +114,10 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 // Ceremony miss counter (consecutive misses per validator)
 // ---------------------------------------------------------------------------
 
-// JailValidator resolves a validator operator address to its consensus address
-// and jails the validator via the staking module.
+// JailValidator resolves a validator operator address to its consensus address,
+// jails the validator via the staking module, sets JailedUntil via the slashing
+// module so that standard MsgUnjail works after the cooldown, and resets the
+// ceremony miss counter (punishment applied, clean slate on unjail).
 func (k *Keeper) JailValidator(ctx context.Context, operatorAddr string) error {
 	valAddr, err := sdk.ValAddressFromBech32(operatorAddr)
 	if err != nil {
@@ -131,37 +134,31 @@ func (k *Keeper) JailValidator(ctx context.Context, operatorAddr string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get consensus address for %s: %w", operatorAddr, err)
 	}
-	return k.stakingKeeper.Jail(ctx, consAddr)
-}
 
-// UnjailValidator unjails a validator by its operator address.
-// Resolves the valoper → consensus address via the staking keeper, calls
-// Unjail, and resets the ceremony miss counter.
-func (k Keeper) UnjailValidator(ctx context.Context, valoperAddr string) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic resolving consensus address for %s: %v", valoperAddr, r)
-		}
-	}()
-
-	valAddr, err := sdk.ValAddressFromBech32(valoperAddr)
-	if err != nil {
-		return fmt.Errorf("invalid valoper address %q: %w", valoperAddr, err)
-	}
-	val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
-	if err != nil {
-		return fmt.Errorf("failed to get validator %s: %w", valoperAddr, err)
-	}
-	consAddr, err := val.GetConsAddr()
-	if err != nil {
-		return fmt.Errorf("failed to get consensus address for %s: %w", valoperAddr, err)
-	}
-	if err := k.stakingKeeper.Unjail(ctx, consAddr); err != nil {
+	if err := k.stakingKeeper.Jail(ctx, consAddr); err != nil {
 		return err
 	}
 
+	// Set JailedUntil so the standard cosmos.slashing.v1beta1.MsgUnjail flow
+	// enforces a cooldown before the validator can rejoin.
+	jailDuration, err := k.slashingKeeper.DowntimeJailDuration(ctx)
+	if err != nil {
+		// Fallback to 10 minutes if params are unavailable.
+		jailDuration = 10 * time.Minute
+	}
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	jailUntil := sdkCtx.BlockTime().Add(jailDuration)
+	if err := k.slashingKeeper.JailUntil(ctx, consAddr, jailUntil); err != nil {
+		k.logger.Error("failed to set JailedUntil for ceremony-jailed validator",
+			"validator", operatorAddr, "error", err)
+		// Non-fatal: the validator is still jailed via staking, just won't
+		// have the timed unjail gate. Log and continue.
+	}
+
+	// Reset ceremony miss counter — the punishment has been applied, so the
+	// validator starts fresh when they unjail.
 	kvStore := k.OpenKVStore(ctx)
-	return k.ResetCeremonyMiss(kvStore, valoperAddr)
+	return k.ResetCeremonyMiss(kvStore, operatorAddr)
 }
 
 // GetCeremonyMissCount returns the consecutive ceremony miss count for a validator.
