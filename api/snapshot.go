@@ -21,15 +21,24 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 )
 
+// DefaultLightwalletdURLs is the fallback list of public lightwalletd servers.
+// They are tried in order; the first successful response wins.
+var DefaultLightwalletdURLs = []string{
+	"https://zec.rocks:443",
+	"https://lwdv3.zecwallet.co:443",
+	"https://zcash.mysideoftheweb.com:9067",
+}
+
 // SnapshotConfig holds service URLs for fetching Zcash snapshot data.
 type SnapshotConfig struct {
 	// PIRServiceURL is the URL of the PIR server that serves nullifier tree roots.
 	// Default: "http://localhost:3000"
 	PIRServiceURL string
 
-	// LightwalletdURL is the gRPC address of a lightwalletd server.
-	// Default: "https://zec.rocks:443"
-	LightwalletdURL string
+	// LightwalletdURLs is a list of gRPC addresses to try for lightwalletd.
+	// The first successful response wins. Falls back to DefaultLightwalletdURLs
+	// if empty.
+	LightwalletdURLs []string
 }
 
 // SnapshotData holds the Zcash mainnet data needed for MsgCreateVotingSession.
@@ -50,8 +59,9 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 	if cfg.PIRServiceURL == "" {
 		cfg.PIRServiceURL = "http://localhost:3000"
 	}
-	if cfg.LightwalletdURL == "" {
-		cfg.LightwalletdURL = "https://us.zec.stardust.rest:443"
+	lwdURLs := cfg.LightwalletdURLs
+	if len(lwdURLs) == 0 {
+		lwdURLs = DefaultLightwalletdURLs
 	}
 
 	// Fetch PIR root and tree state in parallel.
@@ -72,7 +82,7 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 		pirCh <- pirResult{root, err}
 	}()
 	go func() {
-		ts, err := fetchTreeState(ctx, cfg.LightwalletdURL, height)
+		ts, err := fetchTreeStateWithFallback(ctx, lwdURLs, height)
 		tsCh <- tsResult{ts, err}
 	}()
 
@@ -293,6 +303,40 @@ func decodeLwdTreeState(b []byte) (*lwdTreeState, error) {
 		}
 	}
 	return ts, nil
+}
+
+// ParseLightwalletdURLs splits a comma-separated list of URLs.
+// Returns nil for empty input (caller should fall back to defaults).
+func ParseLightwalletdURLs(csv string) []string {
+	csv = strings.TrimSpace(csv)
+	if csv == "" {
+		return nil
+	}
+	var urls []string
+	for _, u := range strings.Split(csv, ",") {
+		u = strings.TrimSpace(u)
+		if u != "" {
+			urls = append(urls, u)
+		}
+	}
+	return urls
+}
+
+// fetchTreeStateWithFallback tries each lightwalletd URL in order.
+// Each attempt has a 10-second timeout. Returns the first successful result.
+func fetchTreeStateWithFallback(ctx context.Context, urls []string, height uint64) (*lwdTreeState, error) {
+	var lastErr error
+	for _, url := range urls {
+		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		ts, err := fetchTreeState(attemptCtx, url, height)
+		cancel()
+		if err == nil {
+			return ts, nil
+		}
+		log.Printf("[zally-api] lightwalletd %s failed: %v", url, err)
+		lastErr = err
+	}
+	return nil, fmt.Errorf("all %d lightwalletd servers failed, last error: %w", len(urls), lastErr)
 }
 
 // fetchTreeState calls lightwalletd's GetTreeState gRPC method at the given height.
