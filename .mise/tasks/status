@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+#MISE description="Show status of all services + round state"
+#MISE quiet=true
+
+# ── Detect mode: multi-validator vs single ───────────────────────
+
+MULTI=false
+API="http://localhost:1318"
+CHAIN_UP=false
+
+if pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1; then
+    MULTI=true
+fi
+
+format_chain_status() {
+    python3 -c "
+import sys,json,time,datetime
+d=json.load(sys.stdin); s=d.get('sync_info',{})
+h=s.get('latest_block_height','?')
+t=s.get('latest_block_time','')
+age=''
+if t:
+    dt=datetime.datetime.fromisoformat(t.replace('Z','+00:00'))
+    secs=int(time.time()-dt.timestamp())
+    if secs<60: age=f'{secs}s ago'
+    elif secs<3600: age=f'{secs//60}m ago'
+    else: age=f'{secs//3600}h ago'
+syncing=' (syncing)' if s.get('catching_up') else ''
+print(f'block {h}  {age}{syncing}')
+"
+}
+
+# ── Chain ─────────────────────────────────────────────────────────
+
+if [ "$MULTI" = true ]; then
+    printf '\033[2m(multi-validator mode)\033[0m\n'
+    API="http://localhost:1418"
+    for i in 1 2 3; do
+        home="$HOME/.zallyd-val$i"
+        rpc_port=$((26057 + i * 100))
+        api_port=$((1318 + i * 100))
+        printf "  val%-11s" "$i"
+        STATUS=$(zallyd status --home "$home" --node "tcp://127.0.0.1:$rpc_port" 2>/dev/null) || true
+        if [ -n "$STATUS" ]; then
+            [ "$CHAIN_UP" = false ] && CHAIN_UP=true
+            INFO=$(echo "$STATUS" | format_chain_status)
+            printf '\033[32m● running\033[0m   %s  (:%s)\n' "$INFO" "$api_port"
+        else
+            printf '\033[31m○ stopped\033[0m\n'
+        fi
+    done
+else
+    printf "chain          "
+    STATUS=$(zallyd status --home ~/.zallyd 2>/dev/null) || true
+    if [ -n "$STATUS" ]; then
+        CHAIN_UP=true
+        INFO=$(echo "$STATUS" | format_chain_status)
+        printf '\033[32m● running\033[0m   %s\n' "$INFO"
+    else
+        printf '\033[31m○ stopped\033[0m\n'
+    fi
+fi
+
+# ── nf-server ────────────────────────────────────────────────────
+
+printf "nf-server      "
+if pgrep -f 'nf-server.*serve' > /dev/null 2>&1; then
+    printf '\033[32m● running\033[0m   port 3000\n'
+elif pgrep -f 'cargo.*nf-server' > /dev/null 2>&1; then
+    printf '\033[33m● building\033[0m  (cargo compile in progress)\n'
+else
+    printf '\033[31m○ stopped\033[0m\n'
+fi
+
+# ── Nullifier data ───────────────────────────────────────────────
+
+printf "nullifiers     "
+CP="nullifier-ingest/nullifiers.checkpoint"
+if [ -f "$CP" ]; then
+    HEIGHT=$(od -An -t u8 -j 0 -N 8 "$CP" | tr -d ' ')
+    BYTES=$(wc -c < "nullifier-ingest/nullifiers.bin" 2>/dev/null | tr -d ' ')
+    COUNT=$((BYTES / 32))
+    printf '\033[32m✓ synced\033[0m    height %s  %sM nullifiers\n' "$HEIGHT" "$((COUNT / 1000000))"
+else
+    printf '\033[31m✗ no data\033[0m   run: mise start\n'
+fi
+
+printf "pir-data       "
+if [ -f "nullifier-ingest/pir-data/tier0.bin" ]; then
+    printf '\033[32m✓ exported\033[0m\n'
+else
+    printf '\033[31m✗ not exported\033[0m  run: mise run nullifier:export\n'
+fi
+
+# ── Voting rounds + validators (only if chain is up) ────────────
+
+if [ "$CHAIN_UP" = true ]; then
+    PALLAS_JSON=$(curl -sf "$API/zally/v1/pallas-keys" 2>/dev/null) || true
+    ROUNDS_JSON=$(curl -sf "$API/zally/v1/rounds" 2>/dev/null) || true
+    echo ""
+    if [ -n "$ROUNDS_JSON" ]; then
+        echo "$ROUNDS_JSON" | python3 -c "
+import sys,json
+SESSION={0:'unspecified',1:'active',2:'tallying',3:'finalized',4:'pending'}
+CEREMONY={0:'',1:'registering',2:'dealt',3:'confirmed'}
+data=json.load(sys.stdin)
+rounds=data.get('rounds') or []
+if not rounds:
+    print('No voting rounds')
+else:
+    for r in rounds:
+        sid=r.get('vote_round_id','')[:16]
+        raw=r.get('status','?')
+        status=SESSION.get(raw,str(raw).replace('SESSION_STATUS_','').lower()) if isinstance(raw,int) else str(raw).replace('SESSION_STATUS_','').lower()
+        title=r.get('title','')
+        props=len(r.get('proposals') or [])
+        raw_cs=r.get('ceremony_status',0)
+        cs=CEREMONY.get(raw_cs,str(raw_cs).replace('CEREMONY_STATUS_','').lower()) if isinstance(raw_cs,int) else str(raw_cs).replace('CEREMONY_STATUS_','').lower()
+        line=f'round {sid}..  {status}'
+        if status=='pending' and cs: line+=f'  ceremony: {cs}'
+        if props: line+=f'  {props} proposal{\"s\" if props!=1 else \"\"}'
+        if title: line+=f'  \"{title}\"'
+        print(line)
+" 2>/dev/null || true
+    fi
+
+    # ── Validators: Pallas keys + ceremony acks ─────────────────
+    if [ -n "$PALLAS_JSON" ]; then
+        ROUNDS_JSON="$ROUNDS_JSON" python3 -c "
+import sys,json,os
+pallas=json.loads(sys.argv[1])
+validators=pallas.get('validators') or []
+if not validators:
+    print('\nNo Pallas keys registered')
+    sys.exit(0)
+
+# Find active/pending round's ceremony acks
+acked=set()
+rounds_raw=os.environ.get('ROUNDS_JSON','')
+if rounds_raw:
+    try:
+        rdata=json.loads(rounds_raw)
+        for r in (rdata.get('rounds') or []):
+            raw=r.get('status',0)
+            if raw in (1,4):  # active or pending
+                for a in (r.get('ceremony_acks') or []):
+                    acked.add(a.get('validator_address',''))
+                break
+    except: pass
+
+print()
+for v in validators:
+    addr=v.get('validator_address','')
+    short=addr[:24]+'...' if len(addr)>24 else addr
+    parts=[f'\033[32m🛡 pallas\033[0m']
+    if acked:
+        if addr in acked:
+            parts.append('\033[36mEA ack\033[0m')
+        else:
+            parts.append('\033[2mno ack\033[0m')
+    print(f'  {short}  {\"  \".join(parts)}')
+" "$PALLAS_JSON" 2>/dev/null || true
+    fi
+fi
+
+# ── Paths ─────────────────────────────────────────────────────────
+
+echo ""
+printf '\033[2m'
+if [ "$MULTI" = true ]; then
+    echo "Chain data     ~/.zallyd-val{1,2,3}/"
+    echo "Chain logs     ./sdk/multi-val{1,2,3}.log"
+    echo "EA keys        ~/.zallyd-val*/ea_sk.*"
+else
+    echo "Chain data     ~/.zallyd/"
+    echo "Chain log      ./zallyd.log"
+    echo "EA keys        ~/.zallyd/ea_sk.*"
+fi
+echo "Nullifier data ./nullifier-ingest/nullifiers.{bin,checkpoint}"
+echo "PIR data       ./nullifier-ingest/pir-data/"
+echo "nf-server log  ./nf-serve.log"
+echo "Admin UI       ./shielded_vote_generator_ui/"
+printf '\033[0m'

@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#MISE description="Build + init + start 3-validator chain (no nullifiers/PIR)"
+#MISE quiet=true
+set -e
+
+PID_FILE="$HOME/.zallyd-multi-pids"
+
+# ── Guard: already running? ──────────────────────────────────────
+if pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1; then
+    printf '\033[33mAlready running: zallyd\033[0m\n'
+    exit 0
+fi
+
+# ── Build + init ─────────────────────────────────────────────────
+mise run build:install
+bash sdk/scripts/init_multi.sh
+
+# ── Start 3 validators ──────────────────────────────────────────
+rm -f "$PID_FILE"
+
+ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup zallyd start --home "$HOME/.zallyd-val1" > sdk/multi-val1.log 2>&1 &
+echo "$!" >> "$PID_FILE"
+printf '\033[32mStarted val1 → sdk/multi-val1.log\033[0m\n'
+
+# Wait for val1 to produce blocks before starting val2/val3.
+printf 'Waiting for val1...'
+for i in $(seq 1 30); do
+    if curl -sf "http://127.0.0.1:26157/status" 2>/dev/null | grep -q '"latest_block_height"'; then
+        HEIGHT=$(curl -sf "http://127.0.0.1:26157/status" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['sync_info']['latest_block_height'])" 2>/dev/null || echo "0")
+        if [ "$HEIGHT" != "0" ]; then
+            printf ' \033[32mblock %s\033[0m\n' "$HEIGHT"
+            break
+        fi
+    fi
+    printf '.'
+    sleep 2
+done
+
+for i in 2 3; do
+    home="$HOME/.zallyd-val$i"
+    ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup zallyd start --home "$home" > "sdk/multi-val$i.log" 2>&1 &
+    echo "$!" >> "$PID_FILE"
+    printf '\033[32mStarted val%s → sdk/multi-val%s.log\033[0m\n' "$i" "$i"
+done
+
+# Brief sync delay.
+sleep 5
+
+# ── Register val1 Pallas key ────────────────────────────────────
+printf 'Registering val1 Pallas key...'
+for i in $(seq 1 10); do
+    if zallyd tx vote register-pallas-key \
+        --from validator --chain-id zvote-1 --keyring-backend test \
+        --home "$HOME/.zallyd-val1" --node tcp://localhost:26157 -y > /dev/null 2>&1; then
+        printf ' \033[32m✓\033[0m\n'
+        break
+    fi
+    if [ "$i" = "10" ]; then
+        printf ' \033[31mFAILED\033[0m\n'
+        exit 1
+    fi
+    printf '.'
+    sleep 2
+done
+
+# ── Register val2 + val3 via CreateValidatorWithPallasKey ────────
+SELF_DELEGATION="10000000stake"
+for i in 2 3; do
+    create-val-tx \
+        --home "$HOME/.zallyd-val$i" \
+        --moniker "val$i" \
+        --amount "$SELF_DELEGATION" \
+        --rpc-url tcp://localhost:26157
+    printf '\033[32mVal%s registered\033[0m\n' "$i"
+    sleep 2
+done
+
+printf '\n\033[32mMulti-validator chain running.\033[0m PIDs in %s\n' "$PID_FILE"
+printf 'Status: mise run multi:status\n'
+printf 'Stop:   mise run multi:stop\n'

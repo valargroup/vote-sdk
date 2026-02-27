@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+#MISE description="Build + init + start single-validator chain (no nullifiers/PIR)"
+#MISE quiet=true
+set -e
+
+if pgrep zallyd > /dev/null 2>&1; then
+    printf '\033[33mAlready running: zallyd\033[0m\n'
+    exit 0
+fi
+
+# ── Build + init ─────────────────────────────────────────────────
+make -C sdk init
+
+# ── Start zallyd ─────────────────────────────────────────────────
+ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup make -C sdk start > zallyd.log 2>&1 &
+printf '\033[32mStarted zallyd → zallyd.log\033[0m\n'
+
+# ── Wait for chain readiness ────────────────────────────────────
+printf 'Waiting for chain to be ready...'
+for i in $(seq 1 60); do
+    if zallyd status --home ~/.zallyd 2>/dev/null | grep -q latest_block_height; then
+        printf ' \033[32mready\033[0m\n'
+        break
+    fi
+    if [ "$i" -eq 60 ]; then
+        printf ' \033[31mTIMEOUT\033[0m\n'
+        tail -50 zallyd.log
+        exit 1
+    fi
+    printf '.'
+    sleep 2
+done
+
+# ── Wait for helper server ──────────────────────────────────────
+printf 'Waiting for helper server...'
+for i in $(seq 1 15); do
+    if curl -sf http://localhost:1318/api/v1/status > /dev/null 2>&1; then
+        printf ' \033[32mready\033[0m\n'
+        break
+    fi
+    printf '.'
+    sleep 1
+done
+
+# ── Register Pallas key ─────────────────────────────────────────
+printf 'Registering Pallas key...'
+for i in $(seq 1 10); do
+    if zallyd tx vote register-pallas-key \
+        --from validator --chain-id zvote-1 --keyring-backend test \
+        --home ~/.zallyd -y > /dev/null 2>&1; then
+        printf ' \033[32m✓\033[0m\n'
+        break
+    fi
+    if [ "$i" = "10" ]; then
+        printf ' \033[31mFAILED\033[0m\n'
+        exit 1
+    fi
+    printf '.'
+    sleep 2
+done
+
+# Write iOS local config pointing at single-validator ports
+IOS_CFG="zashi-ios/secant/Resources/voting-config-local.json"
+if [ -d "zashi-ios/secant/Resources" ]; then
+    cat > "$IOS_CFG" <<'EOF'
+{
+  "version": 1,
+  "vote_servers": [{ "url": "http://localhost:1318", "label": "Localhost" }],
+  "pir_servers": [{ "url": "http://localhost:3000", "label": "Localhost" }]
+}
+EOF
+    printf '\033[32miOS config → %s (port 1318)\033[0m\n' "$IOS_CFG"
+fi

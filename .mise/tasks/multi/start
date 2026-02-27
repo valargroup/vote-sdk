@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#MISE description="Init + nullifiers + PIR + start 3-validator chain"
+#MISE quiet=true
+set -e
+
+# ── Guard: already running? ──────────────────────────────────────
+PROCS=""
+pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1 && PROCS="$PROCS zallyd"
+pgrep -f 'nf-server.*serve'        > /dev/null 2>&1 && PROCS="$PROCS nf-server"
+if [ -n "$PROCS" ]; then
+    printf '\033[33mAlready running:%s\033[0m\n' "$PROCS"
+    exit 0
+fi
+
+# ── Chain (build + init + start 3 validators + register) ─────────
+mise run multi:start-chain
+
+# ── Nullifier pipeline (shared data at nullifier-ingest/) ────────
+make -C nullifier-ingest bootstrap
+make -C nullifier-ingest ingest
+make -C nullifier-ingest export-nf
+
+# ── Start PIR server ────────────────────────────────────────────
+if ! pgrep -f 'nf-server.*serve' > /dev/null 2>&1; then
+    nohup make -C nullifier-ingest serve > nf-serve.log 2>&1 &
+    printf '\033[32mStarted nf-server → nf-serve.log\033[0m\n'
+fi
+
+# Write iOS local config pointing at multi-validator ports
+IOS_CFG="zashi-ios/secant/Resources/voting-config-local.json"
+if [ -d "zashi-ios/secant/Resources" ]; then
+    cat > "$IOS_CFG" <<'EOF'
+{
+  "version": 1,
+  "vote_servers": [{ "url": "http://localhost:1418", "label": "Localhost" }],
+  "pir_servers": [{ "url": "http://localhost:3000", "label": "Localhost" }]
+}
+EOF
+    printf '\033[32miOS config → %s (port 1418)\033[0m\n' "$IOS_CFG"
+fi

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#MISE description="Show running status of all 3 validators"
+#MISE quiet=true
+
+echo "=== Multi-Validator Status ==="
+for i in 1 2 3; do
+    home="$HOME/.zallyd-val$i"
+    rpc_port=$((26057 + i * 100))
+    api_port=$((1318 + i * 100))
+    echo ""
+    echo "--- Validator $i (home: $home) ---"
+    proc=$(pgrep -f "zallyd start --home .*val${i}$" 2>/dev/null | head -1)
+    if [ -n "$proc" ]; then
+        echo "  Process : RUNNING (PID $proc)"
+    else
+        echo "  Process : STOPPED"
+    fi
+    rpc_resp=$(curl -sf --max-time 2 "http://127.0.0.1:$rpc_port/status" 2>/dev/null)
+    if [ -n "$rpc_resp" ]; then
+        latest=$(echo "$rpc_resp" | grep -o '"latest_block_height":"[^"]*"' | head -1 | cut -d'"' -f4)
+        moniker=$(echo "$rpc_resp" | grep -o '"moniker":"[^"]*"' | head -1 | cut -d'"' -f4)
+        catching=$(echo "$rpc_resp" | grep -o '"catching_up":[a-z]*' | cut -d':' -f2)
+        echo "  RPC     : UP (port $rpc_port)"
+        echo "  Moniker : $moniker"
+        echo "  Block   : $latest"
+        echo "  Syncing : $catching"
+    else
+        echo "  RPC     : UNREACHABLE (port $rpc_port)"
+    fi
+    api_resp=$(curl -sf --max-time 2 "http://127.0.0.1:$api_port/cosmos/base/tendermint/v1beta1/syncing" 2>/dev/null)
+    if [ -n "$api_resp" ]; then
+        echo "  REST API: UP (port $api_port)"
+    else
+        echo "  REST API: UNREACHABLE (port $api_port)"
+    fi
+done
+echo ""
+
+# nf-server status.
+printf "nf-server      "
+if pgrep -f 'nf-server.*serve' > /dev/null 2>&1; then
+    printf '\033[32m● running\033[0m   port 3000\n'
+else
+    printf '\033[31m○ stopped\033[0m\n'
+fi

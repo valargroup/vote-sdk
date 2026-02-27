@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+#MISE description="Stop all multi-validator processes"
+#MISE quiet=true
+
+PID_FILE="$HOME/.zallyd-multi-pids"
+KILLED=""
+
+# Kill tracked PIDs.
+if [ -f "$PID_FILE" ]; then
+    while read -r pid; do
+        kill "$pid" 2>/dev/null && KILLED="$KILLED $pid" || true
+    done < "$PID_FILE"
+    rm -f "$PID_FILE"
+fi
+
+# Belt-and-suspenders: pkill any stale validators.
+pkill -f 'zallyd start --home.*val' 2>/dev/null && KILLED="$KILLED zallyd" || true
+pkill nf-server 2>/dev/null && KILLED="$KILLED nf-server" || true
+
+if [ -n "$KILLED" ]; then
+    printf '\033[32mStopped:%s\033[0m\n' "$KILLED"
+else
+    echo "No running processes found."
+fi
+rm -f zashi-ios/secant/Resources/voting-config-local.json

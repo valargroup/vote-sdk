@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#MISE description="Restart existing 3-validator chain (skip build+init)"
+#MISE quiet=true
+set -e
+
+PID_FILE="$HOME/.zallyd-multi-pids"
+
+# ── Guard: already running? ──────────────────────────────────────
+if pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1; then
+    printf '\033[33mAlready running: zallyd\033[0m\n'
+    exit 0
+fi
+
+# ── Guard: chain data must exist ─────────────────────────────────
+if [ ! -d "$HOME/.zallyd-val1" ]; then
+    printf '\033[31mNo chain data found. Run: mise run multi:start\033[0m\n'
+    exit 1
+fi
+
+# ── Start 3 validators ──────────────────────────────────────────
+rm -f "$PID_FILE"
+
+ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup zallyd start --home "$HOME/.zallyd-val1" > sdk/multi-val1.log 2>&1 &
+echo "$!" >> "$PID_FILE"
+printf '\033[32mStarted val1 → sdk/multi-val1.log\033[0m\n'
+
+printf 'Waiting for val1...'
+for i in $(seq 1 30); do
+    if curl -sf "http://127.0.0.1:26157/status" 2>/dev/null | grep -q '"latest_block_height"'; then
+        HEIGHT=$(curl -sf "http://127.0.0.1:26157/status" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['sync_info']['latest_block_height'])" 2>/dev/null || echo "0")
+        if [ "$HEIGHT" != "0" ]; then
+            printf ' \033[32mblock %s\033[0m\n' "$HEIGHT"
+            break
+        fi
+    fi
+    printf '.'
+    sleep 2
+done
+
+for i in 2 3; do
+    home="$HOME/.zallyd-val$i"
+    ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup zallyd start --home "$home" > "sdk/multi-val$i.log" 2>&1 &
+    echo "$!" >> "$PID_FILE"
+    printf '\033[32mStarted val%s → sdk/multi-val%s.log\033[0m\n' "$i" "$i"
+done
+
+# ── Start nf-server if not running ──────────────────────────────
+if ! pgrep -f 'nf-server.*serve' > /dev/null 2>&1; then
+    if [ -f "nullifier-ingest/pir-data/tier0.bin" ]; then
+        nohup make -C nullifier-ingest serve > nf-serve.log 2>&1 &
+        printf '\033[32mStarted nf-server → nf-serve.log\033[0m\n'
+    fi
+fi
+
+# Write iOS local config pointing at multi-validator ports
+IOS_CFG="zashi-ios/secant/Resources/voting-config-local.json"
+if [ -d "zashi-ios/secant/Resources" ]; then
+    cat > "$IOS_CFG" <<'EOF'
+{
+  "version": 1,
+  "vote_servers": [{ "url": "http://localhost:1418", "label": "Localhost" }],
+  "pir_servers": [{ "url": "http://localhost:3000", "label": "Localhost" }]
+}
+EOF
+    printf '\033[32miOS config → %s (port 1418)\033[0m\n' "$IOS_CFG"
+fi
+
+printf '\n\033[32mMulti-validator chain restarted.\033[0m PIDs in %s\n' "$PID_FILE"
+printf 'Status: mise run multi:status\n'
+printf 'Stop:   mise run multi:stop\n'
