@@ -284,7 +284,8 @@ $BINARY pallas-keygen --home "$HOME_VAL1"
 configure_config_toml "$HOME_VAL1" "${P2P_PORTS[0]}" "${RPC_PORTS[0]}" "${PPROF_PORTS[0]}"
 configure_app_toml "$HOME_VAL1" "${API_PORTS[0]}" "${GRPC_PORTS[0]}" "${GRPC_WEB_PORTS[0]}" "${RPC_PORTS[0]}"
 
-# Helper server: val1 always gets it; val2/val3 get it in local mode only (see below).
+# Helper server on all validators — each needs its own to accept shares when
+# the iOS app distributes encrypted shares across per-validator URLs.
 configure_helper "$HOME_VAL1" "${API_PORTS[0]}"
 
 # ---------------------------------------------------------------------------
@@ -313,11 +314,7 @@ for i in 2 3; do
     configure_config_toml "$home" "${P2P_PORTS[$idx]}" "${RPC_PORTS[$idx]}" "${PPROF_PORTS[$idx]}"
     configure_app_toml "$home" "${API_PORTS[$idx]}" "${GRPC_PORTS[$idx]}" "${GRPC_WEB_PORTS[$idx]}" "${RPC_PORTS[$idx]}"
 
-    # In local mode, all validators run helper servers for testing convenience.
-    # In CI mode, only val1 runs the helper server (production-like).
-    if [ "$CI_MODE" = false ]; then
-        configure_helper "$home" "${API_PORTS[$idx]}"
-    fi
+    configure_helper "$home" "${API_PORTS[$idx]}"
 
     # Set persistent_peers to val1.
     set_persistent_peers "$home" "$VAL1_PEER"
@@ -354,4 +351,90 @@ if [ "$CI_MODE" = true ]; then
     echo "  create-val-tx --home $HOME_VAL3 --moniker val3 --amount $SELF_DELEGATION --rpc-url tcp://localhost:${RPC_PORTS[0]}"
 else
     echo "Start with: mise run multi:start"
+fi
+
+# ---------------------------------------------------------------------------
+# Edge Config: register per-validator domains (CI mode only)
+# ---------------------------------------------------------------------------
+# Register each validator's sslip.io subdomain as a vote_server in Vercel Edge
+# Config so the iOS app discovers them via service discovery. Only vote_servers
+# are populated — PIR runs on the main domain and is configured separately.
+#
+# Requires: VERCEL_API_TOKEN, EDGE_CONFIG_ID (skipped silently if unset)
+# Optional: VOTING_CONFIG_URL (default: https://zally-phi.vercel.app)
+
+if [ "$CI_MODE" = true ] && [ -n "$VERCEL_API_TOKEN" ] && [ -n "$EDGE_CONFIG_ID" ]; then
+    echo ""
+    echo "=== Registering validator domains in Edge Config ==="
+
+    if ! command -v jq > /dev/null 2>&1; then
+        echo "Warning: jq not found, skipping domain registration."
+    else
+        # Detect public IP and construct sslip.io base domain.
+        PUBLIC_IP=$(curl -4s --connect-timeout 5 ifconfig.me || true)
+        if [ -z "$PUBLIC_IP" ]; then
+            echo "Warning: Could not detect public IP, skipping domain registration."
+        else
+            DASHED_IP=$(echo "$PUBLIC_IP" | tr '.' '-')
+            BASE_DOMAIN="${DASHED_IP}.sslip.io"
+
+            # Fetch current voting-config from the public endpoint.
+            CONFIG_URL="${VOTING_CONFIG_URL:-https://zally-phi.vercel.app}"
+            CURRENT_CONFIG=$(curl -s "${CONFIG_URL}/api/voting-config" 2>/dev/null)
+            if ! echo "$CURRENT_CONFIG" | jq -e '.vote_servers' > /dev/null 2>&1; then
+                CURRENT_CONFIG='{"version":1,"vote_servers":[],"pir_servers":[]}'
+            fi
+
+            # Upsert each validator's subdomain. Both URL and operator_address are
+            # unique keys — evict any existing entry matching either, then append.
+            UPDATED_CONFIG="$CURRENT_CONFIG"
+            CHANGED=false
+            for i in $(seq 1 $NUM_VALIDATORS); do
+                idx=$((i - 1))
+                URL="https://val${i}.${BASE_DOMAIN}"
+                LABEL="val${i}"
+                ADDR=$(cat "${HOMES[$idx]}/validator_address.txt" 2>/dev/null || echo "")
+
+                # Remove any entry with matching URL or operator_address.
+                UPDATED_CONFIG=$(echo "$UPDATED_CONFIG" | jq \
+                    --arg url "$URL" --arg addr "$ADDR" \
+                    '.vote_servers |= [.[] | select(.url != $url and .operator_address != $addr)]')
+
+                # Append fresh entry.
+                UPDATED_CONFIG=$(echo "$UPDATED_CONFIG" | jq \
+                    --arg url "$URL" \
+                    --arg label "$LABEL" \
+                    --arg addr "$ADDR" \
+                    '.vote_servers += [{"url": $url, "label": $label, "operator_address": $addr}]')
+                echo "  ${LABEL}: ${URL} (${ADDR})"
+                CHANGED=true
+            done
+
+            if [ "$CHANGED" = true ]; then
+                PATCH_BODY=$(jq -n --argjson config "$UPDATED_CONFIG" \
+                    '{items: [{operation: "upsert", key: "voting-config", value: $config}]}')
+
+                HTTP_STATUS=$(curl -s -o /tmp/edge-config-resp.txt -w "%{http_code}" \
+                    -X PATCH \
+                    "https://api.vercel.com/v1/edge-config/${EDGE_CONFIG_ID}/items" \
+                    -H "Authorization: Bearer ${VERCEL_API_TOKEN}" \
+                    -H "Content-Type: application/json" \
+                    -d "$PATCH_BODY")
+
+                if [ "$HTTP_STATUS" = "200" ]; then
+                    echo "  Edge Config updated successfully."
+                else
+                    echo "  Warning: Edge Config update failed (HTTP ${HTTP_STATUS})."
+                    cat /tmp/edge-config-resp.txt 2>/dev/null
+                    echo ""
+                fi
+                rm -f /tmp/edge-config-resp.txt
+            else
+                echo "  All domains already registered, no changes needed."
+            fi
+        fi
+    fi
+elif [ "$CI_MODE" = true ]; then
+    echo ""
+    echo "Note: Set VERCEL_API_TOKEN and EDGE_CONFIG_ID to auto-register validator domains in Edge Config."
 fi
