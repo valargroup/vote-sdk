@@ -325,3 +325,77 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Helper
+// ---------------------------------------------------------------------------
+
+func validDelegateVote() *types.MsgDelegateVote {
+	return &types.MsgDelegateVote{
+		Rk:                 bytes.Repeat([]byte{0x01}, 32),
+		SpendAuthSig:       bytes.Repeat([]byte{0x02}, 64),
+		SignedNoteNullifier: bytes.Repeat([]byte{0x03}, 32),
+		CmxNew:             bytes.Repeat([]byte{0x04}, 32),
+		VanCmx:             bytes.Repeat([]byte{0x05}, 32),
+		GovNullifiers: [][]byte{
+			bytes.Repeat([]byte{0x10}, 32),
+			bytes.Repeat([]byte{0x11}, 32),
+			bytes.Repeat([]byte{0x12}, 32),
+			bytes.Repeat([]byte{0x13}, 32),
+			bytes.Repeat([]byte{0x14}, 32),
+		},
+		Proof:       bytes.Repeat([]byte{0x06}, 128),
+		VoteRoundId: bytes.Repeat([]byte{0x07}, 32),
+		Sighash:     bytes.Repeat([]byte{0x08}, 32),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: MsgDelegateVote.ValidateBasic
+// ---------------------------------------------------------------------------
+
+func (s *ValidateBasicTestSuite) TestDelegateVote_ValidateBasic() {
+	tests := []struct {
+		name        string
+		modify      func(*types.MsgDelegateVote)
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name:   "valid: distinct gov_nullifiers",
+			modify: func(m *types.MsgDelegateVote) {},
+		},
+		{
+			name: "invalid: duplicate gov_nullifiers",
+			modify: func(m *types.MsgDelegateVote) {
+				m.GovNullifiers[1] = m.GovNullifiers[0]
+			},
+			expectErr:   true,
+			errContains: "duplicate gov_nullifiers",
+		},
+		{
+			name: "invalid: duplicate gov_nullifiers (non-adjacent)",
+			modify: func(m *types.MsgDelegateVote) {
+				m.GovNullifiers[4] = m.GovNullifiers[0]
+			},
+			expectErr:   true,
+			errContains: "duplicate gov_nullifiers",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			msg := validDelegateVote()
+			tc.modify(msg)
+			err := msg.ValidateBasic()
+			if tc.expectErr {
+				s.Require().Error(err)
+				if tc.errContains != "" {
+					s.Require().Contains(err.Error(), tc.errContains)
+				}
+			} else {
+				s.Require().NoError(err)
+			}
+		})
+	}
+}

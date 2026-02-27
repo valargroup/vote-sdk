@@ -91,6 +91,17 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 			return fmt.Errorf("%w: gov_nullifiers[%d] cannot be empty", ErrInvalidField, i)
 		}
 	}
+
+	// Cheap defense-in-depth: reject duplicate gov_nullifiers within the same message
+	// since the circuit does not constrain the 5 governance nullifiers to be distinct.
+	seen := make(map[string]struct{}, len(msg.GovNullifiers))
+	for i, nf := range msg.GovNullifiers {
+		k := string(nf)
+		if _, dup := seen[k]; dup {
+			return fmt.Errorf("%w: duplicate gov_nullifiers[%d]", ErrInvalidField, i)
+		}
+		seen[k] = struct{}{}
+	}
 	if len(msg.Proof) == 0 {
 		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
 	}
