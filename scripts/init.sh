@@ -5,7 +5,7 @@ CHAIN_ID="zvote-1"
 MONIKER="validator"
 HOME_DIR="$HOME/.zallyd"
 BINARY="zallyd"
-DENOM="stake"
+DENOM="uzvote"
 
 echo "=== Initializing Zally Chain ==="
 

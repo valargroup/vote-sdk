@@ -33,7 +33,7 @@ fi
 
 CHAIN_ID="zvote-1"
 BINARY="zallyd"
-DENOM="stake"
+DENOM="uzvote"
 NUM_VALIDATORS=3
 
 # Home directories.

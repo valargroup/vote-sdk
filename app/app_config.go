@@ -44,6 +44,10 @@ func init() {
 	cfg.SetBech32PrefixForAccount("zvote", "zvotepub")
 	cfg.SetBech32PrefixForValidator("zvotevaloper", "zvotevaloperpub")
 	cfg.SetBech32PrefixForConsensusNode("zvotevalcons", "zvotevalconspub")
+
+	// Override the default bond denom so that DefaultParams(), genesis generation,
+	// and test helpers all use "uzvote" without needing post-hoc JSON patching.
+	sdk.DefaultBondDenom = "uzvote"
 }
 
 var (

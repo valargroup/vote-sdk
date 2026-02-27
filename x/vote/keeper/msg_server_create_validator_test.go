@@ -42,7 +42,7 @@ func validStakingMsgBytes() ([]byte, string) {
 		MinSelfDelegation: math.NewInt(1),
 		ValidatorAddress:  valAddr,
 		Pubkey:            pkAny,
-		Value:             sdk.NewInt64Coin("stake", 1000000),
+		Value:             sdk.NewInt64Coin("uzvote", 1000000),
 	}
 
 	bz, err := msg.Marshal()

@@ -75,7 +75,7 @@ comet_rpc = "{{ .Vote.CometRPC }}"
 func initAppConfig() (string, interface{}) {
 	srvCfg := serverconfig.DefaultConfig()
 	// Set default min gas prices to 0 for the vote chain (no fees needed).
-	srvCfg.MinGasPrices = "0stake"
+	srvCfg.MinGasPrices = "0uzvote"
 
 	customConfig := CustomAppConfig{
 		Config: *srvCfg,

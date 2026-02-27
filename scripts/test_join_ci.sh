@@ -145,7 +145,7 @@ fi
 # ─── Step 5: Fund the joiner account ─────────────────────────────────────────
 
 echo "Funding joiner account..."
-zallyd tx bank send validator "$JOINER_ADDR" 200000stake \
+zallyd tx bank send validator "$JOINER_ADDR" 200000uzvote \
     --home "$VAL1_HOME" --keyring-backend test --chain-id "$CHAIN_ID" -y \
     > /dev/null 2>&1
 
@@ -153,9 +153,9 @@ zallyd tx bank send validator "$JOINER_ADDR" 200000stake \
 echo "Waiting for balance..."
 for i in $(seq 1 30); do
     BALANCE=$(zallyd query bank balances "$JOINER_ADDR" --home "$JOINER_HOME" --node tcp://127.0.0.1:26757 --output json 2>/dev/null \
-        | python3 -c "import sys,json; balances=json.load(sys.stdin).get('balances',[]); print(next((b['amount'] for b in balances if b['denom']=='stake'), '0'))" 2>/dev/null || echo "0")
+        | python3 -c "import sys,json; balances=json.load(sys.stdin).get('balances',[]); print(next((b['amount'] for b in balances if b['denom']=='uzvote'), '0'))" 2>/dev/null || echo "0")
     if [ "$BALANCE" != "0" ] && [ -n "$BALANCE" ]; then
-        echo "  Joiner funded: $BALANCE stake"
+        echo "  Joiner funded: $BALANCE uzvote"
         break
     fi
     sleep 2
@@ -172,7 +172,7 @@ echo "Registering joiner as validator (create-val-tx)..."
 create-val-tx \
     --home "$JOINER_HOME" \
     --moniker "$MONIKER" \
-    --amount 100000stake \
+    --amount 100000uzvote \
     --rpc-url tcp://localhost:26657
 
 # Wait for the registration tx to commit.
