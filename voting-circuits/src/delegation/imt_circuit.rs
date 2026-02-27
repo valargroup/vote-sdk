@@ -1,9 +1,11 @@
 //! IMT non-membership circuit gates and synthesis (condition 13).
 //!
 //! Extracted from `circuit.rs` for readability. Contains:
-//! - `ImtSwapGate`: conditional swap at each Merkle level
 //! - `IntervalGate`: interval inclusion check (low <= real_nf <= low + width)
 //! - `synthesize_imt_non_membership`: orchestrates leaf hash → Merkle path → interval check
+//!
+//! The Merkle conditional swap gate and path synthesis are provided by
+//! [`crate::circuit::poseidon_merkle`].
 
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
@@ -19,136 +21,13 @@ use halo2_gadgets::{
         primitives::{self as poseidon, ConstantLength},
         Hash as PoseidonHash, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig,
     },
-    utilities::bool_check,
 };
 
+use orchard::circuit::gadget::assign_free_advice;
 use orchard::constants::OrchardFixedBases;
 
 use super::imt::IMT_DEPTH;
-
-// ================================================================
-// ImtSwapGate
-// ================================================================
-
-/// Conditional swap gate for the IMT Poseidon Merkle path.
-///
-/// **Layout** (1 row):
-/// - `advices[0]`: pos_bit (bool — left or right child)
-/// - `advices[1]`: current (hash being walked up)
-/// - `advices[2]`: sibling (authentication path node)
-/// - `advices[3]`: left (output)
-/// - `advices[4]`: right (output)
-///
-/// **Constraints**:
-/// - `left = current + pos_bit * (sibling - current)`
-/// - `left + right = current + sibling` (conservation)
-/// - `bool_check(pos_bit)`
-#[derive(Clone, Debug)]
-pub(crate) struct ImtSwapGate {
-    pub(crate) q_imt_swap: Selector,
-    advices: [Column<Advice>; 5],
-}
-
-impl ImtSwapGate {
-    /// Configures the gate. Uses `advices[0..5]`.
-    pub(crate) fn configure(
-        meta: &mut plonk::ConstraintSystem<pallas::Base>,
-        advices: [Column<Advice>; 5],
-    ) -> Self {
-        let q_imt_swap = meta.selector();
-
-        // IMT conditional swap gate (condition 13).
-        // At each level of the Poseidon Merkle path, we need to place (current, sibling)
-        // into (left, right) based on the position bit. If pos_bit=0, current is the
-        // left child; if pos_bit=1, they swap.
-        meta.create_gate("IMT conditional swap", |meta| {
-            let q = meta.query_selector(q_imt_swap);
-            let pos_bit = meta.query_advice(advices[0], Rotation::cur());
-            let current = meta.query_advice(advices[1], Rotation::cur());
-            let sibling = meta.query_advice(advices[2], Rotation::cur());
-            let left = meta.query_advice(advices[3], Rotation::cur());
-            let right = meta.query_advice(advices[4], Rotation::cur());
-
-            Constraints::with_selector(
-                q,
-                [
-                    // left = current + pos_bit * (sibling - current)
-                    // i.e. left = current when pos_bit=0, left = sibling when pos_bit=1.
-                    (
-                        "swap left",
-                        left.clone()
-                            - current.clone()
-                            - pos_bit.clone() * (sibling.clone() - current.clone()),
-                    ),
-                    // left + right = current + sibling (conservation: no values lost).
-                    // given that left is oneof {current, sibling}, right is forced to be the other.
-                    ("swap right", left + right - current - sibling),
-                    // pos_bit must be 0 or 1.
-                    ("bool_check pos_bit", bool_check(pos_bit)),
-                ],
-            )
-        });
-
-        ImtSwapGate {
-            q_imt_swap,
-            advices,
-        }
-    }
-
-    /// Assigns a single swap row. Returns `(left, right)`.
-    pub(crate) fn assign(
-        &self,
-        region: &mut halo2_proofs::circuit::Region<'_, pallas::Base>,
-        offset: usize,
-        pos_bit: &AssignedCell<pallas::Base, pallas::Base>,
-        current: &AssignedCell<pallas::Base, pallas::Base>,
-        sibling: &AssignedCell<pallas::Base, pallas::Base>,
-    ) -> Result<
-        (
-            AssignedCell<pallas::Base, pallas::Base>,
-            AssignedCell<pallas::Base, pallas::Base>,
-        ),
-        plonk::Error,
-    > {
-        self.q_imt_swap.enable(region, offset)?;
-
-        let pos_bit_cell =
-            pos_bit.copy_advice(|| "pos_bit", region, self.advices[0], offset)?;
-        let current_cell =
-            current.copy_advice(|| "current", region, self.advices[1], offset)?;
-        let sibling_cell =
-            sibling.copy_advice(|| "sibling", region, self.advices[2], offset)?;
-
-        let swap = pos_bit_cell
-            .value()
-            .copied()
-            .zip(current_cell.value().copied())
-            .zip(sibling_cell.value().copied())
-            .map(|((bit, cur), sib)| {
-                if bit == pallas::Base::zero() {
-                    (cur, sib)
-                } else {
-                    (sib, cur)
-                }
-            });
-
-        let left = region.assign_advice(
-            || "left",
-            self.advices[3],
-            offset,
-            || swap.map(|(l, _)| l),
-        )?;
-
-        let right = region.assign_advice(
-            || "right",
-            self.advices[4],
-            offset,
-            || swap.map(|(_, r)| r),
-        )?;
-
-        Ok((left, right))
-    }
-}
+use crate::circuit::poseidon_merkle::{MerkleSwapGate, synthesize_poseidon_merkle_path};
 
 // ================================================================
 // IntervalGate
@@ -285,12 +164,12 @@ impl IntervalGate {
 // ImtNonMembershipConfig
 // ================================================================
 
-/// Bundles both IMT gates and the columns they need.
+/// Bundles the Merkle swap gate, interval gate, and the columns they need.
 #[derive(Clone, Debug)]
 pub(crate) struct ImtNonMembershipConfig {
-    pub(crate) swap_gate: ImtSwapGate,
+    pub(crate) swap_gate: MerkleSwapGate,
     pub(crate) interval_gate: IntervalGate,
-    /// The first advice column, used for free-witness assignments (pos_bit, sibling, low, width).
+    /// The first advice column, used for free-witness assignments (low, width).
     pub(crate) advice_0: Column<Advice>,
 }
 
@@ -301,7 +180,7 @@ impl ImtNonMembershipConfig {
         meta: &mut plonk::ConstraintSystem<pallas::Base>,
         advices: &[Column<Advice>; 10],
     ) -> Self {
-        let swap_gate = ImtSwapGate::configure(
+        let swap_gate = MerkleSwapGate::configure(
             meta,
             [advices[0], advices[1], advices[2], advices[3], advices[4]],
         );
@@ -326,7 +205,7 @@ impl ImtNonMembershipConfig {
 /// Orchestrates:
 /// 1. Witness low/width
 /// 2. Poseidon leaf hash = Poseidon(low, width)
-/// 3. 29-level Merkle path using `ImtSwapGate` at each level
+/// 3. 29-level Merkle path via [`synthesize_poseidon_merkle_path`]
 /// 4. Interval check using `IntervalGate`
 /// 5. Range checks on x, x_shifted to [0, 2^250)
 ///
@@ -347,23 +226,17 @@ pub(crate) fn synthesize_imt_non_membership(
     let s = slot;
 
     // Witness low and width explicitly.
-    let imt_low_cell = {
-        use orchard::circuit::gadget::assign_free_advice;
-        assign_free_advice(
-            layouter.namespace(|| format!("note {s} imt_low")),
-            imt_config.advice_0,
-            imt_low,
-        )?
-    };
+    let imt_low_cell = assign_free_advice(
+        layouter.namespace(|| format!("note {s} imt_low")),
+        imt_config.advice_0,
+        imt_low,
+    )?;
 
-    let imt_width_cell = {
-        use orchard::circuit::gadget::assign_free_advice;
-        assign_free_advice(
-            layouter.namespace(|| format!("note {s} imt_width")),
-            imt_config.advice_0,
-            imt_width,
-        )?
-    };
+    let imt_width_cell = assign_free_advice(
+        layouter.namespace(|| format!("note {s} imt_width")),
+        imt_config.advice_0,
+        imt_width,
+    )?;
 
     // Compute leaf hash: Poseidon(low, width).
     let leaf_hash = {
@@ -384,66 +257,17 @@ pub(crate) fn synthesize_imt_non_membership(
         )?
     };
 
-    // Poseidon Merkle path from leaf_hash, 29 levels.
-    // At each level, ImtSwapGate orders (current, sibling) by position bit,
-    // then Poseidon(left, right) computes the parent.
-    let mut current = leaf_hash;
-
-    for i in 0..IMT_DEPTH {
-        let pos_bit = {
-            use orchard::circuit::gadget::assign_free_advice;
-            assign_free_advice(
-                layouter.namespace(|| format!("note {s} imt pos_bit {i}")),
-                imt_config.advice_0,
-                imt_leaf_pos
-                    .map(|p| pallas::Base::from(((p >> i) & 1) as u64)),
-            )?
-        };
-
-        let sibling = {
-            use orchard::circuit::gadget::assign_free_advice;
-            assign_free_advice(
-                layouter.namespace(|| format!("note {s} imt sibling {i}")),
-                imt_config.advice_0,
-                imt_path.map(|path| path[i]),
-            )?
-        };
-
-        let (left, right) = layouter.assign_region(
-            || format!("note {s} imt swap level {i}"),
-            |mut region| {
-                imt_config.swap_gate.assign(
-                    &mut region,
-                    0,
-                    &pos_bit,
-                    &current,
-                    &sibling,
-                )
-            },
-        )?;
-
-        let parent = {
-            let poseidon_hasher = PoseidonHash::<
-                pallas::Base,
-                _,
-                poseidon::P128Pow5T3,
-                ConstantLength<2>,
-                3,
-                2,
-            >::init(
-                PoseidonChip::construct(poseidon_config.clone()),
-                layouter.namespace(|| format!("note {s} imt path hash init level {i}")),
-            )?;
-            poseidon_hasher.hash(
-                layouter.namespace(|| format!("note {s} Poseidon(left, right) level {i}")),
-                [left, right],
-            )?
-        };
-        current = parent;
-    }
-    // The computed root is checked against the public nf_imt_root in the
-    // q_per_note gate in circuit.rs.
-    let imt_root = current;
+    // 29-level Poseidon Merkle path from leaf_hash to imt_root.
+    let imt_root = synthesize_poseidon_merkle_path::<IMT_DEPTH>(
+        &imt_config.swap_gate,
+        poseidon_config,
+        layouter,
+        imt_config.advice_0,
+        leaf_hash,
+        imt_leaf_pos,
+        imt_path,
+        &format!("note {s} imt"),
+    )?;
 
     // Interval check: prove low <= real_nf <= low + width.
     // The IntervalGate constrains x, x_shifted from the witnessed values.

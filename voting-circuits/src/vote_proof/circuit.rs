@@ -54,10 +54,7 @@ use alloc::vec::Vec;
 
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value, floor_planner},
-    plonk::{
-        self, Advice, Column, ConstraintSystem, Constraints, Fixed, Instance as InstanceColumn, Selector
-    },
-    poly::Rotation,
+    plonk::{self, Advice, Column, ConstraintSystem, Fixed, Instance as InstanceColumn},
 };
 use pasta_curves::{pallas, vesta};
 
@@ -71,12 +68,13 @@ use halo2_gadgets::{
         Hash as PoseidonHash, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig,
     },
     sinsemilla::chip::{SinsemillaChip, SinsemillaConfig},
-    utilities::{bool_check, lookup_range_check::LookupRangeCheckConfig},
+    utilities::lookup_range_check::LookupRangeCheckConfig,
 };
 use crate::circuit::address_ownership::{prove_address_ownership, spend_auth_g_mul};
 use crate::circuit::elgamal::{EaPkInstanceLoc, prove_elgamal_encryptions};
+use crate::circuit::poseidon_merkle::{MerkleSwapGate, synthesize_poseidon_merkle_path};
 use orchard::circuit::commit_ivk::{CommitIvkChip, CommitIvkConfig};
-use orchard::circuit::gadget::{add_chip::{AddChip, AddConfig}, AddInstruction};
+use orchard::circuit::gadget::{add_chip::{AddChip, AddConfig}, assign_free_advice, AddInstruction};
 use orchard::constants::{
     OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains,
 };
@@ -313,13 +311,12 @@ pub struct Config {
     /// Used in condition 6 to ensure authority values and diff are in [0, 2^16)
     /// (16-bit bitmask), and condition 9 to ensure each share is in `[0, 2^30)`.
     range_check: LookupRangeCheckConfig<pallas::Base, 10>,
-    /// Selector for the Merkle conditional swap gate (condition 1).
+    /// Merkle conditional swap gate (condition 1).
     ///
     /// At each of the 24 Merkle tree levels, conditionally swaps
     /// (current, sibling) into (left, right) based on the position bit.
     /// Uses advices[0..5]: pos_bit, current, sibling, left, right.
-    /// Identical to the delegation circuit's `q_imt_swap` gate.
-    q_merkle_swap: Selector,
+    merkle_swap: MerkleSwapGate,
     /// Configuration for condition 6 (Proposal Authority Decrement).
     authority_decrement: AuthorityDecrementConfig,
 }
@@ -524,21 +521,6 @@ impl Circuit {
     }
 }
 
-/// Loads a private witness value into a fresh advice cell.
-///
-/// Each call gets its own single-row region, matching the delegation
-/// circuit's `assign_free_advice` helper pattern.
-fn assign_free_advice(
-    mut layouter: impl Layouter<pallas::Base>,
-    column: Column<Advice>,
-    value: Value<pallas::Base>,
-) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error> {
-    layouter.assign_region(
-        || "load private",
-        |mut region| region.assign_advice(|| "private input", column, 0, || value),
-    )
-}
-
 /// In-circuit Poseidon hash for one share commitment: `Poseidon(blind, c1_x, c2_x)`.
 ///
 /// Uses the same parameters as the out-of-circuit [`share_commitment`] (P128Pow5T3,
@@ -635,40 +617,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         );
 
         // Merkle conditional swap gate (condition 1).
-        // At each level of the Poseidon Merkle path, we need to place
-        // (current, sibling) into (left, right) based on the position bit.
-        // If pos_bit=0, current is the left child; if pos_bit=1, they swap.
-        // Identical to the delegation circuit's q_imt_swap gate.
-        let q_merkle_swap = meta.selector();
-        meta.create_gate("Merkle conditional swap", |meta| {
-            let q = meta.query_selector(q_merkle_swap);
-            let pos_bit = meta.query_advice(advices[0], Rotation::cur());
-            let current = meta.query_advice(advices[1], Rotation::cur());
-            let sibling = meta.query_advice(advices[2], Rotation::cur());
-            let left = meta.query_advice(advices[3], Rotation::cur());
-            let right = meta.query_advice(advices[4], Rotation::cur());
-
-            Constraints::with_selector(
-                q,
-                [
-                    // left = current + pos_bit * (sibling - current)
-                    // i.e. left = current when pos_bit=0, left = sibling when pos_bit=1.
-                    (
-                        "swap left",
-                        left.clone()
-                            - current.clone()
-                            - pos_bit.clone() * (sibling.clone() - current.clone()),
-                    ),
-                    // left + right = current + sibling (conservation: no values lost).
-                    ("swap right", left + right - current - sibling),
-                    // pos_bit must be 0 or 1.
-                    (
-                        "bool_check pos_bit",
-                        bool_check(pos_bit),
-                    ),
-                ],
-            )
-        });
+        let merkle_swap = MerkleSwapGate::configure(
+            meta,
+            [advices[0], advices[1], advices[2], advices[3], advices[4]],
+        );
 
         // Condition 6: Proposal Authority Decrement.
         let authority_decrement = AuthorityDecrementChip::configure(meta, advices);
@@ -682,7 +634,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
             sinsemilla_config,
             commit_ivk_config,
             range_check,
-            q_merkle_swap,
+            merkle_swap,
             authority_decrement,
         }
     }
@@ -924,120 +876,22 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // matching vote_commitment_tree::MerkleHashVote::combine.
         // ---------------------------------------------------------------
         {
-            let mut current = vote_authority_note_old_cond1;
-
-            for i in 0..VOTE_COMM_TREE_DEPTH {
-                // Witness position bit for this level.
-                let pos_bit = assign_free_advice(
-                    layouter.namespace(|| alloc::format!("merkle pos_bit {i}")),
-                    config.advices[0],
-                    self.vote_comm_tree_position
-                        .map(|p| pallas::Base::from(((p >> i) & 1) as u64)),
-                )?;
-
-                // Witness sibling hash at this level.
-                let sibling = assign_free_advice(
-                    layouter.namespace(|| alloc::format!("merkle sibling {i}")),
-                    config.advices[0],
-                    self.vote_comm_tree_path.map(|path| path[i]),
-                )?;
-
-                // Conditional swap: order (current, sibling) by position bit.
-                // The q_merkle_swap gate constrains:
-                //   left  = current + pos_bit * (sibling - current)
-                //   right = current + sibling - left
-                //   pos_bit ∈ {0, 1}
-                let (left, right) = layouter.assign_region(
-                    || alloc::format!("merkle swap level {i}"),
-                    |mut region| {
-                        config.q_merkle_swap.enable(&mut region, 0)?;
-
-                        let pos_bit_cell = pos_bit.copy_advice(
-                            || "pos_bit",
-                            &mut region,
-                            config.advices[0],
-                            0,
-                        )?;
-                        let current_cell = current.copy_advice(
-                            || "current",
-                            &mut region,
-                            config.advices[1],
-                            0,
-                        )?;
-                        let sibling_cell = sibling.copy_advice(
-                            || "sibling",
-                            &mut region,
-                            config.advices[2],
-                            0,
-                        )?;
-
-                        let left = region.assign_advice(
-                            || "left",
-                            config.advices[3],
-                            0,
-                            || {
-                                pos_bit_cell
-                                    .value()
-                                    .copied()
-                                    .zip(current_cell.value().copied())
-                                    .zip(sibling_cell.value().copied())
-                                    .map(|((bit, cur), sib)| {
-                                        if bit == pallas::Base::zero() {
-                                            cur
-                                        } else {
-                                            sib
-                                        }
-                                    })
-                            },
-                        )?;
-
-                        let right = region.assign_advice(
-                            || "right",
-                            config.advices[4],
-                            0,
-                            || {
-                                current_cell
-                                    .value()
-                                    .copied()
-                                    .zip(sibling_cell.value().copied())
-                                    .zip(left.value().copied())
-                                    .map(|((cur, sib), l)| cur + sib - l)
-                            },
-                        )?;
-
-                        Ok((left, right))
-                    },
-                )?;
-
-                // Hash parent = Poseidon(left, right).
-                let parent = {
-                    let hasher = PoseidonHash::<
-                        pallas::Base,
-                        _,
-                        poseidon::P128Pow5T3,
-                        ConstantLength<2>,
-                        3, // WIDTH
-                        2, // RATE
-                    >::init(
-                        config.poseidon_chip(),
-                        layouter.namespace(|| alloc::format!("merkle hash init level {i}")),
-                    )?;
-                    hasher.hash(
-                        layouter.namespace(|| alloc::format!(
-                            "Poseidon(left, right) level {i}"
-                        )),
-                        [left, right],
-                    )?
-                };
-
-                current = parent;
-            }
+            let root = synthesize_poseidon_merkle_path::<VOTE_COMM_TREE_DEPTH>(
+                &config.merkle_swap,
+                &config.poseidon_config,
+                &mut layouter,
+                config.advices[0],
+                vote_authority_note_old_cond1,
+                self.vote_comm_tree_position,
+                self.vote_comm_tree_path,
+                "cond1: merkle",
+            )?;
 
             // Bind the computed Merkle root to the VOTE_COMM_TREE_ROOT
             // public input. The verifier checks that the voter's VAN is
             // a leaf in the published vote commitment tree.
             layouter.constrain_instance(
-                current.cell(),
+                root.cell(),
                 config.primary,
                 VOTE_COMM_TREE_ROOT,
             )?;
