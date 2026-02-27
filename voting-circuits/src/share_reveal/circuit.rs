@@ -15,8 +15,10 @@
 //!   such that `share_comms[share_index] = Poseidon(blind, c1_x, c2_x)`,
 //!   binding the publicly revealed encrypted share to the committed set.
 //! - **Condition 5**: Share Nullifier Integrity — `share_nullifier` is
-//!   correctly derived via a 4-layer Poseidon chain that includes
-//!   `voting_round_id` to prevent cross-round replay.
+//!   correctly derived as
+//!   `Poseidon(domain_tag, vote_commitment, share_index, c1_x, c2_x)`.
+//!   Round-binding is transitive through `vote_commitment`, which already
+//!   commits to `voting_round_id`.
 //!
 //! ## Privacy
 //!
@@ -115,13 +117,12 @@ pub fn domain_tag_share_spend() -> pallas::Base {
 /// Out-of-circuit share nullifier hash (condition 5).
 ///
 /// ```text
-/// share_nullifier = Poseidon(domain_tag, vote_commitment, share_index, c1_x, c2_x, voting_round_id)
+/// share_nullifier = Poseidon(domain_tag, vote_commitment, share_index, c1_x, c2_x)
 /// ```
 ///
-/// Single `ConstantLength<6>` call (3 permutations at rate=2).
-/// The `voting_round_id` input binds the nullifier to a specific
-/// voting round, preventing cross-round proof replay (the commitment
-/// tree is global, not per-round).
+/// Single `ConstantLength<5>` call (3 permutations at rate=2).
+/// Round-binding comes transitively through `vote_commitment`, which
+/// already commits to `voting_round_id` as one of its Poseidon inputs.
 ///
 /// Matches `helper-server/src/nullifier.rs::derive_share_nullifier`.
 pub fn share_nullifier_hash(
@@ -129,15 +130,13 @@ pub fn share_nullifier_hash(
     share_index: pallas::Base,
     c1_x: pallas::Base,
     c2_x: pallas::Base,
-    voting_round_id: pallas::Base,
 ) -> pallas::Base {
-    poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<6>, 3, 2>::init().hash([
+    poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<5>, 3, 2>::init().hash([
         domain_tag_share_spend(),
         vote_commitment,
         share_index,
         c1_x,
         c2_x,
-        voting_round_id,
     ])
 }
 
@@ -495,8 +494,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         )?;
 
         // Copy voting_round_id from instance into advice.
-        // Used in condition 2 (vote commitment integrity) and condition 5
-        // (share nullifier integrity).
+        // Used in condition 2 (vote commitment integrity).
         let voting_round_id = layouter.assign_region(
             || "copy voting_round_id from instance",
             |mut region| {
@@ -509,8 +507,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 )
             },
         )?;
-        let voting_round_id_cond2 = voting_round_id.clone();
-        let voting_round_id_cond5 = voting_round_id.clone();
+        let voting_round_id_cond2 = voting_round_id;
 
         // ---------------------------------------------------------------
         // Witness 16 share_comms as private advice cells.
@@ -851,11 +848,11 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // Condition 5: Share Nullifier Integrity.
         //
         // share_nullifier = Poseidon(domain_tag, vote_commitment, share_index,
-        //                            selected_c1, selected_c2, voting_round_id)
+        //                            selected_c1, selected_c2)
         //
-        // Single ConstantLength<6> Poseidon hash (3 permutations at rate=2).
-        // The voting_round_id input binds the nullifier to the round,
-        // preventing cross-round proof replay (the commitment tree is global).
+        // Single ConstantLength<5> Poseidon hash (3 permutations at rate=2).
+        // Round-binding is transitive through vote_commitment, which already
+        // commits to voting_round_id as one of its Poseidon inputs.
         // Matches helper-server/src/nullifier.rs exactly.
         // ---------------------------------------------------------------
         {
@@ -871,7 +868,7 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 pallas::Base,
                 _,
                 poseidon::P128Pow5T3,
-                ConstantLength<6>,
+                ConstantLength<5>,
                 3,
                 2,
             >::init(
@@ -879,9 +876,9 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 layouter.namespace(|| "cond5: share nullifier Poseidon init"),
             )?
             .hash(
-                layouter.namespace(|| "cond5: Poseidon(tag, vc, idx, c1, c2, round_id)"),
+                layouter.namespace(|| "cond5: Poseidon(tag, vc, idx, c1, c2)"),
                 [domain_tag, vote_commitment_cond5, share_index_cond5,
-                 enc_c1_x_cond5, enc_c2_x_cond5, voting_round_id_cond5],
+                 enc_c1_x_cond5, enc_c2_x_cond5],
             )?;
 
             layouter.constrain_instance(

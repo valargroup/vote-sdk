@@ -76,7 +76,6 @@ pub fn build_share_reveal(
         share_index_fp,
         enc_c1_x,
         enc_c2_x,
-        voting_round_id,
     );
 
     let circuit = Circuit {
