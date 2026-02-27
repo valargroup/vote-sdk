@@ -1,19 +1,12 @@
 package keeper
 
 import (
-	"context"
 	"fmt"
-	"time"
 
 	"cosmossdk.io/core/store"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/z-cale/zally/x/vote/types"
 )
-
-// DefaultCeremonyMissJailThreshold is the number of consecutive ceremony
-// misses after which a validator is jailed.
-const DefaultCeremonyMissJailThreshold = 3
 
 // GetCeremonyState retrieves the singleton ceremony state from the KV store.
 // Returns nil, nil if no ceremony has been initialized yet.
@@ -108,85 +101,4 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 		}
 	}
 	round.CeremonyPayloads = keptPayloads
-}
-
-// ---------------------------------------------------------------------------
-// Ceremony miss counter (consecutive misses per validator)
-// ---------------------------------------------------------------------------
-
-// JailValidator resolves a validator operator address to its consensus address,
-// jails the validator via the staking module, sets JailedUntil via the slashing
-// module so that standard MsgUnjail works after the cooldown, and resets the
-// ceremony miss counter (punishment applied, clean slate on unjail).
-func (k *Keeper) JailValidator(ctx context.Context, operatorAddr string) error {
-	valAddr, err := sdk.ValAddressFromBech32(operatorAddr)
-	if err != nil {
-		return fmt.Errorf("invalid operator address %s: %w", operatorAddr, err)
-	}
-	val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
-	if err != nil {
-		return fmt.Errorf("failed to get validator %s: %w", operatorAddr, err)
-	}
-	if val.ConsensusPubkey == nil {
-		return fmt.Errorf("validator %s has no consensus pubkey", operatorAddr)
-	}
-	consAddr, err := val.GetConsAddr()
-	if err != nil {
-		return fmt.Errorf("failed to get consensus address for %s: %w", operatorAddr, err)
-	}
-
-	if err := k.stakingKeeper.Jail(ctx, consAddr); err != nil {
-		return err
-	}
-
-	// Set JailedUntil so the standard cosmos.slashing.v1beta1.MsgUnjail flow
-	// enforces a cooldown before the validator can rejoin.
-	jailDuration, err := k.slashingKeeper.DowntimeJailDuration(ctx)
-	if err != nil {
-		// Fallback to 10 minutes if params are unavailable.
-		jailDuration = 10 * time.Minute
-	}
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	jailUntil := sdkCtx.BlockTime().Add(jailDuration)
-	if err := k.slashingKeeper.JailUntil(ctx, consAddr, jailUntil); err != nil {
-		k.logger.Error("failed to set JailedUntil for ceremony-jailed validator",
-			"validator", operatorAddr, "error", err)
-		// Non-fatal: the validator is still jailed via staking, just won't
-		// have the timed unjail gate. Log and continue.
-	}
-
-	// Reset ceremony miss counter — the punishment has been applied, so the
-	// validator starts fresh when they unjail.
-	kvStore := k.OpenKVStore(ctx)
-	return k.ResetCeremonyMiss(kvStore, operatorAddr)
-}
-
-// GetCeremonyMissCount returns the consecutive ceremony miss count for a validator.
-func (k Keeper) GetCeremonyMissCount(kvStore store.KVStore, valoperAddr string) (uint64, error) {
-	bz, err := kvStore.Get(types.CeremonyMissKey(valoperAddr))
-	if err != nil {
-		return 0, err
-	}
-	if len(bz) < 8 {
-		return 0, nil
-	}
-	return getUint64BE(bz), nil
-}
-
-// IncrementCeremonyMiss increments the consecutive miss counter for a validator
-// and returns the new count.
-func (k Keeper) IncrementCeremonyMiss(kvStore store.KVStore, valoperAddr string) (uint64, error) {
-	count, err := k.GetCeremonyMissCount(kvStore, valoperAddr)
-	if err != nil {
-		return 0, err
-	}
-	count++
-	val := make([]byte, 8)
-	putUint64BE(val, count)
-	return count, kvStore.Set(types.CeremonyMissKey(valoperAddr), val)
-}
-
-// ResetCeremonyMiss resets the consecutive miss counter for a validator to zero.
-func (k Keeper) ResetCeremonyMiss(kvStore store.KVStore, valoperAddr string) error {
-	return kvStore.Delete(types.CeremonyMissKey(valoperAddr))
 }

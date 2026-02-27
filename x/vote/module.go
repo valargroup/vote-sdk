@@ -22,7 +22,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
@@ -209,8 +208,7 @@ type ModuleInputs struct {
 	Cdc            codec.Codec
 	Logger         log.Logger
 	Config         *modulev1.Module
-	StakingKeeper  *stakingkeeper.Keeper
-	SlashingKeeper slashingkeeper.Keeper
+	StakingKeeper *stakingkeeper.Keeper
 }
 
 // ModuleOutputs defines the outputs produced by the vote module.
@@ -228,7 +226,6 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.Config.Authority,
 		in.Logger,
 		in.StakingKeeper,
-		in.SlashingKeeper,
 	)
 
 	m := NewAppModule(k, in.Cdc)
@@ -482,31 +479,6 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 
 		nAcks := len(round.CeremonyAcks)
 		nVals := len(round.CeremonyValidators)
-
-		// Identify non-ackers for miss tracking.
-		acked := make(map[string]bool, nAcks)
-		for _, a := range round.CeremonyAcks {
-			acked[a.ValidatorAddress] = true
-		}
-		for _, v := range round.CeremonyValidators {
-			if acked[v.ValidatorAddress] {
-				continue
-			}
-			// Non-acker: increment miss counter, jail if threshold reached.
-			missCount, err := am.keeper.IncrementCeremonyMiss(kvStore, v.ValidatorAddress)
-			if err != nil {
-				return err
-			}
-			if missCount >= keeper.DefaultCeremonyMissJailThreshold {
-				if err := am.keeper.JailValidator(goCtx, v.ValidatorAddress); err != nil {
-					am.keeper.Logger().Error("failed to jail validator for ceremony misses",
-						"validator", v.ValidatorAddress, "misses", missCount, "error", err)
-				} else {
-					keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-						fmt.Sprintf("validator %s jailed after %d consecutive ceremony misses", v.ValidatorAddress, missCount))
-				}
-			}
-		}
 
 		if keeper.OneThirdAcked(round) {
 			// >= 1/3 acked: strip non-ackers (offline/non-responsive), confirm

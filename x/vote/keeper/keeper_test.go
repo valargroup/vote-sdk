@@ -59,7 +59,7 @@ func (s *KeeperTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(testBlockTime)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil, nil)
+	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -969,7 +969,6 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
 		"zvote1authority",
 		log.NewNopLogger(),
 		nil,
-		nil,
 	)
 	freshRoot, err := freshKeeper.ComputeTreeRoot(kv, 3, 3)
 	s.Require().NoError(err)
@@ -1041,7 +1040,6 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 		s.keeper.StoreServiceForTest(),
 		"zvote1authority",
 		log.NewNopLogger(),
-		nil,
 		nil,
 	)
 
