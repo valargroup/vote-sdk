@@ -201,14 +201,15 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 		fmt.Sprintf("ack from %s (%d/%d acked)", msg.Creator, len(round.CeremonyAcks), len(round.CeremonyValidators)))
 
-	// Check if >= 1/3 validators acked -> transition to CONFIRMED + ACTIVE.
-	if OneThirdAcked(round) {
-		stripped := len(round.CeremonyValidators) - len(round.CeremonyAcks)
-		StripNonAckersFromRound(round)
+	// Fast path: confirm only when ALL validators have acked. This gives
+	// every validator a chance to ack via PrepareProposal before the ceremony
+	// closes. If some validators are offline, the timeout path in EndBlocker
+	// handles confirmation with >= 1/3 acks and strips non-ackers.
+	if len(round.CeremonyAcks) == len(round.CeremonyValidators) {
 		round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 		round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
 		AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-			fmt.Sprintf("ceremony confirmed, %d non-ackers stripped, round ACTIVE", stripped))
+			fmt.Sprintf("ceremony confirmed (%d/%d acked), round ACTIVE", len(round.CeremonyAcks), len(round.CeremonyValidators)))
 	}
 
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {

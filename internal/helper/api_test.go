@@ -98,18 +98,6 @@ func TestSubmitShare_ValidationErrors(t *testing.T) {
 			modify:  func(p *SharePayload) { p.VoteRoundID = "ZZ" },
 			errPart: "vote_round_id",
 		},
-		{
-			name:    "wrong number of all_enc_shares",
-			modify:  func(p *SharePayload) { p.AllEncShares = p.AllEncShares[:2] },
-			errPart: "all_enc_shares",
-		},
-		{
-			name: "enc_share mismatch",
-			modify: func(p *SharePayload) {
-				p.EncShare.C1 = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
-			},
-			errPart: "enc_share c1/c2",
-		},
 	}
 
 	for _, tc := range tests {

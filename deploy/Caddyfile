@@ -7,6 +7,7 @@
 # Deploy:   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl restart caddy
 #   — or —  make caddy   (from the sdk directory)
 
+# Main domain — val1 REST API + shared services (nullifier PIR, binary releases).
 46-101-255-48.sslip.io {
 	# No CORS headers here — the nullifier query-server sets its own via
 	# CorsLayer (same reason we skip them for zallyd; duplicates cause browsers
@@ -21,4 +22,20 @@
 	}
 
 	reverse_proxy localhost:1418
+}
+
+# Per-validator subdomains — each validator gets its own HTTPS endpoint so
+# iOS clients can distribute shares across distinct vote server URLs.
+# All subdomains resolve to the same IP via sslip.io; Caddy routes by hostname.
+
+val1.46-101-255-48.sslip.io {
+	reverse_proxy localhost:1418
+}
+
+val2.46-101-255-48.sslip.io {
+	reverse_proxy localhost:1518
+}
+
+val3.46-101-255-48.sslip.io {
+	reverse_proxy localhost:1618
 }

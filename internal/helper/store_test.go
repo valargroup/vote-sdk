@@ -19,13 +19,9 @@ func newTestStore(t *testing.T) *ShareStore {
 
 func testPayload(roundID string, shareIndex uint32) SharePayload {
 	const zeroB64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-	allEnc := make([]EncryptedShareWire, 16)
-	for i := range allEnc {
-		allEnc[i] = EncryptedShareWire{C1: zeroB64, C2: zeroB64, ShareIndex: uint32(i)}
-	}
-	blinds := make([]string, 16)
-	for i := range blinds {
-		blinds[i] = zeroB64
+	comms := make([]string, 16)
+	for i := range comms {
+		comms[i] = zeroB64
 	}
 	return SharePayload{
 		SharesHash:   zeroB64,
@@ -39,8 +35,8 @@ func testPayload(roundID string, shareIndex uint32) SharePayload {
 		ShareIndex:   shareIndex,
 		TreePosition: 0,
 		VoteRoundID:  roundID,
-		AllEncShares: allEnc,
-		ShareBlinds:  blinds,
+		ShareComms:   comms,
+		PrimaryBlind: zeroB64,
 	}
 }
 

@@ -1072,10 +1072,8 @@ func TestFullCeremonyCycle_DealThenAck(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestMultiValidatorCeremony_DealAckConfirm uses 3 validators (1 real + 2
-// phantom) to exercise the auto-deal and auto-ack flow through the full ABCI
-// pipeline. With 3 validators, 1 ack satisfies the 1/3 threshold (1*3 >= 3),
-// so the ack handler confirms the ceremony immediately without waiting for
-// the EndBlocker timeout.
+// phantom) to exercise the auto-deal and ack flow through the full ABCI
+// pipeline. The fast path requires all validators to ack before confirming.
 func TestMultiValidatorCeremony_DealAckConfirm(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
@@ -1124,23 +1122,50 @@ func TestMultiValidatorCeremony_DealAckConfirm(t *testing.T) {
 		require.NotEmpty(t, p.Ciphertext, "payload ciphertext should be set for %s", p.ValidatorAddress)
 	}
 
-	// Block 2: PrepareProposal fires auto-ack → 1/3 met → immediate confirm.
+	// Block 2: PrepareProposal fires auto-ack from real validator → still DEALT.
 	app.NextBlockWithPrepareProposal()
 
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore = app.VoteKeeper().OpenKVStore(ctx)
 	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
+		"ceremony should still be DEALT (1/3 not enough for fast path)")
+	require.Len(t, round.CeremonyAcks, 1, "should have 1 ack from real validator")
+
+	// Manually deliver acks from phantom1 and phantom2.
+	for _, addr := range []string{phantom1Addr, phantom2Addr} {
+		h := sha256.New()
+		h.Write([]byte("ack"))
+		h.Write(round.EaPk)
+		h.Write([]byte(addr))
+		ackSig := h.Sum(nil)
+
+		ackMsg := &types.MsgAckExecutiveAuthorityKey{
+			Creator:      addr,
+			VoteRoundId:  roundID,
+			AckSignature: ackSig,
+		}
+		ackTx, err := voteapi.EncodeCeremonyTx(ackMsg, voteapi.TagAckExecutiveAuthorityKey)
+		require.NoError(t, err)
+		ackResult := app.DeliverVoteTx(ackTx)
+		require.Equal(t, uint32(0), ackResult.Code,
+			"ack from %s should succeed, got: %s", addr, ackResult.Log)
+	}
+
+	// All 3 validators acked → fast path confirms.
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus,
-		"ceremony should be CONFIRMED (1 ack of 3 validators meets 1/3 threshold)")
+		"ceremony should be CONFIRMED after all 3 validators acked")
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
 		"round should be ACTIVE after ceremony confirmation")
-	require.Len(t, round.CeremonyAcks, 1, "should have exactly 1 ack (from real validator)")
-	require.Equal(t, valAddr, round.CeremonyAcks[0].ValidatorAddress)
+	require.Len(t, round.CeremonyAcks, 3, "should have 3 acks (all validators)")
 
-	// Non-acking phantom validators should be stripped from CeremonyValidators.
-	require.Len(t, round.CeremonyValidators, 1, "only the acking validator should remain")
-	require.Equal(t, valAddr, round.CeremonyValidators[0].ValidatorAddress)
+	// No stripping — all validators remain.
+	require.Len(t, round.CeremonyValidators, 3, "all validators should remain (no stripping)")
 
 	// EA public key should be set.
 	require.NotEmpty(t, round.EaPk, "ea_pk should be set on the round")
@@ -1286,7 +1311,7 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 // the 1/3 threshold requires 2*3=6 >= 4, so 2 acks are needed.
 //
 // Cycle 1: timeout (only real validator acks, 1*3=3 < 4).
-// Cycle 2: phantom1 manually acks → 2 acks total → CONFIRMED + ACTIVE.
+// Cycle 2: phantom1 manually acks → 2 acks total → timeout confirms + strips.
 func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
@@ -1410,8 +1435,14 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	require.Equal(t, uint32(0), ackResult.Code,
 		"phantom1 ack should succeed, got: %s", ackResult.Log)
 
+	// Fast path requires ALL validators to ack, so 2/4 stays DEALT.
+	// Advance past timeout → EndBlocker confirms with >= 1/3 acks and strips
+	// non-ackers (phantom2, phantom3).
+	timeoutTime = time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
+	app.NextBlockAtTime(timeoutTime)
+
 	// -----------------------------------------------------------------------
-	// Assertions: ceremony confirmed, miss counters correct.
+	// Assertions: ceremony confirmed via timeout, miss counters correct.
 	// -----------------------------------------------------------------------
 
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
@@ -1421,7 +1452,7 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 
 	// Round should be ACTIVE with ceremony CONFIRMED.
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
-		"round should be ACTIVE after 2/4 acks meet threshold")
+		"round should be ACTIVE after timeout with 2/4 acks")
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus,
 		"ceremony should be CONFIRMED")
 
@@ -1438,18 +1469,16 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	require.Equal(t, uint64(0), phantom1Miss,
 		"phantom1 miss counter should be 0 after recovery ack")
 
-	// phantom2 and phantom3 miss counters: 1 (from cycle 1 timeout only;
-	// the ack-handler confirm path strips non-ackers but does not increment
-	// miss counters — that only happens in the EndBlocker timeout path).
+	// phantom2 and phantom3 miss counters: 2 (cycle 1 timeout + cycle 2 timeout).
 	phantom2Miss, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, phantom2Addr)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), phantom2Miss,
-		"phantom2 miss counter should be 1 (cycle 1 timeout only)")
+	require.Equal(t, uint64(2), phantom2Miss,
+		"phantom2 miss counter should be 2 (cycle 1 + cycle 2 timeouts)")
 
 	phantom3Miss, err := app.VoteKeeper().GetCeremonyMissCount(kvStore, phantom3Addr)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), phantom3Miss,
-		"phantom3 miss counter should be 1 (cycle 1 timeout only)")
+	require.Equal(t, uint64(2), phantom3Miss,
+		"phantom3 miss counter should be 2 (cycle 1 + cycle 2 timeouts)")
 
 	// Real validator miss counter: still 0.
 	realMiss, err = app.VoteKeeper().GetCeremonyMissCount(kvStore, valAddr)
