@@ -170,8 +170,8 @@ pub struct Config {
     ///
     /// Constraints:
     /// - Each sel_i is boolean.
-    /// - sel_i * (share_index - i) == 0 (index matching).
     /// - Exactly one sel_i is 1.
+    /// - share_index == Σ i * sel_i (index reconstruction, replaces 16 per-bit checks).
     /// - selected_comm = Σ sel_i * comm_i.
     q_share_comm_mux: Selector,
 }
@@ -362,24 +362,26 @@ impl plonk::Circuit<pallas::Base> for Circuit {
                 .map(|i| ("bool sel_i", bool_check(sel[i].clone())))
                 .collect();
 
-            // Index matching: sel_i * (share_index - i) == 0.
-            let index_checks: Vec<(&'static str, Expression<pallas::Base>)> = (0..16)
-                .map(|i| {
-                    let idx_expr = Expression::Constant(pallas::Base::from(i as u64));
-                    ("sel_i * (share_index - i)", sel[i].clone() * (share_index.clone() - idx_expr))
-                })
-                .collect();
-
             let sum_expr = sel.iter().skip(1).fold(sel[0].clone(), |acc, s| acc + s.clone());
             let sum_check = ("sum sel == 1", sum_expr - one);
+
+            // Index reconstruction: share_index == sum(i * sel[i]).
+            //
+            // Given bool + sum guarantees exactly one sel[j] = 1, the sum collapses
+            // to j, so this single constraint.
+            let reconstructed = sel.iter().enumerate().skip(1).fold(
+                Expression::Constant(pallas::Base::zero()),
+                |acc, (i, s)| acc + Expression::Constant(pallas::Base::from(i as u64)) * s.clone(),
+            );
+            let index_reconstruct = ("index reconstruct", share_index.clone() - reconstructed);
 
             let comm_mux_expr = comm.iter().zip(sel.iter())
                 .fold(selected_comm, |acc, (c, s)| acc - s.clone() * c.clone());
             let comm_mux = ("comm mux", comm_mux_expr);
 
             let mut constraints: Vec<(&'static str, Expression<pallas::Base>)> = bool_checks;
-            constraints.extend(index_checks);
             constraints.push(sum_check);
+            constraints.push(index_reconstruct);
             constraints.push(comm_mux);
 
             Constraints::with_selector(q, constraints)
