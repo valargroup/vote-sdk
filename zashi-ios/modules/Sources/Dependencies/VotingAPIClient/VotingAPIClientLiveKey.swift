@@ -58,6 +58,14 @@ private let httpSession: URLSession = {
     return URLSession(configuration: config)
 }()
 
+/// Fast URLSession for share POSTs and health probes (5s timeout).
+/// Share delivery should fail fast so we can failover to another server.
+private let fastHttpSession: URLSession = {
+    let config = URLSessionConfiguration.default
+    config.timeoutIntervalForRequest = 5
+    return URLSession(configuration: config)
+}()
+
 private func getJSON(_ path: String, baseURL: String? = nil) async throws -> [String: Any] {
     let resolvedDefault = await ZallyAPIConfigStore.shared.baseURL
     let base = baseURL ?? resolvedDefault
@@ -113,7 +121,7 @@ private func postServerJSON(_ serverURL: String, _ path: String, body: [String: 
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-    let (data, response) = try await httpSession.data(for: request)
+    let (data, response) = try await fastHttpSession.data(for: request)
     guard let http = response as? HTTPURLResponse else {
         throw ZallyAPIError.invalidResponse("not an HTTP response")
     }
@@ -272,6 +280,9 @@ extension VotingAPIClient: DependencyKey {
             },
             configureURLs: { config in
                 await ZallyAPIConfigStore.shared.configure(from: config)
+                await ServerHealthTracker.shared.initialize(
+                    serverURLs: config.voteServers.map(\.url)
+                )
                 let base = await ZallyAPIConfigStore.shared.baseURL
                 let pir = await ZallyAPIConfigStore.shared.pirServerURL
                 print("[VotingAPI] URLs configured: base=\(base), servers=\(config.voteServers.count), pir=\(pir)")
@@ -378,20 +389,13 @@ extension VotingAPIClient: DependencyKey {
                 return try parseTxResult(json)
             },
             delegateShares: { payloads, roundIdHex in
-                // Distribute shares across available vote servers for temporal unlinkability.
-                let servers = await ZallyAPIConfigStore.shared.voteServerURLs
+                // Distribute shares across healthy vote servers with per-share failover.
+                let tracker = ServerHealthTracker.shared
+                let healthy = await tracker.healthyServers().shuffled()
+
+                var lastError: Error?
                 for (i, payload) in payloads.enumerated() {
-                    let serverURL: String
-                    if servers.count >= payloads.count {
-                        // One share per server (shuffled for privacy)
-                        serverURL = servers.shuffled()[i % servers.count]
-                    } else if servers.count > 1 {
-                        // Round-robin across available servers
-                        serverURL = servers[i % servers.count]
-                    } else {
-                        // Single server — all shares go there
-                        serverURL = servers[0]
-                    }
+                    let serverURL = healthy[i % healthy.count]
 
                     let body: [String: Any] = [
                         "shares_hash": payload.sharesHash.base64EncodedString(),
@@ -408,7 +412,36 @@ extension VotingAPIClient: DependencyKey {
                         "share_comms": payload.shareComms.map { $0.base64EncodedString() },
                         "primary_blind": payload.primaryBlind.base64EncodedString()
                     ]
-                    _ = try await postServerJSON(serverURL, "/api/v1/shares", body: body)
+
+                    do {
+                        _ = try await postServerJSON(serverURL, "/api/v1/shares", body: body)
+                        await tracker.recordSuccess(for: serverURL)
+                    } catch {
+                        await tracker.recordFailure(for: serverURL)
+                        print("[VotingAPI] Share \(i) failed on \(serverURL): \(error.localizedDescription)")
+
+                        // Retry once on a different server
+                        let fallbacks = await tracker.healthyServers().shuffled().filter { $0 != serverURL }
+                        if let fallback = fallbacks.first {
+                            do {
+                                _ = try await postServerJSON(fallback, "/api/v1/shares", body: body)
+                                await tracker.recordSuccess(for: fallback)
+                                print("[VotingAPI] Share \(i) succeeded on fallback \(fallback)")
+                                continue
+                            } catch {
+                                await tracker.recordFailure(for: fallback)
+                                lastError = error
+                                print("[VotingAPI] Share \(i) fallback also failed on \(fallback): \(error.localizedDescription)")
+                            }
+                        } else {
+                            lastError = error
+                        }
+                    }
+                }
+
+                // If any shares failed after retry, surface the error so the outer retry loop can handle it
+                if let lastError {
+                    throw lastError
                 }
             },
             fetchProposalTally: { roundId, proposalId in
