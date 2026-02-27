@@ -15,7 +15,7 @@ import (
 )
 
 // GenerateShareRevealProof generates a ZKP #3 (share reveal) proof using the
-// Rust Halo2 prover via CGo. This is a CPU-intensive operation (~30-60s).
+// Rust Halo2 prover via CGo. This is a CPU-intensive operation (~5-15s).
 //
 // Parameters:
 //   - merklePath: 772-byte serialized Merkle path (from votetree.TreeHandle.Path)
