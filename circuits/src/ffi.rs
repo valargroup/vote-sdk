@@ -1059,9 +1059,11 @@ pub fn build_share_reveal_test_data()
     let shares_hash_fp = orchard::shared_primitives::shares_hash::shares_hash_from_comms(share_comms);
 
     // Compute vote_commitment.
+    let voting_round_id = hash_bytes_to_fp(round_id);
     let proposal_id_fp = pallas::Base::from(u64::from(proposal_id));
     let vote_decision_fp = pallas::Base::from(u64::from(vote_decision));
     let vote_commitment = vote_commitment_tree::vote_commitment_hash(
+        voting_round_id,
         shares_hash_fp,
         proposal_id_fp,
         vote_decision_fp,
