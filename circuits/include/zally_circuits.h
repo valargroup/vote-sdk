@@ -349,7 +349,7 @@ int32_t zally_verify_vote_proof(
  * ----------------------------------------------------------------------- */
 
 /*
- * Verify a real share reveal circuit proof (ZKP #3, 5 conditions, K=14).
+ * Verify a real share reveal circuit proof (ZKP #3, 5 conditions, K=11).
  *
  * The public inputs are passed as a flat byte array of 7 x 32-byte
  * chunks (224 bytes total), in order:

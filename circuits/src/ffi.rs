@@ -851,7 +851,7 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
 /// 3. Decode primary blind and revealed share coordinates
 /// 4. Deserialize round_id as canonical Fp
 /// 5. Build share reveal circuit with all witnesses + public share_comms
-/// 6. Generate Halo2 proof (CPU-intensive, ~30-60s in release mode)
+/// 6. Generate Halo2 proof (CPU-intensive, ~5-15s in release mode)
 ///
 /// # Arguments
 /// * `merkle_path_ptr/len`   - 772-byte serialized Merkle path
@@ -1019,7 +1019,7 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     let tree_root = bundle.instance.vote_comm_tree_root;
 
     // --- Step 7: Generate Halo2 proof ---
-    // Uses cached params and proving key (~30-60s in release mode).
+    // Uses cached params and proving key (~5-15s in release mode).
     let proof_bytes = std::panic::catch_unwind(|| {
         share_reveal::create_share_reveal_proof(bundle.circuit, &bundle.instance)
     });
@@ -1517,7 +1517,7 @@ mod tests {
     use super::*;
     /// Full round-trip test: generate a share reveal proof and verify it via FFI.
     ///
-    /// This test runs real Halo2 proving (~30-60s in release mode).
+    /// This test runs real Halo2 proving (~5-15s in release mode).
     /// Run with: `cargo test --release -p zally-circuits test_generate_share_reveal -- --ignored`
     #[test]
     #[ignore]
