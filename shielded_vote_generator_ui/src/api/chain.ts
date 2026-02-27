@@ -327,10 +327,26 @@ export async function getActiveRound(): Promise<{ round: ChainRound | null }> {
 
 // -- Edge Config management --
 
+export interface ServiceEntry {
+  url: string;
+  label: string;
+  operator_address?: string;
+}
+
 export interface VotingConfig {
   version: number;
-  vote_servers: Array<{ url: string; label: string }>;
-  pir_servers: Array<{ url: string; label: string }>;
+  vote_servers: ServiceEntry[];
+  pir_servers: ServiceEntry[];
+}
+
+export interface PendingRegistration {
+  operator_address: string;
+  url: string;
+  moniker: string;
+  timestamp: number;
+  signature: string;
+  pub_key: string;
+  expires_at: number;
 }
 
 /**
@@ -358,6 +374,38 @@ export interface UpdateVotingConfigParams {
  */
 export async function updateVotingConfig(params: UpdateVotingConfigParams): Promise<{ status: string }> {
   return fetchJson<{ status: string }>("/api/update-voting-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+}
+
+// -- Validator self-registration --
+
+/**
+ * Fetch pending validator registrations from Edge Config.
+ */
+export async function getPendingRegistrations(): Promise<PendingRegistration[]> {
+  try {
+    return await fetchJson<PendingRegistration[]>("/api/pending-registrations");
+  } catch {
+    return [];
+  }
+}
+
+export interface ApproveRegistrationParams {
+  payload: { action: "approve"; operator_address: string };
+  signature: string;
+  pubKey: string;
+  signerAddress: string;
+}
+
+/**
+ * Approve a pending validator registration (vote-manager only).
+ * Moves the entry from pending-registrations to vote_servers in voting-config.
+ */
+export async function approveRegistration(params: ApproveRegistrationParams): Promise<{ status: string }> {
+  return fetchJson<{ status: string }>("/api/approve-registration", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
