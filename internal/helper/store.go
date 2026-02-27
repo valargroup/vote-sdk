@@ -86,7 +86,6 @@ func migrate(db *sql.DB) error {
 			enc_share_c1    TEXT NOT NULL,
 			enc_share_c2    TEXT NOT NULL,
 			tree_position   INTEGER NOT NULL,
-			all_enc_shares  TEXT NOT NULL,
 			share_comms     TEXT NOT NULL DEFAULT '[]',
 			primary_blind   TEXT NOT NULL DEFAULT '',
 			state           INTEGER NOT NULL DEFAULT 0,
@@ -243,7 +242,6 @@ func migrateSharesPK(db *sql.DB) error {
 		enc_share_c1    TEXT NOT NULL,
 		enc_share_c2    TEXT NOT NULL,
 		tree_position   INTEGER NOT NULL,
-		all_enc_shares  TEXT NOT NULL,
 		share_comms     TEXT NOT NULL DEFAULT '[]',
 		primary_blind   TEXT NOT NULL DEFAULT '',
 		state           INTEGER NOT NULL DEFAULT 0,
@@ -256,7 +254,7 @@ func migrateSharesPK(db *sql.DB) error {
 
 	if _, err := tx.Exec(`INSERT INTO shares_new SELECT
 		round_id, share_index, shares_hash, proposal_id, vote_decision,
-		enc_share_c1, enc_share_c2, tree_position, all_enc_shares, share_comms,
+		enc_share_c1, enc_share_c2, tree_position, share_comms,
 		primary_blind, state, attempts, vote_end_time
 	FROM shares`); err != nil {
 		return err
@@ -285,10 +283,6 @@ func schedKey(roundID string, shareIndex, proposalID uint32, treePosition uint64
 //   - EnqueueConflict when an entry exists for (round_id, share_index) but
 //     with different payload content.
 func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
-	allEncJSON, err := json.Marshal(payload.AllEncShares)
-	if err != nil {
-		return EnqueueConflict, fmt.Errorf("marshal all_enc_shares: %w", err)
-	}
 	commsJSON, err := json.Marshal(payload.ShareComms)
 	if err != nil {
 		return EnqueueConflict, fmt.Errorf("marshal share_comms: %w", err)
@@ -303,8 +297,8 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO shares
 		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
-		  enc_share_c1, enc_share_c2, tree_position, all_enc_shares, share_comms, primary_blind, state, attempts, vote_end_time)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind, state, attempts, vote_end_time)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
 		 ON CONFLICT(round_id, share_index, proposal_id, tree_position) DO NOTHING`,
 		payload.VoteRoundID,
 		payload.EncShare.ShareIndex,
@@ -314,7 +308,6 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		payload.EncShare.C1,
 		payload.EncShare.C2,
 		payload.TreePosition,
-		string(allEncJSON),
 		string(commsJSON),
 		payload.PrimaryBlind,
 		voteEndTime,
@@ -575,12 +568,12 @@ func (s *ShareStore) recover() error {
 
 func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, treePosition uint64) (QueuedShare, bool) {
 	var q QueuedShare
-	var allEncJSON, commsJSON string
+	var commsJSON string
 	var state, attempts int
 
 	err := s.db.QueryRow(
 		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
-		        tree_position, all_enc_shares, share_comms, primary_blind, state, attempts
+		        tree_position, share_comms, primary_blind, state, attempts
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
@@ -590,7 +583,6 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 		&q.Payload.EncShare.C1,
 		&q.Payload.EncShare.C2,
 		&q.Payload.TreePosition,
-		&allEncJSON,
 		&commsJSON,
 		&q.Payload.PrimaryBlind,
 		&state,
@@ -606,9 +598,6 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 	q.State = ShareState(state)
 	q.Attempts = attempts
 
-	if err := json.Unmarshal([]byte(allEncJSON), &q.Payload.AllEncShares); err != nil {
-		return q, false
-	}
 	if err := json.Unmarshal([]byte(commsJSON), &q.Payload.ShareComms); err != nil {
 		return q, false
 	}
@@ -625,14 +614,6 @@ func payloadEqual(existing, incoming SharePayload) bool {
 		existing.ShareIndex != incoming.ShareIndex ||
 		existing.TreePosition != incoming.TreePosition {
 		return false
-	}
-	if len(existing.AllEncShares) != len(incoming.AllEncShares) {
-		return false
-	}
-	for i := range existing.AllEncShares {
-		if existing.AllEncShares[i] != incoming.AllEncShares[i] {
-			return false
-		}
 	}
 	if len(existing.ShareComms) != len(incoming.ShareComms) {
 		return false

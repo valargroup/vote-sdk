@@ -300,10 +300,6 @@ func TestValidatePayload(t *testing.T) {
 	roundID := hex.EncodeToString(make([]byte, 32))
 	b64_32 := base64.StdEncoding.EncodeToString(make([]byte, 32))
 
-	allEnc := make([]EncryptedShareWire, 16)
-	for i := range allEnc {
-		allEnc[i] = EncryptedShareWire{C1: b64_32, C2: b64_32, ShareIndex: uint32(i)}
-	}
 	comms := make([]string, 16)
 	for i := range comms {
 		comms[i] = b64_32
@@ -317,7 +313,6 @@ func TestValidatePayload(t *testing.T) {
 		ShareIndex:   0,
 		TreePosition: 0,
 		VoteRoundID:  roundID,
-		AllEncShares: allEnc,
 		ShareComms:   comms,
 		PrimaryBlind: b64_32,
 	}
@@ -335,11 +330,4 @@ func TestValidatePayload(t *testing.T) {
 		assert.Contains(t, err.Error(), "vote_round_id")
 	})
 
-	t.Run("all_enc_shares wrong order", func(t *testing.T) {
-		p := valid
-		p.AllEncShares[2].ShareIndex = 99
-		err := validatePayload(&p)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "all_enc_shares[2]")
-	})
 }
