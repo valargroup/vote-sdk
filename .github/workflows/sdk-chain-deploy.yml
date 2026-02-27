@@ -168,6 +168,12 @@ jobs:
               fi
               sleep 2
             done
+            # Register val1 pallas key (gentx doesn't include it)
+            ${{ env.DEPLOY_PATH }}/zallyd tx vote register-pallas-key \
+              --from validator --keyring-backend test \
+              --home "$HOME/.zallyd-val1" \
+              --chain-id zvote-1 --node tcp://localhost:26157 --yes
+            sleep 2
             # Register val2
             ${{ env.DEPLOY_PATH }}/create-val-tx \
               --home "$HOME/.zallyd-val2" \

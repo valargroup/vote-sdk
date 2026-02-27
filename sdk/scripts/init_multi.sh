@@ -61,7 +61,7 @@ PPROF_PORTS=(6160 6260 6360)
 # Self-delegation amounts. In local mode, val1 gets extra stake so that any 2
 # validators hold >2/3 of total power — the chain keeps producing blocks if one
 # node goes down (required for the restart test). CI mode uses uniform stakes.
-VAL1_SELF_DELEGATION="10000000${DENOM}"
+VAL1_SELF_DELEGATION="20000000${DENOM}"
 SELF_DELEGATION="10000000${DENOM}"
 
 # Validator genesis balance (covers the 10M self-delegation).
@@ -254,7 +254,7 @@ done
 echo "$VAL1_ADDR" > "$HOME_VAL1/validator_address.txt"
 
 # Add genesis accounts for all 3 validators and the bootstrap admin.
-$BINARY genesis add-genesis-account "$VAL1_ADDR" "$GENESIS_BALANCE" \
+$BINARY genesis add-genesis-account "$VAL1_ADDR" "$VAL1_SELF_DELEGATION" \
     --keyring-backend test --home "$HOME_VAL1"
 $BINARY genesis add-genesis-account "$MANAGER_ADDR" "$ADMIN_BALANCE" \
     --keyring-backend test --home "$HOME_VAL1"
