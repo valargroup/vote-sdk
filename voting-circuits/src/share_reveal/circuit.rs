@@ -181,6 +181,22 @@ impl Config {
     pub(crate) fn poseidon_chip(&self) -> PoseidonChip<pallas::Base, 3, 2> {
         PoseidonChip::construct(self.poseidon_config.clone())
     }
+
+    /// Assigns a field-element constant to an advice cell so the value is
+    /// baked into the verification key via `assign_advice_from_constant`.
+    pub(crate) fn assign_constant(
+        &self,
+        layouter: &mut impl Layouter<pallas::Base>,
+        label: &'static str,
+        value: pallas::Base,
+    ) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error> {
+        layouter.assign_region(
+            || label,
+            |mut region| {
+                region.assign_advice_from_constant(|| label, self.advices[0], 0, value)
+            },
+        )
+    }
 }
 
 // ================================================================
@@ -682,16 +698,10 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         // ---------------------------------------------------------------
 
         // DOMAIN_VC constant (baked into the VK).
-        let domain_vc = layouter.assign_region(
-            || "cond2: DOMAIN_VC constant",
-            |mut region| {
-                region.assign_advice_from_constant(
-                    || "domain_vc",
-                    config.advices[0],
-                    0,
-                    pallas::Base::from(vote_commitment::DOMAIN_VC),
-                )
-            },
+        let domain_vc = config.assign_constant(
+            &mut layouter,
+            "cond2: DOMAIN_VC constant",
+            pallas::Base::from(vote_commitment::DOMAIN_VC),
         )?;
 
         let derived_vc = vote_commitment::vote_commitment_poseidon(
@@ -851,38 +861,28 @@ impl plonk::Circuit<pallas::Base> for Circuit {
         {
             // "share spend" domain tag — constant-constrained so the
             // value is baked into the verification key.
-            let domain_tag = layouter.assign_region(
-                || "cond5: DOMAIN_SHARE_SPEND constant",
-                |mut region| {
-                    region.assign_advice_from_constant(
-                        || "domain_share_spend",
-                        config.advices[0],
-                        0,
-                        domain_tag_share_spend(),
-                    )
-                },
+            let domain_tag = config.assign_constant(
+                &mut layouter,
+                "cond5: DOMAIN_SHARE_SPEND constant",
+                domain_tag_share_spend(),
             )?;
 
-            // share_nullifier = Poseidon(domain_tag, vote_commitment, share_index,
-            //                            selected_c1, selected_c2, voting_round_id)
-            let share_nullifier = {
-                let hasher = PoseidonHash::<
-                    pallas::Base,
-                    _,
-                    poseidon::P128Pow5T3,
-                    ConstantLength<6>,
-                    3,
-                    2,
-                >::init(
-                    config.poseidon_chip(),
-                    layouter.namespace(|| "cond5: share nullifier Poseidon init"),
-                )?;
-                hasher.hash(
-                    layouter.namespace(|| "cond5: Poseidon(tag, vc, idx, c1, c2, round_id)"),
-                    [domain_tag, vote_commitment_cond5, share_index_cond5,
-                     enc_c1_x_cond5, enc_c2_x_cond5, voting_round_id_cond5],
-                )?
-            };
+            let share_nullifier = PoseidonHash::<
+                pallas::Base,
+                _,
+                poseidon::P128Pow5T3,
+                ConstantLength<6>,
+                3,
+                2,
+            >::init(
+                config.poseidon_chip(),
+                layouter.namespace(|| "cond5: share nullifier Poseidon init"),
+            )?
+            .hash(
+                layouter.namespace(|| "cond5: Poseidon(tag, vc, idx, c1, c2, round_id)"),
+                [domain_tag, vote_commitment_cond5, share_index_cond5,
+                 enc_c1_x_cond5, enc_c2_x_cond5, voting_round_id_cond5],
+            )?;
 
             layouter.constrain_instance(
                 share_nullifier.cell(),
