@@ -73,17 +73,29 @@ func (p *Processor) Run(ctx context.Context) error {
 	}
 }
 
-// randomDelay samples from Exp(1/meanInterval) using crypto/rand for
-// unpredictable inter-submission timing.
-func (p *Processor) randomDelay() time.Duration {
-	if p.meanInterval <= 0 {
+// exponentialDelay samples from Exp(1/mean) using crypto/rand for
+// unpredictable timing.
+func exponentialDelay(mean time.Duration) time.Duration {
+	if mean <= 0 {
 		return 0
 	}
 	var buf [8]byte
 	_, _ = rand.Read(buf[:])
 	u := (float64(binary.LittleEndian.Uint64(buf[:])) + 1.0) / (float64(1<<64) + 1.0)
-	delaySecs := -p.meanInterval.Seconds() * math.Log(u)
+	delaySecs := -mean.Seconds() * math.Log(u)
 	return time.Duration(delaySecs * float64(time.Second))
+}
+
+// randomDelay samples from Exp(1/meanInterval) for inter-cycle timing.
+func (p *Processor) randomDelay() time.Duration {
+	return exponentialDelay(p.meanInterval)
+}
+
+// intraShareDelay samples from Exp(2/meanInterval) — half the mean of the
+// inter-cycle delay — adding jitter between individual share submissions
+// within a batch.
+func (p *Processor) intraShareDelay() time.Duration {
+	return exponentialDelay(p.meanInterval / 2)
 }
 
 // processBatch takes all ready shares and processes them.
@@ -109,6 +121,18 @@ func (p *Processor) processBatch(ctx context.Context) {
 			case <-gctx.Done():
 				return nil
 			default:
+			}
+
+			// Skip jitter if less than 60s remain before vote ends — submit immediately.
+			if share.VoteEndTime == 0 || time.Until(time.Unix(int64(share.VoteEndTime), 0)) > 60*time.Second {
+				delay := p.intraShareDelay()
+				timer := time.NewTimer(delay)
+				select {
+				case <-gctx.Done():
+					timer.Stop()
+					return nil
+				case <-timer.C:
+				}
 			}
 
 			if err := p.processShare(gctx, share); err != nil {

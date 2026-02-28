@@ -327,7 +327,6 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 				"round_id", payload.VoteRoundID,
 				"share_index", payload.EncShare.ShareIndex,
 				"proposal_id", payload.ProposalID,
-				"delay_seconds", int(delay.Seconds()),
 			)
 		}
 		return EnqueueInserted, nil
@@ -573,7 +572,7 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 
 	err := s.db.QueryRow(
 		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
-		        tree_position, share_comms, primary_blind, state, attempts
+		        tree_position, share_comms, primary_blind, state, attempts, vote_end_time
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
@@ -587,6 +586,7 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 		&q.Payload.PrimaryBlind,
 		&state,
 		&attempts,
+		&q.VoteEndTime,
 	)
 	if err != nil {
 		return q, false

@@ -41,7 +41,7 @@ func DefaultConfig() Config {
 		APIToken:            "",
 		DBPath:              "",
 		MeanDelay:           43200,
-		ProcessInterval:     5,
+		ProcessInterval:     30,
 		ChainAPIPort:        1318,
 		MaxConcurrentProofs: 2,
 	}
@@ -83,9 +83,10 @@ const (
 
 // QueuedShare is a share payload with processing metadata.
 type QueuedShare struct {
-	Payload  SharePayload
-	State    ShareState
-	Attempts int
+	Payload     SharePayload
+	State       ShareState
+	Attempts    int
+	VoteEndTime uint64 // unix seconds; 0 if unknown
 }
 
 // QueueStatus holds per-round queue statistics.
