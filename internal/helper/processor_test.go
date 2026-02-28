@@ -264,7 +264,9 @@ func TestProcessor_MaxConcurrentFallback(t *testing.T) {
 	assert.Equal(t, 1, status[roundID].Submitted)
 }
 
-func TestProcessor_ProcessBatch_ConcurrencyLimit(t *testing.T) {
+// Verify that shares are processed sequentially (maxConcurrent forced to 1
+// for Poisson timing privacy).
+func TestProcessor_ProcessBatch_Sequential(t *testing.T) {
 	store := newTestStore(t)
 	prover := &trackingProver{sleep: 60 * time.Millisecond}
 	tree := newMockTreeReader()
@@ -276,7 +278,7 @@ func TestProcessor_ProcessBatch_ConcurrencyLimit(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 1)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	for i := 0; i < 4; i++ {
@@ -288,8 +290,7 @@ func TestProcessor_ProcessBatch_ConcurrencyLimit(t *testing.T) {
 	proc.processBatch(context.Background())
 
 	maxSeen := prover.maxInFlight.Load()
-	assert.LessOrEqual(t, maxSeen, int32(2))
-	assert.GreaterOrEqual(t, maxSeen, int32(2))
+	assert.Equal(t, int32(1), maxSeen)
 
 	status := store.Status()
 	assert.Equal(t, 4, status[roundID].Submitted)
