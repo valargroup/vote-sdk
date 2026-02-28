@@ -265,6 +265,22 @@ impl<'a> TierServer<'a> {
             .flat_map(|v| v.to_le_bytes())
             .collect()
     }
+
+    /// Extract the hint bytes and release the `hint_0` backing memory.
+    ///
+    /// `hint_0` is only needed for offline precomputation (already done) and for
+    /// serving to clients. After extracting the bytes, the `Vec<u64>` is freed,
+    /// saving ~64–112 MB per tier.
+    pub fn take_hint_bytes(&mut self) -> Vec<u8> {
+        let bytes = self
+            .offline
+            .hint_0
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        self.offline.hint_0 = vec![];
+        bytes
+    }
 }
 
 impl Drop for TierServer<'_> {
@@ -302,58 +318,43 @@ pub struct HealthInfo {
 
 // ── OwnedTierState ────────────────────────────────────────────────────────────
 
-/// Owns the tier data and the `TierServer`, avoiding `Box::leak` accumulation.
+/// Owns a `TierServer` constructed from tier data.
 ///
-/// On drop, the server is dropped first (via `ManuallyDrop`), then the data
-/// `Vec<u8>` is freed — reclaiming ~6 GB on each rebuild instead of leaking.
+/// The raw tier bytes are NOT retained — YPIR's `FilePtIter` is consumed during
+/// `YServer::new()`, which copies everything into its own `db_buf_aligned`.
+/// Dropping the source data after construction saves ~6 GB.
 pub struct OwnedTierState {
-    server: std::mem::ManuallyDrop<TierServer<'static>>,
-    // Actual owner of the bytes; kept alive as long as the server is alive.
-    _data: Vec<u8>,
+    server: TierServer<'static>,
 }
 
 impl OwnedTierState {
-    /// Construct a new `OwnedTierState` from owned tier data and a YPIR scenario.
+    /// Construct a new `OwnedTierState` from borrowed tier data and a YPIR scenario.
+    ///
+    /// The data slice only needs to live for the duration of this call.
     ///
     /// # Safety
     ///
     /// We extend the lifetime of the data reference to `'static`. This is sound
-    /// because:
-    /// 1. `_data` lives in this struct and outlives `server` (ManuallyDrop + Drop order)
-    /// 2. YPIR's `FilePtIter` is consumed during `YServer::new()` — after construction,
-    ///    the server holds precomputed values, not references to the original data.
-    /// 3. In-flight requests must be drained before dropping this struct.
-    pub fn new(data: Vec<u8>, scenario: YpirScenario) -> Self {
+    /// because YPIR's `FilePtIter` is consumed during `YServer::new()` — after
+    /// construction, the server holds precomputed values in its own
+    /// `db_buf_aligned`, not references to the original data. The `'static`
+    /// lifetime on `TierServer` constrains only `params: &'a Params` (pointing
+    /// to the owned `Box<Params>`), not the input data.
+    pub fn new(data: &[u8], scenario: YpirScenario) -> Self {
         let data_ref: &'static [u8] = unsafe {
-            std::mem::transmute::<&[u8], &'static [u8]>(data.as_slice())
+            std::mem::transmute::<&[u8], &'static [u8]>(data)
         };
         let server = TierServer::new(data_ref, scenario);
-        Self {
-            server: std::mem::ManuallyDrop::new(server),
-            _data: data,
-        }
+        Self { server }
     }
 
     pub fn server(&self) -> &TierServer<'static> {
         &self.server
     }
 
-    /// Return the YPIR hint bytes for this tier.
-    pub fn hint_bytes(&self) -> Vec<u8> {
-        self.server.hint_bytes()
-    }
-
-    /// Access the raw tier data for direct row reads.
-    pub fn data(&self) -> &[u8] {
-        &self._data
-    }
-}
-
-impl Drop for OwnedTierState {
-    fn drop(&mut self) {
-        // Drop server first (releases any internal YPIR state).
-        unsafe { std::mem::ManuallyDrop::drop(&mut self.server); }
-        // Then self._data drops naturally, freeing the tier bytes.
+    /// Extract the YPIR hint bytes and release the internal `hint_0` memory.
+    pub fn take_hint_bytes(&mut self) -> Vec<u8> {
+        self.server.take_hint_bytes()
     }
 }
 

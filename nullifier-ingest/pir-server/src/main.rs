@@ -1,3 +1,4 @@
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -13,21 +14,20 @@ use axum::Router;
 
 use pir_export::PirMetadata;
 use pir_server::{
-    HealthInfo, QueryTiming, RootInfo, TierServer, YpirScenario, TIER1_ROWS, TIER1_ROW_BYTES,
+    HealthInfo, OwnedTierState, QueryTiming, RootInfo, YpirScenario, TIER1_ROWS, TIER1_ROW_BYTES,
     TIER2_ROWS, TIER2_ROW_BYTES,
 };
 use tracing::{info, warn};
 
 struct AppState {
-    tier0_data: Vec<u8>,
-    tier1_data: &'static [u8],
-    tier2_data: &'static [u8],
-    tier1: TierServer<'static>,
-    tier2: TierServer<'static>,
+    tier0_data: Bytes,
+    data_dir: PathBuf,
+    tier1: OwnedTierState,
+    tier2: OwnedTierState,
     tier1_scenario: YpirScenario,
     tier2_scenario: YpirScenario,
-    tier1_hint: Vec<u8>,
-    tier2_hint: Vec<u8>,
+    tier1_hint: Bytes,
+    tier2_hint: Bytes,
     metadata: PirMetadata,
     next_req_id: AtomicU64,
     inflight_requests: AtomicUsize,
@@ -51,9 +51,12 @@ async fn main() -> Result<()> {
     // Load tier files
     eprintln!("Loading tier files from {:?}...", data_dir);
 
-    let tier0_data = std::fs::read(data_dir.join("tier0.bin"))?;
+    let tier0_data = Bytes::from(std::fs::read(data_dir.join("tier0.bin"))?);
     eprintln!("  Tier 0: {} bytes", tier0_data.len());
 
+    // Read tier data into temporary buffers. These are dropped after YPIR
+    // construction — the YPIR server copies everything into its own
+    // `db_buf_aligned` during `YServer::new()`.
     let tier1_data = std::fs::read(data_dir.join("tier1.bin"))?;
     eprintln!(
         "  Tier 1: {} bytes ({} rows)",
@@ -88,31 +91,29 @@ async fn main() -> Result<()> {
         metadata.root29.get(..16).unwrap_or(&metadata.root29)
     );
 
-    // Initialize YPIR servers
+    // Initialize YPIR servers. Pass borrowed data — OwnedTierState does not
+    // retain it (YPIR copies into its own db_buf_aligned during construction).
     eprintln!("Initializing YPIR servers...");
 
     let tier1_scenario = pir_server::tier1_scenario();
-    // Leak the data so TierServer can have a 'static lifetime.
-    // These are massive allocations that live for the entire process anyway.
-    let tier1_data_static: &'static [u8] = Box::leak(tier1_data.into_boxed_slice());
-    let tier1_server = TierServer::new(tier1_data_static, tier1_scenario.clone());
-    let tier1_hint = tier1_server.hint_bytes();
+    let mut tier1 = OwnedTierState::new(&tier1_data, tier1_scenario.clone());
+    drop(tier1_data); // free ~48 MB
+    let tier1_hint = Bytes::from(tier1.take_hint_bytes());
     eprintln!("  Tier 1 YPIR ready (hint: {} bytes)", tier1_hint.len());
 
     let tier2_scenario = pir_server::tier2_scenario();
-    let tier2_data_static: &'static [u8] = Box::leak(tier2_data.into_boxed_slice());
-    let tier2_server = TierServer::new(tier2_data_static, tier2_scenario.clone());
-    let tier2_hint = tier2_server.hint_bytes();
+    let mut tier2 = OwnedTierState::new(&tier2_data, tier2_scenario.clone());
+    drop(tier2_data); // free ~6 GB
+    let tier2_hint = Bytes::from(tier2.take_hint_bytes());
     eprintln!("  Tier 2 YPIR ready (hint: {} bytes)", tier2_hint.len());
 
     eprintln!("Server ready in {:.1}s", t_total.elapsed().as_secs_f64());
 
     let state = Arc::new(AppState {
         tier0_data,
-        tier1_data: tier1_data_static,
-        tier2_data: tier2_data_static,
-        tier1: tier1_server,
-        tier2: tier2_server,
+        data_dir: data_dir.clone(),
+        tier1,
+        tier2,
         tier1_scenario,
         tier2_scenario,
         tier1_hint,
@@ -188,7 +189,7 @@ async fn post_tier1_query(State(state): State<Arc<AppState>>, body: Bytes) -> im
         inflight_requests = inflight,
         "pir_request_started"
     );
-    match state.tier1.answer_query(&body) {
+    match state.tier1.server().answer_query(&body) {
         Ok(answer) => {
             let handler_ms = t0.elapsed().as_secs_f64() * 1000.0;
             let mut response = (
@@ -238,7 +239,7 @@ async fn post_tier2_query(State(state): State<Arc<AppState>>, body: Bytes) -> im
         inflight_requests = inflight,
         "pir_request_started"
     );
-    match state.tier2.answer_query(&body) {
+    match state.tier2.server().answer_query(&body) {
         Ok(answer) => {
             let handler_ms = t0.elapsed().as_secs_f64() * 1000.0;
             let mut response = (
@@ -332,13 +333,16 @@ async fn get_tier1_row(
     if idx >= TIER1_ROWS {
         return (StatusCode::NOT_FOUND, "row index out of range").into_response();
     }
-    let offset = idx * TIER1_ROW_BYTES;
-    let row = &state.tier1_data[offset..offset + TIER1_ROW_BYTES];
-    (
-        [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
-        row.to_vec(),
-    )
-        .into_response()
+    let path = state.data_dir.join("tier1.bin");
+    let offset = (idx * TIER1_ROW_BYTES) as u64;
+    match read_tier_row(&path, offset, TIER1_ROW_BYTES) {
+        Ok(row) => (
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            row,
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("read error: {e}")).into_response(),
+    }
 }
 
 async fn get_tier2_row(
@@ -348,13 +352,25 @@ async fn get_tier2_row(
     if idx >= TIER2_ROWS {
         return (StatusCode::NOT_FOUND, "row index out of range").into_response();
     }
-    let offset = idx * TIER2_ROW_BYTES;
-    let row = &state.tier2_data[offset..offset + TIER2_ROW_BYTES];
-    (
-        [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
-        row.to_vec(),
-    )
-        .into_response()
+    let path = state.data_dir.join("tier2.bin");
+    let offset = (idx * TIER2_ROW_BYTES) as u64;
+    match read_tier_row(&path, offset, TIER2_ROW_BYTES) {
+        Ok(row) => (
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            row,
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("read error: {e}")).into_response(),
+    }
+}
+
+/// Read a single row from a tier file on disk.
+fn read_tier_row(path: &std::path::Path, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start(offset))?;
+    let mut buf = vec![0u8; len];
+    f.read_exact(&mut buf)?;
+    Ok(buf)
 }
 
 async fn get_root(State(state): State<Arc<AppState>>) -> impl IntoResponse {

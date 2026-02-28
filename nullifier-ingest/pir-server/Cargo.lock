@@ -832,6 +832,7 @@ dependencies = [
  "pir-export",
  "serde",
  "serde_json",
+ "spiral-rs",
  "tokio",
  "tracing",
  "tracing-subscriber",
