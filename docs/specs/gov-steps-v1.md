@@ -676,13 +676,13 @@ If the tree has grown since the payload was created, the server uses the latest 
 
 We need a nullifier per share to prevent double-counting. The server derives:
 
-`share_nullifier = H("share spend", vote_commitment, share_index, enc_share_i)`
+`share_nullifier = H("share spend", vote_commitment, share_index, blind_i)`
 
 Where:
 
 - `vote_commitment` — the VC this share belongs to (known from the payload)
-- `share_index` — which of the 4 shares (0..3)
-- `enc_share_i` — the El Gamal ciphertext for this share; makes the nullifier infeasible to link back to a specific vote commitment without knowledge of the ciphertext
+- `share_index` — which of the 16 shares (0..15)
+- `blind_i` — the share commitment blinding factor; because blinds are never posted on-chain, the nullifier cannot be derived by an observer — even one who knows the vote commitment tree leaves and the public ciphertext coordinates
 
 This is deterministic and unique per share per vote commitment. The server has all required inputs from the payload.
 
@@ -736,7 +736,7 @@ Share opening:
 
 Nullifier:
 
-5. **(Share Nullifier Integrity)** `share_nullifier = H("share spend", vote_commitment, share_index, enc_share)`. Correctly derived, unique per share per vote commitment. The `enc_share` ciphertext prevents brute-force linking. (Analogous to ZKP #2 cond. 4 — VAN Nullifier Integrity, and §3.6's nullifier pattern)
+5. **(Share Nullifier Integrity)** `share_nullifier = H("share spend", vote_commitment, share_index, blind)`. Correctly derived, unique per share per vote commitment. The `blind` (share commitment blinding factor) is never posted on-chain, preventing brute-force linking from public data. (Analogous to ZKP #2 cond. 4 — VAN Nullifier Integrity, and §3.6's nullifier pattern)
 
 **Out-of-circuit checks:**
 

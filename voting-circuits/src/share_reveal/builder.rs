@@ -74,7 +74,7 @@ pub fn build_share_reveal(
     let share_nullifier = share_nullifier_hash(
         vote_commitment,
         share_index_fp,
-        enc_c1_x,
+        primary_blind,
     );
 
     let circuit = Circuit {
