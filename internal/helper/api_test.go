@@ -130,7 +130,6 @@ func TestStatus_Empty(t *testing.T) {
 	var resp statusResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, "ok", resp.Status)
-	assert.Empty(t, resp.Queues)
 }
 
 func TestStatus_WithShares(t *testing.T) {
@@ -148,8 +147,10 @@ func TestStatus_WithShares(t *testing.T) {
 
 	var resp statusResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, 2, resp.Queues[roundID].Total)
-	assert.Equal(t, 2, resp.Queues[roundID].Pending)
+	assert.Equal(t, "ok", resp.Status)
+
+	// Queue counts are intentionally omitted from the response to prevent
+	// timing correlation by observers polling the status endpoint.
 }
 
 func TestRoutes_HelperUnavailable(t *testing.T) {
