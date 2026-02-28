@@ -23,6 +23,12 @@ type Config struct {
 	// capped at the vote end time. Default: 43200 (12 hours).
 	MeanDelay int `mapstructure:"mean_delay"`
 
+	// MinDelay is the minimum delay floor (seconds). No share will be
+	// submitted sooner than this after receipt, preventing near-zero
+	// exponential samples from making shares trivially linkable.
+	// Default: 90 (3 × default ProcessInterval).
+	MinDelay int `mapstructure:"min_delay"`
+
 	// ProcessInterval is how often to check for shares ready to submit (seconds).
 	ProcessInterval int `mapstructure:"process_interval"`
 
@@ -41,7 +47,8 @@ func DefaultConfig() Config {
 		APIToken:            "",
 		DBPath:              "",
 		MeanDelay:           43200,
-		ProcessInterval:     5,
+		MinDelay:            90,
+		ProcessInterval:     30,
 		ChainAPIPort:        1318,
 		MaxConcurrentProofs: 2,
 	}
@@ -83,9 +90,10 @@ const (
 
 // QueuedShare is a share payload with processing metadata.
 type QueuedShare struct {
-	Payload  SharePayload
-	State    ShareState
-	Attempts int
+	Payload     SharePayload
+	State       ShareState
+	Attempts    int
+	VoteEndTime uint64 // unix seconds; 0 if unknown
 }
 
 // QueueStatus holds per-round queue statistics.

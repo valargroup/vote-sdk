@@ -129,13 +129,6 @@ export interface BroadcastResult {
   log?: string;
 }
 
-export interface HelperQueueStatus {
-  total: number;
-  pending: number;
-  submitted: number;
-  failed: number;
-}
-
 export interface HelperTreeStatus {
   leaf_count: number;
   anchor_height: number;
@@ -143,7 +136,6 @@ export interface HelperTreeStatus {
 
 export interface HelperStatus {
   status: string;
-  queues: Record<string, HelperQueueStatus>;
   tree?: HelperTreeStatus;
 }
 

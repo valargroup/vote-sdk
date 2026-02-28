@@ -107,9 +107,8 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 }
 
 type statusResponse struct {
-	Status string                 `json:"status"`
-	Queues map[string]QueueStatus `json:"queues"`
-	Tree   *TreeStatus            `json:"tree,omitempty"`
+	Status string      `json:"status"`
+	Tree   *TreeStatus `json:"tree,omitempty"`
 }
 
 func (h *apiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +120,6 @@ func (h *apiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	resp := statusResponse{
 		Status: "ok",
-		Queues: store.Status(),
 	}
 
 	if h.getTree != nil {

@@ -1430,33 +1430,6 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                       />
                     </>
                   )}
-                  {Object.keys(helperStatus.queues).length > 0 && (
-                    <>
-                      {Object.entries(helperStatus.queues).map(([roundId, q]) => (
-                        <div key={roundId} className="bg-surface-2 rounded-lg px-3 py-2 space-y-1">
-                          <p className="text-[10px] text-text-muted font-mono truncate">
-                            {roundId.slice(0, 16)}...
-                          </p>
-                          <div className="flex gap-3 text-[10px]">
-                            <span className="text-text-secondary">
-                              {q.pending} pending
-                            </span>
-                            <span className="text-success">
-                              {q.submitted} submitted
-                            </span>
-                            {q.failed > 0 && (
-                              <span className="text-danger">
-                                {q.failed} failed
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </>
-                  )}
-                  {Object.keys(helperStatus.queues).length === 0 && (
-                    <p className="text-[10px] text-text-muted">No shares in queue</p>
-                  )}
                 </div>
               )}
               {connStatus === "ok" && !helperStatus && (

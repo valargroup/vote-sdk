@@ -11,7 +11,7 @@ import (
 
 func newTestStore(t *testing.T) *ShareStore {
 	t.Helper()
-	s, err := NewShareStore(":memory:", 0, nil)
+	s, err := NewShareStore(":memory:", 0, 0, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { s.Close() })
 	return s
@@ -208,7 +208,7 @@ func TestRecovery(t *testing.T) {
 	// Use a file-based DB so we can reopen it.
 	dbPath := t.TempDir() + "/helper_test.db"
 
-	s1, err := NewShareStore(dbPath, 0, nil)
+	s1, err := NewShareStore(dbPath, 0, 0, nil)
 	require.NoError(t, err)
 
 	enqueueAndRequireInserted(t, s1, testPayload("round1", 0))
@@ -221,7 +221,7 @@ func TestRecovery(t *testing.T) {
 	s1.Close()
 
 	// Reopen: recovery should reset Witnessed → Received with fresh delay.
-	s2, err := NewShareStore(dbPath, 0, nil)
+	s2, err := NewShareStore(dbPath, 0, 0, nil)
 	require.NoError(t, err)
 	defer s2.Close()
 
@@ -231,7 +231,7 @@ func TestRecovery(t *testing.T) {
 
 func TestExponentialDelayCapped(t *testing.T) {
 	// meanDelay=1h, voteEndTime=30s from now → delay must be capped.
-	s, err := NewShareStore(":memory:", time.Hour, nil)
+	s, err := NewShareStore(":memory:", time.Hour, 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -250,7 +250,7 @@ func TestExponentialDelayCapped(t *testing.T) {
 }
 
 func TestExponentialDelayZeroMean(t *testing.T) {
-	s, err := NewShareStore(":memory:", 0, nil)
+	s, err := NewShareStore(":memory:", 0, 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -264,7 +264,7 @@ func TestExponentialDelayZeroMean(t *testing.T) {
 
 func TestExponentialDelayDistribution(t *testing.T) {
 	// Verify that exponential samples are non-negative and roughly follow the mean.
-	s, err := NewShareStore(":memory:", 10*time.Second, nil)
+	s, err := NewShareStore(":memory:", 10*time.Second, 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -288,7 +288,7 @@ func TestGetVoteEndTime_Cache(t *testing.T) {
 		return 1000000, nil
 	}
 
-	s, err := NewShareStore(":memory:", 0, fetcher)
+	s, err := NewShareStore(":memory:", 0, 0, fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -304,7 +304,7 @@ func TestGetVoteEndTime_Cache(t *testing.T) {
 }
 
 func TestGetVoteEndTime_NilFetcher(t *testing.T) {
-	s, err := NewShareStore(":memory:", 0, nil)
+	s, err := NewShareStore(":memory:", 0, 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -340,7 +340,7 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, oldDB.Close())
 
 	// Opening with current code should migrate PK and add vote_end_time.
-	s, err := NewShareStore(dbPath, 0, nil)
+	s, err := NewShareStore(dbPath, 0, 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
