@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"time"
 
+	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/types"
 )
 
@@ -149,12 +150,10 @@ func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *typ
 }
 
 // ValidRevealShare returns a MsgRevealShare with mock data.
-// EncShare is a deterministic 64-byte stub derived from nullifierSeed.
+// EncShare is a valid ElGamal identity ciphertext (two identity Pallas points)
+// that passes keeper validation. The nullifierSeed only affects ShareNullifier.
 func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgRevealShare {
-	encShare := make([]byte, 64)
-	for i := range encShare {
-		encShare[i] = nullifierSeed
-	}
+	encShare := elgamal.IdentityCiphertextBytes()
 	return &types.MsgRevealShare{
 		ShareNullifier:           MakeNullifier(nullifierSeed),
 		EncShare:                 encShare,

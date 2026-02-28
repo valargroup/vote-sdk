@@ -1055,9 +1055,11 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
 /// Returns (merkle_path, share_comms_flat, primary_blind, enc_c1_x, enc_c2_x,
 ///          share_index, proposal_id, vote_decision, round_id).
 pub fn build_share_reveal_test_data()
-    -> (Vec<u8>, [u8; 512], [u8; 32], [u8; 32], [u8; 32], u32, u32, u32, [u8; 32])
+    -> (Vec<u8>, [u8; 512], [u8; 32], [u8; 32], [u8; 32], [u8; 64], u32, u32, u32, [u8; 32])
 {
+    use halo2_proofs::arithmetic::CurveAffine;
     use pasta_curves::group::ff::PrimeField;
+    use pasta_curves::group::{Curve, GroupEncoding};
     use pasta_curves::pallas;
 
     let proposal_id: u32 = 3;
@@ -1065,17 +1067,40 @@ pub fn build_share_reveal_test_data()
     let share_index: u32 = 0;
     let round_id = [0u8; 32];
 
+    // Deterministic test EA secret key and public key.
+    let ea_sk = pallas::Scalar::from(777u64);
+    let g = pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
+    let ea_pk = g * ea_sk;
+
     // Synthetic blind factors.
     let share_blinds: [pallas::Base; 16] =
         core::array::from_fn(|i| pallas::Base::from(1001u64 + i as u64));
 
-    // Synthetic x-coordinates for encrypted shares.
+    // Real ElGamal encryption for each share: encrypts value i under ea_pk with
+    // deterministic randomness. C1 = [r]*G, C2 = [v]*G + [r]*ea_pk.
+    // Both C1 and C2 are real Pallas curve points, so their x-coordinates are
+    // valid and their compressed encodings are accepted by UnmarshalCiphertext.
     let mut all_c1_x = [pallas::Base::zero(); 16];
     let mut all_c2_x = [pallas::Base::zero(); 16];
-    for i in 0..16u64 {
-        all_c1_x[i as usize] = pallas::Base::from(100 + i);
-        all_c2_x[i as usize] = pallas::Base::from(200 + i);
+    let mut all_c1_compressed = [[0u8; 32]; 16];
+    let mut all_c2_compressed = [[0u8; 32]; 16];
+    for i in 0..16usize {
+        let randomness = pallas::Scalar::from(1000u64 + i as u64);
+        let share_val = pallas::Scalar::from(i as u64);
+        let c1 = g * randomness;
+        let c2 = g * share_val + ea_pk * randomness;
+        let c1_affine = c1.to_affine();
+        let c2_affine = c2.to_affine();
+        all_c1_x[i] = *c1_affine.coordinates().unwrap().x();
+        all_c2_x[i] = *c2_affine.coordinates().unwrap().x();
+        all_c1_compressed[i] = c1_affine.to_bytes().into();
+        all_c2_compressed[i] = c2_affine.to_bytes().into();
     }
+
+    // Full compressed ciphertext for the revealed share (share_index = 0).
+    let mut enc_share = [0u8; 64];
+    enc_share[..32].copy_from_slice(&all_c1_compressed[share_index as usize]);
+    enc_share[32..].copy_from_slice(&all_c2_compressed[share_index as usize]);
 
     // Compute share commitments and shares_hash.
     let share_comms: [pallas::Base; 16] = core::array::from_fn(|i| {
@@ -1122,6 +1147,7 @@ pub fn build_share_reveal_test_data()
         primary_blind_bytes,
         enc_c1_x_bytes,
         enc_c2_x_bytes,
+        enc_share,
         share_index,
         proposal_id,
         vote_decision,
@@ -1528,6 +1554,7 @@ mod tests {
             primary_blind,
             enc_c1_x,
             enc_c2_x,
+            _enc_share,
             share_index,
             proposal_id,
             vote_decision,

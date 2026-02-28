@@ -23,19 +23,20 @@ import (
 // generator (cargo test --release -- generate_fixtures --ignored).
 // Proof generation takes ~5-15s in release mode.
 func TestGenerateShareRevealRoundTrip(t *testing.T) {
-	// Format (1424 bytes):
+	// Format (1488 bytes):
 	//   [0..772)       merkle_path
 	//   [772..1284)    share_comms (512 bytes: 16 × 32)
 	//   [1284..1316)   primary_blind (32 bytes)
-	//   [1316..1348)   enc_c1_x (32 bytes)
-	//   [1348..1380)   enc_c2_x (32 bytes)
+	//   [1316..1348)   enc_c1_x (32 bytes, LE Fp — ZKP public input)
+	//   [1348..1380)   enc_c2_x (32 bytes, LE Fp — ZKP public input)
 	//   [1380..1384)   share_index (u32 LE)
 	//   [1384..1388)   proposal_id (u32 LE)
 	//   [1388..1392)   vote_decision (u32 LE)
 	//   [1392..1424)   round_id (32 bytes)
+	//   [1424..1488)   enc_share (64 bytes: C1 compressed || C2 compressed Pallas points)
 	fixture, err := os.ReadFile("../testdata/share_reveal_inputs.bin")
 	require.NoError(t, err, "fixture file missing — run: make fixtures")
-	require.Len(t, fixture, 1424, "unexpected fixture size")
+	require.Len(t, fixture, 1488, "unexpected fixture size — run: make fixtures")
 
 	merklePath := fixture[0:772]
 
@@ -60,6 +61,12 @@ func TestGenerateShareRevealRoundTrip(t *testing.T) {
 	var roundID [32]byte
 	copy(roundID[:], fixture[1392:1424])
 
+	// enc_share: the full compressed ElGamal ciphertext (C1 || C2, 64 bytes).
+	// Read directly from the fixture — these are real Pallas compressed points
+	// produced by the Rust fixture generator, compatible with UnmarshalCiphertext.
+	encShare := make([]byte, 64)
+	copy(encShare, fixture[1424:1488])
+
 	// Generate proof.
 	t.Log("generating share reveal proof (this takes ~5-15s)...")
 	proof, nullifier, treeRoot, err := GenerateShareRevealProof(
@@ -77,11 +84,6 @@ func TestGenerateShareRevealRoundTrip(t *testing.T) {
 
 	t.Logf("proof: %d bytes, nullifier: %x..., treeRoot: %x...",
 		len(proof), nullifier[:4], treeRoot[:4])
-
-	// Build EncShare: C1 || C2 for the revealed share.
-	encShare := make([]byte, 64)
-	copy(encShare[:32], encC1X[:])
-	copy(encShare[32:], encC2X[:])
 
 	inputs := zkp.VoteShareInputs{
 		ShareNullifier:   nullifier[:],

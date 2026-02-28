@@ -320,16 +320,17 @@ fn generate_cast_vote_redpallas_fixtures(
 /// binary file so the Go test can call generate + verify without needing Poseidon
 /// in Go.
 ///
-/// Format (1384 bytes total):
+/// Format (1488 bytes total):
 ///   [0..772)       merkle_path (772 bytes)
 ///   [772..1284)    share_comms (512 bytes: 16 × 32-byte commitments)
 ///   [1284..1316)   primary_blind (32 bytes)
-///   [1316..1348)   enc_c1_x (32 bytes)
-///   [1348..1380)   enc_c2_x (32 bytes)
+///   [1316..1348)   enc_c1_x (32 bytes, LE Fp — ZKP public input)
+///   [1348..1380)   enc_c2_x (32 bytes, LE Fp — ZKP public input)
 ///   [1380..1384)   share_index (u32 LE)
 ///   [1384..1388)   proposal_id (u32 LE)
 ///   [1388..1392)   vote_decision (u32 LE)
 ///   [1392..1424)   round_id (32 bytes)
+///   [1424..1488)   enc_share (64 bytes: C1 compressed || C2 compressed Pallas points)
 fn generate_share_reveal_fixtures() {
     use zally_circuits::ffi::build_share_reveal_test_data;
 
@@ -341,20 +342,21 @@ fn generate_share_reveal_fixtures() {
     fs::create_dir_all(&testdata_dir).expect("failed to create testdata directory");
 
     let (merkle_path, share_comms, primary_blind, enc_c1_x, enc_c2_x,
-         share_index, proposal_id, vote_decision, round_id) =
+         enc_share, share_index, proposal_id, vote_decision, round_id) =
         build_share_reveal_test_data();
 
-    let mut fixture: Vec<u8> = Vec::with_capacity(1424);
-    fixture.extend_from_slice(&merkle_path);       // 772 bytes
-    fixture.extend_from_slice(&share_comms);        // 512 bytes
-    fixture.extend_from_slice(&primary_blind);      // 32 bytes
-    fixture.extend_from_slice(&enc_c1_x);           // 32 bytes
-    fixture.extend_from_slice(&enc_c2_x);           // 32 bytes
+    let mut fixture: Vec<u8> = Vec::with_capacity(1488);
+    fixture.extend_from_slice(&merkle_path);                  // 772 bytes
+    fixture.extend_from_slice(&share_comms);                  // 512 bytes
+    fixture.extend_from_slice(&primary_blind);                // 32 bytes
+    fixture.extend_from_slice(&enc_c1_x);                    // 32 bytes
+    fixture.extend_from_slice(&enc_c2_x);                    // 32 bytes
     fixture.extend_from_slice(&share_index.to_le_bytes());   // 4 bytes
     fixture.extend_from_slice(&proposal_id.to_le_bytes());   // 4 bytes
     fixture.extend_from_slice(&vote_decision.to_le_bytes()); // 4 bytes
-    fixture.extend_from_slice(&round_id);           // 32 bytes
-    assert_eq!(fixture.len(), 1424);
+    fixture.extend_from_slice(&round_id);                    // 32 bytes
+    fixture.extend_from_slice(&enc_share);                   // 64 bytes
+    assert_eq!(fixture.len(), 1488);
 
     let fixture_path = testdata_dir.join("share_reveal_inputs.bin");
     fs::write(&fixture_path, &fixture).expect("failed to write share reveal fixture");
