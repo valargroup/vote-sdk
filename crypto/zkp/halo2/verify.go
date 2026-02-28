@@ -185,9 +185,16 @@ func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 
 	// Validate Fp fields before the FFI call so we get a clear error
 	// naming the exact field, instead of the opaque "-3" from Rust.
-	// Slots skipped: rk (slot 1, compressed point), vote_round_id (slot 4, wide-reduced in Rust).
+	// Slot skipped: vote_round_id (slot 4, wide-reduced in Rust).
 	if err := validatePallasFp("nf_signed", inputs.SignedNoteNullifier); err != nil {
 		return err
+	}
+	// rk (slot 1) is a compressed Pallas point: validate it is on the curve
+	// and non-identity before passing to Rust. Without this check a caller
+	// could supply any 32-byte garbage that silently reaches FFI
+	// deserialization, causing undefined behavior.
+	if _, err := elgamal.UnmarshalPublicKey(inputs.Rk); err != nil {
+		return fmt.Errorf("rk: invalid compressed Pallas point: %w", err)
 	}
 	if err := validatePallasFp("cmx_new", inputs.CmxNew); err != nil {
 		return err

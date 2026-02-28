@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -25,6 +27,23 @@ func fpLE(v uint64) []byte {
 	buf := make([]byte, 32)
 	binary.LittleEndian.PutUint64(buf[:8], v)
 	return buf
+}
+
+// validCiphertextBytes generates a real serialized ElGamal ciphertext encrypting
+// value v under a fresh random key. Used in tests that must pass the keeper's
+// well-formedness check on the first AddToTally call.
+func validCiphertextBytes(t *testing.T, v uint64) []byte {
+	t.Helper()
+	_, pk := elgamal.KeyGen(rand.Reader)
+	ct, err := elgamal.Encrypt(pk, v, rand.Reader)
+	if err != nil {
+		t.Fatalf("validCiphertextBytes: Encrypt: %v", err)
+	}
+	bz, err := elgamal.MarshalCiphertext(ct)
+	if err != nil {
+		t.Fatalf("validCiphertextBytes: MarshalCiphertext: %v", err)
+	}
+	return bz
 }
 
 // ---------------------------------------------------------------------------
@@ -477,10 +496,10 @@ func (s *KeeperTestSuite) TestTally_IndependentTuples() {
 	roundA := bytes.Repeat([]byte{0x0A}, 32)
 	roundB := bytes.Repeat([]byte{0x0B}, 32)
 
-	ctA10 := bytes.Repeat([]byte{0xA1}, 64)
-	ctA11 := bytes.Repeat([]byte{0xA2}, 64)
-	ctA20 := bytes.Repeat([]byte{0xA3}, 64)
-	ctB10 := bytes.Repeat([]byte{0xB1}, 64)
+	ctA10 := validCiphertextBytes(s.T(), 1)
+	ctA11 := validCiphertextBytes(s.T(), 2)
+	ctA20 := validCiphertextBytes(s.T(), 3)
+	ctB10 := validCiphertextBytes(s.T(), 4)
 
 	// Store ciphertexts in different (round, proposal, decision) tuples.
 	s.Require().NoError(s.keeper.AddToTally(kv, roundA, 1, 0, ctA10))

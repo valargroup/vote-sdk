@@ -20,6 +20,7 @@ import (
 	"github.com/z-cale/zally/x/vote/types"
 )
 
+
 // ---------------------------------------------------------------------------
 // Query server test suite
 // ---------------------------------------------------------------------------
@@ -203,10 +204,9 @@ func (s *QueryServerTestSuite) TestProposalTally_WithVotes() {
 	roundID := bytes.Repeat([]byte{0x01}, 32)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
-	// Use 64-byte ciphertext stubs for tally entries.
-	ct0 := bytes.Repeat([]byte{0xA1}, 64)
-	ct1 := bytes.Repeat([]byte{0xA2}, 64)
-	ct2 := bytes.Repeat([]byte{0xA3}, 64)
+	ct0 := validCiphertextBytes(s.T(), 1)
+	ct1 := validCiphertextBytes(s.T(), 2)
+	ct2 := validCiphertextBytes(s.T(), 3)
 
 	// Add tallies for proposal 1: decision 0 and decision 1.
 	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 1, 0, ct0))
@@ -229,9 +229,8 @@ func (s *QueryServerTestSuite) TestProposalTally_AccumulatesMultipleAdds() {
 	roundID := bytes.Repeat([]byte{0x01}, 32)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
-	// First ciphertext stored directly; second would HomomorphicAdd.
-	// We test with the same stub which stores on first add.
-	ct := bytes.Repeat([]byte{0xB1}, 64)
+	// First ciphertext stored directly; the query should return it as-is.
+	ct := validCiphertextBytes(s.T(), 1)
 	s.Require().NoError(s.keeper.AddToTally(kvStore, roundID, 1, 0, ct))
 
 	resp, err := s.queryServer.ProposalTally(s.ctx, &types.QueryProposalTallyRequest{
