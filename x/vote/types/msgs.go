@@ -34,8 +34,11 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 	if len(msg.VkZkp3) == 0 {
 		return fmt.Errorf("%w: vk_zkp3 cannot be empty", ErrInvalidField)
 	}
-	if len(msg.Proposals) == 0 || len(msg.Proposals) > 16 {
-		return fmt.Errorf("%w: proposals count must be between 1 and 16, got %d", ErrInvalidField, len(msg.Proposals))
+	// Max 15 usable proposals: the circuit's proposal_authority bitmask is 16 bits
+	// but bit 0 is reserved as the sentinel (rejected by the non-zero gate), so
+	// only bit positions 1–15 are usable. IDs are 1-indexed (Id = i+1).
+	if len(msg.Proposals) == 0 || len(msg.Proposals) > 15 {
+		return fmt.Errorf("%w: proposals count must be between 1 and 15, got %d", ErrInvalidField, len(msg.Proposals))
 	}
 	for i, p := range msg.Proposals {
 		if p.Title == "" {

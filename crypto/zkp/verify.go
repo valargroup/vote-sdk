@@ -31,7 +31,11 @@ type VoteCommitmentInputs struct {
 	RVpkY                []byte // 32-byte Pallas Fp: y-coordinate of randomized voting key (condition 4)
 	VoteAuthorityNoteNew []byte // New vote authority note commitment
 	VoteCommitment       []byte // The vote commitment
-	ProposalId           uint32 // Which proposal this vote is for
+	// ProposalId is 1-indexed (matching on-chain proposal IDs). The circuit uses
+	// this value as a bit-position in the 16-bit proposal_authority bitmask;
+	// bit 0 is the sentinel and rejected by the circuit's non-zero gate.
+	// Valid range: [1, 15].
+	ProposalId           uint32
 	VoteRoundId          []byte // The vote round
 	AnchorHeight         uint64 // Commitment tree anchor height used by the proof
 	VoteCommTreeRoot     []byte // 32-byte Pallas Fp: tree root at AnchorHeight (from on-chain state)
@@ -42,8 +46,8 @@ type VoteCommitmentInputs struct {
 type VoteShareInputs struct {
 	ShareNullifier  []byte // Share nullifier (prevents double-reveal)
 	EncShare        []byte // 64 bytes: ElGamal ciphertext (encrypted vote share)
-	ProposalId      uint32 // Which proposal
-	VoteDecision    uint32 // The vote choice
+	ProposalId      uint32 // 1-indexed proposal ID (same convention as VoteCommitmentInputs)
+	VoteDecision    uint32 // The vote choice (0-indexed into the proposal's options)
 	VoteRoundId     []byte // The vote round
 	AnchorHeight    uint64 // Commitment tree anchor height used by the proof
 	VoteCommTreeRoot []byte // Vote commitment tree root at AnchorHeight (32 bytes)

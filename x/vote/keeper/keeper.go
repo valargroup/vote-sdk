@@ -518,6 +518,9 @@ func getUint32BE(b []byte) uint32 {
 // ---------------------------------------------------------------------------
 
 // ValidateProposalId checks that proposalId is valid for the round (1-indexed).
+// This 1-indexed value is passed directly to the ZKP circuit as the bit-position
+// in the proposal_authority bitmask. The circuit's non-zero gate rejects 0,
+// aligning on-chain validation with circuit semantics.
 func (k *Keeper) ValidateProposalId(kvStore store.KVStore, roundID []byte, proposalId uint32) error {
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {

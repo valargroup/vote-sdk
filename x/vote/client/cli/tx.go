@@ -282,7 +282,7 @@ All byte fields are hex-encoded in the JSON.  Required fields:
   vk_zkp1             (hex)    — Halo2 verification key for ZKP-1 (DelegateVote)
   vk_zkp2             (hex)    — Halo2 verification key for ZKP-2 (CastVote)
   vk_zkp3             (hex)    — Halo2 verification key for ZKP-3 (RevealShare)
-  proposals           (array)  — 1-16 proposals, each with id (1-based uint32),
+  proposals           (array)  — 1-15 proposals, each with id (1-based uint32),
                                  title (string), and options (2-8 elements with
                                  index (0-based uint32) and label (ASCII string))
 

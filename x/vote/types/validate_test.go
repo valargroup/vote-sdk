@@ -86,11 +86,11 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			errContains: "proposals count",
 		},
 		{
-			name: "invalid: 17 proposals (exceeds max)",
+			name: "invalid: 16 proposals (exceeds max; circuit bit 0 is sentinel, only 1-15 usable)",
 			modify: func(m *types.MsgCreateVotingSession) {
-				m.Proposals = make([]*types.Proposal, 17)
+				m.Proposals = make([]*types.Proposal, 16)
 				for i := range m.Proposals {
-					m.Proposals[i] = &types.Proposal{Id: uint32(i), Title: "P", Options: zallytest.DefaultOptions()}
+					m.Proposals[i] = &types.Proposal{Id: uint32(i + 1), Title: "P", Options: zallytest.DefaultOptions()}
 				}
 			},
 			expectErr:   true,
@@ -126,9 +126,9 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			},
 		},
 		{
-			name: "valid: 16 proposals (max)",
+			name: "valid: 15 proposals (max; circuit supports bit positions 1-15)",
 			modify: func(m *types.MsgCreateVotingSession) {
-				m.Proposals = make([]*types.Proposal, 16)
+				m.Proposals = make([]*types.Proposal, 15)
 				for i := range m.Proposals {
 					m.Proposals[i] = &types.Proposal{Id: uint32(i + 1), Title: "P", Options: zallytest.DefaultOptions()}
 				}
