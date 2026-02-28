@@ -359,7 +359,13 @@ func (k *Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, d
 	}
 
 	if existing == nil {
-		// First share: store directly (identity + X = X).
+		// First share: validate it is a well-formed ElGamal ciphertext before
+		// storing. Subsequent additions go through UnmarshalCiphertext anyway,
+		// but skipping this check on the first share would leave a malformed
+		// baseline in the KV store that breaks all later accumulations.
+		if _, err := elgamal.UnmarshalCiphertext(encShareBytes); err != nil {
+			return fmt.Errorf("failed to unmarshal first enc_share: %w", err)
+		}
 		return kvStore.Set(key, encShareBytes)
 	}
 

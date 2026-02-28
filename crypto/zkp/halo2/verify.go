@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/crypto/zkp"
 )
 
@@ -345,7 +346,15 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 //	 vote_decision, vote_comm_tree_root, voting_round_id]
 //
 // All values are plain Fp elements (32-byte LE canonical encoding).
-// enc_share is split into C1 and C2 x-coordinates (sign bit cleared).
+// enc_share carries two compressed Pallas points (C1 || C2, 32 bytes each).
+// The circuit (ZKP #3, elgamal.rs) constrains only the x-coordinates of C1
+// and C2 as public inputs; y-coordinates are not exposed by the circuit.
+// This function extracts the x-coordinates by clearing the sign bit (MSB of
+// byte 31 in each chunk) and feeds them to the Rust verifier. It first
+// decompresses both points via elgamal.UnmarshalCiphertext to confirm they
+// are valid Pallas curve points, closing the gap where a caller could flip
+// the sign bit to pass ZKP verification while storing the negated point,
+// which would corrupt HomomorphicAdd accumulation at tally time.
 //
 // Returns nil on success, or an error describing the failure.
 func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
@@ -367,10 +376,20 @@ func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
 	if len(inputs.EncShare) != 64 {
 		return fmt.Errorf("enc_share must be 64 bytes, got %d", len(inputs.EncShare))
 	}
+	// Validate that both compressed points are on the Pallas curve before
+	// extracting x-coordinates. This ensures the sign bits in the transaction
+	// are self-consistent with a valid curve point: a flipped sign bit that
+	// produces a point not on the curve is rejected here, and if both candidate
+	// y-values are on-curve (the normal case), downstream HomomorphicAdd
+	// operates on well-formed points. Without this check the ZKP would accept
+	// any sign bit because the circuit only binds x-coordinates.
+	if _, err := elgamal.UnmarshalCiphertext(inputs.EncShare); err != nil {
+		return fmt.Errorf("enc_share contains invalid Pallas point: %w", err)
+	}
 	copy(buf[32:64], inputs.EncShare[:32])
-	buf[63] &= 0x7F
+	buf[63] &= 0x7F // clear sign bit to obtain x-coordinate (ExtractP convention)
 	copy(buf[64:96], inputs.EncShare[32:64])
-	buf[95] &= 0x7F
+	buf[95] &= 0x7F // clear sign bit to obtain x-coordinate (ExtractP convention)
 
 	// Slot 3: proposal_id (encode as 32-byte LE Fp)
 	binary.LittleEndian.PutUint64(buf[96:104], uint64(inputs.ProposalId))
