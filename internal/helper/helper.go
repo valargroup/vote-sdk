@@ -46,6 +46,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, homeDir string, log
 	store, err := NewShareStore(
 		dbPath,
 		time.Duration(cfg.MeanDelay)*time.Second,
+		time.Duration(cfg.MinDelay)*time.Second,
 		submitter.FetchVoteRound,
 	)
 	if err != nil {
