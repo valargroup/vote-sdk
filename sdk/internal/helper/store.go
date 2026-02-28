@@ -24,6 +24,7 @@ type ShareStore struct {
 	mu             sync.Mutex
 	schedule       map[string]time.Time // key: "round_id:share_index:proposal_id:tree_position"
 	meanDelay      time.Duration
+	minDelay       time.Duration
 	roundCache     map[string]uint64                // roundID → vote_end_time (unix seconds)
 	fetchRoundInfo RoundInfoFetcher                 // queries the chain; may be nil in tests
 	logger         func(msg string, keyvals ...any) // optional error logger
@@ -40,7 +41,7 @@ const (
 )
 
 // NewShareStore opens (or creates) a SQLite database and runs migrations.
-func NewShareStore(dbPath string, meanDelay time.Duration, fetcher RoundInfoFetcher) (*ShareStore, error) {
+func NewShareStore(dbPath string, meanDelay, minDelay time.Duration, fetcher RoundInfoFetcher) (*ShareStore, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -62,6 +63,7 @@ func NewShareStore(dbPath string, meanDelay time.Duration, fetcher RoundInfoFetc
 		db:             db,
 		schedule:       make(map[string]time.Time),
 		meanDelay:      meanDelay,
+		minDelay:       minDelay,
 		roundCache:     make(map[string]uint64),
 		fetchRoundInfo: fetcher,
 	}
@@ -689,11 +691,16 @@ func (s *ShareStore) exponentialSample() time.Duration {
 	return time.Duration(delaySecs * float64(time.Second))
 }
 
-// cappedExponentialDelay generates an exponential delay capped so the share
-// is submitted before voteEndTime (with a 60s buffer). If voteEndTime is 0
-// (unknown), the delay is uncapped.
+// cappedExponentialDelay generates an exponential delay with a minimum floor,
+// capped so the share is submitted before voteEndTime (with a 60s buffer).
+// The floor prevents near-zero samples from making shares trivially linkable.
+// If voteEndTime is 0 (unknown), the delay is uncapped. The cap takes
+// precedence over the floor when the deadline is imminent.
 func (s *ShareStore) cappedExponentialDelay(voteEndTime uint64) time.Duration {
 	delay := s.exponentialSample()
+	if delay < s.minDelay {
+		delay = s.minDelay
+	}
 	if voteEndTime == 0 {
 		return delay
 	}

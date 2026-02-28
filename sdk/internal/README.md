@@ -15,8 +15,11 @@ was cast from the time the share becomes eligible for processing.
 
 - Distribution: Exp(1/`mean_delay`)
 - Config: `helper.mean_delay` (seconds), default **43200** (12 hours)
+- Floor: delay is raised to at least `min_delay` seconds, preventing
+  near-zero samples from making shares trivially linkable
 - Cap: delay is clamped so the share is submitted at least 60 seconds
-  before `vote_end_time`
+  before `vote_end_time` (cap takes precedence over floor when the
+  deadline is imminent)
 - On restart, shares get fresh random delays (scheduling is ephemeral)
 
 ## Layer 2: Poisson processing cycle
@@ -54,6 +57,7 @@ near-simultaneously.
 | Parameter               | app.toml key                   | Default  | Controls           |
 |-------------------------|--------------------------------|----------|--------------------|
 | `MeanDelay`             | `helper.mean_delay`            | 43200 s  | Layer 1 mean       |
+| `MinDelay`              | `helper.min_delay`             | 90 s     | Layer 1 floor      |
 | `ProcessInterval`       | `helper.process_interval`      | 30 s     | Layer 2 & 3 mean   |
 | `MaxConcurrentProofs`   | `helper.max_concurrent_proofs` | 2        | Parallelism        |
 
