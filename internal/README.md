@@ -74,3 +74,52 @@ This produces an exponentially distributed sample with the given mean.
 `crypto/rand` is used instead of `math/rand` so that an adversary who
 observes submission times cannot reconstruct the PRNG state and predict
 future delays.
+
+## Crash Recovery
+
+The helper server is designed for crash-safe operation. Share payloads and
+processing state are persisted to SQLite (WAL mode); only scheduling delays
+are kept in memory. On startup, `NewShareStore` calls `recover()` which:
+
+1. **Resets in-flight shares** — any share in Witnessed state (taken for
+   proof generation but not yet submitted) is rolled back to Received.
+2. **Rebuilds the round cache** from the persisted `rounds` table and heals
+   shares whose `vote_end_time` was 0 (transient fetch failure at enqueue).
+3. **Assigns fresh random delays** to all pending shares. Scheduling is
+   intentionally ephemeral — on restart, shares get new exponential delays
+   so that an observer cannot predict post-restart timing from pre-crash
+   patterns.
+
+### State-by-state behaviour
+
+| State at crash | On recovery | Share lost? |
+|---|---|---|
+| **Received (0)** — waiting for delay | Fresh random delay, re-enters schedule | No |
+| **Witnessed (1)** — mid-processing | Reset to Received, fresh delay, re-processes | No |
+| **Submitted (2)** — on chain | Terminal, no action needed | No |
+| **Failed (3)** — permanent failure | Terminal, no action needed | N/A |
+
+### Wallet retry safety
+
+If the server crashes between receiving the HTTP POST and completing the
+SQLite INSERT, the wallet gets an HTTP error and can retry. `Enqueue` is
+idempotent — duplicate payloads return `"duplicate"`, conflicting payloads
+for the same `(round_id, share_index, proposal_id, tree_position)` are
+rejected with 409 Conflict.
+
+### Known limitations
+
+- **Retry budget**: `MarkFailed` allows 5 attempts with exponential backoff
+  (2 s, 4 s, 8 s, 16 s, 32 s ≈ 62 s total). If the chain is unreachable
+  for longer, shares become permanently failed. Attempt counts survive
+  recovery (not reset), so a share with prior failures has fewer retries
+  remaining after restart.
+- **Almost-submitted race**: If the chain accepted a share but the server
+  crashed before `MarkSubmitted`, the share reverts to Received on recovery
+  and is re-processed. The chain rejects the duplicate (nullifier already
+  used), consuming retry attempts. The vote itself is safe — it is already
+  on chain — but the helper DB may show it as Failed.
+- **Synchronous mode**: No explicit `PRAGMA synchronous=FULL` is set.
+  SQLite WAL defaults to FULL on most builds, but a power loss (vs process
+  crash) could theoretically lose the last committed transaction depending
+  on the driver.
