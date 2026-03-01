@@ -16,28 +16,60 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 
+	"github.com/mikelodder7/curvey"
+
 	voteapi "github.com/z-cale/zally/api"
 	"github.com/z-cale/zally/crypto/ecies"
 	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/z-cale/zally/crypto/shamir"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
 
-// eaSkPathForRound returns the per-round ea_sk file path:
+// eaSkPathForRound returns the per-round ea_sk file path (legacy single-key mode):
 //
 //	<dir>/ea_sk.<hex(round_id)>
 func eaSkPathForRound(dir string, roundID []byte) string {
 	return filepath.Join(dir, "ea_sk."+hex.EncodeToString(roundID))
 }
 
+// sharePathForRound returns the per-round Shamir share file path (threshold mode).
+// In threshold mode each validator writes their scalar share here instead of the
+// full ea_sk. The file stores 32 raw bytes (the Pallas Fq scalar).
+//
+//	<dir>/share.<hex(round_id)>
+func sharePathForRound(dir string, roundID []byte) string {
+	return filepath.Join(dir, "share."+hex.EncodeToString(roundID))
+}
+
+// thresholdForN computes the default threshold t = ceil(n/3) + 1.
+// Returns 0 when n < 2 (threshold splitting is not meaningful for fewer than
+// two validators; callers should fall back to legacy single-key mode).
+func thresholdForN(n int) int {
+	if n < 2 {
+		return 0
+	}
+	t := (n+2)/3 + 1 // ceil(n/3) + 1
+	if t > n {
+		t = n // clamp: with a very small n, t can exceed n
+	}
+	return t
+}
+
 // CeremonyDealPrepareProposalHandler returns a PrepareProposalInjector that
 // checks whether a PENDING round needs a deal and, if so, generates a fresh
-// ea_sk, ECIES-encrypts it to each ceremony validator, and injects a
-// MsgDealExecutiveAuthorityKey.
+// ea_sk, and injects a MsgDealExecutiveAuthorityKey.
 //
-// The proposer must be in the round's CeremonyValidators to deal. The
-// generated ea_sk is written to <eaSkDir>/ea_sk.<hex(round_id)> for the
-// auto-tally system to pick up later.
+// Threshold mode (n >= 2): ea_sk is Shamir-split into (t, n) shares with
+// t = ceil(n/3)+1. Each validator receives ECIES(share_i, pk_i). VK_i = share_i*G
+// and the threshold value are included in the deal message so validators can verify
+// their share on ack. The dealer's share is written to disk by the ack handler
+// (when the dealer is next the block proposer after DEALT is set), not here.
+//
+// Legacy mode (n < 2): ea_sk is ECIES-encrypted to every validator unchanged.
+// ea_sk is likewise written to disk by the ack handler, not here.
+//
+// The proposer must be in the round's CeremonyValidators to deal.
 func CeremonyDealPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
@@ -112,16 +144,43 @@ func CeremonyDealPrepareProposalHandler(
 
 		// Generate fresh ea_sk.
 		eaSk, eaPk := elgamal.KeyGen(rand.Reader)
-		eaSkBytes, err := elgamal.MarshalSecretKey(eaSk)
-		if err != nil {
-			logger.Error("PrepareProposal[deal]: failed to marshal ea_sk", "err", err)
-			return txs
-		}
 		eaPkBytes := eaPk.Point.ToAffineCompressed()
 		G := elgamal.PallasGenerator()
 
-		// ECIES-encrypt ea_sk to each ceremony validator's Pallas PK.
-		payloads := make([]*types.DealerPayload, len(round.CeremonyValidators))
+		n := len(round.CeremonyValidators)
+		t := thresholdForN(n)
+
+		// Threshold mode: split ea_sk into (t, n) Shamir shares, ECIES-encrypt
+		// share_i to validator_i, and compute VK_i = share_i * G.
+		// Legacy mode (t == 0): encrypt the full ea_sk to every validator.
+		var (
+			shares           []shamir.Share
+			verificationKeys [][]byte
+		)
+		if t > 0 {
+			var coeffs []curvey.Scalar
+			shares, coeffs, err = shamir.Split(eaSk.Scalar, t, n)
+			if err != nil {
+				logger.Error("PrepareProposal[deal]: shamir split failed", "err", err)
+				return txs
+			}
+			// Coefficients are secret material — zero them after use.
+			defer func() {
+				for _, c := range coeffs {
+					if c != nil {
+						c.Zero()
+					}
+				}
+			}()
+
+			verificationKeys = make([][]byte, n)
+			for i := range shares {
+				verificationKeys[i] = G.Mul(shares[i].Value).ToAffineCompressed()
+			}
+		}
+
+		// ECIES-encrypt the payload (share or full ea_sk) to each ceremony validator.
+		payloads := make([]*types.DealerPayload, n)
 		for i, v := range round.CeremonyValidators {
 			recipientPk, err := elgamal.UnmarshalPublicKey(v.PallasPk)
 			if err != nil {
@@ -129,7 +188,20 @@ func CeremonyDealPrepareProposalHandler(
 					"validator", v.ValidatorAddress, "err", err)
 				return txs
 			}
-			env, err := ecies.Encrypt(G, recipientPk.Point, eaSkBytes, rand.Reader)
+
+			var plaintext []byte
+			if t > 0 {
+				plaintext = shares[i].Value.Bytes()
+			} else {
+				eaSkBytes, marshalErr := elgamal.MarshalSecretKey(eaSk)
+				if marshalErr != nil {
+					logger.Error("PrepareProposal[deal]: failed to marshal ea_sk", "err", marshalErr)
+					return txs
+				}
+				plaintext = eaSkBytes
+			}
+
+			env, err := ecies.Encrypt(G, recipientPk.Point, plaintext, rand.Reader)
 			if err != nil {
 				logger.Error("PrepareProposal[deal]: ECIES encryption failed",
 					"validator", v.ValidatorAddress, "err", err)
@@ -144,10 +216,12 @@ func CeremonyDealPrepareProposalHandler(
 
 		// Build deal message.
 		dealMsg := &types.MsgDealExecutiveAuthorityKey{
-			Creator:     proposerValAddr,
-			VoteRoundId: round.VoteRoundId,
-			EaPk:        eaPkBytes,
-			Payloads:    payloads,
+			Creator:          proposerValAddr,
+			VoteRoundId:      round.VoteRoundId,
+			EaPk:             eaPkBytes,
+			Payloads:         payloads,
+			Threshold:        uint32(t),
+			VerificationKeys: verificationKeys,
 		}
 
 		txBytes, err := voteapi.EncodeCeremonyTx(dealMsg, voteapi.TagDealExecutiveAuthorityKey)
@@ -156,22 +230,16 @@ func CeremonyDealPrepareProposalHandler(
 			return txs
 		}
 
-		// Write ea_sk to per-round path for auto-tally.
-		if eaSkDir != "" {
-			path := eaSkPathForRound(eaSkDir, round.VoteRoundId)
-			if err := os.WriteFile(path, eaSkBytes, 0600); err != nil {
-				logger.Error("PrepareProposal[deal]: failed to write ea_sk",
-					"path", path, "err", err)
-				// Continue — deal injection is more important.
-			} else {
-				logger.Info("PrepareProposal[deal]: ea_sk written to disk", "path", path)
-			}
-		}
+		// The dealer does NOT write their share/ea_sk to disk here. The ack handler
+		// handles all validators uniformly: when the dealer is next the block proposer
+		// after DEALT status is set, it decrypts its own payload and writes share.<round_id>
+		// (or ea_sk.<round_id> in legacy mode) just like any other validator.
 
 		logger.Info("PrepareProposal[deal]: injecting MsgDealExecutiveAuthorityKey",
 			"proposer", proposerValAddr,
 			"round", hex.EncodeToString(round.VoteRoundId),
-			"validators", len(payloads))
+			"validators", n,
+			"threshold", t)
 		return append([][]byte{txBytes}, txs...)
 	}
 }
@@ -180,12 +248,15 @@ func CeremonyDealPrepareProposalHandler(
 // checks whether a PENDING round's ceremony is in DEALT state and, if so,
 // injects a MsgAckExecutiveAuthorityKey on behalf of the block proposer.
 //
-// The proposer decrypts their ECIES payload using the Pallas secret key
-// loaded from pallasSkPath. If the key file is absent, the ceremony is not
-// DEALT, or the proposer has already acked, injection is skipped gracefully.
+// The proposer decrypts their ECIES payload using the Pallas secret key loaded
+// from pallasSkPath. If the key file is absent, the ceremony is not DEALT, or
+// the proposer has already acked, injection is skipped gracefully.
 //
-// After successful decryption, the ea_sk is written to <eaSkDir>/ea_sk.<hex(round_id)>
-// so the auto-tally system can pick it up.
+// Threshold mode (round.Threshold > 0): verifies share_i * G == VK_i and
+// writes the share to <eaSkDir>/share.<hex(round_id)>.
+//
+// Legacy mode (round.Threshold == 0): verifies ea_sk * G == ea_pk and
+// writes ea_sk to <eaSkDir>/ea_sk.<hex(round_id)>.
 func CeremonyAckPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
@@ -287,27 +358,72 @@ func CeremonyAckPrepareProposalHandler(
 			Ciphertext: payload.Ciphertext,
 		}
 
-		eaSkBytes, err := ecies.Decrypt(pallasSk.Scalar, env)
+		secretBytes, err := ecies.Decrypt(pallasSk.Scalar, env)
 		if err != nil {
 			logger.Error("PrepareProposal[ack]: ECIES decryption failed",
 				"proposer", proposerValAddr, "err", err)
 			return txs
 		}
 
-		// Verify ea_sk * G == ea_pk.
-		recoveredSk, err := elgamal.UnmarshalSecretKey(eaSkBytes)
+		recoveredSk, err := elgamal.UnmarshalSecretKey(secretBytes)
 		if err != nil {
-			logger.Error("PrepareProposal[ack]: failed to parse decrypted ea_sk",
+			logger.Error("PrepareProposal[ack]: failed to parse decrypted secret",
 				"proposer", proposerValAddr, "err", err)
 			return txs
 		}
+
 		G := elgamal.PallasGenerator()
-		recoveredPkPoint := G.Mul(recoveredSk.Scalar)
-		if !bytesEqual(recoveredPkPoint.ToAffineCompressed(), round.EaPk) {
-			logger.Error("PrepareProposal[ack]: ea_sk * G != ea_pk — dealer sent garbage",
-				"proposer", proposerValAddr,
-				"round", hex.EncodeToString(round.VoteRoundId))
-			return txs
+
+		// Verify the decrypted scalar against the expected public commitment and
+		// determine where on disk to write it.
+		//
+		// Threshold mode (round.Threshold > 0): the payload contains share_i.
+		//   Expected: share_i * G == VK_i (from round.VerificationKeys[validatorIdx]).
+		//   Write to: share.<round_id>
+		//
+		// Legacy mode (round.Threshold == 0): the payload contains ea_sk.
+		//   Expected: ea_sk * G == ea_pk
+		//   Write to: ea_sk.<round_id>
+		var diskPath string
+		if round.Threshold > 0 {
+			// Find this validator's 0-based index to look up the correct VK.
+			validatorIdx := -1
+			for i, v := range round.CeremonyValidators {
+				if v.ValidatorAddress == proposerValAddr {
+					validatorIdx = i
+					break
+				}
+			}
+			if validatorIdx < 0 || validatorIdx >= len(round.VerificationKeys) {
+				logger.Error("PrepareProposal[ack]: validator index out of range for VK lookup",
+					"proposer", proposerValAddr,
+					"round", hex.EncodeToString(round.VoteRoundId))
+				return txs
+			}
+
+			expectedVK := round.VerificationKeys[validatorIdx]
+			computedVK := G.Mul(recoveredSk.Scalar).ToAffineCompressed()
+			if !bytesEqual(computedVK, expectedVK) {
+				logger.Error("PrepareProposal[ack]: share_i * G != VK_i — dealer sent bad share",
+					"proposer", proposerValAddr,
+					"validator_index", validatorIdx+1,
+					"round", hex.EncodeToString(round.VoteRoundId))
+				return txs
+			}
+			if eaSkDir != "" {
+				diskPath = sharePathForRound(eaSkDir, round.VoteRoundId)
+			}
+		} else {
+			// Legacy: verify the full ea_sk.
+			if !bytesEqual(G.Mul(recoveredSk.Scalar).ToAffineCompressed(), round.EaPk) {
+				logger.Error("PrepareProposal[ack]: ea_sk * G != ea_pk — dealer sent garbage",
+					"proposer", proposerValAddr,
+					"round", hex.EncodeToString(round.VoteRoundId))
+				return txs
+			}
+			if eaSkDir != "" {
+				diskPath = eaSkPathForRound(eaSkDir, round.VoteRoundId)
+			}
 		}
 
 		// Compute ack_signature = SHA256("ack" || ea_pk || validator_address).
@@ -330,15 +446,14 @@ func CeremonyAckPrepareProposalHandler(
 			return txs
 		}
 
-		// Write ea_sk to per-round path for auto-tally.
-		if eaSkDir != "" {
-			path := eaSkPathForRound(eaSkDir, round.VoteRoundId)
-			if err := os.WriteFile(path, eaSkBytes, 0600); err != nil {
-				logger.Error("PrepareProposal[ack]: failed to write ea_sk",
-					"path", path, "err", err)
+		// Write the decrypted secret to disk for the tally injector.
+		if diskPath != "" {
+			if err := os.WriteFile(diskPath, secretBytes, 0600); err != nil {
+				logger.Error("PrepareProposal[ack]: failed to write secret to disk",
+					"path", diskPath, "err", err)
 				// Continue — the ack injection itself is more important.
 			} else {
-				logger.Info("PrepareProposal[ack]: ea_sk written to disk", "path", path)
+				logger.Info("PrepareProposal[ack]: secret written to disk", "path", diskPath)
 			}
 		}
 

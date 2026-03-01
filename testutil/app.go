@@ -373,6 +373,46 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 	return roundID
 }
 
+// SeedDealtCeremonyThreshold creates a PENDING round with DEALT ceremony fields
+// in threshold mode. Callers supply pre-computed ECIES payloads, VK_i points,
+// and the threshold t. This lets ack handler tests exercise threshold-mode
+// verification (share_i * G == VK_i) without going through the full deal flow.
+func (ta *TestApp) SeedDealtCeremonyThreshold(
+	eaPkBytes []byte,
+	payloads []*types.DealerPayload,
+	validators []*types.ValidatorPallasKey,
+	threshold uint32,
+	verificationKeys [][]byte,
+) []byte {
+	ta.t.Helper()
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	h, _ := blake2b.New256(nil)
+	h.Write(eaPkBytes)
+	roundID := h.Sum(nil)
+
+	round := &types.VoteRound{
+		VoteRoundId:          roundID,
+		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
+		EaPk:                 eaPkBytes,
+		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+		CeremonyDealer:       "dealer",
+		CeremonyValidators:   validators,
+		CeremonyPayloads:     payloads,
+		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
+		CeremonyPhaseTimeout: types.DefaultDealTimeout,
+		Threshold:            threshold,
+		VerificationKeys:     verificationKeys,
+	}
+	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
+	require.NoError(ta.t, err)
+
+	ta.NextBlock()
+	return roundID
+}
+
 // SeedRegisteringCeremony creates a PENDING round with REGISTERING ceremony
 // status and the given validators. Commits via an empty block. Returns the
 // round ID. Used for testing auto-deal and full ceremony cycle flows.
