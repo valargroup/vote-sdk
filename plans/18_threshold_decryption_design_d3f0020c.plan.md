@@ -4,7 +4,7 @@ overview: "Replace the current ceremony where every validator receives the full 
 todos:
   - id: step1-shamir-crypto
     content: "Shamir splitting, partial decryption, Lagrange interpolation in sdk/crypto/shamir/"
-    status: pending
+    status: completed
   - id: step1-proto
     content: "Add MsgSubmitPartialDecryption proto, add threshold + verification_keys fields to deal message and VoteRound"
     status: pending
