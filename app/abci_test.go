@@ -1170,10 +1170,12 @@ func TestMultiValidatorCeremony_DealAckConfirm(t *testing.T) {
 	// EA public key should be set.
 	require.NotEmpty(t, round.EaPk, "ea_pk should be set on the round")
 
-	// Verify ea_sk was written to disk.
-	skFile := app.EaSkDir + "/ea_sk." + fmt.Sprintf("%x", roundID)
-	_, err = os.Stat(skFile)
-	require.NoError(t, err, "ea_sk file should exist on disk after ack")
+	// Verify the proposer's share was written to disk.
+	// With n=3 validators, the ceremony uses threshold mode (t=ceil(3/3)+1=2),
+	// so the ack handler writes share.<round_id> instead of ea_sk.<round_id>.
+	shareFile := app.EaSkDir + "/share." + fmt.Sprintf("%x", roundID)
+	_, err = os.Stat(shareFile)
+	require.NoError(t, err, "share file should exist on disk after ack (threshold mode)")
 }
 
 // ---------------------------------------------------------------------------
