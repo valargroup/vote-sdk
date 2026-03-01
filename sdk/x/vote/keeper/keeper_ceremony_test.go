@@ -8,6 +8,7 @@ import (
 
 	"github.com/z-cale/zally/crypto/ecies"
 	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/z-cale/zally/crypto/shamir"
 	zallytest "github.com/z-cale/zally/testutil"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
@@ -171,7 +172,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_GlobalRegistry() {
 // Per-round ceremony helper tests
 // ===========================================================================
 
-func (s *KeeperTestSuite) TestOneThirdAcked() {
+func (s *KeeperTestSuite) TestHalfAcked() {
 	tests := []struct {
 		name   string
 		round  *types.VoteRound
@@ -190,7 +191,32 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 			expect: true,
 		},
 		{
-			name: "exactly 1/3 (1 of 3)",
+			name: "exactly 1/2 (2 of 4)",
+			round: &types.VoteRound{
+				CeremonyValidators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"}, {ValidatorAddress: "val4"},
+				},
+				CeremonyAcks: []*types.AckEntry{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "exactly ceil(n/2) (2 of 3)",
+			round: &types.VoteRound{
+				CeremonyValidators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"}, {ValidatorAddress: "val3"},
+				},
+				CeremonyAcks: []*types.AckEntry{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "below 1/2 (1 of 3)",
 			round: &types.VoteRound{
 				CeremonyValidators: []*types.ValidatorPallasKey{
 					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"}, {ValidatorAddress: "val3"},
@@ -199,10 +225,10 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 					{ValidatorAddress: "val1"},
 				},
 			},
-			expect: true,
+			expect: false,
 		},
 		{
-			name: "below 1/3 (1 of 4)",
+			name: "below 1/2 (1 of 4)",
 			round: &types.VoteRound{
 				CeremonyValidators: []*types.ValidatorPallasKey{
 					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
@@ -213,19 +239,6 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 				},
 			},
 			expect: false,
-		},
-		{
-			name: "2 of 4 (50% >= 33%)",
-			round: &types.VoteRound{
-				CeremonyValidators: []*types.ValidatorPallasKey{
-					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
-					{ValidatorAddress: "val3"}, {ValidatorAddress: "val4"},
-				},
-				CeremonyAcks: []*types.AckEntry{
-					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
-				},
-			},
-			expect: true,
 		},
 		{
 			name: "no acks",
@@ -242,7 +255,7 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 			expect: false,
 		},
 		{
-			name: "single validator acked (1/1 >= 1/3)",
+			name: "single validator acked (1/1)",
 			round: &types.VoteRound{
 				CeremonyValidators: []*types.ValidatorPallasKey{{ValidatorAddress: "val1"}},
 				CeremonyAcks:       []*types.AckEntry{{ValidatorAddress: "val1"}},
@@ -253,7 +266,7 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
-			s.Require().Equal(tc.expect, keeper.OneThirdAcked(tc.round))
+			s.Require().Equal(tc.expect, keeper.HalfAcked(tc.round))
 		})
 	}
 }
@@ -261,28 +274,34 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 func (s *KeeperTestSuite) TestFindValidatorInRoundCeremony() {
 	round := &types.VoteRound{
 		CeremonyValidators: []*types.ValidatorPallasKey{
-			{ValidatorAddress: "val_alpha"}, {ValidatorAddress: "val_beta"}, {ValidatorAddress: "val_gamma"},
+			{ValidatorAddress: "val_alpha", ShamirIndex: 1},
+			{ValidatorAddress: "val_beta", ShamirIndex: 2},
+			{ValidatorAddress: "val_gamma", ShamirIndex: 3},
 		},
 	}
 
 	tests := []struct {
-		name      string
-		valAddr   string
-		wantIndex int
-		wantFound bool
+		name            string
+		valAddr         string
+		wantShamirIndex uint32
+		wantFound       bool
 	}{
-		{"first", "val_alpha", 0, true},
-		{"middle", "val_beta", 1, true},
-		{"last", "val_gamma", 2, true},
-		{"unknown", "val_delta", -1, false},
-		{"empty", "", -1, false},
+		{"first", "val_alpha", 1, true},
+		{"middle", "val_beta", 2, true},
+		{"last", "val_gamma", 3, true},
+		{"unknown", "val_delta", 0, false},
+		{"empty", "", 0, false},
 	}
 
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
-			idx, found := keeper.FindValidatorInRoundCeremony(round, tc.valAddr)
+			v, found := keeper.FindValidatorInRoundCeremony(round, tc.valAddr)
 			s.Require().Equal(tc.wantFound, found)
-			s.Require().Equal(tc.wantIndex, idx)
+			if found {
+				s.Require().Equal(tc.wantShamirIndex, v.ShamirIndex)
+			} else {
+				s.Require().Nil(v)
+			}
 		})
 	}
 }
@@ -311,9 +330,9 @@ func (s *KeeperTestSuite) TestFindAckInRoundCeremony() {
 func (s *KeeperTestSuite) TestStripNonAckersFromRound() {
 	round := &types.VoteRound{
 		CeremonyValidators: []*types.ValidatorPallasKey{
-			{ValidatorAddress: "val1", PallasPk: []byte{0x01}},
-			{ValidatorAddress: "val2", PallasPk: []byte{0x02}},
-			{ValidatorAddress: "val3", PallasPk: []byte{0x03}},
+			{ValidatorAddress: "val1", PallasPk: []byte{0x01}, ShamirIndex: 1},
+			{ValidatorAddress: "val2", PallasPk: []byte{0x02}, ShamirIndex: 2},
+			{ValidatorAddress: "val3", PallasPk: []byte{0x03}, ShamirIndex: 3},
 		},
 		CeremonyPayloads: []*types.DealerPayload{
 			{ValidatorAddress: "val1", Ciphertext: []byte{0x10}},
@@ -331,6 +350,10 @@ func (s *KeeperTestSuite) TestStripNonAckersFromRound() {
 	s.Require().Len(round.CeremonyValidators, 2)
 	s.Require().Equal("val1", round.CeremonyValidators[0].ValidatorAddress)
 	s.Require().Equal("val3", round.CeremonyValidators[1].ValidatorAddress)
+	// ShamirIndex must be preserved through stripping so Lagrange interpolation
+	// uses the correct original x-coordinate (val3's share is f(3), not f(2)).
+	s.Require().Equal(uint32(1), round.CeremonyValidators[0].ShamirIndex)
+	s.Require().Equal(uint32(3), round.CeremonyValidators[1].ShamirIndex)
 
 	s.Require().Len(round.CeremonyPayloads, 2)
 	s.Require().Equal("val1", round.CeremonyPayloads[0].ValidatorAddress)
@@ -425,12 +448,18 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 	roundID, addrs, _ := s.createPendingRoundWithValidators(3)
 	eaPk := testPallasPK()
 	payloads := makePayloads(addrs)
+	vks := make([][]byte, 3)
+	for i := range vks {
+		vks[i] = testPallasPK()
+	}
 
 	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
-		Creator:     "dealer1",
-		VoteRoundId: roundID,
-		EaPk:        eaPk,
-		Payloads:    payloads,
+		Creator:          "dealer1",
+		VoteRoundId:      roundID,
+		EaPk:             eaPk,
+		Payloads:         payloads,
+		Threshold:        2,
+		VerificationKeys: vks,
 	})
 	s.Require().NoError(err)
 
@@ -447,6 +476,11 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 	s.Require().Len(round.CeremonyPayloads, 3)
 	for i, p := range round.CeremonyPayloads {
 		s.Require().Equal(addrs[i], p.ValidatorAddress)
+	}
+	s.Require().EqualValues(2, round.Threshold)
+	s.Require().Len(round.VerificationKeys, 3)
+	for i, vk := range round.VerificationKeys {
+		s.Require().Equal(vks[i], vk)
 	}
 
 	// Verify event emission.
@@ -629,6 +663,99 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 			},
 			errContains: "invalid pallas point",
 		},
+		// --- threshold / verification key validation (lines 123–149) ---
+		{
+			name: "n>=2: threshold < 2",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:          "dealer1",
+					VoteRoundId:      roundID,
+					EaPk:             testPallasPK(),
+					Payloads:         makePayloads(addrs),
+					Threshold:        1, // invalid: must be >= 2
+					VerificationKeys: [][]byte{testPallasPK(), testPallasPK()},
+				}
+			},
+			errContains: "invalid threshold",
+		},
+		{
+			name: "n>=2: wrong number of verification keys",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(3)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:          "dealer1",
+					VoteRoundId:      roundID,
+					EaPk:             testPallasPK(),
+					Payloads:         makePayloads(addrs),
+					Threshold:        2,
+					VerificationKeys: [][]byte{testPallasPK()}, // only 1 of the required 3
+				}
+			},
+			errContains: "invalid threshold",
+		},
+		{
+			name: "n>=2: invalid point in verification keys",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        testPallasPK(),
+					Payloads:    makePayloads(addrs),
+					Threshold:   2,
+					VerificationKeys: [][]byte{
+						testPallasPK(),
+						bytes.Repeat([]byte{0xFF}, 32), // off-curve
+					},
+				}
+			},
+			errContains: "invalid pallas point",
+		},
+		{
+			name: "n==1: threshold must be 0",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(1)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:     "dealer1",
+					VoteRoundId: roundID,
+					EaPk:        testPallasPK(),
+					Payloads:    makePayloads(addrs),
+					Threshold:   1, // must be 0 in legacy mode
+				}
+			},
+			errContains: "invalid threshold",
+		},
+		{
+			name: "n==1: verification_keys must be empty",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(1)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
+				return &types.MsgDealExecutiveAuthorityKey{
+					Creator:          "dealer1",
+					VoteRoundId:      roundID,
+					EaPk:             testPallasPK(),
+					Payloads:         makePayloads(addrs),
+					Threshold:        0,
+					VerificationKeys: [][]byte{testPallasPK()}, // must be empty
+				}
+			},
+			errContains: "invalid threshold",
+		},
 	}
 
 	for _, tc := range tests {
@@ -648,14 +775,27 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 
 // dealPendingRound creates a PENDING round with n validators, deals, and
 // returns (roundID, validator addrs). The round is left in DEALT status.
+// Threshold mode is used automatically when n >= 2.
 func (s *MsgServerTestSuite) dealPendingRound(n int) (roundID []byte, addrs []string) {
 	roundID, addrs, _ = s.createPendingRoundWithValidators(n)
-	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
+	msg := &types.MsgDealExecutiveAuthorityKey{
 		Creator:     "dealer",
 		VoteRoundId: roundID,
 		EaPk:        testPallasPK(),
 		Payloads:    makePayloads(addrs),
-	})
+	}
+	if n >= 2 {
+		t := (n + 1) / 2 // ceil(n/2) — matches thresholdForN
+		if t < 2 {
+			t = 2
+		}
+		msg.Threshold = uint32(t)
+		msg.VerificationKeys = make([][]byte, n)
+		for i := range msg.VerificationKeys {
+			msg.VerificationKeys[i] = testPallasPK()
+		}
+	}
+	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, msg)
 	s.Require().NoError(err)
 	return
 }
@@ -664,7 +804,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_HappyPath() {
 	s.SetupTest()
 	roundID, addrs := s.dealPendingRound(3)
 
-	// First ack: fast path requires ALL validators, so 1/3 stays DEALT.
+	// First ack: fast path requires ALL validators, so 1/3 (count) stays DEALT.
 	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
@@ -738,7 +878,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_PartialAcks() {
 	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
 
-	// Second ack: 2 of 4 → still DEALT (>= 1/3 but not all).
+	// Second ack: 2 of 4 → still DEALT (not all).
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[1],
 		VoteRoundId:  roundID,
@@ -878,7 +1018,7 @@ func (s *MsgServerTestSuite) TestCeremonyLog_DealAndAck() {
 	s.Require().Contains(round.CeremonyLog[0], "deal from")
 	s.Require().Contains(round.CeremonyLog[0], "ea_pk=")
 
-	// Ack from first validator: 1/3 — fast path requires all, stays DEALT.
+	// Ack from first validator: 1 of 3 — fast path requires all, stays DEALT.
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
@@ -891,7 +1031,7 @@ func (s *MsgServerTestSuite) TestCeremonyLog_DealAndAck() {
 	// deal + ack = 2 entries (no confirm yet).
 	s.Require().Len(round.CeremonyLog, 2, "expected 2 log entries after deal+ack")
 	s.Require().Contains(round.CeremonyLog[1], "ack from")
-	s.Require().Contains(round.CeremonyLog[1], "1/3 acked")
+	s.Require().Contains(round.CeremonyLog[1], "1/3 acked") // "1/3" = count format (1 of 3)
 
 	// Ack all remaining validators to trigger confirm.
 	for _, addr := range addrs[1:] {
@@ -977,16 +1117,19 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 	// 2. Create a PENDING round with these validators.
 	roundID := s.createPendingRound(ceremonyVals)
 
-	// 3. Generate ea_sk, ea_pk.
+	// 3. Generate ea_sk, ea_pk, and Shamir-split ea_sk into shares.
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
-	eaSkBytes, err := elgamal.MarshalSecretKey(eaSk)
-	s.Require().NoError(err)
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
+	const threshold = 2
+	shares, _, err := shamir.Split(eaSk.Scalar, threshold, numValidators)
+	s.Require().NoError(err)
 
-	// 4. For each validator, encrypt ea_sk to pk_i using ECIES.
+	// 4. For each validator, encrypt share_i to pk_i using ECIES.
 	payloads := make([]*types.DealerPayload, numValidators)
+	vks := make([][]byte, numValidators)
 	for i, v := range validators {
-		env, err := ecies.Encrypt(G, v.pk.Point, eaSkBytes, rand.Reader)
+		shareBytes := shares[i].Value.Bytes()
+		env, err := ecies.Encrypt(G, v.pk.Point, shareBytes, rand.Reader)
 		s.Require().NoError(err, "ECIES encrypt for validator %d", i)
 
 		payloads[i] = &types.DealerPayload{
@@ -994,30 +1137,34 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
 			Ciphertext:       env.Ciphertext,
 		}
+		vks[i] = G.Mul(shares[i].Value).ToAffineCompressed()
 	}
 
-	// 5. Submit MsgDealExecutiveAuthorityKey with VoteRoundId.
+	// 5. Submit MsgDealExecutiveAuthorityKey with threshold fields.
 	_, err = s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
-		Creator:     "dealer",
-		VoteRoundId: roundID,
-		EaPk:        eaPkBytes,
-		Payloads:    payloads,
+		Creator:          "dealer",
+		VoteRoundId:      roundID,
+		EaPk:             eaPkBytes,
+		Payloads:         payloads,
+		Threshold:        threshold,
+		VerificationKeys: vks,
 	})
 	s.Require().NoError(err)
 
-	// Verify DEALT status on the round.
+	// Verify DEALT status and TSS fields on the round.
 	kv := s.keeper.OpenKVStore(s.ctx)
 	round, err := s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
 	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
+	s.Require().EqualValues(threshold, round.Threshold)
+	s.Require().Len(round.VerificationKeys, numValidators)
 
-	// 6. For each validator: decrypt and verify they can recover ea_sk.
+	// 6. For each validator: decrypt share and verify share_i * G == VK_i.
 	for i, v := range validators {
 		payload := round.CeremonyPayloads[i]
 		s.Require().Equal(addrs[i], payload.ValidatorAddress)
 
-		// Reconstruct the ECIES envelope from on-chain bytes.
 		ephPk, err := elgamal.UnmarshalPublicKey(payload.EphemeralPk)
 		s.Require().NoError(err, "unmarshal ephemeral_pk for validator %d", i)
 
@@ -1026,20 +1173,14 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 			Ciphertext: payload.Ciphertext,
 		}
 
-		// Decrypt using sk_i.
-		decryptedEaSk, err := ecies.Decrypt(v.sk.Scalar, env)
+		decryptedShare, err := ecies.Decrypt(v.sk.Scalar, env)
 		s.Require().NoError(err, "ECIES decrypt for validator %d", i)
+		s.Require().Equal(shares[i].Value.Bytes(), decryptedShare,
+			"decrypted share mismatch for validator %d", i)
 
-		// Verify decrypted bytes == ea_sk bytes.
-		s.Require().Equal(eaSkBytes, decryptedEaSk,
-			"decrypted ea_sk mismatch for validator %d", i)
-
-		// Verify ea_sk * G == ea_pk.
-		recoveredSk, err := elgamal.UnmarshalSecretKey(decryptedEaSk)
-		s.Require().NoError(err)
-		recoveredPk := G.Mul(recoveredSk.Scalar)
-		s.Require().Equal(eaPkBytes, recoveredPk.ToAffineCompressed(),
-			"recovered ea_pk mismatch for validator %d", i)
+		// Verify VK_i = share_i * G.
+		s.Require().Equal(vks[i], round.VerificationKeys[i],
+			"stored VK[%d] must match computed VK", i)
 	}
 
 	// 7. Submit acks from all validators — fast path requires all to ack.

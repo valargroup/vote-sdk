@@ -156,6 +156,13 @@ message CeremonyState {
 message ValidatorPallasKey {
   string validator_address = 1;
   bytes  pallas_pk         = 2; // Compressed Pallas point (32 bytes)
+  // shamir_index is the original 1-based Shamir evaluation point f(shamir_index)
+  // assigned to this validator when the round ceremony was created. It is set
+  // once at round creation and never changed, even when non-acking validators
+  // are stripped from CeremonyValidators by StripNonAckersFromRound. Partial
+  // decrypt injectors and the SubmitPartialDecryption handler must use this
+  // field for Lagrange interpolation indices, not the post-stripping array position.
+  uint32 shamir_index      = 3;
 }
 
 // DealerPayload is an ECIES envelope from the dealer to a specific validator.

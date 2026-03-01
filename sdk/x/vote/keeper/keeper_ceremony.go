@@ -45,25 +45,28 @@ func (k *Keeper) SetCeremonyState(kvStore store.KVStore, state *types.CeremonySt
 // Per-round ceremony helpers (operate on VoteRound ceremony fields)
 // ---------------------------------------------------------------------------
 
-// OneThirdAcked returns true if at least 1/3 of round ceremony validators have
-// acknowledged. Uses integer arithmetic: acks * 3 >= validators.
-func OneThirdAcked(round *types.VoteRound) bool {
+// HalfAcked returns true if at least 1/2 of round ceremony validators have
+// acknowledged. Uses integer arithmetic: acks * 2 >= validators.
+func HalfAcked(round *types.VoteRound) bool {
 	n := len(round.CeremonyValidators)
 	if n == 0 {
 		return false
 	}
-	return len(round.CeremonyAcks)*3 >= n
+	return len(round.CeremonyAcks)*2 >= n
 }
 
-// FindValidatorInRoundCeremony returns the index and true if valAddr is found
-// in the round's ceremony_validators list, or (-1, false) otherwise.
-func FindValidatorInRoundCeremony(round *types.VoteRound, valAddr string) (int, bool) {
-	for i, v := range round.CeremonyValidators {
+// FindValidatorInRoundCeremony returns the ValidatorPallasKey and true if
+// valAddr is found in the round's ceremony_validators list, or (nil, false)
+// otherwise. Callers that need the original Shamir evaluation point must use
+// the returned validator's ShamirIndex field rather than the array position,
+// which changes after StripNonAckersFromRound removes non-acking validators.
+func FindValidatorInRoundCeremony(round *types.VoteRound, valAddr string) (*types.ValidatorPallasKey, bool) {
+	for _, v := range round.CeremonyValidators {
 		if v.ValidatorAddress == valAddr {
-			return i, true
+			return v, true
 		}
 	}
-	return -1, false
+	return nil, false
 }
 
 // FindAckInRoundCeremony returns the index and true if valAddr has an ack entry

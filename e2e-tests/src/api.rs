@@ -720,6 +720,17 @@ pub fn broadcast_cosmos_msg_with_retries(
     Err(last_err.unwrap())
 }
 
+/// Returns the full round JSON object from a round query.
+/// Returns None if the round doesn't exist or the query fails.
+pub fn get_round(round_id_hex: &str) -> Option<Value> {
+    let path = format!("/zally/v1/round/{}", round_id_hex);
+    let (status, json) = get_json(&path).ok()?;
+    if status != 200 {
+        return None;
+    }
+    json.get("round").cloned()
+}
+
 /// Returns the EA public key (base64-decoded) from a round query.
 /// Returns None if the round doesn't exist, has no ea_pk, or ea_pk is empty.
 pub fn get_round_ea_pk(round_id_hex: &str) -> Option<Vec<u8>> {

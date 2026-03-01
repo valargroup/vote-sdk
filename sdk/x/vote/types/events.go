@@ -14,6 +14,7 @@ const (
 	EventTypeAckExecutiveAuthorityKey     = "ack_executive_authority_key"
 	EventTypeCeremonyStatusChange             = "ceremony_status_change"
 	EventTypeSetVoteManager                   = "set_vote_manager"
+	EventTypeSubmitPartialDecryption          = "submit_partial_decryption"
 )
 
 // Event attribute keys.
@@ -34,4 +35,6 @@ const (
 	AttributeKeyCeremonyStatus     = "ceremony_status"
 	AttributeKeyEAPK               = "ea_pk"
 	AttributeKeyVoteManager        = "vote_manager"
+	AttributeKeyValidatorIndex     = "validator_index"
+	AttributeKeyEntryCount         = "entry_count"
 )

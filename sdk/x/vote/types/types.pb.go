@@ -1191,8 +1191,15 @@ type ValidatorPallasKey struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	ValidatorAddress string                 `protobuf:"bytes,1,opt,name=validator_address,json=validatorAddress,proto3" json:"validator_address,omitempty"`
 	PallasPk         []byte                 `protobuf:"bytes,2,opt,name=pallas_pk,json=pallasPk,proto3" json:"pallas_pk,omitempty"` // Compressed Pallas point (32 bytes)
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// shamir_index is the original 1-based Shamir evaluation point f(shamir_index)
+	// assigned to this validator when the round ceremony was created. It is set
+	// once at round creation and never changed, even when non-acking validators
+	// are stripped from CeremonyValidators by StripNonAckersFromRound. Partial
+	// decrypt injectors and the SubmitPartialDecryption handler must use this
+	// field for Lagrange interpolation indices, not the post-stripping array position.
+	ShamirIndex   uint32 `protobuf:"varint,3,opt,name=shamir_index,json=shamirIndex,proto3" json:"shamir_index,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ValidatorPallasKey) Reset() {
@@ -1237,6 +1244,13 @@ func (x *ValidatorPallasKey) GetPallasPk() []byte {
 		return x.PallasPk
 	}
 	return nil
+}
+
+func (x *ValidatorPallasKey) GetShamirIndex() uint32 {
+	if x != nil {
+		return x.ShamirIndex
+	}
+	return 0
 }
 
 // DealerPayload is an ECIES envelope from the dealer to a specific validator.
@@ -1462,10 +1476,11 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x06dealer\x18\x06 \x01(\tR\x06dealer\x12\x1f\n" +
 	"\vphase_start\x18\a \x01(\x04R\n" +
 	"phaseStart\x12#\n" +
-	"\rphase_timeout\x18\b \x01(\x04R\fphaseTimeout\"^\n" +
+	"\rphase_timeout\x18\b \x01(\x04R\fphaseTimeout\"\x81\x01\n" +
 	"\x12ValidatorPallasKey\x12+\n" +
 	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12\x1b\n" +
-	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\"\x7f\n" +
+	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\x12!\n" +
+	"\fshamir_index\x18\x03 \x01(\rR\vshamirIndex\"\x7f\n" +
 	"\rDealerPayload\x12+\n" +
 	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12!\n" +
 	"\fephemeral_pk\x18\x02 \x01(\fR\vephemeralPk\x12\x1e\n" +

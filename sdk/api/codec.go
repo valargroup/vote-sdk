@@ -27,8 +27,13 @@ const (
 	TagRegisterPallasKey              byte = 0x06
 	TagDealExecutiveAuthorityKey      byte = 0x07
 	TagAckExecutiveAuthorityKey       byte = 0x08
-	TagCreateValidatorWithPallasKey         byte = 0x09
-	TagSetVoteManager                      byte = 0x0C
+	TagCreateValidatorWithPallasKey   byte = 0x09
+	TagSetVoteManager                 byte = 0x0C
+
+	// TagSubmitPartialDecryption (0x0D) is auto-injected by PrepareProposal
+	// during the TALLYING phase of a threshold-mode round. Like MsgAck, it is
+	// never client-signed and uses the custom wire format.
+	TagSubmitPartialDecryption byte = 0x0D
 )
 
 // IsCustomTag returns true if b is a valid custom transaction type tag
@@ -44,13 +49,14 @@ func IsVoteTag(b byte) bool {
 	return b >= TagDelegateVote && b <= TagSubmitTally
 }
 
-// IsCeremonyTag returns true if b is a ceremony transaction type tag that
-// uses the custom wire format. MsgDealExecutiveAuthorityKey (0x07) and
-// MsgAckExecutiveAuthorityKey (0x08) are auto-injected by PrepareProposal
-// and never client-signed. All other ceremony messages flow through standard
-// Cosmos SDK transactions with proper signature verification.
+// IsCeremonyTag returns true if b is an auto-injected ceremony/tally
+// transaction type tag that uses the custom wire format and is never
+// client-signed. Currently: Deal (0x07), Ack (0x08), and
+// SubmitPartialDecryption (0x0D).
 func IsCeremonyTag(b byte) bool {
-	return b == TagDealExecutiveAuthorityKey || b == TagAckExecutiveAuthorityKey
+	return b == TagDealExecutiveAuthorityKey ||
+		b == TagAckExecutiveAuthorityKey ||
+		b == TagSubmitPartialDecryption
 }
 
 // TagForMessage returns the wire-format tag for a VoteMessage.
@@ -126,15 +132,16 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 	return tag, voteMsg, nil
 }
 
-// EncodeCeremonyTx serializes a ceremony message into the custom wire format:
+// EncodeCeremonyTx serializes an auto-injected message into the custom wire format:
 //
 //	[1 byte: msg_type_tag] [N bytes: protobuf-encoded message]
 //
-// Tags 0x07 (Deal) and 0x08 (Ack) use the custom wire format — both are
-// auto-injected by PrepareProposal and never client-signed.
+// Tags 0x07 (Deal), 0x08 (Ack), and 0x0D (SubmitPartialDecryption) use the
+// custom wire format — all are auto-injected by PrepareProposal and never
+// client-signed.
 func EncodeCeremonyTx(msg proto.Message, tag byte) ([]byte, error) {
 	if !IsCeremonyTag(tag) {
-		return nil, fmt.Errorf("invalid ceremony tag: 0x%02x (only 0x07-0x08 use custom wire format)", tag)
+		return nil, fmt.Errorf("invalid auto-inject tag: 0x%02x (only 0x07, 0x08, 0x0D use custom wire format)", tag)
 	}
 
 	body, err := proto.Marshal(msg)
@@ -165,8 +172,10 @@ func DecodeCeremonyTx(raw []byte) (byte, proto.Message, error) {
 		msg = &types.MsgDealExecutiveAuthorityKey{}
 	case TagAckExecutiveAuthorityKey:
 		msg = &types.MsgAckExecutiveAuthorityKey{}
+	case TagSubmitPartialDecryption:
+		msg = &types.MsgSubmitPartialDecryption{}
 	default:
-		return 0, nil, fmt.Errorf("invalid ceremony tx tag: 0x%02x (only 0x07-0x08 use custom wire format)", tag)
+		return 0, nil, fmt.Errorf("invalid auto-inject tx tag: 0x%02x (only 0x07, 0x08, 0x0D use custom wire format)", tag)
 	}
 
 	if err := proto.Unmarshal(body, msg); err != nil {

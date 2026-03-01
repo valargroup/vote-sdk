@@ -38,6 +38,8 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/codec"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/z-cale/zally/app"
 	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/crypto/roundid"
@@ -130,6 +132,68 @@ func (ta *TestApp) WriteEaSkForRound(roundID []byte, eaSkBytes []byte) {
 	}
 	path := filepath.Join(ta.EaSkDir, "ea_sk."+hex.EncodeToString(roundID))
 	require.NoError(ta.t, os.WriteFile(path, eaSkBytes, 0600))
+}
+
+// WriteShareForRound writes a raw 32-byte Shamir share scalar to
+// <EaSkDir>/share.<hex(round_id)>, the path the partial decrypt injector
+// expects. Call after creating a TALLYING round in threshold mode.
+func (ta *TestApp) WriteShareForRound(roundID []byte, shareBytes []byte) {
+	ta.t.Helper()
+	if ta.EaSkDir == "" {
+		ta.t.Fatal("EaSkDir not set — use SetupTestAppWithPallasKey")
+	}
+	path := filepath.Join(ta.EaSkDir, "share."+hex.EncodeToString(roundID))
+	require.NoError(ta.t, os.WriteFile(path, shareBytes, 0600))
+}
+
+// SeedTallyingRoundThreshold creates a TALLYING round in threshold mode
+// directly in the KV store and commits via an empty block. Returns the
+// round ID. Callers can subsequently use VoteKeeper().AddToTally to
+// populate ciphertext accumulators, then call WriteShareForRound to put
+// the share on disk before calling CallPrepareProposal.
+//
+// If any validator has ShamirIndex == 0 (unset), this function assigns
+// ShamirIndex = position+1, mirroring what CreateVotingSession does in
+// production so that Lagrange interpolation uses the correct x-coordinates.
+func (ta *TestApp) SeedTallyingRoundThreshold(
+	roundID []byte,
+	threshold uint32,
+	proposals []*types.Proposal,
+	validators []*types.ValidatorPallasKey,
+	verificationKeys [][]byte,
+) []byte {
+	ta.t.Helper()
+
+	// Assign ShamirIndex to any validator that doesn't have one, mirroring
+	// the assignment done by CreateVotingSession in production.
+	indexedValidators := make([]*types.ValidatorPallasKey, len(validators))
+	for i, v := range validators {
+		if v.ShamirIndex == 0 {
+			vCopy := proto.Clone(v).(*types.ValidatorPallasKey)
+			vCopy.ShamirIndex = uint32(i + 1)
+			indexedValidators[i] = vCopy
+		} else {
+			indexedValidators[i] = v
+		}
+	}
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	round := &types.VoteRound{
+		VoteRoundId:        roundID,
+		Status:             types.SessionStatus_SESSION_STATUS_TALLYING,
+		EaPk:               make([]byte, 32), // placeholder
+		Proposals:          proposals,
+		CeremonyValidators: indexedValidators,
+		Threshold:          threshold,
+		VerificationKeys:   verificationKeys,
+	}
+	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
+	require.NoError(ta.t, err)
+
+	ta.NextBlock()
+	return roundID
 }
 
 // setupTestApp is the shared implementation for SetupTestApp and SetupTestAppWithEAKey.
@@ -365,6 +429,46 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 		CeremonyPayloads:     payloads,
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
+	}
+	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
+	require.NoError(ta.t, err)
+
+	ta.NextBlock()
+	return roundID
+}
+
+// SeedDealtCeremonyThreshold creates a PENDING round with DEALT ceremony fields
+// in threshold mode. Callers supply pre-computed ECIES payloads, VK_i points,
+// and the threshold t. This lets ack handler tests exercise threshold-mode
+// verification (share_i * G == VK_i) without going through the full deal flow.
+func (ta *TestApp) SeedDealtCeremonyThreshold(
+	eaPkBytes []byte,
+	payloads []*types.DealerPayload,
+	validators []*types.ValidatorPallasKey,
+	threshold uint32,
+	verificationKeys [][]byte,
+) []byte {
+	ta.t.Helper()
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	h, _ := blake2b.New256(nil)
+	h.Write(eaPkBytes)
+	roundID := h.Sum(nil)
+
+	round := &types.VoteRound{
+		VoteRoundId:          roundID,
+		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
+		EaPk:                 eaPkBytes,
+		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+		CeremonyDealer:       "dealer",
+		CeremonyValidators:   validators,
+		CeremonyPayloads:     payloads,
+		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
+		CeremonyPhaseTimeout: types.DefaultDealTimeout,
+		Threshold:            threshold,
+		VerificationKeys:     verificationKeys,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)

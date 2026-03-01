@@ -120,6 +120,34 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 		}
 	}
 
+	// Validate threshold and verification keys.
+	nValidators := len(round.CeremonyValidators)
+	if nValidators >= 2 {
+		if msg.Threshold < 2 {
+			return nil, fmt.Errorf("%w: threshold must be >= 2 when n=%d, got %d",
+				types.ErrInvalidThreshold, nValidators, msg.Threshold)
+		}
+		if len(msg.VerificationKeys) != nValidators {
+			return nil, fmt.Errorf("%w: expected %d verification keys, got %d",
+				types.ErrInvalidThreshold, nValidators, len(msg.VerificationKeys))
+		}
+		for i, vk := range msg.VerificationKeys {
+			if _, err := elgamal.UnmarshalPublicKey(vk); err != nil {
+				return nil, fmt.Errorf("%w: verification_key[%d]: %v",
+					types.ErrInvalidPallasPoint, i, err)
+			}
+		}
+	} else {
+		if msg.Threshold != 0 {
+			return nil, fmt.Errorf("%w: threshold must be 0 when n=%d, got %d",
+				types.ErrInvalidThreshold, nValidators, msg.Threshold)
+		}
+		if len(msg.VerificationKeys) != 0 {
+			return nil, fmt.Errorf("%w: verification_keys must be empty when n=%d, got %d",
+				types.ErrInvalidThreshold, nValidators, len(msg.VerificationKeys))
+		}
+	}
+
 	// Store deal data on the round and transition ceremony to DEALT.
 	round.EaPk = msg.EaPk
 	round.CeremonyPayloads = msg.Payloads
@@ -127,6 +155,8 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	round.CeremonyPhaseStart = uint64(ctx.BlockTime().Unix())
 	round.CeremonyPhaseTimeout = types.DefaultDealTimeout
 	round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_DEALT
+	round.Threshold = msg.Threshold
+	round.VerificationKeys = msg.VerificationKeys
 
 	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 		fmt.Sprintf("deal from %s, ea_pk=%s", msg.Creator, hex.EncodeToString(msg.EaPk)[:16]))

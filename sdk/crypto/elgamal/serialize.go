@@ -81,6 +81,16 @@ func decompressPallasPoint(data []byte) (curvey.Point, error) {
 	return receiver.FromAffineCompressed(data)
 }
 
+// UnmarshalPoint deserializes a 32-byte compressed Pallas point, accepting
+// the identity point (all zeros). Use this when the identity is a valid value
+// (e.g. partial decryption points D_i = share * C1).
+func UnmarshalPoint(data []byte) (curvey.Point, error) {
+	if len(data) != CompressedPointSize {
+		return nil, fmt.Errorf("elgamal: UnmarshalPoint: expected %d bytes, got %d", CompressedPointSize, len(data))
+	}
+	return decompressPallasPoint(data)
+}
+
 // UnmarshalPublicKey deserializes a 32-byte compressed Pallas point into a PublicKey.
 // Validates that the point is on the curve and not the identity.
 func UnmarshalPublicKey(data []byte) (*PublicKey, error) {

@@ -28,7 +28,7 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
   PENDING (REGISTERING) ──> PENDING (DEALT) ──> ACTIVE (CONFIRMED)
                                   │                (all acked)
                        timeout    │
-                       (< 1/3)   │ timeout (≥ 1/3)
+                       (< 1/2)   │ timeout (≥ 1/2)
                           │       │
                           v       v
                     REGISTERING   ACTIVE (CONFIRMED)
@@ -40,11 +40,11 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
 |---|---|---|---|
 | REGISTERING | DEALT | Auto-deal via PrepareProposal | Block proposer is a ceremony validator |
 | DEALT | CONFIRMED + ACTIVE | MsgAckExecutiveAuthorityKey | All validators acked (fast path) |
-| DEALT | CONFIRMED + ACTIVE | EndBlocker timeout | >= 1/3 acked at timeout; non-ackers stripped |
-| DEALT | REGISTERING | EndBlocker timeout | < 1/3 acked; reset for re-deal by next proposer |
+| DEALT | CONFIRMED + ACTIVE | EndBlocker timeout | >= 1/2 acked at timeout; non-ackers stripped |
+| DEALT | REGISTERING | EndBlocker timeout | < 1/2 acked; reset for re-deal by next proposer |
 
 Key behaviors:
-- **Fast path vs timeout** — the fast path confirms when ALL validators ack (no stripping needed). The timeout path confirms with >= 1/3 acks (integer arithmetic: `acks * 3 >= validators`) and strips non-ackers.
+- **Fast path vs timeout** — the fast path confirms when ALL validators ack (no stripping needed). The timeout path confirms with >= 1/2 acks (integer arithmetic: `acks * 2 >= validators`) and strips non-ackers.
 - **Auto-deal** — the block proposer automatically deals when it detects a PENDING round in REGISTERING state. No manual `ceremony.sh deal` step.
 - **Auto-ack** — each block proposer auto-acks via PrepareProposal when it detects a DEALT round.
 - **Miss tracking** — validators snapshotted into a ceremony who fail to ack have a consecutive miss counter incremented. After 3 consecutive misses, the validator is jailed.
@@ -57,14 +57,14 @@ Validators register their Pallas key once via `MsgRegisterPallasKey` or `MsgCrea
 #### Auto-Deal and Auto-Ack via PrepareProposal
 
 `PrepareProposal` composes two ceremony injectors:
-1. **Auto-deal** — if a PENDING round is in REGISTERING state and the proposer is a ceremony validator, generate `ea_sk`/`ea_pk`, ECIES-encrypt shares for all ceremony validators, and inject `MsgDealExecutiveAuthorityKey`.
-2. **Auto-ack** — if a PENDING round is in DEALT state and the proposer hasn't acked, decrypt the share, verify `ea_sk * G == ea_pk`, inject `MsgAckExecutiveAuthorityKey`, and write `ea_sk` to disk.
+1. **Auto-deal** — if a PENDING round is in REGISTERING state and the proposer is a ceremony validator, generate `ea_sk`, Shamir-split it into `(t, n)` shares, ECIES-encrypt `share_i` to each validator, publish `VK_i = share_i * G` and `threshold = ceil(n/2)`, and inject `MsgDealExecutiveAuthorityKey`.
+2. **Auto-ack** — if a PENDING round is in DEALT state and the proposer hasn't acked, decrypt the payload to recover their share, verify `share_i * G == VK_i` (threshold mode) or `ea_sk * G == ea_pk` (legacy), inject `MsgAckExecutiveAuthorityKey`, and write the share/key to disk.
 
 #### Timeout (EndBlocker)
 
 Only the DEALT phase has a timeout (default: 30 minutes). On timeout:
-- **>= 1/3 acked:** Confirm ceremony, strip non-ackers, activate round. Increment miss counter for each non-acker; jail if >= 3 consecutive misses.
-- **< 1/3 acked:** Reset to REGISTERING for re-deal by the next proposer. Increment miss counters.
+- **>= 1/2 acked:** Confirm ceremony, strip non-ackers, activate round. Increment miss counter for each non-acker; jail if >= 3 consecutive misses.
+- **< 1/2 acked:** Reset to REGISTERING for re-deal by the next proposer. Increment miss counters.
 
 #### ECIES Encryption Scheme
 
@@ -98,15 +98,19 @@ ACTIVE ──> TALLYING ──> FINALIZED
 
 **`MsgCreateVotingSession`** reads `ea_pk` from the confirmed ceremony state (not from the message). The round stores its own copy of `ea_pk` for future key rotation support. Only the VoteManager can create voting sessions. An optional `description` field provides human-readable context for the round.
 
-**`MsgSubmitTally`** is auto-injected via `PrepareProposal` when a round enters TALLYING (same pattern as auto-ack). Cannot be submitted through the mempool.
+**`MsgSubmitPartialDecryption`** is auto-injected via `PrepareProposal` when a round is in TALLYING state and threshold mode is active. Each validator submits `D_i = share_i * C1` per accumulator. Cannot be submitted through the mempool.
+
+**`MsgSubmitTally`** is auto-injected via `PrepareProposal` once `t` partial decryptions exist on-chain. The proposer Lagrange-combines them to recover `ea_sk * C1`, runs BSGS, and submits plaintext totals. Cannot be submitted through the mempool.
 
 ### PrepareProposal / ProcessProposal Pipeline
 
-`PrepareProposal` composes two injectors that run sequentially on each proposed block:
-1. **Ceremony ack injection** — if ceremony is DEALT and the proposer hasn't acked, inject `MsgAckExecutiveAuthorityKey`
-2. **Tally injection** — if a round is TALLYING, decrypt accumulators and inject `MsgSubmitTally`
+`PrepareProposal` composes four injectors that run sequentially on each proposed block:
+1. **Ceremony deal injection** — if a PENDING round is in REGISTERING and the proposer is a ceremony validator, auto-deal via `MsgDealExecutiveAuthorityKey`
+2. **Ceremony ack injection** — if a PENDING round is in DEALT and the proposer hasn't acked, auto-ack via `MsgAckExecutiveAuthorityKey`
+3. **Partial decryption injection** (threshold mode) — if a TALLYING round has `threshold > 0` and the proposer hasn't yet submitted, compute `D_i = share_i * C1` per accumulator and inject `MsgSubmitPartialDecryption`
+4. **Tally injection** — when `t` partials are on-chain (threshold mode) or `ea_sk` is on disk (legacy), Lagrange-combine and BSGS-solve, then inject `MsgSubmitTally`
 
-`ProcessProposal` validates all injected txs on non-proposer validators before accepting a block. Both `MsgAckExecutiveAuthorityKey` and `MsgSubmitTally` are blocked from the mempool (CheckTx rejects them).
+`ProcessProposal` validates all injected txs on non-proposer validators before accepting a block. `MsgAckExecutiveAuthorityKey`, `MsgSubmitPartialDecryption`, and `MsgSubmitTally` are all blocked from the mempool (CheckTx rejects them).
 
 ### Custom Wire Format
 

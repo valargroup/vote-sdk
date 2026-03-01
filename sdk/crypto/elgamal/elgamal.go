@@ -123,6 +123,13 @@ func validatePublicKey(pk *PublicKey) error {
 	return nil
 }
 
+// ValuePoint returns v*G — the point encoding of a plaintext vote total.
+// Used in on-chain threshold tally verification: the Lagrange-combined
+// partial decryption C2 - sum(λ_i * D_i) must equal this point.
+func ValuePoint(v uint64) curvey.Point {
+	return PallasGenerator().Mul(scalarFromUint64(v))
+}
+
 // DecryptToPoint decrypts a ciphertext to the embedded value point v*G.
 // It does NOT recover the plaintext v; use BSGS (baby-step giant-step) for that.
 //
