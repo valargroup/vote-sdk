@@ -28,12 +28,15 @@ const bsgsDefaultBound = 1 << 28
 // tx list. Injectors should prepend their txs before the existing ones.
 type PrepareProposalInjector = func(ctx sdk.Context, req *abci.RequestPrepareProposal, txs [][]byte) [][]byte
 
-// ComposedPrepareProposalHandler composes ceremony deal, ceremony ack, and
-// tally injection into a single sdk.PrepareProposalHandler. Injectors run
-// sequentially: deal → ack → tally.
+// ComposedPrepareProposalHandler composes ceremony deal, ceremony ack,
+// threshold partial decryption, and tally injection into a single
+// sdk.PrepareProposalHandler. Injectors run sequentially:
+//
+//	deal → ack → partialDecrypt → tally
 func ComposedPrepareProposalHandler(
 	dealInjector PrepareProposalInjector,
 	ackInjector PrepareProposalInjector,
+	partialDecryptInjector PrepareProposalInjector,
 	tallyHandler sdk.PrepareProposalHandler,
 ) sdk.PrepareProposalHandler {
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
@@ -45,6 +48,9 @@ func ComposedPrepareProposalHandler(
 
 		// Run ceremony ack injection (may prepend MsgAckExecutiveAuthorityKey).
 		txs = ackInjector(ctx, req, txs)
+
+		// Run threshold partial decryption injection (may prepend MsgSubmitPartialDecryption).
+		txs = partialDecryptInjector(ctx, req, txs)
 
 		// Run tally injection by creating a modified request with the updated txs.
 		modifiedReq := *req

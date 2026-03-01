@@ -157,7 +157,8 @@ func NewZallyApp(
 	// Install composed PrepareProposal handler:
 	// 1. Ceremony deal injection: auto-deal when a PENDING round needs it
 	// 2. Ceremony ack injection: auto-ack when ceremony is DEALT
-	// 3. Tally injection: auto-tally when a round is TALLYING
+	// 3. Threshold partial decryption: submit D_i = share * C1 when TALLYING (threshold mode)
+	// 4. Tally injection: Lagrange-combine partials (threshold) or decrypt directly (legacy)
 	ceremonyDealHandler := CeremonyDealPrepareProposalHandler(
 		app.VoteKeeper,
 		app.StakingKeeper,
@@ -172,13 +173,24 @@ func NewZallyApp(
 		eaSkDir,
 		logger,
 	)
+	partialDecryptHandler := PartialDecryptPrepareProposalInjector(
+		app.VoteKeeper,
+		app.StakingKeeper,
+		eaSkDir,
+		logger,
+	)
 	tallyHandler := TallyPrepareProposalHandler(
 		app.VoteKeeper,
 		app.StakingKeeper,
 		eaSkDir,
 		logger,
 	)
-	app.SetPrepareProposal(ComposedPrepareProposalHandler(ceremonyDealHandler, ceremonyAckHandler, tallyHandler))
+	app.SetPrepareProposal(ComposedPrepareProposalHandler(
+		ceremonyDealHandler,
+		ceremonyAckHandler,
+		partialDecryptHandler,
+		tallyHandler,
+	))
 
 	// Install ProcessProposal handler that validates injected ack and tally txs.
 	app.SetProcessProposal(ProcessProposalHandler(

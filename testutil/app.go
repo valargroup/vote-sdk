@@ -132,6 +132,51 @@ func (ta *TestApp) WriteEaSkForRound(roundID []byte, eaSkBytes []byte) {
 	require.NoError(ta.t, os.WriteFile(path, eaSkBytes, 0600))
 }
 
+// WriteShareForRound writes a raw 32-byte Shamir share scalar to
+// <EaSkDir>/share.<hex(round_id)>, the path the partial decrypt injector
+// expects. Call after creating a TALLYING round in threshold mode.
+func (ta *TestApp) WriteShareForRound(roundID []byte, shareBytes []byte) {
+	ta.t.Helper()
+	if ta.EaSkDir == "" {
+		ta.t.Fatal("EaSkDir not set — use SetupTestAppWithPallasKey")
+	}
+	path := filepath.Join(ta.EaSkDir, "share."+hex.EncodeToString(roundID))
+	require.NoError(ta.t, os.WriteFile(path, shareBytes, 0600))
+}
+
+// SeedTallyingRoundThreshold creates a TALLYING round in threshold mode
+// directly in the KV store and commits via an empty block. Returns the
+// round ID. Callers can subsequently use VoteKeeper().AddToTally to
+// populate ciphertext accumulators, then call WriteShareForRound to put
+// the share on disk before calling CallPrepareProposal.
+func (ta *TestApp) SeedTallyingRoundThreshold(
+	roundID []byte,
+	threshold uint32,
+	proposals []*types.Proposal,
+	validators []*types.ValidatorPallasKey,
+	verificationKeys [][]byte,
+) []byte {
+	ta.t.Helper()
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	round := &types.VoteRound{
+		VoteRoundId:        roundID,
+		Status:             types.SessionStatus_SESSION_STATUS_TALLYING,
+		EaPk:               make([]byte, 32), // placeholder
+		Proposals:          proposals,
+		CeremonyValidators: validators,
+		Threshold:          threshold,
+		VerificationKeys:   verificationKeys,
+	}
+	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
+	require.NoError(ta.t, err)
+
+	ta.NextBlock()
+	return roundID
+}
+
 // setupTestApp is the shared implementation for SetupTestApp and SetupTestAppWithEAKey.
 func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 	t.Helper()
