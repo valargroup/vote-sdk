@@ -147,6 +147,9 @@ func CeremonyDealPrepareProposalHandler(
 
 		// Generate fresh ea_sk.
 		eaSk, eaPk := elgamal.KeyGen(rand.Reader)
+		// Zero the secret scalar as soon as we leave this scope so the full key
+		// does not linger in GC-managed memory after shares/encryptions are built.
+		defer eaSk.Scalar.Zero()
 		eaPkBytes := eaPk.Point.ToAffineCompressed()
 		G := elgamal.PallasGenerator()
 
