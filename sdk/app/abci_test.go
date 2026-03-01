@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -748,7 +748,6 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyNonProposerRejected() {
 	// Submit tally with the block proposer's validator address should succeed.
 	goodTallyMsg := testutil.ValidSubmitTallyWithEntries(roundID, s.app.ValidatorOperAddr(), []*types.TallyEntry{
 		{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
-
 	})
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(goodTallyMsg))
 	s.Require().Equal(uint32(0), result.Code, "submit tally from block proposer should succeed, got: %s", result.Log)
@@ -931,7 +930,7 @@ func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
 		{
 			ValidatorAddress: valAddr,
 			EphemeralPk:      pallasPk.Point.ToAffineCompressed(), // dummy
-			Ciphertext:       bytes.Repeat([]byte{0xAB}, 48),     // dummy
+			Ciphertext:       bytes.Repeat([]byte{0xAB}, 48),      // dummy
 		},
 	}
 	app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
@@ -962,7 +961,7 @@ func TestPrepareProposalAutoDeal(t *testing.T) {
 
 	// Step 1: Register the genesis validator's Pallas key.
 	regMsg := &types.MsgRegisterPallasKey{
-		Creator: app.ValidatorAccAddr(),
+		Creator:  app.ValidatorAccAddr(),
 		PallasPk: pallasPk.Point.ToAffineCompressed(),
 	}
 	regTx := app.MustBuildSignedCeremonyTx(regMsg)
@@ -1557,17 +1556,17 @@ func TestFullLifecycle_Legacy(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Full Lifecycle E2E: Ceremony → Vote → Tally (Threshold, n=2, t=2)
+// Full Lifecycle E2E: Ceremony → Vote → Tally (Threshold, n=3, t=2)
 //
 // Drives the complete pipeline in threshold mode through real ABCI calls:
-//   REGISTERING → deal (Shamir) → DEALT → ack (proposer + phantom) → ACTIVE
+//   REGISTERING → deal (Shamir t=2,n=3) → DEALT
+//   → ack (proposer + 2 phantoms) → ACTIVE
 //   → delegate → cast → reveal (real ElGamal to ceremony ea_pk)
-//   → EndBlocker TALLYING → partial decrypt + Lagrange tally → FINALIZED
+//   → EndBlocker TALLYING
+//   → partial decrypt (proposer + phantom1, phantom2 absent) → Lagrange → FINALIZED
 //
-// This test would have caught the Threshold storage bug at two points:
-//   1. Ack: proposer reads round.Threshold to decide verification mode
-//   2. Tally: injector reads round.Threshold to choose legacy vs threshold path
-// ---------------------------------------------------------------------------
+// Uses n=3 with t=2 to exercise the case where threshold < n: phantom2 never
+// submits a partial decryption, yet the tally succeeds with exactly t=2 shares.
 
 func TestFullLifecycle_Threshold(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
@@ -1575,14 +1574,19 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	proposerAddr := app.ValidatorOperAddr()
 	G := elgamal.PallasGenerator()
 
-	// Phantom validator (not a real node — we pre-seed its ack and D_i manually).
-	phantomSk, phantomPk := elgamal.KeyGen(rand.Reader)
-	_ = phantomSk
-	phantomAddr := sdk.ValAddress(bytes.Repeat([]byte{0xB1}, 20)).String()
+	// Two phantom validators (not real nodes — we pre-seed their acks and
+	// phantom1's D_i manually; phantom2 is deliberately absent from tally).
+	phantom1Sk, phantom1Pk := elgamal.KeyGen(rand.Reader)
+	_ = phantom1Sk
+	phantom1Addr := sdk.ValAddress(bytes.Repeat([]byte{0xB1}, 20)).String()
+
+	_, phantom2Pk := elgamal.KeyGen(rand.Reader)
+	phantom2Addr := sdk.ValAddress(bytes.Repeat([]byte{0xB2}, 20)).String()
 
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-		{ValidatorAddress: phantomAddr, PallasPk: phantomPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: phantom1Addr, PallasPk: phantom1Pk.Point.ToAffineCompressed()},
+		{ValidatorAddress: phantom2Addr, PallasPk: phantom2Pk.Point.ToAffineCompressed()},
 	}
 	voteEndTime := app.Time.Add(90 * time.Second)
 
@@ -1609,9 +1613,9 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
 	app.NextBlock()
 
-	// --- Ceremony: deal → proposer ack → phantom ack → ACTIVE ---
+	// --- Ceremony: deal → proposer ack → phantom acks → ACTIVE ---
 
-	// Block 1: auto-deal fires → DEALT with threshold mode (n=2 → t=2).
+	// Block 1: auto-deal fires → DEALT with threshold mode (n=3 → t=2).
 	app.NextBlockWithPrepareProposal()
 
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
@@ -1620,11 +1624,11 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	require.EqualValues(t, 2, round.Threshold,
-		"threshold should be 2 for n=2 (stored by deal handler)")
-	require.Len(t, round.VerificationKeys, 2,
-		"verification keys should be stored by deal handler")
+		"threshold should be 2 for n=3 (ceil(3/3)+1 = 2, stored by deal handler)")
+	require.Len(t, round.VerificationKeys, 3,
+		"one verification key per validator should be stored by deal handler")
 
-	// Block 2: auto-ack from proposer → 1/2 acked, still DEALT.
+	// Block 2: auto-ack from proposer → 1/3 acked, stays DEALT.
 	app.NextBlockWithPrepareProposal()
 
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
@@ -1632,33 +1636,35 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"1/2 acked — fast path needs all, stays DEALT")
+		"1/3 acked — fast path needs all 3, stays DEALT")
 	require.Len(t, round.CeremonyAcks, 1)
 
-	// Manual ack from phantom validator → 2/2 → CONFIRMED + ACTIVE.
-	h := sha256.New()
-	h.Write([]byte("ack"))
-	h.Write(round.EaPk)
-	h.Write([]byte(phantomAddr))
-	phantomAckSig := h.Sum(nil)
+	// Manual acks from both phantom validators → 3/3 → CONFIRMED + ACTIVE.
+	for _, addr := range []string{phantom1Addr, phantom2Addr} {
+		h := sha256.New()
+		h.Write([]byte("ack"))
+		h.Write(round.EaPk)
+		h.Write([]byte(addr))
 
-	ackMsg := &types.MsgAckExecutiveAuthorityKey{
-		Creator:      phantomAddr,
-		VoteRoundId:  roundID,
-		AckSignature: phantomAckSig,
+		ackMsg := &types.MsgAckExecutiveAuthorityKey{
+			Creator:      addr,
+			VoteRoundId:  roundID,
+			AckSignature: h.Sum(nil),
+		}
+		ackTx, encErr := voteapi.EncodeCeremonyTx(ackMsg, voteapi.TagAckExecutiveAuthorityKey)
+		require.NoError(t, encErr)
+		ackResult := app.DeliverVoteTx(ackTx)
+		require.Equal(t, uint32(0), ackResult.Code,
+			"ack from %s should succeed, got: %s", addr, ackResult.Log)
 	}
-	ackTx, err := voteapi.EncodeCeremonyTx(ackMsg, voteapi.TagAckExecutiveAuthorityKey)
-	require.NoError(t, err)
-	ackResult := app.DeliverVoteTx(ackTx)
-	require.Equal(t, uint32(0), ackResult.Code,
-		"phantom ack should succeed, got: %s", ackResult.Log)
 
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore = app.VoteKeeper().OpenKVStore(ctx)
 	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
-		"round should be ACTIVE after 2/2 acks")
+		"round should be ACTIVE after 3/3 acks")
+	require.Len(t, round.CeremonyAcks, 3)
 	require.EqualValues(t, 2, round.Threshold)
 
 	// Recover the ceremony's ea_pk for encrypting reveal shares.
@@ -1688,36 +1694,29 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
 	require.Equal(t, uint32(0), result.Code, "reveal share should succeed, got: %s", result.Log)
 
-	// --- Tally setup: recover shares, pre-seed phantom's D_i ---
+	// --- Tally setup: recover phantom1's share, pre-seed its D_i ---
+	// Phantom2 is deliberately absent — only proposer + phantom1 contribute (t=2).
 
-	// The proposer's share was written to disk by the ack handler (threshold mode).
-	// The tally partial-decrypt injector will read it automatically.
-	// We need to pre-seed the phantom's partial decryption.
+	// Decrypt phantom1's ECIES payload to recover its Shamir share.
+	phantom1Payload := round.CeremonyPayloads[1]
+	require.Equal(t, phantom1Addr, phantom1Payload.ValidatorAddress)
 
-	// Recover the Shamir shares from the ECIES payloads to compute phantom's D_i.
-	// The deal produced shares[0] for proposer, shares[1] for phantom.
-	// We need phantom's share to compute D_phantom = share_phantom * C1.
-	//
-	// Decrypt the phantom's payload to recover its share.
-	phantomPayload := round.CeremonyPayloads[1]
-	require.Equal(t, phantomAddr, phantomPayload.ValidatorAddress)
-
-	ephPk, err := elgamal.UnmarshalPublicKey(phantomPayload.EphemeralPk)
+	ephPk, err := elgamal.UnmarshalPublicKey(phantom1Payload.EphemeralPk)
 	require.NoError(t, err)
-	phantomShareBytes, err := ecies.Decrypt(phantomSk.Scalar, &ecies.Envelope{
+	phantom1ShareBytes, err := ecies.Decrypt(phantom1Sk.Scalar, &ecies.Envelope{
 		Ephemeral:  ephPk.Point,
-		Ciphertext: phantomPayload.Ciphertext,
+		Ciphertext: phantom1Payload.Ciphertext,
 	})
 	require.NoError(t, err)
-	require.Len(t, phantomShareBytes, 32)
+	require.Len(t, phantom1ShareBytes, 32)
 
-	phantomShareScalar, err := new(curvey.ScalarPallas).SetBytes(phantomShareBytes)
+	phantom1ShareScalar, err := new(curvey.ScalarPallas).SetBytes(phantom1ShareBytes)
 	require.NoError(t, err)
 
-	// Verify VK consistency: share * G == round.VerificationKeys[1].
-	computedVK := G.Mul(phantomShareScalar).ToAffineCompressed()
+	// Verify VK consistency: share_1 * G == round.VerificationKeys[1].
+	computedVK := G.Mul(phantom1ShareScalar).ToAffineCompressed()
 	require.Equal(t, round.VerificationKeys[1], computedVK,
-		"phantom share * G must match stored VK")
+		"phantom1 share * G must match stored VK[1]")
 
 	// --- Transition to TALLYING ---
 
@@ -1729,24 +1728,26 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// Pre-seed phantom's partial decryption: D_phantom = share_phantom * C1
-	// for each accumulator.
+	// Pre-seed phantom1's partial decryption: D_1 = share_1 * C1 for each accumulator.
 	tallyBytes, err := app.VoteKeeper().GetTally(kvStore, roundID, 1, 1)
 	require.NoError(t, err)
 	tallyCt, err := elgamal.UnmarshalCiphertext(tallyBytes)
 	require.NoError(t, err)
 
-	phantomDi := tallyCt.C1.Mul(phantomShareScalar)
-	phantomEntries := []*types.PartialDecryptionEntry{{
+	phantom1Di := tallyCt.C1.Mul(phantom1ShareScalar)
+	phantom1Entries := []*types.PartialDecryptionEntry{{
 		ProposalId:     1,
 		VoteDecision:   1,
-		PartialDecrypt: phantomDi.ToAffineCompressed(),
+		PartialDecrypt: phantom1Di.ToAffineCompressed(),
 	}}
 
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	require.NoError(t, app.VoteKeeper().SetPartialDecryptions(kvStore, roundID, 2, phantomEntries))
+	// Phantom1 is validator index 2 (1-based).
+	require.NoError(t, app.VoteKeeper().SetPartialDecryptions(kvStore, roundID, 2, phantom1Entries))
 	app.NextBlock()
+
+	// Phantom2 deliberately does NOT submit — testing threshold < n.
 
 	// --- Tally: partial decrypt (proposer) → Lagrange combine → FINALIZED ---
 
@@ -1757,7 +1758,8 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	kvStore = app.VoteKeeper().OpenKVStore(ctx)
 	count, err := app.VoteKeeper().CountPartialDecryptionValidators(kvStore, roundID)
 	require.NoError(t, err)
-	require.Equal(t, 2, count, "both validators should have submitted partial decryptions")
+	require.Equal(t, 2, count,
+		"proposer + phantom1 should have submitted (phantom2 absent)")
 
 	// Round should still be TALLYING — tally combiner saw count=1 at the start
 	// of PrepareProposal (proposer's partial decrypt not yet committed).
@@ -1773,7 +1775,7 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
-		"round should be FINALIZED after threshold tally")
+		"round should be FINALIZED after threshold tally (t=2 of n=3)")
 
 	tallyResults, err := app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
 	require.NoError(t, err)
@@ -1785,4 +1787,3 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
