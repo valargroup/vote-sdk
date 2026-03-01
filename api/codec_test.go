@@ -179,7 +179,7 @@ func TestEncodeCeremonyTx_RejectsNonAckTags(t *testing.T) {
 	// Non-ack ceremony tags should be rejected since they now use standard Cosmos txs.
 	_, err := EncodeCeremonyTx(msg, TagSetVoteManager)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "only 0x07-0x08 use custom wire format")
+	require.Contains(t, err.Error(), "only 0x07, 0x08, 0x0D use custom wire format")
 }
 
 func TestDecodeVoteTx_TooShort(t *testing.T) {
