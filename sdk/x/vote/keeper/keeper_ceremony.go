@@ -45,14 +45,14 @@ func (k *Keeper) SetCeremonyState(kvStore store.KVStore, state *types.CeremonySt
 // Per-round ceremony helpers (operate on VoteRound ceremony fields)
 // ---------------------------------------------------------------------------
 
-// OneThirdAcked returns true if at least 1/3 of round ceremony validators have
-// acknowledged. Uses integer arithmetic: acks * 3 >= validators.
-func OneThirdAcked(round *types.VoteRound) bool {
+// HalfAcked returns true if at least 1/2 of round ceremony validators have
+// acknowledged. Uses integer arithmetic: acks * 2 >= validators.
+func HalfAcked(round *types.VoteRound) bool {
 	n := len(round.CeremonyValidators)
 	if n == 0 {
 		return false
 	}
-	return len(round.CeremonyAcks)*3 >= n
+	return len(round.CeremonyAcks)*2 >= n
 }
 
 // FindValidatorInRoundCeremony returns the ValidatorPallasKey and true if

@@ -19,20 +19,20 @@ func TestThresholdForN(t *testing.T) {
 		// n < 2: legacy mode
 		{n: 0, want: 0},
 		{n: 1, want: 0},
-		// n=2: t = ceil(2/3)+1 = 1+1 = 2; clamp(2, n=2) = 2
+		// n=2: ceil(2/2)=1 → floor at 2
 		{n: 2, want: 2},
-		// n=3: t = ceil(3/3)+1 = 1+1 = 2
+		// n=3: ceil(3/2)=2
 		{n: 3, want: 2},
-		// n=4: t = ceil(4/3)+1 = 2+1 = 3
-		{n: 4, want: 3},
-		// n=6: t = ceil(6/3)+1 = 2+1 = 3
+		// n=4: ceil(4/2)=2
+		{n: 4, want: 2},
+		// n=6: ceil(6/2)=3
 		{n: 6, want: 3},
-		// n=9: t = ceil(9/3)+1 = 3+1 = 4
-		{n: 9, want: 4},
-		// n=10: t = ceil(10/3)+1 = 4+1 = 5
+		// n=9: ceil(9/2)=5
+		{n: 9, want: 5},
+		// n=10: ceil(10/2)=5
 		{n: 10, want: 5},
-		// n=100: t = ceil(100/3)+1 = 34+1 = 35
-		{n: 100, want: 35},
+		// n=100: ceil(100/2)=50
+		{n: 100, want: 50},
 	}
 
 	for _, tc := range tests {

@@ -28,7 +28,7 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
   PENDING (REGISTERING) ──> PENDING (DEALT) ──> ACTIVE (CONFIRMED)
                                   │                (all acked)
                        timeout    │
-                       (< 1/3)   │ timeout (≥ 1/3)
+                       (< 1/2)   │ timeout (≥ 1/2)
                           │       │
                           v       v
                     REGISTERING   ACTIVE (CONFIRMED)
@@ -40,11 +40,11 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
 |---|---|---|---|
 | REGISTERING | DEALT | Auto-deal via PrepareProposal | Block proposer is a ceremony validator |
 | DEALT | CONFIRMED + ACTIVE | MsgAckExecutiveAuthorityKey | All validators acked (fast path) |
-| DEALT | CONFIRMED + ACTIVE | EndBlocker timeout | >= 1/3 acked at timeout; non-ackers stripped |
-| DEALT | REGISTERING | EndBlocker timeout | < 1/3 acked; reset for re-deal by next proposer |
+| DEALT | CONFIRMED + ACTIVE | EndBlocker timeout | >= 1/2 acked at timeout; non-ackers stripped |
+| DEALT | REGISTERING | EndBlocker timeout | < 1/2 acked; reset for re-deal by next proposer |
 
 Key behaviors:
-- **Fast path vs timeout** — the fast path confirms when ALL validators ack (no stripping needed). The timeout path confirms with >= 1/3 acks (integer arithmetic: `acks * 3 >= validators`) and strips non-ackers.
+- **Fast path vs timeout** — the fast path confirms when ALL validators ack (no stripping needed). The timeout path confirms with >= 1/2 acks (integer arithmetic: `acks * 2 >= validators`) and strips non-ackers.
 - **Auto-deal** — the block proposer automatically deals when it detects a PENDING round in REGISTERING state. No manual `ceremony.sh deal` step.
 - **Auto-ack** — each block proposer auto-acks via PrepareProposal when it detects a DEALT round.
 - **Miss tracking** — validators snapshotted into a ceremony who fail to ack have a consecutive miss counter incremented. After 3 consecutive misses, the validator is jailed.
@@ -57,14 +57,14 @@ Validators register their Pallas key once via `MsgRegisterPallasKey` or `MsgCrea
 #### Auto-Deal and Auto-Ack via PrepareProposal
 
 `PrepareProposal` composes two ceremony injectors:
-1. **Auto-deal** — if a PENDING round is in REGISTERING state and the proposer is a ceremony validator, generate `ea_sk`, Shamir-split it into `(t, n)` shares, ECIES-encrypt `share_i` to each validator, publish `VK_i = share_i * G` and `threshold = ceil(n/3) + 1`, and inject `MsgDealExecutiveAuthorityKey`.
+1. **Auto-deal** — if a PENDING round is in REGISTERING state and the proposer is a ceremony validator, generate `ea_sk`, Shamir-split it into `(t, n)` shares, ECIES-encrypt `share_i` to each validator, publish `VK_i = share_i * G` and `threshold = ceil(n/2)`, and inject `MsgDealExecutiveAuthorityKey`.
 2. **Auto-ack** — if a PENDING round is in DEALT state and the proposer hasn't acked, decrypt the payload to recover their share, verify `share_i * G == VK_i` (threshold mode) or `ea_sk * G == ea_pk` (legacy), inject `MsgAckExecutiveAuthorityKey`, and write the share/key to disk.
 
 #### Timeout (EndBlocker)
 
 Only the DEALT phase has a timeout (default: 30 minutes). On timeout:
-- **>= 1/3 acked:** Confirm ceremony, strip non-ackers, activate round. Increment miss counter for each non-acker; jail if >= 3 consecutive misses.
-- **< 1/3 acked:** Reset to REGISTERING for re-deal by the next proposer. Increment miss counters.
+- **>= 1/2 acked:** Confirm ceremony, strip non-ackers, activate round. Increment miss counter for each non-acker; jail if >= 3 consecutive misses.
+- **< 1/2 acked:** Reset to REGISTERING for re-deal by the next proposer. Increment miss counters.
 
 #### ECIES Encryption Scheme
 
