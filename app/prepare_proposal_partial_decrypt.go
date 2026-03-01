@@ -93,13 +93,15 @@ func PartialDecryptPrepareProposalInjector(
 			return txs
 		}
 
-		// Find proposer's 1-based validator index in the round's ceremony set.
-		validatorIdx, found := votekeeper.FindValidatorInRoundCeremony(tallyRound, proposerValAddr)
+		// Find proposer's original Shamir index in the round's ceremony set.
+		// ShamirIndex is set once at round creation and survives validator stripping,
+		// so it always reflects the correct x-coordinate for Lagrange interpolation.
+		ceremonyVal, found := votekeeper.FindValidatorInRoundCeremony(tallyRound, proposerValAddr)
 		if !found {
 			// Proposer is not in the ceremony set — skip.
 			return txs
 		}
-		validatorIndex := uint32(validatorIdx + 1) // convert to 1-based
+		validatorIndex := ceremonyVal.ShamirIndex
 
 		// Skip if this validator has already submitted for this round.
 		has, err := voteKeeper.HasPartialDecryptionsFromValidator(kvStore, tallyRound.VoteRoundId, validatorIndex)

@@ -60,12 +60,14 @@ func validEntry(proposalID, decision uint32) *types.PartialDecryptionEntry {
 var msgPdRoundID = bytes.Repeat([]byte{0xAB}, 32)
 
 // validatorSet returns n dummy ceremony validators with addresses "zvote1validator1" ... "zvote1validatorN".
+// ShamirIndex is set to i+1 (1-based), matching what CreateVotingSession assigns in production.
 func validatorSet(n int) []*types.ValidatorPallasKey {
 	v := make([]*types.ValidatorPallasKey, n)
 	for i := range v {
 		v[i] = &types.ValidatorPallasKey{
 			ValidatorAddress: "zvote1validator" + string(rune('1'+i)),
 			PallasPk:         bytes.Repeat([]byte{byte(i + 1)}, 32),
+			ShamirIndex:      uint32(i + 1),
 		}
 	}
 	return v
@@ -224,7 +226,8 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 
 		// --- validator_index ---
 		{
-			name:        "validator_index=0 (below 1-based range)",
+			// ValidatorIndex=0 is never valid (ShamirIndex is always >= 1).
+			name:        "validator_index=0 does not match shamir_index",
 			nValidators: 2,
 			buildMsg: func(v []*types.ValidatorPallasKey) *types.MsgSubmitPartialDecryption {
 				return &types.MsgSubmitPartialDecryption{
@@ -233,10 +236,11 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 				}
 			},
 			wantErr:     types.ErrInvalidField,
-			errContains: "out of range",
+			errContains: "shamir_index",
 		},
 		{
-			name:        "validator_index exceeds n",
+			// ValidatorIndex that doesn't match the creator's stored ShamirIndex.
+			name:        "validator_index does not match shamir_index",
 			nValidators: 2,
 			buildMsg: func(v []*types.ValidatorPallasKey) *types.MsgSubmitPartialDecryption {
 				return &types.MsgSubmitPartialDecryption{
@@ -245,21 +249,22 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 				}
 			},
 			wantErr:     types.ErrInvalidField,
-			errContains: "out of range",
+			errContains: "shamir_index",
 		},
 		{
+			// Creator submits another validator's ShamirIndex.
 			name:        "creator does not match validator_index",
 			nValidators: 3,
 			buildMsg: func(v []*types.ValidatorPallasKey) *types.MsgSubmitPartialDecryption {
 				return &types.MsgSubmitPartialDecryption{
 					VoteRoundId:    msgPdRoundID,
-					Creator:        v[2].ValidatorAddress, // index 3, but ValidatorIndex=1
+					Creator:        v[2].ValidatorAddress, // ShamirIndex=3, but submits ValidatorIndex=1
 					ValidatorIndex: 1,
 					Entries:        []*types.PartialDecryptionEntry{validEntry(1, 0)},
 				}
 			},
 			wantErr:     types.ErrInvalidField,
-			errContains: "maps to",
+			errContains: "shamir_index",
 		},
 
 		// --- entry-level validation ---

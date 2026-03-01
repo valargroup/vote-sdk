@@ -149,6 +149,10 @@ func (ta *TestApp) WriteShareForRound(roundID []byte, shareBytes []byte) {
 // round ID. Callers can subsequently use VoteKeeper().AddToTally to
 // populate ciphertext accumulators, then call WriteShareForRound to put
 // the share on disk before calling CallPrepareProposal.
+//
+// If any validator has ShamirIndex == 0 (unset), this function assigns
+// ShamirIndex = position+1, mirroring what CreateVotingSession does in
+// production so that Lagrange interpolation uses the correct x-coordinates.
 func (ta *TestApp) SeedTallyingRoundThreshold(
 	roundID []byte,
 	threshold uint32,
@@ -158,6 +162,19 @@ func (ta *TestApp) SeedTallyingRoundThreshold(
 ) []byte {
 	ta.t.Helper()
 
+	// Assign ShamirIndex to any validator that doesn't have one, mirroring
+	// the assignment done by CreateVotingSession in production.
+	indexedValidators := make([]*types.ValidatorPallasKey, len(validators))
+	for i, v := range validators {
+		if v.ShamirIndex == 0 {
+			vCopy := *v
+			vCopy.ShamirIndex = uint32(i + 1)
+			indexedValidators[i] = &vCopy
+		} else {
+			indexedValidators[i] = v
+		}
+	}
+
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
 
@@ -166,7 +183,7 @@ func (ta *TestApp) SeedTallyingRoundThreshold(
 		Status:             types.SessionStatus_SESSION_STATUS_TALLYING,
 		EaPk:               make([]byte, 32), // placeholder
 		Proposals:          proposals,
-		CeremonyValidators: validators,
+		CeremonyValidators: indexedValidators,
 		Threshold:          threshold,
 		VerificationKeys:   verificationKeys,
 	}

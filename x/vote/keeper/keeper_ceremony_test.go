@@ -262,28 +262,34 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 func (s *KeeperTestSuite) TestFindValidatorInRoundCeremony() {
 	round := &types.VoteRound{
 		CeremonyValidators: []*types.ValidatorPallasKey{
-			{ValidatorAddress: "val_alpha"}, {ValidatorAddress: "val_beta"}, {ValidatorAddress: "val_gamma"},
+			{ValidatorAddress: "val_alpha", ShamirIndex: 1},
+			{ValidatorAddress: "val_beta", ShamirIndex: 2},
+			{ValidatorAddress: "val_gamma", ShamirIndex: 3},
 		},
 	}
 
 	tests := []struct {
-		name      string
-		valAddr   string
-		wantIndex int
-		wantFound bool
+		name            string
+		valAddr         string
+		wantShamirIndex uint32
+		wantFound       bool
 	}{
-		{"first", "val_alpha", 0, true},
-		{"middle", "val_beta", 1, true},
-		{"last", "val_gamma", 2, true},
-		{"unknown", "val_delta", -1, false},
-		{"empty", "", -1, false},
+		{"first", "val_alpha", 1, true},
+		{"middle", "val_beta", 2, true},
+		{"last", "val_gamma", 3, true},
+		{"unknown", "val_delta", 0, false},
+		{"empty", "", 0, false},
 	}
 
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
-			idx, found := keeper.FindValidatorInRoundCeremony(round, tc.valAddr)
+			v, found := keeper.FindValidatorInRoundCeremony(round, tc.valAddr)
 			s.Require().Equal(tc.wantFound, found)
-			s.Require().Equal(tc.wantIndex, idx)
+			if found {
+				s.Require().Equal(tc.wantShamirIndex, v.ShamirIndex)
+			} else {
+				s.Require().Nil(v)
+			}
 		})
 	}
 }
@@ -312,9 +318,9 @@ func (s *KeeperTestSuite) TestFindAckInRoundCeremony() {
 func (s *KeeperTestSuite) TestStripNonAckersFromRound() {
 	round := &types.VoteRound{
 		CeremonyValidators: []*types.ValidatorPallasKey{
-			{ValidatorAddress: "val1", PallasPk: []byte{0x01}},
-			{ValidatorAddress: "val2", PallasPk: []byte{0x02}},
-			{ValidatorAddress: "val3", PallasPk: []byte{0x03}},
+			{ValidatorAddress: "val1", PallasPk: []byte{0x01}, ShamirIndex: 1},
+			{ValidatorAddress: "val2", PallasPk: []byte{0x02}, ShamirIndex: 2},
+			{ValidatorAddress: "val3", PallasPk: []byte{0x03}, ShamirIndex: 3},
 		},
 		CeremonyPayloads: []*types.DealerPayload{
 			{ValidatorAddress: "val1", Ciphertext: []byte{0x10}},
@@ -332,6 +338,10 @@ func (s *KeeperTestSuite) TestStripNonAckersFromRound() {
 	s.Require().Len(round.CeremonyValidators, 2)
 	s.Require().Equal("val1", round.CeremonyValidators[0].ValidatorAddress)
 	s.Require().Equal("val3", round.CeremonyValidators[1].ValidatorAddress)
+	// ShamirIndex must be preserved through stripping so Lagrange interpolation
+	// uses the correct original x-coordinate (val3's share is f(3), not f(2)).
+	s.Require().Equal(uint32(1), round.CeremonyValidators[0].ShamirIndex)
+	s.Require().Equal(uint32(3), round.CeremonyValidators[1].ShamirIndex)
 
 	s.Require().Len(round.CeremonyPayloads, 2)
 	s.Require().Equal("val1", round.CeremonyPayloads[0].ValidatorAddress)

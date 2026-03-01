@@ -78,6 +78,18 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		return nil, fmt.Errorf("no validators have registered Pallas keys")
 	}
 
+	// Assign each validator their immutable 1-based Shamir evaluation point
+	// (shamir_index = position + 1). This index must match the evaluation point
+	// used during the Shamir split in the deal phase and must survive
+	// StripNonAckersFromRound so that Lagrange interpolation always uses the
+	// correct original x-coordinate, even after non-ackers are removed.
+	ceremonyValidators := make([]*types.ValidatorPallasKey, len(eligible))
+	for i, v := range eligible {
+		vCopy := *v
+		vCopy.ShamirIndex = uint32(i + 1)
+		ceremonyValidators[i] = &vCopy
+	}
+
 	ms.k.Logger().Info("CreateVotingSession",
 		"round_id", hex.EncodeToString(roundID),
 		"nullifier_imt_root", hex.EncodeToString(msg.NullifierImtRoot),
@@ -104,7 +116,7 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		Title:           msg.Title,
 		// Per-round ceremony fields.
 		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-		CeremonyValidators: eligible,
+		CeremonyValidators: ceremonyValidators,
 	}
 
 	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
@@ -436,17 +448,18 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 		return nil, fmt.Errorf("%w: MsgSubmitPartialDecryption requires threshold mode (threshold > 0)", types.ErrInvalidField)
 	}
 
-	// Validate validator_index is 1-based and within range.
-	if msg.ValidatorIndex < 1 || int(msg.ValidatorIndex) > len(round.CeremonyValidators) {
-		return nil, fmt.Errorf("%w: validator_index %d out of range [1, %d]",
-			types.ErrInvalidField, msg.ValidatorIndex, len(round.CeremonyValidators))
+	// Validate validator_index against the creator's stored ShamirIndex.
+	// We look up by address rather than by array position because
+	// StripNonAckersFromRound may have compacted CeremonyValidators after
+	// some validators failed to ack, making array positions unreliable.
+	ceremonyVal, found := FindValidatorInRoundCeremony(round, msg.Creator)
+	if !found {
+		return nil, fmt.Errorf("%w: %s is not a ceremony validator for this round",
+			types.ErrInvalidField, msg.Creator)
 	}
-
-	// Index must match the creator's address.
-	expectedAddr := round.CeremonyValidators[msg.ValidatorIndex-1].ValidatorAddress
-	if expectedAddr != msg.Creator {
-		return nil, fmt.Errorf("%w: validator_index %d maps to %s, creator is %s",
-			types.ErrInvalidField, msg.ValidatorIndex, expectedAddr, msg.Creator)
+	if msg.ValidatorIndex != ceremonyVal.ShamirIndex {
+		return nil, fmt.Errorf("%w: validator_index %d does not match stored shamir_index %d for %s",
+			types.ErrInvalidField, msg.ValidatorIndex, ceremonyVal.ShamirIndex, msg.Creator)
 	}
 
 	// Reject duplicate submissions — one submission per validator per round.
