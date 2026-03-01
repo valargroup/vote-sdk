@@ -487,12 +487,27 @@ func eaSkDirFromPath(eaSkPath string) string {
 }
 
 // loadEaSkForRound reads the per-round ea_sk file and returns the parsed key.
-// Returns nil, nil if the file doesn't exist (non-dealer validators).
+// Returns a non-nil error if the file doesn't exist (non-dealer validators).
 func loadEaSkForRound(dir string, roundID []byte) (*elgamal.SecretKey, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("ea_sk dir is empty")
 	}
 	path := eaSkPathForRound(dir, roundID)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return elgamal.UnmarshalSecretKey(raw)
+}
+
+// loadShareForRound reads the per-round Shamir share file written by the ack
+// handler and returns the scalar as an elgamal.SecretKey (same 32-byte format).
+// Returns a non-nil error if the file doesn't exist.
+func loadShareForRound(dir string, roundID []byte) (*elgamal.SecretKey, error) {
+	if dir == "" {
+		return nil, fmt.Errorf("share dir is empty")
+	}
+	path := sharePathForRound(dir, roundID)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

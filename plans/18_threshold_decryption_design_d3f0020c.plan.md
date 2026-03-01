@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: step1-tally-partial
     content: "New PrepareProposal injector: submit bare partial decryptions (no DLEQ) when round is TALLYING"
-    status: pending
+    status: completed
   - id: step1-tally-combine
     content: "Modify tally PrepareProposal: when t partials exist on-chain, Lagrange-combine + BSGS, inject MsgSubmitTally"
     status: pending

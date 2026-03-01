@@ -355,6 +355,94 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 	}, nil
 }
 
+// SubmitPartialDecryption handles MsgSubmitPartialDecryption.
+//
+// This message is auto-injected by PrepareProposal during the TALLYING phase
+// of a threshold-mode voting round and must never enter the mempool.
+//
+// In Step 1 (bare TSS), entries are stored without DLEQ verification. Step 2
+// adds on-chain proof verification against the stored VK_i.
+func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.MsgSubmitPartialDecryption) (*types.MsgSubmitPartialDecryptionResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+
+	if ctx.IsCheckTx() || ctx.IsReCheckTx() {
+		return nil, fmt.Errorf("%w: MsgSubmitPartialDecryption cannot be submitted via mempool", types.ErrInvalidField)
+	}
+
+	kvStore := ms.k.OpenKVStore(ctx)
+
+	round, err := ms.k.GetVoteRound(kvStore, msg.VoteRoundId)
+	if err != nil {
+		return nil, err
+	}
+
+	if round.Status != types.SessionStatus_SESSION_STATUS_TALLYING {
+		return nil, fmt.Errorf("%w: status is %s, expected TALLYING", types.ErrRoundNotTallying, round.Status)
+	}
+
+	if round.Threshold == 0 {
+		return nil, fmt.Errorf("%w: MsgSubmitPartialDecryption requires threshold mode (threshold > 0)", types.ErrInvalidField)
+	}
+
+	// Validate validator_index is 1-based and within range.
+	if msg.ValidatorIndex < 1 || int(msg.ValidatorIndex) > len(round.CeremonyValidators) {
+		return nil, fmt.Errorf("%w: validator_index %d out of range [1, %d]",
+			types.ErrInvalidField, msg.ValidatorIndex, len(round.CeremonyValidators))
+	}
+
+	// Index must match the creator's address.
+	expectedAddr := round.CeremonyValidators[msg.ValidatorIndex-1].ValidatorAddress
+	if expectedAddr != msg.Creator {
+		return nil, fmt.Errorf("%w: validator_index %d maps to %s, creator is %s",
+			types.ErrInvalidField, msg.ValidatorIndex, expectedAddr, msg.Creator)
+	}
+
+	// Reject duplicate submissions — one submission per validator per round.
+	has, err := ms.k.HasPartialDecryptionsFromValidator(kvStore, msg.VoteRoundId, msg.ValidatorIndex)
+	if err != nil {
+		return nil, err
+	}
+	if has {
+		return nil, fmt.Errorf("%w: validator %s (index %d) already submitted partial decryptions for round %x",
+			types.ErrInvalidField, msg.Creator, msg.ValidatorIndex, msg.VoteRoundId)
+	}
+
+	if len(msg.Entries) == 0 {
+		return nil, fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
+	}
+
+	// Validate each entry in the submission.
+	for i, entry := range msg.Entries {
+		if len(entry.PartialDecrypt) != 32 {
+			return nil, fmt.Errorf("%w: entry[%d] partial_decrypt must be 32 bytes, got %d",
+				types.ErrInvalidField, i, len(entry.PartialDecrypt))
+		}
+		if entry.ProposalId < 1 || int(entry.ProposalId) > len(round.Proposals) {
+			return nil, fmt.Errorf("%w: entry[%d] proposal_id %d out of range [1, %d]",
+				types.ErrInvalidProposalID, i, entry.ProposalId, len(round.Proposals))
+		}
+		proposal := round.Proposals[entry.ProposalId-1]
+		if int(entry.VoteDecision) >= len(proposal.Options) {
+			return nil, fmt.Errorf("%w: entry[%d] vote_decision %d out of range [0, %d) for proposal %d",
+				types.ErrInvalidField, i, entry.VoteDecision, len(proposal.Options), entry.ProposalId)
+		}
+	}
+
+	if err := ms.k.SetPartialDecryptions(kvStore, msg.VoteRoundId, msg.ValidatorIndex, msg.Entries); err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeSubmitPartialDecryption,
+		sdk.NewAttribute(types.AttributeKeyRoundID, hex.EncodeToString(msg.VoteRoundId)),
+		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
+		sdk.NewAttribute(types.AttributeKeyValidatorIndex, strconv.Itoa(int(msg.ValidatorIndex))),
+		sdk.NewAttribute(types.AttributeKeyEntryCount, strconv.Itoa(len(msg.Entries))),
+	))
+
+	return &types.MsgSubmitPartialDecryptionResponse{}, nil
+}
+
 // deriveRoundID computes a deterministic vote_round_id from the setup fields
 // via Poseidon hash (FFI call to Rust). The output is a canonical 32-byte
 // Pallas Fp element.
