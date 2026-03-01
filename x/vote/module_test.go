@@ -3,6 +3,7 @@ package vote_test
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"testing"
 	"time"
 
@@ -217,6 +218,34 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 		s.Require().NoError(s.keeper.SetVoteRound(kv, round))
 	}
 
+	// Helper: seed a PENDING round with DEALT ceremony, n validators, a
+	// Shamir threshold, and ackCount acks. Uses the same timeout deadline.
+	seedDealtRoundWithThreshold := func(nVals int, threshold uint32, ackCount int) {
+		kv := s.keeper.OpenKVStore(s.ctx)
+		round := &types.VoteRound{
+			VoteRoundId:          roundID,
+			Status:               types.SessionStatus_SESSION_STATUS_PENDING,
+			EaPk:                 make([]byte, 32),
+			CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+			Threshold:            threshold,
+			CeremonyDealer:       "val1",
+			CeremonyPhaseStart:   999_400,
+			CeremonyPhaseTimeout: 600,
+		}
+		for i := 0; i < nVals; i++ {
+			addr := fmt.Sprintf("val%d", i+1)
+			round.CeremonyValidators = append(round.CeremonyValidators,
+				&types.ValidatorPallasKey{ValidatorAddress: addr, PallasPk: make([]byte, 32)})
+		}
+		for i := 0; i < ackCount; i++ {
+			round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
+				ValidatorAddress: round.CeremonyValidators[i].ValidatorAddress,
+				AckHeight:        9,
+			})
+		}
+		s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+	}
+
 	tests := []struct {
 		name               string
 		setup              func()
@@ -246,6 +275,37 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			},
 			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_PENDING,
+		},
+		{
+			// n=9, threshold=4, 3 acks: OneThirdAcked (3*3>=9) but 3 < threshold=4.
+			// Activating would leave only 3 validators, making tally impossible.
+			// Must reset to REGISTERING instead.
+			name: "DEALT + 1/3 acked + threshold=4 + 3 acks -> REGISTERING (below threshold)",
+			setup: func() {
+				seedDealtRoundWithThreshold(9, 4, 3)
+			},
+			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_PENDING,
+		},
+		{
+			// n=9, threshold=4, 4 acks: OneThirdAcked (4*3>=9) and 4 >= threshold=4.
+			// Both conditions met — strip 5 non-ackers and activate.
+			name: "DEALT + threshold=4 + 4 acks -> CONFIRMED + ACTIVE (meets threshold)",
+			setup: func() {
+				seedDealtRoundWithThreshold(9, 4, 4)
+			},
+			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
+			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
+		},
+		{
+			// Threshold=0 (legacy single-validator mode): liveness check skipped,
+			// 1/3 rule alone governs the timeout path.
+			name: "DEALT + threshold=0 (legacy) + 1/3 acked -> CONFIRMED + ACTIVE",
+			setup: func() {
+				seedDealtRound(1) // 1 of 3 acked, Threshold=0
+			},
+			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
+			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
 		},
 		{
 			name: "DEALT + no timeout yet (block_time < deadline)",
@@ -358,6 +418,44 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		s.Require().Len(round.CeremonyLog, 1)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: reset to REGISTERING")
 		s.Require().Contains(round.CeremonyLog[0], "0/3 acks")
+	})
+
+	s.Run("timeout+below-threshold logs entry and preserves validators", func() {
+		// n=9, threshold=4, 3 acks: 1/3 met but 3 < threshold. Ceremony resets
+		// to REGISTERING so a fresh deal can address all 9 validators again.
+		s.SetupTest()
+		kv := s.keeper.OpenKVStore(s.ctx)
+		round := &types.VoteRound{
+			VoteRoundId:          roundID,
+			Status:               types.SessionStatus_SESSION_STATUS_PENDING,
+			EaPk:                 make([]byte, 32),
+			CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+			Threshold:            4,
+			CeremonyDealer:       "val1",
+			CeremonyPhaseStart:   999_400,
+			CeremonyPhaseTimeout: 600,
+		}
+		for i := 1; i <= 9; i++ {
+			round.CeremonyValidators = append(round.CeremonyValidators,
+				&types.ValidatorPallasKey{ValidatorAddress: fmt.Sprintf("val%d", i), PallasPk: make([]byte, 32)})
+		}
+		for i := 0; i < 3; i++ {
+			round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
+				ValidatorAddress: round.CeremonyValidators[i].ValidatorAddress,
+				AckHeight:        9,
+			})
+		}
+		s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+		s.Require().NoError(s.module.EndBlock(s.ctx))
+
+		round, err := s.keeper.GetVoteRound(kv, roundID)
+		s.Require().NoError(err)
+		s.Require().Len(round.CeremonyLog, 1)
+		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: reset to REGISTERING")
+		s.Require().Contains(round.CeremonyLog[0], "3/9 acks")
+		s.Require().Contains(round.CeremonyLog[0], "remaining 3 < threshold 4")
+		// All 9 validators are preserved (non-ackers were NOT stripped before reset).
+		s.Require().Len(round.CeremonyValidators, 9)
 	})
 }
 

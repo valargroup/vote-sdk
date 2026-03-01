@@ -491,32 +491,62 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		nVals := len(round.CeremonyValidators)
 
 		if keeper.OneThirdAcked(round) {
-			// >= 1/3 acked: strip non-ackers (offline/non-responsive), confirm
-			// ceremony, activate round.
 			stripped := nVals - nAcks
-			keeper.StripNonAckersFromRound(round)
-			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
-			round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
 
-			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-				fmt.Sprintf("DEALT timeout: confirmed with %d/%d acks, %d stripped", nAcks, nVals, stripped))
+			// Post-stripping liveness check: the ackers that remain after
+			// stripping must be >= Threshold so that tally can reconstruct the
+			// EA key via Lagrange interpolation. (Threshold == 0 is legacy
+			// single-validator mode; the check does not apply.)
+			if round.Threshold > 0 && nAcks < int(round.Threshold) {
+				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+					fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, %d stripped, remaining %d < threshold %d)",
+						nAcks, nVals, stripped, nAcks, round.Threshold))
 
-			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
-				return err
+				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
+				round.CeremonyPayloads = nil
+				round.CeremonyAcks = nil
+				round.CeremonyDealer = ""
+				round.CeremonyPhaseStart = 0
+				round.CeremonyPhaseTimeout = 0
+				round.EaPk = nil
+
+				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+					return err
+				}
+
+				ctx.EventManager().EmitEvent(sdk.NewEvent(
+					types.EventTypeCeremonyStatusChange,
+					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+					sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
+					sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+				))
+			} else {
+				// >= 1/3 acked and remaining ackers meet threshold: strip
+				// non-ackers (offline/non-responsive), confirm ceremony, activate round.
+				keeper.StripNonAckersFromRound(round)
+				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+				round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
+
+				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+					fmt.Sprintf("DEALT timeout: confirmed with %d/%d acks, %d stripped", nAcks, nVals, stripped))
+
+				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+					return err
+				}
+
+				ctx.EventManager().EmitEvent(sdk.NewEvent(
+					types.EventTypeCeremonyStatusChange,
+					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+					sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
+					sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+				))
+				ctx.EventManager().EmitEvent(sdk.NewEvent(
+					types.EventTypeRoundStatusChange,
+					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+					sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_PENDING.String()),
+					sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_ACTIVE.String()),
+				))
 			}
-
-			ctx.EventManager().EmitEvent(sdk.NewEvent(
-				types.EventTypeCeremonyStatusChange,
-				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-				sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
-				sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
-			))
-			ctx.EventManager().EmitEvent(sdk.NewEvent(
-				types.EventTypeRoundStatusChange,
-				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-				sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_PENDING.String()),
-				sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_ACTIVE.String()),
-			))
 		} else {
 			// < 1/3 acks: reset ceremony for re-deal by next proposer.
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
