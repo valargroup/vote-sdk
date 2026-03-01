@@ -14,6 +14,9 @@ const (
 // DefaultDealTimeout is the ceremony deal/ack phase timeout in seconds (30 minutes).
 const DefaultDealTimeout uint64 = 1800
 
+// RoundIDLen is the fixed byte-length of a VoteRoundId (SHA-256 digest).
+const RoundIDLen = 32
+
 // NullifierType distinguishes the three independent nullifier sets per voting round.
 type NullifierType byte
 
@@ -80,6 +83,16 @@ var (
 	// ShardCheckpointPrefix stores per-block tree checkpoints:
 	//   0x11 || uint32 BE checkpoint_id -> checkpoint blob (WorkingSetShardStore format)
 	ShardCheckpointPrefix = []byte{0x11}
+
+	// PartialDecryptionPrefix stores per-validator partial decryptions during the
+	// TALLYING phase of a threshold-mode voting round:
+	//   0x12 || round_id (32 bytes) || uint32 BE validator_index || uint32 BE proposal_id || uint32 BE vote_decision
+	//   -> PartialDecryptionEntry (protobuf)
+	//
+	// Prefix scans:
+	//   0x12 || round_id                                   — all partials for a round
+	//   0x12 || round_id || uint32 BE validator_index      — all entries from one validator
+	PartialDecryptionPrefix = []byte{0x12}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -200,6 +213,12 @@ func getUint32BE(b []byte) uint32 {
 	return uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
 }
 
+func mustBeRoundID(id []byte) {
+	if len(id) != RoundIDLen {
+		panic("vote/types: roundID must be exactly 32 bytes")
+	}
+}
+
 // BlockLeafIndexKey returns the store key for a block-to-leaf-index mapping.
 // Format: 0x08 || big-endian uint64 height
 func BlockLeafIndexKey(height uint64) []byte {
@@ -265,11 +284,49 @@ func ShardCheckpointIDFromKey(key []byte) uint32 {
 	return getUint32BE(key[len(ShardCheckpointPrefix):])
 }
 
+// PartialDecryptionKey returns the store key for one partial decryption entry.
+// Format: 0x12 || round_id (32 B) || uint32 BE validator_index || uint32 BE proposal_id || uint32 BE vote_decision
+func PartialDecryptionKey(roundID []byte, validatorIndex, proposalID, decision uint32) []byte {
+	mustBeRoundID(roundID)
+	key := make([]byte, 0, len(PartialDecryptionPrefix)+RoundIDLen+4+4+4)
+	key = append(key, PartialDecryptionPrefix...)
+	key = append(key, roundID...)
+	key = appendUint32BE(key, validatorIndex)
+	key = appendUint32BE(key, proposalID)
+	key = appendUint32BE(key, decision)
+	return key
+}
+
+// PartialDecryptionPrefixForRound returns the KV prefix for all partial decryptions
+// stored for a given round. Used to iterate all validators' entries for a round.
+// Format: 0x12 || round_id (32 B)
+func PartialDecryptionPrefixForRound(roundID []byte) []byte {
+	mustBeRoundID(roundID)
+	key := make([]byte, 0, len(PartialDecryptionPrefix)+RoundIDLen)
+	key = append(key, PartialDecryptionPrefix...)
+	key = append(key, roundID...)
+	return key
+}
+
+// PartialDecryptionPrefixForValidator returns the KV prefix for all partial decryptions
+// from a specific validator within a round. Used to check whether a validator has
+// already submitted and to retrieve all their entries.
+// Format: 0x12 || round_id (32 B) || uint32 BE validator_index
+func PartialDecryptionPrefixForValidator(roundID []byte, validatorIndex uint32) []byte {
+	mustBeRoundID(roundID)
+	key := make([]byte, 0, len(PartialDecryptionPrefix)+RoundIDLen+4)
+	key = append(key, PartialDecryptionPrefix...)
+	key = append(key, roundID...)
+	key = appendUint32BE(key, validatorIndex)
+	return key
+}
+
 // TallyResultPrefixForRound returns the KV prefix for all tally results
 // of a given round. Used for prefix iteration to collect all finalized results.
-// Format: 0x07 || round_id
+// Format: 0x07 || round_id (32 B)
 func TallyResultPrefixForRound(roundID []byte) []byte {
-	key := make([]byte, 0, len(TallyResultPrefix)+len(roundID))
+	mustBeRoundID(roundID)
+	key := make([]byte, 0, len(TallyResultPrefix)+RoundIDLen)
 	key = append(key, TallyResultPrefix...)
 	key = append(key, roundID...)
 	return key
