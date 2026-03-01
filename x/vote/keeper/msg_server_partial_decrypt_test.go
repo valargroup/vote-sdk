@@ -4,11 +4,21 @@ import (
 	"bytes"
 	"encoding/hex"
 
+	"github.com/mikelodder7/curvey"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
+
+// validPointBytes returns 32-byte compressed Pallas point = seed * G.
+// Produces distinct, deterministic, on-curve points for each seed value.
+func validPointBytes(seed int) []byte {
+	s := new(curvey.ScalarPallas).New(seed)
+	return elgamal.PallasGenerator().Mul(s).ToAffineCompressed()
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,12 +57,12 @@ func (s *MsgServerTestSuite) setupTallyingRoundThreshold(
 	}))
 }
 
-// validEntry returns a well-formed PartialDecryptionEntry.
+// validEntry returns a well-formed PartialDecryptionEntry with a valid on-curve point.
 func validEntry(proposalID, decision uint32) *types.PartialDecryptionEntry {
 	return &types.PartialDecryptionEntry{
 		ProposalId:     proposalID,
 		VoteDecision:   decision,
-		PartialDecrypt: bytes.Repeat([]byte{byte(proposalID*10 + decision)}, 32),
+		PartialDecrypt: validPointBytes(int(proposalID*10 + decision)),
 	}
 }
 
@@ -287,7 +297,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 					Entries: []*types.PartialDecryptionEntry{{ProposalId: 1, VoteDecision: 0, PartialDecrypt: nil}},
 				}
 			},
-			wantErr: types.ErrInvalidField, errContains: "32 bytes",
+			wantErr: types.ErrInvalidField, errContains: "not a valid Pallas point",
 		},
 		{
 			name: "partial_decrypt wrong length (31 bytes)",
@@ -297,7 +307,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 					Entries: []*types.PartialDecryptionEntry{{ProposalId: 1, VoteDecision: 0, PartialDecrypt: bytes.Repeat([]byte{0x01}, 31)}},
 				}
 			},
-			wantErr: types.ErrInvalidField, errContains: "32 bytes",
+			wantErr: types.ErrInvalidField, errContains: "not a valid Pallas point",
 		},
 		{
 			name: "partial_decrypt wrong length (33 bytes)",
@@ -307,14 +317,24 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 					Entries: []*types.PartialDecryptionEntry{{ProposalId: 1, VoteDecision: 0, PartialDecrypt: bytes.Repeat([]byte{0x01}, 33)}},
 				}
 			},
-			wantErr: types.ErrInvalidField, errContains: "32 bytes",
+			wantErr: types.ErrInvalidField, errContains: "not a valid Pallas point",
+		},
+		{
+			name: "partial_decrypt 32 bytes but not on curve",
+			buildMsg: func(v []*types.ValidatorPallasKey) *types.MsgSubmitPartialDecryption {
+				return &types.MsgSubmitPartialDecryption{
+					VoteRoundId: msgPdRoundID, Creator: v[0].ValidatorAddress, ValidatorIndex: 1,
+					Entries: []*types.PartialDecryptionEntry{{ProposalId: 1, VoteDecision: 0, PartialDecrypt: bytes.Repeat([]byte{0xFF}, 32)}},
+				}
+			},
+			wantErr: types.ErrInvalidField, errContains: "not a valid Pallas point",
 		},
 		{
 			name: "proposal_id=0 (below 1-based range)",
 			buildMsg: func(v []*types.ValidatorPallasKey) *types.MsgSubmitPartialDecryption {
 				return &types.MsgSubmitPartialDecryption{
 					VoteRoundId: msgPdRoundID, Creator: v[0].ValidatorAddress, ValidatorIndex: 1,
-					Entries: []*types.PartialDecryptionEntry{{ProposalId: 0, VoteDecision: 0, PartialDecrypt: bytes.Repeat([]byte{0x01}, 32)}},
+					Entries: []*types.PartialDecryptionEntry{{ProposalId: 0, VoteDecision: 0, PartialDecrypt: validPointBytes(1)}},
 				}
 			},
 			wantErr: types.ErrInvalidProposalID,
@@ -324,7 +344,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 			buildMsg: func(v []*types.ValidatorPallasKey) *types.MsgSubmitPartialDecryption {
 				return &types.MsgSubmitPartialDecryption{
 					VoteRoundId: msgPdRoundID, Creator: v[0].ValidatorAddress, ValidatorIndex: 1,
-					Entries: []*types.PartialDecryptionEntry{{ProposalId: 99, VoteDecision: 0, PartialDecrypt: bytes.Repeat([]byte{0x01}, 32)}},
+					Entries: []*types.PartialDecryptionEntry{{ProposalId: 99, VoteDecision: 0, PartialDecrypt: validPointBytes(1)}},
 				}
 			},
 			wantErr: types.ErrInvalidProposalID,
@@ -334,8 +354,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 			buildMsg: func(v []*types.ValidatorPallasKey) *types.MsgSubmitPartialDecryption {
 				return &types.MsgSubmitPartialDecryption{
 					VoteRoundId: msgPdRoundID, Creator: v[0].ValidatorAddress, ValidatorIndex: 1,
-					// proposal 1 has options 0 and 1 only; 2 is out of range
-					Entries: []*types.PartialDecryptionEntry{{ProposalId: 1, VoteDecision: 2, PartialDecrypt: bytes.Repeat([]byte{0x01}, 32)}},
+					Entries: []*types.PartialDecryptionEntry{{ProposalId: 1, VoteDecision: 2, PartialDecrypt: validPointBytes(1)}},
 				}
 			},
 			wantErr: types.ErrInvalidField, errContains: "out of range",
@@ -403,14 +422,19 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_MultipleValidators_Inde
 	validators := validatorSet(3)
 	s.setupTallyingRoundThreshold(msgPdRoundID, 2, validators)
 
+	pointsD0 := make([][]byte, len(validators))
+	for i := range validators {
+		pointsD0[i] = validPointBytes(100 + i)
+	}
+
 	for i, v := range validators {
 		_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
 			VoteRoundId:    msgPdRoundID,
 			Creator:        v.ValidatorAddress,
 			ValidatorIndex: uint32(i + 1),
 			Entries: []*types.PartialDecryptionEntry{
-				{ProposalId: 1, VoteDecision: 0, PartialDecrypt: bytes.Repeat([]byte{byte(i + 0x10)}, 32)},
-				{ProposalId: 1, VoteDecision: 1, PartialDecrypt: bytes.Repeat([]byte{byte(i + 0x20)}, 32)},
+				{ProposalId: 1, VoteDecision: 0, PartialDecrypt: pointsD0[i]},
+				{ProposalId: 1, VoteDecision: 1, PartialDecrypt: validPointBytes(200 + i)},
 			},
 		})
 		s.Require().NoError(err, "validator %d submission should succeed", i+1)
@@ -422,7 +446,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_MultipleValidators_Inde
 		entry, err := s.keeper.GetPartialDecryption(kv, msgPdRoundID, idx, 1, 0)
 		s.Require().NoError(err)
 		s.Require().NotNil(entry)
-		s.Require().Equal(bytes.Repeat([]byte{byte(i + 0x10)}, 32), entry.PartialDecrypt,
+		s.Require().Equal(pointsD0[i], entry.PartialDecrypt,
 			"wrong partial_decrypt for validator %d", idx)
 	}
 
@@ -447,7 +471,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_DleqProofStoredVerbatim
 		Entries: []*types.PartialDecryptionEntry{{
 			ProposalId:     1,
 			VoteDecision:   0,
-			PartialDecrypt: bytes.Repeat([]byte{0x01}, 32),
+			PartialDecrypt: validPointBytes(42),
 			DleqProof:      dleqProof,
 		}},
 	})
@@ -468,8 +492,8 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_GetForRoundIntegration(
 	validators := validatorSet(2)
 	s.setupTallyingRoundThreshold(msgPdRoundID, 2, validators)
 
-	d1 := bytes.Repeat([]byte{0xAA}, 32)
-	d2 := bytes.Repeat([]byte{0xBB}, 32)
+	d1 := validPointBytes(301)
+	d2 := validPointBytes(302)
 
 	for i, v := range validators {
 		_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{

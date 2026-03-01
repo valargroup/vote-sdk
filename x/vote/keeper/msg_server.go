@@ -479,9 +479,9 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 
 	// Validate each entry in the submission.
 	for i, entry := range msg.Entries {
-		if len(entry.PartialDecrypt) != 32 {
-			return nil, fmt.Errorf("%w: entry[%d] partial_decrypt must be 32 bytes, got %d",
-				types.ErrInvalidField, i, len(entry.PartialDecrypt))
+		if _, err := elgamal.UnmarshalPoint(entry.PartialDecrypt); err != nil {
+			return nil, fmt.Errorf("%w: entry[%d] partial_decrypt is not a valid Pallas point: %v",
+				types.ErrInvalidField, i, err)
 		}
 		if entry.ProposalId < 1 || int(entry.ProposalId) > len(round.Proposals) {
 			return nil, fmt.Errorf("%w: entry[%d] proposal_id %d out of range [1, %d]",
