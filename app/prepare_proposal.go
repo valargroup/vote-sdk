@@ -15,6 +15,7 @@ import (
 
 	voteapi "github.com/z-cale/zally/api"
 	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/z-cale/zally/crypto/shamir"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -59,13 +60,16 @@ func ComposedPrepareProposalHandler(
 	}
 }
 
-// TallyPrepareProposalHandler returns a PrepareProposalHandler that wraps the
-// default behavior (passing through req.Txs) and additionally injects
-// MsgSubmitTally transactions for any rounds in TALLYING state.
+// TallyPrepareProposalHandler returns a PrepareProposalHandler that injects
+// MsgSubmitTally for any round in TALLYING state.
 //
-// The block proposer decrypts the on-chain ElGamal accumulators using the EA
-// secret key loaded from <eaSkDir>/ea_sk.<hex(round_id)>. If the key file is
-// absent, the handler passes through transactions unchanged.
+// Threshold mode (round.Threshold > 0): reads stored partial decryptions from
+// KV, waits until at least round.Threshold validators have submitted, then
+// performs Lagrange interpolation in the exponent and BSGS. No DLEQ proof is
+// generated (Step 1 trust model).
+//
+// Legacy mode (round.Threshold == 0): loads ea_sk from
+// <eaSkDir>/ea_sk.<hex(round_id)> and decrypts directly with a DLEQ proof.
 func TallyPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
@@ -73,7 +77,7 @@ func TallyPrepareProposalHandler(
 	logger log.Logger,
 ) sdk.PrepareProposalHandler {
 	var (
-		// Per-round ea_sk cache: round_id_hex -> secret key.
+		// Per-round ea_sk cache (legacy mode only): round_id_hex -> secret key.
 		skCache   = make(map[string]*elgamal.SecretKey)
 		skCacheMu sync.Mutex
 
@@ -127,8 +131,8 @@ func TallyPrepareProposalHandler(
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
-		// Find the first round in TALLYING state. We limit to one round per
-		// block to bound PrepareProposal latency (BSGS decryption is expensive).
+		// Find the first round in TALLYING state. We limit to one round per block
+		// to bound PrepareProposal latency (BSGS decryption is expensive).
 		var tallyRound *types.VoteRound
 		if err := voteKeeper.IterateTallyingRounds(kvStore, func(round *types.VoteRound) bool {
 			tallyRound = round
@@ -142,19 +146,45 @@ func TallyPrepareProposalHandler(
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 
-		eaSk, err := loadSkForRound(tallyRound.VoteRoundId)
-		if err != nil {
-			logger.Warn("PrepareProposal: no EA key for round, skipping tally",
-				"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
-			return &abci.ResponsePrepareProposal{Txs: txs}, nil
+		var entries []*types.TallyEntry
+
+		if tallyRound.Threshold > 0 {
+			// Threshold mode: wait until t validators have submitted partial decryptions.
+			validatorCount, err := voteKeeper.CountPartialDecryptionValidators(kvStore, tallyRound.VoteRoundId)
+			if err != nil {
+				logger.Error("PrepareProposal: failed to count partial decryptions", "err", err)
+				return &abci.ResponsePrepareProposal{Txs: txs}, nil
+			}
+			if validatorCount < int(tallyRound.Threshold) {
+				logger.Info("PrepareProposal: waiting for threshold partial decryptions",
+					"round", hex.EncodeToString(tallyRound.VoteRoundId),
+					"have", validatorCount, "need", tallyRound.Threshold)
+				return &abci.ResponsePrepareProposal{Txs: txs}, nil
+			}
+
+			entries, err = decryptRoundTalliesThreshold(kvStore, voteKeeper, tallyRound, loadBSGS())
+			if err != nil {
+				logger.Error("PrepareProposal: threshold tally decryption failed",
+					"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
+				return &abci.ResponsePrepareProposal{Txs: txs}, nil
+			}
+		} else {
+			// Legacy mode: decrypt with the full ea_sk loaded from disk.
+			eaSk, err := loadSkForRound(tallyRound.VoteRoundId)
+			if err != nil {
+				logger.Warn("PrepareProposal: no EA key for round, skipping tally",
+					"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
+				return &abci.ResponsePrepareProposal{Txs: txs}, nil
+			}
+
+			entries, err = decryptRoundTallies(kvStore, voteKeeper, tallyRound, eaSk, loadBSGS())
+			if err != nil {
+				logger.Error("PrepareProposal: failed to decrypt tally",
+					"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
+				return &abci.ResponsePrepareProposal{Txs: txs}, nil
+			}
 		}
 
-		entries, err := decryptRoundTallies(kvStore, voteKeeper, tallyRound, eaSk, loadBSGS())
-		if err != nil {
-			logger.Error("PrepareProposal: failed to decrypt tally",
-				"round", tallyRound.VoteRoundId, "err", err)
-			return &abci.ResponsePrepareProposal{Txs: txs}, nil
-		}
 		msg := &types.MsgSubmitTally{
 			VoteRoundId: tallyRound.VoteRoundId,
 			Creator:     proposerValAddr,
@@ -164,13 +194,14 @@ func TallyPrepareProposalHandler(
 		txBytes, err := voteapi.EncodeVoteTx(msg)
 		if err != nil {
 			logger.Error("PrepareProposal: failed to encode tally tx",
-				"round", tallyRound.VoteRoundId, "err", err)
+				"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 
-		// Prepend injected tally tx before the mempool txs.
 		logger.Info("PrepareProposal: injecting MsgSubmitTally",
-			"round", tallyRound.VoteRoundId, "entries", len(entries))
+			"round", hex.EncodeToString(tallyRound.VoteRoundId),
+			"entries", len(entries),
+			"threshold_mode", tallyRound.Threshold > 0)
 		txs = append([][]byte{txBytes}, txs...)
 
 		return &abci.ResponsePrepareProposal{Txs: txs}, nil
@@ -222,6 +253,93 @@ func decryptRoundTallies(
 				VoteDecision:    decision,
 				TotalValue:      totalValue,
 				DecryptionProof: proof,
+			})
+		}
+	}
+
+	return entries, nil
+}
+
+// decryptRoundTalliesThreshold decrypts all accumulated ciphertexts for a
+// threshold-mode round using Lagrange interpolation in the exponent.
+//
+// For each non-empty (proposal, decision) accumulator it:
+//  1. Retrieves all stored D_i = share_i * C1 partial decryptions from KV.
+//  2. Calls shamir.CombinePartials to compute sum(λ_i * D_i) = ea_sk * C1.
+//  3. Computes v*G = C2 - (ea_sk * C1).
+//  4. Solves v with BSGS.
+//
+// No DecryptionProof is included in Step 1 (the DLEQ field stays nil).
+// The on-chain SubmitTally handler verifies by re-deriving the same Lagrange
+// combination from the stored partials.
+func decryptRoundTalliesThreshold(
+	kvStore store.KVStore,
+	voteKeeper *votekeeper.Keeper,
+	round *types.VoteRound,
+	bsgs *elgamal.BSGSTable,
+) ([]*types.TallyEntry, error) {
+	// Load all partial decryptions for the round, grouped by accumulator key.
+	pdMap, err := voteKeeper.GetPartialDecryptionsForRound(kvStore, round.VoteRoundId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get partial decryptions: %w", err)
+	}
+
+	var entries []*types.TallyEntry
+
+	for _, proposal := range round.Proposals {
+		tallyMap, err := voteKeeper.GetProposalTally(kvStore, round.VoteRoundId, proposal.Id)
+		if err != nil {
+			return nil, err
+		}
+
+		for decision, ctBytes := range tallyMap {
+			ct, err := elgamal.UnmarshalCiphertext(ctBytes)
+			if err != nil {
+				return nil, err
+			}
+
+			accKey := votekeeper.AccumulatorKey(proposal.Id, decision)
+			storedPartials := pdMap[accKey]
+
+			if len(storedPartials) == 0 {
+				return nil, fmt.Errorf("no partial decryptions stored for accumulator (proposal=%d, decision=%d)",
+					proposal.Id, decision)
+			}
+
+			// Convert stored entries to shamir.PartialDecryption values.
+			shamirPartials := make([]shamir.PartialDecryption, len(storedPartials))
+			for i, pd := range storedPartials {
+				point, err := elgamal.UnmarshalPoint(pd.PartialDecrypt)
+				if err != nil {
+					return nil, fmt.Errorf("invalid partial_decrypt for validator %d: %w", pd.ValidatorIndex, err)
+				}
+				shamirPartials[i] = shamir.PartialDecryption{
+					Index: int(pd.ValidatorIndex),
+					Di:    point,
+				}
+			}
+
+			// Lagrange interpolation in the exponent: sum(λ_i * D_i) = ea_sk * C1.
+			skC1, err := shamir.CombinePartials(shamirPartials, int(round.Threshold))
+			if err != nil {
+				return nil, fmt.Errorf("Lagrange combination failed for (proposal=%d, decision=%d): %w",
+					proposal.Id, decision, err)
+			}
+
+			// v*G = C2 - ea_sk*C1
+			vG := ct.C2.Sub(skC1)
+
+			totalValue, err := bsgs.Solve(vG)
+			if err != nil {
+				return nil, fmt.Errorf("BSGS solve failed for (proposal=%d, decision=%d): %w",
+					proposal.Id, decision, err)
+			}
+
+			entries = append(entries, &types.TallyEntry{
+				ProposalId:   proposal.Id,
+				VoteDecision: decision,
+				TotalValue:   totalValue,
+				// DecryptionProof is nil in Step 1; added in Step 2 with DLEQ.
 			})
 		}
 	}

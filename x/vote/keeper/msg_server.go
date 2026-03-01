@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/crypto/roundid"
+	"github.com/z-cale/zally/crypto/shamir"
 	"github.com/z-cale/zally/x/vote/types"
 )
 
@@ -263,15 +265,20 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 }
 
 // SubmitTally handles MsgSubmitTally.
-// Validates that the round is in TALLYING state and the creator matches,
-// then validates each tally entry against the on-chain accumulator,
-// stores finalized tally results, transitions the round to FINALIZED,
-// and emits an event.
+// Validates that the round is in TALLYING state, verifies each entry against
+// the on-chain accumulator, stores finalized tally results, transitions the
+// round to FINALIZED, and emits an event.
+//
+// Threshold mode (round.Threshold > 0): reads stored partial decryptions from
+// KV, Lagrange-combines them per accumulator, and checks
+// C2 - combined == totalValue * G. No DLEQ proof is required (Step 1).
+//
+// Legacy mode (round.Threshold == 0): verifies the Chaum-Pedersen DLEQ proof
+// submitted with each entry.
 func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally) (*types.MsgSubmitTallyResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
-	// Validate the round exists, is in TALLYING state, and creator matches.
 	round, err := ms.k.GetVoteRound(kvStore, msg.VoteRoundId)
 	if err != nil {
 		return nil, err
@@ -281,35 +288,81 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 		return nil, fmt.Errorf("%w: status is %s", types.ErrRoundNotTallying, round.Status)
 	}
 
-	// Validate each entry and store finalized tally results.
+	// In threshold mode, pre-load all stored partial decryptions once so we
+	// can look up each accumulator's partials during per-entry verification
+	// without repeated full-range KV scans.
+	var pdMap map[uint64][]PartialDecryptionWithIndex
+	if round.Threshold > 0 {
+		pdMap, err = ms.k.GetPartialDecryptionsForRound(kvStore, msg.VoteRoundId)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load partial decryptions: %w", err)
+		}
+	}
+
 	for i, entry := range msg.Entries {
-		// Validate proposal_id is within range (1-indexed).
 		if entry.ProposalId < 1 || int(entry.ProposalId) > len(round.Proposals) {
 			return nil, fmt.Errorf("%w: entry[%d] proposal_id %d out of range [1, %d]",
 				types.ErrInvalidProposalID, i, entry.ProposalId, len(round.Proposals))
 		}
 
-		// Validate vote_decision is a valid option for this proposal.
 		proposal := round.Proposals[entry.ProposalId-1]
 		if int(entry.VoteDecision) >= len(proposal.Options) {
 			return nil, fmt.Errorf("%w: entry[%d] vote_decision %d out of range [0, %d) for proposal %d",
 				types.ErrInvalidField, i, entry.VoteDecision, len(proposal.Options), entry.ProposalId)
 		}
 
-		// Verify Chaum-Pedersen DLEQ proof that total_value matches the
-		// encrypted accumulator.
 		accBytes, err := ms.k.GetTally(kvStore, msg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get tally for entry[%d]: %w", i, err)
 		}
+
 		if accBytes == nil {
-			// No shares revealed for this (proposal, decision) — require zero value and no proof.
+			// No votes were revealed for this accumulator — require zero value.
 			if entry.TotalValue != 0 {
 				return nil, fmt.Errorf("%w: entry[%d] claims value %d but no accumulator exists",
 					types.ErrTallyMismatch, i, entry.TotalValue)
 			}
+		} else if round.Threshold > 0 {
+			ct, err := elgamal.UnmarshalCiphertext(accBytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to unmarshal accumulator for entry[%d]: %w", i, err)
+			}
+			// Threshold mode: verify by Lagrange-combining the stored partial
+			// decryptions and checking C2 - combined == totalValue * G.
+			accKey := AccumulatorKey(entry.ProposalId, entry.VoteDecision)
+			storedPartials := pdMap[accKey]
+			if len(storedPartials) == 0 {
+				return nil, fmt.Errorf("%w: entry[%d] no partial decryptions stored for (proposal=%d, decision=%d)",
+					types.ErrTallyMismatch, i, entry.ProposalId, entry.VoteDecision)
+			}
+
+			shamirPartials := make([]shamir.PartialDecryption, len(storedPartials))
+			for j, pd := range storedPartials {
+				point, err := elgamal.UnmarshalPoint(pd.PartialDecrypt)
+				if err != nil {
+					return nil, fmt.Errorf("entry[%d]: invalid partial_decrypt for validator %d: %w",
+						i, pd.ValidatorIndex, err)
+				}
+				shamirPartials[j] = shamir.PartialDecryption{
+					Index: int(pd.ValidatorIndex),
+					Di:    point,
+				}
+			}
+
+			skC1, err := shamir.CombinePartials(shamirPartials, int(round.Threshold))
+			if err != nil {
+				return nil, fmt.Errorf("%w: entry[%d] Lagrange combination failed: %v",
+					types.ErrTallyMismatch, i, err)
+			}
+
+			// C2 - ea_sk*C1 must equal totalValue * G.
+			vG := ct.C2.Sub(skC1)
+			if !bytes.Equal(vG.ToAffineCompressed(), elgamal.ValuePoint(entry.TotalValue).ToAffineCompressed()) {
+				return nil, fmt.Errorf("%w: entry[%d] C2 - combined_partial != totalValue*G",
+					types.ErrTallyMismatch, i)
+			}
 		} else {
-			// Shares are revealed, verify the DLEQ proof.
+			// Legacy mode: verify the Chaum-Pedersen DLEQ proof.
 			ct, err := elgamal.UnmarshalCiphertext(accBytes)
 			if err != nil {
 				return nil, fmt.Errorf("failed to unmarshal accumulator for entry[%d]: %w", i, err)
@@ -324,7 +377,6 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 			}
 		}
 
-		// Store the finalized tally result (decrypted plaintext from EA).
 		if err := ms.k.SetTallyResult(kvStore, &types.TallyResult{
 			VoteRoundId:  msg.VoteRoundId,
 			ProposalId:   entry.ProposalId,
