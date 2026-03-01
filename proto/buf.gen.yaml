@@ -1,8 +1,8 @@
 version: v1
 plugins:
-  - plugin: go
+  - plugin: buf.build/protocolbuffers/go:v1.36.11
     out: ..
     opt: module=github.com/z-cale/zally
-  - plugin: go-grpc
+  - plugin: buf.build/grpc/go
     out: ..
     opt: module=github.com/z-cale/zally

@@ -17,6 +17,7 @@ service Msg {
   rpc CastVote(MsgCastVote) returns (MsgCastVoteResponse);
   rpc RevealShare(MsgRevealShare) returns (MsgRevealShareResponse);
   rpc SubmitTally(MsgSubmitTally) returns (MsgSubmitTallyResponse);
+  rpc SubmitPartialDecryption(MsgSubmitPartialDecryption) returns (MsgSubmitPartialDecryptionResponse);
   rpc RegisterPallasKey(MsgRegisterPallasKey) returns (MsgRegisterPallasKeyResponse);
   rpc DealExecutiveAuthorityKey(MsgDealExecutiveAuthorityKey) returns (MsgDealExecutiveAuthorityKeyResponse);
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
@@ -127,11 +128,15 @@ message MsgRegisterPallasKey {
 message MsgRegisterPallasKeyResponse {}
 
 // MsgDealExecutiveAuthorityKey is submitted by the bootstrap dealer to distribute encrypted ea_sk shares.
+// In threshold mode, each payload contains ECIES(f(i), pk_i) where f is a degree-(t-1) polynomial
+// with f(0) = ea_sk. verification_keys holds VK_i = f(i)*G for each validator (one per payload).
 message MsgDealExecutiveAuthorityKey {
-  string                 creator       = 1; // Dealer's validator address
-  bytes                  ea_pk         = 2; // Executive authority public key (Pallas, 32 bytes)
-  repeated DealerPayload payloads      = 3; // One ECIES envelope per registered validator
-  bytes                  vote_round_id = 4; // Target voting round (per-round ceremony)
+  string                 creator            = 1; // Dealer's validator address
+  bytes                  ea_pk              = 2; // Executive authority public key (Pallas, 32 bytes)
+  repeated DealerPayload payloads           = 3; // One ECIES envelope per registered validator
+  bytes                  vote_round_id      = 4; // Target voting round (per-round ceremony)
+  uint32                 threshold          = 5; // Minimum shares required to reconstruct (t). 0 = legacy single-key mode.
+  repeated bytes         verification_keys  = 6; // VK_i = f(i)*G per validator (32-byte compressed Pallas points, same order as payloads)
 }
 
 message MsgDealExecutiveAuthorityKeyResponse {}
@@ -154,6 +159,29 @@ message MsgCreateValidatorWithPallasKey {
 }
 
 message MsgCreateValidatorWithPallasKeyResponse {}
+
+// MsgSubmitPartialDecryption is submitted by a validator during the TALLYING phase.
+// The validator computes D_i = share_i * C1 for each (proposal, decision) accumulator
+// and submits all entries in a single message. In Step 1 there is no dleq_proof;
+// that field is added in Step 2.
+message MsgSubmitPartialDecryption {
+  bytes                             vote_round_id    = 1;
+  string                            creator          = 2; // Validator operator address
+  uint32                            validator_index  = 3; // 1-based index matching Shamir evaluation point
+  repeated PartialDecryptionEntry   entries          = 4;
+}
+
+// PartialDecryptionEntry holds one partial decryption D_i = share_i * C1 for a
+// single (proposal_id, vote_decision) accumulator.
+// dleq_proof is reserved for Step 2 (DLEQ correctness proofs) and must be empty in Step 1.
+message PartialDecryptionEntry {
+  uint32 proposal_id      = 1;
+  uint32 vote_decision    = 2;
+  bytes  partial_decrypt  = 3; // 32 bytes: compressed Pallas point D_i = share_i * C1
+  bytes  dleq_proof       = 4; // reserved — populated in Step 2
+}
+
+message MsgSubmitPartialDecryptionResponse {}
 
 // MsgSetVoteManager sets or changes the vote manager address.
 // Only callable by the current vote manager or any bonded validator.

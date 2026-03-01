@@ -55,6 +55,12 @@ message VoteRound {
   uint64                      ceremony_phase_start   = 23;
   uint64                      ceremony_phase_timeout = 24;
   repeated string             ceremony_log           = 25; // Timestamped human-readable ceremony log entries
+
+  // Threshold decryption fields (populated by MsgDealExecutiveAuthorityKey in threshold mode).
+  // threshold is the minimum number of partial decryptions required to reconstruct the tally.
+  // verification_keys holds VK_i = f(i)*G for each validator (same order as ceremony_validators).
+  uint32         threshold         = 26; // 0 = legacy single-key mode
+  repeated bytes verification_keys = 27; // 32-byte compressed Pallas points, one per ceremony validator
 }
 
 // VoteManagerState stores the singleton vote manager address.

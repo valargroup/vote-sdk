@@ -281,8 +281,13 @@ type VoteRound struct {
 	CeremonyPhaseStart   uint64                `protobuf:"varint,23,opt,name=ceremony_phase_start,json=ceremonyPhaseStart,proto3" json:"ceremony_phase_start,omitempty"`
 	CeremonyPhaseTimeout uint64                `protobuf:"varint,24,opt,name=ceremony_phase_timeout,json=ceremonyPhaseTimeout,proto3" json:"ceremony_phase_timeout,omitempty"`
 	CeremonyLog          []string              `protobuf:"bytes,25,rep,name=ceremony_log,json=ceremonyLog,proto3" json:"ceremony_log,omitempty"` // Timestamped human-readable ceremony log entries
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Threshold decryption fields (populated by MsgDealExecutiveAuthorityKey in threshold mode).
+	// threshold is the minimum number of partial decryptions required to reconstruct the tally.
+	// verification_keys holds VK_i = f(i)*G for each validator (same order as ceremony_validators).
+	Threshold        uint32   `protobuf:"varint,26,opt,name=threshold,proto3" json:"threshold,omitempty"`                                      // 0 = legacy single-key mode
+	VerificationKeys [][]byte `protobuf:"bytes,27,rep,name=verification_keys,json=verificationKeys,proto3" json:"verification_keys,omitempty"` // 32-byte compressed Pallas points, one per ceremony validator
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *VoteRound) Reset() {
@@ -486,6 +491,20 @@ func (x *VoteRound) GetCeremonyPhaseTimeout() uint64 {
 func (x *VoteRound) GetCeremonyLog() []string {
 	if x != nil {
 		return x.CeremonyLog
+	}
+	return nil
+}
+
+func (x *VoteRound) GetThreshold() uint32 {
+	if x != nil {
+		return x.Threshold
+	}
+	return 0
+}
+
+func (x *VoteRound) GetVerificationKeys() [][]byte {
+	if x != nil {
+		return x.VerificationKeys
 	}
 	return nil
 }
@@ -1355,7 +1374,7 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12.\n" +
-	"\aoptions\x18\x04 \x03(\v2\x14.zvote.v1.VoteOptionR\aoptions\"\x9f\b\n" +
+	"\aoptions\x18\x04 \x03(\v2\x14.zvote.v1.VoteOptionR\aoptions\"\xea\b\n" +
 	"\tVoteRound\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -1382,7 +1401,9 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x0fceremony_dealer\x18\x16 \x01(\tR\x0eceremonyDealer\x120\n" +
 	"\x14ceremony_phase_start\x18\x17 \x01(\x04R\x12ceremonyPhaseStart\x124\n" +
 	"\x16ceremony_phase_timeout\x18\x18 \x01(\x04R\x14ceremonyPhaseTimeout\x12!\n" +
-	"\fceremony_log\x18\x19 \x03(\tR\vceremonyLog\",\n" +
+	"\fceremony_log\x18\x19 \x03(\tR\vceremonyLog\x12\x1c\n" +
+	"\tthreshold\x18\x1a \x01(\rR\tthreshold\x12+\n" +
+	"\x11verification_keys\x18\x1b \x03(\fR\x10verificationKeys\",\n" +
 	"\x10VoteManagerState\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x8d\x01\n" +
 	"\x13CommitmentTreeState\x12\x1d\n" +

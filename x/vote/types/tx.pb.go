@@ -929,14 +929,18 @@ func (*MsgRegisterPallasKeyResponse) Descriptor() ([]byte, []int) {
 }
 
 // MsgDealExecutiveAuthorityKey is submitted by the bootstrap dealer to distribute encrypted ea_sk shares.
+// In threshold mode, each payload contains ECIES(f(i), pk_i) where f is a degree-(t-1) polynomial
+// with f(0) = ea_sk. verification_keys holds VK_i = f(i)*G for each validator (one per payload).
 type MsgDealExecutiveAuthorityKey struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                              // Dealer's validator address
-	EaPk          []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                        // Executive authority public key (Pallas, 32 bytes)
-	Payloads      []*DealerPayload       `protobuf:"bytes,3,rep,name=payloads,proto3" json:"payloads,omitempty"`                            // One ECIES envelope per registered validator
-	VoteRoundId   []byte                 `protobuf:"bytes,4,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"` // Target voting round (per-round ceremony)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Creator          string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                           // Dealer's validator address
+	EaPk             []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                                     // Executive authority public key (Pallas, 32 bytes)
+	Payloads         []*DealerPayload       `protobuf:"bytes,3,rep,name=payloads,proto3" json:"payloads,omitempty"`                                         // One ECIES envelope per registered validator
+	VoteRoundId      []byte                 `protobuf:"bytes,4,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`              // Target voting round (per-round ceremony)
+	Threshold        uint32                 `protobuf:"varint,5,opt,name=threshold,proto3" json:"threshold,omitempty"`                                      // Minimum shares required to reconstruct (t). 0 = legacy single-key mode.
+	VerificationKeys [][]byte               `protobuf:"bytes,6,rep,name=verification_keys,json=verificationKeys,proto3" json:"verification_keys,omitempty"` // VK_i = f(i)*G per validator (32-byte compressed Pallas points, same order as payloads)
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *MsgDealExecutiveAuthorityKey) Reset() {
@@ -993,6 +997,20 @@ func (x *MsgDealExecutiveAuthorityKey) GetPayloads() []*DealerPayload {
 func (x *MsgDealExecutiveAuthorityKey) GetVoteRoundId() []byte {
 	if x != nil {
 		return x.VoteRoundId
+	}
+	return nil
+}
+
+func (x *MsgDealExecutiveAuthorityKey) GetThreshold() uint32 {
+	if x != nil {
+		return x.Threshold
+	}
+	return 0
+}
+
+func (x *MsgDealExecutiveAuthorityKey) GetVerificationKeys() [][]byte {
+	if x != nil {
+		return x.VerificationKeys
 	}
 	return nil
 }
@@ -1221,6 +1239,185 @@ func (*MsgCreateValidatorWithPallasKeyResponse) Descriptor() ([]byte, []int) {
 	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{18}
 }
 
+// MsgSubmitPartialDecryption is submitted by a validator during the TALLYING phase.
+// The validator computes D_i = share_i * C1 for each (proposal, decision) accumulator
+// and submits all entries in a single message. In Step 1 there is no dleq_proof;
+// that field is added in Step 2.
+type MsgSubmitPartialDecryption struct {
+	state          protoimpl.MessageState    `protogen:"open.v1"`
+	VoteRoundId    []byte                    `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
+	Creator        string                    `protobuf:"bytes,2,opt,name=creator,proto3" json:"creator,omitempty"`                                      // Validator operator address
+	ValidatorIndex uint32                    `protobuf:"varint,3,opt,name=validator_index,json=validatorIndex,proto3" json:"validator_index,omitempty"` // 1-based index matching Shamir evaluation point
+	Entries        []*PartialDecryptionEntry `protobuf:"bytes,4,rep,name=entries,proto3" json:"entries,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *MsgSubmitPartialDecryption) Reset() {
+	*x = MsgSubmitPartialDecryption{}
+	mi := &file_zvote_v1_tx_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgSubmitPartialDecryption) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgSubmitPartialDecryption) ProtoMessage() {}
+
+func (x *MsgSubmitPartialDecryption) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_tx_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgSubmitPartialDecryption.ProtoReflect.Descriptor instead.
+func (*MsgSubmitPartialDecryption) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *MsgSubmitPartialDecryption) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
+}
+
+func (x *MsgSubmitPartialDecryption) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+func (x *MsgSubmitPartialDecryption) GetValidatorIndex() uint32 {
+	if x != nil {
+		return x.ValidatorIndex
+	}
+	return 0
+}
+
+func (x *MsgSubmitPartialDecryption) GetEntries() []*PartialDecryptionEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+// PartialDecryptionEntry holds one partial decryption D_i = share_i * C1 for a
+// single (proposal_id, vote_decision) accumulator.
+// dleq_proof is reserved for Step 2 (DLEQ correctness proofs) and must be empty in Step 1.
+type PartialDecryptionEntry struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ProposalId     uint32                 `protobuf:"varint,1,opt,name=proposal_id,json=proposalId,proto3" json:"proposal_id,omitempty"`
+	VoteDecision   uint32                 `protobuf:"varint,2,opt,name=vote_decision,json=voteDecision,proto3" json:"vote_decision,omitempty"`
+	PartialDecrypt []byte                 `protobuf:"bytes,3,opt,name=partial_decrypt,json=partialDecrypt,proto3" json:"partial_decrypt,omitempty"` // 32 bytes: compressed Pallas point D_i = share_i * C1
+	DleqProof      []byte                 `protobuf:"bytes,4,opt,name=dleq_proof,json=dleqProof,proto3" json:"dleq_proof,omitempty"`                // reserved — populated in Step 2
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PartialDecryptionEntry) Reset() {
+	*x = PartialDecryptionEntry{}
+	mi := &file_zvote_v1_tx_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PartialDecryptionEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PartialDecryptionEntry) ProtoMessage() {}
+
+func (x *PartialDecryptionEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_tx_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PartialDecryptionEntry.ProtoReflect.Descriptor instead.
+func (*PartialDecryptionEntry) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *PartialDecryptionEntry) GetProposalId() uint32 {
+	if x != nil {
+		return x.ProposalId
+	}
+	return 0
+}
+
+func (x *PartialDecryptionEntry) GetVoteDecision() uint32 {
+	if x != nil {
+		return x.VoteDecision
+	}
+	return 0
+}
+
+func (x *PartialDecryptionEntry) GetPartialDecrypt() []byte {
+	if x != nil {
+		return x.PartialDecrypt
+	}
+	return nil
+}
+
+func (x *PartialDecryptionEntry) GetDleqProof() []byte {
+	if x != nil {
+		return x.DleqProof
+	}
+	return nil
+}
+
+type MsgSubmitPartialDecryptionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgSubmitPartialDecryptionResponse) Reset() {
+	*x = MsgSubmitPartialDecryptionResponse{}
+	mi := &file_zvote_v1_tx_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgSubmitPartialDecryptionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgSubmitPartialDecryptionResponse) ProtoMessage() {}
+
+func (x *MsgSubmitPartialDecryptionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_zvote_v1_tx_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgSubmitPartialDecryptionResponse.ProtoReflect.Descriptor instead.
+func (*MsgSubmitPartialDecryptionResponse) Descriptor() ([]byte, []int) {
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{21}
+}
+
 // MsgSetVoteManager sets or changes the vote manager address.
 // Only callable by the current vote manager or any bonded validator.
 // On first call (no vote manager set), accepts any bonded validator.
@@ -1234,7 +1431,7 @@ type MsgSetVoteManager struct {
 
 func (x *MsgSetVoteManager) Reset() {
 	*x = MsgSetVoteManager{}
-	mi := &file_zvote_v1_tx_proto_msgTypes[19]
+	mi := &file_zvote_v1_tx_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1246,7 +1443,7 @@ func (x *MsgSetVoteManager) String() string {
 func (*MsgSetVoteManager) ProtoMessage() {}
 
 func (x *MsgSetVoteManager) ProtoReflect() protoreflect.Message {
-	mi := &file_zvote_v1_tx_proto_msgTypes[19]
+	mi := &file_zvote_v1_tx_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1259,7 +1456,7 @@ func (x *MsgSetVoteManager) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSetVoteManager.ProtoReflect.Descriptor instead.
 func (*MsgSetVoteManager) Descriptor() ([]byte, []int) {
-	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{19}
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *MsgSetVoteManager) GetCreator() string {
@@ -1284,7 +1481,7 @@ type MsgSetVoteManagerResponse struct {
 
 func (x *MsgSetVoteManagerResponse) Reset() {
 	*x = MsgSetVoteManagerResponse{}
-	mi := &file_zvote_v1_tx_proto_msgTypes[20]
+	mi := &file_zvote_v1_tx_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1296,7 +1493,7 @@ func (x *MsgSetVoteManagerResponse) String() string {
 func (*MsgSetVoteManagerResponse) ProtoMessage() {}
 
 func (x *MsgSetVoteManagerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zvote_v1_tx_proto_msgTypes[20]
+	mi := &file_zvote_v1_tx_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1309,7 +1506,7 @@ func (x *MsgSetVoteManagerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSetVoteManagerResponse.ProtoReflect.Descriptor instead.
 func (*MsgSetVoteManagerResponse) Descriptor() ([]byte, []int) {
-	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{20}
+	return file_zvote_v1_tx_proto_rawDescGZIP(), []int{23}
 }
 
 var File_zvote_v1_tx_proto protoreflect.FileDescriptor
@@ -1390,12 +1587,14 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\x14MsgRegisterPallasKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\x1b\n" +
 	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\"\x1e\n" +
-	"\x1cMsgRegisterPallasKeyResponse\"\xa6\x01\n" +
+	"\x1cMsgRegisterPallasKeyResponse\"\xf1\x01\n" +
 	"\x1cMsgDealExecutiveAuthorityKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\x13\n" +
 	"\x05ea_pk\x18\x02 \x01(\fR\x04eaPk\x123\n" +
 	"\bpayloads\x18\x03 \x03(\v2\x17.zvote.v1.DealerPayloadR\bpayloads\x12\"\n" +
-	"\rvote_round_id\x18\x04 \x01(\fR\vvoteRoundId\"&\n" +
+	"\rvote_round_id\x18\x04 \x01(\fR\vvoteRoundId\x12\x1c\n" +
+	"\tthreshold\x18\x05 \x01(\rR\tthreshold\x12+\n" +
+	"\x11verification_keys\x18\x06 \x03(\fR\x10verificationKeys\"&\n" +
 	"$MsgDealExecutiveAuthorityKeyResponse\"\x80\x01\n" +
 	"\x1bMsgAckExecutiveAuthorityKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12#\n" +
@@ -1406,18 +1605,32 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\vstaking_msg\x18\x01 \x01(\fR\n" +
 	"stakingMsg\x12\x1b\n" +
 	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\")\n" +
-	"'MsgCreateValidatorWithPallasKeyResponse\"N\n" +
+	"'MsgCreateValidatorWithPallasKeyResponse\"\xbf\x01\n" +
+	"\x1aMsgSubmitPartialDecryption\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12\x18\n" +
+	"\acreator\x18\x02 \x01(\tR\acreator\x12'\n" +
+	"\x0fvalidator_index\x18\x03 \x01(\rR\x0evalidatorIndex\x12:\n" +
+	"\aentries\x18\x04 \x03(\v2 .zvote.v1.PartialDecryptionEntryR\aentries\"\xa6\x01\n" +
+	"\x16PartialDecryptionEntry\x12\x1f\n" +
+	"\vproposal_id\x18\x01 \x01(\rR\n" +
+	"proposalId\x12#\n" +
+	"\rvote_decision\x18\x02 \x01(\rR\fvoteDecision\x12'\n" +
+	"\x0fpartial_decrypt\x18\x03 \x01(\fR\x0epartialDecrypt\x12\x1d\n" +
+	"\n" +
+	"dleq_proof\x18\x04 \x01(\fR\tdleqProof\"$\n" +
+	"\"MsgSubmitPartialDecryptionResponse\"N\n" +
 	"\x11MsgSetVoteManager\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\x1f\n" +
 	"\vnew_manager\x18\x02 \x01(\tR\n" +
 	"newManager\"\x1b\n" +
-	"\x19MsgSetVoteManagerResponse2\xab\a\n" +
+	"\x19MsgSetVoteManagerResponse2\x9a\b\n" +
 	"\x03Msg\x12a\n" +
 	"\x13CreateVotingSession\x12 .zvote.v1.MsgCreateVotingSession\x1a(.zvote.v1.MsgCreateVotingSessionResponse\x12L\n" +
 	"\fDelegateVote\x12\x19.zvote.v1.MsgDelegateVote\x1a!.zvote.v1.MsgDelegateVoteResponse\x12@\n" +
 	"\bCastVote\x12\x15.zvote.v1.MsgCastVote\x1a\x1d.zvote.v1.MsgCastVoteResponse\x12I\n" +
 	"\vRevealShare\x12\x18.zvote.v1.MsgRevealShare\x1a .zvote.v1.MsgRevealShareResponse\x12I\n" +
-	"\vSubmitTally\x12\x18.zvote.v1.MsgSubmitTally\x1a .zvote.v1.MsgSubmitTallyResponse\x12[\n" +
+	"\vSubmitTally\x12\x18.zvote.v1.MsgSubmitTally\x1a .zvote.v1.MsgSubmitTallyResponse\x12m\n" +
+	"\x17SubmitPartialDecryption\x12$.zvote.v1.MsgSubmitPartialDecryption\x1a,.zvote.v1.MsgSubmitPartialDecryptionResponse\x12[\n" +
 	"\x11RegisterPallasKey\x12\x1e.zvote.v1.MsgRegisterPallasKey\x1a&.zvote.v1.MsgRegisterPallasKeyResponse\x12s\n" +
 	"\x19DealExecutiveAuthorityKey\x12&.zvote.v1.MsgDealExecutiveAuthorityKey\x1a..zvote.v1.MsgDealExecutiveAuthorityKeyResponse\x12p\n" +
 	"\x18AckExecutiveAuthorityKey\x12%.zvote.v1.MsgAckExecutiveAuthorityKey\x1a-.zvote.v1.MsgAckExecutiveAuthorityKeyResponse\x12|\n" +
@@ -1436,7 +1649,7 @@ func file_zvote_v1_tx_proto_rawDescGZIP() []byte {
 	return file_zvote_v1_tx_proto_rawDescData
 }
 
-var file_zvote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_zvote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_zvote_v1_tx_proto_goTypes = []any{
 	(*MsgCreateVotingSession)(nil),                  // 0: zvote.v1.MsgCreateVotingSession
 	(*MsgCreateVotingSessionResponse)(nil),          // 1: zvote.v1.MsgCreateVotingSessionResponse
@@ -1457,40 +1670,46 @@ var file_zvote_v1_tx_proto_goTypes = []any{
 	(*MsgAckExecutiveAuthorityKeyResponse)(nil),     // 16: zvote.v1.MsgAckExecutiveAuthorityKeyResponse
 	(*MsgCreateValidatorWithPallasKey)(nil),         // 17: zvote.v1.MsgCreateValidatorWithPallasKey
 	(*MsgCreateValidatorWithPallasKeyResponse)(nil), // 18: zvote.v1.MsgCreateValidatorWithPallasKeyResponse
-	(*MsgSetVoteManager)(nil),                       // 19: zvote.v1.MsgSetVoteManager
-	(*MsgSetVoteManagerResponse)(nil),               // 20: zvote.v1.MsgSetVoteManagerResponse
-	(*Proposal)(nil),                                // 21: zvote.v1.Proposal
-	(*DealerPayload)(nil),                           // 22: zvote.v1.DealerPayload
+	(*MsgSubmitPartialDecryption)(nil),              // 19: zvote.v1.MsgSubmitPartialDecryption
+	(*PartialDecryptionEntry)(nil),                  // 20: zvote.v1.PartialDecryptionEntry
+	(*MsgSubmitPartialDecryptionResponse)(nil),      // 21: zvote.v1.MsgSubmitPartialDecryptionResponse
+	(*MsgSetVoteManager)(nil),                       // 22: zvote.v1.MsgSetVoteManager
+	(*MsgSetVoteManagerResponse)(nil),               // 23: zvote.v1.MsgSetVoteManagerResponse
+	(*Proposal)(nil),                                // 24: zvote.v1.Proposal
+	(*DealerPayload)(nil),                           // 25: zvote.v1.DealerPayload
 }
 var file_zvote_v1_tx_proto_depIdxs = []int32{
-	21, // 0: zvote.v1.MsgCreateVotingSession.proposals:type_name -> zvote.v1.Proposal
+	24, // 0: zvote.v1.MsgCreateVotingSession.proposals:type_name -> zvote.v1.Proposal
 	9,  // 1: zvote.v1.MsgSubmitTally.entries:type_name -> zvote.v1.TallyEntry
-	22, // 2: zvote.v1.MsgDealExecutiveAuthorityKey.payloads:type_name -> zvote.v1.DealerPayload
-	0,  // 3: zvote.v1.Msg.CreateVotingSession:input_type -> zvote.v1.MsgCreateVotingSession
-	2,  // 4: zvote.v1.Msg.DelegateVote:input_type -> zvote.v1.MsgDelegateVote
-	4,  // 5: zvote.v1.Msg.CastVote:input_type -> zvote.v1.MsgCastVote
-	6,  // 6: zvote.v1.Msg.RevealShare:input_type -> zvote.v1.MsgRevealShare
-	8,  // 7: zvote.v1.Msg.SubmitTally:input_type -> zvote.v1.MsgSubmitTally
-	11, // 8: zvote.v1.Msg.RegisterPallasKey:input_type -> zvote.v1.MsgRegisterPallasKey
-	13, // 9: zvote.v1.Msg.DealExecutiveAuthorityKey:input_type -> zvote.v1.MsgDealExecutiveAuthorityKey
-	15, // 10: zvote.v1.Msg.AckExecutiveAuthorityKey:input_type -> zvote.v1.MsgAckExecutiveAuthorityKey
-	17, // 11: zvote.v1.Msg.CreateValidatorWithPallasKey:input_type -> zvote.v1.MsgCreateValidatorWithPallasKey
-	19, // 12: zvote.v1.Msg.SetVoteManager:input_type -> zvote.v1.MsgSetVoteManager
-	1,  // 13: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
-	3,  // 14: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
-	5,  // 15: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
-	7,  // 16: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
-	10, // 17: zvote.v1.Msg.SubmitTally:output_type -> zvote.v1.MsgSubmitTallyResponse
-	12, // 18: zvote.v1.Msg.RegisterPallasKey:output_type -> zvote.v1.MsgRegisterPallasKeyResponse
-	14, // 19: zvote.v1.Msg.DealExecutiveAuthorityKey:output_type -> zvote.v1.MsgDealExecutiveAuthorityKeyResponse
-	16, // 20: zvote.v1.Msg.AckExecutiveAuthorityKey:output_type -> zvote.v1.MsgAckExecutiveAuthorityKeyResponse
-	18, // 21: zvote.v1.Msg.CreateValidatorWithPallasKey:output_type -> zvote.v1.MsgCreateValidatorWithPallasKeyResponse
-	20, // 22: zvote.v1.Msg.SetVoteManager:output_type -> zvote.v1.MsgSetVoteManagerResponse
-	13, // [13:23] is the sub-list for method output_type
-	3,  // [3:13] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	25, // 2: zvote.v1.MsgDealExecutiveAuthorityKey.payloads:type_name -> zvote.v1.DealerPayload
+	20, // 3: zvote.v1.MsgSubmitPartialDecryption.entries:type_name -> zvote.v1.PartialDecryptionEntry
+	0,  // 4: zvote.v1.Msg.CreateVotingSession:input_type -> zvote.v1.MsgCreateVotingSession
+	2,  // 5: zvote.v1.Msg.DelegateVote:input_type -> zvote.v1.MsgDelegateVote
+	4,  // 6: zvote.v1.Msg.CastVote:input_type -> zvote.v1.MsgCastVote
+	6,  // 7: zvote.v1.Msg.RevealShare:input_type -> zvote.v1.MsgRevealShare
+	8,  // 8: zvote.v1.Msg.SubmitTally:input_type -> zvote.v1.MsgSubmitTally
+	19, // 9: zvote.v1.Msg.SubmitPartialDecryption:input_type -> zvote.v1.MsgSubmitPartialDecryption
+	11, // 10: zvote.v1.Msg.RegisterPallasKey:input_type -> zvote.v1.MsgRegisterPallasKey
+	13, // 11: zvote.v1.Msg.DealExecutiveAuthorityKey:input_type -> zvote.v1.MsgDealExecutiveAuthorityKey
+	15, // 12: zvote.v1.Msg.AckExecutiveAuthorityKey:input_type -> zvote.v1.MsgAckExecutiveAuthorityKey
+	17, // 13: zvote.v1.Msg.CreateValidatorWithPallasKey:input_type -> zvote.v1.MsgCreateValidatorWithPallasKey
+	22, // 14: zvote.v1.Msg.SetVoteManager:input_type -> zvote.v1.MsgSetVoteManager
+	1,  // 15: zvote.v1.Msg.CreateVotingSession:output_type -> zvote.v1.MsgCreateVotingSessionResponse
+	3,  // 16: zvote.v1.Msg.DelegateVote:output_type -> zvote.v1.MsgDelegateVoteResponse
+	5,  // 17: zvote.v1.Msg.CastVote:output_type -> zvote.v1.MsgCastVoteResponse
+	7,  // 18: zvote.v1.Msg.RevealShare:output_type -> zvote.v1.MsgRevealShareResponse
+	10, // 19: zvote.v1.Msg.SubmitTally:output_type -> zvote.v1.MsgSubmitTallyResponse
+	21, // 20: zvote.v1.Msg.SubmitPartialDecryption:output_type -> zvote.v1.MsgSubmitPartialDecryptionResponse
+	12, // 21: zvote.v1.Msg.RegisterPallasKey:output_type -> zvote.v1.MsgRegisterPallasKeyResponse
+	14, // 22: zvote.v1.Msg.DealExecutiveAuthorityKey:output_type -> zvote.v1.MsgDealExecutiveAuthorityKeyResponse
+	16, // 23: zvote.v1.Msg.AckExecutiveAuthorityKey:output_type -> zvote.v1.MsgAckExecutiveAuthorityKeyResponse
+	18, // 24: zvote.v1.Msg.CreateValidatorWithPallasKey:output_type -> zvote.v1.MsgCreateValidatorWithPallasKeyResponse
+	23, // 25: zvote.v1.Msg.SetVoteManager:output_type -> zvote.v1.MsgSetVoteManagerResponse
+	15, // [15:26] is the sub-list for method output_type
+	4,  // [4:15] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_zvote_v1_tx_proto_init() }
@@ -1505,7 +1724,7 @@ func file_zvote_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_v1_tx_proto_rawDesc), len(file_zvote_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
