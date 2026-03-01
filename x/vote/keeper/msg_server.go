@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/crypto/roundid"
@@ -85,9 +86,9 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 	// correct original x-coordinate, even after non-ackers are removed.
 	ceremonyValidators := make([]*types.ValidatorPallasKey, len(eligible))
 	for i, v := range eligible {
-		vCopy := *v
+		vCopy := proto.Clone(v).(*types.ValidatorPallasKey)
 		vCopy.ShamirIndex = uint32(i + 1)
-		ceremonyValidators[i] = &vCopy
+		ceremonyValidators[i] = vCopy
 	}
 
 	ms.k.Logger().Info("CreateVotingSession",

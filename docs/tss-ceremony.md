@@ -17,7 +17,7 @@ TSS replaces the single-key distribution with Shamir secret sharing. The full ke
 For a ceremony with `n` validators:
 
 ```
-t = ceil(n/3) + 1    (for n >= 2)
+t = ceil(n/2)        (for n >= 2, minimum 2)
 t = 0                (legacy mode for n < 2)
 ```
 
@@ -52,7 +52,7 @@ New `VoteRound` fields:
 When a block proposer detects a PENDING round in REGISTERING status and is a ceremony validator:
 
 1. Generate a fresh `ea_sk` and `ea_pk = ea_sk * G`.
-2. Compute `t = ceil(n/3) + 1`.
+2. Compute `t = ceil(n/2)` (minimum 2).
 3. Build a degree-`(t-1)` polynomial `f(x)` over Pallas Fq with `f(0) = ea_sk`:
    ```
    f(x) = ea_sk + a_1*x + a_2*x^2 + ... + a_{t-1}*x^{t-1}

@@ -490,13 +490,13 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		nAcks := len(round.CeremonyAcks)
 		nVals := len(round.CeremonyValidators)
 
-		if keeper.OneThirdAcked(round) {
+		if keeper.HalfAcked(round) {
 			stripped := nVals - nAcks
 
-			// Post-stripping liveness check: the ackers that remain after
-			// stripping must be >= Threshold so that tally can reconstruct the
-			// EA key via Lagrange interpolation. (Threshold == 0 is legacy
-			// single-validator mode; the check does not apply.)
+			// Safety check: the ack quorum (>= 1/2) was designed to match the
+			// TSS threshold (ceil(n/2)), so this branch should never trigger
+			// with a correctly-computed threshold. It guards against a dealer
+			// that published an unusually high threshold value.
 			if round.Threshold > 0 && nAcks < int(round.Threshold) {
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 					fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, %d stripped, remaining %d < threshold %d)",
@@ -521,7 +521,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 					sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
 				))
 			} else {
-				// >= 1/3 acked and remaining ackers meet threshold: strip
+				// >= 1/2 acked and remaining ackers meet threshold: strip
 				// non-ackers (offline/non-responsive), confirm ceremony, activate round.
 				keeper.StripNonAckersFromRound(round)
 				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
@@ -548,7 +548,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				))
 			}
 		} else {
-			// < 1/3 acks: reset ceremony for re-deal by next proposer.
+			// < 1/2 acks: reset ceremony for re-deal by next proposer.
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 				fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, below threshold)", nAcks, nVals))
 

@@ -42,16 +42,19 @@ func sharePathForRound(dir string, roundID []byte) string {
 	return filepath.Join(dir, "share."+hex.EncodeToString(roundID))
 }
 
-// thresholdForN computes the default threshold t = ceil(n/3) + 1.
+// thresholdForN computes the default threshold t = ceil(n/2).
+// This matches the ack requirement (HalfAcked) so that the set of validators
+// that survives ceremony stripping is always large enough to reconstruct the
+// EA key during tally.
 // Returns 0 when n < 2 (threshold splitting is not meaningful for fewer than
 // two validators; callers should fall back to legacy single-key mode).
 func thresholdForN(n int) int {
 	if n < 2 {
 		return 0
 	}
-	t := (n+2)/3 + 1 // ceil(n/3) + 1
-	if t > n {
-		t = n // clamp: with a very small n, t can exceed n
+	t := (n + 1) / 2 // ceil(n/2)
+	if t < 2 {
+		t = 2 // Shamir requires t >= 2; applies only when n=2 gives ceil(2/2)=1
 	}
 	return t
 }
@@ -61,7 +64,7 @@ func thresholdForN(n int) int {
 // ea_sk, and injects a MsgDealExecutiveAuthorityKey.
 //
 // Threshold mode (n >= 2): ea_sk is Shamir-split into (t, n) shares with
-// t = ceil(n/3)+1. Each validator receives ECIES(share_i, pk_i). VK_i = share_i*G
+// t = ceil(n/2). Each validator receives ECIES(share_i, pk_i). VK_i = share_i*G
 // and the threshold value are included in the deal message so validators can verify
 // their share on ack. The dealer's share is written to disk by the ack handler
 // (when the dealer is next the block proposer after DEALT is set), not here.

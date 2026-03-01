@@ -172,7 +172,7 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_GlobalRegistry() {
 // Per-round ceremony helper tests
 // ===========================================================================
 
-func (s *KeeperTestSuite) TestOneThirdAcked() {
+func (s *KeeperTestSuite) TestHalfAcked() {
 	tests := []struct {
 		name   string
 		round  *types.VoteRound
@@ -191,7 +191,32 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 			expect: true,
 		},
 		{
-			name: "exactly 1/3 (1 of 3)",
+			name: "exactly 1/2 (2 of 4)",
+			round: &types.VoteRound{
+				CeremonyValidators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
+					{ValidatorAddress: "val3"}, {ValidatorAddress: "val4"},
+				},
+				CeremonyAcks: []*types.AckEntry{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "exactly ceil(n/2) (2 of 3)",
+			round: &types.VoteRound{
+				CeremonyValidators: []*types.ValidatorPallasKey{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"}, {ValidatorAddress: "val3"},
+				},
+				CeremonyAcks: []*types.AckEntry{
+					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "below 1/2 (1 of 3)",
 			round: &types.VoteRound{
 				CeremonyValidators: []*types.ValidatorPallasKey{
 					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"}, {ValidatorAddress: "val3"},
@@ -200,10 +225,10 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 					{ValidatorAddress: "val1"},
 				},
 			},
-			expect: true,
+			expect: false,
 		},
 		{
-			name: "below 1/3 (1 of 4)",
+			name: "below 1/2 (1 of 4)",
 			round: &types.VoteRound{
 				CeremonyValidators: []*types.ValidatorPallasKey{
 					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
@@ -214,19 +239,6 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 				},
 			},
 			expect: false,
-		},
-		{
-			name: "2 of 4 (50% >= 33%)",
-			round: &types.VoteRound{
-				CeremonyValidators: []*types.ValidatorPallasKey{
-					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
-					{ValidatorAddress: "val3"}, {ValidatorAddress: "val4"},
-				},
-				CeremonyAcks: []*types.AckEntry{
-					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
-				},
-			},
-			expect: true,
 		},
 		{
 			name: "no acks",
@@ -243,7 +255,7 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 			expect: false,
 		},
 		{
-			name: "single validator acked (1/1 >= 1/3)",
+			name: "single validator acked (1/1)",
 			round: &types.VoteRound{
 				CeremonyValidators: []*types.ValidatorPallasKey{{ValidatorAddress: "val1"}},
 				CeremonyAcks:       []*types.AckEntry{{ValidatorAddress: "val1"}},
@@ -254,7 +266,7 @@ func (s *KeeperTestSuite) TestOneThirdAcked() {
 
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
-			s.Require().Equal(tc.expect, keeper.OneThirdAcked(tc.round))
+			s.Require().Equal(tc.expect, keeper.HalfAcked(tc.round))
 		})
 	}
 }
@@ -773,7 +785,11 @@ func (s *MsgServerTestSuite) dealPendingRound(n int) (roundID []byte, addrs []st
 		Payloads:    makePayloads(addrs),
 	}
 	if n >= 2 {
-		msg.Threshold = uint32(n/3 + 2) // valid threshold >= 2
+		t := (n + 1) / 2 // ceil(n/2) — matches thresholdForN
+		if t < 2 {
+			t = 2
+		}
+		msg.Threshold = uint32(t)
 		msg.VerificationKeys = make([][]byte, n)
 		for i := range msg.VerificationKeys {
 			msg.VerificationKeys[i] = testPallasPK()
@@ -788,7 +804,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_HappyPath() {
 	s.SetupTest()
 	roundID, addrs := s.dealPendingRound(3)
 
-	// First ack: fast path requires ALL validators, so 1/3 stays DEALT.
+	// First ack: fast path requires ALL validators, so 1/3 (count) stays DEALT.
 	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
@@ -862,7 +878,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_PartialAcks() {
 	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
 
-	// Second ack: 2 of 4 → still DEALT (>= 1/3 but not all).
+	// Second ack: 2 of 4 → still DEALT (not all).
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[1],
 		VoteRoundId:  roundID,
@@ -1002,7 +1018,7 @@ func (s *MsgServerTestSuite) TestCeremonyLog_DealAndAck() {
 	s.Require().Contains(round.CeremonyLog[0], "deal from")
 	s.Require().Contains(round.CeremonyLog[0], "ea_pk=")
 
-	// Ack from first validator: 1/3 — fast path requires all, stays DEALT.
+	// Ack from first validator: 1 of 3 — fast path requires all, stays DEALT.
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
@@ -1015,7 +1031,7 @@ func (s *MsgServerTestSuite) TestCeremonyLog_DealAndAck() {
 	// deal + ack = 2 entries (no confirm yet).
 	s.Require().Len(round.CeremonyLog, 2, "expected 2 log entries after deal+ack")
 	s.Require().Contains(round.CeremonyLog[1], "ack from")
-	s.Require().Contains(round.CeremonyLog[1], "1/3 acked")
+	s.Require().Contains(round.CeremonyLog[1], "1/3 acked") // "1/3" = count format (1 of 3)
 
 	// Ack all remaining validators to trigger confirm.
 	for _, addr := range addrs[1:] {

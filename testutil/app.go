@@ -38,6 +38,8 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/codec"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/z-cale/zally/app"
 	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/crypto/roundid"
@@ -167,9 +169,9 @@ func (ta *TestApp) SeedTallyingRoundThreshold(
 	indexedValidators := make([]*types.ValidatorPallasKey, len(validators))
 	for i, v := range validators {
 		if v.ShamirIndex == 0 {
-			vCopy := *v
+			vCopy := proto.Clone(v).(*types.ValidatorPallasKey)
 			vCopy.ShamirIndex = uint32(i + 1)
-			indexedValidators[i] = &vCopy
+			indexedValidators[i] = vCopy
 		} else {
 			indexedValidators[i] = v
 		}
