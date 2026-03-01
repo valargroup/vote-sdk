@@ -52,6 +52,7 @@ func init() {
 			ProvideCastVoteSigner,
 			ProvideRevealShareSigner,
 			ProvideSubmitTallySigner,
+			ProvideSubmitPartialDecryptionSigner,
 			ProvideRegisterPallasKeySigner,
 			ProvideDealExecutiveAuthorityKeySigner,
 			ProvideAckExecutiveAuthorityKeySigner,
@@ -159,6 +160,15 @@ func ProvideRevealShareSigner() signing.CustomGetSigner {
 func ProvideSubmitTallySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("zvote.v1.MsgSubmitTally"),
+		Fn:      noopSignerFn,
+	}
+}
+
+// MsgSubmitPartialDecryption stays noop: it is auto-injected by PrepareProposal
+// during the TALLYING phase and never goes through standard Cosmos SDK signing.
+func ProvideSubmitPartialDecryptionSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("zvote.v1.MsgSubmitPartialDecryption"),
 		Fn:      noopSignerFn,
 	}
 }

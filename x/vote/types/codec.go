@@ -18,6 +18,7 @@ func init() {
 	gogoproto.RegisterType((*Proposal)(nil), "zvote.v1.Proposal")
 	gogoproto.RegisterType((*VoteOption)(nil), "zvote.v1.VoteOption")
 	gogoproto.RegisterType((*TallyEntry)(nil), "zvote.v1.TallyEntry")
+	gogoproto.RegisterType((*PartialDecryptionEntry)(nil), "zvote.v1.PartialDecryptionEntry")
 }
 
 // RegisterInterfaces registers the vote module's message types with the
@@ -34,6 +35,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgCastVote{},
 		&MsgRevealShare{},
 		&MsgSubmitTally{},
+		&MsgSubmitPartialDecryption{},
 		&MsgRegisterPallasKey{},
 		&MsgDealExecutiveAuthorityKey{},
 		&MsgAckExecutiveAuthorityKey{},
