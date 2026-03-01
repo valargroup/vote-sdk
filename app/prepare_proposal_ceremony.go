@@ -149,7 +149,7 @@ func CeremonyDealPrepareProposalHandler(
 		eaSk, eaPk := elgamal.KeyGen(rand.Reader)
 		// Zero the secret scalar as soon as we leave this scope so the full key
 		// does not linger in GC-managed memory after shares/encryptions are built.
-		defer eaSk.Scalar.Zero()
+		defer zeroScalar(eaSk.Scalar)
 		eaPkBytes := eaPk.Point.ToAffineCompressed()
 		G := elgamal.PallasGenerator()
 
@@ -163,7 +163,7 @@ func CeremonyDealPrepareProposalHandler(
 			shares           []shamir.Share
 			verificationKeys [][]byte
 		)
-		if t > 0 {
+			if t > 0 {
 			var coeffs []curvey.Scalar
 			shares, coeffs, err = shamir.Split(eaSk.Scalar, t, n)
 			if err != nil {
@@ -174,7 +174,16 @@ func CeremonyDealPrepareProposalHandler(
 			defer func() {
 				for _, c := range coeffs {
 					if c != nil {
-						c.Zero()
+						zeroScalar(c)
+					}
+				}
+			}()
+			// Share values (each f(i)) are equally secret — zero them once payloads
+			// and verification keys have been built so they don't linger on the heap.
+			defer func() {
+				for i := range shares {
+					if shares[i].Value != nil {
+						zeroScalar(shares[i].Value)
 					}
 				}
 			}()
@@ -467,6 +476,16 @@ func CeremonyAckPrepareProposalHandler(
 			"proposer", proposerValAddr,
 			"round", hex.EncodeToString(round.VoteRoundId))
 		return append([][]byte{txBytes}, txs...)
+	}
+}
+
+// zeroScalar overwrites a Pallas scalar's internal limbs in place.
+// curvey.Scalar.Zero() returns a *new* zero scalar without mutating the
+// receiver, so we type-assert to ScalarPallas and call Field4.SetZero()
+// which actually zeroes the memory backing the value.
+func zeroScalar(s curvey.Scalar) {
+	if ps, ok := s.(*curvey.ScalarPallas); ok && ps != nil && ps.Value != nil {
+		ps.Value.SetZero()
 	}
 }
 

@@ -311,6 +311,73 @@ func TestCeremonyDealLegacyStoredOnRound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Share scalar zeroing — defence-in-depth
+//
+// After the deal handler builds payloads and verification keys, the share
+// scalars (fresh f(i) values returned by shamir.Split) must be zeroed to
+// prevent a heap-dump adversary from recovering all n shares and
+// reconstructing ea_sk. This test exercises the zeroing mechanism directly:
+// split, zero shares, assert all Values are the zero scalar.
+// ---------------------------------------------------------------------------
+
+func TestShareScalarsZeroedAfterDeal(t *testing.T) {
+	secret := new(curvey.ScalarPallas).Random(rand.Reader)
+	shares, coeffs, err := shamir.Split(secret, 2, 3)
+	require.NoError(t, err)
+
+	zeroBytes := new(curvey.ScalarPallas).Zero().Bytes()
+
+	// Shares and coefficients must be non-zero before scrubbing.
+	for i, s := range shares {
+		require.NotEqual(t, zeroBytes, s.Value.Bytes(),
+			"share[%d] must be non-zero before zeroing", i)
+	}
+	for i, c := range coeffs {
+		require.NotEqual(t, zeroBytes, c.Bytes(),
+			"coeffs[%d] must be non-zero before zeroing", i)
+	}
+
+	// curvey.Scalar.Zero() is a factory that returns a *new* zero scalar —
+	// it does NOT mutate the receiver. Verify this is indeed the case so the
+	// test is meaningful: if the library ever fixes this, the assertion below
+	// would need updating.
+	probe := new(curvey.ScalarPallas).Random(rand.Reader)
+	probeBytes := probe.Bytes()
+	_ = probe.Zero() // returns new scalar, should NOT touch probe
+	require.Equal(t, probeBytes, probe.Bytes(),
+		"Scalar.Zero() must not mutate receiver (confirms the bug this test guards against)")
+
+	// In-place zeroing via Field4.SetZero() — mirrors the zeroScalar helper
+	// used in the deal handler.
+	inPlaceZero := func(s curvey.Scalar) {
+		if ps, ok := s.(*curvey.ScalarPallas); ok && ps != nil && ps.Value != nil {
+			ps.Value.SetZero()
+		}
+	}
+
+	for i := range shares {
+		if shares[i].Value != nil {
+			inPlaceZero(shares[i].Value)
+		}
+	}
+	for _, c := range coeffs {
+		if c != nil {
+			inPlaceZero(c)
+		}
+	}
+
+	// Every share value must now be the zero scalar.
+	for i, s := range shares {
+		require.Equal(t, zeroBytes, s.Value.Bytes(),
+			"share[%d].Value must be zero after scrubbing", i)
+	}
+	for i, c := range coeffs {
+		require.Equal(t, zeroBytes, c.Bytes(),
+			"coeffs[%d] must be zero after scrubbing", i)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // CeremonyAckPrepareProposalHandler — threshold mode
 //
 // The ack handler must verify share_i * G == VK_i (not ea_pk) and write
