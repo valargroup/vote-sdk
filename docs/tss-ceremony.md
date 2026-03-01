@@ -111,6 +111,57 @@ ct  = ChaCha20-Poly1305(k, nonce=0, plaintext)
 
 The plaintext is `share_i.Bytes()` (32 bytes) in threshold mode, or `ea_sk.Bytes()` (32 bytes) in legacy mode.
 
+### Tally phase
+
+After a round enters TALLYING, partial decryptions are collected and combined.
+
+#### Step 1: submit partial decryptions (`PrepareProposal`)
+
+When a validator is the block proposer and a TALLYING round with `Threshold > 0` exists, and the proposer has not yet submitted for that round:
+
+1. Load `<ea_sk_dir>/share.<hex(round_id)>` from disk (written during ack phase).
+2. For each non-empty ElGamal accumulator `(C1, C2)` on-chain:
+   - Compute `D_i = share_i * C1`.
+3. Inject `MsgSubmitPartialDecryption` with all `(proposal_id, vote_decision, D_i)` entries.
+
+**On-chain `MsgSubmitPartialDecryption` handler** (Step 1, no proof verification):
+- Validates round is TALLYING with `threshold > 0`.
+- Validates `validator_index` is 1-based and matches `creator`.
+- Rejects duplicate submissions (one per validator per round).
+- Validates each entry: 32-byte `partial_decrypt`, valid `proposal_id` and `vote_decision`.
+- Stores all entries via `SetPartialDecryptions` under key `0x12 || round_id || validator_index || proposal_id || decision`.
+
+#### Step 2: combine and finalize (`PrepareProposal`)
+
+When the block proposer detects that `CountPartialDecryptionValidators >= threshold`:
+
+1. Load all stored partial decryptions grouped by accumulator via `GetPartialDecryptionsForRound`.
+2. For each accumulator `(C1, C2)`:
+   - Build `[{Index: i, Di: D_i}]` from all stored entries.
+   - Call `shamir.CombinePartials(partials, threshold)` → `skC1 = ea_sk * C1`.
+   - Compute `v*G = C2 - skC1`.
+   - Run BSGS to solve `v*G → v`.
+3. Inject `MsgSubmitTally` with `(proposal_id, decision, total_value)` per accumulator. No `DecryptionProof` in Step 1.
+
+**On-chain `MsgSubmitTally` handler — threshold verification** (Step 1):
+- For each entry with a non-nil accumulator, re-runs the Lagrange combination from stored partials.
+- Checks `C2 - combined == totalValue * G` by comparing compressed Pallas points.
+- On success, stores `TallyResult`, transitions round to FINALIZED.
+
+**Legacy mode** (threshold == 0): existing Chaum-Pedersen DLEQ proof path unchanged.
+
+#### KV storage layout for partial decryptions
+
+```
+0x12 || round_id (32 bytes) || uint32 BE validator_index
+     || uint32 BE proposal_id || uint32 BE vote_decision
+  → PartialDecryptionEntry (protobuf)
+```
+
+Prefix scans:
+- `0x12 || round_id` — all entries for a round (used by tally combiner)
+- `0x12 || round_id || validator_index` — check if a validator already submitted
+
 ### Security properties
 
 | Property | Legacy | Step 1 (TSS) |
