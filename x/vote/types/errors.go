@@ -27,6 +27,7 @@ var (
 	ErrDuplicateAck           = errors.Register(ModuleName, 25, "validator already acknowledged")
 	ErrNotRegisteredValidator  = errors.Register(ModuleName, 26, "validator not in ceremony validator list")
 	ErrCeremonySessionActive   = errors.Register(ModuleName, 27, "ceremony session is in progress")
+	ErrInvalidThreshold        = errors.Register(ModuleName, 28, "invalid threshold parameters")
 
 	// Vote manager errors.
 	ErrNotAuthorized  = errors.Register(ModuleName, 30, "sender is not authorized")

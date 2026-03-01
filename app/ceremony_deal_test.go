@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
 
@@ -209,6 +210,104 @@ func TestCeremonyDealSkipsWhenProposerNotInValidators(t *testing.T) {
 
 	resp := ta.CallPrepareProposal()
 	require.Empty(t, resp.Txs, "no deal tx should be injected when proposer is not a ceremony validator")
+}
+
+// ---------------------------------------------------------------------------
+// DealExecutiveAuthorityKey — round-trip: deal → FinalizeBlock → read round
+//
+// Exercises the full on-chain path to verify that Threshold and
+// VerificationKeys survive the handler and are persisted to KV. This is the
+// test that was missing — all prior threshold tests bypass the handler by
+// seeding state directly.
+// ---------------------------------------------------------------------------
+
+func TestCeremonyDealThresholdStoredOnRound(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	dealerAddr := ta.ValidatorOperAddr()
+
+	_, pk2 := elgamal.KeyGen(rand.Reader)
+	_, pk3 := elgamal.KeyGen(rand.Reader)
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: dealerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: "zvote1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
+		{ValidatorAddress: "zvote1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk3.Point.ToAffineCompressed()},
+	}
+
+	roundID := ta.SeedRegisteringCeremony(validators)
+
+	// PrepareProposal injects the deal tx.
+	resp := ta.CallPrepareProposal()
+	require.Len(t, resp.Txs, 1)
+
+	tag, protoMsg, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
+	require.NoError(t, err)
+	require.Equal(t, voteapi.TagDealExecutiveAuthorityKey, tag)
+
+	deal := protoMsg.(*types.MsgDealExecutiveAuthorityKey)
+	require.EqualValues(t, 2, deal.Threshold)
+	require.Len(t, deal.VerificationKeys, 3)
+
+	// Deliver the deal tx through FinalizeBlock + Commit.
+	txResult := ta.DeliverVoteTx(resp.Txs[0])
+	require.EqualValues(t, 0, txResult.Code,
+		"deal tx must succeed: %s", txResult.Log)
+
+	// Read the round back from KV and verify TSS fields were persisted.
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+
+	require.EqualValues(t, 2, round.Threshold,
+		"round.Threshold must be persisted by DealExecutiveAuthorityKey handler")
+	require.Len(t, round.VerificationKeys, 3,
+		"round.VerificationKeys must be persisted by DealExecutiveAuthorityKey handler")
+	for i, vk := range round.VerificationKeys {
+		require.Equal(t, deal.VerificationKeys[i], vk,
+			"round.VerificationKeys[%d] must match deal message", i)
+	}
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+}
+
+// ---------------------------------------------------------------------------
+// DealExecutiveAuthorityKey — legacy mode round-trip (n=1)
+//
+// Verifies that Threshold=0 and empty VerificationKeys are stored correctly
+// through the handler for the legacy single-key path.
+// ---------------------------------------------------------------------------
+
+func TestCeremonyDealLegacyStoredOnRound(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	dealerAddr := ta.ValidatorOperAddr()
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: dealerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+	}
+
+	roundID := ta.SeedRegisteringCeremony(validators)
+
+	resp := ta.CallPrepareProposal()
+	require.Len(t, resp.Txs, 1)
+
+	txResult := ta.DeliverVoteTx(resp.Txs[0])
+	require.EqualValues(t, 0, txResult.Code,
+		"legacy deal tx must succeed: %s", txResult.Log)
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+
+	require.EqualValues(t, 0, round.Threshold,
+		"legacy mode must have Threshold=0")
+	require.Empty(t, round.VerificationKeys,
+		"legacy mode must have empty VerificationKeys")
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 }
 
 // ---------------------------------------------------------------------------
