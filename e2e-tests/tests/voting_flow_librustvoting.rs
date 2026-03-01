@@ -13,7 +13,7 @@ use blake2b_simd::Params as Blake2bParams;
 use e2e_tests::{
     api::{
         self, broadcast_cosmos_msg, commitment_tree_next_index, default_cosmos_tx_config,
-        get_json, helper_server_url, import_hex_key,
+        get_json, get_round, helper_server_url, import_hex_key,
         post_json_accept_committed, post_helper_json, tally_has_proposal,
         wait_for_round_status, SESSION_STATUS_ACTIVE, SESSION_STATUS_FINALIZED,
         SESSION_STATUS_TALLYING,
@@ -123,6 +123,29 @@ fn voting_flow_librustvoting_path() {
         .expect("ACTIVE round should have ea_pk set");
     assert_eq!(ea_pk_bytes.len(), 32, "ea_pk must be 32 bytes");
     log_step("Step 1b", &format!("ea_pk from round: {}", hex::encode(&ea_pk_bytes)));
+
+    // Verify TSS fields when multiple validators are present.
+    let round_json = get_round(&round_id_hex).expect("should be able to query ACTIVE round");
+    let threshold = round_json.get("threshold").and_then(|t| t.as_u64()).unwrap_or(0);
+    let vk_count = round_json
+        .get("verificationKeys")
+        .or_else(|| round_json.get("verification_keys"))
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let n_validators = round_json
+        .get("ceremonyValidators")
+        .or_else(|| round_json.get("ceremony_validators"))
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    if n_validators >= 2 {
+        assert!(threshold >= 2, "threshold should be >= 2 for {} validators, got {}", n_validators, threshold);
+        assert_eq!(vk_count, n_validators, "verification_keys count should match validator count");
+        log_step("Step 1b", &format!("TSS mode: threshold={}, verification_keys={}, validators={}", threshold, vk_count, n_validators));
+    } else {
+        log_step("Step 1b", &format!("Legacy mode: threshold={}, validators={}", threshold, n_validators));
+    }
 
     // ---- Step 2: Delegate vote (real ZKP #1) ----
     // The commitment tree is global across rounds/tests. Capture the current
