@@ -22,14 +22,40 @@ use super::circuit::{Circuit, Instance, K};
 const NUM_PUBLIC_INPUTS: usize = 9;
 
 // ================================================================
-// Params / key generation
+// Cached params + keys
+// ================================================================
+
+// Keygen is deterministic and expensive (~30s on device). Compute once
+// per process and reuse for all subsequent proofs and verifications.
+#[cfg(feature = "std")]
+static VOTE_PROOF_PK_CACHE: std::sync::OnceLock<(
+    Params<EqAffine>,
+    plonk::ProvingKey<EqAffine>,
+    plonk::VerifyingKey<EqAffine>,
+)> = std::sync::OnceLock::new();
+
+#[cfg(feature = "std")]
+fn get_vote_proof_keys() -> &'static (Params<EqAffine>, plonk::ProvingKey<EqAffine>, plonk::VerifyingKey<EqAffine>) {
+    VOTE_PROOF_PK_CACHE.get_or_init(|| {
+        let params = Params::new(K);
+        let empty_circuit = Circuit::default();
+        let vk = keygen_vk(&params, &empty_circuit)
+            .expect("vote_proof keygen_vk should not fail");
+        let pk = keygen_pk(&params, vk.clone(), &empty_circuit)
+            .expect("vote_proof keygen_pk should not fail");
+        (params, pk, vk)
+    })
+}
+
+// ================================================================
+// Params / key generation (public API, non-cached fallbacks)
 // ================================================================
 
 /// Generate the IPA params (SRS) for the vote proof circuit.
 /// Deterministic for a given `K`.
 ///
-/// **Expensive**: K=14 params generation takes several seconds.
-/// Callers should cache the result.
+/// Prefer [`get_vote_proof_keys`] when the `std` feature is enabled —
+/// it caches the result across calls.
 pub fn vote_proof_params() -> Params<EqAffine> {
     Params::new(K)
 }
@@ -39,8 +65,8 @@ pub fn vote_proof_params() -> Params<EqAffine> {
 /// Uses `Circuit::default()` (all witnesses unknown) as the empty circuit
 /// for key generation — the same pattern as the Orchard action circuit.
 ///
-/// **Expensive**: first call involves full circuit layout. Callers should
-/// cache the result alongside the params.
+/// Prefer [`get_vote_proof_keys`] when the `std` feature is enabled —
+/// it caches the result across calls.
 pub fn vote_proof_proving_key(
     params: &Params<EqAffine>,
 ) -> (
@@ -65,16 +91,26 @@ pub fn vote_proof_proving_key(
 /// `Instance` (9 public inputs).
 ///
 /// **Expensive**: K=14 proof generation takes ~30-60 seconds in release mode.
+/// Params and keys are cached (with `std`) so only the first call pays keygen.
 pub fn create_vote_proof(circuit: Circuit, instance: &Instance) -> Vec<u8> {
-    let params = vote_proof_params();
-    let (pk, _vk) = vote_proof_proving_key(&params);
+    #[cfg(feature = "std")]
+    let (params, pk, _vk) = get_vote_proof_keys();
+
+    #[cfg(not(feature = "std"))]
+    let (params_owned, pk, _vk) = {
+        let p = vote_proof_params();
+        let (pk, vk) = vote_proof_proving_key(&p);
+        (p, pk, vk)
+    };
+    #[cfg(not(feature = "std"))]
+    let params = &params_owned;
 
     let public_inputs = instance.to_halo2_instance();
 
     let mut transcript = Blake2bWrite::<_, EqAffine, Challenge255<_>>::init(vec![]);
     create_proof(
-        &params,
-        &pk,
+        params,
+        pk,
         &[circuit],
         &[&[&public_inputs]],
         OsRng,
@@ -96,15 +132,24 @@ pub fn verify_vote_proof(
     proof: &[u8],
     instance: &Instance,
 ) -> Result<(), String> {
-    let params = vote_proof_params();
-    let (_pk, vk) = vote_proof_proving_key(&params);
+    #[cfg(feature = "std")]
+    let (params, _pk, vk) = get_vote_proof_keys();
+
+    #[cfg(not(feature = "std"))]
+    let (params_owned, _pk, vk) = {
+        let p = vote_proof_params();
+        let (pk, vk) = vote_proof_proving_key(&p);
+        (p, pk, vk)
+    };
+    #[cfg(not(feature = "std"))]
+    let params = &params_owned;
 
     let public_inputs = instance.to_halo2_instance();
 
-    let strategy = SingleVerifier::new(&params);
+    let strategy = SingleVerifier::new(params);
     let mut transcript = Blake2bRead::<_, EqAffine, Challenge255<_>>::init(proof);
 
-    verify_proof(&params, &vk, strategy, &[&[&public_inputs]], &mut transcript)
+    verify_proof(params, vk, strategy, &[&[&public_inputs]], &mut transcript)
         .map_err(|e| format!("vote proof verification failed: {:?}", e))
 }
 
@@ -149,15 +194,24 @@ pub fn verify_vote_proof_raw(
         }
     }
 
-    let params = vote_proof_params();
-    let (_pk, vk) = vote_proof_proving_key(&params);
+    #[cfg(feature = "std")]
+    let (params, _pk, vk) = get_vote_proof_keys();
 
-    let strategy = SingleVerifier::new(&params);
+    #[cfg(not(feature = "std"))]
+    let (params_owned, _pk, vk) = {
+        let p = vote_proof_params();
+        let (pk, vk) = vote_proof_proving_key(&p);
+        (p, pk, vk)
+    };
+    #[cfg(not(feature = "std"))]
+    let params = &params_owned;
+
+    let strategy = SingleVerifier::new(params);
     let mut transcript = Blake2bRead::<_, EqAffine, Challenge255<_>>::init(proof);
 
     verify_proof(
-        &params,
-        &vk,
+        params,
+        vk,
         strategy,
         &[&[&public_inputs]],
         &mut transcript,
