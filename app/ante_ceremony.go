@@ -68,10 +68,11 @@ func ceremonyValidatorRequired(msg sdk.Msg) (string, bool) {
 	}
 }
 
-// CeremonyFeeExemptDecorator grants an infinite gas meter and skips fee
-// deduction for transactions that contain only ceremony messages. Ceremony
-// messages are free — validators should not need to pay gas to participate
-// in the EA key ceremony or chain governance operations.
+// CeremonyFeeExemptDecorator grants an infinite gas meter to all standard
+// Cosmos transactions. This chain is fee-free — no DeductFeeDecorator is
+// present and MinGasPrices is 0. The infinite gas meter prevents "out of
+// gas" failures for any message type (bank sends, slashing unjails, etc.)
+// without requiring callers to estimate gas.
 type CeremonyFeeExemptDecorator struct{}
 
 func NewCeremonyFeeExemptDecorator() CeremonyFeeExemptDecorator {
@@ -79,40 +80,6 @@ func NewCeremonyFeeExemptDecorator() CeremonyFeeExemptDecorator {
 }
 
 func (d CeremonyFeeExemptDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
-	if isCeremonyOnlyTx(tx) {
-		ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
-	}
+	ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
 	return next(ctx, tx, simulate)
-}
-
-// isCeremonyOnlyTx returns true if every message in the transaction is a
-// ceremony message type (standard Cosmos tx path).
-func isCeremonyOnlyTx(tx sdk.Tx) bool {
-	msgs := tx.GetMsgs()
-	if len(msgs) == 0 {
-		return false
-	}
-	for _, msg := range msgs {
-		if !isCeremonyMsg(msg) {
-			return false
-		}
-	}
-	return true
-}
-
-// isCeremonyMsg returns true if the message is a ceremony or governance type
-// that flows through the standard Cosmos SDK transaction path.
-// MsgCreateVotingSession is included here because it requires signature
-// verification (the vote manager must sign) rather than ZKP authentication.
-func isCeremonyMsg(msg sdk.Msg) bool {
-	switch msg.(type) {
-	case *types.MsgRegisterPallasKey,
-		*types.MsgDealExecutiveAuthorityKey,
-		*types.MsgCreateValidatorWithPallasKey,
-		*types.MsgSetVoteManager,
-		*types.MsgCreateVotingSession:
-		return true
-	default:
-		return false
-	}
 }
