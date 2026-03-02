@@ -101,7 +101,6 @@ func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote 
 		SpendAuthSig:        bytes.Repeat([]byte{0x02}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0x03}, 32),
 		CmxNew:              FpLE(0x80 + uint64(nullifierSeed)),
-		EncMemo:             bytes.Repeat([]byte{0x05}, 64),
 		VanCmx:              FpLE(0x90 + uint64(nullifierSeed)),
 		GovNullifiers: [][]byte{
 			MakeNullifier(nullifierSeed),

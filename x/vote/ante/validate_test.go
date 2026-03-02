@@ -155,7 +155,6 @@ func newValidMsgDelegateVote() *types.MsgDelegateVote {
 		SpendAuthSig:        bytes.Repeat([]byte{0xBB}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
 		CmxNew:              bytes.Repeat([]byte{0xDD}, 32),
-		EncMemo:             bytes.Repeat([]byte{0xEE}, 64),
 		VanCmx:              bytes.Repeat([]byte{0xFF}, 32),
 		GovNullifiers: [][]byte{
 			bytes.Repeat([]byte{0x11}, 32),

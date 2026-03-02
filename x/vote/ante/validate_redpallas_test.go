@@ -55,7 +55,6 @@ func TestRedPallasDelegationValidSig(t *testing.T) {
 		Sighash:             sighash, // 32-byte sighash the signature covers
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
-		EncMemo:             make([]byte, 64),
 		VanCmx:              make([]byte, 32),
 		GovNullifiers: [][]byte{
 			make([]byte, 32),
@@ -97,7 +96,6 @@ func TestRedPallasDelegationWrongSig(t *testing.T) {
 		Sighash:             sighash,  // same sighash — wrong sig should still fail
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
-		EncMemo:             make([]byte, 64),
 		VanCmx:              make([]byte, 32),
 		GovNullifiers: [][]byte{
 			make([]byte, 32),

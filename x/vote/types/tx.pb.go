@@ -217,7 +217,6 @@ type MsgDelegateVote struct {
 	SpendAuthSig        []byte                 `protobuf:"bytes,2,opt,name=spend_auth_sig,json=spendAuthSig,proto3" json:"spend_auth_sig,omitempty"`                      // RedPallas signature
 	SignedNoteNullifier []byte                 `protobuf:"bytes,3,opt,name=signed_note_nullifier,json=signedNoteNullifier,proto3" json:"signed_note_nullifier,omitempty"` // Nullifier of the dummy signed note
 	CmxNew              []byte                 `protobuf:"bytes,4,opt,name=cmx_new,json=cmxNew,proto3" json:"cmx_new,omitempty"`                                          // Output note commitment
-	EncMemo             []byte                 `protobuf:"bytes,5,opt,name=enc_memo,json=encMemo,proto3" json:"enc_memo,omitempty"`                                       // Encrypted memo
 	VanCmx              []byte                 `protobuf:"bytes,6,opt,name=van_cmx,json=vanCmx,proto3" json:"van_cmx,omitempty"`                                          // Vote authority note commitment
 	GovNullifiers       [][]byte               `protobuf:"bytes,7,rep,name=gov_nullifiers,json=govNullifiers,proto3" json:"gov_nullifiers,omitempty"`                     // Up to 5 governance nullifiers
 	Proof               []byte                 `protobuf:"bytes,8,opt,name=proof,proto3" json:"proof,omitempty"`                                                          // Halo2 ZKP #1
@@ -281,13 +280,6 @@ func (x *MsgDelegateVote) GetSignedNoteNullifier() []byte {
 func (x *MsgDelegateVote) GetCmxNew() []byte {
 	if x != nil {
 		return x.CmxNew
-	}
-	return nil
-}
-
-func (x *MsgDelegateVote) GetEncMemo() []byte {
-	if x != nil {
-		return x.EncMemo
 	}
 	return nil
 }
@@ -1530,13 +1522,12 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\vdescription\x18\f \x01(\tR\vdescription\x12\x14\n" +
 	"\x05title\x18\r \x01(\tR\x05title\"D\n" +
 	"\x1eMsgCreateVotingSessionResponse\x12\"\n" +
-	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xc3\x02\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xa8\x02\n" +
 	"\x0fMsgDelegateVote\x12\x0e\n" +
 	"\x02rk\x18\x01 \x01(\fR\x02rk\x12$\n" +
 	"\x0espend_auth_sig\x18\x02 \x01(\fR\fspendAuthSig\x122\n" +
 	"\x15signed_note_nullifier\x18\x03 \x01(\fR\x13signedNoteNullifier\x12\x17\n" +
-	"\acmx_new\x18\x04 \x01(\fR\x06cmxNew\x12\x19\n" +
-	"\benc_memo\x18\x05 \x01(\fR\aencMemo\x12\x17\n" +
+	"\acmx_new\x18\x04 \x01(\fR\x06cmxNew\x12\x17\n" +
 	"\avan_cmx\x18\x06 \x01(\fR\x06vanCmx\x12%\n" +
 	"\x0egov_nullifiers\x18\a \x03(\fR\rgovNullifiers\x12\x14\n" +
 	"\x05proof\x18\b \x01(\fR\x05proof\x12\"\n" +

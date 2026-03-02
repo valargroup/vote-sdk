@@ -14,7 +14,6 @@ type DelegationInputs struct {
 	Rk                  []byte   // Randomized spend auth key (32 bytes)
 	SignedNoteNullifier []byte   // Nullifier of the dummy signed note
 	CmxNew              []byte   // Output note commitment
-	EncMemo             []byte   // Encrypted memo
 	VanCmx              []byte   // Vote authority note commitment
 	GovNullifiers       [][]byte // Up to 5 governance nullifiers
 	VoteRoundId         []byte   // The vote round this delegation belongs to

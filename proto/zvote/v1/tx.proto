@@ -55,7 +55,6 @@ message MsgDelegateVote {
   bytes spend_auth_sig         = 2;  // RedPallas signature
   bytes signed_note_nullifier  = 3;  // Nullifier of the dummy signed note
   bytes cmx_new                = 4;  // Output note commitment
-  bytes enc_memo               = 5;  // Encrypted memo
   bytes van_cmx                = 6;  // Vote authority note commitment
   repeated bytes gov_nullifiers = 7; // Up to 5 governance nullifiers
   bytes proof                  = 8;  // Halo2 ZKP #1

@@ -70,7 +70,6 @@ func TestHalo2DelegationValidProof(t *testing.T) {
 		SpendAuthSig:        make([]byte, 64),
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
-		EncMemo:             make([]byte, 64),
 		VanCmx:              publicInput, // 32-byte toy circuit public input
 		GovNullifiers: [][]byte{
 			make([]byte, 32),
@@ -110,7 +109,6 @@ func TestHalo2DelegationWrongInput(t *testing.T) {
 		SpendAuthSig:        make([]byte, 64),
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
-		EncMemo:             make([]byte, 64),
 		VanCmx:              wrongInput, // wrong public input
 		GovNullifiers: [][]byte{
 			make([]byte, 32),
