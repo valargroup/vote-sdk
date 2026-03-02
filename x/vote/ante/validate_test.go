@@ -168,7 +168,7 @@ func newValidMsgDelegateVote() *types.MsgDelegateVote {
 }
 
 func newValidMsgCastVote() *types.MsgCastVote {
-	msg := &types.MsgCastVote{
+	return &types.MsgCastVote{
 		VanNullifier:             bytes.Repeat([]byte{0x33}, 32),
 		RVpkX:                    bytes.Repeat([]byte{0x3a}, 32),
 		RVpkY:                    bytes.Repeat([]byte{0x3b}, 32),
@@ -180,10 +180,7 @@ func newValidMsgCastVote() *types.MsgCastVote {
 		VoteCommTreeAnchorHeight: 10,
 		VoteAuthSig:              bytes.Repeat([]byte{0xBB}, 64),
 		RVpk:                     bytes.Repeat([]byte{0x3c}, 32),
-		Sighash:                  make([]byte, 32), // overwritten below
 	}
-	msg.Sighash = types.ComputeCastVoteSighash(msg)
-	return msg
 }
 
 func newValidMsgRevealShare() *types.MsgRevealShare {
@@ -730,18 +727,6 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 			errContains: "vote_auth_sig",
 		},
 		{
-			name: "invalid: sighash wrong length",
-			msg: func() types.VoteMessage {
-				m := newValidMsgCastVote()
-				m.Sighash = bytes.Repeat([]byte{0x01}, 16) // 16 instead of 32
-				return m
-			},
-			opts:        mockOpts(),
-			setup:       func() { s.setupActiveRound() },
-			expectErr:   true,
-			errContains: "sighash must be 32 bytes",
-		},
-		{
 			name: "invalid: r_vpk wrong length",
 			msg: func() types.VoteMessage {
 				m := newValidMsgCastVote()
@@ -752,18 +737,6 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
 			errContains: "r_vpk must be 32 bytes",
-		},
-		{
-			name: "invalid: sighash does not match message",
-			msg: func() types.VoteMessage {
-				m := newValidMsgCastVote()
-				m.Sighash = bytes.Repeat([]byte{0x99}, 32) // wrong; must equal ComputeCastVoteSighash(m)
-				return m
-			},
-			opts:        mockOpts(),
-			setup:       func() { s.setupActiveRound() },
-			expectErr:   true,
-			errContains: "sighash does not match",
 		},
 		// --- Signature verification failure ---
 		{
@@ -1231,19 +1204,6 @@ func (s *ValidateTestSuite) TestValidateVoteTx_ValidationOrder() {
 			setup: func() { s.setupActiveRound() },
 			// Should get invalid-signature, not invalid-proof.
 			errContains: "invalid RedPallas signature",
-		},
-		// CastVote ordering: sighash check fires before sig check.
-		{
-			name: "CastVote: sighash mismatch fires before sig check",
-			msg: func() types.VoteMessage {
-				m := newValidMsgCastVote()
-				m.Sighash = bytes.Repeat([]byte{0x99}, 32) // wrong sighash
-				return m
-			},
-			opts:  failSigOpts(),
-			setup: func() { s.setupActiveRound() },
-			// Should get sighash-mismatch, not invalid-signature.
-			errContains: "sighash does not match",
 		},
 		// CastVote ordering: sig check fires before ZKP check.
 		{

@@ -78,7 +78,7 @@ message MsgCastVote {
   bytes  r_vpk_x                      = 8;  // Pallas Fp: x-coordinate of randomized voting key (condition 4)
   bytes  r_vpk_y                      = 9;  // Pallas Fp: y-coordinate of randomized voting key (condition 4)
   bytes  vote_auth_sig                = 10; // RedPallas signature under randomized voting key
-  bytes  sighash                      = 11; // Client-provided canonical sighash (32 bytes)
+  // Field 11 removed: sighash is now computed on-chain via ComputeCastVoteSighash.
   bytes  r_vpk                        = 12; // Compressed Pallas point (32 bytes) for sig verification
 }
 
