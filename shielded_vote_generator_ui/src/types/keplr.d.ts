@@ -42,9 +42,6 @@ interface Keplr {
   experimentalSuggestChain(chainInfo: KeplrChainInfo): Promise<void>;
   enable(chainId: string): Promise<void>;
   getOfflineSigner(chainId: string): OfflineDirectSigner;
-  // Returns a signer locked to SIGN_MODE_DIRECT — Keplr cannot override the
-  // fee embedded in authInfoBytes, so the zero-fee policy is enforced.
-  getOfflineSignerOnlyDirect(chainId: string): OfflineDirectSigner;
   signArbitrary(chainId: string, signer: string, data: string): Promise<KeplrSignArbitraryResult>;
 }
 

@@ -88,12 +88,7 @@ export async function connectKeplr(restUrl: string, rpcUrl: string): Promise<Wal
   await window.keplr.enable(chainId);
   keplrChainId = chainId;
 
-  // Use getOfflineSignerOnlyDirect to lock Keplr into SIGN_MODE_DIRECT.
-  // With the combined getOfflineSigner Keplr can fall back to amino mode and
-  // override the fee using its registered gas price (0.025 uzvote/gas ×
-  // 200 000 gas = 0.005 ZVOTE). In direct mode the fee is taken verbatim
-  // from authInfoBytes, which we always set to zero.
-  const signer = window.keplr.getOfflineSignerOnlyDirect(chainId);
+  const signer = window.keplr.getOfflineSigner(chainId);
   const [account] = await signer.getAccounts();
 
   return { signer, address: account.address };
