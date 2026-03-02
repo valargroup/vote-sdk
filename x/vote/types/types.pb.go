@@ -1087,17 +1087,19 @@ func (x *OptionSummary) GetTotalValue() uint64 {
 
 // CeremonyState tracks the singleton EA key ceremony lifecycle.
 type CeremonyState struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        CeremonyStatus         `protobuf:"varint,1,opt,name=status,proto3,enum=zvote.v1.CeremonyStatus" json:"status,omitempty"`
-	EaPk          []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                          // Set when DealerTx lands
-	Validators    []*ValidatorPallasKey  `protobuf:"bytes,3,rep,name=validators,proto3" json:"validators,omitempty"`                          // All registered pk_i
-	Payloads      []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                              // ECIES envelopes from DealerTx
-	Acks          []*AckEntry            `protobuf:"bytes,5,rep,name=acks,proto3" json:"acks,omitempty"`                                      // Per-validator ack status
-	Dealer        string                 `protobuf:"bytes,6,opt,name=dealer,proto3" json:"dealer,omitempty"`                                  // Validator address of the dealer
-	PhaseStart    uint64                 `protobuf:"varint,7,opt,name=phase_start,json=phaseStart,proto3" json:"phase_start,omitempty"`       // Unix seconds when current phase started
-	PhaseTimeout  uint64                 `protobuf:"varint,8,opt,name=phase_timeout,json=phaseTimeout,proto3" json:"phase_timeout,omitempty"` // Timeout in seconds for current phase
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Status           CeremonyStatus         `protobuf:"varint,1,opt,name=status,proto3,enum=zvote.v1.CeremonyStatus" json:"status,omitempty"`
+	EaPk             []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                                      // Set when DealerTx lands
+	Validators       []*ValidatorPallasKey  `protobuf:"bytes,3,rep,name=validators,proto3" json:"validators,omitempty"`                                      // All registered pk_i
+	Payloads         []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                                          // ECIES envelopes from DealerTx
+	Acks             []*AckEntry            `protobuf:"bytes,5,rep,name=acks,proto3" json:"acks,omitempty"`                                                  // Per-validator ack status
+	Dealer           string                 `protobuf:"bytes,6,opt,name=dealer,proto3" json:"dealer,omitempty"`                                              // Validator address of the dealer
+	PhaseStart       uint64                 `protobuf:"varint,7,opt,name=phase_start,json=phaseStart,proto3" json:"phase_start,omitempty"`                   // Unix seconds when current phase started
+	PhaseTimeout     uint64                 `protobuf:"varint,8,opt,name=phase_timeout,json=phaseTimeout,proto3" json:"phase_timeout,omitempty"`             // Timeout in seconds for current phase
+	Threshold        uint32                 `protobuf:"varint,9,opt,name=threshold,proto3" json:"threshold,omitempty"`                                       // Minimum shares for reconstruction (0 = legacy single-key mode)
+	VerificationKeys [][]byte               `protobuf:"bytes,10,rep,name=verification_keys,json=verificationKeys,proto3" json:"verification_keys,omitempty"` // VK_i = f(i)*G per validator (32-byte compressed Pallas points)
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *CeremonyState) Reset() {
@@ -1184,6 +1186,20 @@ func (x *CeremonyState) GetPhaseTimeout() uint64 {
 		return x.PhaseTimeout
 	}
 	return 0
+}
+
+func (x *CeremonyState) GetThreshold() uint32 {
+	if x != nil {
+		return x.Threshold
+	}
+	return 0
+}
+
+func (x *CeremonyState) GetVerificationKeys() [][]byte {
+	if x != nil {
+		return x.VerificationKeys
+	}
+	return nil
 }
 
 // ValidatorPallasKey records a validator's registered Pallas public key.
@@ -1464,7 +1480,7 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12!\n" +
 	"\fballot_count\x18\x03 \x01(\x04R\vballotCount\x12\x1f\n" +
 	"\vtotal_value\x18\x04 \x01(\x04R\n" +
-	"totalValue\"\xcf\x02\n" +
+	"totalValue\"\x9a\x03\n" +
 	"\rCeremonyState\x120\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.zvote.v1.CeremonyStatusR\x06status\x12\x13\n" +
 	"\x05ea_pk\x18\x02 \x01(\fR\x04eaPk\x12<\n" +
@@ -1476,7 +1492,10 @@ const file_zvote_v1_types_proto_rawDesc = "" +
 	"\x06dealer\x18\x06 \x01(\tR\x06dealer\x12\x1f\n" +
 	"\vphase_start\x18\a \x01(\x04R\n" +
 	"phaseStart\x12#\n" +
-	"\rphase_timeout\x18\b \x01(\x04R\fphaseTimeout\"\x81\x01\n" +
+	"\rphase_timeout\x18\b \x01(\x04R\fphaseTimeout\x12\x1c\n" +
+	"\tthreshold\x18\t \x01(\rR\tthreshold\x12+\n" +
+	"\x11verification_keys\x18\n" +
+	" \x03(\fR\x10verificationKeys\"\x81\x01\n" +
 	"\x12ValidatorPallasKey\x12+\n" +
 	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12\x1b\n" +
 	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\x12!\n" +

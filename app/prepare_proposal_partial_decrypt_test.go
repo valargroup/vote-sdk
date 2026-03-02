@@ -237,22 +237,6 @@ func TestPartialDecryptInjector_Skips(t *testing.T) {
 				ta.WriteShareForRound(pdRound, shareBytes)
 			},
 		},
-		{
-			name: "no tally accumulators (no votes yet)",
-			setup: func(t *testing.T, ta *testutil.TestApp, proposerAddr string, pallasPk *elgamal.PublicKey, _ *elgamal.PublicKey) {
-				share, _ := elgamal.KeyGen(rand.Reader)
-				G := elgamal.PallasGenerator()
-				vk := G.Mul(share.Scalar).ToAffineCompressed()
-				validators := []*types.ValidatorPallasKey{
-					{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-				}
-				// TALLYING round but no ciphertexts stored
-				ta.SeedTallyingRoundThreshold(pdRound, 1, sampleProposals(), validators, [][]byte{vk})
-
-				shareBytes, _ := elgamal.MarshalSecretKey(share)
-				ta.WriteShareForRound(pdRound, shareBytes)
-			},
-		},
 	}
 
 	for _, tc := range cases {
@@ -267,4 +251,33 @@ func TestPartialDecryptInjector_Skips(t *testing.T) {
 				"injector should not fire for case %q", tc.name)
 		})
 	}
+}
+
+// TestPartialDecryptInjector_Skips_ZeroAccumulators verifies that the partial
+// decrypt injector does NOT fire when there are no tally accumulators.
+// The tally handler DOES fire (injecting an empty MsgSubmitTally to finalize
+// the zero-vote round), so we verify the injected tx is a tally, not a partial.
+func TestPartialDecryptInjector_Skips_ZeroAccumulators(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	require.NotEmpty(t, ta.EaSkDir)
+
+	proposerAddr := ta.ValidatorOperAddr()
+
+	share, _ := elgamal.KeyGen(rand.Reader)
+	G := elgamal.PallasGenerator()
+	vk := G.Mul(share.Scalar).ToAffineCompressed()
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+	}
+	ta.SeedTallyingRoundThreshold(pdRound, 1, sampleProposals(), validators, [][]byte{vk})
+
+	shareBytes, _ := elgamal.MarshalSecretKey(share)
+	ta.WriteShareForRound(pdRound, shareBytes)
+
+	resp := ta.CallPrepareProposal()
+	require.Len(t, resp.Txs, 1,
+		"tally handler should inject MsgSubmitTally for zero-vote round")
+
+	require.Equal(t, byte(voteapi.TagSubmitTally), resp.Txs[0][0],
+		"injected tx should be a tally, not a partial decryption")
 }

@@ -278,3 +278,77 @@ func TestDecryptRoundTalliesThreshold(t *testing.T) {
 		})
 	}
 }
+
+// TestRoundHasAccumulators verifies that roundHasAccumulators correctly
+// distinguishes rounds with zero votes from rounds with at least one
+// accumulator entry.
+func TestRoundHasAccumulators(t *testing.T) {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+
+	proposals := []*types.Proposal{
+		{Id: 1, Title: "P1", Options: []*types.VoteOption{{Index: 0, Label: "Yes"}, {Index: 1, Label: "No"}}},
+		{Id: 2, Title: "P2", Options: []*types.VoteOption{{Index: 0, Label: "Yes"}, {Index: 1, Label: "No"}}},
+	}
+
+	t.Run("no accumulators", func(t *testing.T) {
+		k, ctx := newTallyThresholdTestKV(t)
+		kvStore := k.OpenKVStore(ctx)
+
+		round := &types.VoteRound{
+			VoteRoundId: roundID,
+			Proposals:   proposals,
+			Threshold:   2,
+		}
+		require.NoError(t, k.SetVoteRound(kvStore, round))
+
+		has, err := roundHasAccumulators(kvStore, k, round)
+		require.NoError(t, err)
+		require.False(t, has, "should be false when no votes were cast")
+	})
+
+	t.Run("one accumulator in first proposal", func(t *testing.T) {
+		k, ctx := newTallyThresholdTestKV(t)
+		kvStore := k.OpenKVStore(ctx)
+
+		_, eaPk := elgamal.KeyGen(rand.Reader)
+		ct, err := elgamal.Encrypt(eaPk, 42, rand.Reader)
+		require.NoError(t, err)
+		ctBytes, err := elgamal.MarshalCiphertext(ct)
+		require.NoError(t, err)
+		require.NoError(t, k.AddToTally(kvStore, roundID, 1, 0, ctBytes))
+
+		round := &types.VoteRound{
+			VoteRoundId: roundID,
+			Proposals:   proposals,
+			Threshold:   2,
+		}
+		require.NoError(t, k.SetVoteRound(kvStore, round))
+
+		has, err := roundHasAccumulators(kvStore, k, round)
+		require.NoError(t, err)
+		require.True(t, has, "should be true when at least one vote was cast")
+	})
+
+	t.Run("accumulator only in second proposal", func(t *testing.T) {
+		k, ctx := newTallyThresholdTestKV(t)
+		kvStore := k.OpenKVStore(ctx)
+
+		_, eaPk := elgamal.KeyGen(rand.Reader)
+		ct, err := elgamal.Encrypt(eaPk, 7, rand.Reader)
+		require.NoError(t, err)
+		ctBytes, err := elgamal.MarshalCiphertext(ct)
+		require.NoError(t, err)
+		require.NoError(t, k.AddToTally(kvStore, roundID, 2, 1, ctBytes))
+
+		round := &types.VoteRound{
+			VoteRoundId: roundID,
+			Proposals:   proposals,
+			Threshold:   2,
+		}
+		require.NoError(t, k.SetVoteRound(kvStore, round))
+
+		has, err := roundHasAccumulators(kvStore, k, round)
+		require.NoError(t, err)
+		require.True(t, has, "should detect accumulator even in later proposals")
+	})
+}

@@ -196,14 +196,16 @@ func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCerem
 
 	// Map per-round ceremony fields to legacy CeremonyState shape.
 	state := &types.CeremonyState{
-		Status:       source.CeremonyStatus,
-		EaPk:         source.EaPk,
-		Validators:   source.CeremonyValidators,
-		Payloads:     source.CeremonyPayloads,
-		Acks:         source.CeremonyAcks,
-		Dealer:       source.CeremonyDealer,
-		PhaseStart:   source.CeremonyPhaseStart,
-		PhaseTimeout: source.CeremonyPhaseTimeout,
+		Status:           source.CeremonyStatus,
+		EaPk:             source.EaPk,
+		Validators:       source.CeremonyValidators,
+		Payloads:         source.CeremonyPayloads,
+		Acks:             source.CeremonyAcks,
+		Dealer:           source.CeremonyDealer,
+		PhaseStart:       source.CeremonyPhaseStart,
+		PhaseTimeout:     source.CeremonyPhaseTimeout,
+		Threshold:        source.Threshold,
+		VerificationKeys: source.VerificationKeys,
 	}
 
 	return &types.QueryCeremonyStateResponse{Ceremony: state}, nil

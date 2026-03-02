@@ -149,24 +149,36 @@ func TallyPrepareProposalHandler(
 		var entries []*types.TallyEntry
 
 		if tallyRound.Threshold > 0 {
-			// Threshold mode: wait until t validators have submitted partial decryptions.
-			validatorCount, err := voteKeeper.CountPartialDecryptionValidators(kvStore, tallyRound.VoteRoundId)
+			// Check whether any votes were cast (non-empty tally accumulators).
+			hasAccumulators, err := roundHasAccumulators(kvStore, voteKeeper, tallyRound)
 			if err != nil {
-				logger.Error("PrepareProposal: failed to count partial decryptions", "err", err)
-				return &abci.ResponsePrepareProposal{Txs: txs}, nil
-			}
-			if validatorCount < int(tallyRound.Threshold) {
-				logger.Info("PrepareProposal: waiting for threshold partial decryptions",
-					"round", hex.EncodeToString(tallyRound.VoteRoundId),
-					"have", validatorCount, "need", tallyRound.Threshold)
+				logger.Error("PrepareProposal: failed to check tally accumulators", "err", err)
 				return &abci.ResponsePrepareProposal{Txs: txs}, nil
 			}
 
-			entries, err = decryptRoundTalliesThreshold(kvStore, voteKeeper, tallyRound, loadBSGS())
-			if err != nil {
-				logger.Error("PrepareProposal: threshold tally decryption failed",
-					"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
-				return &abci.ResponsePrepareProposal{Txs: txs}, nil
+			if hasAccumulators {
+				// Threshold mode: wait until t validators have submitted partial decryptions.
+				validatorCount, err := voteKeeper.CountPartialDecryptionValidators(kvStore, tallyRound.VoteRoundId)
+				if err != nil {
+					logger.Error("PrepareProposal: failed to count partial decryptions", "err", err)
+					return &abci.ResponsePrepareProposal{Txs: txs}, nil
+				}
+				if validatorCount < int(tallyRound.Threshold) {
+					logger.Info("PrepareProposal: waiting for threshold partial decryptions",
+						"round", hex.EncodeToString(tallyRound.VoteRoundId),
+						"have", validatorCount, "need", tallyRound.Threshold)
+					return &abci.ResponsePrepareProposal{Txs: txs}, nil
+				}
+
+				entries, err = decryptRoundTalliesThreshold(kvStore, voteKeeper, tallyRound, loadBSGS())
+				if err != nil {
+					logger.Error("PrepareProposal: threshold tally decryption failed",
+						"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
+					return &abci.ResponsePrepareProposal{Txs: txs}, nil
+				}
+			} else {
+				logger.Info("PrepareProposal: no votes cast, finalizing with empty tally",
+					"round", hex.EncodeToString(tallyRound.VoteRoundId))
 			}
 		} else {
 			// Legacy mode: decrypt with the full ea_sk loaded from disk.
@@ -345,4 +357,25 @@ func decryptRoundTalliesThreshold(
 	}
 
 	return entries, nil
+}
+
+// roundHasAccumulators reports whether any (proposal, decision) tally
+// accumulator is non-empty for the given round, i.e. at least one vote was
+// cast. Used to distinguish the zero-vote case, which can be finalized
+// immediately without waiting for partial decryptions.
+func roundHasAccumulators(
+	kvStore store.KVStore,
+	voteKeeper *votekeeper.Keeper,
+	round *types.VoteRound,
+) (bool, error) {
+	for _, proposal := range round.Proposals {
+		tallyMap, err := voteKeeper.GetProposalTally(kvStore, round.VoteRoundId, proposal.Id)
+		if err != nil {
+			return false, err
+		}
+		if len(tallyMap) > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }

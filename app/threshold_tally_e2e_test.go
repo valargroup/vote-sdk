@@ -285,3 +285,74 @@ func TestThresholdTallyLifecycle_WaitsForThreshold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, count, "no partial decryptions should have been submitted")
 }
+
+// TestThresholdTallyLifecycle_ZeroVotes verifies that a threshold-mode round
+// with zero votes (no tally accumulators) auto-finalizes instead of getting
+// stuck in TALLYING forever. Without the zero-vote fix, the partial decrypt
+// injector would never fire (nothing to decrypt) and the tally combiner would
+// wait indefinitely for partial decryptions that can never arrive.
+func TestThresholdTallyLifecycle_ZeroVotes(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	require.NotEmpty(t, ta.EaSkDir)
+
+	proposerAddr := ta.ValidatorOperAddr()
+	G := elgamal.PallasGenerator()
+
+	eaSk, _ := elgamal.KeyGen(rand.Reader)
+	shares, _, err := shamir.Split(eaSk.Scalar, 2, 2)
+	require.NoError(t, err)
+
+	_, v2Pk := elgamal.KeyGen(rand.Reader)
+	v2Addr := sdk.ValAddress([]byte("phantom-validator-2-------")).String()
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: v2Addr, PallasPk: v2Pk.Point.ToAffineCompressed()},
+	}
+	vks := [][]byte{
+		G.Mul(shares[0].Value).ToAffineCompressed(),
+		G.Mul(shares[1].Value).ToAffineCompressed(),
+	}
+
+	proposals := []*types.Proposal{
+		{Id: 1, Title: "Prop 1", Options: []*types.VoteOption{
+			{Index: 0, Label: "Yes"}, {Index: 1, Label: "No"},
+		}},
+	}
+
+	roundID := make([]byte, 32)
+	roundID[0] = 0xE2
+
+	ta.SeedTallyingRoundThreshold(roundID, 2, proposals, validators, vks)
+
+	// Do NOT populate any tally accumulators — zero votes.
+	// Write the proposer's share to disk (partial decrypt would use it if there
+	// were accumulators, but in the zero-vote case it should be irrelevant).
+	shareBytes, err := elgamal.MarshalSecretKey(&elgamal.SecretKey{Scalar: shares[0].Value})
+	require.NoError(t, err)
+	ta.WriteShareForRound(roundID, shareBytes)
+
+	// First PrepareProposal: the tally handler should detect zero accumulators
+	// and inject an empty MsgSubmitTally, bypassing partial decryptions.
+	ta.NextBlockWithPrepareProposal()
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height, Time: ta.Time})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
+		"zero-vote threshold round should auto-finalize in one block")
+
+	// No partial decryptions should have been submitted.
+	count, err := ta.VoteKeeper().CountPartialDecryptionValidators(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, 0, count,
+		"no partial decryptions should exist for a zero-vote round")
+
+	// No tally results should be stored (empty entries).
+	results, err := ta.VoteKeeper().GetAllTallyResults(kvStore, roundID)
+	require.NoError(t, err)
+	require.Len(t, results, 0,
+		"zero-vote round should have no tally results")
+}
