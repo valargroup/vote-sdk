@@ -371,8 +371,6 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			},
 			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
-				RVpkX:                    fpLE(0xE1a),
-				RVpkY:                    fpLE(0xE1b),
 				VoteAuthorityNoteNew:     fpLE(0xE2),
 				VoteCommitment:           fpLE(0xE3),
 				ProposalId:               1,
@@ -400,8 +398,6 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			},
 			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
-				RVpkX:                    fpLE(0xE1a),
-				RVpkY:                    fpLE(0xE1b),
 				VoteAuthorityNoteNew:     fpLE(0xE2),
 				VoteCommitment:           fpLE(0xE3),
 				ProposalId:               1,
@@ -420,8 +416,6 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			},
 			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
-				RVpkX:                    fpLE(0xE1a),
-				RVpkY:                    fpLE(0xE1b),
 				VoteAuthorityNoteNew:     fpLE(0xE2),
 				VoteCommitment:           fpLE(0xE3),
 				ProposalId:               5, // out of range
@@ -440,8 +434,6 @@ func (s *MsgServerTestSuite) TestCastVote() {
 				// First CastVote with this nullifier succeeds and records it.
 				first := &types.MsgCastVote{
 					VanNullifier:             bytes.Repeat([]byte{0xDD}, 32),
-					RVpkX:                    fpLE(0xE1a),
-					RVpkY:                    fpLE(0xE1b),
 					VoteAuthorityNoteNew:     fpLE(0xE2),
 					VoteCommitment:           fpLE(0xE3),
 					ProposalId:               1,
@@ -454,8 +446,6 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			},
 			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xDD}, 32), // same as first
-				RVpkX:                    fpLE(0xE1a),
-				RVpkY:                    fpLE(0xE1b),
 				VoteAuthorityNoteNew:     fpLE(0xE5),
 				VoteCommitment:           fpLE(0xE6),
 				ProposalId:               1,

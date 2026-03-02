@@ -543,7 +543,7 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
     use group::Curve;
     use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
 
-    const NUM_CHUNKS: usize = 10;
+    const NUM_CHUNKS: usize = 9;
     const EXPECTED_LEN: usize = NUM_CHUNKS * 32;
 
     // Validate pointers and lengths.
@@ -580,79 +580,88 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
         }
     };
 
-    // Slots 1–2: r_vpk_x, r_vpk_y (condition 4: Spend Authority)
-    let r_vpk_x = match deserialize_fp(chunk(1)) {
-        Some(f) => f,
+    // Slot 1: r_vpk (compressed Pallas point) — decompress to (x, y).
+    let r_vpk_bytes = chunk(1);
+    let r_vpk_point: pallas::Point = match pallas::Point::from_bytes(&r_vpk_bytes).into() {
+        Some(p) => p,
         None => {
-            set_ffi_error("vote: slot 1 (r_vpk_x) is not a canonical Pallas Fp element");
+            set_ffi_error(format!(
+                "vote: slot 1 (r_vpk) is not a valid compressed Pallas point: {:02x?}",
+                &r_vpk_bytes[..4]
+            ));
             return -3;
         }
     };
-    let r_vpk_y = match deserialize_fp(chunk(2)) {
-        Some(f) => f,
+    let r_vpk_affine = r_vpk_point.to_affine();
+    let r_vpk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+        r_vpk_affine.coordinates().into();
+    let r_vpk_coords = match r_vpk_coords {
+        Some(c) => c,
         None => {
-            set_ffi_error("vote: slot 2 (r_vpk_y) is not a canonical Pallas Fp element");
+            set_ffi_error("vote: slot 1 (r_vpk) decompressed to the identity point");
             return -3;
         }
     };
+    let r_vpk_x: pallas::Base = *r_vpk_coords.x();
+    let r_vpk_y: pallas::Base = *r_vpk_coords.y();
 
-    // Slot 3: vote_authority_note_new (Fp)
-    let vote_authority_note_new = match deserialize_fp(chunk(3)) {
+    // Slot 2: vote_authority_note_new (Fp)
+    let vote_authority_note_new = match deserialize_fp(chunk(2)) {
         Some(f) => f,
         None => {
             set_ffi_error(
-                "vote: slot 3 (vote_authority_note_new) is not a canonical Pallas Fp element",
+                "vote: slot 2 (vote_authority_note_new) is not a canonical Pallas Fp element",
             );
             return -3;
         }
     };
 
-    // Slot 4: vote_commitment (Fp)
-    let vote_commitment = match deserialize_fp(chunk(4)) {
+    // Slot 3: vote_commitment (Fp)
+    let vote_commitment = match deserialize_fp(chunk(3)) {
         Some(f) => f,
         None => {
-            set_ffi_error("vote: slot 4 (vote_commitment) is not a canonical Pallas Fp element");
+            set_ffi_error("vote: slot 3 (vote_commitment) is not a canonical Pallas Fp element");
             return -3;
         }
     };
 
-    // Slot 5: vote_comm_tree_root (Fp)
-    let vote_comm_tree_root = match deserialize_fp(chunk(5)) {
+    // Slot 4: vote_comm_tree_root (Fp)
+    let vote_comm_tree_root = match deserialize_fp(chunk(4)) {
         Some(f) => f,
         None => {
             set_ffi_error(
-                "vote: slot 5 (vote_comm_tree_root) is not a canonical Pallas Fp element",
+                "vote: slot 4 (vote_comm_tree_root) is not a canonical Pallas Fp element",
             );
             return -3;
         }
     };
 
-    // Slot 6: anchor_height (uint64 LE zero-padded to 32 bytes → Fp)
-    let anchor_height_bytes = chunk(6);
+    // Slot 5: anchor_height (uint64 LE zero-padded to 32 bytes → Fp)
+    let anchor_height_bytes = chunk(5);
     let anchor_height_u64 = u64::from_le_bytes(anchor_height_bytes[..8].try_into().unwrap());
     let vote_comm_tree_anchor_height = pallas::Base::from(anchor_height_u64);
 
-    // Slot 7: proposal_id (uint32 LE zero-padded to 32 bytes → Fp)
-    let proposal_id_bytes = chunk(7);
+    // Slot 6: proposal_id (uint32 LE zero-padded to 32 bytes → Fp)
+    let proposal_id_bytes = chunk(6);
     let proposal_id_u32 = u32::from_le_bytes(proposal_id_bytes[..4].try_into().unwrap());
     let proposal_id = pallas::Base::from(u64::from(proposal_id_u32));
 
-    // Slot 8: voting_round_id (canonical Pallas Fp element)
-    let voting_round_id = match deserialize_fp(chunk(8)) {
+    // Slot 7: voting_round_id (canonical Pallas Fp element)
+    let voting_round_id = match deserialize_fp(chunk(7)) {
         Some(f) => f,
         None => {
-            set_ffi_error("vote: slot 8 (voting_round_id) is not a canonical Pallas Fp element");
+            set_ffi_error("vote: slot 7 (voting_round_id) is not a canonical Pallas Fp element");
             return -3;
         }
     };
 
-    // Slot 9: ea_pk (compressed Pallas point) — decompress to (x, y).
-    let ea_pk_bytes = chunk(9);
+    // Slot 8: ea_pk (compressed Pallas point) — decompress to (x, y).
+    let ea_pk_bytes = chunk(8);
     let ea_pk_point: pallas::Point = match pallas::Point::from_bytes(&ea_pk_bytes).into() {
         Some(p) => p,
         None => {
             set_ffi_error(format!(
-                "vote: slot 9 (ea_pk) is not a valid compressed Pallas point: {:02x?}",
+                "vote: slot 8 (ea_pk) is not a valid compressed Pallas point: {:02x?}",
                 &ea_pk_bytes[..4]
             ));
             return -3;
@@ -664,7 +673,7 @@ pub unsafe extern "C" fn zally_verify_vote_proof(
     let ea_pk_coords = match ea_pk_coords {
         Some(c) => c,
         None => {
-            set_ffi_error("vote: slot 9 (ea_pk) decompressed to the identity point");
+            set_ffi_error("vote: slot 8 (ea_pk) decompressed to the identity point");
             return -3;
         }
     };

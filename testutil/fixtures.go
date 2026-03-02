@@ -131,8 +131,6 @@ func ensureBytes32(b []byte) []byte {
 func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgCastVote {
 	return &types.MsgCastVote{
 		VanNullifier:             ensureBytes32(MakeNullifier(nullifierSeed)),
-		RVpkX:                    FpLE(0xA1 + uint64(nullifierSeed)),
-		RVpkY:                    FpLE(0xA2 + uint64(nullifierSeed)),
 		VoteAuthorityNoteNew:     ensureBytes32(FpLE(0xA0 + uint64(nullifierSeed))),
 		VoteCommitment:           ensureBytes32(FpLE(0xB0 + uint64(nullifierSeed))),
 		ProposalId:               1, // first proposal in SampleProposals()

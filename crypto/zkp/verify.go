@@ -22,12 +22,11 @@ type DelegationInputs struct {
 }
 
 // VoteCommitmentInputs contains the public inputs for ZKP #2 (vote commitment).
-// Condition 4 (Spend Authority) adds r_vpk = vsk.ak + [alpha_v]*G; the circuit
-// exposes r_vpk_x and r_vpk_y as public inputs (offsets 1 and 2).
+// Condition 4 (Spend Authority) adds r_vpk = vsk.ak + [alpha_v]*G; the FFI
+// decompresses r_vpk to (x, y) for the circuit's public inputs.
 type VoteCommitmentInputs struct {
 	VanNullifier         []byte // Vote authority note nullifier
-	RVpkX                []byte // 32-byte Pallas Fp: x-coordinate of randomized voting key (condition 4)
-	RVpkY                []byte // 32-byte Pallas Fp: y-coordinate of randomized voting key (condition 4)
+	RVpk                 []byte // 32-byte compressed Pallas point: randomized voting key (condition 4)
 	VoteAuthorityNoteNew []byte // New vote authority note commitment
 	VoteCommitment       []byte // The vote commitment
 	// ProposalId is 1-indexed (matching on-chain proposal IDs). The circuit uses

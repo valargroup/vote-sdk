@@ -132,8 +132,6 @@ func TestRedPallasCastVoteValidSig(t *testing.T) {
 
 	msg := &types.MsgCastVote{
 		VanNullifier:             make([]byte, 32),
-		RVpkX:                    make([]byte, 32),
-		RVpkY:                    make([]byte, 32),
 		VoteAuthorityNoteNew:     make([]byte, 32),
 		VoteCommitment:           make([]byte, 32),
 		ProposalId:               1,
@@ -167,8 +165,6 @@ func TestRedPallasCastVoteWrongSig(t *testing.T) {
 
 	msg := &types.MsgCastVote{
 		VanNullifier:             make([]byte, 32),
-		RVpkX:                    make([]byte, 32),
-		RVpkY:                    make([]byte, 32),
 		VoteAuthorityNoteNew:     make([]byte, 32),
 		VoteCommitment:           make([]byte, 32),
 		ProposalId:               1,

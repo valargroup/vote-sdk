@@ -367,11 +367,10 @@ type MsgCastVote struct {
 	Proof                    []byte                 `protobuf:"bytes,5,opt,name=proof,proto3" json:"proof,omitempty"`
 	VoteRoundId              []byte                 `protobuf:"bytes,6,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
 	VoteCommTreeAnchorHeight uint64                 `protobuf:"varint,7,opt,name=vote_comm_tree_anchor_height,json=voteCommTreeAnchorHeight,proto3" json:"vote_comm_tree_anchor_height,omitempty"`
-	RVpkX                    []byte                 `protobuf:"bytes,8,opt,name=r_vpk_x,json=rVpkX,proto3" json:"r_vpk_x,omitempty"`                    // Pallas Fp: x-coordinate of randomized voting key (condition 4)
-	RVpkY                    []byte                 `protobuf:"bytes,9,opt,name=r_vpk_y,json=rVpkY,proto3" json:"r_vpk_y,omitempty"`                    // Pallas Fp: y-coordinate of randomized voting key (condition 4)
-	VoteAuthSig              []byte                 `protobuf:"bytes,10,opt,name=vote_auth_sig,json=voteAuthSig,proto3" json:"vote_auth_sig,omitempty"` // RedPallas signature under randomized voting key
+	// r_vpk_x/r_vpk_y are now decompressed from r_vpk in the FFI verifier.
+	VoteAuthSig []byte `protobuf:"bytes,10,opt,name=vote_auth_sig,json=voteAuthSig,proto3" json:"vote_auth_sig,omitempty"` // RedPallas signature under randomized voting key
 	// Field 11 removed: sighash is now computed on-chain via ComputeCastVoteSighash.
-	RVpk          []byte `protobuf:"bytes,12,opt,name=r_vpk,json=rVpk,proto3" json:"r_vpk,omitempty"` // Compressed Pallas point (32 bytes) for sig verification
+	RVpk          []byte `protobuf:"bytes,12,opt,name=r_vpk,json=rVpk,proto3" json:"r_vpk,omitempty"` // Compressed Pallas point (32 bytes) — sig verification + FFI decompresses to (x,y) for ZKP
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -453,20 +452,6 @@ func (x *MsgCastVote) GetVoteCommTreeAnchorHeight() uint64 {
 		return x.VoteCommTreeAnchorHeight
 	}
 	return 0
-}
-
-func (x *MsgCastVote) GetRVpkX() []byte {
-	if x != nil {
-		return x.RVpkX
-	}
-	return nil
-}
-
-func (x *MsgCastVote) GetRVpkY() []byte {
-	if x != nil {
-		return x.RVpkY
-	}
-	return nil
 }
 
 func (x *MsgCastVote) GetVoteAuthSig() []byte {
@@ -1527,7 +1512,7 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"\rvote_round_id\x18\t \x01(\fR\vvoteRoundId\x12\x18\n" +
 	"\asighash\x18\n" +
 	" \x01(\fR\asighash\"\x19\n" +
-	"\x17MsgDelegateVoteResponse\"\x96\x03\n" +
+	"\x17MsgDelegateVoteResponse\"\xe6\x02\n" +
 	"\vMsgCastVote\x12#\n" +
 	"\rvan_nullifier\x18\x01 \x01(\fR\fvanNullifier\x125\n" +
 	"\x17vote_authority_note_new\x18\x02 \x01(\fR\x14voteAuthorityNoteNew\x12'\n" +
@@ -1536,9 +1521,7 @@ const file_zvote_v1_tx_proto_rawDesc = "" +
 	"proposalId\x12\x14\n" +
 	"\x05proof\x18\x05 \x01(\fR\x05proof\x12\"\n" +
 	"\rvote_round_id\x18\x06 \x01(\fR\vvoteRoundId\x12>\n" +
-	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\x12\x16\n" +
-	"\ar_vpk_x\x18\b \x01(\fR\x05rVpkX\x12\x16\n" +
-	"\ar_vpk_y\x18\t \x01(\fR\x05rVpkY\x12\"\n" +
+	"\x1cvote_comm_tree_anchor_height\x18\a \x01(\x04R\x18voteCommTreeAnchorHeight\x12\"\n" +
 	"\rvote_auth_sig\x18\n" +
 	" \x01(\fR\vvoteAuthSig\x12\x13\n" +
 	"\x05r_vpk\x18\f \x01(\fR\x04rVpk\"\x15\n" +

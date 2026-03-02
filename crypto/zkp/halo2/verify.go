@@ -243,7 +243,7 @@ func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 // The inputs are serialized as 10 × 32-byte chunks (320 bytes), matching the
 // circuit's 11 public inputs (ea_pk is decompressed to x,y in Rust):
 //
-//	[van_nullifier, r_vpk_x, r_vpk_y, vote_authority_note_new, vote_commitment,
+//	[van_nullifier, r_vpk_compressed, vote_authority_note_new, vote_commitment,
 //	 vote_comm_tree_root, anchor_height_le, proposal_id_le, voting_round_id, ea_pk_compressed]
 //
 // Returns nil on success, or an error describing the failure.
@@ -252,9 +252,10 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 		return fmt.Errorf("vote proof is empty")
 	}
 
-	// Serialize VoteCommitmentInputs into 10 × 32-byte flat buffer (condition 4: r_vpk in-circuit).
+	// Serialize VoteCommitmentInputs into 9 × 32-byte flat buffer.
+	// The FFI decompresses r_vpk and ea_pk to (x, y) for the circuit.
 	const chunkSize = 32
-	const numChunks = 10
+	const numChunks = 9
 	buf := make([]byte, numChunks*chunkSize)
 
 	copyChunk := func(offset int, src []byte) error {
@@ -269,48 +270,40 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 	if err := copyChunk(0*chunkSize, inputs.VanNullifier); err != nil {
 		return fmt.Errorf("van_nullifier: %w", err)
 	}
-	// Slots 1–2: r_vpk_x, r_vpk_y (condition 4: Spend Authority)
-	if err := copyChunk(1*chunkSize, inputs.RVpkX); err != nil {
-		return fmt.Errorf("r_vpk_x: %w", err)
+	// Slot 1: r_vpk (compressed Pallas point — FFI decompresses to x, y)
+	if err := copyChunk(1*chunkSize, inputs.RVpk); err != nil {
+		return fmt.Errorf("r_vpk: %w", err)
 	}
-	if err := copyChunk(2*chunkSize, inputs.RVpkY); err != nil {
-		return fmt.Errorf("r_vpk_y: %w", err)
-	}
-	// Slot 3: vote_authority_note_new (Fp)
-	if err := copyChunk(3*chunkSize, inputs.VoteAuthorityNoteNew); err != nil {
+	// Slot 2: vote_authority_note_new (Fp)
+	if err := copyChunk(2*chunkSize, inputs.VoteAuthorityNoteNew); err != nil {
 		return fmt.Errorf("vote_authority_note_new: %w", err)
 	}
-	// Slot 4: vote_commitment (Fp)
-	if err := copyChunk(4*chunkSize, inputs.VoteCommitment); err != nil {
+	// Slot 3: vote_commitment (Fp)
+	if err := copyChunk(3*chunkSize, inputs.VoteCommitment); err != nil {
 		return fmt.Errorf("vote_commitment: %w", err)
 	}
-	// Slot 5: vote_comm_tree_root (Fp, from on-chain state)
-	if err := copyChunk(5*chunkSize, inputs.VoteCommTreeRoot); err != nil {
+	// Slot 4: vote_comm_tree_root (Fp, from on-chain state)
+	if err := copyChunk(4*chunkSize, inputs.VoteCommTreeRoot); err != nil {
 		return fmt.Errorf("vote_comm_tree_root: %w", err)
 	}
-	// Slot 6: anchor_height (uint64 LE, zero-padded to 32 bytes)
-	binary.LittleEndian.PutUint64(buf[6*chunkSize:], inputs.AnchorHeight)
-	// Slot 7: proposal_id (uint32 LE, zero-padded to 32 bytes)
-	binary.LittleEndian.PutUint32(buf[7*chunkSize:], inputs.ProposalId)
-	// Slot 8: voting_round_id (Fp)
-	if err := copyChunk(8*chunkSize, inputs.VoteRoundId); err != nil {
+	// Slot 5: anchor_height (uint64 LE, zero-padded to 32 bytes)
+	binary.LittleEndian.PutUint64(buf[5*chunkSize:], inputs.AnchorHeight)
+	// Slot 6: proposal_id (uint32 LE, zero-padded to 32 bytes)
+	binary.LittleEndian.PutUint32(buf[6*chunkSize:], inputs.ProposalId)
+	// Slot 7: voting_round_id (Fp)
+	if err := copyChunk(7*chunkSize, inputs.VoteRoundId); err != nil {
 		return fmt.Errorf("voting_round_id: %w", err)
 	}
-	// Slot 9: ea_pk (compressed Pallas point, from session)
-	if err := copyChunk(9*chunkSize, inputs.EaPk); err != nil {
+	// Slot 8: ea_pk (compressed Pallas point, from session)
+	if err := copyChunk(8*chunkSize, inputs.EaPk); err != nil {
 		return fmt.Errorf("ea_pk: %w", err)
 	}
 
 	// Validate Fp fields before the FFI call.
-	// Slots skipped: anchor_height (slot 6, uint64), proposal_id (slot 7, uint32),
-	// voting_round_id (slot 8, wide-reduced in Rust), ea_pk (slot 9, compressed point).
+	// Slots skipped: r_vpk (slot 1, compressed point), anchor_height (slot 5, uint64),
+	// proposal_id (slot 6, uint32), voting_round_id (slot 7, wide-reduced in Rust),
+	// ea_pk (slot 8, compressed point).
 	if err := validatePallasFp("van_nullifier", inputs.VanNullifier); err != nil {
-		return err
-	}
-	if err := validatePallasFp("r_vpk_x", inputs.RVpkX); err != nil {
-		return err
-	}
-	if err := validatePallasFp("r_vpk_y", inputs.RVpkY); err != nil {
 		return err
 	}
 	if err := validatePallasFp("vote_authority_note_new", inputs.VoteAuthorityNoteNew); err != nil {

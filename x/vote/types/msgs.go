@@ -122,12 +122,6 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	if len(msg.VanNullifier) == 0 {
 		return fmt.Errorf("%w: van_nullifier cannot be empty", ErrInvalidField)
 	}
-	if len(msg.RVpkX) != 32 {
-		return fmt.Errorf("%w: r_vpk_x must be 32 bytes (Pallas Fp), got %d", ErrInvalidField, len(msg.RVpkX))
-	}
-	if len(msg.RVpkY) != 32 {
-		return fmt.Errorf("%w: r_vpk_y must be 32 bytes (Pallas Fp), got %d", ErrInvalidField, len(msg.RVpkY))
-	}
 	if len(msg.VoteAuthorityNoteNew) == 0 {
 		return fmt.Errorf("%w: vote_authority_note_new cannot be empty", ErrInvalidField)
 	}
