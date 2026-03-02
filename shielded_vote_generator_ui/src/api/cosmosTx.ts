@@ -19,9 +19,13 @@ import { SignMode } from "cosmjs-types/cosmos/tx/signing/v1beta1/signing";
 import { sha256 } from "@noble/hashes/sha2.js";
 import type { BroadcastResult } from "./chain";
 
-// All transactions are fee-exempt on this chain. Setting gas to "0" means
-// Keplr computes fee = gasPrice × 0 = 0, so the user sees a zero fee.
-const DEFAULT_GAS = "0";
+// All transactions are fee-exempt on this chain (no DeductFeeDecorator,
+// infinite gas meter in ante handler). We still need a non-zero gas limit
+// because gas_limit=0 in the SignDoc causes signing failures in Keplr and
+// some Cosmos SDK validation paths. The actual value doesn't matter — the
+// chain's CeremonyFeeExemptDecorator grants infinite gas to all transactions.
+// Fee amount is "0" (line 406) so the user pays nothing regardless of gas limit.
+const DEFAULT_GAS = "200000";
 
 
 // ── Protobuf mini-writer ────────────────────────────────────────
