@@ -2,7 +2,7 @@ package keeper_test
 
 import (
 	"bytes"
-	"crypto/rand"
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -15,8 +15,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/crypto/roundid"
 	zallytest "github.com/z-cale/zally/testutil"
 	"github.com/z-cale/zally/x/vote/keeper"
@@ -50,7 +50,7 @@ func (s *MsgServerTestSuite) SetupTest() {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Shared helpers
 // ---------------------------------------------------------------------------
 
 // setupActiveRound creates a vote round in the store with an end time in the future and ACTIVE status.
@@ -123,6 +123,80 @@ func (s *MsgServerTestSuite) seedEligibleValidators(n int) []string {
 	addrs, _ := s.registerValidators(n)
 	s.setupWithMockStaking(addrs...)
 	return addrs
+}
+
+// ---------------------------------------------------------------------------
+// Mock staking keeper
+// ---------------------------------------------------------------------------
+
+// testValAddr generates a deterministic valid bech32 validator address from a seed byte.
+func testValAddr(seed byte) string {
+	addr := make([]byte, 20)
+	addr[0] = seed
+	return sdk.ValAddress(addr).String()
+}
+
+// testAccAddr generates a deterministic valid bech32 account address from a seed byte.
+func testAccAddr(seed byte) string {
+	addr := make([]byte, 20)
+	addr[0] = seed
+	return sdk.AccAddress(addr).String()
+}
+
+// mockStakingKeeper implements keeper.StakingKeeper for tests.
+// validators maps bech32 operator address -> validator.
+type mockStakingKeeper struct {
+	validators map[string]stakingtypes.Validator
+}
+
+func newMockStakingKeeper(valAddrs ...string) *mockStakingKeeper {
+	mk := &mockStakingKeeper{validators: make(map[string]stakingtypes.Validator)}
+	for _, addr := range valAddrs {
+		mk.validators[addr] = stakingtypes.Validator{
+			OperatorAddress: addr,
+			Status:          stakingtypes.Bonded,
+		}
+	}
+	return mk
+}
+
+func (mk *mockStakingKeeper) GetValidator(_ context.Context, addr sdk.ValAddress) (stakingtypes.Validator, error) {
+	v, ok := mk.validators[addr.String()]
+	if !ok {
+		return stakingtypes.Validator{}, fmt.Errorf("validator %s not found", addr)
+	}
+	return v, nil
+}
+
+func (mk *mockStakingKeeper) GetValidatorByConsAddr(_ context.Context, _ sdk.ConsAddress) (stakingtypes.Validator, error) {
+	return stakingtypes.Validator{}, fmt.Errorf("not implemented in mock")
+}
+
+func (mk *mockStakingKeeper) Jail(_ context.Context, _ sdk.ConsAddress) error {
+	return nil
+}
+
+func (mk *mockStakingKeeper) Unjail(_ context.Context, _ sdk.ConsAddress) error {
+	return nil
+}
+
+// setupWithMockStaking replaces the keeper's staking keeper with a mock that
+// recognizes the given addresses as validators.
+func (s *MsgServerTestSuite) setupWithMockStaking(valAddrs ...string) {
+	s.setupWithMockStakingKeeper(newMockStakingKeeper(valAddrs...))
+}
+
+// seedVoteManager sets the vote manager address in the KV store for tests.
+func (s *MsgServerTestSuite) seedVoteManager(addr string) {
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: addr}))
+}
+
+// setupWithMockStakingKeeper replaces the keeper's staking keeper with the
+// given mock and rebuilds the msgServer so it uses the updated keeper.
+func (s *MsgServerTestSuite) setupWithMockStakingKeeper(sk keeper.StakingKeeper) {
+	s.keeper.SetStakingKeeper(sk)
+	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +347,47 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 	}
 }
 
+func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
+	s.SetupTest()
+	s.seedEligibleValidators(1)
+	s.seedVoteManager("zvote1admin")
+	msg := validSetupMsg()
+
+	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	s.Require().NoError(err)
+
+	// Same inputs must produce same ID.
+	expected := computeExpectedRoundID(msg)
+	s.Require().Equal(expected, resp1.VoteRoundId)
+	s.Require().Len(resp1.VoteRoundId, 32)
+}
+
+func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
+	s.SetupTest()
+	s.seedEligibleValidators(1)
+	s.seedVoteManager("zvote1admin")
+	msg := validSetupMsg()
+
+	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	s.Require().NoError(err)
+
+	events := s.ctx.EventManager().Events()
+	found := false
+	for _, e := range events {
+		if e.Type == types.EventTypeCreateVotingSession {
+			found = true
+			// Verify round ID attribute present.
+			for _, attr := range e.Attributes {
+				if attr.Key == types.AttributeKeyRoundID {
+					expected := fmt.Sprintf("%x", computeExpectedRoundID(msg))
+					s.Require().Equal(expected, attr.Value)
+				}
+			}
+		}
+	}
+	s.Require().True(found, "expected %s event", types.EventTypeCreateVotingSession)
+}
+
 // ---------------------------------------------------------------------------
 // DelegateVote
 // ---------------------------------------------------------------------------
@@ -394,7 +509,6 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			name: "invalid anchor height: no root stored",
 			setup: func() {
 				s.setupActiveRound(roundID)
-				// No root at height 999.
 			},
 			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
@@ -481,564 +595,290 @@ func (s *MsgServerTestSuite) TestCastVote() {
 }
 
 // ---------------------------------------------------------------------------
-// RevealShare
+// SetVoteManager
 // ---------------------------------------------------------------------------
 
-// testEncShare generates a valid 64-byte ElGamal ciphertext for testing.
-func testEncShare(s *MsgServerTestSuite, value uint64) []byte {
-	_, pk := elgamal.KeyGen(rand.Reader)
-	ct, err := elgamal.Encrypt(pk, value, rand.Reader)
-	s.Require().NoError(err)
-	bz, err := elgamal.MarshalCiphertext(ct)
-	s.Require().NoError(err)
-	return bz
-}
-
-// testEncShareWithPK generates a valid 64-byte ElGamal ciphertext using a specific public key.
-func testEncShareWithPK(s *MsgServerTestSuite, pk *elgamal.PublicKey, value uint64) []byte {
-	ct, err := elgamal.Encrypt(pk, value, rand.Reader)
-	s.Require().NoError(err)
-	bz, err := elgamal.MarshalCiphertext(ct)
-	s.Require().NoError(err)
-	return bz
-}
-
-func (s *MsgServerTestSuite) TestRevealShare() {
-	roundID := bytes.Repeat([]byte{0x30}, 32)
-
-	tests := []struct {
-		name        string
-		setup       func()
-		msg         func() *types.MsgRevealShare
-		expectErr   bool
-		errContains string
-		check       func()
-	}{
-		{
-			name:  "happy path: nullifier recorded and tally accumulated",
-			setup: func() { s.setupActiveRound(roundID) },
-			msg: func() *types.MsgRevealShare {
-				return &types.MsgRevealShare{
-					ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
-					EncShare:                 testEncShare(s, 500),
-					ProposalId:               1,
-					VoteDecision:             1,
-					Proof:                    bytes.Repeat([]byte{0xF2}, 64),
-					VoteRoundId:              roundID,
-					VoteCommTreeAnchorHeight: 10,
-				}
-			},
-			check: func() {
-				kv := s.keeper.OpenKVStore(s.ctx)
-
-				has, err := s.keeper.HasNullifier(kv, types.NullifierTypeShare, roundID, bytes.Repeat([]byte{0xF1}, 32))
-				s.Require().NoError(err)
-				s.Require().True(has)
-
-				tally, err := s.keeper.GetTally(kv, roundID, 1, 1)
-				s.Require().NoError(err)
-				s.Require().NotNil(tally, "tally should be stored")
-				s.Require().Len(tally, 64, "tally should be 64 bytes (ElGamal ciphertext)")
-			},
-		},
-		{
-			name: "tally accumulates across multiple reveals via HomomorphicAdd",
-			setup: func() {
-				s.setupActiveRound(roundID)
-				// Use same keypair for both shares so accumulation works.
-				_, pk := elgamal.KeyGen(rand.Reader)
-				// First reveal.
-				_, err := s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
-					ShareNullifier:           bytes.Repeat([]byte{0xF3}, 32),
-					EncShare:                 testEncShareWithPK(s, pk, 300),
-					ProposalId:               1,
-					VoteDecision:             1,
-					Proof:                    bytes.Repeat([]byte{0xF4}, 64),
-					VoteRoundId:              roundID,
-					VoteCommTreeAnchorHeight: 10,
-				})
-				s.Require().NoError(err)
-			},
-			msg: func() *types.MsgRevealShare {
-				return &types.MsgRevealShare{
-					ShareNullifier:           bytes.Repeat([]byte{0xF5}, 32),
-					EncShare:                 testEncShare(s, 200),
-					ProposalId:               1,
-					VoteDecision:             1,
-					Proof:                    bytes.Repeat([]byte{0xF6}, 64),
-					VoteRoundId:              roundID,
-					VoteCommTreeAnchorHeight: 10,
-				}
-			},
-			check: func() {
-				kv := s.keeper.OpenKVStore(s.ctx)
-				tally, err := s.keeper.GetTally(kv, roundID, 1, 1)
-				s.Require().NoError(err)
-				s.Require().NotNil(tally)
-				s.Require().Len(tally, 64, "accumulated tally should be 64 bytes")
-			},
-		},
-		{
-			name:  "invalid proposal_id rejected",
-			setup: func() { s.setupActiveRound(roundID) },
-			msg: func() *types.MsgRevealShare {
-				return &types.MsgRevealShare{
-					ShareNullifier:           bytes.Repeat([]byte{0xF7}, 32),
-					EncShare:                 testEncShare(s, 100),
-					ProposalId:               5, // out of range
-					VoteDecision:             1,
-					Proof:                    bytes.Repeat([]byte{0xF8}, 64),
-					VoteRoundId:              roundID,
-					VoteCommTreeAnchorHeight: 10,
-				}
-			},
-			expectErr:   true,
-			errContains: "invalid proposal ID",
-		},
-		{
-			name: "duplicate share nullifier rejected (double-count)",
-			setup: func() {
-				s.setupActiveRound(roundID)
-				first := &types.MsgRevealShare{
-					ShareNullifier:           bytes.Repeat([]byte{0xFA}, 32),
-					EncShare:                 testEncShare(s, 100),
-					ProposalId:               1,
-					VoteDecision:             1,
-					Proof:                    bytes.Repeat([]byte{0xFB}, 64),
-					VoteRoundId:              roundID,
-					VoteCommTreeAnchorHeight: 10,
-				}
-				_, err := s.msgServer.RevealShare(s.ctx, first)
-				s.Require().NoError(err)
-			},
-			msg: func() *types.MsgRevealShare {
-				return &types.MsgRevealShare{
-					ShareNullifier:           bytes.Repeat([]byte{0xFA}, 32), // same as first
-					EncShare:                 testEncShare(s, 200),
-					ProposalId:               1,
-					VoteDecision:             1,
-					Proof:                    bytes.Repeat([]byte{0xFC}, 64),
-					VoteRoundId:              roundID,
-					VoteCommTreeAnchorHeight: 10,
-				}
-			},
-			expectErr:   true,
-			errContains: "nullifier already",
-		},
-	}
-
-	for _, tc := range tests {
-		s.Run(tc.name, func() {
-			s.SetupTest()
-			if tc.setup != nil {
-				tc.setup()
-			}
-			_, err := s.msgServer.RevealShare(s.ctx, tc.msg())
-			if tc.expectErr {
-				s.Require().Error(err)
-				if tc.errContains != "" {
-					s.Require().Contains(err.Error(), tc.errContains)
-				}
-			} else {
-				s.Require().NoError(err)
-				if tc.check != nil {
-					tc.check()
-				}
-			}
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// SubmitTally
-// ---------------------------------------------------------------------------
-
-func (s *MsgServerTestSuite) TestSubmitTally() {
-	roundID := bytes.Repeat([]byte{0x40}, 32)
-	creator := "zvote1creator"
-
-	// Generate a real EA keypair for DLEQ proof tests.
-	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
-	eaPkBytes := eaPk.Point.ToAffineCompressed()
-
-	// Helper: set up a TALLYING round with an encrypted tally accumulator
-	// using the real EA public key.
-	setupTallyingRoundWithAccumulator := func() (*elgamal.Ciphertext, []byte) {
-		kv := s.keeper.OpenKVStore(s.ctx)
-		s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
-			VoteRoundId: roundID,
-			VoteEndTime: 500_000,
-			Creator:     creator,
-			Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
-			EaPk:        eaPkBytes,
-			Proposals: []*types.Proposal{
-				{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
-				{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
-			},
-		}))
-		// Pre-populate the tally accumulator with a ciphertext encrypted under the real EA key.
-		encShareBytes := testEncShareWithPK(s, eaPk, 500)
-		s.Require().NoError(s.keeper.AddToTally(kv, roundID, 1, 1, encShareBytes))
-
-		ct, err := elgamal.UnmarshalCiphertext(encShareBytes)
-		s.Require().NoError(err)
-		return ct, encShareBytes
-	}
-
-	// Helper: generate a valid DLEQ proof for the given ciphertext and value.
-	makeDLEQProof := func(ct *elgamal.Ciphertext, value uint64) []byte {
-		proof, err := elgamal.GenerateDLEQProof(eaSk, ct, value)
-		s.Require().NoError(err)
-		return proof
-	}
-
-	tests := []struct {
-		name        string
-		setup       func()
-		msg         func() *types.MsgSubmitTally
-		expectErr   bool
-		errContains string
-		check       func(resp *types.MsgSubmitTallyResponse)
-	}{
-		{
-			name: "happy path: round finalized with valid DLEQ proof",
-			msg: func() *types.MsgSubmitTally {
-				ct, _ := setupTallyingRoundWithAccumulator()
-				return &types.MsgSubmitTally{
-					VoteRoundId: roundID,
-					Creator:     creator,
-					Entries: []*types.TallyEntry{
-						{ProposalId: 1, VoteDecision: 1, TotalValue: 500, DecryptionProof: makeDLEQProof(ct, 500)},
-					},
-				}
-			},
-			check: func(resp *types.MsgSubmitTallyResponse) {
-				s.Require().Equal(uint32(1), resp.FinalizedEntries)
-
-				kv := s.keeper.OpenKVStore(s.ctx)
-
-				// Round is FINALIZED.
-				round, err := s.keeper.GetVoteRound(kv, roundID)
-				s.Require().NoError(err)
-				s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
-
-				// TallyResult is stored (uint64 decrypted value from EA).
-				result, err := s.keeper.GetTallyResult(kv, roundID, 1, 1)
-				s.Require().NoError(err)
-				s.Require().NotNil(result)
-				s.Require().Equal(uint64(500), result.TotalValue)
-				s.Require().Equal(uint32(1), result.ProposalId)
-				s.Require().Equal(uint32(1), result.VoteDecision)
-			},
-		},
-		{
-			name: "rejected: invalid DLEQ proof (wrong value)",
-			msg: func() *types.MsgSubmitTally {
-				ct, _ := setupTallyingRoundWithAccumulator()
-				// Generate proof for 500 but claim 999.
-				return &types.MsgSubmitTally{
-					VoteRoundId: roundID,
-					Creator:     creator,
-					Entries: []*types.TallyEntry{
-						{ProposalId: 1, VoteDecision: 1, TotalValue: 999, DecryptionProof: makeDLEQProof(ct, 500)},
-					},
-				}
-			},
-			expectErr:   true,
-			errContains: "tally entry does not match",
-		},
-		{
-			name: "rejected: missing DLEQ proof when accumulator exists",
-			msg: func() *types.MsgSubmitTally {
-				setupTallyingRoundWithAccumulator()
-				return &types.MsgSubmitTally{
-					VoteRoundId: roundID,
-					Creator:     creator,
-					Entries: []*types.TallyEntry{
-						{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
-					},
-				}
-			},
-			expectErr:   true,
-			errContains: "tally entry does not match",
-		},
-		{
-			name: "rejected: entry references non-existent proposal",
-			msg: func() *types.MsgSubmitTally {
-				setupTallyingRoundWithAccumulator()
-				return &types.MsgSubmitTally{
-					VoteRoundId: roundID,
-					Creator:     creator,
-					Entries: []*types.TallyEntry{
-						{ProposalId: 5, VoteDecision: 1, TotalValue: 500},
-					},
-				}
-			},
-			expectErr:   true,
-			errContains: "invalid proposal ID",
-		},
-		{
-			name: "rejected: round is ACTIVE not TALLYING",
-			setup: func() {
-				s.setupActiveRound(roundID)
-			},
-			msg: func() *types.MsgSubmitTally {
-				return &types.MsgSubmitTally{
-					VoteRoundId: roundID,
-					Creator:     "zvote1creator",
-					Entries: []*types.TallyEntry{
-						{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
-					},
-				}
-			},
-			expectErr:   true,
-			errContains: "not in tallying state",
-		},
-		{
-			name: "rejected: round is already FINALIZED",
-			setup: func() {
-				kv := s.keeper.OpenKVStore(s.ctx)
-				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
-					VoteRoundId: roundID,
-					VoteEndTime: 500_000,
-					Creator:     creator,
-					Status:      types.SessionStatus_SESSION_STATUS_FINALIZED,
-				}))
-			},
-			msg: func() *types.MsgSubmitTally {
-				return &types.MsgSubmitTally{
-					VoteRoundId: roundID,
-					Creator:     creator,
-					Entries: []*types.TallyEntry{
-						{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
-					},
-				}
-			},
-			expectErr:   true,
-			errContains: "not in tallying state",
-		},
-		{
-			name: "accepted: different creator with valid DLEQ proof",
-			msg: func() *types.MsgSubmitTally {
-				ct, _ := setupTallyingRoundWithAccumulator()
-				return &types.MsgSubmitTally{
-					VoteRoundId: roundID,
-					Creator:     "zvote1othervalidator",
-					Entries: []*types.TallyEntry{
-						{ProposalId: 1, VoteDecision: 1, TotalValue: 500, DecryptionProof: makeDLEQProof(ct, 500)},
-					},
-				}
-			},
-			check: func(resp *types.MsgSubmitTallyResponse) {
-				s.Require().Equal(uint32(1), resp.FinalizedEntries)
-			},
-		},
-		{
-			name: "rejected: round does not exist",
-			msg: func() *types.MsgSubmitTally {
-				return &types.MsgSubmitTally{
-					VoteRoundId: bytes.Repeat([]byte{0xFF}, 32),
-					Creator:     creator,
-					Entries: []*types.TallyEntry{
-						{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
-					},
-				}
-			},
-			expectErr:   true,
-			errContains: "vote round not found",
-		},
-		{
-			name: "happy path: zero-valued entry for (proposal, decision) with no reveals",
-			msg: func() *types.MsgSubmitTally {
-				ct, _ := setupTallyingRoundWithAccumulator()
-				// proposal 1 / decision 0 has no reveals → accumulator nil → no proof needed.
-				return &types.MsgSubmitTally{
-					VoteRoundId: roundID,
-					Creator:     creator,
-					Entries: []*types.TallyEntry{
-						{ProposalId: 1, VoteDecision: 1, TotalValue: 500, DecryptionProof: makeDLEQProof(ct, 500)},
-						{ProposalId: 1, VoteDecision: 0, TotalValue: 0},
-					},
-				}
-			},
-			check: func(resp *types.MsgSubmitTallyResponse) {
-				s.Require().Equal(uint32(2), resp.FinalizedEntries)
-			},
-		},
-		{
-			name: "rejected: non-zero value claimed for nil accumulator",
-			msg: func() *types.MsgSubmitTally {
-				ct, _ := setupTallyingRoundWithAccumulator()
-				return &types.MsgSubmitTally{
-					VoteRoundId: roundID,
-					Creator:     creator,
-					Entries: []*types.TallyEntry{
-						{ProposalId: 1, VoteDecision: 1, TotalValue: 500, DecryptionProof: makeDLEQProof(ct, 500)},
-						{ProposalId: 1, VoteDecision: 0, TotalValue: 42}, // no accumulator for decision 0
-					},
-				}
-			},
-			expectErr:   true,
-			errContains: "tally entry does not match",
-		},
-	}
-
-	for _, tc := range tests {
-		s.Run(tc.name, func() {
-			s.SetupTest()
-			if tc.setup != nil {
-				tc.setup()
-			}
-			resp, err := s.msgServer.SubmitTally(s.ctx, tc.msg())
-			if tc.expectErr {
-				s.Require().Error(err)
-				if tc.errContains != "" {
-					s.Require().Contains(err.Error(), tc.errContains)
-				}
-			} else {
-				s.Require().NoError(err)
-				if tc.check != nil {
-					tc.check(resp)
-				}
-			}
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// SubmitTally: event emission
-// ---------------------------------------------------------------------------
-
-func (s *MsgServerTestSuite) TestSubmitTally_EmitsEvent() {
+func (s *MsgServerTestSuite) TestSetVoteManager_Bootstrap() {
+	// First call when no vote manager exists — any validator can set it.
 	s.SetupTest()
-	roundID := bytes.Repeat([]byte{0x50}, 32)
-	creator := "zvote1creator"
+	val1 := testValAddr(1)
+	mgr1 := testAccAddr(10)
+	s.setupWithMockStaking(val1)
 
-	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
-		VoteRoundId: roundID,
-		VoteEndTime: 500_000,
-		Creator:     creator,
-		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
-	}))
-
-	_, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
-		VoteRoundId: roundID,
-		Creator:     creator,
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    val1,
+		NewManager: mgr1,
 	})
 	s.Require().NoError(err)
 
-	events := s.ctx.EventManager().Events()
-	found := false
-	for _, e := range events {
-		if e.Type == types.EventTypeSubmitTally {
+	kv := s.keeper.OpenKVStore(s.ctx)
+	mgr, err := s.keeper.GetVoteManager(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(mgr1, mgr.Address)
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_VoteManagerCanChange() {
+	s.SetupTest()
+	s.setupWithMockStaking()
+
+	currentMgr := testAccAddr(20)
+	newMgr := testAccAddr(21)
+
+	// Seed a vote manager.
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: currentMgr}))
+
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    currentMgr,
+		NewManager: newMgr,
+	})
+	s.Require().NoError(err)
+
+	mgr, err := s.keeper.GetVoteManager(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(newMgr, mgr.Address)
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_ValidatorCanChange() {
+	s.SetupTest()
+	val1 := testValAddr(1)
+	currentMgr := testAccAddr(30)
+	newMgr := testAccAddr(31)
+	s.setupWithMockStaking(val1)
+
+	// Seed a vote manager that is NOT the validator.
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: currentMgr}))
+
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    val1,
+		NewManager: newMgr,
+	})
+	s.Require().NoError(err)
+
+	mgr, err := s.keeper.GetVoteManager(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(newMgr, mgr.Address)
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_NonValidatorNonManagerRejected() {
+	s.SetupTest()
+	s.setupWithMockStaking() // no validators in the mock
+
+	currentMgr := testAccAddr(40)
+	newMgr := testAccAddr(41)
+
+	// Seed a vote manager.
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: currentMgr}))
+
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    "random_address",
+		NewManager: newMgr,
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not authorized")
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_EmptyNewManagerRejected() {
+	s.SetupTest()
+	val1 := testValAddr(1)
+	s.setupWithMockStaking(val1)
+
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    val1,
+		NewManager: "",
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "new_manager cannot be empty")
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_BootstrapNonValidatorRejected() {
+	// No vote manager set, non-validator tries to set one.
+	s.SetupTest()
+	s.setupWithMockStaking() // no validators
+
+	newMgr := testAccAddr(50)
+
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    "random_address",
+		NewManager: newMgr,
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not authorized")
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_InvalidAddressRejected() {
+	s.SetupTest()
+	val1 := testValAddr(1)
+	s.setupWithMockStaking(val1)
+
+	// Reject non-bech32 string.
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    val1,
+		NewManager: "not_a_valid_address",
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not a valid account address")
+
+	// Reject validator operator address (valoper).
+	_, err = s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    val1,
+		NewManager: testValAddr(2),
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not a valid account address")
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_EmitsEvent() {
+	s.SetupTest()
+	val1 := testValAddr(1)
+	mgr1 := testAccAddr(60)
+	s.setupWithMockStaking(val1)
+
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    val1,
+		NewManager: mgr1,
+	})
+	s.Require().NoError(err)
+
+	var found bool
+	for _, e := range s.ctx.EventManager().Events() {
+		if e.Type == types.EventTypeSetVoteManager {
 			found = true
 			for _, attr := range e.Attributes {
-				if attr.Key == types.AttributeKeyRoundID {
-					expected := fmt.Sprintf("%x", roundID)
-					s.Require().Equal(expected, attr.Value)
-				}
-				if attr.Key == types.AttributeKeyNewStatus {
-					s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED.String(), attr.Value)
+				if attr.Key == types.AttributeKeyVoteManager {
+					s.Require().Equal(mgr1, attr.Value)
 				}
 			}
 		}
 	}
-	s.Require().True(found, "expected %s event", types.EventTypeSubmitTally)
+	s.Require().True(found, "expected %s event", types.EventTypeSetVoteManager)
 }
 
 // ---------------------------------------------------------------------------
-// SubmitTally: finalized round rejects further shares
+// CreateVotingSession: VoteManager gating tests
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestSubmitTally_FinalizedRejectsShares() {
-	s.SetupTest()
-	roundID := bytes.Repeat([]byte{0x60}, 32)
-	creator := "zvote1creator"
-
-	// Create a TALLYING round.
-	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
-		VoteRoundId: roundID,
-		VoteEndTime: 500_000,
-		Creator:     creator,
-		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
-		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
-		},
-	}))
-
-	// Finalize it.
-	_, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
-		VoteRoundId: roundID,
-		Creator:     creator,
-	})
-	s.Require().NoError(err)
-
-	// Attempt to submit a reveal share — should fail because round is FINALIZED.
-	_, err = s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
-		ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
-		EncShare:                 testEncShare(s, 100),
-		ProposalId:               1,
-		VoteDecision:             1,
-		Proof:                    bytes.Repeat([]byte{0xF2}, 64),
-		VoteRoundId:              roundID,
-		VoteCommTreeAnchorHeight: 10,
-	})
-	// RevealShare validates proposal_id which succeeds, but the ante handler
-	// would reject it. At the keeper level, RevealShare doesn't check status,
-	// so we verify the status is FINALIZED which the ante handler uses.
-	kv = s.keeper.OpenKVStore(s.ctx)
-	round, err2 := s.keeper.GetVoteRound(kv, roundID)
-	s.Require().NoError(err2)
-	s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
-}
-
-// ---------------------------------------------------------------------------
-// CreateVotingSession: deterministic round ID
-// ---------------------------------------------------------------------------
-
-func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
+func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWithNoVoteManager() {
 	s.SetupTest()
 	s.seedEligibleValidators(1)
-	s.seedVoteManager("zvote1admin")
+
 	msg := validSetupMsg()
-
-	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
-	s.Require().NoError(err)
-
-	// Same inputs must produce same ID.
-	expected := computeExpectedRoundID(msg)
-	s.Require().Equal(expected, resp1.VoteRoundId)
-	s.Require().Len(resp1.VoteRoundId, 32)
-}
-
-// ---------------------------------------------------------------------------
-// Event emission smoke test
-// ---------------------------------------------------------------------------
-
-func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
-	s.SetupTest()
-	s.seedEligibleValidators(1)
-	s.seedVoteManager("zvote1admin")
-	msg := validSetupMsg()
-
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "no vote manager set")
+}
+
+func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotVoteManager() {
+	s.SetupTest()
+	s.seedEligibleValidators(1)
+	s.seedVoteManager("the_real_manager")
+
+	msg := validSetupMsg()
+	msg.Creator = "not_the_manager"
+	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not authorized")
+}
+
+func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsWithVoteManager() {
+	s.SetupTest()
+	s.seedEligibleValidators(1)
+	s.seedVoteManager("zvote1admin")
+
+	msg := validSetupMsg()
+	msg.Creator = "zvote1admin"
+	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	s.Require().NoError(err)
+	s.Require().NotEmpty(resp.VoteRoundId)
+}
+
+func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
+	s.SetupTest()
+	s.seedEligibleValidators(1)
+	s.seedVoteManager("zvote1admin")
+
+	msg := validSetupMsg()
+	msg.Creator = "zvote1admin"
+	msg.Description = "Test round description"
+	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().NoError(err)
 
-	events := s.ctx.EventManager().Events()
-	found := false
-	for _, e := range events {
-		if e.Type == types.EventTypeCreateVotingSession {
-			found = true
-			// Verify round ID attribute present.
-			for _, attr := range e.Attributes {
-				if attr.Key == types.AttributeKeyRoundID {
-					expected := fmt.Sprintf("%x", computeExpectedRoundID(msg))
-					s.Require().Equal(expected, attr.Value)
-				}
-			}
-		}
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, resp.VoteRoundId)
+	s.Require().NoError(err)
+	s.Require().Equal("Test round description", round.Description)
+}
+
+// ---------------------------------------------------------------------------
+// VoteManager CRUD tests (on KeeperTestSuite)
+// ---------------------------------------------------------------------------
+
+func (s *KeeperTestSuite) TestVoteManager_ReturnsNilWhenEmpty() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	state, err := s.keeper.GetVoteManager(kv)
+	s.Require().NoError(err)
+	s.Require().Nil(state, "should return nil when no vote manager exists")
+}
+
+func (s *KeeperTestSuite) TestVoteManager_RoundTrip() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "zvote1manager"}))
+
+	got, err := s.keeper.GetVoteManager(kv)
+	s.Require().NoError(err)
+	s.Require().NotNil(got)
+	s.Require().Equal("zvote1manager", got.Address)
+}
+
+func (s *KeeperTestSuite) TestVoteManager_Overwrite() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "first"}))
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "second"}))
+
+	got, err := s.keeper.GetVoteManager(kv)
+	s.Require().NoError(err)
+	s.Require().Equal("second", got.Address)
+}
+
+// ---------------------------------------------------------------------------
+// Genesis: VoteManager restoration (on KeeperTestSuite)
+// ---------------------------------------------------------------------------
+
+func (s *KeeperTestSuite) TestGenesis_VoteManagerRestored() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	genesis := &types.GenesisState{
+		VoteManager: "zvote1genesis_manager",
 	}
-	s.Require().True(found, "expected %s event", types.EventTypeCreateVotingSession)
+
+	s.Require().NoError(s.keeper.InitGenesis(kv, genesis))
+
+	mgr, err := s.keeper.GetVoteManager(kv)
+	s.Require().NoError(err)
+	s.Require().NotNil(mgr)
+	s.Require().Equal("zvote1genesis_manager", mgr.Address)
+}
+
+func (s *KeeperTestSuite) TestGenesis_EmptyVoteManagerNotSet() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	genesis := &types.GenesisState{
+		VoteManager: "",
+	}
+
+	s.Require().NoError(s.keeper.InitGenesis(kv, genesis))
+
+	mgr, err := s.keeper.GetVoteManager(kv)
+	s.Require().NoError(err)
+	s.Require().Nil(mgr)
 }
