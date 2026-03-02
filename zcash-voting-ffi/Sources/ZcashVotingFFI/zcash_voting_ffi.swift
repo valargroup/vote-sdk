@@ -559,6 +559,11 @@ public protocol VotingDatabaseProtocol: AnyObject, Sendable {
 
     func buildSharePayloads(encShares: [EncryptedShare], commitment: VoteCommitmentBundle, voteDecision: UInt32, numOptions: UInt32, vcTreePosition: UInt64) throws  -> [SharePayload]
 
+    /**
+     * Build a vote commitment (ZKP #2) for the given proposal.
+     *
+     * `proposal_id` is 1-indexed (matches on-chain proposal IDs). Valid range: 1–15.
+     */
     func buildVoteCommitment(roundId: String, bundleIndex: UInt32, hotkeySeed: Data, networkId: UInt32, proposalId: UInt32, choice: UInt32, numOptions: UInt32, vanAuthPath: [Data], vanPosition: UInt32, anchorHeight: UInt32, progress: ProofProgressReporter) throws  -> VoteCommitmentBundle
 
     func clearRound(roundId: String) throws
@@ -767,6 +772,11 @@ open func buildSharePayloads(encShares: [EncryptedShare], commitment: VoteCommit
 })
 }
 
+    /**
+     * Build a vote commitment (ZKP #2) for the given proposal.
+     *
+     * `proposal_id` is 1-indexed (matches on-chain proposal IDs). Valid range: 1–15.
+     */
 open func buildVoteCommitment(roundId: String, bundleIndex: UInt32, hotkeySeed: Data, networkId: UInt32, proposalId: UInt32, choice: UInt32, numOptions: UInt32, vanAuthPath: [Data], vanPosition: UInt32, anchorHeight: UInt32, progress: ProofProgressReporter)throws  -> VoteCommitmentBundle  {
     return try  FfiConverterTypeVoteCommitmentBundle_lift(try rustCallWithError(FfiConverterTypeVotingError_lift) {
     uniffi_zcash_voting_ffi_fn_method_votingdatabase_build_vote_commitment(self.uniffiClonePointer(),
@@ -3907,7 +3917,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_share_payloads() != 40058) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_vote_commitment() != 8385) {
+    if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_build_vote_commitment() != 46436) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zcash_voting_ffi_checksum_method_votingdatabase_clear_round() != 15915) {
