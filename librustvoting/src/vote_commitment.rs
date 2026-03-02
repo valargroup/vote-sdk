@@ -147,7 +147,6 @@ pub fn sign_cast_vote(
     Ok(CastVoteSignature {
         r_vpk_x,
         r_vpk_y,
-        sighash: sighash.to_vec(),
         vote_auth_sig: sig_bytes.to_vec(),
     })
 }

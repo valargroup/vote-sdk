@@ -207,15 +207,15 @@ pub struct SharePayload {
 
 /// Computed signature fields for cast-vote TX submission.
 /// Returned by `sign_cast_vote` after ZKP #2 builds the vote commitment bundle.
+/// The sighash is computed on-chain from the message fields; the client only
+/// needs to provide the signature (which was signed over the same sighash).
 #[derive(Clone, Debug)]
 pub struct CastVoteSignature {
     /// Decompressed r_vpk x-coordinate (32 bytes).
     pub r_vpk_x: Vec<u8>,
     /// Decompressed r_vpk y-coordinate (32 bytes).
     pub r_vpk_y: Vec<u8>,
-    /// Canonical cast-vote sighash (32 bytes).
-    pub sighash: Vec<u8>,
-    /// Spend auth signature over sighash (64 bytes).
+    /// Spend auth signature over the canonical sighash (64 bytes).
     pub vote_auth_sig: Vec<u8>,
 }
 

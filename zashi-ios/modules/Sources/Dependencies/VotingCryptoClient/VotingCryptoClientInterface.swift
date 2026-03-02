@@ -146,7 +146,7 @@ public struct VotingCryptoClient {
     /// Drop the in-memory TreeClient so the next `syncVoteTree` starts fresh.
     /// Recovers from stale state after commitment tree timeout.
     public var resetTreeClient: @Sendable () async throws -> Void
-    /// Compute canonical cast-vote sighash, decompress r_vpk, and sign.
+    /// Decompress r_vpk and sign the canonical cast-vote sighash.
     /// Call after `buildVoteCommitment` completes, before `submitVoteCommitment`.
     public var signCastVote: @Sendable (
         _ hotkeySeed: [UInt8],

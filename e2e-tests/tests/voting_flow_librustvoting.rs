@@ -472,7 +472,6 @@ fn voting_flow_librustvoting_path() {
         1, // proposal_id
         &bundle.proof,
         &bundle.r_vpk_bytes,
-        &sighash,
         &vote_auth_sig_bytes,
     );
     let cast_target_next_index = van_position + 3; // delegation leaf + 2 cast leaves

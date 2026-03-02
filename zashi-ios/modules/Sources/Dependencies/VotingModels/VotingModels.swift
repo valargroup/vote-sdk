@@ -521,16 +521,16 @@ public struct CommitmentTreeState: Equatable, Sendable {
 
 /// Computed signature fields for cast-vote TX submission.
 /// Returned by signCastVote after ZKP #2 builds the vote commitment bundle.
+/// The sighash is computed on-chain from message fields; the client only
+/// provides the signature (which was signed over the same sighash).
 public struct CastVoteSignature: Equatable, Sendable {
     public let rVpkX: Data
     public let rVpkY: Data
-    public let sighash: Data
     public let voteAuthSig: Data
 
-    public init(rVpkX: Data, rVpkY: Data, sighash: Data, voteAuthSig: Data) {
+    public init(rVpkX: Data, rVpkY: Data, voteAuthSig: Data) {
         self.rVpkX = rVpkX
         self.rVpkY = rVpkY
-        self.sighash = sighash
         self.voteAuthSig = voteAuthSig
     }
 }

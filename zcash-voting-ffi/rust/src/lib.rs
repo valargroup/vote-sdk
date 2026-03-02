@@ -277,15 +277,15 @@ pub struct SharePayload {
 }
 
 /// Computed signature fields for cast-vote TX submission.
+/// The sighash is computed on-chain from message fields; the client only
+/// provides the signature (which was signed over the same sighash).
 #[derive(Clone, uniffi::Record)]
 pub struct CastVoteSignature {
     /// Decompressed r_vpk x-coordinate (32 bytes).
     pub r_vpk_x: Vec<u8>,
     /// Decompressed r_vpk y-coordinate (32 bytes).
     pub r_vpk_y: Vec<u8>,
-    /// Canonical cast-vote sighash (32 bytes).
-    pub sighash: Vec<u8>,
-    /// Spend auth signature over sighash (64 bytes).
+    /// Spend auth signature over the canonical sighash (64 bytes).
     pub vote_auth_sig: Vec<u8>,
 }
 
@@ -294,7 +294,6 @@ impl From<voting::CastVoteSignature> for CastVoteSignature {
         Self {
             r_vpk_x: s.r_vpk_x,
             r_vpk_y: s.r_vpk_y,
-            sighash: s.sighash,
             vote_auth_sig: s.vote_auth_sig,
         }
     }

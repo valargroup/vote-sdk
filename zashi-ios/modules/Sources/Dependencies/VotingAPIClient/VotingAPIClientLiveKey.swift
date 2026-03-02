@@ -381,7 +381,6 @@ extension VotingAPIClient: DependencyKey {
                     "vote_round_id": roundIdBytes.base64EncodedString(),
                     "vote_comm_tree_anchor_height": bundle.anchorHeight,
                     "r_vpk": bundle.rVpkBytes.base64EncodedString(),
-                    "sighash": signature.sighash.base64EncodedString(),
                     "vote_auth_sig": signature.voteAuthSig.base64EncodedString()
                 ]
                 let json = try await postJSON("/zally/v1/cast-vote", body: body)

@@ -509,7 +509,6 @@ extension VotingCryptoClient: DependencyKey {
                 return CastVoteSignature(
                     rVpkX: ffiSig.rVpkX,
                     rVpkY: ffiSig.rVpkY,
-                    sighash: ffiSig.sighash,
                     voteAuthSig: ffiSig.voteAuthSig
                 )
             },

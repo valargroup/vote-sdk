@@ -128,7 +128,6 @@ func TestRedPallasDelegationWrongSig(t *testing.T) {
 // r_vpk = fixture, rest zeros except proposal_id=1, anchor_height=10.
 func TestRedPallasCastVoteValidSig(t *testing.T) {
 	rVpk := rpMustReadFixture(t, "cast_vote_r_vpk.bin")
-	sighash := rpMustReadFixture(t, "cast_vote_sighash.bin")
 	sig := rpMustReadFixture(t, "cast_vote_sig.bin")
 
 	msg := &types.MsgCastVote{
@@ -142,7 +141,6 @@ func TestRedPallasCastVoteValidSig(t *testing.T) {
 		VoteRoundId:              testRoundID,
 		VoteCommTreeAnchorHeight: 10,
 		RVpk:                     rVpk,
-		Sighash:                  sighash,
 		VoteAuthSig:              sig,
 	}
 
@@ -164,7 +162,6 @@ func TestRedPallasCastVoteValidSig(t *testing.T) {
 // over the wrong message fails verification for MsgCastVote.
 func TestRedPallasCastVoteWrongSig(t *testing.T) {
 	rVpk := rpMustReadFixture(t, "cast_vote_r_vpk.bin")
-	sighash := rpMustReadFixture(t, "cast_vote_sighash.bin")
 	// Use delegation's wrong_sig.bin (signature over a different message)
 	wrongSig := rpMustReadFixture(t, "wrong_sig.bin")
 
@@ -179,7 +176,6 @@ func TestRedPallasCastVoteWrongSig(t *testing.T) {
 		VoteRoundId:              testRoundID,
 		VoteCommTreeAnchorHeight: 10,
 		RVpk:                     rVpk,
-		Sighash:                  sighash,
 		VoteAuthSig:              wrongSig,
 	}
 

@@ -11,9 +11,8 @@ import (
 const CastVoteSighashDomain = "ZALLY_CAST_VOTE_SIGHASH_V0"
 
 // ComputeCastVoteSighash returns the 32-byte Blake2b-256 hash of the
-// canonical signable payload for MsgCastVote. The payload binds the
-// signature to the message content so the chain can verify that the
-// client-provided sighash matches.
+// canonical signable payload for MsgCastVote. The chain computes this
+// on-chain and uses it as the message for RedPallas signature verification.
 //
 // Canonical encoding (domain || fixed-order fields):
 //   - domain: CastVoteSighashDomain (no trailing null)
