@@ -1,9 +1,11 @@
 package keeper
 
 import (
+	"context"
 	"fmt"
 
 	"cosmossdk.io/core/store"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/z-cale/zally/x/vote/types"
 )
@@ -104,4 +106,24 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 		}
 	}
 	round.CeremonyPayloads = keptPayloads
+}
+
+// ---------------------------------------------------------------------------
+// Ceremony submission validation
+// ---------------------------------------------------------------------------
+
+// ValidateAckSubmitter checks that MsgAckExecutiveAuthorityKey is only
+// submitted during block execution (not via mempool). This ensures acks
+// can only be injected by the block proposer via PrepareProposal,
+// mirroring the pattern used by ValidateTallySubmitter.
+func (k *Keeper) ValidateAckSubmitter(ctx context.Context) error {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	// MsgAckExecutiveAuthorityKey must never enter the mempool — it can only
+	// be injected by the block proposer via PrepareProposal.
+	if sdkCtx.IsCheckTx() || sdkCtx.IsReCheckTx() {
+		return fmt.Errorf("%w: MsgAckExecutiveAuthorityKey cannot be submitted via mempool", types.ErrInvalidField)
+	}
+
+	return nil
 }
