@@ -14,10 +14,12 @@ import (
 
 // ProcessProposalHandler returns a handler that validates injected txs
 // proposed by the block proposer. For deal messages: verifies the round is
-// PENDING with ceremony REGISTERING and payload count matches. For ack
+// PENDING with ceremony REGISTERING, payload count matches, creator is a
+// ceremony validator, and creator matches the block proposer. For ack
 // messages: verifies the round is PENDING with ceremony DEALT, creator is a
 // ceremony validator, and no duplicate ack. For tally messages: verifies the
-// round is TALLYING. All other txs pass through (ACCEPT).
+// round is TALLYING and creator matches the block proposer. All other txs
+// pass through (ACCEPT).
 func ProcessProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	logger log.Logger,
@@ -65,8 +67,9 @@ func ProcessProposalHandler(
 }
 
 // validateInjectedDeal checks that an injected MsgDealExecutiveAuthorityKey
-// is valid: the round is PENDING with ceremony in REGISTERING, and the
-// payload count matches the ceremony validator count.
+// is valid: the round is PENDING with ceremony in REGISTERING, the payload
+// count matches the ceremony validator count, the creator is a ceremony
+// validator, and the creator matches the current block proposer.
 func validateInjectedDeal(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
 	if err != nil {
@@ -92,6 +95,16 @@ func validateInjectedDeal(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByte
 	}
 	if len(dealMsg.Payloads) != len(round.CeremonyValidators) {
 		return errInvalidInjectedTx("payload count does not match validator count")
+	}
+
+	// Verify creator is a ceremony validator.
+	if _, found := votekeeper.FindValidatorInRoundCeremony(round, dealMsg.Creator); !found {
+		return errInvalidInjectedTx("creator is not a ceremony validator")
+	}
+
+	// Verify creator matches the block proposer.
+	if err := voteKeeper.ValidateDealSubmitter(ctx, dealMsg.Creator); err != nil {
+		return errInvalidInjectedTx(err.Error())
 	}
 
 	return nil
@@ -138,7 +151,8 @@ func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes
 }
 
 // validateInjectedTally checks that an injected MsgSubmitTally is valid:
-// the round exists and is in TALLYING state.
+// the round exists and is in TALLYING state, and the creator matches the
+// current block proposer.
 func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, voteMsg, err := voteapi.DecodeVoteTx(txBytes)
 	if err != nil {
@@ -152,6 +166,10 @@ func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByt
 
 	if err := voteKeeper.ValidateRoundForTally(ctx, tallyMsg.VoteRoundId); err != nil {
 		return err
+	}
+
+	if err := voteKeeper.ValidateTallySubmitter(ctx, tallyMsg.Creator); err != nil {
+		return errInvalidInjectedTx(err.Error())
 	}
 
 	return nil

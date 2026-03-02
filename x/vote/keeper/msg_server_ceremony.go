@@ -66,7 +66,15 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 // DealExecutiveAuthorityKey handles MsgDealExecutiveAuthorityKey.
 // The dealer distributes encrypted ea_sk shares to all validators in the
 // round's ceremony. Per-round ceremony: REGISTERING -> DEALT.
+//
+// This message can only be injected by the block proposer via PrepareProposal;
+// direct submission through the mempool is rejected by ValidateDealSubmitter.
 func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.MsgDealExecutiveAuthorityKey) (*types.MsgDealExecutiveAuthorityKeyResponse, error) {
+	// Block mempool submission and verify creator is the block proposer.
+	if err := ms.k.ValidateDealSubmitter(goCtx, msg.Creator); err != nil {
+		return nil, err
+	}
+
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
@@ -87,6 +95,11 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	// Need at least one registered validator.
 	if len(round.CeremonyValidators) == 0 {
 		return nil, fmt.Errorf("%w: no validators in round ceremony", types.ErrCeremonyWrongStatus)
+	}
+
+	// Validate creator is a registered ceremony validator.
+	if _, found := FindValidatorInRoundCeremony(round, msg.Creator); !found {
+		return nil, fmt.Errorf("%w: %s is not a ceremony validator", types.ErrNotRegisteredValidator, msg.Creator)
 	}
 
 	// Validate ea_pk is a valid Pallas point.

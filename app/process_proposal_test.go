@@ -24,6 +24,152 @@ import (
 // Table-driven unit tests for ProcessProposalHandler
 // ---------------------------------------------------------------------------
 
+// TestProcessProposalDealValidation exercises the injected MsgDealExecutiveAuthorityKey
+// validation path in ProcessProposal with various good and bad inputs.
+func TestProcessProposalDealValidation(t *testing.T) {
+	app := testutil.SetupTestApp(t)
+	valAddr := app.ValidatorOperAddr()
+
+	_, eaPk := elgamal.KeyGen(rand.Reader)
+	eaPkBytes := eaPk.Point.ToAffineCompressed()
+
+	_, ephPk := elgamal.KeyGen(rand.Reader)
+	ephPkBytes := ephPk.Point.ToAffineCompressed()
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: valAddr},
+	}
+
+	var currentRoundID []byte
+
+	buildDealTx := func(creator string, roundID []byte, ceremonyValidators []*types.ValidatorPallasKey) []byte {
+		payloads := make([]*types.DealerPayload, len(ceremonyValidators))
+		for i, v := range ceremonyValidators {
+			payloads[i] = &types.DealerPayload{
+				ValidatorAddress: v.ValidatorAddress,
+				EphemeralPk:      ephPkBytes,
+				Ciphertext:       bytes.Repeat([]byte{0x01}, 48),
+			}
+		}
+		msg := &types.MsgDealExecutiveAuthorityKey{
+			Creator:     creator,
+			VoteRoundId: roundID,
+			EaPk:        eaPkBytes,
+			Payloads:    payloads,
+		}
+		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagDealExecutiveAuthorityKey)
+		require.NoError(t, err)
+		return txBytes
+	}
+
+	tests := []struct {
+		name       string
+		setup      func()
+		txs        func() [][]byte
+		wantAccept bool
+	}{
+		{
+			name: "valid deal tx in REGISTERING state",
+			setup: func() {
+				currentRoundID = app.SeedRegisteringCeremony(validators)
+			},
+			txs: func() [][]byte {
+				return [][]byte{buildDealTx(valAddr, currentRoundID, validators)}
+			},
+			wantAccept: true,
+		},
+		{
+			name: "deal tx for non-existent round → reject",
+			setup: func() {
+				currentRoundID = bytes.Repeat([]byte{0xFF}, 32)
+			},
+			txs: func() [][]byte {
+				return [][]byte{buildDealTx(valAddr, currentRoundID, validators)}
+			},
+			wantAccept: false,
+		},
+		{
+			name: "deal tx when round is not REGISTERING (DEALT) → reject",
+			setup: func() {
+				payload := []*types.DealerPayload{
+					{ValidatorAddress: valAddr, EphemeralPk: ephPkBytes, Ciphertext: bytes.Repeat([]byte{0x01}, 48)},
+				}
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payload, validators)
+			},
+			txs: func() [][]byte {
+				return [][]byte{buildDealTx(valAddr, currentRoundID, validators)}
+			},
+			wantAccept: false,
+		},
+		{
+			name: "creator is not a ceremony validator → reject",
+			setup: func() {
+				currentRoundID = app.SeedRegisteringCeremony(validators)
+			},
+			txs: func() [][]byte {
+				return [][]byte{buildDealTx("cosmosvaloper1notincermony", currentRoundID, validators)}
+			},
+			wantAccept: false,
+		},
+		{
+			name: "creator does not match block proposer → reject",
+			setup: func() {
+				// Seed a round whose only ceremony validator is NOT the block proposer.
+				// Creator passes the ceremony-validator check but fails the proposer check.
+				other := []*types.ValidatorPallasKey{{ValidatorAddress: "cosmosvaloper1other"}}
+				currentRoundID = app.SeedRegisteringCeremony(other)
+			},
+			txs: func() [][]byte {
+				other := []*types.ValidatorPallasKey{{ValidatorAddress: "cosmosvaloper1other"}}
+				return [][]byte{buildDealTx("cosmosvaloper1other", currentRoundID, other)}
+			},
+			wantAccept: false,
+		},
+		{
+			name: "payload count mismatch → reject",
+			setup: func() {
+				currentRoundID = app.SeedRegisteringCeremony(validators)
+			},
+			txs: func() [][]byte {
+				msg := &types.MsgDealExecutiveAuthorityKey{
+					Creator:     valAddr,
+					VoteRoundId: currentRoundID,
+					EaPk:        eaPkBytes,
+					Payloads:    nil, // 0 payloads for a 1-validator round
+				}
+				txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagDealExecutiveAuthorityKey)
+				require.NoError(t, err)
+				return [][]byte{txBytes}
+			},
+			wantAccept: false,
+		},
+		{
+			name: "malformed deal tx (corrupted protobuf) → reject",
+			setup: func() {
+				currentRoundID = app.SeedRegisteringCeremony(validators)
+			},
+			txs: func() [][]byte {
+				return [][]byte{{voteapi.TagDealExecutiveAuthorityKey, 0xFF, 0xFF, 0xFF}}
+			},
+			wantAccept: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup()
+			resp := app.CallProcessProposal(tc.txs())
+			if tc.wantAccept {
+				require.Equal(t, abci.ResponseProcessProposal_ACCEPT, resp.Status,
+					"expected ACCEPT for case: %s", tc.name)
+			} else {
+				require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status,
+					"expected REJECT for case: %s", tc.name)
+			}
+		})
+	}
+}
+
 // TestProcessProposalAckValidation exercises the injected MsgAckExecutiveAuthorityKey
 // validation path in ProcessProposal with various good and bad inputs.
 func TestProcessProposalAckValidation(t *testing.T) {
