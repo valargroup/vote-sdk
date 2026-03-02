@@ -1180,15 +1180,14 @@ func TestMultiValidatorCeremony_DealAckConfirm(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 6.2.22: Multi-Validator Ceremony — Timeout, Miss Tracking, Re-Deal
+// 6.2.22: Multi-Validator Ceremony — Timeout, Re-Deal
 // ---------------------------------------------------------------------------
 
 // TestMultiValidatorCeremony_TimeoutMissTracking uses 4 validators (1 real +
-// 3 phantom) to exercise the timeout path where acks fall below the 1/3
-// threshold. With 4 validators, 1 ack gives 1*3=3 < 4 — below threshold.
-// The EndBlocker resets the ceremony to REGISTERING and increments miss
-// counters for non-acking validators. Repeats 3 cycles to verify miss
-// accumulation across rounds.
+// 3 phantom) to exercise the timeout path where acks fall below the 1/2
+// threshold. With 4 validators, 1 ack gives 1*2=2 < 4 — below threshold.
+// The EndBlocker resets the ceremony to REGISTERING for re-deal.
+// Repeats 3 cycles to verify reset behavior across rounds.
 func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
@@ -1232,7 +1231,7 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 		require.Len(t, round.CeremonyPayloads, 4,
 			"cycle %d: should have 4 ECIES payloads", cycle)
 
-		// Step 2: PrepareProposal fires auto-ack → 1/4 < 1/3 → stays DEALT.
+		// Step 2: PrepareProposal fires auto-ack → 1/4 < 1/2 → stays DEALT.
 		app.NextBlockWithPrepareProposal()
 
 		ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
@@ -1283,12 +1282,12 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestCeremonyRecovery_ValidatorRejoinsAfterMiss exercises the recovery path
-// where a validator that missed a ceremony cycle (accumulated miss=1) comes
-// back online and successfully acks in the next cycle. This resets its miss
-// counter and pushes the ceremony past the 1/3 threshold to CONFIRMED.
+// where a validator that missed a ceremony cycle comes back online and
+// successfully acks in the next cycle, pushing the ceremony past the 1/2
+// threshold to CONFIRMED.
 //
 // Setup: 4 validators (1 real proposer + 3 phantom). With 4 validators,
-// the 1/3 threshold requires 2*3=6 >= 4, so 2 acks are needed.
+// the 1/2 threshold requires 2*2=4 >= 4, so 2 acks are needed.
 //
 // Cycle 1: timeout (only real validator acks, 1*3=3 < 4).
 // Cycle 2: phantom1 manually acks → 2 acks total → timeout confirms + strips.
@@ -1405,13 +1404,13 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 		"phantom1 ack should succeed, got: %s", ackResult.Log)
 
 	// Fast path requires ALL validators to ack, so 2/4 stays DEALT.
-	// Advance past timeout → EndBlocker confirms with >= 1/3 acks and strips
+	// Advance past timeout → EndBlocker confirms with >= 1/2 acks and strips
 	// non-ackers (phantom2, phantom3).
 	timeoutTime = time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
 	app.NextBlockAtTime(timeoutTime)
 
 	// -----------------------------------------------------------------------
-	// Assertions: ceremony confirmed via timeout, miss counters correct.
+	// Assertions: ceremony confirmed via timeout, non-ackers stripped.
 	// -----------------------------------------------------------------------
 
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})

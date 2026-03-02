@@ -178,7 +178,7 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 
 // AckExecutiveAuthorityKey handles MsgAckExecutiveAuthorityKey.
 // A registered validator acknowledges receipt of their ea_sk share.
-// When >= 1/3 validators have acked, ceremony transitions DEALT -> CONFIRMED
+// When all validators have acked (fast path), ceremony transitions DEALT -> CONFIRMED
 // and the round transitions PENDING -> ACTIVE.
 //
 // This message can only be injected by the block proposer via PrepareProposal;
@@ -229,7 +229,7 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 	// Fast path: confirm only when ALL validators have acked. This gives
 	// every validator a chance to ack via PrepareProposal before the ceremony
 	// closes. If some validators are offline, the timeout path in EndBlocker
-	// handles confirmation with >= 1/3 acks and strips non-ackers.
+	// handles confirmation with >= 1/2 acks and strips non-ackers.
 	if len(round.CeremonyAcks) == len(round.CeremonyValidators) {
 		round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 		round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE

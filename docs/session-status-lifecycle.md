@@ -6,10 +6,12 @@ This document describes the `SessionStatus` state machine for `VoteRound`, inclu
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ACTIVE: MsgCreateVotingSession
+    [*] --> PENDING: MsgCreateVotingSession
+    PENDING --> ACTIVE: Ceremony confirmed (all acked or timeout with >= 1/2)
     ACTIVE --> TALLYING: EndBlocker (blockTime >= vote_end_time)
-    TALLYING --> FINALIZED: MsgSubmitTally (future)
+    TALLYING --> FINALIZED: MsgSubmitTally (auto-injected via PrepareProposal)
 
+    note right of PENDING: Ceremony in progress (deal + ack)
     note right of ACTIVE: DelegateVote, CastVote, RevealShare accepted
     note right of TALLYING: Only RevealShare accepted
     note right of FINALIZED: Read-only (no messages accepted)
@@ -23,15 +25,16 @@ stateDiagram-v2
 | 1 | `SESSION_STATUS_ACTIVE` | Voting is open; all message types accepted |
 | 2 | `SESSION_STATUS_TALLYING` | Voting closed; only `MsgRevealShare` accepted |
 | 3 | `SESSION_STATUS_FINALIZED` | Tally complete; round is read-only |
+| 4 | `SESSION_STATUS_PENDING` | Ceremony in progress; round is not yet open for voting |
 
 ## Per-Status Message Acceptance
 
-| Message Type | ACTIVE | TALLYING | FINALIZED |
-|---|---|---|---|
-| `MsgDelegateVote` | Accepted | **Rejected** | **Rejected** |
-| `MsgCastVote` | Accepted | **Rejected** | **Rejected** |
-| `MsgRevealShare` | Accepted | Accepted | **Rejected** |
-| `MsgCreateVotingSession` | N/A (creates new round) | N/A | N/A |
+| Message Type | PENDING | ACTIVE | TALLYING | FINALIZED |
+|---|---|---|---|---|
+| `MsgDelegateVote` | **Rejected** | Accepted | **Rejected** | **Rejected** |
+| `MsgCastVote` | **Rejected** | Accepted | **Rejected** | **Rejected** |
+| `MsgRevealShare` | **Rejected** | Accepted | Accepted | **Rejected** |
+| `MsgCreateVotingSession` | N/A | N/A | N/A | N/A |
 
 This is implemented via the `AcceptsTallyingRound()` method on the `VoteMessage` interface:
 
@@ -39,6 +42,13 @@ This is implemented via the `AcceptsTallyingRound()` method on the `VoteMessage`
 - All other messages return `false` — routed to `ValidateRoundForVoting`
 
 ## Transitions
+
+### PENDING → ACTIVE
+
+- **Trigger (fast path)**: `MsgAckExecutiveAuthorityKey` — when ALL ceremony validators have acked
+- **Trigger (timeout path)**: `EndBlocker` — DEALT phase timeout with >= 1/2 acks; non-ackers are stripped
+- **Trigger (timeout reset)**: `EndBlocker` — DEALT phase timeout with < 1/2 acks; ceremony resets to REGISTERING for re-deal (round stays PENDING)
+- **Action**: Sets `status = SESSION_STATUS_ACTIVE`, `ceremony_status = CEREMONY_STATUS_CONFIRMED`
 
 ### ACTIVE → TALLYING
 
@@ -52,9 +62,9 @@ This is implemented via the `AcceptsTallyingRound()` method on the `VoteMessage`
 
 ### TALLYING → FINALIZED
 
-- **Trigger**: `MsgSubmitTally` (not yet implemented)
-- **Condition**: Valid tally submission
-- **Note**: The `SESSION_STATUS_FINALIZED` enum value is defined but the transition is not yet implemented. It is reserved for future `MsgSubmitTally` work.
+- **Trigger**: `MsgSubmitTally` (auto-injected via `PrepareProposal`)
+- **Condition**: Valid tally submission with decrypted accumulators
+- **Action**: Sets `status = SESSION_STATUS_FINALIZED`, stores tally results
 
 ## Belt-and-Suspenders Validation
 

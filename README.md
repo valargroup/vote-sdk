@@ -14,7 +14,7 @@ Cosmos SDK application chain for private voting using Zcash-derived cryptography
 
 ### Module: `x/vote`
 
-The vote module has two major subsystems: the **EA Key Ceremony** (one-time chain setup) and **Voting Rounds** (created after the ceremony completes).
+The vote module has two major subsystems: the **EA Key Ceremony** (automatic per voting round) and **Voting Rounds** (transition from PENDING through ceremony to ACTIVE).
 
 ### EA Key Ceremony (Per-Round)
 
@@ -47,7 +47,7 @@ Key behaviors:
 - **Fast path vs timeout** — the fast path confirms when ALL validators ack (no stripping needed). The timeout path confirms with >= 1/2 acks (integer arithmetic: `acks * 2 >= validators`) and strips non-ackers.
 - **Auto-deal** — the block proposer automatically deals when it detects a PENDING round in REGISTERING state. No manual `ceremony.sh deal` step.
 - **Auto-ack** — each block proposer auto-acks via PrepareProposal when it detects a DEALT round.
-- **Miss tracking** — validators snapshotted into a ceremony who fail to ack have a consecutive miss counter incremented. After 3 consecutive misses, the validator is jailed.
+- **Non-acker stripping** — validators who fail to ack within the timeout are stripped from the round's ceremony (removed from `ceremony_validators` and `ceremony_payloads`). No miss counters or ceremony-based jailing — liveness enforcement is handled by `x/slashing` block-miss detection.
 - **Ceremony log** — each state transition appends a timestamped entry to `ceremony_log` on the round, visible in queries and the admin UI.
 
 #### Pallas Key Registration (One-Time)
@@ -63,8 +63,8 @@ Validators register their Pallas key once via `MsgRegisterPallasKey` or `MsgCrea
 #### Timeout (EndBlocker)
 
 Only the DEALT phase has a timeout (default: 30 minutes). On timeout:
-- **>= 1/2 acked:** Confirm ceremony, strip non-ackers, activate round. Increment miss counter for each non-acker; jail if >= 3 consecutive misses.
-- **< 1/2 acked:** Reset to REGISTERING for re-deal by the next proposer. Increment miss counters.
+- **>= 1/2 acked:** Confirm ceremony, strip non-ackers, activate round.
+- **< 1/2 acked:** Reset to REGISTERING for re-deal by the next proposer.
 
 #### ECIES Encryption Scheme
 
@@ -131,8 +131,8 @@ Vote and ceremony transactions bypass the standard Cosmos SDK `Tx` envelope. Eac
 | `0x07` | `MsgDealExecutiveAuthorityKey`     | Ceremony                |
 | `0x08` | `MsgAckExecutiveAuthorityKey`      | Ceremony (injected)     |
 | `0x09` | `MsgCreateValidatorWithPallasKey`  | Ceremony                |
-| `0x0B` | `MsgReInitializeElectionAuthority` | Ceremony                |
 | `0x0C` | `MsgSetVoteManager`                | Management              |
+| `0x0D` | `MsgSubmitPartialDecryption`       | Tallying (injected)     |
 
 Any transaction whose first byte does not match a known tag is decoded as a standard Cosmos SDK `Tx`. Tag `0x0A` is deliberately skipped because it collides with the standard Cosmos Tx protobuf encoding (field 1, wire type 2). Note that raw `MsgCreateValidator` is blocked by the ante handler for live transactions -- post-genesis validators must use `MsgCreateValidatorWithPallasKey` (tag `0x09`) instead.
 
@@ -140,36 +140,40 @@ Any transaction whose first byte does not match a known tag is decoded as a stan
 
 The chain exposes a JSON REST API alongside CometBFT RPC. Clients POST JSON bodies for transaction submission and GET for queries — no protobuf encoding required on the client side.
 
-#### Transaction Endpoints
+#### Transaction Endpoints (Custom Wire Format)
 
-| Method | Path                                     | Description                                             |
-| ------ | ---------------------------------------- | ------------------------------------------------------- |
-| POST   | `/zally/v1/register-pallas-key`          | Register validator Pallas PK for ceremony               |
-| POST   | `/zally/v1/create-validator-with-pallas` | Create validator + register Pallas key (post-genesis)   |
-| POST   | `/zally/v1/reinitialize-ea`              | Reset ceremony to REGISTERING (rejected during DEALT)   |
-| POST   | `/zally/v1/deal-ea-key`                  | Deal ECIES-encrypted `ea_sk` shares to validators       |
-| POST   | `/zally/v1/create-voting-session`        | Create a new voting round (requires CONFIRMED ceremony) |
-| POST   | `/zally/v1/delegate-vote`                | Submit a delegation proof (ZKP #1)                      |
-| POST   | `/zally/v1/cast-vote`                    | Cast an encrypted vote (ZKP #2)                         |
-| POST   | `/zally/v1/reveal-share`                 | Reveal an encrypted share (ZKP #3)                      |
-| POST   | `/zally/v1/submit-tally`                 | Submit tally results (normally auto-injected)           |
-| POST   | `/zally/v1/set-vote-manager`             | Set or change the VoteManager address                   |
+Vote-round messages use the custom wire format and are submitted as JSON POST requests:
 
-All POST endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`.
+| Method | Path                          | Description                                   |
+| ------ | ----------------------------- | --------------------------------------------- |
+| POST   | `/zally/v1/delegate-vote`     | Submit a delegation proof (ZKP #1)            |
+| POST   | `/zally/v1/cast-vote`         | Cast an encrypted vote (ZKP #2)               |
+| POST   | `/zally/v1/reveal-share`      | Reveal an encrypted share (ZKP #3)            |
+| POST   | `/zally/v1/submit-tally`      | Submit tally results (normally auto-injected) |
+
+These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`.
+
+Ceremony and management messages (`MsgRegisterPallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgSetVoteManager`, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, `MsgCreateVotingSession`) are standard Cosmos SDK transactions routed through the MsgServiceRouter. They can be submitted via the Cosmos SDK CLI or gRPC gateway.
 
 #### Query Endpoints
 
 | Method | Path                                       | Description                                |
 | ------ | ------------------------------------------ | ------------------------------------------ |
 | GET    | `/zally/v1/ceremony`                       | Current ceremony state and status          |
+| GET    | `/zally/v1/rounds`                         | List all stored vote rounds                |
 | GET    | `/zally/v1/rounds/active`                  | Currently active voting round              |
 | GET    | `/zally/v1/round/{round_id}`               | Voting round by hex round ID               |
+| GET    | `/zally/v1/vote-summary/{round_id}`        | Denormalized round summary with proposals  |
 | GET    | `/zally/v1/tally/{round_id}/{proposal_id}` | Tally for a specific proposal              |
 | GET    | `/zally/v1/tally-results/{round_id}`       | All tally results for a round              |
 | GET    | `/zally/v1/commitment-tree/{height}`       | Vote commitment tree at block height       |
 | GET    | `/zally/v1/commitment-tree/latest`         | Latest vote commitment tree                |
 | GET    | `/zally/v1/commitment-tree/leaves`         | Tree leaves (`?from_height=X&to_height=Y`) |
+| GET    | `/zally/v1/pallas-keys`                    | All registered Pallas keys                 |
 | GET    | `/zally/v1/vote-manager`                   | Current VoteManager address                |
+| GET    | `/zally/v1/genesis`                        | Chain genesis JSON                         |
+| GET    | `/zally/v1/snapshot-data/{height}`         | Nullifier snapshot data at block height    |
+| GET    | `/zally/v1/tx/{hash}`                      | Transaction status by hash                 |
 
 ### On-Chain State (KV Store Keys)
 
@@ -187,7 +191,7 @@ enum CeremonyStatus {
   CEREMONY_STATUS_UNSPECIFIED   = 0;
   CEREMONY_STATUS_REGISTERING   = 1; // Accepting validator pk_i registrations (no timeout)
   CEREMONY_STATUS_DEALT         = 2; // DealerTx landed, awaiting acks
-  CEREMONY_STATUS_CONFIRMED     = 3; // >=2/3 validators acked, ea_pk ready
+  CEREMONY_STATUS_CONFIRMED     = 3; // All acked (fast path) or >=1/2 acked at timeout, ea_pk ready
 }
 
 message CeremonyState {

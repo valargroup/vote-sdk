@@ -459,9 +459,9 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	// --- 3. Per-round ceremony DEALT phase timeout ---
 	// Only the DEALT phase has a timeout. REGISTERING persists indefinitely
 	// until a deal is injected by a proposer.
-	// On DEALT timeout with >= 1/3 acks: strip non-ackers, confirm ceremony,
+	// On DEALT timeout with >= 1/2 acks: strip non-ackers, confirm ceremony,
 	// transition round to ACTIVE.
-	// On DEALT timeout with < 1/3 acks: reset ceremony to REGISTERING for re-deal.
+	// On DEALT timeout with < 1/2 acks: reset ceremony to REGISTERING for re-deal.
 	// Collect round IDs with expired ceremony deadlines (avoid mutating store during iteration).
 	var ceremonyTimeoutIDs [][]byte
 	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {

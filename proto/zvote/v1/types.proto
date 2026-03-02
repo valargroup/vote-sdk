@@ -137,7 +137,7 @@ enum CeremonyStatus {
   CEREMONY_STATUS_UNSPECIFIED   = 0;
   CEREMONY_STATUS_REGISTERING   = 1; // Accepting validator pk_i registrations (no timeout)
   CEREMONY_STATUS_DEALT         = 2; // DealerTx landed, awaiting acks
-  CEREMONY_STATUS_CONFIRMED     = 3; // >=2/3 validators acked, ea_pk ready
+  CEREMONY_STATUS_CONFIRMED     = 3; // All acked (fast path) or >=1/2 acked at timeout, ea_pk ready
 }
 
 // CeremonyState tracks the singleton EA key ceremony lifecycle.
