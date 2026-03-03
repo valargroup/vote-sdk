@@ -6,6 +6,7 @@ package testutil
 import (
 	"bytes"
 	"encoding/binary"
+	"math/rand/v2"
 	"time"
 
 	"github.com/z-cale/zally/crypto/elgamal"
@@ -66,10 +67,10 @@ func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession
 		VoteEndTime:       uint64(refTime.Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:    bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:    bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:    bytes.Repeat([]byte{0x33}, 64),
-		Proposals: SampleProposals(),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         SampleProposals(),
 	}
 }
 
@@ -84,10 +85,10 @@ func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSessi
 		VoteEndTime:       uint64(refTime.Add(-1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:    bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:    bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:    bytes.Repeat([]byte{0x33}, 64),
-		Proposals: SampleProposals(),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         SampleProposals(),
 	}
 }
 
@@ -203,4 +204,122 @@ func ValidSubmitTallyWithEntries(roundID []byte, creator string, entries []*type
 // MakeNullifier creates a deterministic 32-byte nullifier from a seed byte.
 func MakeNullifier(seed byte) []byte {
 	return bytes.Repeat([]byte{seed}, 32)
+}
+
+// makeNullifierFromUint64 creates a deterministic 32-byte nullifier from a
+// uint64. This supports large stress batches without the 256-value collision
+// limit of MakeNullifier(seed byte).
+func makeNullifierFromUint64(v uint64) []byte {
+	out := make([]byte, 32)
+	binary.LittleEndian.PutUint64(out[0:8], v)
+	binary.LittleEndian.PutUint64(out[8:16], v^0x9e3779b97f4a7c15)
+	binary.LittleEndian.PutUint64(out[16:24], v^0x243f6a8885a308d3)
+	binary.LittleEndian.PutUint64(out[24:32], v^0xb7e151628aed2a6b)
+	return out
+}
+
+// ValidDelegationN returns n deterministic MsgDelegateVote messages with unique
+// gov nullifiers and VAN commitments. The seed controls reproducible generation.
+func ValidDelegationN(roundID []byte, n int, seed uint64) []*types.MsgDelegateVote {
+	if n <= 0 {
+		return nil
+	}
+	out := make([]*types.MsgDelegateVote, 0, n)
+	for i := range n {
+		base := seed + uint64(i)*4
+		msg := &types.MsgDelegateVote{
+			Rk:                  bytes.Repeat([]byte{0x01}, 32),
+			SpendAuthSig:        bytes.Repeat([]byte{0x02}, 64),
+			SignedNoteNullifier: makeNullifierFromUint64(base + 1),
+			CmxNew:              FpLE(base + 2),
+			VanCmx:              FpLE(base + 3),
+			GovNullifiers: [][]byte{
+				makeNullifierFromUint64(base + 10),
+				makeNullifierFromUint64(base + 11),
+			},
+			Proof:       []byte("mock-delegation-proof"),
+			VoteRoundId: ensureBytes32(roundID),
+			Sighash:     bytes.Repeat([]byte{0x99}, 32),
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
+// ValidCastVoteN returns n deterministic MsgCastVote messages with unique VAN
+// nullifiers and commitment leaves. The seed controls reproducible generation.
+func ValidCastVoteN(roundID []byte, anchorHeight uint64, n int, seed uint64) []*types.MsgCastVote {
+	if n <= 0 {
+		return nil
+	}
+	out := make([]*types.MsgCastVote, 0, n)
+	for i := range n {
+		base := seed + uint64(i)*5
+		sigByte := byte((base & 0xff))
+		rvpkByte := byte(((base + 77) & 0xff))
+		msg := &types.MsgCastVote{
+			VanNullifier:             makeNullifierFromUint64(base + 20),
+			VoteAuthorityNoteNew:     FpLE(base + 21),
+			VoteCommitment:           FpLE(base + 22),
+			ProposalId:               1,
+			Proof:                    []byte("mock-vote-commitment-proof"),
+			VoteRoundId:              ensureBytes32(roundID),
+			VoteCommTreeAnchorHeight: anchorHeight,
+			VoteAuthSig:              bytes.Repeat([]byte{sigByte}, 64),
+			RVpk:                     bytes.Repeat([]byte{rvpkByte}, 32),
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
+// ShuffleWithSeed returns a deterministically shuffled copy of in.
+func ShuffleWithSeed[T any](in []T, seed uint64) []T {
+	out := make([]T, len(in))
+	copy(out, in)
+	r := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
+	r.Shuffle(len(out), func(i, j int) {
+		out[i], out[j] = out[j], out[i]
+	})
+	return out
+}
+
+// NullifierConflictSet contains conflicting/fresh tx fixtures for both
+// delegation (gov nullifiers) and cast-vote (VAN nullifiers) race tests.
+type NullifierConflictSet struct {
+	GovWinner *types.MsgDelegateVote
+	GovLoser  *types.MsgDelegateVote
+	GovFresh  *types.MsgDelegateVote
+
+	VanWinner *types.MsgCastVote
+	VanLoser  *types.MsgCastVote
+	VanFresh  *types.MsgCastVote
+}
+
+// BuildConflictingNullifierSet builds deterministic tx fixtures where two txs
+// intentionally conflict on the same nullifier and one tx is fresh.
+func BuildConflictingNullifierSet(roundID []byte, anchorHeight uint64, seed uint64) NullifierConflictSet {
+	govWinner := ValidDelegationN(roundID, 1, seed+100)[0]
+	govLoser := ValidDelegationN(roundID, 1, seed+200)[0]
+	// Force conflict on both gov nullifiers.
+	govLoser.GovNullifiers = [][]byte{
+		append([]byte(nil), govWinner.GovNullifiers[0]...),
+		append([]byte(nil), govWinner.GovNullifiers[1]...),
+	}
+	govFresh := ValidDelegationN(roundID, 1, seed+300)[0]
+
+	vanWinner := ValidCastVoteN(roundID, anchorHeight, 1, seed+400)[0]
+	vanLoser := ValidCastVoteN(roundID, anchorHeight, 1, seed+500)[0]
+	// Force conflict on VAN nullifier.
+	vanLoser.VanNullifier = append([]byte(nil), vanWinner.VanNullifier...)
+	vanFresh := ValidCastVoteN(roundID, anchorHeight, 1, seed+600)[0]
+
+	return NullifierConflictSet{
+		GovWinner: govWinner,
+		GovLoser:  govLoser,
+		GovFresh:  govFresh,
+		VanWinner: vanWinner,
+		VanLoser:  vanLoser,
+		VanFresh:  vanFresh,
+	}
 }
