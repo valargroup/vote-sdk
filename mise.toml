@@ -224,6 +224,114 @@ run = "make -C nullifier-ingest test-proof"
 description = "Test: kill val2, restart, verify it rejoins consensus"
 run = "bash sdk/scripts/test_validator_restart.sh"
 
+[tasks."test:tree-stress"]
+description = "VC/VAN in-process determinism stress tests (debug_tree)"
+dir = "sdk"
+run = "go test -tags debug_tree -count=1 -run TestTreeStress ./app/..."
+
+[tasks."test:tree-consistency"]
+description = "VC/VAN per-height multi-validator consistency checks (requires load)"
+run = "bash sdk/scripts/test_tree_consistency.sh"
+
+[tasks."test:tree-crash-recovery"]
+description = "VC/VAN crash/restart replay consistency checks (requires load)"
+run = "bash sdk/scripts/test_tree_crash_recovery.sh"
+
+[tasks."test:tree-soak"]
+description = "VC/VAN long-running soak with rolling restarts (requires load)"
+run = "bash sdk/scripts/test_tree_soak.sh"
+
+[tasks."test:sync-stress-real"]
+description = "Real-proof VC/VAN sync stress E2E (ignored test)"
+run = '''
+#!/usr/bin/env bash
+set -e
+ZALLY_API_URL=${ZALLY_API_URL:-http://localhost:1418} \
+HELPER_SERVER_URL=${HELPER_SERVER_URL:-$ZALLY_API_URL} \
+ZALLY_STRESS_DELEGATION_COUNT=${ZALLY_STRESS_DELEGATION_COUNT:-5} \
+ZALLY_E2E_VOTE_WINDOW_SECS=${ZALLY_E2E_VOTE_WINDOW_SECS:-420} \
+cargo test --release --manifest-path e2e-tests/Cargo.toml --test sync_stress -- --nocapture --ignored --test-threads=1
+'''
+
+[tasks."test:tree-consistency:real"]
+description = "Tier 2 consistency checks using real-proof sync_stress load"
+run = "LOAD_MODE=real-proof bash sdk/scripts/test_tree_consistency.sh"
+
+[tasks."test:tree-consistency:real:mixed"]
+description = "Tier 2 consistency checks using real-proof sync_stress + VC flow load"
+run = "LOAD_MODE=real-proof REAL_PROOF_INCLUDE_VC_FLOW=1 bash sdk/scripts/test_tree_consistency.sh"
+
+[tasks."test:tree-crash-recovery:real"]
+description = "Tier 3 crash/restart checks using real-proof sync_stress load"
+run = "LOAD_MODE=real-proof bash sdk/scripts/test_tree_crash_recovery.sh"
+
+[tasks."test:tree-crash-recovery:real:mixed"]
+description = "Tier 3 crash/restart checks using real-proof sync_stress + VC flow load"
+run = "LOAD_MODE=real-proof REAL_PROOF_INCLUDE_VC_FLOW=1 bash sdk/scripts/test_tree_crash_recovery.sh"
+
+[tasks."test:tree-soak:real"]
+description = "Tier 4 soak using real-proof sync_stress load"
+run = "LOAD_MODE=real-proof bash sdk/scripts/test_tree_soak.sh"
+
+[tasks."test:tree-soak:real:mixed"]
+description = "Tier 4 soak using real-proof sync_stress + VC flow load"
+run = "LOAD_MODE=real-proof REAL_PROOF_INCLUDE_VC_FLOW=1 bash sdk/scripts/test_tree_soak.sh"
+
+[tasks."test:sync-stress-real:local"]
+description = "Single command: start local 3-validator chain and run real-proof sync stress"
+quiet = true
+run = '''
+#!/usr/bin/env bash
+set -e
+
+# Start chain if needed.
+if ! pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1; then
+  mise run multi:start-chain
+fi
+
+# Wait for helper server on val1 API.
+for i in $(seq 1 40); do
+  if curl -sf http://localhost:1418/api/v1/status > /dev/null 2>&1; then
+    break
+  fi
+  if [ "$i" = "40" ]; then
+    echo "helper server not ready on :1418"
+    exit 1
+  fi
+  sleep 2
+done
+
+ZALLY_API_URL=${ZALLY_API_URL:-http://localhost:1418} \
+HELPER_SERVER_URL=${HELPER_SERVER_URL:-http://localhost:1418} \
+ZALLY_HOME=${ZALLY_HOME:-$HOME/.zallyd-val1} \
+ZALLY_NODE_URL=${ZALLY_NODE_URL:-tcp://localhost:26157} \
+ZALLY_PALLAS_PK_PATH=${ZALLY_PALLAS_PK_PATH:-$HOME/.zallyd-val1/pallas.pk} \
+ZALLY_STRESS_DELEGATION_COUNT=${ZALLY_STRESS_DELEGATION_COUNT:-5} \
+ZALLY_E2E_VOTE_WINDOW_SECS=${ZALLY_E2E_VOTE_WINDOW_SECS:-420} \
+mise run test:sync-stress-real
+'''
+
+[tasks."test:vc-van:premerge"]
+description = "Single command pre-merge suite (fast + mixed real-proof, optional soak)"
+quiet = true
+run = '''
+#!/usr/bin/env bash
+set -e
+
+# Fast deterministic in-process checks.
+mise run test:tree-stress
+
+# Local real-proof run and multi-validator determinism checks.
+mise run test:sync-stress-real:local
+mise run test:tree-consistency:real:mixed
+mise run test:tree-crash-recovery:real:mixed
+
+# Optional long soak, disabled by default for pre-merge developer runs.
+if [ "${RUN_SOAK:-0}" = "1" ]; then
+  DURATION_MINUTES=${DURATION_MINUTES:-60} mise run test:tree-soak:real:mixed
+fi
+'''
+
 [tasks."test:join"]
 description = "Smoke test: validator join flow against running chain"
 run = "bash sdk/scripts/test_join_ci.sh"

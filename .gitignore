@@ -1,6 +1,7 @@
 # Log files
 *.log
 .claude/**
+artifacts/
 
 # Go binary
 sdk/zallyd

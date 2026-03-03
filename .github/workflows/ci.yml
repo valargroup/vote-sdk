@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
 
 permissions:
   contents: read
@@ -102,9 +104,30 @@ jobs:
       - name: Run Go Halo2 verification tests
         run: mise run test:halo2
 
+  test-vc-van-deterministic:
+    name: VC/VAN Deterministic Stress
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: sdk/.cache/go-build
+          key: ${{ runner.os }}-vc-van-deterministic-go-${{ hashFiles('sdk/go.sum', 'sdk/circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-vc-van-deterministic-go-
+      - name: Run deterministic VC/VAN tree stress tests
+        run: mise run test:tree-stress
+        env:
+          GOCACHE: ${{ github.workspace }}/sdk/.cache/go-build
+
   test-api:
     name: API Integration Tests
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -157,7 +180,7 @@ jobs:
 
   test-multi-validator:
     name: Multi-Validator E2E
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -237,9 +260,109 @@ jobs:
             sdk/multi-val3.log
           retention-days: 7
 
+  test-vc-van-realism:
+    name: VC/VAN Real-Proof Stress
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Add GOBIN to PATH
+        run: echo "$HOME/go/bin" >> $GITHUB_PATH
+      - name: Cache Rust build (circuits + e2e-tests + tree client)
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdk/circuits/target
+            e2e-tests/target
+            vote-commitment-tree-client/target
+          key: ${{ runner.os }}-vc-van-real-rust-${{ hashFiles('sdk/circuits/Cargo.lock', 'e2e-tests/Cargo.lock', 'vote-commitment-tree-client/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-vc-van-real-rust-
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: sdk/.cache/go-build
+          key: ${{ runner.os }}-vc-van-real-go-${{ hashFiles('sdk/go.sum', 'sdk/circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-vc-van-real-go-
+      - name: Pre-build vote-commitment-tree-client
+        run: cargo build --release --manifest-path vote-commitment-tree-client/Cargo.toml
+      - name: Start 3-validator chain
+        run: mise run multi:start-chain
+        env:
+          GOCACHE: ${{ github.workspace }}/sdk/.cache/go-build
+          ZALLY_PIR_URL: "disabled"
+      - name: Wait for helper server readiness
+        run: |
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:1418/api/v1/status > /dev/null 2>&1; then
+              echo "Helper server is ready on val1"
+              exit 0
+            fi
+            echo "Waiting for helper server... ($i/40)"
+            sleep 2
+          done
+          echo "Helper server failed to start"
+          tail -100 sdk/multi-val1.log
+          exit 1
+      - name: Set multi-validator env
+        run: |
+          echo "ZALLY_HOME=$HOME/.zallyd-val1" >> $GITHUB_ENV
+          echo "ZALLY_NODE_URL=tcp://localhost:26157" >> $GITHUB_ENV
+          echo "ZALLY_PALLAS_PK_PATH=$HOME/.zallyd-val1/pallas.pk" >> $GITHUB_ENV
+      - name: Run real-proof sync stress
+        run: mise run test:sync-stress-real
+        env:
+          ZALLY_API_URL: http://localhost:1418
+          HELPER_SERVER_URL: http://localhost:1418
+          ZALLY_STRESS_DELEGATION_COUNT: "5"
+          ZALLY_E2E_VOTE_WINDOW_SECS: "420"
+      - name: Run real-proof VC flow (delegation + cast + reveal)
+        run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1
+        env:
+          ZALLY_API_URL: http://localhost:1418
+          HELPER_SERVER_URL: http://localhost:1418
+          ZALLY_E2E_VOTE_WINDOW_SECS: "420"
+      - name: Run Tier 2 consistency with real-proof load
+        run: mise run test:tree-consistency:real
+        env:
+          REAL_PROOF_API_URL: http://localhost:1418
+          REAL_PROOF_HELPER_URL: http://localhost:1418
+          REAL_PROOF_DELEGATION_COUNT: "5"
+          REAL_PROOF_VOTE_WINDOW_SECS: "420"
+          REAL_PROOF_INCLUDE_VC_FLOW: "1"
+          SAMPLE_BLOCKS: "12"
+          RUN_RESTART_PHASE: "1"
+          ZALLY_PIR_URL: "disabled"
+      - name: Run Tier 3 crash recovery with real-proof load (nightly + manual)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: mise run test:tree-crash-recovery:real
+        env:
+          REAL_PROOF_API_URL: http://localhost:1418
+          REAL_PROOF_HELPER_URL: http://localhost:1418
+          REAL_PROOF_DELEGATION_COUNT: "5"
+          REAL_PROOF_VOTE_WINDOW_SECS: "420"
+          SAMPLE_BLOCKS: "10"
+          ZALLY_PIR_URL: "disabled"
+      - name: Upload VC/VAN realism logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vc-van-realism-logs
+          path: |
+            sdk/multi-val1.log
+            sdk/multi-val2.log
+            sdk/multi-val3.log
+            artifacts/tree-consistency/
+            artifacts/tree-crash-recovery/
+          retention-days: 7
+
   test-join:
     name: Validator Join Flow
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
