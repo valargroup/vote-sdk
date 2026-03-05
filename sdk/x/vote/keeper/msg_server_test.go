@@ -146,7 +146,8 @@ func testAccAddr(seed byte) string {
 // mockStakingKeeper implements keeper.StakingKeeper for tests.
 // validators maps bech32 operator address -> validator.
 type mockStakingKeeper struct {
-	validators map[string]stakingtypes.Validator
+	validators       map[string]stakingtypes.Validator
+	proposerOperator string // operator address returned by GetValidatorByConsAddr
 }
 
 func newMockStakingKeeper(valAddrs ...string) *mockStakingKeeper {
@@ -169,7 +170,10 @@ func (mk *mockStakingKeeper) GetValidator(_ context.Context, addr sdk.ValAddress
 }
 
 func (mk *mockStakingKeeper) GetValidatorByConsAddr(_ context.Context, _ sdk.ConsAddress) (stakingtypes.Validator, error) {
-	return stakingtypes.Validator{}, fmt.Errorf("not implemented in mock")
+	if mk.proposerOperator == "" {
+		return stakingtypes.Validator{}, fmt.Errorf("proposer not configured in mock")
+	}
+	return stakingtypes.Validator{OperatorAddress: mk.proposerOperator}, nil
 }
 
 func (mk *mockStakingKeeper) Jail(_ context.Context, _ sdk.ConsAddress) error {
@@ -190,6 +194,14 @@ func (s *MsgServerTestSuite) setupWithMockStaking(valAddrs ...string) {
 func (s *MsgServerTestSuite) seedVoteManager(addr string) {
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: addr}))
+}
+
+// setDealProposer configures the mock staking keeper so that
+// ValidateDealSubmitter sees creator as the block proposer.
+func (s *MsgServerTestSuite) setDealProposer(creator string) {
+	mk := newMockStakingKeeper()
+	mk.proposerOperator = creator
+	s.setupWithMockStakingKeeper(mk)
 }
 
 // setupWithMockStakingKeeper replaces the keeper's staking keeper with the
