@@ -119,8 +119,9 @@ func (s *MsgServerTestSuite) createPendingRoundWithValidators(n int) (roundID []
 // Threshold mode is used automatically when n >= 2.
 func (s *MsgServerTestSuite) dealPendingRound(n int) (roundID []byte, addrs []string) {
 	roundID, addrs, _ = s.createPendingRoundWithValidators(n)
+	s.setDealProposer(addrs[0])
 	msg := &types.MsgDealExecutiveAuthorityKey{
-		Creator:     "dealer",
+		Creator:     addrs[0],
 		VoteRoundId: roundID,
 		EaPk:        testPallasPK(),
 		Payloads:    makePayloads(addrs),
@@ -289,6 +290,7 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 	s.SetupTest()
 
 	roundID, addrs, _ := s.createPendingRoundWithValidators(3)
+	s.setDealProposer(addrs[0])
 	eaPk := testPallasPK()
 	payloads := makePayloads(addrs)
 	vks := make([][]byte, 3)
@@ -297,7 +299,7 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 	}
 
 	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
-		Creator:          "dealer1",
+		Creator:          addrs[0],
 		VoteRoundId:      roundID,
 		EaPk:             eaPk,
 		Payloads:         payloads,
@@ -313,7 +315,7 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
 	s.Require().Equal(eaPk, round.EaPk)
-	s.Require().Equal("dealer1", round.CeremonyDealer)
+	s.Require().Equal(addrs[0], round.CeremonyDealer)
 	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), round.CeremonyPhaseStart)
 	s.Require().Equal(types.DefaultDealTimeout, round.CeremonyPhaseTimeout)
 	s.Require().Len(round.CeremonyPayloads, 3)
@@ -603,7 +605,12 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 		s.Run(tc.name, func() {
 			s.SetupTest()
 			roundID, addrs := tc.setup()
-			_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, tc.msg(roundID, addrs))
+			msg := tc.msg(roundID, addrs)
+			if len(addrs) > 0 {
+				msg.Creator = addrs[0]
+			}
+			s.setDealProposer(msg.Creator)
+			_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, msg)
 			s.Require().Error(err)
 			s.Require().Contains(err.Error(), tc.errContains)
 		})
@@ -906,6 +913,7 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 	}
 
 	roundID := s.createPendingRound(ceremonyVals)
+	s.setDealProposer(addrs[0])
 
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
@@ -929,7 +937,7 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 	}
 
 	_, err = s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
-		Creator:          "dealer",
+		Creator:          addrs[0],
 		VoteRoundId:      roundID,
 		EaPk:             eaPkBytes,
 		Payloads:         payloads,
