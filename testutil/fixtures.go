@@ -9,9 +9,25 @@ import (
 	"math/rand/v2"
 	"time"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
+
 	"github.com/z-cale/zally/crypto/elgamal"
 	"github.com/z-cale/zally/x/vote/types"
 )
+
+// TestValAddr generates a deterministic valid bech32 validator operator address from a seed byte.
+func TestValAddr(seed byte) string {
+	addr := make([]byte, 20)
+	addr[0] = seed
+	return sdk.ValAddress(addr).String()
+}
+
+// TestAccAddr generates a deterministic valid bech32 account address from a seed byte.
+func TestAccAddr(seed byte) string {
+	addr := make([]byte, 20)
+	addr[0] = seed
+	return sdk.AccAddress(addr).String()
+}
 
 // FpLE returns a 32-byte little-endian encoding of v as a Pallas Fp element.
 // Values 0 <= v < 2^64 are always canonical. Use for commitment tree leaves in tests.
@@ -19,6 +35,24 @@ func FpLE(v uint64) []byte {
 	buf := make([]byte, 32)
 	binary.LittleEndian.PutUint64(buf[:8], v)
 	return buf
+}
+
+// ActiveRoundFixture returns a VoteRound in ACTIVE status with sensible defaults.
+// Used to seed keeper state directly in unit tests without going through CreateVotingSession.
+func ActiveRoundFixture(roundID []byte) *types.VoteRound {
+	return &types.VoteRound{
+		VoteRoundId:      roundID,
+		VoteEndTime:      2_000_000,
+		Creator:          "zvote1creator",
+		Status:           types.SessionStatus_SESSION_STATUS_ACTIVE,
+		NullifierImtRoot: bytes.Repeat([]byte{0x03}, 32),
+		NcRoot:           bytes.Repeat([]byte{0x04}, 32),
+		EaPk:             bytes.Repeat([]byte{0x05}, 32),
+		VkZkp1:           bytes.Repeat([]byte{0x06}, 64),
+		VkZkp2:           bytes.Repeat([]byte{0x07}, 64),
+		VkZkp3:           bytes.Repeat([]byte{0x08}, 64),
+		Proposals:        SampleProposals(),
+	}
 }
 
 // DefaultOptions returns the standard binary vote options (Support/Oppose).
@@ -65,6 +99,24 @@ func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
 		VoteEndTime:       uint64(refTime.Add(1 * time.Hour).Unix()),
+		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
+		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
+		Proposals:         SampleProposals(),
+	}
+}
+
+// ValidCreateVotingSessionWithEndTime returns a MsgCreateVotingSession with an explicit
+// VoteEndTime. Use when you need a specific end time (e.g. 10 seconds from block time).
+func ValidCreateVotingSessionWithEndTime(endTime time.Time) *types.MsgCreateVotingSession {
+	return &types.MsgCreateVotingSession{
+		Creator:           "zvote1admin",
+		SnapshotHeight:    100,
+		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
+		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
+		VoteEndTime:       uint64(endTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),

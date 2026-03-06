@@ -30,13 +30,7 @@ func testPallasPK() []byte {
 	return pk.Point.ToAffineCompressed()
 }
 
-// testValoperAddr returns the valoper address corresponding to testAccAddr(seed).
-// This is what RegisterPallasKey stores after converting account → valoper.
-func testValoperAddr(seed byte) string {
-	addr := make([]byte, 20)
-	addr[0] = seed
-	return sdk.ValAddress(addr).String()
-}
+var testValoperAddr = zallytest.TestValAddr
 
 // registerValidators is a test helper that registers N validators and returns
 // the stored valoper addresses and their Pallas public keys.

@@ -2,7 +2,6 @@ package vote_test
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"testing"
 	"time"
@@ -21,18 +20,13 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	zallytest "github.com/z-cale/zally/testutil"
 	vote "github.com/z-cale/zally/x/vote"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
 
-// fpLE returns a 32-byte little-endian Pallas Fp encoding of a small integer.
-// Used so commitment leaves are canonical and accepted by the votetree FFI.
-func fpLE(v uint64) []byte {
-	buf := make([]byte, 32)
-	binary.LittleEndian.PutUint64(buf[:8], v)
-	return buf
-}
+var fpLE = zallytest.FpLE
 
 // ---------------------------------------------------------------------------
 // Test suite

@@ -3,7 +3,6 @@ package keeper_test
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/binary"
 	"testing"
 	"time"
 
@@ -17,17 +16,12 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/z-cale/zally/crypto/elgamal"
+	zallytest "github.com/z-cale/zally/testutil"
 	"github.com/z-cale/zally/x/vote/keeper"
 	"github.com/z-cale/zally/x/vote/types"
 )
 
-// fpLE returns a 32-byte little-endian Pallas Fp encoding of v (canonical for 0 <= v < 2^64).
-// Use for commitment tree leaves so the votetree FFI accepts them.
-func fpLE(v uint64) []byte {
-	buf := make([]byte, 32)
-	binary.LittleEndian.PutUint64(buf[:8], v)
-	return buf
-}
+var fpLE = zallytest.FpLE
 
 // validCiphertextBytes generates a real serialized ElGamal ciphertext encrypting
 // value v under a fresh random key. Used in tests that must pass the keeper's

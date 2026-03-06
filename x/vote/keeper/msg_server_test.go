@@ -56,22 +56,7 @@ func (s *MsgServerTestSuite) SetupTest() {
 // setupActiveRound creates a vote round in the store with an end time in the future and ACTIVE status.
 func (s *MsgServerTestSuite) setupActiveRound(roundID []byte) {
 	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
-		VoteRoundId:      roundID,
-		VoteEndTime:      2_000_000,
-		Creator:          "zvote1creator",
-		Status:           types.SessionStatus_SESSION_STATUS_ACTIVE,
-		NullifierImtRoot: bytes.Repeat([]byte{0x03}, 32),
-		NcRoot:           bytes.Repeat([]byte{0x04}, 32),
-		EaPk:             bytes.Repeat([]byte{0x05}, 32),
-		VkZkp1:           bytes.Repeat([]byte{0x06}, 64),
-		VkZkp2:           bytes.Repeat([]byte{0x07}, 64),
-		VkZkp3:           bytes.Repeat([]byte{0x08}, 64),
-		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
-			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
-		},
-	}))
+	s.Require().NoError(s.keeper.SetVoteRound(kv, zallytest.ActiveRoundFixture(roundID)))
 }
 
 // setupRootAtHeight stores a commitment tree root at the given height.
@@ -99,22 +84,7 @@ func computeExpectedRoundID(msg *types.MsgCreateVotingSession) []byte {
 
 // validSetupMsg returns a valid MsgCreateVotingSession for tests.
 func validSetupMsg() *types.MsgCreateVotingSession {
-	return &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
-		SnapshotHeight:    100,
-		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
-		VoteEndTime:       2_000_000,
-		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
-		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
-		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
-			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
-		},
-	}
+	return zallytest.ValidCreateVotingSessionWithEndTime(time.Unix(2_000_000, 0))
 }
 
 // seedEligibleValidators registers Pallas keys for n validators and sets up
@@ -129,19 +99,10 @@ func (s *MsgServerTestSuite) seedEligibleValidators(n int) []string {
 // Mock staking keeper
 // ---------------------------------------------------------------------------
 
-// testValAddr generates a deterministic valid bech32 validator address from a seed byte.
-func testValAddr(seed byte) string {
-	addr := make([]byte, 20)
-	addr[0] = seed
-	return sdk.ValAddress(addr).String()
-}
-
-// testAccAddr generates a deterministic valid bech32 account address from a seed byte.
-func testAccAddr(seed byte) string {
-	addr := make([]byte, 20)
-	addr[0] = seed
-	return sdk.AccAddress(addr).String()
-}
+var (
+	testValAddr = zallytest.TestValAddr
+	testAccAddr = zallytest.TestAccAddr
+)
 
 // mockStakingKeeper implements keeper.StakingKeeper for tests.
 // validators maps bech32 operator address -> validator.

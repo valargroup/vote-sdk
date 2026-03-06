@@ -389,19 +389,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
 func (s *ABCIIntegrationSuite) TestEndBlockerStatusTransition() {
 	// Create a session that expires 10 seconds from now.
 	voteEndTime := s.app.Time.Add(10 * time.Second)
-	setupMsg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
-		SnapshotHeight:    100,
-		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
-		VoteEndTime:       uint64(voteEndTime.Unix()),
-		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
-		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
-		Proposals:         testutil.SampleProposals(),
-	}
+	setupMsg := testutil.ValidCreateVotingSessionWithEndTime(voteEndTime)
 	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Verify round is ACTIVE.
@@ -430,19 +418,7 @@ func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
 	// Create a session expiring 60 seconds from now — enough headroom for
 	// several DeliverVoteTx calls (each advances time by 5 seconds).
 	voteEndTime := s.app.Time.Add(60 * time.Second)
-	setupMsg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
-		SnapshotHeight:    200,
-		SnapshotBlockhash: bytes.Repeat([]byte{0x1A}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0x1B}, 32),
-		VoteEndTime:       uint64(voteEndTime.Unix()),
-		NullifierImtRoot:  bytes.Repeat([]byte{0x1C}, 32),
-		NcRoot:            bytes.Repeat([]byte{0x1D}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
-		Proposals:         testutil.SampleProposals(),
-	}
+	setupMsg := testutil.ValidCreateVotingSessionWithEndTime(voteEndTime)
 	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Delegate while ACTIVE to populate the tree.
@@ -601,19 +577,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 
 	// Create a session expiring 30 seconds from now.
 	voteEndTime := s.app.Time.Add(30 * time.Second)
-	setupMsg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
-		SnapshotHeight:    500,
-		SnapshotBlockhash: bytes.Repeat([]byte{0x4A}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0x4B}, 32),
-		VoteEndTime:       uint64(voteEndTime.Unix()),
-		NullifierImtRoot:  bytes.Repeat([]byte{0x0C}, 32),
-		NcRoot:            bytes.Repeat([]byte{0x0D}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
-		Proposals:         testutil.SampleProposals(),
-	}
+	setupMsg := testutil.ValidCreateVotingSessionWithEndTime(voteEndTime)
 	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Delegate while ACTIVE to populate the tree.
@@ -708,19 +672,7 @@ func (s *ABCIIntegrationSuite) TestSubmitTallyLifecycle() {
 func (s *ABCIIntegrationSuite) TestSubmitTallyNonProposerRejected() {
 	// Create a session expiring 10 seconds from now.
 	voteEndTime := s.app.Time.Add(10 * time.Second)
-	setupMsg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
-		SnapshotHeight:    600,
-		SnapshotBlockhash: bytes.Repeat([]byte{0x5A}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0x5B}, 32),
-		VoteEndTime:       uint64(voteEndTime.Unix()),
-		NullifierImtRoot:  bytes.Repeat([]byte{0x0E}, 32),
-		NcRoot:            bytes.Repeat([]byte{0x0F}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
-		Proposals:         testutil.SampleProposals(),
-	}
+	setupMsg := testutil.ValidCreateVotingSessionWithEndTime(voteEndTime)
 	roundID := s.app.SeedVotingSession(setupMsg)
 
 	// Advance past VoteEndTime → TALLYING.
@@ -783,19 +735,7 @@ func TestPrepareProposalAutoTally(t *testing.T) {
 
 	// Step 1: Create voting session expiring 30s from now.
 	voteEndTime := app.Time.Add(30 * time.Second)
-	setupMsg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
-		SnapshotHeight:    700,
-		SnapshotBlockhash: bytes.Repeat([]byte{0x7A}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0x7B}, 32),
-		VoteEndTime:       uint64(voteEndTime.Unix()),
-		NullifierImtRoot:  bytes.Repeat([]byte{0x10}, 32),
-		NcRoot:            bytes.Repeat([]byte{0x11}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
-		Proposals:         testutil.SampleProposals(),
-	}
+	setupMsg := testutil.ValidCreateVotingSessionWithEndTime(voteEndTime)
 	roundID := app.SeedVotingSession(setupMsg)
 	app.WriteEaSkForRound(roundID, eaSkBytes)
 
