@@ -32,14 +32,7 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 	}
 
 	// Reject duplicate reveal: share nullifier must not already be recorded (scoped to type + round).
-	has, err := ms.k.HasNullifier(kvStore, types.NullifierTypeShare, msg.VoteRoundId, msg.ShareNullifier)
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		return nil, fmt.Errorf("%w: nullifier already exists", types.ErrDuplicateNullifier)
-	}
-	if err := ms.k.SetNullifier(kvStore, types.NullifierTypeShare, msg.VoteRoundId, msg.ShareNullifier); err != nil {
+	if err := ms.k.CheckAndSetNullifier(kvStore, types.NullifierTypeShare, msg.VoteRoundId, msg.ShareNullifier); err != nil {
 		return nil, err
 	}
 

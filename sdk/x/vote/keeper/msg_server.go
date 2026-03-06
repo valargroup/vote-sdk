@@ -142,14 +142,7 @@ func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVo
 
 	// Record each governance nullifier (scoped to gov type + round).
 	for _, nf := range msg.GovNullifiers {
-		has, err := ms.k.HasNullifier(kvStore, types.NullifierTypeGov, msg.VoteRoundId, nf)
-		if err != nil {
-			return nil, err
-		}
-		if has {
-			return nil, fmt.Errorf("%w: nullifier already exists", types.ErrDuplicateNullifier)
-		}
-		if err := ms.k.SetNullifier(kvStore, types.NullifierTypeGov, msg.VoteRoundId, nf); err != nil {
+		if err := ms.k.CheckAndSetNullifier(kvStore, types.NullifierTypeGov, msg.VoteRoundId, nf); err != nil {
 			return nil, err
 		}
 	}
@@ -194,14 +187,7 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 	}
 
 	// Reject double-vote: VAN nullifier must not already be recorded (scoped to type + round).
-	has, err := ms.k.HasNullifier(kvStore, types.NullifierTypeVoteAuthorityNote, msg.VoteRoundId, msg.VanNullifier)
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		return nil, fmt.Errorf("%w: nullifier already exists", types.ErrDuplicateNullifier)
-	}
-	if err := ms.k.SetNullifier(kvStore, types.NullifierTypeVoteAuthorityNote, msg.VoteRoundId, msg.VanNullifier); err != nil {
+	if err := ms.k.CheckAndSetNullifier(kvStore, types.NullifierTypeVoteAuthorityNote, msg.VoteRoundId, msg.VanNullifier); err != nil {
 		return nil, err
 	}
 

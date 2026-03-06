@@ -26,6 +26,19 @@ func (k *Keeper) SetNullifier(ctx store.KVStore, nfType types.NullifierType, rou
 	return ctx.Set(types.NullifierKey(nfType, roundID, nullifier), []byte{1})
 }
 
+// CheckAndSetNullifier atomically checks that a nullifier has not been recorded
+// and then records it. Returns ErrDuplicateNullifier if already spent.
+func (k *Keeper) CheckAndSetNullifier(kvStore store.KVStore, nfType types.NullifierType, roundID, nullifier []byte) error {
+	has, err := k.HasNullifier(kvStore, nfType, roundID, nullifier)
+	if err != nil {
+		return err
+	}
+	if has {
+		return fmt.Errorf("%w: nullifier already exists", types.ErrDuplicateNullifier)
+	}
+	return k.SetNullifier(kvStore, nfType, roundID, nullifier)
+}
+
 // CheckNullifiersUnique verifies that none of the provided nullifiers have
 // already been recorded in the type-scoped, round-scoped nullifier set.
 // This runs on every check including RecheckTx, because nullifiers may have
