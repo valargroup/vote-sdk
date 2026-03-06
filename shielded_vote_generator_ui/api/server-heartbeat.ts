@@ -13,6 +13,10 @@
 // pending-registrations queue for admin approval (same queue as
 // register-validator).
 //
+// Validators should call POST /api/register-validator on startup first
+// to ensure they are in approved-servers (via on-chain bonding check),
+// then pulse via this endpoint every 30s.
+//
 // Required env vars:
 //   VERCEL_API_TOKEN   — Vercel REST API token with Edge Config write access
 //   EDGE_CONFIG_ID     — ID of the Edge Config store (ecfg_...)
