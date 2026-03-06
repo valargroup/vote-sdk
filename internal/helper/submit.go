@@ -97,7 +97,10 @@ func (c *ChainSubmitter) SubmitRevealShare(msg *MsgRevealShareJSON) (*BroadcastR
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	// 200 = CheckTx passed (code 0). 422 = CheckTx rejected (code != 0) but the
+	// body still contains a structured BroadcastResult. Parse both so the caller
+	// can inspect result.Code.
+	if resp.StatusCode != 200 && resp.StatusCode != 422 {
 		return nil, fmt.Errorf("chain returned %d: %s", resp.StatusCode, string(respBody))
 	}
 

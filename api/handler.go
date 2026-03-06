@@ -3,8 +3,10 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -143,54 +145,55 @@ func (h *Handler) handleSnapshotData(w http.ResponseWriter, r *http.Request) {
 
 // --- TX status ---
 
-// handleTxStatus queries CometBFT for a confirmed transaction by hash.
-// Returns { "height": "...", "code": 0 } if the TX is in a block, or 404 if not yet included.
-func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	txHash := vars["hash"]
-	if txHash == "" {
-		writeError(w, http.StatusBadRequest, "missing tx hash")
-		return
-	}
+// txStatusResult holds the confirmed status of a transaction in a block.
+type txStatusResult struct {
+	Height string
+	Code   uint32
+	Log    string
+}
 
+// errTxNotFound is returned by queryTxByHash when CometBFT has no record of the TX in any block.
+var errTxNotFound = errors.New("tx not found in any block")
+
+// queryTxByHash queries CometBFT's /tx JSON-RPC endpoint for a confirmed
+// transaction. Returns errTxNotFound if the TX is not yet in a block.
+func (h *Handler) queryTxByHash(txHash string) (*txStatusResult, error) {
 	reqBody := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tx",
 		"params": map[string]interface{}{
-			"hash": txHash,
+			"hash":  txHash,
 			"prove": false,
 		},
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("marshal request: %v", err))
-		return
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", h.cometRPC, bytes.NewReader(bodyBytes))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("create request: %v", err))
-		return
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := h.client.Do(req)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("CometBFT request failed: %v", err))
-		return
+		return nil, fmt.Errorf("CometBFT request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	var rpcResp struct {
 		Result *struct {
-			Height string `json:"height"`
+			Height   string `json:"height"`
 			TxResult struct {
 				Code uint32 `json:"code"`
+				Log  string `json:"log"`
 			} `json:"tx_result"`
 		} `json:"result"`
 		Error *struct {
@@ -201,27 +204,58 @@ func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("decode CometBFT response: %v", err))
+		return nil, fmt.Errorf("decode CometBFT response: %w", err)
+	}
+
+	if rpcResp.Error != nil {
+		return nil, errTxNotFound
+	}
+
+	if rpcResp.Result == nil {
+		return nil, fmt.Errorf("unexpected empty result from CometBFT")
+	}
+
+	return &txStatusResult{
+		Height: rpcResp.Result.Height,
+		Code:   rpcResp.Result.TxResult.Code,
+		Log:    rpcResp.Result.TxResult.Log,
+	}, nil
+}
+
+// handleTxStatus queries CometBFT for a confirmed transaction by hash.
+// Returns { "height": "...", "code": 0, "log": "" } if the TX is in a block,
+// or 404 if not yet included. Returns HTTP 422 if the TX was included but
+// failed during execution (code != 0).
+func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	txHash := vars["hash"]
+	if txHash == "" {
+		writeError(w, http.StatusBadRequest, "missing tx hash")
 		return
 	}
 
-	// CometBFT returns an error when the TX is not found
-	if rpcResp.Error != nil {
+	result, err := h.queryTxByHash(txHash)
+	if errors.Is(err, errTxNotFound) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{"error": "tx not found"}) //nolint:errcheck
 		return
 	}
-
-	if rpcResp.Result == nil {
-		writeError(w, http.StatusBadGateway, "unexpected empty result from CometBFT")
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("CometBFT query failed: %v", err))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"height": rpcResp.Result.Height,
-		"code":   rpcResp.Result.TxResult.Code,
-	})
+	resp := map[string]interface{}{
+		"height": result.Height,
+		"code":   result.Code,
+		"log":    result.Log,
+	}
+	if result.Code != 0 {
+		writeJSON(w, http.StatusUnprocessableEntity, resp)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // --- Broadcast ---
@@ -254,6 +288,11 @@ func (h *Handler) broadcastVoteTx(w http.ResponseWriter, msg types.VoteMessage) 
 		return
 	}
 
+	if result.Code != 0 {
+		log.Printf("[zally-api] CheckTx rejected (code %d): %s", result.Code, result.Log)
+		writeJSON(w, http.StatusUnprocessableEntity, result)
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -313,13 +352,32 @@ func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error)
 			detail = rpcResp.Error.Message
 		}
 
-		// "tx already exists in cache" means the tx was previously accepted into the
-		// mempool. Treat this as success so callers don't retry indefinitely.
+		// "tx already exists in cache" means the tx bytes were seen before by CometBFT's
+		// mempool. This includes txs that passed CheckTx AND txs that were rejected — the
+		// cache tracks hashes, not outcomes. Query CometBFT /tx to find the real status.
 		if strings.Contains(detail, "already exists in cache") {
-			log.Printf("[zally-api] tx already in mempool cache, treating as success")
+			txHash := fmt.Sprintf("%X", sha256.Sum256(txBytes))
+			log.Printf("[zally-api] tx already in mempool cache, querying real status hash=%s", txHash)
+
+			status, err := h.queryTxByHash(txHash)
+			if errors.Is(err, errTxNotFound) {
+				// TX is pending in the mempool (not yet committed). Return the hash
+				// so the client can poll /tx/{hash} for confirmation.
+				return &BroadcastResult{
+					TxHash: txHash,
+					Code:   0,
+					Log:    "tx pending in mempool (duplicate submission)",
+				}, nil
+			}
+			if err != nil {
+				return nil, fmt.Errorf("tx in cache but status query failed: %w", err)
+			}
+
+			// TX was committed — return the real outcome (may be code 0 or non-zero).
 			return &BroadcastResult{
-				Code: 0,
-				Log:  "tx already exists in mempool cache",
+				TxHash: txHash,
+				Code:   status.Code,
+				Log:    status.Log,
 			}, nil
 		}
 
