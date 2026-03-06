@@ -173,6 +173,13 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 		}
 	}
 
+	// Verify completeness: entries must cover every non-empty accumulator.
+	// Without this check a malicious proposer could finalize a round with
+	// missing entries, permanently omitting vote results.
+	if err := ms.k.ValidateTallyCompleteness(kvStore, round, msg.Entries); err != nil {
+		return nil, err
+	}
+
 	// Transition to FINALIZED.
 	round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {
