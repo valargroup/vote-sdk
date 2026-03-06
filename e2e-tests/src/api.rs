@@ -20,32 +20,41 @@ pub fn helper_server_url() -> String {
         .unwrap_or_else(|_| base_url())
 }
 
-/// POST JSON to the helper server. Retries on connection errors.
+/// POST JSON to the helper server. Retries on connection and decode errors.
 pub fn post_helper_json(path: &str, body: &Value) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
     let url = format!("{}{}", helper_server_url(), path);
-    let mut last_err = None;
+    let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
     for attempt in 0..MAX_RETRIES {
         match client().post(&url).json(body).send() {
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                let json: Value = resp.json()?;
-                return Ok((status, json));
-            }
-            Err(e) => {
-                last_err = Some(e);
-                if let Some(ref err) = last_err {
-                    if is_retryable(err) && attempt < MAX_RETRIES - 1 {
-                        let backoff_ms = 500 * (attempt + 1) as u64;
-                        eprintln!("[E2E] POST helper {} connection error (attempt {}/{}), retrying in {}ms...", path, attempt + 1, MAX_RETRIES, backoff_ms);
-                        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-                        continue;
+                match resp.json::<Value>() {
+                    Ok(json) => return Ok((status, json)),
+                    Err(e) => {
+                        if attempt < MAX_RETRIES - 1 {
+                            let backoff_ms = 200 * (attempt + 1) as u64;
+                            eprintln!("[E2E] POST helper {} decode error (attempt {}/{}), retrying in {}ms...", path, attempt + 1, MAX_RETRIES, backoff_ms);
+                            std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                            last_err = Some(e.into());
+                            continue;
+                        }
+                        return Err(e.into());
                     }
                 }
-                break;
+            }
+            Err(e) => {
+                if is_retryable(&e) && attempt < MAX_RETRIES - 1 {
+                    let backoff_ms = 500 * (attempt + 1) as u64;
+                    eprintln!("[E2E] POST helper {} connection error (attempt {}/{}), retrying in {}ms...", path, attempt + 1, MAX_RETRIES, backoff_ms);
+                    std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                    last_err = Some(e.into());
+                    continue;
+                }
+                return Err(e.into());
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| unreachable!()).into())
+    Err(last_err.unwrap_or_else(|| "max retries exhausted".into()))
 }
 
 /// Create a blocking client with a reasonable timeout.
@@ -265,6 +274,19 @@ pub fn commitment_tree_next_index() -> Option<u64> {
         return None;
     }
     json.get("tree")?.get("next_index")?.as_u64()
+}
+
+/// Returns (height, root_b64, next_index) from the latest commitment tree state.
+pub fn commitment_tree_latest() -> Option<(u64, String, u64)> {
+    let (status, json) = get_json("/zally/v1/commitment-tree/latest").ok()?;
+    if status != 200 {
+        return None;
+    }
+    let tree = json.get("tree")?;
+    let height = tree.get("height")?.as_u64()?;
+    let root = tree.get("root")?.as_str()?.to_string();
+    let next_index = tree.get("next_index")?.as_u64()?;
+    Some((height, root, next_index))
 }
 
 /// Returns true if the round's tally for the given proposal has at least one share (decision "1").
@@ -718,6 +740,32 @@ pub fn broadcast_cosmos_msg_with_retries(
         }
     }
     Err(last_err.unwrap())
+}
+
+/// Lightweight per-round helper queue status from `/api/v1/queue-status`.
+#[derive(Clone, Debug, Default)]
+pub struct HelperQueueStatus {
+    pub total: u64,
+    pub pending: u64,
+    pub submitted: u64,
+    pub failed: u64,
+}
+
+/// Query the helper's queue-status endpoint for a round.
+pub fn get_helper_queue_status(round_id_hex: &str) -> Option<HelperQueueStatus> {
+    let url = format!("{}/api/v1/queue-status", helper_server_url());
+    let resp = client().get(&url).send().ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: Value = resp.json().ok()?;
+    let round = json.get(round_id_hex)?;
+    Some(HelperQueueStatus {
+        total: round.get("total")?.as_u64()?,
+        pending: round.get("pending")?.as_u64()?,
+        submitted: round.get("submitted")?.as_u64()?,
+        failed: round.get("failed")?.as_u64()?,
+    })
 }
 
 /// Returns the full round JSON object from a round query.

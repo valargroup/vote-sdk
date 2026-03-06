@@ -1,11 +1,9 @@
 //! Build a real delegation bundle for E2E tests (ZKP #1 + RedPallas).
 //!
-//! Generates session params with vote_end_time = now + configured window and a canonical
-//! vote_round_id, then builds the delegation bundle and RedPallas signature
-//! so the test can create the session and delegate without fixture files.
-//! The window defaults to 3 minutes and can be overridden with
-//! ZALLY_E2E_VOTE_WINDOW_SECS. This timestamp is part of vote_round_id, so it must
-//! be chosen before proof generation starts.
+//! Generates session params with a fixed far-future vote_end_time and a canonical
+//! vote_round_id, then builds the delegation bundle and RedPallas signature.
+//! Since vote_end_time is hashed into round_id (a ZKP public input), using a
+//! constant value makes fixtures reusable indefinitely.
 
 use crate::payloads::{DelegationBundlePayload, SetupRoundFields};
 use blake2b_simd::Params as Blake2bParams;
@@ -28,16 +26,10 @@ use voting_circuits::{
     },
 };
 
-const DEFAULT_E2E_VOTE_WINDOW_SECS: u64 = 180;
-const MIN_E2E_VOTE_WINDOW_SECS: u64 = 120;
-
-fn vote_window_secs() -> u64 {
-    std::env::var("ZALLY_E2E_VOTE_WINDOW_SECS")
-        .ok()
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .map(|secs| secs.max(MIN_E2E_VOTE_WINDOW_SECS))
-        .unwrap_or(DEFAULT_E2E_VOTE_WINDOW_SECS)
-}
+/// Far-future vote_end_time (Jan 1 2100 UTC). Since vote_end_time is hashed
+/// into round_id (which is a ZKP public input), fixtures bind to it permanently.
+/// Using a fixed far-future value makes fixtures reusable indefinitely.
+const FAR_FUTURE_VOTE_END_TIME: u64 = 4102444800;
 
 /// Data from delegation that the vote proof builder needs.
 pub struct VoteProofDelegationData {
@@ -56,16 +48,18 @@ pub struct VoteProofDelegationData {
 }
 
 /// Build delegation bundle and session fields for the E2E test.
-/// vote_end_time = now + vote_window_secs() where the default window is 3 min
-/// (override with ZALLY_E2E_VOTE_WINDOW_SECS, clamped to >= 120s).
-/// The round must stay ACTIVE through all submissions, then expire for auto-tally.
 /// Returns payload for MsgDelegateVote, session fields for MsgCreateVotingSession,
 /// and private witness data for building ZKP #2 (vote proof).
+///
+/// `vote_end_time_override`: if None, uses FAR_FUTURE_VOTE_END_TIME (fixtures
+/// reusable indefinitely). Pass `Some(now + secs)` when the test needs the round
+/// to transition to TALLYING within a specific window.
 ///
 /// If `sk_override` is Some, uses that SpendingKey (e.g. derived from a hotkey seed
 /// via ZIP-32, for testing the librustvoting path). Otherwise generates a random key.
 pub fn build_delegation_bundle_for_test(
     sk_override: Option<SpendingKey>,
+    vote_end_time_override: Option<u64>,
 ) -> Result<
     (
         DelegationBundlePayload,
@@ -173,11 +167,6 @@ pub fn build_delegation_bundle_for_test(
 
     let snapshot_blockhash = [0xAAu8; 32];
     let proposals_hash = [0xBBu8; 32];
-    let vote_end_time: u64 = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        + vote_window_secs();
 
     let nc_root_repr = nc_root.to_repr();
     let nf_imt_root_repr = nf_imt_root.to_repr();
@@ -187,7 +176,7 @@ pub fn build_delegation_bundle_for_test(
         snapshot_height,
         snapshot_blockhash,
         proposals_hash,
-        vote_end_time,
+        vote_end_time: vote_end_time_override.unwrap_or(FAR_FUTURE_VOTE_END_TIME),
         nullifier_imt_root: nf_imt_root_repr,
         nc_root: nc_root_repr,
     };
@@ -412,18 +401,13 @@ pub fn build_multi_delegation_bundles(
 
     let snapshot_blockhash = [0xAAu8; 32];
     let proposals_hash = [0xBBu8; 32];
-    let vote_end_time: u64 = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        + vote_window_secs();
 
     let snapshot_height: u64 = 42_000;
     let round_fields = SetupRoundFields {
         snapshot_height,
         snapshot_blockhash,
         proposals_hash,
-        vote_end_time,
+        vote_end_time: FAR_FUTURE_VOTE_END_TIME,
         nullifier_imt_root: nf_imt_root.to_repr(),
         nc_root: nc_root.to_repr(),
     };
@@ -475,14 +459,25 @@ pub fn build_multi_delegation_bundles(
         });
     }
 
-    // ---- Parallel proof generation ----
+    // ---- Parallel proof generation (bounded parallelism) ----
+    let max_parallel: usize = std::env::var("FIXTURE_GEN_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8));
     eprintln!(
-        "[multi-deleg] spawning {} threads for parallel proof generation...",
-        count
+        "[multi-deleg] generating {} proofs with parallelism={}...",
+        count, max_parallel
     );
-    let handles: Vec<_> = inputs
+
+    let mut results = Vec::with_capacity(count);
+    let mut indexed_inputs: Vec<(usize, DelegationInput)> =
+        inputs.into_iter().enumerate().collect();
+
+    while !indexed_inputs.is_empty() {
+    let chunk_size = max_parallel.min(indexed_inputs.len());
+    let chunk: Vec<(usize, DelegationInput)> = indexed_inputs.drain(..chunk_size).collect();
+    let handles: Vec<_> = chunk
         .into_iter()
-        .enumerate()
         .map(|(i, input)| {
             std::thread::spawn(move || -> Result<
                 (DelegationBundlePayload, VoteProofDelegationData),
@@ -578,13 +573,13 @@ pub fn build_multi_delegation_bundles(
         })
         .collect();
 
-    let mut results = Vec::with_capacity(count);
-    for (i, handle) in handles.into_iter().enumerate() {
+    for handle in handles {
         let result = handle
             .join()
-            .map_err(|_| format!("delegation {} thread panicked", i))?;
+            .map_err(|_| "delegation thread panicked".to_string())?;
         results.push(result?);
     }
+    } // end chunk loop
 
     eprintln!("[multi-deleg] all {} bundles built and verified", count);
     Ok((results, round_fields))

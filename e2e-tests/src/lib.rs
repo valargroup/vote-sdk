@@ -7,5 +7,7 @@
 pub mod api;
 pub mod ecies;
 pub mod elgamal;
+pub mod fixtures;
+pub mod metrics;
 pub mod payloads;
 pub mod setup;

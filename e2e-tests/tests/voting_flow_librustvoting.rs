@@ -78,8 +78,14 @@ fn voting_flow_librustvoting_path() {
         "Setup",
         "building delegation bundle with seed-derived key (K=14 proof, 30-60s)...",
     );
+    let vote_end = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 300;
     let (delegation_bundle, session_fields, vote_proof_data) =
-        build_delegation_bundle_for_test(Some(sk)).expect("build_delegation_bundle_for_test");
+        build_delegation_bundle_for_test(Some(sk), Some(vote_end))
+            .expect("build_delegation_bundle_for_test");
     log_step("Setup", "delegation bundle ready");
 
     // Save fields we need for DB before session_fields is consumed

@@ -3,7 +3,7 @@
 # Then: mise install && mise start
 
 [tools]
-go = "1.24.1"
+go = "1.24.3"
 rust = "stable"
 node = "22"
 buf = "latest"

@@ -57,5 +57,10 @@ nullifiers.tree
 nullifiers.index
 nullifier-ingest/pir-data/
 
+# Downloaded/generated E2E throughput fixtures
+e2e-tests/fixtures/**/manifest.json
+e2e-tests/fixtures/**/delegations.json
+e2e-tests/fixtures/**/cast_vote_inputs.json
+
 # macOS
 .DS_Store
