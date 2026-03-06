@@ -107,16 +107,19 @@ db_path = ""
 # Mean of the exponential delay distribution (seconds).
 # Shares are delayed by Exp(1/mean) for temporal unlinkability, capped at vote end time.
 # Use a short value for testing; production default is 43200 (12 hours).
-mean_delay = 60
+mean_delay = 0
+
+# Minimum delay floor (seconds).
+min_delay = 0
 
 # How often to check for shares ready to submit (seconds).
-process_interval = 5
+process_interval = 1
 
 # Port of the chain's REST API (used for MsgRevealShare submission).
 chain_api_port = 1318
 
 # Maximum concurrent proof generation goroutines.
-max_concurrent_proofs = 2
+max_concurrent_proofs = 16
 HELPERCFG
 
 echo ""
