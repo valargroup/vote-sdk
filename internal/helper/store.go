@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -321,7 +320,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	// Only schedule if the row was actually inserted (not a duplicate).
 	affected, _ := res.RowsAffected()
 	if affected > 0 {
-		delay := s.cappedExponentialDelay(voteEndTime)
+		delay := s.uniformDelay(voteEndTime)
 		key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
 		s.schedule[key] = time.Now().Add(delay)
 		if s.logInfo != nil {
@@ -514,6 +513,56 @@ func (s *ShareStore) Close() error {
 	return s.db.Close()
 }
 
+// PurgeExpiredRounds deletes all share data for rounds whose vote_end_time
+// has passed, and removes the corresponding entries from the in-memory
+// schedule and round cache. Returns the number of rows deleted.
+func (s *ShareStore) PurgeExpiredRounds() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().Unix()
+
+	res, err := s.db.Exec(
+		"DELETE FROM shares WHERE vote_end_time > 0 AND vote_end_time < ?", now,
+	)
+	if err != nil {
+		s.logError("PurgeExpiredRounds: delete shares failed", "error", err)
+		return 0
+	}
+	deleted, _ := res.RowsAffected()
+
+	// Also clean the rounds metadata table.
+	if _, err := s.db.Exec(
+		"DELETE FROM rounds WHERE vote_end_time > 0 AND vote_end_time < ?", now,
+	); err != nil {
+		s.logError("PurgeExpiredRounds: delete rounds failed", "error", err)
+	}
+
+	// Prune in-memory caches for expired rounds.
+	for roundID, vet := range s.roundCache {
+		if vet > 0 && vet < uint64(now) {
+			delete(s.roundCache, roundID)
+		}
+	}
+	for key := range s.schedule {
+		parts := strings.SplitN(key, ":", 4)
+		if len(parts) < 1 {
+			continue
+		}
+		roundID := parts[0]
+		if _, ok := s.roundCache[roundID]; !ok {
+			delete(s.schedule, key)
+		}
+	}
+
+	if deleted > 0 {
+		if s.logInfo != nil {
+			s.logInfo("purged expired round data", "rows_deleted", deleted)
+		}
+	}
+	return deleted
+}
+
 // recover resets in-flight shares and schedules fresh delays.
 func (s *ShareStore) recover() error {
 	// Reset Witnessed (1) → Received (0).
@@ -561,7 +610,7 @@ func (s *ShareStore) recover() error {
 				)
 			}
 		}
-		delay := s.cappedExponentialDelay(voteEndTime)
+		delay := s.uniformDelay(voteEndTime)
 		s.schedule[schedKey(roundID, shareIndex, proposalID, treePosition)] = time.Now().Add(delay)
 	}
 	return nil
@@ -676,40 +725,33 @@ func (s *ShareStore) getVoteEndTime(roundID string) uint64 {
 	return vet
 }
 
-// exponentialSample generates a sample from Exp(1/mean) using crypto/rand.
-// Returns 0 if meanDelay is 0.
-func (s *ShareStore) exponentialSample() time.Duration {
-	if s.meanDelay <= 0 {
-		return 0
-	}
-	// Use crypto/rand for unpredictable delays (temporal unlinkability).
+// uniformDelay samples a delay uniformly from [0, remaining_window) where
+// remaining_window = vote_end_time − now − 60s. A minimum floor (minDelay)
+// prevents near-zero samples from making shares trivially linkable to their
+// submission session. When vote_end_time is unknown (0) the delay falls back
+// to a uniform sample over [minDelay, meanDelay*2] as a best-effort spread.
+func (s *ShareStore) uniformDelay(voteEndTime uint64) time.Duration {
 	var buf [8]byte
 	_, _ = rand.Read(buf[:])
-	// Map uint64 to (0, 1]: add 1 to numerator, add 1 to denominator.
-	u := (float64(binary.LittleEndian.Uint64(buf[:])) + 1.0) / (float64(1<<64) + 1.0)
-	delaySecs := -s.meanDelay.Seconds() * math.Log(u)
-	return time.Duration(delaySecs * float64(time.Second))
-}
+	u := float64(binary.LittleEndian.Uint64(buf[:])) / (float64(1<<64) + 1.0)
 
-// cappedExponentialDelay generates an exponential delay with a minimum floor,
-// capped so the share is submitted before voteEndTime (with a 60s buffer).
-// The floor prevents near-zero samples from making shares trivially linkable.
-// If voteEndTime is 0 (unknown), the delay is uncapped. The cap takes
-// precedence over the floor when the deadline is imminent.
-func (s *ShareStore) cappedExponentialDelay(voteEndTime uint64) time.Duration {
-	delay := s.exponentialSample()
-	if delay < s.minDelay {
-		delay = s.minDelay
-	}
 	if voteEndTime == 0 {
-		return delay
+		// Fallback: uniform over [minDelay, 2*meanDelay].
+		spread := 2*s.meanDelay - s.minDelay
+		if spread <= 0 {
+			return s.minDelay
+		}
+		return s.minDelay + time.Duration(u*float64(spread))
 	}
+
 	remaining := time.Until(time.Unix(int64(voteEndTime), 0)) - 60*time.Second
 	if remaining <= 0 {
 		return 0
 	}
-	if delay > remaining {
-		return remaining
+
+	delay := time.Duration(u * float64(remaining))
+	if delay < s.minDelay && remaining > s.minDelay {
+		delay = s.minDelay
 	}
 	return delay
 }

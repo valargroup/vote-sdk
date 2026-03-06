@@ -59,6 +59,7 @@ func NewProcessor(
 // Run starts the processing loop. Blocks until ctx is cancelled.
 // Wake-up intervals follow an exponential distribution so that share
 // submissions form a Poisson process, preventing timing correlation.
+// Each cycle also purges share data for rounds whose voting window has ended.
 func (p *Processor) Run(ctx context.Context) error {
 	for {
 		delay := p.randomDelay()
@@ -68,6 +69,7 @@ func (p *Processor) Run(ctx context.Context) error {
 			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
+			p.store.PurgeExpiredRounds()
 			p.processBatch(ctx)
 		}
 	}

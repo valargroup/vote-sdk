@@ -229,56 +229,104 @@ func TestRecovery(t *testing.T) {
 	assert.Len(t, ready, 1, "recovered share should be ready again")
 }
 
-func TestExponentialDelayCapped(t *testing.T) {
-	// meanDelay=1h, voteEndTime=30s from now → delay must be capped.
+func TestUniformDelay_ImminentDeadline(t *testing.T) {
 	s, err := NewShareStore(":memory:", time.Hour, 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
+	// 30s remaining minus 60s buffer → negative remaining → delay must be 0.
 	voteEndTime := uint64(time.Now().Add(30 * time.Second).Unix())
-	delay := s.cappedExponentialDelay(voteEndTime)
-
-	// Delay should be at most 30s - 60s buffer = 0 (since remaining < 0 after buffer).
-	// Actually 30s - 60s = -30s, so delay should be 0.
+	delay := s.uniformDelay(voteEndTime)
 	assert.Equal(t, time.Duration(0), delay, "delay should be 0 when remaining time < 60s buffer")
 
-	// Now test with enough remaining time.
+	// With enough remaining time, delay must be in [0, remaining - 60s].
 	voteEndTime = uint64(time.Now().Add(5 * time.Minute).Unix())
-	delay = s.cappedExponentialDelay(voteEndTime)
+	delay = s.uniformDelay(voteEndTime)
 	maxAllowed := 5*time.Minute - 60*time.Second
-	assert.LessOrEqual(t, delay, maxAllowed, "delay should be capped at remaining - 60s")
+	assert.LessOrEqual(t, delay, maxAllowed, "delay should be within remaining - 60s")
 }
 
-func TestExponentialDelayZeroMean(t *testing.T) {
+func TestUniformDelay_ZeroMean(t *testing.T) {
 	s, err := NewShareStore(":memory:", 0, 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
-	// With meanDelay=0, all delays should be 0 regardless of voteEndTime.
-	delay := s.cappedExponentialDelay(0)
+	// With meanDelay=0 and voteEndTime=0 (unknown), fallback spread is 0 → minDelay.
+	delay := s.uniformDelay(0)
 	assert.Equal(t, time.Duration(0), delay)
 
-	delay = s.cappedExponentialDelay(uint64(time.Now().Add(time.Hour).Unix()))
-	assert.Equal(t, time.Duration(0), delay)
+	// With a known voteEndTime, uniform over remaining window still works.
+	voteEndTime := uint64(time.Now().Add(time.Hour).Unix())
+	delay = s.uniformDelay(voteEndTime)
+	maxAllowed := time.Hour - 60*time.Second
+	assert.LessOrEqual(t, delay, maxAllowed)
+	assert.GreaterOrEqual(t, delay, time.Duration(0))
 }
 
-func TestExponentialDelayDistribution(t *testing.T) {
-	// Verify that exponential samples are non-negative and roughly follow the mean.
-	s, err := NewShareStore(":memory:", 10*time.Second, 0, nil)
+func TestUniformDelayDistribution(t *testing.T) {
+	// Verify delays are uniformly spread in [0, remaining - 60s] with no
+	// clustering at zero (the old exponential problem).
+	voteEndTime := uint64(time.Now().Add(24 * time.Hour).Unix())
+	remaining := 24*time.Hour - 60*time.Second
+
+	s, err := NewShareStore(":memory:", 12*time.Hour, 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
 	const n = 1000
 	var total time.Duration
 	for range n {
-		d := s.exponentialSample()
+		d := s.uniformDelay(voteEndTime)
 		assert.GreaterOrEqual(t, d, time.Duration(0), "delay must be non-negative")
+		assert.LessOrEqual(t, d, remaining, "delay must be within window")
 		total += d
 	}
-	// Mean should be roughly 10s. Allow wide range: 5s to 20s.
+	// Mean of Uniform(0, remaining) ≈ remaining/2. Allow 30% tolerance.
 	mean := total / n
-	assert.Greater(t, mean, 5*time.Second, "mean delay should be > 5s")
-	assert.Less(t, mean, 20*time.Second, "mean delay should be < 20s")
+	expected := remaining / 2
+	assert.Greater(t, mean, expected*7/10, "mean should be > 0.35 * remaining")
+	assert.Less(t, mean, expected*13/10, "mean should be < 0.65 * remaining")
+}
+
+func TestUniformDelay_FloorRespected(t *testing.T) {
+	minDelay := 2 * time.Minute
+	s, err := NewShareStore(":memory:", time.Hour, minDelay, nil)
+	require.NoError(t, err)
+	defer s.Close()
+
+	voteEndTime := uint64(time.Now().Add(time.Hour).Unix())
+	for range 50 {
+		d := s.uniformDelay(voteEndTime)
+		assert.GreaterOrEqual(t, d, minDelay, "delay must respect minDelay floor")
+	}
+}
+
+func TestPurgeExpiredRounds(t *testing.T) {
+	fetcher := func(roundID string) (uint64, error) {
+		if roundID == "expired_round" {
+			return uint64(time.Now().Add(-time.Hour).Unix()), nil
+		}
+		return uint64(time.Now().Add(time.Hour).Unix()), nil
+	}
+
+	s, err := NewShareStore(":memory:", 0, 0, fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	// Enqueue a share for an expired round and an active round.
+	enqueueAndRequireInserted(t, s, testPayload("expired_round", 0))
+	enqueueAndRequireInserted(t, s, testPayload("active_round", 0))
+
+	status := s.Status()
+	assert.Equal(t, 1, status["expired_round"].Total)
+	assert.Equal(t, 1, status["active_round"].Total)
+
+	deleted := s.PurgeExpiredRounds()
+	assert.Equal(t, int64(1), deleted)
+
+	status = s.Status()
+	assert.Equal(t, 0, status["expired_round"].Total)
+	assert.Equal(t, 1, status["active_round"].Total)
 }
 
 func TestGetVoteEndTime_Cache(t *testing.T) {
