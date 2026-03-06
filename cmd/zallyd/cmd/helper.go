@@ -2,12 +2,15 @@ package cmd
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 
 	"cosmossdk.io/log"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	"github.com/cosmos/cosmos-sdk/server"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
@@ -87,6 +90,19 @@ func helperPostSetup(
 			return err
 		})
 
+		// Start the heartbeat pulse if configured.
+		if cfg.PulseURL != "" && cfg.HelperURL != "" {
+			pulseCfg, err := buildPulseConfig(cfg, svrCtx, clientCtx, logger)
+			if err != nil {
+				logger.Error("heartbeat: failed to initialize, pulse disabled", "error", err)
+			} else {
+				g.Go(func() error {
+					helper.RunPulse(ctx, pulseCfg)
+					return nil
+				})
+			}
+		}
+
 		logger.Info("helper server started")
 		return nil
 	}
@@ -120,8 +136,72 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.max_concurrent_proofs") {
 		cfg.MaxConcurrentProofs = v.GetInt("helper.max_concurrent_proofs")
 	}
+	if v.IsSet("helper.pulse_url") {
+		cfg.PulseURL = v.GetString("helper.pulse_url")
+	}
+	if v.IsSet("helper.helper_url") {
+		cfg.HelperURL = v.GetString("helper.helper_url")
+	}
 
 	return cfg
+}
+
+// buildPulseConfig opens the validator keyring and constructs a PulseConfig
+// for the heartbeat goroutine.
+func buildPulseConfig(
+	cfg helper.Config,
+	svrCtx *server.Context,
+	clientCtx client.Context,
+	logger log.Logger,
+) (helper.PulseConfig, error) {
+	homeDir := svrCtx.Config.RootDir
+
+	kb, err := keyring.New(
+		sdk.KeyringServiceName(),
+		keyring.BackendTest,
+		homeDir,
+		nil,
+		clientCtx.Codec,
+	)
+	if err != nil {
+		return helper.PulseConfig{}, fmt.Errorf("open keyring: %w", err)
+	}
+
+	record, err := kb.Key("validator")
+	if err != nil {
+		return helper.PulseConfig{}, fmt.Errorf("key \"validator\" not found: %w", err)
+	}
+
+	addr, err := record.GetAddress()
+	if err != nil {
+		return helper.PulseConfig{}, fmt.Errorf("get address: %w", err)
+	}
+
+	pubKey, err := record.GetPubKey()
+	if err != nil {
+		return helper.PulseConfig{}, fmt.Errorf("get public key: %w", err)
+	}
+
+	operatorAddress := addr.String()
+	pubKeyB64 := base64.StdEncoding.EncodeToString(pubKey.Bytes())
+
+	signFn := func(payload string) (string, string, error) {
+		signBytes := signArbitraryDoc(operatorAddress, payload)
+		sig, _, err := kb.Sign("validator", signBytes, 0)
+		if err != nil {
+			return "", "", fmt.Errorf("sign: %w", err)
+		}
+		return base64.StdEncoding.EncodeToString(sig), pubKeyB64, nil
+	}
+
+	return helper.PulseConfig{
+		PulseURL:        cfg.PulseURL,
+		HelperURL:       cfg.HelperURL,
+		OperatorAddress: operatorAddress,
+		Moniker:         svrCtx.Config.Moniker,
+		Sign:            signFn,
+		Logger:          logger,
+	}, nil
 }
 
 // keeperTreeReader implements helper.TreeReader by reading directly from the

@@ -38,6 +38,14 @@ type Config struct {
 
 	// MaxConcurrentProofs limits concurrent proof generation goroutines.
 	MaxConcurrentProofs int `mapstructure:"max_concurrent_proofs"`
+
+	// PulseURL is the base URL for the server heartbeat endpoint
+	// (e.g. "https://zally-phi.vercel.app"). When empty, heartbeat is disabled.
+	PulseURL string `mapstructure:"pulse_url"`
+
+	// HelperURL is this server's own public URL as seen by clients
+	// (e.g. "https://1-2-3-4.sslip.io"). When empty, heartbeat is disabled.
+	HelperURL string `mapstructure:"helper_url"`
 }
 
 // DefaultConfig returns the default helper configuration.
