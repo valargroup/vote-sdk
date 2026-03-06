@@ -18,7 +18,11 @@ import (
 // GetTally returns the accumulated ciphertext tally for a (round, proposal, decision) tuple.
 // Returns nil if no tally exists for this tuple.
 func (k *Keeper) GetTally(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) ([]byte, error) {
-	bz, err := kvStore.Get(types.TallyKey(roundID, proposalID, decision))
+	key, err := types.TallyKey(roundID, proposalID, decision)
+	if err != nil {
+		return nil, err
+	}
+	bz, err := kvStore.Get(key)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +32,10 @@ func (k *Keeper) GetTally(kvStore store.KVStore, roundID []byte, proposalID, dec
 // AddToTally accumulates an ElGamal ciphertext (encShareBytes, 64 bytes) into
 // the tally for a (round, proposal, decision) tuple using HomomorphicAdd.
 func (k *Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, decision uint32, encShareBytes []byte) error {
-	key := types.TallyKey(roundID, proposalID, decision)
+	key, err := types.TallyKey(roundID, proposalID, decision)
+	if err != nil {
+		return err
+	}
 	existing, err := kvStore.Get(key)
 	if err != nil {
 		return err
@@ -66,7 +73,10 @@ func (k *Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, d
 // keyed by decision ID. Iterates over the tally prefix
 // 0x05 || round_id || proposal_id to collect all decision → ciphertext entries.
 func (k *Keeper) GetProposalTally(kvStore store.KVStore, roundID []byte, proposalID uint32) (map[uint32][]byte, error) {
-	prefix := types.TallyPrefixForProposal(roundID, proposalID)
+	prefix, err := types.TallyPrefixForProposal(roundID, proposalID)
+	if err != nil {
+		return nil, err
+	}
 	end := types.PrefixEndBytes(prefix)
 
 	iter, err := kvStore.Iterator(prefix, end)
@@ -101,7 +111,10 @@ func (k *Keeper) GetProposalTally(kvStore store.KVStore, roundID []byte, proposa
 // IncrementShareCount atomically increments the share reveal count for a
 // (round, proposal, decision) tuple. If no count exists yet, writes 1.
 func (k *Keeper) IncrementShareCount(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) error {
-	key := types.ShareCountKey(roundID, proposalID, decision)
+	key, err := types.ShareCountKey(roundID, proposalID, decision)
+	if err != nil {
+		return err
+	}
 	bz, err := kvStore.Get(key)
 	if err != nil {
 		return err
@@ -119,7 +132,11 @@ func (k *Keeper) IncrementShareCount(kvStore store.KVStore, roundID []byte, prop
 // GetShareCount returns the number of shares revealed for a (round, proposal, decision) tuple.
 // Returns 0 if no shares have been revealed.
 func (k *Keeper) GetShareCount(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) (uint64, error) {
-	bz, err := kvStore.Get(types.ShareCountKey(roundID, proposalID, decision))
+	key, err := types.ShareCountKey(roundID, proposalID, decision)
+	if err != nil {
+		return 0, err
+	}
+	bz, err := kvStore.Get(key)
 	if err != nil {
 		return 0, err
 	}
@@ -200,12 +217,20 @@ func (k *Keeper) SetTallyResult(kvStore store.KVStore, result *types.TallyResult
 	if err != nil {
 		return err
 	}
-	return kvStore.Set(types.TallyResultKey(result.VoteRoundId, result.ProposalId, result.VoteDecision), bz)
+	key, err := types.TallyResultKey(result.VoteRoundId, result.ProposalId, result.VoteDecision)
+	if err != nil {
+		return err
+	}
+	return kvStore.Set(key, bz)
 }
 
 // GetTallyResult retrieves a finalized tally result for one (round, proposal, decision) tuple.
 func (k *Keeper) GetTallyResult(kvStore store.KVStore, roundID []byte, proposalID, decision uint32) (*types.TallyResult, error) {
-	bz, err := kvStore.Get(types.TallyResultKey(roundID, proposalID, decision))
+	key, err := types.TallyResultKey(roundID, proposalID, decision)
+	if err != nil {
+		return nil, err
+	}
+	bz, err := kvStore.Get(key)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +247,10 @@ func (k *Keeper) GetTallyResult(kvStore store.KVStore, roundID []byte, proposalI
 // GetAllTallyResults retrieves all finalized tally results for a vote round.
 // Results are returned in key order (proposal_id, then decision).
 func (k *Keeper) GetAllTallyResults(kvStore store.KVStore, roundID []byte) ([]*types.TallyResult, error) {
-	prefix := types.TallyResultPrefixForRound(roundID)
+	prefix, err := types.TallyResultPrefixForRound(roundID)
+	if err != nil {
+		return nil, err
+	}
 	end := types.PrefixEndBytes(prefix)
 
 	iter, err := kvStore.Iterator(prefix, end)

@@ -82,8 +82,8 @@ func (qs queryServer) VoteRound(goCtx context.Context, req *types.QueryVoteRound
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
-	if len(req.VoteRoundId) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "vote_round_id is required")
+	if len(req.VoteRoundId) != types.RoundIDLen {
+		return nil, status.Errorf(codes.InvalidArgument, "vote_round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(req.VoteRoundId))
 	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
@@ -103,8 +103,8 @@ func (qs queryServer) ProposalTally(goCtx context.Context, req *types.QueryPropo
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
-	if len(req.VoteRoundId) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "vote_round_id is required")
+	if len(req.VoteRoundId) != types.RoundIDLen {
+		return nil, status.Errorf(codes.InvalidArgument, "vote_round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(req.VoteRoundId))
 	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
@@ -123,8 +123,8 @@ func (qs queryServer) TallyResults(goCtx context.Context, req *types.QueryTallyR
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
-	if len(req.VoteRoundId) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "vote_round_id is required")
+	if len(req.VoteRoundId) != types.RoundIDLen {
+		return nil, status.Errorf(codes.InvalidArgument, "vote_round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(req.VoteRoundId))
 	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
@@ -259,8 +259,8 @@ func (qs queryServer) VoteSummary(goCtx context.Context, req *types.QueryVoteSum
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
-	if len(req.VoteRoundId) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "vote_round_id is required")
+	if len(req.VoteRoundId) != types.RoundIDLen {
+		return nil, status.Errorf(codes.InvalidArgument, "vote_round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(req.VoteRoundId))
 	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
