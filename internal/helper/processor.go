@@ -217,12 +217,12 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	}
 	copy(primaryBlind[:], pbBytes)
 
-	// Decode the revealed share's C1/C2 for the prover.
-	c1Decoded, _ := base64.StdEncoding.DecodeString(share.Payload.EncShare.C1)
-	c2Decoded, _ := base64.StdEncoding.DecodeString(share.Payload.EncShare.C2)
+	// Decode the revealed share's C1/C2 once, reused for both the prover and the message.
+	c1Bytes, _ := base64.StdEncoding.DecodeString(share.Payload.EncShare.C1)
+	c2Bytes, _ := base64.StdEncoding.DecodeString(share.Payload.EncShare.C2)
 	var encC1X, encC2X [32]byte
-	copy(encC1X[:], c1Decoded)
-	copy(encC2X[:], c2Decoded)
+	copy(encC1X[:], c1Bytes)
+	copy(encC2X[:], c2Bytes)
 
 	// Generate ZKP #3 proof.
 	proof, nullifier, _, err := p.prover.GenerateShareRevealProof(
@@ -241,8 +241,6 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	}
 
 	// Build enc_share: C1 || C2 (64 bytes).
-	c1Bytes, _ := base64.StdEncoding.DecodeString(share.Payload.EncShare.C1)
-	c2Bytes, _ := base64.StdEncoding.DecodeString(share.Payload.EncShare.C2)
 	encShareBytes := make([]byte, 64)
 	copy(encShareBytes[:32], c1Bytes)
 	copy(encShareBytes[32:], c2Bytes)

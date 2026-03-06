@@ -58,6 +58,18 @@ type queryHandler struct {
 	clientCtx client.Context
 }
 
+// parseRoundID extracts and hex-decodes the round_id path variable.
+// Returns nil and writes an error response on failure.
+func parseRoundID(w http.ResponseWriter, r *http.Request) []byte {
+	roundIDHex := mux.Vars(r)["round_id"]
+	roundID, err := hex.DecodeString(roundIDHex)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid round_id (expected hex): %v", err))
+		return nil
+	}
+	return roundID
+}
+
 func (qh *queryHandler) handleCommitmentTreeAtHeight(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	heightStr := vars["height"]
@@ -103,11 +115,8 @@ func (qh *queryHandler) handleActiveRound(w http.ResponseWriter, _ *http.Request
 }
 
 func (qh *queryHandler) handleVoteRound(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	roundIDHex := vars["round_id"]
-	roundID, err := hex.DecodeString(roundIDHex)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid round_id (expected hex): %v", err))
+	roundID := parseRoundID(w, r)
+	if roundID == nil {
 		return
 	}
 
@@ -123,16 +132,12 @@ func (qh *queryHandler) handleVoteRound(w http.ResponseWriter, r *http.Request) 
 }
 
 func (qh *queryHandler) handleProposalTally(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-
-	roundIDHex := vars["round_id"]
-	roundID, err := hex.DecodeString(roundIDHex)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid round_id (expected hex): %v", err))
+	roundID := parseRoundID(w, r)
+	if roundID == nil {
 		return
 	}
 
-	proposalIDStr := vars["proposal_id"]
+	proposalIDStr := mux.Vars(r)["proposal_id"]
 	proposalID, err := strconv.ParseUint(proposalIDStr, 10, 32)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid proposal_id: %v", err))
@@ -188,11 +193,8 @@ func (qh *queryHandler) handleCommitmentLeaves(w http.ResponseWriter, r *http.Re
 }
 
 func (qh *queryHandler) handleTallyResults(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	roundIDHex := vars["round_id"]
-	roundID, err := hex.DecodeString(roundIDHex)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid round_id (expected hex): %v", err))
+	roundID := parseRoundID(w, r)
+	if roundID == nil {
 		return
 	}
 
@@ -208,11 +210,8 @@ func (qh *queryHandler) handleTallyResults(w http.ResponseWriter, r *http.Reques
 }
 
 func (qh *queryHandler) handleVoteSummary(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	roundIDHex := vars["round_id"]
-	roundID, err := hex.DecodeString(roundIDHex)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid round_id (expected hex): %v", err))
+	roundID := parseRoundID(w, r)
+	if roundID == nil {
 		return
 	}
 

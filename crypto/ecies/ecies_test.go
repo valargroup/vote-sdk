@@ -8,6 +8,8 @@ import (
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/chacha20poly1305"
+
+	"github.com/z-cale/zally/crypto/elgamal"
 )
 
 // testGenerator returns the standard Pallas generator point.
@@ -388,7 +390,7 @@ func TestMarshalUnmarshalEnvelopeRoundTrip(t *testing.T) {
 
 	data, err := MarshalEnvelope(env)
 	require.NoError(t, err)
-	require.Len(t, data, CompressedPointSize+len(env.Ciphertext))
+	require.Len(t, data, elgamal.CompressedPointSize+len(env.Ciphertext))
 
 	ctLen := len(plaintext) + chacha20poly1305.Overhead
 	env2, err := UnmarshalEnvelope(data, ctLen)
@@ -419,8 +421,8 @@ func TestUnmarshalEnvelopeRejectsWrongLength(t *testing.T) {
 		{"empty", []byte{}, 48},
 		{"too short", make([]byte, 32), 48},
 		{"too long", make([]byte, 128), 48},
-		{"off by one short", make([]byte, CompressedPointSize+48-1), 48},
-		{"off by one long", make([]byte, CompressedPointSize+48+1), 48},
+		{"off by one short", make([]byte, elgamal.CompressedPointSize+48-1), 48},
+		{"off by one long", make([]byte, elgamal.CompressedPointSize+48+1), 48},
 	}
 
 	for _, tc := range tests {
@@ -435,9 +437,9 @@ func TestUnmarshalEnvelopeRejectsWrongLength(t *testing.T) {
 // an envelope with an all-zeros ephemeral key (identity point) is rejected.
 func TestUnmarshalEnvelopeRejectsIdentityEphemeral(t *testing.T) {
 	ctLen := 48
-	data := make([]byte, CompressedPointSize+ctLen) // all zeros = identity for E
+	data := make([]byte, elgamal.CompressedPointSize+ctLen) // all zeros = identity for E
 	// Fill ciphertext portion with non-zero to avoid confusion.
-	for i := CompressedPointSize; i < len(data); i++ {
+	for i := elgamal.CompressedPointSize; i < len(data); i++ {
 		data[i] = 0xFF
 	}
 
@@ -538,7 +540,7 @@ func TestXCoordinateStripsSignBit(t *testing.T) {
 		compressed := P.ToAffineCompressed()
 		x := xCoordinate(P)
 
-		require.Len(t, x, CompressedPointSize)
+		require.Len(t, x, elgamal.CompressedPointSize)
 
 		// Bytes 0..30 must be identical.
 		require.Equal(t, compressed[:31], x[:31],

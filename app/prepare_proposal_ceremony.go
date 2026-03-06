@@ -59,6 +59,39 @@ func thresholdForN(n int) int {
 	return t
 }
 
+// pallasSkLoader creates a sync.Once-guarded loader for the validator's
+// Pallas secret key file. Shared by the deal and ack ceremony injectors.
+func pallasSkLoader(pallasSkPath string, logger log.Logger, phase string) func() (*elgamal.SecretKey, error) {
+	var (
+		once sync.Once
+		sk   *elgamal.SecretKey
+		err  error
+	)
+	return func() (*elgamal.SecretKey, error) {
+		once.Do(func() {
+			if pallasSkPath == "" {
+				logger.Warn(fmt.Sprintf("PrepareProposal: vote.pallas_sk_path is empty — auto-%s disabled", phase))
+				err = os.ErrNotExist
+				return
+			}
+			logger.Info(fmt.Sprintf("PrepareProposal: loading Pallas secret key for %s", phase), "path", pallasSkPath)
+			raw, readErr := os.ReadFile(pallasSkPath)
+			if readErr != nil {
+				err = readErr
+				logger.Error(fmt.Sprintf("PrepareProposal[%s]: failed to load Pallas secret key", phase),
+					"path", pallasSkPath, "err", readErr)
+				return
+			}
+			sk, err = elgamal.UnmarshalSecretKey(raw)
+			if err != nil {
+				logger.Error(fmt.Sprintf("PrepareProposal[%s]: failed to parse Pallas secret key", phase),
+					"path", pallasSkPath, "err", err)
+			}
+		})
+		return sk, err
+	}
+}
+
 // CeremonyDealPrepareProposalHandler returns a PrepareProposalInjector that
 // checks whether a PENDING round needs a deal and, if so, generates a fresh
 // ea_sk, and injects a MsgDealExecutiveAuthorityKey.
@@ -80,35 +113,7 @@ func CeremonyDealPrepareProposalHandler(
 	eaSkDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
-	var (
-		skOnce sync.Once
-		sk     *elgamal.SecretKey
-		skErr  error
-	)
-
-	loadPallasSk := func() (*elgamal.SecretKey, error) {
-		skOnce.Do(func() {
-			if pallasSkPath == "" {
-				logger.Warn("PrepareProposal: vote.pallas_sk_path is empty — auto-deal disabled")
-				skErr = os.ErrNotExist
-				return
-			}
-			logger.Info("PrepareProposal: loading Pallas secret key for deal", "path", pallasSkPath)
-			raw, err := os.ReadFile(pallasSkPath)
-			if err != nil {
-				skErr = err
-				logger.Error("PrepareProposal[deal]: failed to load Pallas secret key",
-					"path", pallasSkPath, "err", err)
-				return
-			}
-			sk, skErr = elgamal.UnmarshalSecretKey(raw)
-			if skErr != nil {
-				logger.Error("PrepareProposal[deal]: failed to parse Pallas secret key",
-					"path", pallasSkPath, "err", skErr)
-			}
-		})
-		return sk, skErr
-	}
+	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "deal")
 
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal, txs [][]byte) [][]byte {
 		// Verify we have a Pallas key. The deal handler needs the Pallas SK
@@ -120,13 +125,10 @@ func CeremonyDealPrepareProposalHandler(
 			return txs
 		}
 
-		// Resolve proposer.
-		consAddr := sdk.ConsAddress(req.ProposerAddress)
-		val, err := stakingKeeper.GetValidatorByConsAddr(ctx, consAddr)
+		proposerValAddr, err := resolveProposer(ctx, stakingKeeper, req.ProposerAddress)
 		if err != nil {
 			return txs
 		}
-		proposerValAddr := val.OperatorAddress
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
@@ -279,35 +281,7 @@ func CeremonyAckPrepareProposalHandler(
 	eaSkDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
-	var (
-		skOnce sync.Once
-		sk     *elgamal.SecretKey
-		skErr  error
-	)
-
-	loadPallasSk := func() (*elgamal.SecretKey, error) {
-		skOnce.Do(func() {
-			if pallasSkPath == "" {
-				logger.Warn("PrepareProposal: vote.pallas_sk_path is empty — auto-ack disabled")
-				skErr = os.ErrNotExist
-				return
-			}
-			logger.Info("PrepareProposal: loading Pallas secret key for ack", "path", pallasSkPath)
-			raw, err := os.ReadFile(pallasSkPath)
-			if err != nil {
-				skErr = err
-				logger.Error("PrepareProposal[ack]: failed to load Pallas secret key",
-					"path", pallasSkPath, "err", err)
-				return
-			}
-			sk, skErr = elgamal.UnmarshalSecretKey(raw)
-			if skErr != nil {
-				logger.Error("PrepareProposal[ack]: failed to parse Pallas secret key",
-					"path", pallasSkPath, "err", skErr)
-			}
-		})
-		return sk, skErr
-	}
+	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "ack")
 
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal, txs [][]byte) [][]byte {
 		pallasSk, err := loadPallasSk()
@@ -315,14 +289,11 @@ func CeremonyAckPrepareProposalHandler(
 			return txs
 		}
 
-		// Resolve proposer.
-		consAddr := sdk.ConsAddress(req.ProposerAddress)
-		val, err := stakingKeeper.GetValidatorByConsAddr(ctx, consAddr)
+		proposerValAddr, err := resolveProposer(ctx, stakingKeeper, req.ProposerAddress)
 		if err != nil {
 			logger.Error("PrepareProposal[ack]: failed to resolve proposer validator", "err", err)
 			return txs
 		}
-		proposerValAddr := val.OperatorAddress
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
