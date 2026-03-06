@@ -144,6 +144,50 @@ Each custom transaction is a 1-byte tag followed by a protobuf-encoded message b
 
 Any transaction whose first byte does not match a known tag is decoded as a standard Cosmos SDK `Tx`. Tag `0x0A` is deliberately skipped because it collides with the standard Cosmos Tx protobuf encoding (field 1, wire type 2) — this collision is what makes the two decoders unambiguously distinguishable by a single byte peek. Note that raw `MsgCreateValidator` is blocked by the ante handler for live transactions -- post-genesis validators must use `MsgCreateValidatorWithPallasKey` (tag `0x09`) instead.
 
+### Message Authentication Invariants
+
+Every message has a specific set of auth checks enforced across the ABCI pipeline. The table below lists the complete check set for each message. "PP" = PrepareProposal, "ProcessProp" = ProcessProposal.
+
+#### Standard Cosmos SDK messages
+
+These flow through the standard ante chain: signature verification (`SigVerificationDecorator`), then `CeremonyValidatorDecorator` for validator-gated types.
+
+| Message | Who can submit | Ante checks | MsgServer checks |
+|---|---|---|---|
+| `MsgRegisterPallasKey` | Any bonded validator | secp256k1 sig + `CeremonyValidatorDecorator` (bonded validator gate) | Valid Pallas point; no duplicate registration |
+| `MsgCreateValidatorWithPallasKey` | Anyone (becomes a validator) | secp256k1 sig; exempt from `CeremonyValidatorDecorator` | Delegates to `x/staking` `CreateValidator`; registers Pallas key; rejects duplicates |
+| `MsgSetVoteManager` | Current VoteManager or any bonded validator | secp256k1 sig; exempt from `CeremonyValidatorDecorator` (has own auth) | `ValidateVoteManagerOrValidator`: accept current VoteManager, any bonded validator, or (on bootstrap) any bonded validator |
+| `MsgCreateVotingSession` | VoteManager only | secp256k1 sig (standard Cosmos Tx) | `ValidateVoteManagerOnly`: creator must be the on-chain VoteManager address |
+| `MsgCreateValidator` | **Blocked** post-genesis | Ante handler rejects at `BlockHeight > 0` | N/A — never reaches MsgServer |
+
+#### Vote-round messages (custom wire format, ZKP/RedPallas auth)
+
+These use the custom wire format and bypass the Cosmos Tx envelope. Auth is handled by the `ValidateVoteTx` pipeline in `x/vote/ante`.
+
+| Message | Who can submit | Ante checks | MsgServer checks |
+|---|---|---|---|
+| `MsgDelegateVote` | Any Zcash note holder (anonymous) | `ValidateBasic` (field sizes); round ACTIVE; gov nullifier uniqueness; RedPallas sig over sighash; ZKP #1 (delegation proof: note ownership, VAN encoding, nc_root, nf_imt_root) | Record gov nullifiers; append van_cmx to commitment tree |
+| `MsgCastVote` | Any delegation holder (anonymous) | `ValidateBasic`; round ACTIVE; VAN nullifier uniqueness; RedPallas sig over canonical sighash; ZKP #2 (vote commitment: VAN ownership, ea_pk binding, commitment tree anchor) | Record VAN nullifier; append vote_authority_note_new + vote_commitment to tree |
+| `MsgRevealShare` | Any vote holder (anonymous) | `ValidateBasic`; round ACTIVE or TALLYING; share nullifier uniqueness; ZKP #3 (vote share: share ownership, commitment tree anchor) | Record share nullifier; HomomorphicAdd enc_share into tally accumulator |
+
+#### Proposer-injected messages (custom wire format, proposer identity auth)
+
+These are auto-injected by `PrepareProposal` and **cannot be submitted through the mempool** (CheckTx/ReCheckTx reject them). Auth is enforced at three layers: ante handler (per-tag dispatch), ProcessProposal (non-proposer validators verify before accepting a block), and MsgServer (FinalizeBlock execution).
+
+| Message | Ante check | ProcessProposal check | MsgServer check |
+|---|---|---|---|
+| `MsgDealExecutiveAuthorityKey` | `ValidateProposerIsCreator` (mempool block + creator == proposer) | Round PENDING + REGISTERING; payload count matches; creator is ceremony validator; creator == proposer | `ValidateProposerIsCreator`; round PENDING + REGISTERING; creator in ceremony validators; ea_pk valid; payloads 1:1 with validators; threshold + VK validation |
+| `MsgAckExecutiveAuthorityKey` | `ValidateProposerIsCreator` (mempool block + creator == proposer) | Round PENDING + DEALT; creator is ceremony validator; no duplicate ack; creator == proposer | `ValidateProposerIsCreator`; round PENDING + DEALT; creator in ceremony validators; no duplicate ack |
+| `MsgSubmitPartialDecryption` | `ValidateProposerIsCreator` (mempool block + creator == proposer) | Round TALLYING + threshold > 0; creator is ceremony validator; ValidatorIndex == ShamirIndex; no duplicate; creator == proposer | `ValidateProposerIsCreator`; round TALLYING + threshold > 0; creator in ceremony validators; ValidatorIndex == ShamirIndex; no duplicate; entries are valid Pallas points |
+| `MsgSubmitTally` | `ValidateVoteTx` → `ValidateProposerIsCreator` (mempool block + creator == proposer) | Round TALLYING; creator == proposer | Round TALLYING; verify each entry against on-chain accumulators (DLEQ proof in legacy mode, Lagrange re-derivation in threshold mode); transition to FINALIZED |
+
+#### Key design invariant
+
+`ValidateProposerIsCreator` is the unified proposer identity check shared by all four injected message types. It enforces two properties:
+
+1. **Mempool exclusion**: `IsCheckTx() || IsReCheckTx()` returns an error, preventing external submission.
+2. **Proposer binding**: During FinalizeBlock, `msg.Creator` must equal the operator address of the validator whose consensus key matches `BlockHeader.ProposerAddress`. This prevents a malicious proposer from injecting messages on behalf of other validators.
+
 ### REST API
 
 The chain exposes a JSON REST API alongside CometBFT RPC. Clients POST JSON bodies for transaction submission and GET for queries — no protobuf encoding required on the client side.
@@ -152,16 +196,15 @@ The chain exposes a JSON REST API alongside CometBFT RPC. Clients POST JSON bodi
 
 Vote-round messages use the custom wire format and are submitted as JSON POST requests:
 
-| Method | Path                          | Description                                   |
-| ------ | ----------------------------- | --------------------------------------------- |
-| POST   | `/zally/v1/delegate-vote`     | Submit a delegation proof (ZKP #1)            |
-| POST   | `/zally/v1/cast-vote`         | Cast an encrypted vote (ZKP #2)               |
-| POST   | `/zally/v1/reveal-share`      | Reveal an encrypted share (ZKP #3)            |
-| POST   | `/zally/v1/submit-tally`      | Submit tally results (normally auto-injected) |
+| Method | Path                          | Description                          |
+| ------ | ----------------------------- | ------------------------------------ |
+| POST   | `/zally/v1/delegate-vote`     | Submit a delegation proof (ZKP #1)   |
+| POST   | `/zally/v1/cast-vote`         | Cast an encrypted vote (ZKP #2)      |
+| POST   | `/zally/v1/reveal-share`      | Reveal an encrypted share (ZKP #3)   |
 
-These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`.
+These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`. `MsgSubmitTally`, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` have no REST endpoints — they are proposer-only and auto-injected via PrepareProposal.
 
-Ceremony and management messages (`MsgRegisterPallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgSetVoteManager`, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, `MsgCreateVotingSession`) are standard Cosmos SDK transactions routed through the MsgServiceRouter. They can be submitted via the Cosmos SDK CLI or gRPC gateway.
+Ceremony and management messages (`MsgRegisterPallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgSetVoteManager`, `MsgCreateVotingSession`) are standard Cosmos SDK transactions routed through the MsgServiceRouter. They can be submitted via the Cosmos SDK CLI or gRPC gateway.
 
 #### Query Endpoints
 
