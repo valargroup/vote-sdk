@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	votetypes "github.com/z-cale/zally/x/vote/types"
 )
 
 // MsgRevealShareJSON is the JSON payload for submitting MsgRevealShare to the
@@ -110,4 +112,12 @@ func (c *ChainSubmitter) SubmitRevealShare(msg *MsgRevealShareJSON) (*BroadcastR
 	}
 
 	return &result, nil
+}
+
+// IsDuplicateNullifier returns true if the chain rejection code matches
+// ErrDuplicateNullifier, meaning the share was already revealed by another
+// helper. In quorum mode multiple helpers process the same share; the first
+// to submit wins and the rest receive this benign rejection.
+func IsDuplicateNullifier(code uint32) bool {
+	return code == votetypes.ErrDuplicateNullifier.ABCICode()
 }

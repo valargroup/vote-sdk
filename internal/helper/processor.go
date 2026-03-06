@@ -261,6 +261,13 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		return fmt.Errorf("submit: %w", err)
 	}
 	if result.Code != 0 {
+		if IsDuplicateNullifier(result.Code) {
+			p.logger.Info("share already revealed by another helper",
+				"round_id", share.Payload.VoteRoundID,
+				"share_index", share.Payload.EncShare.ShareIndex,
+			)
+			return nil
+		}
 		return fmt.Errorf("chain rejected tx (code %d): %s", result.Code, result.Log)
 	}
 
