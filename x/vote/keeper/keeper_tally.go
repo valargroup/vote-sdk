@@ -317,3 +317,27 @@ func (k *Keeper) ValidateTallySubmitter(ctx context.Context, creator string) err
 	}
 	return nil
 }
+
+// ValidatePartialDecryptSubmitter checks that MsgSubmitPartialDecryption is
+// only submitted during block execution (not via mempool) and that the Creator
+// matches the current block proposer. This ensures only the block proposer
+// can inject partial decryption txs (via PrepareProposal), preventing forged
+// submissions.
+func (k *Keeper) ValidatePartialDecryptSubmitter(ctx context.Context, creator string) error {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	if sdkCtx.IsCheckTx() || sdkCtx.IsReCheckTx() {
+		return fmt.Errorf("%w: MsgSubmitPartialDecryption cannot be submitted via mempool", types.ErrInvalidField)
+	}
+
+	proposerConsAddr := sdk.ConsAddress(sdkCtx.BlockHeader().ProposerAddress)
+	val, err := k.stakingKeeper.GetValidatorByConsAddr(ctx, proposerConsAddr)
+	if err != nil {
+		return fmt.Errorf("%w: failed to resolve block proposer: %v", types.ErrInvalidField, err)
+	}
+	if val.OperatorAddress != creator {
+		return fmt.Errorf("%w: partial decrypt creator %s does not match block proposer %s",
+			types.ErrInvalidField, creator, val.OperatorAddress)
+	}
+	return nil
+}

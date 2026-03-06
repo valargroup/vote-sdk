@@ -197,8 +197,8 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 // This message can only be injected by the block proposer via PrepareProposal;
 // direct submission through the mempool is rejected by ValidateAckSubmitter.
 func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.MsgAckExecutiveAuthorityKey) (*types.MsgAckExecutiveAuthorityKeyResponse, error) {
-	// Block mempool submission — acks must arrive via PrepareProposal only.
-	if err := ms.k.ValidateAckSubmitter(goCtx); err != nil {
+	// Block mempool submission and verify creator is the block proposer.
+	if err := ms.k.ValidateAckSubmitter(goCtx, msg.Creator); err != nil {
 		return nil, err
 	}
 

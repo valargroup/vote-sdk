@@ -59,7 +59,9 @@ func NewHandler(cfg HandlerConfig) *Handler {
 //	POST /zally/v1/delegate-vote          → MsgDelegateVote
 //	POST /zally/v1/cast-vote              → MsgCastVote
 //	POST /zally/v1/reveal-share           → MsgRevealShare
-//	POST /zally/v1/submit-tally           → MsgSubmitTally
+//
+// MsgSubmitTally is proposer-only (auto-injected via PrepareProposal) and
+// has no REST endpoint.
 //
 // MsgCreateVotingSession is a standard Cosmos SDK transaction (signed by
 // the vote manager) and should be submitted via zallyd tx sign/broadcast
@@ -69,13 +71,12 @@ func NewHandler(cfg HandlerConfig) *Handler {
 // MsgCreateValidatorWithPallasKey, MsgSetVoteManager) are also standard
 // Cosmos SDK transactions.
 //
-// MsgAckExecutiveAuthorityKey has no REST endpoint — acks are injected
-// in-protocol via PrepareProposal (auto-ack).
+// MsgAckExecutiveAuthorityKey and MsgSubmitPartialDecryption have no REST
+// endpoints — they are injected in-protocol via PrepareProposal.
 func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.HandleFunc("/zally/v1/delegate-vote", h.handleDelegateVote).Methods("POST")
 	router.HandleFunc("/zally/v1/cast-vote", h.handleCastVote).Methods("POST")
 	router.HandleFunc("/zally/v1/reveal-share", h.handleRevealShare).Methods("POST")
-	router.HandleFunc("/zally/v1/submit-tally", h.handleSubmitTally).Methods("POST")
 
 	// Snapshot data endpoint: fetches real nc_root and nullifier_imt_root
 	// for session creation. Used by the admin UI to replace stub values.
@@ -106,14 +107,6 @@ func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
 	msg := &types.MsgRevealShare{}
-	if !h.decodeAndValidate(w, r, msg) {
-		return
-	}
-	h.broadcastVoteTx(w, msg)
-}
-
-func (h *Handler) handleSubmitTally(w http.ResponseWriter, r *http.Request) {
-	msg := &types.MsgSubmitTally{}
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}

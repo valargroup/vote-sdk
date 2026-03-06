@@ -16,6 +16,7 @@ import (
 	"github.com/z-cale/zally/crypto/zkp/halo2"
 	voteante "github.com/z-cale/zally/x/vote/ante"
 	votekeeper "github.com/z-cale/zally/x/vote/keeper"
+	"github.com/z-cale/zally/x/vote/types"
 )
 
 // DualAnteHandlerOptions configures the dual-mode ante handler that supports
@@ -110,14 +111,28 @@ func handleVoteAnte(
 	// All custom txs (vote + ceremony) are free — infinite gas meter.
 	ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
 
-	// Only MsgAckExecutiveAuthorityKey remains on the custom wire format path.
-	// It is auto-injected by PrepareProposal and must be blocked from the
-	// mempool (only injectable by the block proposer). All other ceremony
-	// messages now flow through standard Cosmos SDK transactions with
-	// signature verification and validator gating.
+	// Ceremony messages (Deal 0x07, Ack 0x08, PartialDecrypt 0x0D) use the
+	// custom wire format and are auto-injected by PrepareProposal. Each tag
+	// gets its own proposer identity check to prevent forged submissions.
 	if vtx.CeremonyMsg != nil {
-		if err := k.ValidateAckSubmitter(ctx); err != nil {
-			return ctx, err
+		switch vtx.Tag {
+		case voteapi.TagDealExecutiveAuthorityKey:
+			msg := vtx.CeremonyMsg.(*types.MsgDealExecutiveAuthorityKey)
+			if err := k.ValidateDealSubmitter(ctx, msg.Creator); err != nil {
+				return ctx, err
+			}
+		case voteapi.TagAckExecutiveAuthorityKey:
+			msg := vtx.CeremonyMsg.(*types.MsgAckExecutiveAuthorityKey)
+			if err := k.ValidateAckSubmitter(ctx, msg.Creator); err != nil {
+				return ctx, err
+			}
+		case voteapi.TagSubmitPartialDecryption:
+			msg := vtx.CeremonyMsg.(*types.MsgSubmitPartialDecryption)
+			if err := k.ValidatePartialDecryptSubmitter(ctx, msg.Creator); err != nil {
+				return ctx, err
+			}
+		default:
+			return ctx, fmt.Errorf("unknown ceremony tag: 0x%02x", vtx.Tag)
 		}
 		return ctx, nil
 	}

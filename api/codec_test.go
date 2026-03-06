@@ -10,14 +10,14 @@ import (
 )
 
 func TestIsVoteTag(t *testing.T) {
-	require.False(t, IsVoteTag(TagCreateVotingSession))
 	require.True(t, IsVoteTag(TagDelegateVote))
 	require.True(t, IsVoteTag(TagCastVote))
 	require.True(t, IsVoteTag(TagRevealShare))
 	require.True(t, IsVoteTag(TagSubmitTally))
 	require.False(t, IsVoteTag(0x00))
-	require.False(t, IsVoteTag(0x06))
-	require.False(t, IsVoteTag(0x0a)) // Typical Cosmos Tx first byte
+	require.False(t, IsVoteTag(0x01)) // MsgCreateVotingSession — standard Cosmos Tx
+	require.False(t, IsVoteTag(0x06)) // MsgRegisterPallasKey — standard Cosmos Tx
+	require.False(t, IsVoteTag(0x0a)) // reserved: collides with Cosmos Tx protobuf
 	require.False(t, IsVoteTag(0xff))
 }
 
@@ -135,17 +135,18 @@ func TestEncodeDecodeSubmitTally(t *testing.T) {
 }
 
 func TestIsCeremonyTag(t *testing.T) {
-	// Deal (0x07) and Ack (0x08) use the custom wire format.
+	// Deal (0x07), Ack (0x08), and SubmitPartialDecryption (0x0D) use the custom wire format.
 	require.True(t, IsCeremonyTag(TagDealExecutiveAuthorityKey))
 	require.True(t, IsCeremonyTag(TagAckExecutiveAuthorityKey))
+	require.True(t, IsCeremonyTag(TagSubmitPartialDecryption))
 
-	// All other ceremony tags now use standard Cosmos SDK transactions.
-	require.False(t, IsCeremonyTag(TagRegisterPallasKey))
-	require.False(t, IsCeremonyTag(TagCreateValidatorWithPallasKey))
-	require.False(t, IsCeremonyTag(TagSetVoteManager))
+	// Standard Cosmos Tx ceremony messages are not ceremony tags.
+	require.False(t, IsCeremonyTag(0x06)) // MsgRegisterPallasKey
+	require.False(t, IsCeremonyTag(0x09)) // MsgCreateValidatorWithPallasKey
+	require.False(t, IsCeremonyTag(0x0C)) // MsgSetVoteManager
 	require.False(t, IsCeremonyTag(0x00))
 	require.False(t, IsCeremonyTag(0x0A)) // reserved: collides with Cosmos Tx protobuf
-	require.False(t, IsCeremonyTag(0x01)) // vote tag, not ceremony
+	require.False(t, IsCeremonyTag(0x01)) // MsgCreateVotingSession — standard Cosmos Tx
 }
 
 func TestEncodeDecodeAckExecutiveAuthorityKey(t *testing.T) {
@@ -168,14 +169,14 @@ func TestEncodeDecodeAckExecutiveAuthorityKey(t *testing.T) {
 	require.Equal(t, msg.AckSignature, decodedMsg.AckSignature)
 }
 
-func TestEncodeCeremonyTx_RejectsNonAckTags(t *testing.T) {
+func TestEncodeCeremonyTx_RejectsNonCustomTags(t *testing.T) {
 	msg := &types.MsgSetVoteManager{
 		Creator:    "zvote1admin",
 		NewManager: "zvote1manager",
 	}
 
-	// Non-ack ceremony tags should be rejected since they now use standard Cosmos txs.
-	_, err := EncodeCeremonyTx(msg, TagSetVoteManager)
+	// MsgSetVoteManager (0x0C) uses the standard Cosmos Tx path — EncodeCeremonyTx must reject it.
+	_, err := EncodeCeremonyTx(msg, 0x0C)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "only 0x07, 0x08, 0x0D use custom wire format")
 }
@@ -202,25 +203,19 @@ func TestDecodeVoteTx_InvalidTag(t *testing.T) {
 
 func TestTagForMessage(t *testing.T) {
 	tests := []struct {
-		msg       types.VoteMessage
-		tag       byte
-		name      string
-		expectErr bool
+		msg  types.VoteMessage
+		tag  byte
+		name string
 	}{
-		{&types.MsgCreateVotingSession{}, TagCreateVotingSession, "CreateVotingSession", true},
-		{&types.MsgDelegateVote{}, TagDelegateVote, "DelegateVote", false},
-		{&types.MsgCastVote{}, TagCastVote, "CastVote", false},
-		{&types.MsgRevealShare{}, TagRevealShare, "RevealShare", false},
-		{&types.MsgSubmitTally{}, TagSubmitTally, "SubmitTally", false},
+		{&types.MsgDelegateVote{}, TagDelegateVote, "DelegateVote"},
+		{&types.MsgCastVote{}, TagCastVote, "CastVote"},
+		{&types.MsgRevealShare{}, TagRevealShare, "RevealShare"},
+		{&types.MsgSubmitTally{}, TagSubmitTally, "SubmitTally"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tag, err := TagForMessage(tt.msg)
-			if tt.expectErr {
-				require.Error(t, err)
-				return
-			}
 			require.NoError(t, err)
 			require.Equal(t, tt.tag, tag)
 		})

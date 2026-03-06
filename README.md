@@ -114,27 +114,35 @@ ACTIVE ──> TALLYING ──> FINALIZED
 
 ### Custom Wire Format
 
-Vote and ceremony transactions bypass the standard Cosmos SDK `Tx` envelope. Each transaction is a single-byte tag followed by a protobuf-encoded message body:
+#### Rationale
+
+The standard Cosmos SDK `Tx` envelope requires a signer address, fee fields, and a conventional signature (secp256k1 or ed25519). Vote-round messages (`MsgDelegateVote`, `MsgCastVote`, `MsgRevealShare`) cannot use this envelope because they are authenticated via **ZKP + RedPallas spend-auth signatures** — there is no conventional Cosmos account involved. Similarly, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` are **auto-injected by the block proposer** via `PrepareProposal` and are never client-signed at all.
+
+The custom wire format is the minimal encoding that satisfies both cases: a single-byte type tag lets the `TxDecoder` unambiguously identify the message type without parsing a full `TxBody`, and the tag byte acts as the sole discriminator between the custom path and the standard Cosmos SDK path. Messages that do have a conventional signer (ceremony setup messages, `MsgCreateVotingSession`) still use the standard `Tx` envelope and flow through normal signature verification.
+
+#### Wire Format
+
+Each custom transaction is a 1-byte tag followed by a protobuf-encoded message body:
 
 ```
 [tag (1 byte)] [proto-encoded message body]
 ```
 
-| Tag    | Message                            | Category                |
-| ------ | ---------------------------------- | ----------------------- |
-| `0x01` | `MsgCreateVotingSession`           | Voting round            |
-| `0x02` | `MsgDelegateVote`                  | Voting round            |
-| `0x03` | `MsgCastVote`                      | Voting round            |
-| `0x04` | `MsgRevealShare`                   | Voting round            |
-| `0x05` | `MsgSubmitTally`                   | Voting round (injected) |
-| `0x06` | `MsgRegisterPallasKey`             | Ceremony                |
-| `0x07` | `MsgDealExecutiveAuthorityKey`     | Ceremony                |
-| `0x08` | `MsgAckExecutiveAuthorityKey`      | Ceremony (injected)     |
-| `0x09` | `MsgCreateValidatorWithPallasKey`  | Ceremony                |
-| `0x0C` | `MsgSetVoteManager`                | Management              |
-| `0x0D` | `MsgSubmitPartialDecryption`       | Tallying (injected)     |
+| Tag    | Message                            | Category                | Auth mechanism                  |
+| ------ | ---------------------------------- | ----------------------- | ------------------------------- |
+| `0x01` | `MsgCreateVotingSession`           | Voting round            | Standard Cosmos Tx (signed)     |
+| `0x02` | `MsgDelegateVote`                  | Voting round            | ZKP #1 + RedPallas              |
+| `0x03` | `MsgCastVote`                      | Voting round            | ZKP #2 + RedPallas              |
+| `0x04` | `MsgRevealShare`                   | Voting round            | ZKP #3                          |
+| `0x05` | `MsgSubmitTally`                   | Voting round (injected) | Proposer identity check         |
+| `0x06` | `MsgRegisterPallasKey`             | Ceremony                | Standard Cosmos Tx (signed)     |
+| `0x07` | `MsgDealExecutiveAuthorityKey`     | Ceremony (injected)     | Proposer identity check         |
+| `0x08` | `MsgAckExecutiveAuthorityKey`      | Ceremony (injected)     | Proposer identity check         |
+| `0x09` | `MsgCreateValidatorWithPallasKey`  | Ceremony                | Standard Cosmos Tx (signed)     |
+| `0x0C` | `MsgSetVoteManager`                | Management              | Standard Cosmos Tx (signed)     |
+| `0x0D` | `MsgSubmitPartialDecryption`       | Tallying (injected)     | Proposer identity check         |
 
-Any transaction whose first byte does not match a known tag is decoded as a standard Cosmos SDK `Tx`. Tag `0x0A` is deliberately skipped because it collides with the standard Cosmos Tx protobuf encoding (field 1, wire type 2). Note that raw `MsgCreateValidator` is blocked by the ante handler for live transactions -- post-genesis validators must use `MsgCreateValidatorWithPallasKey` (tag `0x09`) instead.
+Any transaction whose first byte does not match a known tag is decoded as a standard Cosmos SDK `Tx`. Tag `0x0A` is deliberately skipped because it collides with the standard Cosmos Tx protobuf encoding (field 1, wire type 2) — this collision is what makes the two decoders unambiguously distinguishable by a single byte peek. Note that raw `MsgCreateValidator` is blocked by the ante handler for live transactions -- post-genesis validators must use `MsgCreateValidatorWithPallasKey` (tag `0x09`) instead.
 
 ### REST API
 

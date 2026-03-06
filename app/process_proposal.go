@@ -17,9 +17,12 @@ import (
 // PENDING with ceremony REGISTERING, payload count matches, creator is a
 // ceremony validator, and creator matches the block proposer. For ack
 // messages: verifies the round is PENDING with ceremony DEALT, creator is a
-// ceremony validator, and no duplicate ack. For tally messages: verifies the
-// round is TALLYING and creator matches the block proposer. All other txs
-// pass through (ACCEPT).
+// ceremony validator, no duplicate ack, and creator matches the block proposer.
+// For partial decrypt messages: verifies the round is TALLYING in threshold
+// mode, creator is a ceremony validator with matching ShamirIndex, no
+// duplicate submission, and creator matches the block proposer. For tally
+// messages: verifies the round is TALLYING and creator matches the block
+// proposer. All other txs pass through (ACCEPT).
 func ProcessProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	logger log.Logger,
@@ -50,8 +53,17 @@ func ProcessProposalHandler(
 				continue
 			}
 
-			// Validate injected tally txs.
-			if tag == voteapi.TagSubmitTally {
+		// Validate injected partial decryption txs.
+		if tag == voteapi.TagSubmitPartialDecryption {
+			if err := validateInjectedPartialDecrypt(ctx, voteKeeper, txBytes, logger); err != nil {
+				logger.Error("ProcessProposal: rejecting block — invalid partial decrypt tx", "err", err)
+				return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+			}
+			continue
+		}
+
+		// Validate injected tally txs.
+		if tag == voteapi.TagSubmitTally {
 				if err := validateInjectedTally(ctx, voteKeeper, txBytes, logger); err != nil {
 					logger.Error("ProcessProposal: rejecting block — invalid tally tx", "err", err)
 					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
@@ -112,7 +124,8 @@ func validateInjectedDeal(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByte
 
 // validateInjectedAck checks that an injected MsgAckExecutiveAuthorityKey is
 // valid: the round is PENDING with ceremony in DEALT, the creator is a
-// ceremony validator, and the creator has not already acked.
+// ceremony validator, the creator has not already acked, and the creator
+// matches the current block proposer.
 func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
 	if err != nil {
@@ -145,6 +158,63 @@ func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes
 	// Verify no duplicate ack.
 	if _, found := votekeeper.FindAckInRoundCeremony(round, ackMsg.Creator); found {
 		return errInvalidInjectedTx("creator has already acked")
+	}
+
+	// Verify creator matches the block proposer.
+	if err := voteKeeper.ValidateAckSubmitter(ctx, ackMsg.Creator); err != nil {
+		return errInvalidInjectedTx(err.Error())
+	}
+
+	return nil
+}
+
+// validateInjectedPartialDecrypt checks that an injected
+// MsgSubmitPartialDecryption is valid: the round is in TALLYING state with
+// Threshold > 0, the creator is a ceremony validator whose ShamirIndex
+// matches the submitted ValidatorIndex, the validator has not already
+// submitted, and the creator matches the current block proposer.
+func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
+	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
+	if err != nil {
+		return err
+	}
+
+	pdMsg, ok := msg.(*types.MsgSubmitPartialDecryption)
+	if !ok {
+		return errInvalidInjectedTx("expected MsgSubmitPartialDecryption")
+	}
+
+	kvStore := voteKeeper.OpenKVStore(ctx)
+	round, err := voteKeeper.GetVoteRound(kvStore, pdMsg.VoteRoundId)
+	if err != nil {
+		return err
+	}
+
+	if round.Status != types.SessionStatus_SESSION_STATUS_TALLYING {
+		return errInvalidInjectedTx("round is not TALLYING")
+	}
+	if round.Threshold == 0 {
+		return errInvalidInjectedTx("round is not in threshold mode")
+	}
+
+	ceremonyVal, found := votekeeper.FindValidatorInRoundCeremony(round, pdMsg.Creator)
+	if !found {
+		return errInvalidInjectedTx("creator is not a ceremony validator")
+	}
+	if pdMsg.ValidatorIndex != ceremonyVal.ShamirIndex {
+		return errInvalidInjectedTx("validator_index does not match stored shamir_index")
+	}
+
+	has, err := voteKeeper.HasPartialDecryptionsFromValidator(kvStore, pdMsg.VoteRoundId, pdMsg.ValidatorIndex)
+	if err != nil {
+		return err
+	}
+	if has {
+		return errInvalidInjectedTx("validator has already submitted partial decryptions")
+	}
+
+	if err := voteKeeper.ValidatePartialDecryptSubmitter(ctx, pdMsg.Creator); err != nil {
+		return errInvalidInjectedTx(err.Error())
 	}
 
 	return nil

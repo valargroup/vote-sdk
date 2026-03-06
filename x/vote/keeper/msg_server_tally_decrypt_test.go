@@ -872,6 +872,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_HappyPath() {
 	validators := validatorSet(3)
 	s.setupTallyingRoundThreshold(msgPdRoundID, 2, validators)
+	s.setBlockProposer(validators[0].ValidatorAddress)
 
 	msg := &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
@@ -900,6 +901,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_HappyPath() {
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_EmitsEvent() {
 	validators := validatorSet(1)
 	s.setupTallyingRoundThreshold(msgPdRoundID, 1, validators)
+	s.setBlockProposer(validators[0].ValidatorAddress)
 
 	em := sdk.NewEventManager()
 	ctx := s.ctx.WithEventManager(em)
@@ -1138,7 +1140,10 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 				ctx = tc.buildCtx(s)
 			}
 
-			_, err := s.msgServer.SubmitPartialDecryption(ctx, tc.buildMsg(validators))
+			msg := tc.buildMsg(validators)
+			s.setBlockProposer(msg.Creator)
+
+			_, err := s.msgServer.SubmitPartialDecryption(ctx, msg)
 			s.Require().Error(err)
 			s.Require().ErrorIs(err, tc.wantErr)
 			if tc.errContains != "" {
@@ -1151,6 +1156,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsDuplicate() {
 	validators := validatorSet(2)
 	s.setupTallyingRoundThreshold(msgPdRoundID, 2, validators)
+	s.setBlockProposer(validators[0].ValidatorAddress)
 
 	msg := &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
@@ -1178,6 +1184,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_MultipleValidators_Inde
 	}
 
 	for i, v := range validators {
+		s.setBlockProposer(v.ValidatorAddress)
 		_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
 			VoteRoundId:    msgPdRoundID,
 			Creator:        v.ValidatorAddress,
@@ -1208,6 +1215,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_MultipleValidators_Inde
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_DleqProofStoredVerbatim() {
 	validators := validatorSet(1)
 	s.setupTallyingRoundThreshold(msgPdRoundID, 1, validators)
+	s.setBlockProposer(validators[0].ValidatorAddress)
 
 	dleqProof := bytes.Repeat([]byte{0xDE}, 64)
 	_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
@@ -1238,6 +1246,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_GetForRoundIntegration(
 	d2 := validPointBytes(302)
 
 	for i, v := range validators {
+		s.setBlockProposer(v.ValidatorAddress)
 		_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
 			VoteRoundId:    msgPdRoundID,
 			Creator:        v.ValidatorAddress,

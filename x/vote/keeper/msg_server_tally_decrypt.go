@@ -215,12 +215,12 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 // In Step 1 (bare TSS), entries are stored without DLEQ verification. Step 2
 // adds on-chain proof verification against the stored VK_i.
 func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.MsgSubmitPartialDecryption) (*types.MsgSubmitPartialDecryptionResponse, error) {
-	ctx := sdk.UnwrapSDKContext(goCtx)
-
-	if ctx.IsCheckTx() || ctx.IsReCheckTx() {
-		return nil, fmt.Errorf("%w: MsgSubmitPartialDecryption cannot be submitted via mempool", types.ErrInvalidField)
+	// Block mempool submission and verify creator is the block proposer.
+	if err := ms.k.ValidatePartialDecryptSubmitter(goCtx, msg.Creator); err != nil {
+		return nil, err
 	}
 
+	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
 	round, err := ms.k.GetVoteRound(kvStore, msg.VoteRoundId)

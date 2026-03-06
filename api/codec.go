@@ -12,23 +12,24 @@ import (
 
 // Vote transaction type tags. The first byte of the wire format identifies
 // the message type. Tags 0x02–0x05 are vote-round transactions that use
-// ZKP/RedPallas authentication. Tags 0x07–0x08 are ceremony tags auto-injected
-// by PrepareProposal (deal + ack). MsgCreateVotingSession (0x01) and other
-// ceremony messages flow through standard Cosmos SDK transactions.
+// ZKP/RedPallas authentication. Tags 0x07, 0x08, and 0x0D are ceremony/tally
+// tags auto-injected by PrepareProposal that also use the custom wire format.
+//
+// Tags 0x01, 0x06, 0x09, 0x0C are reserved for messages that use the standard
+// Cosmos SDK Tx envelope (MsgCreateVotingSession, MsgRegisterPallasKey,
+// MsgCreateValidatorWithPallasKey, MsgSetVoteManager). They are not used by
+// any encoder or decoder here — see sdk/README.md for the full byte map.
+// Tag 0x0A is deliberately absent: it collides with the standard Cosmos Tx
+// protobuf encoding (field 1, wire type 2).
 const (
-	TagCreateVotingSession byte = 0x01
-	TagDelegateVote        byte = 0x02
-	TagCastVote            byte = 0x03
-	TagRevealShare         byte = 0x04
-	TagSubmitTally         byte = 0x05
+	TagDelegateVote byte = 0x02
+	TagCastVote     byte = 0x03
+	TagRevealShare  byte = 0x04
+	TagSubmitTally  byte = 0x05
 
-	// Ceremony tags — Deal (0x07) and Ack (0x08) use custom wire format
-	// (auto-injected by PrepareProposal). Others are standard Cosmos txs.
-	TagRegisterPallasKey              byte = 0x06
-	TagDealExecutiveAuthorityKey      byte = 0x07
-	TagAckExecutiveAuthorityKey       byte = 0x08
-	TagCreateValidatorWithPallasKey   byte = 0x09
-	TagSetVoteManager                 byte = 0x0C
+	// Auto-injected by PrepareProposal; never client-signed.
+	TagDealExecutiveAuthorityKey byte = 0x07
+	TagAckExecutiveAuthorityKey  byte = 0x08
 
 	// TagSubmitPartialDecryption (0x0D) is auto-injected by PrepareProposal
 	// during the TALLYING phase of a threshold-mode round. Like MsgAck, it is
