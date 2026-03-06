@@ -1520,6 +1520,8 @@ dependencies = [
  "shardtree",
  "subtle",
  "thiserror 2.0.18",
+ "vote-commitment-tree",
+ "vote-commitment-tree-client",
  "voting-circuits",
  "zcash_client_backend",
  "zcash_client_sqlite",

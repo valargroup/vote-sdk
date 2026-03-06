@@ -1,10 +1,9 @@
 uniffi::setup_scaffolding!();
 
 use librustvoting as voting;
-use std::sync::{Arc, Mutex};
-use vote_commitment_tree::{MerklePath, TreeClient};
-use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
+use std::sync::Arc;
 use voting::storage::VotingDb;
+use voting::tree_sync::VoteTreeSync;
 use zcash_keys::keys::UnifiedSpendingKey;
 use zcash_protocol::consensus::{MAIN_NETWORK, TEST_NETWORK};
 use zip32::{AccountId, Scope};
@@ -367,17 +366,12 @@ pub struct VanWitness {
     pub anchor_height: u32,
 }
 
-impl From<(MerklePath, u32)> for VanWitness {
-    fn from((path, anchor_height): (MerklePath, u32)) -> Self {
-        let auth_path = path
-            .auth_path()
-            .iter()
-            .map(|h| h.to_bytes().to_vec())
-            .collect();
+impl From<voting::tree_sync::VanWitness> for VanWitness {
+    fn from(w: voting::tree_sync::VanWitness) -> Self {
         Self {
-            auth_path,
-            position: path.position(),
-            anchor_height,
+            auth_path: w.auth_path.iter().map(|h| h.to_vec()).collect(),
+            position: w.position,
+            anchor_height: w.anchor_height,
         }
     }
 }
@@ -570,9 +564,7 @@ impl From<voting::DelegationProofResult> for DelegationProofResult {
 #[derive(uniffi::Object)]
 pub struct VotingDatabase {
     db: Arc<VotingDb>,
-    /// Client-side vote commitment tree for VAN witness generation.
-    /// Lazily created on first sync_vote_tree call.
-    tree_client: Mutex<Option<TreeClient>>,
+    tree_sync: VoteTreeSync,
 }
 
 #[uniffi::export]
@@ -584,7 +576,7 @@ impl VotingDatabase {
         let db = VotingDb::open(&path)?;
         Ok(Self {
             db: Arc::new(db),
-            tree_client: Mutex::new(None),
+            tree_sync: VoteTreeSync::new(),
         })
     }
 
@@ -936,32 +928,7 @@ impl VotingDatabase {
     ///
     /// Returns the latest synced block height.
     pub fn sync_vote_tree(&self, round_id: String, node_url: String) -> Result<u32, VotingError> {
-        // Mark VAN positions for ALL bundles so witnesses can be generated for any bundle.
-        let bundle_count = self.db.get_bundle_count(&round_id)?;
-
-        let mut guard = self.tree_client.lock().map_err(|e| VotingError::Internal {
-            message: format!("tree client lock poisoned: {}", e),
-        })?;
-
-        let client = guard.get_or_insert_with(TreeClient::empty);
-
-        for bi in 0..bundle_count {
-            // load_van_position may fail if VAN hasn't been stored yet for a bundle — skip it.
-            if let Ok(pos) = self.db.load_van_position(&round_id, bi) {
-                client.mark_position(pos as u64);
-            }
-        }
-
-        let api = HttpTreeSyncApi::new(node_url);
-        client.sync(&api).map_err(|e| VotingError::Internal {
-            message: format!("vote tree sync failed: {}", e),
-        })?;
-
-        client
-            .last_synced_height()
-            .ok_or_else(|| VotingError::Internal {
-                message: "tree has no synced height after sync".to_string(),
-            })
+        Ok(self.tree_sync.sync(&self.db, &round_id, &node_url)?)
     }
 
     /// Generate a VAN Merkle witness for ZKP #2.
@@ -975,26 +942,7 @@ impl VotingDatabase {
         bundle_index: u32,
         anchor_height: u32,
     ) -> Result<VanWitness, VotingError> {
-        let van_position = self.db.load_van_position(&round_id, bundle_index)?;
-
-        let guard = self.tree_client.lock().map_err(|e| VotingError::Internal {
-            message: format!("tree client lock poisoned: {}", e),
-        })?;
-
-        let client = guard.as_ref().ok_or_else(|| VotingError::InvalidInput {
-            message: "must call sync_vote_tree before generate_van_witness".to_string(),
-        })?;
-
-        let path = client
-            .witness(van_position as u64, anchor_height)
-            .ok_or_else(|| VotingError::Internal {
-                message: format!(
-                    "failed to generate witness for position {} at height {}",
-                    van_position, anchor_height
-                ),
-            })?;
-
-        Ok(VanWitness::from((path, anchor_height)))
+        Ok(self.tree_sync.generate_van_witness(&self.db, &round_id, bundle_index, anchor_height)?.into())
     }
 
     pub fn mark_vote_submitted(
@@ -1013,11 +961,7 @@ impl VotingDatabase {
     /// from stale state that would otherwise cause `StartIndexMismatch` or
     /// `RootMismatch` errors.
     pub fn reset_tree_client(&self) -> Result<(), VotingError> {
-        let mut guard = self.tree_client.lock().map_err(|e| VotingError::Internal {
-            message: format!("tree client lock poisoned: {}", e),
-        })?;
-        *guard = None;
-        Ok(())
+        Ok(self.tree_sync.reset()?)
     }
 }
 

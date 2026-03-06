@@ -4,6 +4,7 @@ pub mod elgamal;
 pub mod governance;
 pub mod hotkey;
 pub mod storage;
+pub mod tree_sync;
 pub mod types;
 pub mod vote_commitment;
 pub mod wallet_notes;

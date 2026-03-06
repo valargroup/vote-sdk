@@ -25,6 +25,10 @@ serde_json = "1"
 # PIR (private nullifier exclusion proofs)
 pir-client = { path = "../nullifier-ingest/pir-client" }
 
+# Vote commitment tree (VAN witness generation)
+vote-commitment-tree = { path = "../vote-commitment-tree" }
+vote-commitment-tree-client = { path = "../vote-commitment-tree-client" }
+
 # Storage
 rusqlite = { version = "0.37", features = ["bundled"] }
 

@@ -1501,6 +1501,8 @@ dependencies = [
  "shardtree",
  "subtle",
  "thiserror 2.0.18",
+ "vote-commitment-tree",
+ "vote-commitment-tree-client",
  "voting-circuits",
  "zcash_client_backend",
  "zcash_client_sqlite",
@@ -2219,7 +2221,9 @@ dependencies = [
  "base64",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",
@@ -3201,6 +3205,37 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "vote-commitment-tree"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ff",
+ "halo2_gadgets",
+ "imt-tree",
+ "incrementalmerkletree",
+ "lazy_static",
+ "libc",
+ "pasta_curves",
+ "shardtree",
+]
+
+[[package]]
+name = "vote-commitment-tree-client"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "clap",
+ "ff",
+ "hex",
+ "pasta_curves",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "vote-commitment-tree",
 ]
 
 [[package]]
