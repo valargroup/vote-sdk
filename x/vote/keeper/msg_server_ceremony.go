@@ -78,18 +78,9 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
-	// Load round by vote_round_id.
-	round, err := ms.k.GetVoteRound(kvStore, msg.VoteRoundId)
+	round, err := ms.k.GetPendingRoundWithCeremony(kvStore, msg.VoteRoundId, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING)
 	if err != nil {
 		return nil, err
-	}
-
-	// Round must be PENDING with ceremony in REGISTERING.
-	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
-		return nil, fmt.Errorf("%w: round is %s", types.ErrCeremonyWrongStatus, round.Status)
-	}
-	if round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
-		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, round.CeremonyStatus)
 	}
 
 	// Need at least one registered validator.
@@ -205,18 +196,9 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
-	// Load round by vote_round_id.
-	round, err := ms.k.GetVoteRound(kvStore, msg.VoteRoundId)
+	round, err := ms.k.GetPendingRoundWithCeremony(kvStore, msg.VoteRoundId, types.CeremonyStatus_CEREMONY_STATUS_DEALT)
 	if err != nil {
 		return nil, err
-	}
-
-	// Round must be PENDING with ceremony in DEALT.
-	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
-		return nil, fmt.Errorf("%w: round is %s", types.ErrCeremonyWrongStatus, round.Status)
-	}
-	if round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_DEALT {
-		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, round.CeremonyStatus)
 	}
 
 	// Validate creator is a registered validator.
