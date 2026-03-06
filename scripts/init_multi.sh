@@ -161,6 +161,8 @@ configure_app_toml() {
 configure_helper() {
     local home="$1"
     local api_port="$2"
+    local pulse_url="${3:-}"
+    local helper_url="${4:-}"
 
     local app_toml="$home/config/app.toml"
     cat >> "$app_toml" <<HELPERCFG
@@ -196,10 +198,10 @@ chain_api_port = ${api_port}
 max_concurrent_proofs = 2
 
 # Heartbeat pulse URL. Empty disables the heartbeat (local dev default).
-pulse_url = ""
+pulse_url = "${pulse_url}"
 
 # This server's public URL. Empty disables the heartbeat (local dev default).
-helper_url = ""
+helper_url = "${helper_url}"
 HELPERCFG
 }
 
@@ -214,6 +216,19 @@ set_persistent_peers() {
     sed -i.bak "s|persistent_peers = \"\"|persistent_peers = \"${peers}\"|" "$config_toml"
     rm -f "${config_toml}.bak"
 }
+
+# ---------------------------------------------------------------------------
+# Detect public IP for heartbeat URLs (CI mode only)
+# ---------------------------------------------------------------------------
+PULSE_URL=""
+DASHED_IP=""
+if [ "$CI_MODE" = true ]; then
+    PUBLIC_IP=$(curl -4s --connect-timeout 5 ifconfig.me || true)
+    if [ -n "$PUBLIC_IP" ]; then
+        DASHED_IP=$(echo "$PUBLIC_IP" | tr '.' '-')
+        PULSE_URL="${VOTING_CONFIG_URL:-https://zally-phi.vercel.app}"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Step 1: Initialize Validator 1 (genesis validator)
@@ -299,7 +314,11 @@ configure_app_toml "$HOME_VAL1" "${API_PORTS[0]}" "${GRPC_PORTS[0]}" "${GRPC_WEB
 
 # Helper server on all validators — each needs its own to accept shares when
 # the iOS app distributes encrypted shares across per-validator URLs.
-configure_helper "$HOME_VAL1" "${API_PORTS[0]}"
+if [ -n "$DASHED_IP" ]; then
+    configure_helper "$HOME_VAL1" "${API_PORTS[0]}" "$PULSE_URL" "https://val1.${DASHED_IP}.sslip.io"
+else
+    configure_helper "$HOME_VAL1" "${API_PORTS[0]}"
+fi
 
 # ---------------------------------------------------------------------------
 # Step 2: Configure Validators 2 and 3 (copy genesis, set peers)
@@ -327,7 +346,11 @@ for i in 2 3; do
     configure_config_toml "$home" "${P2P_PORTS[$idx]}" "${RPC_PORTS[$idx]}" "${PPROF_PORTS[$idx]}"
     configure_app_toml "$home" "${API_PORTS[$idx]}" "${GRPC_PORTS[$idx]}" "${GRPC_WEB_PORTS[$idx]}" "${RPC_PORTS[$idx]}"
 
-    configure_helper "$home" "${API_PORTS[$idx]}"
+    if [ -n "$DASHED_IP" ]; then
+        configure_helper "$home" "${API_PORTS[$idx]}" "$PULSE_URL" "https://val${i}.${DASHED_IP}.sslip.io"
+    else
+        configure_helper "$home" "${API_PORTS[$idx]}"
+    fi
 
     # Set persistent_peers to val1.
     set_persistent_peers "$home" "$VAL1_PEER"
@@ -383,12 +406,10 @@ if [ "$CI_MODE" = true ] && [ -n "$VERCEL_API_TOKEN" ] && [ -n "$EDGE_CONFIG_ID"
     if ! command -v jq > /dev/null 2>&1; then
         echo "Warning: jq not found, skipping domain registration."
     else
-        # Detect public IP and construct sslip.io base domain.
-        PUBLIC_IP=$(curl -4s --connect-timeout 5 ifconfig.me || true)
-        if [ -z "$PUBLIC_IP" ]; then
+        # Reuse the public IP detected earlier for heartbeat URLs.
+        if [ -z "$DASHED_IP" ]; then
             echo "Warning: Could not detect public IP, skipping domain registration."
         else
-            DASHED_IP=$(echo "$PUBLIC_IP" | tr '.' '-')
             BASE_DOMAIN="${DASHED_IP}.sslip.io"
 
             # Fetch current voting-config from the public endpoint.
