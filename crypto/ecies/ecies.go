@@ -7,12 +7,9 @@ import (
 
 	"github.com/mikelodder7/curvey"
 	"golang.org/x/crypto/chacha20poly1305"
-)
 
-// CompressedPointSize is the size of a compressed Pallas curve point (32 bytes).
-// A compressed point stores the 255-bit x-coordinate in little-endian form with
-// the y-coordinate sign bit packed into bit 7 of the last byte.
-const CompressedPointSize = 32
+	"github.com/z-cale/zally/crypto/elgamal"
+)
 
 // Envelope holds an ECIES ciphertext: an ephemeral public key and an
 // authenticated ciphertext produced by ChaCha20-Poly1305.
@@ -176,7 +173,7 @@ func deriveKey(E, S curvey.Point) [32]byte {
 // in bit 7 of byte[31]. We clear that bit to get the canonical x value.
 func xCoordinate(p curvey.Point) []byte {
 	compressed := p.ToAffineCompressed()
-	x := make([]byte, CompressedPointSize)
+	x := make([]byte, elgamal.CompressedPointSize)
 	copy(x, compressed)
 	x[31] &= 0x7F // clear sign bit
 	return x

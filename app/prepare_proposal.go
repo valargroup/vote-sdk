@@ -29,6 +29,17 @@ const bsgsDefaultBound = 1 << 28
 // tx list. Injectors should prepend their txs before the existing ones.
 type PrepareProposalInjector = func(ctx sdk.Context, req *abci.RequestPrepareProposal, txs [][]byte) [][]byte
 
+// resolveProposer maps the block proposer's consensus address to their
+// validator operator address. Returns ("", err) on failure.
+func resolveProposer(ctx sdk.Context, stakingKeeper *stakingkeeper.Keeper, proposerAddr []byte) (string, error) {
+	consAddr := sdk.ConsAddress(proposerAddr)
+	val, err := stakingKeeper.GetValidatorByConsAddr(ctx, consAddr)
+	if err != nil {
+		return "", err
+	}
+	return val.OperatorAddress, nil
+}
+
 // ComposedPrepareProposalHandler composes ceremony deal, ceremony ack,
 // threshold partial decryption, and tally injection into a single
 // sdk.PrepareProposalHandler. Injectors run sequentially:
@@ -120,14 +131,11 @@ func TallyPrepareProposalHandler(
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 
-		// Resolve proposer consensus address to validator operator address.
-		consAddr := sdk.ConsAddress(req.ProposerAddress)
-		val, err := stakingKeeper.GetValidatorByConsAddr(ctx, consAddr)
+		proposerValAddr, err := resolveProposer(ctx, stakingKeeper, req.ProposerAddress)
 		if err != nil {
 			logger.Error("PrepareProposal: failed to resolve proposer validator", "err", err)
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
-		proposerValAddr := val.OperatorAddress
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 

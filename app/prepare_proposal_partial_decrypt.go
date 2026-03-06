@@ -67,13 +67,10 @@ func PartialDecryptPrepareProposalInjector(
 			return txs
 		}
 
-		// Resolve proposer consensus address to operator address.
-		consAddr := sdk.ConsAddress(req.ProposerAddress)
-		val, err := stakingKeeper.GetValidatorByConsAddr(ctx, consAddr)
+		proposerValAddr, err := resolveProposer(ctx, stakingKeeper, req.ProposerAddress)
 		if err != nil {
 			return txs
 		}
-		proposerValAddr := val.OperatorAddress
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
