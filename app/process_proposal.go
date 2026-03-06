@@ -115,7 +115,7 @@ func validateInjectedDeal(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByte
 	}
 
 	// Verify creator matches the block proposer.
-	if err := voteKeeper.ValidateDealSubmitter(ctx, dealMsg.Creator); err != nil {
+	if err := voteKeeper.ValidateProposerIsCreator(ctx, dealMsg.Creator, "MsgDealExecutiveAuthorityKey"); err != nil {
 		return errInvalidInjectedTx(err.Error())
 	}
 
@@ -161,7 +161,7 @@ func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes
 	}
 
 	// Verify creator matches the block proposer.
-	if err := voteKeeper.ValidateAckSubmitter(ctx, ackMsg.Creator); err != nil {
+	if err := voteKeeper.ValidateProposerIsCreator(ctx, ackMsg.Creator, "MsgAckExecutiveAuthorityKey"); err != nil {
 		return errInvalidInjectedTx(err.Error())
 	}
 
@@ -213,7 +213,7 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 		return errInvalidInjectedTx("validator has already submitted partial decryptions")
 	}
 
-	if err := voteKeeper.ValidatePartialDecryptSubmitter(ctx, pdMsg.Creator); err != nil {
+	if err := voteKeeper.ValidateProposerIsCreator(ctx, pdMsg.Creator, "MsgSubmitPartialDecryption"); err != nil {
 		return errInvalidInjectedTx(err.Error())
 	}
 
@@ -238,7 +238,7 @@ func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByt
 		return err
 	}
 
-	if err := voteKeeper.ValidateTallySubmitter(ctx, tallyMsg.Creator); err != nil {
+	if err := voteKeeper.ValidateProposerIsCreator(ctx, tallyMsg.Creator, "MsgSubmitTally"); err != nil {
 		return errInvalidInjectedTx(err.Error())
 	}
 

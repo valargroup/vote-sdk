@@ -1134,7 +1134,7 @@ func TestMultiValidatorCeremony_DealAckConfirm(t *testing.T) {
 
 	// Write phantom acks directly to state. In production each phantom
 	// validator would ack when they are the block proposer
-	// (ValidateAckSubmitter enforces creator == proposer).
+	// (ValidateProposerIsCreator enforces creator == proposer).
 	for _, addr := range []string{phantom1Addr, phantom2Addr} {
 		h := sha256.New()
 		h.Write([]byte("ack"))
@@ -1384,7 +1384,7 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 
 	// Block 6: Write phantom1's ack directly to state. In production,
 	// phantom1 would ack when they are the block proposer
-	// (ValidateAckSubmitter enforces creator == proposer).
+	// (ValidateProposerIsCreator enforces creator == proposer).
 	h := sha256.New()
 	h.Write([]byte("ack"))
 	h.Write(round.EaPk)
@@ -1634,9 +1634,9 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 
 	// Phantom validators don't have consensus keys and can't propose blocks,
 	// so we write their acks directly to state. In production each validator
-	// acks when they are the block proposer (ValidateAckSubmitter enforces
-	// creator == proposer). Bypassing the MsgServer here is correct: the
-	// proposer identity check prevents forging acks for other validators,
+	// acks when they are the block proposer (ValidateProposerIsCreator
+	// enforces creator == proposer). Bypassing the MsgServer here is correct:
+	// the proposer identity check prevents forging acks for other validators,
 	// which is exactly the security property we added.
 	for _, addr := range []string{phantom1Addr, phantom2Addr} {
 		h := sha256.New()

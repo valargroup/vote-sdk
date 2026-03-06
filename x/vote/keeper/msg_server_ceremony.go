@@ -68,10 +68,10 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 // round's ceremony. Per-round ceremony: REGISTERING -> DEALT.
 //
 // This message can only be injected by the block proposer via PrepareProposal;
-// direct submission through the mempool is rejected by ValidateDealSubmitter.
+// direct submission through the mempool is rejected by ValidateProposerIsCreator.
 func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.MsgDealExecutiveAuthorityKey) (*types.MsgDealExecutiveAuthorityKeyResponse, error) {
 	// Block mempool submission and verify creator is the block proposer.
-	if err := ms.k.ValidateDealSubmitter(goCtx, msg.Creator); err != nil {
+	if err := ms.k.ValidateProposerIsCreator(goCtx, msg.Creator, "MsgDealExecutiveAuthorityKey"); err != nil {
 		return nil, err
 	}
 
@@ -195,10 +195,10 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 // and the round transitions PENDING -> ACTIVE.
 //
 // This message can only be injected by the block proposer via PrepareProposal;
-// direct submission through the mempool is rejected by ValidateAckSubmitter.
+// direct submission through the mempool is rejected by ValidateProposerIsCreator.
 func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.MsgAckExecutiveAuthorityKey) (*types.MsgAckExecutiveAuthorityKeyResponse, error) {
 	// Block mempool submission and verify creator is the block proposer.
-	if err := ms.k.ValidateAckSubmitter(goCtx, msg.Creator); err != nil {
+	if err := ms.k.ValidateProposerIsCreator(goCtx, msg.Creator, "MsgAckExecutiveAuthorityKey"); err != nil {
 		return nil, err
 	}
 

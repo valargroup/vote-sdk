@@ -200,23 +200,23 @@ func (s *KeeperTestSuite) TestStripNonAckersFromRound() {
 }
 
 // ===========================================================================
-// ValidateAckSubmitter tests
+// ValidateProposerIsCreator tests
 // ===========================================================================
 
-func (s *KeeperTestSuite) TestValidateAckSubmitter_BlocksCheckTx() {
+func (s *KeeperTestSuite) TestValidateProposerIsCreator_BlocksCheckTx() {
 	s.SetupTest()
 
 	checkCtx := s.ctx.WithIsCheckTx(true)
-	err := s.keeper.ValidateAckSubmitter(checkCtx, "anyval")
+	err := s.keeper.ValidateProposerIsCreator(checkCtx, "anyval", "MsgAckExecutiveAuthorityKey")
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "cannot be submitted via mempool")
 }
 
-func (s *KeeperTestSuite) TestValidateAckSubmitter_BlocksReCheckTx() {
+func (s *KeeperTestSuite) TestValidateProposerIsCreator_BlocksReCheckTx() {
 	s.SetupTest()
 
 	recheckCtx := s.ctx.WithIsReCheckTx(true)
-	err := s.keeper.ValidateAckSubmitter(recheckCtx, "anyval")
+	err := s.keeper.ValidateProposerIsCreator(recheckCtx, "anyval", "MsgAckExecutiveAuthorityKey")
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "cannot be submitted via mempool")
 }

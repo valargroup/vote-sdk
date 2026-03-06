@@ -216,7 +216,7 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 // adds on-chain proof verification against the stored VK_i.
 func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.MsgSubmitPartialDecryption) (*types.MsgSubmitPartialDecryptionResponse, error) {
 	// Block mempool submission and verify creator is the block proposer.
-	if err := ms.k.ValidatePartialDecryptSubmitter(goCtx, msg.Creator); err != nil {
+	if err := ms.k.ValidateProposerIsCreator(goCtx, msg.Creator, "MsgSubmitPartialDecryption"); err != nil {
 		return nil, err
 	}
 

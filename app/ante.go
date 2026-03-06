@@ -118,17 +118,17 @@ func handleVoteAnte(
 		switch vtx.Tag {
 		case voteapi.TagDealExecutiveAuthorityKey:
 			msg := vtx.CeremonyMsg.(*types.MsgDealExecutiveAuthorityKey)
-			if err := k.ValidateDealSubmitter(ctx, msg.Creator); err != nil {
+			if err := k.ValidateProposerIsCreator(ctx, msg.Creator, "MsgDealExecutiveAuthorityKey"); err != nil {
 				return ctx, err
 			}
 		case voteapi.TagAckExecutiveAuthorityKey:
 			msg := vtx.CeremonyMsg.(*types.MsgAckExecutiveAuthorityKey)
-			if err := k.ValidateAckSubmitter(ctx, msg.Creator); err != nil {
+			if err := k.ValidateProposerIsCreator(ctx, msg.Creator, "MsgAckExecutiveAuthorityKey"); err != nil {
 				return ctx, err
 			}
 		case voteapi.TagSubmitPartialDecryption:
 			msg := vtx.CeremonyMsg.(*types.MsgSubmitPartialDecryption)
-			if err := k.ValidatePartialDecryptSubmitter(ctx, msg.Creator); err != nil {
+			if err := k.ValidateProposerIsCreator(ctx, msg.Creator, "MsgSubmitPartialDecryption"); err != nil {
 				return ctx, err
 			}
 		default:

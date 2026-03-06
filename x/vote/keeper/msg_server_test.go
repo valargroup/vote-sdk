@@ -196,9 +196,8 @@ func (s *MsgServerTestSuite) seedVoteManager(addr string) {
 	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: addr}))
 }
 
-// setBlockProposer configures the mock staking keeper so that proposer
-// identity checks (ValidateDealSubmitter, ValidateAckSubmitter,
-// ValidatePartialDecryptSubmitter) see creator as the block proposer.
+// setBlockProposer configures the mock staking keeper so that
+// ValidateProposerIsCreator sees creator as the block proposer.
 func (s *MsgServerTestSuite) setBlockProposer(creator string) {
 	mk := newMockStakingKeeper()
 	mk.proposerOperator = creator

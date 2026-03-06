@@ -109,58 +109,28 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 }
 
 // ---------------------------------------------------------------------------
-// Ceremony submission validation
+// Injected-tx proposer validation
 // ---------------------------------------------------------------------------
 
-// ValidateDealSubmitter checks that MsgDealExecutiveAuthorityKey is only
-// submitted during block execution (not via mempool) and that the Creator
-// matches the current block proposer. This ensures only the block proposer
-// can inject deal txs (via PrepareProposal), preventing forged deal submissions.
-func (k *Keeper) ValidateDealSubmitter(ctx context.Context, creator string) error {
+// ValidateProposerIsCreator checks that a proposer-injected message is only
+// submitted during block execution (not via mempool) and that creator matches
+// the current block proposer. msgName is used in error messages for diagnostics
+// (e.g. "MsgDealExecutiveAuthorityKey").
+func (k *Keeper) ValidateProposerIsCreator(ctx context.Context, creator, msgName string) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	// MsgDealExecutiveAuthorityKey must never enter the mempool — it can only
-	// be injected by the block proposer via PrepareProposal.
 	if sdkCtx.IsCheckTx() || sdkCtx.IsReCheckTx() {
-		return fmt.Errorf("%w: MsgDealExecutiveAuthorityKey cannot be submitted via mempool", types.ErrInvalidField)
+		return fmt.Errorf("%w: %s cannot be submitted via mempool", types.ErrInvalidField, msgName)
 	}
 
-	// During FinalizeBlock, verify Creator matches the block proposer.
 	proposerConsAddr := sdk.ConsAddress(sdkCtx.BlockHeader().ProposerAddress)
 	val, err := k.stakingKeeper.GetValidatorByConsAddr(ctx, proposerConsAddr)
 	if err != nil {
 		return fmt.Errorf("%w: failed to resolve block proposer: %v", types.ErrInvalidField, err)
 	}
 	if val.OperatorAddress != creator {
-		return fmt.Errorf("%w: deal creator %s does not match block proposer %s",
-			types.ErrInvalidField, creator, val.OperatorAddress)
-	}
-	return nil
-}
-
-// ValidateAckSubmitter checks that MsgAckExecutiveAuthorityKey is only
-// submitted during block execution (not via mempool) and that the Creator
-// matches the current block proposer. This ensures only the block proposer
-// can inject ack txs (via PrepareProposal), preventing forged ack submissions
-// on behalf of other validators.
-func (k *Keeper) ValidateAckSubmitter(ctx context.Context, creator string) error {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-
-	// MsgAckExecutiveAuthorityKey must never enter the mempool — it can only
-	// be injected by the block proposer via PrepareProposal.
-	if sdkCtx.IsCheckTx() || sdkCtx.IsReCheckTx() {
-		return fmt.Errorf("%w: MsgAckExecutiveAuthorityKey cannot be submitted via mempool", types.ErrInvalidField)
-	}
-
-	// During FinalizeBlock, verify Creator matches the block proposer.
-	proposerConsAddr := sdk.ConsAddress(sdkCtx.BlockHeader().ProposerAddress)
-	val, err := k.stakingKeeper.GetValidatorByConsAddr(ctx, proposerConsAddr)
-	if err != nil {
-		return fmt.Errorf("%w: failed to resolve block proposer: %v", types.ErrInvalidField, err)
-	}
-	if val.OperatorAddress != creator {
-		return fmt.Errorf("%w: ack creator %s does not match block proposer %s",
-			types.ErrInvalidField, creator, val.OperatorAddress)
+		return fmt.Errorf("%w: %s creator %s does not match block proposer %s",
+			types.ErrInvalidField, msgName, creator, val.OperatorAddress)
 	}
 	return nil
 }

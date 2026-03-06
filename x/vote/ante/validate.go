@@ -76,7 +76,7 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 				return err
 			}
 			// Creator must be the block proposer; rejected entirely in CheckTx.
-			if err := k.ValidateTallySubmitter(ctx, m.Creator); err != nil {
+			if err := k.ValidateProposerIsCreator(ctx, m.Creator, "MsgSubmitTally"); err != nil {
 				return err
 			}
 		default:
