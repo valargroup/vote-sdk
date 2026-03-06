@@ -285,7 +285,8 @@ pub fn commitment_tree_next_index() -> Option<u64> {
     if status != 200 {
         return None;
     }
-    json.get("tree")?.get("next_index")?.as_u64()
+    let tree = json.get("tree")?;
+    Some(tree.get("next_index").and_then(|v| v.as_u64()).unwrap_or(0))
 }
 
 /// Returns (height, root_b64, next_index) from the latest commitment tree state.

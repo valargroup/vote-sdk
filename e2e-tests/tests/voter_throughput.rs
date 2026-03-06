@@ -41,7 +41,7 @@ use e2e_tests::api::{
     get_round_ea_pk, import_hex_key, post_helper_json, post_json, wait_for_round_status,
     CosmosTxConfig, HelperQueueStatus, SESSION_STATUS_ACTIVE,
 };
-use e2e_tests::fixtures::ensure_voter_fixture_files;
+use e2e_tests::fixtures::{ensure_voter_fixture_files, resolve_voter_fixture_dir};
 use e2e_tests::metrics::{self, MetricsCollector, Sample};
 use e2e_tests::payloads::{self, create_voting_session_payload};
 use e2e_tests::setup::ensure_pallas_key_registered;
@@ -518,8 +518,11 @@ fn generate_cast_vote(
 #[test]
 #[ignore = "requires running chain + pre-generated fixtures"]
 fn voter_throughput_stress() {
-    let fixture_dir =
-        PathBuf::from(std::env::var("VOTER_FIXTURE_DIR").expect("VOTER_FIXTURE_DIR must be set"));
+    let fixture_dir = resolve_voter_fixture_dir(PathBuf::from(
+        std::env::var("VOTER_FIXTURE_DIR").expect("VOTER_FIXTURE_DIR must be set"),
+    )
+    .as_path())
+    .expect("resolve fixture dir");
     let workers = concurrency();
     let timeout = phase_timeout();
     let w_interval = wave_interval();

@@ -19,6 +19,7 @@ use pasta_curves::pallas;
 use serde::{Deserialize, Serialize};
 
 use e2e_tests::payloads;
+use e2e_tests::fixtures::resolve_voter_fixture_dir;
 use e2e_tests::setup::build_multi_delegation_bundles;
 
 use vote_commitment_tree::MemoryTreeServer;
@@ -90,9 +91,11 @@ fn generate_voter_fixtures() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(10);
 
-    let fixture_dir = PathBuf::from(
-        std::env::var("FIXTURE_DIR").unwrap_or_else(|_| format!("fixtures/{count}")),
-    );
+    let fixture_dir = resolve_voter_fixture_dir(
+        PathBuf::from(std::env::var("FIXTURE_DIR").unwrap_or_else(|_| format!("fixtures/{count}")))
+            .as_path(),
+    )
+    .expect("resolve fixture dir");
 
     eprintln!(
         "=== Generating {count} voter fixtures -> {} ===",

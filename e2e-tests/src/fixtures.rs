@@ -4,10 +4,49 @@
 //! To keep the repo lean, those files are downloaded on demand the first time
 //! a test points at a fixture directory that does not already contain them.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_VOTER_FIXTURE_HOST: &str = "https://vote.fra1.digitaloceanspaces.com";
 const VOTER_FIXTURE_FILES: [&str; 3] = ["manifest.json", "delegations.json", "cast_vote_inputs.json"];
+
+#[must_use]
+pub fn resolve_voter_fixture_dir(
+    dir: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+    if dir.is_absolute() {
+        return Ok(dir.to_path_buf());
+    }
+
+    let cwd = std::env::current_dir()?;
+    let cwd_candidate = cwd.join(dir);
+
+    // Cargo runs these tests from the `e2e-tests` crate directory. If the user
+    // passes a repo-root-relative path like `e2e-tests/fixtures/10k`, anchor it
+    // at the parent of the crate dir instead of nesting `e2e-tests/e2e-tests/...`.
+    let first_component = dir.components().next().and_then(|component| match component {
+        Component::Normal(name) => name.to_str(),
+        _ => None,
+    });
+    let cwd_name = cwd.file_name().and_then(|name| name.to_str());
+    if first_component == cwd_name {
+        if let Some(parent) = cwd.parent() {
+            return Ok(parent.join(dir));
+        }
+    }
+
+    if cwd_candidate.exists() {
+        return Ok(cwd_candidate);
+    }
+
+    if let Some(parent) = cwd.parent() {
+        let parent_candidate = parent.join(dir);
+        if parent_candidate.exists() {
+            return Ok(parent_candidate);
+        }
+    }
+
+    Ok(cwd_candidate)
+}
 
 #[must_use]
 pub fn ensure_voter_fixture_files(
