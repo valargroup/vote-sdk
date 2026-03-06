@@ -17,13 +17,21 @@ import (
 // HasNullifier checks if a nullifier has already been recorded in the given
 // type-scoped, round-scoped nullifier set.
 func (k *Keeper) HasNullifier(ctx store.KVStore, nfType types.NullifierType, roundID, nullifier []byte) (bool, error) {
-	return ctx.Has(types.NullifierKey(nfType, roundID, nullifier))
+	key, err := types.NullifierKey(nfType, roundID, nullifier)
+	if err != nil {
+		return false, err
+	}
+	return ctx.Has(key)
 }
 
 // SetNullifier records a nullifier as spent in the given type-scoped,
 // round-scoped nullifier set.
 func (k *Keeper) SetNullifier(ctx store.KVStore, nfType types.NullifierType, roundID, nullifier []byte) error {
-	return ctx.Set(types.NullifierKey(nfType, roundID, nullifier), []byte{1})
+	key, err := types.NullifierKey(nfType, roundID, nullifier)
+	if err != nil {
+		return err
+	}
+	return ctx.Set(key, []byte{1})
 }
 
 // CheckAndSetNullifier atomically checks that a nullifier has not been recorded

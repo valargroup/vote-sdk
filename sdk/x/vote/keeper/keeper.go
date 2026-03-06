@@ -172,7 +172,11 @@ func (k *Keeper) Logger() log.Logger {
 
 // GetVoteRound retrieves a vote round by its ID.
 func (k *Keeper) GetVoteRound(kvStore store.KVStore, roundID []byte) (*types.VoteRound, error) {
-	bz, err := kvStore.Get(types.VoteRoundKey(roundID))
+	key, err := types.VoteRoundKey(roundID)
+	if err != nil {
+		return nil, err
+	}
+	bz, err := kvStore.Get(key)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +197,11 @@ func (k *Keeper) SetVoteRound(kvStore store.KVStore, round *types.VoteRound) err
 	if err != nil {
 		return err
 	}
-	return kvStore.Set(types.VoteRoundKey(round.VoteRoundId), bz)
+	key, err := types.VoteRoundKey(round.VoteRoundId)
+	if err != nil {
+		return err
+	}
+	return kvStore.Set(key, bz)
 }
 
 // ---------------------------------------------------------------------------

@@ -108,8 +108,8 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 	if len(msg.Proof) == 0 {
 		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
 	}
-	if len(msg.VoteRoundId) == 0 {
-		return fmt.Errorf("%w: vote_round_id cannot be empty", ErrInvalidField)
+	if len(msg.VoteRoundId) != RoundIDLen {
+		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
 	}
 	if len(msg.Sighash) != 32 {
 		return fmt.Errorf("%w: sighash must be 32 bytes, got %d", ErrInvalidField, len(msg.Sighash))
@@ -131,8 +131,8 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	if len(msg.Proof) == 0 {
 		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
 	}
-	if len(msg.VoteRoundId) == 0 {
-		return fmt.Errorf("%w: vote_round_id cannot be empty", ErrInvalidField)
+	if len(msg.VoteRoundId) != RoundIDLen {
+		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
 	}
 	if msg.VoteCommTreeAnchorHeight == 0 {
 		return fmt.Errorf("%w: vote_comm_tree_anchor_height cannot be zero", ErrInvalidField)
@@ -157,8 +157,8 @@ func (msg *MsgRevealShare) ValidateBasic() error {
 	if len(msg.Proof) == 0 {
 		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
 	}
-	if len(msg.VoteRoundId) == 0 {
-		return fmt.Errorf("%w: vote_round_id cannot be empty", ErrInvalidField)
+	if len(msg.VoteRoundId) != RoundIDLen {
+		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
 	}
 	if msg.VoteCommTreeAnchorHeight == 0 {
 		return fmt.Errorf("%w: vote_comm_tree_anchor_height cannot be zero", ErrInvalidField)
@@ -180,8 +180,8 @@ type VoteMessage interface {
 
 // ValidateBasic performs stateless validation for MsgSubmitTally.
 func (msg *MsgSubmitTally) ValidateBasic() error {
-	if len(msg.VoteRoundId) == 0 {
-		return fmt.Errorf("%w: vote_round_id cannot be empty", ErrInvalidField)
+	if len(msg.VoteRoundId) != RoundIDLen {
+		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
 	}
 	if msg.Creator == "" {
 		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)

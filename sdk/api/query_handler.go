@@ -67,6 +67,10 @@ func parseRoundID(w http.ResponseWriter, r *http.Request) []byte {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid round_id (expected hex): %v", err))
 		return nil
 	}
+	if len(roundID) != types.RoundIDLen {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(roundID)))
+		return nil
+	}
 	return roundID
 }
 

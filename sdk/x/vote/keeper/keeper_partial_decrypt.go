@@ -40,7 +40,11 @@ func (k *Keeper) SetPartialDecryptions(
 			return fmt.Errorf("keeper: SetPartialDecryptions: marshal entry (proposal=%d decision=%d): %w",
 				entry.ProposalId, entry.VoteDecision, err)
 		}
-		key := types.PartialDecryptionKey(roundID, validatorIndex, entry.ProposalId, entry.VoteDecision)
+		key, err := types.PartialDecryptionKey(roundID, validatorIndex, entry.ProposalId, entry.VoteDecision)
+		if err != nil {
+			return fmt.Errorf("keeper: SetPartialDecryptions: key (proposal=%d decision=%d): %w",
+				entry.ProposalId, entry.VoteDecision, err)
+		}
 		if err := kvStore.Set(key, bz); err != nil {
 			return fmt.Errorf("keeper: SetPartialDecryptions: set (proposal=%d decision=%d): %w",
 				entry.ProposalId, entry.VoteDecision, err)
@@ -56,7 +60,11 @@ func (k *Keeper) GetPartialDecryption(
 	roundID []byte,
 	validatorIndex, proposalID, decision uint32,
 ) (*types.PartialDecryptionEntry, error) {
-	bz, err := kvStore.Get(types.PartialDecryptionKey(roundID, validatorIndex, proposalID, decision))
+	key, err := types.PartialDecryptionKey(roundID, validatorIndex, proposalID, decision)
+	if err != nil {
+		return nil, err
+	}
+	bz, err := kvStore.Get(key)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +86,10 @@ func (k *Keeper) HasPartialDecryptionsFromValidator(
 	roundID []byte,
 	validatorIndex uint32,
 ) (bool, error) {
-	prefix := types.PartialDecryptionPrefixForValidator(roundID, validatorIndex)
+	prefix, err := types.PartialDecryptionPrefixForValidator(roundID, validatorIndex)
+	if err != nil {
+		return false, err
+	}
 	end := types.PrefixEndBytes(prefix)
 
 	iter, err := kvStore.Iterator(prefix, end)
@@ -97,7 +108,10 @@ func (k *Keeper) CountPartialDecryptionValidators(
 	kvStore store.KVStore,
 	roundID []byte,
 ) (int, error) {
-	prefix := types.PartialDecryptionPrefixForRound(roundID)
+	prefix, err := types.PartialDecryptionPrefixForRound(roundID)
+	if err != nil {
+		return 0, err
+	}
 	end := types.PrefixEndBytes(prefix)
 
 	iter, err := kvStore.Iterator(prefix, end)
@@ -137,7 +151,10 @@ func (k *Keeper) GetPartialDecryptionsForRound(
 	kvStore store.KVStore,
 	roundID []byte,
 ) (map[uint64][]PartialDecryptionWithIndex, error) {
-	prefix := types.PartialDecryptionPrefixForRound(roundID)
+	prefix, err := types.PartialDecryptionPrefixForRound(roundID)
+	if err != nil {
+		return nil, err
+	}
 	end := types.PrefixEndBytes(prefix)
 
 	iter, err := kvStore.Iterator(prefix, end)
