@@ -102,6 +102,10 @@ run = "npm run build"
 description = "Wipe and reinitialize a single-validator chain"
 run = "make -C sdk init"
 
+[tasks."chain:init-benchmark"]
+description = "Wipe and reinitialize a single-validator benchmark chain"
+run = "make -C sdk init-benchmark"
+
 [tasks."chain:start"]
 description = "Start chain daemon (foreground)"
 run = "ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} make -C sdk start"

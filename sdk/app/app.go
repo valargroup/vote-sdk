@@ -318,6 +318,12 @@ func (app *ZallyApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			return ""
 		}
 		return h.APIToken
+	}, func() bool {
+		h := app.GetHelper()
+		if h == nil {
+			return false
+		}
+		return h.ExposeQueueStatus
 	}, func() helper.TreeReader {
 		h := app.GetHelper()
 		if h == nil {

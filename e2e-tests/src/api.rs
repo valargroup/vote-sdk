@@ -20,12 +20,24 @@ pub fn helper_server_url() -> String {
         .unwrap_or_else(|_| base_url())
 }
 
+fn helper_api_token() -> Option<String> {
+    std::env::var("HELPER_API_TOKEN")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// POST JSON to the helper server. Retries on connection and decode errors.
 pub fn post_helper_json(path: &str, body: &Value) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
     let url = format!("{}{}", helper_server_url(), path);
     let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
+    let token = helper_api_token();
     for attempt in 0..MAX_RETRIES {
-        match client().post(&url).json(body).send() {
+        let mut request = client().post(&url).json(body);
+        if let Some(ref token) = token {
+            request = request.header("X-Helper-Token", token);
+        }
+        match request.send() {
             Ok(resp) => {
                 let status = resp.status().as_u16();
                 match resp.json::<Value>() {
@@ -754,7 +766,11 @@ pub struct HelperQueueStatus {
 /// Query the helper's queue-status endpoint for a round.
 pub fn get_helper_queue_status(round_id_hex: &str) -> Option<HelperQueueStatus> {
     let url = format!("{}/api/v1/queue-status", helper_server_url());
-    let resp = client().get(&url).send().ok()?;
+    let mut request = client().get(&url);
+    if let Some(token) = helper_api_token() {
+        request = request.header("X-Helper-Token", token);
+    }
+    let resp = request.send().ok()?;
     if !resp.status().is_success() {
         return None;
     }

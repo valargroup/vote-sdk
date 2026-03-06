@@ -7,16 +7,17 @@
 //! Fixtures use a far-future vote_end_time so they are reusable indefinitely.
 //!
 //! Requires:
-//! - A freshly initialized multi-validator chain built with `make install-ffi`
-//! - Helper server configured for aggressive processing (HELPER_MEAN_DELAY=0, etc.)
+//! - A freshly initialized benchmark chain, e.g. `mise run chain:init-benchmark`
 //! - Pre-generated fixtures (downloaded automatically if missing; see `generate_fixtures.rs`)
 //!
 //! Run:
+//!   HELPER_API_TOKEN=benchmark-helper-token \
 //!   VOTER_FIXTURE_DIR=fixtures/100 \
 //!     cargo test --release --manifest-path e2e-tests/Cargo.toml \
 //!     --test voter_throughput -- --ignored --nocapture
 //!
 //! Environment variables:
+//!   HELPER_API_TOKEN     - helper API token (required for benchmark helper config)
 //!   VOTER_FIXTURE_DIR     - path to fixture directory (required)
 //!   VOTER_FIXTURE_BASE_URL - optional override for fixture download base URL
 //!   VOTER_CONCURRENCY     - number of concurrent submission workers (default: 50)
@@ -36,9 +37,9 @@ use std::time::{Duration, Instant};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use e2e_tests::api::{
     broadcast_cosmos_msg, commitment_tree_latest, commitment_tree_next_index,
-    default_cosmos_tx_config, get_all_validator_operator_addresses, get_round_ea_pk,
-    get_helper_queue_status, import_hex_key, post_helper_json, post_json,
-    wait_for_round_status, CosmosTxConfig, HelperQueueStatus, SESSION_STATUS_ACTIVE,
+    default_cosmos_tx_config, get_all_validator_operator_addresses, get_helper_queue_status,
+    get_round_ea_pk, import_hex_key, post_helper_json, post_json, wait_for_round_status,
+    CosmosTxConfig, HelperQueueStatus, SESSION_STATUS_ACTIVE,
 };
 use e2e_tests::fixtures::ensure_voter_fixture_files;
 use e2e_tests::metrics::{self, MetricsCollector, Sample};
@@ -82,8 +83,6 @@ struct FixtureManifest {
     round_id_b64: String,
     round_fields: RoundFieldsSer,
     expected_tree_after_delegations: ExpectedTree,
-    #[allow(dead_code)]
-    expected_tree_after_cast_votes: ExpectedTree,
 }
 
 #[derive(Deserialize)]
@@ -139,7 +138,10 @@ fn load_fixtures(
         delegations.len() >= manifest.count,
         "delegation count mismatch"
     );
-    assert!(cv_inputs.len() >= manifest.count, "cast_vote_input count mismatch");
+    assert!(
+        cv_inputs.len() >= manifest.count,
+        "cast_vote_input count mismatch"
+    );
 
     let total_count = manifest.count;
     let use_count = match voter_cap {
@@ -161,7 +163,10 @@ fn load_fixtures(
     // the full N-leaf tree. Rebuild a local tree with only the first use_count
     // leaves and recompute auth paths so they match the on-chain tree.
     if use_count < total_count {
-        eprintln!("Recomputing Merkle paths for {} leaves (fixtures had {} leaves)...", use_count, total_count);
+        eprintln!(
+            "Recomputing Merkle paths for {} leaves (fixtures had {} leaves)...",
+            use_count, total_count
+        );
         let mut local_tree = vote_commitment_tree::MemoryTreeServer::empty();
         for d in &delegations {
             let van_cmx_bytes: [u8; 32] = B64.decode(&d.van_cmx_b64).unwrap().try_into().unwrap();
@@ -235,7 +240,6 @@ fn min_successes(total: usize) -> usize {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Submission result tracking
 // ---------------------------------------------------------------------------
@@ -271,59 +275,61 @@ fn submit_concurrent(
             let path = path.to_string();
             let phase = phase_name.to_string();
 
-            std::thread::spawn(move || {
-                loop {
-                    let item = {
-                        let mut q = queue.lock().unwrap();
-                        if q.is_empty() { None } else { Some(q.remove(0)) }
-                    };
-                    let (idx, payload) = match item {
-                        Some(i) => i,
-                        None => break,
-                    };
+            std::thread::spawn(move || loop {
+                let item = {
+                    let mut q = queue.lock().unwrap();
+                    if q.is_empty() {
+                        None
+                    } else {
+                        Some(q.remove(0))
+                    }
+                };
+                let (idx, payload) = match item {
+                    Some(i) => i,
+                    None => break,
+                };
 
-                    let start = Instant::now();
-                    let result = post_json(&path, &payload);
-                    let latency = start.elapsed();
+                let start = Instant::now();
+                let result = post_json(&path, &payload);
+                let latency = start.elapsed();
 
-                    let (http_status, success, tx_hash) = match result {
-                        Ok((status, json)) => {
-                            let code = json.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
-                            let hash = json
-                                .get("tx_hash")
-                                .and_then(|h| h.as_str())
-                                .map(|s| s.to_string());
-                            if code != 0 {
-                                let log_msg = json.get("log").and_then(|l| l.as_str()).unwrap_or("");
-                                eprintln!("[{phase}] voter {idx} FAILED code={code}: {log_msg}");
-                            }
-                            (status, status == 200 && code == 0, hash)
+                let (http_status, success, tx_hash) = match result {
+                    Ok((status, json)) => {
+                        let code = json.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
+                        let hash = json
+                            .get("tx_hash")
+                            .and_then(|h| h.as_str())
+                            .map(|s| s.to_string());
+                        if code != 0 {
+                            let log_msg = json.get("log").and_then(|l| l.as_str()).unwrap_or("");
+                            eprintln!("[{phase}] voter {idx} FAILED code={code}: {log_msg}");
                         }
-                        Err(_) => (0, false, None),
-                    };
-
-                    collector.record(Sample {
-                        phase: phase.clone(),
-                        timestamp: start,
-                        latency,
-                        http_status,
-                        success,
-                    });
-
-                    if success {
-                        succeeded.fetch_add(1, Ordering::Relaxed);
+                        (status, status == 200 && code == 0, hash)
                     }
+                    Err(_) => (0, false, None),
+                };
 
-                    results.lock().unwrap().push((idx, tx_hash));
+                collector.record(Sample {
+                    phase: phase.clone(),
+                    timestamp: start,
+                    latency,
+                    http_status,
+                    success,
+                });
 
-                    let done = submitted.fetch_add(1, Ordering::Relaxed) + 1;
-                    if done % 100 == 0 || done == total {
-                        let ok = succeeded.load(Ordering::Relaxed);
-                        eprintln!(
-                            "[{phase}] {done}/{total} submitted ({ok} succeeded), latency={:.0}ms",
-                            latency.as_secs_f64() * 1000.0
-                        );
-                    }
+                if success {
+                    succeeded.fetch_add(1, Ordering::Relaxed);
+                }
+
+                results.lock().unwrap().push((idx, tx_hash));
+
+                let done = submitted.fetch_add(1, Ordering::Relaxed) + 1;
+                if done % 100 == 0 || done == total {
+                    let ok = succeeded.load(Ordering::Relaxed);
+                    eprintln!(
+                        "[{phase}] {done}/{total} submitted ({ok} succeeded), latency={:.0}ms",
+                        latency.as_secs_f64() * 1000.0
+                    );
                 }
             })
         })
@@ -388,8 +394,13 @@ fn generate_cast_vote(
 ) -> CastVoteBundle {
     let sk_bytes: [u8; 32] = B64.decode(&input.sk_b64).unwrap().try_into().unwrap();
     let sk = orchard::keys::SpendingKey::from_bytes(sk_bytes).unwrap();
-    let van_comm_rand_bytes: [u8; 32] = B64.decode(&input.van_comm_rand_b64).unwrap().try_into().unwrap();
-    let van_comm_rand: pallas::Base = Option::from(pallas::Base::from_repr(van_comm_rand_bytes)).unwrap();
+    let van_comm_rand_bytes: [u8; 32] = B64
+        .decode(&input.van_comm_rand_b64)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let van_comm_rand: pallas::Base =
+        Option::from(pallas::Base::from_repr(van_comm_rand_bytes)).unwrap();
 
     let tree_path: [pallas::Base; VOTE_COMM_TREE_DEPTH] = input
         .tree_path_b64
@@ -498,15 +509,17 @@ fn generate_cast_vote(
         })
         .collect();
 
-    CastVoteBundle { payload, share_payloads }
+    CastVoteBundle {
+        payload,
+        share_payloads,
+    }
 }
 
 #[test]
 #[ignore = "requires running chain + pre-generated fixtures"]
 fn voter_throughput_stress() {
-    let fixture_dir = PathBuf::from(
-        std::env::var("VOTER_FIXTURE_DIR").expect("VOTER_FIXTURE_DIR must be set"),
-    );
+    let fixture_dir =
+        PathBuf::from(std::env::var("VOTER_FIXTURE_DIR").expect("VOTER_FIXTURE_DIR must be set"));
     let workers = concurrency();
     let timeout = phase_timeout();
     let w_interval = wave_interval();
@@ -529,7 +542,10 @@ fn voter_throughput_stress() {
 
     eprintln!("\n=== Voter Throughput Stress Test (Full Pipeline) ===");
     eprintln!("  Voters:          {count}");
-    eprintln!("  Wave size:       {w_size} voters ({} shares)", w_size * 16);
+    eprintln!(
+        "  Wave size:       {w_size} voters ({} shares)",
+        w_size * 16
+    );
     eprintln!("  Wave interval:   {}ms", w_interval.as_millis());
     eprintln!("  Phase timeout:   {:.0}s", timeout.as_secs_f64());
     eprintln!(
@@ -596,7 +612,10 @@ fn voter_throughput_stress() {
     // -----------------------------------------------------------------------
     // Phase 1: Delegations (sequential to preserve fixture tree ordering)
     // -----------------------------------------------------------------------
-    eprintln!("\n--- Phase 1: Submitting {} delegations (sequential for tree ordering) ---", count);
+    eprintln!(
+        "\n--- Phase 1: Submitting {} delegations (sequential for tree ordering) ---",
+        count
+    );
     let phase1_submit_start = Instant::now();
 
     let deleg_payloads: Vec<(usize, serde_json::Value)> = delegations
@@ -631,18 +650,19 @@ fn voter_throughput_stress() {
         commitment_tree_latest().expect("query tree latest");
     eprintln!(
         "Tree next_index: {} (expected: {}), height: {}, root: {}",
-        tree_size, expected_after_deleg, on_chain_height, &on_chain_root[..20]
+        tree_size,
+        expected_after_deleg,
+        on_chain_height,
+        &on_chain_root[..20]
     );
     assert_eq!(
         tree_size, expected_after_deleg,
         "tree size {} did not match expected {} on fresh chain",
-        tree_size,
-        expected_after_deleg
+        tree_size, expected_after_deleg
     );
     if manifest.expected_tree_after_delegations.next_index == count as u64 {
         assert_eq!(
-            on_chain_root,
-            manifest.expected_tree_after_delegations.root_b64,
+            on_chain_root, manifest.expected_tree_after_delegations.root_b64,
             "on-chain tree root after delegations did not match fixture manifest"
         );
     }
@@ -651,11 +671,11 @@ fn voter_throughput_stress() {
         let bytes: [u8; 32] = b64_decode(&manifest.round_id_b64).try_into().unwrap();
         Option::from(pallas::Base::from_repr(bytes)).unwrap()
     };
-    let ea_pk_bytes = get_round_ea_pk(&round_id_hex)
-        .expect("ACTIVE round should have ea_pk from ceremony");
+    let ea_pk_bytes =
+        get_round_ea_pk(&round_id_hex).expect("ACTIVE round should have ea_pk from ceremony");
     let ea_pk_arr: [u8; 32] = ea_pk_bytes.try_into().expect("ea_pk must be 32 bytes");
-    let ea_pk: pallas::Affine = Option::from(pallas::Affine::from_bytes(&ea_pk_arr))
-        .expect("ea_pk decompression");
+    let ea_pk: pallas::Affine =
+        Option::from(pallas::Affine::from_bytes(&ea_pk_arr)).expect("ea_pk decompression");
     eprintln!("EA public key from round: {}", hex::encode(&ea_pk_arr));
 
     let anchor_height = on_chain_height as u32;
@@ -796,57 +816,60 @@ fn voter_throughput_stress() {
                 let wave_succeeded = Arc::clone(&wave_succeeded);
                 let share_err_logged = Arc::clone(&share_err_logged);
                 let collector = Arc::clone(&collector);
-                std::thread::spawn(move || {
-                    loop {
-                        let payload = {
-                            let mut q = queue.lock().unwrap();
-                            q.pop()
-                        };
-                        let payload = match payload {
-                            Some(p) => p,
-                            None => break,
-                        };
+                std::thread::spawn(move || loop {
+                    let payload = {
+                        let mut q = queue.lock().unwrap();
+                        q.pop()
+                    };
+                    let payload = match payload {
+                        Some(p) => p,
+                        None => break,
+                    };
 
-                        let start = Instant::now();
-                        let mut http_status = 0u16;
-                        let mut success = false;
-                        for retry in 0..3u32 {
-                            if retry > 0 {
-                                std::thread::sleep(Duration::from_millis(500 * retry as u64));
-                            }
-                            match post_helper_json("/api/v1/shares", &payload) {
-                                Ok((status, ref json)) => {
-                                    http_status = status;
-                                    if status == 200 {
-                                        success = true;
-                                        break;
-                                    }
-                                    let logged = share_err_logged.fetch_add(1, Ordering::Relaxed);
-                                    if logged < 5 {
-                                        eprintln!("[share] HTTP {} (attempt {}): {:?}", status, retry + 1, json);
-                                    }
+                    let start = Instant::now();
+                    let mut http_status = 0u16;
+                    let mut success = false;
+                    for retry in 0..3u32 {
+                        if retry > 0 {
+                            std::thread::sleep(Duration::from_millis(500 * retry as u64));
+                        }
+                        match post_helper_json("/api/v1/shares", &payload) {
+                            Ok((status, ref json)) => {
+                                http_status = status;
+                                if status == 200 {
+                                    success = true;
+                                    break;
                                 }
-                                Err(ref e) => {
-                                    let logged = share_err_logged.fetch_add(1, Ordering::Relaxed);
-                                    if logged < 5 {
-                                        eprintln!("[share] error (attempt {}): {}", retry + 1, e);
-                                    }
+                                let logged = share_err_logged.fetch_add(1, Ordering::Relaxed);
+                                if logged < 5 {
+                                    eprintln!(
+                                        "[share] HTTP {} (attempt {}): {:?}",
+                                        status,
+                                        retry + 1,
+                                        json
+                                    );
+                                }
+                            }
+                            Err(ref e) => {
+                                let logged = share_err_logged.fetch_add(1, Ordering::Relaxed);
+                                if logged < 5 {
+                                    eprintln!("[share] error (attempt {}): {}", retry + 1, e);
                                 }
                             }
                         }
-                        let latency = start.elapsed();
+                    }
+                    let latency = start.elapsed();
 
-                        collector.record(Sample {
-                            phase: "share_enqueue".to_string(),
-                            timestamp: start,
-                            latency,
-                            http_status,
-                            success,
-                        });
+                    collector.record(Sample {
+                        phase: "share_enqueue".to_string(),
+                        timestamp: start,
+                        latency,
+                        http_status,
+                        success,
+                    });
 
-                        if success {
-                            wave_succeeded.fetch_add(1, Ordering::Relaxed);
-                        }
+                    if success {
+                        wave_succeeded.fetch_add(1, Ordering::Relaxed);
                     }
                 })
             })
@@ -867,12 +890,7 @@ fn voter_throughput_stress() {
             wave_elapsed.as_secs_f64()
         );
 
-        if !wave_voters.is_empty()
-            && voters_with_positions
-                .chunks(w_size)
-                .nth(wave_num)
-                .is_some()
-        {
+        if !wave_voters.is_empty() && voters_with_positions.chunks(w_size).nth(wave_num).is_some() {
             std::thread::sleep(w_interval);
         }
     }
@@ -1011,7 +1029,11 @@ fn voter_throughput_stress() {
         final_tree_size
     );
     eprintln!("  ZKP mode:            REAL Halo2 (K=14 deleg, K=13 cast-vote, K=11 share-reveal)");
-    eprintln!("  Share arrival:       {} voters every {}ms", w_size, w_interval.as_millis());
+    eprintln!(
+        "  Share arrival:       {} voters every {}ms",
+        w_size,
+        w_interval.as_millis()
+    );
     eprintln!(
         "  Chain:               live CometBFT ({} validator{})",
         validators.len(),
@@ -1029,23 +1051,23 @@ fn voter_throughput_stress() {
 
     eprintln!("\n  Server Load Timings (what the chain actually processes)");
     eprintln!("  ─────────────────────────────────────────────────────────────");
-    eprintln!(
-        "  {:46} {:>10} {:>10}",
-        "Phase", "Duration", "tx/s"
-    );
-    eprintln!(
-        "  {:46} {:>10} {:>10}",
-        "─────", "────────", "────"
-    );
+    eprintln!("  {:46} {:>10} {:>10}", "Phase", "Duration", "tx/s");
+    eprintln!("  {:46} {:>10} {:>10}", "─────", "────────", "────");
     eprintln!(
         "  {:46} {:>10} {:>9.0}",
-        format!("1. Submit {} delegations (ZKP #1 verify, {} ok)", count, deleg_ok),
+        format!(
+            "1. Submit {} delegations (ZKP #1 verify, {} ok)",
+            count, deleg_ok
+        ),
         fmt_dur(phase1_submit_elapsed.as_secs_f64()),
         deleg_ok as f64 / phase1_submit_elapsed.as_secs_f64()
     );
     eprintln!(
         "  {:46} {:>10} {:>9.0}",
-        format!("2. Submit {} cast-votes (ZKP #2 verify, {} ok)", count, cast_ok),
+        format!(
+            "2. Submit {} cast-votes (ZKP #2 verify, {} ok)",
+            count, cast_ok
+        ),
         fmt_dur(phase3_submit_elapsed.as_secs_f64()),
         cast_ok as f64 / phase3_submit_elapsed.as_secs_f64()
     );
@@ -1060,9 +1082,7 @@ fn voter_throughput_stress() {
     );
     eprintln!(
         "  {:46} {:>7.0}ms {:>10}",
-        "   └ per share (ZKP #3 prove + verify + tx)",
-        per_share_ms,
-        "—"
+        "   └ per share (ZKP #3 prove + verify + tx)", per_share_ms, "—"
     );
     eprintln!(
         "  {:46} {:>10} {:>10}",
@@ -1079,9 +1099,7 @@ fn voter_throughput_stress() {
 
     eprintln!("\n  Client-Side Prep (not server load)");
     eprintln!("  ─────────────────────────────────────────────────────────────");
-    eprintln!(
-        "  ZKP #1 proofs:       pre-generated offline (K=14, ~6s/proof)"
-    );
+    eprintln!("  ZKP #1 proofs:       pre-generated offline (K=14, ~6s/proof)");
     eprintln!(
         "  ZKP #2 proofs:       {} generated at runtime in {} ({:.1}s/proof avg, K=13)",
         count,
@@ -1089,9 +1107,7 @@ fn voter_throughput_stress() {
         phase2_proof_elapsed.as_secs_f64() / count as f64
     );
 
-    eprintln!(
-        "\n  Per-Tx Latency (HTTP → CheckTx → ZKP verify → response)"
-    );
+    eprintln!("\n  Per-Tx Latency (HTTP → CheckTx → ZKP verify → response)");
     eprintln!("  ─────────────────────────────────────────────────────────────");
     eprintln!(
         "  {:15} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}  {}",
@@ -1132,7 +1148,10 @@ fn voter_throughput_stress() {
     eprintln!("\n  Share Processing Detail (ZKP #3, K=11)");
     eprintln!("  ─────────────────────────────────────────────────────────────");
     eprintln!("  Shares enqueued:     {}", total_shares_expected);
-    eprintln!("  Shares processed:    {} (ZKP #3 generated + verified on-chain)", final_share_count);
+    eprintln!(
+        "  Shares processed:    {} (ZKP #3 generated + verified on-chain)",
+        final_share_count
+    );
     eprintln!("  Shares failed:       {}", final_failed_share_count);
     eprintln!(
         "  Throughput:          {:.2} shares/sec",
@@ -1142,9 +1161,17 @@ fn voter_throughput_stress() {
             0.0
         }
     );
-    eprintln!("  Per-share cost:      {:.0}ms (ZKP #3 prove + MsgRevealShare verify + tx)", per_share_ms);
+    eprintln!(
+        "  Per-share cost:      {:.0}ms (ZKP #3 prove + MsgRevealShare verify + tx)",
+        per_share_ms
+    );
     eprintln!("  Concurrent provers:  16 (max_concurrent_proofs)");
-    eprintln!("  Arrival pattern:     {} voters every {}ms ({} waves)", w_size, w_interval.as_millis(), wave_num);
+    eprintln!(
+        "  Arrival pattern:     {} voters every {}ms ({} waves)",
+        w_size,
+        w_interval.as_millis(),
+        wave_num
+    );
 
     eprintln!("\n  Tree Verification");
     eprintln!("  ─────────────────────────────────────────────────────────────");

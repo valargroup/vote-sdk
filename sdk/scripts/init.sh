@@ -85,6 +85,15 @@ sed -i.bak "s|^ea_sk_path = .*|ea_sk_path = \"$EA_SK_PATH\"|" "$APP_TOML"
 sed -i.bak "s|^pallas_sk_path = .*|pallas_sk_path = \"$PALLAS_SK_PATH\"|" "$APP_TOML"
 rm -f "${APP_TOML}.bak"
 
+# Helper defaults are privacy/dev oriented. Benchmark scripts can override them
+# via environment variables before invoking this script.
+HELPER_API_TOKEN="${ZALLY_HELPER_API_TOKEN:-}"
+HELPER_EXPOSE_QUEUE_STATUS="${ZALLY_HELPER_EXPOSE_QUEUE_STATUS:-false}"
+HELPER_MEAN_DELAY="${ZALLY_HELPER_MEAN_DELAY:-60}"
+HELPER_MIN_DELAY="${ZALLY_HELPER_MIN_DELAY:-90}"
+HELPER_PROCESS_INTERVAL="${ZALLY_HELPER_PROCESS_INTERVAL:-5}"
+HELPER_MAX_CONCURRENT_PROOFS="${ZALLY_HELPER_MAX_CONCURRENT_PROOFS:-2}"
+
 # Append [helper] section (not in the default template).
 cat >> "$APP_TOML" <<HELPERCFG
 
@@ -98,8 +107,12 @@ cat >> "$APP_TOML" <<HELPERCFG
 disable = false
 
 # Optional auth token for POST /api/v1/shares (sent via X-Helper-Token header).
-# Empty disables token auth.
-api_token = ""
+# Empty disables token auth for both share submission and queue-status polling.
+api_token = "$HELPER_API_TOKEN"
+
+# Benchmark-only queue metrics endpoint. Keep disabled by default to avoid
+# exposing per-round share activity to unauthenticated observers.
+expose_queue_status = $HELPER_EXPOSE_QUEUE_STATUS
 
 # Path to the SQLite database file. Empty = default ($HOME/.zallyd/helper.db).
 db_path = ""
@@ -107,19 +120,19 @@ db_path = ""
 # Mean of the exponential delay distribution (seconds).
 # Shares are delayed by Exp(1/mean) for temporal unlinkability, capped at vote end time.
 # Use a short value for testing; production default is 43200 (12 hours).
-mean_delay = 0
+mean_delay = $HELPER_MEAN_DELAY
 
 # Minimum delay floor (seconds).
-min_delay = 0
+min_delay = $HELPER_MIN_DELAY
 
 # How often to check for shares ready to submit (seconds).
-process_interval = 1
+process_interval = $HELPER_PROCESS_INTERVAL
 
 # Port of the chain's REST API (used for MsgRevealShare submission).
 chain_api_port = 1318
 
 # Maximum concurrent proof generation goroutines.
-max_concurrent_proofs = 16
+max_concurrent_proofs = $HELPER_MAX_CONCURRENT_PROOFS
 HELPERCFG
 
 echo ""
