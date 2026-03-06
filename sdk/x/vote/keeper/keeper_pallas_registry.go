@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"fmt"
 
 	"cosmossdk.io/core/store"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -64,6 +65,23 @@ func (k Keeper) IterateAllPallasKeys(kvStore store.KVStore, cb func(vpk *types.V
 		}
 	}
 	return nil
+}
+
+// RegisterPallasKeyCore validates, deduplicates, and stores a Pallas PK for
+// the given validator address. Shared by RegisterPallasKey and
+// CreateValidatorWithPallasKey.
+func (k Keeper) RegisterPallasKeyCore(kvStore store.KVStore, valAddr string, pallasPk []byte) error {
+	has, err := k.HasPallasKey(kvStore, valAddr)
+	if err != nil {
+		return err
+	}
+	if has {
+		return fmt.Errorf("%w: %s", types.ErrDuplicateRegistration, valAddr)
+	}
+	return k.SetPallasKey(kvStore, &types.ValidatorPallasKey{
+		ValidatorAddress: valAddr,
+		PallasPk:         pallasPk,
+	})
 }
 
 // GetEligibleValidators returns all bonded validators that have a registered Pallas PK.

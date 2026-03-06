@@ -37,21 +37,7 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 	}
 	valAddr := sdk.ValAddress(accAddr).String()
 
-	// Reject duplicate registration.
-	has, err := ms.k.HasPallasKey(kvStore, valAddr)
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateRegistration, valAddr)
-	}
-
-	// Store in global registry.
-	vpk := &types.ValidatorPallasKey{
-		ValidatorAddress: valAddr,
-		PallasPk:         msg.PallasPk,
-	}
-	if err := ms.k.SetPallasKey(kvStore, vpk); err != nil {
+	if err := ms.k.RegisterPallasKeyCore(kvStore, valAddr, msg.PallasPk); err != nil {
 		return nil, err
 	}
 
@@ -288,24 +274,9 @@ func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *typ
 		return nil, fmt.Errorf("staking CreateValidator failed: %w", err)
 	}
 
-	// Use the validator operator address from the staking message as the key.
 	validatorAddr := stakingMsg.ValidatorAddress
 
-	// Reject duplicate registration.
-	has, err := ms.k.HasPallasKey(kvStore, validatorAddr)
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateRegistration, validatorAddr)
-	}
-
-	// Store in global registry.
-	vpk := &types.ValidatorPallasKey{
-		ValidatorAddress: validatorAddr,
-		PallasPk:         msg.PallasPk,
-	}
-	if err := ms.k.SetPallasKey(kvStore, vpk); err != nil {
+	if err := ms.k.RegisterPallasKeyCore(kvStore, validatorAddr, msg.PallasPk); err != nil {
 		return nil, err
 	}
 

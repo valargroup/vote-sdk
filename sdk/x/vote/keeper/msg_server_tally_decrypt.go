@@ -93,15 +93,8 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 	}
 
 	for i, entry := range msg.Entries {
-		if entry.ProposalId < 1 || int(entry.ProposalId) > len(round.Proposals) {
-			return nil, fmt.Errorf("%w: entry[%d] proposal_id %d out of range [1, %d]",
-				types.ErrInvalidProposalID, i, entry.ProposalId, len(round.Proposals))
-		}
-
-		proposal := round.Proposals[entry.ProposalId-1]
-		if int(entry.VoteDecision) >= len(proposal.Options) {
-			return nil, fmt.Errorf("%w: entry[%d] vote_decision %d out of range [0, %d) for proposal %d",
-				types.ErrInvalidField, i, entry.VoteDecision, len(proposal.Options), entry.ProposalId)
+		if err := ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
+			return nil, fmt.Errorf("entry[%d]: %w", i, err)
 		}
 
 		accBytes, err := ms.k.GetTally(kvStore, msg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
@@ -263,14 +256,8 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 			return nil, fmt.Errorf("%w: entry[%d] partial_decrypt is not a valid Pallas point: %v",
 				types.ErrInvalidField, i, err)
 		}
-		if entry.ProposalId < 1 || int(entry.ProposalId) > len(round.Proposals) {
-			return nil, fmt.Errorf("%w: entry[%d] proposal_id %d out of range [1, %d]",
-				types.ErrInvalidProposalID, i, entry.ProposalId, len(round.Proposals))
-		}
-		proposal := round.Proposals[entry.ProposalId-1]
-		if int(entry.VoteDecision) >= len(proposal.Options) {
-			return nil, fmt.Errorf("%w: entry[%d] vote_decision %d out of range [0, %d) for proposal %d",
-				types.ErrInvalidField, i, entry.VoteDecision, len(proposal.Options), entry.ProposalId)
+		if err := ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
+			return nil, fmt.Errorf("entry[%d]: %w", i, err)
 		}
 	}
 

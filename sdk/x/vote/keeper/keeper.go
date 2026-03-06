@@ -221,6 +221,58 @@ func (k *Keeper) UpdateVoteRoundStatus(kvStore store.KVStore, roundID []byte, ne
 // This performs a full prefix scan of VoteRoundPrefix. This is acceptable
 // because the expected cardinality is low (a handful of rounds).
 func (k *Keeper) IterateAllRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
+	return k.iterateRounds(kvStore, nil, cb)
+}
+
+// IteratePendingRounds iterates over rounds with SESSION_STATUS_PENDING.
+func (k *Keeper) IteratePendingRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
+	return k.iterateRounds(kvStore, func(r *types.VoteRound) bool {
+		return r.Status == types.SessionStatus_SESSION_STATUS_PENDING
+	}, cb)
+}
+
+// IterateActiveRounds iterates over rounds with SESSION_STATUS_ACTIVE.
+func (k *Keeper) IterateActiveRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
+	return k.iterateRounds(kvStore, func(r *types.VoteRound) bool {
+		return r.Status == types.SessionStatus_SESSION_STATUS_ACTIVE
+	}, cb)
+}
+
+// IterateTallyingRounds iterates over rounds with SESSION_STATUS_TALLYING.
+func (k *Keeper) IterateTallyingRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
+	return k.iterateRounds(kvStore, func(r *types.VoteRound) bool {
+		return r.Status == types.SessionStatus_SESSION_STATUS_TALLYING
+	}, cb)
+}
+
+// HasPendingRound returns true if any stored VoteRound has status PENDING.
+func (k *Keeper) HasPendingRound(kvStore store.KVStore) (bool, error) {
+	found := false
+	err := k.IteratePendingRounds(kvStore, func(_ *types.VoteRound) bool {
+		found = true
+		return true
+	})
+	return found, err
+}
+
+// FindFirstPendingRound returns the first VoteRound with status PENDING and
+// the given CeremonyStatus, or nil if none found.
+func (k *Keeper) FindFirstPendingRound(kvStore store.KVStore, ceremonyStatus types.CeremonyStatus) (*types.VoteRound, error) {
+	var result *types.VoteRound
+	err := k.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
+		if round.CeremonyStatus == ceremonyStatus {
+			result = round
+			return true
+		}
+		return false
+	})
+	return result, err
+}
+
+// iterateRounds is the core prefix-scan loop. If filter is non-nil, only
+// rounds passing the filter are forwarded to cb. Returning true from cb
+// stops iteration.
+func (k *Keeper) iterateRounds(kvStore store.KVStore, filter func(*types.VoteRound) bool, cb func(*types.VoteRound) bool) error {
 	prefix := types.VoteRoundPrefix
 	end := types.PrefixEndBytes(prefix)
 
@@ -234,145 +286,15 @@ func (k *Keeper) IterateAllRounds(kvStore store.KVStore, cb func(round *types.Vo
 		var round types.VoteRound
 		if err := unmarshal(iter.Value(), &round); err != nil {
 			return err
+		}
+		if filter != nil && !filter(&round) {
+			continue
 		}
 		if cb(&round) {
 			break
 		}
 	}
 	return nil
-}
-
-// IterateActiveRounds iterates over all stored VoteRounds and calls the
-// callback for each round whose status is SESSION_STATUS_ACTIVE.
-// The callback receives a pointer to the round; returning true stops iteration.
-//
-// IteratePendingRounds iterates over all stored VoteRounds and calls the
-// callback for each round whose status is SESSION_STATUS_PENDING.
-// The callback receives a pointer to the round; returning true stops iteration.
-func (k Keeper) IteratePendingRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
-	prefix := types.VoteRoundPrefix
-	end := types.PrefixEndBytes(prefix)
-
-	iter, err := kvStore.Iterator(prefix, end)
-	if err != nil {
-		return err
-	}
-	defer iter.Close()
-
-	for ; iter.Valid(); iter.Next() {
-		var round types.VoteRound
-		if err := unmarshal(iter.Value(), &round); err != nil {
-			return err
-		}
-		if round.Status == types.SessionStatus_SESSION_STATUS_PENDING {
-			if cb(&round) {
-				break
-			}
-		}
-	}
-	return nil
-}
-
-// This performs a full prefix scan of VoteRoundPrefix. This is acceptable
-// because the expected cardinality is a few concurrent rounds at most.
-func (k *Keeper) IterateActiveRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
-	prefix := types.VoteRoundPrefix
-	end := types.PrefixEndBytes(prefix)
-
-	iter, err := kvStore.Iterator(prefix, end)
-	if err != nil {
-		return err
-	}
-	defer iter.Close()
-
-	for ; iter.Valid(); iter.Next() {
-		var round types.VoteRound
-		if err := unmarshal(iter.Value(), &round); err != nil {
-			return err
-		}
-		if round.Status == types.SessionStatus_SESSION_STATUS_ACTIVE {
-			if cb(&round) {
-				break
-			}
-		}
-	}
-	return nil
-}
-
-// IterateTallyingRounds iterates over all stored VoteRounds and calls the
-// callback for each round whose status is SESSION_STATUS_TALLYING.
-// The callback receives a pointer to the round; returning true stops iteration.
-func (k *Keeper) IterateTallyingRounds(kvStore store.KVStore, cb func(round *types.VoteRound) bool) error {
-	prefix := types.VoteRoundPrefix
-	end := types.PrefixEndBytes(prefix)
-
-	iter, err := kvStore.Iterator(prefix, end)
-	if err != nil {
-		return err
-	}
-	defer iter.Close()
-
-	for ; iter.Valid(); iter.Next() {
-		var round types.VoteRound
-		if err := unmarshal(iter.Value(), &round); err != nil {
-			return err
-		}
-		if round.Status == types.SessionStatus_SESSION_STATUS_TALLYING {
-			if cb(&round) {
-				break
-			}
-		}
-	}
-	return nil
-}
-
-// HasPendingRound returns true if any stored VoteRound has status PENDING.
-// Used to enforce one active ceremony at a time.
-func (k *Keeper) HasPendingRound(kvStore store.KVStore) (bool, error) {
-	prefix := types.VoteRoundPrefix
-	end := types.PrefixEndBytes(prefix)
-
-	iter, err := kvStore.Iterator(prefix, end)
-	if err != nil {
-		return false, err
-	}
-	defer iter.Close()
-
-	for ; iter.Valid(); iter.Next() {
-		var round types.VoteRound
-		if err := unmarshal(iter.Value(), &round); err != nil {
-			return false, err
-		}
-		if round.Status == types.SessionStatus_SESSION_STATUS_PENDING {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// FindFirstPendingRound returns the first VoteRound with status PENDING and
-// the given CeremonyStatus, or nil if none found.
-func (k Keeper) FindFirstPendingRound(kvStore store.KVStore, ceremonyStatus types.CeremonyStatus) (*types.VoteRound, error) {
-	prefix := types.VoteRoundPrefix
-	end := types.PrefixEndBytes(prefix)
-
-	iter, err := kvStore.Iterator(prefix, end)
-	if err != nil {
-		return nil, err
-	}
-	defer iter.Close()
-
-	for ; iter.Valid(); iter.Next() {
-		var round types.VoteRound
-		if err := unmarshal(iter.Value(), &round); err != nil {
-			return nil, err
-		}
-		if round.Status == types.SessionStatus_SESSION_STATUS_PENDING &&
-			round.CeremonyStatus == ceremonyStatus {
-			return &round, nil
-		}
-	}
-	return nil, nil
 }
 
 // ---------------------------------------------------------------------------

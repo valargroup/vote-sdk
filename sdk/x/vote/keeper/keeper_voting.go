@@ -239,6 +239,23 @@ func (k *Keeper) ValidateVoteDecision(kvStore store.KVStore, roundID []byte, pro
 	return nil
 }
 
+// ValidateEntryBounds checks that proposalId and voteDecision are within
+// the valid ranges for the given round. Unlike ValidateProposalId and
+// ValidateVoteDecision, this takes the already-loaded round to avoid
+// redundant KV lookups in hot loops (SubmitTally, SubmitPartialDecryption).
+func ValidateEntryBounds(round *types.VoteRound, proposalId, voteDecision uint32) error {
+	if proposalId < 1 || int(proposalId) > len(round.Proposals) {
+		return fmt.Errorf("%w: proposal_id %d out of range [1, %d]",
+			types.ErrInvalidProposalID, proposalId, len(round.Proposals))
+	}
+	proposal := round.Proposals[proposalId-1]
+	if int(voteDecision) >= len(proposal.Options) {
+		return fmt.Errorf("%w: vote_decision %d out of range [0, %d) for proposal %d",
+			types.ErrInvalidField, voteDecision, len(proposal.Options), proposalId)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Voting round validation
 // ---------------------------------------------------------------------------

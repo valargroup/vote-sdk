@@ -44,12 +44,12 @@ func UnmarshalCiphertext(data []byte) (*Ciphertext, error) {
 		return nil, fmt.Errorf("elgamal: UnmarshalCiphertext: expected %d bytes, got %d", CiphertextSize, len(data))
 	}
 
-	c1, err := decompressPallasPoint(data[:CompressedPointSize])
+	c1, err := DecompressPallasPoint(data[:CompressedPointSize])
 	if err != nil {
 		return nil, fmt.Errorf("elgamal: UnmarshalCiphertext: failed to decompress C1: %w", err)
 	}
 
-	c2, err := decompressPallasPoint(data[CompressedPointSize:])
+	c2, err := DecompressPallasPoint(data[CompressedPointSize:])
 	if err != nil {
 		return nil, fmt.Errorf("elgamal: UnmarshalCiphertext: failed to decompress C2: %w", err)
 	}
@@ -57,12 +57,12 @@ func UnmarshalCiphertext(data []byte) (*Ciphertext, error) {
 	return &Ciphertext{C1: c1, C2: c2}, nil
 }
 
-// decompressPallasPoint decompresses a 32-byte Pallas point. The identity
+// DecompressPallasPoint decompresses a 32-byte Pallas point. The identity
 // point (point at infinity) serializes to 32 zero bytes but cannot round-trip
 // through FromAffineCompressed (standard for projective-coordinate EC libs),
 // so we detect the all-zeros sentinel and return the identity directly.
 // Any point not on the curve errors.
-func decompressPallasPoint(data []byte) (curvey.Point, error) {
+func DecompressPallasPoint(data []byte) (curvey.Point, error) {
 	// Check for the identity sentinel (all zeros).
 	allZero := true
 	for _, b := range data {
@@ -88,7 +88,7 @@ func UnmarshalPoint(data []byte) (curvey.Point, error) {
 	if len(data) != CompressedPointSize {
 		return nil, fmt.Errorf("elgamal: UnmarshalPoint: expected %d bytes, got %d", CompressedPointSize, len(data))
 	}
-	return decompressPallasPoint(data)
+	return DecompressPallasPoint(data)
 }
 
 // UnmarshalPublicKey deserializes a 32-byte compressed Pallas point into a PublicKey.
@@ -97,7 +97,7 @@ func UnmarshalPublicKey(data []byte) (*PublicKey, error) {
 	if len(data) != CompressedPointSize {
 		return nil, fmt.Errorf("elgamal: UnmarshalPublicKey: expected %d bytes, got %d", CompressedPointSize, len(data))
 	}
-	pt, err := decompressPallasPoint(data)
+	pt, err := DecompressPallasPoint(data)
 	if err != nil {
 		return nil, fmt.Errorf("elgamal: UnmarshalPublicKey: failed to decompress point: %w", err)
 	}
