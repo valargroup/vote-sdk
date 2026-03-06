@@ -253,13 +253,14 @@ struct SubmitResult {
 /// Submit payloads concurrently to the given API path.
 /// Returns success count and per-voter tx_hash for position resolution.
 fn submit_concurrent(
-    payloads: Vec<(usize, serde_json::Value)>,
+    mut payloads: Vec<(usize, serde_json::Value)>,
     path: &str,
     phase_name: &str,
     collector: &Arc<MetricsCollector>,
     concurrency: usize,
 ) -> SubmitResult {
     let total = payloads.len();
+    payloads.reverse();
     let queue = Arc::new(std::sync::Mutex::new(payloads));
     let succeeded = Arc::new(AtomicUsize::new(0));
     let submitted = Arc::new(AtomicUsize::new(0));
@@ -278,11 +279,7 @@ fn submit_concurrent(
             std::thread::spawn(move || loop {
                 let item = {
                     let mut q = queue.lock().unwrap();
-                    if q.is_empty() {
-                        None
-                    } else {
-                        Some(q.remove(0))
-                    }
+                    q.pop()
                 };
                 let (idx, payload) = match item {
                     Some(i) => i,
@@ -787,6 +784,8 @@ fn voter_throughput_stress() {
     let mut voters_with_positions: Vec<(usize, u64)> = positions.into_iter().collect();
     voters_with_positions.sort_by_key(|(idx, _)| *idx);
 
+    let bundle_map: HashMap<usize, &CastVoteBundle> = cv_bundles.iter().map(|(idx, b)| (*idx, b)).collect();
+
     let mut total_enqueued = 0usize;
     let mut wave_num = 0usize;
     let mut wave_timings: Vec<(usize, Duration, usize)> = Vec::new();
@@ -797,7 +796,7 @@ fn voter_throughput_stress() {
 
         let mut wave_payloads = Vec::new();
         for (voter_idx, vc_position) in wave_voters {
-            if let Some((_, bundle)) = cv_bundles.iter().find(|(idx, _)| idx == voter_idx) {
+            if let Some(bundle) = bundle_map.get(voter_idx) {
                 for mut share_payload in bundle.share_payloads.clone() {
                     share_payload["tree_position"] = serde_json::json!(*vc_position);
                     wave_payloads.push(share_payload);
