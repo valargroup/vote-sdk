@@ -150,7 +150,7 @@ fn vote_proof_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine>)
     static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
     CACHE.get_or_init(|| {
         let params = vote_proof::vote_proof_params();
-        let (_pk, vk) = vote_proof::vote_proof_proving_key(&params);
+        let (_pk, vk) = vote_proof::vote_proof_proving_key();
         (params, vk)
     })
 }
@@ -731,7 +731,7 @@ fn share_reveal_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine
     static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
     CACHE.get_or_init(|| {
         let params = share_reveal::share_reveal_params();
-        let (_pk, vk) = share_reveal::share_reveal_proving_key(&params);
+        let (_pk, vk) = share_reveal::share_reveal_proving_key();
         (params, vk)
     })
 }
@@ -1028,7 +1028,7 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     let tree_root = bundle.instance.vote_comm_tree_root;
 
     // --- Step 7: Generate Halo2 proof ---
-    // Uses cached params and proving key (~5-15s in release mode).
+    // Params and proving key are cached via OnceLock in prove.rs.
     let proof_bytes = std::panic::catch_unwind(|| {
         share_reveal::create_share_reveal_proof(bundle.circuit, &bundle.instance)
     });
@@ -1063,9 +1063,18 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
 ///
 /// Returns (merkle_path, share_comms_flat, primary_blind, enc_c1_x, enc_c2_x,
 ///          share_index, proposal_id, vote_decision, round_id).
-pub fn build_share_reveal_test_data()
-    -> (Vec<u8>, [u8; 512], [u8; 32], [u8; 32], [u8; 32], [u8; 64], u32, u32, u32, [u8; 32])
-{
+pub fn build_share_reveal_test_data() -> (
+    Vec<u8>,
+    [u8; 512],
+    [u8; 32],
+    [u8; 32],
+    [u8; 32],
+    [u8; 64],
+    u32,
+    u32,
+    u32,
+    [u8; 32],
+) {
     use halo2_proofs::arithmetic::CurveAffine;
     use pasta_curves::group::ff::PrimeField;
     use pasta_curves::group::{Curve, GroupEncoding};
