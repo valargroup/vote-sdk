@@ -55,13 +55,17 @@ zallyd sign-arbitrary '{"operator_address":"...","url":"...","moniker":"...","ti
 - **`approved-servers`** (persistent) — once a server is approved (via admin approval or on-chain bonding), it stays in this list unless manually removed. Survives reboots and pulse gaps.
 - **`vote_servers`** (active) — only contains servers that are approved AND actively pulsing. This is what iOS reads. Servers are added when they pulse and evicted if no pulse is received for >2 minutes.
 
-### Heartbeat flow
+### Startup and heartbeat flow
 
-Each helper server calls `POST /api/server-heartbeat` on startup and every 30 seconds thereafter. The payload and signature format are identical to `register-validator` (ADR-036 amino signature over `{ operator_address, url, moniker, timestamp }`).
+On every `zallyd start`, the helper performs two steps:
 
-The edge function checks `approved-servers`:
+**Step 1 — Register** (`POST /api/register-validator`): Called once on startup. The edge function checks on-chain bonding status. If the validator is bonded, it upserts into both `approved-servers` and `vote_servers`. If not bonded, the entry goes to `pending-registrations` for admin approval. This is the same endpoint `join.sh` uses, so existing bonded validators automatically populate `approved-servers` on their first restart with the new binary — no manual re-registration needed.
+
+**Step 2 — Pulse** (`POST /api/server-heartbeat`, every 30s): The edge function checks `approved-servers`:
 - **Approved** → upsert into `vote_servers`, update `server-pulses[url] = now`, evict stale entries (>2 min), return `{ status: "active" }`.
-- **Not approved** → upsert into `pending-registrations` (same queue as `register-validator`), return `{ status: "pending" }`.
+- **Not approved** → upsert into `pending-registrations`, return `{ status: "pending" }`.
+
+Both endpoints use the same payload and ADR-036 signature format (`{ operator_address, url, moniker, timestamp }`).
 
 A safety-net cron (`/api/evict-stale-servers`, every 2 minutes) handles eviction when all servers are down and nobody is pulsing.
 
@@ -91,10 +95,10 @@ Both fields must be set for the heartbeat to activate. `join.sh` writes these au
 ### Lifecycle
 
 1. `join.sh` runs → `register-validator` adds server to `approved-servers` + `vote_servers`
-2. `zallyd start` → helper pulse goroutine calls `/api/server-heartbeat` immediately, then every 30s
-3. If the server is in `approved-servers`, it stays in `vote_servers` as long as it keeps pulsing
-4. If the server stops (crash, restart, network issue), it is evicted from `vote_servers` after 2 minutes
-5. On restart, the next pulse re-adds it to `vote_servers` automatically (still in `approved-servers`)
+2. `zallyd start` → helper calls `register-validator` once (ensures `approved-servers` is populated for bonded validators)
+3. Helper starts 30s pulse loop → calls `server-heartbeat` which keeps the server in `vote_servers`
+4. If the server stops (crash, restart, network issue), it is evicted from `vote_servers` after 2 minutes but stays in `approved-servers`
+5. On restart, step 2 re-registers, step 3 resumes pulsing — server re-appears in `vote_servers` automatically
 6. Admin can see active/inactive status in the admin UI "Approved servers" panel
 
 ## Local testing
