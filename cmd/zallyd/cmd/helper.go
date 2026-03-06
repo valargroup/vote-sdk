@@ -102,6 +102,9 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.api_token") {
 		cfg.APIToken = v.GetString("helper.api_token")
 	}
+	if v.IsSet("helper.expose_queue_status") {
+		cfg.ExposeQueueStatus = v.GetBool("helper.expose_queue_status")
+	}
 	if v.IsSet("helper.db_path") {
 		cfg.DBPath = v.GetString("helper.db_path")
 	}

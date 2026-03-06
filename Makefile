@@ -4,7 +4,7 @@ HOME_DIR = $(HOME)/.zallyd
 export GOBIN := $(HOME)/go/bin
 export PATH := $(GOBIN):$(PATH)
 
-.PHONY: install install-ffi init start clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy
+.PHONY: install install-ffi init init-benchmark start clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy
 
 ## install: Build and install the zallyd binary to $GOPATH/bin
 install:
@@ -33,6 +33,10 @@ install-create-val-tx:
 ## init: Initialize a single-validator chain with real RedPallas + Halo2 verification (wipes existing data)
 init: install-ffi
 	bash scripts/init.sh
+
+## init-benchmark: Initialize a single-validator chain with benchmark helper settings
+init-benchmark: install-ffi
+	bash scripts/init_benchmark.sh
 
 ## start: Start the chain (set ZALLY_PIR_URL to override nullifier PIR server)
 start:

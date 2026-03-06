@@ -18,6 +18,7 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 		router,
 		func() *ShareStore { return store },
 		func() string { return "" },
+		func() bool { return false },
 		nil,
 		logger,
 	)
@@ -27,7 +28,7 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 // mux router, resolving the store at request time. This allows routes to be
 // mounted before the helper is fully initialized.
 func RegisterRoutesWithStoreGetter(router *mux.Router, getStore func() *ShareStore, logger log.Logger) {
-	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, nil, logger)
+	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, func() bool { return false }, nil, logger)
 }
 
 // RegisterRoutesWithGetters registers helper routes using runtime getters for
@@ -36,20 +37,28 @@ func RegisterRoutesWithGetters(
 	router *mux.Router,
 	getStore func() *ShareStore,
 	getAPIToken func() string,
+	getExposeQueueStatus func() bool,
 	getTree func() TreeReader,
 	logger log.Logger,
 ) {
-	h := &apiHandler{getStore: getStore, getAPIToken: getAPIToken, getTree: getTree, logger: logger}
+	h := &apiHandler{
+		getStore:             getStore,
+		getAPIToken:          getAPIToken,
+		getExposeQueueStatus: getExposeQueueStatus,
+		getTree:              getTree,
+		logger:               logger,
+	}
 	router.HandleFunc("/api/v1/shares", h.handleSubmitShare).Methods("POST")
 	router.HandleFunc("/api/v1/status", h.handleStatus).Methods("GET")
 	router.HandleFunc("/api/v1/queue-status", h.handleQueueStatus).Methods("GET")
 }
 
 type apiHandler struct {
-	getStore    func() *ShareStore
-	getAPIToken func() string
-	getTree     func() TreeReader
-	logger      log.Logger
+	getStore             func() *ShareStore
+	getAPIToken          func() string
+	getExposeQueueStatus func() bool
+	getTree              func() TreeReader
+	logger               log.Logger
 }
 
 type submitResponse struct {
@@ -143,9 +152,17 @@ func (h *apiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *apiHandler) handleQueueStatus(w http.ResponseWriter, r *http.Request) {
+	if h.getExposeQueueStatus == nil || !h.getExposeQueueStatus() {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
 	store := h.getStore()
 	if store == nil {
 		jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !h.authorizeSubmit(r) {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 

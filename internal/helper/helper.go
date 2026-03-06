@@ -12,10 +12,11 @@ import (
 
 // Helper manages the share processing pipeline lifecycle.
 type Helper struct {
-	Store     *ShareStore
-	Processor *Processor
-	APIToken  string
-	Logger    log.Logger
+	Store             *ShareStore
+	Processor         *Processor
+	APIToken          string
+	ExposeQueueStatus bool
+	Logger            log.Logger
 }
 
 // New creates a new Helper from the given configuration.
@@ -79,10 +80,11 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, homeDir string, log
 	)
 
 	return &Helper{
-		Store:     store,
-		Processor: processor,
-		APIToken:  cfg.APIToken,
-		Logger:    logger,
+		Store:             store,
+		Processor:         processor,
+		APIToken:          cfg.APIToken,
+		ExposeQueueStatus: cfg.ExposeQueueStatus,
+		Logger:            logger,
 	}, nil
 }
 
@@ -92,6 +94,7 @@ func (h *Helper) RegisterRoutes(router *mux.Router) {
 		router,
 		func() *ShareStore { return h.Store },
 		func() string { return h.APIToken },
+		func() bool { return h.ExposeQueueStatus },
 		func() TreeReader { return h.Processor.tree },
 		h.Logger,
 	)

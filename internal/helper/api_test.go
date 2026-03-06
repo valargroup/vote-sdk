@@ -22,6 +22,21 @@ func newTestRouter(t *testing.T) (*mux.Router, *ShareStore) {
 	return router, store
 }
 
+func newQueueStatusRouter(t *testing.T, token string) (*mux.Router, *ShareStore) {
+	t.Helper()
+	store := newTestStore(t)
+	router := mux.NewRouter()
+	RegisterRoutesWithGetters(
+		router,
+		func() *ShareStore { return store },
+		func() string { return token },
+		func() bool { return true },
+		nil,
+		log.NewNopLogger(),
+	)
+	return router, store
+}
+
 func enqueueInserted(t *testing.T, s *ShareStore, p SharePayload) {
 	t.Helper()
 	result, err := s.Enqueue(p)
@@ -153,6 +168,50 @@ func TestStatus_WithShares(t *testing.T) {
 	// timing correlation by observers polling the status endpoint.
 }
 
+func TestQueueStatus_DisabledByDefault(t *testing.T) {
+	router, _ := newTestRouter(t)
+
+	req := httptest.NewRequest("GET", "/api/v1/queue-status", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestQueueStatus_RequiresTokenWhenEnabled(t *testing.T) {
+	router, store := newQueueStatusRouter(t, "secret-token")
+	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	enqueueInserted(t, store, testPayload(roundID, 0))
+
+	t.Run("missing token rejected", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/queue-status", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("wrong token rejected", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/queue-status", nil)
+		req.Header.Set("X-Helper-Token", "wrong")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("valid token returns status", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v1/queue-status", nil)
+		req.Header.Set("X-Helper-Token", "secret-token")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]QueueStatus
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, 1, resp[roundID].Total)
+		assert.Equal(t, 1, resp[roundID].Pending)
+	})
+}
+
 func TestRoutes_HelperUnavailable(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterRoutesWithStoreGetter(router, func() *ShareStore { return nil }, log.NewNopLogger())
@@ -234,6 +293,7 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 		router,
 		func() *ShareStore { return store },
 		func() string { return "secret-token" },
+		func() bool { return false },
 		nil,
 		log.NewNopLogger(),
 	)

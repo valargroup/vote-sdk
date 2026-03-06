@@ -15,6 +15,11 @@ type Config struct {
 	// APIToken protects POST /api/v1/shares when set (checked via X-Helper-Token).
 	APIToken string `mapstructure:"api_token"`
 
+	// ExposeQueueStatus enables the benchmark-only GET /api/v1/queue-status
+	// endpoint. Keep this off by default to avoid exposing per-round queue
+	// counts to observers.
+	ExposeQueueStatus bool `mapstructure:"expose_queue_status"`
+
 	// DBPath is the path to the SQLite database file. Use ":memory:" for testing.
 	DBPath string `mapstructure:"db_path"`
 
@@ -45,6 +50,7 @@ func DefaultConfig() Config {
 	return Config{
 		Disable:             false,
 		APIToken:            "",
+		ExposeQueueStatus:   false,
 		DBPath:              "",
 		MeanDelay:           43200,
 		MinDelay:            90,
