@@ -271,6 +271,51 @@ func (k *Keeper) GetAllTallyResults(kvStore store.KVStore, roundID []byte) ([]*t
 }
 
 // ---------------------------------------------------------------------------
+// Tally completeness
+// ---------------------------------------------------------------------------
+
+// CollectNonEmptyAccumulators returns the set of (proposalID, decision) pairs
+// that have non-empty tally accumulators for the given round. Used by
+// SubmitTally and ProcessProposal to verify that a tally submission covers
+// every accumulator — preventing a malicious proposer from finalizing a
+// round with missing entries.
+func (k *Keeper) CollectNonEmptyAccumulators(kvStore store.KVStore, round *types.VoteRound) (map[[2]uint32]bool, error) {
+	result := make(map[[2]uint32]bool)
+	for _, proposal := range round.Proposals {
+		tallyMap, err := k.GetProposalTally(kvStore, round.VoteRoundId, proposal.Id)
+		if err != nil {
+			return nil, err
+		}
+		for decision := range tallyMap {
+			result[[2]uint32{proposal.Id, decision}] = true
+		}
+	}
+	return result, nil
+}
+
+// ValidateTallyCompleteness checks that a set of tally entries covers every
+// non-empty accumulator in the round. Returns ErrTallyMismatch with the
+// first missing (proposal, decision) pair if incomplete.
+func (k *Keeper) ValidateTallyCompleteness(kvStore store.KVStore, round *types.VoteRound, entries []*types.TallyEntry) error {
+	expected, err := k.CollectNonEmptyAccumulators(kvStore, round)
+	if err != nil {
+		return fmt.Errorf("failed to enumerate accumulators: %w", err)
+	}
+
+	covered := make(map[[2]uint32]bool, len(entries))
+	for _, e := range entries {
+		covered[[2]uint32{e.ProposalId, e.VoteDecision}] = true
+	}
+	for key := range expected {
+		if !covered[key] {
+			return fmt.Errorf("%w: missing entry for accumulator (proposal=%d, decision=%d)",
+				types.ErrTallyMismatch, key[0], key[1])
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Tally validation helpers
 // ---------------------------------------------------------------------------
 

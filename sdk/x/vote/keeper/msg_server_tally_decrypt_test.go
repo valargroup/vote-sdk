@@ -866,6 +866,103 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 }
 
 // ---------------------------------------------------------------------------
+// SubmitTally: completeness validation
+// ---------------------------------------------------------------------------
+
+func (s *MsgServerTestSuite) TestSubmitTally_CompletenessRejections() {
+	roundID := bytes.Repeat([]byte{0x70}, 32)
+	creator := "zvote1creator"
+
+	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
+	eaPkBytes := eaPk.Point.ToAffineCompressed()
+
+	// Setup a TALLYING round with two proposals and two accumulators:
+	// (proposal=1, decision=0) and (proposal=1, decision=1).
+	setupRoundWithTwoAccumulators := func() (*elgamal.Ciphertext, *elgamal.Ciphertext) {
+		kv := s.keeper.OpenKVStore(s.ctx)
+		s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+			VoteRoundId: roundID,
+			VoteEndTime: 500_000,
+			Creator:     creator,
+			Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+			EaPk:        eaPkBytes,
+			Proposals: []*types.Proposal{
+				{Id: 1, Title: "P1", Options: []*types.VoteOption{
+					{Index: 0, Label: "Yes"},
+					{Index: 1, Label: "No"},
+				}},
+			},
+		}))
+		enc0 := testEncShareWithPK(s, eaPk, 100)
+		enc1 := testEncShareWithPK(s, eaPk, 200)
+		s.Require().NoError(s.keeper.AddToTally(kv, roundID, 1, 0, enc0))
+		s.Require().NoError(s.keeper.AddToTally(kv, roundID, 1, 1, enc1))
+
+		ct0, _ := elgamal.UnmarshalCiphertext(enc0)
+		ct1, _ := elgamal.UnmarshalCiphertext(enc1)
+		return ct0, ct1
+	}
+
+	makeProof := func(ct *elgamal.Ciphertext, value uint64) []byte {
+		proof, err := elgamal.GenerateDLEQProof(eaSk, ct, value)
+		s.Require().NoError(err)
+		return proof
+	}
+
+	s.Run("rejected: empty entries when accumulators exist", func() {
+		s.SetupTest()
+		setupRoundWithTwoAccumulators()
+		_, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
+			VoteRoundId: roundID,
+			Creator:     creator,
+			Entries:     nil,
+		})
+		s.Require().Error(err)
+		s.Require().Contains(err.Error(), "missing entry for accumulator")
+
+		// Verify round stayed in TALLYING.
+		kv := s.keeper.OpenKVStore(s.ctx)
+		round, err2 := s.keeper.GetVoteRound(kv, roundID)
+		s.Require().NoError(err2)
+		s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
+	})
+
+	s.Run("rejected: incomplete entries (only one of two accumulators)", func() {
+		s.SetupTest()
+		ct0, _ := setupRoundWithTwoAccumulators()
+		_, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
+			VoteRoundId: roundID,
+			Creator:     creator,
+			Entries: []*types.TallyEntry{
+				{ProposalId: 1, VoteDecision: 0, TotalValue: 100, DecryptionProof: makeProof(ct0, 100)},
+			},
+		})
+		s.Require().Error(err)
+		s.Require().Contains(err.Error(), "missing entry for accumulator")
+		s.Require().Contains(err.Error(), "proposal=1, decision=1")
+	})
+
+	s.Run("accepted: complete entries covering all accumulators", func() {
+		s.SetupTest()
+		ct0, ct1 := setupRoundWithTwoAccumulators()
+		resp, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
+			VoteRoundId: roundID,
+			Creator:     creator,
+			Entries: []*types.TallyEntry{
+				{ProposalId: 1, VoteDecision: 0, TotalValue: 100, DecryptionProof: makeProof(ct0, 100)},
+				{ProposalId: 1, VoteDecision: 1, TotalValue: 200, DecryptionProof: makeProof(ct1, 200)},
+			},
+		})
+		s.Require().NoError(err)
+		s.Require().Equal(uint32(2), resp.FinalizedEntries)
+
+		kv := s.keeper.OpenKVStore(s.ctx)
+		round, _ := s.keeper.GetVoteRound(kv, roundID)
+		s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
+	})
+}
+
+// ---------------------------------------------------------------------------
 // SubmitPartialDecryption
 // ---------------------------------------------------------------------------
 

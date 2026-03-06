@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -48,14 +49,14 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		return nil, err
 	}
 
-	// Reject if round already exists.
+	// Reject if round already exists. GetVoteRound returns ErrRoundNotFound
+	// on miss; any other error is an unexpected KV/unmarshal failure.
 	existing, err := ms.k.GetVoteRound(kvStore, roundID)
-	if err != nil && existing != nil {
-		return nil, fmt.Errorf("%w: %x", types.ErrRoundAlreadyExists, roundID)
-	}
-	// err != nil && existing == nil means ErrRoundNotFound, which is expected.
 	if existing != nil {
 		return nil, fmt.Errorf("%w: %x", types.ErrRoundAlreadyExists, roundID)
+	}
+	if err != nil && !errors.Is(err, types.ErrRoundNotFound) {
+		return nil, err
 	}
 
 	// Reject if another round is already PENDING (one active ceremony at a time).

@@ -221,8 +221,8 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 }
 
 // validateInjectedTally checks that an injected MsgSubmitTally is valid:
-// the round exists and is in TALLYING state, and the creator matches the
-// current block proposer.
+// the round exists and is in TALLYING state, the creator matches the block
+// proposer, and the entries cover every non-empty tally accumulator.
 func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, voteMsg, err := voteapi.DecodeVoteTx(txBytes)
 	if err != nil {
@@ -239,6 +239,16 @@ func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByt
 	}
 
 	if err := voteKeeper.ValidateProposerIsCreator(ctx, tallyMsg.Creator, "MsgSubmitTally"); err != nil {
+		return errInvalidInjectedTx(err.Error())
+	}
+
+	// Reject incomplete tallies: entries must cover all non-empty accumulators.
+	kvStore := voteKeeper.OpenKVStore(ctx)
+	round, err := voteKeeper.GetVoteRound(kvStore, tallyMsg.VoteRoundId)
+	if err != nil {
+		return err
+	}
+	if err := voteKeeper.ValidateTallyCompleteness(kvStore, round, tallyMsg.Entries); err != nil {
 		return errInvalidInjectedTx(err.Error())
 	}
 
