@@ -108,6 +108,22 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 	round.CeremonyPayloads = keptPayloads
 }
 
+// GetPendingRoundWithCeremony loads a vote round and verifies it is PENDING
+// with the specified ceremony status. Used by Deal (REGISTERING) and Ack (DEALT).
+func (k *Keeper) GetPendingRoundWithCeremony(kvStore store.KVStore, roundID []byte, wantCeremony types.CeremonyStatus) (*types.VoteRound, error) {
+	round, err := k.GetVoteRound(kvStore, roundID)
+	if err != nil {
+		return nil, err
+	}
+	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
+		return nil, fmt.Errorf("%w: round is %s", types.ErrCeremonyWrongStatus, round.Status)
+	}
+	if round.CeremonyStatus != wantCeremony {
+		return nil, fmt.Errorf("%w: ceremony is %s", types.ErrCeremonyWrongStatus, round.CeremonyStatus)
+	}
+	return round, nil
+}
+
 // ---------------------------------------------------------------------------
 // Injected-tx proposer validation
 // ---------------------------------------------------------------------------
