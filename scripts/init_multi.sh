@@ -194,6 +194,12 @@ chain_api_port = ${api_port}
 
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = 2
+
+# Heartbeat pulse URL. Empty disables the heartbeat (local dev default).
+pulse_url = ""
+
+# This server's public URL. Empty disables the heartbeat (local dev default).
+helper_url = ""
 HELPERCFG
 }
 

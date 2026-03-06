@@ -170,10 +170,10 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 	prover := &mockProver{}
 	tree := newMockTreeReader()
 
-	// Chain returns non-zero code.
+	// Chain returns non-zero code with a non-nullifier error.
 	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"tx_hash":"","code":5,"log":"duplicate nullifier"}`))
+		w.Write([]byte(`{"tx_hash":"","code":5,"log":"vote round is not active"}`))
 	}))
 	defer chainServer.Close()
 
@@ -190,6 +190,37 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 	// Share should be marked as failed (retried).
 	status := store.Status()
 	assert.Equal(t, 1, status[roundID].Pending) // back to pending for retry
+}
+
+func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	// Chain rejects with duplicate nullifier — another helper already
+	// revealed this share (quorum mode).
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		w.Write([]byte(`{"tx_hash":"","code":2,"log":"nullifier already spent"}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(context.Background())
+
+	// Share should be marked as submitted (not retried), because the
+	// duplicate nullifier means the vote was already revealed on-chain.
+	status := store.Status()
+	assert.Equal(t, 1, status[roundID].Submitted)
+	assert.Equal(t, 0, status[roundID].Pending)
 }
 
 func TestProcessor_Run_CancelContext(t *testing.T) {

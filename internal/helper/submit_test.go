@@ -48,3 +48,21 @@ func TestFetchVoteRound_InvalidJSON(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse response")
 }
+
+func TestIsDuplicateNullifier(t *testing.T) {
+	tests := []struct {
+		name string
+		code uint32
+		want bool
+	}{
+		{"duplicate nullifier code", 2, true},
+		{"round not found code", 3, false},
+		{"round not active code", 4, false},
+		{"zero (success)", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsDuplicateNullifier(tt.code))
+		})
+	}
+}

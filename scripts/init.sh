@@ -93,6 +93,8 @@ HELPER_MEAN_DELAY="${ZALLY_HELPER_MEAN_DELAY:-60}"
 HELPER_MIN_DELAY="${ZALLY_HELPER_MIN_DELAY:-90}"
 HELPER_PROCESS_INTERVAL="${ZALLY_HELPER_PROCESS_INTERVAL:-5}"
 HELPER_MAX_CONCURRENT_PROOFS="${ZALLY_HELPER_MAX_CONCURRENT_PROOFS:-2}"
+HELPER_PULSE_URL="${ZALLY_HELPER_PULSE_URL:-}"
+HELPER_URL="${ZALLY_HELPER_URL:-}"
 
 # Append [helper] section (not in the default template).
 cat >> "$APP_TOML" <<HELPERCFG
@@ -133,6 +135,12 @@ chain_api_port = 1318
 
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = $HELPER_MAX_CONCURRENT_PROOFS
+
+# Heartbeat pulse URL. Empty disables the heartbeat (local dev default).
+pulse_url = "$HELPER_PULSE_URL"
+
+# This server's public URL. Empty disables the heartbeat (local dev default).
+helper_url = "$HELPER_URL"
 HELPERCFG
 
 echo ""
