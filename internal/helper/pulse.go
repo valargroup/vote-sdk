@@ -26,7 +26,7 @@ type PulseConfig struct {
 	Logger           log.Logger
 }
 
-const pulseInterval = 30 * time.Second
+const pulseInterval = 2 * time.Hour
 
 type heartbeatRequest struct {
 	OperatorAddress string `json:"operator_address"`
@@ -97,7 +97,7 @@ func sendSigned(ctx context.Context, client *http.Client, endpoint string, cfg P
 
 // RunPulse registers with register-validator on startup (to ensure
 // approved-servers is populated), then sends a heartbeat pulse to
-// server-heartbeat every 30 seconds until ctx is cancelled.
+// server-heartbeat every 2 hours until ctx is cancelled.
 //
 // If the initial registration returns "pending" (e.g. the chain API wasn't
 // reachable yet on Vercel's side), registration is retried on each tick
