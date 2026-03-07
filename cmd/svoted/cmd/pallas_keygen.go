@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cosmos/cosmos-sdk/client/flags"
-	"github.com/z-cale/shielded-vote/app"
-	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/app"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
 )
 
 // PallasKeygenCmd generates a Pallas keypair for ECIES encryption.

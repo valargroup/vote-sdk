@@ -11,10 +11,10 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 
-	voteapi "github.com/z-cale/shielded-vote/api"
-	"github.com/z-cale/shielded-vote/crypto/elgamal"
-	votekeeper "github.com/z-cale/shielded-vote/x/vote/keeper"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	voteapi "github.com/valargroup/shielded-vote/api"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	votekeeper "github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // PartialDecryptPrepareProposalInjector returns a PrepareProposalInjector that

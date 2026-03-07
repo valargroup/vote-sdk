@@ -12,7 +12,7 @@ import (
 
 	"cosmossdk.io/log"
 
-	"github.com/z-cale/shielded-vote/app"
+	"github.com/valargroup/shielded-vote/app"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/debug"
@@ -28,7 +28,7 @@ import (
 	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
 
-	votecli "github.com/z-cale/shielded-vote/x/vote/client/cli"
+	votecli "github.com/valargroup/shielded-vote/x/vote/client/cli"
 )
 
 // initCometBFTConfig helps to override default CometBFT Config values.

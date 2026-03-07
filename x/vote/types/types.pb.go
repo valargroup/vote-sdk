@@ -1521,7 +1521,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x1bCEREMONY_STATUS_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bCEREMONY_STATUS_REGISTERING\x10\x01\x12\x19\n" +
 	"\x15CEREMONY_STATUS_DEALT\x10\x02\x12\x1d\n" +
-	"\x19CEREMONY_STATUS_CONFIRMED\x10\x03B.Z,github.com/z-cale/shielded-vote/x/vote/typesb\x06proto3"
+	"\x19CEREMONY_STATUS_CONFIRMED\x10\x03B2Z0github.com/valargroup/shielded-vote/x/vote/typesb\x06proto3"
 
 var (
 	file_svote_v1_types_proto_rawDescOnce sync.Once

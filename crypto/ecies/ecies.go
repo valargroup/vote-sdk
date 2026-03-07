@@ -8,7 +8,7 @@ import (
 	"github.com/mikelodder7/curvey"
 	"golang.org/x/crypto/chacha20poly1305"
 
-	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
 )
 
 // Envelope holds an ECIES ciphertext: an ephemeral public key and an

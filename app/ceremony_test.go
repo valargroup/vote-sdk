@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/z-cale/shielded-vote/testutil"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	"github.com/valargroup/shielded-vote/testutil"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------

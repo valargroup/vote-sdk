@@ -28,8 +28,8 @@ import (
 
 	"cosmossdk.io/core/store"
 
-	"github.com/z-cale/shielded-vote/crypto/votetree"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	"github.com/valargroup/shielded-vote/crypto/votetree"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // debugVerifyConsistency reads all nextIndex commitment leaves from kvStore,

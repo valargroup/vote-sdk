@@ -72,10 +72,10 @@ var File_svote_module_v1_module_proto protoreflect.FileDescriptor
 
 const file_svote_module_v1_module_proto_rawDesc = "" +
 	"\n" +
-	"\x1csvote/module/v1/module.proto\x12\x0fsvote.module.v1\x1a cosmos/app/v1alpha1/module.proto\"V\n" +
+	"\x1csvote/module/v1/module.proto\x12\x0fsvote.module.v1\x1a cosmos/app/v1alpha1/module.proto\"Z\n" +
 	"\x06Module\x12\x1c\n" +
-	"\tauthority\x18\x01 \x01(\tR\tauthority:.\xba\xc0\x96\xda\x01(\n" +
-	"&github.com/z-cale/shielded-vote/x/voteB2Z0github.com/z-cale/shielded-vote/x/vote/module/v1b\x06proto3"
+	"\tauthority\x18\x01 \x01(\tR\tauthority:2\xba\xc0\x96\xda\x01,\n" +
+	"*github.com/valargroup/shielded-vote/x/voteB6Z4github.com/valargroup/shielded-vote/x/vote/module/v1b\x06proto3"
 
 var (
 	file_svote_module_v1_module_proto_rawDescOnce sync.Once

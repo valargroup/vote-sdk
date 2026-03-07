@@ -32,9 +32,9 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
 
-	voteapi "github.com/z-cale/shielded-vote/api"
-	"github.com/z-cale/shielded-vote/internal/helper"
-	votekeeper "github.com/z-cale/shielded-vote/x/vote/keeper"
+	voteapi "github.com/valargroup/shielded-vote/api"
+	"github.com/valargroup/shielded-vote/internal/helper"
+	votekeeper "github.com/valargroup/shielded-vote/x/vote/keeper"
 )
 
 // DefaultNodeHome is the default home directory for the svoted daemon.

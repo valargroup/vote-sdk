@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	votetypes "github.com/z-cale/shielded-vote/x/vote/types"
+	votetypes "github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // MsgRevealShareJSON is the JSON payload for submitting MsgRevealShare to the

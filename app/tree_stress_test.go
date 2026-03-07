@@ -13,10 +13,10 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 
-	"github.com/z-cale/shielded-vote/crypto/votetree"
-	"github.com/z-cale/shielded-vote/testutil"
-	votekeeper "github.com/z-cale/shielded-vote/x/vote/keeper"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	"github.com/valargroup/shielded-vote/crypto/votetree"
+	"github.com/valargroup/shielded-vote/testutil"
+	votekeeper "github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 type treeSnapshot struct {

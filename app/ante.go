@@ -10,13 +10,13 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	voteapi "github.com/z-cale/shielded-vote/api"
-	"github.com/z-cale/shielded-vote/crypto/redpallas"
-	"github.com/z-cale/shielded-vote/crypto/zkp"
-	"github.com/z-cale/shielded-vote/crypto/zkp/halo2"
-	voteante "github.com/z-cale/shielded-vote/x/vote/ante"
-	votekeeper "github.com/z-cale/shielded-vote/x/vote/keeper"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	voteapi "github.com/valargroup/shielded-vote/api"
+	"github.com/valargroup/shielded-vote/crypto/redpallas"
+	"github.com/valargroup/shielded-vote/crypto/zkp"
+	"github.com/valargroup/shielded-vote/crypto/zkp/halo2"
+	voteante "github.com/valargroup/shielded-vote/x/vote/ante"
+	votekeeper "github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // DualAnteHandlerOptions configures the dual-mode ante handler that supports

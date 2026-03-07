@@ -10,7 +10,7 @@ import (
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 
-	"github.com/z-cale/shielded-vote/app"
+	"github.com/valargroup/shielded-vote/app"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/config"

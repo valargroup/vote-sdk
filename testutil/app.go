@@ -40,11 +40,11 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/z-cale/shielded-vote/app"
-	"github.com/z-cale/shielded-vote/crypto/elgamal"
-	"github.com/z-cale/shielded-vote/crypto/roundid"
-	votekeeper "github.com/z-cale/shielded-vote/x/vote/keeper"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	"github.com/valargroup/shielded-vote/app"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/roundid"
+	votekeeper "github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 const testChainID = "svote-test-1"

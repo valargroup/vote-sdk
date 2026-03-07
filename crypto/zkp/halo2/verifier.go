@@ -2,7 +2,7 @@
 
 package halo2
 
-import "github.com/z-cale/shielded-vote/crypto/zkp"
+import "github.com/valargroup/shielded-vote/crypto/zkp"
 
 // IsMock is false when built with the "halo2" tag — the real FFI verifier is active.
 const IsMock = false

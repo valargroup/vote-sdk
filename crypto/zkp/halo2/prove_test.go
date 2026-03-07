@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/z-cale/shielded-vote/crypto/zkp"
+	"github.com/valargroup/shielded-vote/crypto/zkp"
 )
 
 // TestGenerateShareRevealRoundTrip generates a share reveal proof and verifies it.

@@ -16,8 +16,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/shielded-vote/x/vote/keeper"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	"github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 

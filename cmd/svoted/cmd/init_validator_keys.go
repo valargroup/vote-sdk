@@ -14,8 +14,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/shielded-vote/app"
-	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/app"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
 )
 
 // InitValidatorKeysCmd generates all cryptographic keys needed for a new validator

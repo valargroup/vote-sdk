@@ -20,10 +20,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	svtest "github.com/z-cale/shielded-vote/testutil"
-	vote "github.com/z-cale/shielded-vote/x/vote"
-	"github.com/z-cale/shielded-vote/x/vote/keeper"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	svtest "github.com/valargroup/shielded-vote/testutil"
+	vote "github.com/valargroup/shielded-vote/x/vote"
+	"github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 var fpLE = svtest.FpLE

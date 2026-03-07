@@ -10,11 +10,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/z-cale/shielded-vote/crypto/redpallas"
-	"github.com/z-cale/shielded-vote/crypto/zkp"
-	"github.com/z-cale/shielded-vote/crypto/zkp/halo2"
-	"github.com/z-cale/shielded-vote/x/vote/ante"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	"github.com/valargroup/shielded-vote/crypto/redpallas"
+	"github.com/valargroup/shielded-vote/crypto/zkp"
+	"github.com/valargroup/shielded-vote/crypto/zkp/halo2"
+	"github.com/valargroup/shielded-vote/x/vote/ante"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // repoRoot returns the absolute path to the repository root by walking up

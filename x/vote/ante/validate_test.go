@@ -20,12 +20,12 @@ import (
 
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/z-cale/shielded-vote/crypto/redpallas"
-	"github.com/z-cale/shielded-vote/crypto/zkp"
-	svtest "github.com/z-cale/shielded-vote/testutil"
-	"github.com/z-cale/shielded-vote/x/vote/ante"
-	"github.com/z-cale/shielded-vote/x/vote/keeper"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	"github.com/valargroup/shielded-vote/crypto/redpallas"
+	"github.com/valargroup/shielded-vote/crypto/zkp"
+	svtest "github.com/valargroup/shielded-vote/testutil"
+	"github.com/valargroup/shielded-vote/x/vote/ante"
+	"github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // testProposerConsAddr is the consensus address embedded in the test block header.

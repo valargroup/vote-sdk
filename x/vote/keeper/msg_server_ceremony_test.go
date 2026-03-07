@@ -13,11 +13,11 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/z-cale/shielded-vote/crypto/ecies"
-	"github.com/z-cale/shielded-vote/crypto/elgamal"
-	"github.com/z-cale/shielded-vote/crypto/shamir"
-	svtest "github.com/z-cale/shielded-vote/testutil"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	"github.com/valargroup/shielded-vote/crypto/ecies"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/shamir"
+	svtest "github.com/valargroup/shielded-vote/testutil"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------

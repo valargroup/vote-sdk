@@ -29,8 +29,8 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/z-cale/shielded-vote/crypto/elgamal"
-	"github.com/z-cale/shielded-vote/crypto/zkp"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/zkp"
 )
 
 // rustLastError retrieves the thread-local error message stored by the most

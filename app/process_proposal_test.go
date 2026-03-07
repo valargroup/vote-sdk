@@ -13,11 +13,11 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
-	voteapi "github.com/z-cale/shielded-vote/api"
-	"github.com/z-cale/shielded-vote/crypto/ecies"
-	"github.com/z-cale/shielded-vote/crypto/elgamal"
-	"github.com/z-cale/shielded-vote/testutil"
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	voteapi "github.com/valargroup/shielded-vote/api"
+	"github.com/valargroup/shielded-vote/crypto/ecies"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/testutil"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------

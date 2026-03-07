@@ -6,7 +6,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/shielded-vote/x/vote/types"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // Compile-time check that VoteTxWrapper implements sdk.Tx.

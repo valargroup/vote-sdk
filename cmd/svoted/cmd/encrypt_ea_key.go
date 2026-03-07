@@ -12,8 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/z-cale/shielded-vote/crypto/ecies"
-	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/ecies"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
 )
 
 const defaultRESTAddr = "http://localhost:1318"
