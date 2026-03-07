@@ -3,7 +3,7 @@ package helper
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -431,7 +431,7 @@ func TestSubmitShare_VCCrossCheck_NoLeaf(t *testing.T) {
 func TestSubmitShare_UnknownRound(t *testing.T) {
 	// Build a store whose round fetcher rejects unknown rounds.
 	fetcher := func(roundID string) (uint64, error) {
-		return 0, errors.New("round not found")
+		return 0, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
 	}
 	store, err := NewShareStore(":memory:", 0, 0, fetcher)
 	require.NoError(t, err)
@@ -475,7 +475,7 @@ func TestSubmitShare_VCCrossCheck_GracefulDegradation(t *testing.T) {
 
 func TestEnqueue_UnknownRoundRejected(t *testing.T) {
 	fetcher := func(roundID string) (uint64, error) {
-		return 0, errors.New("round not found")
+		return 0, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
 	}
 	s, err := NewShareStore(":memory:", 0, 0, fetcher)
 	require.NoError(t, err)

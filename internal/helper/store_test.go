@@ -366,9 +366,9 @@ func TestGetVoteEndTime_NilFetcher(t *testing.T) {
 	require.NoError(t, err)
 	defer s.Close()
 
-	// With nil fetcher and no cache, should return error.
+	// With nil fetcher and no cache, should return ErrUnknownRound.
 	_, err = s.getVoteEndTime("round1")
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrUnknownRound)
 }
 
 func TestMigrateOldSchema(t *testing.T) {

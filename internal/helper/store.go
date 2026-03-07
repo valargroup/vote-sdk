@@ -298,7 +298,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	// Fetch vote_end_time before acquiring the lock (direct keeper KV read).
 	voteEndTime, err := s.getVoteEndTime(payload.VoteRoundID)
 	if err != nil {
-		return EnqueueConflict, fmt.Errorf("%w: %s", ErrUnknownRound, payload.VoteRoundID)
+		return EnqueueConflict, err
 	}
 
 	s.mu.Lock()
@@ -713,11 +713,11 @@ func (s *ShareStore) getVoteEndTime(roundID string) (uint64, error) {
 
 	// Fetch from keeper (outside lock — direct KV read).
 	if s.fetchRoundInfo == nil {
-		return 0, fmt.Errorf("unknown round %s: no round fetcher configured", roundID)
+		return 0, fmt.Errorf("%w: no round fetcher configured", ErrUnknownRound)
 	}
 	vet, err = s.fetchRoundInfo(roundID)
 	if err != nil {
-		return 0, fmt.Errorf("unknown round %s: %w", roundID, err)
+		return 0, err
 	}
 
 	// Cache in both memory and SQLite.
