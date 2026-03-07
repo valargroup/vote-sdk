@@ -1,6 +1,6 @@
-# Auto-deploy setup for SDK chain (zallyd) — 3-validator
+# Auto-deploy setup for SDK chain (svoted) — 3-validator
 
-The workflow `.github/workflows/sdk-chain-deploy.yml` builds zallyd (with circuits FFI) on every push to `main` (when `sdk/**` changes) and deploys a 3-validator chain to a single remote host via SSH. On `reset_chain`, the chain is fully re-initialized and the EA key ceremony is bootstrapped so the chain is immediately ready for use.
+The workflow `.github/workflows/sdk-chain-deploy.yml` builds svoted (with circuits FFI) on every push to `main` (when `sdk/**` changes) and deploys a 3-validator chain to a single remote host via SSH. On `reset_chain`, the chain is fully re-initialized and the EA key ceremony is bootstrapped so the chain is immediately ready for use.
 
 ## Port layout
 
@@ -28,11 +28,11 @@ In the repo: **Settings → Secrets and variables → Actions**, add:
 The `CEREMONY_SSH_KEY` secret lives in the GitHub **production** environment (Settings → Environments → production). Generate the keypair and authorize it on the remote:
 
 ```bash
-ssh-keygen -t ed25519 -C "github-actions-ceremony" -f /tmp/zally-ci-key -N ""
+ssh-keygen -t ed25519 -C "github-actions-ceremony" -f /tmp/shielded-vote-ci-key -N ""
 # Add public key to remote
-cat /tmp/zally-ci-key.pub | ssh root@<DEPLOY_HOST> 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys'
+cat /tmp/shielded-vote-ci-key.pub | ssh root@<DEPLOY_HOST> 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys'
 # Copy private key contents into the CEREMONY_SSH_KEY secret
-cat /tmp/zally-ci-key
+cat /tmp/shielded-vote-ci-key
 ```
 
 ## 2. One-time setup on the remote host
@@ -40,8 +40,8 @@ cat /tmp/zally-ci-key
 ### Deploy directory
 
 ```bash
-sudo mkdir -p /opt/zally-chain
-sudo chown $DEPLOY_USER:$DEPLOY_USER /opt/zally-chain
+sudo mkdir -p /opt/shielded-vote
+sudo chown $DEPLOY_USER:$DEPLOY_USER /opt/shielded-vote
 ```
 
 ### Systemd units
@@ -49,20 +49,20 @@ sudo chown $DEPLOY_USER:$DEPLOY_USER /opt/zally-chain
 Install all three validator unit files and enable them:
 
 ```bash
-sudo cp sdk/docs/zallyd-val1.service /etc/systemd/system/
-sudo cp sdk/docs/zallyd-val2.service /etc/systemd/system/
-sudo cp sdk/docs/zallyd-val3.service /etc/systemd/system/
+sudo cp sdk/docs/svoted-val1.service /etc/systemd/system/
+sudo cp sdk/docs/svoted-val2.service /etc/systemd/system/
+sudo cp sdk/docs/svoted-val3.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable zallyd-val1 zallyd-val2 zallyd-val3
+sudo systemctl enable svoted-val1 svoted-val2 svoted-val3
 ```
 
-Each unit starts `zallyd` with a separate `--home` directory:
+Each unit starts `svoted` with a separate `--home` directory:
 
 | Unit          | Home directory                        |
 |---------------|---------------------------------------|
-| zallyd-val1   | /opt/zally-chain/.zallyd-val1         |
-| zallyd-val2   | /opt/zally-chain/.zallyd-val2         |
-| zallyd-val3   | /opt/zally-chain/.zallyd-val3         |
+| svoted-val1   | /opt/shielded-vote/.svoted-val1         |
+| svoted-val2   | /opt/shielded-vote/.svoted-val2         |
+| svoted-val3   | /opt/shielded-vote/.svoted-val3         |
 
 No pre-existing chain data is needed — the first deploy with `reset_chain=true` will initialize everything.
 
@@ -70,9 +70,9 @@ No pre-existing chain data is needed — the first deploy with `reset_chain=true
 
 ### Binary-only update (default, `reset_chain=false`)
 
-1. **Build**: Go + Rust circuits are compiled, producing `zallyd`, `create-val-tx`, and `init_multi.sh`.
-2. **Deploy**: Binaries and scripts are SCP'd to `/opt/zally-chain`.
-3. **Stop**: `zallyd-val1/2/3` are stopped and ports confirmed free.
+1. **Build**: Go + Rust circuits are compiled, producing `svoted`, `create-val-tx`, and `init_multi.sh`.
+2. **Deploy**: Binaries and scripts are SCP'd to `/opt/shielded-vote`.
+3. **Stop**: `svoted-val1/2/3` are stopped and ports confirmed free.
 4. **Start**: All three services are restarted with the new binary.
 5. **Verify**: Val1's API (port 1418) and helper server are checked.
 6. **Ceremony**: Runs against val1; skipped if ceremony is already confirmed.
@@ -82,7 +82,7 @@ No pre-existing chain data is needed — the first deploy with `reset_chain=true
 Steps 1–2 are the same, then:
 
 3. **Stop**: All three services stopped.
-4. **Init**: `init_multi.sh --ci` runs with `HOME=/opt/zally-chain`, initializing fresh home directories for all three validators. Val2 and val3 get their genesis, keys, and port config; val1 also gets the helper server configured.
+4. **Init**: `init_multi.sh --ci` runs with `HOME=/opt/shielded-vote`, initializing fresh home directories for all three validators. Val2 and val3 get their genesis, keys, and port config; val1 also gets the helper server configured.
 5. **Start**: All three services started.
 6. **Register**: `create-val-tx` registers val2 and val3 as post-genesis validators via val1's REST API.
 7. **Verify**: Service health + chain API + helper server checked.
@@ -108,13 +108,13 @@ The workflow has `workflow_dispatch`, so you can run it from **Actions → Deplo
 
 ## 6. Helper server configuration
 
-The helper server runs inside `zallyd` on **val1 only** and shares val1's REST API port (1418). It is configured in `/opt/zally-chain/.zallyd-val1/config/app.toml` under `[helper]` (written by `init_multi.sh --ci`):
+The helper server runs inside `svoted` on **val1 only** and shares val1's REST API port (1418). It is configured in `/opt/shielded-vote/.svoted-val1/config/app.toml` under `[helper]` (written by `init_multi.sh --ci`):
 
 | Key                     | Default | Description                                                                                               |
 | ----------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
 | `disable`               | `false` | Set to `true` to disable the helper server entirely.                                                      |
 | `api_token`             | `""`    | Optional token for `POST /api/v1/shares` (`X-Helper-Token` header).                                       |
-| `db_path`               | `""`    | Path to SQLite database. Empty = `$HOME/.zallyd-val1/helper.db`.                                          |
+| `db_path`               | `""`    | Path to SQLite database. Empty = `$HOME/.svoted-val1/helper.db`.                                          |
 | `mean_delay`            | `60`    | Mean of exponential delay distribution (seconds). `init_multi.sh --ci` sets 60 for testing.                 |
 | `process_interval`      | `5`     | How often to check for ready shares (seconds).                                                            |
 | `chain_api_port`        | `1418`  | Port of val1's REST API (for `MsgRevealShare` submission).                                                 |
@@ -123,8 +123,8 @@ The helper server runs inside `zallyd` on **val1 only** and shares val1's REST A
 ## 7. Deploy health checks
 
 After services are started, the workflow verifies:
-1. All three systemd services (`zallyd-val1/2/3`) are active
-2. Val1's chain API responds at `http://localhost:1418/zally/v1/commitment-tree/latest`
+1. All three systemd services (`svoted-val1/2/3`) are active
+2. Val1's chain API responds at `http://localhost:1418/shielded-vote/v1/commitment-tree/latest`
 3. Val1's helper server responds at `http://localhost:1418/api/v1/status`
 
 If any check fails, the deploy step fails with `journalctl` output for debugging.
@@ -133,16 +133,16 @@ If any check fails, the deploy step fails with `journalctl` output for debugging
 
 ```bash
 # Val1 (primary — chain API, helper server)
-sudo journalctl -u zallyd-val1 -f
+sudo journalctl -u svoted-val1 -f
 
 # Val2 / Val3
-sudo journalctl -u zallyd-val2 -f
-sudo journalctl -u zallyd-val3 -f
+sudo journalctl -u svoted-val2 -f
+sudo journalctl -u svoted-val3 -f
 
 # Or tail log files directly
-tail -f /opt/zally-chain/.zallyd-val1/node.log
+tail -f /opt/shielded-vote/.svoted-val1/node.log
 ```
 
 ## 9. Same host as nullifier-ingest
 
-If the same machine is used for both nullifier-ingest and the SDK chain, that's fine — they use different deploy paths (`/opt/nullifier-ingest` vs `/opt/zally-chain`) and different systemd units.
+If the same machine is used for both nullifier-ingest and the SDK chain, that's fine — they use different deploy paths (`/opt/nullifier-ingest` vs `/opt/shielded-vote`) and different systemd units.

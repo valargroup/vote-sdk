@@ -14,42 +14,42 @@ import (
 	"github.com/gorilla/mux"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // RegisterQueryRoutes registers vote query REST endpoints on the router.
 //
-//	GET /zally/v1/commitment-tree/{height}
-//	GET /zally/v1/commitment-tree/latest
-//	GET /zally/v1/commitment-tree/leaves?from_height=X&to_height=Y
-//	GET /zally/v1/round/{round_id}
-//	GET /zally/v1/rounds
-//	GET /zally/v1/rounds/active
-//	GET /zally/v1/tally/{round_id}/{proposal_id}
-//	GET /zally/v1/tally-results/{round_id}
-//	GET /zally/v1/vote-summary/{round_id}
-//	GET /zally/v1/ceremony
-//	GET /zally/v1/pallas-keys
-//	GET /zally/v1/vote-manager
-//	GET /zally/v1/genesis
+//	GET /shielded-vote/v1/commitment-tree/{height}
+//	GET /shielded-vote/v1/commitment-tree/latest
+//	GET /shielded-vote/v1/commitment-tree/leaves?from_height=X&to_height=Y
+//	GET /shielded-vote/v1/round/{round_id}
+//	GET /shielded-vote/v1/rounds
+//	GET /shielded-vote/v1/rounds/active
+//	GET /shielded-vote/v1/tally/{round_id}/{proposal_id}
+//	GET /shielded-vote/v1/tally-results/{round_id}
+//	GET /shielded-vote/v1/vote-summary/{round_id}
+//	GET /shielded-vote/v1/ceremony
+//	GET /shielded-vote/v1/pallas-keys
+//	GET /shielded-vote/v1/vote-manager
+//	GET /shielded-vote/v1/genesis
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
 	qh := &queryHandler{clientCtx: clientCtx}
 
 	// Register "latest" and "leaves" before "{height}" to avoid gorilla/mux
 	// treating them as a height param.
-	router.HandleFunc("/zally/v1/commitment-tree/latest", qh.handleLatestCommitmentTree).Methods("GET")
-	router.HandleFunc("/zally/v1/commitment-tree/leaves", qh.handleCommitmentLeaves).Methods("GET")
-	router.HandleFunc("/zally/v1/commitment-tree/{height}", qh.handleCommitmentTreeAtHeight).Methods("GET")
-	router.HandleFunc("/zally/v1/rounds/active", qh.handleActiveRound).Methods("GET")
-	router.HandleFunc("/zally/v1/rounds", qh.handleListRounds).Methods("GET")
-	router.HandleFunc("/zally/v1/round/{round_id}", qh.handleVoteRound).Methods("GET")
-	router.HandleFunc("/zally/v1/tally/{round_id}/{proposal_id}", qh.handleProposalTally).Methods("GET")
-	router.HandleFunc("/zally/v1/tally-results/{round_id}", qh.handleTallyResults).Methods("GET")
-	router.HandleFunc("/zally/v1/vote-summary/{round_id}", qh.handleVoteSummary).Methods("GET")
-	router.HandleFunc("/zally/v1/ceremony", qh.handleCeremonyState).Methods("GET")
-	router.HandleFunc("/zally/v1/pallas-keys", qh.handlePallasKeys).Methods("GET")
-	router.HandleFunc("/zally/v1/vote-manager", qh.handleVoteManager).Methods("GET")
-	router.HandleFunc("/zally/v1/genesis", qh.handleGenesis).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/commitment-tree/latest", qh.handleLatestCommitmentTree).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/commitment-tree/leaves", qh.handleCommitmentLeaves).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/commitment-tree/{height}", qh.handleCommitmentTreeAtHeight).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/rounds/active", qh.handleActiveRound).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/rounds", qh.handleListRounds).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/round/{round_id}", qh.handleVoteRound).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/tally/{round_id}/{proposal_id}", qh.handleProposalTally).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/tally-results/{round_id}", qh.handleTallyResults).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/vote-summary/{round_id}", qh.handleVoteSummary).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/ceremony", qh.handleCeremonyState).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/pallas-keys", qh.handlePallasKeys).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/vote-manager", qh.handleVoteManager).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/genesis", qh.handleGenesis).Methods("GET")
 }
 
 // queryHandler handles query REST endpoints by delegating to the gRPC query
@@ -86,7 +86,7 @@ func (qh *queryHandler) handleCommitmentTreeAtHeight(w http.ResponseWriter, r *h
 	req := &types.QueryCommitmentTreeRequest{Height: height}
 	resp := &types.QueryCommitmentTreeResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/CommitmentTreeAtHeight", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/CommitmentTreeAtHeight", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -98,7 +98,7 @@ func (qh *queryHandler) handleLatestCommitmentTree(w http.ResponseWriter, _ *htt
 	req := &types.QueryLatestTreeRequest{}
 	resp := &types.QueryLatestTreeResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/LatestCommitmentTree", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/LatestCommitmentTree", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -110,7 +110,7 @@ func (qh *queryHandler) handleActiveRound(w http.ResponseWriter, _ *http.Request
 	req := &types.QueryActiveRoundRequest{}
 	resp := &types.QueryActiveRoundResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/ActiveRound", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/ActiveRound", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -127,7 +127,7 @@ func (qh *queryHandler) handleVoteRound(w http.ResponseWriter, r *http.Request) 
 	req := &types.QueryVoteRoundRequest{VoteRoundId: roundID}
 	resp := &types.QueryVoteRoundResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/VoteRound", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/VoteRound", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -154,7 +154,7 @@ func (qh *queryHandler) handleProposalTally(w http.ResponseWriter, r *http.Reque
 	}
 	resp := &types.QueryProposalTallyResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/ProposalTally", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/ProposalTally", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -188,7 +188,7 @@ func (qh *queryHandler) handleCommitmentLeaves(w http.ResponseWriter, r *http.Re
 	}
 	resp := &types.QueryCommitmentLeavesResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/CommitmentLeaves", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/CommitmentLeaves", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -205,7 +205,7 @@ func (qh *queryHandler) handleTallyResults(w http.ResponseWriter, r *http.Reques
 	req := &types.QueryTallyResultsRequest{VoteRoundId: roundID}
 	resp := &types.QueryTallyResultsResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/TallyResults", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/TallyResults", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -222,7 +222,7 @@ func (qh *queryHandler) handleVoteSummary(w http.ResponseWriter, r *http.Request
 	req := &types.QueryVoteSummaryRequest{VoteRoundId: roundID}
 	resp := &types.QueryVoteSummaryResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/VoteSummary", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/VoteSummary", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -234,7 +234,7 @@ func (qh *queryHandler) handleCeremonyState(w http.ResponseWriter, _ *http.Reque
 	req := &types.QueryCeremonyStateRequest{}
 	resp := &types.QueryCeremonyStateResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/CeremonyState", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/CeremonyState", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -246,7 +246,7 @@ func (qh *queryHandler) handlePallasKeys(w http.ResponseWriter, _ *http.Request)
 	req := &types.QueryPallasKeysRequest{}
 	resp := &types.QueryPallasKeysResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/PallasKeys", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/PallasKeys", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -258,7 +258,7 @@ func (qh *queryHandler) handleListRounds(w http.ResponseWriter, _ *http.Request)
 	req := &types.QueryListRoundsRequest{}
 	resp := &types.QueryListRoundsResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/ListRounds", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/ListRounds", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -284,7 +284,7 @@ func (qh *queryHandler) handleVoteManager(w http.ResponseWriter, _ *http.Request
 	req := &types.QueryVoteManagerRequest{}
 	resp := &types.QueryVoteManagerResponse{}
 
-	if err := qh.abciQuery("/zvote.v1.Query/VoteManager", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/VoteManager", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
@@ -294,7 +294,7 @@ func (qh *queryHandler) handleVoteManager(w http.ResponseWriter, _ *http.Request
 
 // abciQuery performs an ABCI query through BaseApp's query routing.
 // The path should be the fully qualified gRPC method name
-// (e.g. "/zvote.v1.Query/VoteRound").
+// (e.g. "/svote.v1.Query/VoteRound").
 func (qh *queryHandler) abciQuery(path string, req proto.Message, resp proto.Message) error {
 	bz, err := proto.Marshal(req)
 	if err != nil {

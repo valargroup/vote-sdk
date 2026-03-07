@@ -10,7 +10,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/z-cale/zally/testutil"
+	"github.com/z-cale/shielded-vote/testutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ func TestMsgCreateValidatorBlockedPostGenesis(t *testing.T) {
 		Description:       stakingtypes.Description{Moniker: "test-validator"},
 		Commission:        stakingtypes.CommissionRates{Rate: sdkmath.LegacyNewDecWithPrec(1, 1), MaxRate: sdkmath.LegacyNewDecWithPrec(2, 1), MaxChangeRate: sdkmath.LegacyNewDecWithPrec(1, 2)},
 		MinSelfDelegation: sdkmath.NewInt(1),
-		ValidatorAddress:  "zvotevaloper1deadbeef",
+		ValidatorAddress:  "svvaloper1deadbeef",
 		Pubkey:            nil,
 		Value:             sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.NewInt(10_000_000)),
 	}

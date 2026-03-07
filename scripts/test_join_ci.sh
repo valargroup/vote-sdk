@@ -7,16 +7,16 @@
 #   3. create-val-tx with MsgCreateValidatorWithPallasKey
 #   4. Validator appearing in the staking module
 #
-# Expects: zallyd + create-val-tx in PATH, val1 running on default ports
+# Expects: svoted + create-val-tx in PATH, val1 running on default ports
 # (API 1318, RPC 26657, P2P 26656).
 #
 # Usage:
 #   mise run test:join
 set -euo pipefail
 
-CHAIN_ID="zvote-1"
-JOINER_HOME="$HOME/.zallyd-joiner"
-VAL1_HOME="$HOME/.zallyd"
+CHAIN_ID="svote-1"
+JOINER_HOME="$HOME/.svoted-joiner"
+VAL1_HOME="$HOME/.svoted"
 MONIKER="joiner"
 
 # ─── Cleanup ──────────────────────────────────────────────────────────────────
@@ -32,18 +32,18 @@ fi
 # ─── Step 1: Initialize joiner node ──────────────────────────────────────────
 
 echo "Initializing joiner node..."
-zallyd init "$MONIKER" --chain-id "$CHAIN_ID" --home "$JOINER_HOME" > /dev/null 2>&1
+svoted init "$MONIKER" --chain-id "$CHAIN_ID" --home "$JOINER_HOME" > /dev/null 2>&1
 
 # Copy genesis from val1.
 cp "$VAL1_HOME/config/genesis.json" "$JOINER_HOME/config/genesis.json"
-zallyd genesis validate-genesis --home "$JOINER_HOME" > /dev/null 2>&1
+svoted genesis validate-genesis --home "$JOINER_HOME" > /dev/null 2>&1
 
 # ─── Step 2: Generate cryptographic keys ──────────────────────────────────────
 
 echo "Generating validator keys (init-validator-keys)..."
-zallyd init-validator-keys --home "$JOINER_HOME"
+svoted init-validator-keys --home "$JOINER_HOME"
 
-JOINER_ADDR=$(zallyd keys show validator -a --keyring-backend test --home "$JOINER_HOME")
+JOINER_ADDR=$(svoted keys show validator -a --keyring-backend test --home "$JOINER_HOME")
 echo "Joiner address: $JOINER_ADDR"
 
 # ─── Step 3: Configure joiner node ───────────────────────────────────────────
@@ -61,7 +61,7 @@ sed -i.bak 's/^timeout_broadcast_tx_commit = .*/timeout_broadcast_tx_commit = "1
 rm -f "${CONFIG_TOML}.bak"
 
 # Set persistent_peers to val1.
-VAL1_NODE_ID=$(zallyd comet show-node-id --home "$VAL1_HOME")
+VAL1_NODE_ID=$(svoted comet show-node-id --home "$VAL1_HOME")
 sed -i.bak "s|persistent_peers = \"\"|persistent_peers = \"${VAL1_NODE_ID}@127.0.0.1:26656\"|" "$CONFIG_TOML"
 rm -f "${CONFIG_TOML}.bak"
 
@@ -98,7 +98,7 @@ HELPERCFG
 # ─── Step 4: Start joiner and wait for sync ──────────────────────────────────
 
 echo "Starting joiner node..."
-zallyd start --home "$JOINER_HOME" > joiner.log 2>&1 &
+svoted start --home "$JOINER_HOME" > joiner.log 2>&1 &
 JOINER_PID=$!
 echo "Joiner PID: $JOINER_PID"
 
@@ -113,7 +113,7 @@ trap cleanup EXIT
 
 echo "Waiting for joiner to sync..."
 for i in $(seq 1 90); do
-    STATUS=$(zallyd status --home "$JOINER_HOME" --node tcp://127.0.0.1:26757 2>/dev/null || echo "")
+    STATUS=$(svoted status --home "$JOINER_HOME" --node tcp://127.0.0.1:26757 2>/dev/null || echo "")
     if [ -z "$STATUS" ]; then
         sleep 2
         continue
@@ -131,7 +131,7 @@ for i in $(seq 1 90); do
 done
 
 # Verify sync completed.
-FINAL_STATUS=$(zallyd status --home "$JOINER_HOME" --node tcp://127.0.0.1:26757 2>/dev/null || echo "")
+FINAL_STATUS=$(svoted status --home "$JOINER_HOME" --node tcp://127.0.0.1:26757 2>/dev/null || echo "")
 if [ -z "$FINAL_STATUS" ]; then
     echo "FAIL: Joiner node not responding after sync wait"
     exit 1
@@ -145,16 +145,16 @@ fi
 # ─── Step 5: Fund the joiner account ─────────────────────────────────────────
 
 echo "Funding joiner account..."
-zallyd tx bank send manager "$JOINER_ADDR" 200000uzvote \
+svoted tx bank send manager "$JOINER_ADDR" 200000usvote \
     --home "$VAL1_HOME" --keyring-backend test --chain-id "$CHAIN_ID" -y
 
 # Wait for the transfer to commit.
 echo "Waiting for balance..."
 for i in $(seq 1 30); do
-    BALANCE=$(zallyd query bank balances "$JOINER_ADDR" --home "$JOINER_HOME" --node tcp://127.0.0.1:26757 --output json 2>/dev/null \
-        | python3 -c "import sys,json; balances=json.load(sys.stdin).get('balances',[]); print(next((b['amount'] for b in balances if b['denom']=='uzvote'), '0'))" 2>/dev/null || echo "0")
+    BALANCE=$(svoted query bank balances "$JOINER_ADDR" --home "$JOINER_HOME" --node tcp://127.0.0.1:26757 --output json 2>/dev/null \
+        | python3 -c "import sys,json; balances=json.load(sys.stdin).get('balances',[]); print(next((b['amount'] for b in balances if b['denom']=='usvote'), '0'))" 2>/dev/null || echo "0")
     if [ "$BALANCE" != "0" ] && [ -n "$BALANCE" ]; then
-        echo "  Joiner funded: $BALANCE uzvote"
+        echo "  Joiner funded: $BALANCE usvote"
         break
     fi
     sleep 2
@@ -171,7 +171,7 @@ echo "Registering joiner as validator (create-val-tx)..."
 create-val-tx \
     --home "$JOINER_HOME" \
     --moniker "$MONIKER" \
-    --amount 100000uzvote \
+    --amount 100000usvote \
     --rpc-url tcp://localhost:26657
 
 # Wait for the registration tx to commit.
@@ -181,7 +181,7 @@ sleep 6
 # ─── Step 7: Verify ──────────────────────────────────────────────────────────
 
 echo "Verifying validator registration..."
-VALIDATORS=$(zallyd query staking validators --home "$JOINER_HOME" --node tcp://127.0.0.1:26757 --output json 2>/dev/null)
+VALIDATORS=$(svoted query staking validators --home "$JOINER_HOME" --node tcp://127.0.0.1:26757 --output json 2>/dev/null)
 FOUND=$(echo "$VALIDATORS" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)

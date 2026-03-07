@@ -10,7 +10,7 @@ import (
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 
-	"github.com/z-cale/zally/app"
+	"github.com/z-cale/shielded-vote/app"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/config"
@@ -24,7 +24,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/auth/types"
 )
 
-// NewRootCmd creates a new root command for zvoted. It is called once in the
+// NewRootCmd creates a new root command for svoted. It is called once in the
 // main function.
 func NewRootCmd() *cobra.Command {
 	var (
@@ -50,8 +50,8 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	rootCmd := &cobra.Command{
-		Use:           "zvoted",
-		Short:         "ZCash Vote Chain daemon",
+		Use:           "svoted",
+		Short:         "Shielded-Vote daemon",
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			// set the default command outputs

@@ -35,7 +35,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, homeDir string, log
 		return nil, nil
 	}
 
-	// Default DB path: $HOME/.zallyd/helper.db
+	// Default DB path: $HOME/.svoted/helper.db
 	dbPath := cfg.DBPath
 	if dbPath == "" {
 		dbPath = filepath.Join(homeDir, "helper.db")

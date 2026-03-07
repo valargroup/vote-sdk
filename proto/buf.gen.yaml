@@ -2,7 +2,7 @@ version: v1
 plugins:
   - plugin: buf.build/protocolbuffers/go:v1.36.11
     out: ..
-    opt: module=github.com/z-cale/zally
+    opt: module=github.com/z-cale/shielded-vote
   - plugin: buf.build/grpc/go
     out: ..
-    opt: module=github.com/z-cale/zally
+    opt: module=github.com/z-cale/shielded-vote

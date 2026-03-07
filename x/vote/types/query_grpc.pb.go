@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             (unknown)
-// source: zvote/v1/query.proto
+// source: svote/v1/query.proto
 
 package types
 
@@ -19,18 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Query_CommitmentTreeAtHeight_FullMethodName = "/zvote.v1.Query/CommitmentTreeAtHeight"
-	Query_LatestCommitmentTree_FullMethodName   = "/zvote.v1.Query/LatestCommitmentTree"
-	Query_VoteRound_FullMethodName              = "/zvote.v1.Query/VoteRound"
-	Query_ProposalTally_FullMethodName          = "/zvote.v1.Query/ProposalTally"
-	Query_TallyResults_FullMethodName           = "/zvote.v1.Query/TallyResults"
-	Query_CommitmentLeaves_FullMethodName       = "/zvote.v1.Query/CommitmentLeaves"
-	Query_ActiveRound_FullMethodName            = "/zvote.v1.Query/ActiveRound"
-	Query_CeremonyState_FullMethodName          = "/zvote.v1.Query/CeremonyState"
-	Query_VoteManager_FullMethodName            = "/zvote.v1.Query/VoteManager"
-	Query_VoteSummary_FullMethodName            = "/zvote.v1.Query/VoteSummary"
-	Query_ListRounds_FullMethodName             = "/zvote.v1.Query/ListRounds"
-	Query_PallasKeys_FullMethodName             = "/zvote.v1.Query/PallasKeys"
+	Query_CommitmentTreeAtHeight_FullMethodName = "/svote.v1.Query/CommitmentTreeAtHeight"
+	Query_LatestCommitmentTree_FullMethodName   = "/svote.v1.Query/LatestCommitmentTree"
+	Query_VoteRound_FullMethodName              = "/svote.v1.Query/VoteRound"
+	Query_ProposalTally_FullMethodName          = "/svote.v1.Query/ProposalTally"
+	Query_TallyResults_FullMethodName           = "/svote.v1.Query/TallyResults"
+	Query_CommitmentLeaves_FullMethodName       = "/svote.v1.Query/CommitmentLeaves"
+	Query_ActiveRound_FullMethodName            = "/svote.v1.Query/ActiveRound"
+	Query_CeremonyState_FullMethodName          = "/svote.v1.Query/CeremonyState"
+	Query_VoteManager_FullMethodName            = "/svote.v1.Query/VoteManager"
+	Query_VoteSummary_FullMethodName            = "/svote.v1.Query/VoteSummary"
+	Query_ListRounds_FullMethodName             = "/svote.v1.Query/ListRounds"
+	Query_PallasKeys_FullMethodName             = "/svote.v1.Query/PallasKeys"
 )
 
 // QueryClient is the client API for Query service.
@@ -516,7 +516,7 @@ func _Query_PallasKeys_Handler(srv interface{}, ctx context.Context, dec func(in
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Query_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "zvote.v1.Query",
+	ServiceName: "svote.v1.Query",
 	HandlerType: (*QueryServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -569,5 +569,5 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "zvote/v1/query.proto",
+	Metadata: "svote/v1/query.proto",
 }

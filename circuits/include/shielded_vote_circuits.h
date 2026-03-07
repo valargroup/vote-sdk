@@ -1,14 +1,14 @@
 /*
- * zally_circuits.h — C header for Zally circuit verification and signature FFI.
+ * shielded_vote_circuits.h — C header for Shielded-Vote circuit verification and signature FFI.
  *
  * This header declares the C-compatible functions exported by the
- * zally-circuits Rust static library (libzally_circuits.a).
+ * shielded-vote-circuits Rust static library (libshielded_vote_circuits.a).
  *
  * Used by Go CGo bindings in crypto/zkp/halo2/ and crypto/redpallas/.
  */
 
-#ifndef ZALLY_CIRCUITS_H
-#define ZALLY_CIRCUITS_H
+#ifndef SHIELDED_VOTE_CIRCUITS_H
+#define SHIELDED_VOTE_CIRCUITS_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -22,7 +22,7 @@ extern "C" {
  *
  * Every FFI function stores a human-readable description of the last
  * failure in a thread-local buffer before returning a non-zero code.
- * Call zally_last_error() immediately after a failed call to retrieve it;
+ * Call sv_last_error() immediately after a failed call to retrieve it;
  * the pointer is valid until the next FFI call on the same thread.
  * ----------------------------------------------------------------------- */
 
@@ -36,7 +36,7 @@ extern "C" {
  *
  * Returns a pointer to an empty string (never NULL) when no error is set.
  */
-const char* zally_last_error(void);
+const char* sv_last_error(void);
 
 /*
  * Clear the thread-local error message.
@@ -44,7 +44,7 @@ const char* zally_last_error(void);
  * Optional housekeeping; all FFI functions overwrite the buffer on every
  * call so an explicit clear is rarely necessary.
  */
-void zally_clear_error(void);
+void sv_clear_error(void);
 
 /* -----------------------------------------------------------------------
  * Halo2 toy circuit verification
@@ -65,7 +65,7 @@ void zally_clear_error(void);
  *   -2  if the proof does not verify.
  *   -3  if there is an internal deserialization error.
  */
-int32_t zally_verify_toy_proof(
+int32_t sv_verify_toy_proof(
     const uint8_t* proof_ptr,
     size_t proof_len,
     const uint8_t* public_input_ptr,
@@ -93,7 +93,7 @@ int32_t zally_verify_toy_proof(
  *   -2  if the signature does not verify.
  *   -3  if there is a deserialization error (e.g. invalid verification key).
  */
-int32_t zally_verify_redpallas_sig(
+int32_t sv_verify_redpallas_sig(
     const uint8_t* rk_ptr,
     size_t rk_len,
     const uint8_t* sighash_ptr,
@@ -107,21 +107,21 @@ int32_t zally_verify_redpallas_sig(
  * ----------------------------------------------------------------------- */
 
 /* Opaque type for the stateful vote commitment tree handle. */
-typedef struct ZallyTreeHandle ZallyTreeHandle;
+typedef struct SvTreeHandle SvTreeHandle;
 
 /*
- * Free a tree handle previously created by zally_vote_tree_create.
+ * Free a tree handle previously created by sv_vote_tree_create.
  *
  * Parameters:
- *   handle - Pointer returned by zally_vote_tree_create.
+ *   handle - Pointer returned by sv_vote_tree_create.
  */
-void zally_vote_tree_free(ZallyTreeHandle* handle);
+void sv_vote_tree_free(SvTreeHandle* handle);
 
 /*
  * Append a batch of leaves to a stateful tree handle.
  *
  * Parameters:
- *   handle     - Pointer returned by zally_vote_tree_create_with_kv.
+ *   handle     - Pointer returned by sv_vote_tree_create_with_kv.
  *   leaves_ptr - Pointer to flat byte array of leaves (each 32 bytes LE Fp).
  *   leaf_count - Number of leaves.
  *
@@ -131,8 +131,8 @@ void zally_vote_tree_free(ZallyTreeHandle* handle);
  *   -3  if a leaf contains a non-canonical field element encoding.
  *   -4  if the KV store or ShardTree returned a storage error.
  */
-int32_t zally_vote_tree_append_batch(
-    ZallyTreeHandle* handle,
+int32_t sv_vote_tree_append_batch(
+    SvTreeHandle* handle,
     const uint8_t* leaves_ptr,
     size_t leaf_count
 );
@@ -145,7 +145,7 @@ int32_t zally_vote_tree_append_batch(
  * append path: one CGO call regardless of batch size, no Go-side allocation.
  *
  * Parameters:
- *   handle - Pointer returned by zally_vote_tree_create_with_kv.
+ *   handle - Pointer returned by sv_vote_tree_create_with_kv.
  *   cursor - Index of the first leaf to append (current treeCursor in Go).
  *   count  - Number of leaves to append (nextIndex - treeCursor).
  *
@@ -154,8 +154,8 @@ int32_t zally_vote_tree_append_batch(
  *   -1  if handle is null.
  *   -4  if a leaf is missing/malformed or the KV store returned an error.
  */
-int32_t zally_vote_tree_append_from_kv(
-    ZallyTreeHandle* handle,
+int32_t sv_vote_tree_append_from_kv(
+    SvTreeHandle* handle,
     uint64_t cursor,
     uint64_t count
 );
@@ -167,7 +167,7 @@ int32_t zally_vote_tree_append_from_kv(
  * root_stateful and path_stateful queries work for that height.
  *
  * Parameters:
- *   handle - Pointer returned by zally_vote_tree_create_with_kv.
+ *   handle - Pointer returned by sv_vote_tree_create_with_kv.
  *   height - Block height to associate with this checkpoint.
  *
  * Returns:
@@ -175,21 +175,21 @@ int32_t zally_vote_tree_append_from_kv(
  *   -1  if handle is null.
  *   -4  if the KV store returned a storage error during the checkpoint write.
  */
-int32_t zally_vote_tree_checkpoint(ZallyTreeHandle* handle, uint32_t height);
+int32_t sv_vote_tree_checkpoint(SvTreeHandle* handle, uint32_t height);
 
 /*
  * Return the 32-byte Merkle root at the latest checkpoint.
  *
  * Parameters:
- *   handle   - Pointer returned by zally_vote_tree_create.
+ *   handle   - Pointer returned by sv_vote_tree_create.
  *   root_out - Pointer to a 32-byte output buffer.
  *
  * Returns:
  *    0  on success (root written to root_out).
  *   -1  if handle or root_out is null.
  */
-int32_t zally_vote_tree_root_stateful(
-    const ZallyTreeHandle* handle,
+int32_t sv_vote_tree_root_stateful(
+    const SvTreeHandle* handle,
     uint8_t* root_out
 );
 
@@ -198,17 +198,17 @@ int32_t zally_vote_tree_root_stateful(
  * Return the number of leaves appended to the stateful handle so far.
  *
  * Parameters:
- *   handle - Pointer returned by zally_vote_tree_create.
+ *   handle - Pointer returned by sv_vote_tree_create.
  *
  * Returns 0 if handle is null.
  */
-uint64_t zally_vote_tree_size(const ZallyTreeHandle* handle);
+uint64_t sv_vote_tree_size(const SvTreeHandle* handle);
 
 /*
  * Compute the Poseidon Merkle authentication path using the stateful handle.
  *
  * Parameters:
- *   handle   - Pointer returned by zally_vote_tree_create.
+ *   handle   - Pointer returned by sv_vote_tree_create.
  *   position - Leaf index for which to generate the path.
  *   height   - Checkpoint height to use as anchor.
  *   path_out - Pointer to a 772-byte output buffer.
@@ -218,8 +218,8 @@ uint64_t zally_vote_tree_size(const ZallyTreeHandle* handle);
  *   -1  if handle or path_out is null.
  *   -2  if position is out of range or height has no checkpoint.
  */
-int32_t zally_vote_tree_path_stateful(
-    const ZallyTreeHandle* handle,
+int32_t sv_vote_tree_path_stateful(
+    const SvTreeHandle* handle,
     uint64_t position,
     uint32_t height,
     uint8_t* path_out
@@ -244,13 +244,13 @@ int32_t zally_vote_tree_path_stateful(
  * iter_free_fn:   closes and frees an iterator handle.
  * free_buf_fn:    frees a C-malloc'd buffer returned by get_fn or iter_next_fn.
  */
-typedef int32_t (*ZallyKvGetFn)(void* ctx, const uint8_t* key, size_t key_len, uint8_t** out_val, size_t* out_val_len);
-typedef int32_t (*ZallyKvSetFn)(void* ctx, const uint8_t* key, size_t key_len, const uint8_t* val, size_t val_len);
-typedef int32_t (*ZallyKvDeleteFn)(void* ctx, const uint8_t* key, size_t key_len);
-typedef void*   (*ZallyKvIterCreateFn)(void* ctx, const uint8_t* prefix, size_t prefix_len, uint8_t reverse);
-typedef int32_t (*ZallyKvIterNextFn)(void* iter, uint8_t** out_key, size_t* out_key_len, uint8_t** out_val, size_t* out_val_len);
-typedef void    (*ZallyKvIterFreeFn)(void* iter);
-typedef void    (*ZallyKvFreeBufFn)(uint8_t* ptr, size_t len);
+typedef int32_t (*SvKvGetFn)(void* ctx, const uint8_t* key, size_t key_len, uint8_t** out_val, size_t* out_val_len);
+typedef int32_t (*SvKvSetFn)(void* ctx, const uint8_t* key, size_t key_len, const uint8_t* val, size_t val_len);
+typedef int32_t (*SvKvDeleteFn)(void* ctx, const uint8_t* key, size_t key_len);
+typedef void*   (*SvKvIterCreateFn)(void* ctx, const uint8_t* prefix, size_t prefix_len, uint8_t reverse);
+typedef int32_t (*SvKvIterNextFn)(void* iter, uint8_t** out_key, size_t* out_key_len, uint8_t** out_val, size_t* out_val_len);
+typedef void    (*SvKvIterFreeFn)(void* iter);
+typedef void    (*SvKvFreeBufFn)(uint8_t* ptr, size_t len);
 
 /*
  * Create a KV-backed stateful tree handle.
@@ -262,17 +262,17 @@ typedef void    (*ZallyKvFreeBufFn)(uint8_t* ptr, size_t len);
  * next_position: CommitmentTreeState.NextIndex from KV (0 on first boot).
  * ctx:           pointer to a stable Go KvStoreProxy; updated each block.
  *
- * Returns a non-null pointer on success; free with zally_vote_tree_free.
+ * Returns a non-null pointer on success; free with sv_vote_tree_free.
  */
-ZallyTreeHandle* zally_vote_tree_create_with_kv(
+SvTreeHandle* sv_vote_tree_create_with_kv(
     void*              ctx,
-    ZallyKvGetFn       get_fn,
-    ZallyKvSetFn       set_fn,
-    ZallyKvDeleteFn    delete_fn,
-    ZallyKvIterCreateFn iter_create_fn,
-    ZallyKvIterNextFn  iter_next_fn,
-    ZallyKvIterFreeFn  iter_free_fn,
-    ZallyKvFreeBufFn   free_buf_fn,
+    SvKvGetFn       get_fn,
+    SvKvSetFn       set_fn,
+    SvKvDeleteFn    delete_fn,
+    SvKvIterCreateFn iter_create_fn,
+    SvKvIterNextFn  iter_next_fn,
+    SvKvIterFreeFn  iter_free_fn,
+    SvKvFreeBufFn   free_buf_fn,
     uint64_t           next_position
 );
 
@@ -303,7 +303,7 @@ ZallyTreeHandle* zally_vote_tree_create_with_kv(
  *   -2  if the proof does not verify.
  *   -3  if there is an internal deserialization error (e.g. invalid rk).
  */
-int32_t zally_verify_delegation_proof(
+int32_t sv_verify_delegation_proof(
     const uint8_t* proof_ptr,
     size_t proof_len,
     const uint8_t* public_inputs_ptr,
@@ -337,7 +337,7 @@ int32_t zally_verify_delegation_proof(
  *   -2  if the proof does not verify.
  *   -3  if there is an internal deserialization error (e.g. invalid ea_pk).
  */
-int32_t zally_verify_vote_proof(
+int32_t sv_verify_vote_proof(
     const uint8_t* proof_ptr,
     size_t proof_len,
     const uint8_t* public_inputs_ptr,
@@ -370,7 +370,7 @@ int32_t zally_verify_vote_proof(
  *   -2  if the proof does not verify.
  *   -3  if there is an internal deserialization error.
  */
-int32_t zally_verify_share_reveal_proof(
+int32_t sv_verify_share_reveal_proof(
     const uint8_t* proof_ptr,
     size_t proof_len,
     const uint8_t* public_inputs_ptr,
@@ -389,7 +389,7 @@ int32_t zally_verify_share_reveal_proof(
  *
  * Parameters:
  *   merkle_path_ptr       - Pointer to 772-byte serialized Merkle path
- *                           (from zally_vote_tree_path_stateful: 4 bytes position + 24*32 siblings).
+ *                           (from sv_vote_tree_path_stateful: 4 bytes position + 24*32 siblings).
  *   merkle_path_len       - Length (must be 772).
  *   share_comms_ptr       - Pointer to 512 bytes: 16 share commitments x 32 bytes (Fp LE).
  *   share_comms_len       - Length (must be 512).
@@ -413,7 +413,7 @@ int32_t zally_verify_share_reveal_proof(
  *   -3  deserialization error (non-canonical Fp).
  *   -5  proof generation failure.
  */
-int32_t zally_generate_share_reveal(
+int32_t sv_generate_share_reveal(
     const uint8_t* merkle_path_ptr,
     size_t merkle_path_len,
     const uint8_t* share_comms_ptr,
@@ -454,7 +454,7 @@ int32_t zally_generate_share_reveal(
  *   -1  if inputs are invalid (null pointers, zero length).
  *   -3  if the hex string or frontier data is invalid.
  */
-int32_t zally_extract_nc_root(
+int32_t sv_extract_nc_root(
     const uint8_t* hex_ptr,
     size_t hex_len,
     uint8_t* root_out
@@ -485,7 +485,7 @@ int32_t zally_extract_nc_root(
  *   -1  if any pointer is null.
  *   -3  if nullifier_imt_root or nc_root is not a canonical Pallas Fp.
  */
-int32_t zally_derive_round_id(
+int32_t sv_derive_round_id(
     uint64_t snapshot_height,
     const uint8_t* snapshot_blockhash,
     const uint8_t* proposals_hash,
@@ -499,4 +499,4 @@ int32_t zally_derive_round_id(
 }
 #endif
 
-#endif /* ZALLY_CIRCUITS_H */
+#endif /* SHIELDED_VOTE_CIRCUITS_H */

@@ -1,6 +1,6 @@
 # sdk/crypto/votetree
 
-Go CGO bindings to the Poseidon Merkle tree in the zally-circuits Rust static library (`libzally_circuits.a`).
+Go CGO bindings to the Poseidon Merkle tree in the shielded-vote-circuits Rust static library (`libshielded_vote_circuits.a`).
 
 ## Role in the protocol
 
@@ -41,12 +41,12 @@ Go Keeper
   ├─ kvProxy: *KvStoreProxy           ← stable pointer; address never changes
   │    └─ Current: store.KVStore      ← updated each block before any tree call
   └─ treeHandle: *TreeHandle
-       └─ ptr ──────────────────────► ZallyTreeHandle  (Rust Box<T>, Rust heap)
+       └─ ptr ──────────────────────► SvTreeHandle  (Rust Box<T>, Rust heap)
                                            └─ TreeServer
                                                 └─ ShardTree<KvShardStore, depth=24, shard_height=4>
                                                      └─ KvShardStore
                                                           └─ KvCallbacks { ctx=kvProxy, get, set, delete, iter_* }
-                                                               └─ zallyKv* //export functions in kv_callbacks.go
+                                                               └─ svKv* //export functions in kv_callbacks.go
                                                                     └─ kvProxy.Current (Cosmos KVStore)
 ```
 
@@ -73,12 +73,12 @@ ShardTree calls:  KvShardStore::put_shard(idx, blob)
       ↓
   KvCallbacks.set(ctx, key, key_len, val, val_len)
       ↓
-  zallyKvSet(ctx=*KvStoreProxy, ...)  [//export in kv_callbacks.go]
+  svKvSet(ctx=*KvStoreProxy, ...)  [//export in kv_callbacks.go]
       ↓
   proxy.Current.Set(key, val)  [Cosmos KVStore for current block]
 ```
 
-`get_fn` / `iter_next_fn` return C-malloc'd buffers; Rust copies the data then calls `free_buf_fn` (which calls `C.free`). Iterator handles are `cgo.Handle` values wrapping a `store.Iterator`; they are closed and deleted by `zallyKvIterFree`.
+`get_fn` / `iter_next_fn` return C-malloc'd buffers; Rust copies the data then calls `free_buf_fn` (which calls `C.free`). Iterator handles are `cgo.Handle` values wrapping a `store.Iterator`; they are closed and deleted by `svKvIterFree`.
 
 **Why a `KvStoreProxy` rather than a `cgo.Handle`?** The Cosmos KV store is per-block — a new instance is passed to every EndBlocker invocation. The `KvStoreProxy` is allocated once and its address is stable for the lifetime of the process. Go updates `proxy.Current` before each tree call; Rust's callbacks always see the current block's store through the same stable pointer.
 
@@ -119,7 +119,7 @@ Leaf appends cross the CGO boundary as a single flat byte array regardless of ba
 ```go
 flat := make([]byte, len(leaves)*LeafBytes)
 for i, leaf := range leaves { copy(flat[i*LeafBytes:], leaf) }
-C.zally_vote_tree_append_batch(handle, &flat[0], len(leaves))
+C.sv_vote_tree_append_batch(handle, &flat[0], len(leaves))
 ```
 
 CGO calls carry ~50–100 ns overhead each; batching amortises that to one call per block.
@@ -136,13 +136,13 @@ The Rust static library must be built before CGO can link:
 cargo build --release --manifest-path sdk/circuits/Cargo.toml
 ```
 
-For development, `make dev-incr` in `zcash-voting-ffi/` also rebuilds it. The library is at `sdk/circuits/target/release/libzally_circuits.a`.
+For development, `make dev-incr` in `zcash-voting-ffi/` also rebuilds it. The library is at `sdk/circuits/target/release/libshielded_vote_circuits.a`.
 
 ## Files
 
 | File | Contents |
 |---|---|
 | `tree_ffi.go` | Package doc, constants, stateless functions (`ComputePoseidonRoot`, `ComputeMerklePath`), `TreeHandle` type and core methods (`AppendBatch`, `Checkpoint`, `Root`, `Size`, `Path`, `Close`) |
-| `kv_callbacks.go` | `KvStoreProxy` struct; `//export zallyKv*` reverse-FFI callbacks (`zallyKvGet`, `zallyKvSet`, `zallyKvDelete`, `zallyKvIterCreate`, `zallyKvIterNext`, `zallyKvIterFree`, `zallyKvFreeBuf`) |
-| `tree_kv_handle.go` | `NewTreeHandleWithKV` — creates a KV-backed handle by passing the callback function pointers to `zally_vote_tree_create_with_kv`; separate file required by CGO `//export` rules |
+| `kv_callbacks.go` | `KvStoreProxy` struct; `//export svKv*` reverse-FFI callbacks (`svKvGet`, `svKvSet`, `svKvDelete`, `svKvIterCreate`, `svKvIterNext`, `svKvIterFree`, `svKvFreeBuf`) |
+| `tree_kv_handle.go` | `NewTreeHandleWithKV` — creates a KV-backed handle by passing the callback function pointers to `sv_vote_tree_create_with_kv`; separate file required by CGO `//export` rules |
 | `tree_ffi_test.go` | Golden vector tests, stateless round-trip tests, `TreeHandle` tests |

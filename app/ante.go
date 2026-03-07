@@ -10,13 +10,13 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	voteapi "github.com/z-cale/zally/api"
-	"github.com/z-cale/zally/crypto/redpallas"
-	"github.com/z-cale/zally/crypto/zkp"
-	"github.com/z-cale/zally/crypto/zkp/halo2"
-	voteante "github.com/z-cale/zally/x/vote/ante"
-	votekeeper "github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	voteapi "github.com/z-cale/shielded-vote/api"
+	"github.com/z-cale/shielded-vote/crypto/redpallas"
+	"github.com/z-cale/shielded-vote/crypto/zkp"
+	"github.com/z-cale/shielded-vote/crypto/zkp/halo2"
+	voteante "github.com/z-cale/shielded-vote/x/vote/ante"
+	votekeeper "github.com/z-cale/shielded-vote/x/vote/keeper"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // DualAnteHandlerOptions configures the dual-mode ante handler that supports
@@ -85,7 +85,7 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 		for _, msg := range tx.GetMsgs() {
 			if _, ok := msg.(*stakingtypes.MsgCreateValidator); ok {
 				if ctx.BlockHeight() > 0 {
-					return ctx, fmt.Errorf("MsgCreateValidator is disabled; use MsgCreateValidatorWithPallasKey via /zally/v1/create-validator-with-pallas")
+					return ctx, fmt.Errorf("MsgCreateValidator is disabled; use MsgCreateValidatorWithPallasKey via /shielded-vote/v1/create-validator-with-pallas")
 				}
 			}
 		}

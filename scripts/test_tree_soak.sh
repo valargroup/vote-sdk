@@ -32,8 +32,8 @@ REAL_PROOF_VOTE_WINDOW_SECS="${REAL_PROOF_VOTE_WINDOW_SECS:-420}"
 REAL_PROOF_TEST_THREADS="${REAL_PROOF_TEST_THREADS:-1}"
 REAL_PROOF_INCLUDE_VC_FLOW="${REAL_PROOF_INCLUDE_VC_FLOW:-0}"
 FAIL_ON_LOAD_ERROR="${FAIL_ON_LOAD_ERROR:-1}"
-ZALLY_PIR_URL="${ZALLY_PIR_URL:-http://localhost:3000}"
-export ZALLY_PIR_URL
+SVOTE_PIR_URL="${SVOTE_PIR_URL:-http://localhost:3000}"
+export SVOTE_PIR_URL
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 ARTIFACT_DIR="${ARTIFACT_DIR:-artifacts/tree-soak/$TIMESTAMP}"
@@ -49,7 +49,7 @@ echo -e "ts\tphase\theight\tvalidator\troot_hex\tnext_index\tapp_hash\tlatest_he
 rss_kb_for_validator() {
   local suffix="$1"
   local pid
-  pid="$(pgrep -f "^zallyd start --home.*${suffix}" | head -n 1 || true)"
+  pid="$(pgrep -f "^svoted start --home.*${suffix}" | head -n 1 || true)"
   if [[ -z "$pid" ]]; then
     echo "0"
     return
@@ -142,7 +142,7 @@ rolling_restart() {
   echo "[restart] ${name} pid(s)=${pids}"
   tree_kill_validator_by_suffix "$suffix" "$name"
   sleep 2
-  tree_restart_validator "$suffix" "sdk/multi-${suffix}.log" "$HOME/.zallyd-${suffix}"
+  tree_restart_validator "$suffix" "sdk/multi-${suffix}.log" "$HOME/.svoted-${suffix}"
   if tree_wait_validator_caught_up "$rpc_port" 180; then
     echo -e "${ts}\t${name}\trestarted\tcaught_up" >> "$RESTART_FILE"
   else

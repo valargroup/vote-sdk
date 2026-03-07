@@ -7,17 +7,17 @@ package votetree
 // the current KvStoreProxy, which holds the per-block store.KVStore.
 //
 // Buffer ownership: get_fn / iter_next_fn return C.malloc-allocated buffers.
-// Rust copies the data and then calls free_buf_fn (zallyKvFreeBuf) to release
+// Rust copies the data and then calls free_buf_fn (svKvFreeBuf) to release
 // them. Write callbacks receive Rust-owned slices; they must copy if needed.
 //
-// Iterator handles: zallyKvIterCreate stores the store.Iterator in a
-// cgo.Handle and returns the handle value as an unsafe.Pointer. zallyKvIterFree
+// Iterator handles: svKvIterCreate stores the store.Iterator in a
+// cgo.Handle and returns the handle value as an unsafe.Pointer. svKvIterFree
 // closes the iterator and deletes the handle.
 //
 // Thread safety: EndBlocker is single-threaded. No locking is needed.
 
 /*
-#include "../../circuits/include/zally_circuits.h"
+#include "../../circuits/include/shielded_vote_circuits.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -54,8 +54,8 @@ func (p *KvStoreProxy) SetStore(s store.KVStore) { p.Current = s }
 // Exported C callbacks
 // ---------------------------------------------------------------------------
 
-//export zallyKvGet
-func zallyKvGet(
+//export svKvGet
+func svKvGet(
 	ctx unsafe.Pointer,
 	keyPtr *C.uint8_t, keyLen C.size_t,
 	outVal **C.uint8_t, outValLen *C.size_t,
@@ -68,7 +68,7 @@ func zallyKvGet(
 	key := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
 	val, err := proxy.Current.Get(key)
 	if err != nil {
-		log.Printf("votetree: zallyKvGet: store error (key len=%d): %v", len(key), err)
+		log.Printf("votetree: svKvGet: store error (key len=%d): %v", len(key), err)
 		return -1 // hard error: store corruption, closed store, etc.
 	}
 	if val == nil {
@@ -77,7 +77,7 @@ func zallyKvGet(
 	// Allocate C buffer and copy value in.
 	ptr := C.malloc(C.size_t(len(val)))
 	if ptr == nil {
-		log.Printf("votetree: zallyKvGet: C.malloc failed (val len=%d)", len(val))
+		log.Printf("votetree: svKvGet: C.malloc failed (val len=%d)", len(val))
 		return -1
 	}
 	C.memcpy(ptr, unsafe.Pointer(&val[0]), C.size_t(len(val)))
@@ -86,8 +86,8 @@ func zallyKvGet(
 	return 0
 }
 
-//export zallyKvSet
-func zallyKvSet(
+//export svKvSet
+func svKvSet(
 	ctx unsafe.Pointer,
 	keyPtr *C.uint8_t, keyLen C.size_t,
 	valPtr *C.uint8_t, valLen C.size_t,
@@ -100,14 +100,14 @@ func zallyKvSet(
 	key := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
 	val := C.GoBytes(unsafe.Pointer(valPtr), C.int(valLen))
 	if err := proxy.Current.Set(key, val); err != nil {
-		log.Printf("votetree: zallyKvSet: store error (key len=%d, val len=%d): %v", len(key), len(val), err)
+		log.Printf("votetree: svKvSet: store error (key len=%d, val len=%d): %v", len(key), len(val), err)
 		return -1
 	}
 	return 0
 }
 
-//export zallyKvDelete
-func zallyKvDelete(ctx unsafe.Pointer, keyPtr *C.uint8_t, keyLen C.size_t) C.int32_t {
+//export svKvDelete
+func svKvDelete(ctx unsafe.Pointer, keyPtr *C.uint8_t, keyLen C.size_t) C.int32_t {
 	h := recoverHandle(ctx)
 	proxy, ok := h.Value().(*KvStoreProxy)
 	if !ok {
@@ -115,14 +115,14 @@ func zallyKvDelete(ctx unsafe.Pointer, keyPtr *C.uint8_t, keyLen C.size_t) C.int
 	}
 	key := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
 	if err := proxy.Current.Delete(key); err != nil {
-		log.Printf("votetree: zallyKvDelete: store error (key len=%d): %v", len(key), err)
+		log.Printf("votetree: svKvDelete: store error (key len=%d): %v", len(key), err)
 		return -1
 	}
 	return 0
 }
 
-//export zallyKvIterCreate
-func zallyKvIterCreate(
+//export svKvIterCreate
+func svKvIterCreate(
 	ctx unsafe.Pointer,
 	prefixPtr *C.uint8_t, prefixLen C.size_t,
 	reverse C.uint8_t,
@@ -155,11 +155,11 @@ func zallyKvIterCreate(
 		iter, err = proxy.Current.Iterator(prefix, end)
 	}
 	if err != nil {
-		log.Printf("votetree: zallyKvIterCreate: store error (prefix len=%d, reverse=%v): %v", len(prefix), reverse != 0, err)
+		log.Printf("votetree: svKvIterCreate: store error (prefix len=%d, reverse=%v): %v", len(prefix), reverse != 0, err)
 		return nil
 	}
 	if iter == nil {
-		log.Printf("votetree: zallyKvIterCreate: store returned nil iterator (prefix len=%d)", len(prefix))
+		log.Printf("votetree: svKvIterCreate: store returned nil iterator (prefix len=%d)", len(prefix))
 		return nil
 	}
 	iterH := cgo.NewHandle(iter)
@@ -168,8 +168,8 @@ func zallyKvIterCreate(
 	return unsafe.Pointer(iterPtr)
 }
 
-//export zallyKvIterNext
-func zallyKvIterNext(
+//export svKvIterNext
+func svKvIterNext(
 	iterPtr unsafe.Pointer,
 	outKey **C.uint8_t, outKeyLen *C.size_t,
 	outVal **C.uint8_t, outValLen *C.size_t,
@@ -188,7 +188,7 @@ func zallyKvIterNext(
 
 	kPtr := C.malloc(C.size_t(len(key)))
 	if kPtr == nil {
-		log.Printf("votetree: zallyKvIterNext: C.malloc failed for key (len=%d)", len(key))
+		log.Printf("votetree: svKvIterNext: C.malloc failed for key (len=%d)", len(key))
 		return -1
 	}
 	C.memcpy(kPtr, unsafe.Pointer(&key[0]), C.size_t(len(key)))
@@ -197,7 +197,7 @@ func zallyKvIterNext(
 
 	vPtr := C.malloc(C.size_t(len(val)))
 	if vPtr == nil {
-		log.Printf("votetree: zallyKvIterNext: C.malloc failed for value (len=%d)", len(val))
+		log.Printf("votetree: svKvIterNext: C.malloc failed for value (len=%d)", len(val))
 		C.free(kPtr)
 		return -1
 	}
@@ -207,8 +207,8 @@ func zallyKvIterNext(
 	return 0
 }
 
-//export zallyKvIterFree
-func zallyKvIterFree(iterPtr unsafe.Pointer) {
+//export svKvIterFree
+func svKvIterFree(iterPtr unsafe.Pointer) {
 	h := cgo.Handle(*(*C.uint64_t)(iterPtr))
 	iter, ok := h.Value().(store.Iterator)
 	if !ok {
@@ -221,8 +221,8 @@ func zallyKvIterFree(iterPtr unsafe.Pointer) {
 	C.free(iterPtr)
 }
 
-//export zallyKvFreeBuf
-func zallyKvFreeBuf(ptr *C.uint8_t, _ C.size_t) {
+//export svKvFreeBuf
+func svKvFreeBuf(ptr *C.uint8_t, _ C.size_t) {
 	C.free(unsafe.Pointer(ptr))
 }
 

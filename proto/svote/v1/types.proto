@@ -1,7 +1,7 @@
 syntax = "proto3";
-package zvote.v1;
+package svote.v1;
 
-option go_package = "github.com/z-cale/zally/x/vote/types";
+option go_package = "github.com/z-cale/shielded-vote/x/vote/types";
 
 // SessionStatus represents the lifecycle state of a voting session.
 enum SessionStatus {

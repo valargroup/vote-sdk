@@ -14,11 +14,11 @@ import (
 	"github.com/cosmos/cosmos-sdk/client/tx"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // GetTxCmd returns the transaction commands for the vote module grouped under
-// "zallyd tx vote".
+// "svoted tx vote".
 func GetTxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                        types.ModuleName,
@@ -52,12 +52,12 @@ func CmdRegisterPallasKey() *cobra.Command {
 		Long: `Register the node's pre-generated Pallas public key to participate in
 the Election Authority key ceremony.
 
-The public key is read from <home>/pallas.pk (written by 'zallyd pallas-keygen').
+The public key is read from <home>/pallas.pk (written by 'svoted pallas-keygen').
 The --from key must correspond to a bonded validator. The same address is
 used as the ceremony creator field.
 
 Example:
-  zallyd tx vote register-pallas-key --from myvalidator --chain-id zally-1`,
+  svoted tx vote register-pallas-key --from myvalidator --chain-id svote-1`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientTxContext(cmd)
@@ -104,7 +104,7 @@ Arguments:
 Example payloads.json:
   [
     {
-      "validator_address": "zvotevaloper1...",
+      "validator_address": "svvaloper1...",
       "ephemeral_pk": "02aabb...",
       "ciphertext": "deadbeef..."
     }
@@ -179,10 +179,10 @@ func CmdCreateValidatorWithPallasKey() *cobra.Command {
 Arguments:
   staking-msg-json-file Path to a JSON file containing a
                         cosmos.staking.v1beta1.MsgCreateValidator payload
-                        (same JSON shape as 'zallyd tx staking create-validator
+                        (same JSON shape as 'svoted tx staking create-validator
                         --generate-only' produces).
 
-The Pallas public key is read from <home>/pallas.pk (written by 'zallyd pallas-keygen').
+The Pallas public key is read from <home>/pallas.pk (written by 'svoted pallas-keygen').
 The staking JSON is re-encoded to protobuf binary and embedded in the transaction;
 the chain atomically calls the staking module's CreateValidator and then registers
 the Pallas key.`,
@@ -237,7 +237,7 @@ func CmdSetVoteManager() *cobra.Command {
 		Long: `Broadcast an MsgSetVoteManager transaction.
 
 Argument:
-  new-manager-addr  Bech32 account address (zvote1...) of the new vote manager.
+  new-manager-addr  Bech32 account address (sv1...) of the new vote manager.
 
 The --from signer must be either the current vote manager or a bonded
 validator.  On first call (no vote manager configured), any bonded validator

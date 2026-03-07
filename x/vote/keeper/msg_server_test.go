@@ -17,10 +17,10 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/z-cale/zally/crypto/roundid"
-	zallytest "github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/crypto/roundid"
+	svtest "github.com/z-cale/shielded-vote/testutil"
+	"github.com/z-cale/shielded-vote/x/vote/keeper"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ func (s *MsgServerTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC())
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
+	s.keeper = keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), nil)
 	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }
 
@@ -56,7 +56,7 @@ func (s *MsgServerTestSuite) SetupTest() {
 // setupActiveRound creates a vote round in the store with an end time in the future and ACTIVE status.
 func (s *MsgServerTestSuite) setupActiveRound(roundID []byte) {
 	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteRound(kv, zallytest.ActiveRoundFixture(roundID)))
+	s.Require().NoError(s.keeper.SetVoteRound(kv, svtest.ActiveRoundFixture(roundID)))
 }
 
 // setupRootAtHeight stores a commitment tree root at the given height.
@@ -84,7 +84,7 @@ func computeExpectedRoundID(msg *types.MsgCreateVotingSession) []byte {
 
 // validSetupMsg returns a valid MsgCreateVotingSession for tests.
 func validSetupMsg() *types.MsgCreateVotingSession {
-	return zallytest.ValidCreateVotingSessionWithEndTime(time.Unix(2_000_000, 0))
+	return svtest.ValidCreateVotingSessionWithEndTime(time.Unix(2_000_000, 0))
 }
 
 // seedEligibleValidators registers Pallas keys for n validators and sets up
@@ -100,8 +100,8 @@ func (s *MsgServerTestSuite) seedEligibleValidators(n int) []string {
 // ---------------------------------------------------------------------------
 
 var (
-	testValAddr = zallytest.TestValAddr
-	testAccAddr = zallytest.TestAccAddr
+	testValAddr = svtest.TestValAddr
+	testAccAddr = svtest.TestAccAddr
 )
 
 // mockStakingKeeper implements keeper.StakingKeeper for tests.
@@ -192,7 +192,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: round created with PENDING status and validator snapshot",
 			setup: func() {
 				s.seedEligibleValidators(3)
-				s.seedVoteManager("zvote1admin")
+				s.seedVoteManager("sv1admin")
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -229,7 +229,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "duplicate round rejected",
 			setup: func() {
 				s.seedEligibleValidators(1)
-				s.seedVoteManager("zvote1admin")
+				s.seedVoteManager("sv1admin")
 				_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 				s.Require().NoError(err)
 			},
@@ -241,10 +241,10 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "different fields produce different round ID",
 			setup: func() {
 				s.seedEligibleValidators(1)
-				s.seedVoteManager("zvote1admin")
+				s.seedVoteManager("sv1admin")
 			},
 			msg: &types.MsgCreateVotingSession{
-				Creator:           "zvote1admin",
+				Creator:           "sv1admin",
 				SnapshotHeight:    999,
 				SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
 				ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
@@ -255,8 +255,8 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 				VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 				Proposals: []*types.Proposal{
-					{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
-					{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
+					{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
+					{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
 				},
 			},
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -267,7 +267,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 		{
 			name: "rejected: no validators have registered Pallas keys",
 			setup: func() {
-				s.seedVoteManager("zvote1admin")
+				s.seedVoteManager("sv1admin")
 				// Mock staking with no validators.
 				s.setupWithMockStaking()
 			},
@@ -279,10 +279,10 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "rejected: another PENDING round already exists",
 			setup: func() {
 				s.seedEligibleValidators(1)
-				s.seedVoteManager("zvote1admin")
+				s.seedVoteManager("sv1admin")
 				// Create a different round first to put it in PENDING.
 				_, err := s.msgServer.CreateVotingSession(s.ctx, &types.MsgCreateVotingSession{
-					Creator:           "zvote1admin",
+					Creator:           "sv1admin",
 					SnapshotHeight:    999,
 					SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
 					ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
@@ -323,7 +323,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 	s.SetupTest()
 	s.seedEligibleValidators(1)
-	s.seedVoteManager("zvote1admin")
+	s.seedVoteManager("sv1admin")
 	msg := validSetupMsg()
 
 	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
@@ -338,7 +338,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
 	s.SetupTest()
 	s.seedEligibleValidators(1)
-	s.seedVoteManager("zvote1admin")
+	s.seedVoteManager("sv1admin")
 	msg := validSetupMsg()
 
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
@@ -758,10 +758,10 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotVoteM
 func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsWithVoteManager() {
 	s.SetupTest()
 	s.seedEligibleValidators(1)
-	s.seedVoteManager("zvote1admin")
+	s.seedVoteManager("sv1admin")
 
 	msg := validSetupMsg()
-	msg.Creator = "zvote1admin"
+	msg.Creator = "sv1admin"
 	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().NoError(err)
 	s.Require().NotEmpty(resp.VoteRoundId)
@@ -770,10 +770,10 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsWithVoteManager() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	s.SetupTest()
 	s.seedEligibleValidators(1)
-	s.seedVoteManager("zvote1admin")
+	s.seedVoteManager("sv1admin")
 
 	msg := validSetupMsg()
-	msg.Creator = "zvote1admin"
+	msg.Creator = "sv1admin"
 	msg.Description = "Test round description"
 	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().NoError(err)
@@ -801,12 +801,12 @@ func (s *KeeperTestSuite) TestVoteManager_RoundTrip() {
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "zvote1manager"}))
+	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "sv1manager"}))
 
 	got, err := s.keeper.GetVoteManager(kv)
 	s.Require().NoError(err)
 	s.Require().NotNil(got)
-	s.Require().Equal("zvote1manager", got.Address)
+	s.Require().Equal("sv1manager", got.Address)
 }
 
 func (s *KeeperTestSuite) TestVoteManager_Overwrite() {
@@ -830,7 +830,7 @@ func (s *KeeperTestSuite) TestGenesis_VoteManagerRestored() {
 	kv := s.keeper.OpenKVStore(s.ctx)
 
 	genesis := &types.GenesisState{
-		VoteManager: "zvote1genesis_manager",
+		VoteManager: "sv1genesis_manager",
 	}
 
 	s.Require().NoError(s.keeper.InitGenesis(kv, genesis))
@@ -838,7 +838,7 @@ func (s *KeeperTestSuite) TestGenesis_VoteManagerRestored() {
 	mgr, err := s.keeper.GetVoteManager(kv)
 	s.Require().NoError(err)
 	s.Require().NotNil(mgr)
-	s.Require().Equal("zvote1genesis_manager", mgr.Address)
+	s.Require().Equal("sv1genesis_manager", mgr.Address)
 }
 
 func (s *KeeperTestSuite) TestGenesis_EmptyVoteManagerNotSet() {

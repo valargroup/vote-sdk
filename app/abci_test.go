@@ -17,11 +17,11 @@ import (
 
 	"github.com/mikelodder7/curvey"
 
-	voteapi "github.com/z-cale/zally/api"
-	"github.com/z-cale/zally/crypto/ecies"
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/types"
+	voteapi "github.com/z-cale/shielded-vote/api"
+	"github.com/z-cale/shielded-vote/crypto/ecies"
+	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	"github.com/z-cale/shielded-vote/testutil"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -469,7 +469,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 	lateEnd := s.app.Time.Add(24 * time.Hour)
 
 	soonMsg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
+		Creator:           "sv1admin",
 		SnapshotHeight:    300,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x2A}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0x2B}, 32),
@@ -484,7 +484,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 	soonRoundID := s.app.SeedVotingSession(soonMsg)
 
 	lateMsg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
+		Creator:           "sv1admin",
 		SnapshotHeight:    400,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x3A}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0x3B}, 32),

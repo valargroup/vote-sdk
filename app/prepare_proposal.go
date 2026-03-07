@@ -13,11 +13,11 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 
-	voteapi "github.com/z-cale/zally/api"
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/crypto/shamir"
-	votekeeper "github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	voteapi "github.com/z-cale/shielded-vote/api"
+	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	"github.com/z-cale/shielded-vote/crypto/shamir"
+	votekeeper "github.com/z-cale/shielded-vote/x/vote/keeper"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // bsgsDefaultBound is the upper bound for the baby-step giant-step discrete

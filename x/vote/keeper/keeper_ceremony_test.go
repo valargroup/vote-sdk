@@ -1,8 +1,8 @@
 package keeper_test
 
 import (
-	"github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/x/vote/keeper"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // ===========================================================================

@@ -16,8 +16,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/x/vote/keeper"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 
@@ -44,7 +44,7 @@ func (s *QueryServerTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC()).WithBlockHeight(10)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
+	s.keeper = keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), nil)
 	s.queryServer = keeper.NewQueryServerImpl(s.keeper)
 	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }
@@ -155,7 +155,7 @@ func (s *QueryServerTestSuite) TestVoteRound_Found() {
 		VoteRoundId:      roundID,
 		SnapshotHeight:   100,
 		VoteEndTime:      2_000_000,
-		Creator:          "zvote1creator",
+		Creator:          "sv1creator",
 		Status:           types.SessionStatus_SESSION_STATUS_PENDING,
 		NullifierImtRoot: bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:           bytes.Repeat([]byte{0x04}, 32),
@@ -168,7 +168,7 @@ func (s *QueryServerTestSuite) TestVoteRound_Found() {
 	s.Require().NoError(err)
 	s.Require().NotNil(qResp.Round)
 	s.Require().Equal(roundID, qResp.Round.VoteRoundId)
-	s.Require().Equal("zvote1creator", qResp.Round.Creator)
+	s.Require().Equal("sv1creator", qResp.Round.Creator)
 	s.Require().Equal(uint64(100), qResp.Round.SnapshotHeight)
 	s.Require().Equal(uint64(2_000_000), qResp.Round.VoteEndTime)
 }

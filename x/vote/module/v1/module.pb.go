@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: zvote/module/v1/module.proto
+// source: svote/module/v1/module.proto
 
 package v1
 
@@ -33,7 +33,7 @@ type Module struct {
 
 func (x *Module) Reset() {
 	*x = Module{}
-	mi := &file_zvote_module_v1_module_proto_msgTypes[0]
+	mi := &file_svote_module_v1_module_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +45,7 @@ func (x *Module) String() string {
 func (*Module) ProtoMessage() {}
 
 func (x *Module) ProtoReflect() protoreflect.Message {
-	mi := &file_zvote_module_v1_module_proto_msgTypes[0]
+	mi := &file_svote_module_v1_module_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +58,7 @@ func (x *Module) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Module.ProtoReflect.Descriptor instead.
 func (*Module) Descriptor() ([]byte, []int) {
-	return file_zvote_module_v1_module_proto_rawDescGZIP(), []int{0}
+	return file_svote_module_v1_module_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Module) GetAuthority() string {
@@ -68,32 +68,32 @@ func (x *Module) GetAuthority() string {
 	return ""
 }
 
-var File_zvote_module_v1_module_proto protoreflect.FileDescriptor
+var File_svote_module_v1_module_proto protoreflect.FileDescriptor
 
-const file_zvote_module_v1_module_proto_rawDesc = "" +
+const file_svote_module_v1_module_proto_rawDesc = "" +
 	"\n" +
-	"\x1czvote/module/v1/module.proto\x12\x0fzvote.module.v1\x1a cosmos/app/v1alpha1/module.proto\"N\n" +
+	"\x1csvote/module/v1/module.proto\x12\x0fsvote.module.v1\x1a cosmos/app/v1alpha1/module.proto\"V\n" +
 	"\x06Module\x12\x1c\n" +
-	"\tauthority\x18\x01 \x01(\tR\tauthority:&\xba\xc0\x96\xda\x01 \n" +
-	"\x1egithub.com/z-cale/zally/x/voteB*Z(github.com/z-cale/zally/x/vote/module/v1b\x06proto3"
+	"\tauthority\x18\x01 \x01(\tR\tauthority:.\xba\xc0\x96\xda\x01(\n" +
+	"&github.com/z-cale/shielded-vote/x/voteB2Z0github.com/z-cale/shielded-vote/x/vote/module/v1b\x06proto3"
 
 var (
-	file_zvote_module_v1_module_proto_rawDescOnce sync.Once
-	file_zvote_module_v1_module_proto_rawDescData []byte
+	file_svote_module_v1_module_proto_rawDescOnce sync.Once
+	file_svote_module_v1_module_proto_rawDescData []byte
 )
 
-func file_zvote_module_v1_module_proto_rawDescGZIP() []byte {
-	file_zvote_module_v1_module_proto_rawDescOnce.Do(func() {
-		file_zvote_module_v1_module_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_zvote_module_v1_module_proto_rawDesc), len(file_zvote_module_v1_module_proto_rawDesc)))
+func file_svote_module_v1_module_proto_rawDescGZIP() []byte {
+	file_svote_module_v1_module_proto_rawDescOnce.Do(func() {
+		file_svote_module_v1_module_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_svote_module_v1_module_proto_rawDesc), len(file_svote_module_v1_module_proto_rawDesc)))
 	})
-	return file_zvote_module_v1_module_proto_rawDescData
+	return file_svote_module_v1_module_proto_rawDescData
 }
 
-var file_zvote_module_v1_module_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_zvote_module_v1_module_proto_goTypes = []any{
-	(*Module)(nil), // 0: zvote.module.v1.Module
+var file_svote_module_v1_module_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_svote_module_v1_module_proto_goTypes = []any{
+	(*Module)(nil), // 0: svote.module.v1.Module
 }
-var file_zvote_module_v1_module_proto_depIdxs = []int32{
+var file_svote_module_v1_module_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
 	0, // [0:0] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -101,26 +101,26 @@ var file_zvote_module_v1_module_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_zvote_module_v1_module_proto_init() }
-func file_zvote_module_v1_module_proto_init() {
-	if File_zvote_module_v1_module_proto != nil {
+func init() { file_svote_module_v1_module_proto_init() }
+func file_svote_module_v1_module_proto_init() {
+	if File_svote_module_v1_module_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zvote_module_v1_module_proto_rawDesc), len(file_zvote_module_v1_module_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_module_v1_module_proto_rawDesc), len(file_svote_module_v1_module_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_zvote_module_v1_module_proto_goTypes,
-		DependencyIndexes: file_zvote_module_v1_module_proto_depIdxs,
-		MessageInfos:      file_zvote_module_v1_module_proto_msgTypes,
+		GoTypes:           file_svote_module_v1_module_proto_goTypes,
+		DependencyIndexes: file_svote_module_v1_module_proto_depIdxs,
+		MessageInfos:      file_svote_module_v1_module_proto_msgTypes,
 	}.Build()
-	File_zvote_module_v1_module_proto = out.File
-	file_zvote_module_v1_module_proto_goTypes = nil
-	file_zvote_module_v1_module_proto_depIdxs = nil
+	File_svote_module_v1_module_proto = out.File
+	file_svote_module_v1_module_proto_goTypes = nil
+	file_svote_module_v1_module_proto_depIdxs = nil
 }

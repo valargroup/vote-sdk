@@ -1,9 +1,9 @@
 syntax = "proto3";
-package zvote.v1;
+package svote.v1;
 
-import "zvote/v1/types.proto";
+import "svote/v1/types.proto";
 
-option go_package = "github.com/z-cale/zally/x/vote/types";
+option go_package = "github.com/z-cale/shielded-vote/x/vote/types";
 
 // Query defines the vote module's gRPC query service.
 service Query {

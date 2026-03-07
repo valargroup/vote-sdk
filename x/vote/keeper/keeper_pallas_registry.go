@@ -8,7 +8,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // GetPallasKey retrieves a validator's Pallas PK from the global registry.

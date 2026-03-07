@@ -9,23 +9,22 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cosmos/cosmos-sdk/client/flags"
-	"github.com/z-cale/zally/app"
-	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/z-cale/shielded-vote/app"
+	"github.com/z-cale/shielded-vote/crypto/elgamal"
 )
 
-// PallasKeygenCmd generates a Pallas keypair for ECIES encryption.
-// The secret key is written to <home>/pallas.sk and the public key to <home>/pallas.pk.
-func PallasKeygenCmd() *cobra.Command {
+// EAKeygenCmd generates an ElGamal keypair for the Election Authority.
+// The secret key is written to <home>/ea.sk and the public key to <home>/ea.pk.
+func EAKeygenCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "pallas-keygen",
-		Short: "Generate Pallas keypair for ECIES (ceremony key distribution)",
-		Long: `Generates a Pallas keypair and writes:
-  - <home>/pallas.sk  (32-byte secret key)
-  - <home>/pallas.pk  (32-byte compressed public key)
+		Use:   "ea-keygen",
+		Short: "Generate ElGamal keypair for the Election Authority",
+		Long: `Generates an ElGamal keypair and writes:
+  - <home>/ea.sk  (32-byte secret key)
+  - <home>/ea.pk  (32-byte compressed public key)
 
-The secret key path should be configured in app.toml as vote.pallas_sk_path
-so that PrepareProposal can auto-decrypt the EA key share during the ceremony
-and inject MsgAckExecutiveAuthorityKey.`,
+The secret key path should be configured in app.toml as vote.ea_sk_path
+so that PrepareProposal can auto-decrypt tallies.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir, _ := cmd.Flags().GetString(flags.FlagHome)
 			if homeDir == "" {
@@ -41,8 +40,8 @@ and inject MsgAckExecutiveAuthorityKey.`,
 
 			pkBytes := pk.Point.ToAffineCompressed()
 
-			skPath := filepath.Join(homeDir, "pallas.sk")
-			pkPath := filepath.Join(homeDir, "pallas.pk")
+			skPath := filepath.Join(homeDir, "ea.sk")
+			pkPath := filepath.Join(homeDir, "ea.pk")
 
 			if err := os.WriteFile(skPath, skBytes, 0600); err != nil {
 				return fmt.Errorf("failed to write secret key: %w", err)
@@ -52,7 +51,7 @@ and inject MsgAckExecutiveAuthorityKey.`,
 				return fmt.Errorf("failed to write public key: %w", err)
 			}
 
-			fmt.Printf("Pallas keypair generated:\n  SK: %s\n  PK: %s\n", skPath, pkPath)
+			fmt.Printf("EA keypair generated:\n  SK: %s\n  PK: %s\n", skPath, pkPath)
 			return nil
 		},
 	}

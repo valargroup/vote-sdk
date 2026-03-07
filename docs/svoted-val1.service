@@ -1,0 +1,13 @@
+[Unit]
+Description=Shielded-Vote SDK chain - Validator 1 (svoted-val1)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/shielded-vote
+ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted-val1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

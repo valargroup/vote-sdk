@@ -15,24 +15,24 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/z-cale/zally/app"
-	"github.com/z-cale/zally/crypto/votetree"
-	"github.com/z-cale/zally/internal/helper"
+	"github.com/z-cale/shielded-vote/app"
+	"github.com/z-cale/shielded-vote/crypto/votetree"
+	"github.com/z-cale/shielded-vote/internal/helper"
 )
 
 // addHelperFlags registers helper server CLI flags on the start command.
 func addHelperFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("no-helper", false, "Disable the helper server")
-	cmd.Flags().String("helper-db-path", "", "Path to the helper SQLite database (default: $HOME/.zallyd/helper.db)")
+	cmd.Flags().String("helper-db-path", "", "Path to the helper SQLite database (default: $HOME/.svoted/helper.db)")
 }
 
 // helperPostSetup starts the helper server background processor.
-// It captures the ZallyApp reference via the closure in initRootCmd.
+// It captures the SvoteApp reference via the closure in initRootCmd.
 func helperPostSetup(
-	zallyApp **app.ZallyApp,
+	svoteApp **app.SvoteApp,
 ) func(svrCtx *server.Context, clientCtx client.Context, ctx context.Context, g *errgroup.Group) error {
 	return func(svrCtx *server.Context, clientCtx client.Context, ctx context.Context, g *errgroup.Group) error {
-		if *zallyApp == nil {
+		if *svoteApp == nil {
 			return fmt.Errorf("helper: app not initialized")
 		}
 
@@ -61,7 +61,7 @@ func helperPostSetup(
 
 		// Create the tree accessor that reads directly from the keeper's KV store.
 		treeReader := &keeperTreeReader{
-			app:    *zallyApp,
+			app:    *svoteApp,
 			logger: logger,
 		}
 
@@ -79,7 +79,7 @@ func helperPostSetup(
 		}
 
 		// Set helper on the app so RegisterAPIRoutes can register HTTP routes.
-		(*zallyApp).SetHelper(h)
+		(*svoteApp).SetHelper(h)
 
 		// Start the background processor in the errgroup.
 		// Close the store after the processor exits to avoid
@@ -210,7 +210,7 @@ func buildPulseConfig(
 // keeperTreeReader implements helper.TreeReader by reading directly from the
 // vote keeper's KV store.
 type keeperTreeReader struct {
-	app    *app.ZallyApp
+	app    *app.SvoteApp
 	logger log.Logger
 }
 

@@ -10,8 +10,8 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/z-cale/zally/crypto/votetree"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/crypto/votetree"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // StakingKeeper defines the staking module interface needed by the vote module.

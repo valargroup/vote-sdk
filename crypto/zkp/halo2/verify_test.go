@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/z-cale/zally/crypto/zkp"
+	"github.com/z-cale/shielded-vote/crypto/zkp"
 )
 
 // mustReadFixture reads a fixture file from crypto/zkp/testdata/.
