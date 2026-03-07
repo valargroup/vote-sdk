@@ -20,12 +20,12 @@ import (
 
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/z-cale/zally/crypto/redpallas"
-	"github.com/z-cale/zally/crypto/zkp"
-	zallytest "github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/ante"
-	"github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/valargroup/shielded-vote/crypto/redpallas"
+	"github.com/valargroup/shielded-vote/crypto/zkp"
+	svtest "github.com/valargroup/shielded-vote/testutil"
+	"github.com/valargroup/shielded-vote/x/vote/ante"
+	"github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // testProposerConsAddr is the consensus address embedded in the test block header.
@@ -132,7 +132,7 @@ var (
 
 func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 	return &types.MsgCreateVotingSession{
-		Creator:           "zvote1testcreator",
+		Creator:           "sv1testcreator",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
@@ -143,8 +143,8 @@ func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
-			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
+			{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
 		},
 	}
 }
@@ -251,8 +251,8 @@ func TestValidateTestSuite(t *testing.T) {
 func (s *ValidateTestSuite) SetupTest() {
 	// Configure bech32 prefixes for validator address parsing.
 	cfg := sdk.GetConfig()
-	cfg.SetBech32PrefixForValidator("zvotevaloper", "zvotevaloperpub")
-	cfg.SetBech32PrefixForAccount("zvote", "zvotepub")
+	cfg.SetBech32PrefixForValidator("svvaloper", "svvaloperpub")
+	cfg.SetBech32PrefixForAccount("sv", "svpub")
 
 	key := storetypes.NewKVStoreKey(types.StoreKey)
 	tkey := storetypes.NewTransientStoreKey("transient_test")
@@ -263,7 +263,7 @@ func (s *ValidateTestSuite) SetupTest() {
 		ProposerAddress: testProposerConsAddr,
 	})
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), mockStakingKeeper{})
+	s.keeper = keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), mockStakingKeeper{})
 }
 
 // ---------------------------------------------------------------------------
@@ -298,15 +298,15 @@ func (s *ValidateTestSuite) setupRoundWithStatus(roundID []byte, endTime uint64,
 		VoteEndTime:       endTime,
 		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-		Creator:           "zvote1testcreator",
+		Creator:           "sv1testcreator",
 		Status:            status,
 		EaPk:              bytes.Repeat([]byte{0x05}, 32),
 		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
-			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
+			{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
 		},
 	}
 	err := s.keeper.SetVoteRound(kvStore, round)
@@ -993,7 +993,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 // Tests: MsgSubmitTally
 // ---------------------------------------------------------------------------
 
-// testValidatorAddr returns a valid zvotevaloper bech32 address for test use.
+// testValidatorAddr returns a valid svvaloper bech32 address for test use.
 // Must be called after bech32 config is set in SetupTest.
 func testValidatorAddr() string {
 	return sdk.ValAddress(bytes.Repeat([]byte{0x01}, 20)).String()

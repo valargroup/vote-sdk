@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 env:
-  DEPLOY_PATH: /opt/zally-chain
+  DEPLOY_PATH: /opt/shielded-vote
 
 jobs:
   reset:
@@ -37,10 +37,10 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            for svc in zallyd-val1 zallyd-val2 zallyd-val3; do
+            for svc in svoted-val1 svoted-val2 svoted-val3; do
               sudo systemctl stop "$svc" || true
             done
-            sudo pkill -9 -x zallyd || true
+            sudo pkill -9 -x svoted || true
             for i in $(seq 1 20); do
               if ! ss -tlnp | grep -qE ':26156|:26256|:26356|:6160|:6260|:6360'; then
                 echo "Ports freed"
@@ -63,7 +63,7 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             export HOME=${{ env.DEPLOY_PATH }} PATH=${{ env.DEPLOY_PATH }}:$PATH
-            chmod +x ${{ env.DEPLOY_PATH }}/zallyd ${{ env.DEPLOY_PATH }}/create-val-tx
+            chmod +x ${{ env.DEPLOY_PATH }}/svoted ${{ env.DEPLOY_PATH }}/create-val-tx
             bash ${{ env.DEPLOY_PATH }}/init_multi.sh --ci
 
       - name: Start services
@@ -73,7 +73,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            for svc in zallyd-val1 zallyd-val2 zallyd-val3; do
+            for svc in svoted-val1 svoted-val2 svoted-val3; do
               sudo systemctl start "$svc"
             done
 
@@ -87,35 +87,35 @@ jobs:
           script: |
             export HOME=${{ env.DEPLOY_PATH }} PATH=${{ env.DEPLOY_PATH }}:$PATH
             for i in $(seq 1 30); do
-              if curl -sf http://localhost:1418/zally/v1/commitment-tree/latest > /dev/null 2>&1; then
+              if curl -sf http://localhost:1418/shielded-vote/v1/commitment-tree/latest > /dev/null 2>&1; then
                 echo "Val1 API ready"
                 break
               fi
               if [ "$i" = "30" ]; then
                 echo "FAIL: val1 API not responding after 60s"
-                sudo journalctl -u zallyd-val1 --no-pager -n 50
+                sudo journalctl -u svoted-val1 --no-pager -n 50
                 exit 1
               fi
               sleep 2
             done
             # Register val1 pallas key (gentx doesn't include it)
-            ${{ env.DEPLOY_PATH }}/zallyd tx vote register-pallas-key \
+            ${{ env.DEPLOY_PATH }}/svoted tx vote register-pallas-key \
               --from validator --keyring-backend test \
-              --home "$HOME/.zallyd-val1" \
-              --chain-id zvote-1 --node tcp://localhost:26157 --yes
+              --home "$HOME/.svoted-val1" \
+              --chain-id svote-1 --node tcp://localhost:26157 --yes
             sleep 2
             # Register val2
             ${{ env.DEPLOY_PATH }}/create-val-tx \
-              --home "$HOME/.zallyd-val2" \
+              --home "$HOME/.svoted-val2" \
               --moniker val2 \
-              --amount 10000000uzvote \
+              --amount 10000000usvote \
               --rpc-url tcp://localhost:26157
             sleep 2
             # Register val3
             ${{ env.DEPLOY_PATH }}/create-val-tx \
-              --home "$HOME/.zallyd-val3" \
+              --home "$HOME/.svoted-val3" \
               --moniker val3 \
-              --amount 10000000uzvote \
+              --amount 10000000usvote \
               --rpc-url tcp://localhost:26157
 
       - name: Verify services healthy
@@ -126,7 +126,7 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             sleep 5
-            for svc in zallyd-val1 zallyd-val2 zallyd-val3; do
+            for svc in svoted-val1 svoted-val2 svoted-val3; do
               if ! sudo systemctl is-active --quiet "$svc"; then
                 echo "FAIL: $svc not active"
                 sudo systemctl status "$svc" --no-pager
@@ -136,13 +136,13 @@ jobs:
             done
 
             for i in $(seq 1 30); do
-              if curl -sf http://localhost:1418/zally/v1/commitment-tree/latest > /dev/null 2>&1; then
+              if curl -sf http://localhost:1418/shielded-vote/v1/commitment-tree/latest > /dev/null 2>&1; then
                 echo "Chain API healthy (val1 port 1418)"
                 break
               fi
               if [ "$i" = "30" ]; then
                 echo "FAIL: Chain API not responding after 60s"
-                sudo journalctl -u zallyd-val1 --no-pager -n 50
+                sudo journalctl -u svoted-val1 --no-pager -n 50
                 exit 1
               fi
               sleep 2
@@ -155,7 +155,7 @@ jobs:
               fi
               if [ "$i" = "15" ]; then
                 echo "FAIL: Helper server /api/v1/status not responding after 30s"
-                sudo journalctl -u zallyd-val1 --no-pager -n 50
+                sudo journalctl -u svoted-val1 --no-pager -n 50
                 exit 1
               fi
               sleep 2

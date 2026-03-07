@@ -10,10 +10,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/z-cale/zally/crypto/redpallas"
-	"github.com/z-cale/zally/crypto/zkp"
-	"github.com/z-cale/zally/x/vote/ante"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/valargroup/shielded-vote/crypto/redpallas"
+	"github.com/valargroup/shielded-vote/crypto/zkp"
+	"github.com/valargroup/shielded-vote/x/vote/ante"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // rpRepoRoot returns the absolute path to the repository root by walking up

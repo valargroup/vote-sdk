@@ -11,9 +11,9 @@
 package ncroot
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../circuits/target/release -lzally_circuits -ldl -lm -lpthread
+#cgo LDFLAGS: -L${SRCDIR}/../../circuits/target/release -lshielded_vote_circuits -ldl -lm -lpthread
 #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
-#include "../../circuits/include/zally_circuits.h"
+#include "../../circuits/include/shielded_vote_circuits.h"
 */
 import "C"
 
@@ -35,7 +35,7 @@ func ExtractNcRoot(orchardTreeHex string) ([32]byte, error) {
 
 	hexBytes := []byte(orchardTreeHex)
 
-	rc := C.zally_extract_nc_root(
+	rc := C.sv_extract_nc_root(
 		(*C.uint8_t)(unsafe.Pointer(&hexBytes[0])),
 		C.size_t(len(hexBytes)),
 		(*C.uint8_t)(unsafe.Pointer(&root[0])),

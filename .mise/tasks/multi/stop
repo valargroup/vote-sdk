@@ -2,7 +2,7 @@
 #MISE description="Stop all multi-validator processes"
 #MISE quiet=true
 
-PID_FILE="$HOME/.zallyd-multi-pids"
+PID_FILE="$HOME/.svoted-multi-pids"
 KILLED=""
 
 # Kill tracked PIDs.
@@ -14,7 +14,7 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 # Belt-and-suspenders: pkill any stale validators.
-pkill -f 'zallyd start --home.*val' 2>/dev/null && KILLED="$KILLED zallyd" || true
+pkill -f 'svoted start --home.*val' 2>/dev/null && KILLED="$KILLED svoted" || true
 pkill nf-server 2>/dev/null && KILLED="$KILLED nf-server" || true
 
 if [ -n "$KILLED" ]; then

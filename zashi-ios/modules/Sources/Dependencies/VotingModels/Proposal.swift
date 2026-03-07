@@ -1,7 +1,7 @@
 import Foundation
 
 /// A single vote option within a proposal (e.g. "Support", "Oppose").
-/// Maps to VoteOption message (zvote/v1/types.proto).
+/// Maps to VoteOption message (svote/v1/types.proto).
 public struct VoteOption: Equatable, Sendable {
     public let index: UInt32
     public let label: String
@@ -12,7 +12,7 @@ public struct VoteOption: Equatable, Sendable {
     }
 }
 
-/// Maps to Proposal message (zvote/v1/types.proto).
+/// Maps to Proposal message (svote/v1/types.proto).
 /// Chain uses uint32 id. UI-only metadata (zipNumber, forumURL) comes from off-chain sources.
 public struct Proposal: Equatable, Identifiable, Sendable {
     public let id: UInt32

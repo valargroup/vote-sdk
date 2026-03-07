@@ -1,4 +1,4 @@
-//! JSON payload builders and round_id derivation for Zally REST API.
+//! JSON payload builders and round_id derivation for Shielded-Vote REST API.
 //!
 //! Matches the chain's deriveRoundID: Poseidon hash of 8 Fp elements
 //! derived from (snapshot_height, snapshot_blockhash, proposals_hash,

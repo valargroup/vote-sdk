@@ -18,12 +18,12 @@ import (
 
 	"github.com/mikelodder7/curvey"
 
-	voteapi "github.com/z-cale/zally/api"
-	"github.com/z-cale/zally/crypto/ecies"
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/crypto/shamir"
-	votekeeper "github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	voteapi "github.com/valargroup/shielded-vote/api"
+	"github.com/valargroup/shielded-vote/crypto/ecies"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/shamir"
+	votekeeper "github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // eaSkPathForRound returns the per-round ea_sk file path (legacy single-key mode):

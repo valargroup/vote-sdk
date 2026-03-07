@@ -13,11 +13,11 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/z-cale/zally/crypto/ecies"
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/crypto/shamir"
-	zallytest "github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/valargroup/shielded-vote/crypto/ecies"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/shamir"
+	svtest "github.com/valargroup/shielded-vote/testutil"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ func testPallasPK() []byte {
 	return pk.Point.ToAffineCompressed()
 }
 
-var testValoperAddr = zallytest.TestValAddr
+var testValoperAddr = svtest.TestValAddr
 
 // registerValidators is a test helper that registers N validators and returns
 // the stored valoper addresses and their Pallas public keys.
@@ -75,7 +75,7 @@ func (s *MsgServerTestSuite) createPendingRound(validators []*types.ValidatorPal
 	round := &types.VoteRound{
 		VoteRoundId:        roundID,
 		VoteEndTime:        2_000_000,
-		Creator:            "zvote1creator",
+		Creator:            "sv1creator",
 		Status:             types.SessionStatus_SESSION_STATUS_PENDING,
 		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		CeremonyValidators: validators,
@@ -85,7 +85,7 @@ func (s *MsgServerTestSuite) createPendingRound(validators []*types.ValidatorPal
 		VkZkp2:             bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:             bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "A", Description: "A", Options: zallytest.DefaultOptions()},
+			{Id: 1, Title: "A", Description: "A", Options: svtest.DefaultOptions()},
 		},
 	}
 	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
@@ -1005,7 +1005,7 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 // gogoproto binary format, the same encoding used in production.
 func validStakingMsgBytes() ([]byte, string) {
 	pk := ed25519.GenPrivKey().PubKey()
-	valAddr := "zvotevaloper1testval"
+	valAddr := "svvaloper1testval"
 
 	pkAny, err := codectypes.NewAnyWithValue(pk)
 	if err != nil {
@@ -1024,7 +1024,7 @@ func validStakingMsgBytes() ([]byte, string) {
 		MinSelfDelegation: math.NewInt(1),
 		ValidatorAddress:  valAddr,
 		Pubkey:            pkAny,
-		Value:             sdk.NewInt64Coin("uzvote", 1000000),
+		Value:             sdk.NewInt64Coin("usvote", 1000000),
 	}
 
 	bz, err := msg.Marshal()
@@ -1141,7 +1141,7 @@ func (s *MsgServerTestSuite) TestCreateValidatorWithPallasKey_ProtobufRoundTrip(
 func (s *MsgServerTestSuite) TestCreateValidatorWithPallasKey_ProtoReflectFullName() {
 	msg := &types.MsgCreateValidatorWithPallasKey{}
 	s.Require().Equal(
-		"zvote.v1.MsgCreateValidatorWithPallasKey",
+		"svote.v1.MsgCreateValidatorWithPallasKey",
 		string(msg.ProtoReflect().Descriptor().FullName()),
 	)
 }

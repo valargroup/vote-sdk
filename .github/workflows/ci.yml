@@ -173,23 +173,23 @@ jobs:
         run: mise run start:chain
         env:
           GOCACHE: ${{ github.workspace }}/sdk/.cache/go-build
-          ZALLY_PIR_URL: "disabled"
+          SVOTE_PIR_URL: "disabled"
       - name: Run E2E test (round_activation)
         run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test round_activation -- --nocapture --ignored --test-threads=1
         env:
-          ZALLY_API_URL: http://localhost:1318
+          SVOTE_API_URL: http://localhost:1318
       - name: Run E2E test (voting_flow_librustvoting)
         run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1
         env:
-          ZALLY_API_URL: http://localhost:1318
+          SVOTE_API_URL: http://localhost:1318
           HELPER_SERVER_URL: http://localhost:1318
-          ZALLY_E2E_VOTE_WINDOW_SECS: "420"
+          SVOTE_E2E_VOTE_WINDOW_SECS: "420"
       - name: Upload chain log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: chain-log
-          path: zallyd.log
+          path: svoted.log
           retention-days: 7
 
   test-multi-validator:
@@ -228,7 +228,7 @@ jobs:
         run: mise run multi:start-chain
         env:
           GOCACHE: ${{ github.workspace }}/sdk/.cache/go-build
-          ZALLY_PIR_URL: "disabled"
+          SVOTE_PIR_URL: "disabled"
       - name: Wait for helper server readiness
         run: |
           for i in $(seq 1 30); do
@@ -244,27 +244,27 @@ jobs:
           exit 1
       - name: Set multi-validator env
         run: |
-          echo "ZALLY_HOME=$HOME/.zallyd-val1" >> $GITHUB_ENV
-          echo "ZALLY_NODE_URL=tcp://localhost:26157" >> $GITHUB_ENV
-          echo "ZALLY_PALLAS_PK_PATH=$HOME/.zallyd-val1/pallas.pk" >> $GITHUB_ENV
+          echo "SVOTE_HOME=$HOME/.svoted-val1" >> $GITHUB_ENV
+          echo "SVOTE_NODE_URL=tcp://localhost:26157" >> $GITHUB_ENV
+          echo "SVOTE_PALLAS_PK_PATH=$HOME/.svoted-val1/pallas.pk" >> $GITHUB_ENV
       - name: Run E2E test (round_activation)
         run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test round_activation -- --nocapture --ignored --test-threads=1
         env:
-          ZALLY_API_URL: http://localhost:1418
+          SVOTE_API_URL: http://localhost:1418
       - name: Run E2E test (voting_flow_librustvoting)
         run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1
         env:
-          ZALLY_API_URL: http://localhost:1418
+          SVOTE_API_URL: http://localhost:1418
           HELPER_SERVER_URL: http://localhost:1418
-          ZALLY_E2E_VOTE_WINDOW_SECS: "420"
+          SVOTE_E2E_VOTE_WINDOW_SECS: "420"
       - name: Restart val2 and verify recovery
         run: mise run test:restart
         env:
-          ZALLY_PIR_URL: "disabled"
+          SVOTE_PIR_URL: "disabled"
       - name: Run E2E test (round_activation after restart)
         run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test round_activation -- --nocapture --ignored --test-threads=1
         env:
-          ZALLY_API_URL: http://localhost:1418
+          SVOTE_API_URL: http://localhost:1418
       - name: Upload validator logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -303,7 +303,7 @@ jobs:
           key: ${{ runner.os }}-join-go-${{ hashFiles('sdk/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-join-go-
-      - name: Build and install zallyd + create-val-tx
+      - name: Build and install svoted + create-val-tx
         run: mise run build:install
         env:
           GOCACHE: ${{ github.workspace }}/sdk/.cache/go-build
@@ -311,7 +311,7 @@ jobs:
         run: mise run chain:init
       - name: Start chain in background
         run: |
-          zallyd start --home ~/.zallyd > sdk/chain.log 2>&1 &
+          svoted start --home ~/.svoted > sdk/chain.log 2>&1 &
           echo "Chain PID: $!"
       - name: Wait for chain readiness
         run: |

@@ -22,8 +22,8 @@ use blake2b_simd::Params as Blake2bParams;
 use rand::{thread_rng, RngCore};
 use reddsa::{orchard as reddsa_orchard, SigningKey, VerificationKey};
 
-use zally_circuits::redpallas as rp;
-use zally_circuits::toy;
+use shielded_vote_circuits::redpallas as rp;
+use shielded_vote_circuits::toy;
 
 /// Generate fixture files for Go and TypeScript tests.
 ///
@@ -234,7 +234,7 @@ fn generate_redpallas_fixtures() {
 }
 
 /// Canonical cast vote sighash domain. Must match sdk/x/vote/types/sighash.go.
-const CAST_VOTE_SIGHASH_DOMAIN: &[u8] = b"ZALLY_CAST_VOTE_SIGHASH_V0";
+const CAST_VOTE_SIGHASH_DOMAIN: &[u8] = b"SVOTE_CAST_VOTE_SIGHASH_V0";
 
 /// Build the canonical signable payload for the RedPallas CastVote test message
 /// used in validate_redpallas_test.go: vote_round_id = 32×0x01, r_vpk = given,
@@ -332,7 +332,7 @@ fn generate_cast_vote_redpallas_fixtures(
 ///   [1392..1424)   round_id (32 bytes)
 ///   [1424..1488)   enc_share (64 bytes: C1 compressed || C2 compressed Pallas points)
 fn generate_share_reveal_fixtures() {
-    use zally_circuits::ffi::build_share_reveal_test_data;
+    use shielded_vote_circuits::ffi::build_share_reveal_test_data;
 
     let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

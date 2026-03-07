@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cosmos/cosmos-sdk/client/flags"
-	"github.com/z-cale/zally/app"
-	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/app"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
 )
 
 // EAKeygenCmd generates an ElGamal keypair for the Election Authority.

@@ -1,8 +1,8 @@
-//! Zally Circuits: Halo2 ZKP circuits, RedPallas signature verification,
+//! Shielded-Vote Circuits: Halo2 ZKP circuits, RedPallas signature verification,
 //! and FFI layer for Go via CGo.
 //!
 //! This crate provides:
-//! - Circuit definitions for the Zally vote chain's three ZKP types
+//! - Circuit definitions for the Shielded-Vote chain's three ZKP types
 //! - RedPallas (RedDSA over Pallas) spend-auth signature verification
 //! - C-compatible FFI functions for calling from Go via CGo
 //!

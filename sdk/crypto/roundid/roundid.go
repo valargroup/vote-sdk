@@ -11,9 +11,9 @@
 package roundid
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../circuits/target/release -lzally_circuits -ldl -lm -lpthread
+#cgo LDFLAGS: -L${SRCDIR}/../../circuits/target/release -lshielded_vote_circuits -ldl -lm -lpthread
 #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
-#include "../../circuits/include/zally_circuits.h"
+#include "../../circuits/include/shielded_vote_circuits.h"
 */
 import "C"
 
@@ -41,7 +41,7 @@ func DeriveRoundID(
 		return roundID, fmt.Errorf("roundid: all byte inputs must be 32 bytes")
 	}
 
-	rc := C.zally_derive_round_id(
+	rc := C.sv_derive_round_id(
 		C.uint64_t(snapshotHeight),
 		(*C.uint8_t)(unsafe.Pointer(&snapshotBlockhash[0])),
 		(*C.uint8_t)(unsafe.Pointer(&proposalsHash[0])),
@@ -57,7 +57,7 @@ func DeriveRoundID(
 	case -1:
 		return roundID, fmt.Errorf("roundid: invalid input (null pointer)")
 	case -3:
-		errMsg := C.GoString(C.zally_last_error())
+		errMsg := C.GoString(C.sv_last_error())
 		return roundID, fmt.Errorf("roundid: %s", errMsg)
 	default:
 		return roundID, fmt.Errorf("roundid: unexpected error code %d", rc)

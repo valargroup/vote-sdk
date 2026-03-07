@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Session & Round
 
-/// Full on-chain representation from VoteRound proto (zvote/v1/types.proto).
+/// Full on-chain representation from VoteRound proto (svote/v1/types.proto).
 /// vote_round_id is a canonical 32-byte Pallas Fp value derived on-chain from
 /// session setup fields via Poseidon hash.
 public struct VotingSession: Equatable, Sendable {
@@ -63,7 +63,7 @@ public struct VotingSession: Equatable, Sendable {
     }
 }
 
-/// Maps to proto SessionStatus (zvote/v1/types.proto).
+/// Maps to proto SessionStatus (svote/v1/types.proto).
 public enum SessionStatus: UInt32, Equatable, Sendable {
     case unspecified = 0
     case active = 1
@@ -351,7 +351,7 @@ public struct DelegationAction: Equatable, Sendable {
     }
 }
 
-/// Maps to MsgDelegateVote (zvote/v1/tx.proto).
+/// Maps to MsgDelegateVote (svote/v1/tx.proto).
 /// All fields needed for the on-chain delegation transaction.
 public struct DelegationRegistration: Equatable, Sendable {
     public let rk: Data
@@ -406,7 +406,7 @@ public struct EncryptedShare: Equatable, Sendable {
     }
 }
 
-/// Maps to MsgCastVote (zvote/v1/tx.proto).
+/// Maps to MsgCastVote (svote/v1/tx.proto).
 public struct VoteCommitmentBundle: Equatable, Sendable {
     public let vanNullifier: Data
     public let voteAuthorityNoteNew: Data
@@ -506,7 +506,7 @@ public struct VanWitness: Equatable, Sendable {
 
 // MARK: - Tree & Transactions
 
-/// Maps to CommitmentTreeState (zvote/v1/types.proto).
+/// Maps to CommitmentTreeState (svote/v1/types.proto).
 public struct CommitmentTreeState: Equatable, Sendable {
     public let nextIndex: UInt64
     public let root: Data
@@ -532,7 +532,7 @@ public struct CastVoteSignature: Equatable, Sendable {
 }
 
 /// Result of checking whether a TX has been included in a block.
-/// Returned by the /zally/v1/tx/{hash} endpoint.
+/// Returned by the /shielded-vote/v1/tx/{hash} endpoint.
 public struct TxConfirmation: Equatable, Sendable {
     public let height: UInt64
     public let code: UInt32
@@ -558,7 +558,7 @@ public struct TxResult: Equatable, Sendable {
     }
 }
 
-/// Maps to QueryProposalTallyResponse (zvote/v1/query.proto).
+/// Maps to QueryProposalTallyResponse (svote/v1/query.proto).
 /// Chain returns map<uint32, uint64> (vote_decision → accumulated amount).
 public struct TallyResult: Equatable, Sendable {
     public struct Entry: Equatable, Sendable {

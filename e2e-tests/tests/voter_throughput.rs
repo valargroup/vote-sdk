@@ -56,7 +56,7 @@ use voting_circuits::vote_proof::{
 
 const VOTE_MANAGER_PRIVKEY_HEX: &str =
     "b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee";
-const VOTE_MANAGER_ADDRESS: &str = "zvote15fjfr6rrs60vu4st6arrd94w5j6z7f6kxr92cg";
+const VOTE_MANAGER_ADDRESS: &str = "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl";
 
 // ---------------------------------------------------------------------------
 // Fixture deserialization types (must match generate_fixtures.rs)
@@ -435,7 +435,7 @@ fn generate_cast_vote(
     let rsk = ask.randomize(&alpha_v);
     let sighash = {
         let mut canonical = Vec::new();
-        canonical.extend_from_slice(b"ZALLY_CAST_VOTE_SIGHASH_V0");
+        canonical.extend_from_slice(b"SVOTE_CAST_VOTE_SIGHASH_V0");
         let mut buf32 = [0u8; 32];
         let vr = round_id.to_repr();
         buf32[..vr.as_ref().len().min(32)]
@@ -579,7 +579,7 @@ fn voter_throughput_stress() {
 
     let (mut body, _, _derived_round_id) =
         create_voting_session_payload(VOTE_MANAGER_ADDRESS, 600, Some(setup_round_fields));
-    body["@type"] = serde_json::json!("/zvote.v1.MsgCreateVotingSession");
+    body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
 
     let vm_config = CosmosTxConfig {
         key_name: "vote-manager".to_string(),
@@ -626,7 +626,7 @@ fn voter_throughput_stress() {
 
     let deleg_result = submit_concurrent(
         deleg_payloads,
-        "/zally/v1/delegate-vote",
+        "/shielded-vote/v1/delegate-vote",
         "delegation",
         &collector,
         1, // sequential: preserve fixture tree leaf ordering
@@ -740,7 +740,7 @@ fn voter_throughput_stress() {
 
     let cast_result = submit_concurrent(
         cast_payloads,
-        "/zally/v1/cast-vote",
+        "/shielded-vote/v1/cast-vote",
         "cast_vote",
         &collector,
         1, // sequential: deterministic tree ordering for position computation

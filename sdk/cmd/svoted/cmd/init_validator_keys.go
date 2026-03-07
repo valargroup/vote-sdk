@@ -14,8 +14,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/zally/app"
-	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/app"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
 )
 
 // InitValidatorKeysCmd generates all cryptographic keys needed for a new validator
@@ -31,9 +31,9 @@ func InitValidatorKeysCmd() *cobra.Command {
   3. EA keypair          — written to <home>/ea.sk and <home>/ea.pk
 
 This is equivalent to running:
-  zallyd keys add <key-name> --keyring-backend <backend>
-  zallyd pallas-keygen
-  zallyd ea-keygen`,
+  svoted keys add <key-name> --keyring-backend <backend>
+  svoted pallas-keygen
+  svoted ea-keygen`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir, _ := cmd.Flags().GetString(flags.FlagHome)
 			keyName, _ := cmd.Flags().GetString("key-name")

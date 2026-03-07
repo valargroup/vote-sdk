@@ -53,7 +53,7 @@ pub struct Args {
 
     /// Chain SDK URL for checking active rounds before rebuild.
     /// If set, POST /snapshot/prepare will reject rebuilds when a round is active.
-    #[arg(long, env = "ZALLY_CHAIN_URL")]
+    #[arg(long, env = "SVOTE_CHAIN_URL")]
     chain_url: Option<String>,
 }
 
@@ -276,7 +276,7 @@ struct PrepareRequest {
 /// Check if there's an active voting round by querying the chain SDK.
 /// Returns `Ok(Some(round_id))` if active, `Ok(None)` if not.
 async fn check_active_round(chain_url: &str) -> Result<Option<String>> {
-    let url = format!("{}/zally/v1/rounds/active", chain_url.trim_end_matches('/'));
+    let url = format!("{}/shielded-vote/v1/rounds/active", chain_url.trim_end_matches('/'));
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()?;

@@ -8,7 +8,7 @@ import (
 
 // CastVoteSighashDomain is the domain string for the canonical cast-vote
 // sighash. Must match the e2e-tests encoding.
-const CastVoteSighashDomain = "ZALLY_CAST_VOTE_SIGHASH_V0"
+const CastVoteSighashDomain = "SVOTE_CAST_VOTE_SIGHASH_V0"
 
 // ComputeCastVoteSighash returns the 32-byte Blake2b-256 hash of the
 // canonical signable payload for MsgCastVote. The chain computes this

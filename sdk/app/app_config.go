@@ -34,9 +34,9 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	// Vote module: import for depinject side-effects (registers module provider).
-	_ "github.com/z-cale/zally/x/vote"
-	votemodulelv1 "github.com/z-cale/zally/x/vote/module/v1"
-	votetypes "github.com/z-cale/zally/x/vote/types"
+	_ "github.com/valargroup/shielded-vote/x/vote"
+	votemodulelv1 "github.com/valargroup/shielded-vote/x/vote/module/v1"
+	votetypes "github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 func init() {
@@ -44,13 +44,13 @@ func init() {
 	// This is needed because the runtime module computes module authority addresses
 	// using the global SDK config, and these must match the auth module's Bech32Prefix.
 	cfg := sdk.GetConfig()
-	cfg.SetBech32PrefixForAccount("zvote", "zvotepub")
-	cfg.SetBech32PrefixForValidator("zvotevaloper", "zvotevaloperpub")
-	cfg.SetBech32PrefixForConsensusNode("zvotevalcons", "zvotevalconspub")
+	cfg.SetBech32PrefixForAccount("sv", "svpub")
+	cfg.SetBech32PrefixForValidator("svvaloper", "svvaloperpub")
+	cfg.SetBech32PrefixForConsensusNode("svvalcons", "svvalconspub")
 
 	// Override the default bond denom so that DefaultParams(), genesis generation,
-	// and test helpers all use "uzvote" without needing post-hoc JSON patching.
-	sdk.DefaultBondDenom = "uzvote"
+	// and test helpers all use "usvote" without needing post-hoc JSON patching.
+	sdk.DefaultBondDenom = "usvote"
 }
 
 var (
@@ -70,14 +70,14 @@ var (
 		stakingtypes.NotBondedPoolName,
 	}
 
-	// ModuleConfig is the module configuration for the stripped-down Zally chain.
+	// ModuleConfig is the module configuration for the Shielded-Vote chain.
 	// Only the minimal modules needed for block production are included:
 	// auth, bank, staking, distribution, consensus, genutil, tx.
 	ModuleConfig = []*appv1alpha1.ModuleConfig{
 		{
 			Name: runtime.ModuleName,
 			Config: appconfig.WrapAny(&runtimev1alpha1.Module{
-				AppName: "Zally",
+				AppName: "Shielded-Vote",
 				PreBlockers: []string{
 					authtypes.ModuleName,
 				},
@@ -128,7 +128,7 @@ var (
 		{
 			Name: authtypes.ModuleName,
 			Config: appconfig.WrapAny(&authmodulev1.Module{
-				Bech32Prefix:             "zvote",
+				Bech32Prefix:             "sv",
 				ModuleAccountPermissions: moduleAccPerms,
 			}),
 		},
@@ -141,8 +141,8 @@ var (
 		{
 			Name: stakingtypes.ModuleName,
 			Config: appconfig.WrapAny(&stakingmodulev1.Module{
-				Bech32PrefixValidator: "zvotevaloper",
-				Bech32PrefixConsensus: "zvotevalcons",
+			Bech32PrefixValidator: "svvaloper",
+			Bech32PrefixConsensus: "svvalcons",
 			}),
 		},
 		{

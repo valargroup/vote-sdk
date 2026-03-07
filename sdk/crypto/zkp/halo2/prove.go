@@ -3,9 +3,9 @@
 package halo2
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../../circuits/target/release -lzally_circuits -ldl -lm -lpthread
+#cgo LDFLAGS: -L${SRCDIR}/../../../circuits/target/release -lshielded_vote_circuits -ldl -lm -lpthread
 #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
-#include "../../../circuits/include/zally_circuits.h"
+#include "../../../circuits/include/shielded_vote_circuits.h"
 */
 import "C"
 
@@ -57,7 +57,7 @@ func GenerateShareRevealProof(
 	var proofBuf [proofCapacity]byte
 	var proofLen C.size_t
 
-	rc := C.zally_generate_share_reveal(
+	rc := C.sv_generate_share_reveal(
 		(*C.uint8_t)(unsafe.Pointer(&merklePath[0])),
 		C.size_t(len(merklePath)),
 		(*C.uint8_t)(unsafe.Pointer(&commsBuf[0])),

@@ -17,9 +17,9 @@
 package halo2
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../../circuits/target/release -lzally_circuits -ldl -lm -lpthread
+#cgo LDFLAGS: -L${SRCDIR}/../../../circuits/target/release -lshielded_vote_circuits -ldl -lm -lpthread
 #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
-#include "../../../circuits/include/zally_circuits.h"
+#include "../../../circuits/include/shielded_vote_circuits.h"
 */
 import "C"
 
@@ -29,14 +29,14 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/crypto/zkp"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/zkp"
 )
 
 // rustLastError retrieves the thread-local error message stored by the most
 // recent failing Rust FFI call. Returns an empty string if none was set.
 func rustLastError() string {
-	return C.GoString(C.zally_last_error())
+	return C.GoString(C.sv_last_error())
 }
 
 // pallasFpModulus is the Pallas base field modulus in big-endian byte order:
@@ -94,7 +94,7 @@ func VerifyToyProof(proof, publicInput []byte) error {
 		return fmt.Errorf("public input must be 32 bytes, got %d", len(publicInput))
 	}
 
-	rc := C.zally_verify_toy_proof(
+	rc := C.sv_verify_toy_proof(
 		(*C.uint8_t)(unsafe.Pointer(&proof[0])),
 		C.size_t(len(proof)),
 		(*C.uint8_t)(unsafe.Pointer(&publicInput[0])),
@@ -216,7 +216,7 @@ func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 		}
 	}
 
-	rc := C.zally_verify_delegation_proof(
+	rc := C.sv_verify_delegation_proof(
 		(*C.uint8_t)(unsafe.Pointer(&proof[0])),
 		C.size_t(len(proof)),
 		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
@@ -316,7 +316,7 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 		return err
 	}
 
-	rc := C.zally_verify_vote_proof(
+	rc := C.sv_verify_vote_proof(
 		(*C.uint8_t)(unsafe.Pointer(&proof[0])),
 		C.size_t(len(proof)),
 		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
@@ -423,7 +423,7 @@ func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
 		return err
 	}
 
-	rc := C.zally_verify_share_reveal_proof(
+	rc := C.sv_verify_share_reveal_proof(
 		(*C.uint8_t)(unsafe.Pointer(&proof[0])),
 		C.size_t(len(proof)),
 		(*C.uint8_t)(unsafe.Pointer(&buf[0])),

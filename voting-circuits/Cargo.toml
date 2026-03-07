@@ -2,7 +2,7 @@
 name = "voting-circuits"
 version = "0.1.0"
 edition = "2021"
-description = "Governance ZKP circuits (delegation, vote proof, share reveal) for the Zally voting protocol"
+description = "Governance ZKP circuits (delegation, vote proof, share reveal) for the Shielded-Vote protocol"
 
 [dependencies]
 orchard = { path = "../orchard", features = ["circuit"] }

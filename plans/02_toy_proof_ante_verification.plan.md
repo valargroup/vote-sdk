@@ -53,7 +53,7 @@ Create a `Halo2Verifier` struct that implements `zkp.Verifier`:
 
 package halo2
 
-import "github.com/z-cale/zally/crypto/zkp"
+import "github.com/valargroup/shielded-vote/crypto/zkp"
 
 type Halo2Verifier struct{}
 
@@ -84,7 +84,7 @@ Provide a stub so code that imports `halo2.NewVerifier()` still compiles without
 
 package halo2
 
-import "github.com/z-cale/zally/crypto/zkp"
+import "github.com/valargroup/shielded-vote/crypto/zkp"
 
 func NewVerifier() zkp.Verifier {
     return zkp.NewMockVerifier()
@@ -96,7 +96,7 @@ func NewVerifier() zkp.Verifier {
 Replace the hardcoded mock with the build-tag-aware constructor:
 
 ```go
-import halo2 "github.com/z-cale/zally/crypto/zkp/halo2"
+import halo2 "github.com/valargroup/shielded-vote/crypto/zkp/halo2"
 
 // ...
 ZKPVerifier: halo2.NewVerifier(),

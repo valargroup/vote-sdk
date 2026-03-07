@@ -12,7 +12,7 @@ import (
 
 	"cosmossdk.io/log"
 
-	"github.com/z-cale/zally/app"
+	"github.com/valargroup/shielded-vote/app"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/debug"
@@ -27,6 +27,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
+
+	votecli "github.com/valargroup/shielded-vote/x/vote/client/cli"
 )
 
 // initCometBFTConfig helps to override default CometBFT Config values.
@@ -39,13 +41,52 @@ func initCometBFTConfig() *cmtcfg.Config {
 	return cfg
 }
 
+// VoteConfig holds the [vote] section of app.toml.
+type VoteConfig struct {
+	EASkPath     string `mapstructure:"ea_sk_path"`
+	PallasSkPath string `mapstructure:"pallas_sk_path"`
+	CometRPC     string `mapstructure:"comet_rpc"`
+}
+
+// CustomAppConfig embeds the standard server config and adds [vote].
+type CustomAppConfig struct {
+	serverconfig.Config `mapstructure:",squash"`
+	Vote                VoteConfig `mapstructure:"vote"`
+}
+
+const voteConfigTemplate = `
+###############################################################################
+###                         Vote Configuration                              ###
+###############################################################################
+
+[vote]
+
+# Path to the Election Authority secret key file.
+ea_sk_path = "{{ .Vote.EASkPath }}"
+
+# Path to the Pallas secret key file.
+pallas_sk_path = "{{ .Vote.PallasSkPath }}"
+
+# CometBFT RPC endpoint. Adjust to the node's RPC port.
+comet_rpc = "{{ .Vote.CometRPC }}"
+`
+
 // initAppConfig helps to override default appConfig template and configs.
 func initAppConfig() (string, interface{}) {
 	srvCfg := serverconfig.DefaultConfig()
 	// Set default min gas prices to 0 for the vote chain (no fees needed).
-	srvCfg.MinGasPrices = "0stake"
+	srvCfg.MinGasPrices = "0usvote"
 
-	return serverconfig.DefaultConfigTemplate, srvCfg
+	customConfig := CustomAppConfig{
+		Config: *srvCfg,
+		Vote: VoteConfig{
+		EASkPath:     "$HOME/.svoted/ea.sk",
+		PallasSkPath: "$HOME/.svoted/pallas.sk",
+			CometRPC:     "http://localhost:26657",
+		},
+	}
+
+	return serverconfig.DefaultConfigTemplate + voteConfigTemplate, customConfig
 }
 
 func initRootCmd(
@@ -56,14 +97,40 @@ func initRootCmd(
 	cfg := sdk.GetConfig()
 	cfg.Seal()
 
+	// Capture a reference to the app created by newApp, so the helper
+	// PostSetup can access the VoteKeeper for reading tree leaves.
+	var svoteAppRef *app.SvoteApp
+	newAppFn := func(
+		logger log.Logger,
+		db dbm.DB,
+		traceStore io.Writer,
+		appOpts servertypes.AppOptions,
+	) servertypes.Application {
+		baseappOptions := server.DefaultBaseappOptions(appOpts)
+		svoteAppRef = app.NewSvoteApp(
+			logger, db, traceStore, true,
+			appOpts,
+			baseappOptions...,
+		)
+		return svoteAppRef
+	}
+
 	rootCmd.AddCommand(
 		genutilcli.InitCmd(basicManager, app.DefaultNodeHome),
 		debug.Cmd(),
 		pruning.Cmd(newApp, app.DefaultNodeHome),
 		snapshot.Cmd(newApp),
+		EAKeygenCmd(),
+		PallasKeygenCmd(),
+		EncryptEAKeyCmd(),
+		InitValidatorKeysCmd(),
+		SignArbitraryCmd(),
 	)
 
-	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newApp, appExport, server.StartCmdOptions{})
+	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newAppFn, appExport, server.StartCmdOptions{
+		PostSetup: helperPostSetup(&svoteAppRef),
+		AddFlags:  addHelperFlags,
+	})
 
 	// add keybase, auxiliary RPC, query, genesis, and tx child commands
 	rootCmd.AddCommand(
@@ -75,7 +142,7 @@ func initRootCmd(
 	)
 }
 
-// genesisCommand builds genesis-related `zvoted genesis` command.
+// genesisCommand builds genesis-related `svoted genesis` command.
 func genesisCommand(txConfig client.TxConfig, basicManager module.BasicManager, cmds ...*cobra.Command) *cobra.Command {
 	cmd := genutilcli.Commands(txConfig, basicManager, app.DefaultNodeHome)
 
@@ -126,6 +193,7 @@ func txCommand() *cobra.Command {
 		authcmd.GetEncodeCommand(),
 		authcmd.GetDecodeCommand(),
 		authcmd.GetSimulateCmd(),
+		votecli.GetTxCmd(),
 	)
 
 	return cmd
@@ -139,14 +207,14 @@ func newApp(
 	appOpts servertypes.AppOptions,
 ) servertypes.Application {
 	baseappOptions := server.DefaultBaseappOptions(appOpts)
-	return app.NewZallyApp(
+	return app.NewSvoteApp(
 		logger, db, traceStore, true,
 		appOpts,
 		baseappOptions...,
 	)
 }
 
-// appExport creates a new ZVoteApp (optionally at a given height) and exports state.
+// appExport creates a new SvoteApp (optionally at a given height) and exports state.
 func appExport(
 	logger log.Logger,
 	db dbm.DB,
@@ -166,16 +234,16 @@ func appExport(
 	viperAppOpts.Set(server.FlagInvCheckPeriod, 1)
 	appOpts = viperAppOpts
 
-	var zvoteApp *app.ZallyApp
+	var svoteApp *app.SvoteApp
 	if height != -1 {
-		zvoteApp = app.NewZallyApp(logger, db, traceStore, false, appOpts)
+		svoteApp = app.NewSvoteApp(logger, db, traceStore, false, appOpts)
 
-		if err := zvoteApp.LoadHeight(height); err != nil {
+		if err := svoteApp.LoadHeight(height); err != nil {
 			return servertypes.ExportedApp{}, err
 		}
 	} else {
-		zvoteApp = app.NewZallyApp(logger, db, traceStore, true, appOpts)
+		svoteApp = app.NewSvoteApp(logger, db, traceStore, true, appOpts)
 	}
 
-	return zvoteApp.ExportAppStateAndValidators(forZeroHeight, jailAllowedAddrs, modulesToExport)
+	return svoteApp.ExportAppStateAndValidators(forZeroHeight, jailAllowedAddrs, modulesToExport)
 }

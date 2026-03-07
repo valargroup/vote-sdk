@@ -1,9 +1,9 @@
 # Build pre-compiled binaries and publish a GitgHub Release on version tags.
 #
 # Tarball layout:
-#   zally-<version>-<platform>/
-#     bin/zallyd, create-val-tx, nf-server
-#     systemd/zallyd-val{1,2,3}.service, nullifier-query-server.service  (Linux only)
+#   shielded-vote-<version>-<platform>/
+#     bin/svoted, create-val-tx, nf-server
+#     systemd/svoted-val{1,2,3}.service, nullifier-query-server.service  (Linux only)
 #     scripts/init_multi.sh
 #     config/Caddyfile
 #
@@ -65,15 +65,15 @@ jobs:
             # Cross-compile circuits for x86_64 from ARM64 macOS
             cargo build --release --manifest-path sdk/circuits/Cargo.toml --target ${{ matrix.rust_target }}
             mkdir -p sdk/circuits/target/release
-            ln -sf $(pwd)/sdk/circuits/target/${{ matrix.rust_target }}/release/libzally_circuits.a \
-                   sdk/circuits/target/release/libzally_circuits.a
-            # Cross-compile zallyd (Go+CGo)
+            ln -sf $(pwd)/sdk/circuits/target/${{ matrix.rust_target }}/release/libshielded_vote_circuits.a \
+                   sdk/circuits/target/release/libshielded_vote_circuits.a
+            # Cross-compile svoted (Go+CGo)
             cd sdk
             CC="clang -target x86_64-apple-macosx" \
             CGO_CFLAGS="-target x86_64-apple-macosx" \
             CGO_LDFLAGS="-target x86_64-apple-macosx" \
             CGO_ENABLED=1 GOOS=darwin GOARCH=${{ matrix.goarch }} \
-              go build -tags "halo2,redpallas" -o zallyd ./cmd/zallyd
+              go build -tags "halo2,redpallas" -o svoted ./cmd/svoted
             # Cross-compile create-val-tx (pure Go)
             CGO_ENABLED=0 GOOS=darwin GOARCH=${{ matrix.goarch }} go build -o create-val-tx ./scripts/create-val-tx
           else
@@ -86,7 +86,7 @@ jobs:
         with:
           name: sdk-binaries-${{ matrix.platform }}
           path: |
-            sdk/zallyd
+            sdk/svoted
             sdk/create-val-tx
 
   build-ingest:
@@ -195,28 +195,28 @@ jobs:
       - name: Assemble tarball
         run: |
           VERSION="${GITHUB_REF_NAME}"
-          DIR="zally-${VERSION}-${{ matrix.platform }}"
+          DIR="shielded-vote-${VERSION}-${{ matrix.platform }}"
           mkdir -p "${DIR}/bin" "${DIR}/scripts" "${DIR}/config"
 
           # Binaries (artifact downloads flatten the common path prefix)
-          cp sdk-binaries/zallyd sdk-binaries/create-val-tx "${DIR}/bin/"
+          cp sdk-binaries/svoted sdk-binaries/create-val-tx "${DIR}/bin/"
           cp ingest-binaries/nf-server "${DIR}/bin/"
           chmod +x "${DIR}/bin/"*
 
-          # Systemd service files — Linux only, transform paths for /opt/zally layout
+          # Systemd service files — Linux only, transform paths for /opt/shielded-vote layout
           if [ "${{ matrix.os_family }}" = "linux" ]; then
             mkdir -p "${DIR}/systemd"
-            for f in sdk/docs/zallyd-val{1,2,3}.service; do
+            for f in sdk/docs/svoted-val{1,2,3}.service; do
               name=$(basename "$f")
-              sed -e 's|/opt/zally-chain|/opt/zally|g' \
-                  -e 's|ExecStart=/opt/zally/zallyd|ExecStart=/opt/zally/bin/zallyd|' \
+              sed -e 's|/opt/shielded-vote|/opt/shielded-vote|g' \
+                  -e 's|ExecStart=/opt/shielded-vote/svoted|ExecStart=/opt/shielded-vote/bin/svoted|' \
                   "$f" > "${DIR}/systemd/${name}"
             done
 
-            # Nullifier query server service — remap paths to /opt/zally layout
-            sed -e 's|WorkingDirectory=/opt/nullifier-ingest|WorkingDirectory=/opt/zally/nullifier-data|' \
-                -e 's|DATA_DIR=/opt/nullifier-ingest|DATA_DIR=/opt/zally/nullifier-data|' \
-                -e 's|ExecStart=/opt/nullifier-ingest/nf-server|ExecStart=/opt/zally/bin/nf-server|' \
+            # Nullifier query server service — remap paths to /opt/shielded-vote layout
+            sed -e 's|WorkingDirectory=/opt/nullifier-ingest|WorkingDirectory=/opt/shielded-vote/nullifier-data|' \
+                -e 's|DATA_DIR=/opt/nullifier-ingest|DATA_DIR=/opt/shielded-vote/nullifier-data|' \
+                -e 's|ExecStart=/opt/nullifier-ingest/nf-server|ExecStart=/opt/shielded-vote/bin/nf-server|' \
                 nullifier-ingest/docs/nullifier-query-server.service > "${DIR}/systemd/nullifier-query-server.service"
           fi
 
@@ -292,7 +292,7 @@ jobs:
           use_https = True
           EOF
           for PLATFORM in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
-            TARBALL="zally-${VERSION}-${PLATFORM}.tar.gz"
+            TARBALL="shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
             s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" s3://vote/ --acl-public --force
             s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}.sha256" s3://vote/ --acl-public --force
           done

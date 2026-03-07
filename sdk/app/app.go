@@ -32,24 +32,24 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
 
-	voteapi "github.com/z-cale/zally/api"
-	"github.com/z-cale/zally/internal/helper"
-	votekeeper "github.com/z-cale/zally/x/vote/keeper"
+	voteapi "github.com/valargroup/shielded-vote/api"
+	"github.com/valargroup/shielded-vote/internal/helper"
+	votekeeper "github.com/valargroup/shielded-vote/x/vote/keeper"
 )
 
-// DefaultNodeHome is the default home directory for the zallyd daemon.
+// DefaultNodeHome is the default home directory for the svoted daemon.
 var DefaultNodeHome string
 
 var (
-	_ runtime.AppI            = (*ZallyApp)(nil)
-	_ servertypes.Application = (*ZallyApp)(nil)
+	_ runtime.AppI            = (*SvoteApp)(nil)
+	_ servertypes.Application = (*SvoteApp)(nil)
 )
 
-// ZallyApp extends an ABCI application for the Zally chain.
+// SvoteApp extends an ABCI application for the Shielded-Vote chain.
 // Built from a stripped-down Cosmos SDK simapp with only the minimal
 // modules needed for block production (auth, bank, staking, distribution,
 // consensus, genutil).
-type ZallyApp struct {
+type SvoteApp struct {
 	*runtime.App
 	legacyAmino       *codec.LegacyAmino
 	appCodec          codec.Codec
@@ -76,23 +76,23 @@ type ZallyApp struct {
 
 func init() {
 	var err error
-	DefaultNodeHome, err = clienthelpers.GetNodeHomeDirectory(".zallyd")
+	DefaultNodeHome, err = clienthelpers.GetNodeHomeDirectory(".svoted")
 	if err != nil {
 		panic(err)
 	}
 }
 
-// NewZallyApp returns a reference to an initialized ZallyApp.
-func NewZallyApp(
+// NewSvoteApp returns a reference to an initialized SvoteApp.
+func NewSvoteApp(
 	logger log.Logger,
 	db dbm.DB,
 	traceStore io.Writer,
 	loadLatest bool,
 	appOpts servertypes.AppOptions,
 	baseAppOptions ...func(*baseapp.BaseApp),
-) *ZallyApp {
+) *SvoteApp {
 	var (
-		app        = &ZallyApp{}
+		app        = &SvoteApp{}
 		appBuilder *runtime.AppBuilder
 
 		// Merge the AppConfig and runtime configuration.
@@ -208,7 +208,7 @@ func NewZallyApp(
 // setAnteHandler wires up the dual-mode ante handler chain.
 //   - Vote transactions (VoteTxWrapper): ZKP/RedPallas validation with infinite gas
 //   - Standard Cosmos transactions: standard SDK ante chain (sig verify, fees, etc.)
-func (app *ZallyApp) setAnteHandler(txConfig client.TxConfig) {
+func (app *SvoteApp) setAnteHandler(txConfig client.TxConfig) {
 	cryptoOpts := ProductionOpts()
 	anteHandler, err := NewDualAnteHandler(DualAnteHandlerOptions{
 		HandlerOptions: ante.HandlerOptions{
@@ -229,27 +229,27 @@ func (app *ZallyApp) setAnteHandler(txConfig client.TxConfig) {
 }
 
 // LegacyAmino returns the app's amino codec.
-func (app *ZallyApp) LegacyAmino() *codec.LegacyAmino {
+func (app *SvoteApp) LegacyAmino() *codec.LegacyAmino {
 	return app.legacyAmino
 }
 
 // AppCodec returns the app's codec.
-func (app *ZallyApp) AppCodec() codec.Codec {
+func (app *SvoteApp) AppCodec() codec.Codec {
 	return app.appCodec
 }
 
 // InterfaceRegistry returns the app's InterfaceRegistry.
-func (app *ZallyApp) InterfaceRegistry() codectypes.InterfaceRegistry {
+func (app *SvoteApp) InterfaceRegistry() codectypes.InterfaceRegistry {
 	return app.interfaceRegistry
 }
 
 // TxConfig returns the app's TxConfig.
-func (app *ZallyApp) TxConfig() client.TxConfig {
+func (app *SvoteApp) TxConfig() client.TxConfig {
 	return app.txConfig
 }
 
 // GetKey returns the KVStoreKey for the provided store key.
-func (app *ZallyApp) GetKey(storeKey string) *storetypes.KVStoreKey {
+func (app *SvoteApp) GetKey(storeKey string) *storetypes.KVStoreKey {
 	sk := app.UnsafeFindStoreKey(storeKey)
 	kvStoreKey, ok := sk.(*storetypes.KVStoreKey)
 	if !ok {
@@ -259,7 +259,7 @@ func (app *ZallyApp) GetKey(storeKey string) *storetypes.KVStoreKey {
 }
 
 // kvStoreKeys returns all the app's KV store keys.
-func (app *ZallyApp) kvStoreKeys() map[string]*storetypes.KVStoreKey {
+func (app *SvoteApp) kvStoreKeys() map[string]*storetypes.KVStoreKey {
 	keys := make(map[string]*storetypes.KVStoreKey)
 	for _, k := range app.GetStoreKeys() {
 		if kv, ok := k.(*storetypes.KVStoreKey); ok {
@@ -270,18 +270,18 @@ func (app *ZallyApp) kvStoreKeys() map[string]*storetypes.KVStoreKey {
 }
 
 // LoadHeight loads a particular height.
-func (app *ZallyApp) LoadHeight(height int64) error {
+func (app *SvoteApp) LoadHeight(height int64) error {
 	return app.LoadVersion(height)
 }
 
 // SimulationManager implements the SimulationApp interface (required by runtime.AppI).
 // We don't use simulation, so this returns nil.
-func (app *ZallyApp) SimulationManager() *module.SimulationManager {
+func (app *SvoteApp) SimulationManager() *module.SimulationManager {
 	return nil
 }
 
 // RegisterAPIRoutes registers all application module routes with the provided API server.
-func (app *ZallyApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIConfig) {
+func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIConfig) {
 	app.App.RegisterAPIRoutes(apiSvr, apiConfig)
 
 	// Register vote module REST endpoints (tx submission + queries).
@@ -296,8 +296,8 @@ func (app *ZallyApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 	voteHandler := voteapi.NewHandler(voteapi.HandlerConfig{
 		CometRPCEndpoint: cometRPC,
 		Snapshot: voteapi.SnapshotConfig{
-			PIRServiceURL:    os.Getenv("ZALLY_PIR_URL"),
-			LightwalletdURLs: voteapi.ParseLightwalletdURLs(os.Getenv("ZALLY_LWD_URLS")),
+			PIRServiceURL:    os.Getenv("SVOTE_PIR_URL"),
+			LightwalletdURLs: voteapi.ParseLightwalletdURLs(os.Getenv("SVOTE_LWD_URLS")),
 		},
 	})
 	voteHandler.RegisterTxRoutes(apiSvr.Router)
@@ -339,12 +339,12 @@ func (app *ZallyApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 }
 
 // SetHelper publishes the helper instance for concurrent readers.
-func (app *ZallyApp) SetHelper(h *helper.Helper) {
+func (app *SvoteApp) SetHelper(h *helper.Helper) {
 	app.helperRef.Store(h)
 }
 
 // GetHelper returns the currently published helper instance.
-func (app *ZallyApp) GetHelper() *helper.Helper {
+func (app *SvoteApp) GetHelper() *helper.Helper {
 	return app.helperRef.Load()
 }
 

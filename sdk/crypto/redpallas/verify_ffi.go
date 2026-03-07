@@ -1,7 +1,7 @@
 //go:build redpallas
 
 // This file provides CGo bindings to the RedPallas signature verification
-// function exported by the zally-circuits Rust static library.
+// function exported by the shielded-vote-circuits Rust static library.
 //
 // Only compiled when the "redpallas" build tag is set:
 //
@@ -13,9 +13,9 @@
 package redpallas
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../circuits/target/release -lzally_circuits -ldl -lm -lpthread
+#cgo LDFLAGS: -L${SRCDIR}/../../circuits/target/release -lshielded_vote_circuits -ldl -lm -lpthread
 #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
-#include "../../circuits/include/zally_circuits.h"
+#include "../../circuits/include/shielded_vote_circuits.h"
 */
 import "C"
 
@@ -44,7 +44,7 @@ func VerifySpendAuthSig(rk, sighash, sig []byte) error {
 		return fmt.Errorf("redpallas: sig must be 64 bytes, got %d", len(sig))
 	}
 
-	rc := C.zally_verify_redpallas_sig(
+	rc := C.sv_verify_redpallas_sig(
 		(*C.uint8_t)(unsafe.Pointer(&rk[0])),
 		C.size_t(len(rk)),
 		(*C.uint8_t)(unsafe.Pointer(&sighash[0])),

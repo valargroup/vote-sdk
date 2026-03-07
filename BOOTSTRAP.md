@@ -1,6 +1,6 @@
 # Bootstrap Playbook
 
-End-to-end guide for standing up a new Zally network from scratch. Each step gives the exact command; detailed explanations live in the linked docs.
+End-to-end guide for standing up a new Shielded-Vote network from scratch. Each step gives the exact command; detailed explanations live in the linked docs.
 
 ## Prerequisites
 
@@ -33,9 +33,9 @@ See: [`sdk/deploy/Caddyfile`](sdk/deploy/Caddyfile)
 ### 1.3 Install systemd units
 
 ```bash
-scp sdk/docs/zallyd-val{1,2,3}.service root@<SERVER_IP>:/etc/systemd/system/
+scp sdk/docs/svoted-val{1,2,3}.service root@<SERVER_IP>:/etc/systemd/system/
 scp nullifier-ingest/docs/nullifier-query-server.service root@<SERVER_IP>:/etc/systemd/system/
-ssh root@<SERVER_IP> "systemctl daemon-reload && systemctl enable zallyd-val1 zallyd-val2 zallyd-val3 nullifier-query-server"
+ssh root@<SERVER_IP> "systemctl daemon-reload && systemctl enable svoted-val1 svoted-val2 svoted-val3 nullifier-query-server"
 ```
 
 See: [`sdk/docs/deploy-setup.md` section 2](sdk/docs/deploy-setup.md)
@@ -55,9 +55,9 @@ In **Settings > Secrets and variables > Actions**, add:
 Create a **production** environment and add `CEREMONY_SSH_KEY` (ed25519 private key):
 
 ```bash
-ssh-keygen -t ed25519 -C "github-actions" -f /tmp/zally-ci-key -N ""
-ssh-copy-id -i /tmp/zally-ci-key.pub root@<SERVER_IP>
-# Paste contents of /tmp/zally-ci-key into the CEREMONY_SSH_KEY secret
+ssh-keygen -t ed25519 -C "github-actions" -f /tmp/shielded-vote-ci-key -N ""
+ssh-copy-id -i /tmp/shielded-vote-ci-key.pub root@<SERVER_IP>
+# Paste contents of /tmp/shielded-vote-ci-key into the CEREMONY_SSH_KEY secret
 ```
 
 See: [`sdk/docs/deploy-setup.md` section 1](sdk/docs/deploy-setup.md)
@@ -80,14 +80,14 @@ The first deploy with `reset_chain=true` builds everything and initializes the 3
 
 1. Go to **Actions > Deploy SDK chain > Run workflow**
 2. Check **Reset chain state**
-3. Run — this builds `zallyd` + `create-val-tx`, runs `init_multi.sh --ci`, starts all 3 validators, and registers val2/val3
+3. Run — this builds `svoted` + `create-val-tx`, runs `init_multi.sh --ci`, starts all 3 validators, and registers val2/val3
 
 ### 2.2 Verify chain is running
 
 ```bash
 ssh root@<SERVER_IP>
-systemctl status zallyd-val1 zallyd-val2 zallyd-val3
-curl -s http://localhost:1418/zally/v1/commitment-tree/latest | jq .
+systemctl status svoted-val1 svoted-val2 svoted-val3
+curl -s http://localhost:1418/shielded-vote/v1/commitment-tree/latest | jq .
 ```
 
 ### 2.3 Register validator URL in Edge Config
@@ -136,7 +136,7 @@ In the admin UI, register the nullifier service URL (e.g. `https://your-domain.c
 4. Verify the round transitions from **PENDING** to **ACTIVE**:
 
 ```bash
-curl -s http://localhost:1418/zally/v1/sessions | jq '.[0].status'
+curl -s http://localhost:1418/shielded-vote/v1/sessions | jq '.[0].status'
 ```
 
 ## Phase 5: Onboard Validators
@@ -188,12 +188,12 @@ Run from the server to confirm everything is healthy:
 
 ```bash
 # Chain validators
-for svc in zallyd-val1 zallyd-val2 zallyd-val3; do
+for svc in svoted-val1 svoted-val2 svoted-val3; do
   echo "$svc: $(systemctl is-active $svc)"
 done
 
 # Chain API
-curl -sf http://localhost:1418/zally/v1/commitment-tree/latest > /dev/null && echo "Chain API: OK"
+curl -sf http://localhost:1418/shielded-vote/v1/commitment-tree/latest > /dev/null && echo "Chain API: OK"
 
 # Helper server
 curl -sf http://localhost:1418/api/v1/status > /dev/null && echo "Helper server: OK"
@@ -202,24 +202,24 @@ curl -sf http://localhost:1418/api/v1/status > /dev/null && echo "Helper server:
 curl -sf http://localhost:3000/health > /dev/null && echo "Nullifier service: OK"
 
 # HTTPS (external)
-curl -sf https://<YOUR_DOMAIN>/zally/v1/commitment-tree/latest > /dev/null && echo "HTTPS proxy: OK"
+curl -sf https://<YOUR_DOMAIN>/shielded-vote/v1/commitment-tree/latest > /dev/null && echo "HTTPS proxy: OK"
 
 # Voting sessions
-curl -s http://localhost:1418/zally/v1/sessions | jq '.[0].status'
+curl -s http://localhost:1418/shielded-vote/v1/sessions | jq '.[0].status'
 ```
 
 ## Troubleshooting
 
 **Chain won't start / validators not connecting**
 ```bash
-journalctl -u zallyd-val1 --no-pager -n 50
+journalctl -u svoted-val1 --no-pager -n 50
 # Check persistent_peers in config.toml, ensure P2P port 26656 is open
 ```
 
 **Helper server not responding**
 ```bash
 # Verify [helper] section exists in val1's app.toml
-grep -A5 '\[helper\]' /opt/zally-chain/.zallyd-val1/config/app.toml
+grep -A5 '\[helper\]' /opt/shielded-vote/.svoted-val1/config/app.toml
 ```
 
 **Nullifier service unhealthy**
@@ -241,12 +241,12 @@ caddy validate --config /etc/caddy/Caddyfile
 # Check validator count — need enough ack'ing validators
 curl -s http://localhost:1418/cosmos/staking/v1beta1/validators | jq '[.validators[] | select(.status == "BOND_STATUS_BONDED")] | length'
 # Check val1 logs for ceremony errors
-journalctl -u zallyd-val1 --no-pager | grep -i ceremony
+journalctl -u svoted-val1 --no-pager | grep -i ceremony
 ```
 
 **join.sh checksum failure**
 ```bash
 # Re-run the release workflow to regenerate checksums, or download manually:
-curl -fsSL -o /tmp/zally.tar.gz "https://vote.fra1.digitaloceanspaces.com/zally-<VERSION>-<PLATFORM>.tar.gz"
+curl -fsSL -o /tmp/zally.tar.gz "https://vote.fra1.digitaloceanspaces.com/shielded-vote-<VERSION>-<PLATFORM>.tar.gz"
 sha256sum /tmp/zally.tar.gz
 ```

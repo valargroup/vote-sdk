@@ -1,10 +1,10 @@
 syntax = "proto3";
-package zvote.v1;
+package svote.v1;
 
 import "cosmos/msg/v1/msg.proto";
-import "zvote/v1/types.proto";
+import "svote/v1/types.proto";
 
-option go_package = "github.com/z-cale/zally/x/vote/types";
+option go_package = "github.com/valargroup/shielded-vote/x/vote/types";
 
 // Msg defines the vote module's Msg service.
 // NOTE: Vote transactions use ZKP + RedPallas authentication instead of standard

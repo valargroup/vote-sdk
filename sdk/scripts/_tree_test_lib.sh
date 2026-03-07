@@ -10,30 +10,30 @@ tree_log_line() {
 }
 
 tree_build_tx_env_prefix() {
-  local zally_home="${ZALLY_HOME:-}"
-  local zally_node_url="${ZALLY_NODE_URL:-}"
-  local zally_pallas_pk_path="${ZALLY_PALLAS_PK_PATH:-}"
+  local svote_home="${SVOTE_HOME:-}"
+  local svote_node_url="${SVOTE_NODE_URL:-}"
+  local svote_pallas_pk_path="${SVOTE_PALLAS_PK_PATH:-}"
 
   # Local multi-validator default: val1 is the tx signing home.
-  if [[ -z "$zally_home" && -d "$HOME/.zallyd-val1" ]]; then
-    zally_home="$HOME/.zallyd-val1"
+  if [[ -z "$svote_home" && -d "$HOME/.svoted-val1" ]]; then
+    svote_home="$HOME/.svoted-val1"
   fi
-  if [[ -z "$zally_node_url" && -n "$zally_home" ]]; then
-    zally_node_url="tcp://localhost:26157"
+  if [[ -z "$svote_node_url" && -n "$svote_home" ]]; then
+    svote_node_url="tcp://localhost:26157"
   fi
-  if [[ -z "$zally_pallas_pk_path" && -f "$HOME/.zallyd-val1/pallas.pk" ]]; then
-    zally_pallas_pk_path="$HOME/.zallyd-val1/pallas.pk"
+  if [[ -z "$svote_pallas_pk_path" && -f "$HOME/.svoted-val1/pallas.pk" ]]; then
+    svote_pallas_pk_path="$HOME/.svoted-val1/pallas.pk"
   fi
 
   local prefix=""
-  if [[ -n "$zally_home" ]]; then
-    prefix+="ZALLY_HOME=\"${zally_home}\" "
+  if [[ -n "$svote_home" ]]; then
+    prefix+="SVOTE_HOME=\"${svote_home}\" "
   fi
-  if [[ -n "$zally_node_url" ]]; then
-    prefix+="ZALLY_NODE_URL=\"${zally_node_url}\" "
+  if [[ -n "$svote_node_url" ]]; then
+    prefix+="SVOTE_NODE_URL=\"${svote_node_url}\" "
   fi
-  if [[ -n "$zally_pallas_pk_path" ]]; then
-    prefix+="ZALLY_PALLAS_PK_PATH=\"${zally_pallas_pk_path}\" "
+  if [[ -n "$svote_pallas_pk_path" ]]; then
+    prefix+="SVOTE_PALLAS_PK_PATH=\"${svote_pallas_pk_path}\" "
   fi
   printf "%s" "$prefix"
 }
@@ -41,9 +41,9 @@ tree_build_tx_env_prefix() {
 tree_build_real_proof_load_cmd() {
   local sync_cmd vc_cmd tx_env
   tx_env="$(tree_build_tx_env_prefix)"
-  sync_cmd="${tx_env}"'ZALLY_API_URL="'"${REAL_PROOF_API_URL}"'" HELPER_SERVER_URL="'"${REAL_PROOF_HELPER_URL}"'" ZALLY_STRESS_DELEGATION_COUNT="'"${REAL_PROOF_DELEGATION_COUNT}"'" ZALLY_E2E_VOTE_WINDOW_SECS="'"${REAL_PROOF_VOTE_WINDOW_SECS}"'" cargo test --release --manifest-path e2e-tests/Cargo.toml --test sync_stress -- --nocapture --ignored --test-threads='"${REAL_PROOF_TEST_THREADS}"
+  sync_cmd="${tx_env}"'SVOTE_API_URL="'"${REAL_PROOF_API_URL}"'" HELPER_SERVER_URL="'"${REAL_PROOF_HELPER_URL}"'" SVOTE_STRESS_DELEGATION_COUNT="'"${REAL_PROOF_DELEGATION_COUNT}"'" SVOTE_E2E_VOTE_WINDOW_SECS="'"${REAL_PROOF_VOTE_WINDOW_SECS}"'" cargo test --release --manifest-path e2e-tests/Cargo.toml --test sync_stress -- --nocapture --ignored --test-threads='"${REAL_PROOF_TEST_THREADS}"
   if [[ "${REAL_PROOF_INCLUDE_VC_FLOW:-0}" == "1" ]]; then
-    vc_cmd="${tx_env}"'ZALLY_API_URL="'"${REAL_PROOF_API_URL}"'" HELPER_SERVER_URL="'"${REAL_PROOF_HELPER_URL}"'" ZALLY_E2E_VOTE_WINDOW_SECS="'"${REAL_PROOF_VOTE_WINDOW_SECS}"'" cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1'
+    vc_cmd="${tx_env}"'SVOTE_API_URL="'"${REAL_PROOF_API_URL}"'" HELPER_SERVER_URL="'"${REAL_PROOF_HELPER_URL}"'" SVOTE_E2E_VOTE_WINDOW_SECS="'"${REAL_PROOF_VOTE_WINDOW_SECS}"'" cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1'
     cat <<EOF
 ${sync_cmd} && ${vc_cmd}
 EOF
@@ -150,7 +150,7 @@ tree_at_height() {
   local tmp_body
   tmp_body="$(mktemp)"
   local code
-  code="$(curl -sS -o "$tmp_body" -w "%{http_code}" "http://127.0.0.1:${api_port}/zally/v1/commitment-tree/${height}")"
+  code="$(curl -sS -o "$tmp_body" -w "%{http_code}" "http://127.0.0.1:${api_port}/shielded-vote/v1/commitment-tree/${height}")"
   if [[ "$code" == "200" ]]; then
     local body root next_index
     body="$(<"$tmp_body")"
@@ -173,7 +173,7 @@ assert_reachable() {
       tree_log_line "FAIL: ${name} RPC unreachable"
       exit 1
     }
-    curl -sf "http://127.0.0.1:${api_port}/zally/v1/commitment-tree/latest" > /dev/null || {
+    curl -sf "http://127.0.0.1:${api_port}/shielded-vote/v1/commitment-tree/latest" > /dev/null || {
       tree_log_line "FAIL: ${name} API unreachable"
       exit 1
     }
@@ -189,7 +189,7 @@ ensure_active_round_if_required() {
     return
   fi
   local active_json round_id
-  active_json="$(curl -sf "http://127.0.0.1:1418/zally/v1/rounds/active" || true)"
+  active_json="$(curl -sf "http://127.0.0.1:1418/shielded-vote/v1/rounds/active" || true)"
   round_id="$(json_field "$active_json" ".round.vote_round_id")"
   if [[ -z "$round_id" ]]; then
     tree_log_line "FAIL: no ACTIVE round found on val1 (:1418)."
@@ -214,7 +214,7 @@ tree_wait_height_advance() {
 
 tree_validator_pids_by_suffix() {
   local suffix="$1"
-  pgrep -f "^zallyd start --home .*/\\.zallyd-${suffix}$" || true
+  pgrep -f "^svoted start --home .*/\\.svoted-${suffix}$" || true
 }
 
 tree_kill_validator_by_suffix() {
@@ -245,8 +245,8 @@ tree_wait_validator_down() {
 tree_restart_validator() {
   local suffix="$1"
   local log_file="$2"
-  local home="${3:-$HOME/.zallyd-${suffix}}"
-  ZALLY_PIR_URL="${ZALLY_PIR_URL:-http://localhost:3000}" nohup zallyd start --home "$home" >> "$log_file" 2>&1 &
+  local home="${3:-$HOME/.svoted-${suffix}}"
+  SVOTE_PIR_URL="${SVOTE_PIR_URL:-http://localhost:3000}" nohup svoted start --home "$home" >> "$log_file" 2>&1 &
 }
 
 tree_wait_validator_caught_up() {

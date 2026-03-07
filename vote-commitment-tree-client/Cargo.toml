@@ -2,7 +2,7 @@
 name = "vote-commitment-tree-client"
 version = "0.1.0"
 edition = "2021"
-description = "Remote client CLI for syncing and verifying the vote commitment tree against a running Zally chain node"
+description = "Remote client CLI for syncing and verifying the vote commitment tree against a running Shielded-Vote chain node"
 
 [[bin]]
 name = "vote-tree-cli"

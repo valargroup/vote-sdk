@@ -3,28 +3,28 @@
 #MISE quiet=true
 set -e
 
-if pgrep zallyd > /dev/null 2>&1; then
-    printf '\033[33mAlready running: zallyd\033[0m\n'
+if pgrep svoted > /dev/null 2>&1; then
+    printf '\033[33mAlready running: svoted\033[0m\n'
     exit 0
 fi
 
 # ── Build + init ─────────────────────────────────────────────────
 make -C sdk init
 
-# ── Start zallyd ─────────────────────────────────────────────────
-ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup make -C sdk start > zallyd.log 2>&1 &
-printf '\033[32mStarted zallyd → zallyd.log\033[0m\n'
+# ── Start svoted ─────────────────────────────────────────────────
+SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} nohup make -C sdk start > svoted.log 2>&1 &
+printf '\033[32mStarted svoted → svoted.log\033[0m\n'
 
 # ── Wait for chain readiness ────────────────────────────────────
 printf 'Waiting for chain to be ready...'
 for i in $(seq 1 60); do
-    if zallyd status --home ~/.zallyd 2>/dev/null | grep -q latest_block_height; then
+    if svoted status --home ~/.svoted 2>/dev/null | grep -q latest_block_height; then
         printf ' \033[32mready\033[0m\n'
         break
     fi
     if [ "$i" -eq 60 ]; then
         printf ' \033[31mTIMEOUT\033[0m\n'
-        tail -50 zallyd.log
+        tail -50 svoted.log
         exit 1
     fi
     printf '.'
@@ -45,9 +45,9 @@ done
 # ── Register Pallas key ─────────────────────────────────────────
 printf 'Registering Pallas key...'
 for i in $(seq 1 10); do
-    if zallyd tx vote register-pallas-key \
-        --from validator --chain-id zvote-1 --keyring-backend test \
-        --home ~/.zallyd -y > /dev/null 2>&1; then
+    if svoted tx vote register-pallas-key \
+        --from validator --chain-id svote-1 --keyring-backend test \
+        --home ~/.svoted -y > /dev/null 2>&1; then
         printf ' \033[32m✓\033[0m\n'
         break
     fi

@@ -5,7 +5,7 @@ How Zashi discovers vote servers and PIR servers at runtime.
 ## Resolution order
 
 1. **Local override** — `voting-config-local.json` bundled in the app (DEBUG builds only)
-2. **CDN** — `https://zally-phi.vercel.app/api/voting-config` (served from Vercel Edge Config)
+2. **CDN** — `https://shielded-vote-phi.vercel.app/api/voting-config` (served from Vercel Edge Config)
 3. **Hardcoded fallback** — deployed dev server (`46.101.255.48`)
 
 The first source that succeeds wins. This means a TestFlight build works out of the box (CDN or fallback), while a developer can drop a local file into the bundle to point at localhost.
@@ -16,7 +16,7 @@ The first source that succeeds wins. This means a TestFlight build works out of 
 {
   "version": 1,
   "vote_servers": [
-    { "url": "https://46-101-255-48.sslip.io", "label": "Primary", "operator_address": "zvote1abc..." }
+    { "url": "https://46-101-255-48.sslip.io", "label": "Primary", "operator_address": "sv1abc..." }
   ],
   "pir_servers": [
     { "url": "https://46-101-255-48.sslip.io/nullifier", "label": "PIR Server" }
@@ -28,7 +28,7 @@ The first source that succeeds wins. This means a TestFlight build works out of 
 
 The `operator_address` field is optional and used by the self-registration system to track which validator owns each entry. Swift `Codable` ignores unknown keys, so adding this field is backward-compatible with existing iOS builds.
 
-`vote_servers` entries each serve the full set of endpoints — both chain API (`/zally/v1/*`) and helper API (`/api/v1/shares`). This is because the SDK and helper server are a single merged binary.
+`vote_servers` entries each serve the full set of endpoints — both chain API (`/shielded-vote/v1/*`) and helper API (`/api/v1/shares`). This is because the SDK and helper server are a single merged binary.
 
 `pir_servers` serve the PIR nullifier exclusion proof protocol (port 3000 by default).
 
@@ -42,10 +42,10 @@ Validators can register their URL with a single command via `join.sh`. The regis
 
 Both phases use the same endpoint (`POST /api/register-validator`) and the same ADR-036 amino signature format. The edge function decides the path based on on-chain bonding status. Both phases also write to `approved-servers` (see below).
 
-The `zallyd sign-arbitrary` command provides the signature:
+The `svoted sign-arbitrary` command provides the signature:
 ```bash
-zallyd sign-arbitrary '{"operator_address":"...","url":"...","moniker":"...","timestamp":...}' \
-  --from validator --keyring-backend test --home ~/.zallyd
+svoted sign-arbitrary '{"operator_address":"...","url":"...","moniker":"...","timestamp":...}' \
+  --from validator --keyring-backend test --home ~/.svoted
 ```
 
 ## Server heartbeat (active vs approved)
@@ -57,7 +57,7 @@ zallyd sign-arbitrary '{"operator_address":"...","url":"...","moniker":"...","ti
 
 ### Startup and heartbeat flow
 
-On every `zallyd start`, the helper performs two steps:
+On every `svoted start`, the helper performs two steps:
 
 **Step 1 — Register** (`POST /api/register-validator`): Called once on startup. The edge function checks on-chain bonding status. If the validator is bonded, it upserts into both `approved-servers` and `vote_servers`. If not bonded, the entry goes to `pending-registrations` for admin approval. This is the same endpoint `join.sh` uses, so existing bonded validators automatically populate `approved-servers` on their first restart with the new binary — no manual re-registration needed.
 
@@ -84,7 +84,7 @@ The heartbeat is configured in `app.toml` under `[helper]`:
 
 ```toml
 # Vercel base URL for the heartbeat endpoint.
-pulse_url = "https://zally-phi.vercel.app"
+pulse_url = "https://shielded-vote-phi.vercel.app"
 
 # This server's public URL as seen by clients (the Caddy TLS URL).
 helper_url = "https://1-2-3-4.sslip.io"
@@ -95,7 +95,7 @@ Both fields must be set for the heartbeat to activate. `join.sh` writes these au
 ### Lifecycle
 
 1. `join.sh` runs → `register-validator` adds server to `approved-servers` + `vote_servers`
-2. `zallyd start` → helper calls `register-validator` once (ensures `approved-servers` is populated for bonded validators)
+2. `svoted start` → helper calls `register-validator` once (ensures `approved-servers` is populated for bonded validators)
 3. Helper starts 2-hour pulse loop → calls `server-heartbeat` which keeps the server in `vote_servers`
 4. If the server stops (crash, restart, network issue), it is evicted from `vote_servers` after 6 hours but stays in `approved-servers`
 5. On restart, step 2 re-registers, step 3 resumes pulsing — server re-appears in `vote_servers` automatically
@@ -119,7 +119,7 @@ To manually override, edit the file directly — it won't be overwritten until t
 ```
 VotingStore.initialize
   → votingAPI.fetchServiceConfig()        // resolves config per order above
-  → votingAPI.configureURLs(config)       // sets ZallyAPIConfigStore actor
+  → votingAPI.configureURLs(config)       // sets SvAPIConfigStore actor
   → all subsequent API calls use resolved URLs
 ```
 
@@ -149,13 +149,13 @@ Changes take effect immediately — no git push or redeploy needed. This is usef
 ### Setup (one-time)
 
 1. In the Vercel dashboard, go to **Storage** → **Create** → **Edge Config**
-2. Connect it to the `zally` project
+2. Connect it to the `shielded-vote` project
 3. Add a key `voting-config` with the JSON value:
    ```json
    {
      "version": 1,
      "vote_servers": [
-       { "url": "https://46-101-255-48.sslip.io", "label": "Primary", "operator_address": "zvote1..." }
+       { "url": "https://46-101-255-48.sslip.io", "label": "Primary", "operator_address": "sv1..." }
      ],
      "pir_servers": [
        { "url": "https://46-101-255-48.sslip.io/nullifier", "label": "Primary" }

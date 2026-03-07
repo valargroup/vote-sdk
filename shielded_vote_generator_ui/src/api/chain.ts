@@ -1,6 +1,6 @@
-// Chain API client for the Zally voting chain REST endpoints.
+// Chain API client for the Shielded-Vote chain REST endpoints.
 
-const CHAIN_URL_KEY = "zally-chain-url";
+const CHAIN_URL_KEY = "shielded-vote-chain-url";
 const DEFAULT_CHAIN_URL = import.meta.env.VITE_CHAIN_URL || "http://localhost:1318";
 
 export function getChainUrl(): string {
@@ -11,14 +11,14 @@ export function setChainUrl(url: string) {
   localStorage.setItem(CHAIN_URL_KEY, url);
 }
 
-// In dev mode the Vite proxy forwards /zally/* and /cosmos/* to the chain
+// In dev mode the Vite proxy forwards /shielded-vote/* and /cosmos/* to the chain
 // (relative paths). The proxy target is set at Vite startup from VITE_CHAIN_URL.
 // If the user has explicitly saved a chain URL via the Settings UI, use it
 // directly so that changing the URL at runtime actually takes effect (the Vite
 // proxy target is static and won't follow runtime changes).
 function apiBase(): string {
   // In dev mode always use the Vite proxy (relative paths). The proxy
-  // forwards /zally/* and /cosmos/* server-side to the chain, so a stored
+  // forwards /shielded-vote/* and /cosmos/* server-side to the chain, so a stored
   // "localhost:1318" from the Settings UI would be wrong for remote browsers.
   if (import.meta.env.DEV) {
     return "";
@@ -175,7 +175,7 @@ export interface Validator {
 // -- API methods --
 
 export async function getCeremonyState(): Promise<CeremonyState> {
-  return fetchJson<CeremonyState>("/zally/v1/ceremony");
+  return fetchJson<CeremonyState>("/shielded-vote/v1/ceremony");
 }
 
 // Alias: test connection by fetching ceremony state.
@@ -197,7 +197,7 @@ export async function getLatestBlock(): Promise<LatestBlockInfo> {
 }
 
 export async function getVoteManager(): Promise<{ address: string }> {
-  return fetchJson<{ address: string }>("/zally/v1/vote-manager");
+  return fetchJson<{ address: string }>("/shielded-vote/v1/vote-manager");
 }
 
 export async function getHelperStatus(): Promise<HelperStatus> {
@@ -223,20 +223,20 @@ export async function getNullifierStatus(): Promise<NullifierStatus> {
 // transaction signed client-side. See cosmosTx.ts.
 
 export async function listRounds(): Promise<{ rounds: ChainRound[] | null }> {
-  return fetchJson<{ rounds: ChainRound[] | null }>("/zally/v1/rounds");
+  return fetchJson<{ rounds: ChainRound[] | null }>("/shielded-vote/v1/rounds");
 }
 
 export async function getRound(
   roundIdHex: string
 ): Promise<{ round: ChainRound }> {
-  return fetchJson<{ round: ChainRound }>(`/zally/v1/round/${roundIdHex}`);
+  return fetchJson<{ round: ChainRound }>(`/shielded-vote/v1/round/${roundIdHex}`);
 }
 
 export async function getTallyResults(
   roundIdHex: string
 ): Promise<{ results: TallyResult[] | null }> {
   return fetchJson<{ results: TallyResult[] | null }>(
-    `/zally/v1/tally-results/${roundIdHex}`
+    `/shielded-vote/v1/tally-results/${roundIdHex}`
   );
 }
 
@@ -244,7 +244,7 @@ export async function getVoteSummary(
   roundIdHex: string
 ): Promise<VoteSummaryResponse> {
   return fetchJson<VoteSummaryResponse>(
-    `/zally/v1/vote-summary/${roundIdHex}`
+    `/shielded-vote/v1/vote-summary/${roundIdHex}`
   );
 }
 
@@ -279,7 +279,7 @@ export interface PallasKeyEntry {
 }
 
 export async function getPallasKeys(): Promise<{ validators: PallasKeyEntry[] }> {
-  const resp = await fetchJson<{ validators?: PallasKeyEntry[] }>("/zally/v1/pallas-keys");
+  const resp = await fetchJson<{ validators?: PallasKeyEntry[] }>("/shielded-vote/v1/pallas-keys");
   return { validators: resp.validators ?? [] };
 }
 
@@ -310,7 +310,7 @@ export async function prepareSnapshot(height: number): Promise<{ status: string;
 
 export async function getActiveRound(): Promise<{ round: ChainRound | null }> {
   try {
-    const resp = await fetchJson<{ round?: ChainRound }>("/zally/v1/rounds/active");
+    const resp = await fetchJson<{ round?: ChainRound }>("/shielded-vote/v1/rounds/active");
     return { round: resp.round ?? null };
   } catch {
     return { round: null };

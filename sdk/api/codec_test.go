@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 func TestIsVoteTag(t *testing.T) {
@@ -106,7 +106,7 @@ func TestEncodeDecodeRevealShare(t *testing.T) {
 func TestEncodeDecodeSubmitTally(t *testing.T) {
 	msg := &types.MsgSubmitTally{
 		VoteRoundId: []byte("roundid12345678901234567890123456"),
-		Creator:     "zvote1admin",
+		Creator:     "sv1admin",
 		Entries: []*types.TallyEntry{
 			{ProposalId: 0, VoteDecision: 1, TotalValue: 500},
 			{ProposalId: 1, VoteDecision: 0, TotalValue: 200},
@@ -151,7 +151,7 @@ func TestIsCeremonyTag(t *testing.T) {
 
 func TestEncodeDecodeAckExecutiveAuthorityKey(t *testing.T) {
 	msg := &types.MsgAckExecutiveAuthorityKey{
-		Creator:      "zvotevaloper1val",
+		Creator:      "svvaloper1val",
 		AckSignature: []byte("signature"),
 	}
 
@@ -171,8 +171,8 @@ func TestEncodeDecodeAckExecutiveAuthorityKey(t *testing.T) {
 
 func TestEncodeCeremonyTx_RejectsNonCustomTags(t *testing.T) {
 	msg := &types.MsgSetVoteManager{
-		Creator:    "zvote1admin",
-		NewManager: "zvote1manager",
+		Creator:    "sv1admin",
+		NewManager: "sv1manager",
 	}
 
 	// MsgSetVoteManager (0x0C) uses the standard Cosmos Tx path — EncodeCeremonyTx must reject it.

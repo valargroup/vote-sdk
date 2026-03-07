@@ -20,13 +20,13 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	zallytest "github.com/z-cale/zally/testutil"
-	vote "github.com/z-cale/zally/x/vote"
-	"github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	svtest "github.com/valargroup/shielded-vote/testutil"
+	vote "github.com/valargroup/shielded-vote/x/vote"
+	"github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
-var fpLE = zallytest.FpLE
+var fpLE = svtest.FpLE
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -52,7 +52,7 @@ func (s *EndBlockerTestSuite) SetupTest() {
 		WithBlockTime(time.Unix(1_000_000, 0).UTC()).
 		WithBlockHeight(10)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
+	s.keeper = keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), nil)
 	s.module = vote.NewAppModule(s.keeper, nil) // codec unused by EndBlock
 }
 
@@ -486,19 +486,19 @@ func TestCeremonySignerProviders(t *testing.T) {
 		{
 			name:    "RegisterPallasKey",
 			signer:  vote.ProvideRegisterPallasKeySigner,
-			wantMsg: "zvote.v1.MsgRegisterPallasKey",
+			wantMsg: "svote.v1.MsgRegisterPallasKey",
 			msg:     &types.MsgRegisterPallasKey{Creator: valAddr.String()},
 		},
 		{
 			name:    "DealExecutiveAuthorityKey",
 			signer:  vote.ProvideDealExecutiveAuthorityKeySigner,
-			wantMsg: "zvote.v1.MsgDealExecutiveAuthorityKey",
+			wantMsg: "svote.v1.MsgDealExecutiveAuthorityKey",
 			msg:     &types.MsgDealExecutiveAuthorityKey{Creator: valAddr.String()},
 		},
 		{
 			name:    "AckExecutiveAuthorityKey",
 			signer:  vote.ProvideAckExecutiveAuthorityKeySigner,
-			wantMsg: "zvote.v1.MsgAckExecutiveAuthorityKey",
+			wantMsg: "svote.v1.MsgAckExecutiveAuthorityKey",
 		},
 	}
 
@@ -557,14 +557,14 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 	}
 
 	wantMsgTypes := []protoreflect.FullName{
-		"zvote.v1.MsgCreateVotingSession",
-		"zvote.v1.MsgDelegateVote",
-		"zvote.v1.MsgCastVote",
-		"zvote.v1.MsgRevealShare",
-		"zvote.v1.MsgSubmitTally",
-		"zvote.v1.MsgRegisterPallasKey",
-		"zvote.v1.MsgDealExecutiveAuthorityKey",
-		"zvote.v1.MsgAckExecutiveAuthorityKey",
+		"svote.v1.MsgCreateVotingSession",
+		"svote.v1.MsgDelegateVote",
+		"svote.v1.MsgCastVote",
+		"svote.v1.MsgRevealShare",
+		"svote.v1.MsgSubmitTally",
+		"svote.v1.MsgRegisterPallasKey",
+		"svote.v1.MsgDealExecutiveAuthorityKey",
+		"svote.v1.MsgAckExecutiveAuthorityKey",
 	}
 
 	signerMap := make(map[protoreflect.FullName]bool, len(allSigners))

@@ -13,11 +13,11 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
-	voteapi "github.com/z-cale/zally/api"
-	"github.com/z-cale/zally/crypto/ecies"
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/types"
+	voteapi "github.com/valargroup/shielded-vote/api"
+	"github.com/valargroup/shielded-vote/crypto/ecies"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/testutil"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -360,7 +360,7 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 	// Create a voting session expiring soon.
 	voteEndTime := app.Time.Add(10 * time.Second)
 	setupMsg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
+		Creator:           "sv1admin",
 		SnapshotHeight:    800,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x8A}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0x8B}, 32),
@@ -516,7 +516,7 @@ func TestPrepareProposalThenProcessProposalTally(t *testing.T) {
 	// Create a voting session expiring soon.
 	voteEndTime := app.Time.Add(30 * time.Second)
 	setupMsg := &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
+		Creator:           "sv1admin",
 		SnapshotHeight:    900,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x9A}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0x9B}, 32),

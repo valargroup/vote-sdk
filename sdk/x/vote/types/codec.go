@@ -14,11 +14,11 @@ func init() {
 	// registers with the v2 registry only. Bridge all types that appear as
 	// nested messages inside transaction Msg types into the gogoproto registry
 	// so that standard Cosmos SDK tx decoding succeeds.
-	gogoproto.RegisterType((*DealerPayload)(nil), "zvote.v1.DealerPayload")
-	gogoproto.RegisterType((*Proposal)(nil), "zvote.v1.Proposal")
-	gogoproto.RegisterType((*VoteOption)(nil), "zvote.v1.VoteOption")
-	gogoproto.RegisterType((*TallyEntry)(nil), "zvote.v1.TallyEntry")
-	gogoproto.RegisterType((*PartialDecryptionEntry)(nil), "zvote.v1.PartialDecryptionEntry")
+	gogoproto.RegisterType((*DealerPayload)(nil), "svote.v1.DealerPayload")
+	gogoproto.RegisterType((*Proposal)(nil), "svote.v1.Proposal")
+	gogoproto.RegisterType((*VoteOption)(nil), "svote.v1.VoteOption")
+	gogoproto.RegisterType((*TallyEntry)(nil), "svote.v1.TallyEntry")
+	gogoproto.RegisterType((*PartialDecryptionEntry)(nil), "svote.v1.PartialDecryptionEntry")
 }
 
 // RegisterInterfaces registers the vote module's message types with the

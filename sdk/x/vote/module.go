@@ -25,9 +25,9 @@ import (
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/z-cale/zally/x/vote/keeper"
-	modulev1 "github.com/z-cale/zally/x/vote/module/v1"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/valargroup/shielded-vote/x/vote/keeper"
+	modulev1 "github.com/valargroup/shielded-vote/x/vote/module/v1"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // Compile-time interface assertions.
@@ -131,35 +131,35 @@ func createValidatorWithPallasKeySignerFn(msg proto.Message) ([][]byte, error) {
 
 func ProvideCreateVotingSessionSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgCreateVotingSession"),
+		MsgType: protoreflect.FullName("svote.v1.MsgCreateVotingSession"),
 		Fn:      ceremonyCreatorSignerFn,
 	}
 }
 
 func ProvideDelegateVoteSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgDelegateVote"),
+		MsgType: protoreflect.FullName("svote.v1.MsgDelegateVote"),
 		Fn:      noopSignerFn,
 	}
 }
 
 func ProvideCastVoteSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgCastVote"),
+		MsgType: protoreflect.FullName("svote.v1.MsgCastVote"),
 		Fn:      noopSignerFn,
 	}
 }
 
 func ProvideRevealShareSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgRevealShare"),
+		MsgType: protoreflect.FullName("svote.v1.MsgRevealShare"),
 		Fn:      noopSignerFn,
 	}
 }
 
 func ProvideSubmitTallySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgSubmitTally"),
+		MsgType: protoreflect.FullName("svote.v1.MsgSubmitTally"),
 		Fn:      noopSignerFn,
 	}
 }
@@ -168,21 +168,21 @@ func ProvideSubmitTallySigner() signing.CustomGetSigner {
 // during the TALLYING phase and never goes through standard Cosmos SDK signing.
 func ProvideSubmitPartialDecryptionSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgSubmitPartialDecryption"),
+		MsgType: protoreflect.FullName("svote.v1.MsgSubmitPartialDecryption"),
 		Fn:      noopSignerFn,
 	}
 }
 
 func ProvideRegisterPallasKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgRegisterPallasKey"),
+		MsgType: protoreflect.FullName("svote.v1.MsgRegisterPallasKey"),
 		Fn:      ceremonyCreatorSignerFn,
 	}
 }
 
 func ProvideDealExecutiveAuthorityKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgDealExecutiveAuthorityKey"),
+		MsgType: protoreflect.FullName("svote.v1.MsgDealExecutiveAuthorityKey"),
 		Fn:      ceremonyCreatorSignerFn,
 	}
 }
@@ -191,21 +191,21 @@ func ProvideDealExecutiveAuthorityKeySigner() signing.CustomGetSigner {
 // PrepareProposal and never goes through standard Cosmos SDK signing.
 func ProvideAckExecutiveAuthorityKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgAckExecutiveAuthorityKey"),
+		MsgType: protoreflect.FullName("svote.v1.MsgAckExecutiveAuthorityKey"),
 		Fn:      noopSignerFn,
 	}
 }
 
 func ProvideCreateValidatorWithPallasKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgCreateValidatorWithPallasKey"),
+		MsgType: protoreflect.FullName("svote.v1.MsgCreateValidatorWithPallasKey"),
 		Fn:      createValidatorWithPallasKeySignerFn,
 	}
 }
 
 func ProvideSetVoteManagerSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("zvote.v1.MsgSetVoteManager"),
+		MsgType: protoreflect.FullName("svote.v1.MsgSetVoteManager"),
 		Fn:      ceremonyCreatorSignerFn,
 	}
 }
@@ -294,7 +294,7 @@ func (am AppModule) RegisterServices(cfg module.Configurator) {
 func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 	return &autocliv1.ModuleOptions{
 		Query: &autocliv1.ServiceCommandDescriptor{
-			Service: "zvote.v1.Query",
+			Service: "svote.v1.Query",
 			RpcCommandOptions: []*autocliv1.RpcCommandOptions{
 				{
 					RpcMethod: "CommitmentTreeAtHeight",
@@ -580,7 +580,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 // default vote manager when no explicit manager is configured in genesis.
 //
 // Private key (hex): b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee
-const DefaultVoteManagerAddress = "zvote15fjfr6rrs60vu4st6arrd94w5j6z7f6kxr92cg"
+const DefaultVoteManagerAddress = "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl"
 
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {

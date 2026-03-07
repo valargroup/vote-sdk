@@ -12,13 +12,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/z-cale/zally/crypto/ecies"
-	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/ecies"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
 )
 
 const defaultRESTAddr = "http://localhost:1318"
 
-// EncryptEAKeyCmd produces a payloads.json for use with "zallyd tx vote deal-ea-key".
+// EncryptEAKeyCmd produces a payloads.json for use with "svoted tx vote deal-ea-key".
 // It reads ea.sk from disk, fetches all registered validators and their Pallas
 // public keys from the chain's ceremony state, and ECIES-encrypts the secret key
 // for each validator.
@@ -36,10 +36,10 @@ validators that have registered a Pallas public key, and ECIES-encrypts the
 secret key for each one.
 
 The resulting JSON array is written to --output (default: payloads.json) and
-can be passed directly to "zallyd tx vote deal-ea-key".
+can be passed directly to "svoted tx vote deal-ea-key".
 
 Example:
-  zallyd encrypt-ea-key ~/.zallyd/ea.sk \
+  svoted encrypt-ea-key ~/.svoted/ea.sk \
     --node http://localhost:1318 \
     --output /tmp/payloads.json`,
 		Args: cobra.ExactArgs(1),
@@ -104,14 +104,14 @@ Example:
 		},
 	}
 
-	cmd.Flags().StringVar(&nodeAddr, "node", defaultRESTAddr, "REST endpoint of the running zallyd node")
+	cmd.Flags().StringVar(&nodeAddr, "node", defaultRESTAddr, "REST endpoint of the running svoted node")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "payloads.json", `Output file path (use "-" for stdout)`)
 
 	return cmd
 }
 
 // validatorPallasEntry holds a registered validator's address and decoded
-// Pallas public key bytes, derived from the /zally/v1/ceremony REST response.
+// Pallas public key bytes, derived from the /shielded-vote/v1/ceremony REST response.
 type validatorPallasEntry struct {
 	ValidatorAddress string
 	PallasPk         []byte
@@ -120,7 +120,7 @@ type validatorPallasEntry struct {
 // fetchRegisteredValidators GETs the ceremony state and returns all validators
 // that have registered a Pallas public key.
 func fetchRegisteredValidators(restAddr string) ([]validatorPallasEntry, error) {
-	url := restAddr + "/zally/v1/ceremony"
+	url := restAddr + "/shielded-vote/v1/ceremony"
 
 	resp, err := http.Get(url) //nolint:noctx // simple CLI call
 	if err != nil {

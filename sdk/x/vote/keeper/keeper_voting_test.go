@@ -5,8 +5,8 @@ import (
 
 	"cosmossdk.io/log"
 
-	"github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -579,7 +579,7 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
 	// root3 must match what a cold-start restart produces.
 	freshKeeper := keeper.NewKeeper(
 		s.keeper.StoreServiceForTest(),
-		"zvote1authority",
+		"sv1authority",
 		log.NewNopLogger(),
 		nil,
 	)
@@ -651,7 +651,7 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 	// root at checkpoint 10 without replaying any leaves.
 	freshKeeper := keeper.NewKeeper(
 		s.keeper.StoreServiceForTest(),
-		"zvote1authority",
+		"sv1authority",
 		log.NewNopLogger(),
 		nil,
 	)

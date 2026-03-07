@@ -3,7 +3,7 @@ package keeper
 import (
 	"cosmossdk.io/core/store"
 
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // InitGenesis initializes the vote module state from a genesis state.

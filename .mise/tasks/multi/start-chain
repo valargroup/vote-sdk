@@ -3,11 +3,11 @@
 #MISE quiet=true
 set -e
 
-PID_FILE="$HOME/.zallyd-multi-pids"
+PID_FILE="$HOME/.svoted-multi-pids"
 
 # ── Guard: already running? ──────────────────────────────────────
-if pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1; then
-    printf '\033[33mAlready running: zallyd\033[0m\n'
+if pgrep -f 'svoted start --home.*val' > /dev/null 2>&1; then
+    printf '\033[33mAlready running: svoted\033[0m\n'
     exit 0
 fi
 
@@ -18,7 +18,7 @@ bash sdk/scripts/init_multi.sh
 # ── Start 3 validators ──────────────────────────────────────────
 rm -f "$PID_FILE"
 
-ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup zallyd start --home "$HOME/.zallyd-val1" > sdk/multi-val1.log 2>&1 &
+SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} nohup svoted start --home "$HOME/.svoted-val1" > sdk/multi-val1.log 2>&1 &
 echo "$!" >> "$PID_FILE"
 printf '\033[32mStarted val1 → sdk/multi-val1.log\033[0m\n'
 
@@ -38,8 +38,8 @@ for i in $(seq 1 30); do
 done
 
 for i in 2 3; do
-    home="$HOME/.zallyd-val$i"
-    ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup zallyd start --home "$home" > "sdk/multi-val$i.log" 2>&1 &
+    home="$HOME/.svoted-val$i"
+    SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} nohup svoted start --home "$home" > "sdk/multi-val$i.log" 2>&1 &
     echo "$!" >> "$PID_FILE"
     printf '\033[32mStarted val%s → sdk/multi-val%s.log\033[0m\n' "$i" "$i"
 done
@@ -50,9 +50,9 @@ sleep 5
 # ── Register val1 Pallas key ────────────────────────────────────
 printf 'Registering val1 Pallas key...'
 for i in $(seq 1 10); do
-    if zallyd tx vote register-pallas-key \
-        --from validator --chain-id zvote-1 --keyring-backend test \
-        --home "$HOME/.zallyd-val1" --node tcp://localhost:26157 -y > /dev/null 2>&1; then
+    if svoted tx vote register-pallas-key \
+        --from validator --chain-id svote-1 --keyring-backend test \
+        --home "$HOME/.svoted-val1" --node tcp://localhost:26157 -y > /dev/null 2>&1; then
         printf ' \033[32m✓\033[0m\n'
         break
     fi
@@ -68,7 +68,7 @@ done
 SELF_DELEGATION="10000000stake"
 for i in 2 3; do
     create-val-tx \
-        --home "$HOME/.zallyd-val$i" \
+        --home "$HOME/.svoted-val$i" \
         --moniker "val$i" \
         --amount "$SELF_DELEGATION" \
         --rpc-url tcp://localhost:26157

@@ -14,7 +14,7 @@ const (
 	DLEQProofSize = 2 * CompressedPointSize // 64 bytes
 
 	// dleqDomainTag is the domain separator for the Fiat-Shamir challenge hash.
-	dleqDomainTag = "zally-dleq-v1"
+	dleqDomainTag = "svote-dleq-v1"
 )
 
 // GenerateDLEQProof generates a Chaum-Pedersen DLEQ proof that the EA correctly
@@ -123,7 +123,7 @@ func VerifyDLEQProof(proof []byte, pk *PublicKey, ct *Ciphertext, totalValue uin
 
 // dleqChallenge computes the Fiat-Shamir challenge hash for Chaum-Pedersen:
 //
-//	e = HashToScalar("zally-dleq-v1" || G || pk || C1 || D || R1 || R2)
+//	e = HashToScalar("svote-dleq-v1" || G || pk || C1 || D || R1 || R2)
 //
 // The hash binds the challenge to the full proof statement (G, pk, C1, D) and
 // the prover's commitments (R1, R2), with a domain separator tag to prevent

@@ -1,4 +1,4 @@
-module github.com/z-cale/zally
+module github.com/valargroup/shielded-vote
 
 go 1.24.0
 

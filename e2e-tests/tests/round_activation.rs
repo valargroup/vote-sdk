@@ -21,7 +21,7 @@ use e2e_tests::{
 /// Default vote manager secp256k1 private key (set in genesis).
 const VOTE_MANAGER_PRIVKEY_HEX: &str =
     "b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee";
-const VOTE_MANAGER_ADDRESS: &str = "zvote15fjfr6rrs60vu4st6arrd94w5j6z7f6kxr92cg";
+const VOTE_MANAGER_ADDRESS: &str = "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl";
 
 #[test]
 #[ignore = "requires running chain"]
@@ -38,7 +38,7 @@ fn round_activation() {
     let (mut body, _, round_id) =
         create_voting_session_payload(VOTE_MANAGER_ADDRESS, 180, None);
     let round_id_hex = hex::encode(round_id);
-    body["@type"] = serde_json::json!("/zvote.v1.MsgCreateVotingSession");
+    body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
 
     let vm_config = e2e_tests::api::CosmosTxConfig {
         key_name: "vote-manager".to_string(),

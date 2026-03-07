@@ -6,7 +6,7 @@ import (
 
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
-	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
 )
 
 // TestPartialDecryptEndToEnd verifies that threshold partial decryption

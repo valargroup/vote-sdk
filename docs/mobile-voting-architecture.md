@@ -2,7 +2,7 @@
 
 Governance voting for Zashi iOS. The mobile client handles the full voter flow: delegation signing, ZKP generation, vote commitment, and share delegation to a helper server.
 
-See [Gov Steps V1](https://github.com/z-cale/zally/blob/main/docs/gov-steps-v1.md) for the cryptographic protocol spec. See the [Figma board](https://www.figma.com/board/CCKJMV6iozvYV8mT6H050a/Wallet-SDK-V2) for UI design.
+See [Gov Steps V1](https://github.com/valargroup/shielded-vote/blob/main/docs/gov-steps-v1.md) for the cryptographic protocol spec. See the [Figma board](https://www.figma.com/board/CCKJMV6iozvYV8mT6H050a/Wallet-SDK-V2) for UI design.
 
 ## System Context
 
@@ -20,7 +20,7 @@ See [Gov Steps V1](https://github.com/z-cale/zally/blob/main/docs/gov-steps-v1.m
      +--------> (share delegation) ----------+
 ```
 
-The mobile client is one of several components in the zally repo. This doc covers the three that make up the mobile stack:
+The mobile client is one of several components in the shielded-vote repo. This doc covers the three that make up the mobile stack:
 
 | Layer                | Path          | Language      | Role                                 |
 | -------------------- | ------------- | ------------- | ------------------------------------ |

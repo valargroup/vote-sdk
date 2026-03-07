@@ -5,7 +5,7 @@
 //! data, HTTP tree sync, witness generation, and proof generation all through
 //! the librustvoting / vote-commitment-tree-client APIs.
 //!
-//! Share payloads are sent to the helper (integrated into zallyd), which
+//! Share payloads are sent to the helper (integrated into svoted), which
 //! generates ZKP #3 and submits reveal-share TXs to the chain.
 
 use base64::Engine;
@@ -39,8 +39,8 @@ const BLOCK_WAIT_MS: u64 = 6000;
 /// Default vote manager secp256k1 private key (set in genesis).
 const VOTE_MANAGER_PRIVKEY_HEX: &str =
     "b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee";
-/// Bech32 address derived from VOTE_MANAGER_PRIVKEY_HEX with the "zvote" prefix.
-const VOTE_MANAGER_ADDRESS: &str = "zvote15fjfr6rrs60vu4st6arrd94w5j6z7f6kxr92cg";
+/// Bech32 address derived from VOTE_MANAGER_PRIVKEY_HEX with the "sv" prefix.
+const VOTE_MANAGER_ADDRESS: &str = "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl";
 
 fn log_step(step: &str, msg: &str) {
     eprintln!("[E2E-lib] {}: {}", step, msg);
@@ -97,7 +97,7 @@ fn voting_flow_librustvoting_path() {
     // ---- Step 1: Create voting session ----
     // MsgCreateVotingSession is a standard Cosmos SDK tx signed by the vote manager.
     log_step("Step 1", "create voting session (Cosmos SDK tx)");
-    body["@type"] = serde_json::json!("/zvote.v1.MsgCreateVotingSession");
+    body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
     let vm_config = e2e_tests::api::CosmosTxConfig {
         key_name: "vote-manager".to_string(),
         home_dir: config.home_dir.clone(),
@@ -160,7 +160,7 @@ fn voting_flow_librustvoting_path() {
     let van_position = pre_delegate_next_index;
     log_step("Step 2", "delegate vote (ZKP #1)");
     let deleg_body = delegate_vote_payload(&round_id, &delegation_bundle);
-    let (status, json) = post_json_accept_committed("/zally/v1/delegate-vote", &deleg_body, || {
+    let (status, json) = post_json_accept_committed("/shielded-vote/v1/delegate-vote", &deleg_body, || {
         commitment_tree_next_index()
             .map(|n| n >= pre_delegate_next_index + 1)
             .unwrap_or(false)
@@ -191,7 +191,7 @@ fn voting_flow_librustvoting_path() {
     );
     let mut anchor_height: u32 = 0;
     for _ in 0..30 {
-        let (status, json) = get_json("/zally/v1/commitment-tree/latest").expect("GET tree latest");
+        let (status, json) = get_json("/shielded-vote/v1/commitment-tree/latest").expect("GET tree latest");
         assert_eq!(status, 200);
         if let Some(tree) = json.get("tree") {
             let h = tree.get("height").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
@@ -301,7 +301,7 @@ fn voting_flow_librustvoting_path() {
         .root_at_height(anchor_height)
         .expect("local root at anchor height");
     {
-        let (status, json) = get_json(&format!("/zally/v1/commitment-tree/{}", anchor_height))
+        let (status, json) = get_json(&format!("/shielded-vote/v1/commitment-tree/{}", anchor_height))
             .expect("GET tree at height");
         assert_eq!(status, 200);
         let on_chain_root_b64 = json
@@ -412,7 +412,7 @@ fn voting_flow_librustvoting_path() {
     log_step("Step 8", "computing sighash and signing cast-vote TX");
 
     // 8a: Compute canonical sighash (must match Go's ComputeCastVoteSighash).
-    const CAST_VOTE_SIGHASH_DOMAIN: &[u8] = b"ZALLY_CAST_VOTE_SIGHASH_V0";
+    const CAST_VOTE_SIGHASH_DOMAIN: &[u8] = b"SVOTE_CAST_VOTE_SIGHASH_V0";
     let mut canonical = Vec::new();
     canonical.extend_from_slice(CAST_VOTE_SIGHASH_DOMAIN);
     // vote_round_id: pad to 32 bytes
@@ -475,7 +475,7 @@ fn voting_flow_librustvoting_path() {
     let (status, json) = {
         let mut last = None;
         for attempt in 1..=3 {
-            let result = post_json_accept_committed("/zally/v1/cast-vote", &cast_body, || {
+            let result = post_json_accept_committed("/shielded-vote/v1/cast-vote", &cast_body, || {
                 commitment_tree_next_index()
                     .map(|n| n >= cast_target_next_index)
                     .unwrap_or(false)
@@ -596,7 +596,7 @@ fn voting_flow_librustvoting_path() {
     log_step("Step 11", "verifying tally has ciphertext");
     block_wait();
     let (status, json) =
-        get_json(&format!("/zally/v1/tally/{}/1", round_id_hex)).expect("GET tally");
+        get_json(&format!("/shielded-vote/v1/tally/{}/1", round_id_hex)).expect("GET tally");
     assert_eq!(status, 200);
     let tally = json.get("tally").expect("tally");
     assert!(
@@ -633,7 +633,7 @@ fn voting_flow_librustvoting_path() {
 
     // ---- Step 14: Tally results queryable ----
     log_step("Step 14", "tally results queryable");
-    let (status, json) = get_json(&format!("/zally/v1/tally-results/{}", round_id_hex))
+    let (status, json) = get_json(&format!("/shielded-vote/v1/tally-results/{}", round_id_hex))
         .expect("GET tally-results");
     assert_eq!(
         status, 200,

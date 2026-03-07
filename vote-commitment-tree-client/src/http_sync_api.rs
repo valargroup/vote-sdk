@@ -1,9 +1,9 @@
 //! HTTP implementation of [`TreeSyncApi`] for connecting to a running Zally chain node.
 //!
 //! Maps the three trait methods to the chain's REST endpoints:
-//! - `get_tree_state()`        → `GET /zally/v1/commitment-tree/latest`
-//! - `get_root_at_height(h)`   → `GET /zally/v1/commitment-tree/{h}`
-//! - `get_block_commitments()` → `GET /zally/v1/commitment-tree/leaves?from_height=X&to_height=Y`
+//! - `get_tree_state()`        → `GET /shielded-vote/v1/commitment-tree/latest`
+//! - `get_root_at_height(h)`   → `GET /shielded-vote/v1/commitment-tree/{h}`
+//! - `get_block_commitments()` → `GET /shielded-vote/v1/commitment-tree/leaves?from_height=X&to_height=Y`
 
 use pasta_curves::Fp;
 
@@ -69,7 +69,7 @@ impl TreeSyncApi for HttpTreeSyncApi {
     type Error = HttpSyncError;
 
     fn get_tree_state(&self) -> Result<TreeState, Self::Error> {
-        let url = format!("{}/zally/v1/commitment-tree/latest", self.base_url);
+        let url = format!("{}/shielded-vote/v1/commitment-tree/latest", self.base_url);
         let resp: QueryLatestTreeResponse = self.client.get(&url).send()?.json()?;
         resp.tree
             .ok_or(HttpSyncError::NoTreeState)?
@@ -79,7 +79,7 @@ impl TreeSyncApi for HttpTreeSyncApi {
 
     fn get_root_at_height(&self, height: u32) -> Result<Option<Fp>, Self::Error> {
         let url = format!(
-            "{}/zally/v1/commitment-tree/{}",
+            "{}/shielded-vote/v1/commitment-tree/{}",
             self.base_url, height
         );
         let resp: QueryCommitmentTreeResponse = self.client.get(&url).send()?.json()?;
@@ -98,7 +98,7 @@ impl TreeSyncApi for HttpTreeSyncApi {
         to_height: u32,
     ) -> Result<Vec<BlockCommitments>, Self::Error> {
         let url = format!(
-            "{}/zally/v1/commitment-tree/leaves?from_height={}&to_height={}",
+            "{}/shielded-vote/v1/commitment-tree/leaves?from_height={}&to_height={}",
             self.base_url, from_height, to_height
         );
         let resp: QueryCommitmentLeavesResponse = self.client.get(&url).send()?.json()?;

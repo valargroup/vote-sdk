@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
 
-CHAIN_ID="zvote-1"
+CHAIN_ID="svote-1"
 MONIKER="validator"
-HOME_DIR="$HOME/.zallyd"
-BINARY="zallyd"
-DENOM="uzvote"
+HOME_DIR="$HOME/.svoted"
+BINARY="svoted"
+DENOM="usvote"
 
-echo "=== Initializing Zally Chain ==="
+echo "=== Initializing Shielded-Vote Chain ==="
 
 # Remove existing data
 rm -rf "$HOME_DIR"
@@ -87,14 +87,14 @@ rm -f "${APP_TOML}.bak"
 
 # Helper defaults are privacy/dev oriented. Benchmark scripts can override them
 # via environment variables before invoking this script.
-HELPER_API_TOKEN="${ZALLY_HELPER_API_TOKEN:-}"
-HELPER_EXPOSE_QUEUE_STATUS="${ZALLY_HELPER_EXPOSE_QUEUE_STATUS:-false}"
-HELPER_MEAN_DELAY="${ZALLY_HELPER_MEAN_DELAY:-60}"
-HELPER_MIN_DELAY="${ZALLY_HELPER_MIN_DELAY:-90}"
-HELPER_PROCESS_INTERVAL="${ZALLY_HELPER_PROCESS_INTERVAL:-5}"
-HELPER_MAX_CONCURRENT_PROOFS="${ZALLY_HELPER_MAX_CONCURRENT_PROOFS:-2}"
-HELPER_PULSE_URL="${ZALLY_HELPER_PULSE_URL:-}"
-HELPER_URL="${ZALLY_HELPER_URL:-}"
+HELPER_API_TOKEN="${SVOTE_HELPER_API_TOKEN:-}"
+HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
+HELPER_MEAN_DELAY="${SVOTE_HELPER_MEAN_DELAY:-60}"
+HELPER_MIN_DELAY="${SVOTE_HELPER_MIN_DELAY:-90}"
+HELPER_PROCESS_INTERVAL="${SVOTE_HELPER_PROCESS_INTERVAL:-5}"
+HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-2}"
+HELPER_PULSE_URL="${SVOTE_HELPER_PULSE_URL:-}"
+HELPER_URL="${SVOTE_HELPER_URL:-}"
 
 # Append [helper] section (not in the default template).
 cat >> "$APP_TOML" <<HELPERCFG
@@ -116,7 +116,7 @@ api_token = "$HELPER_API_TOKEN"
 # exposing per-round share activity to unauthenticated observers.
 expose_queue_status = $HELPER_EXPOSE_QUEUE_STATUS
 
-# Path to the SQLite database file. Empty = default ($HOME/.zallyd/helper.db).
+# Path to the SQLite database file. Empty = default ($HOME/.svoted/helper.db).
 db_path = ""
 
 # Mean of the exponential delay distribution (seconds).

@@ -611,9 +611,9 @@ pub fn ensure_pallas_key_registered() {
         });
 
     // Read the chain validator's Pallas PK from disk.
-    let pallas_pk_path = std::env::var("ZALLY_PALLAS_PK_PATH").unwrap_or_else(|_| {
+    let pallas_pk_path = std::env::var("SVOTE_PALLAS_PK_PATH").unwrap_or_else(|_| {
         let home = std::env::var("HOME").expect("HOME env var must be set");
-        format!("{}/.zallyd/pallas.pk", home)
+        format!("{}/.svoted/pallas.pk", home)
     });
     let pallas_pk_bytes = std::fs::read(&pallas_pk_path)
         .unwrap_or_else(|e| panic!("failed to read Pallas PK from {}: {}", pallas_pk_path, e));
@@ -628,7 +628,7 @@ pub fn ensure_pallas_key_registered() {
         validator_addr
     );
     let mut msg = register_pallas_key_payload(&validator_addr, &pallas_pk_bytes);
-    msg["@type"] = serde_json::json!("/zvote.v1.MsgRegisterPallasKey");
+    msg["@type"] = serde_json::json!("/svote.v1.MsgRegisterPallasKey");
     match broadcast_cosmos_msg(&msg, &config) {
         Ok((status, json)) => {
             let code = json.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);

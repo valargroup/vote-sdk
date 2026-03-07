@@ -15,7 +15,7 @@ Monorepo for the Zcash shielded voting system. Contains the vote chain (Cosmos S
 
 | Component                     | Language           | Description                                                                                             |
 | ----------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
-| `sdk/`                        | Go + Rust (CGo)    | Cosmos SDK chain (`zallyd`) with vote module, ante handlers, and ZK verification                        |
+| `sdk/`                        | Go + Rust (CGo)    | Cosmos SDK chain (`svoted`) with vote module, ante handlers, and ZK verification                        |
 | `nullifier-ingest/`           | Rust               | Ingests Orchard nullifiers from a lightwallet server into flat binary files and serves exclusion proofs |
 | `shielded_vote_generator_ui/` | TypeScript / React | UI for constructing and submitting shielded votes                                                       |
 | `zcash-voting-ffi/`           | Rust + Swift       | iOS FFI bindings for the voting circuits                                                                |
@@ -44,7 +44,7 @@ Go, Rust, and Node are pinned in `mise.toml`. Submodules that need specific Rust
 ## Setup
 
 ```sh
-cd zally
+cd shielded-vote
 mise trust      # one-time: allow mise to run this project's config
 mise start      # init chain, bootstrap nullifiers, start everything
 ```
@@ -73,9 +73,9 @@ Run `mise tasks` for the full list. Key namespaces: `build:*`, `chain:*`, `multi
 | `ui` | Start admin UI dev server (port 5173) |
 | `test` | E2E tests against running chain |
 | **build:\*** | |
-| `build` | Build zallyd with FFI (Halo2 + RedPallas) |
-| `build:quick` | Build zallyd without FFI (Go only) |
-| `build:install` | Install zallyd with FFI to $GOBIN |
+| `build` | Build svoted with FFI (Halo2 + RedPallas) |
+| `build:quick` | Build svoted without FFI (Go only) |
+| `build:install` | Install svoted with FFI to $GOBIN |
 | `build:circuits` | Build Rust circuit static library |
 | `build:ui` | Build admin UI for production |
 | **chain:\*** | |

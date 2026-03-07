@@ -1,4 +1,4 @@
-# Deploy a 3-validator zallyd chain to a single remote host on every push to
+# Deploy a 3-validator svoted chain to a single remote host on every push to
 # main, then restart services. Optionally reset chain state.
 #
 # Port layout (all validators on one host):
@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 env:
-  DEPLOY_PATH: /opt/zally-chain
+  DEPLOY_PATH: /opt/shielded-vote
 
 jobs:
   build:
@@ -63,7 +63,7 @@ jobs:
         with:
           name: sdk-chain-binaries
           path: |
-            sdk/zallyd
+            sdk/svoted
             sdk/create-val-tx
             sdk/init_multi.sh
 
@@ -78,7 +78,7 @@ jobs:
           name: sdk-chain-binaries
 
       - name: Make binaries executable
-        run: chmod +x zallyd create-val-tx
+        run: chmod +x svoted create-val-tx
 
       - name: Create deploy directory
         uses: appleboy/ssh-action@v1.0.3
@@ -94,7 +94,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
-          source: "zallyd,create-val-tx,init_multi.sh"
+          source: "svoted,create-val-tx,init_multi.sh"
           target: ${{ env.DEPLOY_PATH }}
 
   restart:

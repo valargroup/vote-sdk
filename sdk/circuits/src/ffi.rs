@@ -7,7 +7,7 @@
 //!   -3 = internal error (deserialization, etc.)
 //!
 //! On any non-zero return, a human-readable description is stored in a
-//! thread-local buffer. Call `zally_last_error()` immediately after a
+//! thread-local buffer. Call `sv_last_error()` immediately after a
 //! failing call to retrieve the message before the next FFI call clears it.
 
 use std::ffi::CString;
@@ -30,7 +30,7 @@ use crate::votetree;
 // ---------------------------------------------------------------------------
 
 // Each thread keeps its own CString so that the pointer returned by
-// `zally_last_error()` is stable until the next FFI call on that thread.
+// `sv_last_error()` is stable until the next FFI call on that thread.
 thread_local! {
     static LAST_ERROR: std::cell::RefCell<CString> =
         std::cell::RefCell::new(CString::new("").unwrap());
@@ -39,7 +39,7 @@ thread_local! {
 /// Store a human-readable error message in the thread-local buffer.
 ///
 /// Called internally by every FFI function before returning a non-zero code.
-/// The message is retrievable via `zally_last_error()`.
+/// The message is retrievable via `sv_last_error()`.
 fn set_ffi_error(msg: impl AsRef<str>) {
     let s = msg.as_ref();
     let cstr = CString::new(s)
@@ -58,7 +58,7 @@ fn set_ffi_error(msg: impl AsRef<str>) {
 ///
 /// The caller MUST NOT free the returned pointer.
 #[no_mangle]
-pub extern "C" fn zally_last_error() -> *const std::os::raw::c_char {
+pub extern "C" fn sv_last_error() -> *const std::os::raw::c_char {
     LAST_ERROR.with(|cell| cell.borrow().as_ptr())
 }
 
@@ -67,7 +67,7 @@ pub extern "C" fn zally_last_error() -> *const std::os::raw::c_char {
 /// Optional housekeeping; all FFI functions overwrite the buffer on entry
 /// so an explicit clear is rarely needed.
 #[no_mangle]
-pub extern "C" fn zally_clear_error() {
+pub extern "C" fn sv_clear_error() {
     LAST_ERROR.with(|cell| {
         *cell.borrow_mut() = CString::new("").unwrap();
     });
@@ -176,7 +176,7 @@ fn vote_proof_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine>)
 /// # Safety
 /// Caller must ensure the pointers are valid and the lengths are correct.
 #[no_mangle]
-pub unsafe extern "C" fn zally_verify_toy_proof(
+pub unsafe extern "C" fn sv_verify_toy_proof(
     proof_ptr: *const u8,
     proof_len: usize,
     public_input_ptr: *const u8,
@@ -242,7 +242,7 @@ pub unsafe extern "C" fn zally_verify_toy_proof(
 /// # Safety
 /// Caller must ensure the pointers are valid and the lengths are correct.
 #[no_mangle]
-pub unsafe extern "C" fn zally_verify_redpallas_sig(
+pub unsafe extern "C" fn sv_verify_redpallas_sig(
     rk_ptr: *const u8,
     rk_len: usize,
     sighash_ptr: *const u8,
@@ -318,7 +318,7 @@ pub unsafe extern "C" fn zally_verify_redpallas_sig(
 /// # Safety
 /// Caller must ensure the pointers are valid and the lengths are correct.
 #[no_mangle]
-pub unsafe extern "C" fn zally_verify_delegation_proof(
+pub unsafe extern "C" fn sv_verify_delegation_proof(
     proof_ptr: *const u8,
     proof_len: usize,
     public_inputs_ptr: *const u8,
@@ -534,7 +534,7 @@ pub unsafe extern "C" fn zally_verify_delegation_proof(
 /// # Safety
 /// Caller must ensure the pointers are valid and the lengths are correct.
 #[no_mangle]
-pub unsafe extern "C" fn zally_verify_vote_proof(
+pub unsafe extern "C" fn sv_verify_vote_proof(
     proof_ptr: *const u8,
     proof_len: usize,
     public_inputs_ptr: *const u8,
@@ -761,7 +761,7 @@ fn share_reveal_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine
 /// # Safety
 /// Caller must ensure the pointers are valid and the lengths are correct.
 #[no_mangle]
-pub unsafe extern "C" fn zally_verify_share_reveal_proof(
+pub unsafe extern "C" fn sv_verify_share_reveal_proof(
     proof_ptr: *const u8,
     proof_len: usize,
     public_inputs_ptr: *const u8,
@@ -885,7 +885,7 @@ pub unsafe extern "C" fn zally_verify_share_reveal_proof(
 /// # Safety
 /// Caller must ensure all pointers are valid and buffers are correctly sized.
 #[no_mangle]
-pub unsafe extern "C" fn zally_generate_share_reveal(
+pub unsafe extern "C" fn sv_generate_share_reveal(
     merkle_path_ptr: *const u8,
     merkle_path_len: usize,
     share_comms_ptr: *const u8,
@@ -1054,7 +1054,7 @@ pub unsafe extern "C" fn zally_generate_share_reveal(
     0
 }
 
-/// Build test data for `zally_generate_share_reveal` FFI round-trip tests.
+/// Build test data for `sv_generate_share_reveal` FFI round-trip tests.
 ///
 /// Uses synthetic x-coordinates (small Fp values) as stand-ins for actual
 /// encrypted share x-coordinates. Since canonical Pallas Fp elements never
@@ -1178,7 +1178,7 @@ pub fn build_share_reveal_test_data() -> (
 // ---------------------------------------------------------------------------
 
 /// C function pointer types for the KV store callbacks.
-pub type ZallyKvGetFn = unsafe extern "C" fn(
+pub type SvKvGetFn = unsafe extern "C" fn(
     ctx: *mut std::os::raw::c_void,
     key: *const u8,
     key_len: usize,
@@ -1186,7 +1186,7 @@ pub type ZallyKvGetFn = unsafe extern "C" fn(
     out_val_len: *mut usize,
 ) -> i32;
 
-pub type ZallyKvSetFn = unsafe extern "C" fn(
+pub type SvKvSetFn = unsafe extern "C" fn(
     ctx: *mut std::os::raw::c_void,
     key: *const u8,
     key_len: usize,
@@ -1194,17 +1194,17 @@ pub type ZallyKvSetFn = unsafe extern "C" fn(
     val_len: usize,
 ) -> i32;
 
-pub type ZallyKvDeleteFn =
+pub type SvKvDeleteFn =
     unsafe extern "C" fn(ctx: *mut std::os::raw::c_void, key: *const u8, key_len: usize) -> i32;
 
-pub type ZallyKvIterCreateFn = unsafe extern "C" fn(
+pub type SvKvIterCreateFn = unsafe extern "C" fn(
     ctx: *mut std::os::raw::c_void,
     prefix: *const u8,
     prefix_len: usize,
     reverse: u8,
 ) -> *mut std::os::raw::c_void;
 
-pub type ZallyKvIterNextFn = unsafe extern "C" fn(
+pub type SvKvIterNextFn = unsafe extern "C" fn(
     iter: *mut std::os::raw::c_void,
     out_key: *mut *mut u8,
     out_key_len: *mut usize,
@@ -1212,9 +1212,9 @@ pub type ZallyKvIterNextFn = unsafe extern "C" fn(
     out_val_len: *mut usize,
 ) -> i32;
 
-pub type ZallyKvIterFreeFn = unsafe extern "C" fn(iter: *mut std::os::raw::c_void);
+pub type SvKvIterFreeFn = unsafe extern "C" fn(iter: *mut std::os::raw::c_void);
 
-pub type ZallyKvFreeBufFn = unsafe extern "C" fn(ptr: *mut u8, len: usize);
+pub type SvKvFreeBufFn = unsafe extern "C" fn(ptr: *mut u8, len: usize);
 
 /// Create a KV-backed stateful vote commitment tree handle.
 ///
@@ -1225,22 +1225,22 @@ pub type ZallyKvFreeBufFn = unsafe extern "C" fn(ptr: *mut u8, len: usize);
 /// `next_position` must be `CommitmentTreeState.NextIndex` (0 on first boot).
 ///
 /// The caller owns the returned pointer and must free it with
-/// [`zally_vote_tree_free`].
+/// [`sv_vote_tree_free`].
 ///
 /// # Safety
 /// All function pointers must remain valid for the lifetime of the handle.
 /// `ctx` must point to a stable Go `KvStoreProxy`; it is updated each block
 /// by Go before any tree call.
 #[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_create_with_kv(
+pub unsafe extern "C" fn sv_vote_tree_create_with_kv(
     ctx: *mut std::os::raw::c_void,
-    get_fn: ZallyKvGetFn,
-    set_fn: ZallyKvSetFn,
-    delete_fn: ZallyKvDeleteFn,
-    iter_create_fn: ZallyKvIterCreateFn,
-    iter_next_fn: ZallyKvIterNextFn,
-    iter_free_fn: ZallyKvIterFreeFn,
-    free_buf_fn: ZallyKvFreeBufFn,
+    get_fn: SvKvGetFn,
+    set_fn: SvKvSetFn,
+    delete_fn: SvKvDeleteFn,
+    iter_create_fn: SvKvIterCreateFn,
+    iter_next_fn: SvKvIterNextFn,
+    iter_free_fn: SvKvIterFreeFn,
+    free_buf_fn: SvKvFreeBufFn,
     next_position: u64,
 ) -> *mut votetree::TreeHandle {
     use vote_commitment_tree::kv_shard_store::KvCallbacks;
@@ -1258,13 +1258,13 @@ pub unsafe extern "C" fn zally_vote_tree_create_with_kv(
     Box::into_raw(handle)
 }
 
-/// Free a tree handle previously created by [`zally_vote_tree_create`].
+/// Free a tree handle previously created by [`sv_vote_tree_create`].
 ///
 /// # Safety
-/// `handle` must be a pointer returned by [`zally_vote_tree_create`] and
+/// `handle` must be a pointer returned by [`sv_vote_tree_create`] and
 /// must not have been freed before.
 #[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_free(handle: *mut votetree::TreeHandle) {
+pub unsafe extern "C" fn sv_vote_tree_free(handle: *mut votetree::TreeHandle) {
     if !handle.is_null() {
         drop(Box::from_raw(handle));
     }
@@ -1273,7 +1273,7 @@ pub unsafe extern "C" fn zally_vote_tree_free(handle: *mut votetree::TreeHandle)
 /// Append a batch of leaves to a stateful tree handle.
 ///
 /// # Arguments
-/// * `handle`      - Pointer returned by [`zally_vote_tree_create_with_kv`].
+/// * `handle`      - Pointer returned by [`sv_vote_tree_create_with_kv`].
 /// * `leaves_ptr`  - Pointer to a flat byte array of leaves (each 32 bytes LE Fp).
 /// * `leaf_count`  - Number of leaves.
 ///
@@ -1287,7 +1287,7 @@ pub unsafe extern "C" fn zally_vote_tree_free(handle: *mut votetree::TreeHandle)
 /// Caller must ensure `handle` is valid and `leaves_ptr` is valid for
 /// `leaf_count * 32` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_append_batch(
+pub unsafe extern "C" fn sv_vote_tree_append_batch(
     handle: *mut votetree::TreeHandle,
     leaves_ptr: *const u8,
     leaf_count: usize,
@@ -1314,7 +1314,7 @@ pub unsafe extern "C" fn zally_vote_tree_append_batch(
 /// Go's `ensureTreeLoaded`.
 ///
 /// # Arguments
-/// * `handle` - Pointer returned by [`zally_vote_tree_create_with_kv`].
+/// * `handle` - Pointer returned by [`sv_vote_tree_create_with_kv`].
 /// * `cursor` - Index of the first leaf to append (= current `treeCursor`).
 /// * `count`  - Number of leaves to append (= `nextIndex - treeCursor`).
 ///
@@ -1324,9 +1324,9 @@ pub unsafe extern "C" fn zally_vote_tree_append_batch(
 /// * `-4` if a leaf is missing, malformed, or the KV store returned an error.
 ///
 /// # Safety
-/// `handle` must be a valid pointer returned by [`zally_vote_tree_create_with_kv`].
+/// `handle` must be a valid pointer returned by [`sv_vote_tree_create_with_kv`].
 #[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_append_from_kv(
+pub unsafe extern "C" fn sv_vote_tree_append_from_kv(
     handle: *mut votetree::TreeHandle,
     cursor: u64,
     count: u64,
@@ -1351,9 +1351,9 @@ pub unsafe extern "C" fn zally_vote_tree_append_from_kv(
 /// * `-4` if the checkpoint failed (non-monotonic height or KV storage error).
 ///
 /// # Safety
-/// `handle` must be a valid pointer returned by [`zally_vote_tree_create_with_kv`].
+/// `handle` must be a valid pointer returned by [`sv_vote_tree_create_with_kv`].
 #[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_checkpoint(
+pub unsafe extern "C" fn sv_vote_tree_checkpoint(
     handle: *mut votetree::TreeHandle,
     height: u32,
 ) -> i32 {
@@ -1369,7 +1369,7 @@ pub unsafe extern "C" fn zally_vote_tree_checkpoint(
 /// Return the 32-byte Merkle root at the latest checkpoint.
 ///
 /// # Arguments
-/// * `handle`   - Pointer returned by [`zally_vote_tree_create`].
+/// * `handle`   - Pointer returned by [`sv_vote_tree_create`].
 /// * `root_out` - Pointer to a 32-byte output buffer.
 ///
 /// # Returns
@@ -1379,7 +1379,7 @@ pub unsafe extern "C" fn zally_vote_tree_checkpoint(
 /// # Safety
 /// Caller must ensure `handle` is valid and `root_out` has room for 32 bytes.
 #[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_root_stateful(
+pub unsafe extern "C" fn sv_vote_tree_root_stateful(
     handle: *const votetree::TreeHandle,
     root_out: *mut u8,
 ) -> i32 {
@@ -1394,10 +1394,10 @@ pub unsafe extern "C" fn zally_vote_tree_root_stateful(
 /// Return the number of leaves appended to the stateful handle so far.
 ///
 /// # Safety
-/// `handle` must be a valid pointer returned by [`zally_vote_tree_create`].
+/// `handle` must be a valid pointer returned by [`sv_vote_tree_create`].
 /// Returns 0 for a null pointer.
 #[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_size(handle: *const votetree::TreeHandle) -> u64 {
+pub unsafe extern "C" fn sv_vote_tree_size(handle: *const votetree::TreeHandle) -> u64 {
     if handle.is_null() {
         return 0;
     }
@@ -1408,7 +1408,7 @@ pub unsafe extern "C" fn zally_vote_tree_size(handle: *const votetree::TreeHandl
 /// using the stateful tree handle.
 ///
 /// # Arguments
-/// * `handle`   - Pointer returned by [`zally_vote_tree_create`].
+/// * `handle`   - Pointer returned by [`sv_vote_tree_create`].
 /// * `position` - Leaf index for which to generate the path.
 /// * `height`   - Checkpoint height to use as anchor.
 /// * `path_out` - Pointer to a [`MERKLE_PATH_BYTES`]-byte output buffer.
@@ -1422,7 +1422,7 @@ pub unsafe extern "C" fn zally_vote_tree_size(handle: *const votetree::TreeHandl
 /// Caller must ensure `handle` is valid and `path_out` has room for
 /// [`votetree::MERKLE_PATH_BYTES`] bytes.
 #[no_mangle]
-pub unsafe extern "C" fn zally_vote_tree_path_stateful(
+pub unsafe extern "C" fn sv_vote_tree_path_stateful(
     handle: *const votetree::TreeHandle,
     position: u64,
     height: u32,
@@ -1464,7 +1464,7 @@ pub unsafe extern "C" fn zally_vote_tree_path_stateful(
 /// # Safety
 /// Caller must ensure pointers are valid and root_out has room for 32 bytes.
 #[no_mangle]
-pub unsafe extern "C" fn zally_extract_nc_root(
+pub unsafe extern "C" fn sv_extract_nc_root(
     hex_ptr: *const u8,
     hex_len: usize,
     root_out: *mut u8,
@@ -1515,7 +1515,7 @@ pub unsafe extern "C" fn zally_extract_nc_root(
 /// # Safety
 /// All pointers must be valid and point to buffers of at least 32 bytes.
 #[no_mangle]
-pub unsafe extern "C" fn zally_derive_round_id(
+pub unsafe extern "C" fn sv_derive_round_id(
     snapshot_height: u64,
     snapshot_blockhash: *const u8,
     proposals_hash: *const u8,
@@ -1562,7 +1562,7 @@ mod tests {
     /// Full round-trip test: generate a share reveal proof and verify it via FFI.
     ///
     /// This test runs real Halo2 proving (~5-15s in release mode).
-    /// Run with: `cargo test --release -p zally-circuits test_generate_share_reveal -- --ignored`
+    /// Run with: `cargo test --release -p shielded-vote-circuits test_generate_share_reveal -- --ignored`
     #[test]
     #[ignore]
     fn test_generate_share_reveal() {
@@ -1585,7 +1585,7 @@ mod tests {
         let mut tree_root = [0u8; 32];
 
         let rc = unsafe {
-            zally_generate_share_reveal(
+            sv_generate_share_reveal(
                 merkle_path.as_ptr(),
                 merkle_path.len(),
                 share_comms.as_ptr(),
@@ -1640,7 +1640,7 @@ mod tests {
         public_inputs[192..224].copy_from_slice(&round_id);
 
         let verify_rc = unsafe {
-            zally_verify_share_reveal_proof(
+            sv_verify_share_reveal_proof(
                 proof.as_ptr(),
                 proof.len(),
                 public_inputs.as_ptr(),
@@ -1700,7 +1700,7 @@ mod tests {
 
         let mut ffi_out = [0u8; 32];
         let rc = unsafe {
-            zally_derive_round_id(
+            sv_derive_round_id(
                 1000,
                 bh.as_ptr(),
                 ph.as_ptr(),

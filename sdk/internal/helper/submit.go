@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	votetypes "github.com/z-cale/zally/x/vote/types"
+	votetypes "github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // MsgRevealShareJSON is the JSON payload for submitting MsgRevealShare to the
@@ -44,7 +44,7 @@ func NewChainSubmitter(baseURL string) *ChainSubmitter {
 	}
 }
 
-// voteRoundResponse is the JSON structure returned by GET /zally/v1/round/{round_id}.
+// voteRoundResponse is the JSON structure returned by GET /shielded-vote/v1/round/{round_id}.
 type voteRoundResponse struct {
 	Round struct {
 		VoteEndTime uint64 `json:"vote_end_time"`
@@ -54,7 +54,7 @@ type voteRoundResponse struct {
 // FetchVoteRound queries the chain REST API for a vote round's metadata and
 // returns the vote_end_time (unix seconds).
 func (c *ChainSubmitter) FetchVoteRound(roundID string) (uint64, error) {
-	url := fmt.Sprintf("%s/zally/v1/round/%s", c.baseURL, roundID)
+	url := fmt.Sprintf("%s/shielded-vote/v1/round/%s", c.baseURL, roundID)
 
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
@@ -81,7 +81,7 @@ func (c *ChainSubmitter) FetchVoteRound(roundID string) (uint64, error) {
 
 // SubmitRevealShare POSTs a MsgRevealShare to the chain endpoint.
 func (c *ChainSubmitter) SubmitRevealShare(msg *MsgRevealShareJSON) (*BroadcastResult, error) {
-	url := fmt.Sprintf("%s/zally/v1/reveal-share", c.baseURL)
+	url := fmt.Sprintf("%s/shielded-vote/v1/reveal-share", c.baseURL)
 
 	body, err := json.Marshal(msg)
 	if err != nil {

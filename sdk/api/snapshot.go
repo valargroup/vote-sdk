@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/z-cale/zally/crypto/ncroot"
+	"github.com/valargroup/shielded-vote/crypto/ncroot"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -109,7 +109,7 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 		return nil, fmt.Errorf("compute nc_root from orchard frontier: %w", err)
 	}
 
-	log.Printf("[zally-api] snapshot data fetched: height=%d blockhash=%s pir_root=%x nc_root=%x",
+	log.Printf("[shielded-vote-api] snapshot data fetched: height=%d blockhash=%s pir_root=%x nc_root=%x",
 		ts.Height, ts.Hash[:min(16, len(ts.Hash))]+"...", pirRes.root[:8], ncRoot[:8])
 
 	return &SnapshotData{
@@ -333,7 +333,7 @@ func fetchTreeStateWithFallback(ctx context.Context, urls []string, height uint6
 		if err == nil {
 			return ts, nil
 		}
-		log.Printf("[zally-api] lightwalletd %s failed: %v", url, err)
+		log.Printf("[shielded-vote-api] lightwalletd %s failed: %v", url, err)
 		lastErr = err
 	}
 	return nil, fmt.Errorf("all %d lightwalletd servers failed, last error: %w", len(urls), lastErr)

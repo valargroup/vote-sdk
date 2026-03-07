@@ -10,11 +10,11 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/crypto/shamir"
-	zallytest "github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/shamir"
+	svtest "github.com/valargroup/shielded-vote/testutil"
+	"github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -59,13 +59,13 @@ func validEntry(proposalID, decision uint32) *types.PartialDecryptionEntry {
 // msgPdRoundID is the deterministic round ID used across SubmitPartialDecryption tests.
 var msgPdRoundID = bytes.Repeat([]byte{0xAB}, 32)
 
-// validatorSet returns n dummy ceremony validators with addresses "zvote1validator1" ... "zvote1validatorN".
+// validatorSet returns n dummy ceremony validators with addresses "sv1validator1" ... "sv1validatorN".
 // ShamirIndex is set to i+1 (1-based), matching what CreateVotingSession assigns in production.
 func validatorSet(n int) []*types.ValidatorPallasKey {
 	v := make([]*types.ValidatorPallasKey, n)
 	for i := range v {
 		v[i] = &types.ValidatorPallasKey{
-			ValidatorAddress: "zvote1validator" + string(rune('1'+i)),
+			ValidatorAddress: "sv1validator" + string(rune('1'+i)),
 			PallasPk:         bytes.Repeat([]byte{byte(i + 1)}, 32),
 			ShamirIndex:      uint32(i + 1),
 		}
@@ -326,7 +326,7 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 
 func (s *MsgServerTestSuite) TestSubmitTally() {
 	roundID := bytes.Repeat([]byte{0x40}, 32)
-	creator := "zvote1creator"
+	creator := "sv1creator"
 
 	// Generate a real EA keypair for DLEQ proof tests.
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
@@ -343,8 +343,8 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
 			EaPk:        eaPkBytes,
 			Proposals: []*types.Proposal{
-				{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
-				{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
+				{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
+				{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
 			},
 		}))
 		// Pre-populate the tally accumulator with a ciphertext encrypted under the real EA key.
@@ -456,7 +456,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 			msg: func() *types.MsgSubmitTally {
 				return &types.MsgSubmitTally{
 					VoteRoundId: roundID,
-					Creator:     "zvote1creator",
+					Creator:     "sv1creator",
 					Entries: []*types.TallyEntry{
 						{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
 					},
@@ -494,7 +494,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 				ct, _ := setupTallyingRoundWithAccumulator()
 				return &types.MsgSubmitTally{
 					VoteRoundId: roundID,
-					Creator:     "zvote1othervalidator",
+					Creator:     "sv1othervalidator",
 					Entries: []*types.TallyEntry{
 						{ProposalId: 1, VoteDecision: 1, TotalValue: 500, DecryptionProof: makeDLEQProof(ct, 500)},
 					},
@@ -579,7 +579,7 @@ func (s *MsgServerTestSuite) TestSubmitTally() {
 func (s *MsgServerTestSuite) TestSubmitTally_EmitsEvent() {
 	s.SetupTest()
 	roundID := bytes.Repeat([]byte{0x50}, 32)
-	creator := "zvote1creator"
+	creator := "sv1creator"
 
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
@@ -617,7 +617,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_EmitsEvent() {
 func (s *MsgServerTestSuite) TestSubmitTally_FinalizedRejectsShares() {
 	s.SetupTest()
 	roundID := bytes.Repeat([]byte{0x60}, 32)
-	creator := "zvote1creator"
+	creator := "sv1creator"
 
 	// Create a TALLYING round.
 	kv := s.keeper.OpenKVStore(s.ctx)
@@ -627,7 +627,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_FinalizedRejectsShares() {
 		Creator:     creator,
 		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
 		},
 	}))
 
@@ -685,7 +685,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 			msg: func(rid []byte) *types.MsgSubmitTally {
 				return &types.MsgSubmitTally{
 					VoteRoundId: rid,
-					Creator:     "zvote1proposer",
+					Creator:     "sv1proposer",
 					Entries:     []*types.TallyEntry{{ProposalId: 1, VoteDecision: 0, TotalValue: 42}},
 				}
 			},
@@ -712,7 +712,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 			msg: func(rid []byte) *types.MsgSubmitTally {
 				return &types.MsgSubmitTally{
 					VoteRoundId: rid,
-					Creator:     "zvote1proposer",
+					Creator:     "sv1proposer",
 					Entries: []*types.TallyEntry{
 						{ProposalId: 1, VoteDecision: 0, TotalValue: 10},
 						{ProposalId: 1, VoteDecision: 1, TotalValue: 20},
@@ -739,7 +739,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 			msg: func(rid []byte) *types.MsgSubmitTally {
 				return &types.MsgSubmitTally{
 					VoteRoundId: rid,
-					Creator:     "zvote1proposer",
+					Creator:     "sv1proposer",
 					Entries:     []*types.TallyEntry{{ProposalId: 1, VoteDecision: 0, TotalValue: 0}},
 				}
 			},
@@ -759,7 +759,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 			msg: func(rid []byte) *types.MsgSubmitTally {
 				return &types.MsgSubmitTally{
 					VoteRoundId: rid,
-					Creator:     "zvote1proposer",
+					Creator:     "sv1proposer",
 					Entries:     []*types.TallyEntry{{ProposalId: 1, VoteDecision: 0, TotalValue: 77}},
 				}
 			},
@@ -781,7 +781,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 			msg: func(rid []byte) *types.MsgSubmitTally {
 				return &types.MsgSubmitTally{
 					VoteRoundId: rid,
-					Creator:     "zvote1proposer",
+					Creator:     "sv1proposer",
 					Entries:     []*types.TallyEntry{{ProposalId: 1, VoteDecision: 0, TotalValue: 999}},
 				}
 			},
@@ -800,7 +800,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 			msg: func(rid []byte) *types.MsgSubmitTally {
 				return &types.MsgSubmitTally{
 					VoteRoundId: rid,
-					Creator:     "zvote1proposer",
+					Creator:     "sv1proposer",
 					Entries:     []*types.TallyEntry{{ProposalId: 1, VoteDecision: 0, TotalValue: 5}},
 				}
 			},
@@ -817,7 +817,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 			msg: func(rid []byte) *types.MsgSubmitTally {
 				return &types.MsgSubmitTally{
 					VoteRoundId: rid,
-					Creator:     "zvote1proposer",
+					Creator:     "sv1proposer",
 					Entries:     []*types.TallyEntry{{ProposalId: 1, VoteDecision: 0, TotalValue: 42}},
 				}
 			},
@@ -832,7 +832,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 			msg: func(rid []byte) *types.MsgSubmitTally {
 				return &types.MsgSubmitTally{
 					VoteRoundId: rid,
-					Creator:     "zvote1proposer",
+					Creator:     "sv1proposer",
 					Entries:     []*types.TallyEntry{{ProposalId: 1, VoteDecision: 0, TotalValue: 1}},
 				}
 			},
@@ -871,7 +871,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 
 func (s *MsgServerTestSuite) TestSubmitTally_CompletenessRejections() {
 	roundID := bytes.Repeat([]byte{0x70}, 32)
-	creator := "zvote1creator"
+	creator := "sv1creator"
 
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
@@ -1073,7 +1073,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 			buildMsg: func([]*types.ValidatorPallasKey) *types.MsgSubmitPartialDecryption {
 				return &types.MsgSubmitPartialDecryption{
 					VoteRoundId:    bytes.Repeat([]byte{0xFF}, 32),
-					Creator:        "zvote1validator1",
+					Creator:        "sv1validator1",
 					ValidatorIndex: 1,
 					Entries:        []*types.PartialDecryptionEntry{validEntry(1, 0)},
 				}

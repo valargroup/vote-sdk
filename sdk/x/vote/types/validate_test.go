@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	zallytest "github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/types"
+	svtest "github.com/valargroup/shielded-vote/testutil"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -28,7 +28,7 @@ func TestValidateBasicTestSuite(t *testing.T) {
 
 func validCreateSession() *types.MsgCreateVotingSession {
 	return &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
+		Creator:           "sv1admin",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
@@ -39,8 +39,8 @@ func validCreateSession() *types.MsgCreateVotingSession {
 		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
 		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First", Options: zallytest.DefaultOptions()},
-			{Id: 2, Title: "Proposal B", Description: "Second", Options: zallytest.DefaultOptions()},
+			{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
+			{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
 		},
 	}
 }
@@ -90,7 +90,7 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			modify: func(m *types.MsgCreateVotingSession) {
 				m.Proposals = make([]*types.Proposal, 16)
 				for i := range m.Proposals {
-					m.Proposals[i] = &types.Proposal{Id: uint32(i + 1), Title: "P", Options: zallytest.DefaultOptions()}
+					m.Proposals[i] = &types.Proposal{Id: uint32(i + 1), Title: "P", Options: svtest.DefaultOptions()}
 				}
 			},
 			expectErr:   true,
@@ -100,7 +100,7 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			name: "invalid: proposal with empty title",
 			modify: func(m *types.MsgCreateVotingSession) {
 				m.Proposals = []*types.Proposal{
-					{Id: 1, Title: "", Description: "No title", Options: zallytest.DefaultOptions()},
+					{Id: 1, Title: "", Description: "No title", Options: svtest.DefaultOptions()},
 				}
 			},
 			expectErr:   true,
@@ -110,8 +110,8 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			name: "invalid: proposal ID mismatch (non-sequential)",
 			modify: func(m *types.MsgCreateVotingSession) {
 				m.Proposals = []*types.Proposal{
-					{Id: 1, Title: "A", Description: "ok", Options: zallytest.DefaultOptions()},
-					{Id: 5, Title: "B", Description: "bad id", Options: zallytest.DefaultOptions()},
+					{Id: 1, Title: "A", Description: "ok", Options: svtest.DefaultOptions()},
+					{Id: 5, Title: "B", Description: "bad id", Options: svtest.DefaultOptions()},
 				}
 			},
 			expectErr:   true,
@@ -121,7 +121,7 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			name: "valid: single proposal",
 			modify: func(m *types.MsgCreateVotingSession) {
 				m.Proposals = []*types.Proposal{
-					{Id: 1, Title: "Only Option", Description: "Single", Options: zallytest.DefaultOptions()},
+					{Id: 1, Title: "Only Option", Description: "Single", Options: svtest.DefaultOptions()},
 				}
 			},
 		},
@@ -130,7 +130,7 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			modify: func(m *types.MsgCreateVotingSession) {
 				m.Proposals = make([]*types.Proposal, 15)
 				for i := range m.Proposals {
-					m.Proposals[i] = &types.Proposal{Id: uint32(i + 1), Title: "P", Options: zallytest.DefaultOptions()}
+					m.Proposals[i] = &types.Proposal{Id: uint32(i + 1), Title: "P", Options: svtest.DefaultOptions()}
 				}
 			},
 		},
@@ -245,7 +245,7 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 			name: "valid: all fields correct",
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
-				Creator:     "zvote1admin",
+				Creator:     "sv1admin",
 				Entries: []*types.TallyEntry{
 					{ProposalId: 1, VoteDecision: 1, TotalValue: 1000},
 				},
@@ -255,7 +255,7 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 			name: "valid: multiple entries",
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
-				Creator:     "zvote1admin",
+				Creator:     "sv1admin",
 				Entries: []*types.TallyEntry{
 					{ProposalId: 1, VoteDecision: 0, TotalValue: 500},
 					{ProposalId: 1, VoteDecision: 1, TotalValue: 1000},
@@ -267,7 +267,7 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 			name: "invalid: empty vote_round_id",
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: nil,
-				Creator:     "zvote1admin",
+				Creator:     "sv1admin",
 				Entries: []*types.TallyEntry{
 					{ProposalId: 1, VoteDecision: 1, TotalValue: 1000},
 				},
@@ -291,7 +291,7 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 			name: "valid: empty entries (zero-vote round)",
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
-				Creator:     "zvote1admin",
+				Creator:     "sv1admin",
 				Entries:     nil,
 			},
 			expectErr: false,
@@ -300,7 +300,7 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 			name: "invalid: duplicate (proposal_id, vote_decision) pair",
 			msg: &types.MsgSubmitTally{
 				VoteRoundId: bytes.Repeat([]byte{0x01}, 32),
-				Creator:     "zvote1admin",
+				Creator:     "sv1admin",
 				Entries: []*types.TallyEntry{
 					{ProposalId: 1, VoteDecision: 1, TotalValue: 500},
 					{ProposalId: 1, VoteDecision: 1, TotalValue: 600},

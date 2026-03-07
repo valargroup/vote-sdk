@@ -62,19 +62,19 @@ pub(crate) struct ChainBlockCommitments {
     pub leaves: Vec<String>,
 }
 
-/// `GET /zally/v1/commitment-tree/latest` response.
+/// `GET /shielded-vote/v1/commitment-tree/latest` response.
 #[derive(Debug, Deserialize)]
 pub(crate) struct QueryLatestTreeResponse {
     pub tree: Option<ChainTreeState>,
 }
 
-/// `GET /zally/v1/commitment-tree/{height}` response.
+/// `GET /shielded-vote/v1/commitment-tree/{height}` response.
 #[derive(Debug, Deserialize)]
 pub(crate) struct QueryCommitmentTreeResponse {
     pub tree: Option<ChainTreeState>,
 }
 
-/// `GET /zally/v1/commitment-tree/leaves` response.
+/// `GET /shielded-vote/v1/commitment-tree/leaves` response.
 #[derive(Debug, Deserialize)]
 pub(crate) struct QueryCommitmentLeavesResponse {
     #[serde(default)]

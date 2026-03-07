@@ -40,20 +40,20 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/z-cale/zally/app"
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/crypto/roundid"
-	votekeeper "github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/valargroup/shielded-vote/app"
+	"github.com/valargroup/shielded-vote/crypto/elgamal"
+	"github.com/valargroup/shielded-vote/crypto/roundid"
+	votekeeper "github.com/valargroup/shielded-vote/x/vote/keeper"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
-const testChainID = "zally-test-1"
+const testChainID = "svote-test-1"
 
-// TestApp wraps ZallyApp with helpers for driving the ABCI lifecycle
+// TestApp wraps SvoteApp with helpers for driving the ABCI lifecycle
 // in integration tests. No CometBFT process or network is involved —
 // tests call FinalizeBlock/Commit/CheckTx directly.
 type TestApp struct {
-	*app.ZallyApp
+	*app.SvoteApp
 
 	t      *testing.T
 	Height int64
@@ -77,7 +77,7 @@ type TestApp struct {
 	EaPk []byte
 }
 
-// SetupTestApp creates a fresh ZallyApp backed by an in-memory database,
+// SetupTestApp creates a fresh SvoteApp backed by an in-memory database,
 // initializes the chain with a proper genesis (including a genesis validator),
 // and returns a TestApp ready for integration testing.
 func SetupTestApp(t *testing.T) *TestApp {
@@ -90,7 +90,7 @@ func SetupTestApp(t *testing.T) *TestApp {
 	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
 
 	// Seed the vote manager so CreateVotingSession passes authorization.
-	ta.SeedVoteManager("zvote1admin")
+	ta.SeedVoteManager("sv1admin")
 
 	return ta
 }
@@ -118,7 +118,7 @@ func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey, []byte) 
 	ta := setupTestApp(t, appOpts)
 	ta.EaSkDir = tmpDir
 	ta.EaPk = pk.Point.ToAffineCompressed()
-	ta.SeedVoteManager("zvote1admin")
+	ta.SeedVoteManager("sv1admin")
 
 	return ta, pk, skBytes
 }
@@ -203,7 +203,7 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 	db := dbm.NewMemDB()
 	logger := log.NewNopLogger()
 
-	zallyApp := app.NewZallyApp(
+	svoteApp := app.NewSvoteApp(
 		logger, db, nil, true, appOpts,
 		baseapp.SetChainID(testChainID),
 	)
@@ -231,8 +231,8 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 	// use the genesis account as operator so that ceremony message signing
 	// (which requires the operator's account key) works in tests.
 	genesisState, err := genesisStateWithAccountOperator(
-		zallyApp.AppCodec(),
-		zallyApp.DefaultGenesis(),
+		svoteApp.AppCodec(),
+		svoteApp.DefaultGenesis(),
 		valSet,
 		[]authtypes.GenesisAccount{genAcc},
 		balance,
@@ -245,7 +245,7 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 	now := time.Unix(1_000_000, 0).UTC()
 
 	// Initialize the chain.
-	_, err = zallyApp.InitChain(&abci.RequestInitChain{
+	_, err = svoteApp.InitChain(&abci.RequestInitChain{
 		ChainId:         testChainID,
 		AppStateBytes:   stateBytes,
 		ConsensusParams: simtestutil.DefaultConsensusParams,
@@ -260,7 +260,7 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 	proposerAddr := valSet.Validators[0].Address.Bytes()
 
 	// Finalize the genesis block (height 1) so the app is fully initialized.
-	_, err = zallyApp.FinalizeBlock(&abci.RequestFinalizeBlock{
+	_, err = svoteApp.FinalizeBlock(&abci.RequestFinalizeBlock{
 		Height:             1,
 		Time:               now,
 		NextValidatorsHash: valSet.Hash(),
@@ -268,11 +268,11 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 	})
 	require.NoError(t, err)
 
-	_, err = zallyApp.Commit()
+	_, err = svoteApp.Commit()
 	require.NoError(t, err)
 
 	return &TestApp{
-		ZallyApp:        zallyApp,
+		SvoteApp:        svoteApp,
 		t:               t,
 		Height:          1,
 		Time:            now,
@@ -314,7 +314,7 @@ func SetupTestAppWithPallasKey(t *testing.T) (ta *TestApp, pallasSk *elgamal.Sec
 
 // VoteKeeper returns the vote module keeper for querying state in tests.
 func (ta *TestApp) VoteKeeper() *votekeeper.Keeper {
-	return ta.ZallyApp.VoteKeeper
+	return ta.SvoteApp.VoteKeeper
 }
 
 // SeedVoteManager writes the vote manager address directly into the module's
@@ -643,7 +643,7 @@ func (ta *TestApp) RecheckTxSync(txBytes []byte) *abci.ResponseCheckTx {
 func (ta *TestApp) CallPrepareProposal() *abci.ResponsePrepareProposal {
 	ta.t.Helper()
 
-	resp, err := ta.ZallyApp.PrepareProposal(&abci.RequestPrepareProposal{
+	resp, err := ta.SvoteApp.PrepareProposal(&abci.RequestPrepareProposal{
 		Height:          ta.Height + 1,
 		Time:            ta.Time.Add(5 * time.Second),
 		ProposerAddress: ta.ProposerAddress,
@@ -657,7 +657,7 @@ func (ta *TestApp) CallPrepareProposal() *abci.ResponsePrepareProposal {
 func (ta *TestApp) CallPrepareProposalWithTxs(txs [][]byte) *abci.ResponsePrepareProposal {
 	ta.t.Helper()
 
-	resp, err := ta.ZallyApp.PrepareProposal(&abci.RequestPrepareProposal{
+	resp, err := ta.SvoteApp.PrepareProposal(&abci.RequestPrepareProposal{
 		Height:          ta.Height + 1,
 		Time:            ta.Time.Add(5 * time.Second),
 		Txs:             txs,
@@ -672,7 +672,7 @@ func (ta *TestApp) CallPrepareProposalWithTxs(txs [][]byte) *abci.ResponsePrepar
 func (ta *TestApp) CallProcessProposal(txs [][]byte) *abci.ResponseProcessProposal {
 	ta.t.Helper()
 
-	resp, err := ta.ZallyApp.ProcessProposal(&abci.RequestProcessProposal{
+	resp, err := ta.SvoteApp.ProcessProposal(&abci.RequestProcessProposal{
 		Height:          ta.Height + 1,
 		Time:            ta.Time.Add(5 * time.Second),
 		Txs:             txs,
@@ -691,7 +691,7 @@ func (ta *TestApp) NextBlockWithPrepareProposal() {
 	ta.Height++
 	ta.Time = ta.Time.Add(5 * time.Second)
 
-	ppResp, err := ta.ZallyApp.PrepareProposal(&abci.RequestPrepareProposal{
+	ppResp, err := ta.SvoteApp.PrepareProposal(&abci.RequestPrepareProposal{
 		Height:          ta.Height,
 		Time:            ta.Time,
 		ProposerAddress: ta.ProposerAddress,
@@ -716,7 +716,7 @@ func (ta *TestApp) NextBlockWithPrepareProposal() {
 func (ta *TestApp) MustBuildSignedCeremonyTx(msg sdk.Msg) []byte {
 	ta.t.Helper()
 
-	txConfig := ta.ZallyApp.TxConfig()
+	txConfig := ta.SvoteApp.TxConfig()
 	privKey := ta.ValPrivKey
 	accAddr := sdk.AccAddress(privKey.PubKey().Address())
 

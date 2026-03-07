@@ -19,7 +19,7 @@ import { bech32 } from 'bech32';
 
 export const config = { runtime: 'edge' };
 
-const BECH32_PREFIX = 'zvote';
+const BECH32_PREFIX = 'sv';
 
 // -- Crypto helpers (duplicated from update-voting-config.ts) --
 

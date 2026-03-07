@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-27
 
-**Repository:** https://github.com/z-cale/Shielded-Vote
+**Repository:** https://github.com/valargroup/Shielded-Vote
 
 **Commit:** `eef9904f48693aaccf6c6eda5ce81a448196556f` (branch: `main`) TODO: Update this
 

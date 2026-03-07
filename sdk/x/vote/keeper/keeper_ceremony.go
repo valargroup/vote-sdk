@@ -7,7 +7,7 @@ import (
 	"cosmossdk.io/core/store"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // GetCeremonyState retrieves the singleton ceremony state from the KV store.
