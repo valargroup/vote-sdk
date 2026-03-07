@@ -165,7 +165,7 @@ export interface CreateVotingSessionValue {
   title: string;
 }
 
-// message MsgCreateVotingSession { ... } — see sdk/proto/zvote/v1/tx.proto
+// message MsgCreateVotingSession { ... } — see sdk/proto/svote/v1/tx.proto
 const MsgCreateVotingSessionProto = {
   encode(
     m: CreateVotingSessionValue,
@@ -269,9 +269,9 @@ const MsgSendProto = {
 function createRegistry(): Registry {
   const registry = new Registry();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registry.register("/zvote.v1.MsgSetVoteManager", MsgSetVoteManagerProto as any);
+  registry.register("/svote.v1.MsgSetVoteManager", MsgSetVoteManagerProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registry.register("/zvote.v1.MsgCreateVotingSession", MsgCreateVotingSessionProto as any);
+  registry.register("/svote.v1.MsgCreateVotingSession", MsgCreateVotingSessionProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/cosmos.slashing.v1beta1.MsgUnjail", MsgUnjailProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -403,7 +403,7 @@ async function signAndBroadcast({
   const gasLimit = parseInt(gas, 10);
   const authInfoBytes = makeAuthInfoBytes(
     [{ pubkey, sequence }],
-    [{ denom: "uzvote", amount: "0" }],
+    [{ denom: "usvote", amount: "0" }],
     gasLimit,
     undefined,
     undefined,
@@ -491,7 +491,7 @@ async function fetchSnapshotData(
   nullifierImtRoot: Uint8Array;
   snapshotBlockhash: Uint8Array;
 }> {
-  const resp = await fetch(`${apiBase}/zally/v1/snapshot-data/${snapshotHeight}`);
+  const resp = await fetch(`${apiBase}/shielded-vote/v1/snapshot-data/${snapshotHeight}`);
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
     throw new Error(
@@ -527,7 +527,7 @@ export async function setVoteManager(
     signer,
     messages: [
       {
-        typeUrl: "/zvote.v1.MsgSetVoteManager",
+        typeUrl: "/svote.v1.MsgSetVoteManager",
         value: { creator: account.address, newManager },
       },
     ],
@@ -571,7 +571,7 @@ export async function createVotingSession(
     signer,
     messages: [
       {
-        typeUrl: "/zvote.v1.MsgCreateVotingSession",
+        typeUrl: "/svote.v1.MsgCreateVotingSession",
         value: {
           creator: account.address,
           snapshotHeight: params.snapshotHeight,
@@ -598,13 +598,13 @@ export async function createVotingSession(
  * Used by the "Fund validator" UI to transfer stake tokens from the
  * bootstrap operator to a validator address.
  *
- * @param amountUzvote - amount in micro-tokens (uzvote), e.g. "1000000" for 1 ZVOTE
+ * @param amountUsvote - amount in micro-tokens (usvote), e.g. "1000000" for 1 SVOTE
  */
 export async function fundValidator(
   apiBase: string,
   signer: OfflineDirectSigner,
   toAddress: string,
-  amountUzvote: string,
+  amountUsvote: string,
 ): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
   return signAndBroadcast({
@@ -616,7 +616,7 @@ export async function fundValidator(
         value: {
           fromAddress: account.address,
           toAddress,
-          amount: [{ denom: "uzvote", amount: amountUzvote }],
+          amount: [{ denom: "usvote", amount: amountUsvote }],
         },
       },
     ],

@@ -24,7 +24,7 @@ run = '''
 #!/usr/bin/env bash
 set -e
 PROCS=""
-pgrep zallyd                   > /dev/null 2>&1 && PROCS="$PROCS zallyd"
+pgrep svoted                   > /dev/null 2>&1 && PROCS="$PROCS svoted"
 pgrep -f 'nf-server.*serve'   > /dev/null 2>&1 && PROCS="$PROCS nf-server"
 if [ -n "$PROCS" ]; then
     printf '\033[33mAlready running:%s\033[0m\n' "$PROCS"
@@ -48,7 +48,7 @@ quiet = true
 run = '''
 #!/usr/bin/env bash
 KILLED=""
-pkill zallyd    2>/dev/null && KILLED="$KILLED zallyd"    || true
+pkill svoted    2>/dev/null && KILLED="$KILLED svoted"    || true
 pkill nf-server 2>/dev/null && KILLED="$KILLED nf-server" || true
 if [ -n "$KILLED" ]; then
     printf '\033[32mStopped:%s\033[0m\n' "$KILLED"
@@ -72,15 +72,15 @@ run = "cargo test --release --manifest-path e2e-tests/Cargo.toml voting_flow_lib
 # ── build:* ─────────────────────────────────────────────────────────
 
 [tasks."build"]
-description = "Build zallyd with FFI (Halo2 + RedPallas)"
+description = "Build svoted with FFI (Halo2 + RedPallas)"
 run = "make -C sdk build-ffi"
 
 [tasks."build:quick"]
-description = "Build zallyd without FFI (Go only, no ZK verification)"
+description = "Build svoted without FFI (Go only, no ZK verification)"
 run = "make -C sdk build"
 
 [tasks."build:install"]
-description = "Install zallyd + create-val-tx with FFI to $GOBIN"
+description = "Install svoted + create-val-tx with FFI to $GOBIN"
 run = "make -C sdk install-ffi install-create-val-tx"
 
 [tasks."build:create-val-tx"]
@@ -108,12 +108,12 @@ run = "make -C sdk init-benchmark"
 
 [tasks."chain:start"]
 description = "Start chain daemon (foreground)"
-run = "ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} make -C sdk start"
+run = "SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} make -C sdk start"
 
 [tasks."chain:clean"]
-description = "Remove chain data directory (~/.zallyd)"
+description = "Remove chain data directory (~/.svoted)"
 run = "make -C sdk clean"
-confirm = "This will delete ~/.zallyd and the local zallyd binary. Continue?"
+confirm = "This will delete ~/.svoted and the local svoted binary. Continue?"
 
 [tasks."chain:ceremony"]
 description = "Register Pallas key + create round + wait ACTIVE"
@@ -141,13 +141,13 @@ run = "npm install --silent && VITE_CHAIN_URL=http://localhost:1418 npm run dev"
 [tasks."multi:clean"]
 description = "Stop + remove all multi-validator data"
 quiet = true
-confirm = "This will stop and delete all multi-validator data (~/.zallyd-val1,2,3). Continue?"
+confirm = "This will stop and delete all multi-validator data (~/.svoted-val1,2,3). Continue?"
 run = '''
 #!/usr/bin/env bash
 set -e
 mise run multi:stop 2>/dev/null || true
-rm -rf "$HOME/.zallyd-val1" "$HOME/.zallyd-val2" "$HOME/.zallyd-val3"
-rm -f "$HOME/.zallyd-multi-pids"
+rm -rf "$HOME/.svoted-val1" "$HOME/.svoted-val2" "$HOME/.svoted-val3"
+rm -f "$HOME/.svoted-multi-pids"
 printf '\033[32mCleaned multi-validator data.\033[0m\n'
 '''
 
@@ -250,10 +250,10 @@ description = "Real-proof VC/VAN sync stress E2E (ignored test)"
 run = '''
 #!/usr/bin/env bash
 set -e
-ZALLY_API_URL=${ZALLY_API_URL:-http://localhost:1418} \
-HELPER_SERVER_URL=${HELPER_SERVER_URL:-$ZALLY_API_URL} \
-ZALLY_STRESS_DELEGATION_COUNT=${ZALLY_STRESS_DELEGATION_COUNT:-5} \
-ZALLY_E2E_VOTE_WINDOW_SECS=${ZALLY_E2E_VOTE_WINDOW_SECS:-420} \
+SVOTE_API_URL=${SVOTE_API_URL:-http://localhost:1418} \
+HELPER_SERVER_URL=${HELPER_SERVER_URL:-$SVOTE_API_URL} \
+SVOTE_STRESS_DELEGATION_COUNT=${SVOTE_STRESS_DELEGATION_COUNT:-5} \
+SVOTE_E2E_VOTE_WINDOW_SECS=${SVOTE_E2E_VOTE_WINDOW_SECS:-420} \
 cargo test --release --manifest-path e2e-tests/Cargo.toml --test sync_stress -- --nocapture --ignored --test-threads=1
 '''
 
@@ -289,7 +289,7 @@ run = '''
 set -e
 
 # Start chain if needed.
-if ! pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1; then
+if ! pgrep -f 'svoted start --home.*val' > /dev/null 2>&1; then
   mise run multi:start-chain
 fi
 
@@ -305,13 +305,13 @@ for i in $(seq 1 40); do
   sleep 2
 done
 
-ZALLY_API_URL=${ZALLY_API_URL:-http://localhost:1418} \
+SVOTE_API_URL=${SVOTE_API_URL:-http://localhost:1418} \
 HELPER_SERVER_URL=${HELPER_SERVER_URL:-http://localhost:1418} \
-ZALLY_HOME=${ZALLY_HOME:-$HOME/.zallyd-val1} \
-ZALLY_NODE_URL=${ZALLY_NODE_URL:-tcp://localhost:26157} \
-ZALLY_PALLAS_PK_PATH=${ZALLY_PALLAS_PK_PATH:-$HOME/.zallyd-val1/pallas.pk} \
-ZALLY_STRESS_DELEGATION_COUNT=${ZALLY_STRESS_DELEGATION_COUNT:-5} \
-ZALLY_E2E_VOTE_WINDOW_SECS=${ZALLY_E2E_VOTE_WINDOW_SECS:-420} \
+SVOTE_HOME=${SVOTE_HOME:-$HOME/.svoted-val1} \
+SVOTE_NODE_URL=${SVOTE_NODE_URL:-tcp://localhost:26157} \
+SVOTE_PALLAS_PK_PATH=${SVOTE_PALLAS_PK_PATH:-$HOME/.svoted-val1/pallas.pk} \
+SVOTE_STRESS_DELEGATION_COUNT=${SVOTE_STRESS_DELEGATION_COUNT:-5} \
+SVOTE_E2E_VOTE_WINDOW_SECS=${SVOTE_E2E_VOTE_WINDOW_SECS:-420} \
 mise run test:sync-stress-real
 '''
 

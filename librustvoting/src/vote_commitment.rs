@@ -104,7 +104,7 @@ pub fn sign_cast_vote(
         })?;
 
     // Compute canonical sighash (must match Go's ComputeCastVoteSighash)
-    const CAST_VOTE_SIGHASH_DOMAIN: &[u8] = b"ZALLY_CAST_VOTE_SIGHASH_V0";
+    const CAST_VOTE_SIGHASH_DOMAIN: &[u8] = b"SVOTE_CAST_VOTE_SIGHASH_V0";
     let mut canonical = Vec::new();
     canonical.extend_from_slice(CAST_VOTE_SIGHASH_DOMAIN);
     // vote_round_id: pad to 32 bytes

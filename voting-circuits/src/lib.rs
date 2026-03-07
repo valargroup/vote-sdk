@@ -1,4 +1,4 @@
-//! Governance ZKP circuits for the Zally voting protocol.
+//! Governance ZKP circuits for the Shielded-Vote protocol.
 //!
 //! Contains three circuits:
 //! - **Delegation** (ZKP #1): Proves delegation of voting rights.

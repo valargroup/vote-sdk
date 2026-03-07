@@ -40,7 +40,7 @@ When `RUN_SOAK=1`, premerge uses mixed Tier 4 load as well (`sync_stress` + VC f
 
 - `mise install`
 - Rust toolchain and Go toolchain available via mise
-- `zallyd` / `create-val-tx` built by `multi:start-chain` automatically
+- `svoted` / `create-val-tx` built by `multi:start-chain` automatically
 
 ## Modes
 
@@ -115,9 +115,9 @@ mise run test:sync-stress-real:local
 
 Optional knobs:
 
-- `ZALLY_STRESS_DELEGATION_COUNT` (default `5`)
-- `ZALLY_E2E_VOTE_WINDOW_SECS` (default `420`)
-- `ZALLY_API_URL` (default `http://localhost:1418`)
+- `SVOTE_STRESS_DELEGATION_COUNT` (default `5`)
+- `SVOTE_E2E_VOTE_WINDOW_SECS` (default `420`)
+- `SVOTE_API_URL` (default `http://localhost:1418`)
 - `HELPER_SERVER_URL` (default `http://localhost:1418`)
 
 ### Tier 2/3/4 with real-proof load
@@ -151,8 +151,8 @@ Script-level knobs:
 - `REAL_PROOF_DELEGATION_COUNT` (default `5`)
 - `REAL_PROOF_VOTE_WINDOW_SECS` (default `420`)
 - `REAL_PROOF_API_URL` / `REAL_PROOF_HELPER_URL` (default `http://localhost:1418`)
-- `ZALLY_HOME` / `ZALLY_NODE_URL` / `ZALLY_PALLAS_PK_PATH` for Cosmos tx signing
-  context (auto-defaults to `val1` local paths when unset and `~/.zallyd-val1` exists)
+- `SVOTE_HOME` / `SVOTE_NODE_URL` / `SVOTE_PALLAS_PK_PATH` for Cosmos tx signing
+  context (auto-defaults to `val1` local paths when unset and `~/.svoted-val1` exists)
 - `REAL_PROOF_INCLUDE_VC_FLOW` (`0`/`1`, default `0`) to append `voting_flow_librustvoting`
   after `sync_stress` in each load phase
 - `FAIL_ON_LOAD_ERROR` (`0`/`1`, default `1`) for soak behavior on load command failures

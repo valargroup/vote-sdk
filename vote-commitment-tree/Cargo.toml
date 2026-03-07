@@ -2,7 +2,7 @@
 name = "vote-commitment-tree"
 version = "0.1.0"
 edition = "2021"
-description = "Append-only Poseidon Merkle tree for Vote Authority Notes and Vote Commitments (Zally voting protocol)"
+description = "Append-only Poseidon Merkle tree for Vote Authority Notes and Vote Commitments (Shielded-Vote protocol)"
 
 [dependencies]
 imt-tree = { path = "../nullifier-ingest/imt-tree" }

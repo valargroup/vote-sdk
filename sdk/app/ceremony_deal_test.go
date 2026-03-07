@@ -11,12 +11,12 @@ import (
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
 
-	voteapi "github.com/z-cale/zally/api"
-	"github.com/z-cale/zally/crypto/ecies"
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/crypto/shamir"
-	"github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/types"
+	voteapi "github.com/z-cale/shielded-vote/api"
+	"github.com/z-cale/shielded-vote/crypto/ecies"
+	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	"github.com/z-cale/shielded-vote/crypto/shamir"
+	"github.com/z-cale/shielded-vote/testutil"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -42,8 +42,8 @@ func TestCeremonyDealThresholdMode(t *testing.T) {
 
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: dealerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-		{ValidatorAddress: "zvote1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
-		{ValidatorAddress: "zvote1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk3.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk3.Point.ToAffineCompressed()},
 	}
 
 	roundID := ta.SeedRegisteringCeremony(validators)
@@ -178,8 +178,8 @@ func TestCeremonyDealSkipsWhenNoPallasKey(t *testing.T) {
 
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: dealerAddr, PallasPk: pk.Point.ToAffineCompressed()},
-		{ValidatorAddress: "zvote1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk.Point.ToAffineCompressed()},
-		{ValidatorAddress: "zvote1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk.Point.ToAffineCompressed()},
 	}
 	ta.SeedRegisteringCeremony(validators)
 
@@ -202,9 +202,9 @@ func TestCeremonyDealSkipsWhenProposerNotInValidators(t *testing.T) {
 	_, pkB := elgamal.KeyGen(rand.Reader)
 
 	validators := []*types.ValidatorPallasKey{
-		{ValidatorAddress: "zvote1stranger1xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pkA.Point.ToAffineCompressed()},
-		{ValidatorAddress: "zvote1stranger2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pkB.Point.ToAffineCompressed()},
-		{ValidatorAddress: "zvote1stranger3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pkB.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1stranger1xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pkA.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1stranger2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pkB.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1stranger3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pkB.Point.ToAffineCompressed()},
 	}
 	ta.SeedRegisteringCeremony(validators)
 
@@ -231,8 +231,8 @@ func TestCeremonyDealThresholdStoredOnRound(t *testing.T) {
 
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: dealerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-		{ValidatorAddress: "zvote1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
-		{ValidatorAddress: "zvote1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk3.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk3.Point.ToAffineCompressed()},
 	}
 
 	roundID := ta.SeedRegisteringCeremony(validators)
@@ -409,8 +409,8 @@ func TestCeremonyAckThresholdMode(t *testing.T) {
 	}
 	validatorAddrs := []string{
 		proposerAddr,
-		"zvote1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx",
-		"zvote1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx",
 	}
 
 	// ECIES-encrypt share_i to validator_i and compute VK_i = share_i * G.
@@ -488,8 +488,8 @@ func TestCeremonyAckThresholdRejectsBadShare(t *testing.T) {
 	validatorPKs := []curvey.Point{pallasPk.Point, pk2.Point, pk3.Point}
 	validatorAddrs := []string{
 		proposerAddr,
-		"zvote1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx",
-		"zvote1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx",
 	}
 
 	// Encrypt the WRONG share to the proposer but publish the correct VK.

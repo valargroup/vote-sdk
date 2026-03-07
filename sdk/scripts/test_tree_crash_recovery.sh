@@ -21,8 +21,8 @@ REAL_PROOF_HELPER_URL="${REAL_PROOF_HELPER_URL:-$REAL_PROOF_API_URL}"
 REAL_PROOF_VOTE_WINDOW_SECS="${REAL_PROOF_VOTE_WINDOW_SECS:-420}"
 REAL_PROOF_TEST_THREADS="${REAL_PROOF_TEST_THREADS:-1}"
 REAL_PROOF_INCLUDE_VC_FLOW="${REAL_PROOF_INCLUDE_VC_FLOW:-0}"
-ZALLY_PIR_URL="${ZALLY_PIR_URL:-http://localhost:3000}"
-export ZALLY_PIR_URL
+SVOTE_PIR_URL="${SVOTE_PIR_URL:-http://localhost:3000}"
+export SVOTE_PIR_URL
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 ARTIFACT_DIR="${ARTIFACT_DIR:-artifacts/tree-crash-recovery/$TIMESTAMP}"
@@ -101,7 +101,7 @@ wait_val2_down() {
 }
 
 restart_val2() {
-  tree_restart_validator "val2" "sdk/multi-val2.log" "$HOME/.zallyd-val2"
+  tree_restart_validator "val2" "sdk/multi-val2.log" "$HOME/.svoted-val2"
 }
 
 wait_val2_caught_up() {

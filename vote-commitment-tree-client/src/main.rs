@@ -1,4 +1,4 @@
-//! CLI for syncing and verifying the vote commitment tree against a Zally chain node.
+//! CLI for syncing and verifying the vote commitment tree against a Shielded-Vote chain node.
 //!
 //! Commands:
 //! - `sync`    — Sync the tree from a chain node, print status
@@ -21,7 +21,7 @@ use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
 
 #[derive(Parser)]
 #[command(name = "vote-tree-cli")]
-#[command(about = "Sync, witness, and verify the Zally vote commitment tree")]
+#[command(about = "Sync, witness, and verify the Shielded-Vote commitment tree")]
 struct Cli {
     #[command(subcommand)]
     command: Command,

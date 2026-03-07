@@ -3,7 +3,7 @@ package ecies
 import (
 	"fmt"
 
-	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/z-cale/shielded-vote/crypto/elgamal"
 )
 
 // MarshalEnvelope serializes an Envelope to bytes:

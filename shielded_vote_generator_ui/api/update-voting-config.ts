@@ -17,7 +17,7 @@ import { bech32 } from 'bech32';
 
 export const config = { runtime: 'edge' };
 
-const BECH32_PREFIX = 'zvote';
+const BECH32_PREFIX = 'sv';
 
 // Reconstruct the amino sign doc used by Keplr's signArbitrary.
 // The data is base64-encoded in the sign doc.
@@ -143,7 +143,7 @@ export default async function handler(req: Request) {
   // 3. Query the chain to confirm the signer is the current vote-manager.
   let voteManager: string;
   try {
-    const resp = await fetch(`${CHAIN_API_URL}/zally/v1/vote-manager`);
+    const resp = await fetch(`${CHAIN_API_URL}/shielded-vote/v1/vote-manager`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     voteManager = data.address ?? '';

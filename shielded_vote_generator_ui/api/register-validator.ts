@@ -19,8 +19,8 @@ import { bech32 } from 'bech32';
 
 export const config = { runtime: 'edge' };
 
-const BECH32_PREFIX = 'zvote';
-const VALOPER_PREFIX = 'zvotevaloper';
+const BECH32_PREFIX = 'sv';
+const VALOPER_PREFIX = 'svvaloper';
 const TIMESTAMP_WINDOW_SECS = 300; // 5 minutes
 const PENDING_EXPIRY_SECS = 7 * 24 * 60 * 60; // 7 days
 

@@ -1,4 +1,4 @@
-//! HTTP client wrapper for Zally REST API.
+//! HTTP client wrapper for Shielded-Vote REST API.
 //!
 //! Uses reqwest blocking with retry on socket errors and optional polling
 //! for round status.
@@ -9,10 +9,10 @@ use serde_json::Value;
 /// Default port 1318 matches init.sh (moved from 1317 to avoid Cursor IDE conflict).
 /// Uses 127.0.0.1 instead of localhost to avoid IPv6 resolution issues on macOS.
 pub fn base_url() -> String {
-    std::env::var("ZALLY_API_URL").unwrap_or_else(|_| "http://127.0.0.1:1318".to_string())
+    std::env::var("SVOTE_API_URL").unwrap_or_else(|_| "http://127.0.0.1:1318".to_string())
 }
 
-/// Helper server URL. Since the helper is now integrated into zallyd, it
+/// Helper server URL. Since the helper is now integrated into svoted, it
 /// serves on the same port as the chain REST API (default 1318).
 /// Uses 127.0.0.1 instead of localhost to avoid IPv6 resolution issues on macOS.
 pub fn helper_server_url() -> String {
@@ -190,7 +190,7 @@ pub const SESSION_STATUS_PENDING: i64 = 4;
 pub fn get_validator_operator_address() -> Option<String> {
     // Allow explicit override so callers in multi-validator setups can pin a
     // specific validator without relying on staking query ordering.
-    if let Ok(addr) = std::env::var("ZALLY_VALIDATOR_ADDR") {
+    if let Ok(addr) = std::env::var("SVOTE_VALIDATOR_ADDR") {
         if !addr.is_empty() {
             return Some(addr);
         }
@@ -202,7 +202,7 @@ pub fn get_validator_operator_address() -> Option<String> {
     }
 
     // If a moniker filter is set, prefer the matching validator.
-    if let Ok(moniker) = std::env::var("ZALLY_VALIDATOR_MONIKER") {
+    if let Ok(moniker) = std::env::var("SVOTE_VALIDATOR_MONIKER") {
         if !moniker.is_empty() {
             if let Some(addr) = json
                 .get("validators")?
@@ -278,10 +278,10 @@ pub fn get_validators_with_monikers() -> Option<Vec<(String, String)>> {
     }
 }
 
-/// Returns commitment tree next_index (number of leaves) from GET /zally/v1/commitment-tree/latest.
+/// Returns commitment tree next_index (number of leaves) from GET /shielded-vote/v1/commitment-tree/latest.
 /// Used to detect if delegate/cast txs were committed after a 502 (e.g. EOF or tx in cache).
 pub fn commitment_tree_next_index() -> Option<u64> {
-    let (status, json) = get_json("/zally/v1/commitment-tree/latest").ok()?;
+    let (status, json) = get_json("/shielded-vote/v1/commitment-tree/latest").ok()?;
     if status != 200 {
         return None;
     }
@@ -291,7 +291,7 @@ pub fn commitment_tree_next_index() -> Option<u64> {
 
 /// Returns (height, root_b64, next_index) from the latest commitment tree state.
 pub fn commitment_tree_latest() -> Option<(u64, String, u64)> {
-    let (status, json) = get_json("/zally/v1/commitment-tree/latest").ok()?;
+    let (status, json) = get_json("/shielded-vote/v1/commitment-tree/latest").ok()?;
     if status != 200 {
         return None;
     }
@@ -305,7 +305,7 @@ pub fn commitment_tree_latest() -> Option<(u64, String, u64)> {
 /// Returns true if the round's tally for the given proposal has at least one share (decision "1").
 /// Used to detect if a reveal tx was committed after a 502.
 pub fn tally_has_proposal(round_id_hex: &str, proposal_id: u64) -> bool {
-    let path = format!("/zally/v1/tally/{}/{}", round_id_hex, proposal_id);
+    let path = format!("/shielded-vote/v1/tally/{}/{}", round_id_hex, proposal_id);
     let (status, json) = match get_json(&path) {
         Ok(x) => x,
         Err(_) => return false,
@@ -349,16 +349,16 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Standard Cosmos SDK tx signing and broadcasting via `zallyd` CLI
+// Standard Cosmos SDK tx signing and broadcasting via `svoted` CLI
 // ---------------------------------------------------------------------------
 
 /// Configuration for signing and broadcasting standard Cosmos SDK transactions.
 pub struct CosmosTxConfig {
     /// Name of the signing key in the keyring (e.g. "validator").
     pub key_name: String,
-    /// Path to the node's home directory (e.g. "$HOME/.zallyd").
+    /// Path to the node's home directory (e.g. "$HOME/.svoted").
     pub home_dir: String,
-    /// Chain ID (e.g. "zvote-1").
+    /// Chain ID (e.g. "svote-1").
     pub chain_id: String,
     /// CometBFT RPC endpoint (e.g. "tcp://localhost:26657").
     pub node_url: String,
@@ -367,33 +367,33 @@ pub struct CosmosTxConfig {
 /// Returns a default CosmosTxConfig for the single-validator dev chain setup.
 pub fn default_cosmos_tx_config() -> CosmosTxConfig {
     let home = std::env::var("HOME").expect("HOME env var must be set");
-    let home_dir = std::env::var("ZALLY_HOME")
-        .unwrap_or_else(|_| format!("{}/.zallyd", home));
-    let node_url = std::env::var("ZALLY_NODE_URL")
+    let home_dir = std::env::var("SVOTE_HOME")
+        .unwrap_or_else(|_| format!("{}/.svoted", home));
+    let node_url = std::env::var("SVOTE_NODE_URL")
         .unwrap_or_else(|_| "tcp://localhost:26657".to_string());
     CosmosTxConfig {
         key_name: "validator".to_string(),
         home_dir,
-        chain_id: "zvote-1".to_string(),
+        chain_id: "svote-1".to_string(),
         node_url,
     }
 }
 
 /// Sign and broadcast a standard Cosmos SDK transaction containing the given
 /// message. The message must include an `@type` field with the full protobuf
-/// type URL (e.g. "/zvote.v1.MsgRegisterPallasKey").
+/// type URL (e.g. "/svote.v1.MsgRegisterPallasKey").
 ///
-/// When `ZALLY_SSH_HOST` is set, sign and broadcast commands run on the remote
-/// host via SSH (the remote has the vote module types registered in its `zallyd`
-/// binary). The remote binary path defaults to `zallyd` but can be overridden
-/// with `ZALLY_REMOTE_ZALLYD`.
+/// When `SVOTE_SSH_HOST` is set, sign and broadcast commands run on the remote
+/// host via SSH (the remote has the vote module types registered in its `svoted`
+/// binary). The remote binary path defaults to `svoted` but can be overridden
+/// with `SVOTE_REMOTE_SVOTED`.
 ///
 /// Returns `(200, json)` on successful broadcast or an error.
 pub fn broadcast_cosmos_msg(
     msg: &Value,
     config: &CosmosTxConfig,
 ) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
-    let ssh_host = std::env::var("ZALLY_SSH_HOST").ok();
+    let ssh_host = std::env::var("SVOTE_SSH_HOST").ok();
     if let Some(host) = ssh_host {
         broadcast_cosmos_msg_ssh(msg, config, &host)
     } else {
@@ -416,8 +416,8 @@ fn broadcast_cosmos_msg_local(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let unsigned_path = tmp_dir.join(format!("zally_unsigned_{}.json", ts));
-    let signed_path = tmp_dir.join(format!("zally_signed_{}.json", ts));
+    let unsigned_path = tmp_dir.join(format!("sv_unsigned_{}.json", ts));
+    let signed_path = tmp_dir.join(format!("sv_signed_{}.json", ts));
 
     // Write unsigned tx to temp file.
     {
@@ -425,8 +425,8 @@ fn broadcast_cosmos_msg_local(
         f.write_all(serde_json::to_string_pretty(&unsigned_tx)?.as_bytes())?;
     }
 
-    // Sign via zallyd tx sign.
-    let sign_output = Command::new("zallyd")
+    // Sign via svoted tx sign.
+    let sign_output = Command::new("svoted")
         .args([
             "tx", "sign",
             unsigned_path.to_str().unwrap(),
@@ -446,11 +446,11 @@ fn broadcast_cosmos_msg_local(
     if !sign_output.status.success() {
         let _ = std::fs::remove_file(&signed_path);
         let stderr = String::from_utf8_lossy(&sign_output.stderr);
-        return Err(format!("zallyd tx sign failed: {}", stderr).into());
+        return Err(format!("svoted tx sign failed: {}", stderr).into());
     }
 
-    // Broadcast via zallyd tx broadcast.
-    let broadcast_output = Command::new("zallyd")
+    // Broadcast via svoted tx broadcast.
+    let broadcast_output = Command::new("svoted")
         .args([
             "tx", "broadcast",
             signed_path.to_str().unwrap(),
@@ -464,7 +464,7 @@ fn broadcast_cosmos_msg_local(
 
     if !broadcast_output.status.success() {
         let stderr = String::from_utf8_lossy(&broadcast_output.stderr);
-        return Err(format!("zallyd tx broadcast failed: {}", stderr).into());
+        return Err(format!("svoted tx broadcast failed: {}", stderr).into());
     }
 
     parse_broadcast_stdout(&broadcast_output.stdout)
@@ -473,7 +473,7 @@ fn broadcast_cosmos_msg_local(
 /// Remote sign + broadcast via SSH.
 ///
 /// Pipes the unsigned tx to a temp file on the remote host, signs and
-/// broadcasts there, then cleans up. This lets us use the server's `zallyd`
+/// broadcasts there, then cleans up. This lets us use the server's `svoted`
 /// binary which has the vote module types registered.
 fn broadcast_cosmos_msg_ssh(
     msg: &Value,
@@ -483,8 +483,8 @@ fn broadcast_cosmos_msg_ssh(
     use std::io::Write;
     use std::process::Command;
 
-    let remote_zallyd = std::env::var("ZALLY_REMOTE_ZALLYD")
-        .unwrap_or_else(|_| "zallyd".to_string());
+    let remote_svoted = std::env::var("SVOTE_REMOTE_SVOTED")
+        .unwrap_or_else(|_| "svoted".to_string());
 
     let unsigned_tx = build_unsigned_tx(msg);
     let unsigned_json = serde_json::to_string_pretty(&unsigned_tx)?;
@@ -493,8 +493,8 @@ fn broadcast_cosmos_msg_ssh(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let remote_unsigned = format!("/tmp/zally_unsigned_{}.json", ts);
-    let remote_signed = format!("/tmp/zally_signed_{}.json", ts);
+    let remote_unsigned = format!("/tmp/sv_unsigned_{}.json", ts);
+    let remote_signed = format!("/tmp/sv_signed_{}.json", ts);
 
     // Pipe unsigned tx to remote temp file.
     let mut upload = Command::new("ssh")
@@ -518,7 +518,7 @@ fn broadcast_cosmos_msg_ssh(
         .args([
             ssh_host,
             &format!(
-                "{zallyd} tx sign {unsigned} \
+                "{svoted} tx sign {unsigned} \
                  --from {from} \
                  --keyring-backend test \
                  --chain-id {chain_id} \
@@ -526,7 +526,7 @@ fn broadcast_cosmos_msg_ssh(
                  --node {node} \
                  --output-document {signed} \
                  --yes",
-                zallyd = remote_zallyd,
+                svoted = remote_svoted,
                 unsigned = remote_unsigned,
                 from = config.key_name,
                 chain_id = config.chain_id,
@@ -547,7 +547,7 @@ fn broadcast_cosmos_msg_ssh(
             .args([ssh_host, &format!("rm -f {}", remote_signed)])
             .output();
         let stderr = String::from_utf8_lossy(&sign_output.stderr);
-        return Err(format!("zallyd tx sign (remote) failed: {}", stderr).into());
+        return Err(format!("svoted tx sign (remote) failed: {}", stderr).into());
     }
 
     // Broadcast on remote.
@@ -555,10 +555,10 @@ fn broadcast_cosmos_msg_ssh(
         .args([
             ssh_host,
             &format!(
-                "{zallyd} tx broadcast {signed} \
+                "{svoted} tx broadcast {signed} \
                  --node {node} \
                  --output json",
-                zallyd = remote_zallyd,
+                svoted = remote_svoted,
                 signed = remote_signed,
                 node = config.node_url,
             ),
@@ -572,7 +572,7 @@ fn broadcast_cosmos_msg_ssh(
 
     if !broadcast_output.status.success() {
         let stderr = String::from_utf8_lossy(&broadcast_output.stderr);
-        return Err(format!("zallyd tx broadcast (remote) failed: {}", stderr).into());
+        return Err(format!("svoted tx broadcast (remote) failed: {}", stderr).into());
     }
 
     parse_broadcast_stdout(&broadcast_output.stdout)
@@ -601,7 +601,7 @@ fn build_unsigned_tx(msg: &Value) -> Value {
     })
 }
 
-/// Parse zallyd broadcast stdout JSON, normalizing field names.
+/// Parse svoted broadcast stdout JSON, normalizing field names.
 fn parse_broadcast_stdout(
     stdout_bytes: &[u8],
 ) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
@@ -610,7 +610,7 @@ fn parse_broadcast_stdout(
         .map_err(|e| format!("failed to parse broadcast output: {} (raw: {})", e, stdout))?;
 
     // Normalize field names for compatibility with existing test assertions:
-    // zallyd outputs "txhash" and "raw_log"; tests expect "tx_hash" and "log".
+    // svoted outputs "txhash" and "raw_log"; tests expect "tx_hash" and "log".
     if let Some(obj) = result.as_object_mut() {
         if let Some(txhash) = obj.remove("txhash") {
             obj.insert("tx_hash".to_string(), txhash);
@@ -625,22 +625,22 @@ fn parse_broadcast_stdout(
 
 /// Returns the bech32 account address for a key in the test keyring.
 ///
-/// Runs `zallyd keys show <name> -a --keyring-backend test --home <home>`.
-/// When `ZALLY_SSH_HOST` is set, the command is executed on the remote host
+/// Runs `svoted keys show <name> -a --keyring-backend test --home <home>`.
+/// When `SVOTE_SSH_HOST` is set, the command is executed on the remote host
 /// via SSH (the keyring lives there, not on the CI runner).
 pub fn key_account_address(key_name: &str, home_dir: &str) -> Option<String> {
     use std::process::Command;
 
-    let ssh_host = std::env::var("ZALLY_SSH_HOST").ok();
+    let ssh_host = std::env::var("SVOTE_SSH_HOST").ok();
     let output = if let Some(ref host) = ssh_host {
-        let remote_zallyd = std::env::var("ZALLY_REMOTE_ZALLYD")
-            .unwrap_or_else(|_| "zallyd".to_string());
+        let remote_svoted = std::env::var("SVOTE_REMOTE_SVOTED")
+            .unwrap_or_else(|_| "svoted".to_string());
         Command::new("ssh")
             .args([
                 host.as_str(),
                 &format!(
-                    "{zallyd} keys show {key} -a --keyring-backend test --home {home}",
-                    zallyd = remote_zallyd,
+                    "{svoted} keys show {key} -a --keyring-backend test --home {home}",
+                    svoted = remote_svoted,
                     key = key_name,
                     home = home_dir,
                 ),
@@ -648,7 +648,7 @@ pub fn key_account_address(key_name: &str, home_dir: &str) -> Option<String> {
             .output()
             .ok()?
     } else {
-        Command::new("zallyd")
+        Command::new("svoted")
             .args([
                 "keys", "show",
                 key_name,
@@ -667,33 +667,33 @@ pub fn key_account_address(key_name: &str, home_dir: &str) -> Option<String> {
     if addr.is_empty() { None } else { Some(addr) }
 }
 
-/// Import a hex-encoded secp256k1 private key into the zallyd test keyring.
+/// Import a hex-encoded secp256k1 private key into the svoted test keyring.
 ///
-/// Runs `zallyd keys import-hex <name> <hex> --keyring-backend test --home <home>`.
-/// When `ZALLY_SSH_HOST` is set, the command is executed on the remote host via SSH.
+/// Runs `svoted keys import-hex <name> <hex> --keyring-backend test --home <home>`.
+/// When `SVOTE_SSH_HOST` is set, the command is executed on the remote host via SSH.
 /// Silently succeeds if the key already exists (duplicate import).
 pub fn import_hex_key(name: &str, hex_privkey: &str, home_dir: &str) {
     use std::process::Command;
 
-    let ssh_host = std::env::var("ZALLY_SSH_HOST").ok();
+    let ssh_host = std::env::var("SVOTE_SSH_HOST").ok();
     let output = if let Some(ref host) = ssh_host {
-        let remote_zallyd = std::env::var("ZALLY_REMOTE_ZALLYD")
-            .unwrap_or_else(|_| "zallyd".to_string());
+        let remote_svoted = std::env::var("SVOTE_REMOTE_SVOTED")
+            .unwrap_or_else(|_| "svoted".to_string());
         Command::new("ssh")
             .args([
                 host.as_str(),
                 &format!(
-                    "{zallyd} keys import-hex {name} {hex} --keyring-backend test --home {home}",
-                    zallyd = remote_zallyd,
+                    "{svoted} keys import-hex {name} {hex} --keyring-backend test --home {home}",
+                    svoted = remote_svoted,
                     name = name,
                     hex = hex_privkey,
                     home = home_dir,
                 ),
             ])
             .output()
-            .expect("failed to run zallyd keys import-hex via SSH")
+            .expect("failed to run svoted keys import-hex via SSH")
     } else {
-        Command::new("zallyd")
+        Command::new("svoted")
             .args([
                 "keys", "import-hex",
                 name,
@@ -702,7 +702,7 @@ pub fn import_hex_key(name: &str, hex_privkey: &str, home_dir: &str) {
                 "--home", home_dir,
             ])
             .output()
-            .expect("failed to run zallyd keys import-hex")
+            .expect("failed to run svoted keys import-hex")
     };
 
     if !output.status.success() {
@@ -713,7 +713,7 @@ pub fn import_hex_key(name: &str, hex_privkey: &str, home_dir: &str) {
             return;
         }
         panic!(
-            "zallyd keys import-hex failed: {}",
+            "svoted keys import-hex failed: {}",
             stderr
         );
     }
@@ -788,7 +788,7 @@ pub fn get_helper_queue_status(round_id_hex: &str) -> Option<HelperQueueStatus> 
 /// Returns the full round JSON object from a round query.
 /// Returns None if the round doesn't exist or the query fails.
 pub fn get_round(round_id_hex: &str) -> Option<Value> {
-    let path = format!("/zally/v1/round/{}", round_id_hex);
+    let path = format!("/shielded-vote/v1/round/{}", round_id_hex);
     let (status, json) = get_json(&path).ok()?;
     if status != 200 {
         return None;
@@ -802,7 +802,7 @@ pub fn get_round_ea_pk(round_id_hex: &str) -> Option<Vec<u8>> {
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
 
-    let path = format!("/zally/v1/round/{}", round_id_hex);
+    let path = format!("/shielded-vote/v1/round/{}", round_id_hex);
     let (status, json) = get_json(&path).ok()?;
     if status != 200 {
         return None;
@@ -814,7 +814,7 @@ pub fn get_round_ea_pk(round_id_hex: &str) -> Option<Vec<u8>> {
     B64.decode(ea_pk_b64).ok()
 }
 
-/// Poll GET /zally/v1/round/{round_id_hex} until status reaches expected or timeout.
+/// Poll GET /shielded-vote/v1/round/{round_id_hex} until status reaches expected or timeout.
 /// Accepts statuses that are "at or past" the expected status in the round lifecycle
 /// (PENDING → ACTIVE → TALLYING → FINALIZED), so fast transitions between polls
 /// don't cause spurious timeouts.
@@ -836,7 +836,7 @@ pub fn wait_for_round_status(
         }
     }
 
-    let path = format!("/zally/v1/round/{}", round_id_hex);
+    let path = format!("/shielded-vote/v1/round/{}", round_id_hex);
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
     let expected_rank = lifecycle_rank(expected);
     let mut polls = 0u32;

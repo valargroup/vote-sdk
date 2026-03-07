@@ -1,5 +1,5 @@
 #!/bin/bash
-# init_multi.sh — Initialize a 3-validator Zally chain on localhost.
+# init_multi.sh — Initialize a 3-validator Shielded-Vote chain on localhost.
 #
 # Init-only: creates home dirs, genesis, keys, config for all 3 validators.
 # Does NOT start processes or register validators — that's handled externally.
@@ -31,15 +31,15 @@ if [ "$CI_MODE" = false ]; then
     export GOTOOLCHAIN=auto
 fi
 
-CHAIN_ID="zvote-1"
-BINARY="zallyd"
-DENOM="uzvote"
+CHAIN_ID="svote-1"
+BINARY="svoted"
+DENOM="usvote"
 NUM_VALIDATORS=3
 
 # Home directories.
-HOME_VAL1="$HOME/.zallyd-val1"
-HOME_VAL2="$HOME/.zallyd-val2"
-HOME_VAL3="$HOME/.zallyd-val3"
+HOME_VAL1="$HOME/.svoted-val1"
+HOME_VAL2="$HOME/.svoted-val2"
+HOME_VAL3="$HOME/.svoted-val3"
 HOMES=("$HOME_VAL1" "$HOME_VAL2" "$HOME_VAL3")
 
 # Port allocation per validator (all offset from defaults to avoid conflicts
@@ -74,11 +74,11 @@ ADMIN_BALANCE="1000000000${DENOM}"
 # ---------------------------------------------------------------------------
 echo "=== Cleaning up previous multi-validator data ==="
 
-# Kill any running zallyd processes for these home directories (local dev only;
+# Kill any running svoted processes for these home directories (local dev only;
 # CI uses systemd which stops services before running this script).
 if [ "$CI_MODE" = false ]; then
     for home in "${HOMES[@]}"; do
-        pkill -f "zallyd start --home ${home}" 2>/dev/null || true
+        pkill -f "svoted start --home ${home}" 2>/dev/null || true
     done
     sleep 1
 fi
@@ -226,7 +226,7 @@ if [ "$CI_MODE" = true ]; then
     PUBLIC_IP=$(curl -4s --connect-timeout 5 ifconfig.me || true)
     if [ -n "$PUBLIC_IP" ]; then
         DASHED_IP=$(echo "$PUBLIC_IP" | tr '.' '-')
-        PULSE_URL="${VOTING_CONFIG_URL:-https://zally-phi.vercel.app}"
+        PULSE_URL="${VOTING_CONFIG_URL:-https://shielded-vote-phi.vercel.app}"
     fi
 fi
 
@@ -366,7 +366,7 @@ echo "============================================="
 echo ""
 
 if [ "$CI_MODE" = true ]; then
-    echo "Validators (start via systemd: zallyd-val1/2/3):"
+    echo "Validators (start via systemd: svoted-val1/2/3):"
 else
     echo "Validators:"
 fi
@@ -397,7 +397,7 @@ fi
 # are populated — PIR runs on the main domain and is configured separately.
 #
 # Requires: VERCEL_API_TOKEN, EDGE_CONFIG_ID (skipped silently if unset)
-# Optional: VOTING_CONFIG_URL (default: https://zally-phi.vercel.app)
+# Optional: VOTING_CONFIG_URL (default: https://shielded-vote-phi.vercel.app)
 
 if [ "$CI_MODE" = true ] && [ -n "$VERCEL_API_TOKEN" ] && [ -n "$EDGE_CONFIG_ID" ]; then
     echo ""
@@ -413,7 +413,7 @@ if [ "$CI_MODE" = true ] && [ -n "$VERCEL_API_TOKEN" ] && [ -n "$EDGE_CONFIG_ID"
             BASE_DOMAIN="${DASHED_IP}.sslip.io"
 
             # Fetch current voting-config from the public endpoint.
-            CONFIG_URL="${VOTING_CONFIG_URL:-https://zally-phi.vercel.app}"
+            CONFIG_URL="${VOTING_CONFIG_URL:-https://shielded-vote-phi.vercel.app}"
             CURRENT_CONFIG=$(curl -s "${CONFIG_URL}/api/voting-config" 2>/dev/null)
             if ! echo "$CURRENT_CONFIG" | jq -e '.vote_servers' > /dev/null 2>&1; then
                 CURRENT_CONFIG='{"version":1,"vote_servers":[],"pir_servers":[]}'

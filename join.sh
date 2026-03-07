@@ -1,15 +1,15 @@
 #!/bin/bash
-# join.sh — Join the Zally chain as a validator.
+# join.sh — Join the Shielded-Vote chain as a validator.
 #
 # Binary-only (no repo):
 #   curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
 #
 # Source developer (has repo + mise):
-#   mise run build:install   # builds zallyd + create-val-tx → $HOME/go/bin
-#   ZALLY_LOCAL_BINARIES=1 ./join.sh   # uses local binaries, skips download
+#   mise run build:install   # builds svoted + create-val-tx → $HOME/go/bin
+#   SVOTE_LOCAL_BINARIES=1 ./join.sh   # uses local binaries, skips download
 #
 # What it does:
-#   1. Acquires zallyd + create-val-tx (always downloads latest; set ZALLY_LOCAL_BINARIES=1 to use local)
+#   1. Acquires svoted + create-val-tx (always downloads latest; set SVOTE_LOCAL_BINARIES=1 to use local)
 #   2. Discovers the network via the Vercel API (voting-config endpoint)
 #   3. Fetches genesis.json + node identity from a live validator
 #   4. Initializes a node, generates cryptographic keys
@@ -21,25 +21,25 @@
 
 set -euo pipefail
 
-CHAIN_ID="zvote-1"
-INSTALL_DIR="${ZALLY_INSTALL_DIR:-$HOME/.local/bin}"
-HOME_DIR="${ZALLY_HOME:-$HOME/.zallyd}"
+CHAIN_ID="svote-1"
+INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
+HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
-VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://zally-phi.vercel.app}"
+VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://shielded-vote-phi.vercel.app}"
 
 # Parse --domain flag for TLS hostname override.
-ZALLY_DOMAIN="${ZALLY_DOMAIN:-}"
+SVOTE_DOMAIN="${SVOTE_DOMAIN:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --domain) ZALLY_DOMAIN="$2"; shift 2 ;;
-    --domain=*) ZALLY_DOMAIN="${1#--domain=}"; shift ;;
+    --domain) SVOTE_DOMAIN="$2"; shift 2 ;;
+    --domain=*) SVOTE_DOMAIN="${1#--domain=}"; shift ;;
     *) shift ;;
   esac
 done
 
 # ─── Preflight ────────────────────────────────────────────────────────────────
 
-echo "=== Zally validator join ==="
+echo "=== Shielded-Vote validator join ==="
 echo ""
 
 for cmd in curl jq; do
@@ -51,8 +51,8 @@ done
 
 # ─── Prompt for moniker ──────────────────────────────────────────────────────
 
-if [ -n "${ZALLY_MONIKER:-}" ]; then
-  MONIKER="$ZALLY_MONIKER"
+if [ -n "${SVOTE_MONIKER:-}" ]; then
+  MONIKER="$SVOTE_MONIKER"
 else
   printf "Enter a name for your validator: "
   read -r MONIKER < /dev/tty
@@ -65,11 +65,11 @@ fi
 # ─── Acquire binaries ────────────────────────────────────────────────────────
 # Always download the latest release binaries from DO Spaces to avoid version
 # mismatches. Source developers who built from source can skip the download by
-# setting ZALLY_LOCAL_BINARIES=1 before running the script.
+# setting SVOTE_LOCAL_BINARIES=1 before running the script.
 
-if [ "${ZALLY_LOCAL_BINARIES:-0}" = "1" ] && command -v zallyd > /dev/null 2>&1 && command -v create-val-tx > /dev/null 2>&1; then
-  echo "Using local binaries (ZALLY_LOCAL_BINARIES=1):"
-  echo "  zallyd:         $(command -v zallyd)"
+if [ "${SVOTE_LOCAL_BINARIES:-0}" = "1" ] && command -v svoted > /dev/null 2>&1 && command -v create-val-tx > /dev/null 2>&1; then
+  echo "Using local binaries (SVOTE_LOCAL_BINARIES=1):"
+  echo "  svoted:         $(command -v svoted)"
   echo "  create-val-tx:  $(command -v create-val-tx)"
 else
   echo "=== Downloading binaries ==="
@@ -107,16 +107,16 @@ else
 
   echo "Version: ${VERSION}"
   echo "Platform: ${PLATFORM}"
-  curl -fsSL -o /tmp/zally-release.tar.gz "${DO_BASE}/zally-${VERSION}-${PLATFORM}.tar.gz"
+  curl -fsSL -o /tmp/shielded-vote-release.tar.gz "${DO_BASE}/shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
 
   # Verify tarball integrity via SHA-256 checksum.
-  CHECKSUM_URL="${DO_BASE}/zally-${VERSION}-${PLATFORM}.tar.gz.sha256"
-  if curl -fsSL -o /tmp/zally-release.tar.gz.sha256 "${CHECKSUM_URL}" 2>/dev/null; then
-    EXPECTED=$(awk '{print $1}' /tmp/zally-release.tar.gz.sha256)
+  CHECKSUM_URL="${DO_BASE}/shielded-vote-${VERSION}-${PLATFORM}.tar.gz.sha256"
+  if curl -fsSL -o /tmp/shielded-vote-release.tar.gz.sha256 "${CHECKSUM_URL}" 2>/dev/null; then
+    EXPECTED=$(awk '{print $1}' /tmp/shielded-vote-release.tar.gz.sha256)
     if command -v sha256sum > /dev/null 2>&1; then
-      ACTUAL=$(sha256sum /tmp/zally-release.tar.gz | awk '{print $1}')
+      ACTUAL=$(sha256sum /tmp/shielded-vote-release.tar.gz | awk '{print $1}')
     elif command -v shasum > /dev/null 2>&1; then
-      ACTUAL=$(shasum -a 256 /tmp/zally-release.tar.gz | awk '{print $1}')
+      ACTUAL=$(shasum -a 256 /tmp/shielded-vote-release.tar.gz | awk '{print $1}')
     else
       echo "WARNING: Neither sha256sum nor shasum found — skipping checksum verification."
       ACTUAL="$EXPECTED"
@@ -126,40 +126,40 @@ else
       echo "  Expected: ${EXPECTED}"
       echo "  Actual:   ${ACTUAL}"
       echo "  The downloaded tarball may be corrupted or tampered with."
-      rm -f /tmp/zally-release.tar.gz /tmp/zally-release.tar.gz.sha256
+      rm -f /tmp/shielded-vote-release.tar.gz /tmp/shielded-vote-release.tar.gz.sha256
       exit 1
     fi
     echo "Checksum verified."
-    rm -f /tmp/zally-release.tar.gz.sha256
+    rm -f /tmp/shielded-vote-release.tar.gz.sha256
   else
     echo "WARNING: Checksum file not available — skipping verification."
   fi
 
-  TARBALL_DIR="zally-${VERSION}-${PLATFORM}"
-  tar xzf /tmp/zally-release.tar.gz -C /tmp "${TARBALL_DIR}/bin/zallyd" "${TARBALL_DIR}/bin/create-val-tx"
+  TARBALL_DIR="shielded-vote-${VERSION}-${PLATFORM}"
+  tar xzf /tmp/shielded-vote-release.tar.gz -C /tmp "${TARBALL_DIR}/bin/svoted" "${TARBALL_DIR}/bin/create-val-tx"
 
   # Stop running service before overwriting (avoids "Text file busy").
   OS_NAME=$(uname -s)
   if [ "$OS_NAME" = "Darwin" ]; then
-    PLIST_LABEL="com.zally.validator"
+    PLIST_LABEL="com.shielded-vote.validator"
     if launchctl print "gui/$(id -u)/${PLIST_LABEL}" >/dev/null 2>&1; then
       echo "Stopping running ${PLIST_LABEL} service before upgrading..."
       launchctl bootout "gui/$(id -u)/${PLIST_LABEL}" 2>/dev/null || true
     fi
   else
-    if systemctl is-active --quiet zallyd 2>/dev/null; then
-      echo "Stopping running zallyd service before upgrading..."
-      systemctl stop zallyd
+    if systemctl is-active --quiet svoted 2>/dev/null; then
+      echo "Stopping running svoted service before upgrading..."
+      systemctl stop svoted
     fi
   fi
 
-  cp "/tmp/${TARBALL_DIR}/bin/zallyd" "${INSTALL_DIR}/zallyd"
+  cp "/tmp/${TARBALL_DIR}/bin/svoted" "${INSTALL_DIR}/svoted"
   cp "/tmp/${TARBALL_DIR}/bin/create-val-tx" "${INSTALL_DIR}/create-val-tx"
-  chmod +x "${INSTALL_DIR}/zallyd" "${INSTALL_DIR}/create-val-tx"
-  rm -rf /tmp/zally-release.tar.gz "/tmp/${TARBALL_DIR}"
+  chmod +x "${INSTALL_DIR}/svoted" "${INSTALL_DIR}/create-val-tx"
+  rm -rf /tmp/shielded-vote-release.tar.gz "/tmp/${TARBALL_DIR}"
 
   hash -r
-  echo "Installed: ${INSTALL_DIR}/zallyd, ${INSTALL_DIR}/create-val-tx"
+  echo "Installed: ${INSTALL_DIR}/svoted, ${INSTALL_DIR}/create-val-tx"
 fi
 
 # Ensure install dir is on PATH for this session.
@@ -215,13 +215,13 @@ if [ -d "${HOME_DIR}" ]; then
   rm -rf "${HOME_DIR}"
 fi
 
-zallyd init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}" > /dev/null 2>&1
+svoted init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}" > /dev/null 2>&1
 
 # ─── Fetch genesis from the seed node ────────────────────────────────────────
 
 echo "Fetching genesis.json from ${SEED_URL}..."
-curl -fsSL -o "${HOME_DIR}/config/genesis.json" "${SEED_URL}/zally/v1/genesis"
-zallyd genesis validate-genesis --home "${HOME_DIR}" > /dev/null 2>&1
+curl -fsSL -o "${HOME_DIR}/config/genesis.json" "${SEED_URL}/shielded-vote/v1/genesis"
+svoted genesis validate-genesis --home "${HOME_DIR}" > /dev/null 2>&1
 echo "Genesis validated."
 
 # ─── Generate keys ────────────────────────────────────────────────────────────
@@ -229,9 +229,9 @@ echo "Genesis validated."
 echo ""
 echo "=== Generating cryptographic keys ==="
 
-zallyd init-validator-keys --home "${HOME_DIR}"
+svoted init-validator-keys --home "${HOME_DIR}"
 
-VALIDATOR_ADDR=$(zallyd keys show validator -a --keyring-backend test --home "${HOME_DIR}")
+VALIDATOR_ADDR=$(svoted keys show validator -a --keyring-backend test --home "${HOME_DIR}")
 
 # ─── Configure config.toml ───────────────────────────────────────────────────
 
@@ -257,7 +257,7 @@ sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "${APP_TOML}"
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "${APP_TOML}"
 
 # Fix [vote] paths (template uses literal $HOME, replace with actual).
-sed -i.bak "s|\\\$HOME/.zallyd|${HOME_DIR}|g" "${APP_TOML}"
+sed -i.bak "s|\\\$HOME/.svoted|${HOME_DIR}|g" "${APP_TOML}"
 
 rm -f "${APP_TOML}.bak"
 
@@ -277,7 +277,7 @@ disable = false
 # Empty disables token auth.
 api_token = ""
 
-# Path to the SQLite database file. Empty = default (\$HOME/.zallyd/helper.db).
+# Path to the SQLite database file. Empty = default (\$HOME/.svoted/helper.db).
 db_path = ""
 
 # Mean of the exponential delay distribution (seconds).
@@ -312,22 +312,22 @@ echo "Node configured."
 echo ""
 echo "=== Setting up TLS reverse proxy ==="
 
-if [ -z "$ZALLY_DOMAIN" ]; then
+if [ -z "$SVOTE_DOMAIN" ]; then
   # Auto-detect public IP and use sslip.io for a valid TLS hostname.
   PUBLIC_IP=$(curl -fsSL --connect-timeout 5 https://ifconfig.me 2>/dev/null || echo "")
   if [ -z "$PUBLIC_IP" ]; then
     echo "WARNING: Could not detect public IP. Skipping Caddy setup."
-    echo "  Re-run with --domain <hostname> or set ZALLY_DOMAIN to configure TLS."
+    echo "  Re-run with --domain <hostname> or set SVOTE_DOMAIN to configure TLS."
     VALIDATOR_URL=""
   else
-    ZALLY_DOMAIN="$(echo "$PUBLIC_IP" | tr '.' '-').sslip.io"
+    SVOTE_DOMAIN="$(echo "$PUBLIC_IP" | tr '.' '-').sslip.io"
     echo "Detected public IP: ${PUBLIC_IP}"
-    echo "Using sslip.io domain: ${ZALLY_DOMAIN}"
+    echo "Using sslip.io domain: ${SVOTE_DOMAIN}"
   fi
 fi
 
-if [ -n "$ZALLY_DOMAIN" ]; then
-  VALIDATOR_URL="https://${ZALLY_DOMAIN}"
+if [ -n "$SVOTE_DOMAIN" ]; then
+  VALIDATOR_URL="https://${SVOTE_DOMAIN}"
 
   # Install Caddy if not present.
   if ! command -v caddy > /dev/null 2>&1; then
@@ -375,17 +375,17 @@ if [ -n "$VALIDATOR_URL" ] && command -v caddy > /dev/null 2>&1; then
     CADDYFILE="${CADDY_DIR}/Caddyfile"
   fi
 
-  echo "Configuring Caddy for ${ZALLY_DOMAIN} → localhost:1317..."
+  echo "Configuring Caddy for ${SVOTE_DOMAIN} → localhost:1317..."
 
   if [ "$OS_NAME" = "Darwin" ]; then
     cat > "${CADDYFILE}" <<CADDYEOF
-${ZALLY_DOMAIN} {
+${SVOTE_DOMAIN} {
     reverse_proxy localhost:1317
 }
 CADDYEOF
   else
     sudo tee "${CADDYFILE}" > /dev/null <<CADDYEOF
-${ZALLY_DOMAIN} {
+${SVOTE_DOMAIN} {
     reverse_proxy localhost:1317
 }
 CADDYEOF
@@ -419,7 +419,7 @@ if [ -n "$VALIDATOR_URL" ]; then
   TIMESTAMP=$(date +%s)
   REG_PAYLOAD="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${TIMESTAMP}}"
 
-  if SIG_JSON=$(zallyd sign-arbitrary "$REG_PAYLOAD" --from validator --keyring-backend test --home "${HOME_DIR}" 2>/dev/null); then
+  if SIG_JSON=$(svoted sign-arbitrary "$REG_PAYLOAD" --from validator --keyring-backend test --home "${HOME_DIR}" 2>/dev/null); then
     SIG=$(echo "$SIG_JSON" | jq -r '.signature')
     PUB_KEY=$(echo "$SIG_JSON" | jq -r '.pub_key')
 
@@ -438,7 +438,7 @@ if [ -n "$VALIDATOR_URL" ]; then
       fi
     else
       echo "WARNING: Could not reach registration API. You can register manually later:"
-      echo "  zallyd sign-arbitrary '<payload>' --from validator --keyring-backend test --home ${HOME_DIR}"
+      echo "  svoted sign-arbitrary '<payload>' --from validator --keyring-backend test --home ${HOME_DIR}"
     fi
   else
     echo "WARNING: Could not sign registration payload. You can register manually later."
@@ -446,12 +446,12 @@ if [ -n "$VALIDATOR_URL" ]; then
 fi
 
 # ─── Service installation ─────────────────────────────────────────────────────
-# Install a persistent service so zallyd survives terminal closes and reboots.
+# Install a persistent service so svoted survives terminal closes and reboots.
 # Uses systemd on Linux and launchd on macOS.
 
 LOG_FILE="${HOME_DIR}/node.log"
-ZALLYD_BIN=$(command -v zallyd)
-SERVICE_NAME="zallyd"
+SVOTED_BIN=$(command -v svoted)
+SERVICE_NAME="svoted"
 
 # Re-register URL with the vote network (idempotent).
 # Once bonded, this promotes the pending entry to vote_servers directly.
@@ -462,7 +462,7 @@ register_url() {
   local ts=$(date +%s)
   local payload="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${ts}}"
   local sig_json
-  sig_json=$(zallyd sign-arbitrary "$payload" --from validator --keyring-backend test --home "${HOME_DIR}" 2>/dev/null) || return 0
+  sig_json=$(svoted sign-arbitrary "$payload" --from validator --keyring-backend test --home "${HOME_DIR}" 2>/dev/null) || return 0
   local sig=$(echo "$sig_json" | jq -r '.signature')
   local pub_key=$(echo "$sig_json" | jq -r '.pub_key')
   local body="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${ts},\"signature\":\"${sig}\",\"pub_key\":\"${pub_key}\"}"
@@ -478,7 +478,7 @@ if [ "$OS_NAME" = "Darwin" ]; then
   # ── macOS: launchd ──────────────────────────────────────────────────────────
   echo "=== Installing launchd service ==="
 
-  PLIST_LABEL="com.zally.validator"
+  PLIST_LABEL="com.shielded-vote.validator"
   PLIST_DIR="${HOME}/Library/LaunchAgents"
   PLIST_FILE="${PLIST_DIR}/${PLIST_LABEL}.plist"
   mkdir -p "${PLIST_DIR}"
@@ -495,7 +495,7 @@ if [ "$OS_NAME" = "Darwin" ]; then
     <string>${PLIST_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${ZALLYD_BIN}</string>
+        <string>${SVOTED_BIN}</string>
         <string>start</string>
         <string>--home</string>
         <string>${HOME_DIR}</string>
@@ -526,7 +526,7 @@ PLISTEOF
 
   # Start Caddy as a launchd service if configured.
   if [ -n "${VALIDATOR_URL:-}" ] && command -v caddy > /dev/null 2>&1; then
-    CADDY_LABEL="com.zally.caddy"
+    CADDY_LABEL="com.shielded-vote.caddy"
     CADDY_PLIST="${PLIST_DIR}/${CADDY_LABEL}.plist"
     CADDY_LOG="${HOME_DIR}/caddy.log"
     CADDY_BIN=$(command -v caddy)
@@ -569,13 +569,13 @@ else
 
   sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null <<SVCEOF
 [Unit]
-Description=Zally validator (${MONIKER})
+Description=Shielded-Vote validator (${MONIKER})
 After=network.target
 
 [Service]
 Type=simple
 User=$(whoami)
-ExecStart=${ZALLYD_BIN} start --home ${HOME_DIR}
+ExecStart=${SVOTED_BIN} start --home ${HOME_DIR}
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${LOG_FILE}
@@ -598,7 +598,7 @@ sleep 5
 echo "Waiting for node to sync..."
 echo "  (follow logs with: tail -f ${LOG_FILE})"
 while true; do
-  STATUS=$(zallyd status --home "${HOME_DIR}" 2>/dev/null || echo "")
+  STATUS=$(svoted status --home "${HOME_DIR}" 2>/dev/null || echo "")
   if [ -z "$STATUS" ]; then
     sleep 2
     continue
@@ -616,7 +616,7 @@ while true; do
 done
 
 # Check if already a validator (e.g. re-running after a restart).
-IS_VALIDATOR=$(zallyd query staking validators --home "${HOME_DIR}" --output json 2>/dev/null \
+IS_VALIDATOR=$(svoted query staking validators --home "${HOME_DIR}" --output json 2>/dev/null \
   | jq -r ".validators[] | select(.description.moniker == \"${MONIKER}\") | .operator_address" 2>/dev/null || echo "")
 
 if [ -n "$IS_VALIDATOR" ]; then
@@ -627,17 +627,17 @@ else
   echo "Waiting for account ${VALIDATOR_ADDR} to be funded..."
   echo "  (ask the bootstrap operator to fund your address in the admin UI)"
   while true; do
-    BALANCE=$(zallyd query bank balances "${VALIDATOR_ADDR}" --home "${HOME_DIR}" --output json 2>/dev/null \
-      | jq -r '.balances[] | select(.denom == "uzvote") | .amount' 2>/dev/null || echo "")
+    BALANCE=$(svoted query bank balances "${VALIDATOR_ADDR}" --home "${HOME_DIR}" --output json 2>/dev/null \
+      | jq -r '.balances[] | select(.denom == "usvote") | .amount' 2>/dev/null || echo "")
     if [ -n "$BALANCE" ] && [ "$BALANCE" != "0" ]; then
-      echo "Account funded (${BALANCE} uzvote)."
+      echo "Account funded (${BALANCE} usvote)."
       break
     fi
     sleep 5
   done
 
   echo "Registering as validator..."
-  if ! create-val-tx --moniker "${MONIKER}" --amount 10000000uzvote --home "${HOME_DIR}" --rpc-url tcp://localhost:26657; then
+  if ! create-val-tx --moniker "${MONIKER}" --amount 10000000usvote --home "${HOME_DIR}" --rpc-url tcp://localhost:26657; then
     echo ""
     echo "ERROR: create-val-tx exited with a non-zero status." >&2
     echo "  Check node logs for details: ${LOG_FILE}" >&2
@@ -647,7 +647,7 @@ else
   # Verify the validator actually appeared on-chain.
   echo "Verifying registration on-chain (waiting ~6s for block commit)..."
   sleep 6
-  IS_NOW_VALIDATOR=$(zallyd query staking validators --home "${HOME_DIR}" --output json 2>/dev/null \
+  IS_NOW_VALIDATOR=$(svoted query staking validators --home "${HOME_DIR}" --output json 2>/dev/null \
     | jq -r ".validators[] | select(.description.moniker == \"${MONIKER}\") | .operator_address" 2>/dev/null || echo "")
   if [ -z "${IS_NOW_VALIDATOR}" ]; then
     echo ""

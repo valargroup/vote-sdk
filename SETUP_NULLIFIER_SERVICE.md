@@ -31,7 +31,7 @@ From the repo root, run the fully automated setup:
 This performs three steps in sequence:
 
 1. **Install dependencies** — installs system packages (`build-essential`, `wget`, `pkg-config`, `libssl-dev`) and Rust/cargo via `rustup` if not already present.
-2. **Bootstrap** — downloads a pre-built nullifier snapshot (`nullifiers.bin`, `nullifiers.checkpoint`) from the Zally bootstrap server so you don't have to sync from block 0.
+2. **Bootstrap** — downloads a pre-built nullifier snapshot (`nullifiers.bin`, `nullifiers.checkpoint`) from the Shielded-Vote bootstrap server so you don't have to sync from block 0.
 3. **Serve** — compiles `nf-server` in release mode and starts the PIR server. The first build takes a few minutes; subsequent starts are fast.
 
 The server runs in the foreground. Press `Ctrl+C` to stop it.

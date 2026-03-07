@@ -1,5 +1,5 @@
 // Package votetree provides Go CGO bindings to the Poseidon Merkle tree
-// exported by the zally-circuits Rust static library (libzally_circuits.a).
+// exported by the shielded-vote-circuits Rust static library (libshielded_vote_circuits.a).
 //
 // # Overview
 //
@@ -28,11 +28,11 @@
 //	Go Keeper
 //	  ├─ kvProxy *KvStoreProxy  ← stable pointer; Current updated each block
 //	  └─ treeHandle *TreeHandle
-//	       └─ ptr ──────────► ZallyTreeHandle  (Rust Box<T>, Rust heap)
+//	       └─ ptr ──────────► SvTreeHandle  (Rust Box<T>, Rust heap)
 //	                               └─ TreeServer
 //	                                    └─ ShardTree<KvShardStore, 24, 4>
 //	                                         └─ KvCallbacks { ctx=kvProxy, ... }
-//	                                              └─ zallyKv* //export functions
+//	                                              └─ svKv* //export functions
 //	                                                   └─ kvProxy.Current (KVStore)
 //
 // # KV key schema
@@ -69,9 +69,9 @@
 package votetree
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../circuits/target/release -lzally_circuits -ldl -lm -lpthread
+#cgo LDFLAGS: -L${SRCDIR}/../../circuits/target/release -lshielded_vote_circuits -ldl -lm -lpthread
 #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation
-#include "../../circuits/include/zally_circuits.h"
+#include "../../circuits/include/shielded_vote_circuits.h"
 #include <stdlib.h>
 */
 import "C"
@@ -92,7 +92,7 @@ const (
 	// MerklePathBytes is the byte size of a serialized Merkle authentication
 	// path: 4 bytes (leaf position as u32 LE) + TREE_DEPTH×32 bytes (sibling
 	// hashes from leaf to root, leaf-first order) = 4 + 24×32 = 772 bytes.
-	// Consumed by the share-reveal proof generator (zally_generate_share_reveal)
+	// Consumed by the share-reveal proof generator (sv_generate_share_reveal)
 	// and by ZKP #2 / ZKP #3 circuit inputs.
 	MerklePathBytes = 772
 )
@@ -122,8 +122,8 @@ const (
 //
 // # Memory ownership
 //
-// ptr is an opaque pointer into Rust-managed heap memory (a Box<ZallyTreeHandle>
-// allocated by zally_vote_tree_create_with_kv). The Go GC does not track this
+// ptr is an opaque pointer into Rust-managed heap memory (a Box<SvTreeHandle>
+// allocated by sv_vote_tree_create_with_kv). The Go GC does not track this
 // memory. Close must be called to free it. Close is idempotent.
 //
 // # Concurrency
@@ -131,7 +131,7 @@ const (
 // TreeHandle is NOT safe for concurrent use. The Keeper holds it under
 // single-threaded EndBlocker execution; no external locking is needed.
 type TreeHandle struct {
-	ptr         unsafe.Pointer // *C.ZallyTreeHandle — Rust heap allocation, not GC-tracked
+	ptr         unsafe.Pointer // *C.SvTreeHandle — Rust heap allocation, not GC-tracked
 	proxyHandle cgo.Handle     // keeps the KvStoreProxy reachable and lets callbacks recover it
 	ctxPtr      unsafe.Pointer // C-malloc'd uintptr_t holding proxyHandle; freed in Close
 }
@@ -162,8 +162,8 @@ func (h *TreeHandle) AppendBatch(leaves [][]byte) error {
 		copy(flat[i*LeafBytes:], leaf)
 	}
 
-	rc := C.zally_vote_tree_append_batch(
-		(*C.ZallyTreeHandle)(h.ptr),
+	rc := C.sv_vote_tree_append_batch(
+		(*C.SvTreeHandle)(h.ptr),
 		(*C.uint8_t)(unsafe.Pointer(&flat[0])),
 		C.size_t(len(leaves)),
 	)
@@ -195,8 +195,8 @@ func (h *TreeHandle) AppendFromKV(cursor, count uint64) error {
 	if count == 0 {
 		return nil
 	}
-	rc := C.zally_vote_tree_append_from_kv(
-		(*C.ZallyTreeHandle)(h.ptr),
+	rc := C.sv_vote_tree_append_from_kv(
+		(*C.SvTreeHandle)(h.ptr),
 		C.uint64_t(cursor),
 		C.uint64_t(count),
 	)
@@ -222,7 +222,7 @@ func (h *TreeHandle) AppendFromKV(cursor, count uint64) error {
 // Calling Checkpoint at the same height twice is harmless. Calling Root or
 // Path before any Checkpoint returns the empty-tree root or an error.
 func (h *TreeHandle) Checkpoint(height uint32) error {
-	rc := C.zally_vote_tree_checkpoint((*C.ZallyTreeHandle)(h.ptr), C.uint32_t(height))
+	rc := C.sv_vote_tree_checkpoint((*C.SvTreeHandle)(h.ptr), C.uint32_t(height))
 	switch rc {
 	case 0:
 		return nil
@@ -239,8 +239,8 @@ func (h *TreeHandle) Checkpoint(height uint32) error {
 // the deterministic empty-tree root if no checkpoint has ever been made).
 func (h *TreeHandle) Root() ([]byte, error) {
 	var rootBuf [LeafBytes]byte
-	rc := C.zally_vote_tree_root_stateful(
-		(*C.ZallyTreeHandle)(h.ptr),
+	rc := C.sv_vote_tree_root_stateful(
+		(*C.SvTreeHandle)(h.ptr),
 		(*C.uint8_t)(unsafe.Pointer(&rootBuf[0])),
 	)
 	if rc != 0 {
@@ -254,7 +254,7 @@ func (h *TreeHandle) Root() ([]byte, error) {
 // Size returns the total number of leaves appended since the handle was
 // created.
 func (h *TreeHandle) Size() uint64 {
-	return uint64(C.zally_vote_tree_size((*C.ZallyTreeHandle)(h.ptr)))
+	return uint64(C.sv_vote_tree_size((*C.SvTreeHandle)(h.ptr)))
 }
 
 // Path returns the MerklePathBytes (772) serialized Merkle authentication path
@@ -269,8 +269,8 @@ func (h *TreeHandle) Size() uint64 {
 // Returns an error if position ≥ Size() or height has no checkpoint.
 func (h *TreeHandle) Path(position uint64, height uint32) ([]byte, error) {
 	var pathBuf [MerklePathBytes]byte
-	rc := C.zally_vote_tree_path_stateful(
-		(*C.ZallyTreeHandle)(h.ptr),
+	rc := C.sv_vote_tree_path_stateful(
+		(*C.SvTreeHandle)(h.ptr),
 		C.uint64_t(position),
 		C.uint32_t(height),
 		(*C.uint8_t)(unsafe.Pointer(&pathBuf[0])),
@@ -289,13 +289,13 @@ func (h *TreeHandle) Path(position uint64, height uint32) ([]byte, error) {
 	}
 }
 
-// Close frees the Rust-side heap allocation by calling zally_vote_tree_free,
+// Close frees the Rust-side heap allocation by calling sv_vote_tree_free,
 // which reconstructs the Box<TreeHandle> and drops it. After Close, the
 // handle is zeroed (ptr = nil) and all further method calls are no-ops or
 // will return errors. Close is idempotent.
 func (h *TreeHandle) Close() {
 	if h.ptr != nil {
-		C.zally_vote_tree_free((*C.ZallyTreeHandle)(h.ptr))
+		C.sv_vote_tree_free((*C.SvTreeHandle)(h.ptr))
 		h.ptr = nil
 		h.proxyHandle.Delete()
 		if h.ctxPtr != nil {

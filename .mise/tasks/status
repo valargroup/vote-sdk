@@ -8,7 +8,7 @@ MULTI=false
 API="http://localhost:1318"
 CHAIN_UP=false
 
-if pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1; then
+if pgrep -f 'svoted start --home.*val' > /dev/null 2>&1; then
     MULTI=true
 fi
 
@@ -36,11 +36,11 @@ if [ "$MULTI" = true ]; then
     printf '\033[2m(multi-validator mode)\033[0m\n'
     API="http://localhost:1418"
     for i in 1 2 3; do
-        home="$HOME/.zallyd-val$i"
+        home="$HOME/.svoted-val$i"
         rpc_port=$((26057 + i * 100))
         api_port=$((1318 + i * 100))
         printf "  val%-11s" "$i"
-        STATUS=$(zallyd status --home "$home" --node "tcp://127.0.0.1:$rpc_port" 2>/dev/null) || true
+        STATUS=$(svoted status --home "$home" --node "tcp://127.0.0.1:$rpc_port" 2>/dev/null) || true
         if [ -n "$STATUS" ]; then
             [ "$CHAIN_UP" = false ] && CHAIN_UP=true
             INFO=$(echo "$STATUS" | format_chain_status)
@@ -51,7 +51,7 @@ if [ "$MULTI" = true ]; then
     done
 else
     printf "chain          "
-    STATUS=$(zallyd status --home ~/.zallyd 2>/dev/null) || true
+    STATUS=$(svoted status --home ~/.svoted 2>/dev/null) || true
     if [ -n "$STATUS" ]; then
         CHAIN_UP=true
         INFO=$(echo "$STATUS" | format_chain_status)
@@ -95,8 +95,8 @@ fi
 # ── Voting rounds + validators (only if chain is up) ────────────
 
 if [ "$CHAIN_UP" = true ]; then
-    PALLAS_JSON=$(curl -sf "$API/zally/v1/pallas-keys" 2>/dev/null) || true
-    ROUNDS_JSON=$(curl -sf "$API/zally/v1/rounds" 2>/dev/null) || true
+    PALLAS_JSON=$(curl -sf "$API/shielded-vote/v1/pallas-keys" 2>/dev/null) || true
+    ROUNDS_JSON=$(curl -sf "$API/shielded-vote/v1/rounds" 2>/dev/null) || true
     echo ""
     if [ -n "$ROUNDS_JSON" ]; then
         echo "$ROUNDS_JSON" | python3 -c "
@@ -168,13 +168,13 @@ fi
 echo ""
 printf '\033[2m'
 if [ "$MULTI" = true ]; then
-    echo "Chain data     ~/.zallyd-val{1,2,3}/"
+    echo "Chain data     ~/.svoted-val{1,2,3}/"
     echo "Chain logs     ./sdk/multi-val{1,2,3}.log"
-    echo "EA keys        ~/.zallyd-val*/ea_sk.*"
+    echo "EA keys        ~/.svoted-val*/ea_sk.*"
 else
-    echo "Chain data     ~/.zallyd/"
-    echo "Chain log      ./zallyd.log"
-    echo "EA keys        ~/.zallyd/ea_sk.*"
+    echo "Chain data     ~/.svoted/"
+    echo "Chain log      ./svoted.log"
+    echo "EA keys        ~/.svoted/ea_sk.*"
 fi
 echo "Nullifier data ./nullifier-ingest/nullifiers.{bin,checkpoint}"
 echo "PIR data       ./nullifier-ingest/pir-data/"

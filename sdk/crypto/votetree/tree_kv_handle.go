@@ -5,18 +5,18 @@ package votetree
 // exported functions as C function pointers live in different .go files.
 
 /*
-#include "../../circuits/include/zally_circuits.h"
+#include "../../circuits/include/shielded_vote_circuits.h"
 #include <stdint.h>
 #include <stdlib.h>
 
 // Forward-declare the Go-exported KV callbacks so we can take their address.
-extern int32_t zallyKvGet(void*, const uint8_t*, size_t, uint8_t**, size_t*);
-extern int32_t zallyKvSet(void*, const uint8_t*, size_t, const uint8_t*, size_t);
-extern int32_t zallyKvDelete(void*, const uint8_t*, size_t);
-extern void*   zallyKvIterCreate(void*, const uint8_t*, size_t, uint8_t);
-extern int32_t zallyKvIterNext(void*, uint8_t**, size_t*, uint8_t**, size_t*);
-extern void    zallyKvIterFree(void*);
-extern void    zallyKvFreeBuf(uint8_t*, size_t);
+extern int32_t svKvGet(void*, const uint8_t*, size_t, uint8_t**, size_t*);
+extern int32_t svKvSet(void*, const uint8_t*, size_t, const uint8_t*, size_t);
+extern int32_t svKvDelete(void*, const uint8_t*, size_t);
+extern void*   svKvIterCreate(void*, const uint8_t*, size_t, uint8_t);
+extern int32_t svKvIterNext(void*, uint8_t**, size_t*, uint8_t**, size_t*);
+extern void    svKvIterFree(void*);
+extern void    svKvFreeBuf(uint8_t*, size_t);
 */
 import "C"
 
@@ -48,15 +48,15 @@ func NewTreeHandleWithKV(proxy *KvStoreProxy, nextPosition uint64) (*TreeHandle,
 	ctxPtr := (*C.uint64_t)(C.malloc(C.size_t(unsafe.Sizeof(C.uint64_t(0)))))
 	*ctxPtr = C.uint64_t(h)
 
-	ptr := C.zally_vote_tree_create_with_kv(
+	ptr := C.sv_vote_tree_create_with_kv(
 		unsafe.Pointer(ctxPtr),
-		C.ZallyKvGetFn(C.zallyKvGet),
-		C.ZallyKvSetFn(C.zallyKvSet),
-		C.ZallyKvDeleteFn(C.zallyKvDelete),
-		C.ZallyKvIterCreateFn(C.zallyKvIterCreate),
-		C.ZallyKvIterNextFn(C.zallyKvIterNext),
-		C.ZallyKvIterFreeFn(C.zallyKvIterFree),
-		C.ZallyKvFreeBufFn(C.zallyKvFreeBuf),
+		C.SvKvGetFn(C.svKvGet),
+		C.SvKvSetFn(C.svKvSet),
+		C.SvKvDeleteFn(C.svKvDelete),
+		C.SvKvIterCreateFn(C.svKvIterCreate),
+		C.SvKvIterNextFn(C.svKvIterNext),
+		C.SvKvIterFreeFn(C.svKvIterFree),
+		C.SvKvFreeBufFn(C.svKvFreeBuf),
 		C.uint64_t(nextPosition),
 	)
 	if ptr == nil {

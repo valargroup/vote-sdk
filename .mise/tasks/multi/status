@@ -4,12 +4,12 @@
 
 echo "=== Multi-Validator Status ==="
 for i in 1 2 3; do
-    home="$HOME/.zallyd-val$i"
+    home="$HOME/.svoted-val$i"
     rpc_port=$((26057 + i * 100))
     api_port=$((1318 + i * 100))
     echo ""
     echo "--- Validator $i (home: $home) ---"
-    proc=$(pgrep -f "zallyd start --home .*val${i}$" 2>/dev/null | head -1)
+    proc=$(pgrep -f "svoted start --home .*val${i}$" 2>/dev/null | head -1)
     if [ -n "$proc" ]; then
         echo "  Process : RUNNING (PID $proc)"
     else

@@ -414,7 +414,7 @@ post_to_slack() {
   local report
   report=$(cat "$REPORT_FILE")
 
-  local run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-z-cale/zally}/actions/runs/${GITHUB_RUN_ID:-0}"
+  local run_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-z-cale/shielded-vote}/actions/runs/${GITHUB_RUN_ID:-0}"
   local timestamp
   timestamp=$(date -u '+%Y-%m-%d %H:%M UTC')
 

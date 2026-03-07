@@ -11,7 +11,7 @@ import (
 
 func TestFetchVoteRound_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/zally/v1/round/aabbccdd", r.URL.Path)
+		assert.Equal(t, "/shielded-vote/v1/round/aabbccdd", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"round":{"vote_end_time":1700000000}}`))
 	}))

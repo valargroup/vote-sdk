@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), tailwindcss()],
     server: {
       proxy: {
-        '/zally': {
+        '/shielded-vote': {
           target: chainUrl,
           changeOrigin: true,
         },

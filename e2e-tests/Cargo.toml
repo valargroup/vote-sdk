@@ -2,11 +2,11 @@
 name = "e2e-tests"
 version = "0.1.0"
 edition = "2021"
-description = "Rust E2E API tests for Zally voting flow (replaces TypeScript suite)"
+description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeScript suite)"
 
 [dependencies]
 # Path deps (relative to repo root; e2e-tests is at root)
-zally-circuits = { path = "../sdk/circuits" }
+shielded-vote-circuits = { path = "../sdk/circuits" }
 orchard = { path = "../orchard" }
 voting-circuits = { path = "../voting-circuits", features = ["share-reveal"] }
 vote-commitment-tree = { path = "../vote-commitment-tree" }

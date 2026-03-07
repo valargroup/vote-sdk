@@ -5,7 +5,7 @@ set -e
 
 # ── Guard: already running? ──────────────────────────────────────
 PROCS=""
-pgrep -f 'zallyd start --home.*val' > /dev/null 2>&1 && PROCS="$PROCS zallyd"
+pgrep -f 'svoted start --home.*val' > /dev/null 2>&1 && PROCS="$PROCS svoted"
 pgrep -f 'nf-server.*serve'        > /dev/null 2>&1 && PROCS="$PROCS nf-server"
 if [ -n "$PROCS" ]; then
     printf '\033[33mAlready running:%s\033[0m\n' "$PROCS"

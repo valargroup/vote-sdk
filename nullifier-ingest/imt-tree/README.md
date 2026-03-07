@@ -1,6 +1,6 @@
 # imt-tree
 
-Indexed Merkle Tree (IMT) for nullifier non-membership proofs in the Zally voting protocol. This crate builds a gap-range Poseidon Merkle tree from on-chain Zcash Orchard nullifiers and generates exclusion proofs that feed directly into the delegation circuit.
+Indexed Merkle Tree (IMT) for nullifier non-membership proofs in the Shielded-Vote voting protocol. This crate builds a gap-range Poseidon Merkle tree from on-chain Zcash Orchard nullifiers and generates exclusion proofs that feed directly into the delegation circuit.
 
 ## Architecture Overview
 

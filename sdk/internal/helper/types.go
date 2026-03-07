@@ -3,7 +3,7 @@
 // unlinkability, generates ZKP #3 proofs, and submits MsgRevealShare to
 // the chain.
 //
-// This package runs inside the zallyd binary, reading commitment tree
+// This package runs inside the svoted binary, reading commitment tree
 // leaves directly from the vote keeper's KV store.
 package helper
 
@@ -45,7 +45,7 @@ type Config struct {
 	MaxConcurrentProofs int `mapstructure:"max_concurrent_proofs"`
 
 	// PulseURL is the base URL for the server heartbeat endpoint
-	// (e.g. "https://zally-phi.vercel.app"). When empty, heartbeat is disabled.
+	// (e.g. "https://shielded-vote-phi.vercel.app"). When empty, heartbeat is disabled.
 	PulseURL string `mapstructure:"pulse_url"`
 
 	// HelperURL is this server's own public URL as seen by clients

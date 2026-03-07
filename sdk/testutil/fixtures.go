@@ -1,6 +1,6 @@
-// Package testutil provides shared test infrastructure for the Zally chain
+// Package testutil provides shared test infrastructure for the Shielded-Vote chain
 // integration tests. It includes reusable message constructors, raw tx encoding
-// helpers, and a TestApp that wraps ZallyApp for in-process ABCI testing.
+// helpers, and a TestApp that wraps SvoteApp for in-process ABCI testing.
 package testutil
 
 import (
@@ -11,8 +11,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // TestValAddr generates a deterministic valid bech32 validator operator address from a seed byte.
@@ -43,7 +43,7 @@ func ActiveRoundFixture(roundID []byte) *types.VoteRound {
 	return &types.VoteRound{
 		VoteRoundId:      roundID,
 		VoteEndTime:      2_000_000,
-		Creator:          "zvote1creator",
+		Creator:          "sv1creator",
 		Status:           types.SessionStatus_SESSION_STATUS_ACTIVE,
 		NullifierImtRoot: bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:           bytes.Repeat([]byte{0x04}, 32),
@@ -76,7 +76,7 @@ func SampleProposals() []*types.Proposal {
 // The VoteEndTime is set 1 hour in the future from the reference time.
 func ValidCreateVotingSession() *types.MsgCreateVotingSession {
 	return &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
+		Creator:           "sv1admin",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
@@ -94,7 +94,7 @@ func ValidCreateVotingSession() *types.MsgCreateVotingSession {
 // to the given reference time. Use this when the block time is deterministic.
 func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession {
 	return &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
+		Creator:           "sv1admin",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
@@ -112,7 +112,7 @@ func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession
 // VoteEndTime. Use when you need a specific end time (e.g. 10 seconds from block time).
 func ValidCreateVotingSessionWithEndTime(endTime time.Time) *types.MsgCreateVotingSession {
 	return &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
+		Creator:           "sv1admin",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
@@ -130,7 +130,7 @@ func ValidCreateVotingSessionWithEndTime(endTime time.Time) *types.MsgCreateVoti
 // relative to the given reference time.
 func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession {
 	return &types.MsgCreateVotingSession{
-		Creator:           "zvote1admin",
+		Creator:           "sv1admin",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),

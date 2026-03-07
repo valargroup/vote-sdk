@@ -29,7 +29,7 @@ import { bech32 } from 'bech32';
 
 export const config = { runtime: 'edge' };
 
-const BECH32_PREFIX = 'zvote';
+const BECH32_PREFIX = 'sv';
 const TIMESTAMP_WINDOW_SECS = 300; // 5 minutes
 const PENDING_EXPIRY_SECS = 7 * 24 * 60 * 60; // 7 days
 const STALE_PULSE_SECS = 120; // 2 minutes — evict from vote_servers after this

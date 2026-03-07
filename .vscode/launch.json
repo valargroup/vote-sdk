@@ -2,24 +2,24 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch zallyd start",
+            "name": "Launch svoted start",
             "type": "go",
             "request": "launch",
             "mode": "debug",
-            "program": "sdk/cmd/zallyd/main.go",
+            "program": "sdk/cmd/svoted/main.go",
             "buildFlags": "-tags=halo2,redpallas,debug_tree",
             "dlvFlags": ["--check-go-version=false"],
             "args": [
                 "start",
                 "--home",
-                "${env:HOME}/.zallyd"
+                "${env:HOME}/.svoted"
             ]
         },
         {
-            // Note: zallyd must already be running with Delve.
+            // Note: svoted must already be running with Delve.
             // Example:
-            //   dlv exec ./zallyd --headless --listen=:2345 --api-version=2 -- start --home ~/.zallyd
-            "name": "Attach to running zallyd process",
+            //   dlv exec ./svoted --headless --listen=:2345 --api-version=2 -- start --home ~/.svoted
+            "name": "Attach to running svoted process",
             "type": "go",
             "request": "attach",
             "mode": "remote",

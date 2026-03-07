@@ -1,6 +1,6 @@
 # vote-commitment-tree
 
-Append-only Poseidon Merkle tree for the **Vote Commitment Tree** in the Zally voting protocol. This crate provides the tree structure, sync protocol, and witness generation used by the vote chain for ZKP #2 (VAN membership) and ZKP #3 (VC membership). The design follows **Gov Steps V1** and the **Wallet SDK → Cosmos SDK Messages** flow.
+Append-only Poseidon Merkle tree for the **Vote Commitment Tree** in the Shielded-Vote voting protocol. This crate provides the tree structure, sync protocol, and witness generation used by the vote chain for ZKP #2 (VAN membership) and ZKP #3 (VC membership). The design follows **Gov Steps V1** and the **Wallet SDK → Cosmos SDK Messages** flow.
 
 ## Table of contents
 
@@ -218,7 +218,7 @@ Our vote commitment tree is structurally the same (append-only, fixed-depth Merk
 | Depth | 32 | **24** ([rationale](#tree-depth-choice)) |
 | Leaf contents | Note commitments only | **Both VANs and VCs** (domain-separated) |
 | Where it lives | ZCash mainnet | **Vote chain** (Cosmos SDK) |
-| Block format | CompactBlock via lightwalletd | Vote chain blocks via REST API (`/zally/v1/commitment-tree/leaves`) |
+| Block format | CompactBlock via lightwalletd | Vote chain blocks via REST API (`/shielded-vote/v1/commitment-tree/leaves`) |
 | Who inserts | ZCash consensus (every shielded output) | Vote chain consensus (MsgDelegateVote, MsgCastVote) |
 | Who needs witnesses | Spender (for spend proofs) | **Voter** (ZKP #2) and **helper server** (ZKP #3) |
 
@@ -423,7 +423,7 @@ graph TB
     subgraph "sdk (Cosmos SDK chain — Go)"
         KEEPER["x/vote/keeper<br/><i>AppendCommitment<br/>EndBlocker root snapshot</i>"]
         FFI["crypto/votetree FFI<br/><i>Go → C → Rust</i>"]
-        REST["REST API<br/><i>/zally/v1/commitment-tree/*</i>"]
+        REST["REST API<br/><i>/shielded-vote/v1/commitment-tree/*</i>"]
         KV["KV Store<br/><i>Leaves: 0x02||idx<br/>Roots: 0x03||height</i>"]
 
         KEEPER --> KV
@@ -643,7 +643,7 @@ graph TB
     HTTP["HttpTreeSyncApi<br/><i>implements over HTTP</i>"] -->|"implements (network)"| P1
     C1 -->|"consumes"| P1
 
-    REST["Chain REST API<br/>/zally/v1/commitment-tree/*"] -.->|"called by"| HTTP
+    REST["Chain REST API<br/>/shielded-vote/v1/commitment-tree/*"] -.->|"called by"| HTTP
 ```
 
 ### Sync sequence (client syncing from chain)
@@ -660,14 +660,14 @@ sequenceDiagram
     CLI->>TC: sync(&api)
 
     TC->>API: get_tree_state()
-    API->>CHAIN: GET /zally/v1/commitment-tree/latest
+    API->>CHAIN: GET /shielded-vote/v1/commitment-tree/latest
     CHAIN-->>API: { next_index, root, height }
     API-->>TC: TreeState { height: H }
 
     TC->>TC: Compute from_height (last_synced + 1)
 
     TC->>API: get_block_commitments(1, H)
-    API->>CHAIN: GET /zally/v1/commitment-tree/leaves?from_height=1&to_height=H
+    API->>CHAIN: GET /shielded-vote/v1/commitment-tree/leaves?from_height=1&to_height=H
     CHAIN-->>API: { blocks: [{ height, start_index, leaves[] }...] }
     API-->>TC: Vec<BlockCommitments>
 
@@ -677,7 +677,7 @@ sequenceDiagram
         TC->>TC: checkpoint(block.height)
 
         TC->>API: get_root_at_height(block.height)
-        API->>CHAIN: GET /zally/v1/commitment-tree/{height}
+        API->>CHAIN: GET /shielded-vote/v1/commitment-tree/{height}
         CHAIN-->>API: { root }
         API-->>TC: Option<Fp>
 
@@ -696,9 +696,9 @@ The sync protocol uses three message types. In the POC the server implements `Tr
 
 | TreeSyncApi method | REST endpoint | Request | Response |
 |---|---|---|---|
-| `get_tree_state()` | `GET /zally/v1/commitment-tree/latest` | — | `{ next_index, root (base64), height }` |
-| `get_root_at_height(h)` | `GET /zally/v1/commitment-tree/{h}` | height in path | `{ root (base64), height }` |
-| `get_block_commitments(from, to)` | `GET /zally/v1/commitment-tree/leaves?from_height=X&to_height=Y` | query params | `{ blocks: [{ height, start_index, leaves[] }] }` |
+| `get_tree_state()` | `GET /shielded-vote/v1/commitment-tree/latest` | — | `{ next_index, root (base64), height }` |
+| `get_root_at_height(h)` | `GET /shielded-vote/v1/commitment-tree/{h}` | height in path | `{ root (base64), height }` |
+| `get_block_commitments(from, to)` | `GET /shielded-vote/v1/commitment-tree/leaves?from_height=X&to_height=Y` | query params | `{ blocks: [{ height, start_index, leaves[] }] }` |
 
 Field elements are 32-byte Pallas Fp values, serialized as little-endian bytes and base64-encoded over the wire.
 
@@ -794,9 +794,9 @@ Trait defining the contract between server and client. The server implements it 
 
 | Method | In-process | HTTP (production) |
 |---|---|---|
-| `get_block_commitments(from_h, to_h)` | Direct access to server data | `GET /zally/v1/commitment-tree/leaves?from_height=X&to_height=Y` |
-| `get_root_at_height(h)` | Direct root lookup | `GET /zally/v1/commitment-tree/{height}` |
-| `get_tree_state()` | Direct state access | `GET /zally/v1/commitment-tree/latest` |
+| `get_block_commitments(from_h, to_h)` | Direct access to server data | `GET /shielded-vote/v1/commitment-tree/leaves?from_height=X&to_height=Y` |
+| `get_root_at_height(h)` | Direct root lookup | `GET /shielded-vote/v1/commitment-tree/{height}` |
+| `get_tree_state()` | Direct state access | `GET /shielded-vote/v1/commitment-tree/latest` |
 
 Supporting types:
 
@@ -903,9 +903,9 @@ Golden test vectors (3 leaves `[1, 2, 3]`) ensure Go and Rust produce identical 
 
 | Endpoint | Handler | Purpose |
 |---|---|---|
-| `GET /zally/v1/commitment-tree/latest` | `handleLatestCommitmentTree` | Current tree state (next_index, root, height) |
-| `GET /zally/v1/commitment-tree/{height}` | `handleCommitmentTreeAtHeight` | Root at specific checkpoint height |
-| `GET /zally/v1/commitment-tree/leaves?from_height=X&to_height=Y` | `handleCommitmentLeaves` | Block-level leaf batches for sync |
+| `GET /shielded-vote/v1/commitment-tree/latest` | `handleLatestCommitmentTree` | Current tree state (next_index, root, height) |
+| `GET /shielded-vote/v1/commitment-tree/{height}` | `handleCommitmentTreeAtHeight` | Root at specific checkpoint height |
+| `GET /shielded-vote/v1/commitment-tree/leaves?from_height=X&to_height=Y` | `handleCommitmentLeaves` | Block-level leaf batches for sync |
 
 ---
 
@@ -994,8 +994,8 @@ Tests run automatically via GitHub Actions (`.github/workflows/`):
 | **CLI** | `vote-commitment-tree-client` | `src/main.rs` | `vote-tree-cli`: sync, witness, verify, status commands |
 | **FFI bridge** | `sdk/circuits` | `src/votetree.rs` | `compute_root_from_raw`, `compute_path_from_raw` for Go → Rust |
 | **Chain keeper** | `sdk/x/vote/keeper` | `tree_root_poseidon.go` | `AppendCommitment`, EndBlocker root via FFI |
-| **Chain REST** | `sdk/api` | `query_handler.go` | HTTP endpoints: `/zally/v1/commitment-tree/{latest,height,leaves}` |
-| **Chain proto** | `sdk/proto/zvote/v1` | `query.proto`, `types.proto` | `CommitmentTreeState`, `BlockCommitments`, `CommitmentLeaves` proto definitions |
+| **Chain REST** | `sdk/api` | `query_handler.go` | HTTP endpoints: `/shielded-vote/v1/commitment-tree/{latest,height,leaves}` |
+| **Chain proto** | `sdk/proto/svote/v1` | `query.proto`, `types.proto` | `CommitmentTreeState`, `BlockCommitments`, `CommitmentLeaves` proto definitions |
 | **Integration tests** | `vote-commitment-tree` | `tests/client_server_integration.rs` | 11 Rust integration tests (server → client → witness) |
 | **HTTP tests** | `vote-commitment-tree-client` | `tests/mock_server_tests.rs` | Mock HTTP server tests |
 | **FFI tests** | `sdk/crypto/votetree` | `tree_ffi_test.go` | Golden vector Go/Rust parity |
@@ -1047,4 +1047,4 @@ This section records how this crate aligns with the governance plan (Gov Steps V
 - **ZKP #1, #2, #3 circuits** — Proof generation and verification are defined in the protocol spec and implemented in the circuits repo; this crate only provides Merkle paths and roots for the public inputs.
 - **Note commitment tree (`nc_root`)** — Built and anchored on ZCash mainnet; we only consume its root as an anchor for ZKP #1.
 - **Nullifier sets, tally accumulator, MsgSubmitTally** — Chain state and message handling; see Cosmos SDK messages spec and keeper code.
-- **REST API round scoping** — Current SDK endpoints (`/zally/v1/commitment-tree/latest`, `/{height}`, `/leaves`) may not include `round_id` in the path; production may need per-round routes or query params. See `sdk/api/query_handler.go` and keeper store keys.
+- **REST API round scoping** — Current SDK endpoints (`/shielded-vote/v1/commitment-tree/latest`, `/{height}`, `/leaves`) may not include `round_id` in the path; production may need per-round routes or query params. See `sdk/api/query_handler.go` and keeper store keys.

@@ -888,7 +888,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [latestBlock, setLatestBlock] = useState<chainApi.LatestBlockInfo | null>(null);
   const [helperStatus, setHelperStatus] = useState<chainApi.HelperStatus | null>(null);
   const [voteManager, setVoteManagerAddr] = useState<string>(
-    () => localStorage.getItem("zally-vm-address") ?? ""
+    () => localStorage.getItem("sv-vm-address") ?? ""
   );
   const [chainDetailsOpen, setChainDetailsOpen] = useState(false);
 
@@ -1364,7 +1364,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                             type="text"
                             value={vmNewAddr}
                             onChange={(e) => setVmNewAddr(e.target.value)}
-                            placeholder="zvote1..."
+                            placeholder="sv1..."
                             className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
                           />
                         </div>
@@ -1936,7 +1936,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                 Validators
               </h1>
               <p className="text-[11px] text-text-muted">
-                Active validator set on the Zally chain
+                Active validator set on the Shielded-Vote chain
               </p>
             </div>
           </div>
@@ -2005,7 +2005,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                             className="w-24 px-1.5 py-0.5 bg-surface-2 border border-border-subtle rounded text-[10px] text-text-primary text-right font-mono focus:outline-none focus:border-accent/50"
                             placeholder="amount"
                           />
-                          <span className="text-[9px] text-text-muted">uzvote</span>
+                          <span className="text-[9px] text-text-muted">usvote</span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <button
@@ -2469,8 +2469,8 @@ function FundValidatorModal({
     }
   };
 
-  // Display amount in ZVOTE (1 ZVOTE = 1,000,000 uzvote)
-  const displayAmount = amountValid ? `${(amountNum / 1_000_000).toLocaleString()} ZVOTE` : "";
+  // Display amount in SVOTE (1 SVOTE = 1,000,000 usvote)
+  const displayAmount = amountValid ? `${(amountNum / 1_000_000).toLocaleString()} SVOTE` : "";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -2532,7 +2532,7 @@ function FundValidatorModal({
                     type="text"
                     value={recipientAddress}
                     onChange={(e) => handleAddressChange(e.target.value)}
-                    placeholder="zvote1..."
+                    placeholder="sv1..."
                     spellCheck={false}
                     autoComplete="off"
                     className={`w-full px-3 py-2 bg-surface-2 border rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none font-mono ${
@@ -2546,7 +2546,7 @@ function FundValidatorModal({
 
                 <div>
                   <label className="block text-[11px] text-text-secondary mb-1.5">
-                    Amount (uzvote)
+                    Amount (usvote)
                   </label>
                   <input
                     type="text"
@@ -2829,7 +2829,7 @@ function VoteStatusView({ expectRoundCount }: { expectRoundCount?: number | null
                 Vote status
               </h1>
               <p className="text-[11px] text-text-muted">
-                Live proposal results from the Zally chain
+                Live proposal results from the Shielded-Vote chain
               </p>
             </div>
           </div>

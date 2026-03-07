@@ -20,7 +20,7 @@ import (
 func deterministicReader() *chacha20.Cipher {
 	// 32-byte key, 12-byte nonce — all derived from a human-readable seed.
 	key := [32]byte{}
-	copy(key[:], "zally-elgamal-fixture-seed-00001")
+	copy(key[:], "svote-elgamal-fixture-seed-00001")
 	nonce := [12]byte{}
 	copy(nonce[:], "fixture-nonce")
 	stream, err := chacha20.NewUnauthenticatedCipher(key[:], nonce[:])

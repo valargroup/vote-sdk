@@ -18,7 +18,7 @@ import (
 	"github.com/gorilla/mux"
 	protov2 "google.golang.org/protobuf/proto"
 
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // HandlerConfig configures the REST API handler.
@@ -58,15 +58,15 @@ func NewHandler(cfg HandlerConfig) *Handler {
 
 // RegisterTxRoutes registers vote transaction submission endpoints on the router.
 //
-//	POST /zally/v1/delegate-vote          → MsgDelegateVote
-//	POST /zally/v1/cast-vote              → MsgCastVote
-//	POST /zally/v1/reveal-share           → MsgRevealShare
+//	POST /shielded-vote/v1/delegate-vote          → MsgDelegateVote
+//	POST /shielded-vote/v1/cast-vote              → MsgCastVote
+//	POST /shielded-vote/v1/reveal-share           → MsgRevealShare
 //
 // MsgSubmitTally is proposer-only (auto-injected via PrepareProposal) and
 // has no REST endpoint.
 //
 // MsgCreateVotingSession is a standard Cosmos SDK transaction (signed by
-// the vote manager) and should be submitted via zallyd tx sign/broadcast
+// the vote manager) and should be submitted via svoted tx sign/broadcast
 // or /cosmos/tx/v1beta1/txs.
 //
 // Ceremony messages (MsgRegisterPallasKey, MsgDealExecutiveAuthorityKey,
@@ -76,17 +76,17 @@ func NewHandler(cfg HandlerConfig) *Handler {
 // MsgAckExecutiveAuthorityKey and MsgSubmitPartialDecryption have no REST
 // endpoints — they are injected in-protocol via PrepareProposal.
 func (h *Handler) RegisterTxRoutes(router *mux.Router) {
-	router.HandleFunc("/zally/v1/delegate-vote", h.handleDelegateVote).Methods("POST")
-	router.HandleFunc("/zally/v1/cast-vote", h.handleCastVote).Methods("POST")
-	router.HandleFunc("/zally/v1/reveal-share", h.handleRevealShare).Methods("POST")
+	router.HandleFunc("/shielded-vote/v1/delegate-vote", h.handleDelegateVote).Methods("POST")
+	router.HandleFunc("/shielded-vote/v1/cast-vote", h.handleCastVote).Methods("POST")
+	router.HandleFunc("/shielded-vote/v1/reveal-share", h.handleRevealShare).Methods("POST")
 
 	// Snapshot data endpoint: fetches real nc_root and nullifier_imt_root
 	// for session creation. Used by the admin UI to replace stub values.
-	router.HandleFunc("/zally/v1/snapshot-data/{height}", h.handleSnapshotData).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/snapshot-data/{height}", h.handleSnapshotData).Methods("GET")
 
 	// TX confirmation endpoint: checks whether a TX has been included in a block.
 	// Used by iOS app to verify vote commitment TXs landed after tree growth timeout.
-	router.HandleFunc("/zally/v1/tx/{hash}", h.handleTxStatus).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/tx/{hash}", h.handleTxStatus).Methods("GET")
 }
 
 // --- Tx submission handlers ---
@@ -131,7 +131,7 @@ func (h *Handler) handleSnapshotData(w http.ResponseWriter, r *http.Request) {
 
 	data, err := fetchSnapshotData(ctx, h.snapshot, height)
 	if err != nil {
-		log.Printf("[zally-api] snapshot-data error: %v", err)
+		log.Printf("[shielded-vote-api] snapshot-data error: %v", err)
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("fetch snapshot data: %v", err))
 		return
 	}
@@ -279,17 +279,17 @@ func (h *Handler) broadcastVoteTx(w http.ResponseWriter, msg types.VoteMessage) 
 	start := time.Now()
 	result, err := h.cometBroadcastTxSync(raw)
 	elapsed := time.Since(start)
-	log.Printf("[zally-api] broadcast_tx_sync duration_ms=%d msg_type=%T", elapsed.Milliseconds(), msg)
+	log.Printf("[shielded-vote-api] broadcast_tx_sync duration_ms=%d msg_type=%T", elapsed.Milliseconds(), msg)
 	if err != nil {
 		// 502 = CometBFT rejected the broadcast (RPC error). The error string now includes
 		// CometBFT's error.data when present (e.g. "tx already in cache", "context canceled").
-		log.Printf("[zally-api] broadcast_tx_sync failed: %v", err)
+		log.Printf("[shielded-vote-api] broadcast_tx_sync failed: %v", err)
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("broadcast failed: %v", err))
 		return
 	}
 
 	if result.Code != 0 {
-		log.Printf("[zally-api] CheckTx rejected (code %d): %s", result.Code, result.Log)
+		log.Printf("[shielded-vote-api] CheckTx rejected (code %d): %s", result.Code, result.Log)
 		writeJSON(w, http.StatusUnprocessableEntity, result)
 		return
 	}
@@ -357,7 +357,7 @@ func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error)
 		// cache tracks hashes, not outcomes. Query CometBFT /tx to find the real status.
 		if strings.Contains(detail, "already exists in cache") {
 			txHash := fmt.Sprintf("%X", sha256.Sum256(txBytes))
-			log.Printf("[zally-api] tx already in mempool cache, querying real status hash=%s", txHash)
+			log.Printf("[shielded-vote-api] tx already in mempool cache, querying real status hash=%s", txHash)
 
 			status, err := h.queryTxByHash(txHash)
 			if errors.Is(err, errTxNotFound) {

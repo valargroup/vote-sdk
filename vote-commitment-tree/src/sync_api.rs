@@ -43,8 +43,8 @@ pub struct TreeState {
 /// In the POC: in-process (server implements this directly).
 /// In production: maps to Cosmos SDK gRPC/REST endpoints:
 /// - `get_block_commitments` → custom compact-block endpoint or Tendermint block queries
-/// - `get_root_at_height` → `GET /zally/v1/commitment-tree/{height}`
-/// - `get_tree_state` → `GET /zally/v1/commitment-tree/latest`
+/// - `get_root_at_height` → `GET /shielded-vote/v1/commitment-tree/{height}`
+/// - `get_tree_state` → `GET /shielded-vote/v1/commitment-tree/latest`
 pub trait TreeSyncApi {
     type Error: std::fmt::Debug;
 
@@ -60,11 +60,11 @@ pub trait TreeSyncApi {
 
     /// Fetch tree root at a checkpoint height (anchor verification).
     ///
-    /// Maps to: `GET /zally/v1/commitment-tree/{height}`
+    /// Maps to: `GET /shielded-vote/v1/commitment-tree/{height}`
     fn get_root_at_height(&self, height: u32) -> Result<Option<Fp>, Self::Error>;
 
     /// Fetch current tree state (next_index, root, latest height).
     ///
-    /// Maps to: `GET /zally/v1/commitment-tree/latest`
+    /// Maps to: `GET /shielded-vote/v1/commitment-tree/latest`
     fn get_tree_state(&self) -> Result<TreeState, Self::Error>;
 }

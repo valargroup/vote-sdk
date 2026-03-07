@@ -1,26 +1,26 @@
-BINARY = zallyd
-HOME_DIR = $(HOME)/.zallyd
+BINARY = svoted
+HOME_DIR = $(HOME)/.svoted
 
 export GOBIN := $(HOME)/go/bin
 export PATH := $(GOBIN):$(PATH)
 
 .PHONY: install install-ffi init init-benchmark start clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy
 
-## install: Build and install the zallyd binary to $GOPATH/bin
+## install: Build and install the svoted binary to $GOPATH/bin
 install:
-	go install ./cmd/zallyd
+	go install ./cmd/svoted
 
-## install-ffi: Build and install zallyd with real RedPallas + Halo2 verification (requires: make circuits)
+## install-ffi: Build and install svoted with real RedPallas + Halo2 verification (requires: make circuits)
 install-ffi: circuits
-	go install -tags "halo2,redpallas" ./cmd/zallyd
+	go install -tags "halo2,redpallas" ./cmd/svoted
 
-## build: Build the zallyd binary locally
+## build: Build the svoted binary locally
 build:
-	go build -o $(BINARY) ./cmd/zallyd
+	go build -o $(BINARY) ./cmd/svoted
 
-## build-ffi: Build zallyd with real RedPallas + Halo2 (requires: make circuits). Use this or run "make circuits" before go build -tags halo2,redpallas.
+## build-ffi: Build svoted with real RedPallas + Halo2 (requires: make circuits). Use this or run "make circuits" before go build -tags halo2,redpallas.
 build-ffi: circuits
-	go build -tags "halo2,redpallas" -o $(BINARY) ./cmd/zallyd
+	go build -tags "halo2,redpallas" -o $(BINARY) ./cmd/svoted
 
 ## build-create-val-tx: Build the create-val-tx helper binary locally
 build-create-val-tx:
@@ -38,9 +38,9 @@ init: install-ffi
 init-benchmark: install-ffi
 	bash scripts/init_benchmark.sh
 
-## start: Start the chain (set ZALLY_PIR_URL to override nullifier PIR server)
+## start: Start the chain (set SVOTE_PIR_URL to override nullifier PIR server)
 start:
-	ZALLY_PIR_URL=$${ZALLY_PIR_URL:-http://localhost:3000} $(BINARY) start --home $(HOME_DIR)
+	SVOTE_PIR_URL=$${SVOTE_PIR_URL:-http://localhost:3000} $(BINARY) start --home $(HOME_DIR)
 
 ## clean: Remove chain data directory
 clean:
@@ -72,11 +72,11 @@ test: test-unit test-integration test-helper
 
 ## ceremony: Register Pallas key + create round + wait for ACTIVE (per-round auto-ceremony)
 ceremony:
-	ZALLY_API_URL=http://localhost:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml round_activation -- --nocapture --ignored
+	SVOTE_API_URL=http://localhost:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml round_activation -- --nocapture --ignored
 
 ## test-api: Rust E2E API tests against a running chain (requires: make init && make start)
 test-api:
-	ZALLY_API_URL=http://localhost:1318 HELPER_SERVER_URL=http://127.0.0.1:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml -- --nocapture --ignored
+	SVOTE_API_URL=http://localhost:1318 HELPER_SERVER_URL=http://127.0.0.1:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml -- --nocapture --ignored
 
 ## test-e2e: Alias for test-api (Rust E2E tests)
 test-e2e: test-api

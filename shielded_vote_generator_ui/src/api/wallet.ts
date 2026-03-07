@@ -14,11 +14,11 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import type { KeplrChainInfo } from "../types/keplr";
 
-const BECH32_PREFIX = "zvote";
+const BECH32_PREFIX = "sv";
 
 const COIN = {
-  coinDenom: "ZVOTE",
-  coinMinimalDenom: "uzvote",
+  coinDenom: "SVOTE",
+  coinMinimalDenom: "usvote",
   coinDecimals: 6,
 };
 
@@ -39,7 +39,7 @@ async function fetchChainId(restUrl: string): Promise<string> {
 function buildChainInfo(chainId: string, restUrl: string, rpcUrl: string): KeplrChainInfo {
   return {
     chainId,
-    chainName: "Zally Voting",
+    chainName: "Shielded-Vote",
     rpc: rpcUrl,
     rest: restUrl,
     bip44: { coinType: 133 },

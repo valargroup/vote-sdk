@@ -1,12 +1,12 @@
 // Command create-val-tx constructs a MsgCreateValidatorWithPallasKey,
-// signs it via `zallyd tx sign`, and broadcasts it via `zallyd tx broadcast`.
+// signs it via `svoted tx sign`, and broadcasts it via `svoted tx broadcast`.
 // Used by init_multi.sh --ci to register post-genesis validators that join an
 // already-running chain.
 //
 // Usage:
 //
 //	create-val-tx \
-//	  --home ~/.zallyd-val2 \
+//	  --home ~/.svoted-val2 \
 //	  --moniker val2 \
 //	  --amount 10000000stake \
 //	  --rpc-url tcp://localhost:26157
@@ -31,11 +31,11 @@ import (
 )
 
 func main() {
-	// Configure bech32 prefixes to match the Zally chain.
+	// Configure bech32 prefixes to match the Shielded-Vote chain.
 	cfg := sdk.GetConfig()
-	cfg.SetBech32PrefixForAccount("zvote", "zvotepub")
-	cfg.SetBech32PrefixForValidator("zvotevaloper", "zvotevaloperpub")
-	cfg.SetBech32PrefixForConsensusNode("zvotevalcons", "zvotevalconspub")
+	cfg.SetBech32PrefixForAccount("sv", "svpub")
+	cfg.SetBech32PrefixForValidator("svvaloper", "svvaloperpub")
+	cfg.SetBech32PrefixForConsensusNode("svvalcons", "svvalconspub")
 
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -72,7 +72,7 @@ func run() error {
 	edPk := &ed25519.PubKey{Key: consPubKeyBytes}
 
 	// Derive the validator account address from the keyring.
-	addrOut, err := exec.Command("zallyd",
+	addrOut, err := exec.Command("svoted",
 		"keys", "show", args.keyName,
 		"--keyring-backend", "test",
 		"--home", args.home,
@@ -80,7 +80,7 @@ func run() error {
 		"-a",
 	).Output()
 	if err != nil {
-		return fmt.Errorf("zallyd keys show failed: %w", err)
+		return fmt.Errorf("svoted keys show failed: %w", err)
 	}
 	valAccAddr := strings.TrimSpace(string(addrOut))
 
@@ -140,17 +140,17 @@ func run() error {
 	// Write to temp file.
 	ts := time.Now().UnixNano()
 	tmpDir := os.TempDir()
-	unsignedPath := filepath.Join(tmpDir, fmt.Sprintf("zally_unsigned_%d.json", ts))
-	signedPath := filepath.Join(tmpDir, fmt.Sprintf("zally_signed_%d.json", ts))
+	unsignedPath := filepath.Join(tmpDir, fmt.Sprintf("sv_unsigned_%d.json", ts))
+	signedPath := filepath.Join(tmpDir, fmt.Sprintf("sv_signed_%d.json", ts))
 
 	if err := os.WriteFile(unsignedPath, unsignedJSON, 0600); err != nil {
 		return fmt.Errorf("write unsigned tx: %w", err)
 	}
 	defer os.Remove(unsignedPath) //nolint:errcheck
 
-	// Sign via zallyd tx sign.
+	// Sign via svoted tx sign.
 	fmt.Printf("Signing with key %q from %s ...\n", args.keyName, args.home)
-	signCmd := exec.Command("zallyd",
+	signCmd := exec.Command("svoted",
 		"tx", "sign", unsignedPath,
 		"--from", args.keyName,
 		"--keyring-backend", "test",
@@ -163,13 +163,13 @@ func run() error {
 	signCmd.Stdout = os.Stdout
 	signCmd.Stderr = os.Stderr
 	if err := signCmd.Run(); err != nil {
-		return fmt.Errorf("zallyd tx sign failed: %w", err)
+		return fmt.Errorf("svoted tx sign failed: %w", err)
 	}
 	defer os.Remove(signedPath) //nolint:errcheck
 
-	// Broadcast via zallyd tx broadcast.
+	// Broadcast via svoted tx broadcast.
 	fmt.Printf("Broadcasting to %s ...\n", args.rpcURL)
-	broadcastCmd := exec.Command("zallyd",
+	broadcastCmd := exec.Command("svoted",
 		"tx", "broadcast", signedPath,
 		"--node", args.rpcURL,
 		"--output", "json",
@@ -177,9 +177,9 @@ func run() error {
 	broadcastOut, err := broadcastCmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return fmt.Errorf("zallyd tx broadcast failed: %s", string(exitErr.Stderr))
+			return fmt.Errorf("svoted tx broadcast failed: %s", string(exitErr.Stderr))
 		}
-		return fmt.Errorf("zallyd tx broadcast failed: %w", err)
+		return fmt.Errorf("svoted tx broadcast failed: %w", err)
 	}
 
 	fmt.Printf("Broadcast result: %s\n", strings.TrimSpace(string(broadcastOut)))
@@ -193,7 +193,7 @@ func buildUnsignedTx(stakingMsgBytes, pallasPkBytes []byte) map[string]interface
 		"body": map[string]interface{}{
 			"messages": []map[string]interface{}{
 				{
-					"@type":       "/zvote.v1.MsgCreateValidatorWithPallasKey",
+					"@type":       "/svote.v1.MsgCreateValidatorWithPallasKey",
 					"staking_msg": base64.StdEncoding.EncodeToString(stakingMsgBytes),
 					"pallas_pk":   base64.StdEncoding.EncodeToString(pallasPkBytes),
 				},
@@ -234,10 +234,10 @@ func parseArgs() cliArgs {
 	}
 
 	args := cliArgs{
-		home:    filepath.Join(homeDir, ".zallyd"),
+		home:    filepath.Join(homeDir, ".svoted"),
 		amount:  "10000000stake",
 		rpcURL:  "tcp://localhost:26157",
-		chainID: "zvote-1",
+		chainID: "svote-1",
 		keyName: "validator",
 	}
 

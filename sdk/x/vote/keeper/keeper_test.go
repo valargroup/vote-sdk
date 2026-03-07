@@ -15,13 +15,13 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/zally/crypto/elgamal"
-	zallytest "github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/keeper"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	svtest "github.com/z-cale/shielded-vote/testutil"
+	"github.com/z-cale/shielded-vote/x/vote/keeper"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
-var fpLE = zallytest.FpLE
+var fpLE = svtest.FpLE
 
 // validCiphertextBytes generates a real serialized ElGamal ciphertext encrypting
 // value v under a fresh random key. Used in tests that must pass the keeper's
@@ -72,7 +72,7 @@ func (s *KeeperTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(testBlockTime)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "zvote1authority", log.NewNopLogger(), nil)
+	s.keeper = keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), nil)
 }
 
 func uint64Ptr(v uint64) *uint64 { return &v }
@@ -98,7 +98,7 @@ func (s *KeeperTestSuite) TestVoteRound_SetAndGet() {
 				VoteEndTime:       activeEndTime,
 				NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 				NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-				Creator:           "zvote1creator",
+				Creator:           "sv1creator",
 			},
 			lookupID:    testRoundID,
 			expectFound: true,
@@ -258,7 +258,7 @@ func (s *KeeperTestSuite) TestIterateActiveRounds() {
 
 func (s *KeeperTestSuite) TestGetAuthority() {
 	s.SetupTest()
-	s.Require().Equal("zvote1authority", s.keeper.GetAuthority())
+	s.Require().Equal("sv1authority", s.keeper.GetAuthority())
 }
 
 func (s *KeeperTestSuite) TestLogger() {

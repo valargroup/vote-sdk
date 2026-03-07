@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/chacha20poly1305"
 
-	"github.com/z-cale/zally/crypto/elgamal"
+	"github.com/z-cale/shielded-vote/crypto/elgamal"
 )
 
 // testGenerator returns the standard Pallas generator point.

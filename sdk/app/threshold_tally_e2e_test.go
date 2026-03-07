@@ -25,10 +25,10 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/crypto/shamir"
-	"github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/types"
+	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	"github.com/z-cale/shielded-vote/crypto/shamir"
+	"github.com/z-cale/shielded-vote/testutil"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 func TestThresholdTallyLifecycle(t *testing.T) {

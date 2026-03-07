@@ -1,8 +1,8 @@
 [package]
-name = "zally-circuits"
+name = "shielded-vote-circuits"
 version = "0.1.0"
 edition = "2021"
-description = "Halo2 ZKP circuits and FFI verification for the Zally vote chain"
+description = "Halo2 ZKP circuits and FFI verification for the Shielded-Vote chain"
 
 [lib]
 crate-type = ["staticlib", "lib"]

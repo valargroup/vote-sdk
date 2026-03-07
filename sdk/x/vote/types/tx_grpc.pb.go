@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             (unknown)
-// source: zvote/v1/tx.proto
+// source: svote/v1/tx.proto
 
 package types
 
@@ -19,17 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Msg_CreateVotingSession_FullMethodName          = "/zvote.v1.Msg/CreateVotingSession"
-	Msg_DelegateVote_FullMethodName                 = "/zvote.v1.Msg/DelegateVote"
-	Msg_CastVote_FullMethodName                     = "/zvote.v1.Msg/CastVote"
-	Msg_RevealShare_FullMethodName                  = "/zvote.v1.Msg/RevealShare"
-	Msg_SubmitTally_FullMethodName                  = "/zvote.v1.Msg/SubmitTally"
-	Msg_SubmitPartialDecryption_FullMethodName      = "/zvote.v1.Msg/SubmitPartialDecryption"
-	Msg_RegisterPallasKey_FullMethodName            = "/zvote.v1.Msg/RegisterPallasKey"
-	Msg_DealExecutiveAuthorityKey_FullMethodName    = "/zvote.v1.Msg/DealExecutiveAuthorityKey"
-	Msg_AckExecutiveAuthorityKey_FullMethodName     = "/zvote.v1.Msg/AckExecutiveAuthorityKey"
-	Msg_CreateValidatorWithPallasKey_FullMethodName = "/zvote.v1.Msg/CreateValidatorWithPallasKey"
-	Msg_SetVoteManager_FullMethodName               = "/zvote.v1.Msg/SetVoteManager"
+	Msg_CreateVotingSession_FullMethodName          = "/svote.v1.Msg/CreateVotingSession"
+	Msg_DelegateVote_FullMethodName                 = "/svote.v1.Msg/DelegateVote"
+	Msg_CastVote_FullMethodName                     = "/svote.v1.Msg/CastVote"
+	Msg_RevealShare_FullMethodName                  = "/svote.v1.Msg/RevealShare"
+	Msg_SubmitTally_FullMethodName                  = "/svote.v1.Msg/SubmitTally"
+	Msg_SubmitPartialDecryption_FullMethodName      = "/svote.v1.Msg/SubmitPartialDecryption"
+	Msg_RegisterPallasKey_FullMethodName            = "/svote.v1.Msg/RegisterPallasKey"
+	Msg_DealExecutiveAuthorityKey_FullMethodName    = "/svote.v1.Msg/DealExecutiveAuthorityKey"
+	Msg_AckExecutiveAuthorityKey_FullMethodName     = "/svote.v1.Msg/AckExecutiveAuthorityKey"
+	Msg_CreateValidatorWithPallasKey_FullMethodName = "/svote.v1.Msg/CreateValidatorWithPallasKey"
+	Msg_SetVoteManager_FullMethodName               = "/svote.v1.Msg/SetVoteManager"
 )
 
 // MsgClient is the client API for Msg service.
@@ -458,7 +458,7 @@ func _Msg_SetVoteManager_Handler(srv interface{}, ctx context.Context, dec func(
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Msg_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "zvote.v1.Msg",
+	ServiceName: "svote.v1.Msg",
 	HandlerType: (*MsgServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -507,5 +507,5 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "zvote/v1/tx.proto",
+	Metadata: "svote/v1/tx.proto",
 }

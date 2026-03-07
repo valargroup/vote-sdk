@@ -9,10 +9,10 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 
-	voteapi "github.com/z-cale/zally/api"
-	"github.com/z-cale/zally/crypto/elgamal"
-	"github.com/z-cale/zally/testutil"
-	"github.com/z-cale/zally/x/vote/types"
+	voteapi "github.com/z-cale/shielded-vote/api"
+	"github.com/z-cale/shielded-vote/crypto/elgamal"
+	"github.com/z-cale/shielded-vote/testutil"
+	"github.com/z-cale/shielded-vote/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ func TestPartialDecryptInjector_Skips(t *testing.T) {
 				G := elgamal.PallasGenerator()
 				vk := G.Mul(share.Scalar).ToAffineCompressed()
 				validators := []*types.ValidatorPallasKey{{
-					ValidatorAddress: "zvote1stranger1xxxxxxxxxxxxxxxxxxxxxxxxxx",
+					ValidatorAddress: "sv1stranger1xxxxxxxxxxxxxxxxxxxxxxxxxx",
 					PallasPk:         strangePk.Point.ToAffineCompressed(),
 				}}
 				seedTallyingRoundWithAccumulators(t, ta, pdRound, 1, validators, [][]byte{vk}, eaPk)

@@ -1,4 +1,4 @@
-# zally
+# shielded-vote
 
 Cosmos SDK application chain for private voting using Zcash-derived cryptography.
 
@@ -83,7 +83,7 @@ The VoteManager is a singleton on-chain address that gates who can create voting
 - **Bootstrap:** When no VoteManager exists, any bonded validator can set the first one
 - **Update:** Once set, the current VoteManager **or any bonded validator** can change it
 - Non-validators who are not the current VoteManager are rejected
-- Uses custom wire format tag `0x0C` and REST endpoint `POST /zally/v1/set-vote-manager`
+- Uses custom wire format tag `0x0C` and REST endpoint `POST /shielded-vote/v1/set-vote-manager`
 - Stored as a singleton `VoteManagerState` in the KV store (key `0x0A`)
 
 ### Voting Rounds
@@ -198,9 +198,9 @@ Vote-round messages use the custom wire format and are submitted as JSON POST re
 
 | Method | Path                          | Description                          |
 | ------ | ----------------------------- | ------------------------------------ |
-| POST   | `/zally/v1/delegate-vote`     | Submit a delegation proof (ZKP #1)   |
-| POST   | `/zally/v1/cast-vote`         | Cast an encrypted vote (ZKP #2)      |
-| POST   | `/zally/v1/reveal-share`      | Reveal an encrypted share (ZKP #3)   |
+| POST   | `/shielded-vote/v1/delegate-vote`     | Submit a delegation proof (ZKP #1)   |
+| POST   | `/shielded-vote/v1/cast-vote`         | Cast an encrypted vote (ZKP #2)      |
+| POST   | `/shielded-vote/v1/reveal-share`      | Reveal an encrypted share (ZKP #3)   |
 
 These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`. `MsgSubmitTally`, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` have no REST endpoints — they are proposer-only and auto-injected via PrepareProposal.
 
@@ -210,21 +210,21 @@ Ceremony and management messages (`MsgRegisterPallasKey`, `MsgCreateValidatorWit
 
 | Method | Path                                       | Description                                |
 | ------ | ------------------------------------------ | ------------------------------------------ |
-| GET    | `/zally/v1/ceremony`                       | Current ceremony state and status          |
-| GET    | `/zally/v1/rounds`                         | List all stored vote rounds                |
-| GET    | `/zally/v1/rounds/active`                  | Currently active voting round              |
-| GET    | `/zally/v1/round/{round_id}`               | Voting round by hex round ID               |
-| GET    | `/zally/v1/vote-summary/{round_id}`        | Denormalized round summary with proposals  |
-| GET    | `/zally/v1/tally/{round_id}/{proposal_id}` | Tally for a specific proposal              |
-| GET    | `/zally/v1/tally-results/{round_id}`       | All tally results for a round              |
-| GET    | `/zally/v1/commitment-tree/{height}`       | Vote commitment tree at block height       |
-| GET    | `/zally/v1/commitment-tree/latest`         | Latest vote commitment tree                |
-| GET    | `/zally/v1/commitment-tree/leaves`         | Tree leaves (`?from_height=X&to_height=Y`) |
-| GET    | `/zally/v1/pallas-keys`                    | All registered Pallas keys                 |
-| GET    | `/zally/v1/vote-manager`                   | Current VoteManager address                |
-| GET    | `/zally/v1/genesis`                        | Chain genesis JSON                         |
-| GET    | `/zally/v1/snapshot-data/{height}`         | Nullifier snapshot data at block height    |
-| GET    | `/zally/v1/tx/{hash}`                      | Transaction status by hash                 |
+| GET    | `/shielded-vote/v1/ceremony`                       | Current ceremony state and status          |
+| GET    | `/shielded-vote/v1/rounds`                         | List all stored vote rounds                |
+| GET    | `/shielded-vote/v1/rounds/active`                  | Currently active voting round              |
+| GET    | `/shielded-vote/v1/round/{round_id}`               | Voting round by hex round ID               |
+| GET    | `/shielded-vote/v1/vote-summary/{round_id}`        | Denormalized round summary with proposals  |
+| GET    | `/shielded-vote/v1/tally/{round_id}/{proposal_id}` | Tally for a specific proposal              |
+| GET    | `/shielded-vote/v1/tally-results/{round_id}`       | All tally results for a round              |
+| GET    | `/shielded-vote/v1/commitment-tree/{height}`       | Vote commitment tree at block height       |
+| GET    | `/shielded-vote/v1/commitment-tree/latest`         | Latest vote commitment tree                |
+| GET    | `/shielded-vote/v1/commitment-tree/leaves`         | Tree leaves (`?from_height=X&to_height=Y`) |
+| GET    | `/shielded-vote/v1/pallas-keys`                    | All registered Pallas keys                 |
+| GET    | `/shielded-vote/v1/vote-manager`                   | Current VoteManager address                |
+| GET    | `/shielded-vote/v1/genesis`                        | Chain genesis JSON                         |
+| GET    | `/shielded-vote/v1/snapshot-data/{height}`         | Nullifier snapshot data at block height    |
+| GET    | `/shielded-vote/v1/tx/{hash}`                      | Transaction status by hash                 |
 
 ### On-Chain State (KV Store Keys)
 

@@ -27,7 +27,7 @@ use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
 
 const VOTE_MANAGER_PRIVKEY_HEX: &str =
     "b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee";
-const VOTE_MANAGER_ADDRESS: &str = "zvote15fjfr6rrs60vu4st6arrd94w5j6z7f6kxr92cg";
+const VOTE_MANAGER_ADDRESS: &str = "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl";
 
 struct SyncClientResult {
     client_id: usize,
@@ -50,7 +50,7 @@ struct SyncClientResult {
 #[test]
 #[ignore = "requires running chain"]
 fn sync_stress_multi_delegation() {
-    let n: usize = std::env::var("ZALLY_STRESS_DELEGATION_COUNT")
+    let n: usize = std::env::var("SVOTE_STRESS_DELEGATION_COUNT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(5);
@@ -73,7 +73,7 @@ fn sync_stress_multi_delegation() {
         create_voting_session_payload(VOTE_MANAGER_ADDRESS, 300, Some(round_fields));
     let round_id_hex = hex::encode(&round_id);
 
-    body["@type"] = serde_json::json!("/zvote.v1.MsgCreateVotingSession");
+    body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
     let vm_config = CosmosTxConfig {
         key_name: "vote-manager".to_string(),
         home_dir: config.home_dir.clone(),
@@ -185,7 +185,7 @@ fn sync_stress_multi_delegation() {
         let deleg_body = delegate_vote_payload(&round_id, payload);
         let target = pre_blast_next_index + i as u64 + 1;
         let (status, json) =
-            post_json_accept_committed("/zally/v1/delegate-vote", &deleg_body, || {
+            post_json_accept_committed("/shielded-vote/v1/delegate-vote", &deleg_body, || {
                 commitment_tree_next_index()
                     .map(|idx| idx >= target)
                     .unwrap_or(false)
@@ -301,7 +301,7 @@ fn sync_stress_multi_delegation() {
 
     // 4c: final_root matches on-chain root at final_height.
     let final_height = first.final_height.expect("must have final height");
-    let (status, json) = get_json(&format!("/zally/v1/commitment-tree/{}", final_height))
+    let (status, json) = get_json(&format!("/shielded-vote/v1/commitment-tree/{}", final_height))
         .expect("GET tree at final height");
     assert_eq!(status, 200);
     let on_chain_root_b64 = json

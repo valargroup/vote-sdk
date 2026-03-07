@@ -8,7 +8,7 @@
 #   mise run test:restart
 set -euo pipefail
 
-VAL2_HOME="$HOME/.zallyd-val2"
+VAL2_HOME="$HOME/.svoted-val2"
 VAL2_RPC_PORT=26257
 VAL1_RPC_PORT=26157
 
@@ -17,7 +17,7 @@ echo ""
 
 # ─── Step 1: Find and kill val2 ────────────────────────────────────────────
 
-VAL2_PID=$(pgrep -f 'zallyd start --home.*val2' || true)
+VAL2_PID=$(pgrep -f 'svoted start --home.*val2' || true)
 if [ -z "$VAL2_PID" ]; then
     echo "FAIL: val2 is not running"
     exit 1
@@ -67,7 +67,7 @@ echo "  Chain advanced: $HEIGHT_BEFORE → $HEIGHT_AFTER (val2 down, 2/3 consens
 # ─── Step 4: Restart val2 ──────────────────────────────────────────────────
 
 echo "Restarting val2..."
-ZALLY_PIR_URL=${ZALLY_PIR_URL:-http://localhost:3000} nohup zallyd start --home "$VAL2_HOME" >> sdk/multi-val2.log 2>&1 &
+SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} nohup svoted start --home "$VAL2_HOME" >> sdk/multi-val2.log 2>&1 &
 NEW_PID=$!
 echo "  val2 restarted (PID $NEW_PID)"
 

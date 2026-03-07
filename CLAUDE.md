@@ -74,14 +74,14 @@ mise test           # end-to-end tests against running chain
 
 ### Full local sequence
 
-1. `mise start` — inits chain, bootstraps + ingests + exports nullifiers, starts zallyd + PIR server
+1. `mise start` — inits chain, bootstraps + ingests + exports nullifiers, starts svoted + PIR server
 2. `mise ui` (separate terminal) — starts admin UI on port 5173
 3. Create and publish a round in the admin UI → ceremony runs automatically (PENDING → ACTIVE)
 4. Rebuild iOS app in Xcode and run
 
 ### Architecture: PIR server owns all nullifier endpoints
 
-The PIR server (`nf-server serve`, port 3000 locally) is the **sole provider** of nullifier data — snapshot status, tree root, rebuild triggers, and PIR queries all live on the PIR server. Clients (admin UI, iOS wallet) talk to the PIR server directly. The chain node (zallyd) does **not** proxy nullifier endpoints — it only uses the PIR server internally when fetching snapshot data for session creation (`/zally/v1/snapshot-data/{height}`). In local dev, the admin UI's Vite proxy routes `/nullifier/*` to the PIR server (stripping the prefix).
+The PIR server (`nf-server serve`, port 3000 locally) is the **sole provider** of nullifier data — snapshot status, tree root, rebuild triggers, and PIR queries all live on the PIR server. Clients (admin UI, iOS wallet) talk to the PIR server directly. The chain node (svoted) does **not** proxy nullifier endpoints — it only uses the PIR server internally when fetching snapshot data for session creation (`/shielded-vote/v1/snapshot-data/{height}`). In local dev, the admin UI's Vite proxy routes `/nullifier/*` to the PIR server (stripping the prefix).
 
 ### Nullifier ingest (`nf-server`)
 
@@ -109,7 +109,7 @@ When modifying circuit logic (in `orchard/`, `librustvoting/`, or `sdk/circuits/
 
 ## Claude Code Workflow Rules
 
-- **Never create a voting round automatically.** When restarting the local chain, only build, init, start zallyd, register the Pallas key, and write the iOS config. Do not run `make -C sdk ceremony` or the `round_activation` test — these create a voting round. Only do so if the user explicitly asks.
+- **Never create a voting round automatically.** When restarting the local chain, only build, init, start svoted, register the Pallas key, and write the iOS config. Do not run `make -C sdk ceremony` or the `round_activation` test — these create a voting round. Only do so if the user explicitly asks.
 
 ## Code Change Guidelines
 

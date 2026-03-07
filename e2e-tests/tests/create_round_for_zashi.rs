@@ -8,7 +8,7 @@
 //! that Zashi can actually delegate to.
 //!
 //! Prerequisites:
-//!   - Local zallyd chain running (port 1318)
+//!   - Local svoted chain running (port 1318)
 //!   - `grpcurl` installed (brew install grpcurl)
 //!   - Validator Pallas key registered (done during chain init)
 //!   - IMT server reachable (default: http://46.101.255.48:3000)
@@ -32,8 +32,8 @@ use serde_json::json;
 /// Default vote manager secp256k1 private key (set in genesis).
 const VOTE_MANAGER_PRIVKEY_HEX: &str =
     "b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee";
-/// Bech32 address derived from VOTE_MANAGER_PRIVKEY_HEX with the "zvote" prefix.
-const VOTE_MANAGER_ADDRESS: &str = "zvote15fjfr6rrs60vu4st6arrd94w5j6z7f6kxr92cg";
+/// Bech32 address derived from VOTE_MANAGER_PRIVKEY_HEX with the "sv" prefix.
+const VOTE_MANAGER_ADDRESS: &str = "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl";
 
 fn log(msg: &str) {
     eprintln!("[create-round] {}", msg);
@@ -268,7 +268,7 @@ fn create_round_for_zashi() {
     // ---- Step 6: Build and broadcast MsgCreateVotingSession ----
     log("creating voting session...");
     let body = json!({
-        "@type": "/zvote.v1.MsgCreateVotingSession",
+        "@type": "/svote.v1.MsgCreateVotingSession",
         "creator": VOTE_MANAGER_ADDRESS,
         "snapshot_height": snap_height,
         "snapshot_blockhash": to_base64(&snapshot_blockhash),

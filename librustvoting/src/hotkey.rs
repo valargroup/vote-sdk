@@ -29,8 +29,8 @@ pub fn generate_hotkey(seed: &[u8]) -> Result<VotingHotkey, VotingError> {
     let pk_bytes = pk.to_affine().to_bytes();
     let sk_bytes = sk.to_repr();
 
-    // Address: zvote1 + hex of first 20 bytes of public key (placeholder encoding)
-    let address = format!("zvote1{}", hex::encode(&pk_bytes[..20]));
+    // Address: sv1 + hex of first 20 bytes of public key (placeholder encoding)
+    let address = format!("sv1{}", hex::encode(&pk_bytes[..20]));
 
     Ok(VotingHotkey {
         secret_key: sk_bytes.to_vec(),
@@ -59,7 +59,7 @@ mod tests {
         let hotkey = generate_hotkey(&seed).unwrap();
         assert_eq!(hotkey.secret_key.len(), 32);
         assert_eq!(hotkey.public_key.len(), 32);
-        assert!(hotkey.address.starts_with("zvote1"));
+        assert!(hotkey.address.starts_with("sv1"));
     }
 
     #[test]

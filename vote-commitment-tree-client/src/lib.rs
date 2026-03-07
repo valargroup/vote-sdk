@@ -1,4 +1,4 @@
-//! Remote client library for the Zally vote commitment tree.
+//! Remote client library for the Shielded-Vote commitment tree.
 //!
 //! Provides [`HttpTreeSyncApi`] — an HTTP implementation of the
 //! [`TreeSyncApi`](vote_commitment_tree::TreeSyncApi) trait that connects to

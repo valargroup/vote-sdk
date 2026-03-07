@@ -2,7 +2,7 @@
   "app_name": "\u003cappd\u003e",
   "app_version": "",
   "genesis_time": "2026-02-20T11:42:01.256806156Z",
-  "chain_id": "zvote-1",
+  "chain_id": "svote-1",
   "initial_height": 1,
   "app_hash": null,
   "app_state": {
@@ -17,28 +17,28 @@
       "accounts": [
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "zvote1rkhksvtruukn8yzcyfz89yx6qptnrv2gzt4uwd",
+          "address": "sv1rkhksvtruukn8yzcyfz89yx6qptnrv2gzt4uwd",
           "pub_key": null,
           "account_number": "0",
           "sequence": "0"
         },
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "zvote15fjfr6rrs60vu4st6arrd94w5j6z7f6kxr92cg",
+          "address": "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl",
           "pub_key": null,
           "account_number": "1",
           "sequence": "0"
         },
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "zvote1wgztzelc8tv5pgvgkf20534xqga3a9wuxl3d4k",
+          "address": "sv1wgztzelc8tv5pgvgkf20534xqga3a9wuxl3d4k",
           "pub_key": null,
           "account_number": "2",
           "sequence": "0"
         },
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "zvote1ecd7g52glmy8ew2cpxyy58rh8pdseyj2ms07m3",
+          "address": "sv1ecd7g52glmy8ew2cpxyy58rh8pdseyj2ms07m3",
           "pub_key": null,
           "account_number": "3",
           "sequence": "0"
@@ -52,37 +52,37 @@
       },
       "balances": [
         {
-          "address": "zvote1rkhksvtruukn8yzcyfz89yx6qptnrv2gzt4uwd",
+          "address": "sv1rkhksvtruukn8yzcyfz89yx6qptnrv2gzt4uwd",
           "coins": [
             {
-              "denom": "uzvote",
+              "denom": "usvote",
               "amount": "100000000"
             }
           ]
         },
         {
-          "address": "zvote1wgztzelc8tv5pgvgkf20534xqga3a9wuxl3d4k",
+          "address": "sv1wgztzelc8tv5pgvgkf20534xqga3a9wuxl3d4k",
           "coins": [
             {
-              "denom": "uzvote",
+              "denom": "usvote",
               "amount": "100000000"
             }
           ]
         },
         {
-          "address": "zvote15fjfr6rrs60vu4st6arrd94w5j6z7f6kxr92cg",
+          "address": "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl",
           "coins": [
             {
-              "denom": "uzvote",
+              "denom": "usvote",
               "amount": "10000000"
             }
           ]
         },
         {
-          "address": "zvote1ecd7g52glmy8ew2cpxyy58rh8pdseyj2ms07m3",
+          "address": "sv1ecd7g52glmy8ew2cpxyy58rh8pdseyj2ms07m3",
           "coins": [
             {
-              "denom": "uzvote",
+              "denom": "usvote",
               "amount": "100000000"
             }
           ]
@@ -90,7 +90,7 @@
       ],
       "supply": [
         {
-          "denom": "uzvote",
+          "denom": "usvote",
           "amount": "310000000"
         }
       ],
@@ -138,13 +138,13 @@
                 },
                 "min_self_delegation": "1",
                 "delegator_address": "",
-                "validator_address": "zvotevaloper1rkhksvtruukn8yzcyfz89yx6qptnrv2g7zg6ft",
+                "validator_address": "svvaloper1rkhksvtruukn8yzcyfz89yx6qptnrv2g7zg6ft",
                 "pubkey": {
                   "@type": "/cosmos.crypto.ed25519.PubKey",
                   "key": "6jOK+NSw3dl48lLXu866rEC6VdVkX9FjG5sF9PsnrNA="
                 },
                 "value": {
-                  "denom": "uzvote",
+                  "denom": "usvote",
                   "amount": "10000000"
                 }
               }
@@ -192,7 +192,7 @@
         "max_validators": 100,
         "max_entries": 7,
         "historical_entries": 10000,
-        "bond_denom": "uzvote",
+        "bond_denom": "usvote",
         "min_commission_rate": "0.000000000000000000"
       },
       "last_total_power": "0",
@@ -204,7 +204,7 @@
       "exported": false
     },
     "vote": {
-      "vote_manager": "zvote15fjfr6rrs60vu4st6arrd94w5j6z7f6kxr92cg"
+      "vote_manager": "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl"
     }
   },
   "consensus": {

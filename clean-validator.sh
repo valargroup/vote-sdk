@@ -1,8 +1,8 @@
 #!/bin/bash
 # clean-validator.sh — Remove all state from a previous join.sh run.
 #
-# Stops zallyd, removes the data directory, and uninstalls Caddy config.
-# Does NOT remove the downloaded binaries (zallyd, create-val-tx) from
+# Stops svoted, removes the data directory, and uninstalls Caddy config.
+# Does NOT remove the downloaded binaries (svoted, create-val-tx) from
 # ~/.local/bin — pass --purge to remove those too.
 #
 # Usage:
@@ -11,8 +11,8 @@
 
 set -euo pipefail
 
-HOME_DIR="${ZALLY_HOME:-$HOME/.zallyd}"
-INSTALL_DIR="${ZALLY_INSTALL_DIR:-$HOME/.local/bin}"
+HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
+INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 PURGE=false
 
 for arg in "$@"; do
@@ -23,16 +23,16 @@ done
 
 echo "=== Cleaning validator state ==="
 
-# Stop zallyd — prefer systemd if a service is installed.
-if systemctl is-active --quiet zallyd 2>/dev/null; then
-  echo "Stopping zallyd systemd service..."
-  sudo systemctl stop zallyd
-  sudo systemctl disable zallyd
-  sudo rm -f /etc/systemd/system/zallyd.service
+# Stop svoted — prefer systemd if a service is installed.
+if systemctl is-active --quiet svoted 2>/dev/null; then
+  echo "Stopping svoted systemd service..."
+  sudo systemctl stop svoted
+  sudo systemctl disable svoted
+  sudo rm -f /etc/systemd/system/svoted.service
   sudo systemctl daemon-reload
-elif pgrep -x zallyd > /dev/null 2>&1; then
-  echo "Stopping zallyd..."
-  pkill -x zallyd || true
+elif pgrep -x svoted > /dev/null 2>&1; then
+  echo "Stopping svoted..."
+  pkill -x svoted || true
   sleep 2
 fi
 
@@ -54,7 +54,7 @@ fi
 # Optionally remove binaries.
 if $PURGE; then
   echo "Removing binaries from ${INSTALL_DIR}..."
-  rm -f "${INSTALL_DIR}/zallyd" "${INSTALL_DIR}/create-val-tx"
+  rm -f "${INSTALL_DIR}/svoted" "${INSTALL_DIR}/create-val-tx"
 fi
 
 echo "Done."

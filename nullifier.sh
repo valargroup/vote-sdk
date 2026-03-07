@@ -1,5 +1,5 @@
 #!/bin/bash
-# nullifier.sh — Nullifier service setup and management helper for Zally.
+# nullifier.sh — Nullifier service setup and management helper for Shielded-Vote.
 #
 # Usage:
 #   ./nullifier.sh <command>
@@ -126,7 +126,7 @@ cmd_serve() {
   require_cmd make
 
   SERVICE_DIR="${SCRIPT_DIR}/nullifier-ingest/service"
-  [ -d "${SERVICE_DIR}" ] || die "Service directory not found: ${SERVICE_DIR}. Are you running from the zally repo root?"
+  [ -d "${SERVICE_DIR}" ] || die "Service directory not found: ${SERVICE_DIR}. Are you running from the shielded-vote repo root?"
 
   log "Data directory: ${DATA_DIR}"
   log "Port:           ${PORT}"

@@ -39,7 +39,7 @@ fn get_tree_state_parses_response() {
     let root_b64 = fp_bytes_to_b64(fp(42));
 
     let mock = server
-        .mock("GET", "/zally/v1/commitment-tree/latest")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -63,7 +63,7 @@ fn get_root_at_height_parses_response() {
     let root_b64 = fp_bytes_to_b64(fp(99));
 
     let mock = server
-        .mock("GET", "/zally/v1/commitment-tree/7")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/7")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -84,7 +84,7 @@ fn get_root_at_height_null_tree() {
     let mut server = mockito::Server::new();
 
     let mock = server
-        .mock("GET", "/zally/v1/commitment-tree/999")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/999")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(r#"{"tree":null}"#)
@@ -110,7 +110,7 @@ fn get_block_commitments_parses_response() {
     let mock = server
         .mock(
             "GET",
-            "/zally/v1/commitment-tree/leaves?from_height=1&to_height=10",
+            "/shielded-vote/v1/commitment-tree/leaves?from_height=1&to_height=10",
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -136,7 +136,7 @@ fn get_block_commitments_empty() {
     let mock = server
         .mock(
             "GET",
-            "/zally/v1/commitment-tree/leaves?from_height=1&to_height=10",
+            "/shielded-vote/v1/commitment-tree/leaves?from_height=1&to_height=10",
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -172,9 +172,9 @@ fn full_sync_pipeline() {
     tree_server.checkpoint(2).unwrap();
     let root_at_2 = tree_server.root_at_height(2).unwrap();
 
-    // Mock: GET /zally/v1/commitment-tree/latest
+    // Mock: GET /shielded-vote/v1/commitment-tree/latest
     let _m_latest = server
-        .mock("GET", "/zally/v1/commitment-tree/latest")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -183,11 +183,11 @@ fn full_sync_pipeline() {
         ))
         .create();
 
-    // Mock: GET /zally/v1/commitment-tree/leaves?from_height=1&to_height=2
+    // Mock: GET /shielded-vote/v1/commitment-tree/leaves?from_height=1&to_height=2
     let _m_leaves = server
         .mock(
             "GET",
-            "/zally/v1/commitment-tree/leaves?from_height=1&to_height=2",
+            "/shielded-vote/v1/commitment-tree/leaves?from_height=1&to_height=2",
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -199,9 +199,9 @@ fn full_sync_pipeline() {
         ))
         .create();
 
-    // Mock: GET /zally/v1/commitment-tree/1 (root verification after block 1)
+    // Mock: GET /shielded-vote/v1/commitment-tree/1 (root verification after block 1)
     let _m_root1 = server
-        .mock("GET", "/zally/v1/commitment-tree/1")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/1")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -210,9 +210,9 @@ fn full_sync_pipeline() {
         ))
         .create();
 
-    // Mock: GET /zally/v1/commitment-tree/2 (root verification after block 2)
+    // Mock: GET /shielded-vote/v1/commitment-tree/2 (root verification after block 2)
     let _m_root2 = server
-        .mock("GET", "/zally/v1/commitment-tree/2")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/2")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -258,7 +258,7 @@ fn incremental_sync() {
     // --- First sync: only block 1 ---
 
     let _m_latest1 = server
-        .mock("GET", "/zally/v1/commitment-tree/latest")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -271,7 +271,7 @@ fn incremental_sync() {
     let _m_leaves1 = server
         .mock(
             "GET",
-            "/zally/v1/commitment-tree/leaves?from_height=1&to_height=1",
+            "/shielded-vote/v1/commitment-tree/leaves?from_height=1&to_height=1",
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -283,7 +283,7 @@ fn incremental_sync() {
         .create();
 
     let _m_root_h1 = server
-        .mock("GET", "/zally/v1/commitment-tree/1")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/1")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -314,7 +314,7 @@ fn incremental_sync() {
     let root_at_2 = tree_server.root_at_height(2).unwrap();
 
     let _m_latest2 = server
-        .mock("GET", "/zally/v1/commitment-tree/latest")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -328,7 +328,7 @@ fn incremental_sync() {
     let _m_leaves2 = server
         .mock(
             "GET",
-            "/zally/v1/commitment-tree/leaves?from_height=2&to_height=2",
+            "/shielded-vote/v1/commitment-tree/leaves?from_height=2&to_height=2",
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -341,7 +341,7 @@ fn incremental_sync() {
         .create();
 
     let _m_root_h2 = server
-        .mock("GET", "/zally/v1/commitment-tree/2")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/2")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -373,7 +373,7 @@ fn server_error_propagates() {
     let mut server = mockito::Server::new();
 
     let _m = server
-        .mock("GET", "/zally/v1/commitment-tree/latest")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/latest")
         .with_status(500)
         .with_body("internal server error")
         .create();
@@ -392,7 +392,7 @@ fn empty_tree_sync() {
     let zero_root_b64 = fp_bytes_to_b64(Fp::zero());
 
     let _m = server
-        .mock("GET", "/zally/v1/commitment-tree/latest")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -419,7 +419,7 @@ fn witness_hex_roundtrip() {
     let root = tree_server.root_at_height(1).unwrap();
 
     let _m_latest = server
-        .mock("GET", "/zally/v1/commitment-tree/latest")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/latest")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -431,7 +431,7 @@ fn witness_hex_roundtrip() {
     let _m_leaves = server
         .mock(
             "GET",
-            "/zally/v1/commitment-tree/leaves?from_height=1&to_height=1",
+            "/shielded-vote/v1/commitment-tree/leaves?from_height=1&to_height=1",
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -442,7 +442,7 @@ fn witness_hex_roundtrip() {
         .create();
 
     let _m_root = server
-        .mock("GET", "/zally/v1/commitment-tree/1")
+        .mock("GET", "/shielded-vote/v1/commitment-tree/1")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(

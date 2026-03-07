@@ -12,7 +12,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/z-cale/zally/app"
+	"github.com/z-cale/shielded-vote/app"
 )
 
 // signArbitraryDoc constructs the amino sign doc used by Keplr's signArbitrary

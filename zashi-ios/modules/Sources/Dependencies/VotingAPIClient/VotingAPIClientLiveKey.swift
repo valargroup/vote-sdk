@@ -4,10 +4,10 @@ import VotingModels
 
 // MARK: - API Configuration
 
-/// Mutable runtime configuration for the Zally chain REST API and helper server.
+/// Mutable runtime configuration for the Shielded-Vote chain REST API and helper server.
 /// URLs are resolved from the CDN service config at startup.
-actor ZallyAPIConfigStore {
-    static let shared = ZallyAPIConfigStore()
+actor SvAPIConfigStore {
+    static let shared = SvAPIConfigStore()
 
     /// Primary vote server URL (serves both chain API and helper endpoints).
     var baseURL = "https://46-101-255-48.sslip.io"
@@ -29,7 +29,7 @@ actor ZallyAPIConfigStore {
 
 // MARK: - Errors
 
-private enum ZallyAPIError: LocalizedError {
+private enum SvAPIError: LocalizedError {
     case httpError(statusCode: Int, message: String)
     case invalidResponse(String)
     case txFailed(code: UInt32, log: String)
@@ -67,30 +67,30 @@ private let fastHttpSession: URLSession = {
 }()
 
 private func getJSON(_ path: String, baseURL: String? = nil) async throws -> [String: Any] {
-    let resolvedDefault = await ZallyAPIConfigStore.shared.baseURL
+    let resolvedDefault = await SvAPIConfigStore.shared.baseURL
     let base = baseURL ?? resolvedDefault
     guard let url = URL(string: "\(base)\(path)") else {
-        throw ZallyAPIError.invalidResponse("invalid URL: \(base)\(path)")
+        throw SvAPIError.invalidResponse("invalid URL: \(base)\(path)")
     }
     let (data, response) = try await httpSession.data(from: url)
     guard let http = response as? HTTPURLResponse else {
-        throw ZallyAPIError.invalidResponse("not an HTTP response")
+        throw SvAPIError.invalidResponse("not an HTTP response")
     }
     guard http.statusCode == 200 else {
         let body = String(data: data, encoding: .utf8) ?? ""
-        throw ZallyAPIError.httpError(statusCode: http.statusCode, message: body)
+        throw SvAPIError.httpError(statusCode: http.statusCode, message: body)
     }
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        throw ZallyAPIError.invalidResponse("expected JSON object")
+        throw SvAPIError.invalidResponse("expected JSON object")
     }
     return json
 }
 
 private func postJSON(_ path: String, body: [String: Any], baseURL: String? = nil) async throws -> [String: Any] {
-    let resolvedDefault = await ZallyAPIConfigStore.shared.baseURL
+    let resolvedDefault = await SvAPIConfigStore.shared.baseURL
     let base = baseURL ?? resolvedDefault
     guard let url = URL(string: "\(base)\(path)") else {
-        throw ZallyAPIError.invalidResponse("invalid URL: \(base)\(path)")
+        throw SvAPIError.invalidResponse("invalid URL: \(base)\(path)")
     }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -99,7 +99,7 @@ private func postJSON(_ path: String, body: [String: Any], baseURL: String? = ni
 
     let (data, response) = try await httpSession.data(for: request)
     guard let http = response as? HTTPURLResponse else {
-        throw ZallyAPIError.invalidResponse("not an HTTP response")
+        throw SvAPIError.invalidResponse("not an HTTP response")
     }
     guard http.statusCode == 200 else {
         // 422 = chain processed the request but rejected the TX (non-zero CheckTx code).
@@ -109,14 +109,14 @@ private func postJSON(_ path: String, body: [String: Any], baseURL: String? = ni
             let code = (json["code"] as? NSNumber)?.uint32Value ?? 0
             let log = json["log"] as? String ?? ""
             if code != 0 {
-                throw ZallyAPIError.txFailed(code: code, log: log)
+                throw SvAPIError.txFailed(code: code, log: log)
             }
         }
         let body = String(data: data, encoding: .utf8) ?? ""
-        throw ZallyAPIError.httpError(statusCode: http.statusCode, message: body)
+        throw SvAPIError.httpError(statusCode: http.statusCode, message: body)
     }
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        throw ZallyAPIError.invalidResponse("expected JSON object")
+        throw SvAPIError.invalidResponse("expected JSON object")
     }
     return json
 }
@@ -124,7 +124,7 @@ private func postJSON(_ path: String, body: [String: Any], baseURL: String? = ni
 /// POST JSON to a specific vote server URL. Returns parsed JSON response.
 private func postServerJSON(_ serverURL: String, _ path: String, body: [String: Any]) async throws -> [String: Any] {
     guard let url = URL(string: "\(serverURL)\(path)") else {
-        throw ZallyAPIError.invalidResponse("invalid URL: \(serverURL)\(path)")
+        throw SvAPIError.invalidResponse("invalid URL: \(serverURL)\(path)")
     }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -133,14 +133,14 @@ private func postServerJSON(_ serverURL: String, _ path: String, body: [String: 
 
     let (data, response) = try await fastHttpSession.data(for: request)
     guard let http = response as? HTTPURLResponse else {
-        throw ZallyAPIError.invalidResponse("not an HTTP response")
+        throw SvAPIError.invalidResponse("not an HTTP response")
     }
     guard http.statusCode == 200 else {
         let body = String(data: data, encoding: .utf8) ?? ""
-        throw ZallyAPIError.httpError(statusCode: http.statusCode, message: body)
+        throw SvAPIError.httpError(statusCode: http.statusCode, message: body)
     }
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        throw ZallyAPIError.invalidResponse("expected JSON object")
+        throw SvAPIError.invalidResponse("expected JSON object")
     }
     return json
 }
@@ -151,7 +151,7 @@ private func parseTxResult(_ json: [String: Any]) throws -> TxResult {
     let code = (json["code"] as? NSNumber)?.uint32Value ?? 0
     let log = json["log"] as? String ?? ""
     if code != 0 {
-        throw ZallyAPIError.txFailed(code: code, log: log)
+        throw SvAPIError.txFailed(code: code, log: log)
     }
     return TxResult(txHash: txHash, code: code, log: log)
 }
@@ -163,7 +163,7 @@ private func parseTxResult(_ json: [String: Any]) throws -> TxResult {
 /// Deterministic failures like 422 (CheckTx rejection) and 400 (bad request) are not.
 private func isBroadcastRetryable(_ error: Error) -> Bool {
     if error is URLError { return true }
-    if case ZallyAPIError.httpError(let status, _) = error {
+    if case SvAPIError.httpError(let status, _) = error {
         return status == 502 || status == 503
     }
     return false
@@ -185,7 +185,7 @@ private func retryWithBackoff<T>(
         } catch {
             let isLast = attempt == maxAttempts
             if isLast || !isRetryable(error) { throw error }
-            print("[zally-api] broadcast attempt \(attempt)/\(maxAttempts) failed (\(error.localizedDescription)), retrying in \(delay)s")
+            print("[shielded-vote-api] broadcast attempt \(attempt)/\(maxAttempts) failed (\(error.localizedDescription)), retrying in \(delay)s")
             try await Task.sleep(for: .seconds(delay))
             delay *= factor
         }
@@ -231,7 +231,7 @@ private func dataFromHex(_ hex: String) -> Data {
 
 // MARK: - Response Parsers
 
-/// Parse a VotingSession from the "round" JSON object returned by GET /zally/v1/round/{id}.
+/// Parse a VotingSession from the "round" JSON object returned by GET /shielded-vote/v1/round/{id}.
 private func parseVotingSession(from round: [String: Any]) throws -> VotingSession {
     let voteEndTimeUnix = parseUInt64(round["vote_end_time"])
     let voteEndTime = Date(timeIntervalSince1970: TimeInterval(voteEndTimeUnix))
@@ -326,23 +326,23 @@ extension VotingAPIClient: DependencyKey {
                 return .fallback
             },
             configureURLs: { config in
-                await ZallyAPIConfigStore.shared.configure(from: config)
+                await SvAPIConfigStore.shared.configure(from: config)
                 await ServerHealthTracker.shared.initialize(
                     serverURLs: config.voteServers.map(\.url)
                 )
-                let base = await ZallyAPIConfigStore.shared.baseURL
-                let pir = await ZallyAPIConfigStore.shared.pirServerURL
+                let base = await SvAPIConfigStore.shared.baseURL
+                let pir = await SvAPIConfigStore.shared.pirServerURL
                 print("[VotingAPI] URLs configured: base=\(base), servers=\(config.voteServers.count), pir=\(pir)")
             },
             fetchActiveVotingSession: {
-                let json = try await getJSON("/zally/v1/rounds/active")
+                let json = try await getJSON("/shielded-vote/v1/rounds/active")
                 guard let round = json["round"] as? [String: Any] else {
-                    throw ZallyAPIError.invalidResponse("missing 'round' in response")
+                    throw SvAPIError.invalidResponse("missing 'round' in response")
                 }
                 return try parseVotingSession(from: round)
             },
             fetchAllRounds: {
-                let json = try await getJSON("/zally/v1/rounds")
+                let json = try await getJSON("/shielded-vote/v1/rounds")
                 guard let roundsArray = json["rounds"] as? [[String: Any]] else {
                     // No rounds — return empty
                     return []
@@ -350,14 +350,14 @@ extension VotingAPIClient: DependencyKey {
                 return try roundsArray.map { try parseVotingSession(from: $0) }
             },
             fetchRoundById: { roundIdHex in
-                let json = try await getJSON("/zally/v1/round/\(roundIdHex)")
+                let json = try await getJSON("/shielded-vote/v1/round/\(roundIdHex)")
                 guard let round = json["round"] as? [String: Any] else {
-                    throw ZallyAPIError.invalidResponse("missing 'round' in response")
+                    throw SvAPIError.invalidResponse("missing 'round' in response")
                 }
                 return try parseVotingSession(from: round)
             },
             fetchTallyResults: { roundIdHex in
-                let json = try await getJSON("/zally/v1/tally-results/\(roundIdHex)")
+                let json = try await getJSON("/shielded-vote/v1/tally-results/\(roundIdHex)")
                 guard let results = json["results"] as? [[String: Any]] else {
                     return [:]
                 }
@@ -386,16 +386,16 @@ extension VotingAPIClient: DependencyKey {
                 fatalError("fetchNullifierExclusionProofs is deprecated — handled by PIR client")
             },
             fetchCommitmentTreeState: { height in
-                let json = try await getJSON("/zally/v1/commitment-tree/\(height)")
+                let json = try await getJSON("/shielded-vote/v1/commitment-tree/\(height)")
                 guard let tree = json["tree"] as? [String: Any] else {
-                    throw ZallyAPIError.invalidResponse("missing 'tree' in response")
+                    throw SvAPIError.invalidResponse("missing 'tree' in response")
                 }
                 return parseCommitmentTree(from: tree)
             },
             fetchLatestCommitmentTree: {
-                let json = try await getJSON("/zally/v1/commitment-tree/latest")
+                let json = try await getJSON("/shielded-vote/v1/commitment-tree/latest")
                 guard let tree = json["tree"] as? [String: Any] else {
-                    throw ZallyAPIError.invalidResponse("missing 'tree' in response")
+                    throw SvAPIError.invalidResponse("missing 'tree' in response")
                 }
                 return parseCommitmentTree(from: tree)
             },
@@ -412,7 +412,7 @@ extension VotingAPIClient: DependencyKey {
                     "vote_round_id": registration.voteRoundId.base64EncodedString()
                 ]
                 return try await retryWithBackoff(isRetryable: isBroadcastRetryable) {
-                    let json = try await postJSON("/zally/v1/delegate-vote", body: body)
+                    let json = try await postJSON("/shielded-vote/v1/delegate-vote", body: body)
                     return try parseTxResult(json)
                 }
             },
@@ -431,7 +431,7 @@ extension VotingAPIClient: DependencyKey {
                     "vote_auth_sig": signature.voteAuthSig.base64EncodedString()
                 ]
                 return try await retryWithBackoff(isRetryable: isBroadcastRetryable) {
-                    let json = try await postJSON("/zally/v1/cast-vote", body: body)
+                    let json = try await postJSON("/shielded-vote/v1/cast-vote", body: body)
                     return try parseTxResult(json)
                 }
             },
@@ -514,7 +514,7 @@ extension VotingAPIClient: DependencyKey {
 
                     if !accepted {
                         print("[VotingAPI] Share \(i) failed on all servers")
-                        lastError = shareError ?? ZallyAPIError.invalidResponse("all servers rejected share \(i)")
+                        lastError = shareError ?? SvAPIError.invalidResponse("all servers rejected share \(i)")
                     }
                 }
 
@@ -524,7 +524,7 @@ extension VotingAPIClient: DependencyKey {
             },
             fetchProposalTally: { roundId, proposalId in
                 let roundIdHex = roundId.map { String(format: "%02x", $0) }.joined()
-                let json = try await getJSON("/zally/v1/tally-results/\(roundIdHex)")
+                let json = try await getJSON("/shielded-vote/v1/tally-results/\(roundIdHex)")
                 guard let results = json["results"] as? [[String: Any]] else {
                     // No results yet — return empty tally
                     return TallyResult(entries: [])
@@ -542,9 +542,9 @@ extension VotingAPIClient: DependencyKey {
             awaitCommitmentTreeGrowth: { previousNextIndex, timeoutSeconds in
                 let deadline = Date().addingTimeInterval(timeoutSeconds)
                 while Date() < deadline {
-                    let json = try await getJSON("/zally/v1/commitment-tree/latest")
+                    let json = try await getJSON("/shielded-vote/v1/commitment-tree/latest")
                     guard let tree = json["tree"] as? [String: Any] else {
-                        throw ZallyAPIError.invalidResponse("missing 'tree' in response")
+                        throw SvAPIError.invalidResponse("missing 'tree' in response")
                     }
                     let state = parseCommitmentTree(from: tree)
                     if state.nextIndex > previousNextIndex {
@@ -552,12 +552,12 @@ extension VotingAPIClient: DependencyKey {
                     }
                     try await Task.sleep(for: .seconds(1))
                 }
-                throw ZallyAPIError.commitmentTreeTimeout(seconds: timeoutSeconds)
+                throw SvAPIError.commitmentTreeTimeout(seconds: timeoutSeconds)
             },
             checkTxConfirmed: { txHash in
                 do {
-                    let base = await ZallyAPIConfigStore.shared.baseURL
-                    guard let url = URL(string: "\(base)/zally/v1/tx/\(txHash)") else { return nil }
+                    let base = await SvAPIConfigStore.shared.baseURL
+                    guard let url = URL(string: "\(base)/shielded-vote/v1/tx/\(txHash)") else { return nil }
                     let (data, response) = try await httpSession.data(from: url)
                     guard let http = response as? HTTPURLResponse else { return nil }
 
