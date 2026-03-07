@@ -72,6 +72,11 @@ func DefaultConfig() Config {
 // Returns the vote_end_time (unix seconds) for the given round ID (hex).
 type RoundInfoFetcher func(roundID string) (voteEndTime uint64, err error)
 
+// VCHashFunc computes the vote commitment Poseidon hash. The implementation
+// is provided by the votecommitment CGo package but abstracted here so the
+// helper package doesn't depend on the Rust FFI library directly.
+type VCHashFunc func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error)
+
 // EncryptedShareWire is the wire format for an encrypted ElGamal share component.
 type EncryptedShareWire struct {
 	C1         string `json:"c1"`          // base64, 32 bytes
@@ -154,4 +159,8 @@ type TreeReader interface {
 	// anchorHeight must correspond to a checkpoint that exists in the persistent
 	// tree (i.e. a block height at which Checkpoint was called by EndBlocker).
 	MerklePath(position uint64, anchorHeight uint32) ([]byte, error)
+
+	// LeafAt returns the raw 32-byte vote commitment stored at the given tree
+	// position, or nil if no leaf exists at that index.
+	LeafAt(position uint64) ([]byte, error)
 }

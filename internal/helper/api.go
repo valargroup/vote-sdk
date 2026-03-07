@@ -1,10 +1,12 @@
 package helper
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -20,6 +22,7 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 		func() string { return "" },
 		func() bool { return false },
 		nil,
+		nil,
 		logger,
 	)
 }
@@ -28,17 +31,22 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 // mux router, resolving the store at request time. This allows routes to be
 // mounted before the helper is fully initialized.
 func RegisterRoutesWithStoreGetter(router *mux.Router, getStore func() *ShareStore, logger log.Logger) {
-	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, func() bool { return false }, nil, logger)
+	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, func() bool { return false }, nil, nil, logger)
 }
 
+// ErrInvalidCommitment is returned when the share's recomputed vote commitment
+// hash does not match the on-chain leaf at the claimed tree position.
+var ErrInvalidCommitment = fmt.Errorf("invalid vote commitment")
+
 // RegisterRoutesWithGetters registers helper routes using runtime getters for
-// store, API token, and tree reader.
+// store, API token, tree reader, and VC hash function.
 func RegisterRoutesWithGetters(
 	router *mux.Router,
 	getStore func() *ShareStore,
 	getAPIToken func() string,
 	getExposeQueueStatus func() bool,
 	getTree func() TreeReader,
+	getVCHash func() VCHashFunc,
 	logger log.Logger,
 ) {
 	h := &apiHandler{
@@ -46,6 +54,7 @@ func RegisterRoutesWithGetters(
 		getAPIToken:          getAPIToken,
 		getExposeQueueStatus: getExposeQueueStatus,
 		getTree:              getTree,
+		getVCHash:            getVCHash,
 		logger:               logger,
 	}
 	router.HandleFunc("/api/v1/shares", h.handleSubmitShare).Methods("POST")
@@ -58,6 +67,7 @@ type apiHandler struct {
 	getAPIToken          func() string
 	getExposeQueueStatus func() bool
 	getTree              func() TreeReader
+	getVCHash            func() VCHashFunc
 	logger               log.Logger
 }
 
@@ -97,6 +107,14 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Vote commitment cross-check: recompute the Poseidon VC hash from the
+	// payload and compare against the on-chain leaf at tree_position. This
+	// rejects fabricated shares before they enter the queue (microsecond cost).
+	if err := h.verifyCommitment(&payload); err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	h.logger.Info("share received",
 		"round_id", payload.VoteRoundID,
 		"share_index", payload.EncShare.ShareIndex,
@@ -106,6 +124,10 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 
 	result, err := store.Enqueue(payload)
 	if err != nil {
+		if errors.Is(err, ErrUnknownRound) {
+			jsonError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		h.logger.Error("failed to enqueue share", "error", err)
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
@@ -177,6 +199,55 @@ func (h *apiHandler) authorizeSubmit(r *http.Request) bool {
 	}
 	provided := r.Header.Get("X-Helper-Token")
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
+}
+
+// verifyCommitment recomputes the vote commitment Poseidon hash from the
+// payload fields and compares it against the on-chain leaf at tree_position.
+// Returns nil when the VC hash function or tree reader is unavailable
+// (graceful degradation during startup).
+func (h *apiHandler) verifyCommitment(p *SharePayload) error {
+	var vcHash VCHashFunc
+	if h.getVCHash != nil {
+		vcHash = h.getVCHash()
+	}
+	if vcHash == nil {
+		return nil
+	}
+	var tree TreeReader
+	if h.getTree != nil {
+		tree = h.getTree()
+	}
+	if tree == nil {
+		return nil
+	}
+
+	var roundID [32]byte
+	roundBytes, _ := hex.DecodeString(p.VoteRoundID) // already validated
+	copy(roundID[:], roundBytes)
+
+	var sharesHash [32]byte
+	shBytes, _ := base64.StdEncoding.DecodeString(p.SharesHash) // already validated
+	copy(sharesHash[:], shBytes)
+
+	computed, err := vcHash(roundID, sharesHash, p.ProposalID, p.VoteDecision)
+	if err != nil {
+		h.logger.Error("vc hash computation failed", "error", err)
+		return ErrInvalidCommitment
+	}
+
+	onChain, err := tree.LeafAt(p.TreePosition)
+	if err != nil {
+		h.logger.Error("leaf read failed", "tree_position", p.TreePosition, "error", err)
+		return fmt.Errorf("%w: tree read error", ErrInvalidCommitment)
+	}
+	if onChain == nil {
+		return fmt.Errorf("%w: no leaf at position %d", ErrInvalidCommitment, p.TreePosition)
+	}
+
+	if !bytes.Equal(computed[:], onChain) {
+		return fmt.Errorf("%w: hash mismatch at position %d", ErrInvalidCommitment, p.TreePosition)
+	}
+	return nil
 }
 
 // validatePayload checks required fields of a share submission.

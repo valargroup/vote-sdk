@@ -11,7 +11,14 @@ import (
 
 func newTestStore(t *testing.T) *ShareStore {
 	t.Helper()
-	s, err := NewShareStore(":memory:", 0, 0, nil)
+	// Provide a permissive round fetcher so tests don't fail on unknown rounds.
+	// Returns vote_end_time=0 so uniformDelay (with meanDelay=0, minDelay=0)
+	// gives zero delay, preserving the existing test expectation that shares
+	// are immediately ready.
+	fetcher := func(roundID string) (uint64, error) {
+		return 0, nil
+	}
+	s, err := NewShareStore(":memory:", 0, 0, fetcher)
 	require.NoError(t, err)
 	t.Cleanup(func() { s.Close() })
 	return s
@@ -207,8 +214,9 @@ func TestSameShareIndexDifferentTreePositions(t *testing.T) {
 func TestRecovery(t *testing.T) {
 	// Use a file-based DB so we can reopen it.
 	dbPath := t.TempDir() + "/helper_test.db"
+	fetcher := func(roundID string) (uint64, error) { return 0, nil }
 
-	s1, err := NewShareStore(dbPath, 0, 0, nil)
+	s1, err := NewShareStore(dbPath, 0, 0, fetcher)
 	require.NoError(t, err)
 
 	enqueueAndRequireInserted(t, s1, testPayload("round1", 0))
@@ -221,7 +229,7 @@ func TestRecovery(t *testing.T) {
 	s1.Close()
 
 	// Reopen: recovery should reset Witnessed → Received with fresh delay.
-	s2, err := NewShareStore(dbPath, 0, 0, nil)
+	s2, err := NewShareStore(dbPath, 0, 0, fetcher)
 	require.NoError(t, err)
 	defer s2.Close()
 
@@ -340,13 +348,15 @@ func TestGetVoteEndTime_Cache(t *testing.T) {
 	require.NoError(t, err)
 	defer s.Close()
 
-	// First call should fetch from chain.
-	vet := s.getVoteEndTime("round1")
+	// First call should fetch from keeper.
+	vet, err := s.getVoteEndTime("round1")
+	require.NoError(t, err)
 	assert.Equal(t, uint64(1000000), vet)
 	assert.Equal(t, 1, fetchCalls)
 
 	// Second call should hit cache, no additional fetch.
-	vet = s.getVoteEndTime("round1")
+	vet, err = s.getVoteEndTime("round1")
+	require.NoError(t, err)
 	assert.Equal(t, uint64(1000000), vet)
 	assert.Equal(t, 1, fetchCalls)
 }
@@ -356,9 +366,9 @@ func TestGetVoteEndTime_NilFetcher(t *testing.T) {
 	require.NoError(t, err)
 	defer s.Close()
 
-	// With nil fetcher and no cache, should return 0.
-	vet := s.getVoteEndTime("round1")
-	assert.Equal(t, uint64(0), vet)
+	// With nil fetcher and no cache, should return error.
+	_, err = s.getVoteEndTime("round1")
+	assert.Error(t, err)
 }
 
 func TestMigrateOldSchema(t *testing.T) {
@@ -388,7 +398,8 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, oldDB.Close())
 
 	// Opening with current code should migrate PK and add vote_end_time.
-	s, err := NewShareStore(dbPath, 0, 0, nil)
+	fetcher := func(roundID string) (uint64, error) { return 0, nil }
+	s, err := NewShareStore(dbPath, 0, 0, fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 

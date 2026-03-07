@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 
 	"cosmossdk.io/log"
@@ -16,8 +17,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/valargroup/shielded-vote/app"
+	"github.com/valargroup/shielded-vote/crypto/votecommitment"
 	"github.com/valargroup/shielded-vote/crypto/votetree"
 	"github.com/valargroup/shielded-vote/internal/helper"
+	votetypes "github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // addHelperFlags registers helper server CLI flags on the start command.
@@ -70,7 +73,7 @@ func helperPostSetup(
 		prover := &halo2Prover{}
 
 		homeDir := svrCtx.Config.RootDir
-		h, err := helper.New(cfg, treeReader, prover, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, votecommitment.VoteCommitmentHash, homeDir, logger)
 		if err != nil {
 			return fmt.Errorf("helper: %w", err)
 		}
@@ -270,6 +273,30 @@ func (r *keeperTreeReader) MerklePath(position uint64, anchorHeight uint32) ([]b
 	defer h.Close()
 
 	return h.Path(position, anchorHeight)
+}
+
+// LeafAt returns the raw 32-byte vote commitment stored at the given tree
+// position, or nil if no leaf exists at that index.
+func (r *keeperTreeReader) LeafAt(position uint64) ([]byte, error) {
+	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
+	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
+	return kvStore.Get(votetypes.CommitmentLeafKey(position))
+}
+
+// GetRoundVoteEndTime reads a vote round directly from the keeper's KV store
+// and returns its vote_end_time. Returns an error if the round doesn't exist.
+func (r *keeperTreeReader) GetRoundVoteEndTime(roundID string) (uint64, error) {
+	roundBytes, err := hex.DecodeString(roundID)
+	if err != nil {
+		return 0, fmt.Errorf("invalid round_id hex: %w", err)
+	}
+	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
+	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
+	round, err := r.app.VoteKeeper.GetVoteRound(kvStore, roundBytes)
+	if err != nil {
+		return 0, err
+	}
+	return round.VoteEndTime, nil
 }
 
 // halo2Prover wraps the CGo proof generation function.

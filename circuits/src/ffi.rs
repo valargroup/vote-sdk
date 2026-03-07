@@ -1489,6 +1489,76 @@ pub unsafe extern "C" fn sv_extract_nc_root(
 }
 
 // ---------------------------------------------------------------------------
+// Vote commitment hash (Poseidon)
+// ---------------------------------------------------------------------------
+
+/// Compute a vote commitment hash via Poseidon.
+///
+/// `VC = Poseidon(DOMAIN_VC=1, voting_round_id, shares_hash, proposal_id, vote_decision)`
+///
+/// # Arguments
+/// * `round_id_ptr`    - 32-byte canonical Pallas Fp (voting round ID).
+/// * `shares_hash_ptr` - 32-byte canonical Pallas Fp (shares hash).
+/// * `proposal_id`     - Proposal index (converted to Fp internally).
+/// * `vote_decision`   - Vote choice (converted to Fp internally).
+/// * `commitment_out`  - 32-byte output buffer for the commitment.
+///
+/// # Returns
+/// * `0`  on success.
+/// * `-1` if any pointer is null.
+/// * `-3` if round_id or shares_hash is not a canonical Pallas Fp element.
+///
+/// # Safety
+/// All pointers must be valid and point to buffers of at least 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn sv_vote_commitment_hash(
+    round_id_ptr: *const u8,
+    shares_hash_ptr: *const u8,
+    proposal_id: u32,
+    vote_decision: u32,
+    commitment_out: *mut u8,
+) -> i32 {
+    if round_id_ptr.is_null() || shares_hash_ptr.is_null() || commitment_out.is_null() {
+        set_ffi_error("vote_commitment_hash: null pointer argument");
+        return -1;
+    }
+
+    let mut rid = [0u8; 32];
+    rid.copy_from_slice(std::slice::from_raw_parts(round_id_ptr, 32));
+    let mut sh = [0u8; 32];
+    sh.copy_from_slice(std::slice::from_raw_parts(shares_hash_ptr, 32));
+
+    let round_id_fp: Fp = match Option::from(Fp::from_repr(rid)) {
+        Some(fp) => fp,
+        None => {
+            set_ffi_error("vote_commitment_hash: round_id is not a canonical Pallas Fp");
+            return -3;
+        }
+    };
+    let shares_hash_fp: Fp = match Option::from(Fp::from_repr(sh)) {
+        Some(fp) => fp,
+        None => {
+            set_ffi_error("vote_commitment_hash: shares_hash is not a canonical Pallas Fp");
+            return -3;
+        }
+    };
+
+    let proposal_id_fp = Fp::from(u64::from(proposal_id));
+    let vote_decision_fp = Fp::from(u64::from(vote_decision));
+
+    let commitment = vote_commitment_tree::vote_commitment_hash(
+        round_id_fp,
+        shares_hash_fp,
+        proposal_id_fp,
+        vote_decision_fp,
+    );
+
+    let bytes = commitment.to_repr();
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), commitment_out, 32);
+    0
+}
+
+// ---------------------------------------------------------------------------
 // Round ID derivation (Poseidon)
 // ---------------------------------------------------------------------------
 

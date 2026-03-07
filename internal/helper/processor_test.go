@@ -80,6 +80,7 @@ func (p *trackingProver) GenerateShareRevealProof(
 type mockTreeReader struct {
 	leafCount    uint64
 	anchorHeight uint64
+	leaves       map[uint64][]byte
 	err          error
 }
 
@@ -98,6 +99,16 @@ func (m *mockTreeReader) MerklePath(_ uint64, _ uint32) ([]byte, error) {
 		return nil, m.err
 	}
 	return make([]byte, 772), nil
+}
+
+func (m *mockTreeReader) LeafAt(position uint64) ([]byte, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.leaves != nil {
+		return m.leaves[position], nil
+	}
+	return nil, nil
 }
 
 func newMockTreeReader() *mockTreeReader {

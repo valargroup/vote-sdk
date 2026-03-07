@@ -1,11 +1,14 @@
 package helper
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
@@ -31,6 +34,7 @@ func newQueueStatusRouter(t *testing.T, token string) (*mux.Router, *ShareStore)
 		func() *ShareStore { return store },
 		func() string { return token },
 		func() bool { return true },
+		nil,
 		nil,
 		log.NewNopLogger(),
 	)
@@ -295,6 +299,7 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 		func() string { return "secret-token" },
 		func() bool { return false },
 		nil,
+		nil,
 		log.NewNopLogger(),
 	)
 
@@ -321,3 +326,245 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
+
+// vcTestRouter creates a router with VC cross-check enabled.
+// The mock VCHash returns a fixed 32-byte commitment; the mock TreeReader
+// returns that same commitment at position 0 so the check passes.
+func vcTestRouter(t *testing.T) (*mux.Router, *ShareStore, *vcMockTree) {
+	t.Helper()
+	fetcher := func(roundID string) (uint64, error) {
+		return uint64(time.Now().Add(time.Hour).Unix()), nil
+	}
+	store, err := NewShareStore(":memory:", 0, 0, fetcher)
+	require.NoError(t, err)
+	t.Cleanup(func() { store.Close() })
+
+	tree := &vcMockTree{leaves: make(map[uint64][]byte)}
+	var commitment [32]byte
+	commitment[0] = 0xAB
+	tree.leaves[0] = commitment[:]
+
+	vcHash := func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
+		return commitment, nil
+	}
+
+	router := mux.NewRouter()
+	RegisterRoutesWithGetters(
+		router,
+		func() *ShareStore { return store },
+		func() string { return "" },
+		func() bool { return false },
+		func() TreeReader { return tree },
+		func() VCHashFunc { return vcHash },
+		log.NewNopLogger(),
+	)
+	return router, store, tree
+}
+
+// vcMockTree implements TreeReader for VC cross-check tests.
+type vcMockTree struct {
+	leaves map[uint64][]byte
+}
+
+func (m *vcMockTree) GetTreeStatus() (TreeStatus, error) {
+	return TreeStatus{LeafCount: 1, AnchorHeight: 1}, nil
+}
+
+func (m *vcMockTree) MerklePath(_ uint64, _ uint32) ([]byte, error) {
+	return make([]byte, 772), nil
+}
+
+func (m *vcMockTree) LeafAt(position uint64) ([]byte, error) {
+	return m.leaves[position], nil
+}
+
+func TestSubmitShare_VCCrossCheck_Match(t *testing.T) {
+	router, store, _ := vcTestRouter(t)
+
+	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp submitResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "queued", resp.Status)
+
+	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	status := store.Status()
+	assert.Equal(t, 1, status[roundID].Total)
+}
+
+func TestSubmitShare_VCCrossCheck_Mismatch(t *testing.T) {
+	router, _, tree := vcTestRouter(t)
+
+	// Change the on-chain leaf to something different from what vcHash returns.
+	badLeaf := make([]byte, 32)
+	badLeaf[0] = 0xFF
+	tree.leaves[0] = badLeaf
+
+	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid vote commitment")
+}
+
+func TestSubmitShare_VCCrossCheck_NoLeaf(t *testing.T) {
+	router, _, tree := vcTestRouter(t)
+
+	// Remove the leaf at position 0.
+	delete(tree.leaves, 0)
+
+	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "no leaf at position")
+}
+
+func TestSubmitShare_UnknownRound(t *testing.T) {
+	// Build a store whose round fetcher rejects unknown rounds.
+	fetcher := func(roundID string) (uint64, error) {
+		return 0, errors.New("round not found")
+	}
+	store, err := NewShareStore(":memory:", 0, 0, fetcher)
+	require.NoError(t, err)
+	defer store.Close()
+
+	router := mux.NewRouter()
+	RegisterRoutes(router, store, log.NewNopLogger())
+
+	// The VC check is not wired (nil getVCHash), so we get past that.
+	// The round rejection happens in Enqueue → getVoteEndTime.
+	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "unknown voting round")
+}
+
+func TestSubmitShare_VCCrossCheck_GracefulDegradation(t *testing.T) {
+	// When VCHash is nil (not configured), shares should still be accepted.
+	store := newTestStore(t)
+	router := mux.NewRouter()
+	RegisterRoutesWithGetters(
+		router,
+		func() *ShareStore { return store },
+		func() string { return "" },
+		func() bool { return false },
+		nil,
+		nil,
+		log.NewNopLogger(),
+	)
+
+	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestEnqueue_UnknownRoundRejected(t *testing.T) {
+	fetcher := func(roundID string) (uint64, error) {
+		return 0, errors.New("round not found")
+	}
+	s, err := NewShareStore(":memory:", 0, 0, fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	p := testPayload("aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd", 0)
+	_, err = s.Enqueue(p)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrUnknownRound)
+}
+
+func TestVerifyCommitment_HashMismatch(t *testing.T) {
+	tree := &vcMockTree{leaves: make(map[uint64][]byte)}
+	wrongLeaf := make([]byte, 32)
+	wrongLeaf[0] = 0x01
+	tree.leaves[0] = wrongLeaf
+
+	var fixedCommitment [32]byte
+	fixedCommitment[0] = 0x99
+	vcHash := func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
+		return fixedCommitment, nil
+	}
+
+	handler := &apiHandler{
+		getTree:   func() TreeReader { return tree },
+		getVCHash: func() VCHashFunc { return vcHash },
+		logger:    log.NewNopLogger(),
+	}
+
+	roundHex := strings.Repeat("aa", 32)
+	sharesB64 := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	p := &SharePayload{
+		VoteRoundID:  roundHex,
+		SharesHash:   sharesB64,
+		ProposalID:   1,
+		VoteDecision: 0,
+		TreePosition: 0,
+	}
+	err := handler.verifyCommitment(p)
+	assert.ErrorIs(t, err, ErrInvalidCommitment)
+	assert.Contains(t, err.Error(), "hash mismatch")
+}
+
+func TestVerifyCommitment_Match(t *testing.T) {
+	var commitment [32]byte
+	commitment[0] = 0xBB
+	tree := &vcMockTree{leaves: map[uint64][]byte{0: commitment[:]}}
+	vcHash := func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
+		return commitment, nil
+	}
+
+	handler := &apiHandler{
+		getTree:   func() TreeReader { return tree },
+		getVCHash: func() VCHashFunc { return vcHash },
+		logger:    log.NewNopLogger(),
+	}
+
+	roundHex := strings.Repeat("aa", 32)
+	sharesB64 := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	p := &SharePayload{
+		VoteRoundID:  roundHex,
+		SharesHash:   sharesB64,
+		ProposalID:   1,
+		VoteDecision: 0,
+		TreePosition: 0,
+	}
+	err := handler.verifyCommitment(p)
+	assert.NoError(t, err)
+}
+
+// Verify that varying tree_position bypasses PK dedup but is caught by VC check.
+func TestSubmitShare_VCCrossCheck_BlocksPositionVariation(t *testing.T) {
+	router, _, _ := vcTestRouter(t)
+
+	// First request at position 0 succeeds (leaf matches).
+	req1 := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	w1 := httptest.NewRecorder()
+	router.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code)
+
+	// Attacker tries same payload but with tree_position=999 — no leaf there.
+	p := testPayload("aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd", 0)
+	p.TreePosition = 999
+	body, _ := json.Marshal(p)
+
+	req2 := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(string(body)))
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assert.Contains(t, w2.Body.String(), "no leaf at position")
+}
+

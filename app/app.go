@@ -330,6 +330,12 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			return nil
 		}
 		return h.Tree()
+	}, func() helper.VCHashFunc {
+		h := app.GetHelper()
+		if h == nil {
+			return nil
+		}
+		return h.VCHash
 	}, app.Logger().With("module", "helper"))
 
 	// Register swagger API.

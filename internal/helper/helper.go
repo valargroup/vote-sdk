@@ -16,6 +16,7 @@ type Helper struct {
 	Processor         *Processor
 	APIToken          string
 	ExposeQueueStatus bool
+	VCHash            VCHashFunc
 	Logger            log.Logger
 }
 
@@ -23,11 +24,13 @@ type Helper struct {
 //
 // Parameters:
 //   - cfg: helper configuration (from app.toml [helper] section)
-//   - tree: accesses the commitment tree (status + merkle paths) from the keeper's KV store
+//   - tree: accesses the commitment tree (status + merkle paths + leaf reads) from the keeper's KV store
 //   - prover: generates ZKP #3 proofs (real FFI or mock)
+//   - roundFetcher: queries the chain for round metadata (direct keeper access)
+//   - vcHash: computes vote commitment Poseidon hash for ingress validation
 //   - homeDir: the chain's home directory (for default DB path)
 //   - logger: module logger
-func New(cfg Config, tree TreeReader, prover ProofGenerator, homeDir string, logger log.Logger) (*Helper, error) {
+func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, vcHash VCHashFunc, homeDir string, logger log.Logger) (*Helper, error) {
 	logger = logger.With("module", "helper")
 
 	if cfg.Disable {
@@ -48,7 +51,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, homeDir string, log
 		dbPath,
 		time.Duration(cfg.MeanDelay)*time.Second,
 		time.Duration(cfg.MinDelay)*time.Second,
-		submitter.FetchVoteRound,
+		roundFetcher,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create share store: %w", err)
@@ -84,6 +87,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, homeDir string, log
 		Processor:         processor,
 		APIToken:          cfg.APIToken,
 		ExposeQueueStatus: cfg.ExposeQueueStatus,
+		VCHash:            vcHash,
 		Logger:            logger,
 	}, nil
 }
@@ -96,6 +100,7 @@ func (h *Helper) RegisterRoutes(router *mux.Router) {
 		func() string { return h.APIToken },
 		func() bool { return h.ExposeQueueStatus },
 		func() TreeReader { return h.Processor.tree },
+		func() VCHashFunc { return h.VCHash },
 		h.Logger,
 	)
 }

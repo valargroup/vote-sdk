@@ -461,6 +461,35 @@ int32_t sv_extract_nc_root(
 );
 
 /* -----------------------------------------------------------------------
+ * Vote commitment hash (Poseidon)
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Compute a vote commitment hash via Poseidon.
+ *
+ * VC = Poseidon(DOMAIN_VC=1, voting_round_id, shares_hash, proposal_id, vote_decision)
+ *
+ * Parameters:
+ *   round_id_ptr    - Pointer to 32-byte canonical Pallas Fp (voting round ID).
+ *   shares_hash_ptr - Pointer to 32-byte canonical Pallas Fp (shares hash).
+ *   proposal_id     - Proposal index (converted to Fp internally).
+ *   vote_decision   - Vote choice (converted to Fp internally).
+ *   commitment_out  - Pointer to 32-byte output buffer.
+ *
+ * Returns:
+ *    0  on success.
+ *   -1  if any pointer is null.
+ *   -3  if round_id or shares_hash is not a canonical Pallas Fp.
+ */
+int32_t sv_vote_commitment_hash(
+    const uint8_t* round_id_ptr,
+    const uint8_t* shares_hash_ptr,
+    uint32_t proposal_id,
+    uint32_t vote_decision,
+    uint8_t* commitment_out
+);
+
+/* -----------------------------------------------------------------------
  * Round ID derivation (Poseidon)
  * ----------------------------------------------------------------------- */
 

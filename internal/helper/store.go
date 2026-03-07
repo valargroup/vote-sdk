@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,6 +14,11 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// ErrUnknownRound is returned when a share references a round that does not
+// exist on-chain. Callers can check for this with errors.Is to distinguish
+// it from transient failures.
+var ErrUnknownRound = errors.New("unknown voting round")
 
 // ShareStore is a SQLite-backed share queue with ephemeral in-memory scheduling.
 // Payload data and processing state are persisted; scheduling delays (which
@@ -289,8 +295,11 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		return EnqueueConflict, fmt.Errorf("marshal share_comms: %w", err)
 	}
 
-	// Fetch vote_end_time before acquiring the lock (may do HTTP).
-	voteEndTime := s.getVoteEndTime(payload.VoteRoundID)
+	// Fetch vote_end_time before acquiring the lock (direct keeper KV read).
+	voteEndTime, err := s.getVoteEndTime(payload.VoteRoundID)
+	if err != nil {
+		return EnqueueConflict, fmt.Errorf("%w: %s", ErrUnknownRound, payload.VoteRoundID)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -683,13 +692,13 @@ func payloadEqual(existing, incoming SharePayload) bool {
 }
 
 // getVoteEndTime returns the cached vote_end_time for a round, fetching from
-// SQLite or the chain if not in memory. Returns 0 if the round is unknown
-// (delay will be uncapped).
-func (s *ShareStore) getVoteEndTime(roundID string) uint64 {
+// SQLite or the keeper if not in memory. Returns an error if the round is
+// unknown (the share should be rejected).
+func (s *ShareStore) getVoteEndTime(roundID string) (uint64, error) {
 	s.mu.Lock()
 	if vet, ok := s.roundCache[roundID]; ok {
 		s.mu.Unlock()
-		return vet
+		return vet, nil
 	}
 
 	// Check SQLite rounds table.
@@ -698,18 +707,17 @@ func (s *ShareStore) getVoteEndTime(roundID string) uint64 {
 	if err == nil {
 		s.roundCache[roundID] = vet
 		s.mu.Unlock()
-		return vet
+		return vet, nil
 	}
 	s.mu.Unlock()
 
-	// Fetch from chain (outside lock — may do HTTP).
+	// Fetch from keeper (outside lock — direct KV read).
 	if s.fetchRoundInfo == nil {
-		return 0
+		return 0, fmt.Errorf("unknown round %s: no round fetcher configured", roundID)
 	}
 	vet, err = s.fetchRoundInfo(roundID)
 	if err != nil {
-		s.logError("getVoteEndTime: fetch failed", "round_id", roundID, "error", err)
-		return 0
+		return 0, fmt.Errorf("unknown round %s: %w", roundID, err)
 	}
 
 	// Cache in both memory and SQLite.
@@ -722,7 +730,7 @@ func (s *ShareStore) getVoteEndTime(roundID string) uint64 {
 		roundID, vet,
 	)
 
-	return vet
+	return vet, nil
 }
 
 // uniformDelay samples a delay uniformly from [0, remaining_window) where
@@ -731,6 +739,11 @@ func (s *ShareStore) getVoteEndTime(roundID string) uint64 {
 // submission session. When vote_end_time is unknown (0) the delay falls back
 // to a uniform sample over [minDelay, meanDelay*2] as a best-effort spread.
 func (s *ShareStore) uniformDelay(voteEndTime uint64) time.Duration {
+	// Benchmark / testing mode: skip all delays.
+	if s.meanDelay == 0 && s.minDelay == 0 {
+		return 0
+	}
+
 	var buf [8]byte
 	_, _ = rand.Read(buf[:])
 	u := float64(binary.LittleEndian.Uint64(buf[:])) / (float64(1<<64) + 1.0)
