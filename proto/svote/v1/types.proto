@@ -78,11 +78,38 @@ message CommitmentTreeState {
 
 // GenesisState defines the vote module's genesis state.
 message GenesisState {
-  repeated VoteRound          rounds          = 1;
-  CommitmentTreeState         tree_state      = 2;
-  repeated CommitmentLeaf     commitment_leaves = 3;
-  repeated NullifierEntry     nullifiers      = 4;
-  string                      vote_manager    = 5;
+  repeated VoteRound               rounds              = 1;
+  CommitmentTreeState              tree_state           = 2;
+  repeated CommitmentLeaf          commitment_leaves    = 3;
+  repeated NullifierEntry          nullifiers           = 4;
+  string                           vote_manager         = 5;
+  repeated TallyResult             tally_results        = 6;
+  repeated ValidatorPallasKey      pallas_keys          = 7;
+  repeated GenesisTallyAccumulator tally_accumulators   = 8;
+  repeated GenesisShareCount       share_counts         = 9;
+  repeated GenesisCommitmentRoot   commitment_roots     = 10;
+}
+
+// GenesisCommitmentRoot is a commitment tree root stored at a specific block height.
+message GenesisCommitmentRoot {
+  uint64 height = 1;
+  bytes  root   = 2;
+}
+
+// GenesisTallyAccumulator is an in-progress ElGamal tally ciphertext for a (round, proposal, decision) tuple.
+message GenesisTallyAccumulator {
+  bytes  round_id      = 1;
+  uint32 proposal_id   = 2;
+  uint32 vote_decision = 3;
+  bytes  ciphertext    = 4; // 64-byte ElGamal ciphertext
+}
+
+// GenesisShareCount is a share reveal count for a (round, proposal, decision) tuple.
+message GenesisShareCount {
+  bytes  round_id      = 1;
+  uint32 proposal_id   = 2;
+  uint32 vote_decision = 3;
+  uint64 count         = 4;
 }
 
 // CommitmentLeaf is an entry in the append-only commitment tree.
