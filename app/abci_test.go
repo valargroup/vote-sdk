@@ -1116,7 +1116,7 @@ func TestMultiValidatorCeremony_DealAckConfirm(t *testing.T) {
 	require.NotEmpty(t, round.EaPk, "ea_pk should be set on the round")
 
 	// Verify the proposer's share was written to disk.
-	// With n=3 validators, the ceremony uses threshold mode (t=ceil(3/3)+1=2),
+	// With n=3 validators, the ceremony uses threshold mode (t=ceil(3/2)=2),
 	// so the ack handler writes share.<round_id> instead of ea_sk.<round_id>.
 	shareFile := app.EaSkDir + "/share." + fmt.Sprintf("%x", roundID)
 	_, err = os.Stat(shareFile)
@@ -1562,7 +1562,7 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	require.EqualValues(t, 2, round.Threshold,
-		"threshold should be 2 for n=3 (ceil(3/3)+1 = 2, stored by deal handler)")
+		"threshold should be 2 for n=3 (ceil(3/2) = 2, stored by deal handler)")
 	require.Len(t, round.VerificationKeys, 3,
 		"one verification key per validator should be stored by deal handler")
 

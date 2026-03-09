@@ -26,11 +26,12 @@ t = 0                (legacy mode for n < 2)
 | n | t |
 |---|---|
 | 1 | 0 (legacy) |
-| 2 | 2 |
+| 2 | 2 (clamped from 1) |
 | 3 | 2 |
-| 4 | 3 |
+| 4 | 2 |
+| 5 | 3 |
 | 6 | 3 |
-| 9 | 4 |
+| 9 | 5 |
 
 ### Ceremony state machine
 

@@ -24,7 +24,7 @@ import (
 //
 // With n=3 validators the deal handler must:
 //   - inject a MsgDealExecutiveAuthorityKey
-//   - set Threshold = ceil(3/3)+1 = 2
+//   - set Threshold = ceil(3/2) = 2
 //   - include one 32-byte VerificationKey per validator
 //   - write the dealer's Shamir share to share.<hex(round_id)> (not ea_sk)
 //   - ECIES-encrypt a different scalar to each validator (share, not full key)
@@ -59,7 +59,7 @@ func TestCeremonyDealThresholdMode(t *testing.T) {
 	deal, ok := protoMsg.(*types.MsgDealExecutiveAuthorityKey)
 	require.True(t, ok)
 
-	// n=3 → t = ceil(3/3)+1 = 2
+	// n=3 → t = ceil(3/2) = 2
 	require.EqualValues(t, 2, deal.Threshold, "threshold should be 2 for n=3")
 
 	// One VK per validator, each 32 bytes.
