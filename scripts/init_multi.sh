@@ -445,8 +445,16 @@ if [ "$CI_MODE" = true ] && [ -n "$VERCEL_API_TOKEN" ] && [ -n "$EDGE_CONFIG_ID"
             done
 
             if [ "$CHANGED" = true ]; then
-                PATCH_BODY=$(jq -n --argjson config "$UPDATED_CONFIG" \
-                    '{items: [{operation: "upsert", key: "voting-config", value: $config}]}')
+                # Build approved-servers from the same entries.
+                APPROVED_SERVERS=$(echo "$UPDATED_CONFIG" | jq '.vote_servers')
+
+                PATCH_BODY=$(jq -n \
+                    --argjson config "$UPDATED_CONFIG" \
+                    --argjson approved "$APPROVED_SERVERS" \
+                    '{items: [
+                        {operation: "upsert", key: "voting-config", value: $config},
+                        {operation: "upsert", key: "approved-servers", value: $approved}
+                    ]}')
 
                 HTTP_STATUS=$(curl -s -o /tmp/edge-config-resp.txt -w "%{http_code}" \
                     -X PATCH \
@@ -456,7 +464,7 @@ if [ "$CI_MODE" = true ] && [ -n "$VERCEL_API_TOKEN" ] && [ -n "$EDGE_CONFIG_ID"
                     -d "$PATCH_BODY")
 
                 if [ "$HTTP_STATUS" = "200" ]; then
-                    echo "  Edge Config updated successfully."
+                    echo "  Edge Config updated successfully (voting-config + approved-servers)."
                 else
                     echo "  Warning: Edge Config update failed (HTTP ${HTTP_STATUS})."
                     cat /tmp/edge-config-resp.txt 2>/dev/null
@@ -466,6 +474,18 @@ if [ "$CI_MODE" = true ] && [ -n "$VERCEL_API_TOKEN" ] && [ -n "$EDGE_CONFIG_ID"
             else
                 echo "  All domains already registered, no changes needed."
             fi
+
+            # Patch pulse_url and helper_url into each validator's app.toml
+            # so the heartbeat goroutine activates on next start.
+            for i in $(seq 1 $NUM_VALIDATORS); do
+                idx=$((i - 1))
+                VAL_URL="https://val${i}.${BASE_DOMAIN}"
+                VAL_TOML="${HOMES[$idx]}/config/app.toml"
+                sed -i.bak "s|^pulse_url = \"\"$|pulse_url = \"${CONFIG_URL}\"|" "$VAL_TOML"
+                sed -i.bak "s|^helper_url = \"\"$|helper_url = \"${VAL_URL}\"|" "$VAL_TOML"
+                rm -f "${VAL_TOML}.bak"
+                echo "  val${i}: pulse_url=${CONFIG_URL} helper_url=${VAL_URL}"
+            done
         fi
     fi
 elif [ "$CI_MODE" = true ]; then
