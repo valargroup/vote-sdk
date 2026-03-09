@@ -283,13 +283,19 @@ SvTreeHandle* sv_vote_tree_create_with_kv(
 /*
  * Verify a real delegation circuit proof (ZKP #1, 15 conditions, K=14).
  *
- * The public inputs are passed as a flat byte array of 12 x 32-byte
- * chunks (384 bytes total), in order:
- *   [nf_signed, rk_compressed, cmx_new, van_comm, vote_round_id,
- *    nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4, gov_null_5]
+ * The caller sends 12 x 32-byte chunks (384 bytes). The FFI decompresses
+ * the compressed Pallas point to produce the circuit's 13 Fp public inputs:
  *
- * rk_compressed is a 32-byte compressed Pallas curve point. The FFI
- * decompresses it into (rk_x, rk_y) for the circuit's 13 field elements.
+ *   Slot 0:    nf_signed           -> Fp (1)
+ *   Slot 1:    rk (compressed)     -> rk_x, rk_y (2)
+ *   Slot 2:    cmx_new             -> Fp (1)
+ *   Slot 3:    van_comm            -> Fp (1)
+ *   Slot 4:    vote_round_id       -> Fp (1)
+ *   Slot 5:    nc_root             -> Fp (1)
+ *   Slot 6:    nf_imt_root         -> Fp (1)
+ *   Slots 7-11: gov_null_1..5      -> Fp (5)
+ *
+ * Total: 12 wire chunks -> 13 circuit public inputs.
  *
  * Parameters:
  *   proof_ptr         - Pointer to serialized Halo2 proof bytes.
@@ -315,21 +321,29 @@ int32_t sv_verify_delegation_proof(
  * ----------------------------------------------------------------------- */
 
 /*
- * Verify a real vote proof circuit proof (ZKP #2, 11 conditions, K=14).
+ * Verify a real vote proof circuit proof (ZKP #2, 11 conditions, K=13).
  *
- * The public inputs are passed as a flat byte array of 10 x 32-byte
- * chunks (320 bytes total), in order:
- *   [van_nullifier, r_vpk_x, r_vpk_y, vote_authority_note_new, vote_commitment,
- *    vote_comm_tree_root, anchor_height_le, proposal_id_le, voting_round_id, ea_pk_compressed]
+ * The caller sends 9 x 32-byte chunks (288 bytes). The FFI decompresses
+ * compressed Pallas points and converts integer slots to produce the
+ * circuit's 11 Fp public inputs:
  *
- * Condition 4 (Spend Authority) adds r_vpk at slots 1-2. Slot 9 (ea_pk_compressed)
- * is decompressed to (ea_pk_x, ea_pk_y) for the circuit's 11 field elements.
+ *   Slot 0: van_nullifier            -> Fp (1)
+ *   Slot 1: r_vpk (compressed)       -> r_vpk_x, r_vpk_y (2)
+ *   Slot 2: vote_authority_note_new  -> Fp (1)
+ *   Slot 3: vote_commitment          -> Fp (1)
+ *   Slot 4: vote_comm_tree_root      -> Fp (1)
+ *   Slot 5: anchor_height (u64 LE)   -> Fp::from(u64) (1)
+ *   Slot 6: proposal_id (u32 LE)     -> Fp::from(u32) (1)
+ *   Slot 7: voting_round_id          -> Fp (1)
+ *   Slot 8: ea_pk (compressed)       -> ea_pk_x, ea_pk_y (2)
+ *
+ * Total: 9 wire chunks -> 11 circuit public inputs.
  *
  * Parameters:
  *   proof_ptr         - Pointer to serialized Halo2 proof bytes.
  *   proof_len         - Length of the proof byte array.
- *   public_inputs_ptr - Pointer to 320 bytes (10 x 32-byte chunks).
- *   public_inputs_len - Length of the public inputs byte array (must be 320).
+ *   public_inputs_ptr - Pointer to 288 bytes (9 x 32-byte chunks).
+ *   public_inputs_len - Length of the public inputs byte array (must be 288).
  *
  * Returns:
  *    0  on successful verification.
