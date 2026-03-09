@@ -13,6 +13,7 @@ import (
 	sdktestutil "github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	svtest "github.com/valargroup/shielded-vote/testutil"
 	"github.com/valargroup/shielded-vote/x/vote/keeper"
 	"github.com/valargroup/shielded-vote/x/vote/types"
 )
@@ -25,7 +26,7 @@ func newPartialDecryptTestKeeper(t *testing.T) (*keeper.Keeper, sdk.Context) {
 	testCtx := sdktestutil.DefaultContextWithDB(t, key, tkey)
 	ctx := testCtx.Ctx
 	svc := runtime.NewKVStoreService(key)
-	k := keeper.NewKeeper(svc, "authority", log.NewNopLogger(), nil)
+	k := keeper.NewKeeper(svc, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	return k, ctx
 }
 

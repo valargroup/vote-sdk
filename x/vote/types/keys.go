@@ -19,6 +19,38 @@ const DefaultDealTimeout uint64 = 1800
 // RoundIDLen is the fixed byte-length of a VoteRoundId (SHA-256 digest).
 const RoundIDLen = 32
 
+// MinProposalID is the minimum valid proposal ID (1-indexed).
+// Bit 0 of the circuit's proposal_authority bitmask is reserved as a
+// sentinel (rejected by the non-zero gate), so valid IDs start at 1.
+const MinProposalID = 1
+
+// MaxProposals is the maximum number of proposals per voting round.
+// The circuit's proposal_authority bitmask is 16 bits with bit 0 reserved
+// as a sentinel (rejected by the non-zero gate), leaving bits 1-15 usable.
+const MaxProposals = 15
+
+// MaxVoteOptions is the maximum number of options per proposal (0-indexed).
+// Circuit-constrained by the vote decision encoding.
+const MaxVoteOptions = 8
+
+// MaxTreePosition is the largest valid commitment tree leaf index.
+// The tree uses zero-based uint32 leaf addressing (depth-24 Poseidon Merkle tree),
+// so valid positions are 0..2^32-1.
+const MaxTreePosition = (1 << 32) - 1
+
+// Session creation field names — used in the HTTP API response, CLI input
+// parsing, and structured logging. Single source of truth for the JSON keys
+// of hex-encoded fields in MsgCreateVotingSession.
+const (
+	SessionKeyNcRoot           = "nc_root"
+	SessionKeyNullifierImtRoot = "nullifier_imt_root"
+	SessionKeyBlockhash        = "snapshot_blockhash"
+	SessionKeyProposalsHash    = "proposals_hash"
+	SessionKeyVkZkp1           = "vk_zkp1"
+	SessionKeyVkZkp2           = "vk_zkp2"
+	SessionKeyVkZkp3           = "vk_zkp3"
+)
+
 // NullifierType distinguishes the three independent nullifier sets per voting round.
 type NullifierType byte
 

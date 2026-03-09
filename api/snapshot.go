@@ -147,7 +147,10 @@ func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint6
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusServiceUnavailable {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("PIR service returned 503 (body unreadable: %v)", readErr)
+		}
 		// Check if this is a rebuilding response
 		var status struct {
 			Phase string `json:"phase"`
@@ -159,7 +162,10 @@ func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint6
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("PIR service returned %d (body unreadable: %v)", resp.StatusCode, readErr)
+		}
 		return nil, fmt.Errorf("PIR service returned %d: %s", resp.StatusCode, string(body))
 	}
 

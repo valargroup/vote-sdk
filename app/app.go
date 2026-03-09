@@ -353,4 +353,3 @@ func (app *SvoteApp) SetHelper(h *helper.Helper) {
 func (app *SvoteApp) GetHelper() *helper.Helper {
 	return app.helperRef.Load()
 }
-

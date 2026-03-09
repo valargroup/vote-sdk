@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
@@ -214,11 +215,12 @@ func ProvideSetVoteManagerSigner() signing.CustomGetSigner {
 type ModuleInputs struct {
 	depinject.In
 
-	StoreService   store.KVStoreService
-	Cdc            codec.Codec
-	Logger         log.Logger
-	Config         *modulev1.Module
+	StoreService  store.KVStoreService
+	Cdc           codec.Codec
+	Logger        log.Logger
+	Config        *modulev1.Module
 	StakingKeeper *stakingkeeper.Keeper
+	BankKeeper    bankkeeper.BaseKeeper
 }
 
 // ModuleOutputs defines the outputs produced by the vote module.
@@ -236,6 +238,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.Config.Authority,
 		in.Logger,
 		in.StakingKeeper,
+		&in.BankKeeper,
 	)
 
 	m := NewAppModule(k, in.Cdc)
@@ -579,7 +582,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 // DefaultVoteManagerAddress is a well-known secp256k1 account used as the
 // default vote manager when no explicit manager is configured in genesis.
 //
-// Private key (hex): b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee
+// See internal SDK notes for access.
 const DefaultVoteManagerAddress = "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl"
 
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
@@ -595,8 +598,12 @@ func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {
 }
 
 // ValidateGenesis performs genesis state validation.
-func (am AppModule) ValidateGenesis(_ codec.JSONCodec, _ client.TxEncodingConfig, _ json.RawMessage) error {
-	return nil
+func (am AppModule) ValidateGenesis(_ codec.JSONCodec, _ client.TxEncodingConfig, data json.RawMessage) error {
+	var gs types.GenesisState
+	if err := json.Unmarshal(data, &gs); err != nil {
+		return fmt.Errorf("vote: failed to unmarshal genesis state: %w", err)
+	}
+	return types.ValidateGenesisState(&gs)
 }
 
 // InitGenesis initializes the module state from genesis.

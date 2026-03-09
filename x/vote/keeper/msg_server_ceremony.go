@@ -1,7 +1,9 @@
 package keeper
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 
@@ -197,6 +199,12 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateAck, msg.Creator)
 	}
 
+	// Verify ack_signature = SHA256("ack" || ea_pk || validator_address).
+	expectedSig := sha256AckSig(round.EaPk, msg.Creator)
+	if !bytes.Equal(msg.AckSignature, expectedSig) {
+		return nil, fmt.Errorf("%w: ack_signature mismatch", types.ErrInvalidField)
+	}
+
 	// Record ack.
 	round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
 		ValidatorAddress: msg.Creator,
@@ -288,4 +296,11 @@ func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *typ
 	return &types.MsgCreateValidatorWithPallasKeyResponse{}, nil
 }
 
-
+// sha256AckSig computes SHA256(AckSigDomain || eaPk || validatorAddress).
+func sha256AckSig(eaPk []byte, validatorAddress string) []byte {
+	h := sha256.New()
+	h.Write([]byte(types.AckSigDomain))
+	h.Write(eaPk)
+	h.Write([]byte(validatorAddress))
+	return h.Sum(nil)
+}

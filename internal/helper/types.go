@@ -45,7 +45,7 @@ type Config struct {
 	MaxConcurrentProofs int `mapstructure:"max_concurrent_proofs"`
 
 	// PulseURL is the base URL for the server heartbeat endpoint
-	// (e.g. "https://shielded-vote-phi.vercel.app"). When empty, heartbeat is disabled.
+	// (e.g. "https://shielded-vote.vercel.app"). When empty, heartbeat is disabled.
 	PulseURL string `mapstructure:"pulse_url"`
 
 	// HelperURL is this server's own public URL as seen by clients

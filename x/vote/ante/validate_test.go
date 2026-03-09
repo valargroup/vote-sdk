@@ -263,7 +263,7 @@ func (s *ValidateTestSuite) SetupTest() {
 		ProposerAddress: testProposerConsAddr,
 	})
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), mockStakingKeeper{})
+	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), mockStakingKeeper{}, nil)
 }
 
 // ---------------------------------------------------------------------------

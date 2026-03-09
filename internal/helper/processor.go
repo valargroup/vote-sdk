@@ -77,27 +77,39 @@ func (p *Processor) Run(ctx context.Context) error {
 
 // exponentialDelay samples from Exp(1/mean) using crypto/rand for
 // unpredictable timing.
-func exponentialDelay(mean time.Duration) time.Duration {
+func exponentialDelay(mean time.Duration) (time.Duration, error) {
 	if mean <= 0 {
-		return 0
+		return 0, nil
 	}
 	var buf [8]byte
-	_, _ = rand.Read(buf[:])
+	if _, err := rand.Read(buf[:]); err != nil {
+		return 0, fmt.Errorf("crypto/rand: %w", err)
+	}
 	u := (float64(binary.LittleEndian.Uint64(buf[:])) + 1.0) / (float64(1<<64) + 1.0)
 	delaySecs := -mean.Seconds() * math.Log(u)
-	return time.Duration(delaySecs * float64(time.Second))
+	return time.Duration(delaySecs * float64(time.Second)), nil
 }
 
 // randomDelay samples from Exp(1/meanInterval) for inter-cycle timing.
 func (p *Processor) randomDelay() time.Duration {
-	return exponentialDelay(p.meanInterval)
+	d, err := exponentialDelay(p.meanInterval)
+	if err != nil {
+		p.logger.Error("randomDelay: crypto/rand failed, using mean", "error", err)
+		return p.meanInterval
+	}
+	return d
 }
 
 // intraShareDelay samples from Exp(2/meanInterval) — half the mean of the
 // inter-cycle delay — adding jitter between individual share submissions
 // within a batch.
 func (p *Processor) intraShareDelay() time.Duration {
-	return exponentialDelay(p.meanInterval / 2)
+	d, err := exponentialDelay(p.meanInterval / 2)
+	if err != nil {
+		p.logger.Error("intraShareDelay: crypto/rand failed, using mean/2", "error", err)
+		return p.meanInterval / 2
+	}
+	return d
 }
 
 // processBatch takes all ready shares and processes them.
@@ -155,7 +167,9 @@ func (p *Processor) processBatch(ctx context.Context) {
 			return nil
 		})
 	}
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		p.logger.Error("share processing batch had errors", "error", err)
+	}
 }
 
 // processShare handles a single share: Merkle path → proof → submit.
@@ -220,8 +234,20 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	copy(primaryBlind[:], pbBytes)
 
 	// Decode the revealed share's C1/C2 once, reused for both the prover and the message.
-	c1Bytes, _ := base64.StdEncoding.DecodeString(share.Payload.EncShare.C1)
-	c2Bytes, _ := base64.StdEncoding.DecodeString(share.Payload.EncShare.C2)
+	c1Bytes, err := base64.StdEncoding.DecodeString(share.Payload.EncShare.C1)
+	if err != nil {
+		return fmt.Errorf("decode enc_share.c1: %w", err)
+	}
+	if len(c1Bytes) != 32 {
+		return fmt.Errorf("enc_share.c1 must be 32 bytes, got %d", len(c1Bytes))
+	}
+	c2Bytes, err := base64.StdEncoding.DecodeString(share.Payload.EncShare.C2)
+	if err != nil {
+		return fmt.Errorf("decode enc_share.c2: %w", err)
+	}
+	if len(c2Bytes) != 32 {
+		return fmt.Errorf("enc_share.c2 must be 32 bytes, got %d", len(c2Bytes))
+	}
 	var encC1X, encC2X [32]byte
 	copy(encC1X[:], c1Bytes)
 	copy(encC2X[:], c2Bytes)

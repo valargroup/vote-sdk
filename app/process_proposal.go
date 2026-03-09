@@ -53,17 +53,17 @@ func ProcessProposalHandler(
 				continue
 			}
 
-		// Validate injected partial decryption txs.
-		if tag == voteapi.TagSubmitPartialDecryption {
-			if err := validateInjectedPartialDecrypt(ctx, voteKeeper, txBytes, logger); err != nil {
-				logger.Error("ProcessProposal: rejecting block — invalid partial decrypt tx", "err", err)
-				return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+			// Validate injected partial decryption txs.
+			if tag == voteapi.TagSubmitPartialDecryption {
+				if err := validateInjectedPartialDecrypt(ctx, voteKeeper, txBytes, logger); err != nil {
+					logger.Error("ProcessProposal: rejecting block — invalid partial decrypt tx", "err", err)
+					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+				}
+				continue
 			}
-			continue
-		}
 
-		// Validate injected tally txs.
-		if tag == voteapi.TagSubmitTally {
+			// Validate injected tally txs.
+			if tag == voteapi.TagSubmitTally {
 				if err := validateInjectedTally(ctx, voteKeeper, txBytes, logger); err != nil {
 					logger.Error("ProcessProposal: rejecting block — invalid tally tx", "err", err)
 					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
@@ -223,6 +223,13 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 // validateInjectedTally checks that an injected MsgSubmitTally is valid:
 // the round exists and is in TALLYING state, the creator matches the block
 // proposer, and the entries cover every non-empty tally accumulator.
+//
+// NOTE: This function intentionally does NOT verify DLEQ proofs
+// or threshold decryption correctness. That verification happens in FinalizeBlock
+// via the MsgSubmitTally keeper handler. A malicious proposer could cause a single
+// block rejection (liveness impact), but invalid tallies can never be committed
+// (safety preserved). Full verification here would duplicate expensive crypto
+// and is not justified given CometBFT's leader rotation.
 func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, voteMsg, err := voteapi.DecodeVoteTx(txBytes)
 	if err != nil {

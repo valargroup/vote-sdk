@@ -10,6 +10,10 @@ import (
 // sighash. Must match the e2e-tests encoding.
 const CastVoteSighashDomain = "SVOTE_CAST_VOTE_SIGHASH_V0"
 
+// AckSigDomain is the domain prefix for the ceremony ack signature hash:
+// SHA256(AckSigDomain || ea_pk || validator_address).
+const AckSigDomain = "ack"
+
 // ComputeCastVoteSighash returns the 32-byte Blake2b-256 hash of the
 // canonical signable payload for MsgCastVote. The chain computes this
 // on-chain and uses it as the message for RedPallas signature verification.
@@ -24,6 +28,9 @@ const CastVoteSighashDomain = "SVOTE_CAST_VOTE_SIGHASH_V0"
 //   - proposal_id: 4 bytes LE, padded to 32 bytes
 //   - vote_comm_tree_anchor_height: 8 bytes LE, padded to 32 bytes
 func ComputeCastVoteSighash(msg *MsgCastVote) []byte {
+	if msg == nil {
+		return nil
+	}
 	h, _ := blake2b.New256(nil)
 	h.Write([]byte(CastVoteSighashDomain))
 	write32(h, msg.VoteRoundId)
@@ -61,4 +68,3 @@ func write32(h hash.Hash, b []byte) {
 	}
 	h.Write(buf[:])
 }
-

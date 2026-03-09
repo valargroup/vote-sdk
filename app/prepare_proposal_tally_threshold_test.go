@@ -32,7 +32,7 @@ func newTallyThresholdTestKV(t *testing.T) (*votekeeper.Keeper, sdk.Context) {
 	tkey := storetypes.NewTransientStoreKey("transient_" + t.Name())
 	ctx := sdktestutil.DefaultContextWithDB(t, key, tkey).Ctx
 	svc := runtime.NewKVStoreService(key)
-	k := votekeeper.NewKeeper(svc, "authority", log.NewNopLogger(), nil)
+	k := votekeeper.NewKeeper(svc, "authority", log.NewNopLogger(), nil, nil)
 	return k, ctx
 }
 

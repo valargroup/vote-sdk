@@ -22,6 +22,14 @@ type StakingKeeper interface {
 	Unjail(ctx context.Context, consAddr sdk.ConsAddress) error
 }
 
+// BankKeeper defines the bank module interface needed by the vote module.
+// Used by MsgSetVoteManager to transfer the treasury balance atomically
+// when reassigning the vote manager role.
+type BankKeeper interface {
+	GetBalance(ctx context.Context, addr sdk.AccAddress, denom string) sdk.Coin
+	SendCoins(ctx context.Context, fromAddr, toAddr sdk.AccAddress, amt sdk.Coins) error
+}
+
 // Keeper of the vote module store.
 //
 // KV Store Layout:
@@ -40,6 +48,7 @@ type Keeper struct {
 	authority     string
 	logger        log.Logger
 	stakingKeeper StakingKeeper
+	bankKeeper    BankKeeper
 
 	// treeHandle and kvProxy are the in-process vote commitment tree state.
 	// They are the only non-KV fields on the Keeper.
@@ -64,12 +73,14 @@ func NewKeeper(
 	authority string,
 	logger log.Logger,
 	stakingKeeper StakingKeeper,
+	bankKeeper BankKeeper,
 ) *Keeper {
 	return &Keeper{
 		storeService:  storeService,
 		authority:     authority,
 		logger:        logger.With("module", "x/"+types.ModuleName),
 		stakingKeeper: stakingKeeper,
+		bankKeeper:    bankKeeper,
 		kvProxy:       &votetree.KvStoreProxy{},
 	}
 }

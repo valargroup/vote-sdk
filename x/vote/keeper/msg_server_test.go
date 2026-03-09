@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"cosmossdk.io/log"
+	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 
 	"github.com/cosmos/cosmos-sdk/runtime"
@@ -45,7 +46,7 @@ func (s *MsgServerTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC())
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), nil)
+	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }
 
@@ -169,6 +170,43 @@ func (s *MsgServerTestSuite) setBlockProposer(creator string) {
 // given mock and rebuilds the msgServer so it uses the updated keeper.
 func (s *MsgServerTestSuite) setupWithMockStakingKeeper(sk keeper.StakingKeeper) {
 	s.keeper.SetStakingKeeper(sk)
+	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
+}
+
+// ---------------------------------------------------------------------------
+// Mock bank keeper
+// ---------------------------------------------------------------------------
+
+// mockBankKeeper implements keeper.BankKeeper for tests.
+type mockBankKeeper struct {
+	balances  map[string]sdk.Coin // addr -> balance
+	sendCalls []sendCall          // recorded SendCoins calls
+}
+
+type sendCall struct {
+	From, To sdk.AccAddress
+	Amt      sdk.Coins
+}
+
+func newMockBankKeeper() *mockBankKeeper {
+	return &mockBankKeeper{balances: make(map[string]sdk.Coin)}
+}
+
+func (mk *mockBankKeeper) GetBalance(_ context.Context, addr sdk.AccAddress, denom string) sdk.Coin {
+	if c, ok := mk.balances[addr.String()]; ok && c.Denom == denom {
+		return c
+	}
+	return sdk.NewCoin(denom, sdkmath.ZeroInt())
+}
+
+func (mk *mockBankKeeper) SendCoins(_ context.Context, from, to sdk.AccAddress, amt sdk.Coins) error {
+	mk.sendCalls = append(mk.sendCalls, sendCall{From: from, To: to, Amt: amt})
+	return nil
+}
+
+// setupWithMockBankKeeper replaces the keeper's bank keeper with the given mock.
+func (s *MsgServerTestSuite) setupWithMockBankKeeper(bk keeper.BankKeeper) {
+	s.keeper.SetBankKeeper(bk)
 	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }
 
@@ -571,35 +609,15 @@ func (s *MsgServerTestSuite) TestCastVote() {
 // SetVoteManager
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestSetVoteManager_Bootstrap() {
-	// First call when no vote manager exists — any validator can set it.
-	s.SetupTest()
-	val1 := testValAddr(1)
-	mgr1 := testAccAddr(10)
-	s.setupWithMockStaking(val1)
-
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    val1,
-		NewManager: mgr1,
-	})
-	s.Require().NoError(err)
-
-	kv := s.keeper.OpenKVStore(s.ctx)
-	mgr, err := s.keeper.GetVoteManager(kv)
-	s.Require().NoError(err)
-	s.Require().Equal(mgr1, mgr.Address)
-}
-
 func (s *MsgServerTestSuite) TestSetVoteManager_VoteManagerCanChange() {
 	s.SetupTest()
-	s.setupWithMockStaking()
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
 
 	currentMgr := testAccAddr(20)
 	newMgr := testAccAddr(21)
 
-	// Seed a vote manager.
-	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: currentMgr}))
+	s.seedVoteManager(currentMgr)
 
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
 		Creator:    currentMgr,
@@ -607,43 +625,21 @@ func (s *MsgServerTestSuite) TestSetVoteManager_VoteManagerCanChange() {
 	})
 	s.Require().NoError(err)
 
-	mgr, err := s.keeper.GetVoteManager(kv)
-	s.Require().NoError(err)
-	s.Require().Equal(newMgr, mgr.Address)
-}
-
-func (s *MsgServerTestSuite) TestSetVoteManager_ValidatorCanChange() {
-	s.SetupTest()
-	val1 := testValAddr(1)
-	currentMgr := testAccAddr(30)
-	newMgr := testAccAddr(31)
-	s.setupWithMockStaking(val1)
-
-	// Seed a vote manager that is NOT the validator.
 	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: currentMgr}))
-
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    val1,
-		NewManager: newMgr,
-	})
-	s.Require().NoError(err)
-
 	mgr, err := s.keeper.GetVoteManager(kv)
 	s.Require().NoError(err)
 	s.Require().Equal(newMgr, mgr.Address)
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_NonValidatorNonManagerRejected() {
+func (s *MsgServerTestSuite) TestSetVoteManager_NonManagerRejected() {
 	s.SetupTest()
-	s.setupWithMockStaking() // no validators in the mock
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
 
 	currentMgr := testAccAddr(40)
 	newMgr := testAccAddr(41)
 
-	// Seed a vote manager.
-	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: currentMgr}))
+	s.seedVoteManager(currentMgr)
 
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
 		Creator:    "random_address",
@@ -653,42 +649,63 @@ func (s *MsgServerTestSuite) TestSetVoteManager_NonValidatorNonManagerRejected()
 	s.Require().Contains(err.Error(), "not authorized")
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_EmptyNewManagerRejected() {
+func (s *MsgServerTestSuite) TestSetVoteManager_ValidatorCannotChange() {
 	s.SetupTest()
 	val1 := testValAddr(1)
+	currentMgr := testAccAddr(30)
+	newMgr := testAccAddr(31)
 	s.setupWithMockStaking(val1)
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
 
+	s.seedVoteManager(currentMgr)
+
+	// A bonded validator that is not the vote manager must be rejected.
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
 		Creator:    val1,
+		NewManager: newMgr,
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not authorized")
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_NoVoteManagerRejected() {
+	s.SetupTest()
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
+
+	// No vote manager set — calling SetVoteManager should fail with ErrNoVoteManager.
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    testAccAddr(1),
+		NewManager: testAccAddr(2),
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "no vote manager set")
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_EmptyNewManagerRejected() {
+	s.SetupTest()
+	currentMgr := testAccAddr(10)
+	s.seedVoteManager(currentMgr)
+
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    currentMgr,
 		NewManager: "",
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "new_manager cannot be empty")
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_BootstrapNonValidatorRejected() {
-	// No vote manager set, non-validator tries to set one.
-	s.SetupTest()
-	s.setupWithMockStaking() // no validators
-
-	newMgr := testAccAddr(50)
-
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    "random_address",
-		NewManager: newMgr,
-	})
-	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "not authorized")
-}
-
 func (s *MsgServerTestSuite) TestSetVoteManager_InvalidAddressRejected() {
 	s.SetupTest()
-	val1 := testValAddr(1)
-	s.setupWithMockStaking(val1)
+	currentMgr := testAccAddr(10)
+	s.seedVoteManager(currentMgr)
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
 
 	// Reject non-bech32 string.
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    val1,
+		Creator:    currentMgr,
 		NewManager: "not_a_valid_address",
 	})
 	s.Require().Error(err)
@@ -696,22 +713,77 @@ func (s *MsgServerTestSuite) TestSetVoteManager_InvalidAddressRejected() {
 
 	// Reject validator operator address (valoper).
 	_, err = s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    val1,
+		Creator:    currentMgr,
 		NewManager: testValAddr(2),
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not a valid account address")
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_EmitsEvent() {
+func (s *MsgServerTestSuite) TestSetVoteManager_TransfersFunds() {
 	s.SetupTest()
-	val1 := testValAddr(1)
-	mgr1 := testAccAddr(60)
-	s.setupWithMockStaking(val1)
+	currentMgr := testAccAddr(20)
+	newMgr := testAccAddr(21)
+
+	bk := newMockBankKeeper()
+	bk.balances[currentMgr] = sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.NewInt(1_000_000_000))
+	s.setupWithMockBankKeeper(bk)
+	s.seedVoteManager(currentMgr)
 
 	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    val1,
-		NewManager: mgr1,
+		Creator:    currentMgr,
+		NewManager: newMgr,
+	})
+	s.Require().NoError(err)
+
+	// Verify SendCoins was called with the full balance.
+	s.Require().Len(bk.sendCalls, 1)
+	call := bk.sendCalls[0]
+
+	fromAddr, _ := sdk.AccAddressFromBech32(currentMgr)
+	toAddr, _ := sdk.AccAddressFromBech32(newMgr)
+	s.Require().Equal(fromAddr, call.From)
+	s.Require().Equal(toAddr, call.To)
+	s.Require().Equal(sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.NewInt(1_000_000_000))), call.Amt)
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_ZeroBalanceNoTransfer() {
+	s.SetupTest()
+	currentMgr := testAccAddr(20)
+	newMgr := testAccAddr(21)
+
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
+	s.seedVoteManager(currentMgr)
+
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    currentMgr,
+		NewManager: newMgr,
+	})
+	s.Require().NoError(err)
+
+	// No SendCoins call when balance is zero.
+	s.Require().Empty(bk.sendCalls)
+
+	// Role still transferred.
+	kv := s.keeper.OpenKVStore(s.ctx)
+	mgr, err := s.keeper.GetVoteManager(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(newMgr, mgr.Address)
+}
+
+func (s *MsgServerTestSuite) TestSetVoteManager_EmitsEvent() {
+	s.SetupTest()
+	currentMgr := testAccAddr(60)
+	newMgr := testAccAddr(61)
+
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
+	s.seedVoteManager(currentMgr)
+
+	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
+		Creator:    currentMgr,
+		NewManager: newMgr,
 	})
 	s.Require().NoError(err)
 
@@ -721,7 +793,7 @@ func (s *MsgServerTestSuite) TestSetVoteManager_EmitsEvent() {
 			found = true
 			for _, attr := range e.Attributes {
 				if attr.Key == types.AttributeKeyVoteManager {
-					s.Require().Equal(mgr1, attr.Value)
+					s.Require().Equal(newMgr, attr.Value)
 				}
 			}
 		}
@@ -841,6 +913,9 @@ func (s *KeeperTestSuite) TestGenesis_VoteManagerRestored() {
 	s.Require().Equal("sv1genesis_manager", mgr.Address)
 }
 
+// TestGenesis_EmptyVoteManagerNotSet verifies keeper-level InitGenesis
+// handles empty VoteManager gracefully. In practice, ValidateGenesisState
+// rejects empty vote_manager before InitGenesis is called.
 func (s *KeeperTestSuite) TestGenesis_EmptyVoteManagerNotSet() {
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)

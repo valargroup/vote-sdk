@@ -353,10 +353,12 @@ func CeremonyAckPrepareProposalHandler(
 
 		recoveredSk, err := elgamal.UnmarshalSecretKey(secretBytes)
 		if err != nil {
+			zeroBytes(secretBytes)
 			logger.Error("PrepareProposal[ack]: failed to parse decrypted secret",
 				"proposer", proposerValAddr, "err", err)
 			return txs
 		}
+		defer zeroSecret(secretBytes, recoveredSk)
 
 		G := elgamal.PallasGenerator()
 
@@ -412,9 +414,9 @@ func CeremonyAckPrepareProposalHandler(
 			}
 		}
 
-		// Compute ack_signature = SHA256("ack" || ea_pk || validator_address).
+		// Compute ack_signature = SHA256(AckSigDomain || ea_pk || validator_address).
 		h := sha256.New()
-		h.Write([]byte("ack"))
+		h.Write([]byte(types.AckSigDomain))
 		h.Write(round.EaPk)
 		h.Write([]byte(proposerValAddr))
 		ackSig := h.Sum(nil)
@@ -457,6 +459,21 @@ func CeremonyAckPrepareProposalHandler(
 func zeroScalar(s curvey.Scalar) {
 	if ps, ok := s.(*curvey.ScalarPallas); ok && ps != nil && ps.Value != nil {
 		ps.Value.SetZero()
+	}
+}
+
+// zeroBytes overwrites a byte slice with zeros.
+func zeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+// zeroSecret zeroes both the raw secret bytes and the parsed scalar.
+func zeroSecret(raw []byte, sk *elgamal.SecretKey) {
+	zeroBytes(raw)
+	if sk != nil {
+		zeroScalar(sk.Scalar)
 	}
 }
 

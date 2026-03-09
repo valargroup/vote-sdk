@@ -139,6 +139,9 @@ func TallyPrepareProposalHandler(
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
+		// Prevent unbounded cache growth by evicting key cache entries for finalized rounds.
+		evictFinalizedSkEntries(kvStore, voteKeeper, skCache, &skCacheMu, logger)
+
 		// Find the first round in TALLYING state. We limit to one round per block
 		// to bound PrepareProposal latency (BSGS decryption is expensive).
 		var tallyRound *types.VoteRound
@@ -365,6 +368,34 @@ func decryptRoundTalliesThreshold(
 	}
 
 	return entries, nil
+}
+
+// evictFinalizedSkEntries removes secret keys from the cache for rounds that
+// have been finalized (or no longer exist). This bounds cache growth and limits
+// exposure of old key material.
+func evictFinalizedSkEntries(
+	kvStore store.KVStore,
+	voteKeeper *votekeeper.Keeper,
+	cache map[string]*elgamal.SecretKey,
+	mu *sync.Mutex,
+	logger log.Logger,
+) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	for roundHex, sk := range cache {
+		roundID, err := hex.DecodeString(roundHex)
+		if err != nil {
+			delete(cache, roundHex)
+			continue
+		}
+		round, err := voteKeeper.GetVoteRound(kvStore, roundID)
+		if err != nil || round.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
+			zeroScalar(sk.Scalar)
+			delete(cache, roundHex)
+			logger.Debug("PrepareProposal: evicted cached sk", "round", roundHex)
+		}
+	}
 }
 
 // roundHasAccumulators reports whether any (proposal, decision) tally

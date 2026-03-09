@@ -91,8 +91,8 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 
 	ms.k.Logger().Info("CreateVotingSession",
 		"round_id", hex.EncodeToString(roundID),
-		"nullifier_imt_root", hex.EncodeToString(msg.NullifierImtRoot),
-		"nc_root", hex.EncodeToString(msg.NcRoot),
+		types.SessionKeyNullifierImtRoot, hex.EncodeToString(msg.NullifierImtRoot),
+		types.SessionKeyNcRoot, hex.EncodeToString(msg.NcRoot),
 		"ceremony_validators", len(eligible),
 	)
 	round := &types.VoteRound{
@@ -212,9 +212,8 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 }
 
 // SetVoteManager handles MsgSetVoteManager.
-// Sets or changes the vote manager address. Only callable by the current
-// vote manager or any bonded validator. On bootstrap (no vote manager set),
-// accepts any bonded validator.
+// Only the current vote manager can reassign the role. Transfers the caller's
+// full usvote balance to the new manager atomically.
 func (ms msgServer) SetVoteManager(goCtx context.Context, msg *types.MsgSetVoteManager) (*types.MsgSetVoteManagerResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
@@ -222,15 +221,26 @@ func (ms msgServer) SetVoteManager(goCtx context.Context, msg *types.MsgSetVoteM
 		return nil, fmt.Errorf("%w: new_manager cannot be empty", types.ErrInvalidField)
 	}
 
-	// new_manager must be a valid account address (not a validator operator address).
-	_, err := sdk.AccAddressFromBech32(msg.NewManager)
+	newManagerAddr, err := sdk.AccAddressFromBech32(msg.NewManager)
 	if err != nil {
 		return nil, fmt.Errorf("%w: new_manager is not a valid account address: %v", types.ErrInvalidField, err)
 	}
 
-	// Authorization: current vote manager or any validator.
-	if err := ms.k.ValidateVoteManagerOrValidator(goCtx, msg.Creator); err != nil {
+	// Only the current vote manager can reassign.
+	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
 		return nil, err
+	}
+
+	// Transfer the current VM's entire bond-denom balance to the new manager.
+	creatorAddr, err := sdk.AccAddressFromBech32(msg.Creator)
+	if err != nil {
+		return nil, fmt.Errorf("%w: creator is not a valid account address: %v", types.ErrInvalidField, err)
+	}
+	balance := ms.k.bankKeeper.GetBalance(ctx, creatorAddr, sdk.DefaultBondDenom)
+	if balance.IsPositive() {
+		if err := ms.k.bankKeeper.SendCoins(ctx, creatorAddr, newManagerAddr, sdk.NewCoins(balance)); err != nil {
+			return nil, fmt.Errorf("failed to transfer funds to new vote manager: %w", err)
+		}
 	}
 
 	kvStore := ms.k.OpenKVStore(ctx)

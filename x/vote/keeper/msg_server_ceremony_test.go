@@ -3,6 +3,7 @@ package keeper_test
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 
 	"cosmossdk.io/math"
 	"google.golang.org/protobuf/proto"
@@ -28,6 +29,18 @@ import (
 func testPallasPK() []byte {
 	_, pk := elgamal.KeyGen(rand.Reader)
 	return pk.Point.ToAffineCompressed()
+}
+
+func (s *MsgServerTestSuite) ackSignature(roundID []byte, validator string) []byte {
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+
+	h := sha256.New()
+	h.Write([]byte(types.AckSigDomain))
+	h.Write(round.EaPk)
+	h.Write([]byte(validator))
+	return h.Sum(nil)
 }
 
 var testValoperAddr = svtest.TestValAddr
@@ -623,7 +636,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_HappyPath() {
 	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		AckSignature: s.ackSignature(roundID, addrs[0]),
 	})
 	s.Require().NoError(err)
 
@@ -637,7 +650,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_HappyPath() {
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[1],
 		VoteRoundId:  roundID,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		AckSignature: s.ackSignature(roundID, addrs[1]),
 	})
 	s.Require().NoError(err)
 
@@ -649,7 +662,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_HappyPath() {
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[2],
 		VoteRoundId:  roundID,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		AckSignature: s.ackSignature(roundID, addrs[2]),
 	})
 	s.Require().NoError(err)
 
@@ -679,7 +692,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_PartialAcks() {
 	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		AckSignature: s.ackSignature(roundID, addrs[0]),
 	})
 	s.Require().NoError(err)
 
@@ -693,7 +706,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_PartialAcks() {
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[1],
 		VoteRoundId:  roundID,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		AckSignature: s.ackSignature(roundID, addrs[1]),
 	})
 	s.Require().NoError(err)
 
@@ -736,7 +749,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 				return &types.MsgAckExecutiveAuthorityKey{
 					Creator:      addrs[0],
 					VoteRoundId:  roundID,
-					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+					AckSignature: s.ackSignature(roundID, addrs[0]),
 				}
 			},
 			errContains: "ceremony is CEREMONY_STATUS_REGISTERING",
@@ -756,7 +769,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 				return &types.MsgAckExecutiveAuthorityKey{
 					Creator:      addrs[0],
 					VoteRoundId:  roundID,
-					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+					AckSignature: s.ackSignature(roundID, addrs[0]),
 				}
 			},
 			errContains: "round is SESSION_STATUS_ACTIVE",
@@ -770,7 +783,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 				return &types.MsgAckExecutiveAuthorityKey{
 					Creator:      "outsider",
 					VoteRoundId:  roundID,
-					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+					AckSignature: s.ackSignature(roundID, "outsider"),
 				}
 			},
 			errContains: "validator not in ceremony",
@@ -782,7 +795,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 				_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 					Creator:      addrs[0],
 					VoteRoundId:  roundID,
-					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+					AckSignature: s.ackSignature(roundID, addrs[0]),
 				})
 				s.Require().NoError(err)
 				return roundID, addrs
@@ -791,7 +804,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 				return &types.MsgAckExecutiveAuthorityKey{
 					Creator:      addrs[0],
 					VoteRoundId:  roundID,
-					AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+					AckSignature: s.ackSignature(roundID, addrs[0]),
 				}
 			},
 			errContains: "already acknowledged",
@@ -830,7 +843,7 @@ func (s *MsgServerTestSuite) TestCeremonyLog_DealAndAck() {
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		AckSignature: s.ackSignature(roundID, addrs[0]),
 	})
 	s.Require().NoError(err)
 
@@ -845,7 +858,7 @@ func (s *MsgServerTestSuite) TestCeremonyLog_DealAndAck() {
 		_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 			Creator:      addr,
 			VoteRoundId:  roundID,
-			AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+			AckSignature: s.ackSignature(roundID, addr),
 		})
 		s.Require().NoError(err)
 	}
@@ -866,7 +879,7 @@ func (s *MsgServerTestSuite) TestCeremonyLog_PartialAcksNoConfirm() {
 	_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[0],
 		VoteRoundId:  roundID,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		AckSignature: s.ackSignature(roundID, addrs[0]),
 	})
 	s.Require().NoError(err)
 
@@ -880,7 +893,7 @@ func (s *MsgServerTestSuite) TestCeremonyLog_PartialAcksNoConfirm() {
 	_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 		Creator:      addrs[1],
 		VoteRoundId:  roundID,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+		AckSignature: s.ackSignature(roundID, addrs[1]),
 	})
 	s.Require().NoError(err)
 
@@ -985,7 +998,7 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 		_, err = s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
 			Creator:      addr,
 			VoteRoundId:  roundID,
-			AckSignature: bytes.Repeat([]byte{0xAC}, 64),
+			AckSignature: s.ackSignature(roundID, addr),
 		})
 		s.Require().NoError(err)
 	}
