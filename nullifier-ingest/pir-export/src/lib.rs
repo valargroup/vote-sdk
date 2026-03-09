@@ -20,11 +20,10 @@ use std::time::Instant;
 use anyhow::Result;
 use ff::PrimeField as _;
 use pasta_curves::Fp;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use imt_tree::hasher::PoseidonHasher;
-use imt_tree::tree::{commit_ranges, precompute_empty_hashes, Range, TREE_DEPTH};
+use imt_tree::tree::{build_levels, commit_ranges, precompute_empty_hashes, Range, TREE_DEPTH};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -139,7 +138,7 @@ pub fn build_pir_tree(ranges: Vec<Range>) -> Result<PirTree> {
     let empty_hashes = precompute_empty_hashes();
 
     let t1 = Instant::now();
-    let (root26, levels) = build_levels_with_depth(leaves, &empty_hashes, PIR_DEPTH);
+    let (root26, levels) = build_levels(leaves, &empty_hashes, PIR_DEPTH);
     eprintln!(
         "  PIR tree build ({} levels): {:.1}s",
         levels.len(),
@@ -156,55 +155,6 @@ pub fn build_pir_tree(ranges: Vec<Range>) -> Result<PirTree> {
         ranges,
         empty_hashes,
     })
-}
-
-/// Build Merkle tree levels bottom-up with a specified depth.
-///
-/// Same algorithm as imt-tree's `build_levels` but parameterized by depth
-/// instead of hardcoded to `TREE_DEPTH`.
-fn build_levels_with_depth(
-    mut leaves: Vec<Fp>,
-    empty: &[Fp; TREE_DEPTH],
-    depth: usize,
-) -> (Fp, Vec<Vec<Fp>>) {
-    let hasher = PoseidonHasher::new();
-    let mut levels: Vec<Vec<Fp>> = Vec::with_capacity(depth);
-
-    // Level 0 = leaf commitments, padded to even length.
-    if leaves.is_empty() {
-        leaves.push(empty[0]);
-    }
-    if leaves.len() & 1 == 1 {
-        leaves.push(empty[0]);
-    }
-    levels.push(leaves);
-
-    const PAR_THRESHOLD: usize = 1024;
-
-    // Hash pairs at each level to produce the next.
-    for i in 0..depth - 1 {
-        let prev = &levels[i];
-        let pairs = prev.len() / 2;
-        let mut next: Vec<Fp> = if pairs >= PAR_THRESHOLD {
-            prev.par_chunks_exact(2)
-                .map_init(PoseidonHasher::new, |h, pair| h.hash(pair[0], pair[1]))
-                .collect()
-        } else {
-            (0..pairs)
-                .map(|j| hasher.hash(prev[j * 2], prev[j * 2 + 1]))
-                .collect()
-        };
-        if next.len() & 1 == 1 {
-            next.push(empty[i + 1]);
-        }
-        levels.push(next);
-    }
-
-    // The final level has exactly two nodes; hash them to get the root.
-    let top = &levels[depth - 1];
-    let root = hasher.hash(top[0], top[1]);
-
-    (root, levels)
 }
 
 /// Extend a depth-26 root to a depth-29 root by hashing with empty subtrees.
@@ -278,6 +228,49 @@ pub fn node_or_empty(levels: &[Vec<Fp>], level: usize, index: usize, empty_hashe
     } else {
         empty_hashes[level]
     }
+}
+
+/// Validate that every 32-byte chunk in `data` is a canonical Fp encoding.
+///
+/// Used by `Tier0Data::from_bytes`, `Tier1Row::from_bytes`, and `Tier2Row::from_bytes`
+/// to reject tier data containing non-canonical field elements.
+pub fn validate_all_fp_chunks(data: &[u8], tier_label: &str) -> anyhow::Result<()> {
+    for (i, chunk) in data.chunks_exact(32).enumerate() {
+        validate_fp_bytes(chunk).map_err(|e| {
+            anyhow::anyhow!("{} invalid field element at 32-byte chunk {}: {}", tier_label, i, e)
+        })?;
+    }
+    Ok(())
+}
+
+/// Binary search a sequence of 64-byte records for the last entry whose key <= `value`.
+///
+/// Each record has a 32-byte key at offset `key_offset_in_record` within the record.
+/// `base` is the byte offset in `data` where the record array starts.
+/// `count` is the number of records.
+///
+/// Returns `Some(index)` of the last record with key <= value, or `None` if all keys > value.
+pub fn binary_search_records(
+    data: &[u8],
+    base: usize,
+    count: usize,
+    record_size: usize,
+    key_offset: usize,
+    value: Fp,
+) -> Option<usize> {
+    let mut lo = 0usize;
+    let mut hi = count;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let k_off = base + mid * record_size + key_offset;
+        let k = read_fp(&data[k_off..k_off + 32]);
+        if k <= value {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if lo == 0 { None } else { Some(lo - 1) }
 }
 
 /// Sort raw nullifiers, inject circuit-required sentinels, and build gap ranges.

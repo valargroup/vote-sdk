@@ -122,11 +122,7 @@ impl<'a> Tier1Row<'a> {
             data.len(),
             TIER1_ROW_BYTES
         );
-        for (i, chunk) in data.chunks_exact(32).enumerate() {
-            crate::validate_fp_bytes(chunk).map_err(|e| {
-                anyhow::anyhow!("Tier 1 row invalid field element at 32-byte chunk {}: {}", i, e)
-            })?;
-        }
+        crate::validate_all_fp_chunks(data, "Tier 1 row")?;
         Ok(Self { data })
     }
 
@@ -151,23 +147,7 @@ impl<'a> Tier1Row<'a> {
     /// Binary search the 128 leaf min_keys to find which sub-subtree contains `value`.
     pub fn find_sub_subtree(&self, value: Fp) -> Option<usize> {
         let base = TIER1_INTERNAL_NODES * 32;
-        let mut lo = 0usize;
-        let mut hi = TIER1_LEAVES;
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            let mk_offset = base + mid * 64 + 32;
-            let mk = crate::read_fp(&self.data[mk_offset..mk_offset + 32]);
-            if mk <= value {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        if lo == 0 {
-            None
-        } else {
-            Some(lo - 1)
-        }
+        crate::binary_search_records(self.data, base, TIER1_LEAVES, 64, 32, value)
     }
 
     /// Extract the 7 sibling hashes from this Tier 1 row for a given sub-subtree index.

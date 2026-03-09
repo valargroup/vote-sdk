@@ -129,9 +129,15 @@ pub fn precompute_empty_hashes() -> [Fp; TREE_DEPTH] {
 /// This uses [`TREE_DEPTH`] levels and retains every intermediate layer so
 /// that Merkle auth paths can be extracted in O([`TREE_DEPTH`]) via simple
 /// sibling lookups.
-fn build_levels(mut leaves: Vec<Fp>, empty: &[Fp; TREE_DEPTH]) -> (Fp, Vec<Vec<Fp>>) {
+/// Build Merkle tree levels bottom-up from leaf hashes.
+///
+/// `depth` controls the number of tree levels (use `TREE_DEPTH` for a full
+/// depth-29 tree, or a smaller value like 26 for the PIR tree).
+/// Returns `(root, levels)` where `levels[0]` contains leaf hashes and
+/// `levels[depth-1]` contains the root's two children.
+pub fn build_levels(mut leaves: Vec<Fp>, empty: &[Fp; TREE_DEPTH], depth: usize) -> (Fp, Vec<Vec<Fp>>) {
     let hasher = PoseidonHasher::new();
-    let mut levels: Vec<Vec<Fp>> = Vec::with_capacity(TREE_DEPTH);
+    let mut levels: Vec<Vec<Fp>> = Vec::with_capacity(depth);
 
     // Level 0 = leaf commitments, padded to even length.
     // Takes ownership of `leaves` to avoid a 1.6 GB memcpy at scale.
@@ -143,11 +149,9 @@ fn build_levels(mut leaves: Vec<Fp>, empty: &[Fp; TREE_DEPTH]) -> (Fp, Vec<Vec<F
     }
     levels.push(leaves);
 
-    // Minimum number of pairs before we dispatch to Rayon.
     const PAR_THRESHOLD: usize = 1024;
 
-    // Hash pairs at each level to produce the next.
-    for i in 0..TREE_DEPTH - 1 {
+    for i in 0..depth - 1 {
         let prev = &levels[i];
         let pairs = prev.len() / 2;
         let mut next: Vec<Fp> = if pairs >= PAR_THRESHOLD {
@@ -165,8 +169,7 @@ fn build_levels(mut leaves: Vec<Fp>, empty: &[Fp; TREE_DEPTH]) -> (Fp, Vec<Vec<F
         levels.push(next);
     }
 
-    // The final level has exactly two nodes; hash them to get the root.
-    let top = &levels[TREE_DEPTH - 1];
+    let top = &levels[depth - 1];
     let root = hasher.hash(top[0], top[1]);
 
     (root, levels)
