@@ -280,6 +280,23 @@ pub fn node_or_empty(levels: &[Vec<Fp>], level: usize, index: usize, empty_hashe
     }
 }
 
+/// Sort raw nullifiers, inject circuit-required sentinels, and build gap ranges.
+///
+/// The sentinel values at `k * 2^250` for `k = 0..=16` are required by the
+/// circuit's gap-width constraint. After injection the list is sorted,
+/// deduplicated, and converted to gap ranges.
+pub fn prepare_nullifiers(mut nfs: Vec<Fp>) -> Vec<Range> {
+    use ff::Field;
+
+    nfs.sort();
+    let step = Fp::from(2u64).pow([250, 0, 0, 0]);
+    let sentinels: Vec<Fp> = (0u64..=16).map(|k| step * Fp::from(k)).collect();
+    nfs.extend(sentinels);
+    nfs.sort();
+    nfs.dedup();
+    imt_tree::tree::build_nf_ranges(nfs)
+}
+
 /// Build a PIR tree from raw nullifiers (sort, sentinel injection, tree build)
 /// and export all tier files.
 ///
@@ -296,22 +313,14 @@ pub fn build_and_export(
 /// Build the PIR tree and export tier files, calling `on_progress(message, pct)`
 /// at each major stage so callers can report progress to users.
 pub fn build_and_export_with_progress(
-    mut nfs: Vec<Fp>,
+    nfs: Vec<Fp>,
     output_dir: &std::path::Path,
     height: Option<u64>,
     on_progress: impl Fn(&str, u8),
 ) -> Result<PirTree> {
-    use ff::Field;
-
     on_progress("sorting nullifiers", 0);
     let t1 = std::time::Instant::now();
-    nfs.sort();
-    let step = Fp::from(2u64).pow([250, 0, 0, 0]);
-    let sentinels: Vec<Fp> = (0u64..=16).map(|k| step * Fp::from(k)).collect();
-    nfs.extend(sentinels);
-    nfs.sort();
-    nfs.dedup();
-    let ranges = imt_tree::tree::build_nf_ranges(nfs);
+    let ranges = prepare_nullifiers(nfs);
     eprintln!(
         "  {} ranges built in {:.1}s",
         ranges.len(),

@@ -1987,6 +1987,7 @@ dependencies = [
  "ff",
  "hex",
  "imt-tree",
+ "nullifier-service",
  "pasta_curves",
  "rand",
  "rayon",

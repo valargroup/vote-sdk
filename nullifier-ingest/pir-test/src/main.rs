@@ -15,7 +15,7 @@ use ff::{Field, PrimeField as _};
 use pasta_curves::Fp;
 use rand::Rng;
 
-use imt_tree::tree::{build_nf_ranges, build_sentinel_tree};
+use imt_tree::tree::build_sentinel_tree;
 
 use pir_export::build_pir_tree;
 use pir_export::{
@@ -152,19 +152,7 @@ fn run_local(nullifiers_path: Option<PathBuf>, num_proofs: usize) -> Result<()> 
 fn run_local_inner(raw_nfs: &[Fp], num_proofs: usize) -> Result<()> {
     let t0 = Instant::now();
 
-    // Sort and build ranges (with sentinels)
-    let mut sorted = raw_nfs.to_vec();
-    sorted.sort();
-
-    // Add sentinel nullifiers at k * 2^250 boundaries
-    let step = Fp::from(2u64).pow([250, 0, 0, 0]);
-    let sentinels: Vec<Fp> = (0u64..=16).map(|k| step * Fp::from(k)).collect();
-    let mut all_nfs = sentinels;
-    all_nfs.extend_from_slice(&sorted);
-    all_nfs.sort();
-    all_nfs.dedup();
-
-    let ranges = build_nf_ranges(all_nfs.iter().copied());
+    let ranges = pir_export::prepare_nullifiers(raw_nfs.to_vec());
     eprintln!(
         "  {} ranges from {} nullifiers in {:.1}s",
         ranges.len(),
@@ -300,15 +288,7 @@ async fn run_server(
     eprintln!("  Connected to PIR server");
 
     // Pick random values
-    let mut sorted = nfs;
-    sorted.sort();
-    let step = Fp::from(2u64).pow([250, 0, 0, 0]);
-    let sentinels: Vec<Fp> = (0u64..=16).map(|k| step * Fp::from(k)).collect();
-    let mut all_nfs = sentinels;
-    all_nfs.extend_from_slice(&sorted);
-    all_nfs.sort();
-    all_nfs.dedup();
-    let ranges = build_nf_ranges(all_nfs.iter().copied());
+    let ranges = pir_export::prepare_nullifiers(nfs);
 
     let mut rng = rand::thread_rng();
     let test_values: Vec<Fp> = (0..num_proofs)
@@ -398,15 +378,7 @@ fn run_compare(nullifiers_path: PathBuf, num_proofs: usize) -> Result<()> {
     );
 
     // Build the depth-26 PIR tree
-    let mut sorted = raw_nfs;
-    sorted.sort();
-    let step = Fp::from(2u64).pow([250, 0, 0, 0]);
-    let sentinels: Vec<Fp> = (0u64..=16).map(|k| step * Fp::from(k)).collect();
-    let mut all_nfs = sentinels;
-    all_nfs.extend_from_slice(&sorted);
-    all_nfs.sort();
-    all_nfs.dedup();
-    let ranges = build_nf_ranges(all_nfs.iter().copied());
+    let ranges = pir_export::prepare_nullifiers(raw_nfs);
 
     let t1 = Instant::now();
     let pir_tree = build_pir_tree(ranges.clone())?;
@@ -569,15 +541,7 @@ fn run_bench(num_queries: usize) -> Result<()> {
     eprintln!("\nBuilding synthetic tree (1000 nullifiers)...");
     let mut rng = rand::thread_rng();
     let raw_nfs: Vec<Fp> = (0..1000).map(|_| Fp::random(&mut rng)).collect();
-    let mut sorted = raw_nfs;
-    sorted.sort();
-    let step = Fp::from(2u64).pow([250, 0, 0, 0]);
-    let sentinels: Vec<Fp> = (0u64..=16).map(|k| step * Fp::from(k)).collect();
-    let mut all_nfs = sentinels;
-    all_nfs.extend_from_slice(&sorted);
-    all_nfs.sort();
-    all_nfs.dedup();
-    let ranges = build_nf_ranges(all_nfs.iter().copied());
+    let ranges = pir_export::prepare_nullifiers(raw_nfs);
     let tree = build_pir_tree(ranges)?;
 
     // Export tier data

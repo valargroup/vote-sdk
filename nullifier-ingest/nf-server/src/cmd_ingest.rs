@@ -3,15 +3,9 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Args as ClapArgs;
 
+use nullifier_service::config;
 use nullifier_service::file_store;
 use nullifier_service::sync_nullifiers;
-
-/// Default lightwalletd endpoints.
-const DEFAULT_LWD_URLS: &[&str] = &[
-    "https://zec.rocks:443",
-    "https://eu2.zec.stardust.rest:443",
-    "https://eu.zec.stardust.rest:443",
-];
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -36,16 +30,7 @@ pub async fn run(args: Args) -> Result<()> {
     // Migrate legacy checkpoints to the index file format.
     file_store::rebuild_index(&args.data_dir)?;
 
-    let lwd_urls: Vec<String> = std::env::var("LWD_URLS")
-        .map(|s| s.split(',').map(|u| u.trim().to_string()).collect())
-        .unwrap_or_else(|_| vec![args.lwd_url.clone()]);
-
-    // Fall back to hardcoded defaults if the single URL is the default and no env override.
-    let lwd_urls = if lwd_urls.len() == 1 && lwd_urls[0] == "https://zec.rocks:443" {
-        DEFAULT_LWD_URLS.iter().map(|s| s.to_string()).collect()
-    } else {
-        lwd_urls
-    };
+    let lwd_urls = config::resolve_lwd_urls(&args.lwd_url);
 
     let dir = &args.data_dir;
 
@@ -86,14 +71,7 @@ pub async fn run(args: Args) -> Result<()> {
         );
 
         if args.invalidate {
-            // Delete stale tree sidecar
-            let sidecar = dir.join("nullifiers.tree");
-            if sidecar.exists() {
-                std::fs::remove_file(&sidecar)?;
-                println!("Deleted stale sidecar: {}", sidecar.display());
-            }
-            // Delete stale PIR tier files
-            for name in &["pir-data/tier0.bin", "pir-data/tier1.bin", "pir-data/tier2.bin", "pir-data/pir_root.json"] {
+            for name in config::STALE_FILES {
                 let path = dir.join(name);
                 if path.exists() {
                     std::fs::remove_file(&path)?;

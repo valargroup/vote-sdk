@@ -21,15 +21,9 @@ use pir_server::{
 use std::io::{Read, Seek, SeekFrom};
 use tracing::{info, warn};
 
+use nullifier_service::config;
 use nullifier_service::file_store;
 use nullifier_service::sync_nullifiers;
-
-/// Default lightwalletd endpoints (shared with cmd_ingest).
-const DEFAULT_LWD_URLS: &[&str] = &[
-    "https://zec.rocks:443",
-    "https://eu2.zec.stardust.rest:443",
-    "https://eu.zec.stardust.rest:443",
-];
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -187,15 +181,7 @@ fn load_serving_state(pir_data_dir: &std::path::Path) -> Result<ServingState> {
 pub async fn run(args: Args) -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    // Resolve lightwalletd URLs
-    let lwd_urls: Vec<String> = std::env::var("LWD_URLS")
-        .map(|s| s.split(',').map(|u| u.trim().to_string()).collect())
-        .unwrap_or_else(|_| vec![args.lwd_url.clone()]);
-    let lwd_urls = if lwd_urls.len() == 1 && lwd_urls[0] == "https://zec.rocks:443" {
-        DEFAULT_LWD_URLS.iter().map(|s| s.to_string()).collect()
-    } else {
-        lwd_urls
-    };
+    let lwd_urls = config::resolve_lwd_urls(&args.lwd_url);
 
     // Ensure the index file exists (migration from old format)
     file_store::rebuild_index(&args.data_dir)?;

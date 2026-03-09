@@ -3,25 +3,14 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use nullifier_service::config;
 use nullifier_service::file_store;
 use nullifier_service::sync_nullifiers;
 
-/// Default lightwalletd endpoints
-const DEFAULT_LWD_URLS: &[&str] = &[
-    "https://zec.rocks:443",
-    "https://eu2.zec.stardust.rest:443",
-    "https://eu.zec.stardust.rest:443",
-];
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    let lwd_urls: Vec<String> = env::var("LWD_URLS")
-        .map(|s| s.split(',').map(|u| u.trim().to_string()).collect())
-        .unwrap_or_else(|_| {
-            env::var("LWD_URL")
-                .map(|u| vec![u])
-                .unwrap_or_else(|_| DEFAULT_LWD_URLS.iter().map(|s| s.to_string()).collect())
-        });
+    let cli_url = env::var("LWD_URL").unwrap_or_else(|_| "https://zec.rocks:443".to_string());
+    let lwd_urls = config::resolve_lwd_urls(&cli_url);
     let data_dir = env::var("DATA_DIR").unwrap_or_else(|_| ".".to_string());
     let dir = Path::new(&data_dir);
 

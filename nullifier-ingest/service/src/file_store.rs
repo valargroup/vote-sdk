@@ -217,16 +217,7 @@ pub fn load_nullifiers_up_to(dir: &Path, byte_offset: u64) -> Result<Vec<Fp>> {
         &full_data
     };
 
-    let nullifiers: Vec<Fp> = data
-        .par_chunks_exact(NULLIFIER_SIZE)
-        .map(|chunk| {
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(chunk);
-            Fp::from_repr(arr).unwrap()
-        })
-        .collect();
-
-    Ok(nullifiers)
+    parse_nullifier_bytes(data)
 }
 
 /// Load the checkpoint. Returns `Some((height, byte_offset))` or `None`.
@@ -302,16 +293,30 @@ pub fn load_all_nullifiers(dir: &Path) -> Result<Vec<Fp>> {
         );
     }
 
-    let nullifiers: Vec<Fp> = data
-        .par_chunks_exact(NULLIFIER_SIZE)
-        .map(|chunk| {
+    parse_nullifier_bytes(&data)
+}
+
+/// Parse raw 32-byte chunks into `Fp` field elements in parallel.
+///
+/// Returns an error if any chunk contains a non-canonical encoding
+/// (value >= the Pallas field modulus).
+pub fn parse_nullifier_bytes(data: &[u8]) -> Result<Vec<Fp>> {
+    anyhow::ensure!(
+        data.len() % NULLIFIER_SIZE == 0,
+        "data length {} is not a multiple of {}",
+        data.len(),
+        NULLIFIER_SIZE
+    );
+    data.par_chunks_exact(NULLIFIER_SIZE)
+        .enumerate()
+        .map(|(i, chunk)| {
             let mut arr = [0u8; 32];
             arr.copy_from_slice(chunk);
-            Fp::from_repr(arr).unwrap()
+            Option::from(Fp::from_repr(arr)).ok_or_else(|| {
+                anyhow::anyhow!("non-canonical nullifier encoding at index {}", i)
+            })
         })
-        .collect();
-
-    Ok(nullifiers)
+        .collect()
 }
 
 /// Number of nullifiers in the file, derived from file size.
