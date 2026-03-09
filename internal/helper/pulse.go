@@ -18,7 +18,7 @@ type SignFn func(payload string) (signature, pubKey string, err error)
 
 // PulseConfig holds the parameters needed for the heartbeat loop.
 type PulseConfig struct {
-	PulseURL         string // Vercel base URL (e.g. "https://shielded-vote-phi.vercel.app")
+	PulseURL         string // Vercel base URL (e.g. "https://shielded-vote.vercel.app")
 	HelperURL        string // Own public URL (e.g. "https://1-2-3-4.sslip.io")
 	OperatorAddress  string // Bech32 operator address derived from validator key
 	Moniker          string // Node moniker from CometBFT config
