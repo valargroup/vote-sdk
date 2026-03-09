@@ -13,9 +13,12 @@ The canonical protocol specification lives in the `shielded_vote_book/` director
 
 ## Reading protocol docs
 
-1. Read `docs/shielded-vote-book-index.md` first to find the relevant file(s).
-2. Then read the specific file(s) from `shielded_vote_book/`.
-3. Do NOT ingest the entire book for a single question.
+When answering questions about ZKP circuits, protocol design, data types, or any topic covered by the spec:
+
+1. **Check the symlink first:** Try to read `shielded_vote_book/SUMMARY.md`. If it fails, stop and prompt the user to set up the symlink (see below) before continuing. Do not answer spec-related questions from the index alone without informing the user the full book is unavailable.
+2. Read `docs/shielded-vote-book-index.md` to find the relevant file(s).
+3. Then read the specific file(s) from `shielded_vote_book/`.
+4. Do NOT ingest the entire book for a single question.
 
 ## Keeping the index accurate
 
