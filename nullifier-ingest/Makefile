@@ -41,7 +41,7 @@ endif
 
 # ── Targets ──────────────────────────────────────────────────────────
 
-.PHONY: build-nf ingest ingest-resync export-nf serve bootstrap test-proof build test test-integration clean status help
+.PHONY: build-nf ingest ingest-resync export-nf serve bootstrap build test clean status help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -50,9 +50,8 @@ help: ## Show this help
 build-nf: ## Build nf-server binary (release, nightly)
 	cd $(NF_DIR) && cargo build --release
 
-build: ## Build nf-server and service binaries (release)
+build: ## Build nf-server and service library (release)
 	cd $(NF_DIR) && cargo build --release
-	cd $(SERVICE_DIR) && cargo build --release
 
 bootstrap: ## Download nullifier files from bootstrap URL if not present in DATA_DIR
 	@if [ ! -f "$(DATA_DIR)/nullifiers.checkpoint" ]; then \
@@ -78,15 +77,9 @@ export-nf: ## Build PIR tree and export tier files from nullifiers.bin
 serve: ## Start the PIR HTTP server
 	cd $(NF_DIR) && cargo run --release --features serve -- serve --pir-data-dir ../$(PIR_DATA_DIR) --data-dir ../$(DATA_DIR) --port $(PORT)
 
-test-proof: ## Run exclusion proof verification against ingested data
-	cd $(SERVICE_DIR) && DATA_DIR=../$(DATA_DIR) cargo run --release --bin test-non-inclusion
-
 test: ## Run unit tests for all subcrates
 	cd $(IMT_DIR) && cargo test --lib
 	cd $(SERVICE_DIR) && cargo test --lib
-
-test-integration: ## Run IMT ↔ delegation-circuit ZK integration test
-	cd $(IMT_DIR) && cargo test --test imt_circuit_integration -- --nocapture
 
 status: ## Show ingestion progress (nullifier count + last synced height)
 	@NF="$(DATA_DIR)/nullifiers.bin"; CP="$(DATA_DIR)/nullifiers.checkpoint"; \

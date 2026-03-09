@@ -17,24 +17,3 @@ axum = "0.6"
 tower-http = { version = "0.4", features = ["cors"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-orchard = { path = "../../orchard" }
-incrementalmerkletree = { version = "0.8.1", features = ["legacy-api"] }
-
-[dev-dependencies]
-reqwest = { version = "0.11", features = ["json", "blocking"] }
-halo2_proofs = "0.3"
-rand = "0.8"
-voting-circuits = { path = "../../voting-circuits" }
-
-[[bin]]
-name = "ingest-nfs"
-path = "src/bin/ingest_nfs.rs"
-
-[[bin]]
-name = "test-non-inclusion"
-path = "src/bin/test_non_inclusion.rs"
-
-[[bin]]
-name = "query-server"
-path = "src/bin/server.rs"

@@ -51,10 +51,14 @@ use pasta_curves::Fp;
 /// Domain tag for Vote Commitments (matches `orchard::vote_proof::circuit::DOMAIN_VC`).
 pub const DOMAIN_VC: u64 = 1;
 
-/// Poseidon hash of two field elements (delegates to imt-tree for circuit consistency).
+/// Poseidon hash of two field elements (P128Pow5T3, ConstantLength<2>).
+///
+/// Uses the same Poseidon parameterisation as imt-tree's PoseidonHasher,
+/// ensuring circuit consistency between vote-commitment and nullifier trees.
 #[inline]
 pub fn poseidon_hash(left: Fp, right: Fp) -> Fp {
-    imt_tree::poseidon_hash(left, right)
+    use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
+    poseidon::Hash::<_, P128Pow5T3, ConstantLength<2>, 3, 2>::init().hash([left, right])
 }
 
 /// Poseidon hash of six field elements (`ConstantLength<6>`, width 3, rate 2).

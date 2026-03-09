@@ -3258,7 +3258,6 @@ dependencies = [
  "anyhow",
  "ff",
  "halo2_gadgets",
- "imt-tree",
  "incrementalmerkletree",
  "lazy_static",
  "libc",

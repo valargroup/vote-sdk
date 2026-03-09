@@ -364,18 +364,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
-name = "imt-tree"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ff",
- "halo2_gadgets",
- "hex",
- "pasta_curves",
- "rayon",
-]
-
-[[package]]
 name = "incrementalmerkletree"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -891,7 +879,6 @@ dependencies = [
  "anyhow",
  "ff",
  "halo2_gadgets",
- "imt-tree",
  "incrementalmerkletree",
  "lazy_static",
  "libc",

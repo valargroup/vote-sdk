@@ -12,12 +12,8 @@ halo2_gadgets = { version = "0.3", default-features = false }
 rayon = "1"
 
 [dev-dependencies]
-orchard = { path = "../../orchard" }
-voting-circuits = { path = "../../voting-circuits" }
-halo2_proofs = { version = "0.3" }
-rand = "0.8"
-incrementalmerkletree = "0.8.1"
 criterion = "0.5"
+rand = "0.8"
 
 [[bench]]
 name = "tree_build"

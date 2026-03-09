@@ -4,12 +4,14 @@ on:
   push:
     branches: [main]
     paths:
-      - 'nullifier-ingest/**'
+      - 'voting-circuits/**'
+      - 'nullifier-ingest/imt-tree/**'
       - 'orchard/**'
   pull_request:
     branches: [main]
     paths:
-      - 'nullifier-ingest/**'
+      - 'voting-circuits/**'
+      - 'nullifier-ingest/imt-tree/**'
       - 'orchard/**'
 
 permissions:
@@ -30,12 +32,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            nullifier-ingest/imt-tree/target
+            voting-circuits/target
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-imt-tree-${{ hashFiles('nullifier-ingest/imt-tree/Cargo.lock') }}
+          key: ${{ runner.os }}-voting-circuits-imt-${{ hashFiles('voting-circuits/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-imt-tree-
+            ${{ runner.os }}-voting-circuits-imt-
       - name: Run IMT integration test
         run: cargo test --test imt_circuit_integration -- --nocapture
-        working-directory: nullifier-ingest/imt-tree
+        working-directory: voting-circuits

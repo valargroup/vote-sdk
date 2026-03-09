@@ -18,8 +18,10 @@ lazy_static = "1"
 sinsemilla = "0.1"
 
 [dev-dependencies]
+imt-tree = { path = "../nullifier-ingest/imt-tree" }
 criterion = "0.4"
 rand = "0.8"
+incrementalmerkletree = "0.8.1"
 
 [features]
 default = ["std"]
