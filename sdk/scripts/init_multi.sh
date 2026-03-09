@@ -226,7 +226,7 @@ if [ "$CI_MODE" = true ]; then
     PUBLIC_IP=$(curl -4s --connect-timeout 5 ifconfig.me || true)
     if [ -n "$PUBLIC_IP" ]; then
         DASHED_IP=$(echo "$PUBLIC_IP" | tr '.' '-')
-        PULSE_URL="${VOTING_CONFIG_URL:-https://shielded-vote-phi.vercel.app}"
+        PULSE_URL="${VOTING_CONFIG_URL:-https://shielded-vote.vercel.app}"
     fi
 fi
 
@@ -397,7 +397,7 @@ fi
 # are populated — PIR runs on the main domain and is configured separately.
 #
 # Requires: VERCEL_API_TOKEN, EDGE_CONFIG_ID (skipped silently if unset)
-# Optional: VOTING_CONFIG_URL (default: https://shielded-vote-phi.vercel.app)
+# Optional: VOTING_CONFIG_URL (default: https://shielded-vote.vercel.app)
 
 if [ "$CI_MODE" = true ] && [ -n "$VERCEL_API_TOKEN" ] && [ -n "$EDGE_CONFIG_ID" ]; then
     echo ""
@@ -413,7 +413,7 @@ if [ "$CI_MODE" = true ] && [ -n "$VERCEL_API_TOKEN" ] && [ -n "$EDGE_CONFIG_ID"
             BASE_DOMAIN="${DASHED_IP}.sslip.io"
 
             # Fetch current voting-config from the public endpoint.
-            CONFIG_URL="${VOTING_CONFIG_URL:-https://shielded-vote-phi.vercel.app}"
+            CONFIG_URL="${VOTING_CONFIG_URL:-https://shielded-vote.vercel.app}"
             CURRENT_CONFIG=$(curl -s "${CONFIG_URL}/api/voting-config" 2>/dev/null)
             if ! echo "$CURRENT_CONFIG" | jq -e '.vote_servers' > /dev/null 2>&1; then
                 CURRENT_CONFIG='{"version":1,"vote_servers":[],"pir_servers":[]}'

@@ -5,7 +5,7 @@ How Zashi discovers vote servers and PIR servers at runtime.
 ## Resolution order
 
 1. **Local override** — `voting-config-local.json` bundled in the app (DEBUG builds only)
-2. **CDN** — `https://shielded-vote-phi.vercel.app/api/voting-config` (served from Vercel Edge Config)
+2. **CDN** — `https://shielded-vote.vercel.app/api/voting-config` (served from Vercel Edge Config)
 3. **Hardcoded fallback** — deployed dev server (`46.101.255.48`)
 
 The first source that succeeds wins. This means a TestFlight build works out of the box (CDN or fallback), while a developer can drop a local file into the bundle to point at localhost.
@@ -84,7 +84,7 @@ The heartbeat is configured in `app.toml` under `[helper]`:
 
 ```toml
 # Vercel base URL for the heartbeat endpoint.
-pulse_url = "https://shielded-vote-phi.vercel.app"
+pulse_url = "https://shielded-vote.vercel.app"
 
 # This server's public URL as seen by clients (the Caddy TLS URL).
 helper_url = "https://1-2-3-4.sslip.io"

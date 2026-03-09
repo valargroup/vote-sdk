@@ -46,7 +46,7 @@ SVOTE_MONIKER=my-validator \
 | `SVOTE_MONIKER` | *(prompted)* | Validator display name |
 | `SVOTE_INSTALL_DIR` | `~/.local/bin` | Where to install `svoted` and `create-val-tx` |
 | `SVOTE_HOME` | `~/.svoted` | Node home directory |
-| `VOTING_CONFIG_URL` | `https://shielded-vote-phi.vercel.app` | Vercel app URL for network discovery |
+| `VOTING_CONFIG_URL` | `https://shielded-vote.vercel.app` | Vercel app URL for network discovery |
 
 After initialization, `join.sh` starts the node, syncs, and waits for funding. Ask the bootstrap operator to fund your address using the **admin UI** (Validators → Fund validator). Once funded, the script automatically registers you as a validator.
 

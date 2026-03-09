@@ -32,7 +32,7 @@ public struct VotingServiceConfig: Codable, Equatable, Sendable {
     }
 
     /// CDN URL for the production config (served from Vercel Edge Config).
-    public static let cdnURL = URL(string: "https://shielded-vote-phi.vercel.app/api/voting-config")!
+    public static let cdnURL = URL(string: "https://shielded-vote.vercel.app/api/voting-config")!
 
     /// Filename for a local override bundled in the app (takes priority over CDN).
     public static let localOverrideFilename = "voting-config-local.json"

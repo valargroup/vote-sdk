@@ -131,7 +131,7 @@ watch -n2 'svoted status --home ~/.svoted 2>/dev/null | python3 -c \
 
 Every node serves its own `genesis.json` at `/shielded-vote/v1/genesis`, so manual upload is no longer needed. Instead, register the genesis node's public URL in Edge Config so that joining validators can discover it.
 
-1. Open the admin UI (`mise ui` or `https://shielded-vote-phi.vercel.app`)
+1. Open the admin UI (`mise ui` or `https://shielded-vote.vercel.app`)
 2. Navigate to **Validators**
 3. On the genesis validator's card, click **Register public URL**
 4. Enter the validator's public HTTPS endpoint (e.g. `https://46-101-255-48.sslip.io`)

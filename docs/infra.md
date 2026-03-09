@@ -35,8 +35,8 @@ Caddy terminates TLS and routes by path:
 | Genesis        | `https://46-101-255-48.sslip.io`           | `/shielded-vote/v1/genesis`         |
 | Helper server  | `https://46-101-255-48.sslip.io`           | `/api/v1/status`                    |
 | Nullifier PIR  | `https://46-101-255-48.sslip.io/nullifier` | `/nullifier/` (Caddy strips prefix) |
-| Frontend (UI)  | `https://shielded-vote-phi.vercel.app`     | —                                   |
-| Voting config  | `https://shielded-vote-phi.vercel.app`     | `/api/voting-config`                |
+| Frontend (UI)  | `https://shielded-vote.vercel.app`     | —                                   |
+| Voting config  | `https://shielded-vote.vercel.app`     | `/api/voting-config`                |
 
 ## Frontend env vars
 
@@ -69,7 +69,7 @@ curl -sf https://46-101-255-48.sslip.io/api/v1/status
 curl -sf https://46-101-255-48.sslip.io/nullifier/health
 
 # Voting config (Edge Config)
-curl -sf https://shielded-vote-phi.vercel.app/api/voting-config
+curl -sf https://shielded-vote.vercel.app/api/voting-config
 ```
 
 ## Ceremony

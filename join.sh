@@ -25,7 +25,7 @@ CHAIN_ID="svote-1"
 INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
-VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://shielded-vote-phi.vercel.app}"
+VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://shielded-vote.vercel.app}"
 
 # Parse --domain flag for TLS hostname override.
 SVOTE_DOMAIN="${SVOTE_DOMAIN:-}"
