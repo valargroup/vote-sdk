@@ -9,11 +9,11 @@ on:
       slack_summary:
         description: 'Post summary to Slack'
         required: false
-        default: 'true'
+        default: 'false'
         type: choice
         options:
-          - 'true'
           - 'false'
+          - 'true'
 
 jobs:
   audit:
