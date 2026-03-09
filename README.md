@@ -79,10 +79,10 @@ Each validator's `ea_sk` share is encrypted using ECIES over the Pallas curve wi
 
 The VoteManager is a singleton on-chain address that gates who can create voting sessions. Before any `MsgCreateVotingSession` is accepted, a VoteManager must be set.
 
-**`MsgSetVoteManager`** -- Sets or changes the VoteManager address.
-- **Bootstrap:** When no VoteManager exists, any bonded validator can set the first one
-- **Update:** Once set, the current VoteManager **or any bonded validator** can change it
-- Non-validators who are not the current VoteManager are rejected
+**`MsgSetVoteManager`** -- Reassigns the VoteManager role.
+- Only the current VoteManager can call this — validators cannot reassign it
+- Transfers the caller's full `usvote` balance to the new manager atomically
+- The VoteManager must be set in genesis (no bootstrap path)
 - Uses custom wire format tag `0x0C` and REST endpoint `POST /shielded-vote/v1/set-vote-manager`
 - Stored as a singleton `VoteManagerState` in the KV store (key `0x0A`)
 
@@ -152,13 +152,13 @@ Every message has a specific set of auth checks enforced across the ABCI pipelin
 
 These flow through the standard ante chain: signature verification (`SigVerificationDecorator`), then `CeremonyValidatorDecorator` for validator-gated types.
 
-| Message                           | Who can submit                              | Ante checks                                                            | MsgServer checks                                                                                                           |
-| --------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `MsgRegisterPallasKey`            | Any bonded validator                        | secp256k1 sig + `CeremonyValidatorDecorator` (bonded validator gate)   | Valid Pallas point; no duplicate registration                                                                              |
-| `MsgCreateValidatorWithPallasKey` | Anyone (becomes a validator)                | secp256k1 sig; exempt from `CeremonyValidatorDecorator`                | Delegates to `x/staking` `CreateValidator`; registers Pallas key; rejects duplicates                                       |
-| `MsgSetVoteManager`               | Current VoteManager or any bonded validator | secp256k1 sig; exempt from `CeremonyValidatorDecorator` (has own auth) | `ValidateVoteManagerOrValidator`: accept current VoteManager, any bonded validator, or (on bootstrap) any bonded validator |
-| `MsgCreateVotingSession`          | VoteManager only                            | secp256k1 sig (standard Cosmos Tx)                                     | `ValidateVoteManagerOnly`: creator must be the on-chain VoteManager address                                                |
-| `MsgCreateValidator`              | **Blocked** post-genesis                    | Ante handler rejects at `BlockHeight > 0`                              | N/A — never reaches MsgServer                                                                                              |
+| Message                           | Who can submit               | Ante checks                                                            | MsgServer checks                                                                                                         |
+| --------------------------------- | ---------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `MsgRegisterPallasKey`            | Any bonded validator         | secp256k1 sig + `CeremonyValidatorDecorator` (bonded validator gate)   | Valid Pallas point; no duplicate registration                                                                            |
+| `MsgCreateValidatorWithPallasKey` | Anyone (becomes a validator) | secp256k1 sig; exempt from `CeremonyValidatorDecorator`                | Delegates to `x/staking` `CreateValidator`; registers Pallas key; rejects duplicates                                     |
+| `MsgSetVoteManager`               | Current VoteManager only     | secp256k1 sig; exempt from `CeremonyValidatorDecorator` (has own auth) | `ValidateVoteManagerOnly`: only the current VoteManager can reassign; transfers full `usvote` balance to the new manager |
+| `MsgCreateVotingSession`          | VoteManager only             | secp256k1 sig (standard Cosmos Tx)                                     | `ValidateVoteManagerOnly`: creator must be the on-chain VoteManager address                                              |
+| `MsgCreateValidator`              | **Blocked** post-genesis     | Ante handler rejects at `BlockHeight > 0`                              | N/A — never reaches MsgServer                                                                                            |
 
 #### Vote-round messages (custom wire format, ZKP/RedPallas auth)
 

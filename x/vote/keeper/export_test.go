@@ -21,3 +21,8 @@ func (k *Keeper) StoreServiceForTest() store.KVStoreService {
 func (k *Keeper) SetStakingKeeper(sk StakingKeeper) {
 	k.stakingKeeper = sk
 }
+
+// SetBankKeeper replaces the bank keeper. Used in tests.
+func (k *Keeper) SetBankKeeper(bk BankKeeper) {
+	k.bankKeeper = bk
+}

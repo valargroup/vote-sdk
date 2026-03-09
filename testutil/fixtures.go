@@ -15,6 +15,9 @@ import (
 	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
+// TestAuthority is the module authority address used by all keeper tests.
+const TestAuthority = "sv1authority"
+
 // TestValAddr generates a deterministic valid bech32 validator operator address from a seed byte.
 func TestValAddr(seed byte) string {
 	addr := make([]byte, 20)

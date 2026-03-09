@@ -72,7 +72,7 @@ func (s *KeeperTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(testBlockTime)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), nil)
+	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 }
 
 func uint64Ptr(v uint64) *uint64 { return &v }
@@ -258,7 +258,7 @@ func (s *KeeperTestSuite) TestIterateActiveRounds() {
 
 func (s *KeeperTestSuite) TestGetAuthority() {
 	s.SetupTest()
-	s.Require().Equal("sv1authority", s.keeper.GetAuthority())
+	s.Require().Equal(svtest.TestAuthority, s.keeper.GetAuthority())
 }
 
 func (s *KeeperTestSuite) TestLogger() {

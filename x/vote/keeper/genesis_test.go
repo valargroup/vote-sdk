@@ -13,6 +13,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 
+	svtest "github.com/valargroup/shielded-vote/testutil"
 	"github.com/valargroup/shielded-vote/x/vote/keeper"
 	"github.com/valargroup/shielded-vote/x/vote/types"
 )
@@ -23,7 +24,7 @@ func TestExportImportGenesis(t *testing.T) {
 	testCtx := testutil.DefaultContextWithDB(t, key, tkey)
 	ctx := testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC())
 	storeService := runtime.NewKVStoreService(key)
-	k := keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), nil)
+	k := keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	kvStore := k.OpenKVStore(ctx)
 
 	roundID := bytes.Repeat([]byte{0xAA}, 32)
@@ -159,7 +160,7 @@ func TestExportImportGenesis(t *testing.T) {
 	testCtx2 := testutil.DefaultContextWithDB(t, key2, tkey2)
 	ctx2 := testCtx2.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC())
 	storeService2 := runtime.NewKVStoreService(key2)
-	k2 := keeper.NewKeeper(storeService2, "sv1authority", log.NewNopLogger(), nil)
+	k2 := keeper.NewKeeper(storeService2, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	kvStore2 := k2.OpenKVStore(ctx2)
 
 	require.NoError(t, k2.InitGenesis(kvStore2, gs))
@@ -245,7 +246,7 @@ func TestExportGenesisEmpty(t *testing.T) {
 	ctx := testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC())
 	_ = ctx
 	storeService := runtime.NewKVStoreService(key)
-	k := keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), nil)
+	k := keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	kvStore := k.OpenKVStore(ctx)
 
 	gs, err := k.ExportGenesis(kvStore)
@@ -270,7 +271,7 @@ func TestInitGenesisNil(t *testing.T) {
 	testCtx := testutil.DefaultContextWithDB(t, key, tkey)
 	ctx := testCtx.Ctx
 	storeService := runtime.NewKVStoreService(key)
-	k := keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), nil)
+	k := keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	kvStore := k.OpenKVStore(ctx)
 
 	require.NoError(t, k.InitGenesis(kvStore, nil))
