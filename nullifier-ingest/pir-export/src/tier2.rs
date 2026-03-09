@@ -127,11 +127,7 @@ impl<'a> Tier2Row<'a> {
             data.len(),
             TIER2_ROW_BYTES
         );
-        for (i, chunk) in data.chunks_exact(32).enumerate() {
-            crate::validate_fp_bytes(chunk).map_err(|e| {
-                anyhow::anyhow!("Tier 2 row invalid field element at 32-byte chunk {}: {}", i, e)
-            })?;
-        }
+        crate::validate_all_fp_chunks(data, "Tier 2 row")?;
         Ok(Self { data })
     }
 
@@ -163,34 +159,11 @@ impl<'a> Tier2Row<'a> {
             return None;
         }
         let base = TIER2_INTERNAL_NODES * 32;
+        let idx = crate::binary_search_records(self.data, base, valid_leaves, 64, 0, value)?;
 
-        // Binary search: find last populated leaf with low ≤ value
-        let mut lo = 0usize;
-        let mut hi = valid_leaves;
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            let low_offset = base + mid * 64;
-            let low = crate::read_fp(&self.data[low_offset..low_offset + 32]);
-            if low <= value {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-
-        if lo == 0 {
-            return None;
-        }
-        let idx = lo - 1;
-
-        // Check value is within the range: value - low ≤ width
+        // Verify value is within the range: value - low <= width
         let (low, width) = self.leaf_record(idx);
-        let offset_val = value - low;
-        if offset_val <= width {
-            Some(idx)
-        } else {
-            None
-        }
+        if value - low <= width { Some(idx) } else { None }
     }
 
     /// Extract the 8 sibling hashes from this Tier 2 row for a given leaf index.

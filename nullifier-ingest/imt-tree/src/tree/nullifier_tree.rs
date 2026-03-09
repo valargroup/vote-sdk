@@ -65,7 +65,7 @@ impl NullifierTree {
         let empty_hashes = precompute_empty_hashes();
 
         let t1 = Instant::now();
-        let (root, levels) = build_levels(leaves, &empty_hashes);
+        let (root, levels) = build_levels(leaves, &empty_hashes, TREE_DEPTH);
         eprintln!("  Tree build ({} levels): {:.1}s", levels.len(), t1.elapsed().as_secs_f64());
 
         Self { ranges, levels, empty_hashes, root, height: None }

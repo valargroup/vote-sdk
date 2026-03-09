@@ -97,11 +97,7 @@ impl Tier0Data {
             data.len(),
             TIER0_BYTES
         );
-        for (i, chunk) in data.chunks_exact(32).enumerate() {
-            crate::validate_fp_bytes(chunk).map_err(|e| {
-                anyhow::anyhow!("Tier 0 invalid field element at 32-byte chunk {}: {}", i, e)
-            })?;
-        }
+        crate::validate_all_fp_chunks(&data, "Tier 0")?;
         Ok(Self { data })
     }
 
@@ -139,24 +135,7 @@ impl Tier0Data {
     /// Returns the subtree index (0..2047) or None if value is beyond all ranges.
     pub fn find_subtree(&self, value: Fp) -> Option<usize> {
         let base = TIER0_INTERNAL_NODES * 32;
-        // Manual binary search: find last index where min_key ≤ value
-        let mut lo = 0usize;
-        let mut hi = TIER1_ROWS;
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            let mk = crate::read_fp(&self.data[base + mid * 64 + 32..base + mid * 64 + 64]);
-            if mk <= value {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        // lo = first index where min_key > value
-        if lo == 0 {
-            None
-        } else {
-            Some(lo - 1)
-        }
+        crate::binary_search_records(&self.data, base, TIER1_ROWS, 64, 32, value)
     }
 
     /// Extract the 11 sibling hashes from Tier 0 for a given depth-11 subtree index.
