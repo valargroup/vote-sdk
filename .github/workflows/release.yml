@@ -1,4 +1,7 @@
-# Build pre-compiled binaries and publish a GitgHub Release on version tags.
+# Build pre-compiled binaries and publish a GitHub Release on version tags.
+#
+# SDK binaries (svoted, create-val-tx) are built here. nf-server is fetched
+# from the latest release of valargroup/vote-nullifier-pir.
 #
 # Tarball layout:
 #   shielded-vote-<version>-<platform>/
@@ -89,71 +92,10 @@ jobs:
             sdk/svoted
             sdk/create-val-tx
 
-  build-ingest:
-    name: Build nf-server (${{ matrix.platform }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux-amd64
-          - os: ubuntu-24.04-arm
-            platform: linux-arm64
-          - os: macos-latest
-            platform: darwin-arm64
-          - os: macos-latest
-            platform: darwin-amd64
-            cross: true
-            rust_target: x86_64-apple-darwin
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target || '' }}
-
-      - name: Cache Rust build
-        uses: actions/cache@v4
-        with:
-          path: |
-            nullifier-ingest/nf-server/target
-            nullifier-ingest/imt-tree/target
-            nullifier-ingest/service/target
-            nullifier-ingest/pir-export/target
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-${{ matrix.platform }}-nf-server-${{ hashFiles('nullifier-ingest/nf-server/Cargo.lock', 'nullifier-ingest/service/Cargo.lock', 'nullifier-ingest/imt-tree/Cargo.lock', 'nullifier-ingest/pir-export/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.platform }}-nf-server-
-
-      - name: Build release binary
-        working-directory: nullifier-ingest/nf-server
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            # Cross-compile without serve: YPIR's C++ build uses -march=native
-            # which fails when host and target arch differ.
-            cargo build --release --target ${{ matrix.rust_target }}
-            mkdir -p target/release
-            cp target/${{ matrix.rust_target }}/release/nf-server target/release/
-          else
-            cargo build --release --features serve
-          fi
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ingest-binaries-${{ matrix.platform }}
-          path: nullifier-ingest/nf-server/target/release/nf-server
-
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-sdk, build-ingest]
+    needs: [build-sdk]
     steps:
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -186,11 +128,18 @@ jobs:
           name: sdk-binaries-${{ matrix.platform }}
           path: sdk-binaries
 
-      - name: Download ingest binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: ingest-binaries-${{ matrix.platform }}
-          path: ingest-binaries
+      - name: Download nf-server from vote-nullifier-pir
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p ingest-binaries
+          gh release download --repo valargroup/vote-nullifier-pir \
+            --pattern "nf-server-${{ matrix.platform }}" \
+            --output ingest-binaries/nf-server
+          gh release download --repo valargroup/vote-nullifier-pir \
+            --pattern "nullifier-query-server.service" \
+            --output ingest-binaries/nullifier-query-server.service
+          chmod +x ingest-binaries/nf-server
 
       - name: Assemble tarball
         run: |
@@ -217,7 +166,7 @@ jobs:
             sed -e 's|WorkingDirectory=/opt/nullifier-ingest|WorkingDirectory=/opt/shielded-vote/nullifier-data|' \
                 -e 's|DATA_DIR=/opt/nullifier-ingest|DATA_DIR=/opt/shielded-vote/nullifier-data|' \
                 -e 's|ExecStart=/opt/nullifier-ingest/nf-server|ExecStart=/opt/shielded-vote/bin/nf-server|' \
-                nullifier-ingest/docs/nullifier-query-server.service > "${DIR}/systemd/nullifier-query-server.service"
+                ingest-binaries/nullifier-query-server.service > "${DIR}/systemd/nullifier-query-server.service"
           fi
 
           # Scripts

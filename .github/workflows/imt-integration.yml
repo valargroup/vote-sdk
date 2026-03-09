@@ -5,13 +5,11 @@ on:
     branches: [main]
     paths:
       - 'voting-circuits/**'
-      - 'nullifier-ingest/imt-tree/**'
       - 'orchard/**'
   pull_request:
     branches: [main]
     paths:
       - 'voting-circuits/**'
-      - 'nullifier-ingest/imt-tree/**'
       - 'orchard/**'
 
 permissions:

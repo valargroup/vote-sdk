@@ -5,12 +5,10 @@ on:
     branches: [main]
     paths:
       - 'vote-commitment-tree/**'
-      - 'nullifier-ingest/imt-tree/**'
   pull_request:
     branches: [main]
     paths:
       - 'vote-commitment-tree/**'
-      - 'nullifier-ingest/imt-tree/**'
 
 permissions:
   contents: read
