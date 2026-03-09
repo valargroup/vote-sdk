@@ -294,14 +294,22 @@ pub unsafe extern "C" fn sv_verify_redpallas_sig(
 
 /// Verify a real delegation circuit proof (ZKP #1).
 ///
-/// The public inputs are passed as a flat byte array of 12 × 32-byte
-/// chunks (384 bytes total), in the order:
-///   [nf_signed, rk_compressed, cmx_new, van_comm, vote_round_id,
-///    nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4, gov_null_5]
+/// The caller sends 12 × 32-byte chunks (384 bytes). This function
+/// decompresses the compressed Pallas point to produce the circuit's
+/// 13 Fp public inputs:
 ///
-/// The `rk_compressed` is a 32-byte compressed Pallas curve point. The FFI
-/// decompresses it into (rk_x, rk_y) to produce the 13 field elements that
-/// the circuit expects.
+/// | Wire slot | Field              | Expansion                    |
+/// |-----------|--------------------|------------------------------|
+/// | 0         | nf_signed          | Fp (1 element)               |
+/// | 1         | rk (compressed)    | → rk_x, rk_y (2 elements)   |
+/// | 2         | cmx_new            | Fp (1 element)               |
+/// | 3         | van_comm           | Fp (1 element)               |
+/// | 4         | vote_round_id      | Fp (1 element)               |
+/// | 5         | nc_root            | Fp (1 element)               |
+/// | 6         | nf_imt_root        | Fp (1 element)               |
+/// | 7–11      | gov_null_1..5      | Fp (5 elements)              |
+///
+/// Total: 12 wire chunks → 13 circuit public inputs.
 ///
 /// # Arguments
 /// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
@@ -510,20 +518,29 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
 
 /// Verify a real vote proof circuit proof (ZKP #2).
 ///
-/// The public inputs are passed as a flat byte array of 10 × 32-byte
-/// chunks (320 bytes total), in the order:
-///   [van_nullifier, r_vpk_x, r_vpk_y, vote_authority_note_new, vote_commitment,
-///    vote_comm_tree_root, anchor_height_le, proposal_id_le, voting_round_id, ea_pk_compressed]
+/// The caller sends 9 × 32-byte chunks (288 bytes). This function
+/// decompresses compressed Pallas points and converts integer slots to
+/// produce the circuit's 11 Fp public inputs:
 ///
-/// Condition 4 (Spend Authority) adds r_vpk = vsk.ak + [alpha_v]*G; r_vpk_x and r_vpk_y
-/// are public inputs at slots 1 and 2. Slot 9 (ea_pk) is decompressed to (ea_pk_x, ea_pk_y)
-/// for the circuit's 11 field elements.
+/// | Wire slot | Field                     | Expansion                       |
+/// |-----------|---------------------------|---------------------------------|
+/// | 0         | van_nullifier             | Fp (1 element)                  |
+/// | 1         | r_vpk (compressed point)  | → r_vpk_x, r_vpk_y (2 elements)|
+/// | 2         | vote_authority_note_new   | Fp (1 element)                  |
+/// | 3         | vote_commitment           | Fp (1 element)                  |
+/// | 4         | vote_comm_tree_root       | Fp (1 element)                  |
+/// | 5         | anchor_height (u64 LE)    | → Fp::from(u64) (1 element)     |
+/// | 6         | proposal_id (u32 LE)      | → Fp::from(u32) (1 element)     |
+/// | 7         | voting_round_id           | Fp (1 element)                  |
+/// | 8         | ea_pk (compressed point)  | → ea_pk_x, ea_pk_y (2 elements) |
+///
+/// Total: 9 wire chunks → 11 circuit public inputs.
 ///
 /// # Arguments
 /// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
 /// * `proof_len`         - Length of the proof byte slice.
-/// * `public_inputs_ptr` - Pointer to 320 bytes (10 × 32-byte chunks).
-/// * `public_inputs_len` - Length of the public inputs byte slice (must be 320).
+/// * `public_inputs_ptr` - Pointer to 288 bytes (9 × 32-byte chunks).
+/// * `public_inputs_len` - Length of the public inputs byte slice (must be 288).
 ///
 /// # Returns
 /// * `0`  on successful verification.
