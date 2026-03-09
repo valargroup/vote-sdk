@@ -68,4 +68,3 @@ func write32(h hash.Hash, b []byte) {
 	}
 	h.Write(buf[:])
 }
-
