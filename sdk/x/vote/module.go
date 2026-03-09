@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
@@ -219,6 +220,7 @@ type ModuleInputs struct {
 	Logger        log.Logger
 	Config        *modulev1.Module
 	StakingKeeper *stakingkeeper.Keeper
+	BankKeeper    bankkeeper.BaseKeeper
 }
 
 // ModuleOutputs defines the outputs produced by the vote module.
@@ -236,6 +238,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.Config.Authority,
 		in.Logger,
 		in.StakingKeeper,
+		&in.BankKeeper,
 	)
 
 	m := NewAppModule(k, in.Cdc)

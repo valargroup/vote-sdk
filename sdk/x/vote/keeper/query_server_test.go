@@ -16,6 +16,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	svtest "github.com/valargroup/shielded-vote/testutil"
 	"github.com/valargroup/shielded-vote/x/vote/keeper"
 	"github.com/valargroup/shielded-vote/x/vote/types"
 )
@@ -44,7 +45,7 @@ func (s *QueryServerTestSuite) SetupTest() {
 
 	s.ctx = testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC()).WithBlockHeight(10)
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, "sv1authority", log.NewNopLogger(), nil)
+	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	s.queryServer = keeper.NewQueryServerImpl(s.keeper)
 	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }

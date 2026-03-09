@@ -181,11 +181,11 @@ message PartialDecryptionEntry {
 
 message MsgSubmitPartialDecryptionResponse {}
 
-// MsgSetVoteManager sets or changes the vote manager address.
-// Only callable by the current vote manager or any bonded validator.
-// On first call (no vote manager set), accepts any bonded validator.
+// MsgSetVoteManager reassigns the vote manager role.
+// Only callable by the current vote manager. Transfers the caller's full
+// usvote balance to new_manager atomically.
 message MsgSetVoteManager {
-  string creator     = 1; // Sender address (must be current vote manager or a validator)
+  string creator     = 1; // Sender address (must be the current vote manager)
   string new_manager = 2; // New vote manager address
 }
 

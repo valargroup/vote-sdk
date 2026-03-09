@@ -5,6 +5,7 @@ import (
 
 	"cosmossdk.io/log"
 
+	svtest "github.com/valargroup/shielded-vote/testutil"
 	"github.com/valargroup/shielded-vote/x/vote/keeper"
 	"github.com/valargroup/shielded-vote/x/vote/types"
 )
@@ -579,8 +580,9 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
 	// root3 must match what a cold-start restart produces.
 	freshKeeper := keeper.NewKeeper(
 		s.keeper.StoreServiceForTest(),
-		"sv1authority",
+		svtest.TestAuthority,
 		log.NewNopLogger(),
+		nil,
 		nil,
 	)
 	freshRoot, err := freshKeeper.ComputeTreeRoot(kv, 3, 3)
@@ -651,8 +653,9 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 	// root at checkpoint 10 without replaying any leaves.
 	freshKeeper := keeper.NewKeeper(
 		s.keeper.StoreServiceForTest(),
-		"sv1authority",
+		svtest.TestAuthority,
 		log.NewNopLogger(),
+		nil,
 		nil,
 	)
 

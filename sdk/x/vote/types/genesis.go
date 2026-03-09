@@ -59,11 +59,12 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
-	// Validate vote manager address if set.
-	if gs.VoteManager != "" {
-		if _, err := sdk.AccAddressFromBech32(gs.VoteManager); err != nil {
-			return fmt.Errorf("vote_manager %q is not a valid bech32 address: %w", gs.VoteManager, err)
-		}
+	// Vote manager is required in genesis — there is no bootstrap path.
+	if gs.VoteManager == "" {
+		return fmt.Errorf("vote_manager is required in genesis")
+	}
+	if _, err := sdk.AccAddressFromBech32(gs.VoteManager); err != nil {
+		return fmt.Errorf("vote_manager %q is not a valid bech32 address: %w", gs.VoteManager, err)
 	}
 
 	// Validate tally results.

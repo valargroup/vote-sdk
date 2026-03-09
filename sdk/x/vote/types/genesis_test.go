@@ -203,12 +203,15 @@ func TestValidateGenesisState_CommitmentRootEmptyRoot(t *testing.T) {
 	require.Contains(t, err.Error(), "commitment_roots[0].root is empty")
 }
 
-func TestValidateGenesisState_EmptyGenesisIsValid(t *testing.T) {
-	require.NoError(t, types.ValidateGenesisState(&types.GenesisState{}))
+func TestValidateGenesisState_EmptyVoteManagerRejected(t *testing.T) {
+	err := types.ValidateGenesisState(&types.GenesisState{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "vote_manager is required")
 }
 
 func TestValidateGenesisState_NoTreeStateWithLeavesIsValid(t *testing.T) {
 	gs := &types.GenesisState{
+		VoteManager: "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl",
 		CommitmentLeaves: []*types.CommitmentLeaf{
 			{Index: 0, Value: bytes.Repeat([]byte{0x01}, 32)},
 		},
