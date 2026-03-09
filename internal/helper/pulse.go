@@ -85,7 +85,10 @@ func sendSigned(ctx context.Context, client *http.Client, endpoint string, cfg P
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return nil, fmt.Errorf("read response body (HTTP %d): %w", resp.StatusCode, err)
+	}
 
 	var result heartbeatResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {

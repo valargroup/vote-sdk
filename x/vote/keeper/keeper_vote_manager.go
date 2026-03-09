@@ -6,6 +6,7 @@ import (
 
 	"cosmossdk.io/core/store"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"github.com/valargroup/shielded-vote/x/vote/types"
 )
@@ -43,8 +44,11 @@ func (k *Keeper) IsValidator(ctx context.Context, address string) bool {
 	if err != nil {
 		return false
 	}
-	_, err = k.stakingKeeper.GetValidator(ctx, valAddr)
-	return err == nil
+	val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
+	if err != nil {
+		return false
+	}
+	return val.GetStatus() == stakingtypes.Bonded
 }
 
 // ValidateVoteManagerOrValidator checks that the creator is either the current

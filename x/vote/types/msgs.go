@@ -34,11 +34,8 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 	if len(msg.VkZkp3) == 0 {
 		return fmt.Errorf("%w: vk_zkp3 cannot be empty", ErrInvalidField)
 	}
-	// Max 15 usable proposals: the circuit's proposal_authority bitmask is 16 bits
-	// but bit 0 is reserved as the sentinel (rejected by the non-zero gate), so
-	// only bit positions 1–15 are usable. IDs are 1-indexed (Id = i+1).
-	if len(msg.Proposals) == 0 || len(msg.Proposals) > 15 {
-		return fmt.Errorf("%w: proposals count must be between 1 and 15, got %d", ErrInvalidField, len(msg.Proposals))
+	if len(msg.Proposals) == 0 || len(msg.Proposals) > MaxProposals {
+		return fmt.Errorf("%w: proposals count must be between 1 and %d, got %d", ErrInvalidField, MaxProposals, len(msg.Proposals))
 	}
 	for i, p := range msg.Proposals {
 		if p.Title == "" {
@@ -47,9 +44,8 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 		if p.Id != uint32(i+1) {
 			return fmt.Errorf("%w: proposal id mismatch at index %d: expected %d, got %d", ErrInvalidField, i, i+1, p.Id)
 		}
-		// Each proposal must have 2-8 vote options.
-		if len(p.Options) < 2 || len(p.Options) > 8 {
-			return fmt.Errorf("%w: proposal %d must have 2-8 options, got %d", ErrInvalidField, i, len(p.Options))
+		if len(p.Options) < 2 || len(p.Options) > MaxVoteOptions {
+			return fmt.Errorf("%w: proposal %d must have 2-%d options, got %d", ErrInvalidField, i, MaxVoteOptions, len(p.Options))
 		}
 		for j, opt := range p.Options {
 			if opt.Index != uint32(j) {
@@ -128,6 +124,9 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	if len(msg.VoteCommitment) == 0 {
 		return fmt.Errorf("%w: vote_commitment cannot be empty", ErrInvalidField)
 	}
+	if msg.ProposalId < MinProposalID || msg.ProposalId > MaxProposals {
+		return fmt.Errorf("%w: proposal_id must be %d..%d, got %d", ErrInvalidField, MinProposalID, MaxProposals, msg.ProposalId)
+	}
 	if len(msg.Proof) == 0 {
 		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
 	}
@@ -153,6 +152,12 @@ func (msg *MsgRevealShare) ValidateBasic() error {
 	}
 	if len(msg.EncShare) != 64 {
 		return fmt.Errorf("%w: enc_share must be 64 bytes (ElGamal ciphertext), got %d", ErrInvalidField, len(msg.EncShare))
+	}
+	if msg.ProposalId < MinProposalID || msg.ProposalId > MaxProposals {
+		return fmt.Errorf("%w: proposal_id must be %d..%d, got %d", ErrInvalidField, MinProposalID, MaxProposals, msg.ProposalId)
+	}
+	if msg.VoteDecision >= MaxVoteOptions {
+		return fmt.Errorf("%w: vote_decision must be 0..%d, got %d", ErrInvalidField, MaxVoteOptions-1, msg.VoteDecision)
 	}
 	if len(msg.Proof) == 0 {
 		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)

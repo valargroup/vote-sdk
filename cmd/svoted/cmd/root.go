@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -109,7 +110,10 @@ func ProvideClientContext(
 		WithHomeDir(app.DefaultNodeHome).
 		WithViper("") // uses by default the binary name as prefix
 
-	clientCtx, _ = config.ReadFromClientConfig(clientCtx)
+	clientCtx, err := config.ReadFromClientConfig(clientCtx)
+	if err != nil {
+		panic(fmt.Errorf("read client config: %w", err))
+	}
 
 	// textual is enabled by default, we need to re-create the tx config
 	// grpc instead of bank keeper.

@@ -354,31 +354,31 @@ Example:
 				return b, nil
 			}
 
-			snapshotBlockhash, err := decodeHex("snapshot_blockhash", input.SnapshotBlockhash)
+			snapshotBlockhash, err := decodeHex(types.SessionKeyBlockhash, input.SnapshotBlockhash)
 			if err != nil {
 				return err
 			}
-			proposalsHash, err := decodeHex("proposals_hash", input.ProposalsHash)
+			proposalsHash, err := decodeHex(types.SessionKeyProposalsHash, input.ProposalsHash)
 			if err != nil {
 				return err
 			}
-			nullifierImtRoot, err := decodeHex("nullifier_imt_root", input.NullifierImtRoot)
+			nullifierImtRoot, err := decodeHex(types.SessionKeyNullifierImtRoot, input.NullifierImtRoot)
 			if err != nil {
 				return err
 			}
-			ncRoot, err := decodeHex("nc_root", input.NcRoot)
+			ncRoot, err := decodeHex(types.SessionKeyNcRoot, input.NcRoot)
 			if err != nil {
 				return err
 			}
-			vkZkp1, err := decodeHex("vk_zkp1", input.VkZkp1)
+			vkZkp1, err := decodeHex(types.SessionKeyVkZkp1, input.VkZkp1)
 			if err != nil {
 				return err
 			}
-			vkZkp2, err := decodeHex("vk_zkp2", input.VkZkp2)
+			vkZkp2, err := decodeHex(types.SessionKeyVkZkp2, input.VkZkp2)
 			if err != nil {
 				return err
 			}
-			vkZkp3, err := decodeHex("vk_zkp3", input.VkZkp3)
+			vkZkp3, err := decodeHex(types.SessionKeyVkZkp3, input.VkZkp3)
 			if err != nil {
 				return err
 			}

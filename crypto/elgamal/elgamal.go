@@ -135,6 +135,9 @@ func ValuePoint(v uint64) curvey.Point {
 //
 //	C2 - sk * C1 = (v*G + r*pk) - sk*(r*G) = v*G
 func DecryptToPoint(sk *SecretKey, ct *Ciphertext) curvey.Point {
+	if sk == nil || ct == nil {
+		return nil
+	}
 	skC1 := ct.C1.Mul(sk.Scalar) // sk * C1 = sk * r * G
 	return ct.C2.Sub(skC1)       // C2 - sk*C1 = v*G
 }
@@ -144,6 +147,9 @@ func DecryptToPoint(sk *SecretKey, ct *Ciphertext) curvey.Point {
 //
 //	(r_a*G + r_b*G, a*G + b*G + (r_a+r_b)*pk) = Enc(a+b, r_a+r_b)
 func HomomorphicAdd(a, b *Ciphertext) *Ciphertext {
+	if a == nil || b == nil {
+		return nil
+	}
 	return &Ciphertext{
 		C1: a.C1.Add(b.C1),
 		C2: a.C2.Add(b.C2),

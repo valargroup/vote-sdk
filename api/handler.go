@@ -137,9 +137,9 @@ func (h *Handler) handleSnapshotData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
-		"nc_root":            hex.EncodeToString(data.NcRoot),
-		"nullifier_imt_root": hex.EncodeToString(data.NullifierIMTRoot),
-		"snapshot_blockhash": hex.EncodeToString(data.SnapshotBlockhash),
+		types.SessionKeyNcRoot:           hex.EncodeToString(data.NcRoot),
+		types.SessionKeyNullifierImtRoot: hex.EncodeToString(data.NullifierIMTRoot),
+		types.SessionKeyBlockhash:        hex.EncodeToString(data.SnapshotBlockhash),
 	})
 }
 
@@ -321,7 +321,10 @@ func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("CometBFT returned status %d (body unreadable: %v)", resp.StatusCode, readErr)
+		}
 		return nil, fmt.Errorf("CometBFT returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 

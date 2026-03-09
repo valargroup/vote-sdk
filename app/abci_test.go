@@ -1077,7 +1077,7 @@ func TestMultiValidatorCeremony_DealAckConfirm(t *testing.T) {
 	// (ValidateProposerIsCreator enforces creator == proposer).
 	for _, addr := range []string{phantom1Addr, phantom2Addr} {
 		h := sha256.New()
-		h.Write([]byte("ack"))
+		h.Write([]byte(types.AckSigDomain))
 		h.Write(round.EaPk)
 		h.Write([]byte(addr))
 
@@ -1326,7 +1326,7 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	// phantom1 would ack when they are the block proposer
 	// (ValidateProposerIsCreator enforces creator == proposer).
 	h := sha256.New()
-	h.Write([]byte("ack"))
+	h.Write([]byte(types.AckSigDomain))
 	h.Write(round.EaPk)
 	h.Write([]byte(phantom1Addr))
 	round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
@@ -1580,7 +1580,7 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	// which is exactly the security property we added.
 	for _, addr := range []string{phantom1Addr, phantom2Addr} {
 		h := sha256.New()
-		h.Write([]byte("ack"))
+		h.Write([]byte(types.AckSigDomain))
 		h.Write(round.EaPk)
 		h.Write([]byte(addr))
 

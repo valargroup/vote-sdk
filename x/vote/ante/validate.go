@@ -172,8 +172,8 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper
 		"van_cmx", hex.EncodeToString(msg.VanCmx),
 		"gov_nullifiers", govNullifiersHex,
 		"vote_round_id", hex.EncodeToString(msg.VoteRoundId),
-		"nc_root", hex.EncodeToString(round.NcRoot),
-		"nullifier_imt_root", hex.EncodeToString(round.NullifierImtRoot),
+		types.SessionKeyNcRoot, hex.EncodeToString(round.NcRoot),
+		types.SessionKeyNullifierImtRoot, hex.EncodeToString(round.NullifierImtRoot),
 	)
 	if err := opts.ZKPVerifier.VerifyDelegation(msg.Proof, zkp.DelegationInputs{
 		Rk:                  msg.Rk,

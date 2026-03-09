@@ -12,6 +12,8 @@ import (
 
 	"cosmossdk.io/log"
 	"github.com/gorilla/mux"
+
+	"github.com/valargroup/shielded-vote/x/vote/types"
 )
 
 // RegisterRoutes registers helper server HTTP routes on the given mux router.
@@ -222,11 +224,17 @@ func (h *apiHandler) verifyCommitment(p *SharePayload) error {
 	}
 
 	var roundID [32]byte
-	roundBytes, _ := hex.DecodeString(p.VoteRoundID) // already validated
+	roundBytes, err := hex.DecodeString(p.VoteRoundID)
+	if err != nil {
+		return fmt.Errorf("vote_round_id: %w", err)
+	}
 	copy(roundID[:], roundBytes)
 
 	var sharesHash [32]byte
-	shBytes, _ := base64.StdEncoding.DecodeString(p.SharesHash) // already validated
+	shBytes, err := base64.StdEncoding.DecodeString(p.SharesHash)
+	if err != nil {
+		return fmt.Errorf("shares_hash: %w", err)
+	}
 	copy(sharesHash[:], shBytes)
 
 	computed, err := vcHash(roundID, sharesHash, p.ProposalID, p.VoteDecision)
@@ -261,16 +269,22 @@ func validatePayload(p *SharePayload) error {
 	if err := validateB64Field(p.EncShare.C2, 32, "enc_share.c2"); err != nil {
 		return err
 	}
-	if p.EncShare.ShareIndex > 15 {
-		return fmt.Errorf("enc_share.share_index must be 0..15")
+	if p.EncShare.ShareIndex > types.MaxProposals {
+		return fmt.Errorf("enc_share.share_index must be 0..%d", types.MaxProposals)
 	}
 	if p.ShareIndex != p.EncShare.ShareIndex {
 		return fmt.Errorf("share_index must match enc_share.share_index")
 	}
 	// Protocol allows up to 8 options per proposal (indices 0-7).
 	// The chain keeper validates the exact range per-proposal.
-	if p.VoteDecision >= 8 {
-		return fmt.Errorf("vote_decision must be 0..7")
+	if p.VoteDecision >= types.MaxVoteOptions {
+		return fmt.Errorf("vote_decision must be 0..%d", types.MaxVoteOptions-1)
+	}
+	if p.ProposalID < types.MinProposalID || p.ProposalID > types.MaxProposals {
+		return fmt.Errorf("proposal_id must be %d..%d, got %d", types.MinProposalID, types.MaxProposals, p.ProposalID)
+	}
+	if p.TreePosition > types.MaxTreePosition {
+		return fmt.Errorf("tree_position %d exceeds maximum tree capacity", p.TreePosition)
 	}
 
 	// vote_round_id: hex, 32 bytes.

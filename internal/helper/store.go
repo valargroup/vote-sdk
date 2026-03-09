@@ -213,7 +213,10 @@ func columnNotInPK(db *sql.DB, tableName, columnName string) (bool, error) {
 // that may lack the vote_end_time column.
 func migrateSharesPK(db *sql.DB) error {
 	// Ensure vote_end_time exists before copying (old schemas may lack it).
-	hasVET, _ := tableHasColumn(db, "shares", "vote_end_time")
+	hasVET, err := tableHasColumn(db, "shares", "vote_end_time")
+	if err != nil {
+		return fmt.Errorf("check vote_end_time column: %w", err)
+	}
 	if !hasVET {
 		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN vote_end_time INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return fmt.Errorf("add vote_end_time: %w", err)
@@ -227,13 +230,19 @@ func migrateSharesPK(db *sql.DB) error {
 	defer tx.Rollback()
 
 	// Ensure share_comms and primary_blind columns exist before migration.
-	hasComms, _ := tableHasColumn(db, "shares", "share_comms")
+	hasComms, err := tableHasColumn(db, "shares", "share_comms")
+	if err != nil {
+		return fmt.Errorf("check share_comms column: %w", err)
+	}
 	if !hasComms {
 		if _, errA := db.Exec("ALTER TABLE shares ADD COLUMN share_comms TEXT NOT NULL DEFAULT '[]'"); errA != nil {
 			return fmt.Errorf("add share_comms before PK migration: %w", errA)
 		}
 	}
-	hasBlind, _ := tableHasColumn(db, "shares", "primary_blind")
+	hasBlind, err := tableHasColumn(db, "shares", "primary_blind")
+	if err != nil {
+		return fmt.Errorf("check primary_blind column: %w", err)
+	}
 	if !hasBlind {
 		if _, errA := db.Exec("ALTER TABLE shares ADD COLUMN primary_blind TEXT NOT NULL DEFAULT ''"); errA != nil {
 			return fmt.Errorf("add primary_blind before PK migration: %w", errA)
@@ -277,6 +286,8 @@ func migrateSharesPK(db *sql.DB) error {
 	return tx.Commit()
 }
 
+// schedKey builds a colon-delimited schedule key.
+// roundID must be hex-encoded (no colons), so the delimiter is unambiguous.
 func schedKey(roundID string, shareIndex, proposalID uint32, treePosition uint64) string {
 	return fmt.Sprintf("%s:%d:%d:%d", roundID, shareIndex, proposalID, treePosition)
 }
@@ -388,11 +399,23 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 			continue
 		}
 		roundID := parts[0]
-		idx64, _ := strconv.ParseUint(parts[1], 10, 32)
+		idx64, err := strconv.ParseUint(parts[1], 10, 32)
+		if err != nil {
+			delete(s.schedule, key)
+			continue
+		}
 		shareIndex := uint32(idx64)
-		pid64, _ := strconv.ParseUint(parts[2], 10, 32)
+		pid64, err := strconv.ParseUint(parts[2], 10, 32)
+		if err != nil {
+			delete(s.schedule, key)
+			continue
+		}
 		proposalID := uint32(pid64)
-		treePos, _ := strconv.ParseUint(parts[3], 10, 64)
+		treePos, err := strconv.ParseUint(parts[3], 10, 64)
+		if err != nil {
+			delete(s.schedule, key)
+			continue
+		}
 
 		// Only take shares in Received state (0).
 		res, err := s.db.Exec(
@@ -613,10 +636,12 @@ func (s *ShareStore) recover() error {
 		if voteEndTime == 0 {
 			if cached, ok := s.roundCache[roundID]; ok && cached != 0 {
 				voteEndTime = cached
-				_, _ = s.db.Exec(
+				if _, err := s.db.Exec(
 					"UPDATE shares SET vote_end_time = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
 					voteEndTime, roundID, shareIndex, proposalID, treePosition,
-				)
+				); err != nil {
+					s.logError("loadSchedule: healing vote_end_time failed", "round_id", roundID, "error", err)
+				}
 			}
 		}
 		delay := s.uniformDelay(voteEndTime)
@@ -745,7 +770,10 @@ func (s *ShareStore) uniformDelay(voteEndTime uint64) time.Duration {
 	}
 
 	var buf [8]byte
-	_, _ = rand.Read(buf[:])
+	if _, err := rand.Read(buf[:]); err != nil {
+		s.logError("uniformDelay: crypto/rand failed, falling back to min delay", "error", err)
+		return s.minDelay
+	}
 	u := float64(binary.LittleEndian.Uint64(buf[:])) / (float64(1<<64) + 1.0)
 
 	if voteEndTime == 0 {

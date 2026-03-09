@@ -91,8 +91,8 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 
 	ms.k.Logger().Info("CreateVotingSession",
 		"round_id", hex.EncodeToString(roundID),
-		"nullifier_imt_root", hex.EncodeToString(msg.NullifierImtRoot),
-		"nc_root", hex.EncodeToString(msg.NcRoot),
+		types.SessionKeyNullifierImtRoot, hex.EncodeToString(msg.NullifierImtRoot),
+		types.SessionKeyNcRoot, hex.EncodeToString(msg.NcRoot),
 		"ceremony_validators", len(eligible),
 	)
 	round := &types.VoteRound{

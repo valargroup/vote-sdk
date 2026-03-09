@@ -203,7 +203,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 	// Helper to build a valid ack tx targeting the current round.
 	validAckTx := func() []byte {
 		h := sha256.New()
-		h.Write([]byte("ack"))
+		h.Write([]byte(types.AckSigDomain))
 		h.Write(eaPkBytes)
 		h.Write([]byte(valAddr))
 		sig := h.Sum(nil)

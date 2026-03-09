@@ -299,10 +299,17 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 		return fmt.Errorf("ea_pk: %w", err)
 	}
 
+	// Validate compressed Pallas points before the FFI call.
+	if _, err := elgamal.UnmarshalPublicKey(inputs.RVpk); err != nil {
+		return fmt.Errorf("r_vpk: invalid compressed Pallas point: %w", err)
+	}
+	if _, err := elgamal.UnmarshalPublicKey(inputs.EaPk); err != nil {
+		return fmt.Errorf("ea_pk: invalid compressed Pallas point: %w", err)
+	}
+
 	// Validate Fp fields before the FFI call.
-	// Slots skipped: r_vpk (slot 1, compressed point), anchor_height (slot 5, uint64),
-	// proposal_id (slot 6, uint32), voting_round_id (slot 7, wide-reduced in Rust),
-	// ea_pk (slot 8, compressed point).
+	// Slots skipped: anchor_height (slot 5, uint64),
+	// proposal_id (slot 6, uint32), voting_round_id (slot 7, wide-reduced in Rust).
 	if err := validatePallasFp("van_nullifier", inputs.VanNullifier); err != nil {
 		return err
 	}

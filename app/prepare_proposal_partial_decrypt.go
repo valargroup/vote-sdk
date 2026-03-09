@@ -74,6 +74,9 @@ func PartialDecryptPrepareProposalInjector(
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
+		// Prevent unbounded cache growth by evicting key cache entries for finalized rounds.
+		evictFinalizedSkEntries(kvStore, voteKeeper, shareCache, &shareCacheMu, logger)
+
 		// Find the first TALLYING round in threshold mode.
 		var tallyRound *types.VoteRound
 		if err := voteKeeper.IterateTallyingRounds(kvStore, func(round *types.VoteRound) bool {
