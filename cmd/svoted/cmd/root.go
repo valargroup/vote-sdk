@@ -110,9 +110,10 @@ func ProvideClientContext(
 		WithHomeDir(app.DefaultNodeHome).
 		WithViper("") // uses by default the binary name as prefix
 
-	clientCtx, err := config.ReadFromClientConfig(clientCtx)
-	if err != nil {
-		panic(fmt.Errorf("read client config: %w", err))
+	if configuredCtx, err := config.ReadFromClientConfig(clientCtx); err == nil {
+		clientCtx = configuredCtx
+	} else {
+		fmt.Fprintf(os.Stderr, "warning: failed to read client config, using defaults until command pre-run: %v\n", err)
 	}
 
 	// textual is enabled by default, we need to re-create the tx config

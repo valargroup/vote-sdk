@@ -33,10 +33,10 @@ const MaxProposals = 15
 // Circuit-constrained by the vote decision encoding.
 const MaxVoteOptions = 8
 
-// MaxTreePosition is the upper bound for commitment tree leaf positions.
-// The tree uses uint32 leaf addressing (depth-24 Poseidon Merkle tree),
-// so positions must fit in 2^32.
-const MaxTreePosition = 1 << 32
+// MaxTreePosition is the largest valid commitment tree leaf index.
+// The tree uses zero-based uint32 leaf addressing (depth-24 Poseidon Merkle tree),
+// so valid positions are 0..2^32-1.
+const MaxTreePosition = (1 << 32) - 1
 
 // Session creation field names — used in the HTTP API response, CLI input
 // parsing, and structured logging. Single source of truth for the JSON keys

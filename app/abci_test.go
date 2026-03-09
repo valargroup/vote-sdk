@@ -874,9 +874,14 @@ func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
 	app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
 
 	// Encode a MsgAckExecutiveAuthorityKey.
+	h := sha256.New()
+	h.Write([]byte(types.AckSigDomain))
+	h.Write(eaPkBytes)
+	h.Write([]byte(valAddr))
+
 	ackMsg := &types.MsgAckExecutiveAuthorityKey{
 		Creator:      valAddr,
-		AckSignature: bytes.Repeat([]byte{0xAC}, 32),
+		AckSignature: h.Sum(nil),
 	}
 
 	txBytes, err := voteapi.EncodeCeremonyTx(ackMsg, voteapi.TagAckExecutiveAuthorityKey)
