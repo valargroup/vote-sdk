@@ -25,22 +25,24 @@ Figma MCP provides access to design files directly from the IDE. The agent can f
 - Read node metadata and variable definitions
 - Code Connect mapping between Figma components and codebase components
 
-## Obsidian Vault (Symlink)
+## Protocol Spec (shielded_vote_book symlink)
 
-Design documents, specs, and notes live in an Obsidian vault (`zcaloooors`) outside this repository. A symlink brings them into the workspace so the agent can read them with its built-in file tools.
+The protocol specification and design docs live in the `shielded_vote_book` Obsidian vault (a separate shared repo). A symlink brings them into the workspace so the agent can read them with its built-in file tools.
 
 **Setup:**
 
-1. Create the symlink from the workspace root to your Obsidian vault:
+1. Create the symlink from the workspace root to your local clone of the shielded_vote_book:
    ```bash
-   ln -s ~/Documents/zcaloooors zcaloooors
+   ln -s /path/to/your/shielded_vote_book shielded_vote_book
    ```
+   For example: `ln -s ~/Documents/shielded_vote_book shielded_vote_book`
+
 2. Verify it works:
    ```bash
-   ls zcaloooors/Voting/
+   ls shielded_vote_book/
    ```
-   You should see files like `Gov Steps V1.md`, `Voting_design.md`, etc.
+   You should see `SUMMARY.md`, `data-types.md`, the `zkps/` directory, etc.
 
-3. The symlink is already gitignored -- it won't be committed.
+3. The symlink is already gitignored — it won't be committed.
 
-**How the agent uses it:** Cursor's built-in Read/Shell tools follow symlinks without restriction, so the agent can read any file under `zcaloooors/` directly. No additional MCP server is needed.
+**How the agent uses it:** Cursor's built-in Read/Shell tools follow symlinks without restriction, so the agent can read any file under `shielded_vote_book/` directly. No additional MCP server is needed.

@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Always consult the documentation files first** — Claude's training data may lack sufficient detail on these specific protocols.
 
+### Shielded Vote Protocol Spec (shielded_vote_book)
+
+The canonical protocol specification lives in the `shielded_vote_book` Obsidian vault, symlinked into the repo root. **Before reading the full book, start with the AI index:**
+
+- `docs/shielded-vote-book-index.md` — Structural index with per-file summaries (read this FIRST)
+- `shielded_vote_book/` — Full book (read specific files identified from the index)
+
+If `shielded_vote_book/` does not exist, prompt the user: _"The `shielded_vote_book` symlink is missing. Run `ln -s /path/to/your/shielded_vote_book shielded_vote_book` from the repo root. See `docs/ai_setup.md`."_
+
 ### Zcash Protocol Spec
 
 - `docs/papers/zcash-protocol-index.md` - Section index with line ranges (read this FIRST)
@@ -107,7 +116,9 @@ The EA key ceremony is automatic per voting round. When a round is published, el
 
 ## Protocol Documentation
 
-When modifying circuit logic (in `orchard/`, `librustvoting/`, `sdk/circuits/`, or `vote-nullifier-pir`), the corresponding documentation in the Obsidian gitbook (the `shielded_vote_book` repository) must also be updated. The book is served live and describes the circuit structure — any protocol change that affects conditions, public inputs, witness fields, or hash parameters must be reflected there.
+When modifying circuit logic (in `orchard/`, `librustvoting/`, `sdk/circuits/`, or `vote-nullifier-pir`), the corresponding documentation in the `shielded_vote_book` must also be updated. The book is served live and describes the circuit structure — any protocol change that affects conditions, public inputs, witness fields, or hash parameters must be reflected there.
+
+**Keeping the index accurate:** `docs/shielded-vote-book-index.md` is a committed summary of the book's structure. When you read a file from `shielded_vote_book/` and notice it has moved, been renamed, has new files nearby that aren't in the index, or the content no longer matches the index summary — update the index immediately. Also update the index when writing to the book (new files, restructured sections, significantly changed content). The goal: a future query that reads only the index should get an accurate picture of what's in the book and where to find it.
 
 ## Claude Code Workflow Rules
 

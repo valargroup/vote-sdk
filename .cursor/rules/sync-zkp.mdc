@@ -1,23 +1,31 @@
 ---
-description: Load the full ZKP design context from the written spec and Figma diagrams
+description: Load the full ZKP design context from the shielded_vote_book and circuit source
 alwaysApply: false
 ---
 
 # /sync-zkp — Load ZKP Design Context
 
-When this rule is invoked, load the following sources for the ZKP (zero-knowledge proof) design and confirm what you retrieved.
+When this rule is invoked, load the ZKP design context and confirm what you retrieved.
 
-## 1. Written ZKP details (Obsidian)
-
-Read the design spec via the in-repo symlink:
+## 1. Read the AI index first
 
 ```
-zcaloooors/Voting/Gov Steps V1.md
+docs/shielded-vote-book-index.md
 ```
 
-This document contains the **written details of the ZKPs**: full protocol specification, glossary, Phase 0–5, and the three ZKP circuit definitions (ZKP #1 delegation, ZKP #2 vote proof, ZKP #3 share reveal), plus appendices on El Gamal and tally.
+Start here for an overview of all book sections. Focus on the "ZKP Specifications" and "Circuit Components" sections.
 
-## 2. Circuit locations in repo
+## 2. ZKP specs (shielded_vote_book)
+
+Read the per-ZKP written specs from the symlinked Obsidian vault:
+
+- `shielded_vote_book/zkps/zkp1-delegation-proof.md` — ZKP #1: delegation proof
+- `shielded_vote_book/zkps/zkp2-vote-proof.md` — ZKP #2: vote proof
+- `shielded_vote_book/zkps/zkp3-vote-reveal-proof.md` — ZKP #3: vote reveal proof
+
+For circuit component details (individual gadgets), see `shielded_vote_book/circuits/`.
+
+## 3. Circuit locations in repo
 
 - **ZKP #1 (delegation):** `voting-circuits/src/delegation/` — K=14, 13 public inputs, 15 conditions
 - **ZKP #2 (vote proof):** `voting-circuits/src/vote_proof/` — K=13, 11 public inputs, 12 conditions
@@ -29,25 +37,25 @@ This document contains the **written details of the ZKPs**: full protocol specif
 
 Each main circuit directory contains: `circuit.rs` (constraints), `builder.rs` (witness assembly), `prove.rs` (keygen/prove/verify).
 
-## 3. Individual ZKP docs — inject into GitBook
+## 4. Individual ZKP docs — inject into GitBook
 
-The following Obsidian docs are the **per-ZKP written specs**. When syncing ZKP context, also **inject them into the Orchard GitBook** so they appear in the book TOC and build.
-
-**Source paths (Obsidian):**
-
-- `/Users/roman/Documents/zcaloooors/shielded_vote_book/zkps/zkp1-delegation-proof.md`
-- `/Users/roman/Documents/zcaloooors/shielded_vote_book/zkps/zkp2-vote-proof.md`
-- `/Users/roman/Documents/zcaloooors/shielded_vote_book/zkps/zkp3-vote-reveal-proof.md`
+The per-ZKP docs from the book can also be symlinked into the Orchard GitBook:
 
 **GitBook injection:**
 
-1. **Place in book:** Ensure each doc is available under `orchard/book/src/zkps/` (e.g. symlink from the paths above or copy). Target filenames: `zkp1-delegation-proof.md`, `zkp2-vote-proof.md`, `zkp3-vote-reveal-proof.md`.
-2. **Update SUMMARY.md:** Add a "ZKPs" section in `orchard/book/src/SUMMARY.md` that links to these three files (e.g. under Design or a new top-level "ZKPs" chapter), so they appear in the sidebar.
+1. **Place in book:** Ensure each doc is available under `orchard/book/src/zkps/` (symlink from `shielded_vote_book/zkps/`). See `orchard/book/src/zkps/README.md` for symlink commands.
+2. **Update SUMMARY.md:** Add a "ZKPs" section in `orchard/book/src/SUMMARY.md` that links to these three files.
+
+## 5. If the symlink is missing
+
+If `shielded_vote_book/` does not exist in the workspace root, tell the user:
+
+> The `shielded_vote_book` symlink is not present. Please create it:
+> ```
+> ln -s /path/to/your/shielded_vote_book shielded_vote_book
+> ```
+> See `docs/ai_setup.md` for details.
 
 ## After loading
 
-Summarize what you loaded (written spec + which Figma boards) and confirm sources are available. If injecting into the GitBook, confirm the three ZKP docs are in `orchard/book/src/zkps/` and listed in SUMMARY.md. Then ask how to proceed.
-
-## MCP setup reference
-
-See `docs/ai_setup.md` for Figma MCP configuration and Obsidian symlink setup.
+Summarize what you loaded and confirm sources are available. Then ask how to proceed.

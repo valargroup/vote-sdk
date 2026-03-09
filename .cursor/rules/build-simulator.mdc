@@ -5,23 +5,30 @@ alwaysApply: false
 
 # Building Zashi for the iOS Simulator
 
-## Booted Simulator
+## Find the Simulator
 
-**iPhone 16 Pro** — device ID: `E0BBD5AF-CC50-4A55-BC6A-1DEDF7646AEB`
+List available iPhone 16 Pro simulators and pick the booted one (or boot one):
 
-If it's Shutdown, boot it first:
 ```bash
-xcrun simctl boot E0BBD5AF-CC50-4A55-BC6A-1DEDF7646AEB && open -a Simulator
+xcrun simctl list devices "iPhone 16 Pro" available
+```
+
+If none are booted:
+```bash
+# Replace DEVICE_ID with the UUID from the list above
+xcrun simctl boot DEVICE_ID && open -a Simulator
 ```
 
 ## Build Command
 
 Always set `FX_ENABLE_GLASS=0` — Flexa 1.1.4 enables iOS 26 glass UI by default, which fails to compile on Xcode 16.
 
+The `zashi-ios` directory is expected as a sibling of this repo (i.e., `../zashi-ios`).
+
 ```bash
-cd /Users/roman/projects/zally/zashi-ios && FX_ENABLE_GLASS=0 xcodebuild \
+cd ../zashi-ios && FX_ENABLE_GLASS=0 xcodebuild \
   -scheme secant-mainnet \
-  -destination 'id=E0BBD5AF-CC50-4A55-BC6A-1DEDF7646AEB' \
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
   -configuration Debug \
   build 2>&1
 ```
@@ -32,18 +39,21 @@ Build takes ~2min (incremental) after the first full build.
 
 Bundle ID: `co.valargroup.secant-mainnet`
 
-```bash
-xcrun simctl install E0BBD5AF-CC50-4A55-BC6A-1DEDF7646AEB \
-  "/Users/roman/Library/Developer/Xcode/DerivedData/secant-cxtkthuvtjsyjbggllztalvjlqmb/Build/Products/Debug-iphonesimulator/secant-mainnet.app"
+Find the built `.app` in DerivedData and install:
 
-xcrun simctl launch E0BBD5AF-CC50-4A55-BC6A-1DEDF7646AEB co.valargroup.secant-mainnet
+```bash
+APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Debug-iphonesimulator/secant-mainnet.app" -type d | head -1)
+DEVICE_ID=$(xcrun simctl list devices booted -j | python3 -c "import sys,json; devs=[d for r in json.load(sys.stdin)['devices'].values() for d in r if d['state']=='Booted' and 'iPhone 16 Pro' in d['name']]; print(devs[0]['udid'])" 2>/dev/null)
+
+xcrun simctl install "$DEVICE_ID" "$APP_PATH"
+xcrun simctl launch "$DEVICE_ID" co.valargroup.secant-mainnet
 ```
 
 ## Terminate & Relaunch
 
 ```bash
-xcrun simctl terminate E0BBD5AF-CC50-4A55-BC6A-1DEDF7646AEB co.valargroup.secant-mainnet
-xcrun simctl launch E0BBD5AF-CC50-4A55-BC6A-1DEDF7646AEB co.valargroup.secant-mainnet
+xcrun simctl terminate booted co.valargroup.secant-mainnet
+xcrun simctl launch booted co.valargroup.secant-mainnet
 ```
 
 ## Notes

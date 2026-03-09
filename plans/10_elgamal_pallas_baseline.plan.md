@@ -27,7 +27,7 @@ isProject: true
 
 ## Context
 
-The voting protocol (Gov Steps V1, Appendix A + B) requires **additively homomorphic El Gamal encryption** over the **Pallas curve** for private vote tallying. Each voting share is encrypted under the election authority's public key `ea_pk`, shares are accumulated homomorphically on-chain, and only the aggregate is decrypted at tally time.
+The voting protocol (see `shielded_vote_book/appendices/el-gamal.md` and `shielded_vote_book/appendices/tally.md`) requires **additively homomorphic El Gamal encryption** over the **Pallas curve** for private vote tallying. Each voting share is encrypted under the election authority's public key `ea_pk`, shares are accumulated homomorphically on-chain, and only the aggregate is decrypted at tally time.
 
 **Current state**: The tally accumulator uses plaintext `uint64` addition (`AddToTally` in `keeper.go`). `MsgRevealShare` carries a `uint64 vote_amount` field. Plan 09 explicitly deferred El Gamal as a non-goal. This plan builds the cryptographic foundation that will later replace the plaintext accumulator.
 

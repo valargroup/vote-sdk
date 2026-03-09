@@ -240,8 +240,11 @@ func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 // VerifyVoteProof verifies a real vote proof circuit proof (ZKP #2)
 // using the Rust verifier via CGo.
 //
-// The inputs are serialized as 10 × 32-byte chunks (320 bytes), matching the
-// circuit's 11 public inputs (ea_pk is decompressed to x,y in Rust):
+// The inputs are serialized as 9 × 32-byte chunks (288 bytes).
+// The Rust FFI (ffi.rs sv_verify_vote_proof) expands this to the circuit's
+// 11 Fp elements: r_vpk (slot 1) and ea_pk (slot 8) are decompressed to
+// (x, y) pairs; anchor_height and proposal_id are read as integers then
+// converted via Fp::from().
 //
 //	[van_nullifier, r_vpk_compressed, vote_authority_note_new, vote_commitment,
 //	 vote_comm_tree_root, anchor_height_le, proposal_id_le, voting_round_id, ea_pk_compressed]

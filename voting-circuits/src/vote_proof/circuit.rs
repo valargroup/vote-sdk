@@ -101,8 +101,8 @@ pub const VOTE_COMM_TREE_DEPTH: usize = 24;
 
 /// Circuit size (2^K rows).
 ///
-/// K=14 (16,384 rows). `CircuitCost::measure` reports a floor-planner
-/// high-water mark of **3,512 rows** (21% of 16,384). The `V1` floor planner
+/// K=13 (8,192 rows). `CircuitCost::measure` reports a floor-planner
+/// high-water mark of **3,512 rows** (43% of 8,192). The `V1` floor planner
 /// packs non-overlapping regions into the same row range across different
 /// columns, so the high-water mark is much lower than a naive sum-of-heights
 /// estimate.

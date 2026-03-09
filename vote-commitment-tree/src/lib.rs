@@ -1,4 +1,4 @@
-//! Append-only Poseidon Merkle tree for the Vote Commitment Tree (Gov Steps V1).
+//! Append-only Poseidon Merkle tree for the Vote Commitment Tree.
 //!
 //! This tree holds both **Vote Authority Notes (VANs)** and **Vote Commitments (VCs)** as leaves.
 //! Domain separation (DOMAIN_VAN / DOMAIN_VC) is applied when *constructing* leaf values

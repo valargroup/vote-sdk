@@ -1,0 +1,35 @@
+---
+description: Protocol spec lives in shielded_vote_book — use the index, keep it accurate
+alwaysApply: true
+---
+
+# Protocol Spec: shielded_vote_book
+
+The canonical protocol specification lives in the `shielded_vote_book/` directory (symlinked from an external Obsidian vault). A committed index at `docs/shielded-vote-book-index.md` summarizes every file in the book.
+
+## Reading protocol docs
+
+1. Read `docs/shielded-vote-book-index.md` first to find the relevant file(s).
+2. Then read the specific file(s) from `shielded_vote_book/`.
+3. Do NOT ingest the entire book for a single question.
+
+## Keeping the index accurate
+
+If you read a file from `shielded_vote_book/` and notice any of the following, update `docs/shielded-vote-book-index.md` immediately:
+
+- A file listed in the index no longer exists or has been renamed
+- New files exist that aren't in the index
+- A file's content no longer matches its index summary
+- Sections have been restructured
+
+Also update the index when writing to the book (new files, restructured sections, significantly changed content).
+
+## If the symlink is missing
+
+If `shielded_vote_book/` does not exist, tell the user:
+
+> The `shielded_vote_book` symlink is not present. Please create it:
+> ```
+> ln -s /path/to/your/shielded_vote_book shielded_vote_book
+> ```
+> See `docs/ai_setup.md` for details.

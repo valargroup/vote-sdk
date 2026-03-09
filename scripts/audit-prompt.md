@@ -120,11 +120,12 @@ Compare implementation against the spec files listed below. Any divergence is a 
 
 **Spec files (in priority order):**
 
-1. `docs/specs/gov-steps-v1.md` — Canonical protocol spec covering all ZKPs, El Gamal, tally, and Cosmos SDK messages. This is the single source of truth.
-2. `voting-circuits/src/delegation/README.md` — ZKP #1 delegation circuit spec (conditions, public inputs, witness layout).
-3. `voting-circuits/src/vote_proof/README.md` — ZKP #2 vote proof circuit spec.
+1. `docs/shielded-vote-book-index.md` — AI-readable index of the shielded_vote_book (read this first to find relevant sections).
+2. `shielded_vote_book/` — Obsidian vault (symlinked into the repo root). The canonical protocol spec covering data types, ZKP specs, circuit components, chain API, delegation, and appendices. Read specific files identified from the index.
+3. `voting-circuits/src/delegation/README.md` — ZKP #1 delegation circuit spec (conditions, public inputs, witness layout).
+4. `voting-circuits/src/vote_proof/README.md` — ZKP #2 vote proof circuit spec.
 
-When reporting a divergence, use this format: `Code <file>:<detail> diverges from spec <spec-file>:<section/condition>`. For example: "Code `delegation/circuit.rs` uses `DOMAIN_VAN = 1` but spec `gov-steps-v1.md` §3.2 defines `DOMAIN_VAN = 0`."
+When reporting a divergence, use this format: `Code <file>:<detail> diverges from spec <spec-file>:<section/condition>`. For example: "Code `delegation/circuit.rs` uses `DOMAIN_VAN = 1` but spec `shielded_vote_book/circuits/domain-tag-separation.md` defines `DOMAIN_VAN = 0`."
 
 ## Output Format
 

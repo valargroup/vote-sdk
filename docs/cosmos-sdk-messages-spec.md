@@ -1,6 +1,6 @@
 # Cosmos SDK Messages Specification — ZCash Governance Voting Protocol
 
-> Derived from **Gov Steps V1** (protocol spec) and the **Wallet SDK Operations → Cosmos SDK Messages** FigJam board.
+> Derived from the **shielded_vote_book** protocol spec and the **Wallet SDK Operations → Cosmos SDK Messages** FigJam board.
 
 ---
 

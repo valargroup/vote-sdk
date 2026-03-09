@@ -1,6 +1,6 @@
 # vote-commitment-tree
 
-Append-only Poseidon Merkle tree for the **Vote Commitment Tree** in the Shielded-Vote voting protocol. This crate provides the tree structure, sync protocol, and witness generation used by the vote chain for ZKP #2 (VAN membership) and ZKP #3 (VC membership). The design follows **Gov Steps V1** and the **Wallet SDK → Cosmos SDK Messages** flow.
+Append-only Poseidon Merkle tree for the **Vote Commitment Tree** in the Shielded-Vote voting protocol. This crate provides the tree structure, sync protocol, and witness generation used by the vote chain for ZKP #2 (VAN membership) and ZKP #3 (VC membership). The design follows the **shielded_vote_book** protocol spec and the **Wallet SDK → Cosmos SDK Messages** flow.
 
 ## Table of contents
 
@@ -28,7 +28,7 @@ The voting protocol is specified in two places; this README assumes that context
 
 | Source | Content |
 |--------|--------|
-| **Gov Steps V1** | Full protocol spec: glossary, Phase 0–5, ZKP #1 (delegation), ZKP #2 (vote), ZKP #3 (share reveal), El Gamal and tally appendices. In-repo ref: `docs/cosmos-sdk-messages-spec.md` (derived from Gov Steps V1). The canonical spec lives in the Obsidian vault `zcaloooors/Voting/Gov Steps V1.md` when the symlink is present. |
+| **shielded_vote_book** | Full protocol spec: overview, data types, circuit components, ZKP #1 (delegation), ZKP #2 (vote), ZKP #3 (share reveal), delegation, El Gamal and tally appendices. Symlinked into the repo root from the Obsidian vault (see `docs/ai_setup.md`). |
 | **Wallet SDK Operations → Cosmos SDK Messages** (Figma) | [Figma board](https://www.figma.com/board/CCKJMV6iozvYV8mT6H050a/Wallet-SDK-V2?node-id=0-1): client flow (note identification, Keystone signing, ZKP #1/#2), helper server (share relay, ZKP #3), Cosmos messages (`MsgDelegateVote`, `MsgCastVote`, `MsgRevealShare`), and chain state (nullifier sets, vote commitment tree, encrypted tally). |
 
 ---
@@ -1030,7 +1030,7 @@ vote-commitment-tree-client/
 
 ## Relationship to protocol spec
 
-This section records how this crate aligns with the governance plan (Gov Steps V1 + Cosmos SDK messages spec) and what is left to the chain or other components.
+This section records how this crate aligns with the governance plan (shielded_vote_book protocol spec + Cosmos SDK messages spec) and what is left to the chain or other components.
 
 ### Documented in the spec but not in this README (until now)
 

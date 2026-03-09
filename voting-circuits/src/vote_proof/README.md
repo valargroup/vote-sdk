@@ -1,6 +1,6 @@
 # Vote Proof Circuit (ZKP 2)
 
-Proves that a registered voter is casting a valid vote, without revealing which VAN they hold. The structure follows the delegation circuit's pattern (ZKP 1). Numbering matches Gov Steps V1 (ZKP #2): 12 conditions total; all conditions 1–12 are fully constrained in-circuit (condition 4 enforces spend authority `r_vpk = vsk.ak + [alpha_v]*G` in-circuit; the vote signature is verified out-of-circuit under `r_vpk`).
+Proves that a registered voter is casting a valid vote, without revealing which VAN they hold. The structure follows the delegation circuit's pattern (ZKP 1). Numbering matches the protocol spec (`shielded_vote_book/zkps/zkp2-vote-proof.md`): 12 conditions total; all conditions 1–12 are fully constrained in-circuit (condition 4 enforces spend authority `r_vpk = vsk.ak + [alpha_v]*G` in-circuit; the vote signature is verified out-of-circuit under `r_vpk`).
 
 **Public inputs:** 11 field elements.
 **Current K:** 14 (16,384 rows) — accommodates conditions 1–4 and 5–12, including 15 variable-base ECC scalar multiplications (condition 11), ~31 Poseidon hashes, and the 10-bit lookup table.
@@ -196,7 +196,7 @@ Single `ConstantLength<4>` call matching ZKP 1 condition 14's governance nullifi
 
 Purpose: ensure the voter has authority for the voted proposal and correctly clears that bit in the authority bitmask (spec-aligned).
 
-**Spec (Gov Steps V1 §3.5 Step 2, ZKP #2 Condition 6):** `proposal_authority` is a 16-bit bitmask; one vote consumes the bit for the chosen proposal: `proposal_authority_new = proposal_authority_old - (1 << proposal_id)`, and the `proposal_id`-th bit of `proposal_authority_old` must be 1.
+**Spec (`shielded_vote_book/circuits/proposal-authority-decrement.md`):** `proposal_authority` is a 16-bit bitmask; one vote consumes the bit for the chosen proposal: `proposal_authority_new = proposal_authority_old - (1 << proposal_id)`, and the `proposal_id`-th bit of `proposal_authority_old` must be 1.
 
 **Implementation (bit decomposition):**
 

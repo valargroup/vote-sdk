@@ -25,8 +25,8 @@ shielded_vote_generator_ui/.vite/
 
 __debug**
 
-# Obsidian vault symlink
-zcaloooors
+# Obsidian vault symlink (protocol spec)
+shielded_vote_book
 
 # Orchard book ZKP docs (symlinked from Obsidian)
 orchard/book/src/zkps/zkp1-delegation-proof.md

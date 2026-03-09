@@ -108,8 +108,8 @@ const VOTE_COMM_TREE_ROOT: usize = 5;
 /// nullifier (condition 5) to bind it to a specific round. This prevents
 /// cross-round proof replay — the commitment tree is global (not per-round),
 /// so `vote_comm_tree_root` alone does not provide round scoping. The chain
-/// also validates that `voting_round_id` matches an active session (Gov Steps
-/// V1 §5.4 "Out-of-circuit checks").
+/// also validates that `voting_round_id` matches an active session
+/// (out-of-circuit check; see shielded_vote_book/zkps/zkp3-vote-reveal-proof.md).
 const VOTING_ROUND_ID: usize = 6;
 
 // ================================================================

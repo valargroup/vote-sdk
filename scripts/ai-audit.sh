@@ -145,11 +145,23 @@ TIER5_FILES=(
   "$REPO_ROOT/nullifier-ingest/service/src/tree_db.rs"
 )
 
-# Protocol spec — committed copy (synced from Obsidian via scripts/sync-obsidian.sh)
-COMMITTED_SPEC="$REPO_ROOT/docs/specs/gov-steps-v1.md"
+# Protocol spec — lives in the shielded_vote_book Obsidian vault.
+# On dev machines: symlinked into the workspace (see docs/ai_setup.md).
+# In CI: checked out by the workflow via actions/checkout (see audit.yml).
+# Falls back to the committed AI index + in-repo READMEs if unavailable.
+BOOK_DIR="$REPO_ROOT/shielded_vote_book"
+BOOK_INDEX="$REPO_ROOT/docs/shielded-vote-book-index.md"
 
-# Fallback: Obsidian symlink (only resolves on dev machines)
-OBSIDIAN_SPEC="$REPO_ROOT/zcaloooors/Voting/Gov Steps V1.md"
+# Audit-relevant book files (data types, ZKP specs, circuit components, appendices)
+BOOK_SPEC_FILES=(
+  "$BOOK_DIR/data-types.md"
+  "$BOOK_DIR/zkps/zkp1-delegation-proof.md"
+  "$BOOK_DIR/zkps/zkp2-vote-proof.md"
+  "$BOOK_DIR/zkps/zkp3-vote-reveal-proof.md"
+  "$BOOK_DIR/circuits/overview.md"
+  "$BOOK_DIR/appendices/el-gamal.md"
+  "$BOOK_DIR/appendices/tally.md"
+)
 
 # ─── collect ──────────────────────────────────────────────────────────
 
@@ -157,31 +169,44 @@ collect_context() {
   echo "=== Collecting audit context ==="
   > "$CONTEXT_FILE"
 
-  # 1. Include protocol spec (committed copy first, symlink fallback)
-  local spec_source=""
-  if [ -f "$COMMITTED_SPEC" ]; then
-    spec_source="$COMMITTED_SPEC"
-    echo "--- Including protocol spec (committed copy) ---"
-  elif [ -f "$OBSIDIAN_SPEC" ]; then
-    spec_source="$OBSIDIAN_SPEC"
-    echo "--- Including protocol spec (Obsidian symlink) ---"
-  else
-    echo "--- WARNING: No protocol spec found (run scripts/sync-obsidian.sh) ---"
-  fi
-
-  if [ -n "$spec_source" ]; then
+  # 1. Always include the committed AI index (available in CI and dev)
+  if [ -f "$BOOK_INDEX" ]; then
+    echo "--- Including protocol spec index ---"
     {
       echo "════════════════════════════════════════════════════════════════"
-      echo "SOURCE: Gov Steps V1.md (Full Protocol Specification)"
+      echo "SOURCE: docs/shielded-vote-book-index.md (Book Structure Index)"
       echo "════════════════════════════════════════════════════════════════"
       echo ""
-      cat "$spec_source"
+      cat "$BOOK_INDEX"
       echo ""
       echo ""
     } >> "$CONTEXT_FILE"
   fi
 
-  # 2. Include all spec files
+  # 2. Include full book files if available (dev symlink or CI checkout)
+  if [ -d "$BOOK_DIR" ]; then
+    echo "--- Including protocol spec (shielded_vote_book) ---"
+    for f in "${BOOK_SPEC_FILES[@]}"; do
+      if [ -f "$f" ]; then
+        local rel="${f#$REPO_ROOT/}"
+        echo "  + $rel"
+        {
+          echo "════════════════════════════════════════════════════════════════"
+          echo "SOURCE: $rel"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          cat "$f"
+          echo ""
+          echo ""
+        } >> "$CONTEXT_FILE"
+      fi
+    done
+  else
+    echo "--- NOTE: shielded_vote_book not available; using committed index + in-repo READMEs ---"
+    echo "         Symlink locally (see docs/ai_setup.md) or configure the GitHub App for CI (see audit.yml)."
+  fi
+
+  # 3. Include all spec files
   for f in "${SPEC_FILES[@]}"; do
     if [ -f "$f" ]; then
       local rel="${f#$REPO_ROOT/}"
@@ -200,7 +225,7 @@ collect_context() {
     fi
   done
 
-  # 3. Include code files (tiered stripping to fit token budget)
+  # 4. Include code files (tiered stripping to fit token budget)
   #
   # emit_code <file> <strip_func> <tier_label>
   emit_code() {
@@ -246,7 +271,7 @@ collect_context() {
   echo "  --- Tier 5: Nullifier Ingest (aggressive strip) ---"
   for f in "${TIER5_FILES[@]}"; do emit_code "$f" strip_rust_aggressive "T5"; done
 
-  # 4. Include git diff against main (uncommitted changes)
+  # 5. Include git diff against main (uncommitted changes)
   local scan_dirs="voting-circuits/src/ orchard/src/ vote-commitment-tree/src/ sdk/x/vote/ sdk/crypto/ sdk/app/ sdk/internal/helper/ sdk/circuits/src/ nullifier-ingest/"
   local diff
   diff=$(cd "$REPO_ROOT" && git diff HEAD -- $scan_dirs 2>/dev/null || true)
@@ -263,7 +288,7 @@ collect_context() {
     } >> "$CONTEXT_FILE"
   fi
 
-  # 5. Include recent git log for change velocity context
+  # 6. Include recent git log for change velocity context
   local log
   log=$(cd "$REPO_ROOT" && git log --oneline -20 -- $scan_dirs 2>/dev/null || true)
   if [ -n "$log" ]; then
