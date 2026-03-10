@@ -88,7 +88,7 @@ This is a structural index of the `shielded_vote_book` Obsidian vault (symlinked
 | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `appendices/el-gamal.md`                            | El Gamal on Pallas: encryption `(r*G, v*G + r*R)`, additive homomorphism for tally, decryption via bounded discrete log. Ballot scaling reduces bit-width.                                                 |
 | `appendices/tally.md`                               | Tally flow: (1) public ciphertext aggregation per `(proposal_id, decision)`, (2) EA decryption with `ea_sk` + bounded discrete log, (3) Chaum–Pedersen proof of correct decryption.                        |
-| `appendices/PIR-Efficient Merkle Path Retrieval.md` | PIR spec for private Merkle path retrieval over ~50M leaves using YPIR (SimplePIR). Three-tier layout (11 plaintext + 8 PIR + 7 PIR layers), sentinel nullifiers, row layouts, storage/bandwidth analysis. |
+| `appendices/pir-efficient-merkle-path-retrieval.md` | PIR spec for private Merkle path retrieval over ~50M leaves using YPIR (SimplePIR). Three-tier layout (11 plaintext + 8 PIR + 7 PIR layers), sentinel nullifiers, row layouts, storage/bandwidth analysis. |
 
 ---
 
@@ -109,5 +109,5 @@ This is a structural index of the `shielded_vote_book` Obsidian vault (symlinked
 | Chain API / session structure        | `chain/chain-api.md`                                                              |
 | Delegation mechanics                 | `delegation/delegation-setup.md`, `delegation/partial-delegation.md`              |
 | Server share submission              | `delegation/server-delegated-shares.md`                                           |
-| Nullifier PIR                        | `appendices/PIR-Efficient Merkle Path Retrieval.md`                               |
+| Nullifier PIR                        | `appendices/pir-efficient-merkle-path-retrieval.md`                               |
 | Wallet UX flow                       | `userflow/wallet-setup.md`, `userflow/casting-a-vote.md`                          |
