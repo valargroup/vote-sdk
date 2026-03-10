@@ -280,11 +280,6 @@ api_token = ""
 # Path to the SQLite database file. Empty = default (\$HOME/.svoted/helper.db).
 db_path = ""
 
-# Mean of the exponential delay distribution (seconds).
-# Shares are delayed by Exp(1/mean) for temporal unlinkability, capped at vote end time.
-# Use a short value for testing; production default is 43200 (12 hours).
-mean_delay = 60
-
 # How often to check for shares ready to submit (seconds).
 process_interval = 5
 

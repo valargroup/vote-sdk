@@ -115,7 +115,6 @@ The helper server runs inside `svoted` on **val1 only** and shares val1's REST A
 | `disable`               | `false` | Set to `true` to disable the helper server entirely.                                                      |
 | `api_token`             | `""`    | Optional token for `POST /api/v1/shares` (`X-Helper-Token` header).                                       |
 | `db_path`               | `""`    | Path to SQLite database. Empty = `$HOME/.svoted-val1/helper.db`.                                          |
-| `mean_delay`            | `60`    | Mean of exponential delay distribution (seconds). `init_multi.sh --ci` sets 60 for testing.                 |
 | `process_interval`      | `5`     | How often to check for ready shares (seconds).                                                            |
 | `chain_api_port`        | `1418`  | Port of val1's REST API (for `MsgRevealShare` submission).                                                 |
 | `max_concurrent_proofs` | `2`     | Maximum parallel proof generation goroutines (~500MB RAM each).                                           |

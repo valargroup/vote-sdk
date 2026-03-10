@@ -22,6 +22,7 @@ func validGenesis() *types.GenesisState {
 		Rounds: []*types.VoteRound{
 			{
 				VoteRoundId: roundID,
+				VoteEndTime: 2_000_000,
 				Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
 			},
 		},
@@ -101,6 +102,7 @@ func TestValidateGenesisState_DuplicateRoundID(t *testing.T) {
 	gs := validGenesis()
 	gs.Rounds = append(gs.Rounds, &types.VoteRound{
 		VoteRoundId: gs.Rounds[0].VoteRoundId,
+		VoteEndTime: 2_000_000,
 	})
 	err := types.ValidateGenesisState(gs)
 	require.Error(t, err)

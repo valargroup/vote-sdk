@@ -128,9 +128,6 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.db_path") {
 		cfg.DBPath = v.GetString("helper.db_path")
 	}
-	if v.IsSet("helper.mean_delay") {
-		cfg.MeanDelay = v.GetInt("helper.mean_delay")
-	}
 	if v.IsSet("helper.min_delay") {
 		cfg.MinDelay = v.GetInt("helper.min_delay")
 	}

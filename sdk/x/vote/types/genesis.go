@@ -39,6 +39,9 @@ func ValidateGenesisState(gs *GenesisState) error {
 		if len(round.VoteRoundId) != RoundIDLen {
 			return fmt.Errorf("rounds[%d].vote_round_id is %d bytes, expected %d", i, len(round.VoteRoundId), RoundIDLen)
 		}
+		if round.VoteEndTime == 0 {
+			return fmt.Errorf("rounds[%d].vote_end_time cannot be zero", i)
+		}
 		key := string(round.VoteRoundId)
 		if _, dup := seenRounds[key]; dup {
 			return fmt.Errorf("rounds[%d]: duplicate vote_round_id %x", i, round.VoteRoundId)

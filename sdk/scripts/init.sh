@@ -89,7 +89,6 @@ rm -f "${APP_TOML}.bak"
 # via environment variables before invoking this script.
 HELPER_API_TOKEN="${SVOTE_HELPER_API_TOKEN:-}"
 HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
-HELPER_MEAN_DELAY="${SVOTE_HELPER_MEAN_DELAY:-60}"
 HELPER_MIN_DELAY="${SVOTE_HELPER_MIN_DELAY:-90}"
 HELPER_PROCESS_INTERVAL="${SVOTE_HELPER_PROCESS_INTERVAL:-5}"
 HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-2}"
@@ -118,11 +117,6 @@ expose_queue_status = $HELPER_EXPOSE_QUEUE_STATUS
 
 # Path to the SQLite database file. Empty = default ($HOME/.svoted/helper.db).
 db_path = ""
-
-# Mean of the exponential delay distribution (seconds).
-# Shares are delayed by Exp(1/mean) for temporal unlinkability, capped at vote end time.
-# Use a short value for testing; production default is 43200 (12 hours).
-mean_delay = $HELPER_MEAN_DELAY
 
 # Minimum delay floor (seconds).
 min_delay = $HELPER_MIN_DELAY

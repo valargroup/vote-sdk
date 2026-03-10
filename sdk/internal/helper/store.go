@@ -28,7 +28,6 @@ type ShareStore struct {
 	db             *sql.DB
 	mu             sync.Mutex
 	schedule       map[string]time.Time // key: "round_id:share_index:proposal_id:tree_position"
-	meanDelay      time.Duration
 	minDelay       time.Duration
 	roundCache     map[string]uint64                // roundID → vote_end_time (unix seconds)
 	fetchRoundInfo RoundInfoFetcher                 // queries the chain; may be nil in tests
@@ -46,7 +45,7 @@ const (
 )
 
 // NewShareStore opens (or creates) a SQLite database and runs migrations.
-func NewShareStore(dbPath string, meanDelay, minDelay time.Duration, fetcher RoundInfoFetcher) (*ShareStore, error) {
+func NewShareStore(dbPath string, minDelay time.Duration, fetcher RoundInfoFetcher) (*ShareStore, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -67,7 +66,6 @@ func NewShareStore(dbPath string, meanDelay, minDelay time.Duration, fetcher Rou
 	s := &ShareStore{
 		db:             db,
 		schedule:       make(map[string]time.Time),
-		meanDelay:      meanDelay,
 		minDelay:       minDelay,
 		roundCache:     make(map[string]uint64),
 		fetchRoundInfo: fetcher,
@@ -292,7 +290,7 @@ func schedKey(roundID string, shareIndex, proposalID uint32, treePosition uint64
 	return fmt.Sprintf("%s:%d:%d:%d", roundID, shareIndex, proposalID, treePosition)
 }
 
-// Enqueue adds a share payload with an exponential random submission delay,
+// Enqueue adds a share payload with a uniform random submission delay,
 // capped at the vote end time for the round.
 //
 // Returns:
@@ -761,11 +759,14 @@ func (s *ShareStore) getVoteEndTime(roundID string) (uint64, error) {
 // uniformDelay samples a delay uniformly from [0, remaining_window) where
 // remaining_window = vote_end_time − now − 60s. A minimum floor (minDelay)
 // prevents near-zero samples from making shares trivially linkable to their
-// submission session. When vote_end_time is unknown (0) the delay falls back
-// to a uniform sample over [minDelay, meanDelay*2] as a best-effort spread.
+// submission session.
 func (s *ShareStore) uniformDelay(voteEndTime uint64) time.Duration {
-	// Benchmark / testing mode: skip all delays.
-	if s.meanDelay == 0 && s.minDelay == 0 {
+	if s.minDelay == 0 {
+		return 0
+	}
+
+	remaining := time.Until(time.Unix(int64(voteEndTime), 0)) - 60*time.Second
+	if remaining <= 0 {
 		return 0
 	}
 
@@ -775,20 +776,6 @@ func (s *ShareStore) uniformDelay(voteEndTime uint64) time.Duration {
 		return s.minDelay
 	}
 	u := float64(binary.LittleEndian.Uint64(buf[:])) / (float64(1<<64) + 1.0)
-
-	if voteEndTime == 0 {
-		// Fallback: uniform over [minDelay, 2*meanDelay].
-		spread := 2*s.meanDelay - s.minDelay
-		if spread <= 0 {
-			return s.minDelay
-		}
-		return s.minDelay + time.Duration(u*float64(spread))
-	}
-
-	remaining := time.Until(time.Unix(int64(voteEndTime), 0)) - 60*time.Second
-	if remaining <= 0 {
-		return 0
-	}
 
 	delay := time.Duration(u * float64(remaining))
 	if delay < s.minDelay && remaining > s.minDelay {

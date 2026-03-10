@@ -39,14 +39,13 @@ This calls `sdk/scripts/init_benchmark.sh`, which overrides the default helper
 settings before invoking `init.sh`. The values are baked into
 `~/.svoted/config/app.toml` under the `[helper]` section:
 
-| Setting | Default (dev) | Benchmark override | Purpose |
-|---------|---------------|-------------------|---------|
-| `mean_delay` | 60 | **0** | Unlinkability delay mean (seconds). 0 = process immediately. |
-| `min_delay` | 90 | **0** | Minimum delay floor (seconds). 0 = no floor. |
-| `process_interval` | 5 | **1** | How often the processor checks for ready shares (seconds). |
-| `max_concurrent_proofs` | 2 | **16** | Parallel ZKP #3 proof generators. |
-| `expose_queue_status` | false | **true** | Enables `GET /api/v1/queue-status` (used by the test to monitor progress). |
-| `api_token` | *(empty)* | **benchmark-helper-token** | Must match `HELPER_API_TOKEN` passed to the test. |
+| Setting                 | Default (dev) | Benchmark override         | Purpose                                                                    |
+| ----------------------- | ------------- | -------------------------- | -------------------------------------------------------------------------- |
+| `min_delay`             | 90            | **0**                      | Minimum delay floor (seconds). 0 = skip all delays.                        |
+| `process_interval`      | 5             | **1**                      | How often the processor checks for ready shares (seconds).                 |
+| `max_concurrent_proofs` | 2             | **16**                     | Parallel ZKP #3 proof generators.                                          |
+| `expose_queue_status`   | false         | **true**                   | Enables `GET /api/v1/queue-status` (used by the test to monitor progress). |
+| `api_token`             | *(empty)*     | **benchmark-helper-token** | Must match `HELPER_API_TOKEN` passed to the test.                          |
 
 The fixtures use `vote_end_time = 2099-12-31` so they never expire. With
 production delay settings, shares would be spread over decades — the zero-delay
