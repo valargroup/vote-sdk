@@ -1,9 +1,10 @@
 # Helper Server — Submission Delay Privacy Model
 
-The helper server uses three layers of exponential delay to make share
-submissions temporally unlinkable. All layers sample from exponential
-distributions via inverse CDF with `crypto/rand`, so delays are
-cryptographically unpredictable.
+The helper server uses three layers of random delay to make share
+submissions temporally unlinkable. Layers 2 and 3 sample from exponential
+distributions (Poisson process) via inverse CDF; Layer 1 uses a uniform
+distribution to spread shares evenly across the remaining voting window.
+All layers use `crypto/rand`, so delays are cryptographically unpredictable.
 
 ## Layer 1: Per-share readiness delay
 
@@ -62,7 +63,7 @@ near-simultaneously.
 
 ## Sampling method
 
-All three layers use the same inverse CDF technique:
+Layers 2 and 3 use inverse CDF exponential sampling:
 
 ```
 U  = crypto/rand uniform in (0, 1]
@@ -70,9 +71,24 @@ delay = -mean * ln(U)
 ```
 
 This produces an exponentially distributed sample with the given mean.
-`crypto/rand` is used instead of `math/rand` so that an adversary who
-observes submission times cannot reconstruct the PRNG state and predict
-future delays.
+Exponential inter-arrivals give the Poisson process its memoryless
+property — an observer gains no information about the next event from
+past observations.
+
+Layer 1 uses uniform sampling over the remaining voting window:
+
+```
+U     = crypto/rand uniform in [0, 1)
+delay = max(min_delay, U * remaining_window)
+```
+
+Uniform spread is preferred over exponential for hold times because
+exponential clusters most samples near zero, making shares trivially
+linkable to their submission session (see `TestUniformDelayDistribution`).
+
+All layers use `crypto/rand` instead of `math/rand` so that an adversary
+who observes submission times cannot reconstruct the PRNG state and
+predict future delays.
 
 ## Crash Recovery
 
@@ -85,7 +101,7 @@ are kept in memory. On startup, `NewShareStore` calls `recover()` which:
 2. **Rebuilds the round cache** from the persisted `rounds` table and heals
    shares whose `vote_end_time` was 0 (transient fetch failure at enqueue).
 3. **Assigns fresh random delays** to all pending shares. Scheduling is
-   intentionally ephemeral — on restart, shares get new exponential delays
+   intentionally ephemeral — on restart, shares get new uniform delays
    so that an observer cannot predict post-restart timing from pre-crash
    patterns.
 
