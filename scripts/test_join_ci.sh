@@ -89,7 +89,6 @@ cat >> "$APP_TOML" <<HELPERCFG
 disable = false
 api_token = ""
 db_path = ""
-mean_delay = 60
 process_interval = 5
 chain_api_port = 1419
 max_concurrent_proofs = 2

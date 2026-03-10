@@ -23,11 +23,6 @@ type Config struct {
 	// DBPath is the path to the SQLite database file. Use ":memory:" for testing.
 	DBPath string `mapstructure:"db_path"`
 
-	// MeanDelay is the mean of the exponential delay distribution (seconds).
-	// Shares are delayed by Exp(1/mean) seconds for temporal unlinkability,
-	// capped at the vote end time. Default: 43200 (12 hours).
-	MeanDelay int `mapstructure:"mean_delay"`
-
 	// MinDelay is the minimum delay floor (seconds). No share will be
 	// submitted sooner than this after receipt, preventing near-zero
 	// exponential samples from making shares trivially linkable.
@@ -60,7 +55,6 @@ func DefaultConfig() Config {
 		APIToken:            "",
 		ExposeQueueStatus:   false,
 		DBPath:              "",
-		MeanDelay:           43200,
 		MinDelay:            90,
 		ProcessInterval:     30,
 		ChainAPIPort:        1318,

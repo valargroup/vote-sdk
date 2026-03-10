@@ -7,14 +7,14 @@ cryptographically unpredictable.
 
 ## Layer 1: Per-share readiness delay
 
-**Where:** `ShareStore.Enqueue()` → `cappedExponentialDelay(voteEndTime)`
+**Where:** `ShareStore.Enqueue()` → `uniformDelay(voteEndTime)`
 
 When a wallet submits a share, it is persisted immediately but not
 processed until a random delay elapses. This decouples the time a vote
 was cast from the time the share becomes eligible for processing.
 
-- Distribution: Exp(1/`mean_delay`)
-- Config: `helper.mean_delay` (seconds), default **43200** (12 hours)
+- Distribution: Uniform over `[0, remaining_window)` where
+  `remaining_window = vote_end_time − now − 60s`
 - Floor: delay is raised to at least `min_delay` seconds, preventing
   near-zero samples from making shares trivially linkable
 - Cap: delay is clamped so the share is submitted at least 60 seconds
@@ -56,7 +56,6 @@ near-simultaneously.
 
 | Parameter               | app.toml key                   | Default  | Controls           |
 |-------------------------|--------------------------------|----------|--------------------|
-| `MeanDelay`             | `helper.mean_delay`            | 43200 s  | Layer 1 mean       |
 | `MinDelay`              | `helper.min_delay`             | 90 s     | Layer 1 floor      |
 | `ProcessInterval`       | `helper.process_interval`      | 30 s     | Layer 2 & 3 mean   |
 | `MaxConcurrentProofs`   | `helper.max_concurrent_proofs` | 2        | Parallelism        |

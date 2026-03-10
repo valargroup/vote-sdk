@@ -12,13 +12,12 @@ import (
 func newTestStore(t *testing.T) *ShareStore {
 	t.Helper()
 	// Provide a permissive round fetcher so tests don't fail on unknown rounds.
-	// Returns vote_end_time=0 so uniformDelay (with meanDelay=0, minDelay=0)
-	// gives zero delay, preserving the existing test expectation that shares
-	// are immediately ready.
+	// minDelay=0 gives zero delay, preserving the existing test expectation
+	// that shares are immediately ready.
 	fetcher := func(roundID string) (uint64, error) {
 		return 0, nil
 	}
-	s, err := NewShareStore(":memory:", 0, 0, fetcher)
+	s, err := NewShareStore(":memory:", 0, fetcher)
 	require.NoError(t, err)
 	t.Cleanup(func() { s.Close() })
 	return s
@@ -216,7 +215,7 @@ func TestRecovery(t *testing.T) {
 	dbPath := t.TempDir() + "/helper_test.db"
 	fetcher := func(roundID string) (uint64, error) { return 0, nil }
 
-	s1, err := NewShareStore(dbPath, 0, 0, fetcher)
+	s1, err := NewShareStore(dbPath, 0, fetcher)
 	require.NoError(t, err)
 
 	enqueueAndRequireInserted(t, s1, testPayload("round1", 0))
@@ -229,7 +228,7 @@ func TestRecovery(t *testing.T) {
 	s1.Close()
 
 	// Reopen: recovery should reset Witnessed → Received with fresh delay.
-	s2, err := NewShareStore(dbPath, 0, 0, fetcher)
+	s2, err := NewShareStore(dbPath, 0, fetcher)
 	require.NoError(t, err)
 	defer s2.Close()
 
@@ -238,7 +237,7 @@ func TestRecovery(t *testing.T) {
 }
 
 func TestUniformDelay_ImminentDeadline(t *testing.T) {
-	s, err := NewShareStore(":memory:", time.Hour, 0, nil)
+	s, err := NewShareStore(":memory:", 90*time.Second, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -254,30 +253,13 @@ func TestUniformDelay_ImminentDeadline(t *testing.T) {
 	assert.LessOrEqual(t, delay, maxAllowed, "delay should be within remaining - 60s")
 }
 
-func TestUniformDelay_ZeroMean(t *testing.T) {
-	s, err := NewShareStore(":memory:", 0, 0, nil)
-	require.NoError(t, err)
-	defer s.Close()
-
-	// With meanDelay=0 and voteEndTime=0 (unknown), fallback spread is 0 → minDelay.
-	delay := s.uniformDelay(0)
-	assert.Equal(t, time.Duration(0), delay)
-
-	// With a known voteEndTime, uniform over remaining window still works.
-	voteEndTime := uint64(time.Now().Add(time.Hour).Unix())
-	delay = s.uniformDelay(voteEndTime)
-	maxAllowed := time.Hour - 60*time.Second
-	assert.LessOrEqual(t, delay, maxAllowed)
-	assert.GreaterOrEqual(t, delay, time.Duration(0))
-}
-
 func TestUniformDelayDistribution(t *testing.T) {
 	// Verify delays are uniformly spread in [0, remaining - 60s] with no
 	// clustering at zero (the old exponential problem).
 	voteEndTime := uint64(time.Now().Add(24 * time.Hour).Unix())
 	remaining := 24*time.Hour - 60*time.Second
 
-	s, err := NewShareStore(":memory:", 12*time.Hour, 0, nil)
+	s, err := NewShareStore(":memory:", 90*time.Second, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -298,7 +280,7 @@ func TestUniformDelayDistribution(t *testing.T) {
 
 func TestUniformDelay_FloorRespected(t *testing.T) {
 	minDelay := 2 * time.Minute
-	s, err := NewShareStore(":memory:", time.Hour, minDelay, nil)
+	s, err := NewShareStore(":memory:", minDelay, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -317,7 +299,7 @@ func TestPurgeExpiredRounds(t *testing.T) {
 		return uint64(time.Now().Add(time.Hour).Unix()), nil
 	}
 
-	s, err := NewShareStore(":memory:", 0, 0, fetcher)
+	s, err := NewShareStore(":memory:", 0, fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -344,7 +326,7 @@ func TestGetVoteEndTime_Cache(t *testing.T) {
 		return 1000000, nil
 	}
 
-	s, err := NewShareStore(":memory:", 0, 0, fetcher)
+	s, err := NewShareStore(":memory:", 0, fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -362,7 +344,7 @@ func TestGetVoteEndTime_Cache(t *testing.T) {
 }
 
 func TestGetVoteEndTime_NilFetcher(t *testing.T) {
-	s, err := NewShareStore(":memory:", 0, 0, nil)
+	s, err := NewShareStore(":memory:", 0, nil)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -399,7 +381,7 @@ func TestMigrateOldSchema(t *testing.T) {
 
 	// Opening with current code should migrate PK and add vote_end_time.
 	fetcher := func(roundID string) (uint64, error) { return 0, nil }
-	s, err := NewShareStore(dbPath, 0, 0, fetcher)
+	s, err := NewShareStore(dbPath, 0, fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 
