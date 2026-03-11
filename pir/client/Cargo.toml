@@ -6,6 +6,7 @@ edition = "2021"
 [dev-dependencies]
 rand = "0.8"
 pir-export = { path = "../export" }
+wiremock = "0.6"
 
 [dependencies]
 pir-types  = { path = "../types", features = ["reader"] }
