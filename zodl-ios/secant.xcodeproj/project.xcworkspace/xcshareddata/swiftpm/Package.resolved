@@ -64,6 +64,15 @@
       }
     },
     {
+      "identity" : "csqlite",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/stephencelis/CSQLite",
+      "state" : {
+        "revision" : "bdb5580e54cdf49251b365ea34e2651199473240",
+        "version" : "3.50.4"
+      }
+    },
+    {
       "identity" : "devicekit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/devicekit/DeviceKit.git",
@@ -133,6 +142,15 @@
       "state" : {
         "revision" : "2d7f3e76e904621e111efada6cc9575f39543bb2",
         "version" : "2.2.5"
+      }
+    },
+    {
+      "identity" : "sqlcipher.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sqlcipher/SQLCipher.swift",
+      "state" : {
+        "revision" : "7da3c29da67ef5f6dac915647087d966451f00d3",
+        "version" : "4.13.0"
       }
     },
     {

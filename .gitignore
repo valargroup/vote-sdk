@@ -58,6 +58,12 @@ e2e-tests/fixtures/**/manifest.json
 e2e-tests/fixtures/**/delegations.json
 e2e-tests/fixtures/**/cast_vote_inputs.json
 
+# Local iOS build directories (subtrees / local SPM packages)
+zashi-ios/
+orchard/
+zcash-light-client-ffi/
+zcash-voting-ffi/
+
 # macOS
 .DS_Store
 .vercel
