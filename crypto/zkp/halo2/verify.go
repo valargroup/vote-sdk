@@ -311,8 +311,11 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 	}
 
 	// Validate Fp fields before the FFI call.
-	// Slots skipped: anchor_height (slot 5, uint64),
-	// proposal_id (slot 6, uint32), voting_round_id (slot 7, wide-reduced in Rust).
+	// Slots skipped — the Rust FFI reads these as integers and converts via
+	// Fp::from(u64), which is infallible (u64 max ≈ 1.8e19 << Pallas p ≈ 2^254):
+	//   anchor_height (slot 5, uint64), proposal_id (slot 6, uint32).
+	// voting_round_id (slot 7) is a Poseidon hash already in canonical Fp form;
+	// the Rust FFI deserializes it via Fp::from_repr and rejects non-canonical values.
 	if err := validatePallasFp("van_nullifier", inputs.VanNullifier); err != nil {
 		return err
 	}
