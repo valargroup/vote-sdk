@@ -50,8 +50,6 @@ incrementalmerkletree = "0.8"
 rand = "0.8"
 rand_chacha = "0.3"
 
-# Patches needed for librustvoting's transitive deps to resolve to local paths
-# Patches needed for transitive deps to resolve to local paths
 [patch.crates-io]
 zcash_keys = { path = "../librustzcash/zcash_keys" }
 zcash_protocol = { path = "../librustzcash/components/zcash_protocol" }
@@ -64,5 +62,11 @@ zcash_primitives = { path = "../librustzcash/zcash_primitives" }
 pczt = { path = "../librustzcash/pczt" }
 orchard = { path = "../voting-circuits/orchard" }
 
-# Keep this crate as a standalone workspace
+[patch."https://github.com/valargroup/vote-nullifier-pir.git"]
+imt-tree = { path = "../vote-nullifier-pir/imt-tree" }
+pir-client = { path = "../vote-nullifier-pir/pir/client" }
+
+[patch."https://github.com/valargroup/voting-circuits.git"]
+voting-circuits = { path = "../voting-circuits/voting-circuits" }
+
 [workspace]

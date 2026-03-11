@@ -10,15 +10,17 @@ resolver = "2"
 # Individual member Cargo.tomls use crates-io version strings;
 # Cargo resolves them from these overrides.
 #
-# orchard: use the copy bundled in voting-circuits repo (upstream 0.11 +
-#   pub visibility for constants/spec + shared_primitives gadget).
-#   This ensures type compatibility with voting-circuits.
-#
-# librustzcash crates: pczt + zcash_keys + zcash_protocol need our
-#   governance visibility changes (pub getters on PCZT types, etc.).
+# Monorepo-local overrides: all subtree repos are available as siblings,
+# so we patch git deps to local paths to avoid network fetches in CI.
 [patch.crates-io]
-orchard = { git = "https://github.com/valargroup/voting-circuits.git" }
+orchard        = { path = "../voting-circuits/orchard" }
+pczt           = { path = "../librustzcash/pczt" }
+zcash_keys     = { path = "../librustzcash/zcash_keys" }
+zcash_protocol = { path = "../librustzcash/components/zcash_protocol" }
 
-pczt              = { git = "https://github.com/valargroup/librustzcash.git", branch = "valargroup/pczt-governance-extensions-0.11" }
-zcash_keys        = { git = "https://github.com/valargroup/librustzcash.git", branch = "valargroup/pczt-governance-extensions-0.11" }
-zcash_protocol    = { git = "https://github.com/valargroup/librustzcash.git", branch = "valargroup/pczt-governance-extensions-0.11" }
+[patch."https://github.com/valargroup/vote-nullifier-pir.git"]
+imt-tree   = { path = "../vote-nullifier-pir/imt-tree" }
+pir-client = { path = "../vote-nullifier-pir/pir/client" }
+
+[patch."https://github.com/valargroup/voting-circuits.git"]
+voting-circuits = { path = "../voting-circuits/voting-circuits" }

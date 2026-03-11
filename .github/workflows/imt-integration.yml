@@ -5,12 +5,10 @@ on:
     branches: [main]
     paths:
       - 'voting-circuits/**'
-      - 'orchard/**'
   pull_request:
     branches: [main]
     paths:
       - 'voting-circuits/**'
-      - 'orchard/**'
 
 permissions:
   contents: read
@@ -34,12 +32,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            voting-circuits/target
+            voting-circuits/voting-circuits/target
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-voting-circuits-imt-${{ hashFiles('voting-circuits/Cargo.lock') }}
+          key: ${{ runner.os }}-voting-circuits-imt-${{ hashFiles('voting-circuits/voting-circuits/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-voting-circuits-imt-
       - name: Run IMT integration test
         run: cargo test --test imt_circuit_integration -- --nocapture
-        working-directory: voting-circuits
+        working-directory: voting-circuits/voting-circuits
