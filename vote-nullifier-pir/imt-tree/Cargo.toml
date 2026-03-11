@@ -1,0 +1,21 @@
+[package]
+name = "imt-tree"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+ff = "0.13"
+hex = "0.4"
+pasta_curves = "0.5"
+halo2_gadgets = { version = "0.3", default-features = false }
+rayon = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+criterion = "0.5"
+rand = "0.8"
+
+[[bench]]
+name = "tree_build"
+harness = false
