@@ -8,6 +8,11 @@ create-val-tx
 # Rust build artifacts
 circuits/target/
 
+# Environment (secrets live here — never commit)
+.env
+.env.*
+!.env.example
+
 # macOS
 .DS_Store
 

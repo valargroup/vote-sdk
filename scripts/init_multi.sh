@@ -15,6 +15,16 @@
 #   - Summary prints systemd + create-val-tx instructions
 set -e
 
+# Load .env from repo root if present (local dev convenience).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ -f "$REPO_ROOT/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$REPO_ROOT/.env"
+    set +a
+fi
+
 # ---------------------------------------------------------------------------
 # Parse flags
 # ---------------------------------------------------------------------------
@@ -238,10 +248,14 @@ $BINARY keys add validator --keyring-backend test --home "$HOME_VAL1"
 VAL1_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_VAL1")
 echo "Val1 address: $VAL1_ADDR"
 
-# Import the bootstrap admin key (matches E2E test constant).
-# In dev mode this account is also set as the vote-manager for convenience.
-# Override via VM_PRIVKEY env var; the default is a well-known dev-only key.
-VM_PRIVKEY="${VM_PRIVKEY:-b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee}"
+# Import the bootstrap admin key used as the vote-manager.
+# Must be set via .env (local) or as a GitHub/CI secret (remote).
+if [ -z "$VM_PRIVKEY" ]; then
+    echo "ERROR: VM_PRIVKEY is not set."
+    echo "  Local dev:  add VM_PRIVKEY=<64-char-hex> to .env (see .env.example)"
+    echo "  CI/deploy:  set the VM_PRIVKEY secret in GitHub Actions"
+    exit 1
+fi
 $BINARY keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_VAL1"
 MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_VAL1")
 echo "Manager address:   $MANAGER_ADDR"

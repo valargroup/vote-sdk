@@ -4,6 +4,8 @@
 
 A Cosmos SDK application chain for **private on-chain voting** using Zcash-derived cryptography (Halo2 ZKP circuits, RedPallas signatures, ElGamal encryption, Poseidon Merkle trees).
 
+**Specification:** [Shielded Voting Protocol ZIP](https://github.com/zcash/zips/pull/1200)
+
 ## Quick Start
 
 ### Prerequisites
@@ -28,7 +30,11 @@ make build
 ### Run a Local Chain
 
 ```bash
-# Initialize a single-validator devnet and start
+# 1. Create .env with the vote-manager private key (one-time)
+cp .env.example .env
+# Edit .env and set VM_PRIVKEY (generate with: openssl rand -hex 32)
+
+# 2. Initialize a single-validator devnet and start
 make init
 make start
 ```

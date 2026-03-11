@@ -33,7 +33,7 @@ func TestExportImportGenesis(t *testing.T) {
 	// --- Populate state ---
 
 	// Vote manager.
-	require.NoError(t, k.SetVoteManager(kvStore, &types.VoteManagerState{Address: "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl"}))
+	require.NoError(t, k.SetVoteManager(kvStore, &types.VoteManagerState{Address: "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}))
 
 	// Vote rounds.
 	round := &types.VoteRound{
@@ -44,7 +44,7 @@ func TestExportImportGenesis(t *testing.T) {
 		VoteEndTime:      2_000_000,
 		NullifierImtRoot: bytes.Repeat([]byte{0x33}, 32),
 		NcRoot:           bytes.Repeat([]byte{0x44}, 32),
-		Creator:          "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl",
+		Creator:          "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
 		Status:           types.SessionStatus_SESSION_STATUS_ACTIVE,
 		Proposals: []*types.Proposal{
 			{Id: 1, Title: "Prop 1", Options: []*types.VoteOption{
@@ -124,7 +124,7 @@ func TestExportImportGenesis(t *testing.T) {
 	// Verify export contents.
 	require.NotNil(t, gs.TreeState)
 	require.Equal(t, uint64(3), gs.TreeState.NextIndex)
-	require.Equal(t, "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl", gs.VoteManager)
+	require.Equal(t, "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3", gs.VoteManager)
 	require.Len(t, gs.Rounds, 2)
 	require.Len(t, gs.CommitmentLeaves, 3)
 	require.Len(t, gs.Nullifiers, 3)
@@ -228,7 +228,7 @@ func TestExportImportGenesis(t *testing.T) {
 	// Verify vote manager.
 	vm, err := k2.GetVoteManager(kvStore2)
 	require.NoError(t, err)
-	require.Equal(t, "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl", vm.Address)
+	require.Equal(t, "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3", vm.Address)
 
 	// Verify commitment roots.
 	rootVal, err := k2.GetCommitmentRootAtHeight(kvStore2, 10)

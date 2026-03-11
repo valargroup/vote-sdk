@@ -1388,12 +1388,12 @@ func (*MsgSubmitPartialDecryptionResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{21}
 }
 
-// MsgSetVoteManager sets or changes the vote manager address.
-// Only callable by the current vote manager or any bonded validator.
-// On first call (no vote manager set), accepts any bonded validator.
+// MsgSetVoteManager reassigns the vote manager role.
+// Only callable by the current vote manager. Transfers the caller's full
+// usvote balance to new_manager atomically.
 type MsgSetVoteManager struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                         // Sender address (must be current vote manager or a validator)
+	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                         // Sender address (must be the current vote manager)
 	NewManager    string                 `protobuf:"bytes,2,opt,name=new_manager,json=newManager,proto3" json:"new_manager,omitempty"` // New vote manager address
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1601,7 +1601,7 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x19DealExecutiveAuthorityKey\x12&.svote.v1.MsgDealExecutiveAuthorityKey\x1a..svote.v1.MsgDealExecutiveAuthorityKeyResponse\x12p\n" +
 	"\x18AckExecutiveAuthorityKey\x12%.svote.v1.MsgAckExecutiveAuthorityKey\x1a-.svote.v1.MsgAckExecutiveAuthorityKeyResponse\x12|\n" +
 	"\x1cCreateValidatorWithPallasKey\x12).svote.v1.MsgCreateValidatorWithPallasKey\x1a1.svote.v1.MsgCreateValidatorWithPallasKeyResponse\x12R\n" +
-	"\x0eSetVoteManager\x12\x1b.svote.v1.MsgSetVoteManager\x1a#.svote.v1.MsgSetVoteManagerResponse\x1a\x05\x80\xe7\xb0*\x01B2Z0github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
+	"\x0eSetVoteManager\x12\x1b.svote.v1.MsgSetVoteManager\x1a#.svote.v1.MsgSetVoteManagerResponse\x1a\x05\x80\xe7\xb0*\x01B-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
 
 var (
 	file_svote_v1_tx_proto_rawDescOnce sync.Once

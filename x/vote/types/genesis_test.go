@@ -31,7 +31,7 @@ func validGenesis() *types.GenesisState {
 			{NullifierType: 1, RoundId: roundID, Nullifier: bytes.Repeat([]byte{0xB2}, 32)},
 			{NullifierType: 2, RoundId: roundID, Nullifier: bytes.Repeat([]byte{0xB3}, 32)},
 		},
-		VoteManager: "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl",
+		VoteManager: "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
 		TallyResults: []*types.TallyResult{
 			{VoteRoundId: roundID, ProposalId: 1, VoteDecision: 0, TotalValue: 100},
 		},
@@ -213,7 +213,7 @@ func TestValidateGenesisState_EmptyVoteManagerRejected(t *testing.T) {
 
 func TestValidateGenesisState_NoTreeStateWithLeavesIsValid(t *testing.T) {
 	gs := &types.GenesisState{
-		VoteManager: "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl",
+		VoteManager: "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
 		CommitmentLeaves: []*types.CommitmentLeaf{
 			{Index: 0, Value: bytes.Repeat([]byte{0x01}, 32)},
 		},
