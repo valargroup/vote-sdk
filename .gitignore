@@ -32,9 +32,9 @@ zcaloooors
 shielded_vote_book
 
 # Orchard book ZKP docs (symlinked from Obsidian)
-orchard/book/src/zkps/zkp1-delegation-proof.md
-orchard/book/src/zkps/zkp2-vote-proof.md
-orchard/book/src/zkps/zkp3-vote-reveal-proof.md
+voting-circuits/orchard/book/src/zkps/zkp1-delegation-proof.md
+voting-circuits/orchard/book/src/zkps/zkp2-vote-proof.md
+voting-circuits/orchard/book/src/zkps/zkp3-vote-reveal-proof.md
 
 # Environment files (secrets)
 .env
@@ -46,14 +46,12 @@ orchard/book/src/zkps/zkp3-vote-reveal-proof.md
 # Swift build artifacts
 keystone-qr/.build/
 
-# xcframework (regenerated via `cd zcash-voting-ffi && make dev`)
-zcash-voting-ffi/releases/zcash_voting_ffiFFI.xcframework/
-
 # Nullifier service data (lives in vote-nullifier-pir repo)
 nullifiers.bin
 nullifiers.checkpoint
 nullifiers.tree
 nullifiers.index
+nullifier-ingest/
 
 # Downloaded/generated E2E throughput fixtures
 e2e-tests/fixtures/**/manifest.json
