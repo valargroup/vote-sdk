@@ -2979,7 +2979,7 @@ function VoteStatusView({ expectRoundCount }: { expectRoundCount?: number | null
                     {summary.proposals.map((prop) => {
                       const options = prop.options ?? [];
 
-                      // Finalized: use total_value for bars & winner.
+                      // Finalized: use total_value for bars & result.
                       // Active: use ballot_count (shares) — no ZEC conversion possible.
                       // Detect winners (may be multiple if tied).
                       const winnerIndices: Set<number> = new Set();
@@ -2998,7 +2998,7 @@ function VoteStatusView({ expectRoundCount }: { expectRoundCount?: number | null
                         return winnerIndices.size > 1;
                       })();
 
-                      // Winner color for banner — uses the option palette
+                      // Result color for banner — uses the option palette
                       const winnerColor = (() => {
                         if (winnerIndices.size === 0) return optionColor(0, options.length);
                         const winnerIdx = [...winnerIndices][0];
@@ -3032,7 +3032,7 @@ function VoteStatusView({ expectRoundCount }: { expectRoundCount?: number | null
                             </p>
                           )}
 
-                          {/* Winner banner — only when finalized */}
+                          {/* Result banner — only when finalized */}
                           {isFinalized && winnerIndices.size > 0 && (
                             <div
                               className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded-md"
@@ -3040,7 +3040,7 @@ function VoteStatusView({ expectRoundCount }: { expectRoundCount?: number | null
                             >
                               <span className="text-xs" style={{ color: winnerColor }}>{isTied ? "⚖" : "✓"}</span>
                               <span className="text-[11px] font-semibold" style={{ color: winnerColor }}>
-                                {isTied ? "Tie: " : "Winner: "}
+                                {isTied ? "Tie: " : "Result: "}
                                 {options
                                   .filter((o) => winnerIndices.has(o.index ?? 0))
                                   .map((o) => o.label ?? `Option ${o.index}`)

@@ -183,13 +183,13 @@ struct ResultsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Winner highlight
+            // Result highlight
             if let winner = winningEntry, totalAmount > 0 {
                 let winnerLabel = optionLabel(for: winner.decision, proposal: proposal)
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.seal.fill")
                         .foregroundStyle(colorForDecision(winner.decision, proposal: proposal))
-                    Text("Winner: \(winnerLabel)")
+                    Text("Result: \(winnerLabel)")
                         .zFont(.semiBold, size: 14, style: Design.Text.primary)
                 }
                 .padding(.horizontal, 10)
