@@ -284,24 +284,47 @@ impl PirClient {
     }
 
     /// Fetch proof and return timing breakdown.
+    ///
+    /// **Error-oracle mitigation**: the tier 2 query is always sent even when
+    /// tier 1 fails. A malicious server could craft a tier 1 response whose
+    /// decryption outcome depends on the client's secret key material (e.g. by
+    /// triggering an assert in the LWE decode path). If the client aborted
+    /// before sending the tier 2 query, the server could observe its absence
+    /// and use the binary "crash / no-crash" signal as an oracle. By
+    /// unconditionally sending a (possibly dummy) tier 2 query we ensure the
+    /// server always sees both requests and gains no information from errors.
     async fn fetch_proof_inner(&self, nullifier: Fp) -> Result<(ImtProofData, NoteTiming)> {
         let note_start = Instant::now();
         let mut path = [Fp::default(); TREE_DEPTH];
 
-        // Process tier 0 (plaintext)
+        // Process tier 0 (plaintext, not server-controlled)
         let s1 = process_tier0(&self.tier0, nullifier, &mut path)?;
 
-        // Process tier 1 (PIR)
-        let (tier1_row, tier1_timing) = self
+        // Process tier 1 (PIR) — capture the outcome without `?` so that a
+        // tier 2 query is always sent regardless of tier 1 success.
+        let tier1_outcome = self
             .ypir_query(&self.tier1_scenario, "tier1", s1, TIER1_ROW_BYTES)
-            .await?;
-        let s2 = process_tier1(&tier1_row, nullifier, &mut path)?;
+            .await
+            .and_then(|(row, timing)| {
+                let s2 = process_tier1(&row, nullifier, &mut path)?;
+                Ok((s1 * TIER1_LEAVES + s2, timing))
+            });
 
-        // Process tier 2 (PIR)
-        let t2_row_idx = s1 * TIER1_LEAVES + s2;
-        let (tier2_row, tier2_timing) = self
+        // Real index on success, dummy index 0 on failure. PIR hides the
+        // queried index from the server, so the dummy is indistinguishable.
+        let t2_row_idx = tier1_outcome
+            .as_ref()
+            .map(|(idx, _)| *idx)
+            .unwrap_or(0);
+
+        // Always send tier 2 to void error-based oracles.
+        let tier2_result = self
             .ypir_query(&self.tier2_scenario, "tier2", t2_row_idx, TIER2_ROW_BYTES)
-            .await?;
+            .await;
+
+        // Propagate errors only after both queries have been sent.
+        let (t2_row_idx, tier1_timing) = tier1_outcome?;
+        let (tier2_row, tier2_timing) = tier2_result?;
 
         let proof = process_tier2_and_build(
             &tier2_row,
@@ -381,9 +404,23 @@ impl PirClient {
             (send_ms - server_ms).max(0.0)
         });
 
-        // Decode the response from the server.
+        // Decode the response. Wrap in catch_unwind so that assert panics
+        // in the YPIR library (e.g. `val < lwe_q_prime` in the LWE decode
+        // path) become recoverable errors rather than process aborts. This is
+        // necessary for the error-oracle mitigation in fetch_proof_inner:
+        // a panic here must not prevent the second query from being sent.
         let t2 = Instant::now();
-        let decoded = ypir_client.decode_response_simplepir(seed, &response_bytes);
+        let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ypir_client.decode_response_simplepir(seed, &response_bytes)
+        }))
+        .map_err(|panic_payload| {
+            let msg = panic_payload
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .or_else(|| panic_payload.downcast_ref::<&str>().copied())
+                .unwrap_or("unknown panic");
+            anyhow::anyhow!("{} response decryption panicked: {}", tier_name, msg)
+        })?;
         let decode_ms = t2.elapsed().as_secs_f64() * 1000.0;
 
         anyhow::ensure!(
@@ -868,5 +905,125 @@ mod tests {
             fix.root29,
         );
         assert!(result.is_err());
+    }
+
+    // ── Error-oracle mitigation ─────────────────────────────────────────
+
+    /// Verify that the tier 2 query is always sent to the server even when
+    /// the tier 1 response is corrupted.
+    ///
+    /// A malicious server could craft a tier 1 response whose decryption
+    /// outcome depends on the client's secret key material (e.g. by
+    /// triggering an assert in the LWE decode path). Without the
+    /// mitigation, a decode failure would prevent the tier 2 query from
+    /// being sent, and the server could use the absence of query 2 as a
+    /// single-bit oracle. This test asserts that both queries are always
+    /// issued regardless of tier 1 outcome.
+    #[tokio::test]
+    async fn tier2_query_sent_despite_tier1_decode_failure() {
+        use ff::PrimeField as _;
+        use pir_types::{TIER1_ITEM_BITS, TIER1_ROWS, TIER2_ITEM_BITS};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // Build real tier0 data so PirClient::connect() succeeds and
+        // process_tier0() produces a valid subtree index.
+        let raw_nfs: Vec<Fp> = (1u64..=10).map(|i| Fp::from(i * 7)).collect();
+        let ranges = build_ranges_with_sentinels(&raw_nfs);
+        let tree = pir_export::build_pir_tree(ranges).unwrap();
+        let tier0_data = pir_export::tier0::export(
+            &tree.root26,
+            &tree.levels,
+            &tree.ranges,
+            &tree.empty_hashes,
+        );
+
+        let root_info = pir_types::RootInfo {
+            root29: hex::encode(tree.root29.to_repr()),
+            root26: hex::encode(tree.root26.to_repr()),
+            num_ranges: tree.ranges.len(),
+            pir_depth: PIR_DEPTH,
+            height: None,
+        };
+
+        // Use the real item_size_bits to satisfy YPIR's internal
+        // parameter constraints. num_items=TIER1_ROWS (2048) matches
+        // production tier1 and is large enough for any s1 value.
+        let tier1_scenario = YpirScenario {
+            num_items: TIER1_ROWS,
+            item_size_bits: TIER1_ITEM_BITS,
+        };
+        let tier2_scenario = YpirScenario {
+            num_items: TIER1_ROWS,
+            item_size_bits: TIER2_ITEM_BITS,
+        };
+
+        let server = MockServer::start().await;
+
+        // ── setup endpoints (valid data) ────────────────────────────────
+        Mock::given(method("GET"))
+            .and(path("/tier0"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(tier0_data))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/params/tier1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&tier1_scenario))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/params/tier2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&tier2_scenario))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/root"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&root_info))
+            .mount(&server)
+            .await;
+
+        // ── query endpoints (corrupted responses) ───────────────────────
+        Mock::given(method("POST"))
+            .and(path("/tier1/query"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_bytes(vec![0xDE; 65536]),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/tier2/query"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_bytes(vec![0xAD; 65536]),
+            )
+            .mount(&server)
+            .await;
+
+        // ── run the client ──────────────────────────────────────────────
+        let client = PirClient::connect(&server.uri()).await.unwrap();
+        let nullifier = tree.ranges[0][0];
+        let result = client.fetch_proof(nullifier).await;
+
+        assert!(
+            result.is_err(),
+            "fetch_proof should fail with corrupted tier1 response"
+        );
+
+        // ── verify both queries were sent ───────────────────────────────
+        let received = server.received_requests().await.unwrap();
+        let tier1_hits = received
+            .iter()
+            .filter(|r| r.url.path() == "/tier1/query")
+            .count();
+        let tier2_hits = received
+            .iter()
+            .filter(|r| r.url.path() == "/tier2/query")
+            .count();
+
+        assert_eq!(tier1_hits, 1, "tier1 query should have been sent");
+        assert_eq!(
+            tier2_hits, 1,
+            "tier2 query must still be sent when tier1 decode fails \
+             (error-oracle mitigation)"
+        );
     }
 }
