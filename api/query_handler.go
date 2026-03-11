@@ -14,7 +14,7 @@ import (
 	"github.com/gorilla/mux"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // RegisterQueryRoutes registers vote query REST endpoints on the router.

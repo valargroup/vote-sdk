@@ -10,8 +10,8 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/valargroup/shielded-vote/crypto/roundid"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/crypto/roundid"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 var _ types.MsgServer = msgServer{}

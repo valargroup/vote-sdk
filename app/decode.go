@@ -3,7 +3,7 @@ package app
 import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	voteapi "github.com/valargroup/shielded-vote/api"
+	voteapi "github.com/valargroup/vote-sdk/api"
 )
 
 // CustomTxDecoder returns a TxDecoder that handles vote wire format,

@@ -75,7 +75,7 @@ const file_svote_module_v1_module_proto_rawDesc = "" +
 	"\x1csvote/module/v1/module.proto\x12\x0fsvote.module.v1\x1a cosmos/app/v1alpha1/module.proto\"Z\n" +
 	"\x06Module\x12\x1c\n" +
 	"\tauthority\x18\x01 \x01(\tR\tauthority:2\xba\xc0\x96\xda\x01,\n" +
-	"*github.com/valargroup/shielded-vote/x/voteB6Z4github.com/valargroup/shielded-vote/x/vote/module/v1b\x06proto3"
+	"*github.com/valargroup/vote-sdk/x/voteB6Z4github.com/valargroup/vote-sdk/x/vote/module/v1b\x06proto3"
 
 var (
 	file_svote_module_v1_module_proto_rawDescOnce sync.Once

@@ -13,9 +13,9 @@ import (
 	sdktestutil "github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	svtest "github.com/valargroup/shielded-vote/testutil"
-	"github.com/valargroup/shielded-vote/x/vote/keeper"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	svtest "github.com/valargroup/vote-sdk/testutil"
+	"github.com/valargroup/vote-sdk/x/vote/keeper"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // newPartialDecryptTestKeeper returns a fresh keeper backed by an in-memory KV store.

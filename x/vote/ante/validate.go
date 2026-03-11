@@ -18,10 +18,10 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/valargroup/shielded-vote/crypto/redpallas"
-	"github.com/valargroup/shielded-vote/crypto/zkp"
-	"github.com/valargroup/shielded-vote/x/vote/keeper"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/crypto/redpallas"
+	"github.com/valargroup/vote-sdk/crypto/zkp"
+	"github.com/valargroup/vote-sdk/x/vote/keeper"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // ValidateOpts configures the validation pipeline.

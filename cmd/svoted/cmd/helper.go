@@ -17,11 +17,11 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/valargroup/shielded-vote/app"
-	"github.com/valargroup/shielded-vote/crypto/votecommitment"
-	"github.com/valargroup/shielded-vote/crypto/votetree"
-	"github.com/valargroup/shielded-vote/internal/helper"
-	votetypes "github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/app"
+	"github.com/valargroup/vote-sdk/crypto/votecommitment"
+	"github.com/valargroup/vote-sdk/crypto/votetree"
+	"github.com/valargroup/vote-sdk/internal/helper"
+	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // addHelperFlags registers helper server CLI flags on the start command.

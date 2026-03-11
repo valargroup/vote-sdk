@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/valargroup/shielded-vote/crypto/ncroot"
+	"github.com/valargroup/vote-sdk/crypto/ncroot"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"

@@ -13,7 +13,7 @@ import (
 	"cosmossdk.io/log"
 	"github.com/gorilla/mux"
 
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // RegisterRoutes registers helper server HTTP routes on the given mux router.

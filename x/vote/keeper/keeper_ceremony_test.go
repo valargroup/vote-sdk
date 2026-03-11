@@ -1,8 +1,8 @@
 package keeper_test
 
 import (
-	"github.com/valargroup/shielded-vote/x/vote/keeper"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/x/vote/keeper"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // ===========================================================================

@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	svtest "github.com/valargroup/shielded-vote/testutil"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	svtest "github.com/valargroup/vote-sdk/testutil"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------

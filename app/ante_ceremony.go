@@ -7,8 +7,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	votekeeper "github.com/valargroup/shielded-vote/x/vote/keeper"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // CeremonyValidatorDecorator rejects ceremony messages from non-validators.

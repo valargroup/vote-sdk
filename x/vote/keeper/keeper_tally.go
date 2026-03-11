@@ -7,8 +7,8 @@ import (
 	"cosmossdk.io/core/store"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/valargroup/shielded-vote/crypto/elgamal"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------

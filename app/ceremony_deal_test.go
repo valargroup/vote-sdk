@@ -11,12 +11,12 @@ import (
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
 
-	voteapi "github.com/valargroup/shielded-vote/api"
-	"github.com/valargroup/shielded-vote/crypto/ecies"
-	"github.com/valargroup/shielded-vote/crypto/elgamal"
-	"github.com/valargroup/shielded-vote/crypto/shamir"
-	"github.com/valargroup/shielded-vote/testutil"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/crypto/ecies"
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/crypto/shamir"
+	"github.com/valargroup/vote-sdk/testutil"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------

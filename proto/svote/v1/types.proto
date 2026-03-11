@@ -1,7 +1,7 @@
 syntax = "proto3";
 package svote.v1;
 
-option go_package = "github.com/valargroup/shielded-vote/x/vote/types";
+option go_package = "github.com/valargroup/vote-sdk/x/vote/types";
 
 // SessionStatus represents the lifecycle state of a voting session.
 enum SessionStatus {

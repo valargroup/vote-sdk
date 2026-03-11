@@ -10,11 +10,11 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/valargroup/shielded-vote/crypto/elgamal"
-	"github.com/valargroup/shielded-vote/crypto/shamir"
-	svtest "github.com/valargroup/shielded-vote/testutil"
-	"github.com/valargroup/shielded-vote/x/vote/keeper"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/crypto/shamir"
+	svtest "github.com/valargroup/vote-sdk/testutil"
+	"github.com/valargroup/vote-sdk/x/vote/keeper"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------

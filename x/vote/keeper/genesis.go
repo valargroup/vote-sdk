@@ -5,7 +5,7 @@ import (
 
 	"cosmossdk.io/core/store"
 
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // InitGenesis initializes the vote module state from a genesis state.

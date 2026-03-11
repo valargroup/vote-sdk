@@ -3,7 +3,7 @@ package keeper_test
 import (
 	"bytes"
 
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // ---------------------------------------------------------------------------

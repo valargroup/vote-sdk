@@ -10,7 +10,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/valargroup/shielded-vote/testutil"
+	"github.com/valargroup/vote-sdk/testutil"
 )
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import (
 
 	"cosmossdk.io/core/store"
 
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // PartialDecryptionWithIndex pairs a validator's 1-based Shamir index with the

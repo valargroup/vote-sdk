@@ -2,7 +2,7 @@
 
 package cmd
 
-import "github.com/valargroup/shielded-vote/crypto/zkp/halo2"
+import "github.com/valargroup/vote-sdk/crypto/zkp/halo2"
 
 func helperHalo2Available() bool {
 	return true

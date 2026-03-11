@@ -7,9 +7,9 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	voteapi "github.com/valargroup/shielded-vote/api"
-	votekeeper "github.com/valargroup/shielded-vote/x/vote/keeper"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	voteapi "github.com/valargroup/vote-sdk/api"
+	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // ProcessProposalHandler returns a handler that validates injected txs

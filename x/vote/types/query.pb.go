@@ -1153,7 +1153,7 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\n" +
 	"ListRounds\x12 .svote.v1.QueryListRoundsRequest\x1a!.svote.v1.QueryListRoundsResponse\x12Q\n" +
 	"\n" +
-	"PallasKeys\x12 .svote.v1.QueryPallasKeysRequest\x1a!.svote.v1.QueryPallasKeysResponseB2Z0github.com/valargroup/shielded-vote/x/vote/typesb\x06proto3"
+	"PallasKeys\x12 .svote.v1.QueryPallasKeysRequest\x1a!.svote.v1.QueryPallasKeysResponseB2Z0github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
 
 var (
 	file_svote_v1_query_proto_rawDescOnce sync.Once

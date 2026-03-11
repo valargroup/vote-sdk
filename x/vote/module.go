@@ -26,9 +26,9 @@ import (
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/valargroup/shielded-vote/x/vote/keeper"
-	modulev1 "github.com/valargroup/shielded-vote/x/vote/module/v1"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/x/vote/keeper"
+	modulev1 "github.com/valargroup/vote-sdk/x/vote/module/v1"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // Compile-time interface assertions.

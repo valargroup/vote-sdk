@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/valargroup/shielded-vote/app"
-	"github.com/valargroup/shielded-vote/cmd/svoted/cmd"
-	"github.com/valargroup/shielded-vote/crypto/redpallas"
-	"github.com/valargroup/shielded-vote/crypto/zkp/halo2"
+	"github.com/valargroup/vote-sdk/app"
+	"github.com/valargroup/vote-sdk/cmd/svoted/cmd"
+	"github.com/valargroup/vote-sdk/crypto/redpallas"
+	"github.com/valargroup/vote-sdk/crypto/zkp/halo2"
 
 	svrcmd "github.com/cosmos/cosmos-sdk/server/cmd"
 )

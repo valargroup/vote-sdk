@@ -34,9 +34,9 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	// Vote module: import for depinject side-effects (registers module provider).
-	_ "github.com/valargroup/shielded-vote/x/vote"
-	votemodulelv1 "github.com/valargroup/shielded-vote/x/vote/module/v1"
-	votetypes "github.com/valargroup/shielded-vote/x/vote/types"
+	_ "github.com/valargroup/vote-sdk/x/vote"
+	votemodulelv1 "github.com/valargroup/vote-sdk/x/vote/module/v1"
+	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 func init() {

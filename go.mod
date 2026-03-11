@@ -1,4 +1,4 @@
-module github.com/valargroup/shielded-vote
+module github.com/valargroup/vote-sdk
 
 go 1.24.0
 

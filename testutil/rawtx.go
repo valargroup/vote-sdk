@@ -3,8 +3,8 @@ package testutil
 import (
 	"google.golang.org/protobuf/proto"
 
-	"github.com/valargroup/shielded-vote/api"
-	"github.com/valargroup/shielded-vote/x/vote/types"
+	"github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // MustEncodeVoteTx encodes a VoteMessage into the raw wire format
