@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'vote-commitment-tree/**'
+      - 'librustvoting/vote-commitment-tree/**'
   pull_request:
     branches: [main]
     paths:
-      - 'vote-commitment-tree/**'
+      - 'librustvoting/vote-commitment-tree/**'
 
 permissions:
   contents: read
@@ -28,15 +28,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            vote-commitment-tree/target
+            librustvoting/vote-commitment-tree/target
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-vote-tree-${{ hashFiles('vote-commitment-tree/Cargo.toml') }}
+          key: ${{ runner.os }}-vote-tree-${{ hashFiles('librustvoting/vote-commitment-tree/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-vote-tree-
       - name: Run unit tests
         run: cargo test --lib
-        working-directory: vote-commitment-tree
+        working-directory: librustvoting/vote-commitment-tree
       - name: Run integration tests
         run: cargo test --test client_server_integration -- --nocapture
-        working-directory: vote-commitment-tree
+        working-directory: librustvoting/vote-commitment-tree

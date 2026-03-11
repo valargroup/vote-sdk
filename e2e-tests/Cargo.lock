@@ -133,15 +133,10 @@ dependencies = [
  "bitvec",
  "blake2s_simd",
  "byteorder",
- "crossbeam-channel",
  "ff",
  "group",
- "lazy_static",
- "log",
- "num_cpus",
  "pairing",
  "rand_core",
- "rayon",
  "subtle",
 ]
 
@@ -502,15 +497,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0b8ce8218c97789f16356e7896b3714f26c2ee1079b79c0b7ae7064bb9089fa"
 dependencies = [
  "hybrid-array",
-]
-
-[[package]]
-name = "daggy"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70def8d72740e44d9f676d8dab2c933a236663d86dd24319b57a2bed4d694774"
-dependencies = [
- "petgraph 0.7.1",
 ]
 
 [[package]]
@@ -1071,12 +1057,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "hermit-abi"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
-
-[[package]]
 name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1335,7 +1315,6 @@ dependencies = [
 [[package]]
 name = "imt-tree"
 version = "0.1.0"
-source = "git+ssh://git@github.com/valargroup/vote-nullifier-pir.git?branch=main#b560bf08858dc86f70d9d04ca5aa50264cd292ac"
 dependencies = [
  "anyhow",
  "ff",
@@ -1343,6 +1322,7 @@ dependencies = [
  "hex",
  "pasta_curves",
  "rayon",
+ "tracing",
 ]
 
 [[package]]
@@ -1513,21 +1493,16 @@ dependencies = [
  "pasta_curves",
  "pczt",
  "pir-client",
- "prost",
  "rand",
  "rusqlite",
  "serde",
  "serde_json",
- "shardtree",
  "subtle",
  "thiserror 2.0.18",
  "vote-commitment-tree",
  "vote-commitment-tree-client",
  "voting-circuits",
- "zcash_client_backend",
- "zcash_client_sqlite",
  "zcash_keys",
- "zcash_primitives",
  "zcash_protocol",
  "zip32",
 ]
@@ -1701,17 +1676,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
- "libm",
-]
-
-[[package]]
-name = "num_cpus"
-version = "1.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
-dependencies = [
- "hermit-abi",
- "libc",
 ]
 
 [[package]]
@@ -1835,7 +1799,7 @@ dependencies = [
 
 [[package]]
 name = "pczt"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
@@ -1868,16 +1832,6 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "petgraph"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
-dependencies = [
- "fixedbitset",
- "indexmap 2.13.0",
-]
-
-[[package]]
-name = "petgraph"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
@@ -1902,15 +1856,14 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 [[package]]
 name = "pir-client"
 version = "0.1.0"
-source = "git+ssh://git@github.com/valargroup/vote-nullifier-pir.git?branch=main#b560bf08858dc86f70d9d04ca5aa50264cd292ac"
 dependencies = [
  "anyhow",
  "ff",
  "futures",
  "hex",
  "imt-tree",
+ "log",
  "pasta_curves",
- "pir-export",
  "pir-types",
  "reqwest",
  "serde_json",
@@ -1919,26 +1872,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "pir-export"
-version = "0.1.0"
-source = "git+ssh://git@github.com/valargroup/vote-nullifier-pir.git?branch=main#b560bf08858dc86f70d9d04ca5aa50264cd292ac"
-dependencies = [
- "anyhow",
- "clap",
- "ff",
- "hex",
- "imt-tree",
- "pasta_curves",
- "rayon",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "pir-types"
 version = "0.1.0"
-source = "git+ssh://git@github.com/valargroup/vote-nullifier-pir.git?branch=main#b560bf08858dc86f70d9d04ca5aa50264cd292ac"
 dependencies = [
+ "anyhow",
+ "ff",
+ "imt-tree",
+ "pasta_curves",
  "serde",
 ]
 
@@ -2071,7 +2011,7 @@ dependencies = [
  "itertools",
  "log",
  "multimap",
- "petgraph 0.8.3",
+ "petgraph",
  "prettyplease",
  "prost",
  "prost-types",
@@ -2151,16 +2091,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.17",
-]
-
-[[package]]
-name = "rand_distr"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
-dependencies = [
- "num-traits",
- "rand",
 ]
 
 [[package]]
@@ -2328,8 +2258,6 @@ dependencies = [
  "hashlink",
  "libsqlite3-sys",
  "smallvec",
- "time",
- "uuid",
 ]
 
 [[package]]
@@ -2430,30 +2358,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "891d81b926048e76efe18581bf793546b4c0eaf8448d72be8de2bbee5fd166e1"
 dependencies = [
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "schemerz"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e82960ac11ccabd77d53c933532612079e01205b5873ec5095f4b3426493434"
-dependencies = [
- "daggy",
- "indexmap 1.9.3",
- "log",
- "thiserror 1.0.69",
- "uuid",
-]
-
-[[package]]
-name = "schemerz-rusqlite"
-version = "0.370.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca6df8a13fb3b7914f94ac6579bd5e76b9292f135886e6becc3525f9e5116827"
-dependencies = [
- "rusqlite",
- "schemerz",
- "uuid",
 ]
 
 [[package]]
@@ -2638,9 +2542,9 @@ dependencies = [
 
 [[package]]
 name = "shardtree"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "637e95dcd06bc1bb3f86ed9db1e1832a70125f32daae071ef37dcb7701b7d4fe"
+checksum = "359e552886ae54d1642091645980d83f7db465fd9b5b0248e3680713c1773388"
 dependencies = [
  "bitflags",
  "either",
@@ -2898,12 +2802,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35e7868883861bd0e56d9ac6efcaaca0d6d5d82a2a7ec8209ff492c07cf37b21"
 dependencies = [
  "deranged",
- "itoa",
  "num-conv",
  "powerfmt",
  "serde",
  "time-core",
- "time-macros",
 ]
 
 [[package]]
@@ -2911,16 +2813,6 @@ name = "time-core"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef927ca75afb808a4d64dd374f00a2adf8d0fcff8e7b184af886c3c87ec4a3f3"
-
-[[package]]
-name = "time-macros"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2834e6017e3e5e4b9834939793b282bc03b37a3336245fa820e35e233e2a85de"
-dependencies = [
- "num-conv",
- "time-core",
-]
 
 [[package]]
 name = "tinystr"
@@ -3216,17 +3108,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
-name = "uuid"
-version = "1.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b672338555252d43fd2240c714dc444b8c6fb0a5c5335e65a07bba7742735ddb"
-dependencies = [
- "getrandom 0.4.1",
- "js-sys",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3262,6 +3143,7 @@ dependencies = [
  "anyhow",
  "ff",
  "halo2_gadgets",
+ "imt-tree",
  "incrementalmerkletree",
  "lazy_static",
  "libc",
@@ -3806,13 +3688,12 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "base64",
  "bech32",
  "bls12_381",
  "bs58",
- "byteorder",
  "crossbeam-channel",
  "document-features",
  "getset",
@@ -3846,48 +3727,6 @@ dependencies = [
  "zcash_transparent",
  "zip32",
  "zip321",
-]
-
-[[package]]
-name = "zcash_client_sqlite"
-version = "0.19.2"
-dependencies = [
- "bitflags",
- "bs58",
- "byteorder",
- "document-features",
- "group",
- "hex",
- "incrementalmerkletree",
- "jubjub",
- "maybe-rayon",
- "nonempty",
- "orchard",
- "prost",
- "rand",
- "rand_core",
- "rand_distr",
- "regex",
- "rusqlite",
- "sapling-crypto",
- "schemerz",
- "schemerz-rusqlite",
- "secrecy",
- "shardtree",
- "static_assertions",
- "subtle",
- "time",
- "tracing",
- "uuid",
- "zcash_address",
- "zcash_client_backend",
- "zcash_encoding",
- "zcash_keys",
- "zcash_primitives",
- "zcash_protocol",
- "zcash_script",
- "zcash_transparent",
- "zip32",
 ]
 
 [[package]]
@@ -4158,3 +3997,7 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[patch.unused]]
+name = "zcash_client_sqlite"
+version = "0.19.4"
