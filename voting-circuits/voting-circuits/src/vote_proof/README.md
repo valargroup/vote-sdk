@@ -3,7 +3,7 @@
 Proves that a registered voter is casting a valid vote, without revealing which VAN they hold. The structure follows the delegation circuit's pattern (ZKP 1). Numbering matches Gov Steps V1 (ZKP #2): 12 conditions total; all conditions 1–12 are fully constrained in-circuit (condition 4 enforces spend authority `r_vpk = vsk.ak + [alpha_v]*G` in-circuit; the vote signature is verified out-of-circuit under `r_vpk`).
 
 **Public inputs:** 11 field elements.
-**Current K:** 14 (16,384 rows) — accommodates conditions 1–4 and 5–12, including 15 variable-base ECC scalar multiplications (condition 11), ~31 Poseidon hashes, and the 10-bit lookup table.
+**Current K:** 13 (8,192 rows) — accommodates conditions 1–4 and 5–12, including 15 variable-base ECC scalar multiplications (condition 11), ~31 Poseidon hashes, and the 10-bit lookup table. High-water mark is ~3,512 rows (43% utilization).
 
 ## Inputs
 
@@ -38,7 +38,7 @@ Proves that a registered voter is casting a valid vote, without revealing which 
    * **enc_share_c1_x[0..15]**: x-coordinates of C1_i = r_i * G (El Gamal first component, via ExtractP).
    * **enc_share_c2_x[0..15]**: x-coordinates of C2_i = shares_i * G + r_i * ea_pk (El Gamal second component, via ExtractP).
    * **share_randomness[0..15]**: El Gamal encryption randomness per share (base field elements, converted to scalars via `ScalarVar::from_base` in-circuit).
-   * **ea_pk**: election authority public key as a Pallas affine point (witnessed as `NonIdentityPoint`, constrained to public inputs at offsets 7–8).
+   * **ea_pk**: election authority public key as a Pallas affine point (witnessed as `NonIdentityPoint`, constrained to public inputs at offsets 9–10).
    * **vote_decision**: the voter's choice.
 
 - Internal wires (not public inputs, not free witnesses)
@@ -318,7 +318,7 @@ Where:
 - **G**: SpendAuthG, the El Gamal generator. Handled via `FixedPointBaseField::from_inner(ecc_chip, SpendAuthGBase)`, which routes scalar multiplication through the precomputed fixed-base lookup tables already loaded by the circuit. No `NonIdentityPoint` witness or advice-from-constant assignment is needed — the generator is structurally baked into the proving key via the lookup tables, preventing a malicious prover from substituting a different base point.
 - **r_i**: El Gamal randomness for share `i` (private witness, `pallas::Base`). Used as the input to `spend_auth_g_base.clone().mul(r_cells[i])` for C1 and as `ScalarVar::from_base(r_cells[i])` for the variable-base `ea_pk` multiplication in C2. The same advice cell is cloned for both calls, ensuring the same randomness binds both ciphertext components.
 - **v_i**: plaintext share value from conditions 8/9. Cell-equality-linked to the same cells used in `AddChip` (condition 8) and range check (condition 9). Used as the input to `spend_auth_g_base.clone().mul(share_cells[i])` for the `[v_i]*G` component of C2.
-- **ea_pk**: election authority public key (Pallas curve point, public input at offsets 7–8). Witnessed once as a `NonIdentityPoint` (on-curve constraint included). Its x and y advice cells are immediately pinned to the instance column via `layouter.constrain_instance`, preventing a prover from using a different or negated key. The same `NonIdentityPoint` is reused (cloned) across all 16 iterations — no re-witnessing.
+- **ea_pk**: election authority public key (Pallas curve point, public input at offsets 9–10). Witnessed once as a `NonIdentityPoint` (on-curve constraint included). Its x and y advice cells are immediately pinned to the instance column via `layouter.constrain_instance`, preventing a prover from using a different or negated key. The same `NonIdentityPoint` is reused (cloned) across all 16 iterations — no re-witnessing.
 - **enc_share_c1_x[i]**, **enc_share_c2_x[i]**: the x-coordinate cells from condition 10's witness region. These are the same cells that were hashed into `shares_hash` by condition 10's Poseidon hash. Condition 11 constrains the ECC computation output to match them via `constrain_equal`, creating a binding between the Poseidon hash (condition 10) and the actual El Gamal encryption.
 
 **Structure:**
