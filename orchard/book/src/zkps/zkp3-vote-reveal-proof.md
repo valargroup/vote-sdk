@@ -1,0 +1,1 @@
+/Users/roman/Documents/zcaloooors/shielded_vote_book/zkps/zkp3-vote-reveal-proof.md
