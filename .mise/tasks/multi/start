@@ -15,14 +15,14 @@ fi
 # ── Chain (build + init + start 3 validators + register) ─────────
 mise run multi:start-chain
 
-# ── Nullifier pipeline (data at ../vote-nullifier-pir/) ──────────
-make -C ../vote-nullifier-pir bootstrap
-make -C ../vote-nullifier-pir ingest
-make -C ../vote-nullifier-pir export-nf
+# ── Nullifier pipeline (data at vote-nullifier-pir/) ──────────
+make -C vote-nullifier-pir bootstrap
+make -C vote-nullifier-pir ingest
+make -C vote-nullifier-pir export-nf
 
 # ── Start PIR server ────────────────────────────────────────────
 if ! pgrep -f 'nf-server.*serve' > /dev/null 2>&1; then
-    nohup make -C ../vote-nullifier-pir serve > nf-serve.log 2>&1 &
+    nohup make -C vote-nullifier-pir serve > nf-serve.log 2>&1 &
     printf '\033[32mStarted nf-server → nf-serve.log\033[0m\n'
 fi
 

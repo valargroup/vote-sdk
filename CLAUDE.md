@@ -58,6 +58,7 @@ Several directories are git subtrees from separate fork repos. Use `git subtree 
 | `voting-circuits/` | `valargroup/voting-circuits` | `main` |
 | `zcash-swift-wallet-sdk/` | `valargroup/zcash-swift-wallet-sdk` | `valargroup/governance-tree-state` |
 | `zodl-ios/` | `valargroup/zodl-ios` | `valargroup/shielded-voting` |
+| `vote-nullifier-pir/` | `valargroup/vote-nullifier-pir` | `main` |
 
 To push subtree changes to a fork repo:
 ```
@@ -66,7 +67,7 @@ git subtree push --prefix=librustzcash git@github.com:valargroup/librustzcash.gi
 
 ## Local Development
 
-All workflow commands go through [mise](https://mise.jdx.dev). Run `mise tasks` to see everything, or `mise tasks --hidden` for internal tasks too. Tasks are thin wrappers over sub-Makefiles (`sdk/Makefile`) and the sibling `vote-nullifier-pir` repo (`../vote-nullifier-pir/Makefile`).
+All workflow commands go through [mise](https://mise.jdx.dev). Run `mise tasks` to see everything, or `mise tasks --hidden` for internal tasks too. Tasks are thin wrappers over sub-Makefiles (`sdk/Makefile`) and the sibling `vote-nullifier-pir` repo (`vote-nullifier-pir/Makefile`).
 
 ### Setup and daily workflow
 
@@ -85,7 +86,7 @@ mise test           # end-to-end tests against running chain
 - **`start:*`** — `start:chain` (chain-only, no nullifiers — used by CI)
 - **`chain:*`** — `chain:init`, `chain:start`, `chain:clean`, `chain:ceremony`
 - **`multi:*`** — `multi:init`, `multi:start`, `multi:start-chain`, `multi:restart`, `multi:stop`, `multi:status`, `multi:clean`
-- **`nullifier:*`** — `nullifier:bootstrap`, `nullifier:ingest`, `nullifier:export`, `nullifier:serve`, `nullifier:status`, `nullifier:clean` (delegate to `../vote-nullifier-pir`)
+- **`nullifier:*`** — `nullifier:bootstrap`, `nullifier:ingest`, `nullifier:export`, `nullifier:serve`, `nullifier:status`, `nullifier:clean` (delegate to `vote-nullifier-pir`)
 - **`test:*`** — `test:unit`, `test:integration`, `test:helper`, `test:go`, `test:circuits`, `test:ffi`, `test:nullifier`, `test:proof`
 - **Flat** — `fmt`, `lint`, `fixtures`, `proto`, `validator:join`
 
@@ -102,11 +103,11 @@ The PIR server (`nf-server serve`, port 3000 locally, from the `vote-nullifier-p
 
 ### Nullifier ingest (`nf-server`)
 
-The `nf-server` binary and all nullifier crates live in the **separate `vote-nullifier-pir` repo** (`git@github.com:valargroup/vote-nullifier-pir.git`), expected at `../vote-nullifier-pir/`. The `nullifier:*` mise tasks delegate to its Makefile.
+The `nf-server` binary and all nullifier crates live in the `vote-nullifier-pir/` subtree (from `valargroup/vote-nullifier-pir`). The `nullifier:*` mise tasks delegate to its Makefile.
 
 `nf-server` has three subcommands: `ingest`, `export`, and `serve`. The `serve` subcommand requires `--features serve` (enabled automatically by `make serve`). For production AVX-512 acceleration, the deploy workflow additionally enables `--features avx512`.
 
-Data files (`nullifiers.bin`, `nullifiers.checkpoint`) are stored at the `vote-nullifier-pir/` root. PIR tier files go in `vote-nullifier-pir/pir-data/`. For manual operations use `make -C ../vote-nullifier-pir`:
+Data files (`nullifiers.bin`, `nullifiers.checkpoint`) are stored at the `vote-nullifier-pir/` root. PIR tier files go in `vote-nullifier-pir/pir-data/`. For manual operations use `make -C vote-nullifier-pir`:
 
 - `SYNC_HEIGHT` must be a **multiple of 10**
 - The full pipeline is **ingest → export → serve**. After re-ingesting nullifiers, you must re-export before the server sees the new data: `make ingest-resync` (deletes stale tier files), then `make export-nf`, then `make serve`
