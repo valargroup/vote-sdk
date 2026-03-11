@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "imt-tree",
+    "nf-server",
+    "pir/client",
+    "pir/export",
+    "pir/server",
+    "pir/test",
+    "pir/types",
+    "nf-ingest",
+]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
