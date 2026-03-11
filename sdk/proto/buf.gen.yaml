@@ -1,8 +1,0 @@
-version: v1
-plugins:
-  - plugin: buf.build/protocolbuffers/go:v1.36.11
-    out: ..
-    opt: module=github.com/valargroup/shielded-vote
-  - plugin: buf.build/grpc/go
-    out: ..
-    opt: module=github.com/valargroup/shielded-vote
