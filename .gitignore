@@ -1,0 +1,17 @@
+# Go binary
+svoted
+create-val-tx
+
+# Go build cache
+.cache/
+
+# Rust build artifacts
+circuits/target/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-lint-go-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-lint-go-
+      - name: Run go vet
+        run: mise run lint
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: circuits/target
+          key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-circuits-
+      - name: Build circuits
+        run: mise run build:circuits
+      - name: Run unit tests
+        run: mise run test:unit
+
+  test-helper:
+    name: Helper Server Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Run helper tests
+        run: mise run test:helper
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: circuits/target
+          key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-circuits-
+      - name: Build circuits
+        run: mise run build:circuits
+      - name: Run integration tests
+        run: mise run test:integration
+
+  test-halo2:
+    name: Halo2 ZKP Verification Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: circuits/target
+          key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-circuits-
+      - name: Build circuits
+        run: mise run build:circuits
+      - name: Run Rust circuit tests
+        run: mise run test:circuits
+      - name: Run Go Halo2 verification tests
+        run: mise run test:halo2
+
+  test-vc-van-deterministic:
+    name: VC/VAN Deterministic Stress
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    env:
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Rust build (circuits)
+        uses: actions/cache@v4
+        with:
+          path: circuits/target
+          key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-circuits-
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: ${{ runner.os }}-vc-van-deterministic-go-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-vc-van-deterministic-go-
+      - name: Build circuits
+        run: mise run build:circuits
+      - name: Run deterministic VC/VAN tree stress tests
+        run: mise run test:tree-stress
