@@ -1,0 +1,64 @@
+@startuml
+hide empty description
+
+[*] -> idle
+
+idle -[#green,bold]-> migrateLegacyCacheDB
+
+migrateLegacyCacheDB : MigrateLegacyCacheDBAction
+migrateLegacyCacheDB -[#green,bold]-> validateServer
+
+validateServer : ValidateServerAction
+validateServer -[#green,bold]-> fetchUTXO
+
+fetchUTXO : FetchUTXOAction
+fetchUTXO -[#green,bold]-> handleSaplingParams
+
+handleSaplingParams : SaplingParamsAction
+handleSaplingParams -[#green,bold]-> updateSubtreeRoots
+
+updateSubtreeRoots : UpdateSubtreeRootsAction
+updateSubtreeRoots -[#green,bold]-> updateChainTip
+
+updateChainTip : UpdateChainTipAction
+updateChainTip -[#green,bold]-> clearCache : Every 10mins or after updateSubtreeRoots
+updateChainTip -[#green,bold]-> download : Processing of scan range continues
+
+processSuggestedScanRanges : ProcessSuggestedScanRangesAction
+processSuggestedScanRanges -[#green,bold]-> download : Scan range available to process
+processSuggestedScanRanges -[#green,bold]-> txResubmissionA : Scan ranges FULLY processed
+
+txResubmissionA : TxResubmissionAction
+txResubmissionA -[#green,bold]-> finished
+
+txResubmissionB : TxResubmissionAction
+txResubmissionB -[#green,bold]-> updateChainTip
+
+download : DownloadAction
+download -[#green,bold]-> scan
+
+scan : ScanAction
+scan -[#green,bold]-> clearAlreadyScannedBlocks : All ok
+scan -[#green,bold]-> rewind : continuity error
+
+rewind : RewindAction
+rewind -[#green,bold]-> processSuggestedScanRanges
+
+clearAlreadyScannedBlocks : ClearAlreadyScannedBlocksAction
+clearAlreadyScannedBlocks -[#green,bold]-> enhance
+
+enhance : EnhanceAction
+enhance -[#green,bold]-> txResubmissionB : Range NOT finished
+enhance -[#green,bold]-> clearCache : Range finished, clear cache and check the scan ranges
+
+note right of enhance
+    Enhance transactions in batches of 1000
+    blocks. Dont't do it for each scan batch
+    which is usualy 100 blocks.
+end note
+
+clearCache : ClearCacheAction
+clearCache -[#green,bold]-> processSuggestedScanRanges
+
+finished --> [*]
+@enduml
