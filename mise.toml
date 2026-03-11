@@ -1,6 +1,4 @@
 # https://mise.jdx.dev
-# Install: curl https://mise.run | sh
-# Then: mise install && mise start
 
 [tools]
 go = "1.24.3"
@@ -13,363 +11,96 @@ jq = "latest"
 GOBIN = "{{env.HOME}}/go/bin"
 _.path = ["{{env.HOME}}/go/bin", "/usr/local/go/bin"]
 
-# ── Top-level shortcuts (daily use) ─────────────────────────────────
-# Long scripts live in .mise/tasks/ (auto-discovered).
-# Extracted: status, start:chain, multi:{start-chain,start,restart,stop,status}
-
-[tasks.start]
-description = "Init chain + bootstrap nullifiers + start everything"
-quiet = true
-run = '''
-#!/usr/bin/env bash
-set -e
-PROCS=""
-pgrep svoted                   > /dev/null 2>&1 && PROCS="$PROCS svoted"
-pgrep -f 'nf-server.*serve'   > /dev/null 2>&1 && PROCS="$PROCS nf-server"
-if [ -n "$PROCS" ]; then
-    printf '\033[33mAlready running:%s\033[0m\n' "$PROCS"
-    exit 0
-fi
-
-# ── Nullifier pipeline (independent of chain build) ─────────────
-make -C vote-nullifier-pir bootstrap
-make -C vote-nullifier-pir ingest
-make -C vote-nullifier-pir export-nf
-nohup make -C vote-nullifier-pir serve > nf-serve.log 2>&1 &
-printf '\033[32mStarted nf-server → nf-serve.log\033[0m\n'
-
-# ── Chain (build + init + start + wait + register) ──────────────
-mise run start:chain
-'''
-
-[tasks.stop]
-description = "Stop all services"
-quiet = true
-run = '''
-#!/usr/bin/env bash
-KILLED=""
-pkill svoted    2>/dev/null && KILLED="$KILLED svoted"    || true
-pkill nf-server 2>/dev/null && KILLED="$KILLED nf-server" || true
-if [ -n "$KILLED" ]; then
-    printf '\033[32mStopped:%s\033[0m\n' "$KILLED"
-else
-    echo "No running processes found."
-fi
-rm -f zodl-ios/secant/Resources/voting-config-local.json
-'''
-
-# status → .mise/tasks/status
-
-[tasks.ui]
-description = "Start admin UI dev server (port 5173)"
-dir = "shielded_vote_generator_ui"
-run = "npm install --silent && npm run dev"
-
-[tasks.test]
-description = "E2E tests against running chain (requires: mise start)"
-run = "cargo test --release --manifest-path e2e-tests/Cargo.toml voting_flow_librustvoting -- --nocapture --ignored"
-
 # ── build:* ─────────────────────────────────────────────────────────
 
 [tasks."build"]
 description = "Build svoted with FFI (Halo2 + RedPallas)"
-run = "make -C sdk build-ffi"
+run = "make build-ffi"
 
 [tasks."build:quick"]
 description = "Build svoted without FFI (Go only, no ZK verification)"
-run = "make -C sdk build"
+run = "make build"
 
 [tasks."build:install"]
 description = "Install svoted + create-val-tx with FFI to $GOBIN"
-run = "make -C sdk install-ffi install-create-val-tx"
+run = "make install-ffi install-create-val-tx"
 
 [tasks."build:create-val-tx"]
 description = "Build create-val-tx helper locally"
-run = "make -C sdk build-create-val-tx"
+run = "make build-create-val-tx"
 
 [tasks."build:circuits"]
 description = "Build Rust circuit static library"
-run = "make -C sdk circuits"
-
-[tasks."build:ui"]
-description = "Build admin UI for production"
-dir = "shielded_vote_generator_ui"
-run = "npm run build"
+run = "make circuits"
 
 # ── chain:* ─────────────────────────────────────────────────────────
 
 [tasks."chain:init"]
 description = "Wipe and reinitialize a single-validator chain"
-run = "make -C sdk init"
-
-[tasks."chain:init-benchmark"]
-description = "Wipe and reinitialize a single-validator benchmark chain"
-run = "make -C sdk init-benchmark"
+run = "make init"
 
 [tasks."chain:start"]
 description = "Start chain daemon (foreground)"
-run = "SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} make -C sdk start"
+run = "SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} make start"
 
 [tasks."chain:clean"]
 description = "Remove chain data directory (~/.svoted)"
-run = "make -C sdk clean"
+run = "make clean"
 confirm = "This will delete ~/.svoted and the local svoted binary. Continue?"
-
-[tasks."chain:ceremony"]
-description = "Register Pallas key + create round + wait ACTIVE"
-run = "make -C sdk ceremony"
-
-# ── multi:* ─────────────────────────────────────────────────────────
-# multi:{start-chain,start,restart,stop,status} → .mise/tasks/multi/
-
-[tasks."multi:init"]
-description = "Build + init 3-validator chain (no start)"
-quiet = true
-run = '''
-#!/usr/bin/env bash
-set -e
-make -C sdk install-ffi
-bash sdk/scripts/init_multi.sh
-'''
-
-
-[tasks."multi:ui"]
-description = "Admin UI pointed at multi-validator chain (port 1418)"
-dir = "shielded_vote_generator_ui"
-run = "npm install --silent && VITE_CHAIN_URL=http://localhost:1418 npm run dev"
-
-[tasks."multi:clean"]
-description = "Stop + remove all multi-validator data"
-quiet = true
-confirm = "This will stop and delete all multi-validator data (~/.svoted-val1,2,3). Continue?"
-run = '''
-#!/usr/bin/env bash
-set -e
-mise run multi:stop 2>/dev/null || true
-rm -rf "$HOME/.svoted-val1" "$HOME/.svoted-val2" "$HOME/.svoted-val3"
-rm -f "$HOME/.svoted-multi-pids"
-printf '\033[32mCleaned multi-validator data.\033[0m\n'
-'''
-
-# ── nullifier:* ─────────────────────────────────────────────────────
-
-[tasks."nullifier:bootstrap"]
-description = "Download nullifier snapshot from DO Spaces"
-run = "make -C vote-nullifier-pir bootstrap"
-
-[tasks."nullifier:ingest"]
-description = "Sync nullifiers to SYNC_HEIGHT or chain tip"
-run = '''
-#!/usr/bin/env bash
-set -e
-if [ -n "${SYNC_HEIGHT:-}" ]; then
-    make -C vote-nullifier-pir ingest SYNC_HEIGHT="$SYNC_HEIGHT"
-else
-    make -C vote-nullifier-pir ingest
-fi
-'''
-
-[tasks."nullifier:export"]
-description = "Build PIR tree and export tier files"
-run = "make -C vote-nullifier-pir export-nf"
-
-[tasks."nullifier:serve"]
-description = "Start PIR server (port 3000)"
-run = "make -C vote-nullifier-pir serve"
-
-[tasks."nullifier:status"]
-description = "Show nullifier ingestion progress"
-run = "make -C vote-nullifier-pir status"
-
-[tasks."nullifier:clean"]
-description = "Remove nullifier data + build artifacts"
-run = "make -C vote-nullifier-pir clean"
-confirm = "This will delete nullifier data files and Rust build artifacts. Continue?"
 
 # ── test:* ──────────────────────────────────────────────────────────
 
 [tasks."test:unit"]
 description = "Go unit tests (keeper, validation, codec)"
-run = "make -C sdk test-unit"
+run = "make test-unit"
 
 [tasks."test:integration"]
 description = "Go ABCI pipeline integration tests"
-run = "make -C sdk test-integration"
+run = "make test-integration"
 
 [tasks."test:helper"]
 description = "Helper server unit tests (SQLite, API, processor)"
-run = "make -C sdk test-helper"
+run = "make test-helper"
 
 [tasks."test:go"]
 description = "All Go tests (unit + integration + helper)"
-run = "make -C sdk test"
+run = "make test"
 
 [tasks."test:circuits"]
 description = "Rust circuit unit tests"
-run = "make -C sdk circuits-test"
+run = "make circuits-test"
 
 [tasks."test:halo2"]
 description = "Go Halo2 ZKP verification tests (requires circuits)"
-run = "make -C sdk test-halo2"
+run = "make test-halo2"
 
 [tasks."test:ffi"]
 description = "All FFI-backed tests (Halo2 + RedPallas)"
-run = "make -C sdk test-all-ffi"
-
-[tasks."test:nullifier"]
-description = "Nullifier crate unit tests"
-run = "make -C vote-nullifier-pir test"
-
-[tasks."test:proof"]
-description = "Verify exclusion proofs against ingested data"
-run = "make -C vote-nullifier-pir test-proof"
-
-[tasks."test:restart"]
-description = "Test: kill val2, restart, verify it rejoins consensus"
-run = "bash sdk/scripts/test_validator_restart.sh"
+run = "make test-all-ffi"
 
 [tasks."test:tree-stress"]
 description = "VC/VAN in-process determinism stress tests (debug_tree)"
-dir = "sdk"
 run = "go test -tags debug_tree -count=1 -run TestTreeStress ./app"
-
-[tasks."test:tree-consistency"]
-description = "VC/VAN per-height multi-validator consistency checks (requires load)"
-run = "bash sdk/scripts/test_tree_consistency.sh"
-
-[tasks."test:tree-crash-recovery"]
-description = "VC/VAN crash/restart replay consistency checks (requires load)"
-run = "bash sdk/scripts/test_tree_crash_recovery.sh"
-
-[tasks."test:tree-soak"]
-description = "VC/VAN long-running soak with rolling restarts (requires load)"
-run = "bash sdk/scripts/test_tree_soak.sh"
-
-[tasks."test:sync-stress-real"]
-description = "Real-proof VC/VAN sync stress E2E (ignored test)"
-run = '''
-#!/usr/bin/env bash
-set -e
-SVOTE_API_URL=${SVOTE_API_URL:-http://localhost:1418} \
-HELPER_SERVER_URL=${HELPER_SERVER_URL:-$SVOTE_API_URL} \
-SVOTE_STRESS_DELEGATION_COUNT=${SVOTE_STRESS_DELEGATION_COUNT:-5} \
-SVOTE_E2E_VOTE_WINDOW_SECS=${SVOTE_E2E_VOTE_WINDOW_SECS:-420} \
-cargo test --release --manifest-path e2e-tests/Cargo.toml --test sync_stress -- --nocapture --ignored --test-threads=1
-'''
-
-[tasks."test:tree-consistency:real"]
-description = "Tier 2 consistency checks using real-proof sync_stress load"
-run = "LOAD_MODE=real-proof bash sdk/scripts/test_tree_consistency.sh"
-
-[tasks."test:tree-consistency:real:mixed"]
-description = "Tier 2 consistency checks using real-proof sync_stress + VC flow load"
-run = "LOAD_MODE=real-proof REAL_PROOF_INCLUDE_VC_FLOW=1 bash sdk/scripts/test_tree_consistency.sh"
-
-[tasks."test:tree-crash-recovery:real"]
-description = "Tier 3 crash/restart checks using real-proof sync_stress load"
-run = "LOAD_MODE=real-proof bash sdk/scripts/test_tree_crash_recovery.sh"
-
-[tasks."test:tree-crash-recovery:real:mixed"]
-description = "Tier 3 crash/restart checks using real-proof sync_stress + VC flow load"
-run = "LOAD_MODE=real-proof REAL_PROOF_INCLUDE_VC_FLOW=1 bash sdk/scripts/test_tree_crash_recovery.sh"
-
-[tasks."test:tree-soak:real"]
-description = "Tier 4 soak using real-proof sync_stress load"
-run = "LOAD_MODE=real-proof bash sdk/scripts/test_tree_soak.sh"
-
-[tasks."test:tree-soak:real:mixed"]
-description = "Tier 4 soak using real-proof sync_stress + VC flow load"
-run = "LOAD_MODE=real-proof REAL_PROOF_INCLUDE_VC_FLOW=1 bash sdk/scripts/test_tree_soak.sh"
-
-[tasks."test:sync-stress-real:local"]
-description = "Single command: start local 3-validator chain and run real-proof sync stress"
-quiet = true
-run = '''
-#!/usr/bin/env bash
-set -e
-
-# Start chain if needed.
-if ! pgrep -f 'svoted start --home.*val' > /dev/null 2>&1; then
-  mise run multi:start-chain
-fi
-
-# Wait for helper server on val1 API.
-for i in $(seq 1 40); do
-  if curl -sf http://localhost:1418/api/v1/status > /dev/null 2>&1; then
-    break
-  fi
-  if [ "$i" = "40" ]; then
-    echo "helper server not ready on :1418"
-    exit 1
-  fi
-  sleep 2
-done
-
-SVOTE_API_URL=${SVOTE_API_URL:-http://localhost:1418} \
-HELPER_SERVER_URL=${HELPER_SERVER_URL:-http://localhost:1418} \
-SVOTE_HOME=${SVOTE_HOME:-$HOME/.svoted-val1} \
-SVOTE_NODE_URL=${SVOTE_NODE_URL:-tcp://localhost:26157} \
-SVOTE_PALLAS_PK_PATH=${SVOTE_PALLAS_PK_PATH:-$HOME/.svoted-val1/pallas.pk} \
-SVOTE_STRESS_DELEGATION_COUNT=${SVOTE_STRESS_DELEGATION_COUNT:-5} \
-SVOTE_E2E_VOTE_WINDOW_SECS=${SVOTE_E2E_VOTE_WINDOW_SECS:-420} \
-mise run test:sync-stress-real
-'''
-
-[tasks."test:vc-van:premerge"]
-description = "Single command pre-merge suite (fast + mixed real-proof, optional soak)"
-quiet = true
-run = '''
-#!/usr/bin/env bash
-set -e
-
-# Fast deterministic in-process checks.
-mise run test:tree-stress
-
-# Local real-proof run and multi-validator determinism checks.
-mise run test:sync-stress-real:local
-mise run test:tree-consistency:real:mixed
-mise run test:tree-crash-recovery:real:mixed
-
-# Optional long soak, disabled by default for pre-merge developer runs.
-if [ "${RUN_SOAK:-0}" = "1" ]; then
-  DURATION_MINUTES=${DURATION_MINUTES:-60} mise run test:tree-soak:real:mixed
-fi
-'''
-
-[tasks."test:join"]
-description = "Smoke test: validator join flow against running chain"
-run = "bash sdk/scripts/test_join_ci.sh"
-
-# ── validator:* ─────────────────────────────────────────────────────
-
-[tasks."validator:join"]
-description = "Build from source and join network as validator"
-run = '''
-mise run build:install
-./join.sh
-'''
 
 # ── Flat utilities ──────────────────────────────────────────────────
 
 [tasks.fmt]
 description = "Format Go code"
-run = "make -C sdk fmt"
+run = "make fmt"
 
 [tasks.lint]
 description = "Run Go vet"
-run = "make -C sdk lint"
+run = "make lint"
 
 [tasks.fixtures]
 description = "Regenerate all fixture files"
-run = "make -C sdk fixtures"
+run = "make fixtures"
 
 [tasks.proto]
 description = "Regenerate protobuf code"
-run = "cd sdk/proto && buf generate"
-
-# ── Hidden (internal/deployment) ────────────────────────────────────
+run = "cd proto && buf generate"
 
 [tasks."deploy:caddy"]
 description = "Install Caddyfile + restart Caddy"
-run = "make -C sdk caddy"
+run = "make caddy"
 hide = true

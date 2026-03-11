@@ -1,9 +1,0 @@
-target/
-nullifiers.db*
-nullifiers.bin
-nullifiers.checkpoint
-nullifiers.tree
-nullifiers.index
-pir-data/
-rust-toolchain.toml
-.vscode/

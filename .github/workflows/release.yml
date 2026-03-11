@@ -1,15 +1,11 @@
 # Build pre-compiled binaries and publish a GitHub Release on version tags.
 #
-# nf-server is released separately from valargroup/vote-nullifier-pir.
-#
 # Tarball layout:
 #   shielded-vote-<version>-<platform>/
 #     bin/svoted, create-val-tx
 #     systemd/svoted-val{1,2,3}.service  (Linux only)
 #     scripts/init_multi.sh
 #     config/Caddyfile
-#
-# Platforms: linux-amd64, linux-arm64, darwin-amd64, darwin-arm64
 
 name: Release
 
@@ -39,57 +35,52 @@ jobs:
             cross: true
             rust_target: x86_64-apple-darwin
             goarch: amd64
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
       - name: Install mise
         uses: jdx/mise-action@v2
-
       - name: Add Rust cross target
         if: matrix.cross
         run: rustup target add ${{ matrix.rust_target }}
-
       - name: Cache Rust build
         uses: actions/cache@v4
         with:
           path: |
-            sdk/circuits/target
+            circuits/target
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-${{ matrix.platform }}-sdk-circuits-${{ hashFiles('sdk/circuits/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.platform }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.platform }}-sdk-circuits-
-
+            ${{ runner.os }}-${{ matrix.platform }}-circuits-
       - name: Build SDK binaries
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
-            # Cross-compile circuits for x86_64 from ARM64 macOS
-            cargo build --release --manifest-path sdk/circuits/Cargo.toml --target ${{ matrix.rust_target }}
-            mkdir -p sdk/circuits/target/release
-            ln -sf $(pwd)/sdk/circuits/target/${{ matrix.rust_target }}/release/libshielded_vote_circuits.a \
-                   sdk/circuits/target/release/libshielded_vote_circuits.a
-            # Cross-compile svoted (Go+CGo)
-            cd sdk
+            cargo build --release --manifest-path circuits/Cargo.toml --target ${{ matrix.rust_target }}
+            mkdir -p circuits/target/release
+            ln -sf $(pwd)/circuits/target/${{ matrix.rust_target }}/release/libshielded_vote_circuits.a \
+                   circuits/target/release/libshielded_vote_circuits.a
             CC="clang -target x86_64-apple-macosx" \
             CGO_CFLAGS="-target x86_64-apple-macosx" \
             CGO_LDFLAGS="-target x86_64-apple-macosx" \
             CGO_ENABLED=1 GOOS=darwin GOARCH=${{ matrix.goarch }} \
               go build -tags "halo2,redpallas" -o svoted ./cmd/svoted
-            # Cross-compile create-val-tx (pure Go)
             CGO_ENABLED=0 GOOS=darwin GOARCH=${{ matrix.goarch }} go build -o create-val-tx ./scripts/create-val-tx
           else
             mise run build
             mise run build:create-val-tx
           fi
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sdk-binaries-${{ matrix.platform }}
           path: |
-            sdk/svoted
-            sdk/create-val-tx
+            svoted
+            create-val-tx
 
   create-release:
     name: Create GitHub Release
@@ -120,45 +111,32 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Download SDK binaries
         uses: actions/download-artifact@v4
         with:
           name: sdk-binaries-${{ matrix.platform }}
           path: sdk-binaries
-
       - name: Assemble tarball
         run: |
           VERSION="${GITHUB_REF_NAME}"
           DIR="shielded-vote-${VERSION}-${{ matrix.platform }}"
           mkdir -p "${DIR}/bin" "${DIR}/scripts" "${DIR}/config"
-
-          # Binaries (artifact downloads flatten the common path prefix)
           cp sdk-binaries/svoted sdk-binaries/create-val-tx "${DIR}/bin/"
           chmod +x "${DIR}/bin/"*
-
-          # Systemd service files — Linux only, transform paths for /opt/shielded-vote layout
           if [ "${{ matrix.os_family }}" = "linux" ]; then
             mkdir -p "${DIR}/systemd"
-            for f in sdk/docs/svoted-val{1,2,3}.service; do
+            for f in docs/svoted-val{1,2,3}.service; do
               name=$(basename "$f")
               sed -e 's|/opt/shielded-vote|/opt/shielded-vote|g' \
                   -e 's|ExecStart=/opt/shielded-vote/svoted|ExecStart=/opt/shielded-vote/bin/svoted|' \
                   "$f" > "${DIR}/systemd/${name}"
             done
           fi
-
-          # Scripts
-          cp sdk/scripts/init_multi.sh "${DIR}/scripts/"
-
-          # Config
-          cp sdk/deploy/Caddyfile "${DIR}/config/"
-
-          # Create tarball + checksum
+          cp scripts/init_multi.sh "${DIR}/scripts/"
+          cp deploy/Caddyfile "${DIR}/config/"
           tar czf "${DIR}.tar.gz" "${DIR}"
           sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
           echo "TARBALL=${DIR}.tar.gz" >> "$GITHUB_ENV"
-
       - name: Upload tarball artifact
         uses: actions/upload-artifact@v4
         with:
@@ -166,7 +144,6 @@ jobs:
           path: |
             ${{ env.TARBALL }}
             ${{ env.TARBALL }}.sha256
-
       - name: Attach to GitHub Release
         run: gh release upload "${GITHUB_REF_NAME}" "${TARBALL}" "${TARBALL}.sha256" --clobber
         env:
@@ -179,30 +156,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Download linux-amd64 release tarball
         uses: actions/download-artifact@v4
         with:
           name: release-tarball-linux-amd64
-
       - name: Download linux-arm64 release tarball
         uses: actions/download-artifact@v4
         with:
           name: release-tarball-linux-arm64
-
       - name: Download darwin-amd64 release tarball
         uses: actions/download-artifact@v4
         with:
           name: release-tarball-darwin-amd64
-
       - name: Download darwin-arm64 release tarball
         uses: actions/download-artifact@v4
         with:
           name: release-tarball-darwin-arm64
-
       - name: Set version
         run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
-
       - name: Upload to DigitalOcean Spaces
         continue-on-error: true
         env:

@@ -1,6 +1,4 @@
 # Deploy Caddyfile to the remote host on changes.
-# No build step — just SCP the config and reload Caddy.
-# Requires repository secrets: DEPLOY_HOST, DEPLOY_USER, SSH_PASSWORD.
 
 name: Deploy Caddyfile
 
@@ -8,7 +6,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'sdk/deploy/Caddyfile'
+      - 'deploy/Caddyfile'
   workflow_dispatch:
 
 permissions:
@@ -22,19 +20,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          sparse-checkout: sdk/deploy/Caddyfile
+          sparse-checkout: deploy/Caddyfile
           sparse-checkout-cone-mode: false
-
       - name: Deploy via SCP
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
-          source: "sdk/deploy/Caddyfile"
+          source: "deploy/Caddyfile"
           target: /tmp
-          strip_components: 2
-
+          strip_components: 1
       - name: Install and reload Caddy
         uses: appleboy/ssh-action@v1.0.3
         with:

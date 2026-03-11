@@ -1,22 +1,11 @@
 # Deploy a 3-validator svoted chain to a single remote host on every push to
 # main, then restart services. Optionally reset chain state.
-#
-# Port layout (all validators on one host):
-#   Val1: P2P 26156  RPC 26157  API 1418  pprof 6160
-#   Val2: P2P 26256  RPC 26257  API 1518  pprof 6260
-#   Val3: P2P 26356  RPC 26357  API 1618  pprof 6360
-#
-# Requires repository secrets: DEPLOY_HOST, DEPLOY_USER, SSH_PASSWORD,
-# CEREMONY_SSH_KEY (ed25519 private key for key-based SSH).
-# See sdk/docs/deploy-setup.md for one-time remote setup.
 
 name: Deploy SDK chain
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'sdk/**'
   workflow_dispatch:
     inputs:
       reset_chain:
@@ -34,38 +23,37 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
       - name: Install mise
         uses: jdx/mise-action@v2
-
       - name: Cache Rust build
         uses: actions/cache@v4
         with:
           path: |
-            sdk/circuits/target
+            circuits/target
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-sdk-circuits-${{ hashFiles('sdk/circuits/Cargo.lock') }}
+          key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-sdk-circuits-
-
+            ${{ runner.os }}-circuits-
       - name: Build SDK binaries
         run: mise run build && mise run build:create-val-tx
-
       - name: Copy init script to build root
-        run: cp sdk/scripts/init_multi.sh sdk/init_multi.sh
-
+        run: cp scripts/init_multi.sh init_multi.sh
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sdk-chain-binaries
           path: |
-            sdk/svoted
-            sdk/create-val-tx
-            sdk/init_multi.sh
+            svoted
+            create-val-tx
+            init_multi.sh
 
   deploy:
     name: Deploy binaries
@@ -76,10 +64,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: sdk-chain-binaries
-
       - name: Make binaries executable
         run: chmod +x svoted create-val-tx
-
       - name: Create deploy directory
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -87,7 +73,6 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           script: mkdir -p ${{ env.DEPLOY_PATH }}
-
       - name: Deploy via SCP
         uses: appleboy/scp-action@v0.1.7
         with:

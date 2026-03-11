@@ -1,0 +1,193 @@
+syntax = "proto3";
+package svote.v1;
+
+import "cosmos/msg/v1/msg.proto";
+import "svote/v1/types.proto";
+
+option go_package = "github.com/valargroup/shielded-vote/x/vote/types";
+
+// Msg defines the vote module's Msg service.
+// NOTE: Vote transactions use ZKP + RedPallas authentication instead of standard
+// Cosmos signatures. In Phase 5, transaction submission bypasses the Cosmos Tx
+// envelope entirely; the Msg service is defined here for gRPC registration only.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+  rpc CreateVotingSession(MsgCreateVotingSession) returns (MsgCreateVotingSessionResponse);
+  rpc DelegateVote(MsgDelegateVote) returns (MsgDelegateVoteResponse);
+  rpc CastVote(MsgCastVote) returns (MsgCastVoteResponse);
+  rpc RevealShare(MsgRevealShare) returns (MsgRevealShareResponse);
+  rpc SubmitTally(MsgSubmitTally) returns (MsgSubmitTallyResponse);
+  rpc SubmitPartialDecryption(MsgSubmitPartialDecryption) returns (MsgSubmitPartialDecryptionResponse);
+  rpc RegisterPallasKey(MsgRegisterPallasKey) returns (MsgRegisterPallasKeyResponse);
+  rpc DealExecutiveAuthorityKey(MsgDealExecutiveAuthorityKey) returns (MsgDealExecutiveAuthorityKeyResponse);
+  rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
+  rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
+  rpc SetVoteManager(MsgSetVoteManager) returns (MsgSetVoteManagerResponse);
+}
+
+// MsgCreateVotingSession creates a new voting session.
+// vote_round_id is computed on-chain as Poseidon(snapshot_height, snapshot_blockhash_lo, snapshot_blockhash_hi, proposals_hash_lo, proposals_hash_hi, vote_end_time, nullifier_imt_root, nc_root).
+// The output is a canonical 32-byte Pallas Fp element. Creates the round in
+// PENDING status; ea_pk is set when the per-round ceremony confirms.
+message MsgCreateVotingSession {
+  string creator              = 1;
+  uint64 snapshot_height      = 2;
+  bytes  snapshot_blockhash   = 3;
+  bytes  proposals_hash       = 4;
+  uint64 vote_end_time        = 5;
+  bytes  nullifier_imt_root   = 6;
+  bytes  nc_root              = 7;
+  bytes  vk_zkp1              = 8;  // Verification key for ZKP #1
+  bytes  vk_zkp2              = 9;  // Verification key for ZKP #2
+  bytes  vk_zkp3              = 10; // Verification key for ZKP #3
+  repeated Proposal proposals = 11;
+  string description          = 12; // Human-readable round description
+  string title                = 13; // Short human-readable round title
+}
+
+message MsgCreateVotingSessionResponse {
+  bytes vote_round_id = 1;
+}
+
+// MsgDelegateVote corresponds to ZKP #1: delegation registration from keystone-signed action.
+message MsgDelegateVote {
+  bytes rk                     = 1;  // Randomized spend auth key (32 bytes)
+  bytes spend_auth_sig         = 2;  // RedPallas signature
+  bytes signed_note_nullifier  = 3;  // Nullifier of the dummy signed note
+  bytes cmx_new                = 4;  // Output note commitment
+  bytes van_cmx                = 6;  // Vote authority note commitment
+  repeated bytes gov_nullifiers = 7; // Up to 5 governance nullifiers
+  bytes proof                  = 8;  // Halo2 ZKP #1
+  bytes vote_round_id          = 9;
+  bytes sighash                = 10; // Client-provided sighash for RedPallas signature verification (32 bytes)
+}
+
+message MsgDelegateVoteResponse {}
+
+// MsgCastVote corresponds to ZKP #2: create a vote commitment.
+// Condition 4 (Spend Authority) adds r_vpk = vsk.ak + [alpha_v]*G; the circuit
+// exposes r_vpk_x and r_vpk_y as public inputs, so the client must send them.
+message MsgCastVote {
+  bytes  van_nullifier                = 1;
+  bytes  vote_authority_note_new      = 2;
+  bytes  vote_commitment              = 3;
+  uint32 proposal_id                  = 4;
+  bytes  proof                        = 5;
+  bytes  vote_round_id                = 6;
+  uint64 vote_comm_tree_anchor_height = 7;
+  // Fields 8-9 removed: r_vpk_x/r_vpk_y are now decompressed from r_vpk in the FFI verifier.
+  bytes  vote_auth_sig                = 10; // RedPallas signature under randomized voting key
+  // Field 11 removed: sighash is now computed on-chain via ComputeCastVoteSighash.
+  bytes  r_vpk                        = 12; // Compressed Pallas point (32 bytes) — sig verification + FFI decompresses to (x,y) for ZKP
+}
+
+message MsgCastVoteResponse {}
+
+// MsgRevealShare corresponds to ZKP #3: reveal vote share (server submits).
+message MsgRevealShare {
+  bytes  share_nullifier              = 1;
+  bytes  enc_share                    = 2;  // 64 bytes: ElGamal ciphertext (C1 || C2, compressed Pallas points)
+  uint32 proposal_id                  = 3;
+  uint32 vote_decision                = 4;
+  bytes  proof                        = 5;
+  bytes  vote_round_id                = 6;
+  uint64 vote_comm_tree_anchor_height = 7;
+}
+
+message MsgRevealShareResponse {}
+
+// MsgSubmitTally finalizes a voting session, transitioning it from TALLYING to FINALIZED.
+// The election authority submits decrypted vote totals for each (proposal, decision) pair.
+// Only the session creator (election authority) may submit this message.
+message MsgSubmitTally {
+  bytes  vote_round_id        = 1;
+  string creator              = 2;  // Must match the session creator
+  repeated TallyEntry entries = 3;  // One per (proposal_id, vote_decision) pair
+}
+
+// TallyEntry contains the decrypted vote total for one (proposal, decision) pair.
+message TallyEntry {
+  uint32 proposal_id      = 1;
+  uint32 vote_decision    = 2;
+  uint64 total_value      = 3;  // Decrypted aggregate (zatoshi)
+  bytes  decryption_proof = 4;  // Chaum-Pedersen DLEQ proof (reserved for future use)
+}
+
+message MsgSubmitTallyResponse {
+  uint32 finalized_entries = 1;  // Number of tally entries stored
+}
+
+// MsgRegisterPallasKey registers a validator's Pallas public key for the EA key ceremony.
+message MsgRegisterPallasKey {
+  string creator   = 1; // Validator address
+  bytes  pallas_pk = 2; // Compressed Pallas point (32 bytes)
+}
+
+message MsgRegisterPallasKeyResponse {}
+
+// MsgDealExecutiveAuthorityKey is submitted by the bootstrap dealer to distribute encrypted ea_sk shares.
+// In threshold mode, each payload contains ECIES(f(i), pk_i) where f is a degree-(t-1) polynomial
+// with f(0) = ea_sk. verification_keys holds VK_i = f(i)*G for each validator (one per payload).
+message MsgDealExecutiveAuthorityKey {
+  string                 creator            = 1; // Dealer's validator address
+  bytes                  ea_pk              = 2; // Executive authority public key (Pallas, 32 bytes)
+  repeated DealerPayload payloads           = 3; // One ECIES envelope per registered validator
+  bytes                  vote_round_id      = 4; // Target voting round (per-round ceremony)
+  uint32                 threshold          = 5; // Minimum shares required to reconstruct (t). 0 = legacy single-key mode.
+  repeated bytes         verification_keys  = 6; // VK_i = f(i)*G per validator (32-byte compressed Pallas points, same order as payloads)
+}
+
+message MsgDealExecutiveAuthorityKeyResponse {}
+
+// MsgAckExecutiveAuthorityKey is submitted by a validator to acknowledge receipt of their ea_sk share.
+message MsgAckExecutiveAuthorityKey {
+  string creator        = 1; // Validator address
+  bytes  ack_signature  = 2; // Signature over H("ack" || ea_pk || validator_address)
+  bytes  vote_round_id  = 3; // Target voting round (per-round ceremony)
+}
+
+message MsgAckExecutiveAuthorityKeyResponse {}
+
+// MsgCreateValidatorWithPallasKey wraps standard MsgCreateValidator with a Pallas public key.
+// The handler creates the validator via the staking module, then registers the Pallas key
+// in the ceremony state. Raw MsgCreateValidator is blocked by the ante handler for live txs.
+message MsgCreateValidatorWithPallasKey {
+  bytes staking_msg = 1;  // Encoded cosmos.staking.v1beta1.MsgCreateValidator
+  bytes pallas_pk   = 2;  // Compressed Pallas point (32 bytes)
+}
+
+message MsgCreateValidatorWithPallasKeyResponse {}
+
+// MsgSubmitPartialDecryption is submitted by a validator during the TALLYING phase.
+// The validator computes D_i = share_i * C1 for each (proposal, decision) accumulator
+// and submits all entries in a single message. In Step 1 there is no dleq_proof;
+// that field is added in Step 2.
+message MsgSubmitPartialDecryption {
+  bytes                             vote_round_id    = 1;
+  string                            creator          = 2; // Validator operator address
+  uint32                            validator_index  = 3; // 1-based index matching Shamir evaluation point
+  repeated PartialDecryptionEntry   entries          = 4;
+}
+
+// PartialDecryptionEntry holds one partial decryption D_i = share_i * C1 for a
+// single (proposal_id, vote_decision) accumulator.
+// dleq_proof is reserved for Step 2 (DLEQ correctness proofs) and must be empty in Step 1.
+message PartialDecryptionEntry {
+  uint32 proposal_id      = 1;
+  uint32 vote_decision    = 2;
+  bytes  partial_decrypt  = 3; // 32 bytes: compressed Pallas point D_i = share_i * C1
+  bytes  dleq_proof       = 4; // reserved — populated in Step 2
+}
+
+message MsgSubmitPartialDecryptionResponse {}
+
+// MsgSetVoteManager reassigns the vote manager role.
+// Only callable by the current vote manager. Transfers the caller's full
+// usvote balance to new_manager atomically.
+message MsgSetVoteManager {
+  string creator     = 1; // Sender address (must be the current vote manager)
+  string new_manager = 2; // New vote manager address
+}
+
+message MsgSetVoteManagerResponse {}
+

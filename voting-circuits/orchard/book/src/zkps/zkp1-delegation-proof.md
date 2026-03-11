@@ -1,1 +1,0 @@
-/Users/roman/Documents/zcaloooors/shielded_vote_book/zkps/zkp1-delegation-proof.md

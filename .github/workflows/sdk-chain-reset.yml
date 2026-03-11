@@ -1,8 +1,5 @@
 # Reset the deployed 3-validator chain: stop, reinitialize, start, register.
 # When reset_chain is false, just restarts services without wiping state.
-#
-# Can be called standalone (workflow_dispatch) or from sdk-chain-deploy.yml
-# after new binaries have been deployed.
 
 name: Reset SDK chain
 
@@ -98,20 +95,17 @@ jobs:
               fi
               sleep 2
             done
-            # Register val1 pallas key (gentx doesn't include it)
             ${{ env.DEPLOY_PATH }}/svoted tx vote register-pallas-key \
               --from validator --keyring-backend test \
               --home "$HOME/.svoted-val1" \
               --chain-id svote-1 --node tcp://localhost:26157 --yes
             sleep 2
-            # Register val2
             ${{ env.DEPLOY_PATH }}/create-val-tx \
               --home "$HOME/.svoted-val2" \
               --moniker val2 \
               --amount 10000000usvote \
               --rpc-url tcp://localhost:26157
             sleep 2
-            # Register val3
             ${{ env.DEPLOY_PATH }}/create-val-tx \
               --home "$HOME/.svoted-val3" \
               --moniker val3 \
@@ -134,7 +128,6 @@ jobs:
                 exit 1
               fi
             done
-
             for i in $(seq 1 30); do
               if curl -sf http://localhost:1418/shielded-vote/v1/commitment-tree/latest > /dev/null 2>&1; then
                 echo "Chain API healthy (val1 port 1418)"
@@ -147,7 +140,6 @@ jobs:
               fi
               sleep 2
             done
-
             for i in $(seq 1 15); do
               if curl -sf http://localhost:1418/api/v1/status > /dev/null 2>&1; then
                 echo "Helper server healthy"
@@ -160,5 +152,4 @@ jobs:
               fi
               sleep 2
             done
-
             echo "Chain + helper server both healthy"
