@@ -1,8 +1,79 @@
-# shielded-vote
+# vote-sdk
 
-Cosmos SDK application chain for private voting using Zcash-derived cryptography.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Technical Assumptions
+A Cosmos SDK application chain for **private on-chain voting** using Zcash-derived cryptography (Halo2 ZKP circuits, RedPallas signatures, ElGamal encryption, Poseidon Merkle trees).
+
+## Quick Start
+
+### Prerequisites
+
+- [Go](https://go.dev/) 1.24+
+- [Rust](https://rustup.rs/) stable (for ZKP circuits)
+- [mise](https://mise.jdx.dev/) (optional, for task orchestration)
+
+### Build
+
+```bash
+# Build the Rust circuit static library (required for full verification)
+make circuits
+
+# Build the chain binary with ZKP + signature verification
+make build-ffi
+
+# Or build without FFI (stubs out Halo2/RedPallas verification — dev only)
+make build
+```
+
+### Run a Local Chain
+
+```bash
+# Initialize a single-validator devnet and start
+make init
+make start
+```
+
+### Test
+
+```bash
+# Go unit tests (no Rust dependency)
+make test
+
+# Halo2 ZKP verification tests (requires: make circuits)
+make test-halo2
+
+# All FFI-backed tests (Halo2 + RedPallas)
+make test-all-ffi
+
+# Rust circuit unit tests
+make circuits-test
+```
+
+## Project Structure
+
+```
+app/            Cosmos app, ABCI handlers, PrepareProposal/ProcessProposal
+api/            REST API handlers, codec, tx wrapper
+circuits/       Rust crate: Halo2 ZKP + RedPallas FFI (staticlib for CGo)
+cmd/svoted/     Chain binary and CLI commands
+crypto/         Cryptographic primitives (ECIES, ElGamal, Shamir, ZKP, etc.)
+deploy/         Caddyfile for HTTPS reverse proxy
+docs/           Deployment and protocol documentation
+internal/       Helper server (share submission, SQLite, random delays)
+proto/          Protobuf definitions (buf-managed)
+scripts/        Chain init scripts, validator tooling
+x/vote/         Vote module: ceremony, voting rounds, tally, keeper
+```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+## Protocol Documentation
+
+### Technical Assumptions
 
 1. The chain launches with a single genesis validator. Additional validators join post-genesis via `MsgCreateValidatorWithPallasKey`, which atomically creates the validator and registers their Pallas key for the ceremony. Raw `MsgCreateValidator` is blocked in the ante handler for live transactions. Validator set changes beyond that are handled via major upgrades or a PoA module (future).
 2. Client interaction avoids Cosmos SDK protobuf encoding:
