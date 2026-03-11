@@ -45,16 +45,24 @@ Do not create new migration files (e.g., `002_*.sql`). This is a pre-production 
 
 ## FFI Builds
 
-There are two xcframework build targets in `zcash-voting-ffi/`:
+The voting FFI is now hand-rolled C in `zcash-swift-wallet-sdk/rust/src/voting.rs` (replaces the old UniFFI-based `zcash-voting-ffi/`). The xcframework is built via `zcash-swift-wallet-sdk/Scripts/prepare-fork-release.sh`.
 
-- **`make dev-incr`** — Incremental build (~30s–2min). Use for Rust-only changes that don't touch the FFI interface (e.g., adding logs, fixing logic in `librustvoting` or `orchard`, tweaking circuit code). Skips clean and bindings regeneration, just recompiles changed crates and copies the `.a` into the xcframework.
+## Git Subtrees
 
-- **`make dev`** — Full clean rebuild (~8min). Use when:
-  - The FFI public API changed (`zcash-voting-ffi/rust/src/lib.rs`, uniffi exports, types exposed through FFI)
-  - You need to regenerate Swift bindings (`Sources/ZcashVotingFFI/zcash_voting_ffi.swift`)
-  - The incremental build produces errors (stale artifacts)
+Several directories are git subtrees from separate fork repos. Use `git subtree push/pull` to sync:
 
-After modifying the FFI public API, you **must** run `make dev` and commit the regenerated Swift file and xcframework binaries alongside the Rust changes.
+| Prefix | Remote repo | Branch |
+|---|---|---|
+| `librustzcash/` | `valargroup/librustzcash` | `valargroup/pczt-governance-extensions-0.11` |
+| `librustvoting/` | `valargroup/librustvoting` | `main` |
+| `voting-circuits/` | `valargroup/voting-circuits` | `main` |
+| `zcash-swift-wallet-sdk/` | `valargroup/zcash-swift-wallet-sdk` | `valargroup/governance-tree-state` |
+| `zodl-ios/` | `valargroup/zodl-ios` | `valargroup/shielded-voting` |
+
+To push subtree changes to a fork repo:
+```
+git subtree push --prefix=librustzcash git@github.com:valargroup/librustzcash.git branch-name
+```
 
 ## Local Development
 

@@ -55,7 +55,7 @@ if [ -n "$KILLED" ]; then
 else
     echo "No running processes found."
 fi
-rm -f zashi-ios/secant/Resources/voting-config-local.json
+rm -f zodl-ios/secant/Resources/voting-config-local.json
 '''
 
 # status → .mise/tasks/status
