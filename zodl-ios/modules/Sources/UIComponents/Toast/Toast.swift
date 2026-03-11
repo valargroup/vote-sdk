@@ -38,6 +38,7 @@ public struct Toast: ViewModifier {
                         Spacer()
                     }
                     
+                    #if compiler(>=6.2)
                     if #available(iOS 26.0, *) {
                         Text(message)
                             .zFont(size: 14, style: Design.Btns.Primary.bg)
@@ -54,6 +55,16 @@ public struct Toast: ViewModifier {
                                     .fill(Design.Btns.Primary.bg.color(colorScheme))
                             }
                     }
+                    #else
+                    Text(message)
+                        .zFont(size: 14, style: Design.Btns.Primary.fg)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background {
+                            RoundedRectangle(cornerRadius: Design.Radius._xl)
+                                .fill(Design.Btns.Primary.bg.color(colorScheme))
+                        }
+                    #endif
                     
                     if top {
                         Spacer()

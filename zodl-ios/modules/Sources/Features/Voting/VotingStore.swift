@@ -85,6 +85,9 @@ private enum VotingErrorMapper {
         if rawError.contains("HTTP 5") {
             return "The voting server is temporarily unavailable. Please try again shortly."
         }
+        if rawError.contains("GRPCStatus") || rawError.contains("RPC timed out") || rawError.contains("Transport became inactive") {
+            return "Unable to reach the Zcash lightwalletd server. Please check your internet connection or try switching to a different server in Settings."
+        }
         return rawError
     }
 }
@@ -1116,7 +1119,10 @@ public struct Voting { // swiftlint:disable:this type_body_length
                 return .none
 
             case .witnessVerificationFailed(let error):
-                state.witnessStatus = .failed(VotingErrorMapper.userFriendlyMessage(from: error))
+                let message = VotingErrorMapper.userFriendlyMessage(from: error)
+                state.witnessStatus = .failed(message)
+                state.delegationProofStatus = .failed(message)
+                state.isDelegationProofInFlight = false
                 return .none
 
             // MARK: - Round Resume
