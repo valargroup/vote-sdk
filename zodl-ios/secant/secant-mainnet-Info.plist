@@ -71,8 +71,6 @@
 		<string>fetch</string>
 		<string>processing</string>
 	</array>
-	<key>UIDesignRequiresCompatibility</key>
-	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UILaunchStoryboardName</key>
@@ -85,5 +83,7 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>UIDesignRequiresCompatibility</key>
+	<true/>
 </dict>
 </plist>
