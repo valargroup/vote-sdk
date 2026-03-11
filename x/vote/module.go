@@ -579,11 +579,9 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	return nil
 }
 
-// DefaultVoteManagerAddress is a well-known secp256k1 account used as the
-// default vote manager when no explicit manager is configured in genesis.
-//
-// See internal SDK notes for access.
-const DefaultVoteManagerAddress = "sv15fjfr6rrs60vu4st6arrd94w5j6z7f6k0mfzpl"
+// DefaultVoteManagerAddress is the default vote manager used in genesis.
+// Corresponds to the VM_PRIVKEY set via .env (local) or GitHub secret (CI).
+const DefaultVoteManagerAddress = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"
 
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {

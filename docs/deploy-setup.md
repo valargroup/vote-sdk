@@ -18,12 +18,15 @@ Val1 is the genesis validator and is the primary API endpoint (reverse-proxied b
 
 In the repo: **Settings → Secrets and variables → Actions**, add:
 
-| Secret         | Scope       | Description                                       |
-| -------------- | ----------- | ------------------------------------------------- |
-| `DEPLOY_HOST`  | Repository  | Remote hostname or IP (e.g. `chain.example.com`). |
-| `DEPLOY_USER`  | Repository  | SSH user on that host (e.g. `deploy` or `root`).  |
-| `SSH_PASSWORD` | Repository  | SSH password for that user.                       |
-| `CEREMONY_SSH_KEY` | Environment (`production`) | Ed25519 private key for ceremony bootstrap SSH. |
+| Secret             | Scope       | Description                                                          |
+| ------------------ | ----------- | -------------------------------------------------------------------- |
+| `DEPLOY_HOST`      | Repository  | Remote hostname or IP (e.g. `chain.example.com`).                    |
+| `DEPLOY_USER`      | Repository  | SSH user on that host (e.g. `deploy` or `root`).                     |
+| `SSH_PASSWORD`     | Repository  | SSH password for that user.                                          |
+| `VM_PRIVKEY`       | Repository  | 64-char hex secp256k1 private key for the bootstrap vote-manager.    |
+| `CEREMONY_SSH_KEY` | Environment (`production`) | Ed25519 private key for ceremony bootstrap SSH.       |
+
+Generate `VM_PRIVKEY` with `openssl rand -hex 32`. This key is imported as the vote-manager account during chain initialization. **Never commit it to the repository** — locally it is loaded from `.env` (see `.env.example`).
 
 The `CEREMONY_SSH_KEY` secret lives in the GitHub **production** environment (Settings → Environments → production). Generate the keypair and authorize it on the remote:
 

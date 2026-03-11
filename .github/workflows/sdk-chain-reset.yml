@@ -58,10 +58,14 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
+          envs: VM_PRIVKEY
           script: |
             export HOME=${{ env.DEPLOY_PATH }} PATH=${{ env.DEPLOY_PATH }}:$PATH
+            export VM_PRIVKEY="$VM_PRIVKEY"
             chmod +x ${{ env.DEPLOY_PATH }}/svoted ${{ env.DEPLOY_PATH }}/create-val-tx
             bash ${{ env.DEPLOY_PATH }}/init_multi.sh --ci
+        env:
+          VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
 
       - name: Start services
         uses: appleboy/ssh-action@v1.0.3
