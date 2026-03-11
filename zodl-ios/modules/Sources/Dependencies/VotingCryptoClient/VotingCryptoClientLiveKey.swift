@@ -495,6 +495,12 @@ private actor DatabaseActor {
     private var _backend: VotingRustBackend?
 
     func open(path: String) throws {
+        // If already open, close the old backend before opening a fresh one.
+        // This makes re-initialization safe (e.g. onAppear firing twice).
+        if let old = _backend {
+            old.close()
+            _backend = nil
+        }
         let b = VotingRustBackend()
         try b.open(path: path)
         _backend = b
