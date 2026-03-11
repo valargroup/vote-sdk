@@ -28,6 +28,7 @@ use e2e_tests::{
 };
 use prost::Message;
 use serde_json::json;
+use zcash_client_backend::proto::service::TreeState;
 
 /// Default vote manager secp256k1 private key (set in genesis).
 const VOTE_MANAGER_PRIVKEY_HEX: &str =
@@ -40,13 +41,11 @@ fn log(msg: &str) {
 }
 
 fn lightwalletd_host() -> String {
-    std::env::var("ZASHI_LIGHTWALLETD")
-        .unwrap_or_else(|_| "us.zec.stardust.rest:443".to_string())
+    std::env::var("ZASHI_LIGHTWALLETD").unwrap_or_else(|_| "us.zec.stardust.rest:443".to_string())
 }
 
 fn imt_url() -> String {
-    std::env::var("ZASHI_IMT_URL")
-        .unwrap_or_else(|_| "http://46.101.255.48:3000".to_string())
+    std::env::var("ZASHI_IMT_URL").unwrap_or_else(|_| "http://46.101.255.48:3000".to_string())
 }
 
 fn vote_window_secs() -> u64 {
@@ -143,7 +142,10 @@ fn get_lightwalletd_latest_height() -> u64 {
     log(&format!("fetching latest block height from {}...", host));
 
     let output = std::process::Command::new("grpcurl")
-        .args([&host, "cash.z.wallet.sdk.rpc.CompactTxStreamer/GetLatestBlock"])
+        .args([
+            &host,
+            "cash.z.wallet.sdk.rpc.CompactTxStreamer/GetLatestBlock",
+        ])
         .output()
         .expect("failed to run grpcurl");
 
@@ -232,8 +234,14 @@ fn create_round_for_zashi() {
 
     // ---- Step 3: Fetch real nc_root from lightwalletd ----
     let tree_state_bytes = fetch_tree_state(snap_height);
-    let nc_root = librustvoting::witness::extract_nc_root(&tree_state_bytes)
-        .expect("failed to extract nc_root from tree state");
+    let tree_state = TreeState::decode(tree_state_bytes.as_slice())
+        .expect("failed to decode TreeState protobuf");
+    let nc_root = tree_state
+        .orchard_tree()
+        .expect("failed to parse orchard tree from TreeState")
+        .root()
+        .to_bytes()
+        .to_vec();
     assert_eq!(nc_root.len(), 32);
     log(&format!("nc_root: {}", hex::encode(&nc_root)));
 
@@ -316,7 +324,10 @@ fn create_round_for_zashi() {
     log(&format!("  round_id:    {}", round_id_hex));
     log(&format!("  snapshot:    {}", snap_height));
     log(&format!("  nc_root:     {}", hex::encode(&nc_root)));
-    log(&format!("  imt_root:    {}", hex::encode(&nullifier_imt_root)));
+    log(&format!(
+        "  imt_root:    {}",
+        hex::encode(&nullifier_imt_root)
+    ));
     log(&format!(
         "  vote_end:    {} ({}s from now)",
         vote_end_time,

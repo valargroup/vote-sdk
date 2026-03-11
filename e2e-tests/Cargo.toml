@@ -7,11 +7,11 @@ description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeSc
 [dependencies]
 # Path deps (relative to repo root; e2e-tests is at root)
 shielded-vote-circuits = { path = "../sdk/circuits" }
-orchard = { path = "../orchard" }
-voting-circuits = { path = "../voting-circuits", features = ["share-reveal"] }
-vote-commitment-tree = { path = "../vote-commitment-tree" }
-vote-commitment-tree-client = { path = "../vote-commitment-tree-client" }
-librustvoting = { path = "../librustvoting" }
+orchard = { path = "../voting-circuits/orchard" }
+voting-circuits = { path = "../voting-circuits/voting-circuits", features = ["share-reveal"] }
+vote-commitment-tree = { path = "../librustvoting/vote-commitment-tree" }
+vote-commitment-tree-client = { path = "../librustvoting/vote-commitment-tree-client" }
+librustvoting = { path = "../librustvoting/librustvoting" }
 zcash_client_backend = { path = "../librustzcash/zcash_client_backend", features = ["orchard"] }
 prost = "0.14"
 
@@ -50,8 +50,6 @@ incrementalmerkletree = "0.8"
 rand = "0.8"
 rand_chacha = "0.3"
 
-# Patches needed for librustvoting's transitive deps to resolve to local paths
-# (same pattern as zcash-voting-ffi/rust/Cargo.toml)
 [patch.crates-io]
 zcash_keys = { path = "../librustzcash/zcash_keys" }
 zcash_protocol = { path = "../librustzcash/components/zcash_protocol" }
@@ -62,7 +60,13 @@ zcash_client_sqlite = { path = "../librustzcash/zcash_client_sqlite" }
 zcash_client_backend = { path = "../librustzcash/zcash_client_backend" }
 zcash_primitives = { path = "../librustzcash/zcash_primitives" }
 pczt = { path = "../librustzcash/pczt" }
-orchard = { path = "../orchard" }
+orchard = { path = "../voting-circuits/orchard" }
 
-# Keep this crate as a standalone workspace
+[patch."https://github.com/valargroup/vote-nullifier-pir.git"]
+imt-tree = { path = "../vote-nullifier-pir/imt-tree" }
+pir-client = { path = "../vote-nullifier-pir/pir/client" }
+
+[patch."https://github.com/valargroup/voting-circuits.git"]
+voting-circuits = { path = "../voting-circuits/voting-circuits" }
+
 [workspace]

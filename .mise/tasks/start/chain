@@ -60,8 +60,8 @@ for i in $(seq 1 10); do
 done
 
 # Write iOS local config pointing at single-validator ports
-IOS_CFG="zashi-ios/secant/Resources/voting-config-local.json"
-if [ -d "zashi-ios/secant/Resources" ]; then
+IOS_CFG="zodl-ios/secant/Resources/voting-config-local.json"
+if [ -d "zodl-ios/secant/Resources" ]; then
     cat > "$IOS_CFG" <<'EOF'
 {
   "version": 1,

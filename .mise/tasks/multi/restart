@@ -47,15 +47,15 @@ done
 
 # ── Start nf-server if not running ──────────────────────────────
 if ! pgrep -f 'nf-server.*serve' > /dev/null 2>&1; then
-    if [ -f "../vote-nullifier-pir/pir-data/tier0.bin" ]; then
-        nohup make -C ../vote-nullifier-pir serve > nf-serve.log 2>&1 &
+    if [ -f "vote-nullifier-pir/pir-data/tier0.bin" ]; then
+        nohup make -C vote-nullifier-pir serve > nf-serve.log 2>&1 &
         printf '\033[32mStarted nf-server → nf-serve.log\033[0m\n'
     fi
 fi
 
 # Write iOS local config pointing at multi-validator ports
-IOS_CFG="zashi-ios/secant/Resources/voting-config-local.json"
-if [ -d "zashi-ios/secant/Resources" ]; then
+IOS_CFG="zodl-ios/secant/Resources/voting-config-local.json"
+if [ -d "zodl-ios/secant/Resources" ]; then
     cat > "$IOS_CFG" <<'EOF'
 {
   "version": 1,

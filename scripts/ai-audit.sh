@@ -105,15 +105,15 @@ TIER1_FILES=(
   "$REPO_ROOT/voting-circuits/src/circuit/poseidon_merkle.rs"
   "$REPO_ROOT/voting-circuits/src/circuit/van_integrity.rs"
   "$REPO_ROOT/voting-circuits/src/circuit/vote_commitment.rs"
-  "$REPO_ROOT/orchard/src/circuit/gadget/add_chip.rs"
+  "$REPO_ROOT/voting-circuits/orchard/src/circuit/gadget/add_chip.rs"
 )
 
 TIER2_FILES=(
-  "$REPO_ROOT/vote-commitment-tree/src/hash.rs"
-  "$REPO_ROOT/vote-commitment-tree/src/path.rs"
-  "$REPO_ROOT/vote-commitment-tree/src/server.rs"
-  "$REPO_ROOT/vote-commitment-tree/src/lib.rs"
-  "$REPO_ROOT/vote-commitment-tree/src/anchor.rs"
+  "$REPO_ROOT/librustvoting/vote-commitment-tree/src/hash.rs"
+  "$REPO_ROOT/librustvoting/vote-commitment-tree/src/path.rs"
+  "$REPO_ROOT/librustvoting/vote-commitment-tree/src/server.rs"
+  "$REPO_ROOT/librustvoting/vote-commitment-tree/src/lib.rs"
+  "$REPO_ROOT/librustvoting/vote-commitment-tree/src/anchor.rs"
 )
 
 TIER3_FILES=(
@@ -272,7 +272,7 @@ collect_context() {
   for f in "${TIER5_FILES[@]}"; do emit_code "$f" strip_rust_aggressive "T5"; done
 
   # 5. Include git diff against main (uncommitted changes)
-  local scan_dirs="voting-circuits/src/ orchard/src/ vote-commitment-tree/src/ sdk/x/vote/ sdk/crypto/ sdk/app/ sdk/internal/helper/ sdk/circuits/src/ nullifier-ingest/"
+  local scan_dirs="voting-circuits/voting-circuits/src/ voting-circuits/orchard/src/ librustvoting/vote-commitment-tree/src/ sdk/x/vote/ sdk/crypto/ sdk/app/ sdk/internal/helper/ sdk/circuits/src/"
   local diff
   diff=$(cd "$REPO_ROOT" && git diff HEAD -- $scan_dirs 2>/dev/null || true)
   if [ -n "$diff" ]; then

@@ -75,10 +75,10 @@ fi
 # ── Nullifier data ───────────────────────────────────────────────
 
 printf "nullifiers     "
-CP="../vote-nullifier-pir/nullifiers.checkpoint"
+CP="vote-nullifier-pir/nullifiers.checkpoint"
 if [ -f "$CP" ]; then
     HEIGHT=$(od -An -t u8 -j 0 -N 8 "$CP" | tr -d ' ')
-    BYTES=$(wc -c < "../vote-nullifier-pir/nullifiers.bin" 2>/dev/null | tr -d ' ')
+    BYTES=$(wc -c < "vote-nullifier-pir/nullifiers.bin" 2>/dev/null | tr -d ' ')
     COUNT=$((BYTES / 32))
     printf '\033[32m✓ synced\033[0m    height %s  %sM nullifiers\n' "$HEIGHT" "$((COUNT / 1000000))"
 else
@@ -86,7 +86,7 @@ else
 fi
 
 printf "pir-data       "
-if [ -f "../vote-nullifier-pir/pir-data/tier0.bin" ]; then
+if [ -f "vote-nullifier-pir/pir-data/tier0.bin" ]; then
     printf '\033[32m✓ exported\033[0m\n'
 else
     printf '\033[31m✗ not exported\033[0m  run: mise run nullifier:export\n'
@@ -176,8 +176,8 @@ else
     echo "Chain log      ./svoted.log"
     echo "EA keys        ~/.svoted/ea_sk.*"
 fi
-echo "Nullifier data ../vote-nullifier-pir/nullifiers.{bin,checkpoint}"
-echo "PIR data       ../vote-nullifier-pir/pir-data/"
+echo "Nullifier data vote-nullifier-pir/nullifiers.{bin,checkpoint}"
+echo "PIR data       vote-nullifier-pir/pir-data/"
 echo "nf-server log  ./nf-serve.log"
 echo "Admin UI       ./shielded_vote_generator_ui/"
 printf '\033[0m'

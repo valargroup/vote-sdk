@@ -1,0 +1,22 @@
+[package]
+name = "pir-server"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+avx512 = ["ypir/explicit_avx512"]
+
+[dependencies]
+pir-types  = { path = "../types" }
+ypir = { git = "https://github.com/menonsamir/ypir.git", branch = "artifact", default-features = false, features = ["server"] }
+spiral-rs = { git = "https://github.com/menonsamir/spiral-rs.git", rev = "f2c23c7" }
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+anyhow = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+ff = "0.13"
+pasta_curves = "0.5"

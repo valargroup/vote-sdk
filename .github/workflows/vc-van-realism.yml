@@ -32,8 +32,8 @@ jobs:
           path: |
             sdk/circuits/target
             e2e-tests/target
-            vote-commitment-tree-client/target
-          key: ${{ runner.os }}-vc-van-real-rust-${{ hashFiles('sdk/circuits/Cargo.lock', 'e2e-tests/Cargo.lock', 'vote-commitment-tree-client/Cargo.lock') }}
+            librustvoting/vote-commitment-tree-client/target
+          key: ${{ runner.os }}-vc-van-real-rust-${{ hashFiles('sdk/circuits/Cargo.lock', 'e2e-tests/Cargo.lock', 'librustvoting/vote-commitment-tree-client/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-vc-van-real-rust-
       - name: Cache Go build
@@ -46,7 +46,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-vc-van-real-go-
       - name: Pre-build vote-commitment-tree-client
-        run: cargo build --release --manifest-path vote-commitment-tree-client/Cargo.toml
+        run: cargo build --release --manifest-path librustvoting/vote-commitment-tree-client/Cargo.toml
       - name: Start 3-validator chain
         run: mise run multi:start-chain
         env:

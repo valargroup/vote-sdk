@@ -150,7 +150,7 @@ fn vote_proof_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine>)
     static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
     CACHE.get_or_init(|| {
         let params = vote_proof::vote_proof_params();
-        let (_pk, vk) = vote_proof::vote_proof_proving_key();
+        let (_pk, vk) = vote_proof::vote_proof_proving_key(&params);
         (params, vk)
     })
 }
@@ -748,7 +748,7 @@ fn share_reveal_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine
     static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
     CACHE.get_or_init(|| {
         let params = share_reveal::share_reveal_params();
-        let (_pk, vk) = share_reveal::share_reveal_proving_key();
+        let (_pk, vk) = share_reveal::share_reveal_proving_key(&params);
         (params, vk)
     })
 }

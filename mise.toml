@@ -32,10 +32,10 @@ if [ -n "$PROCS" ]; then
 fi
 
 # ── Nullifier pipeline (independent of chain build) ─────────────
-make -C ../vote-nullifier-pir bootstrap
-make -C ../vote-nullifier-pir ingest
-make -C ../vote-nullifier-pir export-nf
-nohup make -C ../vote-nullifier-pir serve > nf-serve.log 2>&1 &
+make -C vote-nullifier-pir bootstrap
+make -C vote-nullifier-pir ingest
+make -C vote-nullifier-pir export-nf
+nohup make -C vote-nullifier-pir serve > nf-serve.log 2>&1 &
 printf '\033[32mStarted nf-server → nf-serve.log\033[0m\n'
 
 # ── Chain (build + init + start + wait + register) ──────────────
@@ -55,7 +55,7 @@ if [ -n "$KILLED" ]; then
 else
     echo "No running processes found."
 fi
-rm -f zashi-ios/secant/Resources/voting-config-local.json
+rm -f zodl-ios/secant/Resources/voting-config-local.json
 '''
 
 # status → .mise/tasks/status
@@ -155,7 +155,7 @@ printf '\033[32mCleaned multi-validator data.\033[0m\n'
 
 [tasks."nullifier:bootstrap"]
 description = "Download nullifier snapshot from DO Spaces"
-run = "make -C ../vote-nullifier-pir bootstrap"
+run = "make -C vote-nullifier-pir bootstrap"
 
 [tasks."nullifier:ingest"]
 description = "Sync nullifiers to SYNC_HEIGHT or chain tip"
@@ -163,27 +163,27 @@ run = '''
 #!/usr/bin/env bash
 set -e
 if [ -n "${SYNC_HEIGHT:-}" ]; then
-    make -C ../vote-nullifier-pir ingest SYNC_HEIGHT="$SYNC_HEIGHT"
+    make -C vote-nullifier-pir ingest SYNC_HEIGHT="$SYNC_HEIGHT"
 else
-    make -C ../vote-nullifier-pir ingest
+    make -C vote-nullifier-pir ingest
 fi
 '''
 
 [tasks."nullifier:export"]
 description = "Build PIR tree and export tier files"
-run = "make -C ../vote-nullifier-pir export-nf"
+run = "make -C vote-nullifier-pir export-nf"
 
 [tasks."nullifier:serve"]
 description = "Start PIR server (port 3000)"
-run = "make -C ../vote-nullifier-pir serve"
+run = "make -C vote-nullifier-pir serve"
 
 [tasks."nullifier:status"]
 description = "Show nullifier ingestion progress"
-run = "make -C ../vote-nullifier-pir status"
+run = "make -C vote-nullifier-pir status"
 
 [tasks."nullifier:clean"]
 description = "Remove nullifier data + build artifacts"
-run = "make -C ../vote-nullifier-pir clean"
+run = "make -C vote-nullifier-pir clean"
 confirm = "This will delete nullifier data files and Rust build artifacts. Continue?"
 
 # ── test:* ──────────────────────────────────────────────────────────
@@ -218,11 +218,11 @@ run = "make -C sdk test-all-ffi"
 
 [tasks."test:nullifier"]
 description = "Nullifier crate unit tests"
-run = "make -C ../vote-nullifier-pir test"
+run = "make -C vote-nullifier-pir test"
 
 [tasks."test:proof"]
 description = "Verify exclusion proofs against ingested data"
-run = "make -C ../vote-nullifier-pir test-proof"
+run = "make -C vote-nullifier-pir test-proof"
 
 [tasks."test:restart"]
 description = "Test: kill val2, restart, verify it rejoins consensus"

@@ -1034,7 +1034,7 @@ public class SDKSynchronizer: Synchronizer {
         let treeState = try await initializer.lightWalletService.getTreeState(blockID, mode: .direct)
         return try treeState.serializedData()
     }
-    
+
     public func getSingleUseTransparentAddress(accountUUID: AccountUUID) async throws -> SingleUseTransparentAddress {
         try await initializer.rustBackend.getSingleUseTransparentAddress(accountUUID: accountUUID)
     }

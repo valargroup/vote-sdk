@@ -13,7 +13,7 @@ See the protocol spec in the `shielded_vote_book` Obsidian vault (symlinked into
                          |
      +-------------------+-------------------+
      |                                       |
-  zashi-ios                            vote chain (sdk/)
+  zodl-ios                             vote chain (sdk/)
   (voter)                              (Cosmos, Go)
      |                                       ^
      |            helper server              |
@@ -24,9 +24,9 @@ The mobile client is one of several components in the shielded-vote repo. This d
 
 | Layer                | Path          | Language      | Role                                 |
 | -------------------- | ------------- | ------------- | ------------------------------------ |
-| `librustvoting/`     | Rust crate    | Rust          | Core voting crypto + SQLite storage  |
-| `zcash-voting-ffi/`  | Swift package | Rust + UniFFI | Bridges Rust to iOS via xcframework  |
-| `zashi-ios/modules/` | Swift modules | Swift         | UI, TCA reducers, dependency clients |
+| `librustvoting/`              | Rust crate    | Rust          | Core voting crypto + SQLite storage  |
+| `zcash-swift-wallet-sdk/`     | Swift + Rust  | C FFI         | Hand-rolled C FFI in `rust/src/voting.rs` |
+| `zodl-ios/modules/`           | Swift modules | Swift         | UI, TCA reducers, dependency clients |
 
 ## Layer Diagram
 

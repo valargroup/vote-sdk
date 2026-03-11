@@ -1,61 +1,47 @@
 # librustvoting
 
-Core voting library for Zashi governance. Implements the client-side cryptographic operations and SQLite persistence for the voting round lifecycle.
+Client-side cryptographic library for Zcash shielded voting. Implements proof generation, vote construction, and tree synchronization for the [Zally governance protocol](https://github.com/valargroup/shielded-vote-book).
 
-Used by `zcash-voting-ffi` (iOS via UniFFI) and potentially by other clients.
+## Workspace Crates
 
-## Modules
+| Crate | Description |
+|-------|-------------|
+| **librustvoting** | Core library: ZKP delegation and vote proofs (Halo2), El Gamal encryption, governance PCZT construction, Merkle witness generation, SQLite round-state persistence |
+| **vote-commitment-tree** | Append-only Poseidon Merkle tree for Vote Authority Notes and Vote Commitments |
+| **vote-commitment-tree-client** | HTTP client and CLI for syncing the vote commitment tree from a chain node |
 
-| Module            | Status  | What it does                                                                 |
-| ----------------- | ------- | ---------------------------------------------------------------------------- |
-| `storage/`        | Real    | SQLite database — round state, proofs, votes. WAL mode, versioned migrations |
-| `hotkey`          | Real    | Random Pallas keypair generation for voting hotkeys                          |
-| `decompose`       | Real    | Binary weight decomposition into 4 shares (protocol max)                     |
-| `elgamal`         | Real    | El Gamal encryption of vote shares under EA public key (Pallas curve)        |
-| `action`          | Real    | Constructs Orchard action + governance PCZT for Keystone delegation signing  |
-| `witness`         | Real    | Merkle witness generation from wallet DB shard data                          |
-| `zkp1`            | Real    | ZKP #1 — delegation proof (real Halo2 prover, ~12s on iPhone)                |
-| `zkp2`            | Stubbed | ZKP #2 — vote commitment proof (returns placeholder bundle)                  |
-| `vote_commitment` | Stubbed | Share payload construction for helper server delegation                      |
-| `wallet_notes`    | Real    | Queries Orchard notes from wallet DB at snapshot height                      |
-| `types`           | Real    | Shared types: `VotingError`, `EncryptedShare`, `VoteCommitmentBundle`, etc.  |
+## Architecture
 
-## Storage Schema
-
-Four tables in `storage/migrations/001_init.sql`:
-
-**`rounds`** — One row per voting session. Tracks phase progression (Initialized → HotkeyGenerated → DelegationConstructed → DelegationProved → VoteReady). Stores round parameters (snapshot height, EA public key, nc_root, nullifier IMT root) and optional session JSON.
-
-**`proofs`** — One row per round. Stores the delegation proof blob with a success flag. Written by `build_and_prove_delegation()`.
-
-**`votes`** — One row per (round, proposal). Records the vote choice, commitment JSON, and a `submitted` flag that tracks whether the vote has landed on-chain. Unique constraint on `(round_id, proposal_id)`.
-
-**`cached_tree_state`** — Caches the vote commitment tree state fetched from lightwalletd, keyed by round.
-
-## Usage
-
-All operations go through `VotingDb`:
-
-```rust
-let db = VotingDb::open("voting.sqlite3")?;
-db.init_round(&params, None)?;
-
-let hotkey = db.generate_hotkey(round_id, &seed)?;
-let pczt = db.build_governance_pczt(round_id, &notes, &fvk, &hotkey_addr, ...)?;
-// ... Keystone signs the PCZT ...
-let proof = db.build_and_prove_delegation(round_id, &wallet_db_path, &hotkey_addr, &imt_url, ...)?;
-
-let shares = db.encrypt_shares(round_id, &[64, 32, 2, 1])?;
-let bundle = db.build_vote_commitment(round_id, 0, 0, &shares, &van_witness, &reporter)?;
-db.mark_vote_submitted(round_id, 0)?;
+```
+librustvoting
+├── vote-commitment-tree ──── imt-tree (vote-nullifier-pir)
+├── vote-commitment-tree-client
+├── pir-client (vote-nullifier-pir)
+├── voting-circuits ── ZK delegation + vote proofs, orchard fork
+└── librustzcash ───── pczt, zcash_keys, zcash_client_sqlite, ...
 ```
 
-Each method validates the current phase, performs the operation, persists results, and advances the phase. Phase transitions are atomic with the data writes.
+## Building
 
-## Dependencies
+```bash
+cargo check                    # check all crates
+cargo build -p librustvoting   # build just the core library
+```
 
-- `pasta_curves` / `ff` / `group` — same curve library as Orchard/Zcash
-- `rusqlite` (bundled) — SQLite with no system dependency
-- `halo2_proofs` / `halo2_gadgets` — proof system for ZKP #1
-- `reqwest` (blocking) — HTTP client for IMT server exclusion proofs
-- `orchard` (local, delegation feature) — delegation circuit and builder
+The workspace depends on the private [valargroup/voting-circuits](https://github.com/valargroup/voting-circuits) repo. The `.cargo/config.toml` enables `git-fetch-with-cli` so your local git credentials are used automatically.
+
+## Dependency Strategy
+
+This workspace uses `[patch.crates-io]` (in the root `Cargo.toml`) to override two dependency trees:
+
+- **orchard 0.11** — Resolved from [valargroup/voting-circuits](https://github.com/valargroup/voting-circuits), which bundles an orchard fork with public visibility for `constants`, `spec`, and a `shared_primitives::spend_authority` gadget.
+
+- **librustzcash crates** (pczt, zcash_keys, zcash_client_sqlite, etc.) — Resolved from [valargroup/librustzcash](https://github.com/valargroup/librustzcash) branch `valargroup/pczt-governance-extensions-0.11`. Adds public getters and methods needed for governance PCZT construction and Merkle witness generation.
+
+## FFI
+
+Mobile FFI bindings live in [zcash-swift-wallet-sdk](https://github.com/valargroup/zcash-swift-wallet-sdk) (hand-rolled C FFI + Swift wrappers). This repo is a pure Rust workspace.
+
+## License
+
+TODO

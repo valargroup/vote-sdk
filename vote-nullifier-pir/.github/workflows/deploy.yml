@@ -1,0 +1,97 @@
+# Deploy nf-server to a remote host on every push to main.
+# Requires repository secrets: DEPLOY_HOST, DEPLOY_USER, SSH_PASSWORD.
+# See docs/deploy-setup.md for one-time remote setup.
+
+name: Deploy nf-server
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # allow manual run
+
+permissions:
+  contents: read
+
+env:
+  DEPLOY_PATH: /opt/nf-ingest
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2025-02-25
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-nf-server-v2-nightly-2025-02-25-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-server-v2-nightly-2025-02-25-
+
+      - name: Build release binary
+        run: cd nf-server && cargo build --release --target x86_64-unknown-linux-gnu --features serve,avx512
+        env:
+          # Explicit --target separates host vs target compilation. Build
+          # scripts and proc-macros compile for the host (baseline x86-64),
+          # while target-specific RUSTFLAGS only apply to the actual binary.
+          # Without --target, RUSTFLAGS poison build scripts too → SIGILL on
+          # runners that lack AVX-512.
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C target-feature=+avx512f,+avx512bw,+avx512dq,+avx512cd,+avx512vl"
+
+      - name: Upload binary and config
+        uses: actions/upload-artifact@v4
+        with:
+          name: nf-server-binaries
+          path: |
+            target/x86_64-unknown-linux-gnu/release/nf-server
+            docs/nullifier-query-server.service
+
+  deploy:
+    name: Deploy to remote
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: nf-server-binaries
+
+      - name: Flatten artifacts
+        run: |
+          cp target/x86_64-unknown-linux-gnu/release/nf-server /tmp/nf-server
+          cp docs/nullifier-query-server.service /tmp/nullifier-query-server.service
+          rm -rf target docs
+          mv /tmp/nf-server /tmp/nullifier-query-server.service .
+
+      - name: Deploy via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: "nf-server,nullifier-query-server.service"
+          target: ${{ env.DEPLOY_PATH }}
+
+      - name: Install config and restart services
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            sudo chmod +x /opt/nf-ingest/nf-server
+            sudo cp /opt/nf-ingest/nullifier-query-server.service /etc/systemd/system/nullifier-query-server.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable nullifier-query-server
+            sudo systemctl restart nullifier-query-server
