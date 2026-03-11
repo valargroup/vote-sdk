@@ -59,6 +59,7 @@ Several directories are git subtrees from separate fork repos. Use `git subtree 
 | `zcash-swift-wallet-sdk/` | `valargroup/zcash-swift-wallet-sdk` | `valargroup/governance-tree-state` |
 | `zodl-ios/` | `valargroup/zodl-ios` | `valargroup/shielded-voting` |
 | `vote-nullifier-pir/` | `valargroup/vote-nullifier-pir` | `main` |
+| `shielded_vote_generator_ui/` | `valargroup/vote-shielded-vote-generator-ui` | `main` |
 
 To push subtree changes to a fork repo:
 ```
