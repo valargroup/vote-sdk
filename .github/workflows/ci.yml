@@ -34,9 +34,13 @@ jobs:
   test-unit:
     name: Unit Tests
     runs-on: ubuntu-latest
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
       - name: Install mise
         uses: jdx/mise-action@v2
       - name: Cache Rust build
@@ -65,9 +69,13 @@ jobs:
   test-integration:
     name: Integration Tests
     runs-on: ubuntu-latest
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
       - name: Install mise
         uses: jdx/mise-action@v2
       - name: Cache Rust build
@@ -85,9 +93,13 @@ jobs:
   test-halo2:
     name: Halo2 ZKP Verification Tests
     runs-on: ubuntu-latest
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
       - name: Install mise
         uses: jdx/mise-action@v2
       - name: Cache Rust build
@@ -109,11 +121,14 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       GOCACHE: ${{ github.workspace }}/.cache/go-build
       GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
       - name: Install mise
         uses: jdx/mise-action@v2
       - name: Cache Rust build (circuits)
