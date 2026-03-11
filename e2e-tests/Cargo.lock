@@ -597,7 +597,7 @@ dependencies = [
  "hex",
  "incrementalmerkletree",
  "librustvoting",
- "orchard",
+ "orchard 0.11.0",
  "pasta_curves",
  "prost",
  "rand",
@@ -608,7 +608,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "shielded-vote-circuits",
- "vote-commitment-tree",
+ "vote-commitment-tree 0.1.0",
  "vote-commitment-tree-client",
  "voting-circuits",
  "zcash_client_backend",
@@ -1489,7 +1489,7 @@ dependencies = [
  "hex",
  "incrementalmerkletree",
  "nonempty",
- "orchard",
+ "orchard 0.11.0",
  "pasta_curves",
  "pczt",
  "pir-client",
@@ -1499,7 +1499,7 @@ dependencies = [
  "serde_json",
  "subtle",
  "thiserror 2.0.18",
- "vote-commitment-tree",
+ "vote-commitment-tree 0.1.0",
  "vote-commitment-tree-client",
  "voting-circuits",
  "zcash_keys",
@@ -1774,6 +1774,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "orchard"
+version = "0.11.0"
+source = "git+https://github.com/valargroup/voting-circuits.git#4bca59a9cf40374617d629b70c1d3c111669b1b6"
+dependencies = [
+ "aes",
+ "bitvec",
+ "blake2b_simd",
+ "core2",
+ "ff",
+ "fpe",
+ "getset",
+ "group",
+ "halo2_gadgets",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "hex",
+ "incrementalmerkletree",
+ "lazy_static",
+ "memuse",
+ "nonempty",
+ "pasta_curves",
+ "rand",
+ "reddsa",
+ "serde",
+ "sinsemilla",
+ "subtle",
+ "tracing",
+ "visibility",
+ "zcash_note_encryption",
+ "zcash_spec",
+ "zip32",
+]
+
+[[package]]
 name = "pairing"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1808,7 +1842,7 @@ dependencies = [
  "getset",
  "jubjub",
  "nonempty",
- "orchard",
+ "orchard 0.11.0",
  "pasta_curves",
  "postcard",
  "rand_core",
@@ -2561,12 +2595,13 @@ dependencies = [
  "halo2_gadgets",
  "halo2_proofs",
  "hex",
+ "imt-tree",
  "incrementalmerkletree",
- "orchard",
+ "orchard 0.11.0 (git+https://github.com/valargroup/voting-circuits.git)",
  "pasta_curves",
  "rand_core",
  "reddsa",
- "vote-commitment-tree",
+ "vote-commitment-tree 0.1.0 (git+https://github.com/valargroup/librustvoting.git)",
  "voting-circuits",
 ]
 
@@ -3152,6 +3187,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "vote-commitment-tree"
+version = "0.1.0"
+source = "git+https://github.com/valargroup/librustvoting.git#361b743d06f73cf6310595967609c4e384281837"
+dependencies = [
+ "anyhow",
+ "ff",
+ "halo2_gadgets",
+ "imt-tree",
+ "incrementalmerkletree",
+ "lazy_static",
+ "libc",
+ "pasta_curves",
+ "shardtree",
+]
+
+[[package]]
 name = "vote-commitment-tree-client"
 version = "0.1.0"
 dependencies = [
@@ -3164,7 +3215,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "vote-commitment-tree",
+ "vote-commitment-tree 0.1.0",
 ]
 
 [[package]]
@@ -3179,7 +3230,7 @@ dependencies = [
  "halo2_proofs",
  "incrementalmerkletree",
  "lazy_static",
- "orchard",
+ "orchard 0.11.0",
  "pasta_curves",
  "rand",
  "sinsemilla",
@@ -3702,7 +3753,7 @@ dependencies = [
  "incrementalmerkletree",
  "memuse",
  "nonempty",
- "orchard",
+ "orchard 0.11.0",
  "pasta_curves",
  "percent-encoding",
  "prost",
@@ -3750,7 +3801,7 @@ dependencies = [
  "group",
  "memuse",
  "nonempty",
- "orchard",
+ "orchard 0.11.0",
  "rand_core",
  "sapling-crypto",
  "secrecy",
@@ -3797,7 +3848,7 @@ dependencies = [
  "jubjub",
  "memuse",
  "nonempty",
- "orchard",
+ "orchard 0.11.0",
  "rand",
  "rand_core",
  "redjubjub",

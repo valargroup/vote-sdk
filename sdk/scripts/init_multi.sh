@@ -238,9 +238,10 @@ $BINARY keys add validator --keyring-backend test --home "$HOME_VAL1"
 VAL1_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_VAL1")
 echo "Val1 address: $VAL1_ADDR"
 
-# Import the deterministic bootstrap admin key (matches E2E test constant).
+# Import the bootstrap admin key (matches E2E test constant).
 # In dev mode this account is also set as the vote-manager for convenience.
-VM_PRIVKEY="b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee"
+# Override via VM_PRIVKEY env var; the default is a well-known dev-only key.
+VM_PRIVKEY="${VM_PRIVKEY:-b7e910eded435dd4e19c581b9a0b8e65104dcc4ebca8a1d55aa5c803e72ba2ee}"
 $BINARY keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_VAL1"
 MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_VAL1")
 echo "Manager address:   $MANAGER_ADDR"
