@@ -373,6 +373,7 @@ dependencies = [
  "hex",
  "pasta_curves",
  "rayon",
+ "tracing",
 ]
 
 [[package]]
