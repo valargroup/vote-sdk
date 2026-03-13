@@ -190,12 +190,20 @@ var errTxNotFound = errors.New("tx not found in any block")
 // queryTxByHash queries CometBFT's /tx JSON-RPC endpoint for a confirmed
 // transaction. Returns errTxNotFound if the TX is not yet in a block.
 func (h *Handler) queryTxByHash(txHash string) (*txStatusResult, error) {
+	// CometBFT JSON-RPC unmarshals the hash param as []byte via Go's
+	// json.Unmarshal, which expects base64 — not hex. Convert hex → bytes → base64.
+	hashBytes, err := hex.DecodeString(txHash)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tx hash hex: %w", err)
+	}
+	hashB64 := base64.StdEncoding.EncodeToString(hashBytes)
+
 	reqBody := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tx",
 		"params": map[string]interface{}{
-			"hash":  txHash,
+			"hash":  hashB64,
 			"prove": false,
 		},
 	}
