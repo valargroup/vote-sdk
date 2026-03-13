@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -145,11 +146,42 @@ func (h *Handler) handleSnapshotData(w http.ResponseWriter, r *http.Request) {
 
 // --- TX status ---
 
-// txStatusResult holds the confirmed status of a transaction in a block.
+// txStatusResult holds the confirmed status of a transaction in a block,
+// including any ABCI events emitted during execution.
 type txStatusResult struct {
 	Height string
 	Code   uint32
 	Log    string
+	Events []abciEvent
+}
+
+type abciEvent struct {
+	Type       string          `json:"type"`
+	Attributes []abciAttribute `json:"attributes"`
+}
+
+type abciAttribute struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+	Index bool   `json:"index,omitempty"`
+}
+
+// decodeBase64IfPlain tries to base64-decode s. CometBFT ≤0.37 encodes event
+// attribute keys/values as base64; ≥0.38 sends plain strings. If decoding
+// succeeds and the result is valid UTF-8, the decoded string is returned;
+// otherwise the original value is returned unchanged.
+func decodeBase64IfPlain(s string) string {
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return s
+	}
+	decoded := string(b)
+	for _, r := range decoded {
+		if r == '\uFFFD' {
+			return s
+		}
+	}
+	return decoded
 }
 
 // errTxNotFound is returned by queryTxByHash when CometBFT has no record of the TX in any block.
@@ -192,8 +224,9 @@ func (h *Handler) queryTxByHash(txHash string) (*txStatusResult, error) {
 		Result *struct {
 			Height   string `json:"height"`
 			TxResult struct {
-				Code uint32 `json:"code"`
-				Log  string `json:"log"`
+				Code   uint32      `json:"code"`
+				Log    string      `json:"log"`
+				Events []abciEvent `json:"events"`
 			} `json:"tx_result"`
 		} `json:"result"`
 		Error *struct {
@@ -215,10 +248,19 @@ func (h *Handler) queryTxByHash(txHash string) (*txStatusResult, error) {
 		return nil, fmt.Errorf("unexpected empty result from CometBFT")
 	}
 
+	events := rpcResp.Result.TxResult.Events
+	for i, ev := range events {
+		for j, attr := range ev.Attributes {
+			events[i].Attributes[j].Key = decodeBase64IfPlain(attr.Key)
+			events[i].Attributes[j].Value = decodeBase64IfPlain(attr.Value)
+		}
+	}
+
 	return &txStatusResult{
 		Height: rpcResp.Result.Height,
 		Code:   rpcResp.Result.TxResult.Code,
 		Log:    rpcResp.Result.TxResult.Log,
+		Events: events,
 	}, nil
 }
 
@@ -250,6 +292,7 @@ func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
 		"height": result.Height,
 		"code":   result.Code,
 		"log":    result.Log,
+		"events": result.Events,
 	}
 	if result.Code != 0 {
 		writeJSON(w, http.StatusUnprocessableEntity, resp)
