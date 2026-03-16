@@ -115,7 +115,8 @@ func TestPartialDecryptInjector_HappyPath(t *testing.T) {
 
 	for _, entry := range msg.Entries {
 		require.Len(t, entry.PartialDecrypt, 32, "partial_decrypt must be 32 bytes")
-		require.Empty(t, entry.DleqProof, "dleq_proof must be empty in Step 1")
+		require.Len(t, entry.DleqProof, elgamal.DLEQProofSize,
+			"dleq_proof must be %d bytes", elgamal.DLEQProofSize)
 
 		accKey := uint64(entry.ProposalId)<<32 | uint64(entry.VoteDecision)
 		ctBytes, exists := accumulators[accKey]
