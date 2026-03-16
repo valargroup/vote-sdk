@@ -45,8 +45,15 @@ func TestThresholdTallyLifecycle(t *testing.T) {
 	// -----------------------------------------------------------------------
 
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
-	shares, _, err := shamir.Split(eaSk.Scalar, 2, 2)
+	shares, coeffs, err := shamir.Split(eaSk.Scalar, 2, 2)
 	require.NoError(t, err)
+
+	commitmentPts, err := shamir.FeldmanCommit(G, coeffs)
+	require.NoError(t, err)
+	feldmanCommitments := make([][]byte, len(commitmentPts))
+	for j, c := range commitmentPts {
+		feldmanCommitments[j] = c.ToAffineCompressed()
+	}
 
 	// Phantom validator — no real node, we will pre-seed its D_i directly.
 	_, v2Pk := elgamal.KeyGen(rand.Reader)
@@ -55,10 +62,6 @@ func TestThresholdTallyLifecycle(t *testing.T) {
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
 		{ValidatorAddress: v2Addr, PallasPk: v2Pk.Point.ToAffineCompressed()},
-	}
-	vks := [][]byte{
-		G.Mul(shares[0].Value).ToAffineCompressed(),
-		G.Mul(shares[1].Value).ToAffineCompressed(),
 	}
 
 	// 2 proposals × 2 options = 4 accumulators.
@@ -87,7 +90,7 @@ func TestThresholdTallyLifecycle(t *testing.T) {
 	roundID := make([]byte, 32)
 	roundID[0] = 0xE0
 
-	ta.SeedTallyingRoundThreshold(roundID, 2, proposals, validators, vks)
+	ta.SeedTallyingRoundThreshold(roundID, 2, proposals, validators, feldmanCommitments)
 
 	// -----------------------------------------------------------------------
 	// Step 2: Populate tally accumulators and pre-seed validator 2's D_i.
@@ -231,8 +234,15 @@ func TestThresholdTallyLifecycle_WaitsForThreshold(t *testing.T) {
 	G := elgamal.PallasGenerator()
 
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
-	shares, _, err := shamir.Split(eaSk.Scalar, 2, 2)
+	_, coeffs, err := shamir.Split(eaSk.Scalar, 2, 2)
 	require.NoError(t, err)
+
+	cPts, err := shamir.FeldmanCommit(G, coeffs)
+	require.NoError(t, err)
+	feldmanCommitments := make([][]byte, len(cPts))
+	for j, c := range cPts {
+		feldmanCommitments[j] = c.ToAffineCompressed()
+	}
 
 	_, v2Pk := elgamal.KeyGen(rand.Reader)
 	v2Addr := sdk.ValAddress([]byte("phantom-validator-2-------")).String()
@@ -240,10 +250,6 @@ func TestThresholdTallyLifecycle_WaitsForThreshold(t *testing.T) {
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
 		{ValidatorAddress: v2Addr, PallasPk: v2Pk.Point.ToAffineCompressed()},
-	}
-	vks := [][]byte{
-		G.Mul(shares[0].Value).ToAffineCompressed(),
-		G.Mul(shares[1].Value).ToAffineCompressed(),
 	}
 
 	proposals := []*types.Proposal{
@@ -254,7 +260,7 @@ func TestThresholdTallyLifecycle_WaitsForThreshold(t *testing.T) {
 	roundID[0] = 0xE1
 
 	// VoteEndTime far in the future so EndBlocker doesn't change status.
-	ta.SeedTallyingRoundThreshold(roundID, 2, proposals, validators, vks)
+	ta.SeedTallyingRoundThreshold(roundID, 2, proposals, validators, feldmanCommitments)
 
 	// Store one accumulator.
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height, Time: ta.Time})
@@ -299,8 +305,15 @@ func TestThresholdTallyLifecycle_ZeroVotes(t *testing.T) {
 	G := elgamal.PallasGenerator()
 
 	eaSk, _ := elgamal.KeyGen(rand.Reader)
-	shares, _, err := shamir.Split(eaSk.Scalar, 2, 2)
+	shares, coeffs, err := shamir.Split(eaSk.Scalar, 2, 2)
 	require.NoError(t, err)
+
+	cPts, err := shamir.FeldmanCommit(G, coeffs)
+	require.NoError(t, err)
+	feldmanCommitments := make([][]byte, len(cPts))
+	for j, c := range cPts {
+		feldmanCommitments[j] = c.ToAffineCompressed()
+	}
 
 	_, v2Pk := elgamal.KeyGen(rand.Reader)
 	v2Addr := sdk.ValAddress([]byte("phantom-validator-2-------")).String()
@@ -308,10 +321,6 @@ func TestThresholdTallyLifecycle_ZeroVotes(t *testing.T) {
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
 		{ValidatorAddress: v2Addr, PallasPk: v2Pk.Point.ToAffineCompressed()},
-	}
-	vks := [][]byte{
-		G.Mul(shares[0].Value).ToAffineCompressed(),
-		G.Mul(shares[1].Value).ToAffineCompressed(),
 	}
 
 	proposals := []*types.Proposal{
@@ -323,7 +332,7 @@ func TestThresholdTallyLifecycle_ZeroVotes(t *testing.T) {
 	roundID := make([]byte, 32)
 	roundID[0] = 0xE2
 
-	ta.SeedTallyingRoundThreshold(roundID, 2, proposals, validators, vks)
+	ta.SeedTallyingRoundThreshold(roundID, 2, proposals, validators, feldmanCommitments)
 
 	// Do NOT populate any tally accumulators — zero votes.
 	// Write the proposer's share to disk (partial decrypt would use it if there

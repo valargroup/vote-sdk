@@ -139,9 +139,9 @@ func (s *MsgServerTestSuite) dealPendingRound(n int) (roundID []byte, addrs []st
 			t = 2
 		}
 		msg.Threshold = uint32(t)
-		msg.VerificationKeys = make([][]byte, n)
-		for i := range msg.VerificationKeys {
-			msg.VerificationKeys[i] = testPallasPK()
+		msg.FeldmanCommitments = make([][]byte, t)
+		for i := range msg.FeldmanCommitments {
+			msg.FeldmanCommitments[i] = testPallasPK()
 		}
 	}
 	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, msg)
@@ -300,18 +300,18 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 	s.setBlockProposer(addrs[0])
 	eaPk := testPallasPK()
 	payloads := makePayloads(addrs)
-	vks := make([][]byte, 3)
-	for i := range vks {
-		vks[i] = testPallasPK()
+	commitments := make([][]byte, 2) // threshold = 2, so 2 Feldman commitments
+	for i := range commitments {
+		commitments[i] = testPallasPK()
 	}
 
 	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
-		Creator:          addrs[0],
-		VoteRoundId:      roundID,
-		EaPk:             eaPk,
-		Payloads:         payloads,
-		Threshold:        2,
-		VerificationKeys: vks,
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		EaPk:               eaPk,
+		Payloads:           payloads,
+		Threshold:          2,
+		FeldmanCommitments: commitments,
 	})
 	s.Require().NoError(err)
 
@@ -330,9 +330,9 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_HappyPath() {
 		s.Require().Equal(addrs[i], p.ValidatorAddress)
 	}
 	s.Require().EqualValues(2, round.Threshold)
-	s.Require().Len(round.VerificationKeys, 3)
-	for i, vk := range round.VerificationKeys {
-		s.Require().Equal(vks[i], vk)
+	s.Require().Len(round.FeldmanCommitments, 2)
+	for i, c := range round.FeldmanCommitments {
+		s.Require().Equal(commitments[i], c)
 	}
 
 	// Verify event emission.
@@ -522,36 +522,36 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 			},
 			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:          "dealer1",
-					VoteRoundId:      roundID,
-					EaPk:             testPallasPK(),
-					Payloads:         makePayloads(addrs),
-					Threshold:        1,
-					VerificationKeys: [][]byte{testPallasPK(), testPallasPK()},
+					Creator:            "dealer1",
+					VoteRoundId:        roundID,
+					EaPk:               testPallasPK(),
+					Payloads:           makePayloads(addrs),
+					Threshold:          1,
+					FeldmanCommitments: [][]byte{testPallasPK()},
 				}
 			},
 			errContains: "invalid threshold",
 		},
 		{
-			name: "n>=2: wrong number of verification keys",
+			name: "n>=2: wrong number of Feldman commitments",
 			setup: func() ([]byte, []string) {
 				roundID, addrs, _ := s.createPendingRoundWithValidators(3)
 				return roundID, addrs
 			},
 			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:          "dealer1",
-					VoteRoundId:      roundID,
-					EaPk:             testPallasPK(),
-					Payloads:         makePayloads(addrs),
-					Threshold:        2,
-					VerificationKeys: [][]byte{testPallasPK()},
+					Creator:            "dealer1",
+					VoteRoundId:        roundID,
+					EaPk:               testPallasPK(),
+					Payloads:           makePayloads(addrs),
+					Threshold:          2,
+					FeldmanCommitments: [][]byte{testPallasPK()},
 				}
 			},
 			errContains: "invalid threshold",
 		},
 		{
-			name: "n>=2: invalid point in verification keys",
+			name: "n>=2: invalid point in Feldman commitments",
 			setup: func() ([]byte, []string) {
 				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
 				return roundID, addrs
@@ -563,7 +563,7 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 					EaPk:        testPallasPK(),
 					Payloads:    makePayloads(addrs),
 					Threshold:   2,
-					VerificationKeys: [][]byte{
+					FeldmanCommitments: [][]byte{
 						testPallasPK(),
 						bytes.Repeat([]byte{0xFF}, 32),
 					},
@@ -589,19 +589,19 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 			errContains: "invalid threshold",
 		},
 		{
-			name: "n==1: verification_keys must be empty",
+			name: "n==1: feldman_commitments must be empty",
 			setup: func() ([]byte, []string) {
 				roundID, addrs, _ := s.createPendingRoundWithValidators(1)
 				return roundID, addrs
 			},
 			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
 				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:          "dealer1",
-					VoteRoundId:      roundID,
-					EaPk:             testPallasPK(),
-					Payloads:         makePayloads(addrs),
-					Threshold:        0,
-					VerificationKeys: [][]byte{testPallasPK()},
+					Creator:            "dealer1",
+					VoteRoundId:        roundID,
+					EaPk:               testPallasPK(),
+					Payloads:           makePayloads(addrs),
+					Threshold:          0,
+					FeldmanCommitments: [][]byte{testPallasPK()},
 				}
 			},
 			errContains: "invalid threshold",
@@ -936,11 +936,17 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
 	const threshold = 2
-	shares, _, err := shamir.Split(eaSk.Scalar, threshold, numValidators)
+	shares, coeffs, err := shamir.Split(eaSk.Scalar, threshold, numValidators)
 	s.Require().NoError(err)
 
+	commitmentPts, err := shamir.FeldmanCommit(G, coeffs)
+	s.Require().NoError(err)
+	feldmanCommitments := make([][]byte, len(commitmentPts))
+	for j, c := range commitmentPts {
+		feldmanCommitments[j] = c.ToAffineCompressed()
+	}
+
 	payloads := make([]*types.DealerPayload, numValidators)
-	vks := make([][]byte, numValidators)
 	for i, v := range validators {
 		shareBytes := shares[i].Value.Bytes()
 		env, err := ecies.Encrypt(G, v.pk.Point, shareBytes, rand.Reader)
@@ -951,16 +957,15 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
 			Ciphertext:       env.Ciphertext,
 		}
-		vks[i] = G.Mul(shares[i].Value).ToAffineCompressed()
 	}
 
 	_, err = s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
-		Creator:          addrs[0],
-		VoteRoundId:      roundID,
-		EaPk:             eaPkBytes,
-		Payloads:         payloads,
-		Threshold:        threshold,
-		VerificationKeys: vks,
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		EaPk:               eaPkBytes,
+		Payloads:           payloads,
+		Threshold:          threshold,
+		FeldmanCommitments: feldmanCommitments,
 	})
 	s.Require().NoError(err)
 
@@ -970,7 +975,7 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
 	s.Require().EqualValues(threshold, round.Threshold)
-	s.Require().Len(round.VerificationKeys, numValidators)
+	s.Require().Len(round.FeldmanCommitments, threshold)
 
 	for i, v := range validators {
 		payload := round.CeremonyPayloads[i]
@@ -988,9 +993,11 @@ func (s *MsgServerTestSuite) TestFullCeremonyWithECIES() {
 		s.Require().NoError(err, "ECIES decrypt for validator %d", i)
 		s.Require().Equal(shares[i].Value.Bytes(), decryptedShare,
 			"decrypted share mismatch for validator %d", i)
+	}
 
-		s.Require().Equal(vks[i], round.VerificationKeys[i],
-			"stored VK[%d] must match computed VK", i)
+	for j, c := range round.FeldmanCommitments {
+		s.Require().Equal(feldmanCommitments[j], c,
+			"stored Feldman commitment[%d] must match computed commitment", j)
 	}
 
 	for _, addr := range addrs {

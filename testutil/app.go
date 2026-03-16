@@ -160,7 +160,7 @@ func (ta *TestApp) SeedTallyingRoundThreshold(
 	threshold uint32,
 	proposals []*types.Proposal,
 	validators []*types.ValidatorPallasKey,
-	verificationKeys [][]byte,
+	feldmanCommitments [][]byte,
 ) []byte {
 	ta.t.Helper()
 
@@ -187,7 +187,7 @@ func (ta *TestApp) SeedTallyingRoundThreshold(
 		Proposals:          proposals,
 		CeremonyValidators: indexedValidators,
 		Threshold:          threshold,
-		VerificationKeys:   verificationKeys,
+		FeldmanCommitments: feldmanCommitments,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
@@ -446,7 +446,7 @@ func (ta *TestApp) SeedDealtCeremonyThreshold(
 	payloads []*types.DealerPayload,
 	validators []*types.ValidatorPallasKey,
 	threshold uint32,
-	verificationKeys [][]byte,
+	feldmanCommitments [][]byte,
 ) []byte {
 	ta.t.Helper()
 
@@ -468,7 +468,7 @@ func (ta *TestApp) SeedDealtCeremonyThreshold(
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
 		Threshold:            threshold,
-		VerificationKeys:     verificationKeys,
+		FeldmanCommitments:   feldmanCommitments,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)

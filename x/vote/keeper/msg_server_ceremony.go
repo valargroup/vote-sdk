@@ -112,20 +112,24 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 		}
 	}
 
-	// Validate threshold and verification keys.
+	// Validate threshold and Feldman commitments.
 	nValidators := len(round.CeremonyValidators)
 	if nValidators >= 2 {
 		if msg.Threshold < 2 {
 			return nil, fmt.Errorf("%w: threshold must be >= 2 when n=%d, got %d",
 				types.ErrInvalidThreshold, nValidators, msg.Threshold)
 		}
-		if len(msg.VerificationKeys) != nValidators {
-			return nil, fmt.Errorf("%w: expected %d verification keys, got %d",
-				types.ErrInvalidThreshold, nValidators, len(msg.VerificationKeys))
+		if int(msg.Threshold) > nValidators {
+			return nil, fmt.Errorf("%w: threshold %d exceeds validator count %d",
+				types.ErrInvalidThreshold, msg.Threshold, nValidators)
 		}
-		for i, vk := range msg.VerificationKeys {
-			if _, err := elgamal.UnmarshalPublicKey(vk); err != nil {
-				return nil, fmt.Errorf("%w: verification_key[%d]: %v",
+		if len(msg.FeldmanCommitments) != int(msg.Threshold) {
+			return nil, fmt.Errorf("%w: expected %d Feldman commitments (one per polynomial coefficient), got %d",
+				types.ErrInvalidThreshold, msg.Threshold, len(msg.FeldmanCommitments))
+		}
+		for i, c := range msg.FeldmanCommitments {
+			if _, err := elgamal.UnmarshalPublicKey(c); err != nil {
+				return nil, fmt.Errorf("%w: feldman_commitment[%d]: %v",
 					types.ErrInvalidPallasPoint, i, err)
 			}
 		}
@@ -134,9 +138,9 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 			return nil, fmt.Errorf("%w: threshold must be 0 when n=%d, got %d",
 				types.ErrInvalidThreshold, nValidators, msg.Threshold)
 		}
-		if len(msg.VerificationKeys) != 0 {
-			return nil, fmt.Errorf("%w: verification_keys must be empty when n=%d, got %d",
-				types.ErrInvalidThreshold, nValidators, len(msg.VerificationKeys))
+		if len(msg.FeldmanCommitments) != 0 {
+			return nil, fmt.Errorf("%w: feldman_commitments must be empty when n=%d, got %d",
+				types.ErrInvalidThreshold, nValidators, len(msg.FeldmanCommitments))
 		}
 	}
 
@@ -148,7 +152,7 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	round.CeremonyPhaseTimeout = types.DefaultDealTimeout
 	round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_DEALT
 	round.Threshold = msg.Threshold
-	round.VerificationKeys = msg.VerificationKeys
+	round.FeldmanCommitments = msg.FeldmanCommitments
 
 	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 		fmt.Sprintf("deal from %s, ea_pk=%s", msg.Creator, hex.EncodeToString(msg.EaPk)[:16]))

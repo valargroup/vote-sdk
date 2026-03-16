@@ -20,6 +20,7 @@ import (
 	voteapi "github.com/valargroup/vote-sdk/api"
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/crypto/shamir"
 	"github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -1563,8 +1564,8 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	require.EqualValues(t, 2, round.Threshold,
 		"threshold should be 2 for n=3 (ceil(3/2) = 2, stored by deal handler)")
-	require.Len(t, round.VerificationKeys, 3,
-		"one verification key per validator should be stored by deal handler")
+	require.Len(t, round.FeldmanCommitments, 2,
+		"t=2 Feldman commitments should be stored by deal handler")
 
 	// Block 2: auto-ack from proposer → 1/3 acked, stays DEALT.
 	app.NextBlockWithPrepareProposal()
@@ -1656,10 +1657,17 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	phantom1ShareScalar, err := new(curvey.ScalarPallas).SetBytes(phantom1ShareBytes)
 	require.NoError(t, err)
 
-	// Verify VK consistency: share_1 * G == round.VerificationKeys[1].
-	computedVK := G.Mul(phantom1ShareScalar).ToAffineCompressed()
-	require.Equal(t, round.VerificationKeys[1], computedVK,
-		"phantom1 share * G must match stored VK[1]")
+	// Verify share against Feldman commitments (phantom1 has ShamirIndex=2).
+	commitmentPts := make([]curvey.Point, len(round.FeldmanCommitments))
+	for j, c := range round.FeldmanCommitments {
+		pt, fcErr := elgamal.DecompressPallasPoint(c)
+		require.NoError(t, fcErr)
+		commitmentPts[j] = pt
+	}
+	feldmanOk, fcErr := shamir.VerifyFeldmanShare(G, commitmentPts, 2, phantom1ShareScalar)
+	require.NoError(t, fcErr)
+	require.True(t, feldmanOk,
+		"phantom1 share must verify against stored Feldman commitments")
 
 	// --- Transition to TALLYING ---
 

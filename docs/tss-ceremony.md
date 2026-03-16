@@ -46,7 +46,7 @@ New `VoteRound` fields:
 | Field | Type | Description |
 |---|---|---|
 | `threshold` | `uint32` | Minimum shares required to reconstruct (`t`). `0` = legacy mode. |
-| `verification_keys` | `repeated bytes` | `VK_i = f(i)*G` per validator (32-byte compressed Pallas points, parallel to `ceremony_validators`). |
+| `feldman_commitments` | `repeated bytes` | `C_j = a_j*G` for `j=0..t-1` (Feldman polynomial commitments, `t` compressed Pallas points). Validators derive `VK_i` on the fly via `EvalCommitmentPolynomial`. |
 
 ### Deal phase (`PrepareProposal` — auto-deal)
 
@@ -60,15 +60,15 @@ When a block proposer detects a PENDING round in REGISTERING status and is a cer
    ```
    where `a_1 ... a_{t-1}` are uniformly random scalars.
 4. Evaluate shares: `share_i = f(i)` for `i = 1..n`. Polynomial coefficients are zeroed after use.
-5. Compute verification keys: `VK_i = share_i * G` (one compressed Pallas point per validator).
+5. Compute Feldman commitments: `C_j = a_j * G` for `j = 0..t-1` (one per polynomial coefficient).
 6. ECIES-encrypt `share_i` to `pk_i` (each validator's registered Pallas key) to produce `payload_i`.
 7. Inject `MsgDealExecutiveAuthorityKey` containing:
-   - `ea_pk` — the public key corresponding to `ea_sk = f(0)`
+   - `ea_pk` — the public key corresponding to `ea_sk = f(0)` (also equals `C_0`)
    - `payloads` — one ECIES envelope per validator
    - `threshold` — the value `t`
-   - `verification_keys` — `VK_1 ... VK_n`
+   - `feldman_commitments` — `C_0 ... C_{t-1}`
 
-In **legacy mode** (`n < 2`, `t = 0`): ECIES-encrypts the full `ea_sk` to the single validator as before. `threshold` and `verification_keys` are zero/empty.
+In **legacy mode** (`n < 2`, `t = 0`): ECIES-encrypts the full `ea_sk` to the single validator as before. `threshold` and `feldman_commitments` are zero/empty.
 
 ### Ack phase (`PrepareProposal` — auto-ack)
 
@@ -77,9 +77,9 @@ When a block proposer detects a PENDING round in DEALT status and has not yet ac
 1. Find and decrypt the proposer's ECIES payload to recover the secret bytes.
 2. Parse the secret bytes as a Pallas scalar.
 3. **Threshold mode** (`round.Threshold > 0`):
-   - Find the validator's index `i` in `ceremony_validators`.
-   - Compute `s * G` and compare with `round.VerificationKeys[i]`.
-   - Reject (skip ack) if `s * G != VK_i` — the dealer sent an inconsistent share.
+   - Find the validator's `ShamirIndex` in `ceremony_validators`.
+   - Verify share against Feldman commitments: `VerifyFeldmanShare(G, commitments, shamirIndex, share)`.
+   - Reject (skip ack) if verification fails — the dealer sent an inconsistent share.
    - Write the 32-byte share scalar to `<ea_sk_dir>/share.<hex(round_id)>`.
 4. **Legacy mode** (`round.Threshold == 0`):
    - Verify `s * G == ea_pk`.
@@ -170,7 +170,7 @@ Prefix scans:
 | Who knows `ea_sk` | Every validator who acked | Dealer only (in memory, during deal block) |
 | Single non-dealer can decrypt | Yes | No |
 | Malicious validator can sabotage tally | N/A | No (DLEQ proof required per partial decryption) |
-| Malicious dealer can send bad shares | N/A | Yes (no polynomial consistency check, fixed in Step 3) |
+| Malicious dealer can send bad shares | N/A | No (Feldman commitment verification at ack time, Step 3) |
 
 ## Roadmap
 
@@ -187,11 +187,11 @@ The chain verifies the proof in `SubmitPartialDecryption` (FinalizeBlock) before
 Implementation:
 - `crypto/elgamal/dleq.go`: `GeneratePartialDecryptDLEQ` / `VerifyPartialDecryptDLEQ` with domain tag `"svote-pd-dleq-v1"`.
 - `app/prepare_proposal_partial_decrypt.go`: generates proof alongside each `D_i`.
-- `x/vote/keeper/msg_server_tally_decrypt.go`: verifies proof against `round.VerificationKeys[shamirIndex-1]` and the accumulator's `C1`.
+- `x/vote/keeper/msg_server_tally_decrypt.go`: derives `VK_i` via `EvalCommitmentPolynomial(round.FeldmanCommitments, shamirIndex)` and verifies DLEQ proof against it.
 
-### Step 3: Feldman commitments (correctness vs. dealer)
+### Step 3: Feldman commitments (correctness vs. dealer) — DONE
 
-Replace the per-validator `verification_keys` list with `t` **Feldman polynomial commitments**:
+Replaced per-validator `verification_keys` (n points) with `t` **Feldman polynomial commitments**:
 
 ```
 C_j = a_j * G    for j = 0..t-1

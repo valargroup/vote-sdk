@@ -159,19 +159,30 @@ func CeremonyDealPrepareProposalHandler(
 		t := thresholdForN(n)
 
 		// Threshold mode: split ea_sk into (t, n) Shamir shares, ECIES-encrypt
-		// share_i to validator_i, and compute VK_i = share_i * G.
+		// share_i to validator_i, and compute Feldman polynomial commitments.
 		// Legacy mode (t == 0): encrypt the full ea_sk to every validator.
 		var (
-			shares           []shamir.Share
-			verificationKeys [][]byte
+			shares              []shamir.Share
+			feldmanCommitments  [][]byte
 		)
-			if t > 0 {
+		if t > 0 {
 			var coeffs []curvey.Scalar
 			shares, coeffs, err = shamir.Split(eaSk.Scalar, t, n)
 			if err != nil {
 				logger.Error("PrepareProposal[deal]: shamir split failed", "err", err)
 				return txs
 			}
+
+			commitmentPts, err := shamir.FeldmanCommit(G, coeffs)
+			if err != nil {
+				logger.Error("PrepareProposal[deal]: Feldman commit failed", "err", err)
+				return txs
+			}
+			feldmanCommitments = make([][]byte, len(commitmentPts))
+			for j, c := range commitmentPts {
+				feldmanCommitments[j] = c.ToAffineCompressed()
+			}
+
 			// Coefficients are secret material — zero them after use.
 			defer func() {
 				for _, c := range coeffs {
@@ -181,7 +192,7 @@ func CeremonyDealPrepareProposalHandler(
 				}
 			}()
 			// Share values (each f(i)) are equally secret — zero them once payloads
-			// and verification keys have been built so they don't linger on the heap.
+			// have been built so they don't linger on the heap.
 			defer func() {
 				for i := range shares {
 					if shares[i].Value != nil {
@@ -189,11 +200,6 @@ func CeremonyDealPrepareProposalHandler(
 					}
 				}
 			}()
-
-			verificationKeys = make([][]byte, n)
-			for i := range shares {
-				verificationKeys[i] = G.Mul(shares[i].Value).ToAffineCompressed()
-			}
 		}
 
 		// ECIES-encrypt the payload (share or full ea_sk) to each ceremony validator.
@@ -233,12 +239,12 @@ func CeremonyDealPrepareProposalHandler(
 
 		// Build deal message.
 		dealMsg := &types.MsgDealExecutiveAuthorityKey{
-			Creator:          proposerValAddr,
-			VoteRoundId:      round.VoteRoundId,
-			EaPk:             eaPkBytes,
-			Payloads:         payloads,
-			Threshold:        uint32(t),
-			VerificationKeys: verificationKeys,
+			Creator:            proposerValAddr,
+			VoteRoundId:        round.VoteRoundId,
+			EaPk:               eaPkBytes,
+			Payloads:           payloads,
+			Threshold:          uint32(t),
+			FeldmanCommitments: feldmanCommitments,
 		}
 
 		txBytes, err := voteapi.EncodeCeremonyTx(dealMsg, voteapi.TagDealExecutiveAuthorityKey)
@@ -366,7 +372,7 @@ func CeremonyAckPrepareProposalHandler(
 		// determine where on disk to write it.
 		//
 		// Threshold mode (round.Threshold > 0): the payload contains share_i.
-		//   Expected: share_i * G == VK_i (from round.VerificationKeys[validatorIdx]).
+		//   Verify share against Feldman commitments: share_i * G == sum(C_j * i^j).
 		//   Write to: share.<round_id>
 		//
 		// Legacy mode (round.Threshold == 0): the payload contains ea_sk.
@@ -374,27 +380,33 @@ func CeremonyAckPrepareProposalHandler(
 		//   Write to: ea_sk.<round_id>
 		var diskPath string
 		if round.Threshold > 0 {
-			// Find this validator's 0-based index to look up the correct VK.
-			validatorIdx := -1
-			for i, v := range round.CeremonyValidators {
-				if v.ValidatorAddress == proposerValAddr {
-					validatorIdx = i
-					break
-				}
-			}
-			if validatorIdx < 0 || validatorIdx >= len(round.VerificationKeys) {
-				logger.Error("PrepareProposal[ack]: validator index out of range for VK lookup",
+			ceremonyVal, found := votekeeper.FindValidatorInRoundCeremony(round, proposerValAddr)
+			if !found || ceremonyVal.ShamirIndex == 0 {
+				logger.Error("PrepareProposal[ack]: proposer not found in ceremony validators",
 					"proposer", proposerValAddr,
 					"round", hex.EncodeToString(round.VoteRoundId))
 				return txs
 			}
 
-			expectedVK := round.VerificationKeys[validatorIdx]
-			computedVK := G.Mul(recoveredSk.Scalar).ToAffineCompressed()
-			if !bytesEqual(computedVK, expectedVK) {
-				logger.Error("PrepareProposal[ack]: share_i * G != VK_i — dealer sent bad share",
+			commitmentPts, err := deserializeFeldmanCommitments(round.FeldmanCommitments)
+			if err != nil {
+				logger.Error("PrepareProposal[ack]: failed to deserialize Feldman commitments",
+					"err", err, "round", hex.EncodeToString(round.VoteRoundId))
+				return txs
+			}
+
+			ok, err := shamir.VerifyFeldmanShare(G, commitmentPts, int(ceremonyVal.ShamirIndex), recoveredSk.Scalar)
+			if err != nil {
+				logger.Error("PrepareProposal[ack]: Feldman share verification error",
+					"err", err, "proposer", proposerValAddr,
+					"shamir_index", ceremonyVal.ShamirIndex,
+					"round", hex.EncodeToString(round.VoteRoundId))
+				return txs
+			}
+			if !ok {
+				logger.Error("PrepareProposal[ack]: share failed Feldman verification — dealer sent bad share",
 					"proposer", proposerValAddr,
-					"validator_index", validatorIdx+1,
+					"shamir_index", ceremonyVal.ShamirIndex,
 					"round", hex.EncodeToString(round.VoteRoundId))
 				return txs
 			}
@@ -450,6 +462,24 @@ func CeremonyAckPrepareProposalHandler(
 			"round", hex.EncodeToString(round.VoteRoundId))
 		return append([][]byte{txBytes}, txs...)
 	}
+}
+
+// deserializeFeldmanCommitments converts serialized Feldman commitments (32-byte
+// compressed Pallas points) into curvey.Point values for use with VerifyFeldmanShare
+// and EvalCommitmentPolynomial.
+func deserializeFeldmanCommitments(raw [][]byte) ([]curvey.Point, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("empty feldman commitments")
+	}
+	pts := make([]curvey.Point, len(raw))
+	for i, b := range raw {
+		pt, err := elgamal.DecompressPallasPoint(b)
+		if err != nil {
+			return nil, fmt.Errorf("feldman commitment %d: %w", i, err)
+		}
+		pts[i] = pt
+	}
+	return pts, nil
 }
 
 // zeroScalar overwrites a Pallas scalar's internal limbs in place.

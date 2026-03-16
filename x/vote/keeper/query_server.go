@@ -205,7 +205,7 @@ func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCerem
 		PhaseStart:       source.CeremonyPhaseStart,
 		PhaseTimeout:     source.CeremonyPhaseTimeout,
 		Threshold:        source.Threshold,
-		VerificationKeys: source.VerificationKeys,
+		FeldmanCommitments: source.FeldmanCommitments,
 	}
 
 	return &types.QueryCeremonyStateResponse{Ceremony: state}, nil

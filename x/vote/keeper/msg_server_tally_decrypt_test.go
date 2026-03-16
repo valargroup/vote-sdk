@@ -74,8 +74,9 @@ func validatorSet(n int) []*types.ValidatorPallasKey {
 }
 
 // setupTallyingRoundThreshold creates a TALLYING round with the given threshold
-// and ceremony_validators in the KV store. VK_i values are deterministic
-// on-curve points (i*G). The round has two proposals, each with two vote options.
+// and ceremony_validators in the KV store. Feldman commitments are dummy
+// on-curve points (j*G for j=1..threshold). The round has two proposals, each
+// with two vote options.
 // For tests that need real DLEQ verification, use setupTallyingRoundWithCrypto.
 func (s *MsgServerTestSuite) setupTallyingRoundThreshold(
 	roundID []byte,
@@ -83,10 +84,10 @@ func (s *MsgServerTestSuite) setupTallyingRoundThreshold(
 	validators []*types.ValidatorPallasKey,
 ) {
 	G := elgamal.PallasGenerator()
-	vks := make([][]byte, len(validators))
-	for i := range vks {
-		sc := new(curvey.ScalarPallas).New(i + 1)
-		vks[i] = G.Mul(sc).ToAffineCompressed()
+	commitments := make([][]byte, threshold)
+	for j := range commitments {
+		sc := new(curvey.ScalarPallas).New(j + 1)
+		commitments[j] = G.Mul(sc).ToAffineCompressed()
 	}
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
@@ -96,7 +97,7 @@ func (s *MsgServerTestSuite) setupTallyingRoundThreshold(
 		Threshold:   threshold,
 		Proposals:   pdProposals(),
 		CeremonyValidators: validators,
-		VerificationKeys:   vks,
+		FeldmanCommitments: commitments,
 	}))
 }
 
@@ -120,14 +121,13 @@ type cryptoRoundState struct {
 	eaSk   *elgamal.SecretKey
 	eaPk   *elgamal.PublicKey
 	shares []shamir.Share
-	vks    [][]byte
 	// accumulatorCts maps AccumulatorKey(proposalID, decision) → *Ciphertext.
 	accumulatorCts map[uint64]*elgamal.Ciphertext
 }
 
 // setupTallyingRoundWithCrypto creates a TALLYING round with real Shamir shares,
-// VK_i, and tally accumulators. Returns the cryptoRoundState so callers can
-// compute correct D_i and DLEQ proofs.
+// Feldman commitments, and tally accumulators. Returns the cryptoRoundState so
+// callers can compute correct D_i and DLEQ proofs.
 func (s *MsgServerTestSuite) setupTallyingRoundWithCrypto(
 	roundID []byte,
 	threshold int,
@@ -137,12 +137,15 @@ func (s *MsgServerTestSuite) setupTallyingRoundWithCrypto(
 	G := elgamal.PallasGenerator()
 
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
-	shares, _, err := shamir.Split(eaSk.Scalar, threshold, len(validators))
+	shares, coeffs, err := shamir.Split(eaSk.Scalar, threshold, len(validators))
 	s.Require().NoError(err)
 
-	vks := make([][]byte, len(validators))
-	for i, sh := range shares {
-		vks[i] = G.Mul(sh.Value).ToAffineCompressed()
+	commitmentPts, err := shamir.FeldmanCommit(G, coeffs)
+	s.Require().NoError(err)
+
+	feldmanCommitments := make([][]byte, len(commitmentPts))
+	for j, c := range commitmentPts {
+		feldmanCommitments[j] = c.ToAffineCompressed()
 	}
 
 	proposals := pdProposals()
@@ -154,7 +157,7 @@ func (s *MsgServerTestSuite) setupTallyingRoundWithCrypto(
 		Threshold:          uint32(threshold),
 		Proposals:          proposals,
 		CeremonyValidators: validators,
-		VerificationKeys:   vks,
+		FeldmanCommitments: feldmanCommitments,
 	}))
 
 	accCts := make(map[uint64]*elgamal.Ciphertext)
@@ -173,7 +176,6 @@ func (s *MsgServerTestSuite) setupTallyingRoundWithCrypto(
 		eaSk:           eaSk,
 		eaPk:           eaPk,
 		shares:         shares,
-		vks:            vks,
 		accumulatorCts: accCts,
 	}
 }
