@@ -457,13 +457,26 @@ func (ta *TestApp) SeedDealtCeremonyThreshold(
 	h.Write(eaPkBytes)
 	roundID := h.Sum(nil)
 
+	// Assign ShamirIndex to any validator that doesn't have one, mirroring
+	// the assignment done by DealExecutiveAuthorityKey in production.
+	indexedValidators := make([]*types.ValidatorPallasKey, len(validators))
+	for i, v := range validators {
+		if v.ShamirIndex == 0 && threshold > 0 {
+			vCopy := proto.Clone(v).(*types.ValidatorPallasKey)
+			vCopy.ShamirIndex = uint32(i + 1)
+			indexedValidators[i] = vCopy
+		} else {
+			indexedValidators[i] = v
+		}
+	}
+
 	round := &types.VoteRound{
 		VoteRoundId:          roundID,
 		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
 		EaPk:                 eaPkBytes,
 		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 		CeremonyDealer:       "dealer",
-		CeremonyValidators:   validators,
+		CeremonyValidators:   indexedValidators,
 		CeremonyPayloads:     payloads,
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,

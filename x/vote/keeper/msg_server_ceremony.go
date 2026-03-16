@@ -154,6 +154,15 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	round.Threshold = msg.Threshold
 	round.FeldmanCommitments = msg.FeldmanCommitments
 
+	// Assign 1-based ShamirIndex to each ceremony validator so the ack
+	// handler can map the decrypted share to the correct polynomial
+	// evaluation point for Feldman verification.
+	if msg.Threshold > 0 {
+		for i := range round.CeremonyValidators {
+			round.CeremonyValidators[i].ShamirIndex = uint32(i + 1)
+		}
+	}
+
 	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 		fmt.Sprintf("deal from %s, ea_pk=%s", msg.Creator, hex.EncodeToString(msg.EaPk)[:16]))
 
