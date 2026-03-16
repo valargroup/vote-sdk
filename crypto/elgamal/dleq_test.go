@@ -722,6 +722,19 @@ func TestThresholdDLEQEndToEnd(t *testing.T) {
 	err = VerifyPartialDecryptDLEQ(aggProof, eaPk.Point, C1agg, D)
 	require.NoError(t, err, "aggregate DLEQ proof must verify with full ea_sk")
 
+	// --- 7b. Aggregate DLEQ with v bound into the proof ---
+	// GenerateDLEQProof binds the plaintext total into the Fiat-Shamir
+	// challenge (D = C2 - v*G), so a wrong v is rejected by the verifier.
+	aggProof2, err := GenerateDLEQProof(eaSk, accCt, expectedTotal)
+	require.NoError(t, err)
+	require.Len(t, aggProof2, DLEQProofSize)
+
+	err = VerifyDLEQProof(aggProof2, eaPk, accCt, expectedTotal)
+	require.NoError(t, err, "aggregate DLEQ proof must verify with correct total")
+
+	err = VerifyDLEQProof(aggProof2, eaPk, accCt, expectedTotal+1)
+	require.Error(t, err, "aggregate DLEQ proof must reject wrong total")
+
 	// D must yield the correct plaintext: C2_agg - D == expectedTotal * G.
 	vGFromD := C2agg.Sub(D)
 	require.True(t, vGFromD.Equal(expectedVG),
