@@ -398,10 +398,18 @@ func TestCeremonyAckThresholdMode(t *testing.T) {
 
 	// Build a (t=2, n=3) Shamir split of a fresh ea_sk.
 	eaSk, eaPkForRound := elgamal.KeyGen(rand.Reader)
-	shares, _, err := shamir.Split(eaSk.Scalar, 2, 3)
+	shares, coeffs, err := shamir.Split(eaSk.Scalar, 2, 3)
 	require.NoError(t, err)
 
 	eaPkBytes := eaPkForRound.Point.ToAffineCompressed()
+
+	// Compute Feldman commitments from the polynomial coefficients.
+	commitmentPts, err := shamir.FeldmanCommit(G, coeffs)
+	require.NoError(t, err)
+	feldmanCommitments := make([][]byte, len(commitmentPts))
+	for j, c := range commitmentPts {
+		feldmanCommitments[j] = c.ToAffineCompressed()
+	}
 
 	// Build per-validator inputs: the proposer is validator index 0 (1-based index 1).
 	_, pk2 := elgamal.KeyGen(rand.Reader)
@@ -418,9 +426,8 @@ func TestCeremonyAckThresholdMode(t *testing.T) {
 		"sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx",
 	}
 
-	// ECIES-encrypt share_i to validator_i and compute VK_i = share_i * G.
+	// ECIES-encrypt share_i to validator_i.
 	payloads := make([]*types.DealerPayload, 3)
-	vks := make([][]byte, 3)
 	for i := range shares {
 		shareBytes := shares[i].Value.Bytes()
 		env, encErr := ecies.Encrypt(G, validatorPKs[i], shareBytes, rand.Reader)
@@ -430,7 +437,6 @@ func TestCeremonyAckThresholdMode(t *testing.T) {
 			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
 			Ciphertext:       env.Ciphertext,
 		}
-		vks[i] = G.Mul(shares[i].Value).ToAffineCompressed()
 	}
 
 	validators := make([]*types.ValidatorPallasKey, 3)
@@ -441,7 +447,7 @@ func TestCeremonyAckThresholdMode(t *testing.T) {
 		}
 	}
 
-	roundID := ta.SeedDealtCeremonyThreshold(eaPkBytes, payloads, validators, 2, vks)
+	roundID := ta.SeedDealtCeremonyThreshold(eaPkBytes, payloads, validators, 2, feldmanCommitments)
 
 	// PrepareProposal should inject one ack tx.
 	resp := ta.CallPrepareProposal()
