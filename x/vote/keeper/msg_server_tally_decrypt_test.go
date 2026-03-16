@@ -74,16 +74,19 @@ func validatorSet(n int) []*types.ValidatorPallasKey {
 }
 
 // setupTallyingRoundThreshold creates a TALLYING round with the given threshold
-// and ceremony_validators in the KV store. The round has two proposals, each
-// with two vote options.
+// and ceremony_validators in the KV store. VK_i values are deterministic
+// on-curve points (i*G). The round has two proposals, each with two vote options.
+// For tests that need real DLEQ verification, use setupTallyingRoundWithCrypto.
 func (s *MsgServerTestSuite) setupTallyingRoundThreshold(
 	roundID []byte,
 	threshold uint32,
 	validators []*types.ValidatorPallasKey,
 ) {
+	G := elgamal.PallasGenerator()
 	vks := make([][]byte, len(validators))
 	for i := range vks {
-		vks[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
+		sc := new(curvey.ScalarPallas).New(i + 1)
+		vks[i] = G.Mul(sc).ToAffineCompressed()
 	}
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
@@ -91,19 +94,118 @@ func (s *MsgServerTestSuite) setupTallyingRoundThreshold(
 		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
 		EaPk:        bytes.Repeat([]byte{0x10}, 32),
 		Threshold:   threshold,
-		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Prop 1", Options: []*types.VoteOption{
-				{Index: 0, Label: "Yes"},
-				{Index: 1, Label: "No"},
-			}},
-			{Id: 2, Title: "Prop 2", Options: []*types.VoteOption{
-				{Index: 0, Label: "Yes"},
-				{Index: 1, Label: "No"},
-			}},
-		},
+		Proposals:   pdProposals(),
 		CeremonyValidators: validators,
 		VerificationKeys:   vks,
 	}))
+}
+
+// pdProposals returns two proposals with two vote options each.
+func pdProposals() []*types.Proposal {
+	return []*types.Proposal{
+		{Id: 1, Title: "Prop 1", Options: []*types.VoteOption{
+			{Index: 0, Label: "Yes"},
+			{Index: 1, Label: "No"},
+		}},
+		{Id: 2, Title: "Prop 2", Options: []*types.VoteOption{
+			{Index: 0, Label: "Yes"},
+			{Index: 1, Label: "No"},
+		}},
+	}
+}
+
+// cryptoRoundState holds the real cryptographic state for a threshold round
+// that supports DLEQ proof generation and verification.
+type cryptoRoundState struct {
+	eaSk   *elgamal.SecretKey
+	eaPk   *elgamal.PublicKey
+	shares []shamir.Share
+	vks    [][]byte
+	// accumulatorCts maps AccumulatorKey(proposalID, decision) → *Ciphertext.
+	accumulatorCts map[uint64]*elgamal.Ciphertext
+}
+
+// setupTallyingRoundWithCrypto creates a TALLYING round with real Shamir shares,
+// VK_i, and tally accumulators. Returns the cryptoRoundState so callers can
+// compute correct D_i and DLEQ proofs.
+func (s *MsgServerTestSuite) setupTallyingRoundWithCrypto(
+	roundID []byte,
+	threshold int,
+	validators []*types.ValidatorPallasKey,
+) *cryptoRoundState {
+	s.T().Helper()
+	G := elgamal.PallasGenerator()
+
+	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
+	shares, _, err := shamir.Split(eaSk.Scalar, threshold, len(validators))
+	s.Require().NoError(err)
+
+	vks := make([][]byte, len(validators))
+	for i, sh := range shares {
+		vks[i] = G.Mul(sh.Value).ToAffineCompressed()
+	}
+
+	proposals := pdProposals()
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId:        roundID,
+		Status:             types.SessionStatus_SESSION_STATUS_TALLYING,
+		EaPk:               eaPk.Point.ToAffineCompressed(),
+		Threshold:          uint32(threshold),
+		Proposals:          proposals,
+		CeremonyValidators: validators,
+		VerificationKeys:   vks,
+	}))
+
+	accCts := make(map[uint64]*elgamal.Ciphertext)
+	for _, prop := range proposals {
+		for _, opt := range prop.Options {
+			ct, err := elgamal.Encrypt(eaPk, 42, rand.Reader)
+			s.Require().NoError(err)
+			ctBytes, err := elgamal.MarshalCiphertext(ct)
+			s.Require().NoError(err)
+			s.Require().NoError(s.keeper.AddToTally(kv, roundID, prop.Id, opt.Index, ctBytes))
+			accCts[keeper.AccumulatorKey(prop.Id, opt.Index)] = ct
+		}
+	}
+
+	return &cryptoRoundState{
+		eaSk:           eaSk,
+		eaPk:           eaPk,
+		shares:         shares,
+		vks:            vks,
+		accumulatorCts: accCts,
+	}
+}
+
+// buildValidEntries computes D_i and DLEQ proofs for all accumulators using the
+// given share, returning entries ready for MsgSubmitPartialDecryption.
+func (cs *cryptoRoundState) buildValidEntries(s *MsgServerTestSuite) []*types.PartialDecryptionEntry {
+	return cs.buildValidEntriesForValidator(s, 0)
+}
+
+// buildValidEntriesForValidator computes D_i and DLEQ proofs for all
+// accumulators using the share at the given 0-based index.
+func (cs *cryptoRoundState) buildValidEntriesForValidator(s *MsgServerTestSuite, valIdx int) []*types.PartialDecryptionEntry {
+	s.T().Helper()
+	share := cs.shares[valIdx]
+	var entries []*types.PartialDecryptionEntry
+
+	for _, propID := range []uint32{1, 2} {
+		for _, dec := range []uint32{0, 1} {
+			ct := cs.accumulatorCts[keeper.AccumulatorKey(propID, dec)]
+			Di := ct.C1.Mul(share.Value)
+			proof, err := elgamal.GeneratePartialDecryptDLEQ(share.Value, ct.C1)
+			s.Require().NoError(err)
+			entries = append(entries, &types.PartialDecryptionEntry{
+				ProposalId:     propID,
+				VoteDecision:   dec,
+				PartialDecrypt: Di.ToAffineCompressed(),
+				DleqProof:      proof,
+			})
+		}
+	}
+	return entries
 }
 
 // setupThresholdTallyRound seeds a TALLYING round with the given threshold and
@@ -968,18 +1070,15 @@ func (s *MsgServerTestSuite) TestSubmitTally_CompletenessRejections() {
 
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_HappyPath() {
 	validators := validatorSet(3)
-	s.setupTallyingRoundThreshold(msgPdRoundID, 2, validators)
+	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
 	s.setBlockProposer(validators[0].ValidatorAddress)
 
+	entries := cs.buildValidEntries(s)
 	msg := &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
 		Creator:        validators[0].ValidatorAddress,
 		ValidatorIndex: 1,
-		Entries: []*types.PartialDecryptionEntry{
-			validEntry(1, 0),
-			validEntry(1, 1),
-			validEntry(2, 0),
-		},
+		Entries:        entries,
 	}
 
 	resp, err := s.msgServer.SubmitPartialDecryption(s.ctx, msg)
@@ -992,22 +1091,24 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_HappyPath() {
 		s.Require().NoError(err)
 		s.Require().NotNil(got)
 		s.Require().Equal(entry.PartialDecrypt, got.PartialDecrypt)
+		s.Require().Len(got.DleqProof, elgamal.DLEQProofSize)
 	}
 }
 
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_EmitsEvent() {
-	validators := validatorSet(1)
-	s.setupTallyingRoundThreshold(msgPdRoundID, 1, validators)
+	validators := validatorSet(2)
+	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
 	s.setBlockProposer(validators[0].ValidatorAddress)
 
 	em := sdk.NewEventManager()
 	ctx := s.ctx.WithEventManager(em)
 
+	entries := cs.buildValidEntries(s)
 	_, err := s.msgServer.SubmitPartialDecryption(ctx, &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
 		Creator:        validators[0].ValidatorAddress,
 		ValidatorIndex: 1,
-		Entries:        []*types.PartialDecryptionEntry{validEntry(1, 0)},
+		Entries:        entries,
 	})
 	s.Require().NoError(err)
 
@@ -1024,7 +1125,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_EmitsEvent() {
 		s.Require().Equal(hex.EncodeToString(msgPdRoundID), attrs[types.AttributeKeyRoundID])
 		s.Require().Equal(validators[0].ValidatorAddress, attrs[types.AttributeKeyCreator])
 		s.Require().Equal("1", attrs[types.AttributeKeyValidatorIndex])
-		s.Require().Equal("1", attrs[types.AttributeKeyEntryCount])
+		s.Require().Equal(fmt.Sprintf("%d", len(entries)), attrs[types.AttributeKeyEntryCount])
 	}
 	s.Require().True(found, "submit_partial_decryption event not emitted")
 }
@@ -1252,14 +1353,14 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsDuplicate() {
 	validators := validatorSet(2)
-	s.setupTallyingRoundThreshold(msgPdRoundID, 2, validators)
+	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
 	s.setBlockProposer(validators[0].ValidatorAddress)
 
 	msg := &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
 		Creator:        validators[0].ValidatorAddress,
 		ValidatorIndex: 1,
-		Entries:        []*types.PartialDecryptionEntry{validEntry(1, 0)},
+		Entries:        cs.buildValidEntries(s),
 	}
 
 	_, err := s.msgServer.SubmitPartialDecryption(s.ctx, msg)
@@ -1273,48 +1374,67 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsDuplicate() {
 
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_MultipleValidators_IndependentStorage() {
 	validators := validatorSet(3)
-	s.setupTallyingRoundThreshold(msgPdRoundID, 2, validators)
-
-	pointsD0 := make([][]byte, len(validators))
-	for i := range validators {
-		pointsD0[i] = validPointBytes(100 + i)
-	}
+	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
 
 	for i, v := range validators {
 		s.setBlockProposer(v.ValidatorAddress)
+		entries := cs.buildValidEntriesForValidator(s, i)
 		_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
 			VoteRoundId:    msgPdRoundID,
 			Creator:        v.ValidatorAddress,
 			ValidatorIndex: uint32(i + 1),
-			Entries: []*types.PartialDecryptionEntry{
-				{ProposalId: 1, VoteDecision: 0, PartialDecrypt: pointsD0[i]},
-				{ProposalId: 1, VoteDecision: 1, PartialDecrypt: validPointBytes(200 + i)},
-			},
+			Entries:        entries,
 		})
 		s.Require().NoError(err, "validator %d submission should succeed", i+1)
 	}
 
 	kv := s.keeper.OpenKVStore(s.ctx)
+	count, err := s.keeper.CountPartialDecryptionValidators(kv, msgPdRoundID)
+	s.Require().NoError(err)
+	s.Require().Equal(3, count)
+
 	for i := range validators {
 		idx := uint32(i + 1)
 		entry, err := s.keeper.GetPartialDecryption(kv, msgPdRoundID, idx, 1, 0)
 		s.Require().NoError(err)
-		s.Require().NotNil(entry)
-		s.Require().Equal(pointsD0[i], entry.PartialDecrypt,
-			"wrong partial_decrypt for validator %d", idx)
+		s.Require().NotNil(entry, "validator %d should have stored entry", idx)
+		s.Require().Len(entry.DleqProof, elgamal.DLEQProofSize,
+			"dleq_proof must be 64 bytes for validator %d", idx)
 	}
-
-	count, err := s.keeper.CountPartialDecryptionValidators(kv, msgPdRoundID)
-	s.Require().NoError(err)
-	s.Require().Equal(3, count)
 }
 
-func (s *MsgServerTestSuite) TestSubmitPartialDecryption_DleqProofStoredVerbatim() {
-	validators := validatorSet(1)
-	s.setupTallyingRoundThreshold(msgPdRoundID, 1, validators)
+func (s *MsgServerTestSuite) TestSubmitPartialDecryption_DleqProofVerifiedAndStored() {
+	validators := validatorSet(2)
+	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
 	s.setBlockProposer(validators[0].ValidatorAddress)
 
-	dleqProof := bytes.Repeat([]byte{0xDE}, 64)
+	entries := cs.buildValidEntries(s)
+	_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
+		VoteRoundId:    msgPdRoundID,
+		Creator:        validators[0].ValidatorAddress,
+		ValidatorIndex: 1,
+		Entries:        entries,
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	got, err := s.keeper.GetPartialDecryption(kv, msgPdRoundID, 1, 1, 0)
+	s.Require().NoError(err)
+	s.Require().Len(got.DleqProof, elgamal.DLEQProofSize,
+		"dleq_proof must be stored after verification")
+}
+
+func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsInvalidDleqProof() {
+	validators := validatorSet(2)
+	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
+	s.setBlockProposer(validators[0].ValidatorAddress)
+
+	// Build entries with correct D_i but a bogus DLEQ proof.
+	share := cs.shares[0]
+	ct := cs.accumulatorCts[keeper.AccumulatorKey(1, 0)]
+	Di := ct.C1.Mul(share.Value)
+	bogusProof := bytes.Repeat([]byte{0xDE}, elgamal.DLEQProofSize)
+
 	_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
 		Creator:        validators[0].ValidatorAddress,
@@ -1322,37 +1442,56 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_DleqProofStoredVerbatim
 		Entries: []*types.PartialDecryptionEntry{{
 			ProposalId:     1,
 			VoteDecision:   0,
-			PartialDecrypt: validPointBytes(42),
-			DleqProof:      dleqProof,
+			PartialDecrypt: Di.ToAffineCompressed(),
+			DleqProof:      bogusProof,
 		}},
 	})
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, types.ErrInvalidField)
+	s.Require().Contains(err.Error(), "DLEQ verification failed")
+}
+
+func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsBogusPartialDecrypt() {
+	validators := validatorSet(2)
+	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
+	s.setBlockProposer(validators[0].ValidatorAddress)
+
+	// Generate a valid DLEQ proof for a DIFFERENT scalar (attacker's share).
+	ct := cs.accumulatorCts[keeper.AccumulatorKey(1, 0)]
+	fakeShare := new(curvey.ScalarPallas).Random(rand.Reader)
+	fakeDi := ct.C1.Mul(fakeShare)
+	fakeProof, err := elgamal.GeneratePartialDecryptDLEQ(fakeShare, ct.C1)
 	s.Require().NoError(err)
 
-	kv := s.keeper.OpenKVStore(s.ctx)
-	got, err := s.keeper.GetPartialDecryption(kv, msgPdRoundID, 1, 1, 0)
-	s.Require().NoError(err)
-	s.Require().Equal(dleqProof, got.DleqProof,
-		"dleq_proof must be stored verbatim in Step 1 (no verification)")
+	// The proof is internally consistent with fakeShare, but VK_0 is for the real share.
+	_, err = s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
+		VoteRoundId:    msgPdRoundID,
+		Creator:        validators[0].ValidatorAddress,
+		ValidatorIndex: 1,
+		Entries: []*types.PartialDecryptionEntry{{
+			ProposalId:     1,
+			VoteDecision:   0,
+			PartialDecrypt: fakeDi.ToAffineCompressed(),
+			DleqProof:      fakeProof,
+		}},
+	})
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, types.ErrInvalidField)
+	s.Require().Contains(err.Error(), "DLEQ verification failed")
 }
 
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_GetForRoundIntegration() {
 	validators := validatorSet(2)
-	s.setupTallyingRoundThreshold(msgPdRoundID, 2, validators)
-
-	d1 := validPointBytes(301)
-	d2 := validPointBytes(302)
+	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
 
 	for i, v := range validators {
 		s.setBlockProposer(v.ValidatorAddress)
+		entries := cs.buildValidEntriesForValidator(s, i)
 		_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
 			VoteRoundId:    msgPdRoundID,
 			Creator:        v.ValidatorAddress,
 			ValidatorIndex: uint32(i + 1),
-			Entries: []*types.PartialDecryptionEntry{{
-				ProposalId:     1,
-				VoteDecision:   0,
-				PartialDecrypt: [][]byte{d1, d2}[i],
-			}},
+			Entries:        entries,
 		})
 		s.Require().NoError(err)
 	}
@@ -1364,10 +1503,8 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_GetForRoundIntegration(
 	partials := grouped[keeper.AccumulatorKey(1, 0)]
 	s.Require().Len(partials, 2)
 
-	byIdx := make(map[uint32][]byte, 2)
 	for _, p := range partials {
-		byIdx[p.ValidatorIndex] = p.PartialDecrypt
+		s.Require().Len(p.PartialDecrypt, 32)
+		s.Require().Len(p.DleqProof, elgamal.DLEQProofSize)
 	}
-	s.Require().Equal(d1, byIdx[1])
-	s.Require().Equal(d2, byIdx[2])
 }
