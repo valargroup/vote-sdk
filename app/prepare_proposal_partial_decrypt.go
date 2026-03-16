@@ -143,10 +143,17 @@ func PartialDecryptPrepareProposalInjector(
 
 				// D_i = share_i * C1  (partial ElGamal decryption)
 				Di := ct.C1.Mul(share.Scalar)
-				// Validate the result is on the curve before encoding.
 				if !Di.IsOnCurve() {
 					logger.Error("PrepareProposal[partial-decrypt]: D_i is not on curve",
 						"proposal", proposal.Id, "decision", decision)
+					return txs
+				}
+
+				// DLEQ proof: log_G(VK_i) == log_{C1}(D_i)
+				dleqProof, err := elgamal.GeneratePartialDecryptDLEQ(share.Scalar, ct.C1)
+				if err != nil {
+					logger.Error("PrepareProposal[partial-decrypt]: DLEQ proof generation failed",
+						"proposal", proposal.Id, "decision", decision, "err", err)
 					return txs
 				}
 
@@ -154,7 +161,7 @@ func PartialDecryptPrepareProposalInjector(
 					ProposalId:     proposal.Id,
 					VoteDecision:   decision,
 					PartialDecrypt: Di.ToAffineCompressed(),
-					// DleqProof is empty in Step 1; added in Step 2.
+					DleqProof:      dleqProof,
 				})
 			}
 		}

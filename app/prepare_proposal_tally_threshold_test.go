@@ -152,7 +152,7 @@ func TestDecryptRoundTalliesThreshold(t *testing.T) {
 			wantValues:   map[uint64]uint64{},
 		},
 		{
-			name:        "dleq_proof is nil on every entry (Step 1 behaviour)",
+			name:        "two accumulators (same proposal, both decisions)",
 			threshold:   2,
 			nValidators: 2,
 			accumulators: []accumEntry{

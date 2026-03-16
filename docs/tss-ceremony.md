@@ -169,22 +169,25 @@ Prefix scans:
 |---|---|---|
 | Who knows `ea_sk` | Every validator who acked | Dealer only (in memory, during deal block) |
 | Single non-dealer can decrypt | Yes | No |
-| Malicious validator can sabotage tally | N/A | Yes (no proof of correct share, fixed in Step 2) |
+| Malicious validator can sabotage tally | N/A | No (DLEQ proof required per partial decryption) |
 | Malicious dealer can send bad shares | N/A | Yes (no polynomial consistency check, fixed in Step 3) |
 
 ## Roadmap
 
-### Step 2: DLEQ proofs (correctness vs. validators)
+### Step 2: DLEQ proofs (correctness vs. validators) — DONE
 
-Add a non-interactive zero-knowledge proof to each `PartialDecryptionEntry` proving that the validator used the same scalar for their verification key and their partial decryption:
+Each `PartialDecryptionEntry` now includes a Chaum-Pedersen DLEQ proof proving that the validator used the same scalar for their verification key and their partial decryption:
 
 ```
 DLEQ: log_G(VK_i) == log_{C1}(D_i)
 ```
 
-The chain verifies the proof before storing the partial decryption. A malicious validator with a fake share cannot forge a valid proof against their published `VK_i`.
+The chain verifies the proof in `SubmitPartialDecryption` (FinalizeBlock) before storing the partial decryption. A malicious validator with a fake share cannot forge a valid proof against their published `VK_i`.
 
-New field: `dleq_proof bytes` in `PartialDecryptionEntry` (currently reserved/empty in Step 1).
+Implementation:
+- `crypto/elgamal/dleq.go`: `GeneratePartialDecryptDLEQ` / `VerifyPartialDecryptDLEQ` with domain tag `"svote-pd-dleq-v1"`.
+- `app/prepare_proposal_partial_decrypt.go`: generates proof alongside each `D_i`.
+- `x/vote/keeper/msg_server_tally_decrypt.go`: verifies proof against `round.VerificationKeys[shamirIndex-1]` and the accumulator's `C1`.
 
 ### Step 3: Feldman commitments (correctness vs. dealer)
 

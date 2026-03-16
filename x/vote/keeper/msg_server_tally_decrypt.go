@@ -205,8 +205,9 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 // This message is auto-injected by PrepareProposal during the TALLYING phase
 // of a threshold-mode voting round and must never enter the mempool.
 //
-// In Step 1 (bare TSS), entries are stored without DLEQ verification. Step 2
-// adds on-chain proof verification against the stored VK_i.
+// Each entry's DLEQ proof is verified against the validator's on-chain
+// verification key VK_i, proving log_G(VK_i) == log_{C1}(D_i). This prevents
+// a malicious validator from submitting a bogus partial decryption.
 func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.MsgSubmitPartialDecryption) (*types.MsgSubmitPartialDecryptionResponse, error) {
 	// Block mempool submission and verify creator is the block proposer.
 	if err := ms.k.ValidateProposerIsCreator(goCtx, msg.Creator, "MsgSubmitPartialDecryption"); err != nil {
@@ -257,14 +258,47 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 		return nil, fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
 	}
 
-	// Validate each entry in the submission.
+	// Look up VK_i for DLEQ verification. VerificationKeys uses the original
+	// 0-based array ordering from deal time; ShamirIndex is 1-based.
+	vkIdx := int(msg.ValidatorIndex) - 1
+	if vkIdx < 0 || vkIdx >= len(round.VerificationKeys) {
+		return nil, fmt.Errorf("%w: validator_index %d out of range for verification_keys (len=%d)",
+			types.ErrInvalidField, msg.ValidatorIndex, len(round.VerificationKeys))
+	}
+	vkPk, err := elgamal.UnmarshalPublicKey(round.VerificationKeys[vkIdx])
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to unmarshal VK_%d: %v",
+			types.ErrInvalidField, msg.ValidatorIndex, err)
+	}
+
 	for i, entry := range msg.Entries {
-		if _, err := elgamal.UnmarshalPoint(entry.PartialDecrypt); err != nil {
+		Di, err := elgamal.UnmarshalPoint(entry.PartialDecrypt)
+		if err != nil {
 			return nil, fmt.Errorf("%w: entry[%d] partial_decrypt is not a valid Pallas point: %v",
 				types.ErrInvalidField, i, err)
 		}
 		if err := ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
 			return nil, fmt.Errorf("entry[%d]: %w", i, err)
+		}
+
+		// Load the tally accumulator to get C1 for DLEQ verification.
+		accBytes, err := ms.k.GetTally(kvStore, msg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
+		if err != nil {
+			return nil, fmt.Errorf("entry[%d]: failed to load tally accumulator: %w", i, err)
+		}
+		if accBytes == nil {
+			return nil, fmt.Errorf("%w: entry[%d] no accumulator for (proposal=%d, decision=%d)",
+				types.ErrInvalidField, i, entry.ProposalId, entry.VoteDecision)
+		}
+		ct, err := elgamal.UnmarshalCiphertext(accBytes)
+		if err != nil {
+			return nil, fmt.Errorf("entry[%d]: failed to unmarshal accumulator: %w", i, err)
+		}
+
+		// Verify DLEQ proof: log_G(VK_i) == log_{C1}(D_i)
+		if err := elgamal.VerifyPartialDecryptDLEQ(entry.DleqProof, vkPk.Point, ct.C1, Di); err != nil {
+			return nil, fmt.Errorf("%w: entry[%d] DLEQ verification failed for validator %d: %v",
+				types.ErrInvalidField, i, msg.ValidatorIndex, err)
 		}
 	}
 
