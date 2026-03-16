@@ -211,6 +211,183 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 				}
 			},
 		},
+		// --- option_groups ---
+		{
+			name: "valid: one group for multi-option camp, standalone options ungrouped",
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{{
+					Id: 1, Title: "Sprout sunset", Description: "When?",
+					Options: []*types.VoteOption{
+						{Index: 0, Label: "Immediately"},
+						{Index: 1, Label: "One year"},
+						{Index: 2, Label: "Two years"},
+						{Index: 3, Label: "When quantum threat"},
+					},
+					OptionGroups: []*types.OptionGroup{
+						{Id: 0, Label: "Fixed date", OptionIndices: []uint32{1, 2}},
+					},
+				}}
+			},
+		},
+		{
+			name: "valid: multiple groups, some options ungrouped",
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{{
+					Id: 1, Title: "Complex", Description: "Many camps",
+					Options: []*types.VoteOption{
+						{Index: 0, Label: "A"},
+						{Index: 1, Label: "B1"},
+						{Index: 2, Label: "B2"},
+						{Index: 3, Label: "C1"},
+						{Index: 4, Label: "C2"},
+						{Index: 5, Label: "D"},
+					},
+					OptionGroups: []*types.OptionGroup{
+						{Id: 0, Label: "Camp B", OptionIndices: []uint32{1, 2}},
+						{Id: 1, Label: "Camp C", OptionIndices: []uint32{3, 4}},
+					},
+				}}
+			},
+		},
+		{
+			name: "valid: proposal without groups",
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{{
+					Id: 1, Title: "Simple", Description: "Binary",
+					Options: svtest.DefaultOptions(),
+				}}
+			},
+		},
+		{
+			name:        "invalid: group with only 1 option (use standalone instead)",
+			errContains: "at least 2 options",
+			expectErr:   true,
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{{
+					Id: 1, Title: "A", Description: "d",
+					Options: []*types.VoteOption{
+						{Index: 0, Label: "A"},
+						{Index: 1, Label: "B"},
+						{Index: 2, Label: "C"},
+					},
+					OptionGroups: []*types.OptionGroup{
+						{Id: 0, Label: "Solo", OptionIndices: []uint32{0}},
+					},
+				}}
+			},
+		},
+		{
+			name:        "invalid: group with empty option_indices",
+			errContains: "at least 2 options",
+			expectErr:   true,
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{{
+					Id: 1, Title: "A", Description: "d",
+					Options: []*types.VoteOption{
+						{Index: 0, Label: "A"},
+						{Index: 1, Label: "B"},
+						{Index: 2, Label: "C"},
+					},
+					OptionGroups: []*types.OptionGroup{
+						{Id: 0, Label: "Empty", OptionIndices: nil},
+					},
+				}}
+			},
+		},
+		{
+			name:        "invalid: group ID not sequential",
+			errContains: "group id mismatch",
+			expectErr:   true,
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{{
+					Id: 1, Title: "A", Description: "d",
+					Options: []*types.VoteOption{
+						{Index: 0, Label: "A"},
+						{Index: 1, Label: "B"},
+						{Index: 2, Label: "C"},
+						{Index: 3, Label: "D"},
+					},
+					OptionGroups: []*types.OptionGroup{
+						{Id: 0, Label: "G0", OptionIndices: []uint32{0, 1}},
+						{Id: 5, Label: "G5", OptionIndices: []uint32{2, 3}},
+					},
+				}}
+			},
+		},
+		{
+			name:        "invalid: group with empty label",
+			errContains: "label cannot be empty",
+			expectErr:   true,
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{{
+					Id: 1, Title: "A", Description: "d",
+					Options: []*types.VoteOption{
+						{Index: 0, Label: "A"},
+						{Index: 1, Label: "B"},
+						{Index: 2, Label: "C"},
+					},
+					OptionGroups: []*types.OptionGroup{
+						{Id: 0, Label: "", OptionIndices: []uint32{0, 1}},
+					},
+				}}
+			},
+		},
+		{
+			name:        "invalid: group with non-ASCII label",
+			errContains: "ASCII",
+			expectErr:   true,
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{{
+					Id: 1, Title: "A", Description: "d",
+					Options: []*types.VoteOption{
+						{Index: 0, Label: "A"},
+						{Index: 1, Label: "B"},
+						{Index: 2, Label: "C"},
+					},
+					OptionGroups: []*types.OptionGroup{
+						{Id: 0, Label: "Résultat", OptionIndices: []uint32{0, 1}},
+					},
+				}}
+			},
+		},
+		{
+			name:        "invalid: group references out-of-range option index",
+			errContains: "references option index 5",
+			expectErr:   true,
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{{
+					Id: 1, Title: "A", Description: "d",
+					Options: []*types.VoteOption{
+						{Index: 0, Label: "A"},
+						{Index: 1, Label: "B"},
+						{Index: 2, Label: "C"},
+					},
+					OptionGroups: []*types.OptionGroup{
+						{Id: 0, Label: "G0", OptionIndices: []uint32{0, 5}},
+					},
+				}}
+			},
+		},
+		{
+			name:        "invalid: overlapping option indices across groups",
+			errContains: "appears in both group",
+			expectErr:   true,
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{{
+					Id: 1, Title: "A", Description: "d",
+					Options: []*types.VoteOption{
+						{Index: 0, Label: "A"},
+						{Index: 1, Label: "B"},
+						{Index: 2, Label: "C"},
+						{Index: 3, Label: "D"},
+					},
+					OptionGroups: []*types.OptionGroup{
+						{Id: 0, Label: "G0", OptionIndices: []uint32{0, 1}},
+						{Id: 1, Label: "G1", OptionIndices: []uint32{1, 2}},
+					},
+				}}
+			},
+		},
 	}
 
 	for _, tc := range tests {

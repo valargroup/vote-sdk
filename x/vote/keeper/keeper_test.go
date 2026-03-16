@@ -265,3 +265,143 @@ func (s *KeeperTestSuite) TestLogger() {
 	s.SetupTest()
 	s.Require().NotNil(s.keeper.Logger())
 }
+
+// ---------------------------------------------------------------------------
+// GetVoteSummary — option group aggregation
+// ---------------------------------------------------------------------------
+
+func (s *KeeperTestSuite) TestGetVoteSummary_GroupAggregation() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	roundID := testRoundID
+	round := &types.VoteRound{
+		VoteRoundId: roundID,
+		VoteEndTime: activeEndTime,
+		Status:      types.SessionStatus_SESSION_STATUS_FINALIZED,
+		Proposals: []*types.Proposal{{
+			Id:    1,
+			Title: "Sprout sunset",
+			Options: []*types.VoteOption{
+				{Index: 0, Label: "Immediately"},
+				{Index: 1, Label: "One year"},
+				{Index: 2, Label: "Two years"},
+				{Index: 3, Label: "When quantum threat"},
+			},
+			OptionGroups: []*types.OptionGroup{
+				{Id: 0, Label: "Fixed date", OptionIndices: []uint32{1, 2}},
+			},
+		}},
+	}
+	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+
+	// Simulate finalized tally results (decrypted values in zatoshi).
+	for _, tr := range []*types.TallyResult{
+		{VoteRoundId: roundID, ProposalId: 1, VoteDecision: 0, TotalValue: 1500},
+		{VoteRoundId: roundID, ProposalId: 1, VoteDecision: 1, TotalValue: 800},
+		{VoteRoundId: roundID, ProposalId: 1, VoteDecision: 2, TotalValue: 1200},
+		{VoteRoundId: roundID, ProposalId: 1, VoteDecision: 3, TotalValue: 500},
+	} {
+		s.Require().NoError(s.keeper.SetTallyResult(kv, tr))
+	}
+
+	resp, err := s.keeper.GetVoteSummary(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Len(resp.Proposals, 1)
+
+	prop := resp.Proposals[0]
+
+	// Per-option results should still be present.
+	s.Require().Len(prop.Options, 4)
+	s.Require().Equal(uint64(1500), prop.Options[0].TotalValue)
+	s.Require().Equal(uint64(800), prop.Options[1].TotalValue)
+	s.Require().Equal(uint64(1200), prop.Options[2].TotalValue)
+	s.Require().Equal(uint64(500), prop.Options[3].TotalValue)
+
+	// Only the "Fixed date" group should be present (standalone options are ungrouped).
+	s.Require().Len(prop.Groups, 1)
+
+	g0 := prop.Groups[0]
+	s.Require().Equal("Fixed date", g0.Label)
+	s.Require().Equal([]uint32{1, 2}, g0.OptionIndices)
+	s.Require().Equal(uint64(2000), g0.TotalValue, "800 + 1200 = 2000")
+}
+
+func (s *KeeperTestSuite) TestGetVoteSummary_NoGroups() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	roundID := testRoundID
+	round := &types.VoteRound{
+		VoteRoundId: roundID,
+		VoteEndTime: activeEndTime,
+		Status:      types.SessionStatus_SESSION_STATUS_FINALIZED,
+		Proposals: []*types.Proposal{{
+			Id: 1, Title: "Simple", Options: []*types.VoteOption{
+				{Index: 0, Label: "Support"},
+				{Index: 1, Label: "Oppose"},
+			},
+		}},
+	}
+	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+
+	for _, tr := range []*types.TallyResult{
+		{VoteRoundId: roundID, ProposalId: 1, VoteDecision: 0, TotalValue: 3000},
+		{VoteRoundId: roundID, ProposalId: 1, VoteDecision: 1, TotalValue: 2000},
+	} {
+		s.Require().NoError(s.keeper.SetTallyResult(kv, tr))
+	}
+
+	resp, err := s.keeper.GetVoteSummary(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Len(resp.Proposals, 1)
+	s.Require().Nil(resp.Proposals[0].Groups, "no groups when proposal has no option_groups")
+}
+
+func (s *KeeperTestSuite) TestGetVoteSummary_GroupBallotCounts() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	roundID := testRoundID
+	round := &types.VoteRound{
+		VoteRoundId: roundID,
+		VoteEndTime: activeEndTime,
+		Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+		Proposals: []*types.Proposal{{
+			Id: 1, Title: "Multi",
+			Options: []*types.VoteOption{
+				{Index: 0, Label: "A"},
+				{Index: 1, Label: "B"},
+				{Index: 2, Label: "C"},
+			},
+			OptionGroups: []*types.OptionGroup{
+				{Id: 0, Label: "Camp BC", OptionIndices: []uint32{1, 2}},
+			},
+		}},
+	}
+	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+
+	// Simulate ballot counts via IncrementShareCount (round is ACTIVE, not finalized).
+	for i := 0; i < 3; i++ {
+		s.Require().NoError(s.keeper.IncrementShareCount(kv, roundID, 1, 0))
+	}
+	for i := 0; i < 5; i++ {
+		s.Require().NoError(s.keeper.IncrementShareCount(kv, roundID, 1, 1))
+	}
+	for i := 0; i < 2; i++ {
+		s.Require().NoError(s.keeper.IncrementShareCount(kv, roundID, 1, 2))
+	}
+
+	resp, err := s.keeper.GetVoteSummary(kv, roundID)
+	s.Require().NoError(err)
+	prop := resp.Proposals[0]
+
+	// Only one group (options 1+2). Option 0 is standalone, not in any group.
+	s.Require().Len(prop.Groups, 1)
+	s.Require().Equal(uint64(7), prop.Groups[0].BallotCount, "Camp BC: 5 + 2 = 7 ballots for options 1,2")
+	s.Require().Equal(uint64(0), prop.Groups[0].TotalValue, "not finalized, no decrypted totals")
+
+	// Standalone option 0 is still visible in per-option results.
+	s.Require().Len(prop.Options, 3)
+	s.Require().Equal(uint64(3), prop.Options[0].BallotCount)
+}

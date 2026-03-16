@@ -190,12 +190,38 @@ func (k *Keeper) GetVoteSummary(kvStore store.KVStore, roundID []byte) (*types.Q
 			}
 			options[j] = os
 		}
-		proposals[i] = &types.ProposalSummary{
+		ps := &types.ProposalSummary{
 			Id:          prop.Id,
 			Title:       prop.Title,
 			Description: prop.Description,
 			Options:     options,
 		}
+
+		// Compute group-level aggregates when option_groups are defined.
+		if len(prop.OptionGroups) > 0 {
+			optByIndex := make(map[uint32]*types.OptionSummary, len(options))
+			for _, o := range options {
+				optByIndex[o.Index] = o
+			}
+			groups := make([]*types.GroupSummary, len(prop.OptionGroups))
+			for g, grp := range prop.OptionGroups {
+				gs := &types.GroupSummary{
+					Id:            grp.Id,
+					Label:         grp.Label,
+					OptionIndices: grp.OptionIndices,
+				}
+				for _, idx := range grp.OptionIndices {
+					if o, ok := optByIndex[idx]; ok {
+						gs.BallotCount += o.BallotCount
+						gs.TotalValue += o.TotalValue
+					}
+				}
+				groups[g] = gs
+			}
+			ps.Groups = groups
+		}
+
+		proposals[i] = ps
 	}
 
 	return &types.QueryVoteSummaryResponse{

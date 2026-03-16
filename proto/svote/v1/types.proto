@@ -18,12 +18,23 @@ message VoteOption {
   string label = 2; // e.g. "Support", "Oppose"
 }
 
+// OptionGroup defines a group of vote options that are tallied together
+// in the first phase of a grouped tally. When groups are present, the
+// winning group is determined by summing the votes of its member options,
+// then the winning sub-option is resolved within the winning group.
+message OptionGroup {
+  uint32 id                       = 1; // 0-indexed group ID
+  string label                    = 2; // e.g. "Fixed date"
+  repeated uint32 option_indices  = 3; // Which VoteOption.index values belong to this group
+}
+
 // Proposal represents a single ballot option within a voting session.
 message Proposal {
-  uint32 id                    = 1;
-  string title                 = 2;
-  string description           = 3;
-  repeated VoteOption options  = 4; // 2-8 named choices
+  uint32 id                           = 1;
+  string title                        = 2;
+  string description                  = 3;
+  repeated VoteOption options         = 4; // 2-8 named choices
+  repeated OptionGroup option_groups  = 5; // If non-empty, enables grouped tally mode
 }
 
 // VoteRound represents a voting session created by MsgCreateVotingSession.
@@ -149,6 +160,17 @@ message ProposalSummary {
   string title                    = 2;
   string description              = 3;
   repeated OptionSummary options  = 4;
+  repeated GroupSummary groups    = 5; // Populated when proposal has option_groups
+}
+
+// GroupSummary is a denormalized view of an option group for the VoteSummary query.
+// ballot_count and total_value are the sums across all options in the group.
+message GroupSummary {
+  uint32 id                       = 1;
+  string label                    = 2;
+  repeated uint32 option_indices  = 3;
+  uint64 ballot_count             = 4; // Sum of ballot_count across all options in group
+  uint64 total_value              = 5; // Sum of total_value across all options in group (finalized only)
 }
 
 // OptionSummary is a denormalized view of a vote option for the VoteSummary query.

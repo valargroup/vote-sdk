@@ -58,7 +58,58 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 				return fmt.Errorf("%w: proposal %d option %d label must contain only ASCII characters", ErrInvalidField, i, j)
 			}
 		}
+		if err := validateOptionGroups(i, p); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+// validateOptionGroups checks that option_groups (if present) on a proposal
+// are well-formed: sequential IDs, non-empty ASCII labels, valid option
+// indices with no overlaps, and each group contains at least 2 options.
+//
+// Groups are only needed for "camps" where multiple options should be
+// tallied together. Standalone options (not in any group) are implicitly
+// their own camp. Not every option needs to belong to a group.
+func validateOptionGroups(proposalIdx int, p *Proposal) error {
+	if len(p.OptionGroups) == 0 {
+		return nil
+	}
+
+	numOptions := uint32(len(p.Options))
+	claimed := make(map[uint32]int) // option_index -> group_id that claimed it
+
+	for g, grp := range p.OptionGroups {
+		if grp.Id != uint32(g) {
+			return fmt.Errorf("%w: proposal %d group id mismatch at position %d: expected %d, got %d",
+				ErrInvalidField, proposalIdx, g, g, grp.Id)
+		}
+		if grp.Label == "" {
+			return fmt.Errorf("%w: proposal %d group %d label cannot be empty",
+				ErrInvalidField, proposalIdx, g)
+		}
+		if !isASCII(grp.Label) {
+			return fmt.Errorf("%w: proposal %d group %d label must contain only ASCII characters",
+				ErrInvalidField, proposalIdx, g)
+		}
+		if len(grp.OptionIndices) < 2 {
+			return fmt.Errorf("%w: proposal %d group %d must contain at least 2 options (got %d); single-option camps don't need a group",
+				ErrInvalidField, proposalIdx, g, len(grp.OptionIndices))
+		}
+		for _, idx := range grp.OptionIndices {
+			if idx >= numOptions {
+				return fmt.Errorf("%w: proposal %d group %d references option index %d, but proposal only has %d options",
+					ErrInvalidField, proposalIdx, g, idx, numOptions)
+			}
+			if prevGroup, dup := claimed[idx]; dup {
+				return fmt.Errorf("%w: proposal %d option index %d appears in both group %d and group %d",
+					ErrInvalidField, proposalIdx, idx, prevGroup, g)
+			}
+			claimed[idx] = g
+		}
+	}
+
 	return nil
 }
 
