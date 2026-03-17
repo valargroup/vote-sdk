@@ -4,7 +4,7 @@
  * This header declares the C-compatible functions exported by the
  * shielded-vote-circuits Rust static library (libshielded_vote_circuits.a).
  *
- * Used by Go CGo bindings in crypto/zkp/halo2/ and crypto/redpallas/.
+ * Used by Go CGo bindings in ffi/zkp/halo2/ and ffi/redpallas/.
  */
 
 #ifndef SHIELDED_VOTE_CIRCUITS_H

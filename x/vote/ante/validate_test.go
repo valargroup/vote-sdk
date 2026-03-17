@@ -20,8 +20,8 @@ import (
 
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/valargroup/vote-sdk/crypto/redpallas"
-	"github.com/valargroup/vote-sdk/crypto/zkp"
+	"github.com/valargroup/vote-sdk/ffi/redpallas"
+	"github.com/valargroup/vote-sdk/ffi/zkp"
 	svtest "github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/ante"
 	"github.com/valargroup/vote-sdk/x/vote/keeper"

@@ -9,12 +9,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/valargroup/vote-sdk/crypto/zkp"
+	"github.com/valargroup/vote-sdk/ffi/zkp"
 )
 
-// mustReadFixture reads a fixture file from crypto/zkp/testdata/.
+// mustReadFixture reads a fixture file from ffi/zkp/testdata/.
 // The testdata path is relative to the repo root; we resolve it from
-// the package directory (crypto/zkp/halo2/) by going up one level.
+// the package directory (ffi/zkp/halo2/) by going up one level.
 func mustReadFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	path := filepath.Join("..", "testdata", name)

@@ -10,9 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/valargroup/vote-sdk/crypto/redpallas"
-	"github.com/valargroup/vote-sdk/crypto/zkp"
-	"github.com/valargroup/vote-sdk/crypto/zkp/halo2"
+	"github.com/valargroup/vote-sdk/ffi/redpallas"
+	"github.com/valargroup/vote-sdk/ffi/zkp"
+	"github.com/valargroup/vote-sdk/ffi/zkp/halo2"
 	"github.com/valargroup/vote-sdk/x/vote/ante"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -27,10 +27,10 @@ func repoRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
 }
 
-// mustReadFixture reads a binary fixture from crypto/zkp/testdata/.
+// mustReadFixture reads a binary fixture from ffi/zkp/testdata/.
 func mustReadFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	path := filepath.Join(repoRoot(t), "crypto", "zkp", "testdata", name)
+	path := filepath.Join(repoRoot(t), "ffi", "zkp", "testdata", name)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err, "failed to read fixture %s", path)
 	return data

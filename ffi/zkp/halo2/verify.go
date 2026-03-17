@@ -4,7 +4,7 @@
 //
 // This package is only compiled when the "halo2" build tag is set:
 //
-//	go test -tags halo2 ./crypto/zkp/halo2/...
+//	go test -tags halo2 ./ffi/zkp/halo2/...
 //
 // It requires the Rust static library to be built first:
 //
@@ -30,7 +30,7 @@ import (
 	"unsafe"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
-	"github.com/valargroup/vote-sdk/crypto/zkp"
+	"github.com/valargroup/vote-sdk/ffi/zkp"
 )
 
 // rustLastError retrieves the thread-local error message stored by the most

@@ -28,7 +28,7 @@ import (
 
 	"cosmossdk.io/core/store"
 
-	"github.com/valargroup/vote-sdk/crypto/votetree"
+	"github.com/valargroup/vote-sdk/ffi/votetree"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 

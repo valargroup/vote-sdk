@@ -43,7 +43,7 @@ import (
 
 	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
-	"github.com/valargroup/vote-sdk/crypto/roundid"
+	"github.com/valargroup/vote-sdk/ffi/roundid"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )

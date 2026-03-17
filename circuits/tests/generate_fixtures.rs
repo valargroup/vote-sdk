@@ -3,13 +3,13 @@
 //! Run with: cargo test --release -- generate_fixtures --ignored --nocapture
 //!
 //! Generates:
-//!   crypto/zkp/testdata/toy_valid_proof.bin      - valid Halo2 proof bytes
-//!   crypto/zkp/testdata/toy_valid_input.bin      - correct public input (Fp, 32-byte LE)
-//!   crypto/zkp/testdata/toy_wrong_input.bin      - wrong public input for negative tests
-//!   crypto/redpallas/testdata/valid_rk.bin       - 32-byte RedPallas verification key
-//!   crypto/redpallas/testdata/valid_sighash.bin  - 32-byte sighash (message)
-//!   crypto/redpallas/testdata/valid_sig.bin      - 64-byte valid RedPallas signature
-//!   crypto/redpallas/testdata/wrong_sig.bin      - 64-byte signature over wrong message
+//!   ffi/zkp/testdata/toy_valid_proof.bin      - valid Halo2 proof bytes
+//!   ffi/zkp/testdata/toy_valid_input.bin      - correct public input (Fp, 32-byte LE)
+//!   ffi/zkp/testdata/toy_wrong_input.bin      - wrong public input for negative tests
+//!   ffi/redpallas/testdata/valid_rk.bin       - 32-byte RedPallas verification key
+//!   ffi/redpallas/testdata/valid_sighash.bin  - 32-byte sighash (message)
+//!   ffi/redpallas/testdata/valid_sig.bin      - 64-byte valid RedPallas signature
+//!   ffi/redpallas/testdata/wrong_sig.bin      - 64-byte signature over wrong message
 //!
 //! Delegation fixture (ZKP #1) is no longer generated here; the Rust E2E tests
 //! build the delegation bundle inline via e2e_tests::setup::build_delegation_bundle_for_test.
@@ -44,7 +44,7 @@ fn generate_halo2_fixtures() {
     let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("crypto/zkp/testdata");
+        .join("ffi/zkp/testdata");
 
     fs::create_dir_all(&testdata_dir).expect("failed to create testdata directory");
 
@@ -103,7 +103,7 @@ fn generate_redpallas_fixtures() {
     let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("crypto/redpallas/testdata");
+        .join("ffi/redpallas/testdata");
 
     fs::create_dir_all(&testdata_dir).expect("failed to create redpallas testdata directory");
 
@@ -337,7 +337,7 @@ fn generate_share_reveal_fixtures() {
     let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("crypto/zkp/testdata");
+        .join("ffi/zkp/testdata");
 
     fs::create_dir_all(&testdata_dir).expect("failed to create testdata directory");
 

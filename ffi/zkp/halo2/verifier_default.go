@@ -2,7 +2,7 @@
 
 package halo2
 
-import "github.com/valargroup/vote-sdk/crypto/zkp"
+import "github.com/valargroup/vote-sdk/ffi/zkp"
 
 // IsMock is true when the binary was built without the "halo2" tag,
 // meaning NewVerifier() returns a mock that accepts all ZK proofs.
