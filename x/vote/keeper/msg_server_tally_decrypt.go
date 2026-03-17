@@ -62,12 +62,8 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 // the on-chain accumulator, stores finalized tally results, transitions the
 // round to FINALIZED, and emits an event.
 //
-// Threshold mode (round.Threshold > 0): reads stored partial decryptions from
-// KV, Lagrange-combines them per accumulator, and checks
-// C2 - combined == totalValue * G. No DLEQ proof is required (Step 1).
-//
-// Legacy mode (round.Threshold == 0): verifies the Chaum-Pedersen DLEQ proof
-// submitted with each entry.
+// Reads stored partial decryptions from KV, Lagrange-combines them per
+// accumulator, and checks C2 - combined == totalValue * G.
 func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally) (*types.MsgSubmitTallyResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
@@ -81,15 +77,12 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 		return nil, fmt.Errorf("%w: status is %s", types.ErrRoundNotTallying, round.Status)
 	}
 
-	// In threshold mode, pre-load all stored partial decryptions once so we
-	// can look up each accumulator's partials during per-entry verification
-	// without repeated full-range KV scans.
-	var pdMap map[uint64][]PartialDecryptionWithIndex
-	if round.Threshold > 0 {
-		pdMap, err = ms.k.GetPartialDecryptionsForRound(kvStore, msg.VoteRoundId)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load partial decryptions: %w", err)
-		}
+	// Pre-load all stored partial decryptions once so we can look up each
+	// accumulator's partials during per-entry verification without repeated
+	// full-range KV scans.
+	pdMap, err := ms.k.GetPartialDecryptionsForRound(kvStore, msg.VoteRoundId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load partial decryptions: %w", err)
 	}
 
 	for i, entry := range msg.Entries {
@@ -108,13 +101,13 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 				return nil, fmt.Errorf("%w: entry[%d] claims value %d but no accumulator exists",
 					types.ErrTallyMismatch, i, entry.TotalValue)
 			}
-		} else if round.Threshold > 0 {
+		} else {
 			ct, err := elgamal.UnmarshalCiphertext(accBytes)
 			if err != nil {
 				return nil, fmt.Errorf("failed to unmarshal accumulator for entry[%d]: %w", i, err)
 			}
-			// Threshold mode: verify by Lagrange-combining the stored partial
-			// decryptions and checking C2 - combined == totalValue * G.
+			// Verify by Lagrange-combining the stored partial decryptions
+			// and checking C2 - combined == totalValue * G.
 			accKey := AccumulatorKey(entry.ProposalId, entry.VoteDecision)
 			storedPartials := pdMap[accKey]
 			if len(storedPartials) == 0 {
@@ -141,25 +134,10 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 					types.ErrTallyMismatch, i, err)
 			}
 
-			// C2 - ea_sk*C1 must equal totalValue * G.
 			vG := ct.C2.Sub(skC1)
 			if !bytes.Equal(vG.ToAffineCompressed(), elgamal.ValuePoint(entry.TotalValue).ToAffineCompressed()) {
 				return nil, fmt.Errorf("%w: entry[%d] C2 - combined_partial != totalValue*G",
 					types.ErrTallyMismatch, i)
-			}
-		} else {
-			// Legacy mode: verify the Chaum-Pedersen DLEQ proof.
-			ct, err := elgamal.UnmarshalCiphertext(accBytes)
-			if err != nil {
-				return nil, fmt.Errorf("failed to unmarshal accumulator for entry[%d]: %w", i, err)
-			}
-			pk, err := elgamal.UnmarshalPublicKey(round.EaPk)
-			if err != nil {
-				return nil, fmt.Errorf("failed to unmarshal EA public key: %w", err)
-			}
-			if err := elgamal.VerifyDLEQProof(entry.DecryptionProof, pk, ct, entry.TotalValue); err != nil {
-				return nil, fmt.Errorf("%w: entry[%d] DLEQ verification failed: %v",
-					types.ErrTallyMismatch, i, err)
 			}
 		}
 
@@ -224,10 +202,6 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 
 	if round.Status != types.SessionStatus_SESSION_STATUS_TALLYING {
 		return nil, fmt.Errorf("%w: status is %s, expected TALLYING", types.ErrRoundNotTallying, round.Status)
-	}
-
-	if round.Threshold == 0 {
-		return nil, fmt.Errorf("%w: MsgSubmitPartialDecryption requires threshold mode (threshold > 0)", types.ErrInvalidField)
 	}
 
 	// Validate validator_index against the creator's stored ShamirIndex.

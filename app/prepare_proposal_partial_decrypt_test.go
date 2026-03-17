@@ -188,26 +188,6 @@ func TestPartialDecryptInjector_Skips(t *testing.T) {
 			},
 		},
 		{
-			name: "legacy round (threshold=0)",
-			setup: func(t *testing.T, ta *testutil.TestApp, proposerAddr string, pallasPk *elgamal.PublicKey, eaPk *elgamal.PublicKey) {
-				validators := []*types.ValidatorPallasKey{
-					{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-				}
-				// threshold=0 → partial decrypt injector must ignore this round
-				ta.SeedTallyingRoundThreshold(pdRound, 0, sampleProposals(), validators, nil)
-
-				ct, _ := elgamal.Encrypt(eaPk, 10, rand.Reader)
-				ctBytes, _ := elgamal.MarshalCiphertext(ct)
-				ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
-				require.NoError(t, ta.VoteKeeper().AddToTally(ta.VoteKeeper().OpenKVStore(ctx), pdRound, 1, 0, ctBytes))
-				ta.NextBlock()
-
-				share, _ := elgamal.KeyGen(rand.Reader)
-				shareBytes, _ := elgamal.MarshalSecretKey(share)
-				ta.WriteShareForRound(pdRound, shareBytes)
-			},
-		},
-		{
 			name: "no share file on disk",
 			setup: func(t *testing.T, ta *testutil.TestApp, proposerAddr string, pallasPk *elgamal.PublicKey, eaPk *elgamal.PublicKey) {
 				share, _ := elgamal.KeyGen(rand.Reader)

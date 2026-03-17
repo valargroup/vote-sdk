@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -406,18 +407,28 @@ func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
 }
 
 // SeedDealtCeremony creates a PENDING round with DEALT ceremony fields.
-// The round includes the given validators and ECIES payloads. Commits via
-// an empty block. Returns the round ID.
+// The round includes the given validators and ECIES payloads. A default
+// threshold of 2 and placeholder VKs are set (threshold mode is always
+// required). Commits via an empty block. Returns the round ID.
 func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads []*types.DealerPayload, validators []*types.ValidatorPallasKey) []byte {
 	ta.t.Helper()
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
 
-	// Use a deterministic round ID based on the ea_pk.
 	h, _ := blake2b.New256(nil)
 	h.Write(eaPkBytes)
 	roundID := h.Sum(nil)
+
+	n := len(validators)
+	t := (n + 1) / 2
+	if t < 2 {
+		t = 2
+	}
+	vks := make([][]byte, n)
+	for i := range vks {
+		vks[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
+	}
 
 	round := &types.VoteRound{
 		VoteRoundId:          roundID,
@@ -429,6 +440,8 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 		CeremonyPayloads:     payloads,
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
+		Threshold:            uint32(t),
+		VerificationKeys:     vks,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
