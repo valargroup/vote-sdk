@@ -18,8 +18,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/valargroup/vote-sdk/app"
-	"github.com/valargroup/vote-sdk/crypto/votecommitment"
-	"github.com/valargroup/vote-sdk/crypto/votetree"
+	"github.com/valargroup/vote-sdk/ffi/votecommitment"
+	"github.com/valargroup/vote-sdk/ffi/votetree"
 	"github.com/valargroup/vote-sdk/internal/helper"
 	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
 )

@@ -13,7 +13,7 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 
-	"github.com/valargroup/vote-sdk/crypto/votetree"
+	"github.com/valargroup/vote-sdk/ffi/votetree"
 	"github.com/valargroup/vote-sdk/testutil"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"

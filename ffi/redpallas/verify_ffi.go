@@ -5,7 +5,7 @@
 //
 // Only compiled when the "redpallas" build tag is set:
 //
-//	go test -tags redpallas ./crypto/redpallas/...
+//	go test -tags redpallas ./ffi/redpallas/...
 //
 // It requires the Rust static library to be built first:
 //

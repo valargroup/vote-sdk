@@ -10,7 +10,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/valargroup/vote-sdk/crypto/roundid"
+	"github.com/valargroup/vote-sdk/ffi/roundid"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 

@@ -1,4 +1,4 @@
-# sdk/crypto/votetree
+# sdk/ffi/votetree
 
 Go CGO bindings to the Poseidon Merkle tree in the shielded-vote-circuits Rust static library (`libshielded_vote_circuits.a`).
 
