@@ -1,12 +1,8 @@
 # TSS EA Key Ceremony
 
-This document describes the threshold secret sharing (TSS) upgrade to the EA key ceremony. The ceremony establishes the election authority public key `ea_pk` for each voting round. TSS prevents any single non-dealer validator from decrypting individual votes — only the aggregate tally is recoverable, and only with cooperation from at least `t` validators.
+This document describes the threshold secret sharing (TSS) ceremony for establishing the election authority public key `ea_pk` for each voting round. TSS prevents any single non-dealer validator from decrypting individual votes — only the aggregate tally is recoverable, and only with cooperation from at least `t` validators.
 
-## Background: Legacy Ceremony
-
-In the original (legacy) ceremony the block proposer generates `ea_sk` in memory, ECIES-encrypts the full key to every ceremony validator, and publishes `ea_pk = ea_sk * G`. Every validator who acks receives and stores the full `ea_sk`. Any single validator can decrypt all votes.
-
-TSS replaces the single-key distribution with Shamir secret sharing. The full key never leaves the dealer's memory after the ceremony. No non-dealer validator can decrypt on their own.
+A minimum of 2 eligible validators is required to create a voting session. `CreateVotingSession` rejects rounds when fewer than 2 validators have registered Pallas keys.
 
 ## Step 1 (current): Threshold Secret Sharing
 
@@ -17,16 +13,12 @@ TSS replaces the single-key distribution with Shamir secret sharing. The full ke
 For a ceremony with `n` validators:
 
 ```
-t = ceil(n/2)        (for n >= 2, minimum 2)
-t = 0                (legacy mode for n < 2)
+t = ceil(n/2)        (minimum 2, n >= 2 required)
 ```
-
-`t` is clamped to `n` for very small validator sets. `t = 0` signals legacy single-key mode.
 
 | n | t |
 |---|---|
-| 1 | 0 (legacy) |
-| 2 | 2 (clamped from 1) |
+| 2 | 2 |
 | 3 | 2 |
 | 4 | 2 |
 | 5 | 3 |
@@ -45,7 +37,7 @@ New `VoteRound` fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `threshold` | `uint32` | Minimum shares required to reconstruct (`t`). `0` = legacy mode. |
+| `threshold` | `uint32` | Minimum shares required to reconstruct (`t`). Always >= 2. |
 | `verification_keys` | `repeated bytes` | `VK_i = f(i)*G` per validator (32-byte compressed Pallas points, parallel to `ceremony_validators`). |
 
 ### Deal phase (`PrepareProposal` — auto-deal)
@@ -68,36 +60,28 @@ When a block proposer detects a PENDING round in REGISTERING status and is a cer
    - `threshold` — the value `t`
    - `verification_keys` — `VK_1 ... VK_n`
 
-In **legacy mode** (`n < 2`, `t = 0`): ECIES-encrypts the full `ea_sk` to the single validator as before. `threshold` and `verification_keys` are zero/empty.
-
 ### Ack phase (`PrepareProposal` — auto-ack)
 
 When a block proposer detects a PENDING round in DEALT status and has not yet acked:
 
 1. Find and decrypt the proposer's ECIES payload to recover the secret bytes.
 2. Parse the secret bytes as a Pallas scalar.
-3. **Threshold mode** (`round.Threshold > 0`):
-   - Find the validator's index `i` in `ceremony_validators`.
-   - Compute `s * G` and compare with `round.VerificationKeys[i]`.
-   - Reject (skip ack) if `s * G != VK_i` — the dealer sent an inconsistent share.
-   - Write the 32-byte share scalar to `<ea_sk_dir>/share.<hex(round_id)>`.
-4. **Legacy mode** (`round.Threshold == 0`):
-   - Verify `s * G == ea_pk`.
-   - Reject if mismatch.
-   - Write the 32-byte `ea_sk` scalar to `<ea_sk_dir>/ea_sk.<hex(round_id)>`.
-5. Compute `ack_signature = SHA256("ack" || ea_pk || validator_address)`.
-6. Inject `MsgAckExecutiveAuthorityKey`.
+3. Find the validator's index `i` in `ceremony_validators`.
+4. Compute `s * G` and compare with `round.VerificationKeys[i]`.
+5. Reject (skip ack) if `s * G != VK_i` — the dealer sent an inconsistent share.
+6. Write the 32-byte share scalar to `<ea_sk_dir>/share.<hex(round_id)>`.
+7. Compute `ack_signature = SHA256("ack" || ea_pk || validator_address)`.
+8. Inject `MsgAckExecutiveAuthorityKey`.
 
 The dealer acks through the same flow as every other validator — the deal handler does not write any key material to disk. The dealer's share is written when they are next the block proposer after DEALT status is set.
 
 ### On-disk key files
 
-| Mode | File | Contents |
-|---|---|---|
-| Threshold | `share.<hex(round_id)>` | 32-byte Pallas Fq scalar `f(i)` — the validator's Shamir share |
-| Legacy | `ea_sk.<hex(round_id)>` | 32-byte Pallas Fq scalar `ea_sk` — the full election authority key |
+| File | Contents |
+|---|---|
+| `share.<hex(round_id)>` | 32-byte Pallas Fq scalar `f(i)` — the validator's Shamir share |
 
-Both files are written mode `0600`. The tally injector reads whichever file is present for a given round.
+Files are written mode `0600`. The tally injector reads the share file for the round.
 
 ### ECIES encryption scheme
 
@@ -110,7 +94,7 @@ k   = SHA256(E_compressed || S.x)  (32-byte symmetric key)
 ct  = ChaCha20-Poly1305(k, nonce=0, plaintext)
 ```
 
-The plaintext is `share_i.Bytes()` (32 bytes) in threshold mode, or `ea_sk.Bytes()` (32 bytes) in legacy mode.
+The plaintext is `share_i.Bytes()` (32 bytes).
 
 ### Tally phase
 
@@ -118,15 +102,15 @@ After a round enters TALLYING, partial decryptions are collected and combined.
 
 #### Step 1: submit partial decryptions (`PrepareProposal`)
 
-When a validator is the block proposer and a TALLYING round with `Threshold > 0` exists, and the proposer has not yet submitted for that round:
+When a validator is the block proposer and a TALLYING round exists, and the proposer has not yet submitted for that round:
 
 1. Load `<ea_sk_dir>/share.<hex(round_id)>` from disk (written during ack phase).
 2. For each non-empty ElGamal accumulator `(C1, C2)` on-chain:
    - Compute `D_i = share_i * C1`.
 3. Inject `MsgSubmitPartialDecryption` with all `(proposal_id, vote_decision, D_i)` entries.
 
-**On-chain `MsgSubmitPartialDecryption` handler** (Step 1, no proof verification):
-- Validates round is TALLYING with `threshold > 0`.
+**On-chain `MsgSubmitPartialDecryption` handler**:
+- Validates round is TALLYING.
 - Validates `validator_index` is 1-based and matches `creator`.
 - Rejects duplicate submissions (one per validator per round).
 - Validates each entry: 32-byte `partial_decrypt`, valid `proposal_id` and `vote_decision`.
@@ -149,8 +133,6 @@ When the block proposer detects that `CountPartialDecryptionValidators >= thresh
 - Checks `C2 - combined == totalValue * G` by comparing compressed Pallas points.
 - On success, stores `TallyResult`, transitions round to FINALIZED.
 
-**Legacy mode** (threshold == 0): existing Chaum-Pedersen DLEQ proof path unchanged.
-
 #### KV storage layout for partial decryptions
 
 ```
@@ -165,12 +147,12 @@ Prefix scans:
 
 ### Security properties
 
-| Property | Legacy | Step 1 (TSS) |
-|---|---|---|
-| Who knows `ea_sk` | Every validator who acked | Dealer only (in memory, during deal block) |
-| Single non-dealer can decrypt | Yes | No |
-| Malicious validator can sabotage tally | N/A | No (DLEQ proof required per partial decryption) |
-| Malicious dealer can send bad shares | N/A | Yes (no polynomial consistency check, fixed in Step 3) |
+| Property | TSS |
+|---|---|
+| Who knows `ea_sk` | Dealer only (in memory, during deal block) |
+| Single non-dealer can decrypt | No |
+| Malicious validator can sabotage tally | No (DLEQ proof required per partial decryption) |
+| Malicious dealer can send bad shares | Yes (no polynomial consistency check, fixed in Step 3) |
 
 ## Roadmap
 

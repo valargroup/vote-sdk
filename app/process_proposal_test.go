@@ -9,9 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
-
 	abci "github.com/cometbft/cometbft/abci/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
 	"github.com/valargroup/vote-sdk/crypto/ecies"
@@ -271,8 +270,16 @@ func TestProcessProposalAckValidation(t *testing.T) {
 			name: "duplicate ack from same validator → reject",
 			setup: func() {
 				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
-				// Run PrepareProposal → FinalizeBlock to process the first ack.
-				app.NextBlockWithPrepareProposal()
+				// Manually add an ack entry so the round has already been acked by this validator.
+				ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+				kvStore := app.VoteKeeper().OpenKVStore(ctx)
+				round, _ := app.VoteKeeper().GetVoteRound(kvStore, currentRoundID)
+				round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
+					ValidatorAddress: valAddr,
+					AckSignature:     bytes.Repeat([]byte{0x01}, 32),
+				})
+				require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
+				app.NextBlock()
 			},
 			txs: func() [][]byte {
 				// Second ack from same validator.
@@ -455,137 +462,6 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 // Functional tests: PrepareProposal → ProcessProposal pipeline
 // ---------------------------------------------------------------------------
 
-// TestPrepareProposalThenProcessProposalAck verifies that the ack tx produced
-// by PrepareProposal is accepted by ProcessProposal (simulates a non-proposer
-// validator validating the proposer's injected ack).
-func TestPrepareProposalThenProcessProposalAck(t *testing.T) {
-	app, _, pallasPk, eaSk, eaPk := testutil.SetupTestAppWithPallasKey(t)
-
-	eaPkBytes := eaPk.Point.ToAffineCompressed()
-	eaSkBytes, err := elgamal.MarshalSecretKey(eaSk)
-	require.NoError(t, err)
-
-	valAddr := app.ValidatorOperAddr()
-
-	// ECIES-encrypt ea_sk to the validator's Pallas public key.
-	G := elgamal.PallasGenerator()
-	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
-	require.NoError(t, err)
-
-	validators := []*types.ValidatorPallasKey{
-		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-	}
-	payloads := []*types.DealerPayload{
-		{
-			ValidatorAddress: valAddr,
-			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-			Ciphertext:       env.Ciphertext,
-		},
-	}
-	roundID := app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
-
-	// Step 1: PrepareProposal should inject an ack tx.
-	ppResp := app.CallPrepareProposal()
-	require.NotEmpty(t, ppResp.Txs, "PrepareProposal should inject at least one tx")
-
-	// Verify the first tx is an ack.
-	require.Equal(t, voteapi.TagAckExecutiveAuthorityKey, ppResp.Txs[0][0],
-		"first injected tx should be an ack")
-
-	// Step 2: ProcessProposal should accept the block containing these txs.
-	procResp := app.CallProcessProposal(ppResp.Txs)
-	require.Equal(t, abci.ResponseProcessProposal_ACCEPT, procResp.Status,
-		"ProcessProposal should accept the block with the injected ack")
-
-	// Step 3: Deliver the block and verify ceremony reaches CONFIRMED.
-	app.NextBlockWithPrepareProposal()
-
-	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus,
-		"ceremony should be CONFIRMED after ack pipeline")
-}
-
-// TestPrepareProposalThenProcessProposalTally verifies that the tally tx
-// produced by PrepareProposal is accepted by ProcessProposal.
-func TestPrepareProposalThenProcessProposalTally(t *testing.T) {
-	app, pk, eaSkBytes := testutil.SetupTestAppWithEAKey(t)
-
-	// Create a voting session expiring soon.
-	voteEndTime := app.Time.Add(30 * time.Second)
-	setupMsg := &types.MsgCreateVotingSession{
-		Creator:           "sv1admin",
-		SnapshotHeight:    900,
-		SnapshotBlockhash: bytes.Repeat([]byte{0x9A}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0x9B}, 32),
-		VoteEndTime:       uint64(voteEndTime.Unix()),
-		NullifierImtRoot:  bytes.Repeat([]byte{0x0A}, 32),
-		NcRoot:            bytes.Repeat([]byte{0x0B}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
-		Proposals:         testutil.SampleProposals(),
-	}
-	roundID := app.SeedVotingSession(setupMsg)
-	app.WriteEaSkForRound(roundID, eaSkBytes)
-
-	// Delegate and reveal a share so there is tally data.
-	delegation := testutil.ValidDelegation(roundID, 0x10)
-	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
-	require.Equal(t, uint32(0), result.Code, "delegation should succeed")
-
-	anchorHeight := uint64(app.Height)
-
-	castVote := testutil.ValidCastVote(roundID, anchorHeight, 0x30)
-	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
-	require.Equal(t, uint32(0), result.Code, "cast vote should succeed")
-
-	revealAnchor := uint64(app.Height)
-
-	ct, err := elgamal.Encrypt(pk, 77, rand.Reader)
-	require.NoError(t, err)
-	encShare, err := elgamal.MarshalCiphertext(ct)
-	require.NoError(t, err)
-
-	revealMsg := testutil.ValidRevealShareReal(roundID, revealAnchor, 0x50, 1, 1, encShare)
-	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
-	require.Equal(t, uint32(0), result.Code, "reveal share should succeed")
-
-	// Advance to TALLYING.
-	app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
-
-	// Step 1: PrepareProposal should inject a tally tx.
-	ppResp := app.CallPrepareProposal()
-	require.NotEmpty(t, ppResp.Txs, "PrepareProposal should inject at least one tx")
-
-	// Verify the first tx is a tally.
-	require.Equal(t, voteapi.TagSubmitTally, ppResp.Txs[0][0],
-		"first injected tx should be a tally")
-
-	// Step 2: ProcessProposal should accept the block with the tally tx.
-	procResp := app.CallProcessProposal(ppResp.Txs)
-	require.Equal(t, abci.ResponseProcessProposal_ACCEPT, procResp.Status,
-		"ProcessProposal should accept the block with the injected tally")
-
-	// Step 3: Deliver the block and verify the round is FINALIZED.
-	app.NextBlockWithPrepareProposal()
-
-	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
-		"round should be FINALIZED after tally pipeline")
-
-	tallyResults, err := app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
-	require.NoError(t, err)
-	require.Len(t, tallyResults, 1)
-	require.Equal(t, uint64(77), tallyResults[0].TotalValue,
-		"decrypted tally should match encrypted value of 77")
-}
-
 // TestPrepareProposalIdempotentWhenNoInjection verifies that PrepareProposal
 // and ProcessProposal pass through mempool txs unchanged when no injection
 // conditions are met (ceremony CONFIRMED, no TALLYING rounds).
@@ -608,48 +484,3 @@ func TestPrepareProposalIdempotentWhenNoInjection(t *testing.T) {
 	require.Equal(t, abci.ResponseProcessProposal_ACCEPT, procResp.Status)
 }
 
-// TestPrepareProposalSkipsWhenAlreadyAcked verifies that PrepareProposal
-// does not inject a second ack if the validator has already acked.
-func TestPrepareProposalSkipsWhenAlreadyAcked(t *testing.T) {
-	app, _, pallasPk, eaSk, eaPk := testutil.SetupTestAppWithPallasKey(t)
-
-	eaPkBytes := eaPk.Point.ToAffineCompressed()
-	eaSkBytes, err := elgamal.MarshalSecretKey(eaSk)
-	require.NoError(t, err)
-
-	valAddr := app.ValidatorOperAddr()
-
-	G := elgamal.PallasGenerator()
-	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
-	require.NoError(t, err)
-
-	validators := []*types.ValidatorPallasKey{
-		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-	}
-	payloads := []*types.DealerPayload{
-		{
-			ValidatorAddress: valAddr,
-			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-			Ciphertext:       env.Ciphertext,
-		},
-	}
-	roundID := app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
-
-	// First block: auto-ack fires and moves ceremony to CONFIRMED.
-	app.NextBlockWithPrepareProposal()
-
-	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus)
-
-	// Second block: PrepareProposal should NOT inject anything (already acked / CONFIRMED).
-	ppResp := app.CallPrepareProposal()
-	for _, tx := range ppResp.Txs {
-		if len(tx) > 0 {
-			require.NotEqual(t, voteapi.TagAckExecutiveAuthorityKey, tx[0],
-				"should not inject a second ack after ceremony is CONFIRMED")
-		}
-	}
-}

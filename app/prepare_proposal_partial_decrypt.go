@@ -18,10 +18,10 @@ import (
 )
 
 // PartialDecryptPrepareProposalInjector returns a PrepareProposalInjector that
-// handles the partial decryption phase of threshold-mode tally.
+// handles the partial decryption phase of tally.
 //
-// When a round is in TALLYING state with Threshold > 0 and the block proposer
-// has not yet submitted a partial decryption for that round, it:
+// When a round is in TALLYING state and the block proposer has not yet
+// submitted a partial decryption for that round, it:
 //
 //  1. Loads the proposer's Shamir share from <eaSkDir>/share.<hex(round_id)>
 //  2. Finds the proposer's 1-based validator_index in ceremony_validators
@@ -30,9 +30,6 @@ import (
 //
 // If eaSkDir is empty, the share file is absent, or the proposer is not a
 // ceremony validator, injection is skipped gracefully.
-//
-// Legacy rounds (Threshold == 0) are ignored here; they are handled by the
-// existing TallyPrepareProposalHandler which decrypts with the full ea_sk.
 func PartialDecryptPrepareProposalInjector(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
@@ -74,17 +71,27 @@ func PartialDecryptPrepareProposalInjector(
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
-		// Prevent unbounded cache growth by evicting key cache entries for finalized rounds.
-		evictFinalizedSkEntries(kvStore, voteKeeper, shareCache, &shareCacheMu, logger)
+		// Evict share cache entries for finalized rounds to bound growth.
+		shareCacheMu.Lock()
+		for roundHex, share := range shareCache {
+			roundID, err := hex.DecodeString(roundHex)
+			if err != nil {
+				delete(shareCache, roundHex)
+				continue
+			}
+			r, err := voteKeeper.GetVoteRound(kvStore, roundID)
+			if err != nil || r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
+				zeroScalar(share.Scalar)
+				delete(shareCache, roundHex)
+			}
+		}
+		shareCacheMu.Unlock()
 
-		// Find the first TALLYING round in threshold mode.
+		// Find the first TALLYING round.
 		var tallyRound *types.VoteRound
 		if err := voteKeeper.IterateTallyingRounds(kvStore, func(round *types.VoteRound) bool {
-			if round.Threshold > 0 {
-				tallyRound = round
-				return true // stop at first match
-			}
-			return false
+			tallyRound = round
+			return true // stop at first match
 		}); err != nil {
 			logger.Error("PrepareProposal[partial-decrypt]: failed to iterate tallying rounds", "err", err)
 			return txs
