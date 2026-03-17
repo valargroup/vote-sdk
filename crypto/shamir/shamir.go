@@ -33,8 +33,8 @@ func Split(secret curvey.Scalar, t, n int) ([]Share, []curvey.Scalar, error) {
 	if secret == nil {
 		return nil, nil, fmt.Errorf("shamir: Split: secret must not be nil")
 	}
-	if t < 2 {
-		return nil, nil, fmt.Errorf("shamir: Split: threshold t must be >= 2, got %d", t)
+	if t < 1 {
+		return nil, nil, fmt.Errorf("shamir: Split: threshold t must be >= 1, got %d", t)
 	}
 	if n < t {
 		return nil, nil, fmt.Errorf("shamir: Split: n must be >= t, got n=%d t=%d", n, t)

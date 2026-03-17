@@ -114,8 +114,8 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 
 	// Validate threshold and verification keys.
 	nValidators := len(round.CeremonyValidators)
-	if msg.Threshold < 2 {
-		return nil, fmt.Errorf("%w: threshold must be >= 2 when n=%d, got %d",
+	if msg.Threshold < 1 {
+		return nil, fmt.Errorf("%w: threshold must be >= 1 when n=%d, got %d",
 			types.ErrInvalidThreshold, nValidators, msg.Threshold)
 	}
 	if len(msg.VerificationKeys) != nValidators {

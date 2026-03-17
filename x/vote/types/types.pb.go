@@ -284,7 +284,7 @@ type VoteRound struct {
 	// Threshold decryption fields (populated by MsgDealExecutiveAuthorityKey in threshold mode).
 	// threshold is the minimum number of partial decryptions required to reconstruct the tally.
 	// verification_keys holds VK_i = f(i)*G for each validator (same order as ceremony_validators).
-	Threshold        uint32   `protobuf:"varint,26,opt,name=threshold,proto3" json:"threshold,omitempty"`                                      // 0 = legacy single-key mode
+	Threshold        uint32   `protobuf:"varint,26,opt,name=threshold,proto3" json:"threshold,omitempty"`                                      // Minimum shares for reconstruction (always >= 2)
 	VerificationKeys [][]byte `protobuf:"bytes,27,rep,name=verification_keys,json=verificationKeys,proto3" json:"verification_keys,omitempty"` // 32-byte compressed Pallas points, one per ceremony validator
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -625,19 +625,20 @@ func (x *CommitmentTreeState) GetNextIndexAtRoot() uint64 {
 
 // GenesisState defines the vote module's genesis state.
 type GenesisState struct {
-	state             protoimpl.MessageState     `protogen:"open.v1"`
-	Rounds            []*VoteRound               `protobuf:"bytes,1,rep,name=rounds,proto3" json:"rounds,omitempty"`
-	TreeState         *CommitmentTreeState       `protobuf:"bytes,2,opt,name=tree_state,json=treeState,proto3" json:"tree_state,omitempty"`
-	CommitmentLeaves  []*CommitmentLeaf          `protobuf:"bytes,3,rep,name=commitment_leaves,json=commitmentLeaves,proto3" json:"commitment_leaves,omitempty"`
-	Nullifiers        []*NullifierEntry          `protobuf:"bytes,4,rep,name=nullifiers,proto3" json:"nullifiers,omitempty"`
-	VoteManager       string                     `protobuf:"bytes,5,opt,name=vote_manager,json=voteManager,proto3" json:"vote_manager,omitempty"`
-	TallyResults      []*TallyResult             `protobuf:"bytes,6,rep,name=tally_results,json=tallyResults,proto3" json:"tally_results,omitempty"`
-	PallasKeys        []*ValidatorPallasKey      `protobuf:"bytes,7,rep,name=pallas_keys,json=pallasKeys,proto3" json:"pallas_keys,omitempty"`
-	TallyAccumulators []*GenesisTallyAccumulator `protobuf:"bytes,8,rep,name=tally_accumulators,json=tallyAccumulators,proto3" json:"tally_accumulators,omitempty"`
-	ShareCounts       []*GenesisShareCount       `protobuf:"bytes,9,rep,name=share_counts,json=shareCounts,proto3" json:"share_counts,omitempty"`
-	CommitmentRoots   []*GenesisCommitmentRoot   `protobuf:"bytes,10,rep,name=commitment_roots,json=commitmentRoots,proto3" json:"commitment_roots,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                 protoimpl.MessageState     `protogen:"open.v1"`
+	Rounds                []*VoteRound               `protobuf:"bytes,1,rep,name=rounds,proto3" json:"rounds,omitempty"`
+	TreeState             *CommitmentTreeState       `protobuf:"bytes,2,opt,name=tree_state,json=treeState,proto3" json:"tree_state,omitempty"`
+	CommitmentLeaves      []*CommitmentLeaf          `protobuf:"bytes,3,rep,name=commitment_leaves,json=commitmentLeaves,proto3" json:"commitment_leaves,omitempty"`
+	Nullifiers            []*NullifierEntry          `protobuf:"bytes,4,rep,name=nullifiers,proto3" json:"nullifiers,omitempty"`
+	VoteManager           string                     `protobuf:"bytes,5,opt,name=vote_manager,json=voteManager,proto3" json:"vote_manager,omitempty"`
+	TallyResults          []*TallyResult             `protobuf:"bytes,6,rep,name=tally_results,json=tallyResults,proto3" json:"tally_results,omitempty"`
+	PallasKeys            []*ValidatorPallasKey      `protobuf:"bytes,7,rep,name=pallas_keys,json=pallasKeys,proto3" json:"pallas_keys,omitempty"`
+	TallyAccumulators     []*GenesisTallyAccumulator `protobuf:"bytes,8,rep,name=tally_accumulators,json=tallyAccumulators,proto3" json:"tally_accumulators,omitempty"`
+	ShareCounts           []*GenesisShareCount       `protobuf:"bytes,9,rep,name=share_counts,json=shareCounts,proto3" json:"share_counts,omitempty"`
+	CommitmentRoots       []*GenesisCommitmentRoot   `protobuf:"bytes,10,rep,name=commitment_roots,json=commitmentRoots,proto3" json:"commitment_roots,omitempty"`
+	MinCeremonyValidators uint32                     `protobuf:"varint,11,opt,name=min_ceremony_validators,json=minCeremonyValidators,proto3" json:"min_ceremony_validators,omitempty"` // Minimum eligible validators to create a voting round (default: 1)
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *GenesisState) Reset() {
@@ -738,6 +739,13 @@ func (x *GenesisState) GetCommitmentRoots() []*GenesisCommitmentRoot {
 		return x.CommitmentRoots
 	}
 	return nil
+}
+
+func (x *GenesisState) GetMinCeremonyValidators() uint32 {
+	if x != nil {
+		return x.MinCeremonyValidators
+	}
+	return 0
 }
 
 // GenesisCommitmentRoot is a commitment tree root stored at a specific block height.
@@ -1327,7 +1335,7 @@ type CeremonyState struct {
 	Dealer           string                 `protobuf:"bytes,6,opt,name=dealer,proto3" json:"dealer,omitempty"`                                              // Validator address of the dealer
 	PhaseStart       uint64                 `protobuf:"varint,7,opt,name=phase_start,json=phaseStart,proto3" json:"phase_start,omitempty"`                   // Unix seconds when current phase started
 	PhaseTimeout     uint64                 `protobuf:"varint,8,opt,name=phase_timeout,json=phaseTimeout,proto3" json:"phase_timeout,omitempty"`             // Timeout in seconds for current phase
-	Threshold        uint32                 `protobuf:"varint,9,opt,name=threshold,proto3" json:"threshold,omitempty"`                                       // Minimum shares for reconstruction (0 = legacy single-key mode)
+	Threshold        uint32                 `protobuf:"varint,9,opt,name=threshold,proto3" json:"threshold,omitempty"`                                       // Minimum shares for reconstruction (always >= 2)
 	VerificationKeys [][]byte               `protobuf:"bytes,10,rep,name=verification_keys,json=verificationKeys,proto3" json:"verification_keys,omitempty"` // VK_i = f(i)*G per validator (32-byte compressed Pallas points)
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -1672,7 +1680,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"next_index\x18\x01 \x01(\x04R\tnextIndex\x12\x12\n" +
 	"\x04root\x18\x02 \x01(\fR\x04root\x12\x16\n" +
 	"\x06height\x18\x03 \x01(\x04R\x06height\x12+\n" +
-	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xf6\x04\n" +
+	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xae\x05\n" +
 	"\fGenesisState\x12+\n" +
 	"\x06rounds\x18\x01 \x03(\v2\x13.svote.v1.VoteRoundR\x06rounds\x12<\n" +
 	"\n" +
@@ -1688,7 +1696,8 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x12tally_accumulators\x18\b \x03(\v2!.svote.v1.GenesisTallyAccumulatorR\x11tallyAccumulators\x12>\n" +
 	"\fshare_counts\x18\t \x03(\v2\x1b.svote.v1.GenesisShareCountR\vshareCounts\x12J\n" +
 	"\x10commitment_roots\x18\n" +
-	" \x03(\v2\x1f.svote.v1.GenesisCommitmentRootR\x0fcommitmentRoots\"C\n" +
+	" \x03(\v2\x1f.svote.v1.GenesisCommitmentRootR\x0fcommitmentRoots\x126\n" +
+	"\x17min_ceremony_validators\x18\v \x01(\rR\x15minCeremonyValidators\"C\n" +
 	"\x15GenesisCommitmentRoot\x12\x16\n" +
 	"\x06height\x18\x01 \x01(\x04R\x06height\x12\x12\n" +
 	"\x04root\x18\x02 \x01(\fR\x04root\"\x9a\x01\n" +

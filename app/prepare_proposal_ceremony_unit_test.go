@@ -16,6 +16,7 @@ func TestThresholdForN(t *testing.T) {
 		n    int
 		want int
 	}{
+		{n: 1, want: 1},
 		{n: 2, want: 2},
 		{n: 3, want: 2},
 		{n: 4, want: 2},
@@ -32,15 +33,15 @@ func TestThresholdForN(t *testing.T) {
 	}
 }
 
-func TestThresholdForN_PanicsBelow2(t *testing.T) {
+func TestThresholdForN_PanicsBelow1(t *testing.T) {
 	require.Panics(t, func() { thresholdForN(0) })
-	require.Panics(t, func() { thresholdForN(1) })
+	require.Panics(t, func() { thresholdForN(-1) })
 }
 
 func TestThresholdForN_Invariants(t *testing.T) {
-	for n := 2; n <= 50; n++ {
+	for n := 1; n <= 50; n++ {
 		got := thresholdForN(n)
-		require.GreaterOrEqual(t, got, 2, "n=%d: t must be >= 2", n)
+		require.GreaterOrEqual(t, got, 1, "n=%d: t must be >= 1", n)
 		require.LessOrEqual(t, got, n, "n=%d: t must not exceed n", n)
 	}
 }

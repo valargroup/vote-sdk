@@ -87,7 +87,8 @@ message GenesisState {
   repeated ValidatorPallasKey      pallas_keys          = 7;
   repeated GenesisTallyAccumulator tally_accumulators   = 8;
   repeated GenesisShareCount       share_counts         = 9;
-  repeated GenesisCommitmentRoot   commitment_roots     = 10;
+  repeated GenesisCommitmentRoot   commitment_roots          = 10;
+  uint32                           min_ceremony_validators   = 11; // Minimum eligible validators to create a voting round (default: 1)
 }
 
 // GenesisCommitmentRoot is a commitment tree root stored at a specific block height.
