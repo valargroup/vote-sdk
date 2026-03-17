@@ -120,55 +120,6 @@ func TestCeremonyDealThresholdMode(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// CeremonyDealPrepareProposalHandler — legacy mode (n=1)
-//
-// With only one validator the handler falls back to legacy mode:
-//   - Threshold = 0
-//   - FeldmanCommitments is empty
-//   - ea_sk.<hex(round_id)> is written to disk (not share.<…>)
-// ---------------------------------------------------------------------------
-
-func TestCeremonyDealLegacyMode(t *testing.T) {
-	ta, pallasSk, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-	require.NotEmpty(t, ta.EaSkDir)
-	_ = pallasSk // held by app via pallas_sk_path
-
-	dealerAddr := ta.ValidatorOperAddr()
-
-	validators := []*types.ValidatorPallasKey{
-		{ValidatorAddress: dealerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-	}
-
-	roundID := ta.SeedRegisteringCeremony(validators)
-
-	resp := ta.CallPrepareProposal()
-	require.Len(t, resp.Txs, 1, "expected one injected deal tx")
-
-	tag, protoMsg, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
-	require.NoError(t, err)
-	require.Equal(t, voteapi.TagDealExecutiveAuthorityKey, tag)
-
-	deal, ok := protoMsg.(*types.MsgDealExecutiveAuthorityKey)
-	require.True(t, ok)
-
-	// n=1 → legacy mode
-	require.EqualValues(t, 0, deal.Threshold, "threshold should be 0 in legacy mode")
-	require.Empty(t, deal.FeldmanCommitments, "feldman_commitments must be empty in legacy mode")
-	require.Len(t, deal.Payloads, 1)
-
-	// The deal handler must NOT write any key files — ack handler does that.
-	eaSkPath := filepath.Join(ta.EaSkDir, "ea_sk."+hex.EncodeToString(roundID))
-	_, statErr := os.Stat(eaSkPath)
-	require.True(t, os.IsNotExist(statErr),
-		"deal handler must not write ea_sk file — ack handler does that")
-
-	sharePath := filepath.Join(ta.EaSkDir, "share."+hex.EncodeToString(roundID))
-	_, statErr2 := os.Stat(sharePath)
-	require.True(t, os.IsNotExist(statErr2),
-		"deal handler must not write share file in legacy mode")
-}
-
-// ---------------------------------------------------------------------------
 // CeremonyDealPrepareProposalHandler — no pallas_sk_path configured
 //
 // Without a Pallas secret key the deal handler must skip injection silently.
@@ -274,44 +225,6 @@ func TestCeremonyDealThresholdStoredOnRound(t *testing.T) {
 		require.Equal(t, deal.FeldmanCommitments[j], c,
 			"round.FeldmanCommitments[%d] must match deal message", j)
 	}
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
-}
-
-// ---------------------------------------------------------------------------
-// DealExecutiveAuthorityKey — legacy mode round-trip (n=1)
-//
-// Verifies that Threshold=0 and empty FeldmanCommitments are stored correctly
-// through the handler for the legacy single-key path.
-// ---------------------------------------------------------------------------
-
-func TestCeremonyDealLegacyStoredOnRound(t *testing.T) {
-	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-
-	dealerAddr := ta.ValidatorOperAddr()
-
-	validators := []*types.ValidatorPallasKey{
-		{ValidatorAddress: dealerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-	}
-
-	roundID := ta.SeedRegisteringCeremony(validators)
-
-	resp := ta.CallPrepareProposal()
-	require.Len(t, resp.Txs, 1)
-
-	txResult := ta.DeliverVoteTx(resp.Txs[0])
-	require.EqualValues(t, 0, txResult.Code,
-		"legacy deal tx must succeed: %s", txResult.Log)
-
-	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
-	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
-
-	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
-
-	require.EqualValues(t, 0, round.Threshold,
-		"legacy mode must have Threshold=0")
-	require.Empty(t, round.FeldmanCommitments,
-		"legacy mode must have empty FeldmanCommitments")
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 }
 
@@ -537,57 +450,3 @@ func TestCeremonyAckThresholdRejectsBadShare(t *testing.T) {
 	require.Empty(t, resp.Txs, "ack must be rejected when share_i * G != VK_i")
 }
 
-// ---------------------------------------------------------------------------
-// CeremonyAckPrepareProposalHandler — legacy mode
-//
-// The ack handler must still verify ea_sk * G == ea_pk and write ea_sk to
-// ea_sk.<round_id> when round.Threshold == 0.
-// ---------------------------------------------------------------------------
-
-func TestCeremonyAckLegacyMode(t *testing.T) {
-	ta, pallasSk, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-	require.NotEmpty(t, ta.EaSkDir)
-	_ = pallasSk
-
-	proposerAddr := ta.ValidatorOperAddr()
-	G := elgamal.PallasGenerator()
-
-	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
-	eaSkBytes, err := elgamal.MarshalSecretKey(eaSk)
-	require.NoError(t, err)
-
-	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
-	require.NoError(t, err)
-
-	payloads := []*types.DealerPayload{{
-		ValidatorAddress: proposerAddr,
-		EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-		Ciphertext:       env.Ciphertext,
-	}}
-	validators := []*types.ValidatorPallasKey{{
-		ValidatorAddress: proposerAddr,
-		PallasPk:         pallasPk.Point.ToAffineCompressed(),
-	}}
-
-	// Threshold == 0 → legacy mode (SeedDealtCeremony, no VK fields).
-	eaPkBytes := eaPk.Point.ToAffineCompressed()
-	roundID := ta.SeedDealtCeremony(pallasPk.Point.ToAffineCompressed(), eaPkBytes, payloads, validators)
-
-	resp := ta.CallPrepareProposal()
-	require.Len(t, resp.Txs, 1, "expected one injected ack tx")
-
-	tag, _, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
-	require.NoError(t, err)
-	require.Equal(t, voteapi.TagAckExecutiveAuthorityKey, tag)
-
-	// ea_sk.<round_id> must exist.
-	eaSkPath := filepath.Join(ta.EaSkDir, "ea_sk."+hex.EncodeToString(roundID))
-	written, err := os.ReadFile(eaSkPath)
-	require.NoError(t, err, "ea_sk file should have been written in legacy mode")
-	require.Equal(t, eaSkBytes, written, "written ea_sk must match the original")
-
-	// share.<round_id> must NOT exist.
-	sharePath := filepath.Join(ta.EaSkDir, "share."+hex.EncodeToString(roundID))
-	_, statErr := os.Stat(sharePath)
-	require.True(t, os.IsNotExist(statErr), "share file must not exist in legacy mode")
-}

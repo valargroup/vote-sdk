@@ -74,13 +74,9 @@ func ComposedPrepareProposalHandler(
 // TallyPrepareProposalHandler returns a PrepareProposalHandler that injects
 // MsgSubmitTally for any round in TALLYING state.
 //
-// Threshold mode (round.Threshold > 0): reads stored partial decryptions from
-// KV, waits until at least round.Threshold validators have submitted, then
-// performs Lagrange interpolation in the exponent and BSGS. No DLEQ proof is
-// generated (Step 1 trust model).
-//
-// Legacy mode (round.Threshold == 0): loads ea_sk from
-// <eaSkDir>/ea_sk.<hex(round_id)> and decrypts directly with a DLEQ proof.
+// Reads stored partial decryptions from KV, waits until at least
+// round.Threshold validators have submitted, then performs Lagrange
+// interpolation in the exponent and BSGS.
 func TallyPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
@@ -88,31 +84,9 @@ func TallyPrepareProposalHandler(
 	logger log.Logger,
 ) sdk.PrepareProposalHandler {
 	var (
-		// Per-round ea_sk cache (legacy mode only): round_id_hex -> secret key.
-		skCache   = make(map[string]*elgamal.SecretKey)
-		skCacheMu sync.Mutex
-
 		bsgOnce sync.Once
 		bsgs    *elgamal.BSGSTable
 	)
-
-	loadSkForRound := func(roundID []byte) (*elgamal.SecretKey, error) {
-		roundHex := hex.EncodeToString(roundID)
-
-		skCacheMu.Lock()
-		defer skCacheMu.Unlock()
-
-		if sk, ok := skCache[roundHex]; ok {
-			return sk, nil
-		}
-
-		sk, err := loadEaSkForRound(eaSkDir, roundID)
-		if err != nil {
-			return nil, err
-		}
-		skCache[roundHex] = sk
-		return sk, nil
-	}
 
 	loadBSGS := func() *elgamal.BSGSTable {
 		bsgOnce.Do(func() {
@@ -124,7 +98,6 @@ func TallyPrepareProposalHandler(
 	}
 
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
-		// Start with the transactions from CometBFT (NoOpMempool passes them through).
 		txs := req.Txs
 
 		if eaSkDir == "" {
@@ -138,9 +111,6 @@ func TallyPrepareProposalHandler(
 		}
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
-
-		// Prevent unbounded cache growth by evicting key cache entries for finalized rounds.
-		evictFinalizedSkEntries(kvStore, voteKeeper, skCache, &skCacheMu, logger)
 
 		// Find the first round in TALLYING state. We limit to one round per block
 		// to bound PrepareProposal latency (BSGS decryption is expensive).
@@ -159,53 +129,35 @@ func TallyPrepareProposalHandler(
 
 		var entries []*types.TallyEntry
 
-		if tallyRound.Threshold > 0 {
-			// Check whether any votes were cast (non-empty tally accumulators).
-			hasAccumulators, err := roundHasAccumulators(kvStore, voteKeeper, tallyRound)
+		// Check whether any votes were cast (non-empty tally accumulators).
+		hasAccumulators, err := roundHasAccumulators(kvStore, voteKeeper, tallyRound)
+		if err != nil {
+			logger.Error("PrepareProposal: failed to check tally accumulators", "err", err)
+			return &abci.ResponsePrepareProposal{Txs: txs}, nil
+		}
+
+		if hasAccumulators {
+			validatorCount, err := voteKeeper.CountPartialDecryptionValidators(kvStore, tallyRound.VoteRoundId)
 			if err != nil {
-				logger.Error("PrepareProposal: failed to check tally accumulators", "err", err)
+				logger.Error("PrepareProposal: failed to count partial decryptions", "err", err)
+				return &abci.ResponsePrepareProposal{Txs: txs}, nil
+			}
+			if validatorCount < int(tallyRound.Threshold) {
+				logger.Info("PrepareProposal: waiting for threshold partial decryptions",
+					"round", hex.EncodeToString(tallyRound.VoteRoundId),
+					"have", validatorCount, "need", tallyRound.Threshold)
 				return &abci.ResponsePrepareProposal{Txs: txs}, nil
 			}
 
-			if hasAccumulators {
-				// Threshold mode: wait until t validators have submitted partial decryptions.
-				validatorCount, err := voteKeeper.CountPartialDecryptionValidators(kvStore, tallyRound.VoteRoundId)
-				if err != nil {
-					logger.Error("PrepareProposal: failed to count partial decryptions", "err", err)
-					return &abci.ResponsePrepareProposal{Txs: txs}, nil
-				}
-				if validatorCount < int(tallyRound.Threshold) {
-					logger.Info("PrepareProposal: waiting for threshold partial decryptions",
-						"round", hex.EncodeToString(tallyRound.VoteRoundId),
-						"have", validatorCount, "need", tallyRound.Threshold)
-					return &abci.ResponsePrepareProposal{Txs: txs}, nil
-				}
-
-				entries, err = decryptRoundTalliesThreshold(kvStore, voteKeeper, tallyRound, loadBSGS())
-				if err != nil {
-					logger.Error("PrepareProposal: threshold tally decryption failed",
-						"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
-					return &abci.ResponsePrepareProposal{Txs: txs}, nil
-				}
-			} else {
-				logger.Info("PrepareProposal: no votes cast, finalizing with empty tally",
-					"round", hex.EncodeToString(tallyRound.VoteRoundId))
+			entries, err = decryptRoundTalliesThreshold(kvStore, voteKeeper, tallyRound, loadBSGS())
+			if err != nil {
+				logger.Error("PrepareProposal: threshold tally decryption failed",
+					"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
+				return &abci.ResponsePrepareProposal{Txs: txs}, nil
 			}
 		} else {
-			// Legacy mode: decrypt with the full ea_sk loaded from disk.
-			eaSk, err := loadSkForRound(tallyRound.VoteRoundId)
-			if err != nil {
-				logger.Warn("PrepareProposal: no EA key for round, skipping tally",
-					"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
-				return &abci.ResponsePrepareProposal{Txs: txs}, nil
-			}
-
-			entries, err = decryptRoundTallies(kvStore, voteKeeper, tallyRound, eaSk, loadBSGS())
-			if err != nil {
-				logger.Error("PrepareProposal: failed to decrypt tally",
-					"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
-				return &abci.ResponsePrepareProposal{Txs: txs}, nil
-			}
+			logger.Info("PrepareProposal: no votes cast, finalizing with empty tally",
+				"round", hex.EncodeToString(tallyRound.VoteRoundId))
 		}
 
 		msg := &types.MsgSubmitTally{
@@ -223,64 +175,11 @@ func TallyPrepareProposalHandler(
 
 		logger.Info("PrepareProposal: injecting MsgSubmitTally",
 			"round", hex.EncodeToString(tallyRound.VoteRoundId),
-			"entries", len(entries),
-			"threshold_mode", tallyRound.Threshold > 0)
+			"entries", len(entries))
 		txs = append([][]byte{txBytes}, txs...)
 
 		return &abci.ResponsePrepareProposal{Txs: txs}, nil
 	}
-}
-
-// decryptRoundTallies decrypts all accumulated ciphertexts for a round and
-// returns the corresponding TallyEntry slice.
-func decryptRoundTallies(
-	kvStore store.KVStore,
-	voteKeeper *votekeeper.Keeper,
-	round *types.VoteRound,
-	sk *elgamal.SecretKey,
-	bsgs *elgamal.BSGSTable,
-) ([]*types.TallyEntry, error) {
-	var entries []*types.TallyEntry
-
-	for proposalIdx := range round.Proposals {
-		proposalID := round.Proposals[proposalIdx].Id
-
-		tallyMap, err := voteKeeper.GetProposalTally(kvStore, round.VoteRoundId, proposalID)
-		if err != nil {
-			return nil, err
-		}
-
-		for decision, ctBytes := range tallyMap {
-			ct, err := elgamal.UnmarshalCiphertext(ctBytes)
-			if err != nil {
-				return nil, err
-			}
-
-			// Decrypt: C2 - sk*C1 = v*G
-			vG := elgamal.DecryptToPoint(sk, ct)
-
-			// Solve discrete log: v*G → v
-			totalValue, err := bsgs.Solve(vG)
-			if err != nil {
-				return nil, err
-			}
-
-			// Generate DLEQ proof that the decryption is correct.
-			proof, err := elgamal.GenerateDLEQProof(sk, ct, totalValue)
-			if err != nil {
-				return nil, fmt.Errorf("DLEQ proof generation failed: %w", err)
-			}
-
-			entries = append(entries, &types.TallyEntry{
-				ProposalId:      proposalID,
-				VoteDecision:    decision,
-				TotalValue:      totalValue,
-				DecryptionProof: proof,
-			})
-		}
-	}
-
-	return entries, nil
 }
 
 // decryptRoundTalliesThreshold decrypts all accumulated ciphertexts for a
@@ -368,34 +267,6 @@ func decryptRoundTalliesThreshold(
 	}
 
 	return entries, nil
-}
-
-// evictFinalizedSkEntries removes secret keys from the cache for rounds that
-// have been finalized (or no longer exist). This bounds cache growth and limits
-// exposure of old key material.
-func evictFinalizedSkEntries(
-	kvStore store.KVStore,
-	voteKeeper *votekeeper.Keeper,
-	cache map[string]*elgamal.SecretKey,
-	mu *sync.Mutex,
-	logger log.Logger,
-) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	for roundHex, sk := range cache {
-		roundID, err := hex.DecodeString(roundHex)
-		if err != nil {
-			delete(cache, roundHex)
-			continue
-		}
-		round, err := voteKeeper.GetVoteRound(kvStore, roundID)
-		if err != nil || round.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
-			zeroScalar(sk.Scalar)
-			delete(cache, roundHex)
-			logger.Debug("PrepareProposal: evicted cached sk", "round", roundHex)
-		}
-	}
 }
 
 // roundHasAccumulators reports whether any (proposal, decision) tally

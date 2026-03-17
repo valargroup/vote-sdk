@@ -73,8 +73,13 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 	if err != nil {
 		return nil, err
 	}
-	if len(eligible) == 0 {
-		return nil, fmt.Errorf("no validators have registered Pallas keys")
+	minVal, err := ms.k.GetMinCeremonyValidators(kvStore)
+	if err != nil {
+		return nil, err
+	}
+	if uint32(len(eligible)) < minVal {
+		return nil, fmt.Errorf("%w: at least %d validators with registered Pallas keys required, got %d",
+			types.ErrInsufficientValidators, minVal, len(eligible))
 	}
 
 	// Assign each validator their immutable 1-based Shamir evaluation point

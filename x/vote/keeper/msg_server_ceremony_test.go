@@ -121,28 +121,25 @@ func (s *MsgServerTestSuite) createPendingRoundWithValidators(n int) (roundID []
 	return
 }
 
-// dealPendingRound creates a PENDING round with n validators, deals, and
-// returns (roundID, validator addrs). The round is left in DEALT status.
-// Threshold mode is used automatically when n >= 2.
+// dealPendingRound creates a PENDING round with n validators (n >= 2), deals,
+// and returns (roundID, validator addrs). The round is left in DEALT status.
 func (s *MsgServerTestSuite) dealPendingRound(n int) (roundID []byte, addrs []string) {
 	roundID, addrs, _ = s.createPendingRoundWithValidators(n)
 	s.setBlockProposer(addrs[0])
-	msg := &types.MsgDealExecutiveAuthorityKey{
-		Creator:     addrs[0],
-		VoteRoundId: roundID,
-		EaPk:        testPallasPK(),
-		Payloads:    makePayloads(addrs),
+	t := (n + 1) / 2
+	if t < 2 {
+		t = 2
 	}
-	if n >= 2 {
-		t := (n + 1) / 2 // ceil(n/2) — matches thresholdForN
-		if t < 2 {
-			t = 2
-		}
-		msg.Threshold = uint32(t)
-		msg.FeldmanCommitments = make([][]byte, t)
-		for i := range msg.FeldmanCommitments {
-			msg.FeldmanCommitments[i] = testPallasPK()
-		}
+	msg := &types.MsgDealExecutiveAuthorityKey{
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		EaPk:               testPallasPK(),
+		Payloads:           makePayloads(addrs),
+		Threshold:          uint32(t),
+		FeldmanCommitments: make([][]byte, t),
+	}
+	for i := range msg.FeldmanCommitments {
+		msg.FeldmanCommitments[i] = testPallasPK()
 	}
 	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, msg)
 	s.Require().NoError(err)
@@ -515,7 +512,7 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 			errContains: "invalid pallas point",
 		},
 		{
-			name: "n>=2: threshold < 2",
+			name: "threshold < 1 rejected",
 			setup: func() ([]byte, []string) {
 				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
 				return roundID, addrs
@@ -526,8 +523,8 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 					VoteRoundId:        roundID,
 					EaPk:               testPallasPK(),
 					Payloads:           makePayloads(addrs),
-					Threshold:          1,
-					FeldmanCommitments: [][]byte{testPallasPK()},
+					Threshold:          0,
+					FeldmanCommitments: [][]byte{testPallasPK(), testPallasPK()},
 				}
 			},
 			errContains: "invalid threshold",
@@ -570,41 +567,6 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 				}
 			},
 			errContains: "invalid pallas point",
-		},
-		{
-			name: "n==1: threshold must be 0",
-			setup: func() ([]byte, []string) {
-				roundID, addrs, _ := s.createPendingRoundWithValidators(1)
-				return roundID, addrs
-			},
-			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
-				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:     "dealer1",
-					VoteRoundId: roundID,
-					EaPk:        testPallasPK(),
-					Payloads:    makePayloads(addrs),
-					Threshold:   1,
-				}
-			},
-			errContains: "invalid threshold",
-		},
-		{
-			name: "n==1: feldman_commitments must be empty",
-			setup: func() ([]byte, []string) {
-				roundID, addrs, _ := s.createPendingRoundWithValidators(1)
-				return roundID, addrs
-			},
-			msg: func(roundID []byte, addrs []string) *types.MsgDealExecutiveAuthorityKey {
-				return &types.MsgDealExecutiveAuthorityKey{
-					Creator:            "dealer1",
-					VoteRoundId:        roundID,
-					EaPk:               testPallasPK(),
-					Payloads:           makePayloads(addrs),
-					Threshold:          0,
-					FeldmanCommitments: [][]byte{testPallasPK()},
-				}
-			},
-			errContains: "invalid threshold",
 		},
 	}
 
@@ -757,7 +719,7 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 		{
 			name: "ceremony already CONFIRMED (round ACTIVE)",
 			setup: func() ([]byte, []string) {
-				roundID, addrs := s.dealPendingRound(1)
+				roundID, addrs := s.dealPendingRound(2)
 				kv := s.keeper.OpenKVStore(s.ctx)
 				round, _ := s.keeper.GetVoteRound(kv, roundID)
 				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED

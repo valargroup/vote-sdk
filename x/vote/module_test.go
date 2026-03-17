@@ -302,16 +302,6 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_PENDING,
 		},
 		{
-			// Threshold=0 (legacy single-validator mode): 1/2 ack quorum applies.
-			// 2 of 3 acked satisfies HalfAcked → CONFIRMED + ACTIVE.
-			name: "DEALT + threshold=0 (legacy) + 1/2 acked -> CONFIRMED + ACTIVE",
-			setup: func() {
-				seedDealtRound(2) // 2 of 3 acked, Threshold=0
-			},
-			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
-			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
-		},
-		{
 			name: "DEALT + no timeout yet (block_time < deadline)",
 			setup: func() {
 				seedDealtRound(0)

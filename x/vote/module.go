@@ -500,7 +500,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			// TSS threshold (ceil(n/2)), so this branch should never trigger
 			// with a correctly-computed threshold. It guards against a dealer
 			// that published an unusually high threshold value.
-			if round.Threshold > 0 && nAcks < int(round.Threshold) {
+			if nAcks < int(round.Threshold) {
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 					fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, %d stripped, remaining %d < threshold %d)",
 						nAcks, nVals, stripped, nAcks, round.Threshold))
@@ -586,7 +586,8 @@ const DefaultVoteManagerAddress = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {
 	gs := &types.GenesisState{
-		VoteManager: DefaultVoteManagerAddress,
+		VoteManager:           DefaultVoteManagerAddress,
+		MinCeremonyValidators: 1,
 	}
 	bz, err := json.Marshal(gs)
 	if err != nil {

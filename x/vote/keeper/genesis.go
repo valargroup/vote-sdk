@@ -42,6 +42,15 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 		}
 	}
 
+	// Restore min ceremony validators (default 1 if unset).
+	minVal := genesis.MinCeremonyValidators
+	if minVal == 0 {
+		minVal = 1
+	}
+	if err := k.SetMinCeremonyValidators(kvStore, minVal); err != nil {
+		return err
+	}
+
 	// Restore nullifiers (scoped by type + round).
 	for _, entry := range genesis.Nullifiers {
 		nfType := types.NullifierType(entry.NullifierType)
@@ -119,6 +128,13 @@ func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, erro
 	if vm != nil {
 		gs.VoteManager = vm.Address
 	}
+
+	// Min ceremony validators (singleton).
+	minVal, err := k.GetMinCeremonyValidators(kvStore)
+	if err != nil {
+		return nil, err
+	}
+	gs.MinCeremonyValidators = minVal
 
 	// Vote rounds (0x04 prefix).
 	if err := k.IterateAllRounds(kvStore, func(round *types.VoteRound) bool {

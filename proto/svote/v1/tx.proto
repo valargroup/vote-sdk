@@ -133,7 +133,7 @@ message MsgDealExecutiveAuthorityKey {
   bytes                  ea_pk                 = 2; // Executive authority public key (Pallas, 32 bytes)
   repeated DealerPayload payloads              = 3; // One ECIES envelope per registered validator
   bytes                  vote_round_id         = 4; // Target voting round (per-round ceremony)
-  uint32                 threshold             = 5; // Minimum shares required to reconstruct (t). 0 = legacy single-key mode.
+  uint32                 threshold             = 5; // Minimum shares required to reconstruct (t). Always >= 1.
   repeated bytes         feldman_commitments   = 6; // C_j = a_j*G, t compressed Pallas points (32 bytes each)
 }
 

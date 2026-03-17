@@ -114,33 +114,22 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 
 	// Validate threshold and Feldman commitments.
 	nValidators := len(round.CeremonyValidators)
-	if nValidators >= 2 {
-		if msg.Threshold < 2 {
-			return nil, fmt.Errorf("%w: threshold must be >= 2 when n=%d, got %d",
-				types.ErrInvalidThreshold, nValidators, msg.Threshold)
-		}
-		if int(msg.Threshold) > nValidators {
-			return nil, fmt.Errorf("%w: threshold %d exceeds validator count %d",
-				types.ErrInvalidThreshold, msg.Threshold, nValidators)
-		}
-		if len(msg.FeldmanCommitments) != int(msg.Threshold) {
-			return nil, fmt.Errorf("%w: expected %d Feldman commitments (one per polynomial coefficient), got %d",
-				types.ErrInvalidThreshold, msg.Threshold, len(msg.FeldmanCommitments))
-		}
-		for i, c := range msg.FeldmanCommitments {
-			if _, err := elgamal.UnmarshalPublicKey(c); err != nil {
-				return nil, fmt.Errorf("%w: feldman_commitment[%d]: %v",
-					types.ErrInvalidPallasPoint, i, err)
-			}
-		}
-	} else {
-		if msg.Threshold != 0 {
-			return nil, fmt.Errorf("%w: threshold must be 0 when n=%d, got %d",
-				types.ErrInvalidThreshold, nValidators, msg.Threshold)
-		}
-		if len(msg.FeldmanCommitments) != 0 {
-			return nil, fmt.Errorf("%w: feldman_commitments must be empty when n=%d, got %d",
-				types.ErrInvalidThreshold, nValidators, len(msg.FeldmanCommitments))
+	if msg.Threshold < 1 {
+		return nil, fmt.Errorf("%w: threshold must be >= 1 when n=%d, got %d",
+			types.ErrInvalidThreshold, nValidators, msg.Threshold)
+	}
+	if int(msg.Threshold) > nValidators {
+		return nil, fmt.Errorf("%w: threshold %d exceeds validator count %d",
+			types.ErrInvalidThreshold, msg.Threshold, nValidators)
+	}
+	if len(msg.FeldmanCommitments) != int(msg.Threshold) {
+		return nil, fmt.Errorf("%w: expected %d Feldman commitments (one per polynomial coefficient), got %d",
+			types.ErrInvalidThreshold, msg.Threshold, len(msg.FeldmanCommitments))
+	}
+	for i, c := range msg.FeldmanCommitments {
+		if _, err := elgamal.UnmarshalPublicKey(c); err != nil {
+			return nil, fmt.Errorf("%w: feldman_commitment[%d]: %v",
+				types.ErrInvalidPallasPoint, i, err)
 		}
 	}
 

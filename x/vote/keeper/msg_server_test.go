@@ -266,7 +266,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 		{
 			name: "duplicate round rejected",
 			setup: func() {
-				s.seedEligibleValidators(1)
+				s.seedEligibleValidators(2)
 				s.seedVoteManager("sv1admin")
 				_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 				s.Require().NoError(err)
@@ -278,7 +278,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 		{
 			name: "different fields produce different round ID",
 			setup: func() {
-				s.seedEligibleValidators(1)
+				s.seedEligibleValidators(2)
 				s.seedVoteManager("sv1admin")
 			},
 			msg: &types.MsgCreateVotingSession{
@@ -306,17 +306,60 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "rejected: no validators have registered Pallas keys",
 			setup: func() {
 				s.seedVoteManager("sv1admin")
-				// Mock staking with no validators.
 				s.setupWithMockStaking()
 			},
 			msg:         msg,
 			expectErr:   true,
-			errContains: "no validators have registered Pallas keys",
+			errContains: "at least 1 validators",
+		},
+		{
+			name: "rejected: 1 validator below min_ceremony_validators=2",
+			setup: func() {
+				s.seedEligibleValidators(1)
+				s.seedVoteManager("sv1admin")
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 2))
+			},
+			msg:         msg,
+			expectErr:   true,
+			errContains: "at least 2 validators",
+		},
+		{
+			name: "happy path: 1 validator with default min_ceremony_validators=1",
+			setup: func() {
+				s.seedEligibleValidators(1)
+				s.seedVoteManager("sv1admin")
+			},
+			msg: msg,
+			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
+				s.Require().Equal(expectedID, resp.VoteRoundId)
+
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, err := s.keeper.GetVoteRound(kv, expectedID)
+				s.Require().NoError(err)
+				s.Require().Len(round.CeremonyValidators, 1)
+			},
+		},
+		{
+			name: "happy path: exactly 2 validators",
+			setup: func() {
+				s.seedEligibleValidators(2)
+				s.seedVoteManager("sv1admin")
+			},
+			msg: msg,
+			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
+				s.Require().Equal(expectedID, resp.VoteRoundId)
+
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, err := s.keeper.GetVoteRound(kv, expectedID)
+				s.Require().NoError(err)
+				s.Require().Len(round.CeremonyValidators, 2)
+			},
 		},
 		{
 			name: "rejected: another PENDING round already exists",
 			setup: func() {
-				s.seedEligibleValidators(1)
+				s.seedEligibleValidators(2)
 				s.seedVoteManager("sv1admin")
 				// Create a different round first to put it in PENDING.
 				_, err := s.msgServer.CreateVotingSession(s.ctx, &types.MsgCreateVotingSession{
@@ -360,7 +403,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 	s.SetupTest()
-	s.seedEligibleValidators(1)
+	s.seedEligibleValidators(2)
 	s.seedVoteManager("sv1admin")
 	msg := validSetupMsg()
 
@@ -375,7 +418,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
 	s.SetupTest()
-	s.seedEligibleValidators(1)
+	s.seedEligibleValidators(2)
 	s.seedVoteManager("sv1admin")
 	msg := validSetupMsg()
 
@@ -829,7 +872,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotVoteM
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsWithVoteManager() {
 	s.SetupTest()
-	s.seedEligibleValidators(1)
+	s.seedEligibleValidators(2)
 	s.seedVoteManager("sv1admin")
 
 	msg := validSetupMsg()
@@ -841,7 +884,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsWithVoteManager() {
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	s.SetupTest()
-	s.seedEligibleValidators(1)
+	s.seedEligibleValidators(2)
 	s.seedVoteManager("sv1admin")
 
 	msg := validSetupMsg()

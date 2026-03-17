@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -406,18 +407,28 @@ func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
 }
 
 // SeedDealtCeremony creates a PENDING round with DEALT ceremony fields.
-// The round includes the given validators and ECIES payloads. Commits via
-// an empty block. Returns the round ID.
+// The round includes the given validators and ECIES payloads. A default
+// threshold and placeholder Feldman commitments are set. Commits via an
+// empty block. Returns the round ID.
 func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads []*types.DealerPayload, validators []*types.ValidatorPallasKey) []byte {
 	ta.t.Helper()
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
 
-	// Use a deterministic round ID based on the ea_pk.
 	h, _ := blake2b.New256(nil)
 	h.Write(eaPkBytes)
 	roundID := h.Sum(nil)
+
+	n := len(validators)
+	t := (n + 1) / 2
+	if t < 2 {
+		t = 2
+	}
+	commitments := make([][]byte, t)
+	for i := range commitments {
+		commitments[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
+	}
 
 	round := &types.VoteRound{
 		VoteRoundId:          roundID,
@@ -429,6 +440,8 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 		CeremonyPayloads:     payloads,
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
+		Threshold:            uint32(t),
+		FeldmanCommitments:   commitments,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
@@ -437,10 +450,10 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 	return roundID
 }
 
-// SeedDealtCeremonyThreshold creates a PENDING round with DEALT ceremony fields
-// in threshold mode. Callers supply pre-computed ECIES payloads, VK_i points,
-// and the threshold t. This lets ack handler tests exercise threshold-mode
-// verification (share_i * G == VK_i) without going through the full deal flow.
+// SeedDealtCeremonyThreshold creates a PENDING round with DEALT ceremony fields.
+// Callers supply pre-computed ECIES payloads, Feldman commitments, and the
+// threshold t. This lets ack handler tests exercise Feldman verification
+// without going through the full deal flow.
 func (ta *TestApp) SeedDealtCeremonyThreshold(
 	eaPkBytes []byte,
 	payloads []*types.DealerPayload,

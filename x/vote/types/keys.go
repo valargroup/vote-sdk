@@ -127,6 +127,10 @@ var (
 	//   0x12 || round_id                                   — all partials for a round
 	//   0x12 || round_id || uint32 BE validator_index      — all entries from one validator
 	PartialDecryptionPrefix = []byte{0x12}
+
+	// MinCeremonyValidatorsKey stores the minimum number of eligible validators
+	// required to create a voting session: single key -> uint32 big-endian.
+	MinCeremonyValidatorsKey = []byte{0x13}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
