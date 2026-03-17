@@ -68,6 +68,23 @@ func TestReconstructAnySubset(t *testing.T) {
 	}
 }
 
+func TestSplit_T1N1(t *testing.T) {
+	secret := new(curvey.ScalarPallas).Random(rand.Reader)
+
+	shares, coeffs, err := Split(secret, 1, 1)
+	require.NoError(t, err)
+	require.Len(t, shares, 1)
+	require.Len(t, coeffs, 1)
+
+	require.Equal(t, 1, shares[0].Index)
+	require.Equal(t, 0, shares[0].Value.Cmp(secret),
+		"with t=1 the single share must equal the secret (degree-0 polynomial)")
+
+	recovered, err := Reconstruct(shares, 1)
+	require.NoError(t, err)
+	require.Equal(t, 0, recovered.Cmp(secret))
+}
+
 func TestReconstructInsufficientShares(t *testing.T) {
 	secret := new(curvey.ScalarPallas).Random(rand.Reader)
 	shares, _, err := Split(secret, 3, 5)
@@ -96,13 +113,9 @@ func TestSplitValidation(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "secret must not be nil")
 
-	_, _, err = Split(secret, 1, 3)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "threshold t must be >= 2")
-
 	_, _, err = Split(secret, 0, 3)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "threshold t must be >= 2")
+	require.Contains(t, err.Error(), "threshold t must be >= 1")
 
 	_, _, err = Split(secret, 3, 2)
 	require.Error(t, err)

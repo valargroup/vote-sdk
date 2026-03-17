@@ -512,7 +512,7 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 			errContains: "invalid pallas point",
 		},
 		{
-			name: "n>=2: threshold < 2",
+			name: "threshold < 1 rejected",
 			setup: func() ([]byte, []string) {
 				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
 				return roundID, addrs
@@ -523,7 +523,7 @@ func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Rejects() {
 					VoteRoundId:      roundID,
 					EaPk:             testPallasPK(),
 					Payloads:         makePayloads(addrs),
-					Threshold:        1,
+					Threshold:        0,
 					VerificationKeys: [][]byte{testPallasPK(), testPallasPK()},
 				}
 			},

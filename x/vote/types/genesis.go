@@ -70,6 +70,11 @@ func ValidateGenesisState(gs *GenesisState) error {
 		return fmt.Errorf("vote_manager %q is not a valid bech32 address: %w", gs.VoteManager, err)
 	}
 
+	// min_ceremony_validators must be at least 1 when explicitly set.
+	// A zero value means "use default (1)", so we only reject values that
+	// are explicitly invalid once we enforce a minimum.
+	// (No explicit validation needed: 0 is treated as default 1 in InitGenesis.)
+
 	// Validate tally results.
 	for i, result := range gs.TallyResults {
 		if len(result.VoteRoundId) != RoundIDLen {

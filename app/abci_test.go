@@ -1265,5 +1265,127 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Full Lifecycle E2E: Ceremony → Vote → Tally (Single Validator, n=1, t=1)
+//
+// Validates the degenerate single-share Shamir case works end-to-end.
+// With min_ceremony_validators=1 (the default), a single validator handles
+// deal, ack, partial decrypt, and tally through the same threshold code paths.
+
+func TestFullLifecycle_SingleValidator(t *testing.T) {
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	proposerAddr := app.ValidatorOperAddr()
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed(), ShamirIndex: 1},
+	}
+	voteEndTime := app.Time.Add(60 * time.Second)
+
+	roundID := make([]byte, 32)
+	roundID[0] = 0xF2
+
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	round := &types.VoteRound{
+		VoteRoundId:        roundID,
+		Status:             types.SessionStatus_SESSION_STATUS_PENDING,
+		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		CeremonyValidators: validators,
+		VoteEndTime:        uint64(voteEndTime.Unix()),
+		Proposals:          testutil.SampleProposals(),
+		NullifierImtRoot:   bytes.Repeat([]byte{0x01}, 32),
+		NcRoot:             bytes.Repeat([]byte{0x02}, 32),
+		VkZkp1:             bytes.Repeat([]byte{0x11}, 64),
+		VkZkp2:             bytes.Repeat([]byte{0x22}, 64),
+		VkZkp3:             bytes.Repeat([]byte{0x33}, 64),
+	}
+	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
+	app.NextBlock()
+
+	// Block 1: auto-deal (Shamir t=1, n=1) → DEALT.
+	app.NextBlockWithPrepareProposal()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	require.EqualValues(t, 1, round.Threshold, "t=1 for single validator")
+	require.Len(t, round.VerificationKeys, 1)
+
+	// Block 2: auto-ack → single validator acks → CONFIRMED + ACTIVE.
+	app.NextBlockWithPrepareProposal()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
+		"round should be ACTIVE after single-validator ceremony")
+	require.Len(t, round.CeremonyAcks, 1)
+
+	eaPk, err := elgamal.UnmarshalPublicKey(round.EaPk)
+	require.NoError(t, err)
+
+	// --- Voting ---
+
+	delegation := testutil.ValidDelegation(roundID, 0x10)
+	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	require.Equal(t, uint32(0), result.Code, "delegation should succeed, got: %s", result.Log)
+
+	anchorHeight := uint64(app.Height)
+
+	castVote := testutil.ValidCastVote(roundID, anchorHeight, 0x30)
+	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
+	require.Equal(t, uint32(0), result.Code, "cast vote should succeed, got: %s", result.Log)
+
+	revealAnchor := uint64(app.Height)
+
+	ct, err := elgamal.Encrypt(eaPk, 42, rand.Reader)
+	require.NoError(t, err)
+	encShare, err := elgamal.MarshalCiphertext(ct)
+	require.NoError(t, err)
+
+	revealMsg := testutil.ValidRevealShareReal(roundID, revealAnchor, 0x50, 1, 1, encShare)
+	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
+	require.Equal(t, uint32(0), result.Code, "reveal share should succeed, got: %s", result.Log)
+
+	// --- Tally ---
+
+	app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
+
+	// Block N: partial decrypt (D_1 = share * C1) injected.
+	app.NextBlockWithPrepareProposal()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	count, err := app.VoteKeeper().CountPartialDecryptionValidators(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, 1, count, "single validator should have submitted partial decryption")
+
+	// Block N+1: tally combiner fires (Lagrange with single partial) → FINALIZED.
+	app.NextBlockWithPrepareProposal()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
+		"round should be FINALIZED after single-validator tally")
+
+	tallyResults, err := app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
+	require.NoError(t, err)
+	require.Len(t, tallyResults, 1)
+	require.Equal(t, uint64(42), tallyResults[0].TotalValue,
+		"decrypted tally should match encrypted value of 42")
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

@@ -306,22 +306,39 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "rejected: no validators have registered Pallas keys",
 			setup: func() {
 				s.seedVoteManager("sv1admin")
-				// Mock staking with no validators.
 				s.setupWithMockStaking()
+			},
+			msg:         msg,
+			expectErr:   true,
+			errContains: "at least 1 validators",
+		},
+		{
+			name: "rejected: 1 validator below min_ceremony_validators=2",
+			setup: func() {
+				s.seedEligibleValidators(1)
+				s.seedVoteManager("sv1admin")
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 2))
 			},
 			msg:         msg,
 			expectErr:   true,
 			errContains: "at least 2 validators",
 		},
 		{
-			name: "rejected: only 1 validator (below TSS minimum)",
+			name: "happy path: 1 validator with default min_ceremony_validators=1",
 			setup: func() {
 				s.seedEligibleValidators(1)
 				s.seedVoteManager("sv1admin")
 			},
-			msg:         msg,
-			expectErr:   true,
-			errContains: "at least 2 validators",
+			msg: msg,
+			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
+				s.Require().Equal(expectedID, resp.VoteRoundId)
+
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, err := s.keeper.GetVoteRound(kv, expectedID)
+				s.Require().NoError(err)
+				s.Require().Len(round.CeremonyValidators, 1)
+			},
 		},
 		{
 			name: "happy path: exactly 2 validators",

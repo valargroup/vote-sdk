@@ -907,7 +907,7 @@ type MsgDealExecutiveAuthorityKey struct {
 	EaPk             []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                                     // Executive authority public key (Pallas, 32 bytes)
 	Payloads         []*DealerPayload       `protobuf:"bytes,3,rep,name=payloads,proto3" json:"payloads,omitempty"`                                         // One ECIES envelope per registered validator
 	VoteRoundId      []byte                 `protobuf:"bytes,4,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`              // Target voting round (per-round ceremony)
-	Threshold        uint32                 `protobuf:"varint,5,opt,name=threshold,proto3" json:"threshold,omitempty"`                                      // Minimum shares required to reconstruct (t). 0 = legacy single-key mode.
+	Threshold        uint32                 `protobuf:"varint,5,opt,name=threshold,proto3" json:"threshold,omitempty"`                                      // Minimum shares required to reconstruct (t). Always >= 2.
 	VerificationKeys [][]byte               `protobuf:"bytes,6,rep,name=verification_keys,json=verificationKeys,proto3" json:"verification_keys,omitempty"` // VK_i = f(i)*G per validator (32-byte compressed Pallas points, same order as payloads)
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache

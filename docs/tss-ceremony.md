@@ -2,7 +2,7 @@
 
 This document describes the threshold secret sharing (TSS) ceremony for establishing the election authority public key `ea_pk` for each voting round. TSS prevents any single non-dealer validator from decrypting individual votes — only the aggregate tally is recoverable, and only with cooperation from at least `t` validators.
 
-A minimum of 2 eligible validators is required to create a voting session. `CreateVotingSession` rejects rounds when fewer than 2 validators have registered Pallas keys.
+The minimum number of eligible validators is controlled by the `min_ceremony_validators` genesis parameter (stored as a KV singleton, default: 1). `CreateVotingSession` rejects rounds when fewer than `min_ceremony_validators` validators have registered Pallas keys. Set to 2 or higher on mainnet for real threshold security.
 
 ## Step 1 (current): Threshold Secret Sharing
 
@@ -13,17 +13,21 @@ A minimum of 2 eligible validators is required to create a voting session. `Crea
 For a ceremony with `n` validators:
 
 ```
-t = ceil(n/2)        (minimum 2, n >= 2 required)
+t = 1                (n = 1: trivial single-share, no threshold security)
+t = ceil(n/2)        (n >= 2, minimum 2)
 ```
 
-| n | t |
-|---|---|
-| 2 | 2 |
-| 3 | 2 |
-| 4 | 2 |
-| 5 | 3 |
-| 6 | 3 |
-| 9 | 5 |
+| n | t | Notes |
+|---|---|---|
+| 1 | 1 | Single share = full key; for local testing only |
+| 2 | 2 | Both validators required |
+| 3 | 2 | |
+| 4 | 2 | |
+| 5 | 3 | |
+| 6 | 3 | |
+| 9 | 5 | |
+
+**Warning:** with `n = 1, t = 1` the single validator holds the full `ea_sk` (the degree-0 polynomial makes `share = secret`). This provides no threshold security and should only be used for local development/testing.
 
 ### Ceremony state machine
 

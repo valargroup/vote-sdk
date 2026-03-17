@@ -586,7 +586,8 @@ const DefaultVoteManagerAddress = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {
 	gs := &types.GenesisState{
-		VoteManager: DefaultVoteManagerAddress,
+		VoteManager:           DefaultVoteManagerAddress,
+		MinCeremonyValidators: 1,
 	}
 	bz, err := json.Marshal(gs)
 	if err != nil {

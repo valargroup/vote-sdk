@@ -62,6 +62,32 @@ func TestPartialDecryptEndToEnd(t *testing.T) {
 	}
 }
 
+// TestCombinePartials_SingleShare verifies that CombinePartials works with a
+// single partial decryption (t=1, n=1). The Lagrange coefficient is 1 (empty
+// product), so the result is just D_1 = share * C1 = sk * C1.
+func TestCombinePartials_SingleShare(t *testing.T) {
+	sk, pk := elgamal.KeyGen(rand.Reader)
+
+	ct, err := elgamal.Encrypt(pk, 42, rand.Reader)
+	require.NoError(t, err)
+
+	shares, _, err := Split(sk.Scalar, 1, 1)
+	require.NoError(t, err)
+	require.Len(t, shares, 1)
+
+	Di, err := PartialDecrypt(shares[0].Value, ct.C1)
+	require.NoError(t, err)
+
+	combined, err := CombinePartials([]PartialDecryption{{Index: 1, Di: Di}}, 1)
+	require.NoError(t, err)
+
+	// CombinePartials returns sk*C1. Verify: C2 - combined == v*G.
+	vG := ct.C2.Sub(combined)
+	expectedVG := elgamal.DecryptToPoint(sk, ct)
+	require.True(t, vG.Equal(expectedVG),
+		"C2 - CombinePartials must equal DecryptToPoint result")
+}
+
 // TestPartialDecryptAnySubset verifies that any t-sized subset of n partial
 // decryptions produces the same combined result.
 func TestPartialDecryptAnySubset(t *testing.T) {
