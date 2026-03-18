@@ -95,13 +95,13 @@ func TestGenesisValidatorCreationSucceeds(t *testing.T) {
 // Table-driven: vote/ceremony messages blocked in standard Cosmos txs
 // ---------------------------------------------------------------------------
 
-// TestDualAnteHandler_BlocksVoteModuleMsgs is a table-driven test that verifies
-// every vote and ceremony message type is rejected when submitted inside a
-// standard Cosmos SDK transaction. Allowed message types (MsgSend,
-// MsgRegisterPallasKey, etc.) must pass through to the standard ante chain.
-//
-// This is the single authoritative test for the isVoteModuleMsg ante check.
-func TestDualAnteHandler_BlocksVoteModuleMsgs(t *testing.T) {
+// TestDualAnteHandler_StandardTxRestrictions is a table-driven test that
+// verifies the two structural restrictions on standard Cosmos txs:
+//  1. Multi-message txs are rejected (eliminates the noop-signer attack class).
+//  2. Vote/ceremony messages are rejected even in single-message txs
+//     (defense-in-depth via isVoteModuleMsg type check).
+//  3. Allowed single-message txs pass through to the standard ante chain.
+func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 	ta := testutil.SetupTestApp(t)
 	roundID := ta.SeedVotingSession(testutil.ValidCreateVotingSession())
 
@@ -112,126 +112,167 @@ func TestDualAnteHandler_BlocksVoteModuleMsgs(t *testing.T) {
 	anchorHeight := uint64(ta.Height)
 
 	signerAddr := sdk.AccAddress(ta.ValPrivKey.PubKey().Address())
-
-	tests := []struct {
-		name      string
-		msg       sdk.Msg
-		wantBlock bool
-	}{
-		// --- Vote messages (ZKP-authenticated, must use VoteTxWrapper) ---
-		{
-			name: "MsgDelegateVote",
-			msg: &votetypes.MsgDelegateVote{
-				Rk: bytes.Repeat([]byte{0xAA}, 32), SpendAuthSig: bytes.Repeat([]byte{0xBB}, 64),
-				SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
-				CmxNew:              testutil.FpLE(0xBEEF), VanCmx: testutil.FpLE(0xDEAD),
-				GovNullifiers: [][]byte{bytes.Repeat([]byte{0xFF}, 32)},
-				Proof:         []byte{0x42}, VoteRoundId: roundID,
-				Sighash: bytes.Repeat([]byte{0x99}, 32),
-			},
-			wantBlock: true,
-		},
-		{
-			name: "MsgCastVote",
-			msg: &votetypes.MsgCastVote{
-				VanNullifier:         bytes.Repeat([]byte{0xD1}, 32),
-				VoteAuthorityNoteNew: testutil.FpLE(0xA1A1), VoteCommitment: testutil.FpLE(0xB2B2),
-				ProposalId: 1, Proof: []byte{0x42}, VoteRoundId: roundID,
-				VoteCommTreeAnchorHeight: anchorHeight,
-				VoteAuthSig:              bytes.Repeat([]byte{0xC3}, 64), RVpk: bytes.Repeat([]byte{0xE4}, 32),
-			},
-			wantBlock: true,
-		},
-		{
-			name: "MsgRevealShare",
-			msg: &votetypes.MsgRevealShare{
-				ShareNullifier: bytes.Repeat([]byte{0xE1}, 32),
-				EncShare:       elgamal.IdentityCiphertextBytes(),
-				ProposalId:     1, VoteDecision: 1, Proof: []byte{0x42},
-				VoteRoundId: roundID, VoteCommTreeAnchorHeight: anchorHeight,
-			},
-			wantBlock: true,
-		},
-		// --- Ceremony messages (proposer-injected, must use VoteTxWrapper) ---
-		{
-			name: "MsgDealExecutiveAuthorityKey",
-			msg: &votetypes.MsgDealExecutiveAuthorityKey{
-				Creator: signerAddr.String(), EaPk: bytes.Repeat([]byte{0xAA}, 32),
-				Threshold: 2,
-			},
-			wantBlock: true,
-		},
-		{
-			name: "MsgAckExecutiveAuthorityKey",
-			msg: &votetypes.MsgAckExecutiveAuthorityKey{
-				Creator: signerAddr.String(), AckSignature: bytes.Repeat([]byte{0xBB}, 32),
-				VoteRoundId: bytes.Repeat([]byte{0xCC}, 32),
-			},
-			wantBlock: true,
-		},
-		{
-			name: "MsgSubmitPartialDecryption",
-			msg: &votetypes.MsgSubmitPartialDecryption{
-				VoteRoundId: bytes.Repeat([]byte{0xDD}, 32), Creator: signerAddr.String(),
-				ValidatorIndex: 1,
-			},
-			wantBlock: true,
-		},
-		{
-			name: "MsgSubmitTally",
-			msg: &votetypes.MsgSubmitTally{
-				VoteRoundId: roundID, Creator: signerAddr.String(),
-				Entries: []*votetypes.TallyEntry{{ProposalId: 1, VoteDecision: 1, TotalValue: 0}},
-			},
-			wantBlock: true,
-		},
-		// --- Allowed messages (standard Cosmos tx path) ---
-		{
-			name: "MsgSend (allowed)",
-			msg: &banktypes.MsgSend{
-				FromAddress: signerAddr.String(), ToAddress: signerAddr.String(),
-				Amount: sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 1)),
-			},
-			wantBlock: false,
-		},
-		{
-			name: "MsgRegisterPallasKey (allowed)",
-			msg: &votetypes.MsgRegisterPallasKey{
-				Creator: signerAddr.String(), PallasPk: bytes.Repeat([]byte{0x01}, 32),
-			},
-			wantBlock: false,
-		},
-		{
-			name: "MsgSetVoteManager (allowed)",
-			msg: &votetypes.MsgSetVoteManager{
-				Creator: "sv1admin", NewManager: signerAddr.String(),
-			},
-			wantBlock: false,
-		},
+	carrier := &banktypes.MsgSend{
+		FromAddress: signerAddr.String(),
+		ToAddress:   signerAddr.String(),
+		Amount:      sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 1)),
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			carrier := &banktypes.MsgSend{
-				FromAddress: signerAddr.String(),
-				ToAddress:   signerAddr.String(),
-				Amount:      sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 1)),
-			}
-			txBytes := mustBuildMultiMsgSignedTx(t, ta, carrier, tc.msg)
-			checkResp := ta.CheckTxSync(txBytes)
+	t.Run("multi-msg rejected", func(t *testing.T) {
+		tests := []struct {
+			name string
+			msgs []sdk.Msg
+		}{
+			{
+				name: "MsgSend+MsgSend",
+				msgs: []sdk.Msg{carrier, carrier},
+			},
+			{
+				name: "MsgSend+MsgDelegateVote",
+				msgs: []sdk.Msg{carrier, &votetypes.MsgDelegateVote{
+					Rk: bytes.Repeat([]byte{0xAA}, 32), SpendAuthSig: bytes.Repeat([]byte{0xBB}, 64),
+					SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
+					CmxNew: testutil.FpLE(0xBEEF), VanCmx: testutil.FpLE(0xDEAD),
+					GovNullifiers: [][]byte{bytes.Repeat([]byte{0xFF}, 32)},
+					Proof: []byte{0x42}, VoteRoundId: roundID,
+					Sighash: bytes.Repeat([]byte{0x99}, 32),
+				}},
+			},
+			{
+				name: "MsgSend+MsgRevealShare",
+				msgs: []sdk.Msg{carrier, &votetypes.MsgRevealShare{
+					ShareNullifier: bytes.Repeat([]byte{0xE1}, 32),
+					EncShare: elgamal.IdentityCiphertextBytes(),
+					ProposalId: 1, VoteDecision: 1, Proof: []byte{0x42},
+					VoteRoundId: roundID, VoteCommTreeAnchorHeight: anchorHeight,
+				}},
+			},
+			{
+				name: "MsgSend+MsgDealExecutiveAuthorityKey",
+				msgs: []sdk.Msg{carrier, &votetypes.MsgDealExecutiveAuthorityKey{
+					Creator: signerAddr.String(), EaPk: bytes.Repeat([]byte{0xAA}, 32),
+					Threshold: 2,
+				}},
+			},
+		}
 
-			t.Logf("CheckTx code=%d log=%q", checkResp.Code, checkResp.Log)
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				txBytes := mustBuildMultiMsgSignedTx(t, ta, tc.msgs...)
+				checkResp := ta.CheckTxSync(txBytes)
+				t.Logf("CheckTx code=%d log=%q", checkResp.Code, checkResp.Log)
+				require.NotEqual(t, uint32(0), checkResp.Code)
+				require.Contains(t, checkResp.Log, "multi-message transactions are not supported")
+			})
+		}
+	})
 
-			if tc.wantBlock {
-				require.NotEqual(t, uint32(0), checkResp.Code,
-					"%s should be rejected in standard Cosmos tx", tc.name)
+	t.Run("single-msg vote/ceremony blocked", func(t *testing.T) {
+		tests := []struct {
+			name string
+			msg  sdk.Msg
+		}{
+			{
+				name: "MsgDelegateVote",
+				msg: &votetypes.MsgDelegateVote{
+					Rk: bytes.Repeat([]byte{0xAA}, 32), SpendAuthSig: bytes.Repeat([]byte{0xBB}, 64),
+					SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
+					CmxNew: testutil.FpLE(0xBEEF), VanCmx: testutil.FpLE(0xDEAD),
+					GovNullifiers: [][]byte{bytes.Repeat([]byte{0xFF}, 32)},
+					Proof: []byte{0x42}, VoteRoundId: roundID,
+					Sighash: bytes.Repeat([]byte{0x99}, 32),
+				},
+			},
+			{
+				name: "MsgCastVote",
+				msg: &votetypes.MsgCastVote{
+					VanNullifier: bytes.Repeat([]byte{0xD1}, 32),
+					VoteAuthorityNoteNew: testutil.FpLE(0xA1A1), VoteCommitment: testutil.FpLE(0xB2B2),
+					ProposalId: 1, Proof: []byte{0x42}, VoteRoundId: roundID,
+					VoteCommTreeAnchorHeight: anchorHeight,
+					VoteAuthSig: bytes.Repeat([]byte{0xC3}, 64), RVpk: bytes.Repeat([]byte{0xE4}, 32),
+				},
+			},
+			{
+				name: "MsgRevealShare",
+				msg: &votetypes.MsgRevealShare{
+					ShareNullifier: bytes.Repeat([]byte{0xE1}, 32),
+					EncShare: elgamal.IdentityCiphertextBytes(),
+					ProposalId: 1, VoteDecision: 1, Proof: []byte{0x42},
+					VoteRoundId: roundID, VoteCommTreeAnchorHeight: anchorHeight,
+				},
+			},
+			{
+				name: "MsgDealExecutiveAuthorityKey",
+				msg: &votetypes.MsgDealExecutiveAuthorityKey{
+					Creator: signerAddr.String(), EaPk: bytes.Repeat([]byte{0xAA}, 32),
+					Threshold: 2,
+				},
+			},
+			{
+				name: "MsgAckExecutiveAuthorityKey",
+				msg: &votetypes.MsgAckExecutiveAuthorityKey{
+					Creator: signerAddr.String(), AckSignature: bytes.Repeat([]byte{0xBB}, 32),
+					VoteRoundId: bytes.Repeat([]byte{0xCC}, 32),
+				},
+			},
+			{
+				name: "MsgSubmitPartialDecryption",
+				msg: &votetypes.MsgSubmitPartialDecryption{
+					VoteRoundId: bytes.Repeat([]byte{0xDD}, 32), Creator: signerAddr.String(),
+					ValidatorIndex: 1,
+				},
+			},
+			{
+				name: "MsgSubmitTally",
+				msg: &votetypes.MsgSubmitTally{
+					VoteRoundId: roundID, Creator: signerAddr.String(),
+					Entries: []*votetypes.TallyEntry{{ProposalId: 1, VoteDecision: 1, TotalValue: 0}},
+				},
+			},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				txBytes := buildSignedTxWithKey(t, ta, ta.ValPrivKey, 0, 0, tc.msg)
+				checkResp := ta.CheckTxSync(txBytes)
+				t.Logf("CheckTx code=%d log=%q", checkResp.Code, checkResp.Log)
+				require.NotEqual(t, uint32(0), checkResp.Code)
 				require.Contains(t, checkResp.Log, "not allowed in standard Cosmos transactions")
-			} else {
-				require.NotContains(t, checkResp.Log, "not allowed in standard Cosmos transactions",
-					"%s must not be caught by the vote module message filter", tc.name)
-			}
-		})
-	}
+			})
+		}
+	})
+
+	t.Run("single-msg allowed", func(t *testing.T) {
+		tests := []struct {
+			name string
+			msg  sdk.Msg
+		}{
+			{
+				name: "MsgSend",
+				msg: &banktypes.MsgSend{
+					FromAddress: signerAddr.String(), ToAddress: signerAddr.String(),
+					Amount: sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 1)),
+				},
+			},
+			{
+				name: "MsgRegisterPallasKey",
+				msg: &votetypes.MsgRegisterPallasKey{
+					Creator: signerAddr.String(), PallasPk: bytes.Repeat([]byte{0x01}, 32),
+				},
+			},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				txBytes := buildSignedTxWithKey(t, ta, ta.ValPrivKey, 0, 0, tc.msg)
+				checkResp := ta.CheckTxSync(txBytes)
+				t.Logf("CheckTx code=%d log=%q", checkResp.Code, checkResp.Log)
+				require.NotContains(t, checkResp.Log, "not allowed in standard Cosmos transactions")
+				require.NotContains(t, checkResp.Log, "multi-message transactions are not supported")
+			})
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -608,7 +649,7 @@ func TestNoopSignerBypass_DealExecutiveAuthorityKey(t *testing.T) {
 
 	require.NotEqual(t, uint32(0), checkResp.Code,
 		"MsgDealExecutiveAuthorityKey should be rejected in CheckTx")
-	require.Contains(t, checkResp.Log, "not allowed in standard Cosmos transactions")
+	require.Contains(t, checkResp.Log, "multi-message transactions are not supported")
 }
 
 // TestNoopSignerBypass_AckExecutiveAuthorityKey verifies that
@@ -640,7 +681,7 @@ func TestNoopSignerBypass_AckExecutiveAuthorityKey(t *testing.T) {
 
 	require.NotEqual(t, uint32(0), checkResp.Code,
 		"MsgAckExecutiveAuthorityKey should be rejected in CheckTx")
-	require.Contains(t, checkResp.Log, "not allowed in standard Cosmos transactions")
+	require.Contains(t, checkResp.Log, "multi-message transactions are not supported")
 }
 
 // TestNoopSignerBypass_SubmitPartialDecryption verifies that
@@ -673,7 +714,7 @@ func TestNoopSignerBypass_SubmitPartialDecryption(t *testing.T) {
 
 	require.NotEqual(t, uint32(0), checkResp.Code,
 		"MsgSubmitPartialDecryption should be rejected in CheckTx")
-	require.Contains(t, checkResp.Log, "not allowed in standard Cosmos transactions")
+	require.Contains(t, checkResp.Log, "multi-message transactions are not supported")
 }
 
 // TestNoopSignerBypass_RevealShare_TallyCorruption is an end-to-end tally

@@ -76,7 +76,12 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 			return handleVoteAnte(ctx, vtx, voteKeeper, sigVerifier, zkpVerifier)
 		}
 
-		for _, msg := range tx.GetMsgs() {
+		msgs := tx.GetMsgs()
+		if len(msgs) > 1 {
+			return ctx, fmt.Errorf("multi-message transactions are not supported; got %d messages", len(msgs))
+		}
+
+		for _, msg := range msgs {
 			// Vote module messages (ZKP-authenticated) must only enter via the
 			// custom VoteTxWrapper path where ZKP/RedPallas verification runs.
 			// Reject them in standard Cosmos txs to prevent the noop-signer
