@@ -1479,6 +1479,113 @@ func (*MsgSetVoteManagerResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{23}
 }
 
+// MsgAuthorizedSend transfers coins with role-based authorization.
+// Vote manager can send to anyone. Validators can only send to the vote
+// manager or other bonded validators. All other senders are rejected.
+type MsgAuthorizedSend struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FromAddress   string                 `protobuf:"bytes,1,opt,name=from_address,json=fromAddress,proto3" json:"from_address,omitempty"`
+	ToAddress     string                 `protobuf:"bytes,2,opt,name=to_address,json=toAddress,proto3" json:"to_address,omitempty"`
+	Amount        string                 `protobuf:"bytes,3,opt,name=amount,proto3" json:"amount,omitempty"` // Integer string, e.g. "1000000"
+	Denom         string                 `protobuf:"bytes,4,opt,name=denom,proto3" json:"denom,omitempty"`   // e.g. "usvote"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgAuthorizedSend) Reset() {
+	*x = MsgAuthorizedSend{}
+	mi := &file_svote_v1_tx_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgAuthorizedSend) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgAuthorizedSend) ProtoMessage() {}
+
+func (x *MsgAuthorizedSend) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgAuthorizedSend.ProtoReflect.Descriptor instead.
+func (*MsgAuthorizedSend) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *MsgAuthorizedSend) GetFromAddress() string {
+	if x != nil {
+		return x.FromAddress
+	}
+	return ""
+}
+
+func (x *MsgAuthorizedSend) GetToAddress() string {
+	if x != nil {
+		return x.ToAddress
+	}
+	return ""
+}
+
+func (x *MsgAuthorizedSend) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *MsgAuthorizedSend) GetDenom() string {
+	if x != nil {
+		return x.Denom
+	}
+	return ""
+}
+
+type MsgAuthorizedSendResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgAuthorizedSendResponse) Reset() {
+	*x = MsgAuthorizedSendResponse{}
+	mi := &file_svote_v1_tx_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgAuthorizedSendResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgAuthorizedSendResponse) ProtoMessage() {}
+
+func (x *MsgAuthorizedSendResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgAuthorizedSendResponse.ProtoReflect.Descriptor instead.
+func (*MsgAuthorizedSendResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{25}
+}
+
 var File_svote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_svote_v1_tx_proto_rawDesc = "" +
@@ -1589,7 +1696,14 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\x1f\n" +
 	"\vnew_manager\x18\x02 \x01(\tR\n" +
 	"newManager\"\x1b\n" +
-	"\x19MsgSetVoteManagerResponse2\x9a\b\n" +
+	"\x19MsgSetVoteManagerResponse\"\x83\x01\n" +
+	"\x11MsgAuthorizedSend\x12!\n" +
+	"\ffrom_address\x18\x01 \x01(\tR\vfromAddress\x12\x1d\n" +
+	"\n" +
+	"to_address\x18\x02 \x01(\tR\ttoAddress\x12\x16\n" +
+	"\x06amount\x18\x03 \x01(\tR\x06amount\x12\x14\n" +
+	"\x05denom\x18\x04 \x01(\tR\x05denom\"\x1b\n" +
+	"\x19MsgAuthorizedSendResponse2\xee\b\n" +
 	"\x03Msg\x12a\n" +
 	"\x13CreateVotingSession\x12 .svote.v1.MsgCreateVotingSession\x1a(.svote.v1.MsgCreateVotingSessionResponse\x12L\n" +
 	"\fDelegateVote\x12\x19.svote.v1.MsgDelegateVote\x1a!.svote.v1.MsgDelegateVoteResponse\x12@\n" +
@@ -1601,7 +1715,8 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x19DealExecutiveAuthorityKey\x12&.svote.v1.MsgDealExecutiveAuthorityKey\x1a..svote.v1.MsgDealExecutiveAuthorityKeyResponse\x12p\n" +
 	"\x18AckExecutiveAuthorityKey\x12%.svote.v1.MsgAckExecutiveAuthorityKey\x1a-.svote.v1.MsgAckExecutiveAuthorityKeyResponse\x12|\n" +
 	"\x1cCreateValidatorWithPallasKey\x12).svote.v1.MsgCreateValidatorWithPallasKey\x1a1.svote.v1.MsgCreateValidatorWithPallasKeyResponse\x12R\n" +
-	"\x0eSetVoteManager\x12\x1b.svote.v1.MsgSetVoteManager\x1a#.svote.v1.MsgSetVoteManagerResponse\x1a\x05\x80\xe7\xb0*\x01B-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
+	"\x0eSetVoteManager\x12\x1b.svote.v1.MsgSetVoteManager\x1a#.svote.v1.MsgSetVoteManagerResponse\x12R\n" +
+	"\x0eAuthorizedSend\x12\x1b.svote.v1.MsgAuthorizedSend\x1a#.svote.v1.MsgAuthorizedSendResponse\x1a\x05\x80\xe7\xb0*\x01B-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
 
 var (
 	file_svote_v1_tx_proto_rawDescOnce sync.Once
@@ -1615,7 +1730,7 @@ func file_svote_v1_tx_proto_rawDescGZIP() []byte {
 	return file_svote_v1_tx_proto_rawDescData
 }
 
-var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgCreateVotingSession)(nil),                  // 0: svote.v1.MsgCreateVotingSession
 	(*MsgCreateVotingSessionResponse)(nil),          // 1: svote.v1.MsgCreateVotingSessionResponse
@@ -1641,13 +1756,15 @@ var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgSubmitPartialDecryptionResponse)(nil),      // 21: svote.v1.MsgSubmitPartialDecryptionResponse
 	(*MsgSetVoteManager)(nil),                       // 22: svote.v1.MsgSetVoteManager
 	(*MsgSetVoteManagerResponse)(nil),               // 23: svote.v1.MsgSetVoteManagerResponse
-	(*Proposal)(nil),                                // 24: svote.v1.Proposal
-	(*DealerPayload)(nil),                           // 25: svote.v1.DealerPayload
+	(*MsgAuthorizedSend)(nil),                       // 24: svote.v1.MsgAuthorizedSend
+	(*MsgAuthorizedSendResponse)(nil),               // 25: svote.v1.MsgAuthorizedSendResponse
+	(*Proposal)(nil),                                // 26: svote.v1.Proposal
+	(*DealerPayload)(nil),                           // 27: svote.v1.DealerPayload
 }
 var file_svote_v1_tx_proto_depIdxs = []int32{
-	24, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
+	26, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
 	9,  // 1: svote.v1.MsgSubmitTally.entries:type_name -> svote.v1.TallyEntry
-	25, // 2: svote.v1.MsgDealExecutiveAuthorityKey.payloads:type_name -> svote.v1.DealerPayload
+	27, // 2: svote.v1.MsgDealExecutiveAuthorityKey.payloads:type_name -> svote.v1.DealerPayload
 	20, // 3: svote.v1.MsgSubmitPartialDecryption.entries:type_name -> svote.v1.PartialDecryptionEntry
 	0,  // 4: svote.v1.Msg.CreateVotingSession:input_type -> svote.v1.MsgCreateVotingSession
 	2,  // 5: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
@@ -1660,19 +1777,21 @@ var file_svote_v1_tx_proto_depIdxs = []int32{
 	15, // 12: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
 	17, // 13: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
 	22, // 14: svote.v1.Msg.SetVoteManager:input_type -> svote.v1.MsgSetVoteManager
-	1,  // 15: svote.v1.Msg.CreateVotingSession:output_type -> svote.v1.MsgCreateVotingSessionResponse
-	3,  // 16: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
-	5,  // 17: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
-	7,  // 18: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
-	10, // 19: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
-	21, // 20: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
-	12, // 21: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
-	14, // 22: svote.v1.Msg.DealExecutiveAuthorityKey:output_type -> svote.v1.MsgDealExecutiveAuthorityKeyResponse
-	16, // 23: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
-	18, // 24: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
-	23, // 25: svote.v1.Msg.SetVoteManager:output_type -> svote.v1.MsgSetVoteManagerResponse
-	15, // [15:26] is the sub-list for method output_type
-	4,  // [4:15] is the sub-list for method input_type
+	24, // 15: svote.v1.Msg.AuthorizedSend:input_type -> svote.v1.MsgAuthorizedSend
+	1,  // 16: svote.v1.Msg.CreateVotingSession:output_type -> svote.v1.MsgCreateVotingSessionResponse
+	3,  // 17: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
+	5,  // 18: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
+	7,  // 19: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
+	10, // 20: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
+	21, // 21: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
+	12, // 22: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
+	14, // 23: svote.v1.Msg.DealExecutiveAuthorityKey:output_type -> svote.v1.MsgDealExecutiveAuthorityKeyResponse
+	16, // 24: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
+	18, // 25: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
+	23, // 26: svote.v1.Msg.SetVoteManager:output_type -> svote.v1.MsgSetVoteManagerResponse
+	25, // 27: svote.v1.Msg.AuthorizedSend:output_type -> svote.v1.MsgAuthorizedSendResponse
+	16, // [16:28] is the sub-list for method output_type
+	4,  // [4:16] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -1690,7 +1809,7 @@ func file_svote_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_tx_proto_rawDesc), len(file_svote_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

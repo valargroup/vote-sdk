@@ -8,6 +8,7 @@ import (
 	sdkmath "cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"github.com/valargroup/vote-sdk/testutil"
@@ -75,4 +76,61 @@ func TestGenesisValidatorCreationSucceeds(t *testing.T) {
 	// Verify the genesis validator was actually created.
 	valAddr := app.ValidatorOperAddr()
 	require.NotEmpty(t, valAddr, "genesis validator should exist")
+}
+
+// ---------------------------------------------------------------------------
+// Bank MsgSend / MsgMultiSend ante handler blocking tests
+// ---------------------------------------------------------------------------
+
+func TestBankMsgSendBlocked(t *testing.T) {
+	app := testutil.SetupTestApp(t)
+
+	msg := &banktypes.MsgSend{
+		FromAddress: "sv1sender",
+		ToAddress:   "sv1receiver",
+		Amount:      sdk.NewCoins(sdk.NewCoin("usvote", sdkmath.NewInt(100))),
+	}
+
+	txConfig := app.TxConfig()
+	txBuilder := txConfig.NewTxBuilder()
+	require.NoError(t, txBuilder.SetMsgs(msg))
+	txBuilder.SetGasLimit(200_000)
+	txBuilder.SetFeeAmount(sdk.NewCoins())
+
+	txBytes, err := txConfig.TxEncoder()(txBuilder.GetTx())
+	require.NoError(t, err)
+
+	resp := app.CheckTxSync(txBytes)
+	require.NotEqual(t, uint32(0), resp.Code, "MsgSend should be rejected")
+	require.Contains(t, resp.Log, "bank MsgSend is disabled")
+
+	result := app.DeliverVoteTx(txBytes)
+	require.NotEqual(t, uint32(0), result.Code, "MsgSend should be rejected in DeliverTx")
+	require.Contains(t, result.Log, "bank MsgSend is disabled")
+}
+
+func TestBankMsgMultiSendBlocked(t *testing.T) {
+	app := testutil.SetupTestApp(t)
+
+	msg := &banktypes.MsgMultiSend{
+		Inputs:  []banktypes.Input{{Address: "sv1sender", Coins: sdk.NewCoins(sdk.NewCoin("usvote", sdkmath.NewInt(100)))}},
+		Outputs: []banktypes.Output{{Address: "sv1receiver", Coins: sdk.NewCoins(sdk.NewCoin("usvote", sdkmath.NewInt(100)))}},
+	}
+
+	txConfig := app.TxConfig()
+	txBuilder := txConfig.NewTxBuilder()
+	require.NoError(t, txBuilder.SetMsgs(msg))
+	txBuilder.SetGasLimit(200_000)
+	txBuilder.SetFeeAmount(sdk.NewCoins())
+
+	txBytes, err := txConfig.TxEncoder()(txBuilder.GetTx())
+	require.NoError(t, err)
+
+	resp := app.CheckTxSync(txBytes)
+	require.NotEqual(t, uint32(0), resp.Code, "MsgMultiSend should be rejected")
+	require.Contains(t, resp.Log, "bank MsgMultiSend is disabled")
+
+	result := app.DeliverVoteTx(txBytes)
+	require.NotEqual(t, uint32(0), result.Code, "MsgMultiSend should be rejected in DeliverTx")
+	require.Contains(t, result.Log, "bank MsgMultiSend is disabled")
 }

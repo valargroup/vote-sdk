@@ -1,0 +1,82 @@
+package keeper
+
+import (
+	"context"
+	"fmt"
+
+	sdkmath "cosmossdk.io/math"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+
+	"github.com/valargroup/vote-sdk/x/vote/types"
+)
+
+// AuthorizedSend handles MsgAuthorizedSend — the only coin-transfer path on
+// this chain. Bank MsgSend/MsgMultiSend are blocked at the ante handler because
+// unrestricted transfers would allow anyone to accumulate stake and create a
+// validator, undermining the controlled validator set.
+//
+// Authorization rules:
+//   - Vote manager can send to anyone (used to distribute stake to new validators).
+//   - Bonded validators can send to the vote manager or other bonded validators
+//     (allows operational redistribution within the trusted set).
+//   - All other senders are rejected.
+func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend) (*types.MsgAuthorizedSendResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+
+	fromAddr, err := sdk.AccAddressFromBech32(msg.FromAddress)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid from_address: %v", types.ErrInvalidField, err)
+	}
+	toAddr, err := sdk.AccAddressFromBech32(msg.ToAddress)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid to_address: %v", types.ErrInvalidField, err)
+	}
+
+	amt, ok := sdkmath.NewIntFromString(msg.Amount)
+	if !ok || !amt.IsPositive() {
+		return nil, fmt.Errorf("%w: amount must be a positive integer string", types.ErrInvalidField)
+	}
+	if msg.Denom == "" {
+		return nil, fmt.Errorf("%w: denom cannot be empty", types.ErrInvalidField)
+	}
+
+	coins := sdk.NewCoins(sdk.NewCoin(msg.Denom, amt))
+
+	kvStore := ms.k.OpenKVStore(ctx)
+	mgr, err := ms.k.GetVoteManager(kvStore)
+	if err != nil {
+		return nil, err
+	}
+
+	senderIsManager := mgr != nil && mgr.Address == msg.FromAddress
+
+	if !senderIsManager {
+		senderValAddr := sdk.ValAddress(fromAddr).String()
+		if !ms.k.IsValidator(ctx, senderValAddr) {
+			return nil, fmt.Errorf("%w: %s is neither the vote manager nor a bonded validator",
+				types.ErrUnauthorizedSend, msg.FromAddress)
+		}
+
+		recipientIsManager := mgr != nil && mgr.Address == msg.ToAddress
+		recipientValAddr := sdk.ValAddress(toAddr).String()
+		recipientIsValidator := ms.k.IsValidator(ctx, recipientValAddr)
+
+		if !recipientIsManager && !recipientIsValidator {
+			return nil, fmt.Errorf("%w: validator %s can only send to the vote manager or another bonded validator",
+				types.ErrUnauthorizedSend, msg.FromAddress)
+		}
+	}
+
+	if err := ms.k.bankKeeper.SendCoins(ctx, fromAddr, toAddr, coins); err != nil {
+		return nil, fmt.Errorf("send failed: %w", err)
+	}
+
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeAuthorizedSend,
+		sdk.NewAttribute(types.AttributeKeySender, msg.FromAddress),
+		sdk.NewAttribute(types.AttributeKeyRecipient, msg.ToAddress),
+		sdk.NewAttribute(types.AttributeKeyAmount, coins.String()),
+	))
+
+	return &types.MsgAuthorizedSendResponse{}, nil
+}
