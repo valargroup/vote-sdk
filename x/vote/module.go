@@ -408,48 +408,67 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := am.keeper.OpenKVStore(ctx)
 
-	// --- 1. Commitment tree root computation ---
-	state, err := am.keeper.GetCommitmentTreeState(kvStore)
-	if err != nil {
-		return err
-	}
+	// --- 1. Per-round commitment tree root computation ---
+	blockHeight := uint64(ctx.BlockHeight())
 
-	if state.NextIndex > 0 {
-		blockHeight := uint64(ctx.BlockHeight())
-		root, err := am.keeper.ComputeTreeRoot(kvStore, state.NextIndex, blockHeight)
+	// Compute roots for every active round whose tree has leaves.
+	// Errors must halt the node rather than be swallowed: a partial
+	// state update on some nodes would produce divergent app hashes.
+	var treeErr error
+	if err := am.keeper.IterateActiveRounds(kvStore, func(round *types.VoteRound) bool {
+		roundID := round.VoteRoundId
+
+		state, err := am.keeper.GetCommitmentTreeState(kvStore, roundID)
 		if err != nil {
-			return err
+			treeErr = fmt.Errorf("EndBlocker: read tree state for round %x: %w", roundID, err)
+			return true
+		}
+		if state.NextIndex == 0 {
+			return false
 		}
 
-		// Only write a new root when the tree has changed (new leaves appended).
+		root, err := am.keeper.ComputeTreeRoot(kvStore, roundID, state.NextIndex, blockHeight)
+		if err != nil {
+			treeErr = fmt.Errorf("EndBlocker: compute tree root for round %x: %w", roundID, err)
+			return true
+		}
+
 		if !bytes.Equal(root, state.Root) {
-			if err := am.keeper.SetCommitmentRootAtHeight(kvStore, blockHeight, root); err != nil {
-				return err
+			if err := am.keeper.SetCommitmentRootAtHeight(kvStore, roundID, blockHeight, root); err != nil {
+				treeErr = fmt.Errorf("EndBlocker: set root for round %x: %w", roundID, err)
+				return true
 			}
 
-			// Record the block-to-leaf-index mapping for the CommitmentLeaves query.
-			// New leaves this block span [NextIndexAtRoot, NextIndex).
 			leafStart := state.NextIndexAtRoot
 			leafCount := state.NextIndex - leafStart
 			if leafCount > 0 {
-				if err := am.keeper.SetBlockLeafIndex(kvStore, blockHeight, leafStart, leafCount); err != nil {
-					return err
+				if err := am.keeper.SetBlockLeafIndex(kvStore, roundID, blockHeight, leafStart, leafCount); err != nil {
+					treeErr = fmt.Errorf("EndBlocker: set block leaf index for round %x: %w", roundID, err)
+					return true
 				}
 			}
 
 			state.Root = root
 			state.Height = blockHeight
 			state.NextIndexAtRoot = state.NextIndex
-			if err := am.keeper.SetCommitmentTreeState(kvStore, state); err != nil {
-				return err
+			if err := am.keeper.SetCommitmentTreeState(kvStore, roundID, state); err != nil {
+				treeErr = fmt.Errorf("EndBlocker: set tree state for round %x: %w", roundID, err)
+				return true
 			}
 
 			ctx.EventManager().EmitEvent(sdk.NewEvent(
 				types.EventTypeCommitmentTreeRoot,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", roundID)),
 				sdk.NewAttribute(types.AttributeKeyTreeRoot, fmt.Sprintf("%x", root)),
 				sdk.NewAttribute(types.AttributeKeyBlockHeight, strconv.FormatUint(blockHeight, 10)),
 			))
 		}
+		return false
+	}); err != nil {
+		return err
+	}
+	if treeErr != nil {
+		return treeErr
 	}
 
 	// --- 2. Transition expired ACTIVE rounds to TALLYING ---

@@ -61,19 +61,21 @@ func (s *QueryServerTestSuite) TestCommitmentTreeAtHeight_NilRequest() {
 }
 
 func (s *QueryServerTestSuite) TestCommitmentTreeAtHeight_NotFound() {
-	_, err := s.queryServer.CommitmentTreeAtHeight(s.ctx, &types.QueryCommitmentTreeRequest{Height: 999})
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	_, err := s.queryServer.CommitmentTreeAtHeight(s.ctx, &types.QueryCommitmentTreeRequest{Height: 999, VoteRoundId: roundID})
 	s.Require().Error(err)
 	s.Require().Equal(codes.NotFound, status.Code(err))
 }
 
 func (s *QueryServerTestSuite) TestCommitmentTreeAtHeight_Found() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	// Store a root at height 50 with a block-leaf-index mapping.
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 	root := bytes.Repeat([]byte{0xAB}, 32)
-	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, 50, root))
-	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 50, 0, 2))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, roundID, 50, root))
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 50, 0, 2))
 
-	resp, err := s.queryServer.CommitmentTreeAtHeight(s.ctx, &types.QueryCommitmentTreeRequest{Height: 50})
+	resp, err := s.queryServer.CommitmentTreeAtHeight(s.ctx, &types.QueryCommitmentTreeRequest{Height: 50, VoteRoundId: roundID})
 	s.Require().NoError(err)
 	s.Require().NotNil(resp.Tree)
 	s.Require().Equal(root, resp.Tree.Root)
@@ -92,7 +94,8 @@ func (s *QueryServerTestSuite) TestLatestCommitmentTree_NilRequest() {
 }
 
 func (s *QueryServerTestSuite) TestLatestCommitmentTree_EmptyTree() {
-	resp, err := s.queryServer.LatestCommitmentTree(s.ctx, &types.QueryLatestTreeRequest{})
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	resp, err := s.queryServer.LatestCommitmentTree(s.ctx, &types.QueryLatestTreeRequest{VoteRoundId: roundID})
 	s.Require().NoError(err)
 	s.Require().NotNil(resp.Tree)
 	s.Require().Equal(uint64(0), resp.Tree.NextIndex)
@@ -100,24 +103,25 @@ func (s *QueryServerTestSuite) TestLatestCommitmentTree_EmptyTree() {
 }
 
 func (s *QueryServerTestSuite) TestLatestCommitmentTree_WithCommitments() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
 	// Append some commitments (canonical Pallas Fp encodings for votetree FFI).
-	_, err := s.keeper.AppendCommitment(kvStore, fpLeaf(1))
+	_, err := s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(1))
 	s.Require().NoError(err)
-	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(2))
+	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(2))
 	s.Require().NoError(err)
 
 	// Compute and store root (simulating EndBlocker).
-	state, err := s.keeper.GetCommitmentTreeState(kvStore)
+	state, err := s.keeper.GetCommitmentTreeState(kvStore, roundID)
 	s.Require().NoError(err)
-	root, err := s.keeper.ComputeTreeRoot(kvStore, state.NextIndex, 10)
+	root, err := s.keeper.ComputeTreeRoot(kvStore, roundID, state.NextIndex, 10)
 	s.Require().NoError(err)
 	state.Root = root
 	state.Height = 10
-	s.Require().NoError(s.keeper.SetCommitmentTreeState(kvStore, state))
+	s.Require().NoError(s.keeper.SetCommitmentTreeState(kvStore, roundID, state))
 
-	resp, err := s.queryServer.LatestCommitmentTree(s.ctx, &types.QueryLatestTreeRequest{})
+	resp, err := s.queryServer.LatestCommitmentTree(s.ctx, &types.QueryLatestTreeRequest{VoteRoundId: roundID})
 	s.Require().NoError(err)
 	s.Require().NotNil(resp.Tree)
 	s.Require().Equal(uint64(2), resp.Tree.NextIndex)
@@ -260,40 +264,46 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_NilRequest() {
 }
 
 func (s *QueryServerTestSuite) TestCommitmentLeaves_InvalidRange() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	_, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
-		FromHeight: 10,
-		ToHeight:   5,
+		FromHeight:  10,
+		ToHeight:    5,
+		VoteRoundId: roundID,
 	})
 	s.Require().Error(err)
 	s.Require().Equal(codes.InvalidArgument, status.Code(err))
 }
 
 func (s *QueryServerTestSuite) TestCommitmentLeaves_EmptyRange() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	// No leaves have been stored, so the response should be empty.
 	resp, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
-		FromHeight: 1,
-		ToHeight:   10,
+		FromHeight:  1,
+		ToHeight:    10,
+		VoteRoundId: roundID,
 	})
 	s.Require().NoError(err)
 	s.Require().Empty(resp.Blocks)
 }
 
 func (s *QueryServerTestSuite) TestCommitmentLeaves_SingleBlock() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
 	// Append 2 leaves and record block leaf index at height 5.
 	leaf0 := fpLeaf(0x10)
 	leaf1 := fpLeaf(0x20)
-	_, err := s.keeper.AppendCommitment(kvStore, leaf0)
+	_, err := s.keeper.AppendCommitment(kvStore, roundID, leaf0)
 	s.Require().NoError(err)
-	_, err = s.keeper.AppendCommitment(kvStore, leaf1)
+	_, err = s.keeper.AppendCommitment(kvStore, roundID, leaf1)
 	s.Require().NoError(err)
 
-	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 5, 0, 2))
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 5, 0, 2))
 
 	resp, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
-		FromHeight: 1,
-		ToHeight:   10,
+		FromHeight:  1,
+		ToHeight:    10,
+		VoteRoundId: roundID,
 	})
 	s.Require().NoError(err)
 	s.Require().Len(resp.Blocks, 1)
@@ -305,33 +315,35 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_SingleBlock() {
 }
 
 func (s *QueryServerTestSuite) TestCommitmentLeaves_MultipleBlocks() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
 	// Block 5: 2 leaves (index 0, 1)
-	_, err := s.keeper.AppendCommitment(kvStore, fpLeaf(0x01))
+	_, err := s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x01))
 	s.Require().NoError(err)
-	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(0x02))
+	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x02))
 	s.Require().NoError(err)
-	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 5, 0, 2))
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 5, 0, 2))
 
 	// Block 8: 1 leaf (index 2)
-	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(0x03))
+	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x03))
 	s.Require().NoError(err)
-	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 8, 2, 1))
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 8, 2, 1))
 
 	// Block 12: 3 leaves (index 3, 4, 5)
-	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(0x04))
+	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x04))
 	s.Require().NoError(err)
-	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(0x05))
+	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x05))
 	s.Require().NoError(err)
-	_, err = s.keeper.AppendCommitment(kvStore, fpLeaf(0x06))
+	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x06))
 	s.Require().NoError(err)
-	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 12, 3, 3))
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 12, 3, 3))
 
 	// Query all blocks.
 	resp, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
-		FromHeight: 1,
-		ToHeight:   20,
+		FromHeight:  1,
+		ToHeight:    20,
+		VoteRoundId: roundID,
 	})
 	s.Require().NoError(err)
 	s.Require().Len(resp.Blocks, 3)
@@ -350,8 +362,9 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_MultipleBlocks() {
 
 	// Query subset: only block 8.
 	resp, err = s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
-		FromHeight: 6,
-		ToHeight:   10,
+		FromHeight:  6,
+		ToHeight:    10,
+		VoteRoundId: roundID,
 	})
 	s.Require().NoError(err)
 	s.Require().Len(resp.Blocks, 1)
@@ -363,11 +376,12 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_MultipleBlocks() {
 // ---------------------------------------------------------------------------
 
 func (s *QueryServerTestSuite) TestBlockLeafIndex_SetAndGet() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
-	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, 10, 0, 3))
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 10, 0, 3))
 
-	start, count, found, err := s.keeper.GetBlockLeafIndex(kvStore, 10)
+	start, count, found, err := s.keeper.GetBlockLeafIndex(kvStore, roundID, 10)
 	s.Require().NoError(err)
 	s.Require().True(found)
 	s.Require().Equal(uint64(0), start)
@@ -375,9 +389,10 @@ func (s *QueryServerTestSuite) TestBlockLeafIndex_SetAndGet() {
 }
 
 func (s *QueryServerTestSuite) TestBlockLeafIndex_NotFound() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
-	_, _, found, err := s.keeper.GetBlockLeafIndex(kvStore, 999)
+	_, _, found, err := s.keeper.GetBlockLeafIndex(kvStore, roundID, 999)
 	s.Require().NoError(err)
 	s.Require().False(found)
 }

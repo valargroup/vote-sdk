@@ -66,17 +66,16 @@ func (k *Keeper) CheckNullifiersUnique(ctx context.Context, nfType types.Nullifi
 }
 
 // ---------------------------------------------------------------------------
-// Commitment tree
+// Commitment tree (per-round)
 // ---------------------------------------------------------------------------
 
-// GetCommitmentTreeState returns the current state of the commitment tree.
-func (k *Keeper) GetCommitmentTreeState(kvStore store.KVStore) (*types.CommitmentTreeState, error) {
-	bz, err := kvStore.Get(types.TreeStateKey)
+// GetCommitmentTreeState returns the current state of the commitment tree for a round.
+func (k *Keeper) GetCommitmentTreeState(kvStore store.KVStore, roundID []byte) (*types.CommitmentTreeState, error) {
+	bz, err := kvStore.Get(types.RoundTreeStateKey(roundID))
 	if err != nil {
 		return nil, err
 	}
 	if bz == nil {
-		// Return default state if not initialized.
 		return &types.CommitmentTreeState{NextIndex: 0}, nil
 	}
 
@@ -87,32 +86,30 @@ func (k *Keeper) GetCommitmentTreeState(kvStore store.KVStore) (*types.Commitmen
 	return &state, nil
 }
 
-// SetCommitmentTreeState stores the commitment tree state.
-func (k *Keeper) SetCommitmentTreeState(kvStore store.KVStore, state *types.CommitmentTreeState) error {
+// SetCommitmentTreeState stores the commitment tree state for a round.
+func (k *Keeper) SetCommitmentTreeState(kvStore store.KVStore, roundID []byte, state *types.CommitmentTreeState) error {
 	bz, err := marshal(state)
 	if err != nil {
 		return err
 	}
-	return kvStore.Set(types.TreeStateKey, bz)
+	return kvStore.Set(types.RoundTreeStateKey(roundID), bz)
 }
 
-// AppendCommitment appends a commitment to the tree and returns its index.
-func (k *Keeper) AppendCommitment(kvStore store.KVStore, commitment []byte) (uint64, error) {
-	state, err := k.GetCommitmentTreeState(kvStore)
+// AppendCommitment appends a commitment to a round's tree and returns its index.
+func (k *Keeper) AppendCommitment(kvStore store.KVStore, roundID, commitment []byte) (uint64, error) {
+	state, err := k.GetCommitmentTreeState(kvStore, roundID)
 	if err != nil {
 		return 0, err
 	}
 
 	index := state.NextIndex
 
-	// Write the leaf.
-	if err := kvStore.Set(types.CommitmentLeafKey(index), commitment); err != nil {
+	if err := kvStore.Set(types.CommitmentLeafKey(roundID, index), commitment); err != nil {
 		return 0, err
 	}
 
-	// Increment next_index.
 	state.NextIndex = index + 1
-	if err := k.SetCommitmentTreeState(kvStore, state); err != nil {
+	if err := k.SetCommitmentTreeState(kvStore, roundID, state); err != nil {
 		return 0, err
 	}
 
@@ -120,22 +117,22 @@ func (k *Keeper) AppendCommitment(kvStore store.KVStore, commitment []byte) (uin
 }
 
 // ---------------------------------------------------------------------------
-// Block leaf index
+// Block leaf index (per-round)
 // ---------------------------------------------------------------------------
 
 // SetBlockLeafIndex records the range of commitment leaves that were appended
-// during a specific block height. Value format: start_index (uint64 BE) || count (uint64 BE).
-func (k *Keeper) SetBlockLeafIndex(kvStore store.KVStore, height, startIndex, count uint64) error {
+// during a specific block height for a round.
+func (k *Keeper) SetBlockLeafIndex(kvStore store.KVStore, roundID []byte, height, startIndex, count uint64) error {
 	val := make([]byte, 16)
 	putUint64BE(val[0:8], startIndex)
 	putUint64BE(val[8:16], count)
-	return kvStore.Set(types.BlockLeafIndexKey(height), val)
+	return kvStore.Set(types.BlockLeafIndexKey(roundID, height), val)
 }
 
 // GetBlockLeafIndex returns the (start_index, count) for leaves appended at
-// the given block height. Returns (0, 0, false) if no mapping exists.
-func (k *Keeper) GetBlockLeafIndex(kvStore store.KVStore, height uint64) (startIndex, count uint64, found bool, err error) {
-	val, err := kvStore.Get(types.BlockLeafIndexKey(height))
+// the given block height for a round. Returns (0, 0, false) if no mapping exists.
+func (k *Keeper) GetBlockLeafIndex(kvStore store.KVStore, roundID []byte, height uint64) (startIndex, count uint64, found bool, err error) {
+	val, err := kvStore.Get(types.BlockLeafIndexKey(roundID, height))
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -148,19 +145,19 @@ func (k *Keeper) GetBlockLeafIndex(kvStore store.KVStore, height uint64) (startI
 }
 
 // GetCommitmentLeaves returns the commitment leaves that were appended during
-// blocks from fromHeight to toHeight (inclusive). Each entry contains the block
-// height, the starting leaf index, and the leaves themselves.
-func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, fromHeight, toHeight uint64) ([]*types.BlockCommitments, error) {
-	// Iterate over the BlockLeafIndex prefix for the requested height range.
-	startKey := types.BlockLeafIndexKey(fromHeight)
-	// End key is exclusive: the key just after toHeight.
-	endKey := types.BlockLeafIndexKey(toHeight + 1)
+// blocks from fromHeight to toHeight (inclusive) for a round.
+func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, roundID []byte, fromHeight, toHeight uint64) ([]*types.BlockCommitments, error) {
+	startKey := types.BlockLeafIndexKey(roundID, fromHeight)
+	endKey := types.BlockLeafIndexKey(roundID, toHeight+1)
 
 	iter, err := kvStore.Iterator(startKey, endKey)
 	if err != nil {
 		return nil, err
 	}
 	defer iter.Close()
+
+	// The round prefix length preceding the inner block-leaf-index key.
+	innerOffset := len(types.RoundTreeKey(roundID)) + len(types.BlockLeafIndexPrefix)
 
 	var blocks []*types.BlockCommitments
 	for ; iter.Valid(); iter.Next() {
@@ -171,19 +168,17 @@ func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, fromHeight, toHeight
 		startIndex := getUint64BE(val[0:8])
 		count := getUint64BE(val[8:16])
 
-		// Read the actual leaves from the commitment leaf store.
 		leaves := make([][]byte, count)
 		for i := uint64(0); i < count; i++ {
-			leaf, err := kvStore.Get(types.CommitmentLeafKey(startIndex + i))
+			leaf, err := kvStore.Get(types.CommitmentLeafKey(roundID, startIndex+i))
 			if err != nil {
 				return nil, err
 			}
 			leaves[i] = leaf
 		}
 
-		// Extract height from the key: prefix (1 byte) + height (8 bytes BE).
 		key := iter.Key()
-		height := getUint64BE(key[len(types.BlockLeafIndexPrefix):])
+		height := getUint64BE(key[innerOffset:])
 
 		blocks = append(blocks, &types.BlockCommitments{
 			Height:     height,
@@ -196,17 +191,17 @@ func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, fromHeight, toHeight
 }
 
 // ---------------------------------------------------------------------------
-// Commitment roots
+// Commitment roots (per-round)
 // ---------------------------------------------------------------------------
 
-// GetCommitmentRootAtHeight returns the commitment tree root stored at a specific height.
-func (k *Keeper) GetCommitmentRootAtHeight(kvStore store.KVStore, height uint64) ([]byte, error) {
-	return kvStore.Get(types.CommitmentRootKey(height))
+// GetCommitmentRootAtHeight returns the commitment tree root stored at a specific height for a round.
+func (k *Keeper) GetCommitmentRootAtHeight(kvStore store.KVStore, roundID []byte, height uint64) ([]byte, error) {
+	return kvStore.Get(types.CommitmentRootKey(roundID, height))
 }
 
-// SetCommitmentRootAtHeight stores the commitment tree root for a specific height.
-func (k *Keeper) SetCommitmentRootAtHeight(kvStore store.KVStore, height uint64, root []byte) error {
-	return kvStore.Set(types.CommitmentRootKey(height), root)
+// SetCommitmentRootAtHeight stores the commitment tree root for a specific height and round.
+func (k *Keeper) SetCommitmentRootAtHeight(kvStore store.KVStore, roundID []byte, height uint64, root []byte) error {
+	return kvStore.Set(types.CommitmentRootKey(roundID, height), root)
 }
 
 // ---------------------------------------------------------------------------

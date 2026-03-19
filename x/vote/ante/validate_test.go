@@ -319,11 +319,11 @@ func (s *ValidateTestSuite) setupTallyingRound() {
 }
 
 // setupCommitmentRootAtHeight stores a commitment tree root at the given height
-// so that CastVote/RevealShare messages with that anchor height pass the anchor check.
+// for the test round, so that CastVote/RevealShare messages pass the anchor check.
 func (s *ValidateTestSuite) setupCommitmentRootAtHeight(height uint64) {
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 	root := bytes.Repeat([]byte{0xCC}, 32)
-	err := s.keeper.SetCommitmentRootAtHeight(kvStore, height, root)
+	err := s.keeper.SetCommitmentRootAtHeight(kvStore, testRoundID, height, root)
 	s.Require().NoError(err)
 }
 
@@ -335,12 +335,13 @@ func (s *ValidateTestSuite) recordNullifier(nfType types.NullifierType, roundID,
 	s.Require().NoError(err)
 }
 
-// seedCommitmentRoot stores a dummy commitment tree root at the given height.
-// MsgRevealShare tests need this because verifyRevealShare looks up the root.
+// seedCommitmentRoot stores a dummy commitment tree root at the given height
+// for the test round. MsgRevealShare tests need this because verifyRevealShare
+// looks up the root.
 func (s *ValidateTestSuite) seedCommitmentRoot(height uint64) {
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 	root := bytes.Repeat([]byte{0xAB}, 32)
-	err := s.keeper.SetCommitmentRootAtHeight(kvStore, height, root)
+	err := s.keeper.SetCommitmentRootAtHeight(kvStore, testRoundID, height, root)
 	s.Require().NoError(err)
 }
 

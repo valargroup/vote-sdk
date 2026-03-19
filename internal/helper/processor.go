@@ -198,6 +198,13 @@ func (p *Processor) processBatch(ctx context.Context) {
 
 // processShare handles a single share: Merkle path → proof → submit.
 func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
+	// Scope the tree reader to this share's voting round.
+	roundBytes, err := hex.DecodeString(share.Payload.VoteRoundID)
+	if err != nil {
+		return fmt.Errorf("decode vote_round_id: %w", err)
+	}
+	p.tree.SetRoundID(roundBytes)
+
 	// Read tree status (leaf count + anchor height) without loading leaf data.
 	status, err := p.tree.GetTreeStatus()
 	if err != nil {
@@ -219,12 +226,9 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		return fmt.Errorf("compute merkle path: %w", err)
 	}
 
-	// Decode round_id from hex to raw 32 bytes.
+	// Build fixed-size round_id array for the proof generator (already
+	// decoded above for SetRoundID).
 	var roundID [32]byte
-	roundBytes, err := hex.DecodeString(share.Payload.VoteRoundID)
-	if err != nil {
-		return fmt.Errorf("decode vote_round_id: %w", err)
-	}
 	if len(roundBytes) != 32 {
 		return fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes))
 	}

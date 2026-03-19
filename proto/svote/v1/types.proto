@@ -79,16 +79,22 @@ message CommitmentTreeState {
 // GenesisState defines the vote module's genesis state.
 message GenesisState {
   repeated VoteRound               rounds              = 1;
-  CommitmentTreeState              tree_state           = 2;
-  repeated CommitmentLeaf          commitment_leaves    = 3;
   repeated NullifierEntry          nullifiers           = 4;
   string                           vote_manager         = 5;
   repeated TallyResult             tally_results        = 6;
   repeated ValidatorPallasKey      pallas_keys          = 7;
   repeated GenesisTallyAccumulator tally_accumulators   = 8;
   repeated GenesisShareCount       share_counts         = 9;
-  repeated GenesisCommitmentRoot   commitment_roots          = 10;
-  uint32                           min_ceremony_validators   = 11; // Minimum eligible validators to create a voting round (default: 1)
+  uint32                           min_ceremony_validators   = 11;
+  repeated GenesisRoundTree        round_trees               = 12;
+}
+
+// GenesisRoundTree holds per-round commitment tree state for genesis export/import.
+message GenesisRoundTree {
+  bytes                          vote_round_id    = 1;
+  CommitmentTreeState            tree_state       = 2;
+  repeated CommitmentLeaf        commitment_leaves = 3;
+  repeated GenesisCommitmentRoot commitment_roots  = 4;
 }
 
 // GenesisCommitmentRoot is a commitment tree root stored at a specific block height.

@@ -209,18 +209,23 @@ func buildPulseConfig(
 }
 
 // keeperTreeReader implements helper.TreeReader by reading directly from the
-// vote keeper's KV store.
+// vote keeper's KV store. The roundID must be set before tree methods are
+// called (e.g. from the active round or first share payload).
 type keeperTreeReader struct {
-	app    *app.SvoteApp
-	logger log.Logger
+	app     *app.SvoteApp
+	logger  log.Logger
+	roundID []byte
 }
+
+// SetRoundID sets the voting round used for tree lookups.
+func (r *keeperTreeReader) SetRoundID(id []byte) { r.roundID = id }
 
 // GetTreeStatus returns lightweight tree statistics without reading leaf data.
 func (r *keeperTreeReader) GetTreeStatus() (helper.TreeStatus, error) {
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
 
-	treeState, err := r.app.VoteKeeper.GetCommitmentTreeState(kvStore)
+	treeState, err := r.app.VoteKeeper.GetCommitmentTreeState(kvStore, r.roundID)
 	if err != nil {
 		return helper.TreeStatus{}, fmt.Errorf("get tree state: %w", err)
 	}
@@ -228,7 +233,7 @@ func (r *keeperTreeReader) GetTreeStatus() (helper.TreeStatus, error) {
 	var anchorHeight uint64
 	latestHeight := uint64(r.app.LastBlockHeight())
 	for h := latestHeight; h > 0; h-- {
-		root, err := r.app.VoteKeeper.GetCommitmentRootAtHeight(kvStore, h)
+		root, err := r.app.VoteKeeper.GetCommitmentRootAtHeight(kvStore, r.roundID, h)
 		if err != nil {
 			continue
 		}
@@ -256,14 +261,18 @@ func (r *keeperTreeReader) MerklePath(position uint64, anchorHeight uint32) ([]b
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
 
-	treeState, err := r.app.VoteKeeper.GetCommitmentTreeState(kvStore)
+	treeState, err := r.app.VoteKeeper.GetCommitmentTreeState(kvStore, r.roundID)
 	if err != nil {
 		return nil, fmt.Errorf("get tree state: %w", err)
 	}
 
-	// Create a KV-backed handle from the snapshot store. ShardTree reads only
-	// the frontier shard + cap + checkpoints on creation — no leaf replay.
-	proxy := &votetree.KvStoreProxy{Current: kvStore}
+	// Create a KV-backed handle from the snapshot store with a round-scoped
+	// prefix. ShardTree reads only the frontier shard + cap + checkpoints on
+	// creation — no leaf replay.
+	proxy := &votetree.KvStoreProxy{
+		Current: kvStore,
+		Prefix:  votetypes.RoundTreeKey(r.roundID),
+	}
 	h, err := votetree.NewTreeHandleWithKV(proxy, treeState.NextIndex)
 	if err != nil {
 		return nil, fmt.Errorf("create kv tree handle: %w", err)
@@ -278,7 +287,7 @@ func (r *keeperTreeReader) MerklePath(position uint64, anchorHeight uint32) ([]b
 func (r *keeperTreeReader) LeafAt(position uint64) ([]byte, error) {
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
-	return kvStore.Get(votetypes.CommitmentLeafKey(position))
+	return kvStore.Get(votetypes.CommitmentLeafKey(r.roundID, position))
 }
 
 // GetRoundVoteEndTime reads a vote round directly from the keeper's KV store

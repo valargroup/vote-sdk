@@ -366,6 +366,8 @@ type vcMockTree struct {
 	leaves map[uint64][]byte
 }
 
+func (m *vcMockTree) SetRoundID(_ []byte) {}
+
 func (m *vcMockTree) GetTreeStatus() (TreeStatus, error) {
 	return TreeStatus{LeafCount: 1, AnchorHeight: 1}, nil
 }

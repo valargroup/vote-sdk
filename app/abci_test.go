@@ -87,7 +87,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	}
 
 	// Verify commitment tree advanced by 1 (only van_cmx; cmx_new is not in the tree).
-	treeState, err := s.app.VoteKeeper().GetCommitmentTreeState(kvStore)
+	treeState, err := s.app.VoteKeeper().GetCommitmentTreeState(kvStore, roundID)
 	s.Require().NoError(err)
 	s.Require().Equal(uint64(1), treeState.NextIndex)
 
@@ -97,7 +97,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 
 	ctx = s.queryCtx()
 	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
-	root, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, anchorHeight)
+	root, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, anchorHeight)
 	s.Require().NoError(err)
 	s.Require().NotNil(root, "EndBlocker should have computed a tree root at height %d", anchorHeight)
 	s.Require().Len(root, 32)
@@ -117,7 +117,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	s.Require().True(has, "vote-authority-note nullifier should be recorded")
 
 	// Tree advanced by 2 more (vote_authority_note_new + vote_commitment): 1 + 2 = 3.
-	treeState, err = s.app.VoteKeeper().GetCommitmentTreeState(kvStore)
+	treeState, err = s.app.VoteKeeper().GetCommitmentTreeState(kvStore, roundID)
 	s.Require().NoError(err)
 	s.Require().Equal(uint64(3), treeState.NextIndex)
 
@@ -348,7 +348,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
 
 	ctx := s.queryCtx()
 	kvStore := s.app.VoteKeeper().OpenKVStore(ctx)
-	root1, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, h1)
+	root1, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, h1)
 	s.Require().NoError(err)
 	s.Require().NotNil(root1, "root should be stored at height %d", h1)
 
@@ -359,7 +359,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
 
 	ctx = s.queryCtx()
 	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
-	root2, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, h2)
+	root2, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, h2)
 	s.Require().NoError(err)
 	s.Require().NotNil(root2, "root should be stored at height %d", h2)
 
@@ -372,12 +372,12 @@ func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
 
 	ctx = s.queryCtx()
 	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
-	root3, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, h3)
+	root3, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, h3)
 	s.Require().NoError(err)
 	s.Require().Nil(root3, "no root should be stored at height %d (tree unchanged)", h3)
 
 	// Previous roots still accessible.
-	root1Again, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, h1)
+	root1Again, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, h1)
 	s.Require().NoError(err)
 	s.Require().Equal(root1, root1Again)
 }

@@ -230,6 +230,8 @@ func (h *apiHandler) verifyCommitment(p *SharePayload) error {
 	}
 	copy(roundID[:], roundBytes)
 
+	tree.SetRoundID(roundBytes)
+
 	var sharesHash [32]byte
 	shBytes, err := base64.StdEncoding.DecodeString(p.SharesHash)
 	if err != nil {

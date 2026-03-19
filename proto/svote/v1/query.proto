@@ -48,14 +48,17 @@ service Query {
 }
 
 message QueryCommitmentTreeRequest {
-  uint64 height = 1;
+  uint64 height         = 1;
+  bytes  vote_round_id  = 2;
 }
 
 message QueryCommitmentTreeResponse {
   CommitmentTreeState tree = 1;
 }
 
-message QueryLatestTreeRequest {}
+message QueryLatestTreeRequest {
+  bytes vote_round_id = 1;
+}
 
 message QueryLatestTreeResponse {
   CommitmentTreeState tree = 1;
@@ -88,8 +91,9 @@ message QueryTallyResultsResponse {
 }
 
 message QueryCommitmentLeavesRequest {
-  uint64 from_height = 1;
-  uint64 to_height   = 2;
+  uint64 from_height    = 1;
+  uint64 to_height      = 2;
+  bytes  vote_round_id  = 3;
 }
 
 message QueryCommitmentLeavesResponse {

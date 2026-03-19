@@ -60,11 +60,11 @@ func (s *MsgServerTestSuite) setupActiveRound(roundID []byte) {
 	s.Require().NoError(s.keeper.SetVoteRound(kv, svtest.ActiveRoundFixture(roundID)))
 }
 
-// setupRootAtHeight stores a commitment tree root at the given height.
-func (s *MsgServerTestSuite) setupRootAtHeight(height uint64) {
+// setupRootAtHeight stores a commitment tree root at the given height for a round.
+func (s *MsgServerTestSuite) setupRootAtHeight(roundID []byte, height uint64) {
 	kv := s.keeper.OpenKVStore(s.ctx)
 	root := bytes.Repeat([]byte{0xCC}, 32)
-	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, height, root))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, height, root))
 }
 
 // computeExpectedRoundID mirrors the deriveRoundID function for test verification.
@@ -486,12 +486,12 @@ func (s *MsgServerTestSuite) TestDelegateVote() {
 				}
 
 				// Tree state advanced by 1 (only van_cmx; cmx_new is not in the tree).
-				state, err := s.keeper.GetCommitmentTreeState(kv)
+				state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 				s.Require().NoError(err)
 				s.Require().Equal(uint64(1), state.NextIndex)
 
 				// Verify the single leaf is van_cmx.
-				leaf0, err := kv.Get(types.CommitmentLeafKey(0))
+				leaf0, err := kv.Get(types.CommitmentLeafKey(roundID, 0))
 				s.Require().NoError(err)
 				s.Require().Equal(fpLE(0xB2), leaf0) // van_cmx
 			},
@@ -536,7 +536,7 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			name: "happy path: nullifier recorded and commitments appended",
 			setup: func() {
 				s.setupActiveRound(roundID)
-				s.setupRootAtHeight(10)
+				s.setupRootAtHeight(roundID, 10)
 			},
 			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
@@ -554,7 +554,7 @@ func (s *MsgServerTestSuite) TestCastVote() {
 				s.Require().NoError(err)
 				s.Require().True(has)
 
-				state, err := s.keeper.GetCommitmentTreeState(kv)
+				state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 				s.Require().NoError(err)
 				s.Require().Equal(uint64(2), state.NextIndex)
 			},
@@ -580,7 +580,7 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			name: "invalid proposal_id rejected",
 			setup: func() {
 				s.setupActiveRound(roundID) // round has 2 proposals (id 1, 2)
-				s.setupRootAtHeight(10)
+				s.setupRootAtHeight(roundID, 10)
 			},
 			msg: &types.MsgCastVote{
 				VanNullifier:             bytes.Repeat([]byte{0xE1}, 32),
@@ -598,7 +598,7 @@ func (s *MsgServerTestSuite) TestCastVote() {
 			name: "duplicate VAN nullifier rejected (double-vote)",
 			setup: func() {
 				s.setupActiveRound(roundID)
-				s.setupRootAtHeight(10)
+				s.setupRootAtHeight(roundID, 10)
 				// First CastVote with this nullifier succeeds and records it.
 				first := &types.MsgCastVote{
 					VanNullifier:             bytes.Repeat([]byte{0xDD}, 32),

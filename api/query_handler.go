@@ -19,9 +19,9 @@ import (
 
 // RegisterQueryRoutes registers vote query REST endpoints on the router.
 //
-//	GET /shielded-vote/v1/commitment-tree/{height}
-//	GET /shielded-vote/v1/commitment-tree/latest
-//	GET /shielded-vote/v1/commitment-tree/leaves?from_height=X&to_height=Y
+//	GET /shielded-vote/v1/commitment-tree/{round_id}/latest
+//	GET /shielded-vote/v1/commitment-tree/{round_id}/leaves?from_height=X&to_height=Y
+//	GET /shielded-vote/v1/commitment-tree/{round_id}/{height}
 //	GET /shielded-vote/v1/round/{round_id}
 //	GET /shielded-vote/v1/rounds
 //	GET /shielded-vote/v1/rounds/active
@@ -37,9 +37,9 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 
 	// Register "latest" and "leaves" before "{height}" to avoid gorilla/mux
 	// treating them as a height param.
-	router.HandleFunc("/shielded-vote/v1/commitment-tree/latest", qh.handleLatestCommitmentTree).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/commitment-tree/leaves", qh.handleCommitmentLeaves).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/commitment-tree/{height}", qh.handleCommitmentTreeAtHeight).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/commitment-tree/{round_id}/latest", qh.handleLatestCommitmentTree).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/commitment-tree/{round_id}/leaves", qh.handleCommitmentLeaves).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/commitment-tree/{round_id}/{height}", qh.handleCommitmentTreeAtHeight).Methods("GET")
 	router.HandleFunc("/shielded-vote/v1/rounds/active", qh.handleActiveRound).Methods("GET")
 	router.HandleFunc("/shielded-vote/v1/rounds", qh.handleListRounds).Methods("GET")
 	router.HandleFunc("/shielded-vote/v1/round/{round_id}", qh.handleVoteRound).Methods("GET")
@@ -75,6 +75,10 @@ func parseRoundID(w http.ResponseWriter, r *http.Request) []byte {
 }
 
 func (qh *queryHandler) handleCommitmentTreeAtHeight(w http.ResponseWriter, r *http.Request) {
+	roundID := parseRoundID(w, r)
+	if roundID == nil {
+		return
+	}
 	vars := mux.Vars(r)
 	heightStr := vars["height"]
 	height, err := strconv.ParseUint(heightStr, 10, 64)
@@ -83,7 +87,7 @@ func (qh *queryHandler) handleCommitmentTreeAtHeight(w http.ResponseWriter, r *h
 		return
 	}
 
-	req := &types.QueryCommitmentTreeRequest{Height: height}
+	req := &types.QueryCommitmentTreeRequest{Height: height, VoteRoundId: roundID}
 	resp := &types.QueryCommitmentTreeResponse{}
 
 	if err := qh.abciQuery("/svote.v1.Query/CommitmentTreeAtHeight", req, resp); err != nil {
@@ -94,8 +98,13 @@ func (qh *queryHandler) handleCommitmentTreeAtHeight(w http.ResponseWriter, r *h
 	writeProtoJSON(w, resp)
 }
 
-func (qh *queryHandler) handleLatestCommitmentTree(w http.ResponseWriter, _ *http.Request) {
-	req := &types.QueryLatestTreeRequest{}
+func (qh *queryHandler) handleLatestCommitmentTree(w http.ResponseWriter, r *http.Request) {
+	roundID := parseRoundID(w, r)
+	if roundID == nil {
+		return
+	}
+
+	req := &types.QueryLatestTreeRequest{VoteRoundId: roundID}
 	resp := &types.QueryLatestTreeResponse{}
 
 	if err := qh.abciQuery("/svote.v1.Query/LatestCommitmentTree", req, resp); err != nil {
@@ -163,6 +172,11 @@ func (qh *queryHandler) handleProposalTally(w http.ResponseWriter, r *http.Reque
 }
 
 func (qh *queryHandler) handleCommitmentLeaves(w http.ResponseWriter, r *http.Request) {
+	roundID := parseRoundID(w, r)
+	if roundID == nil {
+		return
+	}
+
 	fromStr := r.URL.Query().Get("from_height")
 	toStr := r.URL.Query().Get("to_height")
 
@@ -183,8 +197,9 @@ func (qh *queryHandler) handleCommitmentLeaves(w http.ResponseWriter, r *http.Re
 	}
 
 	req := &types.QueryCommitmentLeavesRequest{
-		FromHeight: fromHeight,
-		ToHeight:   toHeight,
+		FromHeight:  fromHeight,
+		ToHeight:    toHeight,
+		VoteRoundId: roundID,
 	}
 	resp := &types.QueryCommitmentLeavesResponse{}
 
