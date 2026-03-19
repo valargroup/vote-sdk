@@ -77,6 +77,11 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 			return handleVoteAnte(ctx, vtx, voteKeeper, sigVerifier, zkpVerifier)
 		}
 
+		msgs := tx.GetMsgs()
+		if len(msgs) > 1 {
+			return ctx, fmt.Errorf("multi-message transactions are not supported; got %d messages", len(msgs))
+		}
+
 		// ---------------------------------------------------------------
 		// Blocked message types
 		// ---------------------------------------------------------------
@@ -99,7 +104,20 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 		//   are rejected. This prevents stake from leaking to
 		//   unauthorized parties who could use it to create validators.
 		// ---------------------------------------------------------------
-		for _, msg := range tx.GetMsgs() {
+		for _, msg := range msgs {
+			// Vote module messages (ZKP-authenticated) must only enter via the
+			// custom VoteTxWrapper path where ZKP/RedPallas verification runs.
+			// Reject them in standard Cosmos txs to prevent the noop-signer
+			// bypass: a multi-msg tx [MsgSend, MsgRevealShare] where
+			// MsgRevealShare contributes 0 signers and executes without ZKP.
+			if isVoteModuleMsg(msg) {
+				return ctx, fmt.Errorf("vote module message %T is not allowed in standard Cosmos transactions; use the vote tx format", msg)
+			}
+
+			// Block raw MsgCreateValidator — post-genesis validators must use
+			// MsgCreateValidatorWithPallasKey to atomically register their
+			// Pallas key. Allow during genesis (block height 0) since gentx
+			// produces standard MsgCreateValidator.
 			if _, ok := msg.(*stakingtypes.MsgCreateValidator); ok {
 				if ctx.BlockHeight() > 0 {
 					return ctx, fmt.Errorf("MsgCreateValidator is disabled; use MsgCreateValidatorWithPallasKey via /shielded-vote/v1/create-validator-with-pallas")
@@ -204,4 +222,23 @@ func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper *votekeepe
 	}
 
 	return sdk.ChainAnteDecorators(anteDecorators...), nil
+}
+
+// isVoteModuleMsg returns true for messages that must only be submitted via
+// the custom vote tx wire format (VoteTxWrapper). This includes:
+//   - Vote messages: authenticated by ZKP/RedPallas, not Cosmos signatures.
+//   - Ceremony messages: auto-injected by PrepareProposal, authenticated by
+//     proposer identity check (ValidateProposerIsCreator).
+//
+// Allowing these in standard Cosmos txs would bypass their authentication —
+// vote messages skip ZKP verification, ceremony messages skip proposer gating.
+func isVoteModuleMsg(msg sdk.Msg) bool {
+	switch msg.(type) {
+	case *types.MsgDelegateVote, *types.MsgCastVote, *types.MsgRevealShare:
+		return true
+	case *types.MsgDealExecutiveAuthorityKey, *types.MsgAckExecutiveAuthorityKey, *types.MsgSubmitPartialDecryption, *types.MsgSubmitTally:
+		return true
+	default:
+		return false
+	}
 }
