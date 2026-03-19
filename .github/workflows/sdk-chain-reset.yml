@@ -88,7 +88,7 @@ jobs:
           script: |
             export HOME=${{ env.DEPLOY_PATH }} PATH=${{ env.DEPLOY_PATH }}:$PATH
             for i in $(seq 1 30); do
-              if curl -sf http://localhost:1418/shielded-vote/v1/rounds/active > /dev/null 2>&1; then
+              if curl -sf http://localhost:1418/shielded-vote/v1/rounds > /dev/null 2>&1; then
                 echo "Val1 API ready"
                 break
               fi
@@ -133,7 +133,7 @@ jobs:
               fi
             done
             for i in $(seq 1 30); do
-              if curl -sf http://localhost:1418/shielded-vote/v1/rounds/active > /dev/null 2>&1; then
+              if curl -sf http://localhost:1418/shielded-vote/v1/rounds > /dev/null 2>&1; then
                 echo "Chain API healthy (val1 port 1418)"
                 break
               fi

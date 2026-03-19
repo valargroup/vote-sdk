@@ -173,7 +173,7 @@ assert_reachable() {
       tree_log_line "FAIL: ${name} RPC unreachable"
       exit 1
     }
-    curl -sf "http://127.0.0.1:${api_port}/shielded-vote/v1/rounds/active" > /dev/null || {
+    curl -sf "http://127.0.0.1:${api_port}/shielded-vote/v1/rounds" > /dev/null || {
       tree_log_line "FAIL: ${name} API unreachable"
       exit 1
     }
