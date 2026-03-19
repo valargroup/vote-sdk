@@ -18,6 +18,13 @@ import (
 // Records the share nullifier, accumulates the vote amount into the tally,
 // and emits an event.
 func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare) (*types.MsgRevealShareResponse, error) {
+	// Defense-in-depth: reject shares if the round is not ACTIVE.
+	// The ante handler already enforces this, but duplicating here guards
+	// against internal callers that bypass ante validation.
+	if err := ms.k.ValidateRoundForVoting(goCtx, msg.VoteRoundId); err != nil {
+		return nil, err
+	}
+
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
