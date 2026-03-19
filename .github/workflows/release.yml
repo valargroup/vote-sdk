@@ -1,0 +1,200 @@
+# Build pre-compiled binaries and publish a GitHub Release on version tags.
+#
+# Tarball layout:
+#   shielded-vote-<version>-<platform>/
+#     bin/svoted, create-val-tx
+#     systemd/svoted-val{1,2,3}.service  (Linux only)
+#     scripts/init_multi.sh
+#     config/Caddyfile
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-sdk:
+    name: Build SDK (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: macos-latest
+            platform: darwin-amd64
+            cross: true
+            rust_target: x86_64-apple-darwin
+            goarch: amd64
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Add Rust cross target
+        if: matrix.cross
+        run: rustup target add ${{ matrix.rust_target }}
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            circuits/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-${{ matrix.platform }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.platform }}-circuits-
+      - name: Build SDK binaries
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cargo build --release --manifest-path circuits/Cargo.toml --target ${{ matrix.rust_target }}
+            mkdir -p circuits/target/release
+            ln -sf $(pwd)/circuits/target/${{ matrix.rust_target }}/release/libshielded_vote_circuits.a \
+                   circuits/target/release/libshielded_vote_circuits.a
+            CC="clang -target x86_64-apple-macosx" \
+            CGO_CFLAGS="-target x86_64-apple-macosx" \
+            CGO_LDFLAGS="-target x86_64-apple-macosx" \
+            CGO_ENABLED=1 GOOS=darwin GOARCH=${{ matrix.goarch }} \
+              go build -tags "halo2,redpallas" -o svoted ./cmd/svoted
+            CGO_ENABLED=0 GOOS=darwin GOARCH=${{ matrix.goarch }} go build -o create-val-tx ./scripts/create-val-tx
+          else
+            mise run build
+            mise run build:create-val-tx
+          fi
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-binaries-${{ matrix.platform }}
+          path: |
+            svoted
+            create-val-tx
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-sdk]
+    steps:
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+
+  release:
+    name: Package and release (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-amd64
+            os_family: linux
+          - platform: linux-arm64
+            os_family: linux
+          - platform: darwin-amd64
+            os_family: darwin
+          - platform: darwin-arm64
+            os_family: darwin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download SDK binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: sdk-binaries-${{ matrix.platform }}
+          path: sdk-binaries
+      - name: Assemble tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          DIR="shielded-vote-${VERSION}-${{ matrix.platform }}"
+          mkdir -p "${DIR}/bin" "${DIR}/scripts" "${DIR}/config"
+          cp sdk-binaries/svoted sdk-binaries/create-val-tx "${DIR}/bin/"
+          chmod +x "${DIR}/bin/"*
+          if [ "${{ matrix.os_family }}" = "linux" ]; then
+            mkdir -p "${DIR}/systemd"
+            for f in docs/svoted-val{1,2,3}.service; do
+              name=$(basename "$f")
+              sed -e 's|/opt/shielded-vote|/opt/shielded-vote|g' \
+                  -e 's|ExecStart=/opt/shielded-vote/svoted|ExecStart=/opt/shielded-vote/bin/svoted|' \
+                  "$f" > "${DIR}/systemd/${name}"
+            done
+          fi
+          cp scripts/init_multi.sh "${DIR}/scripts/"
+          cp deploy/Caddyfile "${DIR}/config/"
+          tar czf "${DIR}.tar.gz" "${DIR}"
+          sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
+          echo "TARBALL=${DIR}.tar.gz" >> "$GITHUB_ENV"
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tarball-${{ matrix.platform }}
+          path: |
+            ${{ env.TARBALL }}
+            ${{ env.TARBALL }}.sha256
+      - name: Attach to GitHub Release
+        run: gh release upload "${GITHUB_REF_NAME}" "${TARBALL}" "${TARBALL}.sha256" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  distribute:
+    name: Distribute to server
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download linux-amd64 release tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarball-linux-amd64
+      - name: Download linux-arm64 release tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarball-linux-arm64
+      - name: Download darwin-amd64 release tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarball-darwin-amd64
+      - name: Download darwin-arm64 release tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarball-darwin-arm64
+      - name: Set version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+      - name: Upload to DigitalOcean Spaces
+        continue-on-error: true
+        env:
+          DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
+          DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
+        run: |
+          pip install --quiet s3cmd
+          cat > /tmp/do-spaces.s3cfg <<EOF
+          [default]
+          access_key = ${DO_ACCESS_KEY}
+          secret_key = ${DO_SECRET_KEY}
+          host_base = fra1.digitaloceanspaces.com
+          host_bucket = %(bucket)s.fra1.digitaloceanspaces.com
+          bucket_location = fra1
+          use_https = True
+          EOF
+          for PLATFORM in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            TARBALL="shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
+            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" s3://vote/ --acl-public --force
+            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}.sha256" s3://vote/ --acl-public --force
+          done
+          echo "${VERSION}" > /tmp/version.txt
+          s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put join.sh s3://vote/join.sh --acl-public --force

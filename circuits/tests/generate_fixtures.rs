@@ -1,0 +1,370 @@
+//! Integration test that generates fixture files for Go and TypeScript tests.
+//!
+//! Run with: cargo test --release -- generate_fixtures --ignored --nocapture
+//!
+//! Generates:
+//!   ffi/zkp/testdata/toy_valid_proof.bin      - valid Halo2 proof bytes
+//!   ffi/zkp/testdata/toy_valid_input.bin      - correct public input (Fp, 32-byte LE)
+//!   ffi/zkp/testdata/toy_wrong_input.bin      - wrong public input for negative tests
+//!   ffi/redpallas/testdata/valid_rk.bin       - 32-byte RedPallas verification key
+//!   ffi/redpallas/testdata/valid_sighash.bin  - 32-byte sighash (message)
+//!   ffi/redpallas/testdata/valid_sig.bin      - 64-byte valid RedPallas signature
+//!   ffi/redpallas/testdata/wrong_sig.bin      - 64-byte signature over wrong message
+//!
+//! Delegation fixture (ZKP #1) is no longer generated here; the Rust E2E tests
+//! build the delegation bundle inline via e2e_tests::setup::build_delegation_bundle_for_test.
+
+use pasta_curves::group::ff::PrimeField;
+use std::fs;
+use std::path::Path;
+
+use blake2b_simd::Params as Blake2bParams;
+use rand::{thread_rng, RngCore};
+use reddsa::{orchard as reddsa_orchard, SigningKey, VerificationKey};
+
+use shielded_vote_circuits::redpallas as rp;
+use shielded_vote_circuits::toy;
+
+/// Generate fixture files for Go and TypeScript tests.
+///
+/// Marked `#[ignore]` so it only runs when explicitly requested
+/// (e.g., `cargo test --release -- generate_fixtures --ignored`).
+/// This avoids regenerating fixtures on every `cargo test`.
+#[test]
+#[ignore]
+fn generate_fixtures() {
+    generate_halo2_fixtures();
+    generate_redpallas_fixtures();
+    generate_share_reveal_fixtures();
+    println!("\nAll fixtures generated and validated successfully.");
+}
+
+/// Generate Halo2 toy circuit proof fixtures.
+fn generate_halo2_fixtures() {
+    let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("ffi/zkp/testdata");
+
+    fs::create_dir_all(&testdata_dir).expect("failed to create testdata directory");
+
+    // Generate a valid proof with known inputs: a=2, b=3, constant=7.
+    // c = 7 * 2^2 * 3^2 = 7 * 4 * 9 = 252
+    let (proof, c) = toy::create_toy_proof(2, 3);
+
+    // Serialize the public input as 32-byte little-endian (Pallas Fp repr).
+    let c_bytes = c.to_repr();
+
+    // Write valid proof.
+    let proof_path = testdata_dir.join("toy_valid_proof.bin");
+    fs::write(&proof_path, &proof).expect("failed to write proof fixture");
+    println!(
+        "Wrote valid proof ({} bytes) to {}",
+        proof.len(),
+        proof_path.display()
+    );
+
+    // Write valid public input.
+    let input_path = testdata_dir.join("toy_valid_input.bin");
+    fs::write(&input_path, c_bytes.as_ref()).expect("failed to write input fixture");
+    println!(
+        "Wrote valid input ({} bytes) to {}",
+        c_bytes.as_ref().len(),
+        input_path.display()
+    );
+
+    // Write wrong public input (c = 999, which does not match any valid (a,b) for constant=7).
+    use halo2_proofs::pasta::Fp;
+    let wrong_c = Fp::from(999u64);
+    let wrong_bytes = wrong_c.to_repr();
+    let wrong_path = testdata_dir.join("toy_wrong_input.bin");
+    fs::write(&wrong_path, wrong_bytes.as_ref()).expect("failed to write wrong input fixture");
+    println!(
+        "Wrote wrong input ({} bytes) to {}",
+        wrong_bytes.as_ref().len(),
+        wrong_path.display()
+    );
+
+    // Verify the generated proof works before committing the fixtures.
+    assert!(
+        toy::verify_toy(&proof, &c).is_ok(),
+        "generated proof should verify against correct input"
+    );
+    assert!(
+        toy::verify_toy(&proof, &wrong_c).is_err(),
+        "generated proof should NOT verify against wrong input"
+    );
+
+    println!("Halo2 fixtures generated and validated.");
+}
+
+/// Generate RedPallas SpendAuth signature fixtures.
+fn generate_redpallas_fixtures() {
+    let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("ffi/redpallas/testdata");
+
+    fs::create_dir_all(&testdata_dir).expect("failed to create redpallas testdata directory");
+
+    let mut rng = thread_rng();
+
+    // Generate a signing key and derive the verification key (rk).
+    let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut rng);
+    let vk = VerificationKey::from(&sk);
+    let rk_bytes: [u8; 32] = vk.into();
+
+    // Sighash: arbitrary 32 bytes. The chain only checks len==32 and verifies
+    // the RedPallas sig over it. In production this is the ZIP-244 sighash
+    // extracted from the governance PCZT.
+    let mut sighash = [0u8; 32];
+    rng.fill_bytes(&mut sighash);
+
+    // Sign the sighash.
+    let sig = sk.sign(&mut rng, &sighash);
+    let sig_bytes: [u8; 64] = sig.into();
+
+    // Write valid rk.
+    let rk_path = testdata_dir.join("valid_rk.bin");
+    fs::write(&rk_path, &rk_bytes).expect("failed to write rk fixture");
+    println!(
+        "Wrote valid rk ({} bytes) to {}",
+        rk_bytes.len(),
+        rk_path.display()
+    );
+
+    // Write valid sighash.
+    let sighash_path = testdata_dir.join("valid_sighash.bin");
+    fs::write(&sighash_path, &sighash).expect("failed to write sighash fixture");
+    println!(
+        "Wrote valid sighash ({} bytes) to {}",
+        sighash.len(),
+        sighash_path.display()
+    );
+
+    // Write valid signature.
+    let sig_path = testdata_dir.join("valid_sig.bin");
+    fs::write(&sig_path, &sig_bytes).expect("failed to write sig fixture");
+    println!(
+        "Wrote valid sig ({} bytes) to {}",
+        sig_bytes.len(),
+        sig_path.display()
+    );
+
+    // Generate a wrong signature: sign a different message.
+    let wrong_msg: [u8; 32] = [0xff; 32];
+    let wrong_sig = sk.sign(&mut rng, &wrong_msg);
+    let wrong_sig_bytes: [u8; 64] = wrong_sig.into();
+
+    let wrong_sig_path = testdata_dir.join("wrong_sig.bin");
+    fs::write(&wrong_sig_path, &wrong_sig_bytes).expect("failed to write wrong sig fixture");
+    println!(
+        "Wrote wrong sig ({} bytes) to {}",
+        wrong_sig_bytes.len(),
+        wrong_sig_path.display()
+    );
+
+    // Verify the generated fixtures work before committing.
+    assert!(
+        rp::verify_spend_auth_sig(&rk_bytes, &sighash, &sig_bytes).is_ok(),
+        "valid signature should verify"
+    );
+    assert!(
+        rp::verify_spend_auth_sig(&rk_bytes, &sighash, &wrong_sig_bytes).is_err(),
+        "wrong signature should NOT verify"
+    );
+
+    // Print base64-encoded values for embedding in TypeScript API tests.
+    use std::io::Write;
+    let b64 = |bytes: &[u8]| {
+        use std::io::Cursor;
+        let mut buf = Vec::new();
+        {
+            let mut cursor = Cursor::new(&mut buf);
+            // Simple base64 encoding (standard alphabet, no padding stripping).
+            let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            let mut i = 0;
+            while i < bytes.len() {
+                let b0 = bytes[i] as u32;
+                let b1 = if i + 1 < bytes.len() {
+                    bytes[i + 1] as u32
+                } else {
+                    0
+                };
+                let b2 = if i + 2 < bytes.len() {
+                    bytes[i + 2] as u32
+                } else {
+                    0
+                };
+                let triple = (b0 << 16) | (b1 << 8) | b2;
+                cursor
+                    .write_all(&[alphabet[((triple >> 18) & 0x3F) as usize]])
+                    .unwrap();
+                cursor
+                    .write_all(&[alphabet[((triple >> 12) & 0x3F) as usize]])
+                    .unwrap();
+                if i + 1 < bytes.len() {
+                    cursor
+                        .write_all(&[alphabet[((triple >> 6) & 0x3F) as usize]])
+                        .unwrap();
+                } else {
+                    cursor.write_all(b"=").unwrap();
+                }
+                if i + 2 < bytes.len() {
+                    cursor
+                        .write_all(&[alphabet[(triple & 0x3F) as usize]])
+                        .unwrap();
+                } else {
+                    cursor.write_all(b"=").unwrap();
+                }
+                i += 3;
+            }
+        }
+        String::from_utf8(buf).unwrap()
+    };
+    println!("\n--- Base64 values for TypeScript tests ---");
+    println!("REAL_RK  = \"{}\"", b64(&rk_bytes));
+    println!("REAL_SIG = \"{}\"", b64(&sig_bytes));
+    println!("-------------------------------------------");
+
+    println!("RedPallas delegation fixtures generated and validated.");
+
+    // --- CastVote fixtures ---
+    generate_cast_vote_redpallas_fixtures(&testdata_dir, &mut rng);
+}
+
+/// Canonical cast vote sighash domain. Must match sdk/x/vote/types/sighash.go.
+const CAST_VOTE_SIGHASH_DOMAIN: &[u8] = b"SVOTE_CAST_VOTE_SIGHASH_V0";
+
+/// Build the canonical signable payload for the RedPallas CastVote test message
+/// used in validate_redpallas_test.go: vote_round_id = 32×0x01, r_vpk = given,
+/// rest zeros except proposal_id = 1 (LE, padded to 32) and anchor_height = 10 (LE, padded to 32).
+fn canonical_cast_vote_payload_for_fixture(r_vpk_bytes: &[u8; 32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(
+        CAST_VOTE_SIGHASH_DOMAIN.len() + 7 * 32, // domain + 7 fields of 32 bytes each
+    );
+    out.extend_from_slice(CAST_VOTE_SIGHASH_DOMAIN);
+    out.extend_from_slice(&[0x01u8; 32]); // vote_round_id (testRoundID in Go)
+    out.extend_from_slice(r_vpk_bytes); // r_vpk (compressed)
+    out.extend_from_slice(&[0u8; 32]); // van_nullifier
+    out.extend_from_slice(&[0u8; 32]); // vote_authority_note_new
+    out.extend_from_slice(&[0u8; 32]); // vote_commitment
+                                       // proposal_id: 1 as 4 bytes LE, padded to 32 bytes
+    let mut pid_buf = [0u8; 32];
+    pid_buf[..4].copy_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&pid_buf);
+    // anchor_height: 10 as 8 bytes LE, padded to 32 bytes
+    let mut ah_buf = [0u8; 32];
+    ah_buf[..8].copy_from_slice(&10u64.to_le_bytes());
+    out.extend_from_slice(&ah_buf);
+    out
+}
+
+/// Generate RedPallas SpendAuth signature fixtures for CastVote.
+fn generate_cast_vote_redpallas_fixtures(
+    testdata_dir: &std::path::Path,
+    rng: &mut (impl rand::RngCore + rand::CryptoRng),
+) {
+    // Generate a signing key and derive the verification key (r_vpk).
+    let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut *rng);
+    let vk = VerificationKey::from(&sk);
+    let r_vpk_bytes: [u8; 32] = vk.into();
+
+    // Sighash = Blake2b-256(canonical cast vote payload).
+    let canonical = canonical_cast_vote_payload_for_fixture(&r_vpk_bytes);
+    let sighash_full = Blake2bParams::new().hash_length(32).hash(&canonical);
+    let mut sighash = [0u8; 32];
+    sighash.copy_from_slice(sighash_full.as_bytes());
+
+    // Sign the sighash.
+    let sig = sk.sign(&mut *rng, &sighash);
+    let sig_bytes: [u8; 64] = sig.into();
+
+    // Write CastVote fixtures.
+    let r_vpk_path = testdata_dir.join("cast_vote_r_vpk.bin");
+    fs::write(&r_vpk_path, &r_vpk_bytes).expect("failed to write cast_vote r_vpk fixture");
+    println!(
+        "Wrote cast_vote r_vpk ({} bytes) to {}",
+        r_vpk_bytes.len(),
+        r_vpk_path.display()
+    );
+
+    let sighash_path = testdata_dir.join("cast_vote_sighash.bin");
+    fs::write(&sighash_path, &sighash).expect("failed to write cast_vote sighash fixture");
+    println!(
+        "Wrote cast_vote sighash ({} bytes) to {}",
+        sighash.len(),
+        sighash_path.display()
+    );
+
+    let sig_path = testdata_dir.join("cast_vote_sig.bin");
+    fs::write(&sig_path, &sig_bytes).expect("failed to write cast_vote sig fixture");
+    println!(
+        "Wrote cast_vote sig ({} bytes) to {}",
+        sig_bytes.len(),
+        sig_path.display()
+    );
+
+    // Verify the generated fixtures work.
+    assert!(
+        rp::verify_spend_auth_sig(&r_vpk_bytes, &sighash, &sig_bytes).is_ok(),
+        "CastVote valid signature should verify"
+    );
+
+    println!("RedPallas CastVote fixtures generated and validated.");
+}
+
+/// Generate share reveal (ZKP #3) proof generation fixture for the Go round-trip test.
+///
+/// Writes all inputs needed by `halo2.GenerateShareRevealProof()` to a single
+/// binary file so the Go test can call generate + verify without needing Poseidon
+/// in Go.
+///
+/// Format (1488 bytes total):
+///   [0..772)       merkle_path (772 bytes)
+///   [772..1284)    share_comms (512 bytes: 16 × 32-byte commitments)
+///   [1284..1316)   primary_blind (32 bytes)
+///   [1316..1348)   enc_c1 (32 bytes, compressed Pallas point — C1)
+///   [1348..1380)   enc_c2 (32 bytes, compressed Pallas point — C2)
+///   [1380..1384)   share_index (u32 LE)
+///   [1384..1388)   proposal_id (u32 LE)
+///   [1388..1392)   vote_decision (u32 LE)
+///   [1392..1424)   round_id (32 bytes)
+///   [1424..1488)   enc_share (64 bytes: C1 compressed || C2 compressed Pallas points)
+fn generate_share_reveal_fixtures() {
+    use shielded_vote_circuits::ffi::build_share_reveal_test_data;
+
+    let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("ffi/zkp/testdata");
+
+    fs::create_dir_all(&testdata_dir).expect("failed to create testdata directory");
+
+    let (merkle_path, share_comms, primary_blind, enc_c1_compressed, enc_c2_compressed,
+         enc_share, share_index, proposal_id, vote_decision, round_id) =
+        build_share_reveal_test_data();
+
+    let mut fixture: Vec<u8> = Vec::with_capacity(1488);
+    fixture.extend_from_slice(&merkle_path);                  // 772 bytes
+    fixture.extend_from_slice(&share_comms);                  // 512 bytes
+    fixture.extend_from_slice(&primary_blind);                // 32 bytes
+    fixture.extend_from_slice(&enc_c1_compressed);            // 32 bytes
+    fixture.extend_from_slice(&enc_c2_compressed);            // 32 bytes
+    fixture.extend_from_slice(&share_index.to_le_bytes());   // 4 bytes
+    fixture.extend_from_slice(&proposal_id.to_le_bytes());   // 4 bytes
+    fixture.extend_from_slice(&vote_decision.to_le_bytes()); // 4 bytes
+    fixture.extend_from_slice(&round_id);                    // 32 bytes
+    fixture.extend_from_slice(&enc_share);                   // 64 bytes
+    assert_eq!(fixture.len(), 1488);
+
+    let fixture_path = testdata_dir.join("share_reveal_inputs.bin");
+    fs::write(&fixture_path, &fixture).expect("failed to write share reveal fixture");
+    println!(
+        "Wrote share reveal inputs ({} bytes) to {}",
+        fixture.len(),
+        fixture_path.display()
+    );
+
+    println!("Share reveal fixtures generated.");
+}

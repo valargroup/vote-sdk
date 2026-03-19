@@ -1,0 +1,213 @@
+syntax = "proto3";
+package svote.v1;
+
+option go_package = "github.com/valargroup/vote-sdk/x/vote/types";
+
+// SessionStatus represents the lifecycle state of a voting session.
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_ACTIVE      = 1;
+  SESSION_STATUS_TALLYING    = 2;
+  SESSION_STATUS_FINALIZED   = 3;
+  SESSION_STATUS_PENDING     = 4; // Ceremony in progress, not yet active
+}
+
+// VoteOption represents a named choice within a proposal.
+message VoteOption {
+  uint32 index = 1; // 0-indexed
+  string label = 2; // e.g. "Support", "Oppose"
+}
+
+// Proposal represents a single ballot option within a voting session.
+message Proposal {
+  uint32 id                    = 1;
+  string title                 = 2;
+  string description           = 3;
+  repeated VoteOption options  = 4; // 2-8 named choices
+}
+
+// VoteRound represents a voting session created by MsgCreateVotingSession.
+message VoteRound {
+  bytes         vote_round_id       = 1;
+  uint64        snapshot_height     = 2;
+  bytes         snapshot_blockhash  = 3;
+  bytes         proposals_hash      = 4;
+  uint64        vote_end_time       = 5;
+  bytes         nullifier_imt_root  = 6;
+  bytes         nc_root             = 7;
+  string        creator             = 8;
+  SessionStatus status              = 9;
+  bytes  ea_pk                      = 10; // Election authority public key (Pallas, 32 bytes)
+  repeated Proposal proposals       = 11;
+  string            description     = 12; // Human-readable round description
+  uint64            created_at_height = 13; // Block height at which this round was registered on-chain
+  string            title           = 14; // Short human-readable round title
+
+  // Per-round ceremony fields (populated when status = PENDING).
+  CeremonyStatus              ceremony_status     = 15;
+  repeated ValidatorPallasKey ceremony_validators = 16;
+  repeated DealerPayload      ceremony_payloads   = 17;
+  repeated AckEntry           ceremony_acks       = 18;
+  string                      ceremony_dealer     = 19;
+  uint64                      ceremony_phase_start   = 20;
+  uint64                      ceremony_phase_timeout = 21;
+  repeated string             ceremony_log           = 22; // Timestamped human-readable ceremony log entries
+
+  // Threshold decryption fields (populated by MsgDealExecutiveAuthorityKey in threshold mode).
+  // threshold is the minimum number of partial decryptions required to reconstruct the tally.
+  // verification_keys holds VK_i = f(i)*G for each validator (same order as ceremony_validators).
+  uint32         threshold         = 23; // Minimum shares for reconstruction (always >= 2)
+  repeated bytes verification_keys = 24; // 32-byte compressed Pallas points, one per ceremony validator
+}
+
+// VoteManagerState stores the singleton vote manager address.
+message VoteManagerState {
+  string address = 1;
+}
+
+// CommitmentTreeState holds the current state of the append-only commitment tree.
+message CommitmentTreeState {
+  uint64 next_index          = 1; // Next leaf index to write
+  bytes  root                = 2; // Current Merkle root (empty until EndBlocker computes it)
+  uint64 height              = 3; // Block height at which this root was last computed
+  uint64 next_index_at_root  = 4; // NextIndex at the time the root was last stored (used to compute per-block leaf ranges)
+}
+
+// GenesisState defines the vote module's genesis state.
+message GenesisState {
+  repeated VoteRound               rounds              = 1;
+  repeated NullifierEntry          nullifiers           = 4;
+  string                           vote_manager         = 5;
+  repeated TallyResult             tally_results        = 6;
+  repeated ValidatorPallasKey      pallas_keys          = 7;
+  repeated GenesisTallyAccumulator tally_accumulators   = 8;
+  repeated GenesisShareCount       share_counts         = 9;
+  uint32                           min_ceremony_validators   = 11;
+  repeated GenesisRoundTree        round_trees               = 12;
+}
+
+// GenesisRoundTree holds per-round commitment tree state for genesis export/import.
+message GenesisRoundTree {
+  bytes                          vote_round_id    = 1;
+  CommitmentTreeState            tree_state       = 2;
+  repeated CommitmentLeaf        commitment_leaves = 3;
+  repeated GenesisCommitmentRoot commitment_roots  = 4;
+}
+
+// GenesisCommitmentRoot is a commitment tree root stored at a specific block height.
+message GenesisCommitmentRoot {
+  uint64 height = 1;
+  bytes  root   = 2;
+}
+
+// GenesisTallyAccumulator is an in-progress ElGamal tally ciphertext for a (round, proposal, decision) tuple.
+message GenesisTallyAccumulator {
+  bytes  round_id      = 1;
+  uint32 proposal_id   = 2;
+  uint32 vote_decision = 3;
+  bytes  ciphertext    = 4; // 64-byte ElGamal ciphertext
+}
+
+// GenesisShareCount is a share reveal count for a (round, proposal, decision) tuple.
+message GenesisShareCount {
+  bytes  round_id      = 1;
+  uint32 proposal_id   = 2;
+  uint32 vote_decision = 3;
+  uint64 count         = 4;
+}
+
+// CommitmentLeaf is an entry in the append-only commitment tree.
+message CommitmentLeaf {
+  uint64 index = 1;
+  bytes  value = 2;
+}
+
+// NullifierEntry is a recorded nullifier, scoped by type and round.
+message NullifierEntry {
+  bytes  nullifier      = 1;
+  uint32 nullifier_type = 2; // 0=gov, 1=vote-authority-note, 2=share (maps to NullifierType)
+  bytes  round_id       = 3; // voting round this nullifier belongs to
+}
+
+// TallyResult stores a finalized vote total for one (round, proposal, decision) tuple.
+// Written by MsgSubmitTally, read by the TallyResults query.
+message TallyResult {
+  bytes  vote_round_id  = 1;
+  uint32 proposal_id    = 2;
+  uint32 vote_decision  = 3;
+  uint64 total_value    = 4;  // Decrypted aggregate (zatoshi)
+}
+
+// BlockCommitments holds the commitment leaves appended during a single block.
+// Used by the CommitmentLeaves query to serve tree data to remote clients
+// implementing the TreeSyncApi trait.
+message BlockCommitments {
+  uint64         height      = 1; // Block height
+  uint64         start_index = 2; // Index of the first leaf in this block
+  repeated bytes leaves      = 3; // Commitment leaves (each 32 bytes, Pallas Fp LE)
+}
+
+// ProposalSummary is a denormalized view of a proposal for the VoteSummary query.
+message ProposalSummary {
+  uint32 id                       = 1;
+  string title                    = 2;
+  string description              = 3;
+  repeated OptionSummary options  = 4;
+}
+
+// OptionSummary is a denormalized view of a vote option for the VoteSummary query.
+message OptionSummary {
+  uint32 index        = 1;
+  string label        = 2;
+  uint64 ballot_count = 3; // shares revealed for this (proposal, decision)
+  uint64 total_value  = 4; // only populated when status = FINALIZED
+}
+
+// CeremonyStatus represents the lifecycle state of the EA key ceremony.
+enum CeremonyStatus {
+  CEREMONY_STATUS_UNSPECIFIED   = 0;
+  CEREMONY_STATUS_REGISTERING   = 1; // Accepting validator pk_i registrations (no timeout)
+  CEREMONY_STATUS_DEALT         = 2; // DealerTx landed, awaiting acks
+  CEREMONY_STATUS_CONFIRMED     = 3; // All acked (fast path) or >=1/2 acked at timeout, ea_pk ready
+}
+
+// CeremonyState tracks the singleton EA key ceremony lifecycle.
+message CeremonyState {
+  CeremonyStatus              status            = 1;
+  bytes                       ea_pk             = 2;  // Set when DealerTx lands
+  repeated ValidatorPallasKey validators        = 3;  // All registered pk_i
+  repeated DealerPayload      payloads          = 4;  // ECIES envelopes from DealerTx
+  repeated AckEntry           acks              = 5;  // Per-validator ack status
+  string                      dealer            = 6;  // Validator address of the dealer
+  uint64                      phase_start       = 7;  // Unix seconds when current phase started
+  uint64                      phase_timeout     = 8;  // Timeout in seconds for current phase
+  uint32                      threshold         = 9;  // Minimum shares for reconstruction (always >= 2)
+  repeated bytes              verification_keys = 10; // VK_i = f(i)*G per validator (32-byte compressed Pallas points)
+}
+
+// ValidatorPallasKey records a validator's registered Pallas public key.
+message ValidatorPallasKey {
+  string validator_address = 1;
+  bytes  pallas_pk         = 2; // Compressed Pallas point (32 bytes)
+  // shamir_index is the original 1-based Shamir evaluation point f(shamir_index)
+  // assigned to this validator when the round ceremony was created. It is set
+  // once at round creation and never changed, even when non-acking validators
+  // are stripped from CeremonyValidators by StripNonAckersFromRound. Partial
+  // decrypt injectors and the SubmitPartialDecryption handler must use this
+  // field for Lagrange interpolation indices, not the post-stripping array position.
+  uint32 shamir_index      = 3;
+}
+
+// DealerPayload is an ECIES envelope from the dealer to a specific validator.
+message DealerPayload {
+  string validator_address = 1;
+  bytes  ephemeral_pk      = 2; // E_i (32 bytes)
+  bytes  ciphertext        = 3; // ct_i: ChaCha20-Poly1305 (32 + 16 = 48 bytes)
+}
+
+// AckEntry records a validator's acknowledgement of receiving their share.
+message AckEntry {
+  string validator_address = 1;
+  bytes  ack_signature     = 2; // Signature over H("ack" || ea_pk || validator_address)
+  uint64 ack_height        = 3;
+}
