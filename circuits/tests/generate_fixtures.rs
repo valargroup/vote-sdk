@@ -324,8 +324,8 @@ fn generate_cast_vote_redpallas_fixtures(
 ///   [0..772)       merkle_path (772 bytes)
 ///   [772..1284)    share_comms (512 bytes: 16 × 32-byte commitments)
 ///   [1284..1316)   primary_blind (32 bytes)
-///   [1316..1348)   enc_c1_x (32 bytes, LE Fp — ZKP public input)
-///   [1348..1380)   enc_c2_x (32 bytes, LE Fp — ZKP public input)
+///   [1316..1348)   enc_c1 (32 bytes, compressed Pallas point — C1)
+///   [1348..1380)   enc_c2 (32 bytes, compressed Pallas point — C2)
 ///   [1380..1384)   share_index (u32 LE)
 ///   [1384..1388)   proposal_id (u32 LE)
 ///   [1388..1392)   vote_decision (u32 LE)
@@ -341,7 +341,7 @@ fn generate_share_reveal_fixtures() {
 
     fs::create_dir_all(&testdata_dir).expect("failed to create testdata directory");
 
-    let (merkle_path, share_comms, primary_blind, enc_c1_x, enc_c2_x,
+    let (merkle_path, share_comms, primary_blind, enc_c1_compressed, enc_c2_compressed,
          enc_share, share_index, proposal_id, vote_decision, round_id) =
         build_share_reveal_test_data();
 
@@ -349,8 +349,8 @@ fn generate_share_reveal_fixtures() {
     fixture.extend_from_slice(&merkle_path);                  // 772 bytes
     fixture.extend_from_slice(&share_comms);                  // 512 bytes
     fixture.extend_from_slice(&primary_blind);                // 32 bytes
-    fixture.extend_from_slice(&enc_c1_x);                    // 32 bytes
-    fixture.extend_from_slice(&enc_c2_x);                    // 32 bytes
+    fixture.extend_from_slice(&enc_c1_compressed);            // 32 bytes
+    fixture.extend_from_slice(&enc_c2_compressed);            // 32 bytes
     fixture.extend_from_slice(&share_index.to_le_bytes());   // 4 bytes
     fixture.extend_from_slice(&proposal_id.to_le_bytes());   // 4 bytes
     fixture.extend_from_slice(&vote_decision.to_le_bytes()); // 4 bytes

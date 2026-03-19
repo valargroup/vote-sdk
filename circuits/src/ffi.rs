@@ -755,19 +755,21 @@ fn share_reveal_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine
 
 /// Verify a real share reveal circuit proof (ZKP #3).
 ///
-/// The public inputs are passed as a flat byte array of 7 × 32-byte
-/// chunks (224 bytes total), in order:
-///   [share_nullifier, enc_share_c1_x, enc_share_c2_x, proposal_id,
-///    vote_decision, vote_comm_tree_root, voting_round_id]
+/// The public inputs are passed as a flat byte array of 9 × 32-byte
+/// chunks (288 bytes total), in order:
+///   [share_nullifier, enc_share_c1_x, enc_share_c1_y, enc_share_c2_x,
+///    enc_share_c2_y, proposal_id, vote_decision, vote_comm_tree_root,
+///    voting_round_id]
 ///
 /// All values are plain Fp elements (32-byte LE canonical encoding).
-/// No compressed point decompression needed (unlike delegation's rk).
+/// The y-coordinates bind each commitment to the exact curve point,
+/// preventing ciphertext sign-malleability.
 ///
 /// # Arguments
 /// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
 /// * `proof_len`         - Length of the proof byte slice.
-/// * `public_inputs_ptr` - Pointer to 224 bytes (7 × 32-byte chunks).
-/// * `public_inputs_len` - Length of the public inputs byte slice (must be 224).
+/// * `public_inputs_ptr` - Pointer to 288 bytes (9 × 32-byte chunks).
+/// * `public_inputs_len` - Length of the public inputs byte slice (must be 288).
 ///
 /// # Returns
 /// * `0`  on successful verification.
@@ -786,7 +788,7 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
 ) -> i32 {
     use pasta_curves::pallas;
 
-    const NUM_PUBLIC_INPUTS: usize = 7;
+    const NUM_PUBLIC_INPUTS: usize = 9;
     const EXPECTED_BYTES: usize = NUM_PUBLIC_INPUTS * 32;
 
     // Validate pointers and lengths.
@@ -813,10 +815,12 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
     let deserialize_fp =
         |bytes: [u8; 32]| -> Option<pallas::Base> { pallas::Base::from_repr(bytes).into() };
 
-    const SLOT_NAMES: [&str; 7] = [
+    const SLOT_NAMES: [&str; 9] = [
         "share_nullifier",
         "enc_share_c1_x",
+        "enc_share_c1_y",
         "enc_share_c2_x",
+        "enc_share_c2_y",
         "proposal_id",
         "vote_decision",
         "vote_comm_tree_root",
@@ -874,7 +878,7 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
 ///
 /// 1. Decode Merkle auth path from serialized bytes
 /// 2. Decode 16 share commitments (public inputs to the circuit)
-/// 3. Decode primary blind and revealed share coordinates
+/// 3. Decode primary blind and decompress revealed share ciphertext points
 /// 4. Deserialize round_id as canonical Fp
 /// 5. Build share reveal circuit with all witnesses + public share_comms
 /// 6. Generate Halo2 proof (CPU-intensive, ~5-15s in release mode)
@@ -883,8 +887,8 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
 /// * `merkle_path_ptr/len`   - 772-byte serialized Merkle path
 /// * `share_comms_ptr/len`   - 512 bytes: 16 × 32-byte Poseidon commitments
 /// * `primary_blind_ptr`     - 32-byte blind factor for the revealed share
-/// * `enc_c1_x_ptr`          - 32-byte x-coord of revealed share's C1 (compressed)
-/// * `enc_c2_x_ptr`          - 32-byte x-coord of revealed share's C2 (compressed)
+/// * `enc_c1_ptr`            - 32-byte compressed Pallas point (revealed share C1)
+/// * `enc_c2_ptr`            - 32-byte compressed Pallas point (revealed share C2)
 /// * `share_index`           - Which of the 16 shares (0..15)
 /// * `proposal_id`           - Proposal being voted on
 /// * `vote_decision`         - Vote choice (0=support, 1=oppose, 2=skip)
@@ -896,7 +900,7 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
 /// # Returns
 /// *  `0` on success (proof, nullifier, tree_root written to output buffers)
 /// * `-1` invalid input (null pointers, wrong lengths)
-/// * `-3` deserialization error (non-canonical Fp)
+/// * `-3` deserialization error (non-canonical Fp or invalid curve point)
 /// * `-5` proof generation failure
 ///
 /// # Safety
@@ -908,8 +912,8 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
     share_comms_ptr: *const u8,
     share_comms_len: usize,
     primary_blind_ptr: *const u8,
-    enc_c1_x_ptr: *const u8,
-    enc_c2_x_ptr: *const u8,
+    enc_c1_ptr: *const u8,
+    enc_c2_ptr: *const u8,
     share_index: u32,
     proposal_id: u32,
     vote_decision: u32,
@@ -921,14 +925,15 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
     nullifier_out: *mut u8,
     tree_root_out: *mut u8,
 ) -> i32 {
-    use pasta_curves::pallas;
+    use group::Curve;
+    use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
 
     // --- Input validation ---
     if merkle_path_ptr.is_null()
         || share_comms_ptr.is_null()
         || primary_blind_ptr.is_null()
-        || enc_c1_x_ptr.is_null()
-        || enc_c2_x_ptr.is_null()
+        || enc_c1_ptr.is_null()
+        || enc_c2_ptr.is_null()
         || round_id_ptr.is_null()
         || proof_out.is_null()
         || proof_len_out.is_null()
@@ -995,24 +1000,52 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
         None => return -3,
     };
 
-    // --- Step 4: Decode revealed share coordinates ---
-    let c1_raw = std::slice::from_raw_parts(enc_c1_x_ptr, 32);
+    // --- Step 4: Decompress revealed share ciphertext points to extract (x, y) ---
+    let c1_raw = std::slice::from_raw_parts(enc_c1_ptr, 32);
     let mut c1_bytes = [0u8; 32];
     c1_bytes.copy_from_slice(c1_raw);
-    c1_bytes[31] &= 0x7F; // clear sign bit
-    let enc_c1_x = match Option::from(pallas::Base::from_repr(c1_bytes)) {
-        Some(fp) => fp,
-        None => return -3,
+    let c1_point: pallas::Point = match pallas::Point::from_bytes(&c1_bytes).into() {
+        Some(p) => p,
+        None => {
+            set_ffi_error("share_reveal_gen: enc_c1 is not a valid compressed Pallas point");
+            return -3;
+        }
     };
+    let c1_affine = c1_point.to_affine();
+    let c1_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+        c1_affine.coordinates().into();
+    let c1_coords = match c1_coords {
+        Some(c) => c,
+        None => {
+            set_ffi_error("share_reveal_gen: enc_c1 decompressed to the identity point");
+            return -3;
+        }
+    };
+    let enc_c1_x: pallas::Base = *c1_coords.x();
+    let enc_c1_y: pallas::Base = *c1_coords.y();
 
-    let c2_raw = std::slice::from_raw_parts(enc_c2_x_ptr, 32);
+    let c2_raw = std::slice::from_raw_parts(enc_c2_ptr, 32);
     let mut c2_bytes = [0u8; 32];
     c2_bytes.copy_from_slice(c2_raw);
-    c2_bytes[31] &= 0x7F;
-    let enc_c2_x = match Option::from(pallas::Base::from_repr(c2_bytes)) {
-        Some(fp) => fp,
-        None => return -3,
+    let c2_point: pallas::Point = match pallas::Point::from_bytes(&c2_bytes).into() {
+        Some(p) => p,
+        None => {
+            set_ffi_error("share_reveal_gen: enc_c2 is not a valid compressed Pallas point");
+            return -3;
+        }
     };
+    let c2_affine = c2_point.to_affine();
+    let c2_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+        c2_affine.coordinates().into();
+    let c2_coords = match c2_coords {
+        Some(c) => c,
+        None => {
+            set_ffi_error("share_reveal_gen: enc_c2 decompressed to the identity point");
+            return -3;
+        }
+    };
+    let enc_c2_x: pallas::Base = *c2_coords.x();
+    let enc_c2_y: pallas::Base = *c2_coords.y();
 
     // --- Step 5: Deserialize round_id as canonical Fp ---
     let round_id_raw = std::slice::from_raw_parts(round_id_ptr, 32);
@@ -1034,6 +1067,8 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
         primary_blind,
         enc_c1_x,
         enc_c2_x,
+        enc_c1_y,
+        enc_c2_y,
         share_index,
         proposal_id_fp,
         vote_decision_fp,
@@ -1073,13 +1108,13 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
 
 /// Build test data for `sv_generate_share_reveal` FFI round-trip tests.
 ///
-/// Uses synthetic x-coordinates (small Fp values) as stand-ins for actual
-/// encrypted share x-coordinates. Since canonical Pallas Fp elements never
-/// have the sign bit set (modulus < 2^255), the FFI's sign-bit clearing is
-/// a no-op and the round-trip is clean.
+/// Uses real ElGamal encryption with deterministic randomness, producing
+/// valid Pallas curve points. The share commitments bind to full (x, y)
+/// coordinates via the 5-input Poseidon hash.
 ///
-/// Returns (merkle_path, share_comms_flat, primary_blind, enc_c1_x, enc_c2_x,
-///          share_index, proposal_id, vote_decision, round_id).
+/// Returns (merkle_path, share_comms_flat, primary_blind, enc_c1_compressed,
+///          enc_c2_compressed, enc_share, share_index, proposal_id,
+///          vote_decision, round_id).
 pub fn build_share_reveal_test_data() -> (
     Vec<u8>,
     [u8; 512],
@@ -1113,10 +1148,12 @@ pub fn build_share_reveal_test_data() -> (
 
     // Real ElGamal encryption for each share: encrypts value i under ea_pk with
     // deterministic randomness. C1 = [r]*G, C2 = [v]*G + [r]*ea_pk.
-    // Both C1 and C2 are real Pallas curve points, so their x-coordinates are
+    // Both C1 and C2 are real Pallas curve points, so their coordinates are
     // valid and their compressed encodings are accepted by UnmarshalCiphertext.
     let mut all_c1_x = [pallas::Base::zero(); 16];
     let mut all_c2_x = [pallas::Base::zero(); 16];
+    let mut all_c1_y = [pallas::Base::zero(); 16];
+    let mut all_c2_y = [pallas::Base::zero(); 16];
     let mut all_c1_compressed = [[0u8; 32]; 16];
     let mut all_c2_compressed = [[0u8; 32]; 16];
     for i in 0..16usize {
@@ -1128,6 +1165,8 @@ pub fn build_share_reveal_test_data() -> (
         let c2_affine = c2.to_affine();
         all_c1_x[i] = *c1_affine.coordinates().unwrap().x();
         all_c2_x[i] = *c2_affine.coordinates().unwrap().x();
+        all_c1_y[i] = *c1_affine.coordinates().unwrap().y();
+        all_c2_y[i] = *c2_affine.coordinates().unwrap().y();
         all_c1_compressed[i] = c1_affine.to_bytes().into();
         all_c2_compressed[i] = c2_affine.to_bytes().into();
     }
@@ -1137,9 +1176,15 @@ pub fn build_share_reveal_test_data() -> (
     enc_share[..32].copy_from_slice(&all_c1_compressed[share_index as usize]);
     enc_share[32..].copy_from_slice(&all_c2_compressed[share_index as usize]);
 
-    // Compute share commitments and shares_hash.
+    // Compute share commitments using full (x, y) coordinates and shares_hash.
     let share_comms: [pallas::Base; 16] = core::array::from_fn(|i| {
-        voting_circuits::vote_proof::share_commitment(share_blinds[i], all_c1_x[i], all_c2_x[i])
+        voting_circuits::vote_proof::share_commitment(
+            share_blinds[i],
+            all_c1_x[i],
+            all_c2_x[i],
+            all_c1_y[i],
+            all_c2_y[i],
+        )
     });
     let shares_hash_fp = voting_circuits::shares_hash::shares_hash_from_comms(share_comms);
 
@@ -1173,15 +1218,13 @@ pub fn build_share_reveal_test_data() -> (
     }
 
     let primary_blind_bytes: [u8; 32] = share_blinds[share_index as usize].to_repr();
-    let enc_c1_x_bytes: [u8; 32] = all_c1_x[share_index as usize].to_repr();
-    let enc_c2_x_bytes: [u8; 32] = all_c2_x[share_index as usize].to_repr();
 
     (
         path_buf.to_vec(),
         comms_flat,
         primary_blind_bytes,
-        enc_c1_x_bytes,
-        enc_c2_x_bytes,
+        all_c1_compressed[share_index as usize],
+        all_c2_compressed[share_index as usize],
         enc_share,
         share_index,
         proposal_id,
@@ -1653,12 +1696,15 @@ mod tests {
     #[test]
     #[ignore]
     fn test_generate_share_reveal() {
+        use group::Curve;
+        use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
+
         let (
             merkle_path,
             share_comms,
             primary_blind,
-            enc_c1_x,
-            enc_c2_x,
+            enc_c1_compressed,
+            enc_c2_compressed,
             _enc_share,
             share_index,
             proposal_id,
@@ -1678,8 +1724,8 @@ mod tests {
                 share_comms.as_ptr(),
                 share_comms.len(),
                 primary_blind.as_ptr(),
-                enc_c1_x.as_ptr(),
-                enc_c2_x.as_ptr(),
+                enc_c1_compressed.as_ptr(),
+                enc_c2_compressed.as_ptr(),
                 share_index,
                 proposal_id,
                 vote_decision,
@@ -1698,33 +1744,53 @@ mod tests {
 
         let proof = &proof_buf[..proof_len];
 
-        // Build public inputs for the verifier: 7 × 32-byte chunks.
-        // [share_nullifier, enc_share_c1_x, enc_share_c2_x, proposal_id,
-        //  vote_decision, vote_comm_tree_root, voting_round_id]
-        let mut public_inputs = [0u8; 7 * 32];
+        // Decompress C1 and C2 to extract (x, y) for the verifier.
+        let c1_point: pallas::Point =
+            Option::from(pallas::Point::from_bytes(&enc_c1_compressed)).unwrap();
+        let c1_affine = c1_point.to_affine();
+        let c1_coords = c1_affine.coordinates().unwrap();
+        let c1_x_bytes = c1_coords.x().to_repr();
+        let c1_y_bytes = c1_coords.y().to_repr();
+
+        let c2_point: pallas::Point =
+            Option::from(pallas::Point::from_bytes(&enc_c2_compressed)).unwrap();
+        let c2_affine = c2_point.to_affine();
+        let c2_coords = c2_affine.coordinates().unwrap();
+        let c2_x_bytes = c2_coords.x().to_repr();
+        let c2_y_bytes = c2_coords.y().to_repr();
+
+        // Build public inputs for the verifier: 9 × 32-byte chunks.
+        // [share_nullifier, enc_share_c1_x, enc_share_c1_y, enc_share_c2_x,
+        //  enc_share_c2_y, proposal_id, vote_decision, vote_comm_tree_root,
+        //  voting_round_id]
+        let mut public_inputs = [0u8; 9 * 32];
 
         // Slot 0: share_nullifier
         public_inputs[0..32].copy_from_slice(&nullifier);
 
         // Slot 1: enc_share_c1_x
-        public_inputs[32..64].copy_from_slice(&enc_c1_x);
-        public_inputs[63] &= 0x7F; // clear sign bit
+        public_inputs[32..64].copy_from_slice(&c1_x_bytes);
 
-        // Slot 2: enc_share_c2_x
-        public_inputs[64..96].copy_from_slice(&enc_c2_x);
-        public_inputs[95] &= 0x7F;
+        // Slot 2: enc_share_c1_y
+        public_inputs[64..96].copy_from_slice(&c1_y_bytes);
 
-        // Slot 3: proposal_id as Fp (small u32 → first 4 bytes LE)
-        public_inputs[96..100].copy_from_slice(&proposal_id.to_le_bytes());
+        // Slot 3: enc_share_c2_x
+        public_inputs[96..128].copy_from_slice(&c2_x_bytes);
 
-        // Slot 4: vote_decision as Fp
-        public_inputs[128..132].copy_from_slice(&vote_decision.to_le_bytes());
+        // Slot 4: enc_share_c2_y
+        public_inputs[128..160].copy_from_slice(&c2_y_bytes);
 
-        // Slot 5: vote_comm_tree_root
-        public_inputs[160..192].copy_from_slice(&tree_root);
+        // Slot 5: proposal_id as Fp (small u32 → first 4 bytes LE)
+        public_inputs[160..164].copy_from_slice(&proposal_id.to_le_bytes());
 
-        // Slot 6: voting_round_id (canonical Fp)
-        public_inputs[192..224].copy_from_slice(&round_id);
+        // Slot 6: vote_decision as Fp
+        public_inputs[192..196].copy_from_slice(&vote_decision.to_le_bytes());
+
+        // Slot 7: vote_comm_tree_root
+        public_inputs[224..256].copy_from_slice(&tree_root);
+
+        // Slot 8: voting_round_id (canonical Fp)
+        public_inputs[256..288].copy_from_slice(&round_id);
 
         let verify_rc = unsafe {
             sv_verify_share_reveal_proof(

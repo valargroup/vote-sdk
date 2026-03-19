@@ -365,18 +365,21 @@ int32_t sv_verify_vote_proof(
 /*
  * Verify a real share reveal circuit proof (ZKP #3, 5 conditions, K=11).
  *
- * The public inputs are passed as a flat byte array of 7 x 32-byte
- * chunks (224 bytes total), in order:
- *   [share_nullifier, enc_share_c1_x, enc_share_c2_x, proposal_id,
- *    vote_decision, vote_comm_tree_root, voting_round_id]
+ * The public inputs are passed as a flat byte array of 9 x 32-byte
+ * chunks (288 bytes total), in order:
+ *   [share_nullifier, enc_share_c1_x, enc_share_c1_y, enc_share_c2_x,
+ *    enc_share_c2_y, proposal_id, vote_decision, vote_comm_tree_root,
+ *    voting_round_id]
  *
  * All values are plain Fp elements (32-byte LE canonical encoding).
+ * The y-coordinates bind each commitment to the exact curve point,
+ * preventing ciphertext sign-malleability.
  *
  * Parameters:
  *   proof_ptr         - Pointer to serialized Halo2 proof bytes.
  *   proof_len         - Length of the proof byte array.
- *   public_inputs_ptr - Pointer to 224 bytes (7 x 32-byte chunks).
- *   public_inputs_len - Length of the public inputs byte array (must be 224).
+ *   public_inputs_ptr - Pointer to 288 bytes (9 x 32-byte chunks).
+ *   public_inputs_len - Length of the public inputs byte array (must be 288).
  *
  * Returns:
  *    0  on successful verification.
@@ -398,8 +401,8 @@ int32_t sv_verify_share_reveal_proof(
 /*
  * Generate a share reveal proof (ZKP #3) in a single call.
  *
- * Performs the entire crypto pipeline: decode inputs, compute shares_hash
- * from share_comms, derive nullifier, build circuit, generate Halo2 proof.
+ * Performs the entire crypto pipeline: decode inputs, decompress ciphertext
+ * points, derive nullifier, build circuit, generate Halo2 proof.
  *
  * Parameters:
  *   merkle_path_ptr       - Pointer to 772-byte serialized Merkle path
@@ -408,8 +411,8 @@ int32_t sv_verify_share_reveal_proof(
  *   share_comms_ptr       - Pointer to 512 bytes: 16 share commitments x 32 bytes (Fp LE).
  *   share_comms_len       - Length (must be 512).
  *   primary_blind_ptr     - Pointer to 32-byte blind factor for the revealed share (Fp LE).
- *   enc_c1_x_ptr          - Pointer to 32-byte x-coord of revealed share's C1 (compressed, sign cleared).
- *   enc_c2_x_ptr          - Pointer to 32-byte x-coord of revealed share's C2 (compressed, sign cleared).
+ *   enc_c1_ptr            - Pointer to 32-byte compressed Pallas point (revealed share C1).
+ *   enc_c2_ptr            - Pointer to 32-byte compressed Pallas point (revealed share C2).
  *   share_index           - Which of the 16 shares (0..15).
  *   proposal_id           - Proposal being voted on.
  *   vote_decision         - Vote choice.
@@ -424,7 +427,7 @@ int32_t sv_verify_share_reveal_proof(
  * Returns:
  *    0  on success.
  *   -1  invalid input (null pointers, wrong lengths).
- *   -3  deserialization error (non-canonical Fp).
+ *   -3  deserialization error (non-canonical Fp or invalid curve point).
  *   -5  proof generation failure.
  */
 int32_t sv_generate_share_reveal(
@@ -433,8 +436,8 @@ int32_t sv_generate_share_reveal(
     const uint8_t* share_comms_ptr,
     size_t share_comms_len,
     const uint8_t* primary_blind_ptr,
-    const uint8_t* enc_c1_x_ptr,
-    const uint8_t* enc_c2_x_ptr,
+    const uint8_t* enc_c1_ptr,
+    const uint8_t* enc_c2_ptr,
     uint32_t share_index,
     uint32_t proposal_id,
     uint32_t vote_decision,

@@ -353,21 +353,18 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 // VerifyShareRevealProof verifies a real share reveal circuit proof (ZKP #3)
 // using the Rust verifier via CGo.
 //
-// The inputs are serialized as 7 × 32-byte chunks (224 bytes):
+// The inputs are serialized as 9 × 32-byte chunks (288 bytes):
 //
-//	[share_nullifier, enc_share_c1_x, enc_share_c2_x, proposal_id,
-//	 vote_decision, vote_comm_tree_root, voting_round_id]
+//	[share_nullifier, enc_share_c1_x, enc_share_c1_y, enc_share_c2_x,
+//	 enc_share_c2_y, proposal_id, vote_decision, vote_comm_tree_root,
+//	 voting_round_id]
 //
 // All values are plain Fp elements (32-byte LE canonical encoding).
 // enc_share carries two compressed Pallas points (C1 || C2, 32 bytes each).
-// The circuit (ZKP #3, elgamal.rs) constrains only the x-coordinates of C1
-// and C2 as public inputs; y-coordinates are not exposed by the circuit.
-// This function extracts the x-coordinates by clearing the sign bit (MSB of
-// byte 31 in each chunk) and feeds them to the Rust verifier. It first
-// decompresses both points via elgamal.UnmarshalCiphertext to confirm they
-// are valid Pallas curve points, closing the gap where a caller could flip
-// the sign bit to pass ZKP verification while storing the negated point,
-// which would corrupt HomomorphicAdd accumulation at tally time.
+// This function decompresses both points to extract full (x, y) coordinates.
+// Including y-coordinates in the public inputs binds the proof to the exact
+// curve point, preventing ciphertext sign-malleability where flipping a
+// sign bit would negate the point without invalidating the proof.
 //
 // Returns nil on success, or an error describing the failure.
 func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
@@ -376,7 +373,7 @@ func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
 	}
 
 	const chunkSize = 32
-	const numChunks = 7
+	const numChunks = 9
 	buf := make([]byte, numChunks*chunkSize)
 
 	// Slot 0: share_nullifier
@@ -385,42 +382,44 @@ func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
 	}
 	copy(buf[0:32], inputs.ShareNullifier)
 
-	// Slots 1-2: enc_share_c1_x, enc_share_c2_x
+	// Slots 1-4: decompress C1 and C2 to extract full (x, y) coordinates.
 	if len(inputs.EncShare) != 64 {
 		return fmt.Errorf("enc_share must be 64 bytes, got %d", len(inputs.EncShare))
 	}
-	// Validate that both compressed points are on the Pallas curve before
-	// extracting x-coordinates. This ensures the sign bits in the transaction
-	// are self-consistent with a valid curve point: a flipped sign bit that
-	// produces a point not on the curve is rejected here, and if both candidate
-	// y-values are on-curve (the normal case), downstream HomomorphicAdd
-	// operates on well-formed points. Without this check the ZKP would accept
-	// any sign bit because the circuit only binds x-coordinates.
-	if _, err := elgamal.UnmarshalCiphertext(inputs.EncShare); err != nil {
+	ct, err := elgamal.UnmarshalCiphertext(inputs.EncShare)
+	if err != nil {
 		return fmt.Errorf("enc_share contains invalid Pallas point: %w", err)
 	}
-	copy(buf[32:64], inputs.EncShare[:32])
-	buf[63] &= 0x7F // clear sign bit to obtain x-coordinate (ExtractP convention)
-	copy(buf[64:96], inputs.EncShare[32:64])
-	buf[95] &= 0x7F // clear sign bit to obtain x-coordinate (ExtractP convention)
+	// ToAffineUncompressed returns 64 bytes: x (32 LE) || y (32 LE).
+	c1Uncompressed := ct.C1.ToAffineUncompressed()
+	c2Uncompressed := ct.C2.ToAffineUncompressed()
 
-	// Slot 3: proposal_id (encode as 32-byte LE Fp)
-	binary.LittleEndian.PutUint64(buf[96:104], uint64(inputs.ProposalId))
+	// Slot 1: enc_share_c1_x
+	copy(buf[32:64], c1Uncompressed[:32])
+	// Slot 2: enc_share_c1_y
+	copy(buf[64:96], c1Uncompressed[32:64])
+	// Slot 3: enc_share_c2_x
+	copy(buf[96:128], c2Uncompressed[:32])
+	// Slot 4: enc_share_c2_y
+	copy(buf[128:160], c2Uncompressed[32:64])
 
-	// Slot 4: vote_decision (encode as 32-byte LE Fp)
-	binary.LittleEndian.PutUint64(buf[128:136], uint64(inputs.VoteDecision))
+	// Slot 5: proposal_id (encode as 32-byte LE Fp)
+	binary.LittleEndian.PutUint64(buf[160:168], uint64(inputs.ProposalId))
 
-	// Slot 5: vote_comm_tree_root
+	// Slot 6: vote_decision (encode as 32-byte LE Fp)
+	binary.LittleEndian.PutUint64(buf[192:200], uint64(inputs.VoteDecision))
+
+	// Slot 7: vote_comm_tree_root
 	if len(inputs.VoteCommTreeRoot) != chunkSize {
 		return fmt.Errorf("vote_comm_tree_root must be %d bytes, got %d", chunkSize, len(inputs.VoteCommTreeRoot))
 	}
-	copy(buf[160:192], inputs.VoteCommTreeRoot)
+	copy(buf[224:256], inputs.VoteCommTreeRoot)
 
-	// Slot 6: voting_round_id
+	// Slot 8: voting_round_id
 	if len(inputs.VoteRoundId) != chunkSize {
 		return fmt.Errorf("voting_round_id must be %d bytes, got %d", chunkSize, len(inputs.VoteRoundId))
 	}
-	copy(buf[192:224], inputs.VoteRoundId)
+	copy(buf[256:288], inputs.VoteRoundId)
 
 	// Validate Fp fields before the FFI call.
 	if err := validatePallasFp("share_nullifier", inputs.ShareNullifier); err != nil {
@@ -429,7 +428,13 @@ func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
 	if err := validatePallasFp("enc_share_c1_x", buf[32:64]); err != nil {
 		return err
 	}
-	if err := validatePallasFp("enc_share_c2_x", buf[64:96]); err != nil {
+	if err := validatePallasFp("enc_share_c1_y", buf[64:96]); err != nil {
+		return err
+	}
+	if err := validatePallasFp("enc_share_c2_x", buf[96:128]); err != nil {
+		return err
+	}
+	if err := validatePallasFp("enc_share_c2_y", buf[128:160]); err != nil {
 		return err
 	}
 	if err := validatePallasFp("vote_comm_tree_root", inputs.VoteCommTreeRoot); err != nil {
