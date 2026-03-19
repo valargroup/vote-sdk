@@ -341,9 +341,9 @@ Ceremony and management messages (`MsgRegisterPallasKey`, `MsgCreateValidatorWit
 | GET    | `/shielded-vote/v1/vote-summary/{round_id}`        | Denormalized round summary with proposals  |
 | GET    | `/shielded-vote/v1/tally/{round_id}/{proposal_id}` | Tally for a specific proposal              |
 | GET    | `/shielded-vote/v1/tally-results/{round_id}`       | All tally results for a round              |
-| GET    | `/shielded-vote/v1/commitment-tree/{height}`       | Vote commitment tree at block height       |
-| GET    | `/shielded-vote/v1/commitment-tree/latest`         | Latest vote commitment tree                |
-| GET    | `/shielded-vote/v1/commitment-tree/leaves`         | Tree leaves (`?from_height=X&to_height=Y`) |
+| GET    | `/shielded-vote/v1/commitment-tree/{round_id}/{height}` | Vote commitment tree at block height  |
+| GET    | `/shielded-vote/v1/commitment-tree/{round_id}/latest`   | Latest vote commitment tree           |
+| GET    | `/shielded-vote/v1/commitment-tree/{round_id}/leaves`   | Tree leaves (`?from_height=X&to_height=Y`) |
 | GET    | `/shielded-vote/v1/pallas-keys`                    | All registered Pallas keys                 |
 | GET    | `/shielded-vote/v1/vote-manager`                   | Current VoteManager address                |
 | GET    | `/shielded-vote/v1/genesis`                        | Chain genesis JSON                         |
