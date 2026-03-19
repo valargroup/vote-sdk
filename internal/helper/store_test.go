@@ -12,14 +12,12 @@ import (
 func newTestStore(t *testing.T) *ShareStore {
 	t.Helper()
 	// Provide a permissive round fetcher so tests don't fail on unknown rounds.
-	// minDelay=0 gives zero delay, preserving the existing test expectation
-	// that shares are immediately ready.
-	// Return a 24-hour round that started 12h ago, ending 12h from now.
+	// Return voteEndTime 12h from now.
 	now := uint64(time.Now().Unix())
-	fetcher := func(roundID string) (uint64, uint64, error) {
-		return now - 12*3600, now + 12*3600, nil
+	fetcher := func(roundID string) (uint64, error) {
+		return now + 12*3600, nil
 	}
-	s, err := NewShareStore(":memory:", 0, fetcher)
+	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
 	t.Cleanup(func() { s.Close() })
 	return s
@@ -45,6 +43,7 @@ func testPayload(roundID string, shareIndex uint32) SharePayload {
 		VoteRoundID:  roundID,
 		ShareComms:   comms,
 		PrimaryBlind: zeroB64,
+		SubmitAt:     0, // immediate
 	}
 }
 
@@ -60,7 +59,7 @@ func TestEnqueueAndTakeReady(t *testing.T) {
 
 	enqueueAndRequireInserted(t, s, testPayload("aabbccdd", 0))
 
-	// With zero delay, share should be immediately ready.
+	// With submit_at=0, share should be immediately ready.
 	ready := s.TakeReady()
 	assert.Len(t, ready, 1)
 	assert.Equal(t, "aabbccdd", ready[0].Payload.VoteRoundID)
@@ -216,9 +215,9 @@ func TestRecovery(t *testing.T) {
 	// Use a file-based DB so we can reopen it.
 	dbPath := t.TempDir() + "/helper_test.db"
 	now := uint64(time.Now().Unix())
-	fetcher := func(roundID string) (uint64, uint64, error) { return now - 12*3600, now + 12*3600, nil }
+	fetcher := func(roundID string) (uint64, error) { return now + 12*3600, nil }
 
-	s1, err := NewShareStore(dbPath, 0, fetcher)
+	s1, err := NewShareStore(dbPath, fetcher)
 	require.NoError(t, err)
 
 	enqueueAndRequireInserted(t, s1, testPayload("round1", 0))
@@ -230,8 +229,8 @@ func TestRecovery(t *testing.T) {
 	// Close without marking submitted (simulates crash).
 	s1.Close()
 
-	// Reopen: recovery should reset Witnessed → Received with fresh delay.
-	s2, err := NewShareStore(dbPath, 0, fetcher)
+	// Reopen: recovery should reset Witnessed → Received with same submit_at.
+	s2, err := NewShareStore(dbPath, fetcher)
 	require.NoError(t, err)
 	defer s2.Close()
 
@@ -239,84 +238,79 @@ func TestRecovery(t *testing.T) {
 	assert.Len(t, ready, 1, "recovered share should be ready again")
 }
 
-func TestUniformDelay_ImminentDeadline(t *testing.T) {
-	s, err := NewShareStore(":memory:", 90*time.Second, nil)
-	require.NoError(t, err)
-	defer s.Close()
+func TestRecovery_FutureSubmitAt(t *testing.T) {
+	// Shares with future submit_at should not be immediately ready after recovery.
+	dbPath := t.TempDir() + "/helper_test.db"
+	futureTime := uint64(time.Now().Add(time.Hour).Unix())
+	fetcher := func(roundID string) (uint64, error) { return futureTime + 3600, nil }
 
-	// 10-minute round with 30s remaining. Buffer = 10% × 10min = 1min.
-	// 30s remaining < 1min buffer → delay must be 0.
-	now := time.Now()
-	ceremonyStart := uint64(now.Add(-10*time.Minute + 30*time.Second).Unix())
-	voteEndTime := uint64(now.Add(30 * time.Second).Unix())
-	delay, err := s.uniformDelay(ceremonyStart, voteEndTime)
+	s1, err := NewShareStore(dbPath, fetcher)
 	require.NoError(t, err)
-	assert.Equal(t, time.Duration(0), delay, "delay should be 0 when remaining time < buffer")
 
-	// 1-hour round with 5 minutes remaining. Buffer = 10% × 1h = 6min.
-	// 5min remaining < 6min buffer → delay must be 0.
-	ceremonyStart = uint64(now.Add(-55 * time.Minute).Unix())
-	voteEndTime = uint64(now.Add(5 * time.Minute).Unix())
-	delay, err = s.uniformDelay(ceremonyStart, voteEndTime)
+	p := testPayload("round1", 0)
+	p.SubmitAt = futureTime
+	enqueueAndRequireInserted(t, s1, p)
+
+	s1.Close()
+
+	// Reopen: share should not be immediately ready (submit_at is in the future).
+	s2, err := NewShareStore(dbPath, fetcher)
 	require.NoError(t, err)
-	assert.Equal(t, time.Duration(0), delay, "delay should be 0 when remaining time < buffer")
+	defer s2.Close()
+
+	ready := s2.TakeReady()
+	assert.Empty(t, ready, "share with future submit_at should not be ready")
 }
 
-func TestUniformDelayDistribution(t *testing.T) {
-	// Verify delays are uniformly spread in [0, remaining - buffer] with no
-	// clustering at zero (the old exponential problem).
-	// 7-day round, buffer = 1h (capped). Remaining ≈ 24h - 1h = 23h.
-	now := time.Now()
-	ceremonyStart := uint64(now.Add(-6 * 24 * time.Hour).Unix()) // started 6 days ago
-	voteEndTime := uint64(now.Add(24 * time.Hour).Unix())        // ends in 24h
-	buffer := time.Hour                                            // 10% of 7d > 1h, capped
-	remaining := 24*time.Hour - buffer
+func TestEnqueue_SubmitAtValidation(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	voteEndTime := now + 3600 // 1h from now
+	fetcher := func(roundID string) (uint64, error) { return voteEndTime, nil }
 
-	s, err := NewShareStore(":memory:", 90*time.Second, nil)
+	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 
-	const n = 1000
-	var total time.Duration
-	for range n {
-		d, err := s.uniformDelay(ceremonyStart, voteEndTime)
-		require.NoError(t, err)
-		assert.GreaterOrEqual(t, d, time.Duration(0), "delay must be non-negative")
-		assert.LessOrEqual(t, d, remaining, "delay must be within window")
-		total += d
-	}
-	// Mean of Uniform(0, remaining) ≈ remaining/2. Allow 30% tolerance.
-	mean := total / n
-	expected := remaining / 2
-	assert.Greater(t, mean, expected*7/10, "mean should be > 0.35 * remaining")
-	assert.Less(t, mean, expected*13/10, "mean should be < 0.65 * remaining")
-}
+	t.Run("submit_at after vote_end_time rejected", func(t *testing.T) {
+		p := testPayload("round1", 0)
+		p.SubmitAt = voteEndTime + 100
+		_, err := s.Enqueue(p)
+		assert.ErrorIs(t, err, ErrInvalidSubmitAt)
+	})
 
-func TestUniformDelay_FloorRespected(t *testing.T) {
-	minDelay := 2 * time.Minute
-	s, err := NewShareStore(":memory:", minDelay, nil)
-	require.NoError(t, err)
-	defer s.Close()
+	t.Run("submit_at far in past rejected", func(t *testing.T) {
+		p := testPayload("round2", 0)
+		p.SubmitAt = now - 90000 // > 24h ago
+		_, err := s.Enqueue(p)
+		assert.ErrorIs(t, err, ErrInvalidSubmitAt)
+	})
 
-	now := time.Now()
-	ceremonyStart := uint64(now.Add(-6 * time.Hour).Unix())  // 7-hour round
-	voteEndTime := uint64(now.Add(time.Hour).Unix())          // 1h remaining, buffer = 42min
-	for range 50 {
-		d, err := s.uniformDelay(ceremonyStart, voteEndTime)
+	t.Run("submit_at=0 accepted (immediate)", func(t *testing.T) {
+		p := testPayload("round3", 0)
+		p.SubmitAt = 0
+		result, err := s.Enqueue(p)
 		require.NoError(t, err)
-		assert.GreaterOrEqual(t, d, minDelay, "delay must respect minDelay floor")
-	}
+		assert.Equal(t, EnqueueInserted, result)
+	})
+
+	t.Run("valid future submit_at accepted", func(t *testing.T) {
+		p := testPayload("round4", 0)
+		p.SubmitAt = now + 1800 // 30min from now
+		result, err := s.Enqueue(p)
+		require.NoError(t, err)
+		assert.Equal(t, EnqueueInserted, result)
+	})
 }
 
 func TestPurgeExpiredRounds(t *testing.T) {
-	fetcher := func(roundID string) (uint64, uint64, error) {
+	fetcher := func(roundID string) (uint64, error) {
 		if roundID == "expired_round" {
-			return 0, uint64(time.Now().Add(-time.Hour).Unix()), nil
+			return uint64(time.Now().Add(-time.Hour).Unix()), nil
 		}
-		return 0, uint64(time.Now().Add(time.Hour).Unix()), nil
+		return uint64(time.Now().Add(time.Hour).Unix()), nil
 	}
 
-	s, err := NewShareStore(":memory:", 0, fetcher)
+	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -336,39 +330,37 @@ func TestPurgeExpiredRounds(t *testing.T) {
 	assert.Equal(t, 1, status["active_round"].Total)
 }
 
-func TestGetRoundTimes_Cache(t *testing.T) {
+func TestGetRoundEndTime_Cache(t *testing.T) {
 	fetchCalls := 0
-	fetcher := func(roundID string) (uint64, uint64, error) {
+	fetcher := func(roundID string) (uint64, error) {
 		fetchCalls++
-		return 500000, 1000000, nil
+		return 1000000, nil
 	}
 
-	s, err := NewShareStore(":memory:", 0, fetcher)
+	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 
 	// First call should fetch from keeper.
-	vst, vet, err := s.getRoundTimes("round1")
+	vet, err := s.getRoundEndTime("round1")
 	require.NoError(t, err)
-	assert.Equal(t, uint64(500000), vst)
 	assert.Equal(t, uint64(1000000), vet)
 	assert.Equal(t, 1, fetchCalls)
 
 	// Second call should hit cache, no additional fetch.
-	vst, vet, err = s.getRoundTimes("round1")
+	vet, err = s.getRoundEndTime("round1")
 	require.NoError(t, err)
-	assert.Equal(t, uint64(500000), vst)
 	assert.Equal(t, uint64(1000000), vet)
 	assert.Equal(t, 1, fetchCalls)
 }
 
-func TestGetRoundTimes_NilFetcher(t *testing.T) {
-	s, err := NewShareStore(":memory:", 0, nil)
+func TestGetRoundEndTime_NilFetcher(t *testing.T) {
+	s, err := NewShareStore(":memory:", nil)
 	require.NoError(t, err)
 	defer s.Close()
 
 	// With nil fetcher and no cache, should return ErrUnknownRound.
-	_, _, err = s.getRoundTimes("round1")
+	_, err = s.getRoundEndTime("round1")
 	assert.ErrorIs(t, err, ErrUnknownRound)
 }
 
@@ -398,10 +390,10 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, oldDB.Close())
 
-	// Opening with current code should migrate PK and add vote_end_time.
+	// Opening with current code should migrate PK and add vote_end_time + submit_at.
 	now := uint64(time.Now().Unix())
-	fetcher := func(roundID string) (uint64, uint64, error) { return now - 12*3600, now + 12*3600, nil }
-	s, err := NewShareStore(dbPath, 0, fetcher)
+	fetcher := func(roundID string) (uint64, error) { return now + 12*3600, nil }
+	s, err := NewShareStore(dbPath, fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -409,6 +401,11 @@ func TestMigrateOldSchema(t *testing.T) {
 	hasVoteEndTime, err := tableHasColumn(s.db, "shares", "vote_end_time")
 	require.NoError(t, err)
 	assert.True(t, hasVoteEndTime)
+
+	// submit_at column should now exist.
+	hasSubmitAt, err := tableHasColumn(s.db, "shares", "submit_at")
+	require.NoError(t, err)
+	assert.True(t, hasSubmitAt)
 
 	// tree_position should now be part of the primary key.
 	notInPK, err := columnNotInPK(s.db, "shares", "tree_position")
@@ -435,53 +432,4 @@ func TestMigrateOldSchema(t *testing.T) {
 	result, err = s.Enqueue(p2)
 	require.NoError(t, err)
 	assert.Equal(t, EnqueueInserted, result)
-}
-
-func TestComputeBuffer(t *testing.T) {
-	tests := []struct {
-		name      string
-		startTime uint64
-		endTime   uint64
-		want      time.Duration
-	}{
-		{
-			name:      "7-day round → capped at 1 hour",
-			startTime: 1000,
-			endTime:   1000 + 7*24*3600, // 7 days
-			want:      time.Hour,
-		},
-		{
-			name:      "6-hour round → 36 minutes",
-			startTime: 1000,
-			endTime:   1000 + 6*3600, // 6 hours
-			want:      36 * time.Minute,
-		},
-		{
-			name:      "10-hour round → 1 hour (just at cap)",
-			startTime: 1000,
-			endTime:   1000 + 10*3600, // 10 hours → 10% = 1h exactly
-			want:      time.Hour,
-		},
-		{
-			name:      "10-minute round → 1 minute",
-			startTime: 1000,
-			endTime:   1000 + 600, // 10 minutes
-			want:      time.Minute,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := computeBuffer(tt.startTime, tt.endTime)
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-
-	// Invalid inputs must return errors.
-	_, err := computeBuffer(0, 1000000)
-	assert.Error(t, err, "start=0 should error")
-	_, err = computeBuffer(5000, 3000)
-	assert.Error(t, err, "end<start should error")
-	_, err = computeBuffer(0, 0)
-	assert.Error(t, err, "both zero should error")
 }

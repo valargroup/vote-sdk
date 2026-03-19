@@ -47,37 +47,36 @@ func NewChainSubmitter(baseURL string) *ChainSubmitter {
 // voteRoundResponse is the JSON structure returned by GET /shielded-vote/v1/round/{round_id}.
 type voteRoundResponse struct {
 	Round struct {
-		CeremonyPhaseStart uint64 `json:"ceremony_phase_start"`
-		VoteEndTime        uint64 `json:"vote_end_time"`
+		VoteEndTime uint64 `json:"vote_end_time"`
 	} `json:"round"`
 }
 
 // FetchVoteRound queries the chain REST API for a vote round's metadata and
-// returns ceremony_phase_start and vote_end_time (unix seconds).
-func (c *ChainSubmitter) FetchVoteRound(roundID string) (uint64, uint64, error) {
+// returns vote_end_time (unix seconds).
+func (c *ChainSubmitter) FetchVoteRound(roundID string) (uint64, error) {
 	url := fmt.Sprintf("%s/shielded-vote/v1/round/%s", c.baseURL, roundID)
 
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
-		return 0, 0, fmt.Errorf("HTTP error: %w", err)
+		return 0, fmt.Errorf("HTTP error: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return 0, 0, fmt.Errorf("read response: %w", err)
+		return 0, fmt.Errorf("read response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return 0, 0, fmt.Errorf("chain returned %d: %s", resp.StatusCode, string(respBody))
+		return 0, fmt.Errorf("chain returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result voteRoundResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return 0, 0, fmt.Errorf("parse response: %w", err)
+		return 0, fmt.Errorf("parse response: %w", err)
 	}
 
-	return result.Round.CeremonyPhaseStart, result.Round.VoteEndTime, nil
+	return result.Round.VoteEndTime, nil
 }
 
 // SubmitRevealShare POSTs a MsgRevealShare to the chain endpoint.

@@ -18,7 +18,7 @@ func TestFetchVoteRound_Success(t *testing.T) {
 	defer server.Close()
 
 	submitter := NewChainSubmitter(server.URL)
-	_, vet, err := submitter.FetchVoteRound("aabbccdd")
+	vet, err := submitter.FetchVoteRound("aabbccdd")
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1700000000), vet)
 }
@@ -31,7 +31,7 @@ func TestFetchVoteRound_NotFound(t *testing.T) {
 	defer server.Close()
 
 	submitter := NewChainSubmitter(server.URL)
-	_, _, err := submitter.FetchVoteRound("nonexistent")
+	_, err := submitter.FetchVoteRound("nonexistent")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "404")
 }
@@ -44,7 +44,7 @@ func TestFetchVoteRound_InvalidJSON(t *testing.T) {
 	defer server.Close()
 
 	submitter := NewChainSubmitter(server.URL)
-	_, _, err := submitter.FetchVoteRound("aabbccdd")
+	_, err := submitter.FetchVoteRound("aabbccdd")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse response")
 }
