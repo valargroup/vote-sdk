@@ -1479,15 +1479,9 @@ func (*MsgSetVoteManagerResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{23}
 }
 
-// MsgAuthorizedSend is the only way to transfer coins on this chain.
-// Standard bank MsgSend and MsgMultiSend are disabled at the ante-handler
-// level because unrestricted transfers would let anyone accumulate enough
-// stake to create a validator, bypassing the controlled validator set.
-//
-// Authorization rules:
-//   - Vote manager can send to anyone (distributes stake to new validators).
-//   - Bonded validators can send to the vote manager or other bonded validators.
-//   - All other senders are rejected.
+// MsgAuthorizedSend transfers coins with role-based authorization.
+// Vote manager can send to anyone. Validators can only send to the vote
+// manager or other bonded validators. All other senders are rejected.
 type MsgAuthorizedSend struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	FromAddress   string                 `protobuf:"bytes,1,opt,name=from_address,json=fromAddress,proto3" json:"from_address,omitempty"`
@@ -1702,13 +1696,13 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\x1f\n" +
 	"\vnew_manager\x18\x02 \x01(\tR\n" +
 	"newManager\"\x1b\n" +
-	"\x19MsgSetVoteManagerResponse\"\x96\x01\n" +
+	"\x19MsgSetVoteManagerResponse\"\x83\x01\n" +
 	"\x11MsgAuthorizedSend\x12!\n" +
 	"\ffrom_address\x18\x01 \x01(\tR\vfromAddress\x12\x1d\n" +
 	"\n" +
 	"to_address\x18\x02 \x01(\tR\ttoAddress\x12\x16\n" +
 	"\x06amount\x18\x03 \x01(\tR\x06amount\x12\x14\n" +
-	"\x05denom\x18\x04 \x01(\tR\x05denom:\x11\x82\xe7\xb0*\ffrom_address\"\x1b\n" +
+	"\x05denom\x18\x04 \x01(\tR\x05denom\"\x1b\n" +
 	"\x19MsgAuthorizedSendResponse2\xee\b\n" +
 	"\x03Msg\x12a\n" +
 	"\x13CreateVotingSession\x12 .svote.v1.MsgCreateVotingSession\x1a(.svote.v1.MsgCreateVotingSessionResponse\x12L\n" +

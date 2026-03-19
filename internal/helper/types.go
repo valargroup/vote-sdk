@@ -144,7 +144,12 @@ type TreeStatus struct {
 }
 
 // TreeReader abstracts commitment tree access from the keeper.
+// Commitment trees are scoped per voting round; callers must call SetRoundID
+// before any tree lookup to select the correct round.
 type TreeReader interface {
+	// SetRoundID selects the voting round for subsequent tree lookups.
+	SetRoundID(roundID []byte)
+
 	// GetTreeStatus returns lightweight tree statistics (leaf count + anchor height).
 	GetTreeStatus() (TreeStatus, error)
 

@@ -625,19 +625,14 @@ func (x *CommitmentTreeState) GetNextIndexAtRoot() uint64 {
 
 // GenesisState defines the vote module's genesis state.
 type GenesisState struct {
-	state  protoimpl.MessageState `protogen:"open.v1"`
-	Rounds []*VoteRound           `protobuf:"bytes,1,rep,name=rounds,proto3" json:"rounds,omitempty"`
-	// DEPRECATED: tree_state, commitment_leaves, commitment_roots are replaced by round_trees.
-	// Kept as field numbers 2, 3, 10 for proto wire compatibility during migration.
-	TreeState             *CommitmentTreeState       `protobuf:"bytes,2,opt,name=tree_state,json=treeState,proto3" json:"tree_state,omitempty"`
-	CommitmentLeaves      []*CommitmentLeaf          `protobuf:"bytes,3,rep,name=commitment_leaves,json=commitmentLeaves,proto3" json:"commitment_leaves,omitempty"`
+	state                 protoimpl.MessageState     `protogen:"open.v1"`
+	Rounds                []*VoteRound               `protobuf:"bytes,1,rep,name=rounds,proto3" json:"rounds,omitempty"`
 	Nullifiers            []*NullifierEntry          `protobuf:"bytes,4,rep,name=nullifiers,proto3" json:"nullifiers,omitempty"`
 	VoteManager           string                     `protobuf:"bytes,5,opt,name=vote_manager,json=voteManager,proto3" json:"vote_manager,omitempty"`
 	TallyResults          []*TallyResult             `protobuf:"bytes,6,rep,name=tally_results,json=tallyResults,proto3" json:"tally_results,omitempty"`
 	PallasKeys            []*ValidatorPallasKey      `protobuf:"bytes,7,rep,name=pallas_keys,json=pallasKeys,proto3" json:"pallas_keys,omitempty"`
 	TallyAccumulators     []*GenesisTallyAccumulator `protobuf:"bytes,8,rep,name=tally_accumulators,json=tallyAccumulators,proto3" json:"tally_accumulators,omitempty"`
 	ShareCounts           []*GenesisShareCount       `protobuf:"bytes,9,rep,name=share_counts,json=shareCounts,proto3" json:"share_counts,omitempty"`
-	CommitmentRoots       []*GenesisCommitmentRoot   `protobuf:"bytes,10,rep,name=commitment_roots,json=commitmentRoots,proto3" json:"commitment_roots,omitempty"`
 	MinCeremonyValidators uint32                     `protobuf:"varint,11,opt,name=min_ceremony_validators,json=minCeremonyValidators,proto3" json:"min_ceremony_validators,omitempty"`
 	RoundTrees            []*GenesisRoundTree        `protobuf:"bytes,12,rep,name=round_trees,json=roundTrees,proto3" json:"round_trees,omitempty"`
 	unknownFields         protoimpl.UnknownFields
@@ -681,20 +676,6 @@ func (x *GenesisState) GetRounds() []*VoteRound {
 	return nil
 }
 
-func (x *GenesisState) GetTreeState() *CommitmentTreeState {
-	if x != nil {
-		return x.TreeState
-	}
-	return nil
-}
-
-func (x *GenesisState) GetCommitmentLeaves() []*CommitmentLeaf {
-	if x != nil {
-		return x.CommitmentLeaves
-	}
-	return nil
-}
-
 func (x *GenesisState) GetNullifiers() []*NullifierEntry {
 	if x != nil {
 		return x.Nullifiers
@@ -733,13 +714,6 @@ func (x *GenesisState) GetTallyAccumulators() []*GenesisTallyAccumulator {
 func (x *GenesisState) GetShareCounts() []*GenesisShareCount {
 	if x != nil {
 		return x.ShareCounts
-	}
-	return nil
-}
-
-func (x *GenesisState) GetCommitmentRoots() []*GenesisCommitmentRoot {
-	if x != nil {
-		return x.CommitmentRoots
 	}
 	return nil
 }
@@ -1759,12 +1733,9 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"next_index\x18\x01 \x01(\x04R\tnextIndex\x12\x12\n" +
 	"\x04root\x18\x02 \x01(\fR\x04root\x12\x16\n" +
 	"\x06height\x18\x03 \x01(\x04R\x06height\x12+\n" +
-	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xeb\x05\n" +
+	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\x9a\x04\n" +
 	"\fGenesisState\x12+\n" +
-	"\x06rounds\x18\x01 \x03(\v2\x13.svote.v1.VoteRoundR\x06rounds\x12<\n" +
-	"\n" +
-	"tree_state\x18\x02 \x01(\v2\x1d.svote.v1.CommitmentTreeStateR\ttreeState\x12E\n" +
-	"\x11commitment_leaves\x18\x03 \x03(\v2\x18.svote.v1.CommitmentLeafR\x10commitmentLeaves\x128\n" +
+	"\x06rounds\x18\x01 \x03(\v2\x13.svote.v1.VoteRoundR\x06rounds\x128\n" +
 	"\n" +
 	"nullifiers\x18\x04 \x03(\v2\x18.svote.v1.NullifierEntryR\n" +
 	"nullifiers\x12!\n" +
@@ -1773,9 +1744,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\vpallas_keys\x18\a \x03(\v2\x1c.svote.v1.ValidatorPallasKeyR\n" +
 	"pallasKeys\x12P\n" +
 	"\x12tally_accumulators\x18\b \x03(\v2!.svote.v1.GenesisTallyAccumulatorR\x11tallyAccumulators\x12>\n" +
-	"\fshare_counts\x18\t \x03(\v2\x1b.svote.v1.GenesisShareCountR\vshareCounts\x12J\n" +
-	"\x10commitment_roots\x18\n" +
-	" \x03(\v2\x1f.svote.v1.GenesisCommitmentRootR\x0fcommitmentRoots\x126\n" +
+	"\fshare_counts\x18\t \x03(\v2\x1b.svote.v1.GenesisShareCountR\vshareCounts\x126\n" +
 	"\x17min_ceremony_validators\x18\v \x01(\rR\x15minCeremonyValidators\x12;\n" +
 	"\vround_trees\x18\f \x03(\v2\x1a.svote.v1.GenesisRoundTreeR\n" +
 	"roundTrees\"\x87\x02\n" +
@@ -1921,28 +1890,25 @@ var file_svote_v1_types_proto_depIdxs = []int32{
 	20, // 5: svote.v1.VoteRound.ceremony_payloads:type_name -> svote.v1.DealerPayload
 	21, // 6: svote.v1.VoteRound.ceremony_acks:type_name -> svote.v1.AckEntry
 	4,  // 7: svote.v1.GenesisState.rounds:type_name -> svote.v1.VoteRound
-	6,  // 8: svote.v1.GenesisState.tree_state:type_name -> svote.v1.CommitmentTreeState
-	12, // 9: svote.v1.GenesisState.commitment_leaves:type_name -> svote.v1.CommitmentLeaf
-	13, // 10: svote.v1.GenesisState.nullifiers:type_name -> svote.v1.NullifierEntry
-	14, // 11: svote.v1.GenesisState.tally_results:type_name -> svote.v1.TallyResult
-	19, // 12: svote.v1.GenesisState.pallas_keys:type_name -> svote.v1.ValidatorPallasKey
-	10, // 13: svote.v1.GenesisState.tally_accumulators:type_name -> svote.v1.GenesisTallyAccumulator
-	11, // 14: svote.v1.GenesisState.share_counts:type_name -> svote.v1.GenesisShareCount
-	9,  // 15: svote.v1.GenesisState.commitment_roots:type_name -> svote.v1.GenesisCommitmentRoot
-	8,  // 16: svote.v1.GenesisState.round_trees:type_name -> svote.v1.GenesisRoundTree
-	6,  // 17: svote.v1.GenesisRoundTree.tree_state:type_name -> svote.v1.CommitmentTreeState
-	12, // 18: svote.v1.GenesisRoundTree.commitment_leaves:type_name -> svote.v1.CommitmentLeaf
-	9,  // 19: svote.v1.GenesisRoundTree.commitment_roots:type_name -> svote.v1.GenesisCommitmentRoot
-	17, // 20: svote.v1.ProposalSummary.options:type_name -> svote.v1.OptionSummary
-	1,  // 21: svote.v1.CeremonyState.status:type_name -> svote.v1.CeremonyStatus
-	19, // 22: svote.v1.CeremonyState.validators:type_name -> svote.v1.ValidatorPallasKey
-	20, // 23: svote.v1.CeremonyState.payloads:type_name -> svote.v1.DealerPayload
-	21, // 24: svote.v1.CeremonyState.acks:type_name -> svote.v1.AckEntry
-	25, // [25:25] is the sub-list for method output_type
-	25, // [25:25] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	13, // 8: svote.v1.GenesisState.nullifiers:type_name -> svote.v1.NullifierEntry
+	14, // 9: svote.v1.GenesisState.tally_results:type_name -> svote.v1.TallyResult
+	19, // 10: svote.v1.GenesisState.pallas_keys:type_name -> svote.v1.ValidatorPallasKey
+	10, // 11: svote.v1.GenesisState.tally_accumulators:type_name -> svote.v1.GenesisTallyAccumulator
+	11, // 12: svote.v1.GenesisState.share_counts:type_name -> svote.v1.GenesisShareCount
+	8,  // 13: svote.v1.GenesisState.round_trees:type_name -> svote.v1.GenesisRoundTree
+	6,  // 14: svote.v1.GenesisRoundTree.tree_state:type_name -> svote.v1.CommitmentTreeState
+	12, // 15: svote.v1.GenesisRoundTree.commitment_leaves:type_name -> svote.v1.CommitmentLeaf
+	9,  // 16: svote.v1.GenesisRoundTree.commitment_roots:type_name -> svote.v1.GenesisCommitmentRoot
+	17, // 17: svote.v1.ProposalSummary.options:type_name -> svote.v1.OptionSummary
+	1,  // 18: svote.v1.CeremonyState.status:type_name -> svote.v1.CeremonyStatus
+	19, // 19: svote.v1.CeremonyState.validators:type_name -> svote.v1.ValidatorPallasKey
+	20, // 20: svote.v1.CeremonyState.payloads:type_name -> svote.v1.DealerPayload
+	21, // 21: svote.v1.CeremonyState.acks:type_name -> svote.v1.AckEntry
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_svote_v1_types_proto_init() }

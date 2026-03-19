@@ -84,6 +84,8 @@ type mockTreeReader struct {
 	err          error
 }
 
+func (m *mockTreeReader) SetRoundID(_ []byte) {}
+
 func (m *mockTreeReader) GetTreeStatus() (TreeStatus, error) {
 	if m.err != nil {
 		return TreeStatus{}, m.err

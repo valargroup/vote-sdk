@@ -12,13 +12,6 @@ import (
 func validGenesis() *types.GenesisState {
 	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	return &types.GenesisState{
-		TreeState: &types.CommitmentTreeState{
-			NextIndex: 2,
-		},
-		CommitmentLeaves: []*types.CommitmentLeaf{
-			{Index: 0, Value: bytes.Repeat([]byte{0x01}, 32)},
-			{Index: 1, Value: bytes.Repeat([]byte{0x02}, 32)},
-		},
 		Rounds: []*types.VoteRound{
 			{
 				VoteRoundId: roundID,
@@ -44,9 +37,6 @@ func validGenesis() *types.GenesisState {
 		ShareCounts: []*types.GenesisShareCount{
 			{RoundId: roundID, ProposalId: 1, VoteDecision: 0, Count: 5},
 		},
-		CommitmentRoots: []*types.GenesisCommitmentRoot{
-			{Height: 10, Root: bytes.Repeat([]byte{0xEE}, 32)},
-		},
 	}
 }
 
@@ -56,38 +46,6 @@ func TestValidateGenesisState_Valid(t *testing.T) {
 
 func TestValidateGenesisState_Nil(t *testing.T) {
 	require.NoError(t, types.ValidateGenesisState(nil))
-}
-
-func TestValidateGenesisState_TreeStateLeafCountMismatch(t *testing.T) {
-	gs := validGenesis()
-	gs.TreeState.NextIndex = 99
-	err := types.ValidateGenesisState(gs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "tree_state.next_index is 99")
-}
-
-func TestValidateGenesisState_LeafIndexNotSequential(t *testing.T) {
-	gs := validGenesis()
-	gs.CommitmentLeaves[1].Index = 5
-	err := types.ValidateGenesisState(gs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "commitment_leaves[1].index is 5")
-}
-
-func TestValidateGenesisState_LeafValueEmpty(t *testing.T) {
-	gs := validGenesis()
-	gs.CommitmentLeaves[0].Value = nil
-	err := types.ValidateGenesisState(gs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "commitment_leaves[0].value is empty")
-}
-
-func TestValidateGenesisState_LeafValueWrongSize(t *testing.T) {
-	gs := validGenesis()
-	gs.CommitmentLeaves[0].Value = []byte{0x01, 0x02}
-	err := types.ValidateGenesisState(gs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "commitment_leaves[0].value is 2 bytes")
 }
 
 func TestValidateGenesisState_RoundIDBadLength(t *testing.T) {
@@ -189,34 +147,8 @@ func TestValidateGenesisState_ShareCountBadRoundID(t *testing.T) {
 	require.Contains(t, err.Error(), "share_counts[0].round_id")
 }
 
-func TestValidateGenesisState_CommitmentRootZeroHeight(t *testing.T) {
-	gs := validGenesis()
-	gs.CommitmentRoots[0].Height = 0
-	err := types.ValidateGenesisState(gs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "commitment_roots[0].height is zero")
-}
-
-func TestValidateGenesisState_CommitmentRootEmptyRoot(t *testing.T) {
-	gs := validGenesis()
-	gs.CommitmentRoots[0].Root = nil
-	err := types.ValidateGenesisState(gs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "commitment_roots[0].root is empty")
-}
-
 func TestValidateGenesisState_EmptyVoteManagerRejected(t *testing.T) {
 	err := types.ValidateGenesisState(&types.GenesisState{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "vote_manager is required")
-}
-
-func TestValidateGenesisState_NoTreeStateWithLeavesIsValid(t *testing.T) {
-	gs := &types.GenesisState{
-		VoteManager: "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
-		CommitmentLeaves: []*types.CommitmentLeaf{
-			{Index: 0, Value: bytes.Repeat([]byte{0x01}, 32)},
-		},
-	}
-	require.NoError(t, types.ValidateGenesisState(gs))
 }
