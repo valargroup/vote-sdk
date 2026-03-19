@@ -116,6 +116,21 @@ jobs:
               --amount 10000000usvote \
               --rpc-url tcp://localhost:26157
 
+      - name: Restart services to re-register with Edge Config
+        if: ${{ inputs.reset_chain == true }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            # Helpers tried to register on first start but validators weren't
+            # bonded yet. Now that create-val-tx has run, restart so the
+            # helpers re-run tryRegister against bonded validators.
+            for svc in svoted-val1 svoted-val2 svoted-val3; do
+              sudo systemctl restart "$svc"
+            done
+
       - name: Verify services healthy
         uses: appleboy/ssh-action@v1.0.3
         with:
