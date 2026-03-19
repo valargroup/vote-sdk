@@ -1,0 +1,143 @@
+syntax = "proto3";
+package svote.v1;
+
+import "svote/v1/types.proto";
+
+option go_package = "github.com/valargroup/vote-sdk/x/vote/types";
+
+// Query defines the vote module's gRPC query service.
+service Query {
+  // CommitmentTreeAtHeight returns the commitment tree root at a specific anchor height.
+  rpc CommitmentTreeAtHeight(QueryCommitmentTreeRequest) returns (QueryCommitmentTreeResponse);
+
+  // LatestCommitmentTree returns the latest commitment tree state.
+  rpc LatestCommitmentTree(QueryLatestTreeRequest) returns (QueryLatestTreeResponse);
+
+  // VoteRound returns information about a specific vote round.
+  rpc VoteRound(QueryVoteRoundRequest) returns (QueryVoteRoundResponse);
+
+  // ProposalTally returns the accumulated tally for a proposal within a vote round.
+  rpc ProposalTally(QueryProposalTallyRequest) returns (QueryProposalTallyResponse);
+
+  // TallyResults returns finalized tally results for a vote round (after MsgSubmitTally).
+  rpc TallyResults(QueryTallyResultsRequest) returns (QueryTallyResultsResponse);
+
+  // CommitmentLeaves returns the commitment tree leaves organized by block height.
+  // Used by remote clients implementing TreeSyncApi to sync the vote commitment tree.
+  rpc CommitmentLeaves(QueryCommitmentLeavesRequest) returns (QueryCommitmentLeavesResponse);
+
+  // ActiveRound returns the first active voting round, if any.
+  // Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
+  rpc ActiveRound(QueryActiveRoundRequest) returns (QueryActiveRoundResponse);
+
+  // CeremonyState returns the current EA key ceremony lifecycle state.
+  rpc CeremonyState(QueryCeremonyStateRequest) returns (QueryCeremonyStateResponse);
+
+  // VoteManager returns the current vote manager address.
+  rpc VoteManager(QueryVoteManagerRequest) returns (QueryVoteManagerResponse);
+
+  // VoteSummary returns a denormalized view of a vote round with proposals,
+  // ballot counts, and (if finalized) decrypted totals. Single query for frontend display.
+  rpc VoteSummary(QueryVoteSummaryRequest) returns (QueryVoteSummaryResponse);
+
+  // ListRounds returns all stored vote rounds.
+  rpc ListRounds(QueryListRoundsRequest) returns (QueryListRoundsResponse);
+
+  // PallasKeys returns all registered Pallas public keys from the global registry.
+  rpc PallasKeys(QueryPallasKeysRequest) returns (QueryPallasKeysResponse);
+}
+
+message QueryCommitmentTreeRequest {
+  uint64 height         = 1;
+  bytes  vote_round_id  = 2;
+}
+
+message QueryCommitmentTreeResponse {
+  CommitmentTreeState tree = 1;
+}
+
+message QueryLatestTreeRequest {
+  bytes vote_round_id = 1;
+}
+
+message QueryLatestTreeResponse {
+  CommitmentTreeState tree = 1;
+}
+
+message QueryVoteRoundRequest {
+  bytes vote_round_id = 1;
+}
+
+message QueryVoteRoundResponse {
+  VoteRound round = 1;
+}
+
+message QueryProposalTallyRequest {
+  bytes  vote_round_id = 1;
+  uint32 proposal_id   = 2;
+}
+
+message QueryProposalTallyResponse {
+  // Mapping from vote_decision to serialized ElGamal ciphertext (64 bytes each).
+  map<uint32, bytes> tally = 1;
+}
+
+message QueryTallyResultsRequest {
+  bytes vote_round_id = 1;
+}
+
+message QueryTallyResultsResponse {
+  repeated TallyResult results = 1;
+}
+
+message QueryCommitmentLeavesRequest {
+  uint64 from_height    = 1;
+  uint64 to_height      = 2;
+  bytes  vote_round_id  = 3;
+}
+
+message QueryCommitmentLeavesResponse {
+  repeated BlockCommitments blocks = 1;
+}
+
+message QueryActiveRoundRequest {}
+
+message QueryActiveRoundResponse {
+  VoteRound round = 1;
+}
+
+message QueryCeremonyStateRequest {}
+
+message QueryCeremonyStateResponse {
+  CeremonyState ceremony = 1;
+}
+
+message QueryVoteManagerRequest {}
+
+message QueryVoteManagerResponse {
+  string address = 1;
+}
+
+message QueryVoteSummaryRequest {
+  bytes vote_round_id = 1;
+}
+
+message QueryVoteSummaryResponse {
+  bytes                    vote_round_id = 1;
+  SessionStatus            status        = 2;
+  string                   description   = 3;
+  uint64                   vote_end_time = 4;
+  repeated ProposalSummary proposals     = 5;
+}
+
+message QueryListRoundsRequest {}
+
+message QueryListRoundsResponse {
+  repeated VoteRound rounds = 1;
+}
+
+message QueryPallasKeysRequest {}
+
+message QueryPallasKeysResponse {
+  repeated ValidatorPallasKey validators = 1;
+}

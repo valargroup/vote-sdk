@@ -1,0 +1,14 @@
+[Unit]
+Description=Shielded-Vote SDK chain - Validator 1 (svoted-val1)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/shielded-vote
+Environment="SVOTE_PIR_URL=http://157.180.63.235:3000"
+ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted-val1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

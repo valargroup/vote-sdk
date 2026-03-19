@@ -1,0 +1,114 @@
+# https://mise.jdx.dev
+
+[tools]
+go = "1.24.3"
+rust = "stable"
+node = "22"
+buf = "latest"
+jq = "latest"
+
+[env]
+GOBIN = "{{env.HOME}}/go/bin"
+_.path = ["{{env.HOME}}/go/bin", "/usr/local/go/bin"]
+
+# ── build:* ─────────────────────────────────────────────────────────
+
+[tasks."build"]
+description = "Build svoted with FFI (Halo2 + RedPallas)"
+run = "make build-ffi"
+
+[tasks."build:quick"]
+description = "Build svoted without FFI (Go only, no ZK verification)"
+run = "make build"
+
+[tasks."build:install"]
+description = "Install svoted + create-val-tx with FFI to $GOBIN"
+run = "make install-ffi install-create-val-tx"
+
+[tasks."build:create-val-tx"]
+description = "Build create-val-tx helper locally"
+run = "make build-create-val-tx"
+
+[tasks."build:circuits"]
+description = "Build Rust circuit static library"
+run = "make circuits"
+
+# ── chain:* ─────────────────────────────────────────────────────────
+
+[tasks."chain:init"]
+description = "Wipe and reinitialize a single-validator chain"
+run = "make init"
+
+[tasks."chain:start"]
+description = "Start chain daemon (foreground)"
+run = "SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} make start"
+
+[tasks."chain:clean"]
+description = "Remove chain data directory (~/.svoted)"
+run = "make clean"
+confirm = "This will delete ~/.svoted and the local svoted binary. Continue?"
+
+# ── test:* ──────────────────────────────────────────────────────────
+
+[tasks."test:unit"]
+description = "Go unit tests (keeper, validation, codec)"
+run = "make test-unit"
+
+[tasks."test:integration"]
+description = "Go ABCI pipeline integration tests"
+run = "make test-integration"
+
+[tasks."test:helper"]
+description = "Helper server unit tests (SQLite, API, processor)"
+run = "make test-helper"
+
+[tasks."test:go"]
+description = "All Go tests (unit + integration + helper)"
+run = "make test"
+
+[tasks."test:circuits"]
+description = "Rust circuit unit tests"
+run = "make circuits-test"
+
+[tasks."test:halo2"]
+description = "Go Halo2 ZKP verification tests (requires circuits)"
+run = "make test-halo2"
+
+[tasks."test:ffi"]
+description = "All FFI-backed tests (Halo2 + RedPallas)"
+run = "make test-all-ffi"
+
+[tasks."test:tree-stress"]
+description = "VC/VAN in-process determinism stress tests (debug_tree)"
+run = "go test -tags debug_tree -count=1 -run TestTreeStress ./app"
+
+[tasks."test:e2e"]
+description = "E2E API tests against running chain (round_activation + voting_flow)"
+run = "make test-api"
+
+[tasks."test:e2e:ceremony"]
+description = "Round activation ceremony test"
+run = "make ceremony"
+
+# ── Flat utilities ──────────────────────────────────────────────────
+
+[tasks.fmt]
+description = "Format Go code"
+run = "make fmt"
+
+[tasks.lint]
+description = "Run Go vet"
+run = "make lint"
+
+[tasks.fixtures]
+description = "Regenerate all fixture files"
+run = "make fixtures"
+
+[tasks.proto]
+description = "Regenerate protobuf code"
+run = "cd proto && buf generate"
+
+[tasks."deploy:caddy"]
+description = "Install Caddyfile + restart Caddy"
+run = "make caddy"
+hide = true

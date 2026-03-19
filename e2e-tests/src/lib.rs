@@ -1,0 +1,13 @@
+//! E2E test support library for the Shielded-Vote voting API.
+//!
+//! This crate provides HTTP client helpers and payload builders so that
+//! integration tests in `tests/` can run the full voting flow without
+//! fixture files.
+
+pub mod api;
+pub mod ecies;
+pub mod elgamal;
+pub mod fixtures;
+pub mod metrics;
+pub mod payloads;
+pub mod setup;

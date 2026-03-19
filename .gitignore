@@ -1,0 +1,23 @@
+# Go binary
+svoted
+create-val-tx
+
+# Go build cache
+.cache/
+
+# Rust build artifacts
+circuits/target/
+e2e-tests/target/
+
+# Environment (secrets live here — never commit)
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp

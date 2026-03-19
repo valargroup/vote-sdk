@@ -1,0 +1,231 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-lint-go-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-lint-go-
+      - name: Run go vet
+        run: mise run lint
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: circuits/target
+          key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-circuits-
+      - name: Build circuits
+        run: mise run build:circuits
+      - name: Run unit tests
+        run: mise run test:unit
+
+  test-helper:
+    name: Helper Server Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Run helper tests
+        run: mise run test:helper
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: circuits/target
+          key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-circuits-
+      - name: Build circuits
+        run: mise run build:circuits
+      - name: Run integration tests
+        run: mise run test:integration
+
+  test-halo2:
+    name: Halo2 ZKP Verification Tests
+    runs-on: ubuntu-latest
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: circuits/target
+          key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-circuits-
+      - name: Build circuits
+        run: mise run build:circuits
+      - name: Run Rust circuit tests
+        run: mise run test:circuits
+      - name: Run Go Halo2 verification tests
+        run: mise run test:halo2
+
+  test-vc-van-deterministic:
+    name: VC/VAN Deterministic Stress
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Cache Rust build (circuits)
+        uses: actions/cache@v4
+        with:
+          path: circuits/target
+          key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-circuits-
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: ${{ runner.os }}-vc-van-deterministic-go-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-vc-van-deterministic-go-
+      - name: Build circuits
+        run: mise run build:circuits
+      - name: Run deterministic VC/VAN tree stress tests
+        run: mise run test:tree-stress
+
+  test-e2e:
+    name: E2E API Tests
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Configure private repo access
+        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
+      - name: Install mise
+        uses: jdx/mise-action@v2
+      - name: Add GOBIN to PATH
+        run: echo "$HOME/go/bin" >> $GITHUB_PATH
+      - name: Cache Rust build (circuits + e2e-tests)
+        uses: actions/cache@v4
+        with:
+          path: |
+            circuits/target
+            e2e-tests/target
+          key: ${{ runner.os }}-e2e-rust-${{ hashFiles('circuits/Cargo.lock', 'e2e-tests/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-e2e-rust-
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-e2e-go-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-e2e-go-
+      - name: Build and install svoted with FFI
+        run: mise run build:install
+        env:
+          GOCACHE: ${{ github.workspace }}/.cache/go-build
+      - name: Initialize chain
+        run: mise run chain:init
+        env:
+          VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
+      - name: Start chain in background
+        run: |
+          SVOTE_PIR_URL=disabled svoted start --home ~/.svoted > chain.log 2>&1 &
+          echo "Chain PID: $!"
+      - name: Wait for chain readiness
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:1318/cosmos/base/tendermint/v1beta1/blocks/latest > /dev/null 2>&1; then
+              echo "Chain is producing blocks"
+              exit 0
+            fi
+            echo "Waiting for chain to start... ($i/60)"
+            sleep 2
+          done
+          echo "Chain failed to start within 120s"
+          cat chain.log
+          exit 1
+      - name: Run E2E test (round_activation)
+        run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test round_activation -- --nocapture --ignored --test-threads=1
+        env:
+          SVOTE_API_URL: http://localhost:1318
+          VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
+      - name: Run E2E test (voting_flow_librustvoting)
+        run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1
+        env:
+          SVOTE_API_URL: http://localhost:1318
+          HELPER_SERVER_URL: http://localhost:1318
+          SVOTE_E2E_VOTE_WINDOW_SECS: "420"
+          VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
+      - name: Upload chain log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chain-log
+          path: chain.log
+          retention-days: 7
