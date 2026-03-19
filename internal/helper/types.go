@@ -23,12 +23,6 @@ type Config struct {
 	// DBPath is the path to the SQLite database file. Use ":memory:" for testing.
 	DBPath string `mapstructure:"db_path"`
 
-	// MinDelay is the minimum delay floor (seconds). No share will be
-	// submitted sooner than this after receipt, preventing near-zero
-	// exponential samples from making shares trivially linkable.
-	// Default: 90 (3 × default ProcessInterval).
-	MinDelay int `mapstructure:"min_delay"`
-
 	// ProcessInterval is how often to check for shares ready to submit (seconds).
 	ProcessInterval int `mapstructure:"process_interval"`
 
@@ -55,7 +49,6 @@ func DefaultConfig() Config {
 		APIToken:            "",
 		ExposeQueueStatus:   false,
 		DBPath:              "",
-		MinDelay:            90,
 		ProcessInterval:     30,
 		ChainAPIPort:        1318,
 		MaxConcurrentProofs: 2,
@@ -63,7 +56,7 @@ func DefaultConfig() Config {
 }
 
 // RoundInfoFetcher queries the chain for vote round metadata.
-// Returns the vote_end_time (unix seconds) for the given round ID (hex).
+// Returns vote_end_time (unix seconds) for the given round ID (hex).
 type RoundInfoFetcher func(roundID string) (voteEndTime uint64, err error)
 
 // RoundStatusChecker returns true if the round is still accepting shares
@@ -94,6 +87,7 @@ type SharePayload struct {
 	VoteRoundID  string             `json:"vote_round_id"` // hex, 32 bytes
 	ShareComms   []string           `json:"share_comms"`   // base64, 16 × 32-byte Poseidon commitments
 	PrimaryBlind string             `json:"primary_blind"` // base64, 32 bytes
+	SubmitAt     uint64             `json:"submit_at"`     // unix seconds; 0 = immediate (last-moment)
 }
 
 // ShareState represents the processing state of a queued share.

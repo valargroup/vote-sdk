@@ -130,6 +130,10 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if errors.Is(err, ErrInvalidSubmitAt) {
+			jsonError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		h.logger.Error("failed to enqueue share", "error", err)
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return

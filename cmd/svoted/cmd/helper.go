@@ -128,9 +128,6 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.db_path") {
 		cfg.DBPath = v.GetString("helper.db_path")
 	}
-	if v.IsSet("helper.min_delay") {
-		cfg.MinDelay = v.GetInt("helper.min_delay")
-	}
 	if v.IsSet("helper.process_interval") {
 		cfg.ProcessInterval = v.GetInt("helper.process_interval")
 	}
@@ -291,9 +288,9 @@ func (r *keeperTreeReader) LeafAt(position uint64) ([]byte, error) {
 }
 
 // GetRoundVoteEndTime reads a vote round directly from the keeper's KV store
-// and returns its vote_end_time. Returns ErrUnknownRound when the round
-// doesn't exist; other errors (KV failures) are returned unwrapped so the
-// caller can distinguish client errors from infrastructure failures.
+// and returns its vote_end_time. Returns ErrUnknownRound when the round doesn't
+// exist; other errors (KV failures) are returned unwrapped so the caller can
+// distinguish client errors from infrastructure failures.
 func (r *keeperTreeReader) GetRoundVoteEndTime(roundID string) (uint64, error) {
 	roundBytes, err := hex.DecodeString(roundID)
 	if err != nil {
