@@ -37,6 +37,8 @@ func GetTxCmd() *cobra.Command {
 		CmdSetVoteManager(),
 		CmdCreateVotingSession(),
 		CmdSubmitTally(),
+		// Token transfer — uses whitelisted MsgAuthorizedSend.
+		CmdAuthorizedSend(),
 	)
 
 	return cmd
@@ -252,6 +254,47 @@ may set the initial manager.`,
 			msg := &types.MsgSetVoteManager{
 				Creator:    clientCtx.GetFromAddress().String(),
 				NewManager: args[0],
+			}
+
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
+// CmdAuthorizedSend broadcasts MsgAuthorizedSend.
+// Transfers tokens using the whitelisted MsgAuthorizedSend instead of the
+// blocked bank MsgSend.
+func CmdAuthorizedSend() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "authorized-send [to-address] [amount] [denom]",
+		Short: "Send tokens via MsgAuthorizedSend (whitelisted transfer)",
+		Long: `Broadcast an MsgAuthorizedSend transaction.
+
+Arguments:
+  to-address  Recipient bech32 account address (sv1...)
+  amount      Integer amount to send (e.g. 200000)
+  denom       Token denomination (e.g. usvote)
+
+The --from flag specifies the sender. Unlike 'bank send', this message
+is whitelisted by the chain's MessageWhitelistDecorator.
+
+Example:
+  svoted tx vote authorized-send sv1abc... 200000 usvote --from mykey`,
+		Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+
+			msg := &types.MsgAuthorizedSend{
+				FromAddress: clientCtx.GetFromAddress().String(),
+				ToAddress:   args[0],
+				Amount:      args[1],
+				Denom:       args[2],
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
