@@ -115,11 +115,11 @@ func TestBankMsgSendBlocked(t *testing.T) {
 
 	resp := app.CheckTxSync(txBytes)
 	require.NotEqual(t, uint32(0), resp.Code, "MsgSend should be rejected")
-	require.Contains(t, resp.Log, "bank MsgSend is disabled")
+	require.Contains(t, resp.Log, "is not allowed on this chain")
 
 	result := app.DeliverVoteTx(txBytes)
 	require.NotEqual(t, uint32(0), result.Code, "MsgSend should be rejected in DeliverTx")
-	require.Contains(t, result.Log, "bank MsgSend is disabled")
+	require.Contains(t, result.Log, "is not allowed on this chain")
 }
 
 func TestBankMsgMultiSendBlocked(t *testing.T) {
@@ -141,11 +141,11 @@ func TestBankMsgMultiSendBlocked(t *testing.T) {
 
 	resp := app.CheckTxSync(txBytes)
 	require.NotEqual(t, uint32(0), resp.Code, "MsgMultiSend should be rejected")
-	require.Contains(t, resp.Log, "bank MsgMultiSend is disabled")
+	require.Contains(t, resp.Log, "is not allowed on this chain")
 
 	result := app.DeliverVoteTx(txBytes)
 	require.NotEqual(t, uint32(0), result.Code, "MsgMultiSend should be rejected in DeliverTx")
-	require.Contains(t, result.Log, "bank MsgMultiSend is disabled")
+	require.Contains(t, result.Log, "is not allowed on this chain")
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ func TestBankMsgMultiSendBlocked(t *testing.T) {
 // verifies the two structural restrictions on standard Cosmos txs:
 //  1. Multi-message txs are rejected (eliminates the noop-signer attack class).
 //  2. Vote/ceremony messages are rejected even in single-message txs
-//     (defense-in-depth via isVoteModuleMsg type check).
+//     (defense-in-depth: isVoteModuleMsg fires first, MessageWhitelistDecorator backs it up).
 //  3. Allowed single-message txs pass through to the standard ante chain.
 func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 	ta := testutil.SetupTestApp(t)
@@ -665,13 +665,14 @@ func TestAuthzExecBypass_DelegateVote(t *testing.T) {
 // annotation, so GetSigners() returns []. A multi-msg tx [MsgSend, MsgDeal]
 // would pass the standard ante chain with 1 signer / 1 signature.
 //
-// Without the isVoteModuleMsg ante check, the only remaining defense is the
-// handler-level ValidateProposerIsCreator call, which rejects during
-// DeliverTx (creator != proposer). But CheckTx would still accept the tx
-// into the mempool — a DoS vector.
+// Without the isVoteModuleMsg check and MessageWhitelistDecorator, the only
+// remaining defense is the handler-level ValidateProposerIsCreator call,
+// which rejects during DeliverTx (creator != proposer). But CheckTx would
+// still accept the tx into the mempool — a DoS vector.
 //
-// The ante-level isVoteModuleMsg check blocks the tx at both CheckTx and
-// DeliverTx before it reaches the handler.
+// Two layers block this: isVoteModuleMsg in NewDualAnteHandler fires first
+// (before any decorator), and MessageWhitelistDecorator in the standard
+// ante chain provides a second barrier.
 func TestNoopSignerBypass_DealExecutiveAuthorityKey(t *testing.T) {
 	ta := testutil.SetupTestApp(t)
 
