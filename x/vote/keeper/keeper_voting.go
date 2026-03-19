@@ -293,7 +293,7 @@ func (k *Keeper) ValidateRoundForVoting(ctx context.Context, roundID []byte) err
 }
 
 // ValidateRoundActive checks that a vote round exists and has not expired.
-// Deprecated: Use ValidateRoundForVoting or ValidateRoundForShares instead.
+// Deprecated: Use ValidateRoundForVoting instead.
 // Kept as a thin wrapper to minimize churn in existing callers.
 func (k *Keeper) ValidateRoundActive(ctx context.Context, roundID []byte) error {
 	return k.ValidateRoundForVoting(ctx, roundID)

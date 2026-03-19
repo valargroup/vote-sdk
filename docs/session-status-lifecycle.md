@@ -33,13 +33,10 @@ stateDiagram-v2
 |---|---|---|---|---|
 | `MsgDelegateVote` | **Rejected** | Accepted | **Rejected** | **Rejected** |
 | `MsgCastVote` | **Rejected** | Accepted | **Rejected** | **Rejected** |
-| `MsgRevealShare` | **Rejected** | Accepted | Accepted | **Rejected** |
+| `MsgRevealShare` | **Rejected** | Accepted | **Rejected** | **Rejected** |
 | `MsgCreateVotingSession` | N/A | N/A | N/A | N/A |
 
-This is implemented via the `AcceptsTallyingRound()` method on the `VoteMessage` interface:
-
-- `MsgRevealShare.AcceptsTallyingRound()` returns `true` — routed to `ValidateRoundForShares`
-- All other messages return `false` — routed to `ValidateRoundForVoting`
+All vote-round messages (including `MsgRevealShare`) require ACTIVE status. `MsgSubmitTally` requires TALLYING status and is handled separately. Shares that don't land on-chain before the vote window closes are rejected — accepting them during TALLYING would corrupt the tally accumulator after partial decryptions have been committed.
 
 ## Transitions
 
@@ -77,17 +74,7 @@ ValidateRoundForVoting(ctx, roundID):
   3. blockTime < vote_end_time → ErrRoundNotActive (catches pre-transition)
 ```
 
-`ValidateRoundForShares` is more permissive — it accepts both ACTIVE and TALLYING rounds:
-
-```
-ValidateRoundForShares(ctx, roundID):
-  1. Round exists?                → ErrRoundNotFound
-  2. Status == ACTIVE?            → OK (shares accepted during active voting)
-  3. Status == TALLYING?          → OK (shares accepted during tally phase)
-  4. Any other status (FINALIZED) → ErrRoundNotActive
-```
-
-When the round is ACTIVE but time has passed (EndBlocker hasn't run yet this block), `ValidateRoundForShares` still accepts the message because shares should be valid until the round is FINALIZED.
+`MsgRevealShare` now uses `ValidateRoundForVoting` (same as delegation and cast-vote). Shares must land in a committed block before `vote_end_time`.
 
 ## Genesis
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"cosmossdk.io/core/store"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -318,37 +317,6 @@ func (k *Keeper) ValidateTallyCompleteness(kvStore store.KVStore, round *types.V
 // ---------------------------------------------------------------------------
 // Tally validation helpers
 // ---------------------------------------------------------------------------
-
-// ValidateRoundForShares checks that a vote round exists and is in a state
-// that accepts MsgRevealShare. Shares are accepted when the round is ACTIVE
-// (with time check) or TALLYING (unconditionally).
-func (k *Keeper) ValidateRoundForShares(ctx context.Context, roundID []byte) error {
-	kvStore := k.OpenKVStore(ctx)
-	round, err := k.GetVoteRound(kvStore, roundID)
-	if err != nil {
-		return err
-	}
-
-	switch round.Status {
-	case types.SessionStatus_SESSION_STATUS_ACTIVE:
-		// Belt-and-suspenders: also check time in case EndBlocker hasn't run yet.
-		sdkCtx := sdk.UnwrapSDKContext(ctx)
-		blockTime := uint64(sdkCtx.BlockTime().Unix())
-		if blockTime >= round.VoteEndTime {
-			// Time has passed but EndBlocker hasn't transitioned yet — still
-			// accept shares (the round will become TALLYING this block).
-			return nil
-		}
-		return nil
-
-	case types.SessionStatus_SESSION_STATUS_TALLYING:
-		// Tallying phase: shares are accepted unconditionally.
-		return nil
-
-	default:
-		return fmt.Errorf("%w: status is %s", types.ErrRoundNotActive, round.Status)
-	}
-}
 
 // ValidateRoundForTally checks that a vote round exists and is in TALLYING state.
 func (k *Keeper) ValidateRoundForTally(ctx context.Context, roundID []byte) error {

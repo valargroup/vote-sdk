@@ -260,9 +260,10 @@ func (msg *MsgDelegateVote) AcceptsTallyingRound() bool { return false }
 // AcceptsTallyingRound returns false — casting votes requires ACTIVE status.
 func (msg *MsgCastVote) AcceptsTallyingRound() bool { return false }
 
-// AcceptsTallyingRound returns true — revealing shares is accepted during both
-// ACTIVE and TALLYING phases. This routes to ValidateRoundForShares.
-func (msg *MsgRevealShare) AcceptsTallyingRound() bool { return true }
+// AcceptsTallyingRound returns false — shares must land before the vote window
+// closes. Accepting shares during TALLYING would corrupt the tally accumulator
+// after partial decryptions have been committed.
+func (msg *MsgRevealShare) AcceptsTallyingRound() bool { return false }
 
 // AcceptsTallyingRound returns false — session creation is unrelated to tallying.
 func (msg *MsgCreateVotingSession) AcceptsTallyingRound() bool { return false }
