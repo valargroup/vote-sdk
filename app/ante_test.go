@@ -92,6 +92,63 @@ func TestGenesisValidatorCreationSucceeds(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Bank MsgSend / MsgMultiSend ante handler blocking tests
+// ---------------------------------------------------------------------------
+
+func TestBankMsgSendBlocked(t *testing.T) {
+	app := testutil.SetupTestApp(t)
+
+	msg := &banktypes.MsgSend{
+		FromAddress: "sv1sender",
+		ToAddress:   "sv1receiver",
+		Amount:      sdk.NewCoins(sdk.NewCoin("usvote", sdkmath.NewInt(100))),
+	}
+
+	txConfig := app.TxConfig()
+	txBuilder := txConfig.NewTxBuilder()
+	require.NoError(t, txBuilder.SetMsgs(msg))
+	txBuilder.SetGasLimit(200_000)
+	txBuilder.SetFeeAmount(sdk.NewCoins())
+
+	txBytes, err := txConfig.TxEncoder()(txBuilder.GetTx())
+	require.NoError(t, err)
+
+	resp := app.CheckTxSync(txBytes)
+	require.NotEqual(t, uint32(0), resp.Code, "MsgSend should be rejected")
+	require.Contains(t, resp.Log, "bank MsgSend is disabled")
+
+	result := app.DeliverVoteTx(txBytes)
+	require.NotEqual(t, uint32(0), result.Code, "MsgSend should be rejected in DeliverTx")
+	require.Contains(t, result.Log, "bank MsgSend is disabled")
+}
+
+func TestBankMsgMultiSendBlocked(t *testing.T) {
+	app := testutil.SetupTestApp(t)
+
+	msg := &banktypes.MsgMultiSend{
+		Inputs:  []banktypes.Input{{Address: "sv1sender", Coins: sdk.NewCoins(sdk.NewCoin("usvote", sdkmath.NewInt(100)))}},
+		Outputs: []banktypes.Output{{Address: "sv1receiver", Coins: sdk.NewCoins(sdk.NewCoin("usvote", sdkmath.NewInt(100)))}},
+	}
+
+	txConfig := app.TxConfig()
+	txBuilder := txConfig.NewTxBuilder()
+	require.NoError(t, txBuilder.SetMsgs(msg))
+	txBuilder.SetGasLimit(200_000)
+	txBuilder.SetFeeAmount(sdk.NewCoins())
+
+	txBytes, err := txConfig.TxEncoder()(txBuilder.GetTx())
+	require.NoError(t, err)
+
+	resp := app.CheckTxSync(txBytes)
+	require.NotEqual(t, uint32(0), resp.Code, "MsgMultiSend should be rejected")
+	require.Contains(t, resp.Log, "bank MsgMultiSend is disabled")
+
+	result := app.DeliverVoteTx(txBytes)
+	require.NotEqual(t, uint32(0), result.Code, "MsgMultiSend should be rejected in DeliverTx")
+	require.Contains(t, result.Log, "bank MsgMultiSend is disabled")
+}
+
+// ---------------------------------------------------------------------------
 // Table-driven: vote/ceremony messages blocked in standard Cosmos txs
 // ---------------------------------------------------------------------------
 
@@ -249,13 +306,6 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 			msg  sdk.Msg
 		}{
 			{
-				name: "MsgSend",
-				msg: &banktypes.MsgSend{
-					FromAddress: signerAddr.String(), ToAddress: signerAddr.String(),
-					Amount: sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 1)),
-				},
-			},
-			{
 				name: "MsgRegisterPallasKey",
 				msg: &votetypes.MsgRegisterPallasKey{
 					Creator: signerAddr.String(), PallasPk: bytes.Repeat([]byte{0x01}, 32),
@@ -270,6 +320,7 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 				t.Logf("CheckTx code=%d log=%q", checkResp.Code, checkResp.Log)
 				require.NotContains(t, checkResp.Log, "not allowed in standard Cosmos transactions")
 				require.NotContains(t, checkResp.Log, "multi-message transactions are not supported")
+				require.NotContains(t, checkResp.Log, "is disabled")
 			})
 		}
 	})
@@ -977,20 +1028,17 @@ func TestZeroCostAttack_MsgSetWithdrawAddress(t *testing.T) {
 	t.Log("Part A passed: unfunded attacker rejected, tally intact")
 
 	// ---------------------------------------------------------------
-	// Part B: Validator sends 1 usvote to create the attacker account.
+	// Part B: Fund attacker with 1 usvote to create the account.
+	// MsgSend is blocked by the ante handler, so we use the bank
+	// keeper directly to simulate account creation.
 	// ---------------------------------------------------------------
 
 	t.Log("--- Part B: fund attacker with 1 usvote, retry ---")
 
 	valAddr := sdk.AccAddress(ta.ValPrivKey.PubKey().Address())
-	fundMsg := &banktypes.MsgSend{
-		FromAddress: valAddr.String(),
-		ToAddress:   attackerAddr.String(),
-		Amount:      sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 1)),
-	}
-	fundTx := mustBuildMultiMsgSignedTx(t, ta, fundMsg)
-	fundResult := ta.DeliverVoteTx(fundTx)
-	require.Equal(t, uint32(0), fundResult.Code, "funding attacker should succeed")
+	ctx = ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	err = ta.BankKeeper.SendCoins(ctx, valAddr, attackerAddr, sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 1)))
+	require.NoError(t, err, "funding attacker should succeed")
 
 	// Verify the attacker account now exists.
 	ctx = ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})

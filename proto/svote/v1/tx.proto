@@ -23,6 +23,7 @@ service Msg {
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
   rpc SetVoteManager(MsgSetVoteManager) returns (MsgSetVoteManagerResponse);
+  rpc AuthorizedSend(MsgAuthorizedSend) returns (MsgAuthorizedSendResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -190,4 +191,22 @@ message MsgSetVoteManager {
 }
 
 message MsgSetVoteManagerResponse {}
+
+// MsgAuthorizedSend is the only way to transfer coins on this chain.
+// Standard bank MsgSend and MsgMultiSend are disabled at the ante-handler
+// level because unrestricted transfers would let anyone accumulate enough
+// stake to create a validator, bypassing the controlled validator set.
+//
+// Authorization rules:
+//   - Vote manager can send to anyone (distributes stake to new validators).
+//   - Bonded validators can send to the vote manager or other bonded validators.
+//   - All other senders are rejected.
+message MsgAuthorizedSend {
+  string from_address = 1;
+  string to_address   = 2;
+  string amount       = 3; // Integer string, e.g. "1000000"
+  string denom        = 4; // e.g. "usvote"
+}
+
+message MsgAuthorizedSendResponse {}
 

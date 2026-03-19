@@ -59,6 +59,7 @@ func init() {
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
 			ProvideSetVoteManagerSigner,
+			ProvideAuthorizedSendSigner,
 		),
 	)
 }
@@ -208,6 +209,28 @@ func ProvideSetVoteManagerSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("svote.v1.MsgSetVoteManager"),
 		Fn:      ceremonyCreatorSignerFn,
+	}
+}
+
+// authorizedSendSignerFn extracts the signer from MsgAuthorizedSend's
+// from_address field (an account bech32 address).
+func authorizedSendSignerFn(msg proto.Message) ([][]byte, error) {
+	fd := msg.ProtoReflect().Descriptor().Fields().ByName("from_address")
+	if fd == nil {
+		return nil, fmt.Errorf("MsgAuthorizedSend has no from_address field")
+	}
+	addr := msg.ProtoReflect().Get(fd).String()
+	accAddr, err := sdk.AccAddressFromBech32(addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid from_address %q: %w", addr, err)
+	}
+	return [][]byte{accAddr}, nil
+}
+
+func ProvideAuthorizedSendSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgAuthorizedSend"),
+		Fn:      authorizedSendSignerFn,
 	}
 }
 
