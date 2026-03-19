@@ -377,6 +377,7 @@ fn voting_flow_librustvoting_path() {
             &auth_path_bytes,
             u32::try_from(van_position).expect("van_position fits in u32"),
             anchor_height,
+            false, // single_share
             &NoopProgressReporter,
         )
         .expect("VotingDb::build_vote_commitment");
@@ -593,6 +594,7 @@ fn voting_flow_librustvoting_path() {
             1,           // vote_decision (oppose)
             2,           // num_options
             vc_position, // vc_tree_position
+            false,       // single_share
         )
         .expect("VotingDb::build_share_payloads");
     assert_eq!(payloads.len(), 16, "should have 16 share payloads");
@@ -604,6 +606,125 @@ fn voting_flow_librustvoting_path() {
         assert_eq!(p.enc_share.share_index, i as u32);
     }
     log_step("Step 9", "share payloads built and validated");
+
+    // ---- Step 9b: Verify single_share=true produces valid proof + 1 payload ----
+    // In single-share mode, all voting weight goes into share 0 ([num_ballots, 0, ..., 0])
+    // instead of splitting evenly across 16 shares. The ZKP #2 circuit accepts both.
+    // We can't submit this to chain (same VAN nullifier as above), but we verify the
+    // proof is valid and build_share_payloads returns exactly 1 payload.
+    log_step(
+        "Step 9b",
+        "building vote commitment with single_share=true (K=14 proof, 30-60s)...",
+    );
+    let single_bundle = db
+        .build_vote_commitment(
+            &round_id_hex,
+            0, // bundle_index
+            &seed,
+            1, // network_id (testnet)
+            1, // proposal_id
+            1, // choice (oppose)
+            2, // num_options
+            &auth_path_bytes,
+            u32::try_from(van_position).expect("van_position fits in u32"),
+            anchor_height,
+            true, // single_share
+            &NoopProgressReporter,
+        )
+        .expect("VotingDb::build_vote_commitment(single_share=true)");
+    log_step("Step 9b", "single-share vote commitment built successfully");
+
+    // Basic bundle sanity checks
+    assert_eq!(single_bundle.enc_shares.len(), 16, "circuit always produces 16 encrypted shares");
+    assert_eq!(single_bundle.shares_hash.len(), 32);
+
+    // Verify the proof locally — the circuit must accept [num_ballots, 0, ..., 0] shares
+    {
+        log_step("Step 9b", "verifying single-share vote proof locally...");
+        let van_nf: pallas::Base = Option::from(pallas::Base::from_repr(
+            single_bundle.van_nullifier.as_slice().try_into().unwrap(),
+        ))
+        .expect("van_nullifier");
+        let r_vpk_arr: [u8; 32] = single_bundle.r_vpk_bytes.as_slice().try_into().unwrap();
+        let r_vpk_affine: pallas::Affine =
+            Option::from(pallas::Affine::from_bytes(&r_vpk_arr)).expect("decompress r_vpk");
+        let r_vpk_coords = r_vpk_affine.coordinates().unwrap();
+        let van_new: pallas::Base = Option::from(pallas::Base::from_repr(
+            single_bundle
+                .vote_authority_note_new
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        ))
+        .expect("van_new");
+        let vc_field: pallas::Base = Option::from(pallas::Base::from_repr(
+            single_bundle.vote_commitment.as_slice().try_into().unwrap(),
+        ))
+        .expect("vote_commitment");
+        let vri: pallas::Base = Option::from(pallas::Base::from_repr(
+            round_id.as_slice().try_into().unwrap(),
+        ))
+        .expect("vote_round_id not canonical Fp");
+
+        let ea_pk_arr: [u8; 32] = ea_pk_bytes.as_slice().try_into().expect("ea_pk 32 bytes");
+        let ea_pk_point: pallas::Point =
+            Option::from(pallas::Point::from_bytes(&ea_pk_arr)).expect("ea_pk point");
+        let ea_pk_affine = ea_pk_point.to_affine();
+        let ea_coords = ea_pk_affine.coordinates().unwrap();
+
+        let instance = voting_circuits::vote_proof::Instance::from_parts(
+            van_nf,
+            *r_vpk_coords.x(),
+            *r_vpk_coords.y(),
+            van_new,
+            vc_field,
+            local_root,
+            pallas::Base::from(anchor_height as u64),
+            pallas::Base::from(1u64), // proposal_id
+            vri,
+            *ea_coords.x(),
+            *ea_coords.y(),
+        );
+        voting_circuits::vote_proof::verify_vote_proof(&single_bundle.proof, &instance)
+            .expect("single-share vote proof verification must pass");
+        log_step("Step 9b", "single-share local verification PASSED");
+    }
+
+    // Build share payloads with single_share=true — should return exactly 1
+    let single_wire_shares: Vec<WireEncryptedShare> = single_bundle
+        .enc_shares
+        .iter()
+        .map(WireEncryptedShare::from)
+        .collect();
+    let single_payloads = db
+        .build_share_payloads(
+            &single_wire_shares,
+            &single_bundle,
+            1,           // vote_decision
+            2,           // num_options
+            vc_position, // vc_tree_position (reuse — we won't submit this)
+            true,        // single_share
+        )
+        .expect("VotingDb::build_share_payloads(single_share=true)");
+    assert_eq!(
+        single_payloads.len(),
+        1,
+        "single_share=true should produce exactly 1 payload, got {}",
+        single_payloads.len()
+    );
+    assert_eq!(single_payloads[0].enc_share.share_index, 0, "single payload must be share 0");
+    assert_eq!(single_payloads[0].proposal_id, 1);
+    assert_eq!(single_payloads[0].vote_decision, 1);
+    // The all_enc_shares field should still contain all 16 shares (needed by the helper for ZKP #3)
+    assert_eq!(
+        single_payloads[0].all_enc_shares.len(),
+        16,
+        "all_enc_shares must still contain all 16 shares for ZKP #3"
+    );
+    log_step(
+        "Step 9b",
+        "single_share=true: proof valid, 1 payload produced ✓",
+    );
 
     // ---- Step 10: Send share payloads to helper server ----
     let helper_url = helper_server_url();
