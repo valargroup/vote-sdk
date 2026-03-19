@@ -15,24 +15,15 @@ import (
 	"github.com/valargroup/vote-sdk/ffi/zkp"
 )
 
-// TestSignBitFlip_RealProofVerifiesBothEncodings is the definitive proof of the
-// sign-bit-flip vulnerability. It generates a real Halo2 proof via the Rust FFI,
-// verifies it passes for the original EncShare, flips the sign bits, and
-// demonstrates the SAME proof also passes for the flipped EncShare.
-//
-// No mock verifiers. No dummy proofs. Real circuit. Real Rust prover+verifier.
+// TestSignBitFlip_RejectedAfterFix verifies that the ciphertext sign-malleability
+// vulnerability is closed. After the fix, the ZKP #3 circuit includes y-coordinates
+// in the share commitment Poseidon hash, so flipping the sign bit changes the
+// y-coordinate and the proof no longer verifies.
 //
 // Run with:
 //
-//	go test -tags halo2 -v -run TestSignBitFlip_RealProof ./ffi/zkp/halo2/ -timeout 120s
-//
-// Breakpoints:
-//
-//	ffi/zkp/halo2/verify.go:399  UnmarshalCiphertext — passes for both
-//	ffi/zkp/halo2/verify.go:403  buf[63] &= 0x7F — C1 sign stripped
-//	ffi/zkp/halo2/verify.go:405  buf[95] &= 0x7F — C2 sign stripped
-//	ffi/zkp/halo2/verify.go:439  sv_verify_share_reveal_proof — rc=0 for both
-func TestSignBitFlip_RealProofVerifiesBothEncodings(t *testing.T) {
+//	go test -tags halo2 -v -run TestSignBitFlip_RejectedAfterFix ./ffi/zkp/halo2/ -timeout 120s
+func TestSignBitFlip_RejectedAfterFix(t *testing.T) {
 	require.False(t, IsMock, "this test requires the real Halo2 verifier (build with -tags halo2)")
 
 	// ── Step 1: Parse the fixture (same layout as prove_test.go). ──
@@ -50,11 +41,11 @@ func TestSignBitFlip_RealProofVerifiesBothEncodings(t *testing.T) {
 	var primaryBlind [32]byte
 	copy(primaryBlind[:], fixture[1284:1316])
 
-	var encC1X [32]byte
-	copy(encC1X[:], fixture[1316:1348])
+	var encC1 [32]byte
+	copy(encC1[:], fixture[1316:1348])
 
-	var encC2X [32]byte
-	copy(encC2X[:], fixture[1348:1380])
+	var encC2 [32]byte
+	copy(encC2[:], fixture[1348:1380])
 
 	shareIndex := binary.LittleEndian.Uint32(fixture[1380:1384])
 	proposalID := binary.LittleEndian.Uint32(fixture[1384:1388])
@@ -72,7 +63,7 @@ func TestSignBitFlip_RealProofVerifiesBothEncodings(t *testing.T) {
 	t.Log("Generating real share reveal proof via Rust FFI (~2s)...")
 	proof, nullifier, treeRoot, err := GenerateShareRevealProof(
 		merklePath, shareComms, primaryBlind,
-		encC1X, encC2X,
+		encC1, encC2,
 		shareIndex, proposalID, voteDecision, roundID,
 	)
 	require.NoError(t, err)
@@ -105,10 +96,13 @@ func TestSignBitFlip_RealProofVerifiesBothEncodings(t *testing.T) {
 	t.Logf("Flipped  EncShare: %s", hex.EncodeToString(encFlipped))
 
 	_, err = elgamal.UnmarshalCiphertext(encFlipped)
-	require.NoError(t, err, "flipped EncShare must be valid Pallas points")
+	require.NoError(t, err, "flipped EncShare must be valid Pallas points (both y-values are on-curve)")
 	t.Log("[+] Step 4: Flipped EncShare is valid (both points on Pallas curve)")
 
-	// ── Step 5: Verify SAME proof with flipped EncShare — must ALSO PASS. ──
+	// ── Step 5: Verify SAME proof with flipped EncShare — must FAIL. ──
+	// After the fix, the verifier decompresses to get y-coordinates. Flipping
+	// the sign bit negates y, producing different public inputs. The proof was
+	// generated for the original y-coordinates and must not verify.
 	flippedInputs := zkp.VoteShareInputs{
 		ShareNullifier:   nullifier[:],
 		EncShare:         encFlipped,
@@ -119,42 +113,32 @@ func TestSignBitFlip_RealProofVerifiesBothEncodings(t *testing.T) {
 	}
 
 	err = VerifyShareRevealProof(proof, flippedInputs)
-	require.NoError(t, err,
-		"EXPLOIT: the same real Halo2 proof must ALSO verify against sign-bit-flipped EncShare")
-	t.Log("[+] Step 5: SAME real Halo2 proof VERIFIED against FLIPPED EncShare")
+	require.Error(t, err,
+		"FIX VERIFIED: proof must NOT verify against sign-bit-flipped EncShare")
+	t.Log("[+] Step 5: Proof correctly REJECTED for FLIPPED EncShare — vulnerability is closed")
 
-	// ── Step 6: Demonstrate tally corruption via HomomorphicAdd. ──
+	// ── Step 6: Confirm that the flipped points are negations of the originals. ──
 	ctOriginal, err := elgamal.UnmarshalCiphertext(encShare)
 	require.NoError(t, err)
 	ctFlipped, err := elgamal.UnmarshalCiphertext(encFlipped)
 	require.NoError(t, err)
 
-	// C1 and C2 are negated: ctFlipped.C1 + ctOriginal.C1 should be identity.
 	c1Sum := ctOriginal.C1.Add(ctFlipped.C1)
 	require.True(t, c1Sum.IsIdentity(),
 		"original.C1 + flipped.C1 must be identity (proving negation)")
 	c2Sum := ctOriginal.C2.Add(ctFlipped.C2)
 	require.True(t, c2Sum.IsIdentity(),
 		"original.C2 + flipped.C2 must be identity (proving negation)")
-
-	// HomomorphicAdd of original + flipped cancels out to Enc(0).
-	acc := elgamal.HomomorphicAdd(ctOriginal, ctFlipped)
-	require.True(t, acc.C1.IsIdentity(), "accumulated C1 is identity (zero)")
-	require.True(t, acc.C2.IsIdentity(), "accumulated C2 is identity (zero)")
-	t.Log("[+] Step 6: HomomorphicAdd(original, flipped) = Enc(0) — votes cancel out")
+	t.Log("[+] Step 6: Confirmed flipped points are negations of originals")
 
 	t.Log("")
 	t.Log("=================================================================")
-	t.Log("  EXPLOIT CONFIRMED: Real Halo2 Proof Verifies Both Encodings")
+	t.Log("  FIX VERIFIED: Sign-Bit Flip Now Correctly Rejected")
 	t.Log("=================================================================")
 	t.Log("")
-	t.Log("  A single proof generated by the real Rust Halo2 prover passes")
-	t.Log("  sv_verify_share_reveal_proof for BOTH the original and the")
-	t.Log("  sign-bit-flipped EncShare. Zero mock components involved.")
-	t.Log("")
-	t.Log("  Impact: a malicious proposer flips 2 bits in a mempool tx,")
-	t.Log("  the honest voter's share is negated, and the tally is corrupted.")
-	t.Log("")
-	t.Log("  Root cause: ZKP #3 circuit constrains only x-coordinates.")
-	t.Log("  Fix: add C1_sign and C2_sign as public inputs to the circuit.")
+	t.Log("  The verifier now decompresses ciphertext points to extract full")
+	t.Log("  (x, y) coordinates. The circuit binds y-coordinates via the")
+	t.Log("  5-input Poseidon share commitment hash, so flipping a sign bit")
+	t.Log("  changes the y-coordinate and invalidates the proof chain:")
+	t.Log("  share_comm → shares_hash → vote_commitment → Merkle root.")
 }

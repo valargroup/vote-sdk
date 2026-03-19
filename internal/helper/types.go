@@ -128,14 +128,14 @@ type ProofGenerator interface {
 	// merklePath: 772-byte serialized Merkle path (from votetree.TreeHandle.Path)
 	// shareComms: 16 × 32-byte per-share Poseidon commitments
 	// primaryBlind: 32-byte blind factor for the revealed share
-	// encC1X, encC2X: 32-byte x-coordinates of the revealed share
+	// encC1, encC2: 32-byte compressed Pallas points of the revealed share
 	// Returns proof bytes, nullifier (32 bytes), tree root (32 bytes).
 	GenerateShareRevealProof(
 		merklePath []byte,
 		shareComms [16][32]byte,
 		primaryBlind [32]byte,
-		encC1X [32]byte,
-		encC2X [32]byte,
+		encC1 [32]byte,
+		encC2 [32]byte,
 		shareIndex uint32,
 		proposalID, voteDecision uint32,
 		roundID [32]byte,

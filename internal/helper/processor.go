@@ -276,17 +276,17 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	if len(c2Bytes) != 32 {
 		return fmt.Errorf("enc_share.c2 must be 32 bytes, got %d", len(c2Bytes))
 	}
-	var encC1X, encC2X [32]byte
-	copy(encC1X[:], c1Bytes)
-	copy(encC2X[:], c2Bytes)
+	var encC1, encC2 [32]byte
+	copy(encC1[:], c1Bytes)
+	copy(encC2[:], c2Bytes)
 
 	// Generate ZKP #3 proof.
 	proof, nullifier, _, err := p.prover.GenerateShareRevealProof(
 		merklePath,
 		shareComms,
 		primaryBlind,
-		encC1X,
-		encC2X,
+		encC1,
+		encC2,
 		share.Payload.EncShare.ShareIndex,
 		share.Payload.ProposalID,
 		share.Payload.VoteDecision,

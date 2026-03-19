@@ -517,7 +517,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 [[package]]
 name = "orchard"
 version = "0.11.0"
-source = "git+https://github.com/valargroup/voting-circuits.git#4bca59a9cf40374617d629b70c1d3c111669b1b6"
+source = "git+https://github.com/valargroup/voting-circuits.git#6abd5a86dbe518e648947b66027aa5335d68ef53"
 dependencies = [
  "aes",
  "bitvec",
@@ -947,7 +947,7 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/voting-circuits.git#4bca59a9cf40374617d629b70c1d3c111669b1b6"
+source = "git+https://github.com/valargroup/voting-circuits.git#6abd5a86dbe518e648947b66027aa5335d68ef53"
 dependencies = [
  "blake2b_simd",
  "ff",

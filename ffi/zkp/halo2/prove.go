@@ -21,8 +21,8 @@ import (
 //   - merklePath: 772-byte serialized Merkle path (from votetree.TreeHandle.Path)
 //   - shareComms: 16 per-share Poseidon commitments, 32 bytes each
 //   - primaryBlind: blind factor for the revealed share, 32 bytes
-//   - encC1X: x-coordinate of the revealed share's C1, 32 bytes (compressed)
-//   - encC2X: x-coordinate of the revealed share's C2, 32 bytes (compressed)
+//   - encC1: 32-byte compressed Pallas point (revealed share's C1)
+//   - encC2: 32-byte compressed Pallas point (revealed share's C2)
 //   - shareIndex: which of the 16 shares (0..15)
 //   - proposalID: proposal being voted on
 //   - voteDecision: vote choice
@@ -33,8 +33,8 @@ func GenerateShareRevealProof(
 	merklePath []byte,
 	shareComms [16][32]byte,
 	primaryBlind [32]byte,
-	encC1X [32]byte,
-	encC2X [32]byte,
+	encC1 [32]byte,
+	encC2 [32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
@@ -63,8 +63,8 @@ func GenerateShareRevealProof(
 		(*C.uint8_t)(unsafe.Pointer(&commsBuf[0])),
 		C.size_t(512),
 		(*C.uint8_t)(unsafe.Pointer(&primaryBlind[0])),
-		(*C.uint8_t)(unsafe.Pointer(&encC1X[0])),
-		(*C.uint8_t)(unsafe.Pointer(&encC2X[0])),
+		(*C.uint8_t)(unsafe.Pointer(&encC1[0])),
+		(*C.uint8_t)(unsafe.Pointer(&encC2[0])),
 		C.uint32_t(shareIndex),
 		C.uint32_t(proposalID),
 		C.uint32_t(voteDecision),
@@ -85,7 +85,7 @@ func GenerateShareRevealProof(
 	case -1:
 		return nil, nullifier, treeRoot, fmt.Errorf("share reveal: invalid inputs")
 	case -3:
-		return nil, nullifier, treeRoot, fmt.Errorf("share reveal: deserialization error (non-canonical Fp)")
+		return nil, nullifier, treeRoot, fmt.Errorf("share reveal: deserialization error (non-canonical Fp or invalid curve point)")
 	case -5:
 		return nil, nullifier, treeRoot, fmt.Errorf("share reveal: proof generation failed")
 	default:

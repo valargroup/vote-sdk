@@ -27,8 +27,8 @@ func TestGenerateShareRevealRoundTrip(t *testing.T) {
 	//   [0..772)       merkle_path
 	//   [772..1284)    share_comms (512 bytes: 16 × 32)
 	//   [1284..1316)   primary_blind (32 bytes)
-	//   [1316..1348)   enc_c1_x (32 bytes, LE Fp — ZKP public input)
-	//   [1348..1380)   enc_c2_x (32 bytes, LE Fp — ZKP public input)
+	//   [1316..1348)   enc_c1 (32 bytes, compressed Pallas point)
+	//   [1348..1380)   enc_c2 (32 bytes, compressed Pallas point)
 	//   [1380..1384)   share_index (u32 LE)
 	//   [1384..1388)   proposal_id (u32 LE)
 	//   [1388..1392)   vote_decision (u32 LE)
@@ -48,11 +48,12 @@ func TestGenerateShareRevealRoundTrip(t *testing.T) {
 	var primaryBlind [32]byte
 	copy(primaryBlind[:], fixture[1284:1316])
 
-	var encC1X [32]byte
-	copy(encC1X[:], fixture[1316:1348])
+	// Compressed ciphertext points for proof generation.
+	var encC1 [32]byte
+	copy(encC1[:], fixture[1316:1348])
 
-	var encC2X [32]byte
-	copy(encC2X[:], fixture[1348:1380])
+	var encC2 [32]byte
+	copy(encC2[:], fixture[1348:1380])
 
 	shareIndex := binary.LittleEndian.Uint32(fixture[1380:1384])
 	proposalID := binary.LittleEndian.Uint32(fixture[1384:1388])
@@ -67,14 +68,14 @@ func TestGenerateShareRevealRoundTrip(t *testing.T) {
 	encShare := make([]byte, 64)
 	copy(encShare, fixture[1424:1488])
 
-	// Generate proof.
+	// Generate proof using compressed points.
 	t.Log("generating share reveal proof (this takes ~5-15s)...")
 	proof, nullifier, treeRoot, err := GenerateShareRevealProof(
 		merklePath,
 		shareComms,
 		primaryBlind,
-		encC1X,
-		encC2X,
+		encC1,
+		encC2,
 		shareIndex,
 		proposalID, voteDecision,
 		roundID,
