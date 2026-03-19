@@ -8,7 +8,6 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
-	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
@@ -82,57 +81,25 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 			return ctx, fmt.Errorf("multi-message transactions are not supported; got %d messages", len(msgs))
 		}
 
-		// ---------------------------------------------------------------
-		// Blocked message types
-		// ---------------------------------------------------------------
-		// The checks below harden the chain's permission model around
-		// stake distribution. On this chain, holding the native token
-		// means the ability to self-delegate and create a validator,
-		// which grants block-production and ceremony participation
-		// rights. Unrestricted token transfers would let anyone
-		// accumulate enough stake to spin up a validator, undermining
-		// the controlled validator set.
-		//
-		// • MsgCreateValidator — blocked post-genesis; validators must
-		//   use MsgCreateValidatorWithPallasKey so a Pallas key is
-		//   atomically registered for the EA key ceremony.
-		//
-		// • MsgSend / MsgMultiSend — replaced by MsgAuthorizedSend,
-		//   which enforces role-based rules: the vote manager can send
-		//   to anyone, bonded validators can only send to the vote
-		//   manager or other bonded validators, and all other senders
-		//   are rejected. This prevents stake from leaking to
-		//   unauthorized parties who could use it to create validators.
-		// ---------------------------------------------------------------
 		for _, msg := range msgs {
-			// Vote module messages (ZKP-authenticated) must only enter via the
-			// custom VoteTxWrapper path where ZKP/RedPallas verification runs.
-			// Reject them in standard Cosmos txs to prevent the noop-signer
-			// bypass: a multi-msg tx [MsgSend, MsgRevealShare] where
-			// MsgRevealShare contributes 0 signers and executes without ZKP.
+			// Defense-in-depth: reject ZKP/ceremony messages via explicit
+			// type check even though MessageWhitelistDecorator (in the
+			// standard ante chain) would also catch them. This fires
+			// earlier — before any decorator runs — and gives a clearer
+			// error message explaining the correct submission path.
 			if isVoteModuleMsg(msg) {
 				return ctx, fmt.Errorf("vote module message %T is not allowed in standard Cosmos transactions; use the vote tx format", msg)
 			}
 
-			// Block raw MsgCreateValidator — post-genesis validators must use
-			// MsgCreateValidatorWithPallasKey to atomically register their
-			// Pallas key. Allow during genesis (block height 0) since gentx
-			// produces standard MsgCreateValidator.
+			// Block raw MsgCreateValidator post-genesis — validators must
+			// use MsgCreateValidatorWithPallasKey to atomically register
+			// their Pallas key. Allowed at genesis (height 0) for gentx.
 			if _, ok := msg.(*stakingtypes.MsgCreateValidator); ok {
 				if ctx.BlockHeight() > 0 {
 					return ctx, fmt.Errorf("MsgCreateValidator is disabled; use MsgCreateValidatorWithPallasKey via /shielded-vote/v1/create-validator-with-pallas")
 				}
 			}
-			if _, ok := msg.(*banktypes.MsgSend); ok {
-				return ctx, fmt.Errorf("bank MsgSend is disabled; use MsgAuthorizedSend from the vote module")
-			}
-			if _, ok := msg.(*banktypes.MsgMultiSend); ok {
-				return ctx, fmt.Errorf("bank MsgMultiSend is disabled; use MsgAuthorizedSend from the vote module")
-			}
 		}
-
-		// Ceremony messages pass through to the standard ante chain where
-		// they get signature verification, fee exemption, and validator gating.
 
 		// Standard Cosmos tx path: signature verification, fee deduction, etc.
 		return standardHandler(ctx, tx, simulate)
@@ -207,6 +174,7 @@ func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper *votekeepe
 	anteDecorators := []sdk.AnteDecorator{
 		ante.NewSetUpContextDecorator(),
 		NewCeremonyFeeExemptDecorator(),
+		NewMessageWhitelistDecorator(DefaultAllowedMessages()),
 		ante.NewExtensionOptionsDecorator(options.ExtensionOptionChecker),
 		ante.NewValidateBasicDecorator(),
 		ante.NewTxTimeoutHeightDecorator(),
@@ -232,6 +200,11 @@ func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper *votekeepe
 //
 // Allowing these in standard Cosmos txs would bypass their authentication —
 // vote messages skip ZKP verification, ceremony messages skip proposer gating.
+//
+// Defense-in-depth: the MessageWhitelistDecorator in buildStandardAnteHandler
+// also blocks these (they are not in the allowed set), but this explicit type
+// check fires earlier in NewDualAnteHandler — before any decorator runs —
+// and produces a more actionable error message.
 func isVoteModuleMsg(msg sdk.Msg) bool {
 	switch msg.(type) {
 	case *types.MsgDelegateVote, *types.MsgCastVote, *types.MsgRevealShare:

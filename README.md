@@ -235,7 +235,9 @@ These flow through the standard ante chain: signature verification (`SigVerifica
 | `MsgCreateValidatorWithPallasKey` | Anyone (becomes a validator) | secp256k1 sig; exempt from `CeremonyValidatorDecorator`                | Delegates to `x/staking` `CreateValidator`; registers Pallas key; rejects duplicates                                     |
 | `MsgSetVoteManager`               | Current VoteManager only     | secp256k1 sig; exempt from `CeremonyValidatorDecorator` (has own auth) | `ValidateVoteManagerOnly`: only the current VoteManager can reassign; transfers full `usvote` balance to the new manager |
 | `MsgCreateVotingSession`          | VoteManager only             | secp256k1 sig (standard Cosmos Tx)                                     | `ValidateVoteManagerOnly`: creator must be the on-chain VoteManager address                                              |
+| `MsgAuthorizedSend`               | VoteManager or bonded validators | secp256k1 sig (standard Cosmos Tx)                                 | VoteManager can send to anyone; validators can only send to VoteManager or other bonded validators; all others rejected  |
 | `MsgCreateValidator`              | **Blocked** post-genesis     | Ante handler rejects at `BlockHeight > 0`                              | N/A — never reaches MsgServer                                                                                            |
+| `MsgSend` / `MsgMultiSend`       | **Blocked**                  | Not in message whitelist                                               | N/A — never reaches MsgServer                                                                                            |
 
 #### Vote-round messages (custom wire format, ZKP/RedPallas auth)
 
@@ -264,6 +266,51 @@ These are auto-injected by `PrepareProposal` and **cannot be submitted through t
 
 1. **Mempool exclusion**: `IsCheckTx() || IsReCheckTx()` returns an error, preventing external submission.
 2. **Proposer binding**: During FinalizeBlock, `msg.Creator` must equal the operator address of the validator whose consensus key matches `BlockHeader.ProposerAddress`. This prevents a malicious proposer from injecting messages on behalf of other validators.
+
+### Message Whitelist and Ante Handler Design
+
+Standard Cosmos transactions pass through a two-layer gate before reaching the decorator chain. Both layers are in `app/ante.go` and `app/ante_whitelist.go`.
+
+#### Layer 1: Pre-filter in `NewDualAnteHandler` (before any decorator runs)
+
+1. **Single-message only.** Multi-message transactions are rejected unconditionally. This eliminates the noop-signer attack class where a zero-signer message (e.g. `MsgRevealShare`) piggybacks on a legitimately-signed carrier message.
+2. **Vote/ceremony messages blocked (defense-in-depth).** `isVoteModuleMsg` rejects `MsgDelegateVote`, `MsgCastVote`, `MsgRevealShare`, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, `MsgSubmitPartialDecryption`, and `MsgSubmitTally`. These must enter via the custom `VoteTxWrapper` path where ZKP/RedPallas verification runs. The whitelist (Layer 2) would also catch these, but this explicit type check fires earlier and produces a more actionable error.
+3. **`MsgCreateValidator` blocked post-genesis.** At `BlockHeight > 0`, raw `MsgCreateValidator` is rejected — validators must use `MsgCreateValidatorWithPallasKey` to atomically register a Pallas key. The message is allowed at height 0 for genesis `gentx` bootstrapping.
+
+#### Layer 2: `MessageWhitelistDecorator` (inside the standard ante chain)
+
+A positive-security allowlist: only messages whose proto type URL appears in `DefaultAllowedMessages()` are accepted. Any new message type must be explicitly added here before it can be processed. The current allowed set is:
+
+| Module   | Allowed messages |
+| -------- | ---------------- |
+| Vote     | `MsgCreateVotingSession`, `MsgRegisterPallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgSetVoteManager`, `MsgAuthorizedSend` |
+| Staking  | `MsgCreateValidator` (genesis only — blocked post-genesis by Layer 1), `MsgEditValidator` |
+| Slashing | `MsgUnjail` |
+
+**Explicitly excluded** (and the reasons):
+
+| Excluded messages | Reason |
+| ----------------- | ------ |
+| `MsgSend`, `MsgMultiSend` | Replaced by `MsgAuthorizedSend` with role-based restrictions. Unrestricted transfers would let anyone accumulate stake and create a validator, bypassing the controlled validator set. |
+| `MsgDelegate`, `MsgUndelegate`, `MsgBeginRedelegate` | Prevents validators from reorganizing stake without the vote manager. Initial self-delegation is handled atomically by `MsgCreateValidatorWithPallasKey`. |
+| `MsgWithdrawDelegatorReward`, `MsgWithdrawValidatorCommission` | Prevents extracting staking rewards as liquid tokens that could be transferred outside the vote manager's control. |
+| `MsgFundCommunityPool`, `MsgSetWithdrawAddress`, `MsgUpdateParams` | No governance module; these have no legitimate use on this chain. |
+| All vote/ceremony ZKP messages | Must use the custom `VoteTxWrapper` wire format with ZKP/RedPallas authentication. Blocked by both Layer 1 and Layer 2. |
+
+#### `MsgAuthorizedSend` authorization rules
+
+`MsgAuthorizedSend` is the **only** coin-transfer path on this chain. Authorization is enforced in the MsgServer handler (`x/vote/keeper/msg_server_send.go`):
+
+- **Vote manager** can send to anyone (distributes stake to new validators).
+- **Bonded validators** can send to the vote manager or other bonded validators (operational redistribution within the trusted set).
+- **All other senders** are rejected.
+
+#### Design assumptions
+
+1. The vote manager has full control over stake distribution. Validators receive tokens via `MsgAuthorizedSend` and bond them during `MsgCreateValidatorWithPallasKey`.
+2. The whitelist is a compile-time constant. Adding a new message type requires a code change, rebuild, and coordinated chain upgrade.
+3. Custom wire format messages (`VoteTxWrapper`) are never subject to the whitelist — they are routed to the ZKP/RedPallas validation pipeline before the standard ante chain runs.
+4. If a custom wire format message is somehow removed from `isVoteModuleMsg` (Layer 1), the whitelist (Layer 2) still blocks it since it is not in `DefaultAllowedMessages()`.
 
 ### REST API
 
