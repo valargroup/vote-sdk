@@ -202,6 +202,8 @@ message MsgSetVoteManagerResponse {}
 //   - Bonded validators can send to the vote manager or other bonded validators.
 //   - All other senders are rejected.
 message MsgAuthorizedSend {
+  option (cosmos.msg.v1.signer) = "from_address";
+
   string from_address = 1;
   string to_address   = 2;
   string amount       = 3; // Integer string, e.g. "1000000"

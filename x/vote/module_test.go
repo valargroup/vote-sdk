@@ -60,7 +60,15 @@ func (s *EndBlockerTestSuite) SetupTest() {
 // EndBlocker tests
 // ---------------------------------------------------------------------------
 
+// seedActiveRound stores a vote round with ACTIVE status and a future VoteEndTime.
+func (s *EndBlockerTestSuite) seedActiveRound(roundID []byte) {
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteRound(kv, svtest.ActiveRoundFixture(roundID)))
+}
+
 func (s *EndBlockerTestSuite) TestEndBlock() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+
 	tests := []struct {
 		name  string
 		setup func()
@@ -68,10 +76,10 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 	}{
 		{
 			name:  "no-op when tree is empty",
-			setup: func() {},
+			setup: func() { s.seedActiveRound(roundID) },
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				root, err := s.keeper.GetCommitmentRootAtHeight(kv, 10)
+				root, err := s.keeper.GetCommitmentRootAtHeight(kv, roundID, 10)
 				s.Require().NoError(err)
 				s.Require().Nil(root) // no root stored
 			},
@@ -79,23 +87,24 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 		{
 			name: "computes and stores root when leaves exist",
 			setup: func() {
+				s.seedActiveRound(roundID)
 				kv := s.keeper.OpenKVStore(s.ctx)
-				_, err := s.keeper.AppendCommitment(kv, fpLE(1))
+				_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(1))
 				s.Require().NoError(err)
-				_, err = s.keeper.AppendCommitment(kv, fpLE(2))
+				_, err = s.keeper.AppendCommitment(kv, roundID, fpLE(2))
 				s.Require().NoError(err)
 			},
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 
 				// Root stored at block height 10.
-				root, err := s.keeper.GetCommitmentRootAtHeight(kv, 10)
+				root, err := s.keeper.GetCommitmentRootAtHeight(kv, roundID, 10)
 				s.Require().NoError(err)
 				s.Require().NotNil(root)
 				s.Require().Len(root, 32)
 
 				// Tree state updated.
-				state, err := s.keeper.GetCommitmentTreeState(kv)
+				state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 				s.Require().NoError(err)
 				s.Require().Equal(uint64(10), state.Height)
 				s.Require().Equal(root, state.Root)
@@ -104,8 +113,9 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 		{
 			name: "skips when tree unchanged between blocks",
 			setup: func() {
+				s.seedActiveRound(roundID)
 				kv := s.keeper.OpenKVStore(s.ctx)
-				_, err := s.keeper.AppendCommitment(kv, fpLE(1))
+				_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(1))
 				s.Require().NoError(err)
 
 				// Run EndBlock at height 10 to compute root.
@@ -118,16 +128,16 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 
 				// Root exists at height 10 but not at height 11.
-				root10, err := s.keeper.GetCommitmentRootAtHeight(kv, 10)
+				root10, err := s.keeper.GetCommitmentRootAtHeight(kv, roundID, 10)
 				s.Require().NoError(err)
 				s.Require().NotNil(root10)
 
-				root11, err := s.keeper.GetCommitmentRootAtHeight(kv, 11)
+				root11, err := s.keeper.GetCommitmentRootAtHeight(kv, roundID, 11)
 				s.Require().NoError(err)
 				s.Require().Nil(root11)
 
 				// Height in state is still 10.
-				state, err := s.keeper.GetCommitmentTreeState(kv)
+				state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 				s.Require().NoError(err)
 				s.Require().Equal(uint64(10), state.Height)
 			},
@@ -135,25 +145,26 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 		{
 			name: "new root stored when leaves added after previous root",
 			setup: func() {
+				s.seedActiveRound(roundID)
 				kv := s.keeper.OpenKVStore(s.ctx)
-				_, err := s.keeper.AppendCommitment(kv, fpLE(1))
+				_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(1))
 				s.Require().NoError(err)
 
 				// EndBlock at height 10.
 				s.Require().NoError(s.module.EndBlock(s.ctx))
 
 				// Add another leaf and advance height.
-				_, err = s.keeper.AppendCommitment(kv, fpLE(2))
+				_, err = s.keeper.AppendCommitment(kv, roundID, fpLE(2))
 				s.Require().NoError(err)
 				s.ctx = s.ctx.WithBlockHeight(11)
 			},
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 
-				root10, err := s.keeper.GetCommitmentRootAtHeight(kv, 10)
+				root10, err := s.keeper.GetCommitmentRootAtHeight(kv, roundID, 10)
 				s.Require().NoError(err)
 
-				root11, err := s.keeper.GetCommitmentRootAtHeight(kv, 11)
+				root11, err := s.keeper.GetCommitmentRootAtHeight(kv, roundID, 11)
 				s.Require().NoError(err)
 				s.Require().NotNil(root11)
 
@@ -161,7 +172,7 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 				s.Require().NotEqual(root10, root11)
 
 				// State reflects height 11.
-				state, err := s.keeper.GetCommitmentTreeState(kv)
+				state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 				s.Require().NoError(err)
 				s.Require().Equal(uint64(11), state.Height)
 			},

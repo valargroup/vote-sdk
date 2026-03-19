@@ -44,27 +44,27 @@ func setupStressRound(t *testing.T) (*testutil.TestApp, []byte) {
 	return app, roundID
 }
 
-func queryTreeState(t *testing.T, app *testutil.TestApp) *types.CommitmentTreeState {
+func queryTreeState(t *testing.T, app *testutil.TestApp, roundID []byte) *types.CommitmentTreeState {
 	t.Helper()
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	state, err := app.VoteKeeper().GetCommitmentTreeState(kvStore)
+	state, err := app.VoteKeeper().GetCommitmentTreeState(kvStore, roundID)
 	require.NoError(t, err)
 	return state
 }
 
-func queryRootAtHeight(t *testing.T, app *testutil.TestApp, height uint64) []byte {
+func queryRootAtHeight(t *testing.T, app *testutil.TestApp, roundID []byte, height uint64) []byte {
 	t.Helper()
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	root, err := app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, height)
+	root, err := app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, height)
 	require.NoError(t, err)
 	return root
 }
 
-func assertTreeConsistency(t *testing.T, app *testutil.TestApp, expectedLeaves uint64) {
+func assertTreeConsistency(t *testing.T, app *testutil.TestApp, roundID []byte, expectedLeaves uint64) {
 	t.Helper()
-	state := queryTreeState(t, app)
+	state := queryTreeState(t, app, roundID)
 	require.Equal(t, expectedLeaves, state.NextIndex)
 	if expectedLeaves > 0 {
 		require.NotEmpty(t, state.Root)
@@ -72,9 +72,9 @@ func assertTreeConsistency(t *testing.T, app *testutil.TestApp, expectedLeaves u
 	}
 }
 
-func assertNoPartialAppendOnFailure(t *testing.T, app *testutil.TestApp, before uint64) {
+func assertNoPartialAppendOnFailure(t *testing.T, app *testutil.TestApp, roundID []byte, before uint64) {
 	t.Helper()
-	state := queryTreeState(t, app)
+	state := queryTreeState(t, app, roundID)
 	require.Equal(t, before, state.NextIndex)
 }
 
@@ -96,14 +96,14 @@ func countSuccess(results []*abci.ExecTxResult) int {
 	return ok
 }
 
-func loadAllLeaves(t *testing.T, app *testutil.TestApp, nextIndex uint64) [][]byte {
+func loadAllLeaves(t *testing.T, app *testutil.TestApp, roundID []byte, nextIndex uint64) [][]byte {
 	t.Helper()
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
 
 	leaves := make([][]byte, nextIndex)
 	for i := uint64(0); i < nextIndex; i++ {
-		leaf, err := kvStore.Get(types.CommitmentLeafKey(i))
+		leaf, err := kvStore.Get(types.CommitmentLeafKey(roundID, i))
 		require.NoError(t, err)
 		require.NotEmpty(t, leaf, "missing leaf at index %d", i)
 		leaves[i] = leaf
@@ -113,10 +113,11 @@ func loadAllLeaves(t *testing.T, app *testutil.TestApp, nextIndex uint64) [][]by
 
 func forceResetTreeHandle(t *testing.T, k *votekeeper.Keeper) {
 	t.Helper()
-	rv := reflect.ValueOf(k).Elem().FieldByName("treeHandle")
-	require.True(t, rv.IsValid(), "keeper.treeHandle field missing")
+	rv := reflect.ValueOf(k).Elem().FieldByName("roundTrees")
+	require.True(t, rv.IsValid(), "keeper.roundTrees field missing")
 	ptr := unsafe.Pointer(rv.UnsafeAddr())
-	reflect.NewAt(rv.Type(), ptr).Elem().Set(reflect.Zero(rv.Type()))
+	// Reset the map to empty so all per-round tree handles are cleared.
+	reflect.NewAt(rv.Type(), ptr).Elem().Set(reflect.MakeMap(rv.Type()))
 }
 
 func TestTreeStress_HighVolume(t *testing.T) {
@@ -132,7 +133,7 @@ func TestTreeStress_HighVolume(t *testing.T) {
 	results := app.DeliverVoteTxs(encodeVoteMessages(delegationMsgs))
 	require.Len(t, results, n)
 	require.Equal(t, n, countSuccess(results))
-	assertTreeConsistency(t, app, uint64(n))
+	assertTreeConsistency(t, app, roundID, uint64(n))
 
 	// Block 2: high-volume cast-vote append (2 leaves per success).
 	anchor := uint64(app.Height)
@@ -144,7 +145,7 @@ func TestTreeStress_HighVolume(t *testing.T) {
 	results = app.DeliverVoteTxs(encodeVoteMessages(castMsgs))
 	require.Len(t, results, n)
 	require.Equal(t, n, countSuccess(results))
-	assertTreeConsistency(t, app, uint64(3*n))
+	assertTreeConsistency(t, app, roundID, uint64(3*n))
 
 	// Block 3: another mixed growth pass.
 	anchor = uint64(app.Height)
@@ -161,7 +162,7 @@ func TestTreeStress_HighVolume(t *testing.T) {
 	results = app.DeliverVoteTxs(encodeVoteMessages(mixed))
 	require.Len(t, results, n)
 	require.Equal(t, n, countSuccess(results))
-	assertTreeConsistency(t, app, uint64(3*n+3*(n/2)))
+	assertTreeConsistency(t, app, roundID, uint64(3*n+3*(n/2)))
 }
 
 func runOrderingScenario(t *testing.T, seed uint64) ([]treeSnapshot, [][]uint32) {
@@ -172,7 +173,7 @@ func runOrderingScenario(t *testing.T, seed uint64) ([]treeSnapshot, [][]uint32)
 	var blockCodes [][]uint32
 
 	record := func(results []*abci.ExecTxResult) {
-		state := queryTreeState(t, app)
+		state := queryTreeState(t, app, roundID)
 		codes := make([]uint32, 0, len(results))
 		for _, r := range results {
 			codes = append(codes, r.Code)
@@ -240,7 +241,7 @@ func TestTreeStress_NullifierRace(t *testing.T) {
 	prime := testutil.ValidDelegationN(roundID, 1, 7000)
 	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(prime[0]))
 	require.Equal(t, uint32(0), result.Code, result.Log)
-	beforeGov := queryTreeState(t, app).NextIndex
+	beforeGov := queryTreeState(t, app, roundID).NextIndex
 	anchor := uint64(app.Height)
 
 	conflict := testutil.BuildConflictingNullifierSet(roundID, anchor, 9000)
@@ -251,7 +252,7 @@ func TestTreeStress_NullifierRace(t *testing.T) {
 	require.Equal(t, uint32(0), govResults[0].Code)
 	require.NotEqual(t, uint32(0), govResults[1].Code)
 	require.Equal(t, uint32(0), govResults[2].Code)
-	afterGov := queryTreeState(t, app).NextIndex
+	afterGov := queryTreeState(t, app, roundID).NextIndex
 	require.Equal(t, beforeGov+2, afterGov, "only successful delegation txs append one leaf each")
 
 	// Same-block VAN nullifier conflict.
@@ -263,7 +264,7 @@ func TestTreeStress_NullifierRace(t *testing.T) {
 	require.Equal(t, uint32(0), vanResults[0].Code)
 	require.NotEqual(t, uint32(0), vanResults[1].Code)
 	require.Equal(t, uint32(0), vanResults[2].Code)
-	afterVan := queryTreeState(t, app).NextIndex
+	afterVan := queryTreeState(t, app, roundID).NextIndex
 	require.Equal(t, beforeVan+4, afterVan, "only successful cast-vote txs append two leaves each")
 }
 
@@ -280,19 +281,19 @@ func TestTreeStress_ColdStartRebuild(t *testing.T) {
 		require.Equal(t, len(msgs), countSuccess(results))
 	}
 
-	state := queryTreeState(t, app)
+	state := queryTreeState(t, app, roundID)
 	require.Greater(t, state.NextIndex, uint64(0))
 	require.NotEmpty(t, state.Root)
 
 	// Full replay validation from KV leaves (cold rebuild equivalence).
-	leaves := loadAllLeaves(t, app, state.NextIndex)
+	leaves := loadAllLeaves(t, app, roundID, state.NextIndex)
 	require.NoError(t, votetree.VerifyRootFromLeaves(leaves, state.Root))
 
 	// Simulate restart by resetting keeper.treeHandle to nil, then recompute.
 	forceResetTreeHandle(t, app.VoteKeeper())
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	recomputed, err := app.VoteKeeper().ComputeTreeRoot(kvStore, state.NextIndex, uint64(app.Height))
+	recomputed, err := app.VoteKeeper().ComputeTreeRoot(kvStore, roundID, state.NextIndex, uint64(app.Height))
 	require.NoError(t, err)
 	require.Equal(t, state.Root, recomputed)
 
@@ -304,7 +305,7 @@ func TestTreeStress_ColdStartRebuild(t *testing.T) {
 	}
 	results := app.DeliverVoteTxs(encodeVoteMessages(msgs))
 	require.Equal(t, len(msgs), countSuccess(results))
-	newState := queryTreeState(t, app)
+	newState := queryTreeState(t, app, roundID)
 	require.Equal(t, state.NextIndex+3, newState.NextIndex)
 	require.NotEqual(t, hex.EncodeToString(state.Root), hex.EncodeToString(newState.Root))
 }
@@ -328,11 +329,11 @@ func TestTreeStress_AnchorStaleness(t *testing.T) {
 	require.Equal(t, len(msgs), countSuccess(results))
 
 	// Valid stale anchor succeeds.
-	before := queryTreeState(t, app).NextIndex
+	before := queryTreeState(t, app, roundID).NextIndex
 	validOld := testutil.ValidCastVoteN(roundID, oldAnchor, 1, 130000)[0]
 	res = app.DeliverVoteTx(testutil.MustEncodeVoteTx(validOld))
 	require.Equal(t, uint32(0), res.Code, res.Log)
-	after := queryTreeState(t, app).NextIndex
+	after := queryTreeState(t, app, roundID).NextIndex
 	require.Equal(t, before+2, after)
 
 	// Non-existent old anchor fails and must not append.
@@ -340,15 +341,15 @@ func TestTreeStress_AnchorStaleness(t *testing.T) {
 	invalidOld := testutil.ValidCastVoteN(roundID, oldAnchor-1, 1, 130100)[0]
 	res = app.DeliverVoteTx(testutil.MustEncodeVoteTx(invalidOld))
 	require.NotEqual(t, uint32(0), res.Code)
-	assertNoPartialAppendOnFailure(t, app, before)
+	assertNoPartialAppendOnFailure(t, app, roundID, before)
 
 	// Future anchor fails and must not append.
-	before = queryTreeState(t, app).NextIndex
+	before = queryTreeState(t, app, roundID).NextIndex
 	futureAnchor := uint64(app.Height) + 1000
 	invalidFuture := testutil.ValidCastVoteN(roundID, futureAnchor, 1, 130200)[0]
 	res = app.DeliverVoteTx(testutil.MustEncodeVoteTx(invalidFuture))
 	require.NotEqual(t, uint32(0), res.Code)
-	assertNoPartialAppendOnFailure(t, app, before)
+	assertNoPartialAppendOnFailure(t, app, roundID, before)
 }
 
 func TestTreeStress_EmptyBlocks(t *testing.T) {
@@ -359,29 +360,29 @@ func TestTreeStress_EmptyBlocks(t *testing.T) {
 	res := app.DeliverVoteTx(testutil.MustEncodeVoteTx(deleg))
 	require.Equal(t, uint32(0), res.Code, res.Log)
 	h1 := uint64(app.Height)
-	root1 := queryRootAtHeight(t, app, h1)
+	root1 := queryRootAtHeight(t, app, roundID, h1)
 	require.NotEmpty(t, root1)
 
 	// Advance empty blocks and verify no new root snapshots.
 	app.NextBlock()
 	h2 := uint64(app.Height)
-	require.Nil(t, queryRootAtHeight(t, app, h2))
+	require.Nil(t, queryRootAtHeight(t, app, roundID, h2))
 
 	app.NextBlock()
 	h3 := uint64(app.Height)
-	require.Nil(t, queryRootAtHeight(t, app, h3))
+	require.Nil(t, queryRootAtHeight(t, app, roundID, h3))
 
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	_, _, found2, err := app.VoteKeeper().GetBlockLeafIndex(kvStore, h2)
+	_, _, found2, err := app.VoteKeeper().GetBlockLeafIndex(kvStore, roundID, h2)
 	require.NoError(t, err)
 	require.False(t, found2, "empty block should not have BlockLeafIndex entry")
-	_, _, found3, err := app.VoteKeeper().GetBlockLeafIndex(kvStore, h3)
+	_, _, found3, err := app.VoteKeeper().GetBlockLeafIndex(kvStore, roundID, h3)
 	require.NoError(t, err)
 	require.False(t, found3, "empty block should not have BlockLeafIndex entry")
 
 	// Previous root remains queryable.
-	require.Equal(t, root1, queryRootAtHeight(t, app, h1))
+	require.Equal(t, root1, queryRootAtHeight(t, app, roundID, h1))
 }
 
 func TestTreeStress_Interleaved(t *testing.T) {
@@ -401,7 +402,7 @@ func TestTreeStress_Interleaved(t *testing.T) {
 		require.Equal(t, uint32(0), res.Code, "cast cycle %d failed: %s", i, res.Log)
 		expectedLeaves += 2
 
-		assertTreeConsistency(t, app, expectedLeaves)
+		assertTreeConsistency(t, app, roundID, expectedLeaves)
 	}
 }
 
@@ -422,7 +423,7 @@ func TestTreeStress_RecheckTxChurn(t *testing.T) {
 	checkLoser := app.CheckTxSync(testutil.MustEncodeVoteTx(conflict.GovLoser))
 	require.Equal(t, uint32(0), checkLoser.Code, checkLoser.Log)
 
-	before := queryTreeState(t, app).NextIndex
+	before := queryTreeState(t, app, roundID).NextIndex
 
 	// Commit the winner, then ensure recheck rejects loser.
 	deliverWinner := app.DeliverVoteTx(testutil.MustEncodeVoteTx(conflict.GovWinner))
@@ -434,17 +435,17 @@ func TestTreeStress_RecheckTxChurn(t *testing.T) {
 	// Delivering loser now must fail and must not append.
 	deliverLoser := app.DeliverVoteTx(testutil.MustEncodeVoteTx(conflict.GovLoser))
 	require.NotEqual(t, uint32(0), deliverLoser.Code)
-	require.Equal(t, before+1, queryTreeState(t, app).NextIndex)
+	require.Equal(t, before+1, queryTreeState(t, app, roundID).NextIndex)
 
 	// Repeat churn check on VAN nullifiers.
-	anchor = queryTreeState(t, app).Height
+	anchor = queryTreeState(t, app, roundID).Height
 	conflict = testutil.BuildConflictingNullifierSet(roundID, anchor, 172000)
 	checkVanWinner := app.CheckTxSync(testutil.MustEncodeVoteTx(conflict.VanWinner))
 	require.Equal(t, uint32(0), checkVanWinner.Code, checkVanWinner.Log)
 	checkVanLoser := app.CheckTxSync(testutil.MustEncodeVoteTx(conflict.VanLoser))
 	require.Equal(t, uint32(0), checkVanLoser.Code, checkVanLoser.Log)
 
-	beforeVan := queryTreeState(t, app).NextIndex
+	beforeVan := queryTreeState(t, app, roundID).NextIndex
 	deliverVanWinner := app.DeliverVoteTx(testutil.MustEncodeVoteTx(conflict.VanWinner))
 	require.Equal(t, uint32(0), deliverVanWinner.Code, deliverVanWinner.Log)
 	recheckVanLoser := app.RecheckTxSync(testutil.MustEncodeVoteTx(conflict.VanLoser))
@@ -453,7 +454,7 @@ func TestTreeStress_RecheckTxChurn(t *testing.T) {
 
 	deliverVanLoser := app.DeliverVoteTx(testutil.MustEncodeVoteTx(conflict.VanLoser))
 	require.NotEqual(t, uint32(0), deliverVanLoser.Code)
-	require.Equal(t, beforeVan+2, queryTreeState(t, app).NextIndex)
+	require.Equal(t, beforeVan+2, queryTreeState(t, app, roundID).NextIndex)
 }
 
 func TestTreeStress_ReproducibilityAcrossRuns(t *testing.T) {

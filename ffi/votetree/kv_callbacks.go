@@ -42,13 +42,38 @@ func recoverHandle(ctx unsafe.Pointer) cgo.Handle {
 // KvStoreProxy is a stable Go struct whose address never changes across blocks.
 // The cgo.Handle passed to Rust points here. SetStore must be called before
 // every tree operation so Rust callbacks reach the correct block's KV store.
+//
+// Prefix is prepended to every key that Rust reads/writes through the
+// callbacks. This scopes shard/cap/checkpoint/leaf keys to a specific voting
+// round without modifying any Rust code. Set once at proxy creation time.
 type KvStoreProxy struct {
 	Current store.KVStore
+	Prefix  []byte
 }
 
 // SetStore swaps in the KV store for the current block. Called once per block
 // by the Keeper before any tree FFI call.
 func (p *KvStoreProxy) SetStore(s store.KVStore) { p.Current = s }
+
+// prefixKey prepends p.Prefix to key.
+func (p *KvStoreProxy) prefixKey(key []byte) []byte {
+	if len(p.Prefix) == 0 {
+		return key
+	}
+	out := make([]byte, len(p.Prefix)+len(key))
+	copy(out, p.Prefix)
+	copy(out[len(p.Prefix):], key)
+	return out
+}
+
+// iterWithPrefix bundles a store.Iterator with the proxy prefix length so
+// svKvIterNext can strip the prefix from returned keys. When the proxy has
+// no prefix (len==0), a bare store.Iterator is stored instead to avoid
+// unnecessary wrapping.
+type iterWithPrefix struct {
+	iter      store.Iterator
+	prefixLen int
+}
 
 // ---------------------------------------------------------------------------
 // Exported C callbacks
@@ -65,7 +90,8 @@ func svKvGet(
 	if !ok {
 		return -1
 	}
-	key := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
+	rawKey := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
+	key := proxy.prefixKey(rawKey)
 	val, err := proxy.Current.Get(key)
 	if err != nil {
 		log.Printf("votetree: svKvGet: store error (key len=%d): %v", len(key), err)
@@ -97,7 +123,8 @@ func svKvSet(
 	if !ok {
 		return -1
 	}
-	key := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
+	rawKey := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
+	key := proxy.prefixKey(rawKey)
 	val := C.GoBytes(unsafe.Pointer(valPtr), C.int(valLen))
 	if err := proxy.Current.Set(key, val); err != nil {
 		log.Printf("votetree: svKvSet: store error (key len=%d, val len=%d): %v", len(key), len(val), err)
@@ -113,7 +140,8 @@ func svKvDelete(ctx unsafe.Pointer, keyPtr *C.uint8_t, keyLen C.size_t) C.int32_
 	if !ok {
 		return -1
 	}
-	key := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
+	rawKey := C.GoBytes(unsafe.Pointer(keyPtr), C.int(keyLen))
+	key := proxy.prefixKey(rawKey)
 	if err := proxy.Current.Delete(key); err != nil {
 		log.Printf("votetree: svKvDelete: store error (key len=%d): %v", len(key), err)
 		return -1
@@ -132,7 +160,8 @@ func svKvIterCreate(
 	if !ok {
 		return nil
 	}
-	prefix := C.GoBytes(unsafe.Pointer(prefixPtr), C.int(prefixLen))
+	rawPrefix := C.GoBytes(unsafe.Pointer(prefixPtr), C.int(prefixLen))
+	prefix := proxy.prefixKey(rawPrefix)
 
 	// Compute the end key = prefix with last byte incremented (standard prefix scan).
 	end := make([]byte, len(prefix))
@@ -162,7 +191,15 @@ func svKvIterCreate(
 		log.Printf("votetree: svKvIterCreate: store returned nil iterator (prefix len=%d)", len(prefix))
 		return nil
 	}
-	iterH := cgo.NewHandle(iter)
+	// Wrap the iterator with the proxy prefix length so svKvIterNext can
+	// strip the prefix from returned keys. If no prefix, store unwrapped
+	// for backwards compatibility.
+	var iterH cgo.Handle
+	if len(proxy.Prefix) > 0 {
+		iterH = cgo.NewHandle(&iterWithPrefix{iter: iter, prefixLen: len(proxy.Prefix)})
+	} else {
+		iterH = cgo.NewHandle(iter)
+	}
 	iterPtr := (*C.uint64_t)(C.malloc(C.size_t(unsafe.Sizeof(C.uint64_t(0)))))
 	*iterPtr = C.uint64_t(iterH)
 	return unsafe.Pointer(iterPtr)
@@ -175,9 +212,16 @@ func svKvIterNext(
 	outVal **C.uint8_t, outValLen *C.size_t,
 ) C.int32_t {
 	h := cgo.Handle(*(*C.uint64_t)(iterPtr))
-	iter, ok := h.Value().(store.Iterator)
-	if !ok {
-		return -1 // corrupted handle: not a store.Iterator
+	var iter store.Iterator
+	var prefixLen int
+	switch v := h.Value().(type) {
+	case store.Iterator:
+		iter = v
+	case *iterWithPrefix:
+		iter = v.iter
+		prefixLen = v.prefixLen
+	default:
+		return -1 // corrupted handle
 	}
 	if !iter.Valid() {
 		return 1 // exhausted
@@ -185,6 +229,11 @@ func svKvIterNext(
 	key := iter.Key()
 	val := iter.Value()
 	iter.Next()
+
+	// Strip the round prefix from returned keys so Rust sees unprefixed keys.
+	if prefixLen > 0 && len(key) >= prefixLen {
+		key = key[prefixLen:]
+	}
 
 	kPtr := C.malloc(C.size_t(len(key)))
 	if kPtr == nil {
@@ -210,13 +259,12 @@ func svKvIterNext(
 //export svKvIterFree
 func svKvIterFree(iterPtr unsafe.Pointer) {
 	h := cgo.Handle(*(*C.uint64_t)(iterPtr))
-	iter, ok := h.Value().(store.Iterator)
-	if !ok {
-		h.Delete()
-		C.free(iterPtr)
-		return
+	switch v := h.Value().(type) {
+	case store.Iterator:
+		v.Close()
+	case *iterWithPrefix:
+		v.iter.Close()
 	}
-	iter.Close()
 	h.Delete()
 	C.free(iterPtr)
 }

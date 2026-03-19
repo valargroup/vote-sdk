@@ -24,6 +24,7 @@ const (
 type QueryCommitmentTreeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Height        uint64                 `protobuf:"varint,1,opt,name=height,proto3" json:"height,omitempty"`
+	VoteRoundId   []byte                 `protobuf:"bytes,2,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -63,6 +64,13 @@ func (x *QueryCommitmentTreeRequest) GetHeight() uint64 {
 		return x.Height
 	}
 	return 0
+}
+
+func (x *QueryCommitmentTreeRequest) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
 }
 
 type QueryCommitmentTreeResponse struct {
@@ -111,6 +119,7 @@ func (x *QueryCommitmentTreeResponse) GetTree() *CommitmentTreeState {
 
 type QueryLatestTreeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	VoteRoundId   []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -143,6 +152,13 @@ func (x *QueryLatestTreeRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use QueryLatestTreeRequest.ProtoReflect.Descriptor instead.
 func (*QueryLatestTreeRequest) Descriptor() ([]byte, []int) {
 	return file_svote_v1_query_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *QueryLatestTreeRequest) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
 }
 
 type QueryLatestTreeResponse struct {
@@ -466,6 +482,7 @@ type QueryCommitmentLeavesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	FromHeight    uint64                 `protobuf:"varint,1,opt,name=from_height,json=fromHeight,proto3" json:"from_height,omitempty"`
 	ToHeight      uint64                 `protobuf:"varint,2,opt,name=to_height,json=toHeight,proto3" json:"to_height,omitempty"`
+	VoteRoundId   []byte                 `protobuf:"bytes,3,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -512,6 +529,13 @@ func (x *QueryCommitmentLeavesRequest) GetToHeight() uint64 {
 		return x.ToHeight
 	}
 	return 0
+}
+
+func (x *QueryCommitmentLeavesRequest) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
 }
 
 type QueryCommitmentLeavesResponse struct {
@@ -1082,12 +1106,14 @@ var File_svote_v1_query_proto protoreflect.FileDescriptor
 
 const file_svote_v1_query_proto_rawDesc = "" +
 	"\n" +
-	"\x14svote/v1/query.proto\x12\bsvote.v1\x1a\x14svote/v1/types.proto\"4\n" +
+	"\x14svote/v1/query.proto\x12\bsvote.v1\x1a\x14svote/v1/types.proto\"X\n" +
 	"\x1aQueryCommitmentTreeRequest\x12\x16\n" +
-	"\x06height\x18\x01 \x01(\x04R\x06height\"P\n" +
+	"\x06height\x18\x01 \x01(\x04R\x06height\x12\"\n" +
+	"\rvote_round_id\x18\x02 \x01(\fR\vvoteRoundId\"P\n" +
 	"\x1bQueryCommitmentTreeResponse\x121\n" +
-	"\x04tree\x18\x01 \x01(\v2\x1d.svote.v1.CommitmentTreeStateR\x04tree\"\x18\n" +
-	"\x16QueryLatestTreeRequest\"L\n" +
+	"\x04tree\x18\x01 \x01(\v2\x1d.svote.v1.CommitmentTreeStateR\x04tree\"<\n" +
+	"\x16QueryLatestTreeRequest\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"L\n" +
 	"\x17QueryLatestTreeResponse\x121\n" +
 	"\x04tree\x18\x01 \x01(\v2\x1d.svote.v1.CommitmentTreeStateR\x04tree\";\n" +
 	"\x15QueryVoteRoundRequest\x12\"\n" +
@@ -1107,11 +1133,12 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\x18QueryTallyResultsRequest\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"L\n" +
 	"\x19QueryTallyResultsResponse\x12/\n" +
-	"\aresults\x18\x01 \x03(\v2\x15.svote.v1.TallyResultR\aresults\"\\\n" +
+	"\aresults\x18\x01 \x03(\v2\x15.svote.v1.TallyResultR\aresults\"\x80\x01\n" +
 	"\x1cQueryCommitmentLeavesRequest\x12\x1f\n" +
 	"\vfrom_height\x18\x01 \x01(\x04R\n" +
 	"fromHeight\x12\x1b\n" +
-	"\tto_height\x18\x02 \x01(\x04R\btoHeight\"S\n" +
+	"\tto_height\x18\x02 \x01(\x04R\btoHeight\x12\"\n" +
+	"\rvote_round_id\x18\x03 \x01(\fR\vvoteRoundId\"S\n" +
 	"\x1dQueryCommitmentLeavesResponse\x122\n" +
 	"\x06blocks\x18\x01 \x03(\v2\x1a.svote.v1.BlockCommitmentsR\x06blocks\"\x19\n" +
 	"\x17QueryActiveRoundRequest\"E\n" +

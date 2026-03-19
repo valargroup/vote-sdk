@@ -2,13 +2,14 @@ package keeper
 
 import "cosmossdk.io/core/store"
 
-// TreeSizeForTest exposes treeHandle.Size() for testing. Returns 0 if the
-// handle has not been initialized yet.
-func (k *Keeper) TreeSizeForTest() uint64 {
-	if k.treeHandle == nil {
+// TreeSizeForTest exposes the tree handle Size() for testing. Returns 0 if the
+// handle has not been initialized yet for the given round.
+func (k *Keeper) TreeSizeForTest(roundID []byte) uint64 {
+	rt := k.getOrCreateRoundTree(roundID)
+	if rt.handle == nil {
 		return 0
 	}
-	return k.treeHandle.Size()
+	return rt.handle.Size()
 }
 
 // StoreServiceForTest exposes the store service so tests can create a second

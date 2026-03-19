@@ -142,6 +142,7 @@ func (s *KeeperTestSuite) TestNullifier_CrossRoundIsolation() {
 // ---------------------------------------------------------------------------
 
 func (s *KeeperTestSuite) TestCommitmentTreeState_DefaultAndSet() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	tests := []struct {
 		name          string
 		seedIndex     *uint64 // if non-nil, seed the tree state with this NextIndex
@@ -163,9 +164,9 @@ func (s *KeeperTestSuite) TestCommitmentTreeState_DefaultAndSet() {
 			s.SetupTest()
 			kv := s.keeper.OpenKVStore(s.ctx)
 			if tc.seedIndex != nil {
-				s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, &types.CommitmentTreeState{NextIndex: *tc.seedIndex}))
+				s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, roundID, &types.CommitmentTreeState{NextIndex: *tc.seedIndex}))
 			}
-			state, err := s.keeper.GetCommitmentTreeState(kv)
+			state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 			s.Require().NoError(err)
 			s.Require().Equal(tc.expectedIndex, state.NextIndex)
 		})
@@ -173,6 +174,7 @@ func (s *KeeperTestSuite) TestCommitmentTreeState_DefaultAndSet() {
 }
 
 func (s *KeeperTestSuite) TestAppendCommitment_SequentialIndices() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
@@ -183,36 +185,37 @@ func (s *KeeperTestSuite) TestAppendCommitment_SequentialIndices() {
 	}
 
 	for i, cm := range commitments {
-		idx, err := s.keeper.AppendCommitment(kv, cm)
+		idx, err := s.keeper.AppendCommitment(kv, roundID, cm)
 		s.Require().NoError(err)
 		s.Require().Equal(uint64(i), idx, "commitment %d should get sequential index", i)
 	}
 
 	// Verify tree state was updated.
-	state, err := s.keeper.GetCommitmentTreeState(kv)
+	state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 	s.Require().NoError(err)
 	s.Require().Equal(uint64(3), state.NextIndex)
 
 	// Verify each leaf is readable at its index.
 	for i, cm := range commitments {
-		leaf, err := kv.Get(types.CommitmentLeafKey(uint64(i)))
+		leaf, err := kv.Get(types.CommitmentLeafKey(roundID, uint64(i)))
 		s.Require().NoError(err)
 		s.Require().Equal(cm, leaf)
 	}
 }
 
 func (s *KeeperTestSuite) TestAppendCommitment_ContinuesFromExistingState() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
 	// Seed the tree state to start at index 100.
-	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, &types.CommitmentTreeState{NextIndex: 100}))
+	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, roundID, &types.CommitmentTreeState{NextIndex: 100}))
 
-	idx, err := s.keeper.AppendCommitment(kv, fpLE(0xFF))
+	idx, err := s.keeper.AppendCommitment(kv, roundID, fpLE(0xFF))
 	s.Require().NoError(err)
 	s.Require().Equal(uint64(100), idx)
 
-	state, err := s.keeper.GetCommitmentTreeState(kv)
+	state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 	s.Require().NoError(err)
 	s.Require().Equal(uint64(101), state.NextIndex)
 }
@@ -222,6 +225,7 @@ func (s *KeeperTestSuite) TestAppendCommitment_ContinuesFromExistingState() {
 // ---------------------------------------------------------------------------
 
 func (s *KeeperTestSuite) TestCommitmentRoot_SetAndGetByHeight() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	tests := []struct {
 		name       string
 		height     uint64
@@ -250,9 +254,9 @@ func (s *KeeperTestSuite) TestCommitmentRoot_SetAndGetByHeight() {
 			s.SetupTest()
 			kv := s.keeper.OpenKVStore(s.ctx)
 
-			s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, tc.height, tc.root))
+			s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, tc.height, tc.root))
 
-			got, err := s.keeper.GetCommitmentRootAtHeight(kv, tc.lookupH)
+			got, err := s.keeper.GetCommitmentRootAtHeight(kv, roundID, tc.lookupH)
 			s.Require().NoError(err)
 			s.Require().Equal(tc.expectRoot, got)
 		})
@@ -260,6 +264,7 @@ func (s *KeeperTestSuite) TestCommitmentRoot_SetAndGetByHeight() {
 }
 
 func (s *KeeperTestSuite) TestCommitmentRoot_MultipleHeights() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
@@ -267,19 +272,19 @@ func (s *KeeperTestSuite) TestCommitmentRoot_MultipleHeights() {
 	root10 := bytes.Repeat([]byte{0x0A}, 32)
 	root15 := bytes.Repeat([]byte{0x0F}, 32)
 
-	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, 5, root5))
-	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, 10, root10))
-	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, 15, root15))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, 5, root5))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, 10, root10))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, 15, root15))
 
-	got5, err := s.keeper.GetCommitmentRootAtHeight(kv, 5)
+	got5, err := s.keeper.GetCommitmentRootAtHeight(kv, roundID, 5)
 	s.Require().NoError(err)
 	s.Require().Equal(root5, got5)
 
-	got10, err := s.keeper.GetCommitmentRootAtHeight(kv, 10)
+	got10, err := s.keeper.GetCommitmentRootAtHeight(kv, roundID, 10)
 	s.Require().NoError(err)
 	s.Require().Equal(root10, got10)
 
-	got15, err := s.keeper.GetCommitmentRootAtHeight(kv, 15)
+	got15, err := s.keeper.GetCommitmentRootAtHeight(kv, roundID, 15)
 	s.Require().NoError(err)
 	s.Require().Equal(root15, got15)
 }
@@ -469,6 +474,7 @@ func (s *KeeperTestSuite) TestCheckNullifiersUnique() {
 // ---------------------------------------------------------------------------
 
 func (s *KeeperTestSuite) TestComputeTreeRoot() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	tests := []struct {
 		name      string
 		leaves    [][]byte
@@ -501,11 +507,11 @@ func (s *KeeperTestSuite) TestComputeTreeRoot() {
 			kv := s.keeper.OpenKVStore(s.ctx)
 
 			for _, leaf := range tc.leaves {
-				_, err := s.keeper.AppendCommitment(kv, leaf)
+				_, err := s.keeper.AppendCommitment(kv, roundID, leaf)
 				s.Require().NoError(err)
 			}
 
-			root, err := s.keeper.ComputeTreeRoot(kv, uint64(len(tc.leaves)), 1)
+			root, err := s.keeper.ComputeTreeRoot(kv, roundID, uint64(len(tc.leaves)), 1)
 			s.Require().NoError(err)
 			if tc.expectNil {
 				s.Require().Nil(root)
@@ -517,25 +523,26 @@ func (s *KeeperTestSuite) TestComputeTreeRoot() {
 }
 
 func (s *KeeperTestSuite) TestComputeTreeRoot_DeterministicAndDistinct() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
-	_, err := s.keeper.AppendCommitment(kv, fpLE(1))
+	_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(1))
 	s.Require().NoError(err)
 
-	root1, err := s.keeper.ComputeTreeRoot(kv, 1, 1)
+	root1, err := s.keeper.ComputeTreeRoot(kv, roundID, 1, 1)
 	s.Require().NoError(err)
 
 	// Same state produces same root.
-	root1Again, err := s.keeper.ComputeTreeRoot(kv, 1, 1)
+	root1Again, err := s.keeper.ComputeTreeRoot(kv, roundID, 1, 1)
 	s.Require().NoError(err)
 	s.Require().Equal(root1, root1Again)
 
 	// Add another leaf — root changes.
-	_, err = s.keeper.AppendCommitment(kv, fpLE(2))
+	_, err = s.keeper.AppendCommitment(kv, roundID, fpLE(2))
 	s.Require().NoError(err)
 
-	root2, err := s.keeper.ComputeTreeRoot(kv, 2, 2)
+	root2, err := s.keeper.ComputeTreeRoot(kv, roundID, 2, 2)
 	s.Require().NoError(err)
 	s.Require().NotEqual(root1, root2)
 }
@@ -547,23 +554,24 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeterministicAndDistinct() {
 // TestComputeTreeRoot_Incremental verifies that the stateful tree produces the
 // same root as a fresh full rebuild when leaves are appended incrementally.
 func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
 	// Append 3 leaves across 3 simulated blocks.
-	_, err := s.keeper.AppendCommitment(kv, fpLE(1))
+	_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(1))
 	s.Require().NoError(err)
-	root1, err := s.keeper.ComputeTreeRoot(kv, 1, 1)
-	s.Require().NoError(err)
-
-	_, err = s.keeper.AppendCommitment(kv, fpLE(2))
-	s.Require().NoError(err)
-	root2, err := s.keeper.ComputeTreeRoot(kv, 2, 2)
+	root1, err := s.keeper.ComputeTreeRoot(kv, roundID, 1, 1)
 	s.Require().NoError(err)
 
-	_, err = s.keeper.AppendCommitment(kv, fpLE(3))
+	_, err = s.keeper.AppendCommitment(kv, roundID, fpLE(2))
 	s.Require().NoError(err)
-	root3, err := s.keeper.ComputeTreeRoot(kv, 3, 3)
+	root2, err := s.keeper.ComputeTreeRoot(kv, roundID, 2, 2)
+	s.Require().NoError(err)
+
+	_, err = s.keeper.AppendCommitment(kv, roundID, fpLE(3))
+	s.Require().NoError(err)
+	root3, err := s.keeper.ComputeTreeRoot(kv, roundID, 3, 3)
 	s.Require().NoError(err)
 
 	// All roots are distinct.
@@ -572,10 +580,10 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
 
 	// Simulate what EndBlocker does: persist state.Height so a freshKeeper
 	// takes the O(1) restart path instead of the O(N) first-boot replay.
-	treeState, err := s.keeper.GetCommitmentTreeState(kv)
+	treeState, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 	s.Require().NoError(err)
 	treeState.Height = 3
-	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, treeState))
+	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, roundID, treeState))
 
 	// root3 must match what a cold-start restart produces.
 	freshKeeper := keeper.NewKeeper(
@@ -585,7 +593,7 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
 		nil,
 		nil,
 	)
-	freshRoot, err := freshKeeper.ComputeTreeRoot(kv, 3, 3)
+	freshRoot, err := freshKeeper.ComputeTreeRoot(kv, roundID, 3, 3)
 	s.Require().NoError(err)
 	s.Require().Equal(root3, freshRoot, "restart root must match incremental root")
 }
@@ -593,33 +601,34 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
 // TestComputeTreeRoot_DeltaAppend verifies that calling ComputeTreeRoot with a
 // new nextIndex only reads and appends the delta leaves.
 func (s *KeeperTestSuite) TestComputeTreeRoot_DeltaAppend() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
 	// Add 5 leaves.
 	for i := uint64(1); i <= 5; i++ {
-		_, err := s.keeper.AppendCommitment(kv, fpLE(i))
+		_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(i))
 		s.Require().NoError(err)
 	}
 
 	// First call: cold-start loads all 5 leaves.
-	root5, err := s.keeper.ComputeTreeRoot(kv, 5, 5)
+	root5, err := s.keeper.ComputeTreeRoot(kv, roundID, 5, 5)
 	s.Require().NoError(err)
 	s.Require().Len(root5, 32)
-	s.Require().Equal(uint64(5), s.keeper.TreeSizeForTest())
+	s.Require().Equal(uint64(5), s.keeper.TreeSizeForTest(roundID))
 
 	// Add 3 more leaves.
 	for i := uint64(6); i <= 8; i++ {
-		_, err := s.keeper.AppendCommitment(kv, fpLE(i))
+		_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(i))
 		s.Require().NoError(err)
 	}
 
 	// Second call: should only append leaves [5,8).
-	root8, err := s.keeper.ComputeTreeRoot(kv, 8, 8)
+	root8, err := s.keeper.ComputeTreeRoot(kv, roundID, 8, 8)
 	s.Require().NoError(err)
 	s.Require().Len(root8, 32)
 	s.Require().NotEqual(root5, root8)
-	s.Require().Equal(uint64(8), s.keeper.TreeSizeForTest())
+	s.Require().Equal(uint64(8), s.keeper.TreeSizeForTest(roundID))
 }
 
 // TestComputeTreeRoot_ColdStartNoNewLeaves verifies that a cold-start keeper
@@ -627,25 +636,26 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeltaAppend() {
 // O(N) replay path, the fresh keeper replays all existing leaves via
 // AppendFromKV and checkpoints them, producing the same root as the original.
 func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
 	// Append 4 leaves and compute root at height 10.
 	for i := uint64(1); i <= 4; i++ {
-		_, err := s.keeper.AppendCommitment(kv, fpLE(i))
+		_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(i))
 		s.Require().NoError(err)
 	}
-	root1, err := s.keeper.ComputeTreeRoot(kv, 4, 10)
+	root1, err := s.keeper.ComputeTreeRoot(kv, roundID, 4, 10)
 	s.Require().NoError(err)
 	s.Require().Len(root1, 32)
 
 	// Simulate what EndBlocker does: persist state.Height so a freshKeeper
 	// takes the O(1) restart path (lazy-loads shard data from KV) rather than
 	// the O(N) first-boot replay, which would conflict with existing shard data.
-	treeState, err := s.keeper.GetCommitmentTreeState(kv)
+	treeState, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 	s.Require().NoError(err)
 	treeState.Height = 10
-	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, treeState))
+	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, roundID, treeState))
 
 	// Simulate a node restart: new keeper with the same KV store but a nil
 	// tree handle. The fresh keeper takes the O(1) restart path: it creates a
@@ -662,7 +672,7 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 	// Call at a later block height with the same nextIndex. Since no new leaves
 	// were added, needsCheckpoint=false and root() returns the existing root at
 	// checkpoint 10. Root must equal root1.
-	root2, err := freshKeeper.ComputeTreeRoot(kv, 4, 20)
+	root2, err := freshKeeper.ComputeTreeRoot(kv, roundID, 4, 20)
 	s.Require().NoError(err)
 	s.Require().Equal(root1, root2, "restart root must match original root when no new leaves added")
 }
@@ -670,17 +680,18 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 // TestComputeTreeRoot_IdempotentSameBlock verifies that calling ComputeTreeRoot
 // twice at the same block height (same nextIndex) returns the same root.
 func (s *KeeperTestSuite) TestComputeTreeRoot_IdempotentSameBlock() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
-	_, err := s.keeper.AppendCommitment(kv, fpLE(42))
+	_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(42))
 	s.Require().NoError(err)
 
-	root1, err := s.keeper.ComputeTreeRoot(kv, 1, 10)
+	root1, err := s.keeper.ComputeTreeRoot(kv, roundID, 1, 10)
 	s.Require().NoError(err)
 
 	// Call again at same height, same nextIndex — should return same root.
-	root2, err := s.keeper.ComputeTreeRoot(kv, 1, 10)
+	root2, err := s.keeper.ComputeTreeRoot(kv, roundID, 1, 10)
 	s.Require().NoError(err)
 	s.Require().Equal(root1, root2, "same block, same leaves must produce same root")
 }
@@ -747,12 +758,13 @@ func (s *KeeperTestSuite) TestBlockLeafIndex() {
 		s.Run(tc.name, func() {
 			s.SetupTest()
 			kv := s.keeper.OpenKVStore(s.ctx)
+			roundID := bytes.Repeat([]byte{0xAA}, 32)
 
 			for _, w := range tc.writes {
-				s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, w.height, w.start, w.count))
+				s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, roundID, w.height, w.start, w.count))
 			}
 			for _, r := range tc.reads {
-				start, count, found, err := s.keeper.GetBlockLeafIndex(kv, r.height)
+				start, count, found, err := s.keeper.GetBlockLeafIndex(kv, roundID, r.height)
 				s.Require().NoError(err)
 				s.Require().Equal(r.wantFound, found, "found mismatch for height %d", r.height)
 				if r.wantFound {
@@ -769,6 +781,7 @@ func (s *KeeperTestSuite) TestBlockLeafIndex() {
 // ---------------------------------------------------------------------------
 
 func (s *KeeperTestSuite) TestGetCommitmentLeaves() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	// blockSetup describes leaves to append and the index entry to write.
 	type blockSetup struct {
 		height   uint64
@@ -866,13 +879,13 @@ func (s *KeeperTestSuite) TestGetCommitmentLeaves() {
 			// Seed: append leaves and write block-index entries.
 			for _, b := range tc.blocks {
 				for _, v := range b.leafVals {
-					_, err := s.keeper.AppendCommitment(kv, fpLeaf(v))
+					_, err := s.keeper.AppendCommitment(kv, roundID, fpLeaf(v))
 					s.Require().NoError(err)
 				}
-				s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, b.height, b.start, uint64(len(b.leafVals))))
+				s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, roundID, b.height, b.start, uint64(len(b.leafVals))))
 			}
 
-			got, err := s.keeper.GetCommitmentLeaves(kv, tc.fromHeight, tc.toHeight)
+			got, err := s.keeper.GetCommitmentLeaves(kv, roundID, tc.fromHeight, tc.toHeight)
 			s.Require().NoError(err)
 			s.Require().Len(got, len(tc.want))
 

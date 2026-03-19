@@ -32,16 +32,17 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// debugVerifyConsistency reads all nextIndex commitment leaves from kvStore,
-// builds a fresh ephemeral tree, and verifies that its root equals expectedRoot.
-func (k *Keeper) debugVerifyConsistency(kvStore store.KVStore, nextIndex uint64, expectedRoot []byte) error {
+// debugVerifyConsistency reads all nextIndex commitment leaves from kvStore
+// for the given round, builds a fresh ephemeral tree, and verifies that its
+// root equals expectedRoot.
+func (k *Keeper) debugVerifyConsistency(kvStore store.KVStore, roundID []byte, nextIndex uint64, expectedRoot []byte) error {
 	if nextIndex == 0 {
 		return nil
 	}
 
 	leaves := make([][]byte, nextIndex)
 	for i := uint64(0); i < nextIndex; i++ {
-		leaf, err := kvStore.Get(types.CommitmentLeafKey(i))
+		leaf, err := kvStore.Get(types.CommitmentLeafKey(roundID, i))
 		if err != nil {
 			return fmt.Errorf("debug tree verify: read leaf %d: %w", i, err)
 		}

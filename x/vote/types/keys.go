@@ -131,6 +131,14 @@ var (
 	// MinCeremonyValidatorsKey stores the minimum number of eligible validators
 	// required to create a voting session: single key -> uint32 big-endian.
 	MinCeremonyValidatorsKey = []byte{0x13}
+
+	// RoundTreePrefix scopes all commitment-tree KV entries to a specific
+	// voting round. Per-round keys have the form:
+	//   0x14 || round_id (32 bytes) || <inner key>
+	// where <inner key> is one of the tree-internal prefixes (0x02, 0x03,
+	// 0x06, 0x08). Shard/cap/checkpoint keys (0x0F, 0x10, 0x11) are scoped
+	// transparently by the KvStoreProxy prefix on the Rust side.
+	RoundTreePrefix = []byte{0x14}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -161,19 +169,64 @@ func NullifierPrefixForRound(nfType NullifierType, roundID []byte) ([]byte, erro
 	return key, nil
 }
 
-// CommitmentLeafKey returns the store key for a commitment tree leaf at a given index.
-func CommitmentLeafKey(index uint64) []byte {
-	key := make([]byte, len(CommitmentLeafPrefix)+8)
-	copy(key, CommitmentLeafPrefix)
-	putUint64BE(key[len(CommitmentLeafPrefix):], index)
+// RoundTreeKey returns the per-round tree key prefix: 0x14 || round_id.
+// All commitment-tree KV entries for a round live under this prefix.
+func RoundTreeKey(roundID []byte) []byte {
+	key := make([]byte, len(RoundTreePrefix)+len(roundID))
+	copy(key, RoundTreePrefix)
+	copy(key[len(RoundTreePrefix):], roundID)
 	return key
 }
 
-// CommitmentRootKey returns the store key for a commitment tree root at a given height.
-func CommitmentRootKey(height uint64) []byte {
-	key := make([]byte, len(CommitmentRootByHeightPrefix)+8)
-	copy(key, CommitmentRootByHeightPrefix)
-	putUint64BE(key[len(CommitmentRootByHeightPrefix):], height)
+// CommitmentLeafKey returns the store key for a commitment tree leaf scoped to a round.
+// Format: 0x14 || round_id || 0x02 || big-endian uint64 index
+func CommitmentLeafKey(roundID []byte, index uint64) []byte {
+	rk := RoundTreeKey(roundID)
+	key := make([]byte, len(rk)+len(CommitmentLeafPrefix)+8)
+	copy(key, rk)
+	copy(key[len(rk):], CommitmentLeafPrefix)
+	putUint64BE(key[len(rk)+len(CommitmentLeafPrefix):], index)
+	return key
+}
+
+// CommitmentLeafPrefixForRound returns the prefix for iterating all leaves in a round.
+// Format: 0x14 || round_id || 0x02
+func CommitmentLeafPrefixForRound(roundID []byte) []byte {
+	rk := RoundTreeKey(roundID)
+	key := make([]byte, len(rk)+len(CommitmentLeafPrefix))
+	copy(key, rk)
+	copy(key[len(rk):], CommitmentLeafPrefix)
+	return key
+}
+
+// CommitmentRootKey returns the store key for a commitment tree root scoped to a round.
+// Format: 0x14 || round_id || 0x03 || big-endian uint64 height
+func CommitmentRootKey(roundID []byte, height uint64) []byte {
+	rk := RoundTreeKey(roundID)
+	key := make([]byte, len(rk)+len(CommitmentRootByHeightPrefix)+8)
+	copy(key, rk)
+	copy(key[len(rk):], CommitmentRootByHeightPrefix)
+	putUint64BE(key[len(rk)+len(CommitmentRootByHeightPrefix):], height)
+	return key
+}
+
+// CommitmentRootPrefixForRound returns the prefix for iterating all roots in a round.
+// Format: 0x14 || round_id || 0x03
+func CommitmentRootPrefixForRound(roundID []byte) []byte {
+	rk := RoundTreeKey(roundID)
+	key := make([]byte, len(rk)+len(CommitmentRootByHeightPrefix))
+	copy(key, rk)
+	copy(key[len(rk):], CommitmentRootByHeightPrefix)
+	return key
+}
+
+// RoundTreeStateKey returns the store key for per-round tree state.
+// Format: 0x14 || round_id || 0x06
+func RoundTreeStateKey(roundID []byte) []byte {
+	rk := RoundTreeKey(roundID)
+	key := make([]byte, len(rk)+len(TreeStateKey))
+	copy(key, rk)
+	copy(key[len(rk):], TreeStateKey)
 	return key
 }
 
@@ -280,12 +333,25 @@ func ValidateRoundID(id []byte) error {
 	return nil
 }
 
-// BlockLeafIndexKey returns the store key for a block-to-leaf-index mapping.
-// Format: 0x08 || big-endian uint64 height
-func BlockLeafIndexKey(height uint64) []byte {
-	key := make([]byte, len(BlockLeafIndexPrefix)+8)
-	copy(key, BlockLeafIndexPrefix)
-	putUint64BE(key[len(BlockLeafIndexPrefix):], height)
+// BlockLeafIndexKey returns the store key for a block-to-leaf-index mapping scoped to a round.
+// Format: 0x14 || round_id || 0x08 || big-endian uint64 height
+func BlockLeafIndexKey(roundID []byte, height uint64) []byte {
+	rk := RoundTreeKey(roundID)
+	key := make([]byte, len(rk)+len(BlockLeafIndexPrefix)+8)
+	copy(key, rk)
+	copy(key[len(rk):], BlockLeafIndexPrefix)
+	putUint64BE(key[len(rk)+len(BlockLeafIndexPrefix):], height)
+	return key
+}
+
+// BlockLeafIndexPrefixForRound returns the prefix for iterating all block-leaf
+// index entries in a round.
+// Format: 0x14 || round_id || 0x08
+func BlockLeafIndexPrefixForRound(roundID []byte) []byte {
+	rk := RoundTreeKey(roundID)
+	key := make([]byte, len(rk)+len(BlockLeafIndexPrefix))
+	copy(key, rk)
+	copy(key[len(rk):], BlockLeafIndexPrefix)
 	return key
 }
 

@@ -205,8 +205,8 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keepe
 
 	kvStore := k.OpenKVStore(ctx)
 
-	// Fetch vote commitment tree root at the anchor height.
-	root, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteCommTreeAnchorHeight)
+	// Fetch vote commitment tree root at the anchor height for this round.
+	root, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteRoundId, msg.VoteCommTreeAnchorHeight)
 	if err != nil {
 		return fmt.Errorf("failed to get commitment tree root at height %d: %w", msg.VoteCommTreeAnchorHeight, err)
 	}
@@ -241,9 +241,9 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keepe
 // It looks up the vote commitment tree root at the anchor height specified
 // in the message and includes it as a public input to the ZKP verifier.
 func verifyRevealShare(ctx context.Context, msg *types.MsgRevealShare, k *keeper.Keeper, opts ValidateOpts) error {
-	// Look up the commitment tree root at the specified anchor height.
+	// Look up the commitment tree root at the specified anchor height for this round.
 	kvStore := k.OpenKVStore(ctx)
-	treeRoot, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteCommTreeAnchorHeight)
+	treeRoot, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteRoundId, msg.VoteCommTreeAnchorHeight)
 	if err != nil {
 		return fmt.Errorf("failed to look up commitment tree root: %w", err)
 	}
