@@ -460,47 +460,70 @@ func (s *MsgServerTestSuite) TestSubmitTally_EmitsEvent() {
 	s.Require().True(found, "expected %s event", types.EventTypeSubmitTally)
 }
 
-func (s *MsgServerTestSuite) TestSubmitTally_FinalizedRejectsShares() {
-	s.SetupTest()
-	roundID := bytes.Repeat([]byte{0x60}, 32)
-	creator := "sv1creator"
-
-	// Create a TALLYING round.
-	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
-		VoteRoundId: roundID,
-		VoteEndTime: 500_000,
-		Creator:     creator,
-		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
-		Proposals: []*types.Proposal{
-			{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
+func (s *MsgServerTestSuite) TestRevealShare_RejectsNonActiveRounds() {
+	cases := []struct {
+		name        string
+		setup       func(roundID []byte)
+		errContains string
+	}{
+		{
+			name: "rejected during TALLYING",
+			setup: func(roundID []byte) {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: roundID,
+					VoteEndTime: 500_000,
+					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+					Proposals: []*types.Proposal{
+						{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
+					},
+				}))
+			},
+			errContains: "TALLYING",
 		},
-	}))
+		{
+			name: "rejected during FINALIZED",
+			setup: func(roundID []byte) {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: roundID,
+					VoteEndTime: 500_000,
+					Creator:     "sv1creator",
+					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+					Proposals: []*types.Proposal{
+						{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
+					},
+				}))
+				_, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
+					VoteRoundId: roundID,
+					Creator:     "sv1creator",
+				})
+				s.Require().NoError(err)
+			},
+			errContains: "FINALIZED",
+		},
+	}
 
-	// Finalize it.
-	_, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
-		VoteRoundId: roundID,
-		Creator:     creator,
-	})
-	s.Require().NoError(err)
+	for i, tc := range cases {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			roundID := bytes.Repeat([]byte{byte(0x60 + i)}, 32)
+			tc.setup(roundID)
 
-	// Attempt to submit a reveal share — should fail because round is FINALIZED.
-	_, err = s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
-		ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
-		EncShare:                 testEncShare(s, 100),
-		ProposalId:               1,
-		VoteDecision:             1,
-		Proof:                    bytes.Repeat([]byte{0xF2}, 64),
-		VoteRoundId:              roundID,
-		VoteCommTreeAnchorHeight: 10,
-	})
-	// RevealShare validates proposal_id which succeeds, but the ante handler
-	// would reject it. At the keeper level, RevealShare doesn't check status,
-	// so we verify the status is FINALIZED which the ante handler uses.
-	kv = s.keeper.OpenKVStore(s.ctx)
-	round, err2 := s.keeper.GetVoteRound(kv, roundID)
-	s.Require().NoError(err2)
-	s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
+			_, err := s.msgServer.RevealShare(s.ctx, &types.MsgRevealShare{
+				ShareNullifier:           bytes.Repeat([]byte{0xF1}, 32),
+				EncShare:                 testEncShare(s, 100),
+				ProposalId:               1,
+				VoteDecision:             1,
+				Proof:                    bytes.Repeat([]byte{0xF2}, 64),
+				VoteRoundId:              roundID,
+				VoteCommTreeAnchorHeight: 10,
+			})
+			s.Require().Error(err)
+			s.Require().ErrorIs(err, types.ErrRoundNotActive)
+			s.Require().Contains(err.Error(), tc.errContains)
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

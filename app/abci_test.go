@@ -447,10 +447,12 @@ func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// RevealShare should be accepted during TALLYING (shares are revealed after voting ends).
+	// RevealShare should be rejected during TALLYING — shares must land
+	// before the vote window closes to prevent stale tally corruption.
 	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
-	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
+	s.Require().NotEqual(uint32(0), result.Code, "reveal share during TALLYING should be rejected")
+	s.Require().Contains(result.Log, "vote round is not active")
 
 	// DelegateVote should be rejected during TALLYING.
 	delegation2 := testutil.ValidDelegation(roundID, 0x60)

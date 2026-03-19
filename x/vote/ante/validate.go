@@ -80,14 +80,8 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 				return err
 			}
 		default:
-			if msg.AcceptsTallyingRound() {
-				if err := k.ValidateRoundForShares(ctx, roundID); err != nil {
-					return err
-				}
-			} else {
-				if err := k.ValidateRoundForVoting(ctx, roundID); err != nil {
-					return err
-				}
+			if err := k.ValidateRoundForVoting(ctx, roundID); err != nil {
+				return err
 			}
 		}
 	}
