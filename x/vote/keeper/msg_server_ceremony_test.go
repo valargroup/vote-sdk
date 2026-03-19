@@ -94,9 +94,6 @@ func (s *MsgServerTestSuite) createPendingRound(validators []*types.ValidatorPal
 		CeremonyValidators: validators,
 		NullifierImtRoot:   bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:             bytes.Repeat([]byte{0x04}, 32),
-		VkZkp1:             bytes.Repeat([]byte{0x06}, 64),
-		VkZkp2:             bytes.Repeat([]byte{0x07}, 64),
-		VkZkp3:             bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
 			{Id: 1, Title: "A", Description: "A", Options: svtest.DefaultOptions()},
 		},

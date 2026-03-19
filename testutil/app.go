@@ -376,9 +376,6 @@ func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {
 		Creator:           msg.Creator,
 		Status:            types.SessionStatus_SESSION_STATUS_ACTIVE,
 		EaPk:              eaPk,
-		VkZkp1:            msg.VkZkp1,
-		VkZkp2:            msg.VkZkp2,
-		VkZkp3:            msg.VkZkp3,
 		Proposals:         msg.Proposals,
 		Description:       msg.Description,
 	}

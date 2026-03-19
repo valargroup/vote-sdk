@@ -478,9 +478,6 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 		VoteEndTime:       uint64(soonEnd.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x2C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x2D}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
 	soonRoundID := s.app.SeedVotingSession(soonMsg)
@@ -493,9 +490,6 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 		VoteEndTime:       uint64(lateEnd.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x3C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x3D}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
 	lateRoundID := s.app.SeedVotingSession(lateMsg)
@@ -1083,9 +1077,6 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 		Proposals:          testutil.SampleProposals(),
 		NullifierImtRoot:   bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:             bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:             bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:             bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:             bytes.Repeat([]byte{0x33}, 64),
 	}
 	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
 	app.NextBlock()
@@ -1297,9 +1288,6 @@ func TestFullLifecycle_SingleValidator(t *testing.T) {
 		Proposals:          testutil.SampleProposals(),
 		NullifierImtRoot:   bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:             bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:             bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:             bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:             bytes.Repeat([]byte{0x33}, 64),
 	}
 	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
 	app.NextBlock()

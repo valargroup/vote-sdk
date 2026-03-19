@@ -38,29 +38,26 @@ message VoteRound {
   string        creator             = 8;
   SessionStatus status              = 9;
   bytes  ea_pk                      = 10; // Election authority public key (Pallas, 32 bytes)
-  bytes  vk_zkp1                    = 11; // Verification key for ZKP #1
-  bytes  vk_zkp2                    = 12; // Verification key for ZKP #2
-  bytes  vk_zkp3                    = 13; // Verification key for ZKP #3
-  repeated Proposal proposals       = 14;
-  string            description     = 15; // Human-readable round description
-  uint64            created_at_height = 16; // Block height at which this round was registered on-chain
-  string            title           = 17; // Short human-readable round title
+  repeated Proposal proposals       = 11;
+  string            description     = 12; // Human-readable round description
+  uint64            created_at_height = 13; // Block height at which this round was registered on-chain
+  string            title           = 14; // Short human-readable round title
 
   // Per-round ceremony fields (populated when status = PENDING).
-  CeremonyStatus              ceremony_status     = 18;
-  repeated ValidatorPallasKey ceremony_validators = 19;
-  repeated DealerPayload      ceremony_payloads   = 20;
-  repeated AckEntry           ceremony_acks       = 21;
-  string                      ceremony_dealer     = 22;
-  uint64                      ceremony_phase_start   = 23;
-  uint64                      ceremony_phase_timeout = 24;
-  repeated string             ceremony_log           = 25; // Timestamped human-readable ceremony log entries
+  CeremonyStatus              ceremony_status     = 15;
+  repeated ValidatorPallasKey ceremony_validators = 16;
+  repeated DealerPayload      ceremony_payloads   = 17;
+  repeated AckEntry           ceremony_acks       = 18;
+  string                      ceremony_dealer     = 19;
+  uint64                      ceremony_phase_start   = 20;
+  uint64                      ceremony_phase_timeout = 21;
+  repeated string             ceremony_log           = 22; // Timestamped human-readable ceremony log entries
 
   // Threshold decryption fields (populated by MsgDealExecutiveAuthorityKey in threshold mode).
   // threshold is the minimum number of partial decryptions required to reconstruct the tally.
   // verification_keys holds VK_i = f(i)*G for each validator (same order as ceremony_validators).
-  uint32         threshold         = 26; // Minimum shares for reconstruction (always >= 2)
-  repeated bytes verification_keys = 27; // 32-byte compressed Pallas points, one per ceremony validator
+  uint32         threshold         = 23; // Minimum shares for reconstruction (always >= 2)
+  repeated bytes verification_keys = 24; // 32-byte compressed Pallas points, one per ceremony validator
 }
 
 // VoteManagerState stores the singleton vote manager address.
