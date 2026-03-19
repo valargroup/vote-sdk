@@ -217,7 +217,39 @@ func (s *KeeperTestSuite) TestValidateRoundForShares() {
 			roundID: testRoundID,
 		},
 		{
-			name: "tallying round accepted",
+			name: "tallying round within grace period accepted",
+			setup: func() {
+				// Set block height to 110 — within 60 blocks of tally start at 100.
+				s.ctx = s.ctx.WithBlockHeight(110)
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: testRoundID,
+					VoteEndTime: expiredEndTime,
+					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+				}))
+				s.Require().NoError(s.keeper.SetTallyStartHeight(kv, testRoundID, 100))
+			},
+			roundID: testRoundID,
+		},
+		{
+			name: "tallying round with expired grace period rejected",
+			setup: func() {
+				// Set block height to 200 — 100 blocks past tally start, exceeds grace of 60.
+				s.ctx = s.ctx.WithBlockHeight(200)
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+					VoteRoundId: testRoundID,
+					VoteEndTime: expiredEndTime,
+					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+				}))
+				s.Require().NoError(s.keeper.SetTallyStartHeight(kv, testRoundID, 100))
+			},
+			roundID:     testRoundID,
+			expectErr:   true,
+			errContains: "tally grace period expired",
+		},
+		{
+			name: "tallying round with no tally start height rejected",
 			setup: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
@@ -226,7 +258,9 @@ func (s *KeeperTestSuite) TestValidateRoundForShares() {
 					Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
 				}))
 			},
-			roundID: testRoundID,
+			roundID:     testRoundID,
+			expectErr:   true,
+			errContains: "tally grace period expired",
 		},
 		{
 			name: "finalized round rejected",

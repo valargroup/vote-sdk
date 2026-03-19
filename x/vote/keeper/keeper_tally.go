@@ -316,12 +316,45 @@ func (k *Keeper) ValidateTallyCompleteness(kvStore store.KVStore, round *types.V
 }
 
 // ---------------------------------------------------------------------------
+// Tally start height (grace period support)
+// ---------------------------------------------------------------------------
+
+// SetTallyStartHeight records the block height when a round entered TALLYING.
+func (k *Keeper) SetTallyStartHeight(kvStore store.KVStore, roundID []byte, height uint64) error {
+	key, err := types.TallyStartHeightKey(roundID)
+	if err != nil {
+		return err
+	}
+	var buf [8]byte
+	types.PutUint64BE(buf[:], height)
+	return kvStore.Set(key, buf[:])
+}
+
+// GetTallyStartHeight returns the block height when a round entered TALLYING,
+// or 0 if not set.
+func (k *Keeper) GetTallyStartHeight(kvStore store.KVStore, roundID []byte) (uint64, error) {
+	key, err := types.TallyStartHeightKey(roundID)
+	if err != nil {
+		return 0, err
+	}
+	bz, err := kvStore.Get(key)
+	if err != nil {
+		return 0, err
+	}
+	if bz == nil || len(bz) < 8 {
+		return 0, nil
+	}
+	return types.GetUint64BE(bz), nil
+}
+
+// ---------------------------------------------------------------------------
 // Tally validation helpers
 // ---------------------------------------------------------------------------
 
 // ValidateRoundForShares checks that a vote round exists and is in a state
 // that accepts MsgRevealShare. Shares are accepted when the round is ACTIVE
-// (with time check) or TALLYING (unconditionally).
+// or during the TALLYING grace period (DefaultTallyGraceBlocks blocks after
+// the round entered TALLYING).
 func (k *Keeper) ValidateRoundForShares(ctx context.Context, roundID []byte) error {
 	kvStore := k.OpenKVStore(ctx)
 	round, err := k.GetVoteRound(kvStore, roundID)
@@ -331,19 +364,19 @@ func (k *Keeper) ValidateRoundForShares(ctx context.Context, roundID []byte) err
 
 	switch round.Status {
 	case types.SessionStatus_SESSION_STATUS_ACTIVE:
-		// Belt-and-suspenders: also check time in case EndBlocker hasn't run yet.
-		sdkCtx := sdk.UnwrapSDKContext(ctx)
-		blockTime := uint64(sdkCtx.BlockTime().Unix())
-		if blockTime >= round.VoteEndTime {
-			// Time has passed but EndBlocker hasn't transitioned yet — still
-			// accept shares (the round will become TALLYING this block).
-			return nil
-		}
 		return nil
 
 	case types.SessionStatus_SESSION_STATUS_TALLYING:
-		// Tallying phase: shares are accepted unconditionally.
-		return nil
+		tallyStart, err := k.GetTallyStartHeight(kvStore, roundID)
+		if err != nil {
+			return fmt.Errorf("failed to read tally start height: %w", err)
+		}
+		sdkCtx := sdk.UnwrapSDKContext(ctx)
+		blockHeight := uint64(sdkCtx.BlockHeight())
+		if tallyStart > 0 && blockHeight < tallyStart+types.DefaultTallyGraceBlocks {
+			return nil
+		}
+		return fmt.Errorf("%w: tally grace period expired", types.ErrRoundNotActive)
 
 	default:
 		return fmt.Errorf("%w: status is %s", types.ErrRoundNotActive, round.Status)

@@ -100,6 +100,18 @@ func PartialDecryptPrepareProposalInjector(
 			return txs
 		}
 
+		// Defer partial decryption until the tally grace period expires.
+		// During the grace period, late shares may still land on-chain.
+		tallyStart, err := voteKeeper.GetTallyStartHeight(kvStore, tallyRound.VoteRoundId)
+		if err != nil {
+			logger.Error("PrepareProposal[partial-decrypt]: failed to read tally start height", "err", err)
+			return txs
+		}
+		blockHeight := uint64(ctx.BlockHeight())
+		if tallyStart > 0 && blockHeight < tallyStart+types.DefaultTallyGraceBlocks {
+			return txs
+		}
+
 		// Find proposer's original Shamir index in the round's ceremony set.
 		// ShamirIndex is set once at round creation and survives validator stripping,
 		// so it always reflects the correct x-coordinate for Lagrange interpolation.

@@ -33,13 +33,10 @@ stateDiagram-v2
 |---|---|---|---|---|
 | `MsgDelegateVote` | **Rejected** | Accepted | **Rejected** | **Rejected** |
 | `MsgCastVote` | **Rejected** | Accepted | **Rejected** | **Rejected** |
-| `MsgRevealShare` | **Rejected** | Accepted | Accepted | **Rejected** |
+| `MsgRevealShare` | **Rejected** | Accepted | Grace period | **Rejected** |
 | `MsgCreateVotingSession` | N/A | N/A | N/A | N/A |
 
-This is implemented via the `AcceptsTallyingRound()` method on the `VoteMessage` interface:
-
-- `MsgRevealShare.AcceptsTallyingRound()` returns `true` — routed to `ValidateRoundForShares`
-- All other messages return `false` — routed to `ValidateRoundForVoting`
+`MsgRevealShare` is accepted during the TALLYING grace period (`DefaultTallyGraceSeconds = 300`, ~5 minutes). After the grace period expires, shares are rejected and the partial decryption + tally proceeds. This prevents late-arriving shares from corrupting the tally accumulator after `D_i` has been committed.
 
 ## Transitions
 
@@ -54,7 +51,7 @@ This is implemented via the `AcceptsTallyingRound()` method on the `VoteMessage`
 
 - **Trigger**: `EndBlocker` runs at the end of every block
 - **Condition**: `blockTime >= round.VoteEndTime` for rounds with `status == SESSION_STATUS_ACTIVE`
-- **Action**: Sets `status = SESSION_STATUS_TALLYING` via `UpdateVoteRoundStatus`
+- **Action**: Sets `status = SESSION_STATUS_TALLYING` via `UpdateVoteRoundStatus`; records `tally_start_time` for grace period tracking
 - **Event**: Emits `round_status_change` with attributes:
   - `vote_round_id`: hex-encoded round ID
   - `old_status`: `SESSION_STATUS_ACTIVE`
@@ -77,17 +74,18 @@ ValidateRoundForVoting(ctx, roundID):
   3. blockTime < vote_end_time → ErrRoundNotActive (catches pre-transition)
 ```
 
-`ValidateRoundForShares` is more permissive — it accepts both ACTIVE and TALLYING rounds:
+`ValidateRoundForShares` accepts ACTIVE rounds and TALLYING rounds within the grace period:
 
 ```
 ValidateRoundForShares(ctx, roundID):
-  1. Round exists?                → ErrRoundNotFound
-  2. Status == ACTIVE?            → OK (shares accepted during active voting)
-  3. Status == TALLYING?          → OK (shares accepted during tally phase)
-  4. Any other status (FINALIZED) → ErrRoundNotActive
+  1. Round exists?                                           → ErrRoundNotFound
+  2. Status == ACTIVE?                                       → OK
+  3. Status == TALLYING && blockTime < tallyStart + grace?   → OK (grace period active)
+  4. Status == TALLYING && grace expired?                    → ErrRoundNotActive
+  5. Any other status (FINALIZED)                            → ErrRoundNotActive
 ```
 
-When the round is ACTIVE but time has passed (EndBlocker hasn't run yet this block), `ValidateRoundForShares` still accepts the message because shares should be valid until the round is FINALIZED.
+The grace period (`DefaultTallyGraceSeconds = 300`) gives in-flight shares time to land after the vote window closes. After the grace period, the accumulator is frozen and partial decryption begins.
 
 ## Genesis
 

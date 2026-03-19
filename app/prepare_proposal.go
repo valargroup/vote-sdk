@@ -131,6 +131,17 @@ func TallyPrepareProposalHandler(
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 
+		// Defer tally until the grace period expires — shares may still be landing.
+		tallyStart, err := voteKeeper.GetTallyStartHeight(kvStore, tallyRound.VoteRoundId)
+		if err != nil {
+			logger.Error("PrepareProposal: failed to read tally start height", "err", err)
+			return &abci.ResponsePrepareProposal{Txs: txs}, nil
+		}
+		blockHeight := uint64(ctx.BlockHeight())
+		if tallyStart > 0 && blockHeight < tallyStart+types.DefaultTallyGraceBlocks {
+			return &abci.ResponsePrepareProposal{Txs: txs}, nil
+		}
+
 		var entries []*types.TallyEntry
 
 		// Check whether any votes were cast (non-empty tally accumulators).

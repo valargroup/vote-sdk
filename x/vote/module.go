@@ -474,6 +474,10 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			return err
 		}
 
+		if err := am.keeper.SetTallyStartHeight(kvStore, roundID, uint64(ctx.BlockHeight())); err != nil {
+			return err
+		}
+
 		ctx.EventManager().EmitEvent(sdk.NewEvent(
 			types.EventTypeRoundStatusChange,
 			sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", roundID)),

@@ -447,7 +447,7 @@ func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// RevealShare should be accepted during TALLYING (shares are revealed after voting ends).
+	// RevealShare should be accepted during TALLYING grace period (just transitioned — well within DefaultTallyGraceSeconds).
 	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
 	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
@@ -1231,6 +1231,11 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 
 	// --- Tally: partial decrypt (proposer) → Lagrange combine → FINALIZED ---
 
+	// Advance past the tally grace period (DefaultTallyGraceBlocks = 60).
+	for i := 0; i < int(types.DefaultTallyGraceBlocks); i++ {
+		app.NextBlock()
+	}
+
 	// Block 1: partial decrypt injector fires for proposer → count reaches 2.
 	app.NextBlockWithPrepareProposal()
 
@@ -1359,6 +1364,11 @@ func TestFullLifecycle_SingleValidator(t *testing.T) {
 	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
+
+	// Advance past the tally grace period (DefaultTallyGraceBlocks = 60).
+	for i := 0; i < int(types.DefaultTallyGraceBlocks); i++ {
+		app.NextBlock()
+	}
 
 	// Block N: partial decrypt (D_1 = share * C1) injected.
 	app.NextBlockWithPrepareProposal()

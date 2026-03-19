@@ -27,8 +27,9 @@ type Processor struct {
 	logger    log.Logger
 	// meanInterval is the mean of the exponential distribution for the time
 	// between processing cycles. Submissions form a Poisson process.
-	meanInterval  time.Duration
-	maxConcurrent int
+	meanInterval   time.Duration
+	maxConcurrent  int
+	isRoundActive  RoundStatusChecker
 }
 
 // NewProcessor creates a new share processor.
@@ -40,6 +41,7 @@ func NewProcessor(
 	logger log.Logger,
 	meanInterval time.Duration,
 	maxConcurrent int,
+	isRoundActive RoundStatusChecker,
 ) *Processor {
 	if maxConcurrent < 1 {
 		maxConcurrent = 1
@@ -53,6 +55,7 @@ func NewProcessor(
 		logger:        logger,
 		meanInterval:  meanInterval,
 		maxConcurrent: maxConcurrent,
+		isRoundActive: isRoundActive,
 	}
 }
 
@@ -135,6 +138,27 @@ func (p *Processor) processBatch(ctx context.Context) {
 			case <-gctx.Done():
 				return nil
 			default:
+			}
+
+			if p.isRoundActive != nil {
+				active, err := p.isRoundActive(share.Payload.VoteRoundID)
+				if err != nil {
+					p.logger.Warn("round status check failed, skipping share",
+						"round_id", share.Payload.VoteRoundID,
+						"share_index", share.Payload.EncShare.ShareIndex,
+						"error", err,
+					)
+					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					return nil
+				}
+				if !active {
+					p.logger.Info("round no longer active, skipping share",
+						"round_id", share.Payload.VoteRoundID,
+						"share_index", share.Payload.EncShare.ShareIndex,
+					)
+					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					return nil
+				}
 			}
 
 			// Skip jitter if less than 60s remain before vote ends — submit immediately.

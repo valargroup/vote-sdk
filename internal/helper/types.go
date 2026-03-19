@@ -66,6 +66,11 @@ func DefaultConfig() Config {
 // Returns the vote_end_time (unix seconds) for the given round ID (hex).
 type RoundInfoFetcher func(roundID string) (voteEndTime uint64, err error)
 
+// RoundStatusChecker returns true if the round is still accepting shares
+// (i.e., status == ACTIVE). Used by the processor to skip shares for rounds
+// that have transitioned to TALLYING or beyond, avoiding wasted ZKP computation.
+type RoundStatusChecker func(roundID string) (isActive bool, err error)
+
 // VCHashFunc computes the vote commitment Poseidon hash. The implementation
 // is provided by the votecommitment CGo package but abstracted here so the
 // helper package doesn't depend on the Rust FFI library directly.

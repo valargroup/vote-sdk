@@ -908,13 +908,32 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 			},
 		},
 		{
-			name: "tallying round accepted for shares",
+			name: "tallying round within grace period accepted for shares",
 			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts: mockOpts(),
 			setup: func() {
 				s.setupTallyingRound()
-				s.seedCommitmentRoot(10) // anchor height used by newValidMsgRevealShare
+				s.seedCommitmentRoot(10)
+				// Block height is low (default) — set tally start at height 1 so we're within 60 blocks.
+				s.ctx = s.ctx.WithBlockHeight(10)
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetTallyStartHeight(kv, testRoundID, 1))
 			},
+		},
+		{
+			name: "tallying round with expired grace period rejected for shares",
+			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
+			opts: mockOpts(),
+			setup: func() {
+				s.setupTallyingRound()
+				s.seedCommitmentRoot(10)
+				// Block height 200, tally started at 100 — 100 blocks past, exceeds grace of 60.
+				s.ctx = s.ctx.WithBlockHeight(200)
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetTallyStartHeight(kv, testRoundID, 100))
+			},
+			expectErr:   true,
+			errContains: "tally grace period expired",
 		},
 		{
 			name: "finalized round rejected for shares",

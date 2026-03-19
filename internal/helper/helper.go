@@ -27,10 +27,11 @@ type Helper struct {
 //   - tree: accesses the commitment tree (status + merkle paths + leaf reads) from the keeper's KV store
 //   - prover: generates ZKP #3 proofs (real FFI or mock)
 //   - roundFetcher: queries the chain for round metadata (direct keeper access)
+//   - isRoundActive: checks if a round is still ACTIVE (nil = skip check)
 //   - vcHash: computes vote commitment Poseidon hash for ingress validation
 //   - homeDir: the chain's home directory (for default DB path)
 //   - logger: module logger
-func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, vcHash VCHashFunc, homeDir string, logger log.Logger) (*Helper, error) {
+func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, vcHash VCHashFunc, homeDir string, logger log.Logger) (*Helper, error) {
 	logger = logger.With("module", "helper")
 
 	if cfg.Disable {
@@ -79,6 +80,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		logger,
 		time.Duration(cfg.ProcessInterval)*time.Second,
 		cfg.MaxConcurrentProofs,
+		isRoundActive,
 	)
 
 	return &Helper{

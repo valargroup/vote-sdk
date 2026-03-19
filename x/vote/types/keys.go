@@ -16,6 +16,13 @@ const (
 // DefaultDealTimeout is the ceremony deal/ack phase timeout in seconds (30 minutes).
 const DefaultDealTimeout uint64 = 1800
 
+// DefaultTallyGraceBlocks is the number of blocks after ACTIVE->TALLYING
+// during which MsgRevealShare is still accepted and partial decryption is
+// deferred. Gives in-flight shares time to land before the accumulator is
+// frozen. At 5s blocks this is ~5 minutes. Can be promoted to a governance
+// param later.
+const DefaultTallyGraceBlocks uint64 = 60
+
 // RoundIDLen is the fixed byte-length of a VoteRoundId (SHA-256 digest).
 const RoundIDLen = 32
 
@@ -131,6 +138,11 @@ var (
 	// MinCeremonyValidatorsKey stores the minimum number of eligible validators
 	// required to create a voting session: single key -> uint32 big-endian.
 	MinCeremonyValidatorsKey = []byte{0x13}
+
+	// TallyStartHeightPrefix stores the block height when a round entered TALLYING.
+	// Used with DefaultTallyGraceBlocks to determine the grace period.
+	//   0x14 || round_id (32 bytes) -> uint64 BE block height
+	TallyStartHeightPrefix = []byte{0x14}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -165,7 +177,7 @@ func NullifierPrefixForRound(nfType NullifierType, roundID []byte) ([]byte, erro
 func CommitmentLeafKey(index uint64) []byte {
 	key := make([]byte, len(CommitmentLeafPrefix)+8)
 	copy(key, CommitmentLeafPrefix)
-	putUint64BE(key[len(CommitmentLeafPrefix):], index)
+	PutUint64BE(key[len(CommitmentLeafPrefix):], index)
 	return key
 }
 
@@ -173,7 +185,7 @@ func CommitmentLeafKey(index uint64) []byte {
 func CommitmentRootKey(height uint64) []byte {
 	key := make([]byte, len(CommitmentRootByHeightPrefix)+8)
 	copy(key, CommitmentRootByHeightPrefix)
-	putUint64BE(key[len(CommitmentRootByHeightPrefix):], height)
+	PutUint64BE(key[len(CommitmentRootByHeightPrefix):], height)
 	return key
 }
 
@@ -233,14 +245,14 @@ func PrefixEndBytes(prefix []byte) []byte {
 	return nil // overflow: prefix is all 0xFF
 }
 
-// getUint64BE reads a uint64 from big-endian bytes.
-func getUint64BE(b []byte) uint64 {
+// GetUint64BE reads a uint64 from big-endian bytes.
+func GetUint64BE(b []byte) uint64 {
 	return uint64(b[0])<<56 | uint64(b[1])<<48 | uint64(b[2])<<40 | uint64(b[3])<<32 |
 		uint64(b[4])<<24 | uint64(b[5])<<16 | uint64(b[6])<<8 | uint64(b[7])
 }
 
-// putUint64BE writes a uint64 in big-endian byte order.
-func putUint64BE(b []byte, v uint64) {
+// PutUint64BE writes a uint64 in big-endian byte order.
+func PutUint64BE(b []byte, v uint64) {
 	b[0] = byte(v >> 56)
 	b[1] = byte(v >> 48)
 	b[2] = byte(v >> 40)
@@ -285,7 +297,7 @@ func ValidateRoundID(id []byte) error {
 func BlockLeafIndexKey(height uint64) []byte {
 	key := make([]byte, len(BlockLeafIndexPrefix)+8)
 	copy(key, BlockLeafIndexPrefix)
-	putUint64BE(key[len(BlockLeafIndexPrefix):], height)
+	PutUint64BE(key[len(BlockLeafIndexPrefix):], height)
 	return key
 }
 
@@ -328,13 +340,13 @@ func PallasKeyKey(valoperAddr string) []byte {
 func ShardKey(index uint64) []byte {
 	key := make([]byte, len(ShardPrefix)+8)
 	copy(key, ShardPrefix)
-	putUint64BE(key[len(ShardPrefix):], index)
+	PutUint64BE(key[len(ShardPrefix):], index)
 	return key
 }
 
 // ShardIndexFromKey extracts the shard index from a ShardKey.
 func ShardIndexFromKey(key []byte) uint64 {
-	return getUint64BE(key[len(ShardPrefix):])
+	return GetUint64BE(key[len(ShardPrefix):])
 }
 
 // ShardCheckpointKey returns the store key for a vote commitment tree checkpoint.
@@ -391,6 +403,18 @@ func PartialDecryptionPrefixForValidator(roundID []byte, validatorIndex uint32) 
 	key = append(key, PartialDecryptionPrefix...)
 	key = append(key, roundID...)
 	key = appendUint32BE(key, validatorIndex)
+	return key, nil
+}
+
+// TallyStartHeightKey returns the store key for a round's tally start height.
+// Format: 0x14 || round_id (32 B)
+func TallyStartHeightKey(roundID []byte) ([]byte, error) {
+	if err := ValidateRoundID(roundID); err != nil {
+		return nil, err
+	}
+	key := make([]byte, 0, len(TallyStartHeightPrefix)+RoundIDLen)
+	key = append(key, TallyStartHeightPrefix...)
+	key = append(key, roundID...)
 	return key, nil
 }
 

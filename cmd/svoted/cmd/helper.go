@@ -74,7 +74,7 @@ func helperPostSetup(
 		prover := &halo2Prover{}
 
 		homeDir := svrCtx.Config.RootDir
-		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, votecommitment.VoteCommitmentHash, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, homeDir, logger)
 		if err != nil {
 			return fmt.Errorf("helper: %w", err)
 		}
@@ -300,6 +300,21 @@ func (r *keeperTreeReader) GetRoundVoteEndTime(roundID string) (uint64, error) {
 		return 0, fmt.Errorf("read round %s: %w", roundID, err)
 	}
 	return round.VoteEndTime, nil
+}
+
+// GetRoundIsActive returns true if the round exists and has ACTIVE status.
+func (r *keeperTreeReader) GetRoundIsActive(roundID string) (bool, error) {
+	roundBytes, err := hex.DecodeString(roundID)
+	if err != nil {
+		return false, fmt.Errorf("invalid round_id hex: %v", err)
+	}
+	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
+	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
+	round, err := r.app.VoteKeeper.GetVoteRound(kvStore, roundBytes)
+	if err != nil {
+		return false, err
+	}
+	return round.Status == votetypes.SessionStatus_SESSION_STATUS_ACTIVE, nil
 }
 
 // halo2Prover wraps the CGo proof generation function.
