@@ -35,9 +35,6 @@ func validCreateSession() *types.MsgCreateVotingSession {
 		VoteEndTime:       2_000_000,
 		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
 			{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
 			{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
@@ -61,24 +58,8 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			modify: func(m *types.MsgCreateVotingSession) {},
 		},
 		// ea_pk is no longer in MsgCreateVotingSession; sourced from CeremonyState.
-		{
-			name:        "invalid: empty vk_zkp1",
-			modify:      func(m *types.MsgCreateVotingSession) { m.VkZkp1 = nil },
-			expectErr:   true,
-			errContains: "vk_zkp1",
-		},
-		{
-			name:        "invalid: empty vk_zkp2",
-			modify:      func(m *types.MsgCreateVotingSession) { m.VkZkp2 = nil },
-			expectErr:   true,
-			errContains: "vk_zkp2",
-		},
-		{
-			name:        "invalid: empty vk_zkp3",
-			modify:      func(m *types.MsgCreateVotingSession) { m.VkZkp3 = nil },
-			expectErr:   true,
-			errContains: "vk_zkp3",
-		},
+		// vk_zkp1/2/3 removed: verifying keys are compiled into the Rust Halo2
+		// verifier binary and cannot be overridden per-session.
 		{
 			name:        "invalid: zero proposals",
 			modify:      func(m *types.MsgCreateVotingSession) { m.Proposals = nil },

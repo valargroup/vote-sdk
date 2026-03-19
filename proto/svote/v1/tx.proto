@@ -38,12 +38,9 @@ message MsgCreateVotingSession {
   uint64 vote_end_time        = 5;
   bytes  nullifier_imt_root   = 6;
   bytes  nc_root              = 7;
-  bytes  vk_zkp1              = 8;  // Verification key for ZKP #1
-  bytes  vk_zkp2              = 9;  // Verification key for ZKP #2
-  bytes  vk_zkp3              = 10; // Verification key for ZKP #3
-  repeated Proposal proposals = 11;
-  string description          = 12; // Human-readable round description
-  string title                = 13; // Short human-readable round title
+  repeated Proposal proposals = 8;
+  string description          = 9;  // Human-readable round description
+  string title                = 10; // Short human-readable round title
 }
 
 message MsgCreateVotingSessionResponse {

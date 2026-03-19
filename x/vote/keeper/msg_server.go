@@ -111,9 +111,6 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		Creator:           msg.Creator,
 		Status:            types.SessionStatus_SESSION_STATUS_PENDING,
 		// EaPk left empty — set when ceremony confirms.
-		VkZkp1:          msg.VkZkp1,
-		VkZkp2:          msg.VkZkp2,
-		VkZkp3:          msg.VkZkp3,
 		Proposals:       msg.Proposals,
 		Description:     msg.Description,
 		CreatedAtHeight: uint64(ctx.BlockHeight()),

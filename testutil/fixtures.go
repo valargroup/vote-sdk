@@ -51,9 +51,6 @@ func ActiveRoundFixture(roundID []byte) *types.VoteRound {
 		NullifierImtRoot: bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:           bytes.Repeat([]byte{0x04}, 32),
 		EaPk:             bytes.Repeat([]byte{0x05}, 32),
-		VkZkp1:           bytes.Repeat([]byte{0x06}, 64),
-		VkZkp2:           bytes.Repeat([]byte{0x07}, 64),
-		VkZkp3:           bytes.Repeat([]byte{0x08}, 64),
 		Proposals:        SampleProposals(),
 	}
 }
@@ -86,9 +83,6 @@ func ValidCreateVotingSession() *types.MsgCreateVotingSession {
 		VoteEndTime:       uint64(time.Now().Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         SampleProposals(),
 	}
 }
@@ -104,9 +98,6 @@ func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession
 		VoteEndTime:       uint64(refTime.Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         SampleProposals(),
 	}
 }
@@ -122,9 +113,6 @@ func ValidCreateVotingSessionWithEndTime(endTime time.Time) *types.MsgCreateVoti
 		VoteEndTime:       uint64(endTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         SampleProposals(),
 	}
 }
@@ -140,9 +128,6 @@ func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSessi
 		VoteEndTime:       uint64(refTime.Add(-1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         SampleProposals(),
 	}
 }

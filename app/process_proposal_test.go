@@ -374,9 +374,6 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x08}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x09}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
 	roundID := app.SeedVotingSession(setupMsg)

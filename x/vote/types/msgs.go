@@ -25,15 +25,6 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 	if len(msg.NcRoot) == 0 {
 		return fmt.Errorf("%w: nc_root cannot be empty", ErrInvalidField)
 	}
-	if len(msg.VkZkp1) == 0 {
-		return fmt.Errorf("%w: vk_zkp1 cannot be empty", ErrInvalidField)
-	}
-	if len(msg.VkZkp2) == 0 {
-		return fmt.Errorf("%w: vk_zkp2 cannot be empty", ErrInvalidField)
-	}
-	if len(msg.VkZkp3) == 0 {
-		return fmt.Errorf("%w: vk_zkp3 cannot be empty", ErrInvalidField)
-	}
 	if len(msg.Proposals) == 0 || len(msg.Proposals) > MaxProposals {
 		return fmt.Errorf("%w: proposals count must be between 1 and %d, got %d", ErrInvalidField, MaxProposals, len(msg.Proposals))
 	}

@@ -252,9 +252,6 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				// Ceremony validators snapshotted.
 				s.Require().Len(round.CeremonyValidators, 3)
 
-				s.Require().Equal(msg.VkZkp1, round.VkZkp1)
-				s.Require().Equal(msg.VkZkp2, round.VkZkp2)
-				s.Require().Equal(msg.VkZkp3, round.VkZkp3)
 				s.Require().Len(round.Proposals, len(msg.Proposals))
 				for i, p := range round.Proposals {
 					s.Require().Equal(msg.Proposals[i].Id, p.Id)
@@ -289,9 +286,6 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				VoteEndTime:       2_000_000,
 				NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 				NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-				VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
-				VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
-				VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 				Proposals: []*types.Proposal{
 					{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
 					{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},

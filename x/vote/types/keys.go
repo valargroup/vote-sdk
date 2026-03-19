@@ -46,9 +46,6 @@ const (
 	SessionKeyNullifierImtRoot = "nullifier_imt_root"
 	SessionKeyBlockhash        = "snapshot_blockhash"
 	SessionKeyProposalsHash    = "proposals_hash"
-	SessionKeyVkZkp1           = "vk_zkp1"
-	SessionKeyVkZkp2           = "vk_zkp2"
-	SessionKeyVkZkp3           = "vk_zkp3"
 )
 
 // NullifierType distinguishes the three independent nullifier sets per voting round.
