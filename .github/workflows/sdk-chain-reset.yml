@@ -150,8 +150,11 @@ jobs:
             # Helpers tried to register on first start but validators weren't
             # bonded yet. Now that create-val-tx has run, restart so the
             # helpers re-run tryRegister against bonded validators.
+            # Stagger restarts so each helper's Edge Config write completes
+            # before the next one starts (avoids read-modify-write races).
             for svc in svoted-val1 svoted-val2 svoted-val3; do
               sudo systemctl restart "$svc"
+              sleep 5
             done
 
       - name: Verify services healthy
