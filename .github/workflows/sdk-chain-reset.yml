@@ -67,6 +67,29 @@ jobs:
         env:
           VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
 
+      - name: Reset Edge Config (clear stale validator state)
+        if: ${{ inputs.reset_chain == true }}
+        env:
+          VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+          EDGE_CONFIG_ID: ${{ secrets.EDGE_CONFIG_ID }}
+        run: |
+          # Chain reset generates fresh validator keys, so all previous
+          # entries in Edge Config are stale. Clear them so the helpers
+          # register into a clean slate.
+          curl -sf -X PATCH \
+            "https://api.vercel.com/v1/edge-config/${EDGE_CONFIG_ID}/items" \
+            -H "Authorization: Bearer ${VERCEL_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "items": [
+                {"operation": "upsert", "key": "voting-config", "value": {"version": 1, "vote_servers": [], "pir_servers": [{"url": "https://46-101-255-48.sslip.io/nullifier", "label": "Primary"}]}},
+                {"operation": "upsert", "key": "approved-servers", "value": []},
+                {"operation": "upsert", "key": "pending-registrations", "value": []},
+                {"operation": "upsert", "key": "server-pulses", "value": {}}
+              ]
+            }'
+          echo "Edge Config reset"
+
       - name: Start services
         uses: appleboy/ssh-action@v1.0.3
         with:
