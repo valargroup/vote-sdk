@@ -29,7 +29,7 @@ type ShareStore struct {
 	mu             sync.Mutex
 	schedule       map[string]time.Time // key: "round_id:share_index:proposal_id:tree_position"
 	minDelay       time.Duration
-	roundCache     map[string]uint64                // roundID → vote_end_time (unix seconds)
+	roundCache     map[string][2]uint64             // roundID → [ceremony_phase_start, vote_end_time] (unix seconds)
 	fetchRoundInfo RoundInfoFetcher                 // queries the chain; may be nil in tests
 	logger         func(msg string, keyvals ...any) // optional error logger
 	logInfo        func(msg string, keyvals ...any) // optional info logger
@@ -42,6 +42,15 @@ const (
 	EnqueueInserted EnqueueResult = iota
 	EnqueueDuplicate
 	EnqueueConflict
+)
+
+// Last-moment buffer parameters. Must match the Swift constants in
+// zodl-ios/.../VotingModels.swift (lastMomentBufferFraction, lastMomentBufferMaxSeconds).
+const (
+	// lastMomentBufferDivisor is the denominator for the buffer fraction (10% = 1/10).
+	lastMomentBufferDivisor = 10
+	// lastMomentBufferMax is the ceiling for the computed buffer.
+	lastMomentBufferMax = time.Hour
 )
 
 // NewShareStore opens (or creates) a SQLite database and runs migrations.
@@ -67,7 +76,7 @@ func NewShareStore(dbPath string, minDelay time.Duration, fetcher RoundInfoFetch
 		db:             db,
 		schedule:       make(map[string]time.Time),
 		minDelay:       minDelay,
-		roundCache:     make(map[string]uint64),
+		roundCache:     make(map[string][2]uint64),
 		fetchRoundInfo: fetcher,
 	}
 
@@ -144,10 +153,31 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS rounds (
 			round_id       TEXT PRIMARY KEY,
-			vote_end_time  INTEGER NOT NULL
+			vote_end_time  INTEGER NOT NULL,
+			ceremony_start INTEGER NOT NULL DEFAULT 0
 		)
 	`); err != nil {
 		return fmt.Errorf("create rounds table: %w", err)
+	}
+
+	hasCeremonyStartShares, err := tableHasColumn(db, "shares", "ceremony_start")
+	if err != nil {
+		return fmt.Errorf("check shares schema: %w", err)
+	}
+	if !hasCeremonyStartShares {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN ceremony_start INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add shares.ceremony_start: %w", err)
+		}
+	}
+
+	hasCeremonyStartRounds, err := tableHasColumn(db, "rounds", "ceremony_start")
+	if err != nil {
+		return fmt.Errorf("check rounds schema: %w", err)
+	}
+	if !hasCeremonyStartRounds {
+		if _, err := db.Exec("ALTER TABLE rounds ADD COLUMN ceremony_start INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add rounds.ceremony_start: %w", err)
+		}
 	}
 
 	return nil
@@ -304,8 +334,8 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		return EnqueueConflict, fmt.Errorf("marshal share_comms: %w", err)
 	}
 
-	// Fetch vote_end_time before acquiring the lock (direct keeper KV read).
-	voteEndTime, err := s.getVoteEndTime(payload.VoteRoundID)
+	// Fetch round times before acquiring the lock (direct keeper KV read).
+	ceremonyStart, voteEndTime, err := s.getRoundTimes(payload.VoteRoundID)
 	if err != nil {
 		return EnqueueConflict, err
 	}
@@ -316,8 +346,8 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO shares
 		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
-		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind, state, attempts, vote_end_time)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind, state, attempts, vote_end_time, ceremony_start)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
 		 ON CONFLICT(round_id, share_index, proposal_id, tree_position) DO NOTHING`,
 		payload.VoteRoundID,
 		payload.EncShare.ShareIndex,
@@ -330,6 +360,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		string(commsJSON),
 		payload.PrimaryBlind,
 		voteEndTime,
+		ceremonyStart,
 	)
 	if err != nil {
 		return EnqueueConflict, fmt.Errorf("insert share: %w", err)
@@ -338,7 +369,10 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	// Only schedule if the row was actually inserted (not a duplicate).
 	affected, _ := res.RowsAffected()
 	if affected > 0 {
-		delay := s.uniformDelay(voteEndTime)
+		delay, err := s.uniformDelay(ceremonyStart, voteEndTime)
+		if err != nil {
+			return EnqueueInserted, fmt.Errorf("compute delay: %w", err)
+		}
 		key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
 		s.schedule[key] = time.Now().Add(delay)
 		if s.logInfo != nil {
@@ -569,8 +603,8 @@ func (s *ShareStore) PurgeExpiredRounds() int64 {
 	}
 
 	// Prune in-memory caches for expired rounds.
-	for roundID, vet := range s.roundCache {
-		if vet > 0 && vet < uint64(now) {
+	for roundID, times := range s.roundCache {
+		if times[1] > 0 && times[1] < uint64(now) {
 			delete(s.roundCache, roundID)
 		}
 	}
@@ -601,22 +635,22 @@ func (s *ShareStore) recover() error {
 	}
 
 	// Repopulate round cache from rounds table.
-	roundRows, err := s.db.Query("SELECT round_id, vote_end_time FROM rounds")
+	roundRows, err := s.db.Query("SELECT round_id, ceremony_start, vote_end_time FROM rounds")
 	if err != nil {
 		return fmt.Errorf("query rounds cache: %w", err)
 	}
 	defer roundRows.Close()
 	for roundRows.Next() {
 		var roundID string
-		var vet uint64
-		if err := roundRows.Scan(&roundID, &vet); err != nil {
+		var vst, vet uint64
+		if err := roundRows.Scan(&roundID, &vst, &vet); err != nil {
 			continue
 		}
-		s.roundCache[roundID] = vet
+		s.roundCache[roundID] = [2]uint64{vst, vet}
 	}
 
-	// Load all non-terminal shares with their denormalized vote_end_time.
-	rows, err := s.db.Query("SELECT round_id, share_index, proposal_id, tree_position, vote_end_time FROM shares WHERE state = 0")
+	// Load all non-terminal shares with their denormalized vote times.
+	rows, err := s.db.Query("SELECT round_id, share_index, proposal_id, tree_position, ceremony_start, vote_end_time FROM shares WHERE state = 0")
 	if err != nil {
 		return fmt.Errorf("query recoverable shares: %w", err)
 	}
@@ -625,24 +659,29 @@ func (s *ShareStore) recover() error {
 	for rows.Next() {
 		var roundID string
 		var shareIndex, proposalID uint32
-		var treePosition, voteEndTime uint64
-		if err := rows.Scan(&roundID, &shareIndex, &proposalID, &treePosition, &voteEndTime); err != nil {
+		var treePosition, ceremonyStart, voteEndTime uint64
+		if err := rows.Scan(&roundID, &shareIndex, &proposalID, &treePosition, &ceremonyStart, &voteEndTime); err != nil {
 			continue
 		}
 		// Heal rows with vote_end_time=0 (transient fetch failure at enqueue
 		// time) from the round cache.
 		if voteEndTime == 0 {
-			if cached, ok := s.roundCache[roundID]; ok && cached != 0 {
-				voteEndTime = cached
+			if cached, ok := s.roundCache[roundID]; ok && cached[1] != 0 {
+				ceremonyStart = cached[0]
+				voteEndTime = cached[1]
 				if _, err := s.db.Exec(
-					"UPDATE shares SET vote_end_time = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
-					voteEndTime, roundID, shareIndex, proposalID, treePosition,
+					"UPDATE shares SET ceremony_start = ?, vote_end_time = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+					ceremonyStart, voteEndTime, roundID, shareIndex, proposalID, treePosition,
 				); err != nil {
-					s.logError("loadSchedule: healing vote_end_time failed", "round_id", roundID, "error", err)
+					s.logError("loadSchedule: healing vote times failed", "round_id", roundID, "error", err)
 				}
 			}
 		}
-		delay := s.uniformDelay(voteEndTime)
+		delay, err := s.uniformDelay(ceremonyStart, voteEndTime)
+		if err != nil {
+			s.logError("loadSchedule: invalid round times, skipping share", "round_id", roundID, "error", err)
+			continue
+		}
 		s.schedule[schedKey(roundID, shareIndex, proposalID, treePosition)] = time.Now().Add(delay)
 	}
 	return nil
@@ -655,7 +694,7 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 
 	err := s.db.QueryRow(
 		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
-		        tree_position, share_comms, primary_blind, state, attempts, vote_end_time
+		        tree_position, share_comms, primary_blind, state, attempts, ceremony_start, vote_end_time
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
@@ -669,6 +708,7 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 		&q.Payload.PrimaryBlind,
 		&state,
 		&attempts,
+		&q.CeremonyStart,
 		&q.VoteEndTime,
 	)
 	if err != nil {
@@ -714,66 +754,89 @@ func payloadEqual(existing, incoming SharePayload) bool {
 	return true
 }
 
-// getVoteEndTime returns the cached vote_end_time for a round, fetching from
-// SQLite or the keeper if not in memory. Returns an error if the round is
-// unknown (the share should be rejected).
-func (s *ShareStore) getVoteEndTime(roundID string) (uint64, error) {
+// getRoundTimes returns the cached (ceremony_start, vote_end_time) for a round,
+// fetching from SQLite or the keeper if not in memory. Returns an error if the
+// round is unknown (the share should be rejected).
+func (s *ShareStore) getRoundTimes(roundID string) (ceremonyStart, voteEndTime uint64, err error) {
 	s.mu.Lock()
-	if vet, ok := s.roundCache[roundID]; ok {
+	if times, ok := s.roundCache[roundID]; ok {
 		s.mu.Unlock()
-		return vet, nil
+		return times[0], times[1], nil
 	}
 
 	// Check SQLite rounds table.
-	var vet uint64
-	err := s.db.QueryRow("SELECT vote_end_time FROM rounds WHERE round_id = ?", roundID).Scan(&vet)
+	var vst, vet uint64
+	err = s.db.QueryRow("SELECT ceremony_start, vote_end_time FROM rounds WHERE round_id = ?", roundID).Scan(&vst, &vet)
 	if err == nil {
-		s.roundCache[roundID] = vet
+		s.roundCache[roundID] = [2]uint64{vst, vet}
 		s.mu.Unlock()
-		return vet, nil
+		return vst, vet, nil
 	}
 	s.mu.Unlock()
 
 	// Fetch from keeper (outside lock — direct KV read).
 	if s.fetchRoundInfo == nil {
-		return 0, fmt.Errorf("%w: no round fetcher configured", ErrUnknownRound)
+		return 0, 0, fmt.Errorf("%w: no round fetcher configured", ErrUnknownRound)
 	}
-	vet, err = s.fetchRoundInfo(roundID)
+	vst, vet, err = s.fetchRoundInfo(roundID)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	// Cache in both memory and SQLite.
 	s.mu.Lock()
-	s.roundCache[roundID] = vet
+	s.roundCache[roundID] = [2]uint64{vst, vet}
 	s.mu.Unlock()
 
 	_, _ = s.db.Exec(
-		"INSERT OR IGNORE INTO rounds (round_id, vote_end_time) VALUES (?, ?)",
-		roundID, vet,
+		"INSERT OR IGNORE INTO rounds (round_id, ceremony_start, vote_end_time) VALUES (?, ?, ?)",
+		roundID, vst, vet,
 	)
 
-	return vet, nil
+	return vst, vet, nil
+}
+
+// computeBuffer returns the dynamic buffer duration for a voting round:
+// min(10% × round_duration, 1 hour).
+// Returns an error if ceremonyStart is 0 or voteEndTime <= ceremonyStart.
+func computeBuffer(ceremonyStart, voteEndTime uint64) (time.Duration, error) {
+	if ceremonyStart == 0 {
+		return 0, fmt.Errorf("computeBuffer: ceremony_start is 0 (vote_end_time=%d)", voteEndTime)
+	}
+	if voteEndTime <= ceremonyStart {
+		return 0, fmt.Errorf("computeBuffer: vote_end_time (%d) <= ceremony_start (%d)", voteEndTime, ceremonyStart)
+	}
+	duration := time.Duration(voteEndTime-ceremonyStart) * time.Second
+	buf := duration / lastMomentBufferDivisor
+	if buf > lastMomentBufferMax {
+		return lastMomentBufferMax, nil
+	}
+	return buf, nil
 }
 
 // uniformDelay samples a delay uniformly from [0, remaining_window) where
-// remaining_window = vote_end_time − now − 60s. A minimum floor (minDelay)
+// remaining_window = vote_end_time − now − buffer. The buffer is computed
+// dynamically as min(10% × round_duration, 1 hour). A minimum floor (minDelay)
 // prevents near-zero samples from making shares trivially linkable to their
 // submission session.
-func (s *ShareStore) uniformDelay(voteEndTime uint64) time.Duration {
+func (s *ShareStore) uniformDelay(ceremonyStart, voteEndTime uint64) (time.Duration, error) {
 	if s.minDelay == 0 {
-		return 0
+		return 0, nil
 	}
 
-	remaining := time.Until(time.Unix(int64(voteEndTime), 0)) - 60*time.Second
+	buffer, err := computeBuffer(ceremonyStart, voteEndTime)
+	if err != nil {
+		return 0, err
+	}
+	remaining := time.Until(time.Unix(int64(voteEndTime), 0)) - buffer
 	if remaining <= 0 {
-		return 0
+		return 0, nil
 	}
 
 	var buf [8]byte
 	if _, err := rand.Read(buf[:]); err != nil {
 		s.logError("uniformDelay: crypto/rand failed, falling back to min delay", "error", err)
-		return s.minDelay
+		return s.minDelay, nil
 	}
 	u := float64(binary.LittleEndian.Uint64(buf[:])) / (float64(1<<64) + 1.0)
 
@@ -781,5 +844,5 @@ func (s *ShareStore) uniformDelay(voteEndTime uint64) time.Duration {
 	if delay < s.minDelay && remaining > s.minDelay {
 		delay = s.minDelay
 	}
-	return delay
+	return delay, nil
 }

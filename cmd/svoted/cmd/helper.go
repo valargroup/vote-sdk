@@ -74,7 +74,7 @@ func helperPostSetup(
 		prover := &halo2Prover{}
 
 		homeDir := svrCtx.Config.RootDir
-		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundTimes, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, homeDir, logger)
 		if err != nil {
 			return fmt.Errorf("helper: %w", err)
 		}
@@ -290,25 +290,26 @@ func (r *keeperTreeReader) LeafAt(position uint64) ([]byte, error) {
 	return kvStore.Get(votetypes.CommitmentLeafKey(r.roundID, position))
 }
 
-// GetRoundVoteEndTime reads a vote round directly from the keeper's KV store
-// and returns its vote_end_time. Returns ErrUnknownRound when the round
-// doesn't exist; other errors (KV failures) are returned unwrapped so the
-// caller can distinguish client errors from infrastructure failures.
-func (r *keeperTreeReader) GetRoundVoteEndTime(roundID string) (uint64, error) {
+// GetRoundTimes reads a vote round directly from the keeper's KV store
+// and returns its vote_start_time and vote_end_time. Returns ErrUnknownRound
+// when the round doesn't exist; other errors (KV failures) are returned
+// unwrapped so the caller can distinguish client errors from infrastructure
+// failures.
+func (r *keeperTreeReader) GetRoundTimes(roundID string) (uint64, uint64, error) {
 	roundBytes, err := hex.DecodeString(roundID)
 	if err != nil {
-		return 0, fmt.Errorf("%w: invalid round_id hex: %v", helper.ErrUnknownRound, err)
+		return 0, 0, fmt.Errorf("%w: invalid round_id hex: %v", helper.ErrUnknownRound, err)
 	}
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
 	round, err := r.app.VoteKeeper.GetVoteRound(kvStore, roundBytes)
 	if err != nil {
 		if errors.Is(err, votetypes.ErrRoundNotFound) {
-			return 0, fmt.Errorf("%w: %s", helper.ErrUnknownRound, roundID)
+			return 0, 0, fmt.Errorf("%w: %s", helper.ErrUnknownRound, roundID)
 		}
-		return 0, fmt.Errorf("read round %s: %w", roundID, err)
+		return 0, 0, fmt.Errorf("read round %s: %w", roundID, err)
 	}
-	return round.VoteEndTime, nil
+	return round.CeremonyPhaseStart, round.VoteEndTime, nil
 }
 
 // GetRoundIsActive returns true if the round exists and has ACTIVE status.

@@ -332,8 +332,8 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 // returns that same commitment at position 0 so the check passes.
 func vcTestRouter(t *testing.T) (*mux.Router, *ShareStore, *vcMockTree) {
 	t.Helper()
-	fetcher := func(roundID string) (uint64, error) {
-		return uint64(time.Now().Add(time.Hour).Unix()), nil
+	fetcher := func(roundID string) (uint64, uint64, error) {
+		return 0, uint64(time.Now().Add(time.Hour).Unix()), nil
 	}
 	store, err := NewShareStore(":memory:", 0, fetcher)
 	require.NoError(t, err)
@@ -432,8 +432,8 @@ func TestSubmitShare_VCCrossCheck_NoLeaf(t *testing.T) {
 
 func TestSubmitShare_UnknownRound(t *testing.T) {
 	// Build a store whose round fetcher rejects unknown rounds.
-	fetcher := func(roundID string) (uint64, error) {
-		return 0, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
+	fetcher := func(roundID string) (uint64, uint64, error) {
+		return 0, 0, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
 	}
 	store, err := NewShareStore(":memory:", 0, fetcher)
 	require.NoError(t, err)
@@ -443,7 +443,7 @@ func TestSubmitShare_UnknownRound(t *testing.T) {
 	RegisterRoutes(router, store, log.NewNopLogger())
 
 	// The VC check is not wired (nil getVCHash), so we get past that.
-	// The round rejection happens in Enqueue → getVoteEndTime.
+	// The round rejection happens in Enqueue → getRoundTimes.
 	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -476,8 +476,8 @@ func TestSubmitShare_VCCrossCheck_GracefulDegradation(t *testing.T) {
 }
 
 func TestEnqueue_UnknownRoundRejected(t *testing.T) {
-	fetcher := func(roundID string) (uint64, error) {
-		return 0, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
+	fetcher := func(roundID string) (uint64, uint64, error) {
+		return 0, 0, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
 	}
 	s, err := NewShareStore(":memory:", 0, fetcher)
 	require.NoError(t, err)

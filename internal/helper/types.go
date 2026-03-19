@@ -63,8 +63,9 @@ func DefaultConfig() Config {
 }
 
 // RoundInfoFetcher queries the chain for vote round metadata.
-// Returns the vote_end_time (unix seconds) for the given round ID (hex).
-type RoundInfoFetcher func(roundID string) (voteEndTime uint64, err error)
+// Returns ceremony_phase_start and vote_end_time (unix seconds) for the given round ID (hex).
+// ceremony_phase_start is used as an approximation of when voting began.
+type RoundInfoFetcher func(roundID string) (ceremonyStart, voteEndTime uint64, err error)
 
 // RoundStatusChecker returns true if the round is still accepting shares
 // (i.e., status == ACTIVE). Used by the processor to skip shares for rounds
@@ -108,10 +109,11 @@ const (
 
 // QueuedShare is a share payload with processing metadata.
 type QueuedShare struct {
-	Payload     SharePayload
-	State       ShareState
-	Attempts    int
-	VoteEndTime uint64 // unix seconds; 0 if unknown
+	Payload       SharePayload
+	State         ShareState
+	Attempts      int
+	CeremonyStart uint64 // ceremony_phase_start unix seconds; 0 if unknown (pre-upgrade rounds)
+	VoteEndTime   uint64 // unix seconds; 0 if unknown
 }
 
 // QueueStatus holds per-round queue statistics.

@@ -161,8 +161,18 @@ func (p *Processor) processBatch(ctx context.Context) {
 				}
 			}
 
-			// Skip jitter if less than 60s remain before vote ends — submit immediately.
-			if share.VoteEndTime == 0 || time.Until(time.Unix(int64(share.VoteEndTime), 0)) > 60*time.Second {
+			// Skip jitter if within the dynamic buffer window — submit immediately.
+			buffer, bufErr := computeBuffer(share.CeremonyStart, share.VoteEndTime)
+			if bufErr != nil {
+				p.logger.Error("invalid round times, skipping share",
+					"round_id", share.Payload.VoteRoundID,
+					"share_index", share.Payload.EncShare.ShareIndex,
+					"error", bufErr,
+				)
+				p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+				return nil
+			}
+			if time.Until(time.Unix(int64(share.VoteEndTime), 0)) > buffer {
 				delay := p.intraShareDelay()
 				timer := time.NewTimer(delay)
 				select {
