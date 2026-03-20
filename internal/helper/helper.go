@@ -50,7 +50,6 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 
 	store, err := NewShareStore(
 		dbPath,
-		time.Duration(cfg.MinDelay)*time.Second,
 		roundFetcher,
 	)
 	if err != nil {

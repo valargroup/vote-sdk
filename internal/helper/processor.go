@@ -161,8 +161,8 @@ func (p *Processor) processBatch(ctx context.Context) {
 				}
 			}
 
-			// Skip jitter if less than 60s remain before vote ends — submit immediately.
-			if share.VoteEndTime == 0 || time.Until(time.Unix(int64(share.VoteEndTime), 0)) > 60*time.Second {
+			// Skip jitter for immediate-mode shares (last-moment votes).
+			if share.Payload.SubmitAt != 0 {
 				delay := p.intraShareDelay()
 				timer := time.NewTimer(delay)
 				select {
