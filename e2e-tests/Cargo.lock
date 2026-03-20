@@ -1508,7 +1508,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 [[package]]
 name = "librustvoting"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git#378f4a9cfe2cbe1f1bef1df731e464a715ee8266"
+source = "git+https://github.com/valargroup/librustvoting.git#d87a01b70a8d261ae3b65828e5088e56c3eb658d"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -1761,7 +1761,7 @@ dependencies = [
 [[package]]
 name = "orchard"
 version = "0.11.0"
-source = "git+https://github.com/valargroup/voting-circuits.git#6abd5a86dbe518e648947b66027aa5335d68ef53"
+source = "git+https://github.com/valargroup/voting-circuits.git#05503e205535fce5f0d5ab393eb88f952d15640b"
 dependencies = [
  "aes",
  "bitvec",
@@ -3072,7 +3072,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git#378f4a9cfe2cbe1f1bef1df731e464a715ee8266"
+source = "git+https://github.com/valargroup/librustvoting.git#d87a01b70a8d261ae3b65828e5088e56c3eb658d"
 dependencies = [
  "anyhow",
  "ff",
@@ -3088,7 +3088,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree-client"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git#378f4a9cfe2cbe1f1bef1df731e464a715ee8266"
+source = "git+https://github.com/valargroup/librustvoting.git#d87a01b70a8d261ae3b65828e5088e56c3eb658d"
 dependencies = [
  "base64",
  "clap",
@@ -3105,7 +3105,7 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/voting-circuits.git#6abd5a86dbe518e648947b66027aa5335d68ef53"
+source = "git+https://github.com/valargroup/voting-circuits.git#05503e205535fce5f0d5ab393eb88f952d15640b"
 dependencies = [
  "blake2b_simd",
  "ff",
