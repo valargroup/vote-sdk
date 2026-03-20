@@ -425,6 +425,7 @@ fn generate_cast_vote(
         ea_pk,
         alpha_v,
         (1u64 << 16) - 1,
+        false,
     )
     .expect("cast-vote proof generation failed");
 
