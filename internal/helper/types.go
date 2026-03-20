@@ -64,6 +64,12 @@ type RoundInfoFetcher func(roundID string) (voteEndTime uint64, err error)
 // that have transitioned to TALLYING or beyond, avoiding wasted ZKP computation.
 type RoundStatusChecker func(roundID string) (isActive bool, err error)
 
+// ShareNullifierChecker reports whether a share nullifier is recorded on-chain
+// for the given voting round (hex-encoded 32-byte round id). Used by the
+// share-status endpoint to confirm MsgRevealShare acceptance without exposing
+// a public chain query API to wallets.
+type ShareNullifierChecker func(roundIDHex string, shareNullifier []byte) (bool, error)
+
 // VCHashFunc computes the vote commitment Poseidon hash. The implementation
 // is provided by the votecommitment CGo package but abstracted here so the
 // helper package doesn't depend on the Rust FFI library directly.

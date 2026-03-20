@@ -12,12 +12,13 @@ import (
 
 // Helper manages the share processing pipeline lifecycle.
 type Helper struct {
-	Store             *ShareStore
-	Processor         *Processor
-	APIToken          string
-	ExposeQueueStatus bool
-	VCHash            VCHashFunc
-	Logger            log.Logger
+	Store                 *ShareStore
+	Processor             *Processor
+	APIToken              string
+	ExposeQueueStatus     bool
+	VCHash                VCHashFunc
+	ShareNullifierChecker ShareNullifierChecker
+	Logger                log.Logger
 }
 
 // New creates a new Helper from the given configuration.
@@ -31,7 +32,7 @@ type Helper struct {
 //   - vcHash: computes vote commitment Poseidon hash for ingress validation
 //   - homeDir: the chain's home directory (for default DB path)
 //   - logger: module logger
-func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, vcHash VCHashFunc, homeDir string, logger log.Logger) (*Helper, error) {
+func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, vcHash VCHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
 	logger = logger.With("module", "helper")
 
 	if cfg.Disable {
@@ -83,12 +84,13 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 	)
 
 	return &Helper{
-		Store:             store,
-		Processor:         processor,
-		APIToken:          cfg.APIToken,
-		ExposeQueueStatus: cfg.ExposeQueueStatus,
-		VCHash:            vcHash,
-		Logger:            logger,
+		Store:                 store,
+		Processor:             processor,
+		APIToken:              cfg.APIToken,
+		ExposeQueueStatus:     cfg.ExposeQueueStatus,
+		VCHash:                vcHash,
+		ShareNullifierChecker: shareNF,
+		Logger:                logger,
 	}, nil
 }
 
@@ -101,6 +103,7 @@ func (h *Helper) RegisterRoutes(router *mux.Router) {
 		func() bool { return h.ExposeQueueStatus },
 		func() TreeReader { return h.Processor.tree },
 		func() VCHashFunc { return h.VCHash },
+		func() ShareNullifierChecker { return h.ShareNullifierChecker },
 		h.Logger,
 	)
 }
