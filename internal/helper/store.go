@@ -142,8 +142,7 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS rounds (
 			round_id       TEXT PRIMARY KEY,
-			vote_end_time  INTEGER NOT NULL,
-			ceremony_start INTEGER NOT NULL DEFAULT 0
+			vote_end_time  INTEGER NOT NULL
 		)
 	`); err != nil {
 		return fmt.Errorf("create rounds table: %w", err)
