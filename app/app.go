@@ -336,6 +336,12 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			return nil
 		}
 		return h.VCHash
+	}, func() helper.ShareNullifierChecker {
+		h := app.GetHelper()
+		if h == nil {
+			return nil
+		}
+		return h.ShareNullifierChecker
 	}, app.Logger().With("module", "helper"))
 
 	// Register swagger API.

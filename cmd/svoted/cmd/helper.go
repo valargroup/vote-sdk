@@ -74,7 +74,16 @@ func helperPostSetup(
 		prover := &halo2Prover{}
 
 		homeDir := svrCtx.Config.RootDir
-		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, homeDir, logger)
+		shareNullifierChecker := func(roundIDHex string, shareNullifier []byte) (bool, error) {
+			roundBytes, err := hex.DecodeString(roundIDHex)
+			if err != nil {
+				return false, fmt.Errorf("decode round id: %w", err)
+			}
+			ctx := (*svoteApp).NewUncachedContext(false, cmtproto.Header{})
+			kvStore := (*svoteApp).VoteKeeper.OpenKVStore(ctx)
+			return (*svoteApp).VoteKeeper.HasNullifier(kvStore, votetypes.NullifierTypeShare, roundBytes, shareNullifier)
+		}
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, shareNullifierChecker, homeDir, logger)
 		if err != nil {
 			return fmt.Errorf("helper: %w", err)
 		}

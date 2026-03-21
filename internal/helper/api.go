@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"cosmossdk.io/log"
 	"github.com/gorilla/mux"
@@ -25,6 +26,7 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 		func() bool { return false },
 		nil,
 		nil,
+		nil,
 		logger,
 	)
 }
@@ -33,7 +35,7 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 // mux router, resolving the store at request time. This allows routes to be
 // mounted before the helper is fully initialized.
 func RegisterRoutesWithStoreGetter(router *mux.Router, getStore func() *ShareStore, logger log.Logger) {
-	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, func() bool { return false }, nil, nil, logger)
+	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, func() bool { return false }, nil, nil, nil, logger)
 }
 
 // ErrInvalidCommitment is returned when the share's recomputed vote commitment
@@ -41,7 +43,7 @@ func RegisterRoutesWithStoreGetter(router *mux.Router, getStore func() *ShareSto
 var ErrInvalidCommitment = fmt.Errorf("invalid vote commitment")
 
 // RegisterRoutesWithGetters registers helper routes using runtime getters for
-// store, API token, tree reader, and VC hash function.
+// store, API token, tree reader, VC hash function, and share-nullifier checker.
 func RegisterRoutesWithGetters(
 	router *mux.Router,
 	getStore func() *ShareStore,
@@ -49,6 +51,7 @@ func RegisterRoutesWithGetters(
 	getExposeQueueStatus func() bool,
 	getTree func() TreeReader,
 	getVCHash func() VCHashFunc,
+	getShareNullifier ShareNullifierCheckerGetter,
 	logger log.Logger,
 ) {
 	h := &apiHandler{
@@ -57,12 +60,17 @@ func RegisterRoutesWithGetters(
 		getExposeQueueStatus: getExposeQueueStatus,
 		getTree:              getTree,
 		getVCHash:            getVCHash,
+		getShareNullifier:    getShareNullifier,
 		logger:               logger,
 	}
 	router.HandleFunc("/api/v1/shares", h.handleSubmitShare).Methods("POST")
+	router.HandleFunc("/api/v1/share-status/{roundId}/{nullifier}", h.handleShareStatus).Methods("GET")
 	router.HandleFunc("/api/v1/status", h.handleStatus).Methods("GET")
 	router.HandleFunc("/api/v1/queue-status", h.handleQueueStatus).Methods("GET")
 }
+
+// ShareNullifierCheckerGetter resolves the checker at request time (nil when helper disabled).
+type ShareNullifierCheckerGetter func() ShareNullifierChecker
 
 type apiHandler struct {
 	getStore             func() *ShareStore
@@ -70,12 +78,18 @@ type apiHandler struct {
 	getExposeQueueStatus func() bool
 	getTree              func() TreeReader
 	getVCHash            func() VCHashFunc
+	getShareNullifier    ShareNullifierCheckerGetter
 	logger               log.Logger
 }
 
 type submitResponse struct {
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`
+}
+
+// shareSubmissionStatusResponse is returned by GET /api/v1/share-status/{roundId}/{nullifier}.
+type shareSubmissionStatusResponse struct {
+	Status string `json:"status"`
 }
 
 func jsonError(w http.ResponseWriter, msg string, code int) {
@@ -149,6 +163,65 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 		status = "duplicate"
 	}
 	json.NewEncoder(w).Encode(submitResponse{Status: status})
+}
+
+func (h *apiHandler) handleShareStatus(w http.ResponseWriter, r *http.Request) {
+	if h.getStore() == nil {
+		jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !h.authorizeSubmit(r) {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	roundID := strings.ToLower(strings.TrimSpace(mux.Vars(r)["roundId"]))
+	nullifierHex := strings.ToLower(strings.TrimSpace(mux.Vars(r)["nullifier"]))
+	const idHexLen = 64 // 32-byte field elements / nullifiers
+	if len(roundID) != idHexLen {
+		jsonError(w, "roundId must be 64 hex characters", http.StatusBadRequest)
+		return
+	}
+	if len(nullifierHex) != idHexLen {
+		jsonError(w, "nullifier must be 64 hex characters", http.StatusBadRequest)
+		return
+	}
+	if _, err := hex.DecodeString(roundID); err != nil {
+		jsonError(w, "invalid roundId hex", http.StatusBadRequest)
+		return
+	}
+	nf, err := hex.DecodeString(nullifierHex)
+	if err != nil {
+		jsonError(w, "invalid nullifier hex", http.StatusBadRequest)
+		return
+	}
+	if len(nf) != 32 {
+		jsonError(w, "nullifier must decode to 32 bytes", http.StatusBadRequest)
+		return
+	}
+
+	var checker ShareNullifierChecker
+	if h.getShareNullifier != nil {
+		checker = h.getShareNullifier()
+	}
+	if checker == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(shareSubmissionStatusResponse{Status: "pending"})
+		return
+	}
+
+	onChain, err := checker(roundID, nf)
+	if err != nil {
+		h.logger.Error("share nullifier check failed", "error", err)
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	out := shareSubmissionStatusResponse{Status: "pending"}
+	if onChain {
+		out.Status = "confirmed"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
 }
 
 type statusResponse struct {

@@ -2,6 +2,7 @@ package helper
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -34,6 +35,7 @@ func newQueueStatusRouter(t *testing.T, token string) (*mux.Router, *ShareStore)
 		func() *ShareStore { return store },
 		func() string { return token },
 		func() bool { return true },
+		nil,
 		nil,
 		nil,
 		log.NewNopLogger(),
@@ -71,6 +73,53 @@ func TestSubmitShare_Success(t *testing.T) {
 	// Verify share was actually enqueued.
 	status := store.Status()
 	assert.Equal(t, 1, status["aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"].Total)
+}
+
+func TestShareStatus_PendingThenConfirmed(t *testing.T) {
+	store := newTestStore(t)
+	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	enqueueInserted(t, store, testPayload(roundID, 0))
+
+	var nf [32]byte
+	nf[0] = 0xAB
+	nfHex := hex.EncodeToString(nf[:])
+
+	var checkerCalls int
+	checker := ShareNullifierChecker(func(roundIDHex string, shareNullifier []byte) (bool, error) {
+		checkerCalls++
+		assert.Equal(t, roundID, roundIDHex)
+		assert.Equal(t, nf[:], shareNullifier)
+		return checkerCalls >= 2, nil
+	})
+
+	router := mux.NewRouter()
+	RegisterRoutesWithGetters(
+		router,
+		func() *ShareStore { return store },
+		func() string { return "" },
+		func() bool { return false },
+		nil,
+		nil,
+		func() ShareNullifierChecker { return checker },
+		log.NewNopLogger(),
+	)
+
+	path := "/api/v1/share-status/" + roundID + "/" + nfHex
+	req1 := httptest.NewRequest("GET", path, nil)
+	w1 := httptest.NewRecorder()
+	router.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code)
+	var body1 shareSubmissionStatusResponse
+	require.NoError(t, json.Unmarshal(w1.Body.Bytes(), &body1))
+	assert.Equal(t, "pending", body1.Status)
+
+	req2 := httptest.NewRequest("GET", path, nil)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code)
+	var body2 shareSubmissionStatusResponse
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body2))
+	assert.Equal(t, "confirmed", body2.Status)
 }
 
 func TestSubmitShare_InvalidJSON(t *testing.T) {
@@ -300,6 +349,7 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 		func() bool { return false },
 		nil,
 		nil,
+		nil,
 		log.NewNopLogger(),
 	)
 
@@ -356,6 +406,7 @@ func vcTestRouter(t *testing.T) (*mux.Router, *ShareStore, *vcMockTree) {
 		func() bool { return false },
 		func() TreeReader { return tree },
 		func() VCHashFunc { return vcHash },
+		nil,
 		log.NewNopLogger(),
 	)
 	return router, store, tree
@@ -462,6 +513,7 @@ func TestSubmitShare_VCCrossCheck_GracefulDegradation(t *testing.T) {
 		func() *ShareStore { return store },
 		func() string { return "" },
 		func() bool { return false },
+		nil,
 		nil,
 		nil,
 		log.NewNopLogger(),
