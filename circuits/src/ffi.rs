@@ -295,8 +295,8 @@ pub unsafe extern "C" fn sv_verify_redpallas_sig(
 /// Verify a real delegation circuit proof (ZKP #1).
 ///
 /// The caller sends 12 × 32-byte chunks (384 bytes). This function
-/// decompresses the compressed Pallas point to produce the circuit's
-/// 13 Fp public inputs:
+/// decompresses the compressed Pallas point and derives the nullifier
+/// domain to produce the circuit's 14 Fp public inputs:
 ///
 /// | Wire slot | Field              | Expansion                    |
 /// |-----------|--------------------|------------------------------|
@@ -308,8 +308,11 @@ pub unsafe extern "C" fn sv_verify_redpallas_sig(
 /// | 5         | nc_root            | Fp (1 element)               |
 /// | 6         | nf_imt_root        | Fp (1 element)               |
 /// | 7–11      | gov_null_1..5      | Fp (5 elements)              |
+/// | (derived) | dom                | Fp (1 element, from slot 4)  |
 ///
-/// Total: 12 wire chunks → 13 circuit public inputs.
+/// Total: 12 wire chunks → 14 circuit public inputs.
+/// `dom` is derived internally as `Poseidon("governance authorization", vote_round_id)`
+/// (ZIP §Nullifier Domains, step 5 of out-of-circuit verification).
 ///
 /// # Arguments
 /// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
@@ -469,7 +472,20 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
         }
     };
 
-    // Build the 13-element public input vector (matches circuit instance order).
+    // Derive the nullifier domain from vote_round_id (ZIP §Nullifier Domains).
+    // This implements out-of-circuit verification step 5: verify that dom is
+    // valid for the current application instance.
+    // dom = Poseidon("governance authorization", vote_round_id)
+    let dom = {
+        use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
+        let mut tag_bytes = [0u8; 32];
+        tag_bytes[..24].copy_from_slice(b"governance authorization");
+        let tag = pallas::Base::from_repr(tag_bytes).unwrap();
+        poseidon::Hash::<_, P128Pow5T3, ConstantLength<2>, 3, 2>::init()
+            .hash([tag, vote_round_id])
+    };
+
+    // Build the 14-element public input vector (matches circuit instance order).
     let public_inputs = vec![
         nf_signed,
         rk_x,
@@ -484,6 +500,7 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
         gov_null_3,
         gov_null_4,
         gov_null_5,
+        dom,
     ];
 
     // Run verification using cached params and VK.
