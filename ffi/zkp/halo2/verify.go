@@ -123,7 +123,8 @@ func VerifyToyProof(proof, publicInput []byte) error {
 //	[nf_signed, rk_compressed, cmx_new, van_cmx, vote_round_id,
 //	 nc_root, nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4, gov_null_5]
 //
-// The Rust FFI decompresses rk into (rk_x, rk_y) for the circuit's 13 field elements.
+// The Rust FFI decompresses rk into (rk_x, rk_y) and derives dom from
+// vote_round_id for the circuit's 14 field elements.
 //
 // Returns nil on success, or an error describing the failure.
 func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {

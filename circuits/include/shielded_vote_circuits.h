@@ -284,7 +284,8 @@ SvTreeHandle* sv_vote_tree_create_with_kv(
  * Verify a real delegation circuit proof (ZKP #1, 15 conditions, K=14).
  *
  * The caller sends 12 x 32-byte chunks (384 bytes). The FFI decompresses
- * the compressed Pallas point to produce the circuit's 13 Fp public inputs:
+ * the compressed Pallas point and derives the nullifier domain to produce
+ * the circuit's 14 Fp public inputs:
  *
  *   Slot 0:    nf_signed           -> Fp (1)
  *   Slot 1:    rk (compressed)     -> rk_x, rk_y (2)
@@ -294,8 +295,9 @@ SvTreeHandle* sv_vote_tree_create_with_kv(
  *   Slot 5:    nc_root             -> Fp (1)
  *   Slot 6:    nf_imt_root         -> Fp (1)
  *   Slots 7-11: gov_null_1..5      -> Fp (5)
+ *   (derived): dom                 -> Fp (1, from slot 4)
  *
- * Total: 12 wire chunks -> 13 circuit public inputs.
+ * Total: 12 wire chunks -> 14 circuit public inputs.
  *
  * Parameters:
  *   proof_ptr         - Pointer to serialized Halo2 proof bytes.
