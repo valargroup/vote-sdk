@@ -31,6 +31,7 @@ import (
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/ffi/zkp"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // rustLastError retrieves the thread-local error message stored by the most
@@ -130,6 +131,9 @@ func VerifyToyProof(proof, publicInput []byte) error {
 func VerifyDelegationProof(proof []byte, inputs zkp.DelegationInputs) error {
 	if len(proof) == 0 {
 		return fmt.Errorf("delegation proof is empty")
+	}
+	if len(proof) > types.MaxProofSize {
+		return fmt.Errorf("delegation proof too large: %d bytes (max %d)", len(proof), types.MaxProofSize)
 	}
 
 	// Serialize the DelegationInputs into 12 × 32-byte flat buffer.
@@ -255,6 +259,9 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 	if len(proof) == 0 {
 		return fmt.Errorf("vote proof is empty")
 	}
+	if len(proof) > types.MaxProofSize {
+		return fmt.Errorf("vote proof too large: %d bytes (max %d)", len(proof), types.MaxProofSize)
+	}
 
 	// Serialize VoteCommitmentInputs into 9 × 32-byte flat buffer.
 	// The FFI decompresses r_vpk and ea_pk to (x, y) for the circuit.
@@ -371,6 +378,9 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 func VerifyShareRevealProof(proof []byte, inputs zkp.VoteShareInputs) error {
 	if len(proof) == 0 {
 		return fmt.Errorf("share reveal proof is empty")
+	}
+	if len(proof) > types.MaxProofSize {
+		return fmt.Errorf("share reveal proof too large: %d bytes (max %d)", len(proof), types.MaxProofSize)
 	}
 
 	const chunkSize = 32

@@ -33,6 +33,18 @@ const MaxProposals = 15
 // Circuit-constrained by the vote decision encoding.
 const MaxVoteOptions = 8
 
+// MaxProofSize is the maximum allowed byte length for a Halo2 ZKP.
+// Measured proof sizes (CircuitCost / FFI round-trip):
+//
+//	Delegation  (ZKP #1, K=14): 5,216 bytes
+//	Vote Commit (ZKP #2, K=13): 5,216 bytes
+//	Share Reveal(ZKP #3, K=11): 4,000 bytes
+//
+// The proof generation FFI uses an 8192-byte output buffer. The constant
+// provides ~57% headroom above the largest circuit. Enforced in
+// ValidateBasic to reject oversized payloads before they reach the FFI.
+const MaxProofSize = 8192
+
 // MaxTreePosition is the largest valid commitment tree leaf index.
 // The tree uses zero-based uint32 leaf addressing (depth-24 Poseidon Merkle tree),
 // so valid positions are 0..2^32-1.
