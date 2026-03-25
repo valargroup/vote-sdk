@@ -35,25 +35,9 @@ func sharePathForRound(dir string, roundID []byte) string {
 	return filepath.Join(dir, "share."+hex.EncodeToString(roundID))
 }
 
-// thresholdForN computes the default threshold t = ceil(n/2).
-// This matches the ack requirement (HalfAcked) so that the set of validators
-// that survives ceremony stripping is always large enough to reconstruct the
-// EA key during tally.
-//
-// For n = 1 returns t = 1 (trivial single-share scheme with no threshold
-// security — used for local testing). Panics if n < 1.
-func thresholdForN(n int) int {
-	if n < 1 {
-		panic(fmt.Sprintf("thresholdForN: n must be >= 1, got %d", n))
-	}
-	if n == 1 {
-		return 1
-	}
-	t := (n + 1) / 2 // ceil(n/2)
-	if t < 2 {
-		t = 2 // Shamir requires t >= 2; applies only when n=2 gives ceil(2/2)=1
-	}
-	return t
+// thresholdForN delegates to the canonical keeper.ThresholdForN.
+func thresholdForN(n int) (int, error) {
+	return votekeeper.ThresholdForN(n)
 }
 
 // pallasSkLoader creates a sync.Once-guarded loader for the validator's
@@ -153,7 +137,11 @@ func CeremonyDealPrepareProposalHandler(
 		G := elgamal.PallasGenerator()
 
 		n := len(round.CeremonyValidators)
-		t := thresholdForN(n)
+		t, err := thresholdForN(n)
+		if err != nil {
+			logger.Error("PrepareProposal[deal]: threshold computation failed", "err", err)
+			return txs
+		}
 
 		// Split ea_sk into (t, n) Shamir shares, ECIES-encrypt share_i to
 		// validator_i, and compute VK_i = share_i * G.
