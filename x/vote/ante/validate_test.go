@@ -470,6 +470,30 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			errContains: "rk must be 32 bytes",
 		},
 		{
+			name: "invalid: rk is identity point (all zeros) — rejected at ValidateBasic",
+			msg: func() types.VoteMessage {
+				m := newValidMsgDelegateVote()
+				m.Rk = make([]byte, 32)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "identity point",
+		},
+		{
+			name: "invalid: rk is off-curve (0xFF×32) — rejected at verifyDelegation point check",
+			msg: func() types.VoteMessage {
+				m := newValidMsgDelegateVote()
+				m.Rk = bytes.Repeat([]byte{0xFF}, 32)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "invalid RedPallas signature",
+		},
+		{
 			name: "invalid: empty spend_auth_sig",
 			msg: func() types.VoteMessage {
 				m := newValidMsgDelegateVote()
@@ -730,6 +754,30 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
 			errContains: "r_vpk must be 32 bytes",
+		},
+		{
+			name: "invalid: r_vpk is identity point (all zeros) — rejected at ValidateBasic",
+			msg: func() types.VoteMessage {
+				m := newValidMsgCastVote()
+				m.RVpk = make([]byte, 32)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "identity point",
+		},
+		{
+			name: "invalid: r_vpk is off-curve (0xFF×32) — rejected at verifyCastVote point check",
+			msg: func() types.VoteMessage {
+				m := newValidMsgCastVote()
+				m.RVpk = bytes.Repeat([]byte{0xFF}, 32)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "invalid RedPallas signature",
 		},
 		// --- Signature verification failure ---
 		{
