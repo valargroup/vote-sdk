@@ -525,6 +525,18 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			errContains: "proof",
 		},
 		{
+			name: "invalid: oversized proof exceeds MaxProofSize",
+			msg: func() types.VoteMessage {
+				m := newValidMsgDelegateVote()
+				m.Proof = bytes.Repeat([]byte{0xAB}, types.MaxProofSize+1)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "proof must be 1..",
+		},
+		{
 			name: "invalid: sighash wrong length",
 			msg: func() types.VoteMessage {
 				m := newValidMsgDelegateVote()
@@ -696,6 +708,18 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 			errContains: "vote_commitment",
 		},
 		{
+			name: "invalid: oversized proof exceeds MaxProofSize",
+			msg: func() types.VoteMessage {
+				m := newValidMsgCastVote()
+				m.Proof = bytes.Repeat([]byte{0xAB}, types.MaxProofSize+1)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "proof must be 1..",
+		},
+		{
 			name: "invalid: zero anchor height",
 			msg: func() types.VoteMessage {
 				m := newValidMsgCastVote()
@@ -858,7 +882,31 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 			opts:        mockOpts(),
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
-			errContains: "share_nullifier",
+			errContains: "share_nullifier must be 32 bytes",
+		},
+		{
+			name: "invalid: share_nullifier wrong length (not 32)",
+			msg: func() types.VoteMessage {
+				m := newValidMsgRevealShare()
+				m.ShareNullifier = bytes.Repeat([]byte{0x77}, 16)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "share_nullifier must be 32 bytes",
+		},
+		{
+			name: "invalid: oversized proof exceeds MaxProofSize",
+			msg: func() types.VoteMessage {
+				m := newValidMsgRevealShare()
+				m.Proof = bytes.Repeat([]byte{0xAB}, types.MaxProofSize+1)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "proof must be 1..",
 		},
 		{
 			name: "invalid: wrong enc_share length",

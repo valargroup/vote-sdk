@@ -92,8 +92,8 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 		}
 		seen[k] = struct{}{}
 	}
-	if len(msg.Proof) == 0 {
-		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
+	if len(msg.Proof) == 0 || len(msg.Proof) > MaxProofSize {
+		return fmt.Errorf("%w: proof must be 1..%d bytes, got %d", ErrInvalidField, MaxProofSize, len(msg.Proof))
 	}
 	if len(msg.VoteRoundId) != RoundIDLen {
 		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
@@ -118,8 +118,8 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	if msg.ProposalId < MinProposalID || msg.ProposalId > MaxProposals {
 		return fmt.Errorf("%w: proposal_id must be %d..%d, got %d", ErrInvalidField, MinProposalID, MaxProposals, msg.ProposalId)
 	}
-	if len(msg.Proof) == 0 {
-		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
+	if len(msg.Proof) == 0 || len(msg.Proof) > MaxProofSize {
+		return fmt.Errorf("%w: proof must be 1..%d bytes, got %d", ErrInvalidField, MaxProofSize, len(msg.Proof))
 	}
 	if len(msg.VoteRoundId) != RoundIDLen {
 		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
@@ -138,8 +138,8 @@ func (msg *MsgCastVote) ValidateBasic() error {
 
 // ValidateBasic performs stateless validation for MsgRevealShare.
 func (msg *MsgRevealShare) ValidateBasic() error {
-	if len(msg.ShareNullifier) == 0 {
-		return fmt.Errorf("%w: share_nullifier cannot be empty", ErrInvalidField)
+	if len(msg.ShareNullifier) != 32 {
+		return fmt.Errorf("%w: share_nullifier must be 32 bytes, got %d", ErrInvalidField, len(msg.ShareNullifier))
 	}
 	if len(msg.EncShare) != 64 {
 		return fmt.Errorf("%w: enc_share must be 64 bytes (ElGamal ciphertext), got %d", ErrInvalidField, len(msg.EncShare))
@@ -150,8 +150,8 @@ func (msg *MsgRevealShare) ValidateBasic() error {
 	if msg.VoteDecision >= MaxVoteOptions {
 		return fmt.Errorf("%w: vote_decision must be 0..%d, got %d", ErrInvalidField, MaxVoteOptions-1, msg.VoteDecision)
 	}
-	if len(msg.Proof) == 0 {
-		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
+	if len(msg.Proof) == 0 || len(msg.Proof) > MaxProofSize {
+		return fmt.Errorf("%w: proof must be 1..%d bytes, got %d", ErrInvalidField, MaxProofSize, len(msg.Proof))
 	}
 	if len(msg.VoteRoundId) != RoundIDLen {
 		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
