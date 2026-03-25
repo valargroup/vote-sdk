@@ -366,7 +366,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "imt-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/vote-nullifier-pir.git#a2b07b7a00260a37707c95f256f7665cc31c2f8e"
+source = "git+https://github.com/valargroup/vote-nullifier-pir.git#fcf8db07e7188b68e5100276d0aec089f5a13b9a"
 dependencies = [
  "anyhow",
  "ff",
@@ -517,7 +517,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 [[package]]
 name = "orchard"
 version = "0.11.0"
-source = "git+https://github.com/valargroup/voting-circuits.git#6abd5a86dbe518e648947b66027aa5335d68ef53"
+source = "git+https://github.com/valargroup/voting-circuits.git#7605ae72b3cd97a04284c7742fde9d8223a5f3de"
 dependencies = [
  "aes",
  "bitvec",
@@ -931,7 +931,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git#361b743d06f73cf6310595967609c4e384281837"
+source = "git+https://github.com/valargroup/librustvoting.git#80bba376606880cae564ec175dd710a4f67ad9c0"
 dependencies = [
  "anyhow",
  "ff",
@@ -947,7 +947,7 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/voting-circuits.git#6abd5a86dbe518e648947b66027aa5335d68ef53"
+source = "git+https://github.com/valargroup/voting-circuits.git#7605ae72b3cd97a04284c7742fde9d8223a5f3de"
 dependencies = [
  "blake2b_simd",
  "ff",
