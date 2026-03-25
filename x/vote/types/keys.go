@@ -16,6 +16,11 @@ const (
 // DefaultDealTimeout is the ceremony deal/ack phase timeout in seconds (30 minutes).
 const DefaultDealTimeout uint64 = 1800
 
+// DefaultTallyTimeout is the tally phase timeout in seconds (6 hours).
+// If a round remains in TALLYING longer than this, EndBlock finalizes it
+// with tally_timed_out=true and empty results to prevent permanent liveness loss.
+const DefaultTallyTimeout uint64 = 21600
+
 // RoundIDLen is the fixed byte-length of a VoteRoundId (SHA-256 digest).
 const RoundIDLen = 32
 

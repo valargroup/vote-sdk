@@ -58,6 +58,11 @@ message VoteRound {
   // verification_keys holds VK_i = f(i)*G for each validator (same order as ceremony_validators).
   uint32         threshold         = 23; // Minimum shares for reconstruction (always >= 2)
   repeated bytes verification_keys = 24; // 32-byte compressed Pallas points, one per ceremony validator
+
+  // Tally phase timeout fields (populated when status transitions to TALLYING).
+  uint64 tally_phase_start   = 25; // Unix seconds when TALLYING started
+  uint64 tally_phase_timeout = 26; // Timeout duration in seconds (default: 6 hours)
+  bool   tally_timed_out     = 27; // True if round was finalized via timeout (no decrypted results)
 }
 
 // VoteManagerState stores the singleton vote manager address.

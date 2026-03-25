@@ -283,8 +283,12 @@ type VoteRound struct {
 	// verification_keys holds VK_i = f(i)*G for each validator (same order as ceremony_validators).
 	Threshold        uint32   `protobuf:"varint,23,opt,name=threshold,proto3" json:"threshold,omitempty"`                                      // Minimum shares for reconstruction (always >= 2)
 	VerificationKeys [][]byte `protobuf:"bytes,24,rep,name=verification_keys,json=verificationKeys,proto3" json:"verification_keys,omitempty"` // 32-byte compressed Pallas points, one per ceremony validator
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Tally phase timeout fields (populated when status transitions to TALLYING).
+	TallyPhaseStart   uint64 `protobuf:"varint,25,opt,name=tally_phase_start,json=tallyPhaseStart,proto3" json:"tally_phase_start,omitempty"`       // Unix seconds when TALLYING started
+	TallyPhaseTimeout uint64 `protobuf:"varint,26,opt,name=tally_phase_timeout,json=tallyPhaseTimeout,proto3" json:"tally_phase_timeout,omitempty"` // Timeout duration in seconds (default: 6 hours)
+	TallyTimedOut     bool   `protobuf:"varint,27,opt,name=tally_timed_out,json=tallyTimedOut,proto3" json:"tally_timed_out,omitempty"`             // True if round was finalized via timeout (no decrypted results)
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *VoteRound) Reset() {
@@ -483,6 +487,27 @@ func (x *VoteRound) GetVerificationKeys() [][]byte {
 		return x.VerificationKeys
 	}
 	return nil
+}
+
+func (x *VoteRound) GetTallyPhaseStart() uint64 {
+	if x != nil {
+		return x.TallyPhaseStart
+	}
+	return 0
+}
+
+func (x *VoteRound) GetTallyPhaseTimeout() uint64 {
+	if x != nil {
+		return x.TallyPhaseTimeout
+	}
+	return 0
+}
+
+func (x *VoteRound) GetTallyTimedOut() bool {
+	if x != nil {
+		return x.TallyTimedOut
+	}
+	return false
 }
 
 // VoteManagerState stores the singleton vote manager address.
@@ -1672,7 +1697,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12.\n" +
-	"\aoptions\x18\x04 \x03(\v2\x14.svote.v1.VoteOptionR\aoptions\"\x9f\b\n" +
+	"\aoptions\x18\x04 \x03(\v2\x14.svote.v1.VoteOptionR\aoptions\"\xa3\t\n" +
 	"\tVoteRound\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -1698,7 +1723,10 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x16ceremony_phase_timeout\x18\x15 \x01(\x04R\x14ceremonyPhaseTimeout\x12!\n" +
 	"\fceremony_log\x18\x16 \x03(\tR\vceremonyLog\x12\x1c\n" +
 	"\tthreshold\x18\x17 \x01(\rR\tthreshold\x12+\n" +
-	"\x11verification_keys\x18\x18 \x03(\fR\x10verificationKeys\",\n" +
+	"\x11verification_keys\x18\x18 \x03(\fR\x10verificationKeys\x12*\n" +
+	"\x11tally_phase_start\x18\x19 \x01(\x04R\x0ftallyPhaseStart\x12.\n" +
+	"\x13tally_phase_timeout\x18\x1a \x01(\x04R\x11tallyPhaseTimeout\x12&\n" +
+	"\x0ftally_timed_out\x18\x1b \x01(\bR\rtallyTimedOut\",\n" +
 	"\x10VoteManagerState\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x8d\x01\n" +
 	"\x13CommitmentTreeState\x12\x1d\n" +

@@ -16,6 +16,7 @@ const (
 	EventTypeSetVoteManager                   = "set_vote_manager"
 	EventTypeSubmitPartialDecryption          = "submit_partial_decryption"
 	EventTypeAuthorizedSend                   = "authorized_send"
+	EventTypeTallyTimeout                     = "tally_timeout"
 )
 
 // Event attribute keys.

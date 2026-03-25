@@ -489,7 +489,14 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	}
 
 	for _, roundID := range expiredRoundIDs {
-		if err := am.keeper.UpdateVoteRoundStatus(kvStore, roundID, types.SessionStatus_SESSION_STATUS_TALLYING); err != nil {
+		round, err := am.keeper.GetVoteRound(kvStore, roundID)
+		if err != nil {
+			return err
+		}
+		round.Status = types.SessionStatus_SESSION_STATUS_TALLYING
+		round.TallyPhaseStart = blockTime
+		round.TallyPhaseTimeout = types.DefaultTallyTimeout
+		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 			return err
 		}
 
@@ -616,6 +623,44 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
 			))
 		}
+	}
+
+	// --- 4. Tally phase timeout ---
+	// If a round has been in TALLYING longer than its timeout, finalize it
+	// with tally_timed_out=true and empty results. This prevents permanent
+	// liveness loss when the decryption threshold cannot be reached.
+	var tallyTimeoutIDs [][]byte
+	if err := am.keeper.IterateTallyingRounds(kvStore, func(round *types.VoteRound) bool {
+		if round.TallyPhaseTimeout > 0 &&
+			blockTime >= round.TallyPhaseStart+round.TallyPhaseTimeout {
+			id := make([]byte, len(round.VoteRoundId))
+			copy(id, round.VoteRoundId)
+			tallyTimeoutIDs = append(tallyTimeoutIDs, id)
+		}
+		return false // continue iterating
+	}); err != nil {
+		return err
+	}
+
+	for _, roundID := range tallyTimeoutIDs {
+		round, err := am.keeper.GetVoteRound(kvStore, roundID)
+		if err != nil {
+			return err
+		}
+		if round == nil {
+			continue
+		}
+
+		round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
+		round.TallyTimedOut = true
+		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+			return err
+		}
+
+		ctx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeTallyTimeout,
+			sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+		))
 	}
 
 	return nil
