@@ -187,7 +187,7 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 			{
 				name: "MsgSend+MsgDelegateVote",
 				msgs: []sdk.Msg{carrier, &votetypes.MsgDelegateVote{
-					Rk: bytes.Repeat([]byte{0xAA}, 32), SpendAuthSig: bytes.Repeat([]byte{0xBB}, 64),
+					Rk: append([]byte(nil), testutil.DummyPallasPoint...), SpendAuthSig: bytes.Repeat([]byte{0xBB}, 64),
 					SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
 					CmxNew: testutil.FpLE(0xBEEF), VanCmx: testutil.FpLE(0xDEAD),
 					GovNullifiers: [][]byte{bytes.Repeat([]byte{0xFF}, 32)},
@@ -232,7 +232,7 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 			{
 				name: "MsgDelegateVote",
 				msg: &votetypes.MsgDelegateVote{
-					Rk: bytes.Repeat([]byte{0xAA}, 32), SpendAuthSig: bytes.Repeat([]byte{0xBB}, 64),
+					Rk: append([]byte(nil), testutil.DummyPallasPoint...), SpendAuthSig: bytes.Repeat([]byte{0xBB}, 64),
 					SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
 					CmxNew: testutil.FpLE(0xBEEF), VanCmx: testutil.FpLE(0xDEAD),
 					GovNullifiers: [][]byte{bytes.Repeat([]byte{0xFF}, 32)},
@@ -247,7 +247,7 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 					VoteAuthorityNoteNew: testutil.FpLE(0xA1A1), VoteCommitment: testutil.FpLE(0xB2B2),
 					ProposalId: 1, Proof: []byte{0x42}, VoteRoundId: roundID,
 					VoteCommTreeAnchorHeight: anchorHeight,
-					VoteAuthSig: bytes.Repeat([]byte{0xC3}, 64), RVpk: bytes.Repeat([]byte{0xE4}, 32),
+					VoteAuthSig: bytes.Repeat([]byte{0xC3}, 64), RVpk: append([]byte(nil), testutil.DummyPallasPoint...),
 				},
 			},
 			{
@@ -363,7 +363,7 @@ func TestNoopSignerBypass_DelegateVote(t *testing.T) {
 	fakeGovNullifier := bytes.Repeat([]byte{0xFF}, 32)
 	fakeVanCmx := testutil.FpLE(0xDEAD)
 	voteMsg := &votetypes.MsgDelegateVote{
-		Rk:                  bytes.Repeat([]byte{0xAA}, 32),
+		Rk:                  append([]byte(nil), testutil.DummyPallasPoint...),
 		SpendAuthSig:        bytes.Repeat([]byte{0xBB}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
 		CmxNew:              testutil.FpLE(0xBEEF),
@@ -440,7 +440,7 @@ func TestNoopSignerBypass_CastVote(t *testing.T) {
 		VoteRoundId:              roundID,
 		VoteCommTreeAnchorHeight: anchorHeight,
 		VoteAuthSig:              bytes.Repeat([]byte{0xC3}, 64),
-		RVpk:                     bytes.Repeat([]byte{0xE4}, 32),
+		RVpk:                     append([]byte(nil), testutil.DummyPallasPoint...),
 	}
 	require.NoError(t, castMsg.ValidateBasic())
 
@@ -611,7 +611,7 @@ func TestAuthzExecBypass_DelegateVote(t *testing.T) {
 	signerAddr := sdk.AccAddress(ta.ValPrivKey.PubKey().Address())
 
 	fakeDelegate := &votetypes.MsgDelegateVote{
-		Rk:                  bytes.Repeat([]byte{0xAA}, 32),
+		Rk:                  append([]byte(nil), testutil.DummyPallasPoint...),
 		SpendAuthSig:        bytes.Repeat([]byte{0xBB}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
 		CmxNew:              testutil.FpLE(0xBEEF),
