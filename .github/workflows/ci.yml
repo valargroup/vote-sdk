@@ -229,3 +229,38 @@ jobs:
           name: chain-log
           path: chain.log
           retention-days: 7
+
+  notify-slack:
+    name: Slack Notification
+    if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(join(needs.*.result, ','), 'failure') }}
+    needs: [lint, test-unit, test-helper, test-integration, test-halo2, test-vc-van-deterministic, test-e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Slack on failure
+        uses: slackapi/slack-github-action@v2.1.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "CI failed on main",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": { "type": "plain_text", "text": "CI Failed on main", "emoji": true }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    { "type": "mrkdwn", "text": "*Workflow:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|CI>" },
+                    { "type": "mrkdwn", "text": "*Branch:*\nmain" },
+                    { "type": "mrkdwn", "text": "*Commit:*\n<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|`${{ github.sha }}`>" },
+                    { "type": "mrkdwn", "text": "*Author:*\n${{ github.actor }}" }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nLint: `${{ needs.lint.result }}` | Unit: `${{ needs.test-unit.result }}` | Helper: `${{ needs.test-helper.result }}` | Integration: `${{ needs.test-integration.result }}` | Halo2: `${{ needs.test-halo2.result }}` | VC/VAN: `${{ needs.test-vc-van-deterministic.result }}` | E2E: `${{ needs.test-e2e.result }}`" }
+                }
+              ]
+            }
