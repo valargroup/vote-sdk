@@ -24,6 +24,16 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 	// Restore per-round commitment trees.
 	for _, rt := range genesis.RoundTrees {
 		if rt.TreeState != nil {
+			// Genesis import only carries leaves (0x02) and roots, NOT shard
+			// blobs (0x0F), cap (0x10), or checkpoints (0x11). If we persisted
+			// Height > 0, ensureRoundTreeLoaded would take the restart branch
+			// expecting shard data in KV, produce an empty-tree root, and
+			// EndBlocker would silently corrupt state.Root.
+			// Setting Height = 0 forces the first-boot replay path, which
+			// rebuilds the ShardTree from the imported leaves via AppendFromKV.
+			if rt.TreeState.NextIndex > 0 {
+				rt.TreeState.Height = 0
+			}
 			if err := k.SetCommitmentTreeState(kvStore, rt.VoteRoundId, rt.TreeState); err != nil {
 				return err
 			}
