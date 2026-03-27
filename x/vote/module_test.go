@@ -468,6 +468,153 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 }
 
 // ---------------------------------------------------------------------------
+// Tally phase timeout tests
+// ---------------------------------------------------------------------------
+
+func (s *EndBlockerTestSuite) TestEndBlock_TallyTimeout() {
+	roundID := bytes.Repeat([]byte{0xEE}, 32)
+
+	tests := []struct {
+		name            string
+		setup           func()
+		wantStatus      types.SessionStatus
+		wantTimedOut    bool
+	}{
+		{
+			name: "TALLYING past deadline -> FINALIZED with tally_timed_out=true",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round := &types.VoteRound{
+					VoteRoundId:       roundID,
+					Status:            types.SessionStatus_SESSION_STATUS_TALLYING,
+					EaPk:              make([]byte, 32),
+					Proposals:         svtest.SampleProposals(),
+					TallyPhaseStart:   999_400,
+					TallyPhaseTimeout: 600, // deadline = 1_000_000 == block_time
+				}
+				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+			},
+			wantStatus:   types.SessionStatus_SESSION_STATUS_FINALIZED,
+			wantTimedOut: true,
+		},
+		{
+			name: "TALLYING before deadline -> stays TALLYING",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round := &types.VoteRound{
+					VoteRoundId:       roundID,
+					Status:            types.SessionStatus_SESSION_STATUS_TALLYING,
+					EaPk:              make([]byte, 32),
+					Proposals:         svtest.SampleProposals(),
+					TallyPhaseStart:   999_401,
+					TallyPhaseTimeout: 600, // deadline = 1_000_001 > block_time
+				}
+				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+			},
+			wantStatus:   types.SessionStatus_SESSION_STATUS_TALLYING,
+			wantTimedOut: false,
+		},
+		{
+			name: "TALLYING with zero timeout -> no timeout (disabled)",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round := &types.VoteRound{
+					VoteRoundId:       roundID,
+					Status:            types.SessionStatus_SESSION_STATUS_TALLYING,
+					EaPk:              make([]byte, 32),
+					Proposals:         svtest.SampleProposals(),
+					TallyPhaseStart:   999_400,
+					TallyPhaseTimeout: 0,
+				}
+				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+			},
+			wantStatus:   types.SessionStatus_SESSION_STATUS_TALLYING,
+			wantTimedOut: false,
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			tc.setup()
+			s.Require().NoError(s.module.EndBlock(s.ctx))
+
+			kv := s.keeper.OpenKVStore(s.ctx)
+			round, err := s.keeper.GetVoteRound(kv, roundID)
+			s.Require().NoError(err)
+			s.Require().NotNil(round)
+			s.Require().Equal(tc.wantStatus, round.Status)
+			s.Require().Equal(tc.wantTimedOut, round.TallyTimedOut)
+		})
+	}
+}
+
+func (s *EndBlockerTestSuite) TestEndBlock_TallyTimeout_MultipleRounds() {
+	roundA := bytes.Repeat([]byte{0xA1}, 32)
+	roundB := bytes.Repeat([]byte{0xB2}, 32)
+
+	s.Run("independent timeouts: one expires, other stays", func() {
+		s.SetupTest()
+		kv := s.keeper.OpenKVStore(s.ctx)
+
+		// Round A: past deadline (should timeout).
+		s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+			VoteRoundId:       roundA,
+			Status:            types.SessionStatus_SESSION_STATUS_TALLYING,
+			EaPk:              make([]byte, 32),
+			Proposals:         svtest.SampleProposals(),
+			TallyPhaseStart:   999_400,
+			TallyPhaseTimeout: 600, // deadline = 1_000_000 == block_time
+		}))
+
+		// Round B: not yet expired (should stay TALLYING).
+		s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+			VoteRoundId:       roundB,
+			Status:            types.SessionStatus_SESSION_STATUS_TALLYING,
+			EaPk:              make([]byte, 32),
+			Proposals:         svtest.SampleProposals(),
+			TallyPhaseStart:   999_500,
+			TallyPhaseTimeout: 600, // deadline = 1_000_100 > block_time
+		}))
+
+		s.Require().NoError(s.module.EndBlock(s.ctx))
+
+		rA, err := s.keeper.GetVoteRound(kv, roundA)
+		s.Require().NoError(err)
+		s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, rA.Status)
+		s.Require().True(rA.TallyTimedOut)
+
+		rB, err := s.keeper.GetVoteRound(kv, roundB)
+		s.Require().NoError(err)
+		s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, rB.Status)
+		s.Require().False(rB.TallyTimedOut)
+	})
+}
+
+func (s *EndBlockerTestSuite) TestEndBlock_ActiveToTallyingSetsTimeoutFields() {
+	roundID := bytes.Repeat([]byte{0xFF}, 32)
+
+	s.Run("ACTIVE->TALLYING sets tally_phase_start and tally_phase_timeout", func() {
+		s.SetupTest()
+		kv := s.keeper.OpenKVStore(s.ctx)
+
+		// Seed an ACTIVE round whose vote_end_time has passed.
+		round := svtest.ActiveRoundFixture(roundID)
+		round.VoteEndTime = 999_999 // < block_time (1_000_000)
+		s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+
+		s.Require().NoError(s.module.EndBlock(s.ctx))
+
+		got, err := s.keeper.GetVoteRound(kv, roundID)
+		s.Require().NoError(err)
+		s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, got.Status)
+		s.Require().Equal(uint64(1_000_000), got.TallyPhaseStart)
+		s.Require().Equal(types.DefaultTallyTimeout, got.TallyPhaseTimeout)
+		s.Require().False(got.TallyTimedOut)
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Ceremony signer provider tests (Step 9 wiring)
 // ---------------------------------------------------------------------------
 
