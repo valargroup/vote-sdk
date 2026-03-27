@@ -152,6 +152,9 @@ func (qs queryServer) CommitmentLeaves(goCtx context.Context, req *types.QueryCo
 	if req.ToHeight < req.FromHeight {
 		return nil, status.Errorf(codes.InvalidArgument, "to_height (%d) must be >= from_height (%d)", req.ToHeight, req.FromHeight)
 	}
+	if req.ToHeight-req.FromHeight > types.MaxCommitmentLeafRange {
+		return nil, status.Errorf(codes.InvalidArgument, "block range %d exceeds maximum %d", req.ToHeight-req.FromHeight, types.MaxCommitmentLeafRange)
+	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)

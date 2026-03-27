@@ -274,6 +274,27 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_InvalidRange() {
 	s.Require().Equal(codes.InvalidArgument, status.Code(err))
 }
 
+func (s *QueryServerTestSuite) TestCommitmentLeaves_RangeTooLarge() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+
+	_, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
+		FromHeight:  0,
+		ToHeight:    types.MaxCommitmentLeafRange + 1,
+		VoteRoundId: roundID,
+	})
+	s.Require().Error(err)
+	s.Require().Equal(codes.InvalidArgument, status.Code(err))
+	s.Require().Contains(err.Error(), "exceeds maximum")
+
+	// Exactly at the cap should be accepted (no error from range check).
+	_, err = s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
+		FromHeight:  0,
+		ToHeight:    types.MaxCommitmentLeafRange,
+		VoteRoundId: roundID,
+	})
+	s.Require().NoError(err)
+}
+
 func (s *QueryServerTestSuite) TestCommitmentLeaves_EmptyRange() {
 	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	// No leaves have been stored, so the response should be empty.
