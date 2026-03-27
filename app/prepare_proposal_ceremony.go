@@ -392,6 +392,31 @@ func CeremonyAckPrepareProposalHandler(
 	}
 }
 
+// zeroAndDeleteShareFile overwrites the share file with zeros and removes it.
+// Errors are logged but not fatal — the security-critical part is the overwrite.
+func zeroAndDeleteShareFile(dir string, roundID []byte, logger log.Logger) {
+	if dir == "" {
+		return
+	}
+	path := sharePathForRound(dir, roundID)
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.Warn("share cleanup: failed to open for zeroing", "path", path, "err", err)
+		}
+		return
+	}
+	var zeros [32]byte
+	_, _ = f.Write(zeros[:])
+	_ = f.Sync()
+	f.Close()
+	if err := os.Remove(path); err != nil {
+		logger.Warn("share cleanup: failed to remove", "path", path, "err", err)
+	} else {
+		logger.Info("share cleanup: zeroed and deleted share file", "path", path)
+	}
+}
+
 // zeroScalar overwrites a Pallas scalar's internal limbs in place.
 // curvey.Scalar.Zero() returns a *new* zero scalar without mutating the
 // receiver, so we type-assert to ScalarPallas and call Field4.SetZero()
@@ -451,5 +476,7 @@ func loadShareForRound(dir string, roundID []byte) (*elgamal.SecretKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	return elgamal.UnmarshalSecretKey(raw)
+	sk, err := elgamal.UnmarshalSecretKey(raw)
+	zeroBytes(raw)
+	return sk, err
 }
