@@ -28,19 +28,24 @@ func TestThresholdForN(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run("", func(t *testing.T) {
-			require.Equal(t, tc.want, thresholdForN(tc.n), "n=%d", tc.n)
+			got, err := thresholdForN(tc.n)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got, "n=%d", tc.n)
 		})
 	}
 }
 
-func TestThresholdForN_PanicsBelow1(t *testing.T) {
-	require.Panics(t, func() { thresholdForN(0) })
-	require.Panics(t, func() { thresholdForN(-1) })
+func TestThresholdForN_ErrorsBelow1(t *testing.T) {
+	_, err := thresholdForN(0)
+	require.Error(t, err)
+	_, err = thresholdForN(-1)
+	require.Error(t, err)
 }
 
 func TestThresholdForN_Invariants(t *testing.T) {
 	for n := 1; n <= 50; n++ {
-		got := thresholdForN(n)
+		got, err := thresholdForN(n)
+		require.NoError(t, err)
 		require.GreaterOrEqual(t, got, 1, "n=%d: t must be >= 1", n)
 		require.LessOrEqual(t, got, n, "n=%d: t must not exceed n", n)
 	}
@@ -55,3 +60,4 @@ func TestSharePathForRound(t *testing.T) {
 	got := sharePathForRound("/tmp/keys", roundID)
 	require.Equal(t, "/tmp/keys/share."+hex.EncodeToString(roundID), got)
 }
+

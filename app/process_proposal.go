@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 
 	"cosmossdk.io/log"
@@ -112,6 +114,17 @@ func validateInjectedDeal(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByte
 	// Verify creator is a ceremony validator.
 	if _, found := votekeeper.FindValidatorInRoundCeremony(round, dealMsg.Creator); !found {
 		return errInvalidInjectedTx("creator is not a ceremony validator")
+	}
+
+	// Verify threshold matches the deterministic policy for n validators.
+	expectedThreshold, err := votekeeper.ThresholdForN(len(round.CeremonyValidators))
+	if err != nil {
+		return errInvalidInjectedTx(fmt.Sprintf("threshold computation failed: %v", err))
+	}
+	if dealMsg.Threshold != uint32(expectedThreshold) {
+		return errInvalidInjectedTx(fmt.Sprintf(
+			"invalid threshold: got %d, expected %d for %d validators",
+			dealMsg.Threshold, expectedThreshold, len(round.CeremonyValidators)))
 	}
 
 	// Verify creator matches the block proposer.

@@ -112,11 +112,15 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 		}
 	}
 
-	// Validate threshold and verification keys.
+	// Validate threshold matches the deterministic policy for n validators.
 	nValidators := len(round.CeremonyValidators)
-	if msg.Threshold < 1 {
-		return nil, fmt.Errorf("%w: threshold must be >= 1 when n=%d, got %d",
-			types.ErrInvalidThreshold, nValidators, msg.Threshold)
+	expected, err := ThresholdForN(nValidators)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", types.ErrInvalidThreshold, err)
+	}
+	if msg.Threshold != uint32(expected) {
+		return nil, fmt.Errorf("%w: invalid threshold: got %d, expected %d for %d validators",
+			types.ErrInvalidThreshold, msg.Threshold, expected, nValidators)
 	}
 	if len(msg.VerificationKeys) != nValidators {
 		return nil, fmt.Errorf("%w: expected %d verification keys, got %d",

@@ -1,9 +1,79 @@
 package keeper_test
 
 import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
 	"github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
+
+// ===========================================================================
+// ThresholdForN — table-driven unit tests
+// ===========================================================================
+
+func TestThresholdForN(t *testing.T) {
+	tests := []struct {
+		n       int
+		want    int
+		wantErr bool
+	}{
+		// Edge cases
+		{n: -1, wantErr: true},
+		{n: 0, wantErr: true},
+
+		// n=1: solo validator, threshold must be 1.
+		{n: 1, want: 1},
+
+		// n=2: ceil(2/2)=1 but floor is 2 → clamped to 2.
+		{n: 2, want: 2},
+
+		// n=3: ceil(3/2)=2, satisfies >=2.
+		{n: 3, want: 2},
+
+		// n=4: (4+1)/2=2 (integer division).
+		{n: 4, want: 2},
+
+		// n=5: (5+1)/2=3.
+		{n: 5, want: 3},
+
+		// n=6: (6+1)/2=3.
+		{n: 6, want: 3},
+
+		// n=9: (9+1)/2=5.
+		{n: 9, want: 5},
+
+		// n=10: (10+1)/2=5.
+		{n: 10, want: 5},
+
+		// Large n.
+		{n: 100, want: 50},
+		{n: 101, want: 51},
+	}
+
+	for _, tc := range tests {
+		got, err := keeper.ThresholdForN(tc.n)
+		if tc.wantErr {
+			require.Error(t, err, "n=%d should error", tc.n)
+			continue
+		}
+		require.NoError(t, err, "n=%d", tc.n)
+		require.Equal(t, tc.want, got, "n=%d", tc.n)
+	}
+}
+
+func TestThresholdForN_Invariants(t *testing.T) {
+	for n := 1; n <= 50; n++ {
+		got, err := keeper.ThresholdForN(n)
+		require.NoError(t, err, "n=%d", n)
+		require.GreaterOrEqual(t, got, 1, "n=%d: t must be >= 1", n)
+		require.LessOrEqual(t, got, n, "n=%d: t must not exceed n", n)
+		if n >= 2 {
+			require.GreaterOrEqual(t, got, 2, "n=%d: t must be >= 2 when n >= 2", n)
+		}
+	}
+}
 
 // ===========================================================================
 // Per-round ceremony helper tests (pure functions on KeeperTestSuite)
