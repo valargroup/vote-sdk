@@ -2,10 +2,13 @@ package app
 
 import (
 	"encoding/hex"
+	"os"
+	"strings"
 	"sync"
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
+	"cosmossdk.io/core/store"
 	"cosmossdk.io/log"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -71,7 +74,8 @@ func PartialDecryptPrepareProposalInjector(
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
-		// Evict share cache entries for finalized rounds to bound growth.
+		// Evict share cache entries for finalized rounds to bound growth,
+		// and zero-and-delete the corresponding on-disk share files.
 		shareCacheMu.Lock()
 		for roundHex, share := range shareCache {
 			roundID, err := hex.DecodeString(roundHex)
@@ -83,9 +87,16 @@ func PartialDecryptPrepareProposalInjector(
 			if err != nil || r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
 				zeroScalar(share.Scalar)
 				delete(shareCache, roundHex)
+				zeroAndDeleteShareFile(eaSkDir, roundID, logger)
 			}
 		}
 		shareCacheMu.Unlock()
+
+		// Scan eaSkDir for orphaned share files whose rounds are finalized
+		// (or no longer exist). This catches files that were never loaded
+		// into the in-memory cache (e.g. the validator was never proposer
+		// during TALLYING).
+		cleanOrphanedShareFiles(eaSkDir, voteKeeper, kvStore, logger)
 
 		// Find the first TALLYING round.
 		var tallyRound *types.VoteRound
@@ -199,5 +210,38 @@ func PartialDecryptPrepareProposalInjector(
 			"threshold", tallyRound.Threshold)
 
 		return append([][]byte{txBytes}, txs...)
+	}
+}
+
+// cleanOrphanedShareFiles scans eaSkDir for share.<hex> files belonging to
+// rounds that are finalized or no longer exist, and zero-and-deletes them.
+// This catches files that were never loaded into the in-memory cache.
+func cleanOrphanedShareFiles(
+	eaSkDir string,
+	voteKeeper *votekeeper.Keeper,
+	kvStore store.KVStore,
+	logger log.Logger,
+) {
+	if eaSkDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(eaSkDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "share.") || entry.IsDir() {
+			continue
+		}
+		roundHex := strings.TrimPrefix(name, "share.")
+		roundID, err := hex.DecodeString(roundHex)
+		if err != nil {
+			continue
+		}
+		r, err := voteKeeper.GetVoteRound(kvStore, roundID)
+		if err != nil || r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
+			zeroAndDeleteShareFile(eaSkDir, roundID, logger)
+		}
 	}
 }
