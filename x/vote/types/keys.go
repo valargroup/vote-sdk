@@ -55,6 +55,10 @@ const MaxProofSize = 8192
 // so valid positions are 0..2^32-1.
 const MaxTreePosition = (1 << 32) - 1
 
+// MaxCommitmentLeafRange caps the [fromHeight, toHeight] span accepted by
+// the CommitmentLeaves gRPC query to prevent unbounded memory allocation.
+const MaxCommitmentLeafRange uint64 = 1000
+
 // Session creation field names — used in the HTTP API response, CLI input
 // parsing, and structured logging. Single source of truth for the JSON keys
 // of hex-encoded fields in MsgCreateVotingSession.
