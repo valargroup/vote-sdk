@@ -192,22 +192,30 @@ func (s *KeeperTestSuite) TestUpdateVoteRoundStatus() {
 		Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
 	}))
 
-	// Transition to TALLYING.
-	s.Require().NoError(s.keeper.UpdateVoteRoundStatus(kv, testRoundID, types.SessionStatus_SESSION_STATUS_TALLYING))
+	// Transition ACTIVE -> TALLYING.
+	s.Require().NoError(s.keeper.UpdateVoteRoundStatus(kv, testRoundID,
+		types.SessionStatus_SESSION_STATUS_ACTIVE, types.SessionStatus_SESSION_STATUS_TALLYING))
 
 	round, err := s.keeper.GetVoteRound(kv, testRoundID)
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// Transition to FINALIZED.
-	s.Require().NoError(s.keeper.UpdateVoteRoundStatus(kv, testRoundID, types.SessionStatus_SESSION_STATUS_FINALIZED))
+	// Transition TALLYING -> FINALIZED.
+	s.Require().NoError(s.keeper.UpdateVoteRoundStatus(kv, testRoundID,
+		types.SessionStatus_SESSION_STATUS_TALLYING, types.SessionStatus_SESSION_STATUS_FINALIZED))
 
 	round, err = s.keeper.GetVoteRound(kv, testRoundID)
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
 
+	// Wrong expected-old-status returns ErrInvalidStatusTransition.
+	err = s.keeper.UpdateVoteRoundStatus(kv, testRoundID,
+		types.SessionStatus_SESSION_STATUS_ACTIVE, types.SessionStatus_SESSION_STATUS_TALLYING)
+	s.Require().ErrorIs(err, types.ErrInvalidStatusTransition)
+
 	// Missing round returns error.
-	err = s.keeper.UpdateVoteRoundStatus(kv, bytes.Repeat([]byte{0xFF}, 32), types.SessionStatus_SESSION_STATUS_TALLYING)
+	err = s.keeper.UpdateVoteRoundStatus(kv, bytes.Repeat([]byte{0xFF}, 32),
+		types.SessionStatus_SESSION_STATUS_ACTIVE, types.SessionStatus_SESSION_STATUS_TALLYING)
 	s.Require().ErrorIs(err, types.ErrRoundNotFound)
 }
 

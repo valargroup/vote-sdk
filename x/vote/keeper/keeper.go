@@ -231,11 +231,17 @@ func (k *Keeper) SetVoteRound(kvStore store.KVStore, round *types.VoteRound) err
 // Round status management
 // ---------------------------------------------------------------------------
 
-// UpdateVoteRoundStatus reads a vote round, sets its status, and writes it back.
-func (k *Keeper) UpdateVoteRoundStatus(kvStore store.KVStore, roundID []byte, newStatus types.SessionStatus) error {
+// UpdateVoteRoundStatus reads a vote round, verifies its current status
+// matches expectedOldStatus, sets the new status, and writes it back.
+// Returns ErrInvalidStatusTransition if the current status does not match.
+func (k *Keeper) UpdateVoteRoundStatus(kvStore store.KVStore, roundID []byte, expectedOldStatus, newStatus types.SessionStatus) error {
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
 		return err
+	}
+	if round.Status != expectedOldStatus {
+		return fmt.Errorf("%w: expected %s, got %s",
+			types.ErrInvalidStatusTransition, expectedOldStatus, round.Status)
 	}
 	round.Status = newStatus
 	return k.SetVoteRound(kvStore, round)

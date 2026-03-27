@@ -34,6 +34,9 @@ var (
 	ErrNotAuthorized  = errors.Register(ModuleName, 30, "sender is not authorized")
 	ErrNoVoteManager  = errors.Register(ModuleName, 31, "no vote manager set")
 
+	// Status transition errors.
+	ErrInvalidStatusTransition = errors.Register(ModuleName, 33, "invalid status transition")
+
 	// Authorized send errors.
 	ErrUnauthorizedSend = errors.Register(ModuleName, 32, "sender not authorized to send to recipient")
 )
