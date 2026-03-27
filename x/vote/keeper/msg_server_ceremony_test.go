@@ -31,13 +31,16 @@ func testPallasPK() []byte {
 	return pk.Point.ToAffineCompressed()
 }
 
+// ackSignature computes the ack digest for test assertions.
+// Despite the method name (kept for test compatibility), this is a SHA-256
+// commitment digest, not a cryptographic signature.
 func (s *MsgServerTestSuite) ackSignature(roundID []byte, validator string) []byte {
 	kv := s.keeper.OpenKVStore(s.ctx)
 	round, err := s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
 
 	h := sha256.New()
-	h.Write([]byte(types.AckSigDomain))
+	h.Write([]byte(types.AckDigestDomain))
 	h.Write(round.EaPk)
 	h.Write([]byte(validator))
 	return h.Sum(nil)

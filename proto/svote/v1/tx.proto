@@ -140,7 +140,7 @@ message MsgDealExecutiveAuthorityKeyResponse {}
 // MsgAckExecutiveAuthorityKey is submitted by a validator to acknowledge receipt of their ea_sk share.
 message MsgAckExecutiveAuthorityKey {
   string creator        = 1; // Validator address
-  bytes  ack_signature  = 2; // Signature over H("ack" || ea_pk || validator_address)
+  bytes  ack_signature  = 2; // Commitment digest: SHA256("ack" || ea_pk || validator_address). NOT a cryptographic signature; authentication is via ValidateProposerIsCreator.
   bytes  vote_round_id  = 3; // Target voting round (per-round ceremony)
 }
 

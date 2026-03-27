@@ -10,9 +10,19 @@ import (
 // sighash. Must match the e2e-tests encoding.
 const CastVoteSighashDomain = "SVOTE_CAST_VOTE_SIGHASH_V0"
 
-// AckSigDomain is the domain prefix for the ceremony ack signature hash:
-// SHA256(AckSigDomain || ea_pk || validator_address).
-const AckSigDomain = "ack"
+// AckDigestDomain is the domain prefix for the ceremony ack digest:
+// SHA256(AckDigestDomain || ea_pk || validator_address).
+//
+// Despite the proto field name "ack_signature", this is a SHA-256 commitment
+// digest, NOT a cryptographic signature. Authentication relies on
+// ValidateProposerIsCreator (the message can only be injected by the
+// current block proposer via PrepareProposal). The hash simply binds the
+// ack to a specific (ea_pk, validator) pair.
+const AckDigestDomain = "ack"
+
+// AckSigDomain is a deprecated alias for AckDigestDomain.
+// Deprecated: Use AckDigestDomain instead.
+const AckSigDomain = AckDigestDomain
 
 // ComputeCastVoteSighash returns the 32-byte Blake2b-256 hash of the
 // canonical signable payload for MsgCastVote. The chain computes this

@@ -235,6 +235,6 @@ message DealerPayload {
 // AckEntry records a validator's acknowledgement of receiving their share.
 message AckEntry {
   string validator_address = 1;
-  bytes  ack_signature     = 2; // Signature over H("ack" || ea_pk || validator_address)
+  bytes  ack_signature     = 2; // Commitment digest: SHA256("ack" || ea_pk || validator_address). NOT a cryptographic signature.
   uint64 ack_height        = 3;
 }

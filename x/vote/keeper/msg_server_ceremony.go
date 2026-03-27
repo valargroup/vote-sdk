@@ -192,10 +192,12 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateAck, msg.Creator)
 	}
 
-	// Verify ack_signature = SHA256("ack" || ea_pk || validator_address).
-	expectedSig := sha256AckSig(round.EaPk, msg.Creator)
-	if !bytes.Equal(msg.AckSignature, expectedSig) {
-		return nil, fmt.Errorf("%w: ack_signature mismatch", types.ErrInvalidField)
+	// Verify ack_signature = SHA256(AckDigestDomain || ea_pk || validator_address).
+	// This is a commitment digest (not a cryptographic signature); authentication
+	// is handled by ValidateProposerIsCreator above.
+	expectedDigest := sha256AckDigest(round.EaPk, msg.Creator)
+	if !bytes.Equal(msg.AckSignature, expectedDigest) {
+		return nil, fmt.Errorf("%w: ack_signature digest mismatch", types.ErrInvalidField)
 	}
 
 	// Record ack.
@@ -289,10 +291,12 @@ func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *typ
 	return &types.MsgCreateValidatorWithPallasKeyResponse{}, nil
 }
 
-// sha256AckSig computes SHA256(AckSigDomain || eaPk || validatorAddress).
-func sha256AckSig(eaPk []byte, validatorAddress string) []byte {
+// sha256AckDigest computes SHA256(AckDigestDomain || eaPk || validatorAddress).
+// This is a commitment digest binding the ack to a specific (ea_pk, validator)
+// pair, NOT a cryptographic signature. Authentication is via ValidateProposerIsCreator.
+func sha256AckDigest(eaPk []byte, validatorAddress string) []byte {
 	h := sha256.New()
-	h.Write([]byte(types.AckSigDomain))
+	h.Write([]byte(types.AckDigestDomain))
 	h.Write(eaPk)
 	h.Write([]byte(validatorAddress))
 	return h.Sum(nil)

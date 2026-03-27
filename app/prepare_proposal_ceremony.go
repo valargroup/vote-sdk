@@ -354,9 +354,11 @@ func CeremonyAckPrepareProposalHandler(
 			diskPath = sharePathForRound(eaSkDir, round.VoteRoundId)
 		}
 
-		// Compute ack_signature = SHA256(AckSigDomain || ea_pk || validator_address).
+		// Compute ack digest = SHA256(AckDigestDomain || ea_pk || validator_address).
+		// This is a commitment digest (not a cryptographic signature); authentication
+		// is handled by ValidateProposerIsCreator in the message handler.
 		h := sha256.New()
-		h.Write([]byte(types.AckSigDomain))
+		h.Write([]byte(types.AckDigestDomain))
 		h.Write(round.EaPk)
 		h.Write([]byte(proposerValAddr))
 		ackSig := h.Sum(nil)
