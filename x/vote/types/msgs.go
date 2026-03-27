@@ -3,6 +3,8 @@ package types
 import (
 	"bytes"
 	"fmt"
+
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 )
 
 // zeroPoint32 is the compressed encoding of the Pallas identity (point at
@@ -68,6 +70,9 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 	}
 	if bytes.Equal(msg.Rk, zeroPoint32[:]) {
 		return fmt.Errorf("%w: rk must not be the identity point (all zeros)", ErrInvalidField)
+	}
+	if _, err := elgamal.UnmarshalPublicKey(msg.Rk); err != nil {
+		return fmt.Errorf("%w: rk is not a valid Pallas point: %v", ErrInvalidField, err)
 	}
 	if len(msg.SpendAuthSig) == 0 {
 		return fmt.Errorf("%w: spend_auth_sig cannot be empty", ErrInvalidField)
@@ -146,6 +151,9 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	}
 	if bytes.Equal(msg.RVpk, zeroPoint32[:]) {
 		return fmt.Errorf("%w: r_vpk must not be the identity point (all zeros)", ErrInvalidField)
+	}
+	if _, err := elgamal.UnmarshalPublicKey(msg.RVpk); err != nil {
+		return fmt.Errorf("%w: r_vpk is not a valid Pallas point: %v", ErrInvalidField, err)
 	}
 	return nil
 }
