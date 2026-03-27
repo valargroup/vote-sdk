@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
 	"github.com/valargroup/vote-sdk/ffi/zkp"
 	"github.com/valargroup/vote-sdk/x/vote/keeper"
@@ -142,6 +143,12 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper
 	if len(msg.Sighash) != 32 {
 		return types.ErrSighashMismatch
 	}
+	// Validate rk is a valid on-curve non-identity Pallas point before
+	// passing to the FFI. This makes the Go layer self-sufficient against
+	// the identity-point signature bypass regardless of Rust-side checks.
+	if _, err := elgamal.UnmarshalPublicKey(msg.Rk); err != nil {
+		return fmt.Errorf("%w: rk: %v", types.ErrInvalidSignature, err)
+	}
 	// RedPallas signature verification over the client-provided sighash.
 	if err := opts.SigVerifier.Verify(msg.Rk, msg.Sighash, msg.SpendAuthSig); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
@@ -192,6 +199,12 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keepe
 	// Compute the canonical sighash from message fields and verify the
 	// RedPallas signature over it. r_vpk is the compressed randomized voting
 	// key; the ZKP proves it equals vsk.ak + [alpha_v]*G (condition 4).
+	// Validate r_vpk is a valid on-curve non-identity Pallas point before
+	// passing to the FFI. This makes the Go layer self-sufficient against
+	// the identity-point signature bypass regardless of Rust-side checks.
+	if _, err := elgamal.UnmarshalPublicKey(msg.RVpk); err != nil {
+		return fmt.Errorf("%w: r_vpk: %v", types.ErrInvalidSignature, err)
+	}
 	sighash := types.ComputeCastVoteSighash(msg)
 	if err := opts.SigVerifier.Verify(msg.RVpk, sighash, msg.VoteAuthSig); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)

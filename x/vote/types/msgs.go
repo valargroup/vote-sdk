@@ -1,6 +1,14 @@
 package types
 
-import "fmt"
+import (
+	"bytes"
+	"fmt"
+)
+
+// zeroPoint32 is the compressed encoding of the Pallas identity (point at
+// infinity). Used by ValidateBasic as a cheap stateless guard against the
+// identity-point signature bypass.
+var zeroPoint32 [32]byte
 
 // ValidateBasic performs stateless validation for MsgCreateVotingSession.
 func (msg *MsgCreateVotingSession) ValidateBasic() error {
@@ -57,6 +65,9 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 func (msg *MsgDelegateVote) ValidateBasic() error {
 	if len(msg.Rk) != 32 {
 		return fmt.Errorf("%w: rk must be 32 bytes, got %d", ErrInvalidField, len(msg.Rk))
+	}
+	if bytes.Equal(msg.Rk, zeroPoint32[:]) {
+		return fmt.Errorf("%w: rk must not be the identity point (all zeros)", ErrInvalidField)
 	}
 	if len(msg.SpendAuthSig) == 0 {
 		return fmt.Errorf("%w: spend_auth_sig cannot be empty", ErrInvalidField)
@@ -132,6 +143,9 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	}
 	if len(msg.RVpk) != 32 {
 		return fmt.Errorf("%w: r_vpk must be 32 bytes, got %d", ErrInvalidField, len(msg.RVpk))
+	}
+	if bytes.Equal(msg.RVpk, zeroPoint32[:]) {
+		return fmt.Errorf("%w: r_vpk must not be the identity point (all zeros)", ErrInvalidField)
 	}
 	return nil
 }
