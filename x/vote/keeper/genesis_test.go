@@ -117,6 +117,29 @@ func TestExportImportGenesis(t *testing.T) {
 	root20 := bytes.Repeat([]byte{0xEE}, 32)
 	require.NoError(t, k.SetCommitmentRootAtHeight(kvStore, roundID, 20, root20))
 
+	// Block leaf indices (scoped to roundID).
+	require.NoError(t, k.SetBlockLeafIndex(kvStore, roundID, 10, 0, 2))
+	require.NoError(t, k.SetBlockLeafIndex(kvStore, roundID, 20, 2, 1))
+
+	// Partial decryptions (scoped to roundID).
+	pdEntry1 := &types.PartialDecryptionEntry{
+		ProposalId:     1,
+		VoteDecision:   0,
+		PartialDecrypt: bytes.Repeat([]byte{0xF1}, 32),
+	}
+	pdEntry2 := &types.PartialDecryptionEntry{
+		ProposalId:     1,
+		VoteDecision:   1,
+		PartialDecrypt: bytes.Repeat([]byte{0xF2}, 32),
+	}
+	require.NoError(t, k.SetPartialDecryptions(kvStore, roundID, 1, []*types.PartialDecryptionEntry{pdEntry1, pdEntry2}))
+	pdEntry3 := &types.PartialDecryptionEntry{
+		ProposalId:     1,
+		VoteDecision:   0,
+		PartialDecrypt: bytes.Repeat([]byte{0xF3}, 32),
+	}
+	require.NoError(t, k.SetPartialDecryptions(kvStore, roundID, 2, []*types.PartialDecryptionEntry{pdEntry3}))
+
 	// --- Export ---
 	gs, err := k.ExportGenesis(kvStore)
 	require.NoError(t, err)
@@ -129,6 +152,7 @@ func TestExportImportGenesis(t *testing.T) {
 	require.Len(t, gs.PallasKeys, 1)
 	require.Len(t, gs.TallyAccumulators, 1)
 	require.Len(t, gs.ShareCounts, 1)
+	require.Len(t, gs.PartialDecryptions, 3)
 
 	// Verify per-round tree export (only roundID has tree data).
 	require.Len(t, gs.RoundTrees, 1)
@@ -138,6 +162,7 @@ func TestExportImportGenesis(t *testing.T) {
 	require.Equal(t, uint64(3), rt.TreeState.NextIndex)
 	require.Len(t, rt.CommitmentLeaves, 3)
 	require.Len(t, rt.CommitmentRoots, 2)
+	require.Len(t, rt.BlockLeafIndices, 2)
 
 	// Verify leaf ordering.
 	require.Equal(t, uint64(0), rt.CommitmentLeaves[0].Index)
@@ -158,6 +183,21 @@ func TestExportImportGenesis(t *testing.T) {
 	require.Equal(t, root10, rt.CommitmentRoots[0].Root)
 	require.Equal(t, uint64(20), rt.CommitmentRoots[1].Height)
 	require.Equal(t, root20, rt.CommitmentRoots[1].Root)
+
+	// Verify block leaf indices (in per-round export).
+	require.Equal(t, uint64(10), rt.BlockLeafIndices[0].Height)
+	require.Equal(t, uint64(0), rt.BlockLeafIndices[0].StartIndex)
+	require.Equal(t, uint64(2), rt.BlockLeafIndices[0].Count)
+	require.Equal(t, uint64(20), rt.BlockLeafIndices[1].Height)
+	require.Equal(t, uint64(2), rt.BlockLeafIndices[1].StartIndex)
+	require.Equal(t, uint64(1), rt.BlockLeafIndices[1].Count)
+
+	// Verify partial decryptions export.
+	require.Equal(t, roundID, gs.PartialDecryptions[0].RoundId)
+	require.Equal(t, uint32(1), gs.PartialDecryptions[0].ValidatorIndex)
+	require.Equal(t, bytes.Repeat([]byte{0xF1}, 32), gs.PartialDecryptions[0].PartialDecrypt)
+	require.Equal(t, uint32(2), gs.PartialDecryptions[2].ValidatorIndex)
+	require.Equal(t, bytes.Repeat([]byte{0xF3}, 32), gs.PartialDecryptions[2].PartialDecrypt)
 
 	// --- Import into a fresh keeper ---
 	key2 := storetypes.NewKVStoreKey(types.StoreKey + "2")
@@ -245,6 +285,40 @@ func TestExportImportGenesis(t *testing.T) {
 	rootVal, err = k2.GetCommitmentRootAtHeight(kvStore2, roundID, 20)
 	require.NoError(t, err)
 	require.Equal(t, root20, rootVal)
+
+	// Verify block leaf indices (per-round).
+	startIdx, cnt, found, err := k2.GetBlockLeafIndex(kvStore2, roundID, 10)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(0), startIdx)
+	require.Equal(t, uint64(2), cnt)
+	startIdx, cnt, found, err = k2.GetBlockLeafIndex(kvStore2, roundID, 20)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(2), startIdx)
+	require.Equal(t, uint64(1), cnt)
+	// Negative check: no mapping at height 30.
+	_, _, found, err = k2.GetBlockLeafIndex(kvStore2, roundID, 30)
+	require.NoError(t, err)
+	require.False(t, found)
+
+	// Verify partial decryptions.
+	pd, err := k2.GetPartialDecryption(kvStore2, roundID, 1, 1, 0)
+	require.NoError(t, err)
+	require.NotNil(t, pd)
+	require.Equal(t, bytes.Repeat([]byte{0xF1}, 32), pd.PartialDecrypt)
+	pd, err = k2.GetPartialDecryption(kvStore2, roundID, 1, 1, 1)
+	require.NoError(t, err)
+	require.NotNil(t, pd)
+	require.Equal(t, bytes.Repeat([]byte{0xF2}, 32), pd.PartialDecrypt)
+	pd, err = k2.GetPartialDecryption(kvStore2, roundID, 2, 1, 0)
+	require.NoError(t, err)
+	require.NotNil(t, pd)
+	require.Equal(t, bytes.Repeat([]byte{0xF3}, 32), pd.PartialDecrypt)
+	// Negative check: non-existent partial decryption.
+	pd, err = k2.GetPartialDecryption(kvStore2, roundID, 3, 1, 0)
+	require.NoError(t, err)
+	require.Nil(t, pd)
 }
 
 // TestInitGenesisClearsTreeHeight verifies that InitGenesis forces Height = 0
@@ -311,6 +385,7 @@ func TestExportGenesisEmpty(t *testing.T) {
 	require.Empty(t, gs.PallasKeys)
 	require.Empty(t, gs.TallyAccumulators)
 	require.Empty(t, gs.ShareCounts)
+	require.Empty(t, gs.PartialDecryptions)
 	require.Empty(t, gs.VoteManager)
 }
 

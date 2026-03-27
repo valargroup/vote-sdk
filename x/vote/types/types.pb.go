@@ -626,16 +626,17 @@ func (x *CommitmentTreeState) GetNextIndexAtRoot() uint64 {
 
 // GenesisState defines the vote module's genesis state.
 type GenesisState struct {
-	state                 protoimpl.MessageState     `protogen:"open.v1"`
-	Rounds                []*VoteRound               `protobuf:"bytes,1,rep,name=rounds,proto3" json:"rounds,omitempty"`
-	Nullifiers            []*NullifierEntry          `protobuf:"bytes,4,rep,name=nullifiers,proto3" json:"nullifiers,omitempty"`
-	VoteManager           string                     `protobuf:"bytes,5,opt,name=vote_manager,json=voteManager,proto3" json:"vote_manager,omitempty"`
-	TallyResults          []*TallyResult             `protobuf:"bytes,6,rep,name=tally_results,json=tallyResults,proto3" json:"tally_results,omitempty"`
-	PallasKeys            []*ValidatorPallasKey      `protobuf:"bytes,7,rep,name=pallas_keys,json=pallasKeys,proto3" json:"pallas_keys,omitempty"`
-	TallyAccumulators     []*GenesisTallyAccumulator `protobuf:"bytes,8,rep,name=tally_accumulators,json=tallyAccumulators,proto3" json:"tally_accumulators,omitempty"`
-	ShareCounts           []*GenesisShareCount       `protobuf:"bytes,9,rep,name=share_counts,json=shareCounts,proto3" json:"share_counts,omitempty"`
-	MinCeremonyValidators uint32                     `protobuf:"varint,11,opt,name=min_ceremony_validators,json=minCeremonyValidators,proto3" json:"min_ceremony_validators,omitempty"`
-	RoundTrees            []*GenesisRoundTree        `protobuf:"bytes,12,rep,name=round_trees,json=roundTrees,proto3" json:"round_trees,omitempty"`
+	state                 protoimpl.MessageState      `protogen:"open.v1"`
+	Rounds                []*VoteRound                `protobuf:"bytes,1,rep,name=rounds,proto3" json:"rounds,omitempty"`
+	Nullifiers            []*NullifierEntry           `protobuf:"bytes,4,rep,name=nullifiers,proto3" json:"nullifiers,omitempty"`
+	VoteManager           string                      `protobuf:"bytes,5,opt,name=vote_manager,json=voteManager,proto3" json:"vote_manager,omitempty"`
+	TallyResults          []*TallyResult              `protobuf:"bytes,6,rep,name=tally_results,json=tallyResults,proto3" json:"tally_results,omitempty"`
+	PallasKeys            []*ValidatorPallasKey       `protobuf:"bytes,7,rep,name=pallas_keys,json=pallasKeys,proto3" json:"pallas_keys,omitempty"`
+	TallyAccumulators     []*GenesisTallyAccumulator  `protobuf:"bytes,8,rep,name=tally_accumulators,json=tallyAccumulators,proto3" json:"tally_accumulators,omitempty"`
+	ShareCounts           []*GenesisShareCount        `protobuf:"bytes,9,rep,name=share_counts,json=shareCounts,proto3" json:"share_counts,omitempty"`
+	MinCeremonyValidators uint32                      `protobuf:"varint,11,opt,name=min_ceremony_validators,json=minCeremonyValidators,proto3" json:"min_ceremony_validators,omitempty"`
+	RoundTrees            []*GenesisRoundTree         `protobuf:"bytes,12,rep,name=round_trees,json=roundTrees,proto3" json:"round_trees,omitempty"`
+	PartialDecryptions    []*GenesisPartialDecryption `protobuf:"bytes,13,rep,name=partial_decryptions,json=partialDecryptions,proto3" json:"partial_decryptions,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -733,6 +734,13 @@ func (x *GenesisState) GetRoundTrees() []*GenesisRoundTree {
 	return nil
 }
 
+func (x *GenesisState) GetPartialDecryptions() []*GenesisPartialDecryption {
+	if x != nil {
+		return x.PartialDecryptions
+	}
+	return nil
+}
+
 // GenesisRoundTree holds per-round commitment tree state for genesis export/import.
 type GenesisRoundTree struct {
 	state            protoimpl.MessageState   `protogen:"open.v1"`
@@ -740,6 +748,7 @@ type GenesisRoundTree struct {
 	TreeState        *CommitmentTreeState     `protobuf:"bytes,2,opt,name=tree_state,json=treeState,proto3" json:"tree_state,omitempty"`
 	CommitmentLeaves []*CommitmentLeaf        `protobuf:"bytes,3,rep,name=commitment_leaves,json=commitmentLeaves,proto3" json:"commitment_leaves,omitempty"`
 	CommitmentRoots  []*GenesisCommitmentRoot `protobuf:"bytes,4,rep,name=commitment_roots,json=commitmentRoots,proto3" json:"commitment_roots,omitempty"`
+	BlockLeafIndices []*GenesisBlockLeafIndex `protobuf:"bytes,5,rep,name=block_leaf_indices,json=blockLeafIndices,proto3" json:"block_leaf_indices,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -798,6 +807,13 @@ func (x *GenesisRoundTree) GetCommitmentLeaves() []*CommitmentLeaf {
 func (x *GenesisRoundTree) GetCommitmentRoots() []*GenesisCommitmentRoot {
 	if x != nil {
 		return x.CommitmentRoots
+	}
+	return nil
+}
+
+func (x *GenesisRoundTree) GetBlockLeafIndices() []*GenesisBlockLeafIndex {
+	if x != nil {
+		return x.BlockLeafIndices
 	}
 	return nil
 }
@@ -993,6 +1009,155 @@ func (x *GenesisShareCount) GetCount() uint64 {
 	return 0
 }
 
+// GenesisPartialDecryption stores one validator's partial decryption D_i for
+// a single (round, proposal, decision) accumulator. Exported during TALLYING
+// so validators do not need to re-submit after a chain migration.
+type GenesisPartialDecryption struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RoundId        []byte                 `protobuf:"bytes,1,opt,name=round_id,json=roundId,proto3" json:"round_id,omitempty"`
+	ValidatorIndex uint32                 `protobuf:"varint,2,opt,name=validator_index,json=validatorIndex,proto3" json:"validator_index,omitempty"`
+	ProposalId     uint32                 `protobuf:"varint,3,opt,name=proposal_id,json=proposalId,proto3" json:"proposal_id,omitempty"`
+	VoteDecision   uint32                 `protobuf:"varint,4,opt,name=vote_decision,json=voteDecision,proto3" json:"vote_decision,omitempty"`
+	PartialDecrypt []byte                 `protobuf:"bytes,5,opt,name=partial_decrypt,json=partialDecrypt,proto3" json:"partial_decrypt,omitempty"` // 32-byte compressed Pallas point D_i
+	DleqProof      []byte                 `protobuf:"bytes,6,opt,name=dleq_proof,json=dleqProof,proto3" json:"dleq_proof,omitempty"`                // reserved for DLEQ proofs (Step 2)
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GenesisPartialDecryption) Reset() {
+	*x = GenesisPartialDecryption{}
+	mi := &file_svote_v1_types_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenesisPartialDecryption) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenesisPartialDecryption) ProtoMessage() {}
+
+func (x *GenesisPartialDecryption) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_types_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenesisPartialDecryption.ProtoReflect.Descriptor instead.
+func (*GenesisPartialDecryption) Descriptor() ([]byte, []int) {
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GenesisPartialDecryption) GetRoundId() []byte {
+	if x != nil {
+		return x.RoundId
+	}
+	return nil
+}
+
+func (x *GenesisPartialDecryption) GetValidatorIndex() uint32 {
+	if x != nil {
+		return x.ValidatorIndex
+	}
+	return 0
+}
+
+func (x *GenesisPartialDecryption) GetProposalId() uint32 {
+	if x != nil {
+		return x.ProposalId
+	}
+	return 0
+}
+
+func (x *GenesisPartialDecryption) GetVoteDecision() uint32 {
+	if x != nil {
+		return x.VoteDecision
+	}
+	return 0
+}
+
+func (x *GenesisPartialDecryption) GetPartialDecrypt() []byte {
+	if x != nil {
+		return x.PartialDecrypt
+	}
+	return nil
+}
+
+func (x *GenesisPartialDecryption) GetDleqProof() []byte {
+	if x != nil {
+		return x.DleqProof
+	}
+	return nil
+}
+
+// GenesisBlockLeafIndex records the range of commitment leaves appended during
+// a specific block height. Client convenience for the CommitmentLeaves query.
+type GenesisBlockLeafIndex struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Height        uint64                 `protobuf:"varint,1,opt,name=height,proto3" json:"height,omitempty"`
+	StartIndex    uint64                 `protobuf:"varint,2,opt,name=start_index,json=startIndex,proto3" json:"start_index,omitempty"`
+	Count         uint64                 `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GenesisBlockLeafIndex) Reset() {
+	*x = GenesisBlockLeafIndex{}
+	mi := &file_svote_v1_types_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenesisBlockLeafIndex) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenesisBlockLeafIndex) ProtoMessage() {}
+
+func (x *GenesisBlockLeafIndex) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_types_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenesisBlockLeafIndex.ProtoReflect.Descriptor instead.
+func (*GenesisBlockLeafIndex) Descriptor() ([]byte, []int) {
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GenesisBlockLeafIndex) GetHeight() uint64 {
+	if x != nil {
+		return x.Height
+	}
+	return 0
+}
+
+func (x *GenesisBlockLeafIndex) GetStartIndex() uint64 {
+	if x != nil {
+		return x.StartIndex
+	}
+	return 0
+}
+
+func (x *GenesisBlockLeafIndex) GetCount() uint64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
 // CommitmentLeaf is an entry in the append-only commitment tree.
 type CommitmentLeaf struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1004,7 +1169,7 @@ type CommitmentLeaf struct {
 
 func (x *CommitmentLeaf) Reset() {
 	*x = CommitmentLeaf{}
-	mi := &file_svote_v1_types_proto_msgTypes[10]
+	mi := &file_svote_v1_types_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1016,7 +1181,7 @@ func (x *CommitmentLeaf) String() string {
 func (*CommitmentLeaf) ProtoMessage() {}
 
 func (x *CommitmentLeaf) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_types_proto_msgTypes[10]
+	mi := &file_svote_v1_types_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1029,7 +1194,7 @@ func (x *CommitmentLeaf) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitmentLeaf.ProtoReflect.Descriptor instead.
 func (*CommitmentLeaf) Descriptor() ([]byte, []int) {
-	return file_svote_v1_types_proto_rawDescGZIP(), []int{10}
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CommitmentLeaf) GetIndex() uint64 {
@@ -1058,7 +1223,7 @@ type NullifierEntry struct {
 
 func (x *NullifierEntry) Reset() {
 	*x = NullifierEntry{}
-	mi := &file_svote_v1_types_proto_msgTypes[11]
+	mi := &file_svote_v1_types_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1070,7 +1235,7 @@ func (x *NullifierEntry) String() string {
 func (*NullifierEntry) ProtoMessage() {}
 
 func (x *NullifierEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_types_proto_msgTypes[11]
+	mi := &file_svote_v1_types_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1083,7 +1248,7 @@ func (x *NullifierEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NullifierEntry.ProtoReflect.Descriptor instead.
 func (*NullifierEntry) Descriptor() ([]byte, []int) {
-	return file_svote_v1_types_proto_rawDescGZIP(), []int{11}
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *NullifierEntry) GetNullifier() []byte {
@@ -1121,7 +1286,7 @@ type TallyResult struct {
 
 func (x *TallyResult) Reset() {
 	*x = TallyResult{}
-	mi := &file_svote_v1_types_proto_msgTypes[12]
+	mi := &file_svote_v1_types_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1133,7 +1298,7 @@ func (x *TallyResult) String() string {
 func (*TallyResult) ProtoMessage() {}
 
 func (x *TallyResult) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_types_proto_msgTypes[12]
+	mi := &file_svote_v1_types_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1146,7 +1311,7 @@ func (x *TallyResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TallyResult.ProtoReflect.Descriptor instead.
 func (*TallyResult) Descriptor() ([]byte, []int) {
-	return file_svote_v1_types_proto_rawDescGZIP(), []int{12}
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *TallyResult) GetVoteRoundId() []byte {
@@ -1191,7 +1356,7 @@ type BlockCommitments struct {
 
 func (x *BlockCommitments) Reset() {
 	*x = BlockCommitments{}
-	mi := &file_svote_v1_types_proto_msgTypes[13]
+	mi := &file_svote_v1_types_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1203,7 +1368,7 @@ func (x *BlockCommitments) String() string {
 func (*BlockCommitments) ProtoMessage() {}
 
 func (x *BlockCommitments) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_types_proto_msgTypes[13]
+	mi := &file_svote_v1_types_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1216,7 +1381,7 @@ func (x *BlockCommitments) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlockCommitments.ProtoReflect.Descriptor instead.
 func (*BlockCommitments) Descriptor() ([]byte, []int) {
-	return file_svote_v1_types_proto_rawDescGZIP(), []int{13}
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *BlockCommitments) GetHeight() uint64 {
@@ -1253,7 +1418,7 @@ type ProposalSummary struct {
 
 func (x *ProposalSummary) Reset() {
 	*x = ProposalSummary{}
-	mi := &file_svote_v1_types_proto_msgTypes[14]
+	mi := &file_svote_v1_types_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1265,7 +1430,7 @@ func (x *ProposalSummary) String() string {
 func (*ProposalSummary) ProtoMessage() {}
 
 func (x *ProposalSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_types_proto_msgTypes[14]
+	mi := &file_svote_v1_types_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1278,7 +1443,7 @@ func (x *ProposalSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProposalSummary.ProtoReflect.Descriptor instead.
 func (*ProposalSummary) Descriptor() ([]byte, []int) {
-	return file_svote_v1_types_proto_rawDescGZIP(), []int{14}
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ProposalSummary) GetId() uint32 {
@@ -1322,7 +1487,7 @@ type OptionSummary struct {
 
 func (x *OptionSummary) Reset() {
 	*x = OptionSummary{}
-	mi := &file_svote_v1_types_proto_msgTypes[15]
+	mi := &file_svote_v1_types_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1334,7 +1499,7 @@ func (x *OptionSummary) String() string {
 func (*OptionSummary) ProtoMessage() {}
 
 func (x *OptionSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_types_proto_msgTypes[15]
+	mi := &file_svote_v1_types_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1347,7 +1512,7 @@ func (x *OptionSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OptionSummary.ProtoReflect.Descriptor instead.
 func (*OptionSummary) Descriptor() ([]byte, []int) {
-	return file_svote_v1_types_proto_rawDescGZIP(), []int{15}
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *OptionSummary) GetIndex() uint32 {
@@ -1397,7 +1562,7 @@ type CeremonyState struct {
 
 func (x *CeremonyState) Reset() {
 	*x = CeremonyState{}
-	mi := &file_svote_v1_types_proto_msgTypes[16]
+	mi := &file_svote_v1_types_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1409,7 +1574,7 @@ func (x *CeremonyState) String() string {
 func (*CeremonyState) ProtoMessage() {}
 
 func (x *CeremonyState) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_types_proto_msgTypes[16]
+	mi := &file_svote_v1_types_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1422,7 +1587,7 @@ func (x *CeremonyState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CeremonyState.ProtoReflect.Descriptor instead.
 func (*CeremonyState) Descriptor() ([]byte, []int) {
-	return file_svote_v1_types_proto_rawDescGZIP(), []int{16}
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CeremonyState) GetStatus() CeremonyStatus {
@@ -1513,7 +1678,7 @@ type ValidatorPallasKey struct {
 
 func (x *ValidatorPallasKey) Reset() {
 	*x = ValidatorPallasKey{}
-	mi := &file_svote_v1_types_proto_msgTypes[17]
+	mi := &file_svote_v1_types_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1525,7 +1690,7 @@ func (x *ValidatorPallasKey) String() string {
 func (*ValidatorPallasKey) ProtoMessage() {}
 
 func (x *ValidatorPallasKey) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_types_proto_msgTypes[17]
+	mi := &file_svote_v1_types_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1538,7 +1703,7 @@ func (x *ValidatorPallasKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidatorPallasKey.ProtoReflect.Descriptor instead.
 func (*ValidatorPallasKey) Descriptor() ([]byte, []int) {
-	return file_svote_v1_types_proto_rawDescGZIP(), []int{17}
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ValidatorPallasKey) GetValidatorAddress() string {
@@ -1574,7 +1739,7 @@ type DealerPayload struct {
 
 func (x *DealerPayload) Reset() {
 	*x = DealerPayload{}
-	mi := &file_svote_v1_types_proto_msgTypes[18]
+	mi := &file_svote_v1_types_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1586,7 +1751,7 @@ func (x *DealerPayload) String() string {
 func (*DealerPayload) ProtoMessage() {}
 
 func (x *DealerPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_types_proto_msgTypes[18]
+	mi := &file_svote_v1_types_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1599,7 +1764,7 @@ func (x *DealerPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DealerPayload.ProtoReflect.Descriptor instead.
 func (*DealerPayload) Descriptor() ([]byte, []int) {
-	return file_svote_v1_types_proto_rawDescGZIP(), []int{18}
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *DealerPayload) GetValidatorAddress() string {
@@ -1635,7 +1800,7 @@ type AckEntry struct {
 
 func (x *AckEntry) Reset() {
 	*x = AckEntry{}
-	mi := &file_svote_v1_types_proto_msgTypes[19]
+	mi := &file_svote_v1_types_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1647,7 +1812,7 @@ func (x *AckEntry) String() string {
 func (*AckEntry) ProtoMessage() {}
 
 func (x *AckEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_types_proto_msgTypes[19]
+	mi := &file_svote_v1_types_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1660,7 +1825,7 @@ func (x *AckEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AckEntry.ProtoReflect.Descriptor instead.
 func (*AckEntry) Descriptor() ([]byte, []int) {
-	return file_svote_v1_types_proto_rawDescGZIP(), []int{19}
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AckEntry) GetValidatorAddress() string {
@@ -1734,7 +1899,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"next_index\x18\x01 \x01(\x04R\tnextIndex\x12\x12\n" +
 	"\x04root\x18\x02 \x01(\fR\x04root\x12\x16\n" +
 	"\x06height\x18\x03 \x01(\x04R\x06height\x12+\n" +
-	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\x9a\x04\n" +
+	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xef\x04\n" +
 	"\fGenesisState\x12+\n" +
 	"\x06rounds\x18\x01 \x03(\v2\x13.svote.v1.VoteRoundR\x06rounds\x128\n" +
 	"\n" +
@@ -1748,13 +1913,15 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\fshare_counts\x18\t \x03(\v2\x1b.svote.v1.GenesisShareCountR\vshareCounts\x126\n" +
 	"\x17min_ceremony_validators\x18\v \x01(\rR\x15minCeremonyValidators\x12;\n" +
 	"\vround_trees\x18\f \x03(\v2\x1a.svote.v1.GenesisRoundTreeR\n" +
-	"roundTrees\"\x87\x02\n" +
+	"roundTrees\x12S\n" +
+	"\x13partial_decryptions\x18\r \x03(\v2\".svote.v1.GenesisPartialDecryptionR\x12partialDecryptions\"\xd6\x02\n" +
 	"\x10GenesisRoundTree\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12<\n" +
 	"\n" +
 	"tree_state\x18\x02 \x01(\v2\x1d.svote.v1.CommitmentTreeStateR\ttreeState\x12E\n" +
 	"\x11commitment_leaves\x18\x03 \x03(\v2\x18.svote.v1.CommitmentLeafR\x10commitmentLeaves\x12J\n" +
-	"\x10commitment_roots\x18\x04 \x03(\v2\x1f.svote.v1.GenesisCommitmentRootR\x0fcommitmentRoots\"C\n" +
+	"\x10commitment_roots\x18\x04 \x03(\v2\x1f.svote.v1.GenesisCommitmentRootR\x0fcommitmentRoots\x12M\n" +
+	"\x12block_leaf_indices\x18\x05 \x03(\v2\x1f.svote.v1.GenesisBlockLeafIndexR\x10blockLeafIndices\"C\n" +
 	"\x15GenesisCommitmentRoot\x12\x16\n" +
 	"\x06height\x18\x01 \x01(\x04R\x06height\x12\x12\n" +
 	"\x04root\x18\x02 \x01(\fR\x04root\"\x9a\x01\n" +
@@ -1771,7 +1938,21 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\vproposal_id\x18\x02 \x01(\rR\n" +
 	"proposalId\x12#\n" +
 	"\rvote_decision\x18\x03 \x01(\rR\fvoteDecision\x12\x14\n" +
-	"\x05count\x18\x04 \x01(\x04R\x05count\"<\n" +
+	"\x05count\x18\x04 \x01(\x04R\x05count\"\xec\x01\n" +
+	"\x18GenesisPartialDecryption\x12\x19\n" +
+	"\bround_id\x18\x01 \x01(\fR\aroundId\x12'\n" +
+	"\x0fvalidator_index\x18\x02 \x01(\rR\x0evalidatorIndex\x12\x1f\n" +
+	"\vproposal_id\x18\x03 \x01(\rR\n" +
+	"proposalId\x12#\n" +
+	"\rvote_decision\x18\x04 \x01(\rR\fvoteDecision\x12'\n" +
+	"\x0fpartial_decrypt\x18\x05 \x01(\fR\x0epartialDecrypt\x12\x1d\n" +
+	"\n" +
+	"dleq_proof\x18\x06 \x01(\fR\tdleqProof\"f\n" +
+	"\x15GenesisBlockLeafIndex\x12\x16\n" +
+	"\x06height\x18\x01 \x01(\x04R\x06height\x12\x1f\n" +
+	"\vstart_index\x18\x02 \x01(\x04R\n" +
+	"startIndex\x12\x14\n" +
+	"\x05count\x18\x03 \x01(\x04R\x05count\"<\n" +
 	"\x0eCommitmentLeaf\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x04R\x05index\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05value\"p\n" +
@@ -1857,59 +2038,63 @@ func file_svote_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_svote_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_svote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_svote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_svote_v1_types_proto_goTypes = []any{
-	(SessionStatus)(0),              // 0: svote.v1.SessionStatus
-	(CeremonyStatus)(0),             // 1: svote.v1.CeremonyStatus
-	(*VoteOption)(nil),              // 2: svote.v1.VoteOption
-	(*Proposal)(nil),                // 3: svote.v1.Proposal
-	(*VoteRound)(nil),               // 4: svote.v1.VoteRound
-	(*VoteManagerState)(nil),        // 5: svote.v1.VoteManagerState
-	(*CommitmentTreeState)(nil),     // 6: svote.v1.CommitmentTreeState
-	(*GenesisState)(nil),            // 7: svote.v1.GenesisState
-	(*GenesisRoundTree)(nil),        // 8: svote.v1.GenesisRoundTree
-	(*GenesisCommitmentRoot)(nil),   // 9: svote.v1.GenesisCommitmentRoot
-	(*GenesisTallyAccumulator)(nil), // 10: svote.v1.GenesisTallyAccumulator
-	(*GenesisShareCount)(nil),       // 11: svote.v1.GenesisShareCount
-	(*CommitmentLeaf)(nil),          // 12: svote.v1.CommitmentLeaf
-	(*NullifierEntry)(nil),          // 13: svote.v1.NullifierEntry
-	(*TallyResult)(nil),             // 14: svote.v1.TallyResult
-	(*BlockCommitments)(nil),        // 15: svote.v1.BlockCommitments
-	(*ProposalSummary)(nil),         // 16: svote.v1.ProposalSummary
-	(*OptionSummary)(nil),           // 17: svote.v1.OptionSummary
-	(*CeremonyState)(nil),           // 18: svote.v1.CeremonyState
-	(*ValidatorPallasKey)(nil),      // 19: svote.v1.ValidatorPallasKey
-	(*DealerPayload)(nil),           // 20: svote.v1.DealerPayload
-	(*AckEntry)(nil),                // 21: svote.v1.AckEntry
+	(SessionStatus)(0),               // 0: svote.v1.SessionStatus
+	(CeremonyStatus)(0),              // 1: svote.v1.CeremonyStatus
+	(*VoteOption)(nil),               // 2: svote.v1.VoteOption
+	(*Proposal)(nil),                 // 3: svote.v1.Proposal
+	(*VoteRound)(nil),                // 4: svote.v1.VoteRound
+	(*VoteManagerState)(nil),         // 5: svote.v1.VoteManagerState
+	(*CommitmentTreeState)(nil),      // 6: svote.v1.CommitmentTreeState
+	(*GenesisState)(nil),             // 7: svote.v1.GenesisState
+	(*GenesisRoundTree)(nil),         // 8: svote.v1.GenesisRoundTree
+	(*GenesisCommitmentRoot)(nil),    // 9: svote.v1.GenesisCommitmentRoot
+	(*GenesisTallyAccumulator)(nil),  // 10: svote.v1.GenesisTallyAccumulator
+	(*GenesisShareCount)(nil),        // 11: svote.v1.GenesisShareCount
+	(*GenesisPartialDecryption)(nil), // 12: svote.v1.GenesisPartialDecryption
+	(*GenesisBlockLeafIndex)(nil),    // 13: svote.v1.GenesisBlockLeafIndex
+	(*CommitmentLeaf)(nil),           // 14: svote.v1.CommitmentLeaf
+	(*NullifierEntry)(nil),           // 15: svote.v1.NullifierEntry
+	(*TallyResult)(nil),              // 16: svote.v1.TallyResult
+	(*BlockCommitments)(nil),         // 17: svote.v1.BlockCommitments
+	(*ProposalSummary)(nil),          // 18: svote.v1.ProposalSummary
+	(*OptionSummary)(nil),            // 19: svote.v1.OptionSummary
+	(*CeremonyState)(nil),            // 20: svote.v1.CeremonyState
+	(*ValidatorPallasKey)(nil),       // 21: svote.v1.ValidatorPallasKey
+	(*DealerPayload)(nil),            // 22: svote.v1.DealerPayload
+	(*AckEntry)(nil),                 // 23: svote.v1.AckEntry
 }
 var file_svote_v1_types_proto_depIdxs = []int32{
 	2,  // 0: svote.v1.Proposal.options:type_name -> svote.v1.VoteOption
 	0,  // 1: svote.v1.VoteRound.status:type_name -> svote.v1.SessionStatus
 	3,  // 2: svote.v1.VoteRound.proposals:type_name -> svote.v1.Proposal
 	1,  // 3: svote.v1.VoteRound.ceremony_status:type_name -> svote.v1.CeremonyStatus
-	19, // 4: svote.v1.VoteRound.ceremony_validators:type_name -> svote.v1.ValidatorPallasKey
-	20, // 5: svote.v1.VoteRound.ceremony_payloads:type_name -> svote.v1.DealerPayload
-	21, // 6: svote.v1.VoteRound.ceremony_acks:type_name -> svote.v1.AckEntry
+	21, // 4: svote.v1.VoteRound.ceremony_validators:type_name -> svote.v1.ValidatorPallasKey
+	22, // 5: svote.v1.VoteRound.ceremony_payloads:type_name -> svote.v1.DealerPayload
+	23, // 6: svote.v1.VoteRound.ceremony_acks:type_name -> svote.v1.AckEntry
 	4,  // 7: svote.v1.GenesisState.rounds:type_name -> svote.v1.VoteRound
-	13, // 8: svote.v1.GenesisState.nullifiers:type_name -> svote.v1.NullifierEntry
-	14, // 9: svote.v1.GenesisState.tally_results:type_name -> svote.v1.TallyResult
-	19, // 10: svote.v1.GenesisState.pallas_keys:type_name -> svote.v1.ValidatorPallasKey
+	15, // 8: svote.v1.GenesisState.nullifiers:type_name -> svote.v1.NullifierEntry
+	16, // 9: svote.v1.GenesisState.tally_results:type_name -> svote.v1.TallyResult
+	21, // 10: svote.v1.GenesisState.pallas_keys:type_name -> svote.v1.ValidatorPallasKey
 	10, // 11: svote.v1.GenesisState.tally_accumulators:type_name -> svote.v1.GenesisTallyAccumulator
 	11, // 12: svote.v1.GenesisState.share_counts:type_name -> svote.v1.GenesisShareCount
 	8,  // 13: svote.v1.GenesisState.round_trees:type_name -> svote.v1.GenesisRoundTree
-	6,  // 14: svote.v1.GenesisRoundTree.tree_state:type_name -> svote.v1.CommitmentTreeState
-	12, // 15: svote.v1.GenesisRoundTree.commitment_leaves:type_name -> svote.v1.CommitmentLeaf
-	9,  // 16: svote.v1.GenesisRoundTree.commitment_roots:type_name -> svote.v1.GenesisCommitmentRoot
-	17, // 17: svote.v1.ProposalSummary.options:type_name -> svote.v1.OptionSummary
-	1,  // 18: svote.v1.CeremonyState.status:type_name -> svote.v1.CeremonyStatus
-	19, // 19: svote.v1.CeremonyState.validators:type_name -> svote.v1.ValidatorPallasKey
-	20, // 20: svote.v1.CeremonyState.payloads:type_name -> svote.v1.DealerPayload
-	21, // 21: svote.v1.CeremonyState.acks:type_name -> svote.v1.AckEntry
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	12, // 14: svote.v1.GenesisState.partial_decryptions:type_name -> svote.v1.GenesisPartialDecryption
+	6,  // 15: svote.v1.GenesisRoundTree.tree_state:type_name -> svote.v1.CommitmentTreeState
+	14, // 16: svote.v1.GenesisRoundTree.commitment_leaves:type_name -> svote.v1.CommitmentLeaf
+	9,  // 17: svote.v1.GenesisRoundTree.commitment_roots:type_name -> svote.v1.GenesisCommitmentRoot
+	13, // 18: svote.v1.GenesisRoundTree.block_leaf_indices:type_name -> svote.v1.GenesisBlockLeafIndex
+	19, // 19: svote.v1.ProposalSummary.options:type_name -> svote.v1.OptionSummary
+	1,  // 20: svote.v1.CeremonyState.status:type_name -> svote.v1.CeremonyStatus
+	21, // 21: svote.v1.CeremonyState.validators:type_name -> svote.v1.ValidatorPallasKey
+	22, // 22: svote.v1.CeremonyState.payloads:type_name -> svote.v1.DealerPayload
+	23, // 23: svote.v1.CeremonyState.acks:type_name -> svote.v1.AckEntry
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_svote_v1_types_proto_init() }
@@ -1923,7 +2108,7 @@ func file_svote_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_types_proto_rawDesc), len(file_svote_v1_types_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   20,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

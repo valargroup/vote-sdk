@@ -89,14 +89,16 @@ message GenesisState {
   repeated GenesisShareCount       share_counts         = 9;
   uint32                           min_ceremony_validators   = 11;
   repeated GenesisRoundTree        round_trees               = 12;
+  repeated GenesisPartialDecryption partial_decryptions      = 13;
 }
 
 // GenesisRoundTree holds per-round commitment tree state for genesis export/import.
 message GenesisRoundTree {
-  bytes                          vote_round_id    = 1;
-  CommitmentTreeState            tree_state       = 2;
-  repeated CommitmentLeaf        commitment_leaves = 3;
-  repeated GenesisCommitmentRoot commitment_roots  = 4;
+  bytes                          vote_round_id      = 1;
+  CommitmentTreeState            tree_state         = 2;
+  repeated CommitmentLeaf        commitment_leaves  = 3;
+  repeated GenesisCommitmentRoot commitment_roots   = 4;
+  repeated GenesisBlockLeafIndex block_leaf_indices = 5;
 }
 
 // GenesisCommitmentRoot is a commitment tree root stored at a specific block height.
@@ -119,6 +121,26 @@ message GenesisShareCount {
   uint32 proposal_id   = 2;
   uint32 vote_decision = 3;
   uint64 count         = 4;
+}
+
+// GenesisPartialDecryption stores one validator's partial decryption D_i for
+// a single (round, proposal, decision) accumulator. Exported during TALLYING
+// so validators do not need to re-submit after a chain migration.
+message GenesisPartialDecryption {
+  bytes  round_id         = 1;
+  uint32 validator_index  = 2;
+  uint32 proposal_id      = 3;
+  uint32 vote_decision    = 4;
+  bytes  partial_decrypt  = 5; // 32-byte compressed Pallas point D_i
+  bytes  dleq_proof       = 6; // reserved for DLEQ proofs (Step 2)
+}
+
+// GenesisBlockLeafIndex records the range of commitment leaves appended during
+// a specific block height. Client convenience for the CommitmentLeaves query.
+message GenesisBlockLeafIndex {
+  uint64 height      = 1;
+  uint64 start_index = 2;
+  uint64 count       = 3;
 }
 
 // CommitmentLeaf is an entry in the append-only commitment tree.
