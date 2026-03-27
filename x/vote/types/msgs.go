@@ -18,20 +18,20 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 	if msg.SnapshotHeight == 0 {
 		return fmt.Errorf("%w: snapshot_height cannot be zero", ErrInvalidField)
 	}
-	if len(msg.SnapshotBlockhash) == 0 {
-		return fmt.Errorf("%w: snapshot_blockhash cannot be empty", ErrInvalidField)
+	if len(msg.SnapshotBlockhash) != 32 {
+		return fmt.Errorf("%w: snapshot_blockhash must be 32 bytes, got %d", ErrInvalidField, len(msg.SnapshotBlockhash))
 	}
-	if len(msg.ProposalsHash) == 0 {
-		return fmt.Errorf("%w: proposals_hash cannot be empty", ErrInvalidField)
+	if len(msg.ProposalsHash) != 32 {
+		return fmt.Errorf("%w: proposals_hash must be 32 bytes, got %d", ErrInvalidField, len(msg.ProposalsHash))
 	}
 	if msg.VoteEndTime == 0 {
 		return fmt.Errorf("%w: vote_end_time cannot be zero", ErrInvalidField)
 	}
-	if len(msg.NullifierImtRoot) == 0 {
-		return fmt.Errorf("%w: nullifier_imt_root cannot be empty", ErrInvalidField)
+	if len(msg.NullifierImtRoot) != 32 {
+		return fmt.Errorf("%w: nullifier_imt_root must be 32 bytes, got %d", ErrInvalidField, len(msg.NullifierImtRoot))
 	}
-	if len(msg.NcRoot) == 0 {
-		return fmt.Errorf("%w: nc_root cannot be empty", ErrInvalidField)
+	if len(msg.NcRoot) != 32 {
+		return fmt.Errorf("%w: nc_root must be 32 bytes, got %d", ErrInvalidField, len(msg.NcRoot))
 	}
 	if len(msg.Proposals) == 0 || len(msg.Proposals) > MaxProposals {
 		return fmt.Errorf("%w: proposals count must be between 1 and %d, got %d", ErrInvalidField, MaxProposals, len(msg.Proposals))
@@ -69,17 +69,17 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 	if bytes.Equal(msg.Rk, zeroPoint32[:]) {
 		return fmt.Errorf("%w: rk must not be the identity point (all zeros)", ErrInvalidField)
 	}
-	if len(msg.SpendAuthSig) == 0 {
-		return fmt.Errorf("%w: spend_auth_sig cannot be empty", ErrInvalidField)
+	if len(msg.SpendAuthSig) != 64 {
+		return fmt.Errorf("%w: spend_auth_sig must be 64 bytes, got %d", ErrInvalidField, len(msg.SpendAuthSig))
 	}
-	if len(msg.SignedNoteNullifier) == 0 {
-		return fmt.Errorf("%w: signed_note_nullifier cannot be empty", ErrInvalidField)
+	if len(msg.SignedNoteNullifier) != 32 {
+		return fmt.Errorf("%w: signed_note_nullifier must be 32 bytes, got %d", ErrInvalidField, len(msg.SignedNoteNullifier))
 	}
-	if len(msg.CmxNew) == 0 {
-		return fmt.Errorf("%w: cmx_new cannot be empty", ErrInvalidField)
+	if len(msg.CmxNew) != 32 {
+		return fmt.Errorf("%w: cmx_new must be 32 bytes, got %d", ErrInvalidField, len(msg.CmxNew))
 	}
-	if len(msg.VanCmx) == 0 {
-		return fmt.Errorf("%w: van_cmx cannot be empty", ErrInvalidField)
+	if len(msg.VanCmx) != 32 {
+		return fmt.Errorf("%w: van_cmx must be 32 bytes, got %d", ErrInvalidField, len(msg.VanCmx))
 	}
 	if len(msg.GovNullifiers) == 0 {
 		return fmt.Errorf("%w: gov_nullifiers cannot be empty", ErrInvalidField)
@@ -88,8 +88,8 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 		return fmt.Errorf("%w: gov_nullifiers cannot exceed 5, got %d", ErrInvalidField, len(msg.GovNullifiers))
 	}
 	for i, n := range msg.GovNullifiers {
-		if len(n) == 0 {
-			return fmt.Errorf("%w: gov_nullifiers[%d] cannot be empty", ErrInvalidField, i)
+		if len(n) != 32 {
+			return fmt.Errorf("%w: gov_nullifiers[%d] must be 32 bytes, got %d", ErrInvalidField, i, len(n))
 		}
 	}
 
@@ -117,14 +117,14 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 
 // ValidateBasic performs stateless validation for MsgCastVote.
 func (msg *MsgCastVote) ValidateBasic() error {
-	if len(msg.VanNullifier) == 0 {
-		return fmt.Errorf("%w: van_nullifier cannot be empty", ErrInvalidField)
+	if len(msg.VanNullifier) != 32 {
+		return fmt.Errorf("%w: van_nullifier must be 32 bytes, got %d", ErrInvalidField, len(msg.VanNullifier))
 	}
-	if len(msg.VoteAuthorityNoteNew) == 0 {
-		return fmt.Errorf("%w: vote_authority_note_new cannot be empty", ErrInvalidField)
+	if len(msg.VoteAuthorityNoteNew) != 32 {
+		return fmt.Errorf("%w: vote_authority_note_new must be 32 bytes, got %d", ErrInvalidField, len(msg.VoteAuthorityNoteNew))
 	}
-	if len(msg.VoteCommitment) == 0 {
-		return fmt.Errorf("%w: vote_commitment cannot be empty", ErrInvalidField)
+	if len(msg.VoteCommitment) != 32 {
+		return fmt.Errorf("%w: vote_commitment must be 32 bytes, got %d", ErrInvalidField, len(msg.VoteCommitment))
 	}
 	if msg.ProposalId < MinProposalID || msg.ProposalId > MaxProposals {
 		return fmt.Errorf("%w: proposal_id must be %d..%d, got %d", ErrInvalidField, MinProposalID, MaxProposals, msg.ProposalId)
@@ -138,8 +138,8 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	if msg.VoteCommTreeAnchorHeight == 0 {
 		return fmt.Errorf("%w: vote_comm_tree_anchor_height cannot be zero", ErrInvalidField)
 	}
-	if len(msg.VoteAuthSig) == 0 {
-		return fmt.Errorf("%w: vote_auth_sig cannot be empty", ErrInvalidField)
+	if len(msg.VoteAuthSig) != 64 {
+		return fmt.Errorf("%w: vote_auth_sig must be 64 bytes, got %d", ErrInvalidField, len(msg.VoteAuthSig))
 	}
 	if len(msg.RVpk) != 32 {
 		return fmt.Errorf("%w: r_vpk must be 32 bytes, got %d", ErrInvalidField, len(msg.RVpk))
