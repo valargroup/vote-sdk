@@ -306,7 +306,6 @@ pub fn helper_share_payload(
             "c2": to_base64(enc_share_c2),
             "share_index": share_index,
         },
-        "share_index": share_index,
         "tree_position": tree_position,
         "vote_round_id": hex::encode(round_id),
         "all_enc_shares": all_shares_json,

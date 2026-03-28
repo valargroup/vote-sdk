@@ -355,7 +355,6 @@ func TestValidatePayload(t *testing.T) {
 		ProposalID:   1,
 		VoteDecision: 0,
 		EncShare:     EncryptedShareWire{C1: b64_32, C2: b64_32, ShareIndex: 0},
-		ShareIndex:   0,
 		TreePosition: 0,
 		VoteRoundID:  roundID,
 		ShareComms:   comms,

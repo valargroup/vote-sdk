@@ -45,7 +45,6 @@ func testPayload(roundID string, shareIndex uint32) SharePayload {
 			C2:         zeroB64,
 			ShareIndex: shareIndex,
 		},
-		ShareIndex:   shareIndex,
 		TreePosition: 0,
 		VoteRoundID:  roundID,
 		ShareComms:   comms,
