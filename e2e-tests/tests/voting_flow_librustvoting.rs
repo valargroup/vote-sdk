@@ -756,7 +756,7 @@ fn voting_flow_librustvoting_path() {
             &p.share_comms,
             &p.primary_blind,
         );
-        let (status, json) = post_helper_json("/api/v1/shares", &body)
+        let (status, json) = post_helper_json("/shielded-vote/v1/shares", &body)
             .unwrap_or_else(|e| panic!("POST helper share {}: {}", i, e));
         assert_eq!(
             status, 200,

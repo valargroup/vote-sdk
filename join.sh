@@ -273,7 +273,7 @@ cat >> "${APP_TOML}" <<HELPERCFG
 # Set to true to disable the helper server.
 disable = false
 
-# Optional auth token for POST /api/v1/shares (sent via X-Helper-Token header).
+# Optional auth token for POST /shielded-vote/v1/shares (sent via X-Helper-Token header).
 # Empty disables token auth.
 api_token = ""
 
