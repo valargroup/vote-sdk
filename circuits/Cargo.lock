@@ -366,7 +366,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "imt-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/vote-nullifier-pir.git#4092868458b92184f7de3ec0bc99d0a5661839db"
+source = "git+https://github.com/valargroup/vote-nullifier-pir.git#a7b30464b6ba77b35bae3325924beeb05fe22275"
 dependencies = [
  "anyhow",
  "ff",
@@ -930,7 +930,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git#80bba376606880cae564ec175dd710a4f67ad9c0"
+source = "git+https://github.com/valargroup/librustvoting.git#48af429ad7898aac776fbec31268fffd175554f1"
 dependencies = [
  "anyhow",
  "ff",
