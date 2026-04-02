@@ -1,5 +1,5 @@
 BINARY = svoted
-HOME_DIR = $(HOME)/.svoted
+HOME_DIR := $(or $(SVOTED_HOME),$(HOME)/.svoted)
 
 export GOBIN := $(HOME)/go/bin
 export PATH := $(GOBIN):$(PATH)

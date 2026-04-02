@@ -13,7 +13,7 @@ fi
 
 CHAIN_ID="svote-1"
 MONIKER="validator"
-HOME_DIR="$HOME/.svoted"
+HOME_DIR="${SVOTED_HOME:-$HOME/.svoted}"
 BINARY="svoted"
 DENOM="usvote"
 
