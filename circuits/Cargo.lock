@@ -516,7 +516,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 [[package]]
 name = "orchard"
 version = "0.11.0"
-source = "git+https://github.com/valargroup/voting-circuits.git#99fdd303df7bea2b7d91c13cca0fcc5765e834cc"
+source = "git+https://github.com/valargroup/voting-circuits.git#c00f26d828cf6d2f1db24792342dff343120d4f3"
 dependencies = [
  "aes",
  "bitvec",
@@ -930,7 +930,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git#48af429ad7898aac776fbec31268fffd175554f1"
+source = "git+https://github.com/valargroup/librustvoting.git#3860780a34ab37ced8a4db6752990474291d3610"
 dependencies = [
  "anyhow",
  "ff",
@@ -946,7 +946,7 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/voting-circuits.git#99fdd303df7bea2b7d91c13cca0fcc5765e834cc"
+source = "git+https://github.com/valargroup/voting-circuits.git#c00f26d828cf6d2f1db24792342dff343120d4f3"
 dependencies = [
  "blake2b_simd",
  "ff",
