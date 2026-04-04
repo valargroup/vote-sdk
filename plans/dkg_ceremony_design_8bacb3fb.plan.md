@@ -12,11 +12,11 @@ todos:
     content: "Phase 3: ContributeDKG handler — validate contributions, store in DkgContributions, finalize via CombineCommitments on n-th contribution (REGISTERING→DEALT), FindContributionInRound helper, ErrDuplicateContribution, EventTypeContributeDKG, 20 tests covering happy path, partial accumulation, real-crypto integration, and 13 rejection cases"
     status: completed
   - id: p4-injector
-    content: "Phase 4: Implement CeremonyDKGPrepareProposalHandler (generate polynomial, save coefficients to disk, ECIES encrypt shares, inject MsgContributeDKG). Not wired yet."
-    status: pending
+    content: "Phase 4: Implement CeremonyDKGContributionPrepareProposalHandler — generate random polynomial, shamir.Split, FeldmanCommit, persist coefficients to disk via writeCoeffs, ECIES encrypt n-1 shares (excludes self), inject MsgContributeDKG. coeffsPathForRound helper. Not wired into ComposedPrepareProposalHandler yet."
+    status: completed
   - id: p4-injector-tests
-    content: "Phase 4 tests: injector generates valid contribution, coefficients persist to disk, ECIES envelopes decryptable by recipients, skips if already contributed"
-    status: pending
+    content: "Phase 4 tests (5): injection happy path (correct tag, t commitments, n-1 payloads, no self-reference), coefficients round-trip (parse back, FeldmanCommit matches published), ECIES envelopes decryptable + Feldman-verified, skips when already contributed, skips when not ceremony validator, skips when no Pallas key"
+    status: completed
   - id: p5-ack
     content: "Phase 5: Add DKG ack path in CeremonyAckPrepareProposalHandler (detect DKG via dkg_contributions, load coefficients, decrypt n-1 shares, verify per-contributor Feldman, compute combined share, delete coefficients file)"
     status: pending
@@ -283,14 +283,20 @@ New handler alongside existing DealExecutiveAuthorityKey. Both coexist.
 - On final contribution (n-th): deserialize all commitment vectors, call `CombineCommitments`, set `ea_pk` + `feldman_commitments`, transition to DEALT
 - **Tests**: handler rejects non-proposer, non-validator, duplicate, wrong counts; partial accumulation stays REGISTERING; final contribution computes correct combined commitments and transitions to DEALT
 
-### Phase 4: DKG contribution injector
+### Phase 4: DKG contribution injector ✓
 
-New injector function, not wired into `ComposedPrepareProposalHandler` yet.
+Implemented `CeremonyDKGContributionPrepareProposalHandler` in [prepare_proposal_ceremony.go](vote-sdk/app/prepare_proposal_ceremony.go). Not wired into `ComposedPrepareProposalHandler` yet (Phase 6).
 
-- Implement `CeremonyDKGPrepareProposalHandler` in [prepare_proposal_ceremony.go](vote-sdk/app/prepare_proposal_ceremony.go)
-- Add `coeffsPathForRound(dir, roundID)` helper for coefficient file path
-- Generate random `s_i`, `shamir.Split`, `FeldmanCommit`, save coefficients to disk, ECIES encrypt shares for n-1 other validators, inject `MsgContributeDKG`
-- **Tests**: generates valid contribution with correct commitment/payload counts, coefficients file exists on disk after call, ECIES envelopes are decryptable by intended recipients, skips if already contributed, skips if not ceremony validator
+- `coeffsPathForRound(dir, roundID)` → `<dir>/coeffs.<hex(round_id)>` for polynomial coefficient persistence
+- `writeCoeffs(path, coeffs)` serializes `t` concatenated 32-byte Pallas scalars to disk (mode 0600)
+- Handler flow: load Pallas SK → resolve proposer → find REGISTERING round → check validator membership → check no prior contribution → generate random `s_i` → `shamir.Split(s_i, t, n)` → `FeldmanCommit(G, coeffs)` → persist coefficients → ECIES-encrypt `n-1` shares (excludes self) → inject `MsgContributeDKG`
+- Coefficients are zeroed in memory after write; persisted file is read by Phase 5 ack handler to compute `f_i(shamirIndex)`
+- **Tests** (5 in [ceremony_deal_test.go](vote-sdk/app/ceremony_deal_test.go)):
+  - `TestDKGContributionInjection`: happy path — correct tag, `t=2` commitments, `n-1=2` payloads (no self), ECIES decryptable by intended recipients, Feldman-verified shares, coefficients file on disk
+  - `TestDKGContributionCoeffsRoundTrip`: parse coefficients back from disk, re-derive `FeldmanCommit` matches published commitments
+  - `TestDKGContributionSkipsWhenAlreadyContributed`: pre-populate contribution → no injection
+  - `TestDKGContributionSkipsWhenNotCeremonyValidator`: proposer absent from validators → no injection
+  - `TestDKGContributionSkipsWhenNoPallasKey`: empty `pallasSkPath` → no injection
 
 ### Phase 5: DKG-aware ack path
 
