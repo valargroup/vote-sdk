@@ -11,6 +11,7 @@ const (
 	EventTypeSubmitTally                  = "submit_tally"
 	EventTypeRegisterPallasKey            = "register_pallas_key"
 	EventTypeDealExecutiveAuthorityKey    = "deal_executive_authority_key"
+	EventTypeContributeDKG               = "contribute_dkg"
 	EventTypeAckExecutiveAuthorityKey     = "ack_executive_authority_key"
 	EventTypeCeremonyStatusChange             = "ceremony_status_change"
 	EventTypeSetVoteManager                   = "set_vote_manager"
