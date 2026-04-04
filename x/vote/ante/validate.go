@@ -18,8 +18,9 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/valargroup/vote-sdk/crypto/redpallas"
-	"github.com/valargroup/vote-sdk/crypto/zkp"
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/ffi/redpallas"
+	"github.com/valargroup/vote-sdk/ffi/zkp"
 	"github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -80,14 +81,8 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 				return err
 			}
 		default:
-			if msg.AcceptsTallyingRound() {
-				if err := k.ValidateRoundForShares(ctx, roundID); err != nil {
-					return err
-				}
-			} else {
-				if err := k.ValidateRoundForVoting(ctx, roundID); err != nil {
-					return err
-				}
+			if err := k.ValidateRoundForVoting(ctx, roundID); err != nil {
+				return err
 			}
 		}
 	}
@@ -148,6 +143,12 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper
 	if len(msg.Sighash) != 32 {
 		return types.ErrSighashMismatch
 	}
+	// Validate rk is a valid on-curve non-identity Pallas point before
+	// passing to the FFI. This makes the Go layer self-sufficient against
+	// the identity-point signature bypass regardless of Rust-side checks.
+	if _, err := elgamal.UnmarshalPublicKey(msg.Rk); err != nil {
+		return fmt.Errorf("%w: rk: %v", types.ErrInvalidSignature, err)
+	}
 	// RedPallas signature verification over the client-provided sighash.
 	if err := opts.SigVerifier.Verify(msg.Rk, msg.Sighash, msg.SpendAuthSig); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
@@ -198,6 +199,12 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keepe
 	// Compute the canonical sighash from message fields and verify the
 	// RedPallas signature over it. r_vpk is the compressed randomized voting
 	// key; the ZKP proves it equals vsk.ak + [alpha_v]*G (condition 4).
+	// Validate r_vpk is a valid on-curve non-identity Pallas point before
+	// passing to the FFI. This makes the Go layer self-sufficient against
+	// the identity-point signature bypass regardless of Rust-side checks.
+	if _, err := elgamal.UnmarshalPublicKey(msg.RVpk); err != nil {
+		return fmt.Errorf("%w: r_vpk: %v", types.ErrInvalidSignature, err)
+	}
 	sighash := types.ComputeCastVoteSighash(msg)
 	if err := opts.SigVerifier.Verify(msg.RVpk, sighash, msg.VoteAuthSig); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
@@ -205,8 +212,8 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keepe
 
 	kvStore := k.OpenKVStore(ctx)
 
-	// Fetch vote commitment tree root at the anchor height.
-	root, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteCommTreeAnchorHeight)
+	// Fetch vote commitment tree root at the anchor height for this round.
+	root, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteRoundId, msg.VoteCommTreeAnchorHeight)
 	if err != nil {
 		return fmt.Errorf("failed to get commitment tree root at height %d: %w", msg.VoteCommTreeAnchorHeight, err)
 	}
@@ -241,9 +248,9 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keepe
 // It looks up the vote commitment tree root at the anchor height specified
 // in the message and includes it as a public input to the ZKP verifier.
 func verifyRevealShare(ctx context.Context, msg *types.MsgRevealShare, k *keeper.Keeper, opts ValidateOpts) error {
-	// Look up the commitment tree root at the specified anchor height.
+	// Look up the commitment tree root at the specified anchor height for this round.
 	kvStore := k.OpenKVStore(ctx)
-	treeRoot, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteCommTreeAnchorHeight)
+	treeRoot, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteRoundId, msg.VoteCommTreeAnchorHeight)
 	if err != nil {
 		return fmt.Errorf("failed to look up commitment tree root: %w", err)
 	}

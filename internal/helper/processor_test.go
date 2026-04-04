@@ -24,8 +24,8 @@ func (m *mockProver) GenerateShareRevealProof(
 	merklePath []byte,
 	shareComms [16][32]byte,
 	primaryBlind [32]byte,
-	encC1X [32]byte,
-	encC2X [32]byte,
+	encC1 [32]byte,
+	encC2 [32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
@@ -53,8 +53,8 @@ func (p *trackingProver) GenerateShareRevealProof(
 	merklePath []byte,
 	shareComms [16][32]byte,
 	primaryBlind [32]byte,
-	encC1X [32]byte,
-	encC2X [32]byte,
+	encC1 [32]byte,
+	encC2 [32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
@@ -83,6 +83,8 @@ type mockTreeReader struct {
 	leaves       map[uint64][]byte
 	err          error
 }
+
+func (m *mockTreeReader) SetRoundID(_ []byte) {}
 
 func (m *mockTreeReader) GetTreeStatus() (TreeStatus, error) {
 	if m.err != nil {
@@ -131,7 +133,7 @@ func TestProcessor_ProcessBatch_Success(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2, nil)
 
 	// Enqueue a share (zero delay in test store means immediately ready).
 	roundID := hex.EncodeToString(make([]byte, 32))
@@ -161,7 +163,7 @@ func TestProcessor_ProcessBatch_ProofFailure(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2, nil)
 
 	// Enqueue (zero delay, immediately ready).
 	roundID := hex.EncodeToString(make([]byte, 32))
@@ -189,7 +191,7 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2, nil)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	p := testPayload(roundID, 0)
@@ -218,7 +220,7 @@ func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T)
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2, nil)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	p := testPayload(roundID, 0)
@@ -239,7 +241,7 @@ func TestProcessor_Run_CancelContext(t *testing.T) {
 	prover := &mockProver{}
 	tree := newMockTreeReader()
 	submitter := NewChainSubmitter("http://localhost:0")
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 50*time.Millisecond, 2)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 50*time.Millisecond, 2, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -267,7 +269,7 @@ func TestProcessor_TreePositionOutOfRange(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2, nil)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	p := testPayload(roundID, 0)
@@ -292,7 +294,7 @@ func TestProcessor_MaxConcurrentFallback(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 0)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 0, nil)
 	assert.Equal(t, 1, proc.maxConcurrent)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
@@ -320,7 +322,7 @@ func TestProcessor_ProcessBatch_Sequential(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 1)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 1, nil)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	for i := 0; i < 4; i++ {

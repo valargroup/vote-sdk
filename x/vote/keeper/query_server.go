@@ -22,16 +22,19 @@ func NewQueryServerImpl(keeper *Keeper) types.QueryServer {
 	return &queryServer{k: keeper}
 }
 
-// CommitmentTreeAtHeight returns the commitment tree root at a specific anchor height.
+// CommitmentTreeAtHeight returns the commitment tree root at a specific anchor height for a round.
 func (qs queryServer) CommitmentTreeAtHeight(goCtx context.Context, req *types.QueryCommitmentTreeRequest) (*types.QueryCommitmentTreeResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+	if len(req.VoteRoundId) != types.RoundIDLen {
+		return nil, status.Errorf(codes.InvalidArgument, "vote_round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(req.VoteRoundId))
 	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)
 
-	root, err := qs.k.GetCommitmentRootAtHeight(kvStore, req.Height)
+	root, err := qs.k.GetCommitmentRootAtHeight(kvStore, req.VoteRoundId, req.Height)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get root: %v", err)
 	}
@@ -39,10 +42,8 @@ func (qs queryServer) CommitmentTreeAtHeight(goCtx context.Context, req *types.Q
 		return nil, status.Errorf(codes.NotFound, "no commitment root at height %d", req.Height)
 	}
 
-	// Derive next_index at this height from the block-to-leaf-index mapping.
-	// EndBlocker stores (startIndex, count) per height; next_index = start + count.
 	var nextIndex uint64
-	startIndex, count, found, err := qs.k.GetBlockLeafIndex(kvStore, req.Height)
+	startIndex, count, found, err := qs.k.GetBlockLeafIndex(kvStore, req.VoteRoundId, req.Height)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get block leaf index: %v", err)
 	}
@@ -59,17 +60,19 @@ func (qs queryServer) CommitmentTreeAtHeight(goCtx context.Context, req *types.Q
 	}, nil
 }
 
-// LatestCommitmentTree returns the latest commitment tree state including
-// the current root, height, and next leaf index.
+// LatestCommitmentTree returns the latest commitment tree state for a round.
 func (qs queryServer) LatestCommitmentTree(goCtx context.Context, req *types.QueryLatestTreeRequest) (*types.QueryLatestTreeResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+	if len(req.VoteRoundId) != types.RoundIDLen {
+		return nil, status.Errorf(codes.InvalidArgument, "vote_round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(req.VoteRoundId))
 	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)
 
-	state, err := qs.k.GetCommitmentTreeState(kvStore)
+	state, err := qs.k.GetCommitmentTreeState(kvStore, req.VoteRoundId)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get tree state: %v", err)
 	}
@@ -138,21 +141,25 @@ func (qs queryServer) TallyResults(goCtx context.Context, req *types.QueryTallyR
 	return &types.QueryTallyResultsResponse{Results: results}, nil
 }
 
-// CommitmentLeaves returns the commitment tree leaves organized by block height.
-// This endpoint enables remote clients implementing TreeSyncApi to sync the
-// vote commitment tree without parsing full Cosmos blocks.
+// CommitmentLeaves returns the commitment tree leaves for a round, organized by block height.
 func (qs queryServer) CommitmentLeaves(goCtx context.Context, req *types.QueryCommitmentLeavesRequest) (*types.QueryCommitmentLeavesResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
+	if len(req.VoteRoundId) != types.RoundIDLen {
+		return nil, status.Errorf(codes.InvalidArgument, "vote_round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(req.VoteRoundId))
+	}
 	if req.ToHeight < req.FromHeight {
 		return nil, status.Errorf(codes.InvalidArgument, "to_height (%d) must be >= from_height (%d)", req.ToHeight, req.FromHeight)
+	}
+	if req.ToHeight-req.FromHeight > types.MaxCommitmentLeafRange {
+		return nil, status.Errorf(codes.InvalidArgument, "block range %d exceeds maximum %d", req.ToHeight-req.FromHeight, types.MaxCommitmentLeafRange)
 	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)
 
-	blocks, err := qs.k.GetCommitmentLeaves(kvStore, req.FromHeight, req.ToHeight)
+	blocks, err := qs.k.GetCommitmentLeaves(kvStore, req.VoteRoundId, req.FromHeight, req.ToHeight)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get commitment leaves: %v", err)
 	}

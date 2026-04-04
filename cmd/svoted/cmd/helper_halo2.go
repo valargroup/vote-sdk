@@ -2,7 +2,7 @@
 
 package cmd
 
-import "github.com/valargroup/vote-sdk/crypto/zkp/halo2"
+import "github.com/valargroup/vote-sdk/ffi/zkp/halo2"
 
 func helperHalo2Available() bool {
 	return true
@@ -12,14 +12,14 @@ func halo2GenerateShareRevealProof(
 	merklePath []byte,
 	shareComms [16][32]byte,
 	primaryBlind [32]byte,
-	encC1X [32]byte,
-	encC2X [32]byte,
+	encC1 [32]byte,
+	encC2 [32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
 ) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error) {
 	return halo2.GenerateShareRevealProof(
-		merklePath, shareComms, primaryBlind, encC1X, encC2X,
+		merklePath, shareComms, primaryBlind, encC1, encC2,
 		shareIndex, proposalID, voteDecision, roundID,
 	)
 }

@@ -23,12 +23,6 @@ type Config struct {
 	// DBPath is the path to the SQLite database file. Use ":memory:" for testing.
 	DBPath string `mapstructure:"db_path"`
 
-	// MinDelay is the minimum delay floor (seconds). No share will be
-	// submitted sooner than this after receipt, preventing near-zero
-	// exponential samples from making shares trivially linkable.
-	// Default: 90 (3 × default ProcessInterval).
-	MinDelay int `mapstructure:"min_delay"`
-
 	// ProcessInterval is how often to check for shares ready to submit (seconds).
 	ProcessInterval int `mapstructure:"process_interval"`
 
@@ -55,7 +49,6 @@ func DefaultConfig() Config {
 		APIToken:            "",
 		ExposeQueueStatus:   false,
 		DBPath:              "",
-		MinDelay:            90,
 		ProcessInterval:     30,
 		ChainAPIPort:        1318,
 		MaxConcurrentProofs: 2,
@@ -63,8 +56,19 @@ func DefaultConfig() Config {
 }
 
 // RoundInfoFetcher queries the chain for vote round metadata.
-// Returns the vote_end_time (unix seconds) for the given round ID (hex).
+// Returns vote_end_time (unix seconds) for the given round ID (hex).
 type RoundInfoFetcher func(roundID string) (voteEndTime uint64, err error)
+
+// RoundStatusChecker returns true if the round is still accepting shares
+// (i.e., status == ACTIVE). Used by the processor to skip shares for rounds
+// that have transitioned to TALLYING or beyond, avoiding wasted ZKP computation.
+type RoundStatusChecker func(roundID string) (isActive bool, err error)
+
+// ShareNullifierChecker reports whether a share nullifier is recorded on-chain
+// for the given voting round (hex-encoded 32-byte round id). Used by the
+// share-status endpoint to confirm MsgRevealShare acceptance without exposing
+// a public chain query API to wallets.
+type ShareNullifierChecker func(roundIDHex string, shareNullifier []byte) (bool, error)
 
 // VCHashFunc computes the vote commitment Poseidon hash. The implementation
 // is provided by the votecommitment CGo package but abstracted here so the
@@ -89,6 +93,7 @@ type SharePayload struct {
 	VoteRoundID  string             `json:"vote_round_id"` // hex, 32 bytes
 	ShareComms   []string           `json:"share_comms"`   // base64, 16 × 32-byte Poseidon commitments
 	PrimaryBlind string             `json:"primary_blind"` // base64, 32 bytes
+	SubmitAt     uint64             `json:"submit_at"`     // unix seconds; 0 = immediate (last-moment)
 }
 
 // ShareState represents the processing state of a queued share.
@@ -123,14 +128,14 @@ type ProofGenerator interface {
 	// merklePath: 772-byte serialized Merkle path (from votetree.TreeHandle.Path)
 	// shareComms: 16 × 32-byte per-share Poseidon commitments
 	// primaryBlind: 32-byte blind factor for the revealed share
-	// encC1X, encC2X: 32-byte x-coordinates of the revealed share
+	// encC1, encC2: 32-byte compressed Pallas points of the revealed share
 	// Returns proof bytes, nullifier (32 bytes), tree root (32 bytes).
 	GenerateShareRevealProof(
 		merklePath []byte,
 		shareComms [16][32]byte,
 		primaryBlind [32]byte,
-		encC1X [32]byte,
-		encC2X [32]byte,
+		encC1 [32]byte,
+		encC2 [32]byte,
 		shareIndex uint32,
 		proposalID, voteDecision uint32,
 		roundID [32]byte,
@@ -144,7 +149,12 @@ type TreeStatus struct {
 }
 
 // TreeReader abstracts commitment tree access from the keeper.
+// Commitment trees are scoped per voting round; callers must call SetRoundID
+// before any tree lookup to select the correct round.
 type TreeReader interface {
+	// SetRoundID selects the voting round for subsequent tree lookups.
+	SetRoundID(roundID []byte)
+
 	// GetTreeStatus returns lightweight tree statistics (leaf count + anchor height).
 	GetTreeStatus() (TreeStatus, error)
 

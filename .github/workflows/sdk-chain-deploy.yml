@@ -89,3 +89,38 @@ jobs:
     with:
       reset_chain: ${{ inputs.reset_chain == true }}
     secrets: inherit
+
+  notify-slack:
+    name: Slack Notification
+    if: ${{ always() && github.ref == 'refs/heads/main' && contains(join(needs.*.result, ','), 'failure') }}
+    needs: [build, deploy, restart]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Slack on failure
+        uses: slackapi/slack-github-action@v2.1.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "SDK Chain Deploy failed on main",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": { "type": "plain_text", "text": "SDK Chain Deploy Failed on main", "emoji": true }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    { "type": "mrkdwn", "text": "*Workflow:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Deploy SDK chain>" },
+                    { "type": "mrkdwn", "text": "*Branch:*\nmain" },
+                    { "type": "mrkdwn", "text": "*Commit:*\n<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|`${{ github.sha }}`>" },
+                    { "type": "mrkdwn", "text": "*Author:*\n${{ github.actor }}" }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nBuild: `${{ needs.build.result }}` | Deploy: `${{ needs.deploy.result }}` | Restart: `${{ needs.restart.result }}`" }
+                }
+              ]
+            }

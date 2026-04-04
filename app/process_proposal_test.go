@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
+	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
@@ -50,11 +52,14 @@ func TestProcessProposalDealValidation(t *testing.T) {
 				Ciphertext:       bytes.Repeat([]byte{0x01}, 48),
 			}
 		}
+		threshold, err := votekeeper.ThresholdForN(len(ceremonyValidators))
+		require.NoError(t, err)
 		msg := &types.MsgDealExecutiveAuthorityKey{
 			Creator:     creator,
 			VoteRoundId: roundID,
 			EaPk:        eaPkBytes,
 			Payloads:    payloads,
+			Threshold:   uint32(threshold),
 		}
 		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagDealExecutiveAuthorityKey)
 		require.NoError(t, err)
@@ -374,9 +379,6 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 		VoteEndTime:       uint64(voteEndTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x08}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x09}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
 	roundID := app.SeedVotingSession(setupMsg)
@@ -482,5 +484,133 @@ func TestPrepareProposalIdempotentWhenNoInjection(t *testing.T) {
 	// ProcessProposal should accept these non-custom txs.
 	procResp := app.CallProcessProposal(ppResp.Txs)
 	require.Equal(t, abci.ResponseProcessProposal_ACCEPT, procResp.Status)
+}
+
+// ===========================================================================
+// F-15: Threshold Downgrade — ProcessProposal Rejection Tests
+//
+// Verifies that ProcessProposal rejects deal txs whose threshold does not
+// match ThresholdForN(n). Each sub-test seeds a fresh REGISTERING round with
+// n validators and submits a deal with the given (malicious) threshold.
+// ===========================================================================
+
+func TestProcessProposalRejectsDealWithBadThreshold(t *testing.T) {
+	tests := []struct {
+		name      string
+		n         int
+		threshold uint32
+	}{
+		{"n=2 t=1 (downgrade)", 2, 1},
+		{"n=3 t=1 (downgrade)", 3, 1},
+		{"n=5 t=1 (downgrade)", 5, 1},
+		{"n=3 t=100 (above n)", 3, 100},
+		{"n=3 t=3 (too high)", 3, 3},
+		{"n=10 t=1 (downgrade)", 10, 1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			app := testutil.SetupTestApp(t)
+			valAddr := app.ValidatorOperAddr()
+
+			_, eaPk := elgamal.KeyGen(rand.Reader)
+			eaPkBytes := eaPk.Point.ToAffineCompressed()
+			_, ephPk := elgamal.KeyGen(rand.Reader)
+			ephPkBytes := ephPk.Point.ToAffineCompressed()
+
+			validators := make([]*types.ValidatorPallasKey, tc.n)
+			validators[0] = &types.ValidatorPallasKey{
+				ValidatorAddress: valAddr,
+				PallasPk:         eaPkBytes,
+			}
+			for i := 1; i < tc.n; i++ {
+				_, pk := elgamal.KeyGen(rand.Reader)
+				validators[i] = &types.ValidatorPallasKey{
+					ValidatorAddress: fmt.Sprintf("sv1validator%dxxxxxxxxxxxxxxxxxxxxxxxxx", i+1),
+					PallasPk:         pk.Point.ToAffineCompressed(),
+				}
+			}
+
+			roundID := app.SeedRegisteringCeremony(validators)
+
+			payloads := make([]*types.DealerPayload, tc.n)
+			for i, v := range validators {
+				payloads[i] = &types.DealerPayload{
+					ValidatorAddress: v.ValidatorAddress,
+					EphemeralPk:      ephPkBytes,
+					Ciphertext:       bytes.Repeat([]byte{byte(i + 1)}, 48),
+				}
+			}
+
+			msg := &types.MsgDealExecutiveAuthorityKey{
+				Creator:     valAddr,
+				VoteRoundId: roundID,
+				EaPk:        eaPkBytes,
+				Payloads:    payloads,
+				Threshold:   tc.threshold,
+			}
+			txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagDealExecutiveAuthorityKey)
+			require.NoError(t, err)
+
+			resp := app.CallProcessProposal([][]byte{txBytes})
+			require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status,
+				"ProcessProposal must reject threshold=%d for n=%d", tc.threshold, tc.n)
+		})
+	}
+}
+
+// ===========================================================================
+// F-15: PrepareProposal → ProcessProposal Pipeline Tests
+//
+// Verifies that an honest PrepareProposal generates the correct threshold
+// for various validator counts and that ProcessProposal accepts the result.
+// ===========================================================================
+
+func TestPrepareProposalDealAcceptedByProcessProposal(t *testing.T) {
+	tests := []struct {
+		name              string
+		n                 int
+		expectedThreshold uint32
+	}{
+		{"n=2 → t=2", 2, 2},
+		{"n=3 → t=2", 3, 2},
+		{"n=5 → t=3", 5, 3},
+		{"n=7 → t=4", 7, 4},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+			dealerAddr := ta.ValidatorOperAddr()
+
+			validators := make([]*types.ValidatorPallasKey, tc.n)
+			validators[0] = &types.ValidatorPallasKey{
+				ValidatorAddress: dealerAddr,
+				PallasPk:         pallasPk.Point.ToAffineCompressed(),
+			}
+			for i := 1; i < tc.n; i++ {
+				_, pk := elgamal.KeyGen(rand.Reader)
+				validators[i] = &types.ValidatorPallasKey{
+					ValidatorAddress: fmt.Sprintf("sv1validator%dxxxxxxxxxxxxxxxxxxxxxxxxx", i+1),
+					PallasPk:         pk.Point.ToAffineCompressed(),
+				}
+			}
+
+			ta.SeedRegisteringCeremony(validators)
+
+			ppResp := ta.CallPrepareProposal()
+			require.Len(t, ppResp.Txs, 1, "expected one injected deal tx")
+
+			_, protoMsg, err := voteapi.DecodeCeremonyTx(ppResp.Txs[0])
+			require.NoError(t, err)
+			deal := protoMsg.(*types.MsgDealExecutiveAuthorityKey)
+			require.EqualValues(t, tc.expectedThreshold, deal.Threshold,
+				"PrepareProposal threshold for n=%d", tc.n)
+
+			procResp := ta.CallProcessProposal(ppResp.Txs)
+			require.Equal(t, abci.ResponseProcessProposal_ACCEPT, procResp.Status,
+				"ProcessProposal must accept the honest deal for n=%d", tc.n)
+		})
+	}
 }
 

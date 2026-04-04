@@ -115,7 +115,23 @@ func RunPulse(ctx context.Context, cfg PulseConfig) {
 	registerEndpoint := cfg.PulseURL + "/api/register-validator"
 	heartbeatEndpoint := cfg.PulseURL + "/api/server-heartbeat"
 
+	// Try to register immediately, then retry a few times with short intervals
+	// to handle the common case where the chain isn't fully ready yet at startup
+	// (e.g. after a deploy restart where validators were just bonded).
 	registered := tryRegister(ctx, client, registerEndpoint, cfg)
+	if !registered {
+		for i := 0; i < 5; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(15 * time.Second):
+			}
+			registered = tryRegister(ctx, client, registerEndpoint, cfg)
+			if registered {
+				break
+			}
+		}
+	}
 
 	ticker := time.NewTicker(pulseInterval)
 	defer ticker.Stop()

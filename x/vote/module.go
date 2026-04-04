@@ -59,6 +59,7 @@ func init() {
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
 			ProvideSetVoteManagerSigner,
+			ProvideAuthorizedSendSigner,
 		),
 	)
 }
@@ -208,6 +209,28 @@ func ProvideSetVoteManagerSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("svote.v1.MsgSetVoteManager"),
 		Fn:      ceremonyCreatorSignerFn,
+	}
+}
+
+// authorizedSendSignerFn extracts the signer from MsgAuthorizedSend's
+// from_address field (an account bech32 address).
+func authorizedSendSignerFn(msg proto.Message) ([][]byte, error) {
+	fd := msg.ProtoReflect().Descriptor().Fields().ByName("from_address")
+	if fd == nil {
+		return nil, fmt.Errorf("MsgAuthorizedSend has no from_address field")
+	}
+	addr := msg.ProtoReflect().Get(fd).String()
+	accAddr, err := sdk.AccAddressFromBech32(addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid from_address %q: %w", addr, err)
+	}
+	return [][]byte{accAddr}, nil
+}
+
+func ProvideAuthorizedSendSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgAuthorizedSend"),
+		Fn:      authorizedSendSignerFn,
 	}
 }
 
@@ -385,48 +408,67 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := am.keeper.OpenKVStore(ctx)
 
-	// --- 1. Commitment tree root computation ---
-	state, err := am.keeper.GetCommitmentTreeState(kvStore)
-	if err != nil {
-		return err
-	}
+	// --- 1. Per-round commitment tree root computation ---
+	blockHeight := uint64(ctx.BlockHeight())
 
-	if state.NextIndex > 0 {
-		blockHeight := uint64(ctx.BlockHeight())
-		root, err := am.keeper.ComputeTreeRoot(kvStore, state.NextIndex, blockHeight)
+	// Compute roots for every active round whose tree has leaves.
+	// Errors must halt the node rather than be swallowed: a partial
+	// state update on some nodes would produce divergent app hashes.
+	var treeErr error
+	if err := am.keeper.IterateActiveRounds(kvStore, func(round *types.VoteRound) bool {
+		roundID := round.VoteRoundId
+
+		state, err := am.keeper.GetCommitmentTreeState(kvStore, roundID)
 		if err != nil {
-			return err
+			treeErr = fmt.Errorf("EndBlocker: read tree state for round %x: %w", roundID, err)
+			return true
+		}
+		if state.NextIndex == 0 {
+			return false
 		}
 
-		// Only write a new root when the tree has changed (new leaves appended).
+		root, err := am.keeper.ComputeTreeRoot(kvStore, roundID, state.NextIndex, blockHeight)
+		if err != nil {
+			treeErr = fmt.Errorf("EndBlocker: compute tree root for round %x: %w", roundID, err)
+			return true
+		}
+
 		if !bytes.Equal(root, state.Root) {
-			if err := am.keeper.SetCommitmentRootAtHeight(kvStore, blockHeight, root); err != nil {
-				return err
+			if err := am.keeper.SetCommitmentRootAtHeight(kvStore, roundID, blockHeight, root); err != nil {
+				treeErr = fmt.Errorf("EndBlocker: set root for round %x: %w", roundID, err)
+				return true
 			}
 
-			// Record the block-to-leaf-index mapping for the CommitmentLeaves query.
-			// New leaves this block span [NextIndexAtRoot, NextIndex).
 			leafStart := state.NextIndexAtRoot
 			leafCount := state.NextIndex - leafStart
 			if leafCount > 0 {
-				if err := am.keeper.SetBlockLeafIndex(kvStore, blockHeight, leafStart, leafCount); err != nil {
-					return err
+				if err := am.keeper.SetBlockLeafIndex(kvStore, roundID, blockHeight, leafStart, leafCount); err != nil {
+					treeErr = fmt.Errorf("EndBlocker: set block leaf index for round %x: %w", roundID, err)
+					return true
 				}
 			}
 
 			state.Root = root
 			state.Height = blockHeight
 			state.NextIndexAtRoot = state.NextIndex
-			if err := am.keeper.SetCommitmentTreeState(kvStore, state); err != nil {
-				return err
+			if err := am.keeper.SetCommitmentTreeState(kvStore, roundID, state); err != nil {
+				treeErr = fmt.Errorf("EndBlocker: set tree state for round %x: %w", roundID, err)
+				return true
 			}
 
 			ctx.EventManager().EmitEvent(sdk.NewEvent(
 				types.EventTypeCommitmentTreeRoot,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", roundID)),
 				sdk.NewAttribute(types.AttributeKeyTreeRoot, fmt.Sprintf("%x", root)),
 				sdk.NewAttribute(types.AttributeKeyBlockHeight, strconv.FormatUint(blockHeight, 10)),
 			))
 		}
+		return false
+	}); err != nil {
+		return err
+	}
+	if treeErr != nil {
+		return treeErr
 	}
 
 	// --- 2. Transition expired ACTIVE rounds to TALLYING ---
@@ -447,7 +489,14 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	}
 
 	for _, roundID := range expiredRoundIDs {
-		if err := am.keeper.UpdateVoteRoundStatus(kvStore, roundID, types.SessionStatus_SESSION_STATUS_TALLYING); err != nil {
+		round, err := am.keeper.GetVoteRound(kvStore, roundID)
+		if err != nil {
+			return err
+		}
+		round.Status = types.SessionStatus_SESSION_STATUS_TALLYING
+		round.TallyPhaseStart = blockTime
+		round.TallyPhaseTimeout = types.DefaultTallyTimeout
+		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 			return err
 		}
 
@@ -574,6 +623,44 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
 			))
 		}
+	}
+
+	// --- 4. Tally phase timeout ---
+	// If a round has been in TALLYING longer than its timeout, finalize it
+	// with tally_timed_out=true and empty results. This prevents permanent
+	// liveness loss when the decryption threshold cannot be reached.
+	var tallyTimeoutIDs [][]byte
+	if err := am.keeper.IterateTallyingRounds(kvStore, func(round *types.VoteRound) bool {
+		if round.TallyPhaseTimeout > 0 &&
+			blockTime >= round.TallyPhaseStart+round.TallyPhaseTimeout {
+			id := make([]byte, len(round.VoteRoundId))
+			copy(id, round.VoteRoundId)
+			tallyTimeoutIDs = append(tallyTimeoutIDs, id)
+		}
+		return false // continue iterating
+	}); err != nil {
+		return err
+	}
+
+	for _, roundID := range tallyTimeoutIDs {
+		round, err := am.keeper.GetVoteRound(kvStore, roundID)
+		if err != nil {
+			return err
+		}
+		if round == nil {
+			continue
+		}
+
+		round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
+		round.TallyTimedOut = true
+		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+			return err
+		}
+
+		ctx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeTallyTimeout,
+			sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+		))
 	}
 
 	return nil

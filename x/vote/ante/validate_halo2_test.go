@@ -3,6 +3,7 @@
 package ante_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,9 +11,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/valargroup/vote-sdk/crypto/redpallas"
-	"github.com/valargroup/vote-sdk/crypto/zkp"
-	"github.com/valargroup/vote-sdk/crypto/zkp/halo2"
+	"github.com/valargroup/vote-sdk/ffi/redpallas"
+	"github.com/valargroup/vote-sdk/ffi/zkp"
+	"github.com/valargroup/vote-sdk/ffi/zkp/halo2"
 	"github.com/valargroup/vote-sdk/x/vote/ante"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -27,10 +28,10 @@ func repoRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
 }
 
-// mustReadFixture reads a binary fixture from crypto/zkp/testdata/.
+// mustReadFixture reads a binary fixture from ffi/zkp/testdata/.
 func mustReadFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	path := filepath.Join(repoRoot(t), "crypto", "zkp", "testdata", name)
+	path := filepath.Join(repoRoot(t), "ffi", "zkp", "testdata", name)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err, "failed to read fixture %s", path)
 	return data
@@ -63,10 +64,10 @@ func TestHalo2DelegationValidProof(t *testing.T) {
 	publicInput := mustReadFixture(t, "toy_valid_input.bin")
 
 	// Build a MsgDelegateVote with the real proof.
-	// VanCmx carries the toy circuit public input; Rk is a dummy 32-byte value
-	// (not used by the toy circuit, but required by ValidateBasic).
+	// VanCmx carries the toy circuit public input; Rk is a non-zero dummy
+	// (not used by the toy circuit, but must pass ValidateBasic's identity check).
 	msg := &types.MsgDelegateVote{
-		Rk:                  make([]byte, 32),
+		Rk:                  bytes.Repeat([]byte{0xAA}, 32),
 		SpendAuthSig:        make([]byte, 64),
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
@@ -105,7 +106,7 @@ func TestHalo2DelegationWrongInput(t *testing.T) {
 	wrongInput := mustReadFixture(t, "toy_wrong_input.bin")
 
 	msg := &types.MsgDelegateVote{
-		Rk:                  make([]byte, 32),
+		Rk:                  bytes.Repeat([]byte{0xAA}, 32),
 		SpendAuthSig:        make([]byte, 64),
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),

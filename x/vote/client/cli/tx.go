@@ -37,6 +37,8 @@ func GetTxCmd() *cobra.Command {
 		CmdSetVoteManager(),
 		CmdCreateVotingSession(),
 		CmdSubmitTally(),
+		// Token transfer — uses whitelisted MsgAuthorizedSend.
+		CmdAuthorizedSend(),
 	)
 
 	return cmd
@@ -262,9 +264,50 @@ may set the initial manager.`,
 	return cmd
 }
 
+// CmdAuthorizedSend broadcasts MsgAuthorizedSend.
+// Transfers tokens using the whitelisted MsgAuthorizedSend instead of the
+// blocked bank MsgSend.
+func CmdAuthorizedSend() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "authorized-send [to-address] [amount] [denom]",
+		Short: "Send tokens via MsgAuthorizedSend (whitelisted transfer)",
+		Long: `Broadcast an MsgAuthorizedSend transaction.
+
+Arguments:
+  to-address  Recipient bech32 account address (sv1...)
+  amount      Integer amount to send (e.g. 200000)
+  denom       Token denomination (e.g. usvote)
+
+The --from flag specifies the sender. Unlike 'bank send', this message
+is whitelisted by the chain's MessageWhitelistDecorator.
+
+Example:
+  svoted tx vote authorized-send sv1abc... 200000 usvote --from mykey`,
+		Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+
+			msg := &types.MsgAuthorizedSend{
+				FromAddress: clientCtx.GetFromAddress().String(),
+				ToAddress:   args[0],
+				Amount:      args[1],
+				Denom:       args[2],
+			}
+
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
 // CmdCreateVotingSession broadcasts MsgCreateVotingSession.
 // Only callable by the current vote manager.  Accepts a JSON file because the
-// message carries large binary blobs (VK bytes) and a structured proposal list.
+// message carries a structured proposal list and large binary blobs.
 func CmdCreateVotingSession() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create-voting-session [msg-json-file]",
@@ -279,9 +322,6 @@ All byte fields are hex-encoded in the JSON.  Required fields:
   vote_end_time       (int64)  — Unix timestamp after which voting closes
   nullifier_imt_root  (hex)    — Root of the incremental Merkle tree of nullifiers
   nc_root             (hex)    — Note commitment tree root at snapshot_height
-  vk_zkp1             (hex)    — Halo2 verification key for ZKP-1 (DelegateVote)
-  vk_zkp2             (hex)    — Halo2 verification key for ZKP-2 (CastVote)
-  vk_zkp3             (hex)    — Halo2 verification key for ZKP-3 (RevealShare)
   proposals           (array)  — 1-15 proposals, each with id (1-based uint32),
                                  title (string), and options (2-8 elements with
                                  index (0-based uint32) and label (ASCII string))
@@ -294,9 +334,6 @@ Example:
     "vote_end_time": 1893456000,
     "nullifier_imt_root": "eeff...",
     "nc_root": "0011...",
-    "vk_zkp1": "2233...",
-    "vk_zkp2": "4455...",
-    "vk_zkp3": "6677...",
     "proposals": [
       {
         "id": 1,
@@ -322,18 +359,15 @@ Example:
 			}
 
 			var input struct {
-				SnapshotHeight   uint64 `json:"snapshot_height"`
+				SnapshotHeight    uint64 `json:"snapshot_height"`
 				SnapshotBlockhash string `json:"snapshot_blockhash"`
-				ProposalsHash    string `json:"proposals_hash"`
-				VoteEndTime      uint64 `json:"vote_end_time"`
-				NullifierImtRoot string `json:"nullifier_imt_root"`
-				NcRoot           string `json:"nc_root"`
-				VkZkp1           string `json:"vk_zkp1"`
-				VkZkp2           string `json:"vk_zkp2"`
-				VkZkp3           string `json:"vk_zkp3"`
-				Description      string `json:"description"`
-				Title            string `json:"title"`
-				Proposals        []struct {
+				ProposalsHash     string `json:"proposals_hash"`
+				VoteEndTime       uint64 `json:"vote_end_time"`
+				NullifierImtRoot  string `json:"nullifier_imt_root"`
+				NcRoot            string `json:"nc_root"`
+				Description       string `json:"description"`
+				Title             string `json:"title"`
+				Proposals         []struct {
 					Id      uint32 `json:"id"`
 					Title   string `json:"title"`
 					Options []struct {
@@ -370,18 +404,6 @@ Example:
 			if err != nil {
 				return err
 			}
-			vkZkp1, err := decodeHex(types.SessionKeyVkZkp1, input.VkZkp1)
-			if err != nil {
-				return err
-			}
-			vkZkp2, err := decodeHex(types.SessionKeyVkZkp2, input.VkZkp2)
-			if err != nil {
-				return err
-			}
-			vkZkp3, err := decodeHex(types.SessionKeyVkZkp3, input.VkZkp3)
-			if err != nil {
-				return err
-			}
 
 			proposals := make([]*types.Proposal, len(input.Proposals))
 			for i, p := range input.Proposals {
@@ -407,9 +429,6 @@ Example:
 				VoteEndTime:       input.VoteEndTime,
 				NullifierImtRoot:  nullifierImtRoot,
 				NcRoot:            ncRoot,
-				VkZkp1:            vkZkp1,
-				VkZkp2:            vkZkp2,
-				VkZkp3:            vkZkp3,
 				Proposals:         proposals,
 				Description:       input.Description,
 				Title:             input.Title,

@@ -88,7 +88,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	}
 
 	// Verify commitment tree advanced by 1 (only van_cmx; cmx_new is not in the tree).
-	treeState, err := s.app.VoteKeeper().GetCommitmentTreeState(kvStore)
+	treeState, err := s.app.VoteKeeper().GetCommitmentTreeState(kvStore, roundID)
 	s.Require().NoError(err)
 	s.Require().Equal(uint64(1), treeState.NextIndex)
 
@@ -98,7 +98,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 
 	ctx = s.queryCtx()
 	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
-	root, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, anchorHeight)
+	root, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, anchorHeight)
 	s.Require().NoError(err)
 	s.Require().NotNil(root, "EndBlocker should have computed a tree root at height %d", anchorHeight)
 	s.Require().Len(root, 32)
@@ -118,7 +118,7 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	s.Require().True(has, "vote-authority-note nullifier should be recorded")
 
 	// Tree advanced by 2 more (vote_authority_note_new + vote_commitment): 1 + 2 = 3.
-	treeState, err = s.app.VoteKeeper().GetCommitmentTreeState(kvStore)
+	treeState, err = s.app.VoteKeeper().GetCommitmentTreeState(kvStore, roundID)
 	s.Require().NoError(err)
 	s.Require().Equal(uint64(3), treeState.NextIndex)
 
@@ -349,7 +349,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
 
 	ctx := s.queryCtx()
 	kvStore := s.app.VoteKeeper().OpenKVStore(ctx)
-	root1, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, h1)
+	root1, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, h1)
 	s.Require().NoError(err)
 	s.Require().NotNil(root1, "root should be stored at height %d", h1)
 
@@ -360,7 +360,7 @@ func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
 
 	ctx = s.queryCtx()
 	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
-	root2, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, h2)
+	root2, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, h2)
 	s.Require().NoError(err)
 	s.Require().NotNil(root2, "root should be stored at height %d", h2)
 
@@ -373,12 +373,12 @@ func (s *ABCIIntegrationSuite) TestEndBlockerTreeRootSnapshots() {
 
 	ctx = s.queryCtx()
 	kvStore = s.app.VoteKeeper().OpenKVStore(ctx)
-	root3, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, h3)
+	root3, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, h3)
 	s.Require().NoError(err)
 	s.Require().Nil(root3, "no root should be stored at height %d (tree unchanged)", h3)
 
 	// Previous roots still accessible.
-	root1Again, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, h1)
+	root1Again, err := s.app.VoteKeeper().GetCommitmentRootAtHeight(kvStore, roundID, h1)
 	s.Require().NoError(err)
 	s.Require().Equal(root1, root1Again)
 }
@@ -448,10 +448,12 @@ func (s *ABCIIntegrationSuite) TestTallyingPhaseMessageAcceptance() {
 	s.Require().NoError(err)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
-	// RevealShare should be accepted during TALLYING (shares are revealed after voting ends).
+	// RevealShare should be rejected during TALLYING — shares must land
+	// before the vote window closes to prevent stale tally corruption.
 	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
 	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
-	s.Require().Equal(uint32(0), result.Code, "reveal share during TALLYING should succeed, got: %s", result.Log)
+	s.Require().NotEqual(uint32(0), result.Code, "reveal share during TALLYING should be rejected")
+	s.Require().Contains(result.Log, "vote round is not active")
 
 	// DelegateVote should be rejected during TALLYING.
 	delegation2 := testutil.ValidDelegation(roundID, 0x60)
@@ -477,9 +479,6 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 		VoteEndTime:       uint64(soonEnd.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x2C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x2D}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
 	soonRoundID := s.app.SeedVotingSession(soonMsg)
@@ -492,9 +491,6 @@ func (s *ABCIIntegrationSuite) TestEndBlockerSelectiveTransition() {
 		VoteEndTime:       uint64(lateEnd.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x3C}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x3D}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         testutil.SampleProposals(),
 	}
 	lateRoundID := s.app.SeedVotingSession(lateMsg)
@@ -1082,9 +1078,6 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 		Proposals:          testutil.SampleProposals(),
 		NullifierImtRoot:   bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:             bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:             bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:             bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:             bytes.Repeat([]byte{0x33}, 64),
 	}
 	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
 	app.NextBlock()
@@ -1303,9 +1296,6 @@ func TestFullLifecycle_SingleValidator(t *testing.T) {
 		Proposals:          testutil.SampleProposals(),
 		NullifierImtRoot:   bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:             bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:             bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:             bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:             bytes.Repeat([]byte{0x33}, 64),
 	}
 	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
 	app.NextBlock()

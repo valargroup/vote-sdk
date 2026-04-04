@@ -126,7 +126,7 @@ The helper server runs inside `svoted` on **val1 only** and shares val1's REST A
 
 After services are started, the workflow verifies:
 1. All three systemd services (`svoted-val1/2/3`) are active
-2. Val1's chain API responds at `http://localhost:1418/shielded-vote/v1/commitment-tree/latest`
+2. Val1's chain API responds at `http://localhost:1418/shielded-vote/v1/rounds`
 3. Val1's helper server responds at `http://localhost:1418/api/v1/status`
 
 If any check fails, the deploy step fails with `journalctl` output for debugging.

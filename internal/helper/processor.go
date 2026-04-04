@@ -27,8 +27,9 @@ type Processor struct {
 	logger    log.Logger
 	// meanInterval is the mean of the exponential distribution for the time
 	// between processing cycles. Submissions form a Poisson process.
-	meanInterval  time.Duration
-	maxConcurrent int
+	meanInterval   time.Duration
+	maxConcurrent  int
+	isRoundActive  RoundStatusChecker
 }
 
 // NewProcessor creates a new share processor.
@@ -40,6 +41,7 @@ func NewProcessor(
 	logger log.Logger,
 	meanInterval time.Duration,
 	maxConcurrent int,
+	isRoundActive RoundStatusChecker,
 ) *Processor {
 	if maxConcurrent < 1 {
 		maxConcurrent = 1
@@ -53,6 +55,7 @@ func NewProcessor(
 		logger:        logger,
 		meanInterval:  meanInterval,
 		maxConcurrent: maxConcurrent,
+		isRoundActive: isRoundActive,
 	}
 }
 
@@ -137,8 +140,29 @@ func (p *Processor) processBatch(ctx context.Context) {
 			default:
 			}
 
-			// Skip jitter if less than 60s remain before vote ends — submit immediately.
-			if share.VoteEndTime == 0 || time.Until(time.Unix(int64(share.VoteEndTime), 0)) > 60*time.Second {
+			if p.isRoundActive != nil {
+				active, err := p.isRoundActive(share.Payload.VoteRoundID)
+				if err != nil {
+					p.logger.Warn("round status check failed, skipping share",
+						"round_id", share.Payload.VoteRoundID,
+						"share_index", share.Payload.EncShare.ShareIndex,
+						"error", err,
+					)
+					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					return nil
+				}
+				if !active {
+					p.logger.Info("round no longer active, skipping share",
+						"round_id", share.Payload.VoteRoundID,
+						"share_index", share.Payload.EncShare.ShareIndex,
+					)
+					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					return nil
+				}
+			}
+
+			// Skip jitter for immediate-mode shares (last-moment votes).
+			if share.Payload.SubmitAt != 0 {
 				delay := p.intraShareDelay()
 				timer := time.NewTimer(delay)
 				select {
@@ -174,6 +198,13 @@ func (p *Processor) processBatch(ctx context.Context) {
 
 // processShare handles a single share: Merkle path → proof → submit.
 func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
+	// Scope the tree reader to this share's voting round.
+	roundBytes, err := hex.DecodeString(share.Payload.VoteRoundID)
+	if err != nil {
+		return fmt.Errorf("decode vote_round_id: %w", err)
+	}
+	p.tree.SetRoundID(roundBytes)
+
 	// Read tree status (leaf count + anchor height) without loading leaf data.
 	status, err := p.tree.GetTreeStatus()
 	if err != nil {
@@ -195,12 +226,9 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		return fmt.Errorf("compute merkle path: %w", err)
 	}
 
-	// Decode round_id from hex to raw 32 bytes.
+	// Build fixed-size round_id array for the proof generator (already
+	// decoded above for SetRoundID).
 	var roundID [32]byte
-	roundBytes, err := hex.DecodeString(share.Payload.VoteRoundID)
-	if err != nil {
-		return fmt.Errorf("decode vote_round_id: %w", err)
-	}
 	if len(roundBytes) != 32 {
 		return fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes))
 	}
@@ -248,17 +276,17 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	if len(c2Bytes) != 32 {
 		return fmt.Errorf("enc_share.c2 must be 32 bytes, got %d", len(c2Bytes))
 	}
-	var encC1X, encC2X [32]byte
-	copy(encC1X[:], c1Bytes)
-	copy(encC2X[:], c2Bytes)
+	var encC1, encC2 [32]byte
+	copy(encC1[:], c1Bytes)
+	copy(encC2[:], c2Bytes)
 
 	// Generate ZKP #3 proof.
 	proof, nullifier, _, err := p.prover.GenerateShareRevealProof(
 		merklePath,
 		shareComms,
 		primaryBlind,
-		encC1X,
-		encC2X,
+		encC1,
+		encC2,
 		share.Payload.EncShare.ShareIndex,
 		share.Payload.ProposalID,
 		share.Payload.VoteDecision,

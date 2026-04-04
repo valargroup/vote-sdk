@@ -3,13 +3,13 @@
 //! Run with: cargo test --release -- generate_fixtures --ignored --nocapture
 //!
 //! Generates:
-//!   crypto/zkp/testdata/toy_valid_proof.bin      - valid Halo2 proof bytes
-//!   crypto/zkp/testdata/toy_valid_input.bin      - correct public input (Fp, 32-byte LE)
-//!   crypto/zkp/testdata/toy_wrong_input.bin      - wrong public input for negative tests
-//!   crypto/redpallas/testdata/valid_rk.bin       - 32-byte RedPallas verification key
-//!   crypto/redpallas/testdata/valid_sighash.bin  - 32-byte sighash (message)
-//!   crypto/redpallas/testdata/valid_sig.bin      - 64-byte valid RedPallas signature
-//!   crypto/redpallas/testdata/wrong_sig.bin      - 64-byte signature over wrong message
+//!   ffi/zkp/testdata/toy_valid_proof.bin      - valid Halo2 proof bytes
+//!   ffi/zkp/testdata/toy_valid_input.bin      - correct public input (Fp, 32-byte LE)
+//!   ffi/zkp/testdata/toy_wrong_input.bin      - wrong public input for negative tests
+//!   ffi/redpallas/testdata/valid_rk.bin       - 32-byte RedPallas verification key
+//!   ffi/redpallas/testdata/valid_sighash.bin  - 32-byte sighash (message)
+//!   ffi/redpallas/testdata/valid_sig.bin      - 64-byte valid RedPallas signature
+//!   ffi/redpallas/testdata/wrong_sig.bin      - 64-byte signature over wrong message
 //!
 //! Delegation fixture (ZKP #1) is no longer generated here; the Rust E2E tests
 //! build the delegation bundle inline via e2e_tests::setup::build_delegation_bundle_for_test.
@@ -44,7 +44,7 @@ fn generate_halo2_fixtures() {
     let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("crypto/zkp/testdata");
+        .join("ffi/zkp/testdata");
 
     fs::create_dir_all(&testdata_dir).expect("failed to create testdata directory");
 
@@ -103,7 +103,7 @@ fn generate_redpallas_fixtures() {
     let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("crypto/redpallas/testdata");
+        .join("ffi/redpallas/testdata");
 
     fs::create_dir_all(&testdata_dir).expect("failed to create redpallas testdata directory");
 
@@ -324,8 +324,8 @@ fn generate_cast_vote_redpallas_fixtures(
 ///   [0..772)       merkle_path (772 bytes)
 ///   [772..1284)    share_comms (512 bytes: 16 × 32-byte commitments)
 ///   [1284..1316)   primary_blind (32 bytes)
-///   [1316..1348)   enc_c1_x (32 bytes, LE Fp — ZKP public input)
-///   [1348..1380)   enc_c2_x (32 bytes, LE Fp — ZKP public input)
+///   [1316..1348)   enc_c1 (32 bytes, compressed Pallas point — C1)
+///   [1348..1380)   enc_c2 (32 bytes, compressed Pallas point — C2)
 ///   [1380..1384)   share_index (u32 LE)
 ///   [1384..1388)   proposal_id (u32 LE)
 ///   [1388..1392)   vote_decision (u32 LE)
@@ -337,11 +337,11 @@ fn generate_share_reveal_fixtures() {
     let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("crypto/zkp/testdata");
+        .join("ffi/zkp/testdata");
 
     fs::create_dir_all(&testdata_dir).expect("failed to create testdata directory");
 
-    let (merkle_path, share_comms, primary_blind, enc_c1_x, enc_c2_x,
+    let (merkle_path, share_comms, primary_blind, enc_c1_compressed, enc_c2_compressed,
          enc_share, share_index, proposal_id, vote_decision, round_id) =
         build_share_reveal_test_data();
 
@@ -349,8 +349,8 @@ fn generate_share_reveal_fixtures() {
     fixture.extend_from_slice(&merkle_path);                  // 772 bytes
     fixture.extend_from_slice(&share_comms);                  // 512 bytes
     fixture.extend_from_slice(&primary_blind);                // 32 bytes
-    fixture.extend_from_slice(&enc_c1_x);                    // 32 bytes
-    fixture.extend_from_slice(&enc_c2_x);                    // 32 bytes
+    fixture.extend_from_slice(&enc_c1_compressed);            // 32 bytes
+    fixture.extend_from_slice(&enc_c2_compressed);            // 32 bytes
     fixture.extend_from_slice(&share_index.to_le_bytes());   // 4 bytes
     fixture.extend_from_slice(&proposal_id.to_le_bytes());   // 4 bytes
     fixture.extend_from_slice(&vote_decision.to_le_bytes()); // 4 bytes

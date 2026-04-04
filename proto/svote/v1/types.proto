@@ -38,30 +38,32 @@ message VoteRound {
   string        creator             = 8;
   SessionStatus status              = 9;
   bytes  ea_pk                      = 10; // Election authority public key (Pallas, 32 bytes)
-  bytes  vk_zkp1                    = 11; // Verification key for ZKP #1
-  bytes  vk_zkp2                    = 12; // Verification key for ZKP #2
-  bytes  vk_zkp3                    = 13; // Verification key for ZKP #3
-  repeated Proposal proposals       = 14;
-  string            description     = 15; // Human-readable round description
-  uint64            created_at_height = 16; // Block height at which this round was registered on-chain
-  string            title           = 17; // Short human-readable round title
+  repeated Proposal proposals       = 11;
+  string            description     = 12; // Human-readable round description
+  uint64            created_at_height = 13; // Block height at which this round was registered on-chain
+  string            title           = 14; // Short human-readable round title
 
   // Per-round ceremony fields (populated when status = PENDING).
-  CeremonyStatus              ceremony_status     = 18;
-  repeated ValidatorPallasKey ceremony_validators = 19;
-  repeated DealerPayload      ceremony_payloads   = 20;
-  repeated AckEntry           ceremony_acks       = 21;
-  string                      ceremony_dealer     = 22;
-  uint64                      ceremony_phase_start   = 23;
-  uint64                      ceremony_phase_timeout = 24;
-  repeated string             ceremony_log           = 25; // Timestamped human-readable ceremony log entries
+  CeremonyStatus              ceremony_status     = 15;
+  repeated ValidatorPallasKey ceremony_validators = 16;
+  repeated DealerPayload      ceremony_payloads   = 17;
+  repeated AckEntry           ceremony_acks       = 18;
+  string                      ceremony_dealer     = 19;
+  uint64                      ceremony_phase_start   = 20;
+  uint64                      ceremony_phase_timeout = 21;
+  repeated string             ceremony_log           = 22; // Timestamped human-readable ceremony log entries
 
   // Threshold decryption fields (populated by MsgDealExecutiveAuthorityKey in threshold mode).
   // threshold is the minimum number of partial decryptions required to reconstruct the tally.
   // feldman_commitments holds C_j = a_j*G for j=0..t-1 (Feldman polynomial commitments).
   // Validators derive VK_i = EvalCommitmentPolynomial(commitments, i) for share verification.
-  uint32         threshold            = 26; // Minimum shares for reconstruction (always >= 1)
-  repeated bytes feldman_commitments  = 27; // C_j = a_j*G, t compressed Pallas points (32 bytes each)
+  uint32         threshold            = 23; // Minimum shares for reconstruction (always >= 2)
+  repeated bytes feldman_commitments  = 24; // C_j = a_j*G, t compressed Pallas points (32 bytes each)
+
+  // Tally phase timeout fields (populated when status transitions to TALLYING).
+  uint64 tally_phase_start   = 25; // Unix seconds when TALLYING started
+  uint64 tally_phase_timeout = 26; // Timeout duration in seconds (default: 6 hours)
+  bool   tally_timed_out     = 27; // True if round was finalized via timeout (no decrypted results)
 }
 
 // VoteManagerState stores the singleton vote manager address.
@@ -80,16 +82,24 @@ message CommitmentTreeState {
 // GenesisState defines the vote module's genesis state.
 message GenesisState {
   repeated VoteRound               rounds              = 1;
-  CommitmentTreeState              tree_state           = 2;
-  repeated CommitmentLeaf          commitment_leaves    = 3;
   repeated NullifierEntry          nullifiers           = 4;
   string                           vote_manager         = 5;
   repeated TallyResult             tally_results        = 6;
   repeated ValidatorPallasKey      pallas_keys          = 7;
   repeated GenesisTallyAccumulator tally_accumulators   = 8;
   repeated GenesisShareCount       share_counts         = 9;
-  repeated GenesisCommitmentRoot   commitment_roots          = 10;
-  uint32                           min_ceremony_validators   = 11; // Minimum eligible validators to create a voting round (default: 1)
+  uint32                           min_ceremony_validators   = 11;
+  repeated GenesisRoundTree        round_trees               = 12;
+  repeated GenesisPartialDecryption partial_decryptions      = 13;
+}
+
+// GenesisRoundTree holds per-round commitment tree state for genesis export/import.
+message GenesisRoundTree {
+  bytes                          vote_round_id      = 1;
+  CommitmentTreeState            tree_state         = 2;
+  repeated CommitmentLeaf        commitment_leaves  = 3;
+  repeated GenesisCommitmentRoot commitment_roots   = 4;
+  repeated GenesisBlockLeafIndex block_leaf_indices = 5;
 }
 
 // GenesisCommitmentRoot is a commitment tree root stored at a specific block height.
@@ -112,6 +122,26 @@ message GenesisShareCount {
   uint32 proposal_id   = 2;
   uint32 vote_decision = 3;
   uint64 count         = 4;
+}
+
+// GenesisPartialDecryption stores one validator's partial decryption D_i for
+// a single (round, proposal, decision) accumulator. Exported during TALLYING
+// so validators do not need to re-submit after a chain migration.
+message GenesisPartialDecryption {
+  bytes  round_id         = 1;
+  uint32 validator_index  = 2;
+  uint32 proposal_id      = 3;
+  uint32 vote_decision    = 4;
+  bytes  partial_decrypt  = 5; // 32-byte compressed Pallas point D_i
+  bytes  dleq_proof       = 6; // reserved for DLEQ proofs (Step 2)
+}
+
+// GenesisBlockLeafIndex records the range of commitment leaves appended during
+// a specific block height. Client convenience for the CommitmentLeaves query.
+message GenesisBlockLeafIndex {
+  uint64 height      = 1;
+  uint64 start_index = 2;
+  uint64 count       = 3;
 }
 
 // CommitmentLeaf is an entry in the append-only commitment tree.

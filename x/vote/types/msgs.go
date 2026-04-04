@@ -1,6 +1,14 @@
 package types
 
-import "fmt"
+import (
+	"bytes"
+	"fmt"
+)
+
+// zeroPoint32 is the compressed encoding of the Pallas identity (point at
+// infinity). Used by ValidateBasic as a cheap stateless guard against the
+// identity-point signature bypass.
+var zeroPoint32 [32]byte
 
 // ValidateBasic performs stateless validation for MsgCreateVotingSession.
 func (msg *MsgCreateVotingSession) ValidateBasic() error {
@@ -24,15 +32,6 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 	}
 	if len(msg.NcRoot) == 0 {
 		return fmt.Errorf("%w: nc_root cannot be empty", ErrInvalidField)
-	}
-	if len(msg.VkZkp1) == 0 {
-		return fmt.Errorf("%w: vk_zkp1 cannot be empty", ErrInvalidField)
-	}
-	if len(msg.VkZkp2) == 0 {
-		return fmt.Errorf("%w: vk_zkp2 cannot be empty", ErrInvalidField)
-	}
-	if len(msg.VkZkp3) == 0 {
-		return fmt.Errorf("%w: vk_zkp3 cannot be empty", ErrInvalidField)
 	}
 	if len(msg.Proposals) == 0 || len(msg.Proposals) > MaxProposals {
 		return fmt.Errorf("%w: proposals count must be between 1 and %d, got %d", ErrInvalidField, MaxProposals, len(msg.Proposals))
@@ -66,6 +65,9 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 func (msg *MsgDelegateVote) ValidateBasic() error {
 	if len(msg.Rk) != 32 {
 		return fmt.Errorf("%w: rk must be 32 bytes, got %d", ErrInvalidField, len(msg.Rk))
+	}
+	if bytes.Equal(msg.Rk, zeroPoint32[:]) {
+		return fmt.Errorf("%w: rk must not be the identity point (all zeros)", ErrInvalidField)
 	}
 	if len(msg.SpendAuthSig) == 0 {
 		return fmt.Errorf("%w: spend_auth_sig cannot be empty", ErrInvalidField)
@@ -101,8 +103,8 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 		}
 		seen[k] = struct{}{}
 	}
-	if len(msg.Proof) == 0 {
-		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
+	if len(msg.Proof) == 0 || len(msg.Proof) > MaxProofSize {
+		return fmt.Errorf("%w: proof must be 1..%d bytes, got %d", ErrInvalidField, MaxProofSize, len(msg.Proof))
 	}
 	if len(msg.VoteRoundId) != RoundIDLen {
 		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
@@ -127,8 +129,8 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	if msg.ProposalId < MinProposalID || msg.ProposalId > MaxProposals {
 		return fmt.Errorf("%w: proposal_id must be %d..%d, got %d", ErrInvalidField, MinProposalID, MaxProposals, msg.ProposalId)
 	}
-	if len(msg.Proof) == 0 {
-		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
+	if len(msg.Proof) == 0 || len(msg.Proof) > MaxProofSize {
+		return fmt.Errorf("%w: proof must be 1..%d bytes, got %d", ErrInvalidField, MaxProofSize, len(msg.Proof))
 	}
 	if len(msg.VoteRoundId) != RoundIDLen {
 		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
@@ -142,13 +144,16 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	if len(msg.RVpk) != 32 {
 		return fmt.Errorf("%w: r_vpk must be 32 bytes, got %d", ErrInvalidField, len(msg.RVpk))
 	}
+	if bytes.Equal(msg.RVpk, zeroPoint32[:]) {
+		return fmt.Errorf("%w: r_vpk must not be the identity point (all zeros)", ErrInvalidField)
+	}
 	return nil
 }
 
 // ValidateBasic performs stateless validation for MsgRevealShare.
 func (msg *MsgRevealShare) ValidateBasic() error {
-	if len(msg.ShareNullifier) == 0 {
-		return fmt.Errorf("%w: share_nullifier cannot be empty", ErrInvalidField)
+	if len(msg.ShareNullifier) != 32 {
+		return fmt.Errorf("%w: share_nullifier must be 32 bytes, got %d", ErrInvalidField, len(msg.ShareNullifier))
 	}
 	if len(msg.EncShare) != 64 {
 		return fmt.Errorf("%w: enc_share must be 64 bytes (ElGamal ciphertext), got %d", ErrInvalidField, len(msg.EncShare))
@@ -159,8 +164,8 @@ func (msg *MsgRevealShare) ValidateBasic() error {
 	if msg.VoteDecision >= MaxVoteOptions {
 		return fmt.Errorf("%w: vote_decision must be 0..%d, got %d", ErrInvalidField, MaxVoteOptions-1, msg.VoteDecision)
 	}
-	if len(msg.Proof) == 0 {
-		return fmt.Errorf("%w: proof cannot be empty", ErrInvalidField)
+	if len(msg.Proof) == 0 || len(msg.Proof) > MaxProofSize {
+		return fmt.Errorf("%w: proof must be 1..%d bytes, got %d", ErrInvalidField, MaxProofSize, len(msg.Proof))
 	}
 	if len(msg.VoteRoundId) != RoundIDLen {
 		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
@@ -260,9 +265,10 @@ func (msg *MsgDelegateVote) AcceptsTallyingRound() bool { return false }
 // AcceptsTallyingRound returns false — casting votes requires ACTIVE status.
 func (msg *MsgCastVote) AcceptsTallyingRound() bool { return false }
 
-// AcceptsTallyingRound returns true — revealing shares is accepted during both
-// ACTIVE and TALLYING phases. This routes to ValidateRoundForShares.
-func (msg *MsgRevealShare) AcceptsTallyingRound() bool { return true }
+// AcceptsTallyingRound returns false — shares must land before the vote window
+// closes. Accepting shares during TALLYING would corrupt the tally accumulator
+// after partial decryptions have been committed.
+func (msg *MsgRevealShare) AcceptsTallyingRound() bool { return false }
 
 // AcceptsTallyingRound returns false — session creation is unrelated to tallying.
 func (msg *MsgCreateVotingSession) AcceptsTallyingRound() bool { return false }

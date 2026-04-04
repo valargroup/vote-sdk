@@ -10,7 +10,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/valargroup/vote-sdk/crypto/roundid"
+	"github.com/valargroup/vote-sdk/ffi/roundid"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -111,9 +111,6 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		Creator:           msg.Creator,
 		Status:            types.SessionStatus_SESSION_STATUS_PENDING,
 		// EaPk left empty — set when ceremony confirms.
-		VkZkp1:          msg.VkZkp1,
-		VkZkp2:          msg.VkZkp2,
-		VkZkp3:          msg.VkZkp3,
 		Proposals:       msg.Proposals,
 		Description:     msg.Description,
 		CreatedAtHeight: uint64(ctx.BlockHeight()),
@@ -153,10 +150,10 @@ func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVo
 		}
 	}
 
-	// Only van_cmx is appended to the commitment tree. cmx_new is recorded
-	// on-chain but not included in the tree — no subsequent proof references it;
-	// only the VAN (van_cmx) needs a Merkle path for ZKP #2.
-	vanCmxIdx, err := ms.k.AppendCommitment(kvStore, msg.VanCmx)
+	// Only van_cmx is appended to the round's commitment tree. cmx_new is
+	// recorded on-chain but not included in the tree — no subsequent proof
+	// references it; only the VAN (van_cmx) needs a Merkle path for ZKP #2.
+	vanCmxIdx, err := ms.k.AppendCommitment(kvStore, msg.VoteRoundId, msg.VanCmx)
 	if err != nil {
 		return nil, err
 	}
@@ -183,8 +180,8 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 		return nil, err
 	}
 
-	// Validate anchor height references a stored root.
-	root, err := ms.k.GetCommitmentRootAtHeight(kvStore, msg.VoteCommTreeAnchorHeight)
+	// Validate anchor height references a stored root in this round's tree.
+	root, err := ms.k.GetCommitmentRootAtHeight(kvStore, msg.VoteRoundId, msg.VoteCommTreeAnchorHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -197,12 +194,12 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 		return nil, err
 	}
 
-	// Append vote_authority_note_new, then vote_commitment.
-	vanIdx, err := ms.k.AppendCommitment(kvStore, msg.VoteAuthorityNoteNew)
+	// Append vote_authority_note_new, then vote_commitment to the round's tree.
+	vanIdx, err := ms.k.AppendCommitment(kvStore, msg.VoteRoundId, msg.VoteAuthorityNoteNew)
 	if err != nil {
 		return nil, err
 	}
-	vcIdx, err := ms.k.AppendCommitment(kvStore, msg.VoteCommitment)
+	vcIdx, err := ms.k.AppendCommitment(kvStore, msg.VoteRoundId, msg.VoteCommitment)
 	if err != nil {
 		return nil, err
 	}

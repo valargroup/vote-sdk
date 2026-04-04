@@ -18,6 +18,11 @@ import (
 // TestAuthority is the module authority address used by all keeper tests.
 const TestAuthority = "sv1authority"
 
+// DummyPallasPoint is a valid compressed Pallas curve point (the generator)
+// for use as a dummy rk / RVpk in test messages. Must be on-curve and
+// non-identity to pass UnmarshalPublicKey validation in the ante handler.
+var DummyPallasPoint = elgamal.PallasGenerator().ToAffineCompressed()
+
 // TestValAddr generates a deterministic valid bech32 validator operator address from a seed byte.
 func TestValAddr(seed byte) string {
 	addr := make([]byte, 20)
@@ -51,9 +56,6 @@ func ActiveRoundFixture(roundID []byte) *types.VoteRound {
 		NullifierImtRoot: bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:           bytes.Repeat([]byte{0x04}, 32),
 		EaPk:             bytes.Repeat([]byte{0x05}, 32),
-		VkZkp1:           bytes.Repeat([]byte{0x06}, 64),
-		VkZkp2:           bytes.Repeat([]byte{0x07}, 64),
-		VkZkp3:           bytes.Repeat([]byte{0x08}, 64),
 		Proposals:        SampleProposals(),
 	}
 }
@@ -86,9 +88,6 @@ func ValidCreateVotingSession() *types.MsgCreateVotingSession {
 		VoteEndTime:       uint64(time.Now().Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         SampleProposals(),
 	}
 }
@@ -104,9 +103,6 @@ func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession
 		VoteEndTime:       uint64(refTime.Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         SampleProposals(),
 	}
 }
@@ -122,9 +118,6 @@ func ValidCreateVotingSessionWithEndTime(endTime time.Time) *types.MsgCreateVoti
 		VoteEndTime:       uint64(endTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         SampleProposals(),
 	}
 }
@@ -140,9 +133,6 @@ func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSessi
 		VoteEndTime:       uint64(refTime.Add(-1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x11}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x22}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x33}, 64),
 		Proposals:         SampleProposals(),
 	}
 }
@@ -153,7 +143,7 @@ func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSessi
 // Sighash is set to a dummy 32-byte value; chain only checks length + signature.
 func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote {
 	msg := &types.MsgDelegateVote{
-		Rk:                  bytes.Repeat([]byte{0x01}, 32),
+		Rk:                  append([]byte(nil), DummyPallasPoint...),
 		SpendAuthSig:        bytes.Repeat([]byte{0x02}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0x03}, 32),
 		CmxNew:              FpLE(0x80 + uint64(nullifierSeed)),
@@ -194,7 +184,7 @@ func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *typ
 		VoteRoundId:              ensureBytes32(roundID),
 		VoteCommTreeAnchorHeight: anchorHeight,
 		VoteAuthSig:              bytes.Repeat([]byte{0xC0 + nullifierSeed}, 64), // RedPallas sig stub
-		RVpk:                     ensureBytes32(bytes.Repeat([]byte{0xE0 + nullifierSeed}, 32)),
+		RVpk:                     append([]byte(nil), DummyPallasPoint...),
 	}
 }
 
@@ -283,7 +273,7 @@ func ValidDelegationN(roundID []byte, n int, seed uint64) []*types.MsgDelegateVo
 	for i := range n {
 		base := seed + uint64(i)*4
 		msg := &types.MsgDelegateVote{
-			Rk:                  bytes.Repeat([]byte{0x01}, 32),
+			Rk:                  append([]byte(nil), DummyPallasPoint...),
 			SpendAuthSig:        bytes.Repeat([]byte{0x02}, 64),
 			SignedNoteNullifier: makeNullifierFromUint64(base + 1),
 			CmxNew:              FpLE(base + 2),
@@ -311,7 +301,6 @@ func ValidCastVoteN(roundID []byte, anchorHeight uint64, n int, seed uint64) []*
 	for i := range n {
 		base := seed + uint64(i)*5
 		sigByte := byte((base & 0xff))
-		rvpkByte := byte(((base + 77) & 0xff))
 		msg := &types.MsgCastVote{
 			VanNullifier:             makeNullifierFromUint64(base + 20),
 			VoteAuthorityNoteNew:     FpLE(base + 21),
@@ -321,7 +310,7 @@ func ValidCastVoteN(roundID []byte, anchorHeight uint64, n int, seed uint64) []*
 			VoteRoundId:              ensureBytes32(roundID),
 			VoteCommTreeAnchorHeight: anchorHeight,
 			VoteAuthSig:              bytes.Repeat([]byte{sigByte}, 64),
-			RVpk:                     bytes.Repeat([]byte{rvpkByte}, 32),
+			RVpk:                     append([]byte(nil), DummyPallasPoint...),
 		}
 		out = append(out, msg)
 	}

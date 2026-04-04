@@ -11,9 +11,9 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
-	"github.com/valargroup/vote-sdk/crypto/redpallas"
-	"github.com/valargroup/vote-sdk/crypto/zkp"
-	"github.com/valargroup/vote-sdk/crypto/zkp/halo2"
+	"github.com/valargroup/vote-sdk/ffi/redpallas"
+	"github.com/valargroup/vote-sdk/ffi/zkp"
+	"github.com/valargroup/vote-sdk/ffi/zkp/halo2"
 	voteante "github.com/valargroup/vote-sdk/x/vote/ante"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -76,22 +76,30 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 			return handleVoteAnte(ctx, vtx, voteKeeper, sigVerifier, zkpVerifier)
 		}
 
-		// Block raw MsgCreateValidator — post-genesis validators must use
-		// MsgCreateValidatorWithPallasKey to atomically register their Pallas key.
-		// Allow during genesis (block height 0) since gentx produces standard
-		// MsgCreateValidator; genesis validators register Pallas keys via the
-		// ceremony flow after chain start. MsgCreateValidatorWithPallasKey is
-		// allowed since it wraps MsgCreateValidator with Pallas key registration.
-		for _, msg := range tx.GetMsgs() {
+		msgs := tx.GetMsgs()
+		if len(msgs) > 1 {
+			return ctx, fmt.Errorf("multi-message transactions are not supported; got %d messages", len(msgs))
+		}
+
+		for _, msg := range msgs {
+			// Defense-in-depth: reject ZKP/ceremony messages via explicit
+			// type check even though MessageWhitelistDecorator (in the
+			// standard ante chain) would also catch them. This fires
+			// earlier — before any decorator runs — and gives a clearer
+			// error message explaining the correct submission path.
+			if isVoteModuleMsg(msg) {
+				return ctx, fmt.Errorf("vote module message %T is not allowed in standard Cosmos transactions; use the vote tx format", msg)
+			}
+
+			// Block raw MsgCreateValidator post-genesis — validators must
+			// use MsgCreateValidatorWithPallasKey to atomically register
+			// their Pallas key. Allowed at genesis (height 0) for gentx.
 			if _, ok := msg.(*stakingtypes.MsgCreateValidator); ok {
 				if ctx.BlockHeight() > 0 {
 					return ctx, fmt.Errorf("MsgCreateValidator is disabled; use MsgCreateValidatorWithPallasKey via /shielded-vote/v1/create-validator-with-pallas")
 				}
 			}
 		}
-
-		// Ceremony messages pass through to the standard ante chain where
-		// they get signature verification, fee exemption, and validator gating.
 
 		// Standard Cosmos tx path: signature verification, fee deduction, etc.
 		return standardHandler(ctx, tx, simulate)
@@ -166,6 +174,7 @@ func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper *votekeepe
 	anteDecorators := []sdk.AnteDecorator{
 		ante.NewSetUpContextDecorator(),
 		NewCeremonyFeeExemptDecorator(),
+		NewMessageWhitelistDecorator(DefaultAllowedMessages()),
 		ante.NewExtensionOptionsDecorator(options.ExtensionOptionChecker),
 		ante.NewValidateBasicDecorator(),
 		ante.NewTxTimeoutHeightDecorator(),
@@ -181,4 +190,28 @@ func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper *votekeepe
 	}
 
 	return sdk.ChainAnteDecorators(anteDecorators...), nil
+}
+
+// isVoteModuleMsg returns true for messages that must only be submitted via
+// the custom vote tx wire format (VoteTxWrapper). This includes:
+//   - Vote messages: authenticated by ZKP/RedPallas, not Cosmos signatures.
+//   - Ceremony messages: auto-injected by PrepareProposal, authenticated by
+//     proposer identity check (ValidateProposerIsCreator).
+//
+// Allowing these in standard Cosmos txs would bypass their authentication —
+// vote messages skip ZKP verification, ceremony messages skip proposer gating.
+//
+// Defense-in-depth: the MessageWhitelistDecorator in buildStandardAnteHandler
+// also blocks these (they are not in the allowed set), but this explicit type
+// check fires earlier in NewDualAnteHandler — before any decorator runs —
+// and produces a more actionable error message.
+func isVoteModuleMsg(msg sdk.Msg) bool {
+	switch msg.(type) {
+	case *types.MsgDelegateVote, *types.MsgCastVote, *types.MsgRevealShare:
+		return true
+	case *types.MsgDealExecutiveAuthorityKey, *types.MsgAckExecutiveAuthorityKey, *types.MsgSubmitPartialDecryption, *types.MsgSubmitTally:
+		return true
+	default:
+		return false
+	}
 }

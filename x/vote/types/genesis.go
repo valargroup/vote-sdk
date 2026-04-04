@@ -12,27 +12,6 @@ func ValidateGenesisState(gs *GenesisState) error {
 		return nil
 	}
 
-	// Validate tree state consistency with commitment leaves.
-	if gs.TreeState != nil && gs.TreeState.NextIndex > 0 {
-		if uint64(len(gs.CommitmentLeaves)) != gs.TreeState.NextIndex {
-			return fmt.Errorf("tree_state.next_index is %d but commitment_leaves has %d entries",
-				gs.TreeState.NextIndex, len(gs.CommitmentLeaves))
-		}
-	}
-
-	// Validate commitment leaves are sequential and well-formed.
-	for i, leaf := range gs.CommitmentLeaves {
-		if leaf.Index != uint64(i) {
-			return fmt.Errorf("commitment_leaves[%d].index is %d, expected %d", i, leaf.Index, i)
-		}
-		if len(leaf.Value) == 0 {
-			return fmt.Errorf("commitment_leaves[%d].value is empty", i)
-		}
-		if len(leaf.Value) != 32 {
-			return fmt.Errorf("commitment_leaves[%d].value is %d bytes, expected 32", i, len(leaf.Value))
-		}
-	}
-
 	// Validate rounds: IDs must be 32 bytes, no duplicates.
 	seenRounds := make(map[string]struct{}, len(gs.Rounds))
 	for i, round := range gs.Rounds {
@@ -109,13 +88,16 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
-	// Validate commitment roots.
-	for i, cr := range gs.CommitmentRoots {
-		if cr.Height == 0 {
-			return fmt.Errorf("commitment_roots[%d].height is zero", i)
+	// Validate partial decryptions.
+	for i, pd := range gs.PartialDecryptions {
+		if len(pd.RoundId) != RoundIDLen {
+			return fmt.Errorf("partial_decryptions[%d].round_id is %d bytes, expected %d", i, len(pd.RoundId), RoundIDLen)
 		}
-		if len(cr.Root) == 0 {
-			return fmt.Errorf("commitment_roots[%d].root is empty", i)
+		if pd.ValidatorIndex == 0 {
+			return fmt.Errorf("partial_decryptions[%d].validator_index must be >= 1", i)
+		}
+		if len(pd.PartialDecrypt) != 32 {
+			return fmt.Errorf("partial_decryptions[%d].partial_decrypt is %d bytes, expected 32", i, len(pd.PartialDecrypt))
 		}
 	}
 

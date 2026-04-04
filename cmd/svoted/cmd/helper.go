@@ -18,8 +18,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/valargroup/vote-sdk/app"
-	"github.com/valargroup/vote-sdk/crypto/votecommitment"
-	"github.com/valargroup/vote-sdk/crypto/votetree"
+	"github.com/valargroup/vote-sdk/ffi/votecommitment"
+	"github.com/valargroup/vote-sdk/ffi/votetree"
 	"github.com/valargroup/vote-sdk/internal/helper"
 	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -74,7 +74,16 @@ func helperPostSetup(
 		prover := &halo2Prover{}
 
 		homeDir := svrCtx.Config.RootDir
-		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, votecommitment.VoteCommitmentHash, homeDir, logger)
+		shareNullifierChecker := func(roundIDHex string, shareNullifier []byte) (bool, error) {
+			roundBytes, err := hex.DecodeString(roundIDHex)
+			if err != nil {
+				return false, fmt.Errorf("decode round id: %w", err)
+			}
+			ctx := (*svoteApp).NewUncachedContext(false, cmtproto.Header{})
+			kvStore := (*svoteApp).VoteKeeper.OpenKVStore(ctx)
+			return (*svoteApp).VoteKeeper.HasNullifier(kvStore, votetypes.NullifierTypeShare, roundBytes, shareNullifier)
+		}
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, shareNullifierChecker, homeDir, logger)
 		if err != nil {
 			return fmt.Errorf("helper: %w", err)
 		}
@@ -127,9 +136,6 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	}
 	if v.IsSet("helper.db_path") {
 		cfg.DBPath = v.GetString("helper.db_path")
-	}
-	if v.IsSet("helper.min_delay") {
-		cfg.MinDelay = v.GetInt("helper.min_delay")
 	}
 	if v.IsSet("helper.process_interval") {
 		cfg.ProcessInterval = v.GetInt("helper.process_interval")
@@ -209,18 +215,23 @@ func buildPulseConfig(
 }
 
 // keeperTreeReader implements helper.TreeReader by reading directly from the
-// vote keeper's KV store.
+// vote keeper's KV store. The roundID must be set before tree methods are
+// called (e.g. from the active round or first share payload).
 type keeperTreeReader struct {
-	app    *app.SvoteApp
-	logger log.Logger
+	app     *app.SvoteApp
+	logger  log.Logger
+	roundID []byte
 }
+
+// SetRoundID sets the voting round used for tree lookups.
+func (r *keeperTreeReader) SetRoundID(id []byte) { r.roundID = id }
 
 // GetTreeStatus returns lightweight tree statistics without reading leaf data.
 func (r *keeperTreeReader) GetTreeStatus() (helper.TreeStatus, error) {
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
 
-	treeState, err := r.app.VoteKeeper.GetCommitmentTreeState(kvStore)
+	treeState, err := r.app.VoteKeeper.GetCommitmentTreeState(kvStore, r.roundID)
 	if err != nil {
 		return helper.TreeStatus{}, fmt.Errorf("get tree state: %w", err)
 	}
@@ -228,7 +239,7 @@ func (r *keeperTreeReader) GetTreeStatus() (helper.TreeStatus, error) {
 	var anchorHeight uint64
 	latestHeight := uint64(r.app.LastBlockHeight())
 	for h := latestHeight; h > 0; h-- {
-		root, err := r.app.VoteKeeper.GetCommitmentRootAtHeight(kvStore, h)
+		root, err := r.app.VoteKeeper.GetCommitmentRootAtHeight(kvStore, r.roundID, h)
 		if err != nil {
 			continue
 		}
@@ -256,14 +267,18 @@ func (r *keeperTreeReader) MerklePath(position uint64, anchorHeight uint32) ([]b
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
 
-	treeState, err := r.app.VoteKeeper.GetCommitmentTreeState(kvStore)
+	treeState, err := r.app.VoteKeeper.GetCommitmentTreeState(kvStore, r.roundID)
 	if err != nil {
 		return nil, fmt.Errorf("get tree state: %w", err)
 	}
 
-	// Create a KV-backed handle from the snapshot store. ShardTree reads only
-	// the frontier shard + cap + checkpoints on creation — no leaf replay.
-	proxy := &votetree.KvStoreProxy{Current: kvStore}
+	// Create a KV-backed handle from the snapshot store with a round-scoped
+	// prefix. ShardTree reads only the frontier shard + cap + checkpoints on
+	// creation — no leaf replay.
+	proxy := &votetree.KvStoreProxy{
+		Current: kvStore,
+		Prefix:  votetypes.RoundTreeKey(r.roundID),
+	}
 	h, err := votetree.NewTreeHandleWithKV(proxy, treeState.NextIndex)
 	if err != nil {
 		return nil, fmt.Errorf("create kv tree handle: %w", err)
@@ -278,13 +293,13 @@ func (r *keeperTreeReader) MerklePath(position uint64, anchorHeight uint32) ([]b
 func (r *keeperTreeReader) LeafAt(position uint64) ([]byte, error) {
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
-	return kvStore.Get(votetypes.CommitmentLeafKey(position))
+	return kvStore.Get(votetypes.CommitmentLeafKey(r.roundID, position))
 }
 
 // GetRoundVoteEndTime reads a vote round directly from the keeper's KV store
-// and returns its vote_end_time. Returns ErrUnknownRound when the round
-// doesn't exist; other errors (KV failures) are returned unwrapped so the
-// caller can distinguish client errors from infrastructure failures.
+// and returns its vote_end_time. Returns ErrUnknownRound when the round doesn't
+// exist; other errors (KV failures) are returned unwrapped so the caller can
+// distinguish client errors from infrastructure failures.
 func (r *keeperTreeReader) GetRoundVoteEndTime(roundID string) (uint64, error) {
 	roundBytes, err := hex.DecodeString(roundID)
 	if err != nil {
@@ -302,6 +317,21 @@ func (r *keeperTreeReader) GetRoundVoteEndTime(roundID string) (uint64, error) {
 	return round.VoteEndTime, nil
 }
 
+// GetRoundIsActive returns true if the round exists and has ACTIVE status.
+func (r *keeperTreeReader) GetRoundIsActive(roundID string) (bool, error) {
+	roundBytes, err := hex.DecodeString(roundID)
+	if err != nil {
+		return false, fmt.Errorf("invalid round_id hex: %v", err)
+	}
+	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
+	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
+	round, err := r.app.VoteKeeper.GetVoteRound(kvStore, roundBytes)
+	if err != nil {
+		return false, err
+	}
+	return round.Status == votetypes.SessionStatus_SESSION_STATUS_ACTIVE, nil
+}
+
 // halo2Prover wraps the CGo proof generation function.
 type halo2Prover struct{}
 
@@ -309,14 +339,14 @@ func (p *halo2Prover) GenerateShareRevealProof(
 	merklePath []byte,
 	shareComms [16][32]byte,
 	primaryBlind [32]byte,
-	encC1X [32]byte,
-	encC2X [32]byte,
+	encC1 [32]byte,
+	encC2 [32]byte,
 	shareIndex uint32,
 	proposalID, voteDecision uint32,
 	roundID [32]byte,
 ) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error) {
 	return halo2GenerateShareRevealProof(
-		merklePath, shareComms, primaryBlind, encC1X, encC2X,
+		merklePath, shareComms, primaryBlind, encC1, encC2,
 		shareIndex, proposalID, voteDecision, roundID,
 	)
 }

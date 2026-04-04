@@ -7,6 +7,7 @@ create-val-tx
 
 # Rust build artifacts
 circuits/target/
+e2e-tests/target/
 
 # Environment (secrets live here — never commit)
 .env

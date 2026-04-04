@@ -1,5 +1,5 @@
 BINARY = svoted
-HOME_DIR = $(HOME)/.svoted
+HOME_DIR := $(or $(SVOTED_HOME),$(HOME)/.svoted)
 
 export GOBIN := $(HOME)/go/bin
 export PATH := $(GOBIN):$(PATH)
@@ -72,11 +72,11 @@ test: test-unit test-integration test-helper
 
 ## ceremony: Register Pallas key + create round + wait for ACTIVE (per-round auto-ceremony)
 ceremony:
-	SVOTE_API_URL=http://localhost:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml round_activation -- --nocapture --ignored
+	SVOTE_API_URL=http://localhost:1318 cargo test --release --manifest-path e2e-tests/Cargo.toml round_activation -- --nocapture --ignored
 
 ## test-api: Rust E2E API tests against a running chain (requires: make init && make start)
 test-api:
-	SVOTE_API_URL=http://localhost:1318 HELPER_SERVER_URL=http://127.0.0.1:1318 cargo test --release --manifest-path ../e2e-tests/Cargo.toml -- --nocapture --ignored
+	SVOTE_API_URL=http://localhost:1318 HELPER_SERVER_URL=http://127.0.0.1:1318 cargo test --release --manifest-path e2e-tests/Cargo.toml -- --nocapture --ignored
 
 ## test-e2e: Alias for test-api (Rust E2E tests)
 test-e2e: test-api
@@ -90,8 +90,8 @@ test-api-reinit: init fixtures
 ## fixtures-ts: Copy Halo2 proof fixtures into TS test directory (requires: make fixtures)
 fixtures-ts: fixtures
 	mkdir -p tests/api/fixtures
-	cp crypto/zkp/testdata/toy_valid_proof.bin tests/api/fixtures/
-	cp crypto/zkp/testdata/toy_valid_input.bin tests/api/fixtures/
+	cp ffi/zkp/testdata/toy_valid_proof.bin tests/api/fixtures/
+	cp ffi/zkp/testdata/toy_valid_input.bin tests/api/fixtures/
 
 # ---------------------------------------------------------------------------
 # Rust circuit / FFI targets
@@ -111,7 +111,7 @@ fixtures: circuits
 
 ## test-halo2: Run Go tests that use real Halo2 verification via CGo (requires circuits)
 test-halo2: circuits
-	go test -tags halo2 -count=1 -v ./crypto/zkp/halo2/... ./x/vote/ante/...
+	go test -tags halo2 -count=1 -v ./ffi/zkp/halo2/... ./x/vote/ante/...
 
 ## test-halo2-ante: Run ante handler tests with real Halo2 verification
 test-halo2-ante: circuits
@@ -119,7 +119,7 @@ test-halo2-ante: circuits
 
 ## test-redpallas: Run Go tests with real RedPallas signature verification via CGo (requires circuits)
 test-redpallas: circuits
-	go test -tags redpallas -count=1 -v ./crypto/redpallas/... ./x/vote/ante/...
+	go test -tags redpallas -count=1 -v ./ffi/redpallas/... ./x/vote/ante/...
 
 ## test-redpallas-ante: Run ante handler tests with real RedPallas verification
 test-redpallas-ante: circuits
@@ -127,7 +127,7 @@ test-redpallas-ante: circuits
 
 ## test-all-ffi: Run all FFI-backed tests (Halo2 + RedPallas) (requires circuits)
 test-all-ffi: circuits
-	go test -tags "halo2 redpallas" -count=1 -v ./crypto/zkp/halo2/... ./crypto/redpallas/... ./x/vote/ante/...
+	go test -tags "halo2 redpallas" -count=1 -v ./ffi/zkp/halo2/... ./ffi/redpallas/... ./x/vote/ante/...
 
 # ---------------------------------------------------------------------------
 # Deployment targets

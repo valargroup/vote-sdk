@@ -97,6 +97,10 @@ func TallyPrepareProposalHandler(
 		return bsgs
 	}
 
+	if eaSkDir != "" {
+		go loadBSGS()
+	}
+
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
 		txs := req.Txs
 

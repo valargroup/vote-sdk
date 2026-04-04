@@ -20,8 +20,8 @@ import (
 
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	"github.com/valargroup/vote-sdk/crypto/redpallas"
-	"github.com/valargroup/vote-sdk/crypto/zkp"
+	"github.com/valargroup/vote-sdk/ffi/redpallas"
+	"github.com/valargroup/vote-sdk/ffi/zkp"
 	svtest "github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/ante"
 	"github.com/valargroup/vote-sdk/x/vote/keeper"
@@ -139,9 +139,6 @@ func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 		VoteEndTime:       2_000_000,
 		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
 			{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
 			{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
@@ -301,9 +298,6 @@ func (s *ValidateTestSuite) setupRoundWithStatus(roundID []byte, endTime uint64,
 		Creator:           "sv1testcreator",
 		Status:            status,
 		EaPk:              bytes.Repeat([]byte{0x05}, 32),
-		VkZkp1:            bytes.Repeat([]byte{0x06}, 64),
-		VkZkp2:            bytes.Repeat([]byte{0x07}, 64),
-		VkZkp3:            bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
 			{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
 			{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
@@ -319,11 +313,11 @@ func (s *ValidateTestSuite) setupTallyingRound() {
 }
 
 // setupCommitmentRootAtHeight stores a commitment tree root at the given height
-// so that CastVote/RevealShare messages with that anchor height pass the anchor check.
+// for the test round, so that CastVote/RevealShare messages pass the anchor check.
 func (s *ValidateTestSuite) setupCommitmentRootAtHeight(height uint64) {
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 	root := bytes.Repeat([]byte{0xCC}, 32)
-	err := s.keeper.SetCommitmentRootAtHeight(kvStore, height, root)
+	err := s.keeper.SetCommitmentRootAtHeight(kvStore, testRoundID, height, root)
 	s.Require().NoError(err)
 }
 
@@ -335,12 +329,13 @@ func (s *ValidateTestSuite) recordNullifier(nfType types.NullifierType, roundID,
 	s.Require().NoError(err)
 }
 
-// seedCommitmentRoot stores a dummy commitment tree root at the given height.
-// MsgRevealShare tests need this because verifyRevealShare looks up the root.
+// seedCommitmentRoot stores a dummy commitment tree root at the given height
+// for the test round. MsgRevealShare tests need this because verifyRevealShare
+// looks up the root.
 func (s *ValidateTestSuite) seedCommitmentRoot(height uint64) {
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 	root := bytes.Repeat([]byte{0xAB}, 32)
-	err := s.keeper.SetCommitmentRootAtHeight(kvStore, height, root)
+	err := s.keeper.SetCommitmentRootAtHeight(kvStore, testRoundID, height, root)
 	s.Require().NoError(err)
 }
 
@@ -475,6 +470,30 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			errContains: "rk must be 32 bytes",
 		},
 		{
+			name: "invalid: rk is identity point (all zeros) — rejected at ValidateBasic",
+			msg: func() types.VoteMessage {
+				m := newValidMsgDelegateVote()
+				m.Rk = make([]byte, 32)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "identity point",
+		},
+		{
+			name: "invalid: rk is off-curve (0xFF×32) — rejected at verifyDelegation point check",
+			msg: func() types.VoteMessage {
+				m := newValidMsgDelegateVote()
+				m.Rk = bytes.Repeat([]byte{0xFF}, 32)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "invalid RedPallas signature",
+		},
+		{
 			name: "invalid: empty spend_auth_sig",
 			msg: func() types.VoteMessage {
 				m := newValidMsgDelegateVote()
@@ -528,6 +547,18 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
 			errContains: "proof",
+		},
+		{
+			name: "invalid: oversized proof exceeds MaxProofSize",
+			msg: func() types.VoteMessage {
+				m := newValidMsgDelegateVote()
+				m.Proof = bytes.Repeat([]byte{0xAB}, types.MaxProofSize+1)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "proof must be 1..",
 		},
 		{
 			name: "invalid: sighash wrong length",
@@ -701,6 +732,18 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 			errContains: "vote_commitment",
 		},
 		{
+			name: "invalid: oversized proof exceeds MaxProofSize",
+			msg: func() types.VoteMessage {
+				m := newValidMsgCastVote()
+				m.Proof = bytes.Repeat([]byte{0xAB}, types.MaxProofSize+1)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "proof must be 1..",
+		},
+		{
 			name: "invalid: zero anchor height",
 			msg: func() types.VoteMessage {
 				m := newValidMsgCastVote()
@@ -735,6 +778,30 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
 			errContains: "r_vpk must be 32 bytes",
+		},
+		{
+			name: "invalid: r_vpk is identity point (all zeros) — rejected at ValidateBasic",
+			msg: func() types.VoteMessage {
+				m := newValidMsgCastVote()
+				m.RVpk = make([]byte, 32)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "identity point",
+		},
+		{
+			name: "invalid: r_vpk is off-curve (0xFF×32) — rejected at verifyCastVote point check",
+			msg: func() types.VoteMessage {
+				m := newValidMsgCastVote()
+				m.RVpk = bytes.Repeat([]byte{0xFF}, 32)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "invalid RedPallas signature",
 		},
 		// --- Signature verification failure ---
 		{
@@ -863,7 +930,31 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 			opts:        mockOpts(),
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
-			errContains: "share_nullifier",
+			errContains: "share_nullifier must be 32 bytes",
+		},
+		{
+			name: "invalid: share_nullifier wrong length (not 32)",
+			msg: func() types.VoteMessage {
+				m := newValidMsgRevealShare()
+				m.ShareNullifier = bytes.Repeat([]byte{0x77}, 16)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "share_nullifier must be 32 bytes",
+		},
+		{
+			name: "invalid: oversized proof exceeds MaxProofSize",
+			msg: func() types.VoteMessage {
+				m := newValidMsgRevealShare()
+				m.Proof = bytes.Repeat([]byte{0xAB}, types.MaxProofSize+1)
+				return m
+			},
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "proof must be 1..",
 		},
 		{
 			name: "invalid: wrong enc_share length",
@@ -899,22 +990,26 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 			errContains: "vote round not found",
 		},
 		{
-			name: "expired ACTIVE round accepted for shares",
+			name: "expired ACTIVE round rejected for shares",
 			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts: mockOpts(),
 			setup: func() {
 				s.setupExpiredRound()
-				s.seedCommitmentRoot(10) // anchor height used by newValidMsgRevealShare
+				s.seedCommitmentRoot(10)
 			},
+			expectErr:   true,
+			errContains: "vote round is not active",
 		},
 		{
-			name: "tallying round accepted for shares",
+			name: "tallying round rejected for shares",
 			msg:  func() types.VoteMessage { return newValidMsgRevealShare() },
 			opts: mockOpts(),
 			setup: func() {
 				s.setupTallyingRound()
-				s.seedCommitmentRoot(10) // anchor height used by newValidMsgRevealShare
+				s.seedCommitmentRoot(10)
 			},
+			expectErr:   true,
+			errContains: "vote round is not active",
 		},
 		{
 			name: "finalized round rejected for shares",

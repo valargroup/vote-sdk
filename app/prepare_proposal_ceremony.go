@@ -35,25 +35,9 @@ func sharePathForRound(dir string, roundID []byte) string {
 	return filepath.Join(dir, "share."+hex.EncodeToString(roundID))
 }
 
-// thresholdForN computes the default threshold t = ceil(n/2).
-// This matches the ack requirement (HalfAcked) so that the set of validators
-// that survives ceremony stripping is always large enough to reconstruct the
-// EA key during tally.
-//
-// For n = 1 returns t = 1 (trivial single-share scheme with no threshold
-// security — used for local testing). Panics if n < 1.
-func thresholdForN(n int) int {
-	if n < 1 {
-		panic(fmt.Sprintf("thresholdForN: n must be >= 1, got %d", n))
-	}
-	if n == 1 {
-		return 1
-	}
-	t := (n + 1) / 2 // ceil(n/2)
-	if t < 2 {
-		t = 2 // Shamir requires t >= 2; applies only when n=2 gives ceil(2/2)=1
-	}
-	return t
+// thresholdForN delegates to the canonical keeper.ThresholdForN.
+func thresholdForN(n int) (int, error) {
+	return votekeeper.ThresholdForN(n)
 }
 
 // pallasSkLoader creates a sync.Once-guarded loader for the validator's
@@ -150,7 +134,11 @@ func CeremonyDealPrepareProposalHandler(
 		G := elgamal.PallasGenerator()
 
 		n := len(round.CeremonyValidators)
-		t := thresholdForN(n)
+		t, err := thresholdForN(n)
+		if err != nil {
+			logger.Error("PrepareProposal[deal]: threshold computation failed", "err", err)
+			return txs
+		}
 
 		// Split ea_sk into (t, n) Shamir shares, ECIES-encrypt share_i to
 		// validator_i, and compute Feldman polynomial commitments.
@@ -429,6 +417,31 @@ func deserializeFeldmanCommitments(raw [][]byte) ([]curvey.Point, error) {
 	return pts, nil
 }
 
+// zeroAndDeleteShareFile overwrites the share file with zeros and removes it.
+// Errors are logged but not fatal — the security-critical part is the overwrite.
+func zeroAndDeleteShareFile(dir string, roundID []byte, logger log.Logger) {
+	if dir == "" {
+		return
+	}
+	path := sharePathForRound(dir, roundID)
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.Warn("share cleanup: failed to open for zeroing", "path", path, "err", err)
+		}
+		return
+	}
+	var zeros [32]byte
+	_, _ = f.Write(zeros[:])
+	_ = f.Sync()
+	f.Close()
+	if err := os.Remove(path); err != nil {
+		logger.Warn("share cleanup: failed to remove", "path", path, "err", err)
+	} else {
+		logger.Info("share cleanup: zeroed and deleted share file", "path", path)
+	}
+}
+
 // zeroScalar overwrites a Pallas scalar's internal limbs in place.
 // curvey.Scalar.Zero() returns a *new* zero scalar without mutating the
 // receiver, so we type-assert to ScalarPallas and call Field4.SetZero()
@@ -488,5 +501,7 @@ func loadShareForRound(dir string, roundID []byte) (*elgamal.SecretKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	return elgamal.UnmarshalSecretKey(raw)
+	sk, err := elgamal.UnmarshalSecretKey(raw)
+	zeroBytes(raw)
+	return sk, err
 }

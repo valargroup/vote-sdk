@@ -94,9 +94,6 @@ func (s *MsgServerTestSuite) createPendingRound(validators []*types.ValidatorPal
 		CeremonyValidators: validators,
 		NullifierImtRoot:   bytes.Repeat([]byte{0x03}, 32),
 		NcRoot:             bytes.Repeat([]byte{0x04}, 32),
-		VkZkp1:             bytes.Repeat([]byte{0x06}, 64),
-		VkZkp2:             bytes.Repeat([]byte{0x07}, 64),
-		VkZkp3:             bytes.Repeat([]byte{0x08}, 64),
 		Proposals: []*types.Proposal{
 			{Id: 1, Title: "A", Description: "A", Options: svtest.DefaultOptions()},
 		},
@@ -1126,4 +1123,154 @@ func (s *MsgServerTestSuite) TestCreateValidatorWithPallasKey_ProtoReflectFullNa
 		"svote.v1.MsgCreateValidatorWithPallasKey",
 		string(msg.ProtoReflect().Descriptor().FullName()),
 	)
+}
+
+// ===========================================================================
+// F-15: Threshold-1 Ceremony Downgrade — Regression Tests
+//
+// These tests verify that the handler rejects deals with a threshold that
+// does not match the deterministic ThresholdForN(n) policy. Before the fix,
+// the handler only checked msg.Threshold < 1, allowing any value >= 1.
+// ===========================================================================
+
+// TestDealExecutiveAuthorityKey_Threshold1RejectedWithMultipleValidators
+// verifies that the handler rejects Threshold=1 with n=3 validators
+// (expected threshold for n=3 is ThresholdForN(3) = 2).
+func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_Threshold1RejectedWithMultipleValidators() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(3)
+	s.setBlockProposer(addrs[0])
+
+	vks := make([][]byte, 3)
+	for i := range vks {
+		vks[i] = testPallasPK()
+	}
+
+	msg := &types.MsgDealExecutiveAuthorityKey{
+		Creator:          addrs[0],
+		VoteRoundId:      roundID,
+		EaPk:             testPallasPK(),
+		Payloads:         makePayloads(addrs),
+		Threshold:        1,
+		FeldmanCommitments: vks,
+	}
+
+	_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, msg)
+	s.Require().Error(err, "Threshold=1 with n=3 must be rejected")
+	s.Require().Contains(err.Error(), "invalid threshold")
+}
+
+// TestDealExecutiveAuthorityKey_ThresholdDowngradeVariants verifies that
+// all invalid (n, threshold) combinations are rejected by the handler.
+func (s *MsgServerTestSuite) TestDealExecutiveAuthorityKey_ThresholdDowngradeVariants() {
+	tests := []struct {
+		name      string
+		n         int
+		threshold uint32
+	}{
+		{"n=2 t=1", 2, 1},
+		{"n=3 t=1", 3, 1},
+		{"n=5 t=1", 5, 1},
+		{"n=10 t=1", 10, 1},
+		{"n=3 t=100 (above n)", 3, 100},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			roundID, addrs, _ := s.createPendingRoundWithValidators(tc.n)
+			s.setBlockProposer(addrs[0])
+			vks := make([][]byte, tc.n)
+			for i := range vks {
+				vks[i] = testPallasPK()
+			}
+			msg := &types.MsgDealExecutiveAuthorityKey{
+				Creator:          addrs[0],
+				VoteRoundId:      roundID,
+				EaPk:             testPallasPK(),
+				Payloads:         makePayloads(addrs),
+				Threshold:        tc.threshold,
+				FeldmanCommitments: vks,
+			}
+			_, err := s.msgServer.DealExecutiveAuthorityKey(s.ctx, msg)
+			s.Require().Error(err, "Threshold=%d with n=%d must be rejected", tc.threshold, tc.n)
+			s.Require().Contains(err.Error(), "invalid threshold")
+		})
+	}
+}
+
+// TestThresholdDowngrade_FullAttackChainRejected verifies that the full
+// F-15 attack chain is blocked at the deal step. The attacker constructs
+// a cryptographically valid deal with t=1 (degree-0 Shamir polynomial),
+// but the handler rejects it because the threshold doesn't match
+// ThresholdForN(3) = 2.
+func (s *MsgServerTestSuite) TestThresholdDowngrade_FullAttackChainRejected() {
+	s.SetupTest()
+
+	const numValidators = 3
+	G := elgamal.PallasGenerator()
+
+	type validatorKeys struct {
+		sk *elgamal.SecretKey
+		pk *elgamal.PublicKey
+	}
+	validators := make([]validatorKeys, numValidators)
+	addrs := make([]string, numValidators)
+	ceremonyVals := make([]*types.ValidatorPallasKey, numValidators)
+	for i := range validators {
+		sk, pk := elgamal.KeyGen(rand.Reader)
+		validators[i] = validatorKeys{sk: sk, pk: pk}
+		addrs[i] = testValoperAddr(byte(i + 1))
+		ceremonyVals[i] = &types.ValidatorPallasKey{
+			ValidatorAddress: addrs[i],
+			PallasPk:         pk.Point.ToAffineCompressed(),
+		}
+	}
+
+	roundID := s.createPendingRound(ceremonyVals)
+
+	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
+	shares, _, err := shamir.Split(eaSk.Scalar, 1, numValidators)
+	s.Require().NoError(err)
+
+	// Verify all shares equal ea_sk (degree-0 polynomial property).
+	for i, share := range shares {
+		s.Require().Equal(0, share.Value.Cmp(eaSk.Scalar),
+			"share[%d] should equal ea_sk with t=1", i)
+	}
+
+	payloads := make([]*types.DealerPayload, numValidators)
+	vks := make([][]byte, numValidators)
+	for i, v := range validators {
+		shareBytes := shares[i].Value.Bytes()
+		env, err := ecies.Encrypt(G, v.pk.Point, shareBytes, rand.Reader)
+		s.Require().NoError(err)
+		payloads[i] = &types.DealerPayload{
+			ValidatorAddress: addrs[i],
+			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+			Ciphertext:       env.Ciphertext,
+		}
+		vks[i] = G.Mul(shares[i].Value).ToAffineCompressed()
+	}
+
+	// The deal is cryptographically consistent (VKs match shares, ECIES valid),
+	// but the handler must reject it because threshold != ThresholdForN(3).
+	s.setBlockProposer(addrs[0])
+	_, err = s.msgServer.DealExecutiveAuthorityKey(s.ctx, &types.MsgDealExecutiveAuthorityKey{
+		Creator:          addrs[0],
+		VoteRoundId:      roundID,
+		EaPk:             eaPk.Point.ToAffineCompressed(),
+		Payloads:         payloads,
+		Threshold:        1,
+		FeldmanCommitments: vks,
+	})
+	s.Require().Error(err, "malicious deal with Threshold=1 must be rejected")
+	s.Require().Contains(err.Error(), "invalid threshold")
+
+	// Round must remain in REGISTERING (deal was not applied).
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
 }

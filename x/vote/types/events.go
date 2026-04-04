@@ -15,6 +15,8 @@ const (
 	EventTypeCeremonyStatusChange             = "ceremony_status_change"
 	EventTypeSetVoteManager                   = "set_vote_manager"
 	EventTypeSubmitPartialDecryption          = "submit_partial_decryption"
+	EventTypeAuthorizedSend                   = "authorized_send"
+	EventTypeTallyTimeout                     = "tally_timeout"
 )
 
 // Event attribute keys.
@@ -37,4 +39,7 @@ const (
 	AttributeKeyVoteManager        = "vote_manager"
 	AttributeKeyValidatorIndex     = "validator_index"
 	AttributeKeyEntryCount         = "entry_count"
+	AttributeKeySender             = "sender"
+	AttributeKeyRecipient          = "recipient"
+	AttributeKeyAmount             = "amount"
 )
