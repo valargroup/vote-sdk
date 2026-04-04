@@ -210,7 +210,6 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 				{ValidatorAddress: "val2", PallasPk: make([]byte, 32)},
 				{ValidatorAddress: "val3", PallasPk: make([]byte, 32)},
 			},
-			CeremonyDealer:       "val1",
 			CeremonyPhaseStart:   999_400,
 			CeremonyPhaseTimeout: 600,
 		}
@@ -233,7 +232,6 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			EaPk:                 make([]byte, 32),
 			CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 			Threshold:            threshold,
-			CeremonyDealer:       "val1",
 			CeremonyPhaseStart:   999_400,
 			CeremonyPhaseTimeout: 600,
 		}
@@ -381,7 +379,6 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 				{ValidatorAddress: "val2", PallasPk: make([]byte, 32)},
 				{ValidatorAddress: "val3", PallasPk: make([]byte, 32)},
 			},
-			CeremonyDealer:       "val1",
 			CeremonyPhaseStart:   999_400,
 			CeremonyPhaseTimeout: 600,
 			CeremonyAcks: []*types.AckEntry{
@@ -413,7 +410,6 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 				{ValidatorAddress: "val2", PallasPk: make([]byte, 32)},
 				{ValidatorAddress: "val3", PallasPk: make([]byte, 32)},
 			},
-			CeremonyDealer:       "val1",
 			CeremonyPhaseStart:   999_400,
 			CeremonyPhaseTimeout: 600,
 		}
@@ -440,7 +436,6 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 			EaPk:                 make([]byte, 32),
 			CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 			Threshold:            6,
-			CeremonyDealer:       "val1",
 			CeremonyPhaseStart:   999_400,
 			CeremonyPhaseTimeout: 600,
 		}
@@ -638,12 +633,6 @@ func TestCeremonySignerProviders(t *testing.T) {
 			msg:     &types.MsgRegisterPallasKey{Creator: valAddr.String()},
 		},
 		{
-			name:    "DealExecutiveAuthorityKey",
-			signer:  vote.ProvideDealExecutiveAuthorityKeySigner,
-			wantMsg: "svote.v1.MsgDealExecutiveAuthorityKey",
-			msg:     &types.MsgDealExecutiveAuthorityKey{Creator: valAddr.String()},
-		},
-		{
 			name:    "ContributeDKG",
 			signer:  vote.ProvideContributeDKGSigner,
 			wantMsg: "svote.v1.MsgContributeDKG",
@@ -684,7 +673,6 @@ func TestRegisterInterfaces_IncludesCeremonyMsgs(t *testing.T) {
 
 	ceremonyMsgs := []sdk.Msg{
 		&types.MsgRegisterPallasKey{},
-		&types.MsgDealExecutiveAuthorityKey{},
 		&types.MsgContributeDKG{},
 		&types.MsgAckExecutiveAuthorityKey{},
 	}
@@ -706,7 +694,6 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		vote.ProvideRevealShareSigner(),
 		vote.ProvideSubmitTallySigner(),
 		vote.ProvideRegisterPallasKeySigner(),
-		vote.ProvideDealExecutiveAuthorityKeySigner(),
 		vote.ProvideContributeDKGSigner(),
 		vote.ProvideAckExecutiveAuthorityKeySigner(),
 	}
@@ -718,7 +705,6 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		"svote.v1.MsgRevealShare",
 		"svote.v1.MsgSubmitTally",
 		"svote.v1.MsgRegisterPallasKey",
-		"svote.v1.MsgDealExecutiveAuthorityKey",
 		"svote.v1.MsgContributeDKG",
 		"svote.v1.MsgAckExecutiveAuthorityKey",
 	}

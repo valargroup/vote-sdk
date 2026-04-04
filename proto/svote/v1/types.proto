@@ -46,14 +46,14 @@ message VoteRound {
   // Per-round ceremony fields (populated when status = PENDING).
   CeremonyStatus              ceremony_status     = 15;
   repeated ValidatorPallasKey ceremony_validators = 16;
-  repeated DealerPayload      ceremony_payloads   = 17;
+  reserved 17; // was ceremony_payloads (single-dealer, removed in Phase 9)
   repeated AckEntry           ceremony_acks       = 18;
-  string                      ceremony_dealer     = 19;
+  reserved 19; // was ceremony_dealer (single-dealer, removed in Phase 9)
   uint64                      ceremony_phase_start   = 20;
   uint64                      ceremony_phase_timeout = 21;
   repeated string             ceremony_log           = 22; // Timestamped human-readable ceremony log entries
 
-  // Threshold decryption fields (populated by MsgDealExecutiveAuthorityKey in threshold mode).
+  // Threshold decryption fields (populated by finalizeDKG).
   // threshold is the minimum number of partial decryptions required to reconstruct the tally.
   // feldman_commitments holds C_j = a_j*G for j=0..t-1 (Feldman polynomial commitments).
   // Validators derive VK_i = EvalCommitmentPolynomial(commitments, i) for share verification.
@@ -205,11 +205,11 @@ enum CeremonyStatus {
 // CeremonyState tracks the singleton EA key ceremony lifecycle.
 message CeremonyState {
   CeremonyStatus              status            = 1;
-  bytes                       ea_pk             = 2;  // Set when DealerTx lands
+  bytes                       ea_pk             = 2;  // Set when DKG completes
   repeated ValidatorPallasKey validators        = 3;  // All registered pk_i
-  repeated DealerPayload      payloads          = 4;  // ECIES envelopes from DealerTx
+  reserved 4; // was payloads (single-dealer, removed in Phase 9)
   repeated AckEntry           acks              = 5;  // Per-validator ack status
-  string                      dealer            = 6;  // Validator address of the dealer
+  reserved 6; // was dealer (single-dealer, removed in Phase 9)
   uint64                      phase_start       = 7;  // Unix seconds when current phase started
   uint64                      phase_timeout     = 8;  // Timeout in seconds for current phase
   uint32                      threshold            = 9;  // Minimum shares for reconstruction (always >= 1)

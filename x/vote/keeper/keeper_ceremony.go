@@ -115,8 +115,8 @@ func FindAckInRoundCeremony(round *types.VoteRound, valAddr string) (int, bool) 
 }
 
 // StripNonAckersFromRound removes non-acking validators from the round's
-// CeremonyValidators, CeremonyPayloads, and DkgContributions. After this
-// call, only validators with a matching ack remain.
+// CeremonyValidators and DkgContributions. After this call, only validators
+// with a matching ack remain.
 func StripNonAckersFromRound(round *types.VoteRound) {
 	acked := make(map[string]bool, len(round.CeremonyAcks))
 	for _, a := range round.CeremonyAcks {
@@ -130,14 +130,6 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 		}
 	}
 	round.CeremonyValidators = kept
-
-	keptPayloads := round.CeremonyPayloads[:0]
-	for _, p := range round.CeremonyPayloads {
-		if acked[p.ValidatorAddress] {
-			keptPayloads = append(keptPayloads, p)
-		}
-	}
-	round.CeremonyPayloads = keptPayloads
 
 	keptContribs := round.DkgContributions[:0]
 	for _, c := range round.DkgContributions {
@@ -171,7 +163,7 @@ func (k *Keeper) GetPendingRoundWithCeremony(kvStore store.KVStore, roundID []by
 // ValidateProposerIsCreator checks that a proposer-injected message is only
 // submitted during block execution (not via mempool) and that creator matches
 // the current block proposer. msgName is used in error messages for diagnostics
-// (e.g. "MsgDealExecutiveAuthorityKey").
+// (e.g. "MsgContributeDKG").
 func (k *Keeper) ValidateProposerIsCreator(ctx context.Context, creator, msgName string) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 

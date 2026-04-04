@@ -14,8 +14,6 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
-	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
-	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -25,17 +23,14 @@ import (
 // Table-driven unit tests for ProcessProposalHandler
 // ---------------------------------------------------------------------------
 
-// TestProcessProposalDealValidation exercises the injected MsgDealExecutiveAuthorityKey
+// TestProcessProposalDKGContribValidation exercises the injected MsgContributeDKG
 // validation path in ProcessProposal with various good and bad inputs.
-func TestProcessProposalDealValidation(t *testing.T) {
+func TestProcessProposalDKGContribValidation(t *testing.T) {
 	app := testutil.SetupTestApp(t)
 	valAddr := app.ValidatorOperAddr()
 
 	_, eaPk := elgamal.KeyGen(rand.Reader)
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
-
-	_, ephPk := elgamal.KeyGen(rand.Reader)
-	ephPkBytes := ephPk.Point.ToAffineCompressed()
 
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: valAddr},
@@ -43,25 +38,12 @@ func TestProcessProposalDealValidation(t *testing.T) {
 
 	var currentRoundID []byte
 
-	buildDealTx := func(creator string, roundID []byte, ceremonyValidators []*types.ValidatorPallasKey) []byte {
-		payloads := make([]*types.DealerPayload, len(ceremonyValidators))
-		for i, v := range ceremonyValidators {
-			payloads[i] = &types.DealerPayload{
-				ValidatorAddress: v.ValidatorAddress,
-				EphemeralPk:      ephPkBytes,
-				Ciphertext:       bytes.Repeat([]byte{0x01}, 48),
-			}
-		}
-		threshold, err := votekeeper.ThresholdForN(len(ceremonyValidators))
-		require.NoError(t, err)
-		msg := &types.MsgDealExecutiveAuthorityKey{
+	buildContribTx := func(creator string, roundID []byte) []byte {
+		msg := &types.MsgContributeDKG{
 			Creator:     creator,
 			VoteRoundId: roundID,
-			EaPk:        eaPkBytes,
-			Payloads:    payloads,
-			Threshold:   uint32(threshold),
 		}
-		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagDealExecutiveAuthorityKey)
+		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
 		require.NoError(t, err)
 		return txBytes
 	}
@@ -73,35 +55,32 @@ func TestProcessProposalDealValidation(t *testing.T) {
 		wantAccept bool
 	}{
 		{
-			name: "valid deal tx in REGISTERING state",
+			name: "valid DKG contribution in REGISTERING state",
 			setup: func() {
 				currentRoundID = app.SeedRegisteringCeremony(validators)
 			},
 			txs: func() [][]byte {
-				return [][]byte{buildDealTx(valAddr, currentRoundID, validators)}
+				return [][]byte{buildContribTx(valAddr, currentRoundID)}
 			},
 			wantAccept: true,
 		},
 		{
-			name: "deal tx for non-existent round → reject",
+			name: "DKG contribution for non-existent round → reject",
 			setup: func() {
 				currentRoundID = bytes.Repeat([]byte{0xFF}, 32)
 			},
 			txs: func() [][]byte {
-				return [][]byte{buildDealTx(valAddr, currentRoundID, validators)}
+				return [][]byte{buildContribTx(valAddr, currentRoundID)}
 			},
 			wantAccept: false,
 		},
 		{
-			name: "deal tx when round is not REGISTERING (DEALT) → reject",
+			name: "DKG contribution when round is not REGISTERING (DEALT) → reject",
 			setup: func() {
-				payload := []*types.DealerPayload{
-					{ValidatorAddress: valAddr, EphemeralPk: ephPkBytes, Ciphertext: bytes.Repeat([]byte{0x01}, 48)},
-				}
-				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payload, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
 			},
 			txs: func() [][]byte {
-				return [][]byte{buildDealTx(valAddr, currentRoundID, validators)}
+				return [][]byte{buildContribTx(valAddr, currentRoundID)}
 			},
 			wantAccept: false,
 		},
@@ -111,49 +90,28 @@ func TestProcessProposalDealValidation(t *testing.T) {
 				currentRoundID = app.SeedRegisteringCeremony(validators)
 			},
 			txs: func() [][]byte {
-				return [][]byte{buildDealTx("cosmosvaloper1notincermony", currentRoundID, validators)}
+				return [][]byte{buildContribTx("cosmosvaloper1notincermony", currentRoundID)}
 			},
 			wantAccept: false,
 		},
 		{
 			name: "creator does not match block proposer → reject",
 			setup: func() {
-				// Seed a round whose only ceremony validator is NOT the block proposer.
-				// Creator passes the ceremony-validator check but fails the proposer check.
 				other := []*types.ValidatorPallasKey{{ValidatorAddress: "cosmosvaloper1other"}}
 				currentRoundID = app.SeedRegisteringCeremony(other)
 			},
 			txs: func() [][]byte {
-				other := []*types.ValidatorPallasKey{{ValidatorAddress: "cosmosvaloper1other"}}
-				return [][]byte{buildDealTx("cosmosvaloper1other", currentRoundID, other)}
+				return [][]byte{buildContribTx("cosmosvaloper1other", currentRoundID)}
 			},
 			wantAccept: false,
 		},
 		{
-			name: "payload count mismatch → reject",
+			name: "malformed DKG contribution tx (corrupted protobuf) → reject",
 			setup: func() {
 				currentRoundID = app.SeedRegisteringCeremony(validators)
 			},
 			txs: func() [][]byte {
-				msg := &types.MsgDealExecutiveAuthorityKey{
-					Creator:     valAddr,
-					VoteRoundId: currentRoundID,
-					EaPk:        eaPkBytes,
-					Payloads:    nil, // 0 payloads for a 1-validator round
-				}
-				txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagDealExecutiveAuthorityKey)
-				require.NoError(t, err)
-				return [][]byte{txBytes}
-			},
-			wantAccept: false,
-		},
-		{
-			name: "malformed deal tx (corrupted protobuf) → reject",
-			setup: func() {
-				currentRoundID = app.SeedRegisteringCeremony(validators)
-			},
-			txs: func() [][]byte {
-				return [][]byte{{voteapi.TagDealExecutiveAuthorityKey, 0xFF, 0xFF, 0xFF}}
+				return [][]byte{{voteapi.TagContributeDKG, 0xFF, 0xFF, 0xFF}}
 			},
 			wantAccept: false,
 		},
@@ -177,28 +135,14 @@ func TestProcessProposalDealValidation(t *testing.T) {
 // TestProcessProposalAckValidation exercises the injected MsgAckExecutiveAuthorityKey
 // validation path in ProcessProposal with various good and bad inputs.
 func TestProcessProposalAckValidation(t *testing.T) {
-	app, _, pallasPk, eaSk, eaPk := testutil.SetupTestAppWithPallasKey(t)
+	app, _, pallasPk, _, eaPk := testutil.SetupTestAppWithPallasKey(t)
 
 	eaPkBytes := eaPk.Point.ToAffineCompressed()
-	eaSkBytes, err := elgamal.MarshalSecretKey(eaSk)
-	require.NoError(t, err)
 
 	valAddr := app.ValidatorOperAddr()
 
-	// ECIES-encrypt ea_sk to the validator's Pallas public key.
-	G := elgamal.PallasGenerator()
-	env, err := ecies.Encrypt(G, pallasPk.Point, eaSkBytes, rand.Reader)
-	require.NoError(t, err)
-
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-	}
-	payloads := []*types.DealerPayload{
-		{
-			ValidatorAddress: valAddr,
-			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-			Ciphertext:       env.Ciphertext,
-		},
 	}
 
 	// Track the current round ID (set by each test's setup func).
@@ -231,7 +175,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "valid ack tx in DEALT state",
 			setup: func() {
-				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{validAckTx()}
@@ -257,14 +201,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 				fakeValidators := []*types.ValidatorPallasKey{
 					{ValidatorAddress: "cosmosvaloper1fake", PallasPk: pallasPk.Point.ToAffineCompressed()},
 				}
-				fakePayloads := []*types.DealerPayload{
-					{
-						ValidatorAddress: "cosmosvaloper1fake",
-						EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-						Ciphertext:       env.Ciphertext,
-					},
-				}
-				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, fakePayloads, fakeValidators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, fakeValidators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{validAckTx()}
@@ -274,7 +211,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "duplicate ack from same validator → reject",
 			setup: func() {
-				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
 				// Manually add an ack entry so the round has already been acked by this validator.
 				ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 				kvStore := app.VoteKeeper().OpenKVStore(ctx)
@@ -295,7 +232,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "malformed ack tx (corrupted protobuf) → reject",
 			setup: func() {
-				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagAckExecutiveAuthorityKey, 0xFF, 0xFF, 0xFF}}
@@ -305,7 +242,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "short tx (only tag byte) skipped → accept",
 			setup: func() {
-				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagAckExecutiveAuthorityKey}}
@@ -315,7 +252,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "non-custom tx bytes pass through → accept",
 			setup: func() {
-				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{bytes.Repeat([]byte{0xAA}, 100)}
@@ -325,7 +262,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "valid ack mixed with non-custom tx → accept",
 			setup: func() {
-				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
 			},
 			txs: func() [][]byte {
 				return [][]byte{
@@ -338,7 +275,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 		{
 			name: "empty tx list → accept",
 			setup: func() {
-				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, payloads, validators)
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
 			},
 			txs: func() [][]byte {
 				return nil
@@ -484,79 +421,6 @@ func TestPrepareProposalIdempotentWhenNoInjection(t *testing.T) {
 	// ProcessProposal should accept these non-custom txs.
 	procResp := app.CallProcessProposal(ppResp.Txs)
 	require.Equal(t, abci.ResponseProcessProposal_ACCEPT, procResp.Status)
-}
-
-// ===========================================================================
-// F-15: Threshold Downgrade — ProcessProposal Rejection Tests
-//
-// Verifies that ProcessProposal rejects deal txs whose threshold does not
-// match ThresholdForN(n). Each sub-test seeds a fresh REGISTERING round with
-// n validators and submits a deal with the given (malicious) threshold.
-// ===========================================================================
-
-func TestProcessProposalRejectsDealWithBadThreshold(t *testing.T) {
-	tests := []struct {
-		name      string
-		n         int
-		threshold uint32
-	}{
-		{"n=2 t=1 (downgrade)", 2, 1},
-		{"n=3 t=1 (downgrade)", 3, 1},
-		{"n=5 t=1 (downgrade)", 5, 1},
-		{"n=3 t=100 (above n)", 3, 100},
-		{"n=3 t=3 (too high)", 3, 3},
-		{"n=10 t=1 (downgrade)", 10, 1},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			app := testutil.SetupTestApp(t)
-			valAddr := app.ValidatorOperAddr()
-
-			_, eaPk := elgamal.KeyGen(rand.Reader)
-			eaPkBytes := eaPk.Point.ToAffineCompressed()
-			_, ephPk := elgamal.KeyGen(rand.Reader)
-			ephPkBytes := ephPk.Point.ToAffineCompressed()
-
-			validators := make([]*types.ValidatorPallasKey, tc.n)
-			validators[0] = &types.ValidatorPallasKey{
-				ValidatorAddress: valAddr,
-				PallasPk:         eaPkBytes,
-			}
-			for i := 1; i < tc.n; i++ {
-				_, pk := elgamal.KeyGen(rand.Reader)
-				validators[i] = &types.ValidatorPallasKey{
-					ValidatorAddress: fmt.Sprintf("sv1validator%dxxxxxxxxxxxxxxxxxxxxxxxxx", i+1),
-					PallasPk:         pk.Point.ToAffineCompressed(),
-				}
-			}
-
-			roundID := app.SeedRegisteringCeremony(validators)
-
-			payloads := make([]*types.DealerPayload, tc.n)
-			for i, v := range validators {
-				payloads[i] = &types.DealerPayload{
-					ValidatorAddress: v.ValidatorAddress,
-					EphemeralPk:      ephPkBytes,
-					Ciphertext:       bytes.Repeat([]byte{byte(i + 1)}, 48),
-				}
-			}
-
-			msg := &types.MsgDealExecutiveAuthorityKey{
-				Creator:     valAddr,
-				VoteRoundId: roundID,
-				EaPk:        eaPkBytes,
-				Payloads:    payloads,
-				Threshold:   tc.threshold,
-			}
-			txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagDealExecutiveAuthorityKey)
-			require.NoError(t, err)
-
-			resp := app.CallProcessProposal([][]byte{txBytes})
-			require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status,
-				"ProcessProposal must reject threshold=%d for n=%d", tc.threshold, tc.n)
-		})
-	}
 }
 
 // ===========================================================================

@@ -60,8 +60,6 @@ func ceremonyValidatorRequired(msg sdk.Msg) (string, bool) {
 	switch m := msg.(type) {
 	case *types.MsgRegisterPallasKey:
 		return m.Creator, true
-	case *types.MsgDealExecutiveAuthorityKey:
-		return m.Creator, true
 	case *types.MsgContributeDKG:
 		return m.Creator, true
 	default:
