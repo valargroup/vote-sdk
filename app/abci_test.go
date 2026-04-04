@@ -1386,5 +1386,320 @@ func TestFullLifecycle_SingleValidator(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Full Lifecycle E2E: DKG Ceremony → Vote → Tally (n=3, t=2)
+//
+// Drives the complete pipeline with Joint-Feldman DKG instead of a single dealer:
+//   REGISTERING → 3 DKG contributions (phantom1, phantom2 pre-seeded; proposer via pipeline)
+//   → finalizeDKG → DEALT
+//   → ack (proposer via pipeline + 2 phantom acks seeded) → ACTIVE
+//   → delegate → cast → reveal (real ElGamal to combined ea_pk)
+//   → EndBlocker TALLYING
+//   → partial decrypt (proposer via pipeline + phantom1 seeded; phantom2 absent) → Lagrange → FINALIZED
+//
+// This test validates that DKG-derived combined Shamir shares produce the same
+// correct Lagrange-reconstructed decryption as the single-dealer path.
+// ---------------------------------------------------------------------------
+
+func TestDKGFullLifecycle(t *testing.T) {
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	G := elgamal.PallasGenerator()
+	proposerAddr := app.ValidatorOperAddr()
+
+	phantom1Sk, phantom1Pk := elgamal.KeyGen(rand.Reader)
+	_, phantom2Pk := elgamal.KeyGen(rand.Reader)
+
+	phantom1Addr := sdk.ValAddress(bytes.Repeat([]byte{0xD1}, 20)).String()
+	phantom2Addr := sdk.ValAddress(bytes.Repeat([]byte{0xD2}, 20)).String()
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed(), ShamirIndex: 1},
+		{ValidatorAddress: phantom1Addr, PallasPk: phantom1Pk.Point.ToAffineCompressed(), ShamirIndex: 2},
+		{ValidatorAddress: phantom2Addr, PallasPk: phantom2Pk.Point.ToAffineCompressed(), ShamirIndex: 3},
+	}
+	voteEndTime := app.Time.Add(90 * time.Second)
+
+	roundID := make([]byte, 32)
+	roundID[0] = 0xD0
+
+	n := 3
+	tVal := 2 // ceil(3/2)
+
+	// -----------------------------------------------------------------------
+	// Phase A: Generate phantom DKG state and pre-seed contributions
+	// -----------------------------------------------------------------------
+
+	phantom1Secret := new(curvey.ScalarPallas).Random(rand.Reader)
+	phantom1Shares, phantom1Coeffs, err := shamir.Split(phantom1Secret, tVal, n)
+	require.NoError(t, err)
+	phantom1CommitPts, err := shamir.FeldmanCommit(G, phantom1Coeffs)
+	require.NoError(t, err)
+
+	phantom2Secret := new(curvey.ScalarPallas).Random(rand.Reader)
+	phantom2Shares, phantom2Coeffs, err := shamir.Split(phantom2Secret, tVal, n)
+	require.NoError(t, err)
+	phantom2CommitPts, err := shamir.FeldmanCommit(G, phantom2Coeffs)
+	require.NoError(t, err)
+	_ = phantom2Coeffs
+
+	// Build phantom1's contribution: encrypts shares for proposer and phantom2.
+	phantom1Commitments := make([][]byte, tVal)
+	for j, pt := range phantom1CommitPts {
+		phantom1Commitments[j] = pt.ToAffineCompressed()
+	}
+	phantom1Payloads := make([]*types.DealerPayload, 0, 2)
+	env, err := ecies.Encrypt(G, pallasPk.Point, phantom1Shares[0].Value.Bytes(), rand.Reader)
+	require.NoError(t, err)
+	phantom1Payloads = append(phantom1Payloads, &types.DealerPayload{
+		ValidatorAddress: proposerAddr,
+		EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+		Ciphertext:       env.Ciphertext,
+	})
+	env, err = ecies.Encrypt(G, phantom2Pk.Point, phantom1Shares[2].Value.Bytes(), rand.Reader)
+	require.NoError(t, err)
+	phantom1Payloads = append(phantom1Payloads, &types.DealerPayload{
+		ValidatorAddress: phantom2Addr,
+		EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+		Ciphertext:       env.Ciphertext,
+	})
+
+	// Build phantom2's contribution: encrypts shares for proposer and phantom1.
+	phantom2Commitments := make([][]byte, tVal)
+	for j, pt := range phantom2CommitPts {
+		phantom2Commitments[j] = pt.ToAffineCompressed()
+	}
+	phantom2Payloads := make([]*types.DealerPayload, 0, 2)
+	env, err = ecies.Encrypt(G, pallasPk.Point, phantom2Shares[0].Value.Bytes(), rand.Reader)
+	require.NoError(t, err)
+	phantom2Payloads = append(phantom2Payloads, &types.DealerPayload{
+		ValidatorAddress: proposerAddr,
+		EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+		Ciphertext:       env.Ciphertext,
+	})
+	env, err = ecies.Encrypt(G, phantom1Pk.Point, phantom2Shares[1].Value.Bytes(), rand.Reader)
+	require.NoError(t, err)
+	phantom2Payloads = append(phantom2Payloads, &types.DealerPayload{
+		ValidatorAddress: phantom1Addr,
+		EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+		Ciphertext:       env.Ciphertext,
+	})
+
+	// Seed round with phantom contributions already present.
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	round := &types.VoteRound{
+		VoteRoundId:        roundID,
+		Status:             types.SessionStatus_SESSION_STATUS_PENDING,
+		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		CeremonyValidators: validators,
+		VoteEndTime:        uint64(voteEndTime.Unix()),
+		Proposals:          testutil.SampleProposals(),
+		NullifierImtRoot:   bytes.Repeat([]byte{0x01}, 32),
+		NcRoot:             bytes.Repeat([]byte{0x02}, 32),
+		DkgContributions: []*types.DKGContribution{
+			{
+				ValidatorAddress:   phantom1Addr,
+				FeldmanCommitments: phantom1Commitments,
+				Payloads:           phantom1Payloads,
+			},
+			{
+				ValidatorAddress:   phantom2Addr,
+				FeldmanCommitments: phantom2Commitments,
+				Payloads:           phantom2Payloads,
+			},
+		},
+	}
+	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
+	app.NextBlock()
+
+	// -----------------------------------------------------------------------
+	// Phase B: Proposer contributes via pipeline → finalizeDKG → DEALT
+	// -----------------------------------------------------------------------
+
+	app.NextBlockWithPrepareProposal()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
+		"ceremony should be DEALT after 3rd DKG contribution")
+	require.Len(t, round.DkgContributions, 3)
+	require.EqualValues(t, 2, round.Threshold)
+	require.Len(t, round.FeldmanCommitments, 2, "t=2 combined Feldman commitments")
+	require.NotEmpty(t, round.EaPk, "combined ea_pk must be set")
+
+	// -----------------------------------------------------------------------
+	// Phase C: Proposer acks via pipeline → combined share on disk
+	// -----------------------------------------------------------------------
+
+	app.NextBlockWithPrepareProposal()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
+		"1/3 acked — stays DEALT")
+	require.Len(t, round.CeremonyAcks, 1)
+
+	// -----------------------------------------------------------------------
+	// Phase D: Phantom acks — compute phantom1's combined share for tally
+	// -----------------------------------------------------------------------
+
+	// Phantom1 combined share = own partial + proposer's share + phantom2's share.
+	phantom1OwnPartial := shamir.EvalPolynomial(phantom1Coeffs, 2) // ShamirIndex=2
+	phantom1CombinedShare := phantom1OwnPartial
+
+	for _, contrib := range round.DkgContributions {
+		if contrib.ValidatorAddress == phantom1Addr {
+			continue
+		}
+		for _, p := range contrib.Payloads {
+			if p.ValidatorAddress != phantom1Addr {
+				continue
+			}
+			ephPk, err := elgamal.UnmarshalPublicKey(p.EphemeralPk)
+			require.NoError(t, err)
+			shareBytes, err := ecies.Decrypt(phantom1Sk.Scalar, &ecies.Envelope{
+				Ephemeral:  ephPk.Point,
+				Ciphertext: p.Ciphertext,
+			})
+			require.NoError(t, err)
+			shareScalar, err := new(curvey.ScalarPallas).SetBytes(shareBytes)
+			require.NoError(t, err)
+			phantom1CombinedShare = phantom1CombinedShare.Add(shareScalar)
+		}
+	}
+
+	// Sanity: verify phantom1's combined share against combined commitments.
+	combinedCommitPts := make([]curvey.Point, len(round.FeldmanCommitments))
+	for j, c := range round.FeldmanCommitments {
+		pt, err := elgamal.DecompressPallasPoint(c)
+		require.NoError(t, err)
+		combinedCommitPts[j] = pt
+	}
+	ok, err := shamir.VerifyFeldmanShare(G, combinedCommitPts, 2, phantom1CombinedShare)
+	require.NoError(t, err)
+	require.True(t, ok, "phantom1 combined share must verify against combined Feldman commitments")
+
+	// Write phantom acks directly to state (production: each validator acks
+	// when they propose a block; ValidateProposerIsCreator enforces this).
+	for _, addr := range []string{phantom1Addr, phantom2Addr} {
+		h := sha256.New()
+		h.Write([]byte(types.AckSigDomain))
+		h.Write(round.EaPk)
+		h.Write([]byte(addr))
+
+		round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
+			ValidatorAddress: addr,
+			AckSignature:     h.Sum(nil),
+			AckHeight:        uint64(app.Height),
+		})
+	}
+	round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+	round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
+	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
+	app.NextBlock()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
+		"round should be ACTIVE after 3/3 acks")
+
+	eaPk, err := elgamal.UnmarshalPublicKey(round.EaPk)
+	require.NoError(t, err)
+
+	// -----------------------------------------------------------------------
+	// Phase E: Vote — delegate, cast, reveal with real ElGamal
+	// -----------------------------------------------------------------------
+
+	delegation := testutil.ValidDelegation(roundID, 0x10)
+	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	require.Equal(t, uint32(0), result.Code, "delegation should succeed, got: %s", result.Log)
+
+	anchorHeight := uint64(app.Height)
+
+	castVote := testutil.ValidCastVote(roundID, anchorHeight, 0x30)
+	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
+	require.Equal(t, uint32(0), result.Code, "cast vote should succeed, got: %s", result.Log)
+
+	revealAnchor := uint64(app.Height)
+
+	ct, err := elgamal.Encrypt(eaPk, 99, rand.Reader)
+	require.NoError(t, err)
+	encShare, err := elgamal.MarshalCiphertext(ct)
+	require.NoError(t, err)
+
+	revealMsg := testutil.ValidRevealShareReal(roundID, revealAnchor, 0x50, 1, 1, encShare)
+	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(revealMsg))
+	require.Equal(t, uint32(0), result.Code, "reveal share should succeed, got: %s", result.Log)
+
+	// -----------------------------------------------------------------------
+	// Phase F: Transition to TALLYING
+	// -----------------------------------------------------------------------
+
+	app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
+
+	// -----------------------------------------------------------------------
+	// Phase G: Partial decryptions — phantom1 seeded, proposer via pipeline
+	// -----------------------------------------------------------------------
+
+	// Pre-seed phantom1's partial decryption: D_1 = combined_share * C1.
+	tallyBytes, err := app.VoteKeeper().GetTally(kvStore, roundID, 1, 1)
+	require.NoError(t, err)
+	tallyCt, err := elgamal.UnmarshalCiphertext(tallyBytes)
+	require.NoError(t, err)
+
+	phantom1Di := tallyCt.C1.Mul(phantom1CombinedShare)
+	phantom1Entries := []*types.PartialDecryptionEntry{{
+		ProposalId:     1,
+		VoteDecision:   1,
+		PartialDecrypt: phantom1Di.ToAffineCompressed(),
+	}}
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	require.NoError(t, app.VoteKeeper().SetPartialDecryptions(kvStore, roundID, 2, phantom1Entries))
+	app.NextBlock()
+
+	// Phantom2 deliberately absent — testing threshold (t=2 of n=3).
+
+	// Block 1: partial decrypt injector fires for proposer → count reaches 2.
+	app.NextBlockWithPrepareProposal()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	count, err := app.VoteKeeper().CountPartialDecryptionValidators(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, 2, count,
+		"proposer + phantom1 should have submitted (phantom2 absent)")
+
+	// Block 2: tally combiner sees count=2 >= threshold=2 → Lagrange → FINALIZED.
+	app.NextBlockWithPrepareProposal()
+
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
+		"round should be FINALIZED after threshold tally (t=2 of n=3)")
+
+	tallyResults, err := app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
+	require.NoError(t, err)
+	require.Len(t, tallyResults, 1)
+	require.Equal(t, uint64(99), tallyResults[0].TotalValue,
+		"decrypted tally must match encrypted value of 99 — proves DKG shares are correct")
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
