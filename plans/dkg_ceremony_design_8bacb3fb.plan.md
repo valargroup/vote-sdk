@@ -41,6 +41,9 @@ todos:
   - id: p8-docs
     content: "Phase 8: Rewrite tss-ceremony.md Step 4 with full DKG design, security rationale (bias analysis, why no COMMITTING phase, why no vote extensions), and updated security properties"
     status: pending
+  - id: p9-cleanup
+    content: "Phase 9: Remove single-dealer remnants — delete DealExecutiveAuthorityKey handler, CeremonyDealPrepareProposalHandler, CLI command, ceremony_payloads/ceremony_dealer proto fields, TagDealExecutiveAuthorityKey, all dealer-specific tests"
+    status: pending
 isProject: false
 ---
 
@@ -248,7 +251,7 @@ REGISTERING remains without timeout (same as current -- waits indefinitely for c
 
 ## Development Phases
 
-Each phase is a commit. The existing dealer path works throughout phases 1-5. Only phase 6 flips the switch.
+Each phase is a commit. The existing dealer path works throughout phases 1-5. Phase 6 wires the DKG path into the live pipeline. Phase 9 removes the old dealer code after the DKG path is proven end-to-end.
 
 ### Phase 1: Proto + codec boilerplate (additive only)
 
@@ -328,6 +331,24 @@ Full ceremony end-to-end with DKG.
 ### Phase 8: Documentation
 
 - Rewrite Step 4 section of [tss-ceremony.md](vote-sdk/docs/tss-ceremony.md) with full design, security rationale, and alternatives analysis
+
+### Phase 9: Remove single-dealer remnants
+
+Delete all code that was kept alive during Phases 1-7 for backward compatibility. After Phase 7 the DKG path is proven end-to-end; nothing references the old dealer path.
+
+- **Proto**: delete `ceremony_payloads` (field 17) and `ceremony_dealer` (field 19) from `VoteRound`; delete `payloads` (field 4) and `dealer` (field 6) from `CeremonyState`; delete `MsgDealExecutiveAuthorityKey`, `MsgDealExecutiveAuthorityKeyResponse`, and `DealExecutiveAuthorityKey` RPC
+- **Codec**: remove `TagDealExecutiveAuthorityKey` (0x07) from `IsCeremonyTag`, `DecodeCeremonyTx`, tag constants; update error messages listing valid tags
+- **Handler**: delete `DealExecutiveAuthorityKey` in [msg_server_ceremony.go](vote-sdk/x/vote/keeper/msg_server_ceremony.go)
+- **Injector**: delete `CeremonyDealPrepareProposalHandler` in [prepare_proposal_ceremony.go](vote-sdk/app/prepare_proposal_ceremony.go) (the DKG injector fully replaces it)
+- **Module**: remove `ProvideDealExecutiveAuthorityKeySigner` from init() and signer function
+- **Ante**: remove `TagDealExecutiveAuthorityKey` case and `MsgDealExecutiveAuthorityKey` from `isVoteModuleMsg` / `ceremonyValidatorRequired`
+- **ProcessProposal**: remove `validateInjectedDeal` and its `TagDealExecutiveAuthorityKey` check
+- **CLI**: delete `CmdDealExecutiveAuthorityKey` in [tx.go](vote-sdk/x/vote/client/cli/tx.go)
+- **Query server**: remove `Payloads` and `Dealer` mapping from `CeremonyState` response
+- **Keeper**: remove `CeremonyPayloads` filtering from `StripNonAckersFromRound`
+- **EndBlocker**: remove `CeremonyPayloads = nil` and `CeremonyDealer = ""` from timeout reset (already replaced by `DkgContributions = nil` in Phase 6)
+- **Tests**: delete all dealer-specific unit tests (`TestCeremonyDealThresholdMode`, `TestDealExecutiveAuthorityKey_*`, `TestThresholdDowngrade_*`, etc.); update lifecycle tests that still reference `CeremonyPayloads`/`CeremonyDealer`
+- Regenerate Go types, verify `go vet ./...` and `go test ./...` clean
 
 ## Documentation Update: [tss-ceremony.md](vote-sdk/docs/tss-ceremony.md)
 
