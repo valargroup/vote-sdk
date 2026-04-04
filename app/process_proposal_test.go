@@ -562,11 +562,11 @@ func TestProcessProposalRejectsDealWithBadThreshold(t *testing.T) {
 // ===========================================================================
 // F-15: PrepareProposal → ProcessProposal Pipeline Tests
 //
-// Verifies that an honest PrepareProposal generates the correct threshold
+// Verifies that an honest PrepareProposal injects a valid DKG contribution
 // for various validator counts and that ProcessProposal accepts the result.
 // ===========================================================================
 
-func TestPrepareProposalDealAcceptedByProcessProposal(t *testing.T) {
+func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 	tests := []struct {
 		name              string
 		n                 int
@@ -581,11 +581,11 @@ func TestPrepareProposalDealAcceptedByProcessProposal(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-			dealerAddr := ta.ValidatorOperAddr()
+			proposerAddr := ta.ValidatorOperAddr()
 
 			validators := make([]*types.ValidatorPallasKey, tc.n)
 			validators[0] = &types.ValidatorPallasKey{
-				ValidatorAddress: dealerAddr,
+				ValidatorAddress: proposerAddr,
 				PallasPk:         pallasPk.Point.ToAffineCompressed(),
 			}
 			for i := 1; i < tc.n; i++ {
@@ -599,17 +599,22 @@ func TestPrepareProposalDealAcceptedByProcessProposal(t *testing.T) {
 			ta.SeedRegisteringCeremony(validators)
 
 			ppResp := ta.CallPrepareProposal()
-			require.Len(t, ppResp.Txs, 1, "expected one injected deal tx")
+			require.Len(t, ppResp.Txs, 1, "expected one injected DKG contribution tx")
 
-			_, protoMsg, err := voteapi.DecodeCeremonyTx(ppResp.Txs[0])
+			tag, protoMsg, err := voteapi.DecodeCeremonyTx(ppResp.Txs[0])
 			require.NoError(t, err)
-			deal := protoMsg.(*types.MsgDealExecutiveAuthorityKey)
-			require.EqualValues(t, tc.expectedThreshold, deal.Threshold,
-				"PrepareProposal threshold for n=%d", tc.n)
+			require.Equal(t, voteapi.TagContributeDKG, tag)
+
+			contrib := protoMsg.(*types.MsgContributeDKG)
+			require.Equal(t, proposerAddr, contrib.Creator)
+			require.Len(t, contrib.FeldmanCommitments, int(tc.expectedThreshold),
+				"PrepareProposal commitments for n=%d", tc.n)
+			require.Len(t, contrib.Payloads, tc.n-1,
+				"n-1 ECIES payloads (self excluded) for n=%d", tc.n)
 
 			procResp := ta.CallProcessProposal(ppResp.Txs)
 			require.Equal(t, abci.ResponseProcessProposal_ACCEPT, procResp.Status,
-				"ProcessProposal must accept the honest deal for n=%d", tc.n)
+				"ProcessProposal must accept the honest DKG contribution for n=%d", tc.n)
 		})
 	}
 }

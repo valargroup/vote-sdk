@@ -733,6 +733,27 @@ func (ta *TestApp) NextBlockWithPrepareProposal() {
 	require.NoError(ta.t, err)
 }
 
+// NextBlockWithTxs advances the block by 5 s and runs FinalizeBlock + Commit
+// with the given pre-built txs. Use this when you need to deliver specific txs
+// (e.g. from a directly-invoked handler) without going through PrepareProposal.
+func (ta *TestApp) NextBlockWithTxs(txs [][]byte) {
+	ta.t.Helper()
+
+	ta.Height++
+	ta.Time = ta.Time.Add(5 * time.Second)
+
+	_, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height:          ta.Height,
+		Time:            ta.Time,
+		Txs:             txs,
+		ProposerAddress: ta.ProposerAddress,
+	})
+	require.NoError(ta.t, err)
+
+	_, err = ta.Commit()
+	require.NoError(ta.t, err)
+}
+
 // MustBuildSignedCeremonyTx builds a standard Cosmos SDK transaction containing
 // the ceremony message, signs it with the genesis validator's secp256k1 key,
 // and returns the encoded tx bytes. Panics on failure (safe for tests).

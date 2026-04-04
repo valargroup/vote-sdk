@@ -155,11 +155,11 @@ func NewSvoteApp(
 	eaSkDir := eaSkDirFromPath(eaSkPath)
 
 	// Install composed PrepareProposal handler:
-	// 1. Ceremony deal injection: auto-deal when a PENDING round needs it
-	// 2. Ceremony ack injection: auto-ack when ceremony is DEALT
+	// 1. DKG contribution injection: each validator contributes to Joint-Feldman DKG
+	// 2. Ceremony ack injection: auto-ack when ceremony is DEALT (DKG or dealer path)
 	// 3. Threshold partial decryption: submit D_i = share * C1 when TALLYING (threshold mode)
 	// 4. Tally injection: Lagrange-combine partials (threshold) or decrypt directly (legacy)
-	ceremonyDealHandler := CeremonyDealPrepareProposalHandler(
+	ceremonyDKGHandler := CeremonyDKGContributionPrepareProposalHandler(
 		app.VoteKeeper,
 		app.StakingKeeper,
 		pallasSkPath,
@@ -186,7 +186,7 @@ func NewSvoteApp(
 		logger,
 	)
 	app.SetPrepareProposal(ComposedPrepareProposalHandler(
-		ceremonyDealHandler,
+		ceremonyDKGHandler,
 		ceremonyAckHandler,
 		partialDecryptHandler,
 		tallyHandler,
