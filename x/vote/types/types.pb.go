@@ -280,9 +280,10 @@ type VoteRound struct {
 	CeremonyLog          []string              `protobuf:"bytes,22,rep,name=ceremony_log,json=ceremonyLog,proto3" json:"ceremony_log,omitempty"` // Timestamped human-readable ceremony log entries
 	// Threshold decryption fields (populated by MsgDealExecutiveAuthorityKey in threshold mode).
 	// threshold is the minimum number of partial decryptions required to reconstruct the tally.
-	// verification_keys holds VK_i = f(i)*G for each validator (same order as ceremony_validators).
-	Threshold        uint32   `protobuf:"varint,23,opt,name=threshold,proto3" json:"threshold,omitempty"`                                      // Minimum shares for reconstruction (always >= 2)
-	VerificationKeys [][]byte `protobuf:"bytes,24,rep,name=verification_keys,json=verificationKeys,proto3" json:"verification_keys,omitempty"` // 32-byte compressed Pallas points, one per ceremony validator
+	// feldman_commitments holds C_j = a_j*G for j=0..t-1 (Feldman polynomial commitments).
+	// Validators derive VK_i = EvalCommitmentPolynomial(commitments, i) for share verification.
+	Threshold          uint32   `protobuf:"varint,23,opt,name=threshold,proto3" json:"threshold,omitempty"`                                            // Minimum shares for reconstruction (always >= 2)
+	FeldmanCommitments [][]byte `protobuf:"bytes,24,rep,name=feldman_commitments,json=feldmanCommitments,proto3" json:"feldman_commitments,omitempty"` // C_j = a_j*G, t compressed Pallas points (32 bytes each)
 	// Tally phase timeout fields (populated when status transitions to TALLYING).
 	TallyPhaseStart   uint64 `protobuf:"varint,25,opt,name=tally_phase_start,json=tallyPhaseStart,proto3" json:"tally_phase_start,omitempty"`       // Unix seconds when TALLYING started
 	TallyPhaseTimeout uint64 `protobuf:"varint,26,opt,name=tally_phase_timeout,json=tallyPhaseTimeout,proto3" json:"tally_phase_timeout,omitempty"` // Timeout duration in seconds (default: 6 hours)
@@ -482,9 +483,9 @@ func (x *VoteRound) GetThreshold() uint32 {
 	return 0
 }
 
-func (x *VoteRound) GetVerificationKeys() [][]byte {
+func (x *VoteRound) GetFeldmanCommitments() [][]byte {
 	if x != nil {
-		return x.VerificationKeys
+		return x.FeldmanCommitments
 	}
 	return nil
 }
@@ -1545,19 +1546,19 @@ func (x *OptionSummary) GetTotalValue() uint64 {
 
 // CeremonyState tracks the singleton EA key ceremony lifecycle.
 type CeremonyState struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Status           CeremonyStatus         `protobuf:"varint,1,opt,name=status,proto3,enum=svote.v1.CeremonyStatus" json:"status,omitempty"`
-	EaPk             []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                                      // Set when DealerTx lands
-	Validators       []*ValidatorPallasKey  `protobuf:"bytes,3,rep,name=validators,proto3" json:"validators,omitempty"`                                      // All registered pk_i
-	Payloads         []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                                          // ECIES envelopes from DealerTx
-	Acks             []*AckEntry            `protobuf:"bytes,5,rep,name=acks,proto3" json:"acks,omitempty"`                                                  // Per-validator ack status
-	Dealer           string                 `protobuf:"bytes,6,opt,name=dealer,proto3" json:"dealer,omitempty"`                                              // Validator address of the dealer
-	PhaseStart       uint64                 `protobuf:"varint,7,opt,name=phase_start,json=phaseStart,proto3" json:"phase_start,omitempty"`                   // Unix seconds when current phase started
-	PhaseTimeout     uint64                 `protobuf:"varint,8,opt,name=phase_timeout,json=phaseTimeout,proto3" json:"phase_timeout,omitempty"`             // Timeout in seconds for current phase
-	Threshold        uint32                 `protobuf:"varint,9,opt,name=threshold,proto3" json:"threshold,omitempty"`                                       // Minimum shares for reconstruction (always >= 2)
-	VerificationKeys [][]byte               `protobuf:"bytes,10,rep,name=verification_keys,json=verificationKeys,proto3" json:"verification_keys,omitempty"` // VK_i = f(i)*G per validator (32-byte compressed Pallas points)
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Status             CeremonyStatus         `protobuf:"varint,1,opt,name=status,proto3,enum=svote.v1.CeremonyStatus" json:"status,omitempty"`
+	EaPk               []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                                            // Set when DealerTx lands
+	Validators         []*ValidatorPallasKey  `protobuf:"bytes,3,rep,name=validators,proto3" json:"validators,omitempty"`                                            // All registered pk_i
+	Payloads           []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                                                // ECIES envelopes from DealerTx
+	Acks               []*AckEntry            `protobuf:"bytes,5,rep,name=acks,proto3" json:"acks,omitempty"`                                                        // Per-validator ack status
+	Dealer             string                 `protobuf:"bytes,6,opt,name=dealer,proto3" json:"dealer,omitempty"`                                                    // Validator address of the dealer
+	PhaseStart         uint64                 `protobuf:"varint,7,opt,name=phase_start,json=phaseStart,proto3" json:"phase_start,omitempty"`                         // Unix seconds when current phase started
+	PhaseTimeout       uint64                 `protobuf:"varint,8,opt,name=phase_timeout,json=phaseTimeout,proto3" json:"phase_timeout,omitempty"`                   // Timeout in seconds for current phase
+	Threshold          uint32                 `protobuf:"varint,9,opt,name=threshold,proto3" json:"threshold,omitempty"`                                             // Minimum shares for reconstruction (always >= 1)
+	FeldmanCommitments [][]byte               `protobuf:"bytes,10,rep,name=feldman_commitments,json=feldmanCommitments,proto3" json:"feldman_commitments,omitempty"` // C_j = a_j*G, t compressed Pallas points (32 bytes each)
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CeremonyState) Reset() {
@@ -1653,9 +1654,9 @@ func (x *CeremonyState) GetThreshold() uint32 {
 	return 0
 }
 
-func (x *CeremonyState) GetVerificationKeys() [][]byte {
+func (x *CeremonyState) GetFeldmanCommitments() [][]byte {
 	if x != nil {
-		return x.VerificationKeys
+		return x.FeldmanCommitments
 	}
 	return nil
 }
@@ -1862,7 +1863,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12.\n" +
-	"\aoptions\x18\x04 \x03(\v2\x14.svote.v1.VoteOptionR\aoptions\"\xa3\t\n" +
+	"\aoptions\x18\x04 \x03(\v2\x14.svote.v1.VoteOptionR\aoptions\"\xa7\t\n" +
 	"\tVoteRound\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -1887,8 +1888,8 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x14ceremony_phase_start\x18\x14 \x01(\x04R\x12ceremonyPhaseStart\x124\n" +
 	"\x16ceremony_phase_timeout\x18\x15 \x01(\x04R\x14ceremonyPhaseTimeout\x12!\n" +
 	"\fceremony_log\x18\x16 \x03(\tR\vceremonyLog\x12\x1c\n" +
-	"\tthreshold\x18\x17 \x01(\rR\tthreshold\x12+\n" +
-	"\x11verification_keys\x18\x18 \x03(\fR\x10verificationKeys\x12*\n" +
+	"\tthreshold\x18\x17 \x01(\rR\tthreshold\x12/\n" +
+	"\x13feldman_commitments\x18\x18 \x03(\fR\x12feldmanCommitments\x12*\n" +
 	"\x11tally_phase_start\x18\x19 \x01(\x04R\x0ftallyPhaseStart\x12.\n" +
 	"\x13tally_phase_timeout\x18\x1a \x01(\x04R\x11tallyPhaseTimeout\x12&\n" +
 	"\x0ftally_timed_out\x18\x1b \x01(\bR\rtallyTimedOut\",\n" +
@@ -1982,7 +1983,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12!\n" +
 	"\fballot_count\x18\x03 \x01(\x04R\vballotCount\x12\x1f\n" +
 	"\vtotal_value\x18\x04 \x01(\x04R\n" +
-	"totalValue\"\x9a\x03\n" +
+	"totalValue\"\x9e\x03\n" +
 	"\rCeremonyState\x120\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.svote.v1.CeremonyStatusR\x06status\x12\x13\n" +
 	"\x05ea_pk\x18\x02 \x01(\fR\x04eaPk\x12<\n" +
@@ -1995,9 +1996,9 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\vphase_start\x18\a \x01(\x04R\n" +
 	"phaseStart\x12#\n" +
 	"\rphase_timeout\x18\b \x01(\x04R\fphaseTimeout\x12\x1c\n" +
-	"\tthreshold\x18\t \x01(\rR\tthreshold\x12+\n" +
-	"\x11verification_keys\x18\n" +
-	" \x03(\fR\x10verificationKeys\"\x81\x01\n" +
+	"\tthreshold\x18\t \x01(\rR\tthreshold\x12/\n" +
+	"\x13feldman_commitments\x18\n" +
+	" \x03(\fR\x12feldmanCommitments\"\x81\x01\n" +
 	"\x12ValidatorPallasKey\x12+\n" +
 	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12\x1b\n" +
 	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\x12!\n" +

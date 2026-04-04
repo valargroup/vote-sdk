@@ -876,17 +876,17 @@ func (*MsgRegisterPallasKeyResponse) Descriptor() ([]byte, []int) {
 
 // MsgDealExecutiveAuthorityKey is submitted by the bootstrap dealer to distribute encrypted ea_sk shares.
 // In threshold mode, each payload contains ECIES(f(i), pk_i) where f is a degree-(t-1) polynomial
-// with f(0) = ea_sk. verification_keys holds VK_i = f(i)*G for each validator (one per payload).
+// with f(0) = ea_sk. feldman_commitments holds C_j = a_j*G for j=0..t-1 (Feldman polynomial commitments).
 type MsgDealExecutiveAuthorityKey struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Creator          string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                           // Dealer's validator address
-	EaPk             []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                                     // Executive authority public key (Pallas, 32 bytes)
-	Payloads         []*DealerPayload       `protobuf:"bytes,3,rep,name=payloads,proto3" json:"payloads,omitempty"`                                         // One ECIES envelope per registered validator
-	VoteRoundId      []byte                 `protobuf:"bytes,4,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`              // Target voting round (per-round ceremony)
-	Threshold        uint32                 `protobuf:"varint,5,opt,name=threshold,proto3" json:"threshold,omitempty"`                                      // Minimum shares required to reconstruct (t). Always >= 2.
-	VerificationKeys [][]byte               `protobuf:"bytes,6,rep,name=verification_keys,json=verificationKeys,proto3" json:"verification_keys,omitempty"` // VK_i = f(i)*G per validator (32-byte compressed Pallas points, same order as payloads)
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Creator            string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                                 // Dealer's validator address
+	EaPk               []byte                 `protobuf:"bytes,2,opt,name=ea_pk,json=eaPk,proto3" json:"ea_pk,omitempty"`                                           // Executive authority public key (Pallas, 32 bytes)
+	Payloads           []*DealerPayload       `protobuf:"bytes,3,rep,name=payloads,proto3" json:"payloads,omitempty"`                                               // One ECIES envelope per registered validator
+	VoteRoundId        []byte                 `protobuf:"bytes,4,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`                    // Target voting round (per-round ceremony)
+	Threshold          uint32                 `protobuf:"varint,5,opt,name=threshold,proto3" json:"threshold,omitempty"`                                            // Minimum shares required to reconstruct (t). Always >= 1.
+	FeldmanCommitments [][]byte               `protobuf:"bytes,6,rep,name=feldman_commitments,json=feldmanCommitments,proto3" json:"feldman_commitments,omitempty"` // C_j = a_j*G, t compressed Pallas points (32 bytes each)
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *MsgDealExecutiveAuthorityKey) Reset() {
@@ -954,9 +954,9 @@ func (x *MsgDealExecutiveAuthorityKey) GetThreshold() uint32 {
 	return 0
 }
 
-func (x *MsgDealExecutiveAuthorityKey) GetVerificationKeys() [][]byte {
+func (x *MsgDealExecutiveAuthorityKey) GetFeldmanCommitments() [][]byte {
 	if x != nil {
-		return x.VerificationKeys
+		return x.FeldmanCommitments
 	}
 	return nil
 }
@@ -1639,14 +1639,14 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x14MsgRegisterPallasKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\x1b\n" +
 	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\"\x1e\n" +
-	"\x1cMsgRegisterPallasKeyResponse\"\xf1\x01\n" +
+	"\x1cMsgRegisterPallasKeyResponse\"\xf5\x01\n" +
 	"\x1cMsgDealExecutiveAuthorityKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\x13\n" +
 	"\x05ea_pk\x18\x02 \x01(\fR\x04eaPk\x123\n" +
 	"\bpayloads\x18\x03 \x03(\v2\x17.svote.v1.DealerPayloadR\bpayloads\x12\"\n" +
 	"\rvote_round_id\x18\x04 \x01(\fR\vvoteRoundId\x12\x1c\n" +
-	"\tthreshold\x18\x05 \x01(\rR\tthreshold\x12+\n" +
-	"\x11verification_keys\x18\x06 \x03(\fR\x10verificationKeys\"&\n" +
+	"\tthreshold\x18\x05 \x01(\rR\tthreshold\x12/\n" +
+	"\x13feldman_commitments\x18\x06 \x03(\fR\x12feldmanCommitments\"&\n" +
 	"$MsgDealExecutiveAuthorityKeyResponse\"\x80\x01\n" +
 	"\x1bMsgAckExecutiveAuthorityKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12#\n" +

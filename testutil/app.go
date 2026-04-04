@@ -161,7 +161,7 @@ func (ta *TestApp) SeedTallyingRoundThreshold(
 	threshold uint32,
 	proposals []*types.Proposal,
 	validators []*types.ValidatorPallasKey,
-	verificationKeys [][]byte,
+	feldmanCommitments [][]byte,
 ) []byte {
 	ta.t.Helper()
 
@@ -188,7 +188,7 @@ func (ta *TestApp) SeedTallyingRoundThreshold(
 		Proposals:          proposals,
 		CeremonyValidators: indexedValidators,
 		Threshold:          threshold,
-		VerificationKeys:   verificationKeys,
+		FeldmanCommitments: feldmanCommitments,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
@@ -405,8 +405,8 @@ func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
 
 // SeedDealtCeremony creates a PENDING round with DEALT ceremony fields.
 // The round includes the given validators and ECIES payloads. A default
-// threshold of 2 and placeholder VKs are set (threshold mode is always
-// required). Commits via an empty block. Returns the round ID.
+// threshold and placeholder Feldman commitments are set. Commits via an
+// empty block. Returns the round ID.
 func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads []*types.DealerPayload, validators []*types.ValidatorPallasKey) []byte {
 	ta.t.Helper()
 
@@ -422,9 +422,9 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 	if t < 2 {
 		t = 2
 	}
-	vks := make([][]byte, n)
-	for i := range vks {
-		vks[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
+	commitments := make([][]byte, t)
+	for i := range commitments {
+		commitments[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
 	}
 
 	round := &types.VoteRound{
@@ -438,7 +438,7 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
 		Threshold:            uint32(t),
-		VerificationKeys:     vks,
+		FeldmanCommitments:   commitments,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
@@ -447,16 +447,16 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 	return roundID
 }
 
-// SeedDealtCeremonyThreshold creates a PENDING round with DEALT ceremony fields
-// in threshold mode. Callers supply pre-computed ECIES payloads, VK_i points,
-// and the threshold t. This lets ack handler tests exercise threshold-mode
-// verification (share_i * G == VK_i) without going through the full deal flow.
+// SeedDealtCeremonyThreshold creates a PENDING round with DEALT ceremony fields.
+// Callers supply pre-computed ECIES payloads, Feldman commitments, and the
+// threshold t. This lets ack handler tests exercise Feldman verification
+// without going through the full deal flow.
 func (ta *TestApp) SeedDealtCeremonyThreshold(
 	eaPkBytes []byte,
 	payloads []*types.DealerPayload,
 	validators []*types.ValidatorPallasKey,
 	threshold uint32,
-	verificationKeys [][]byte,
+	feldmanCommitments [][]byte,
 ) []byte {
 	ta.t.Helper()
 
@@ -467,18 +467,31 @@ func (ta *TestApp) SeedDealtCeremonyThreshold(
 	h.Write(eaPkBytes)
 	roundID := h.Sum(nil)
 
+	// Assign ShamirIndex to any validator that doesn't have one, mirroring
+	// the assignment done by DealExecutiveAuthorityKey in production.
+	indexedValidators := make([]*types.ValidatorPallasKey, len(validators))
+	for i, v := range validators {
+		if v.ShamirIndex == 0 && threshold > 0 {
+			vCopy := proto.Clone(v).(*types.ValidatorPallasKey)
+			vCopy.ShamirIndex = uint32(i + 1)
+			indexedValidators[i] = vCopy
+		} else {
+			indexedValidators[i] = v
+		}
+	}
+
 	round := &types.VoteRound{
 		VoteRoundId:          roundID,
 		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
 		EaPk:                 eaPkBytes,
 		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 		CeremonyDealer:       "dealer",
-		CeremonyValidators:   validators,
+		CeremonyValidators:   indexedValidators,
 		CeremonyPayloads:     payloads,
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
 		Threshold:            threshold,
-		VerificationKeys:     verificationKeys,
+		FeldmanCommitments:   feldmanCommitments,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)

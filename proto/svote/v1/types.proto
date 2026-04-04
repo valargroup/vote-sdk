@@ -55,9 +55,10 @@ message VoteRound {
 
   // Threshold decryption fields (populated by MsgDealExecutiveAuthorityKey in threshold mode).
   // threshold is the minimum number of partial decryptions required to reconstruct the tally.
-  // verification_keys holds VK_i = f(i)*G for each validator (same order as ceremony_validators).
-  uint32         threshold         = 23; // Minimum shares for reconstruction (always >= 2)
-  repeated bytes verification_keys = 24; // 32-byte compressed Pallas points, one per ceremony validator
+  // feldman_commitments holds C_j = a_j*G for j=0..t-1 (Feldman polynomial commitments).
+  // Validators derive VK_i = EvalCommitmentPolynomial(commitments, i) for share verification.
+  uint32         threshold            = 23; // Minimum shares for reconstruction (always >= 2)
+  repeated bytes feldman_commitments  = 24; // C_j = a_j*G, t compressed Pallas points (32 bytes each)
 
   // Tally phase timeout fields (populated when status transitions to TALLYING).
   uint64 tally_phase_start   = 25; // Unix seconds when TALLYING started
@@ -208,8 +209,8 @@ message CeremonyState {
   string                      dealer            = 6;  // Validator address of the dealer
   uint64                      phase_start       = 7;  // Unix seconds when current phase started
   uint64                      phase_timeout     = 8;  // Timeout in seconds for current phase
-  uint32                      threshold         = 9;  // Minimum shares for reconstruction (always >= 2)
-  repeated bytes              verification_keys = 10; // VK_i = f(i)*G per validator (32-byte compressed Pallas points)
+  uint32                      threshold            = 9;  // Minimum shares for reconstruction (always >= 1)
+  repeated bytes              feldman_commitments  = 10; // C_j = a_j*G, t compressed Pallas points (32 bytes each)
 }
 
 // ValidatorPallasKey records a validator's registered Pallas public key.
