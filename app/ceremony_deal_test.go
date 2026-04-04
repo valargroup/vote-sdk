@@ -745,3 +745,270 @@ func TestDKGContributionSkipsWhenNoPallasKey(t *testing.T) {
 	require.Empty(t, txs, "no DKG contribution should be injected without a Pallas key")
 }
 
+// ---------------------------------------------------------------------------
+// CeremonyAckPrepareProposalHandler — DKG path
+//
+// When round.DkgContributions is populated, the ack handler takes the DKG
+// path: loads coefficients, decrypts shares from other contributors, verifies
+// per-contributor Feldman, sums into combined share, verifies against combined
+// commitments, writes share to disk, and deletes the coefficients file.
+// ---------------------------------------------------------------------------
+
+// buildDKGDealtRoundState generates the full crypto state for a DKG ceremony
+// with n validators and returns the round, contributions, combined commitments,
+// and per-validator polynomial data needed for testing the ack handler.
+func buildDKGDealtRoundState(
+	t *testing.T,
+	validatorAddrs []string,
+	validatorPKs []curvey.Point,
+) (
+	contributions []*types.DKGContribution,
+	combinedSerialized [][]byte,
+	eaPk []byte,
+	allShares [][]shamir.Share,
+	allCoeffs [][]curvey.Scalar,
+	combinedPts []curvey.Point,
+) {
+	t.Helper()
+
+	G := elgamal.PallasGenerator()
+	n := len(validatorAddrs)
+	tVal := (n + 1) / 2 // ceil(n/2)
+
+	allShares = make([][]shamir.Share, n)
+	allCoeffs = make([][]curvey.Scalar, n)
+	allCommitmentPts := make([][]curvey.Point, n)
+
+	for i := 0; i < n; i++ {
+		secret := new(curvey.ScalarPallas).Random(rand.Reader)
+		shares, coeffs, err := shamir.Split(secret, tVal, n)
+		require.NoError(t, err)
+		allShares[i] = shares
+		allCoeffs[i] = coeffs
+
+		commitPts, err := shamir.FeldmanCommit(G, coeffs)
+		require.NoError(t, err)
+		allCommitmentPts[i] = commitPts
+	}
+
+	contributions = make([]*types.DKGContribution, n)
+	for i := 0; i < n; i++ {
+		commitments := make([][]byte, tVal)
+		for j, pt := range allCommitmentPts[i] {
+			commitments[j] = pt.ToAffineCompressed()
+		}
+
+		payloads := make([]*types.DealerPayload, 0, n-1)
+		for j := 0; j < n; j++ {
+			if i == j {
+				continue
+			}
+			env, err := ecies.Encrypt(G, validatorPKs[j], allShares[i][j].Value.Bytes(), rand.Reader)
+			require.NoError(t, err)
+			payloads = append(payloads, &types.DealerPayload{
+				ValidatorAddress: validatorAddrs[j],
+				EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+				Ciphertext:       env.Ciphertext,
+			})
+		}
+
+		contributions[i] = &types.DKGContribution{
+			ValidatorAddress:   validatorAddrs[i],
+			FeldmanCommitments: commitments,
+			Payloads:           payloads,
+		}
+	}
+
+	combinedPts, err := shamir.CombineCommitments(allCommitmentPts)
+	require.NoError(t, err)
+
+	combinedSerialized = make([][]byte, len(combinedPts))
+	for j, c := range combinedPts {
+		combinedSerialized[j] = c.ToAffineCompressed()
+	}
+	eaPk = combinedSerialized[0]
+	return
+}
+
+// seedDKGDealtRound writes a DEALT round with DKG contributions to the store
+// and persists the proposer's polynomial coefficients to disk.
+func seedDKGDealtRound(
+	t *testing.T,
+	ta *testutil.TestApp,
+	validatorAddrs []string,
+	validatorPKs []curvey.Point,
+	contributions []*types.DKGContribution,
+	combinedSerialized [][]byte,
+	eaPk []byte,
+	proposerCoeffs []curvey.Scalar,
+) []byte {
+	t.Helper()
+
+	n := len(validatorAddrs)
+	tVal := (n + 1) / 2
+
+	validators := make([]*types.ValidatorPallasKey, n)
+	for i := range validatorAddrs {
+		validators[i] = &types.ValidatorPallasKey{
+			ValidatorAddress: validatorAddrs[i],
+			PallasPk:         validatorPKs[i].ToAffineCompressed(),
+			ShamirIndex:      uint32(i + 1),
+		}
+	}
+
+	roundID := make([]byte, 32)
+	copy(roundID, []byte("dkg-ack-test"))
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	round := &types.VoteRound{
+		VoteRoundId:          roundID,
+		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
+		EaPk:                 eaPk,
+		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+		CeremonyValidators:   validators,
+		DkgContributions:     contributions,
+		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
+		CeremonyPhaseTimeout: types.DefaultDealTimeout,
+		Threshold:            uint32(tVal),
+		FeldmanCommitments:   combinedSerialized,
+	}
+	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
+	require.NoError(t, err)
+	ta.NextBlock()
+
+	// Persist proposer's coefficients to disk.
+	coeffsPath := filepath.Join(ta.EaSkDir, "coeffs."+hex.EncodeToString(roundID))
+	buf := make([]byte, 0, tVal*32)
+	for _, c := range proposerCoeffs {
+		buf = append(buf, c.Bytes()...)
+	}
+	require.NoError(t, os.WriteFile(coeffsPath, buf, 0600))
+
+	return roundID
+}
+
+func TestDKGAckHappyPath(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	require.NotEmpty(t, ta.EaSkDir)
+
+	proposerAddr := ta.ValidatorOperAddr()
+	G := elgamal.PallasGenerator()
+
+	_, pk2 := elgamal.KeyGen(rand.Reader)
+	_, pk3 := elgamal.KeyGen(rand.Reader)
+
+	addrs := []string{proposerAddr, "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx"}
+	pks := []curvey.Point{pallasPk.Point, pk2.Point, pk3.Point}
+
+	contributions, combinedSerialized, eaPk, allShares, allCoeffs, combinedPts :=
+		buildDKGDealtRoundState(t, addrs, pks)
+
+	roundID := seedDKGDealtRound(t, ta, addrs, pks, contributions, combinedSerialized, eaPk, allCoeffs[0])
+
+	resp := ta.CallPrepareProposal()
+	require.Len(t, resp.Txs, 1, "expected one injected ack tx")
+
+	tag, _, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
+	require.NoError(t, err)
+	require.Equal(t, voteapi.TagAckExecutiveAuthorityKey, tag)
+
+	// Share file must exist with 32 bytes.
+	sharePath := filepath.Join(ta.EaSkDir, "share."+hex.EncodeToString(roundID))
+	shareBytes, err := os.ReadFile(sharePath)
+	require.NoError(t, err)
+	require.Len(t, shareBytes, 32)
+
+	// Combined share must verify against combined Feldman commitments.
+	shareScalar, err := new(curvey.ScalarPallas).SetBytes(shareBytes)
+	require.NoError(t, err)
+	ok, err := shamir.VerifyFeldmanShare(G, combinedPts, 1, shareScalar)
+	require.NoError(t, err)
+	require.True(t, ok, "combined share must verify against combined Feldman commitments")
+
+	// Combined share must equal sum of all contributors' shares at index 0 (1-based index 1).
+	expectedCombined := allShares[0][0].Value
+	for i := 1; i < 3; i++ {
+		expectedCombined = expectedCombined.Add(allShares[i][0].Value)
+	}
+	require.Equal(t, expectedCombined.Bytes(), shareBytes,
+		"combined share must equal sum of all contributors' shares at this index")
+
+	// Coefficients file must be deleted.
+	coeffsPath := filepath.Join(ta.EaSkDir, "coeffs."+hex.EncodeToString(roundID))
+	_, statErr := os.Stat(coeffsPath)
+	require.True(t, os.IsNotExist(statErr), "coefficients file must be deleted after ack")
+}
+
+func TestDKGAckRejectsBadShare(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	proposerAddr := ta.ValidatorOperAddr()
+	G := elgamal.PallasGenerator()
+
+	_, pk2 := elgamal.KeyGen(rand.Reader)
+	_, pk3 := elgamal.KeyGen(rand.Reader)
+
+	addrs := []string{proposerAddr, "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx"}
+	pks := []curvey.Point{pallasPk.Point, pk2.Point, pk3.Point}
+
+	contributions, combinedSerialized, eaPk, _, allCoeffs, _ :=
+		buildDKGDealtRoundState(t, addrs, pks)
+
+	// Tamper with contributor 1's payload for the proposer: encrypt a random
+	// (wrong) share instead of the correct f_1(1).
+	wrongScalar := new(curvey.ScalarPallas).Random(rand.Reader)
+	env, err := ecies.Encrypt(G, pallasPk.Point, wrongScalar.Bytes(), rand.Reader)
+	require.NoError(t, err)
+
+	for _, p := range contributions[1].Payloads {
+		if p.ValidatorAddress == proposerAddr {
+			p.EphemeralPk = env.Ephemeral.ToAffineCompressed()
+			p.Ciphertext = env.Ciphertext
+			break
+		}
+	}
+
+	seedDKGDealtRound(t, ta, addrs, pks, contributions, combinedSerialized, eaPk, allCoeffs[0])
+
+	resp := ta.CallPrepareProposal()
+	require.Empty(t, resp.Txs, "ack must not be injected when a contributor's share fails Feldman verification")
+}
+
+func TestDKGAckSingleValidator(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	require.NotEmpty(t, ta.EaSkDir)
+
+	proposerAddr := ta.ValidatorOperAddr()
+	G := elgamal.PallasGenerator()
+
+	addrs := []string{proposerAddr}
+	pks := []curvey.Point{pallasPk.Point}
+
+	contributions, combinedSerialized, eaPk, allShares, allCoeffs, combinedPts :=
+		buildDKGDealtRoundState(t, addrs, pks)
+
+	roundID := seedDKGDealtRound(t, ta, addrs, pks, contributions, combinedSerialized, eaPk, allCoeffs[0])
+
+	resp := ta.CallPrepareProposal()
+	require.Len(t, resp.Txs, 1, "expected one injected ack tx")
+
+	tag, _, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
+	require.NoError(t, err)
+	require.Equal(t, voteapi.TagAckExecutiveAuthorityKey, tag)
+
+	sharePath := filepath.Join(ta.EaSkDir, "share."+hex.EncodeToString(roundID))
+	shareBytes, err := os.ReadFile(sharePath)
+	require.NoError(t, err)
+
+	// n=1: combined share is just own partial f_0(1).
+	shareScalar, err := new(curvey.ScalarPallas).SetBytes(shareBytes)
+	require.NoError(t, err)
+	ok, err := shamir.VerifyFeldmanShare(G, combinedPts, 1, shareScalar)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.Equal(t, allShares[0][0].Value.Bytes(), shareBytes,
+		"n=1: combined share must equal the single contributor's share")
+}
+

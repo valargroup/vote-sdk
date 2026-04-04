@@ -18,11 +18,11 @@ todos:
     content: "Phase 4 tests (5): injection happy path (correct tag, t commitments, n-1 payloads, no self-reference), coefficients round-trip (parse back, FeldmanCommit matches published), ECIES envelopes decryptable + Feldman-verified, skips when already contributed, skips when not ceremony validator, skips when no Pallas key"
     status: completed
   - id: p5-ack
-    content: "Phase 5: Add DKG ack path in CeremonyAckPrepareProposalHandler (detect DKG via dkg_contributions, load coefficients, decrypt n-1 shares, verify per-contributor Feldman, compute combined share, delete coefficients file)"
-    status: pending
+    content: "Phase 5: DKG-aware ack path — refactor CeremonyAckPrepareProposalHandler to branch on DKG vs dealer, extract ackDealerRound and ackDKGRound helpers, export EvalPolynomial in shamir, add loadCoeffs/zeroAndDeleteCoeffsFile helpers. DKG path: load coefficients → eval own partial → decrypt + verify per-contributor shares → sum combined → verify against combined commitments → delete coefficients file"
+    status: completed
   - id: p5-ack-tests
-    content: "Phase 5 tests: DKG ack loads coefficients, decrypts all envelopes, verifies per-contributor Feldman, combined share matches combined commitments, rejects on bad share, deletes coefficients file"
-    status: pending
+    content: "Phase 5 tests (5): DKG ack happy path (3 validators, real crypto, combined share = sum of all shares, Feldman-verified, coefficients deleted), bad share rejection (tampered ECIES payload → no ack), single validator (n=1 edge case), plus 2 existing dealer ack tests pass unchanged after refactor"
+    status: completed
   - id: p6-wire
     content: "Phase 6: Wire everything -- add TagContributeDKG to ante.go + process_proposal.go, swap deal injector for DKG injector in ComposedPrepareProposalHandler, EndBlocker clears dkg_contributions, deprecate dealer path"
     status: pending
@@ -298,14 +298,22 @@ Implemented `CeremonyDKGContributionPrepareProposalHandler` in [prepare_proposal
   - `TestDKGContributionSkipsWhenNotCeremonyValidator`: proposer absent from validators → no injection
   - `TestDKGContributionSkipsWhenNoPallasKey`: empty `pallasSkPath` → no injection
 
-### Phase 5: DKG-aware ack path
+### Phase 5: DKG-aware ack path ✓
 
-Modify ack injector to branch on DKG vs dealer. Both paths work.
+Refactored `CeremonyAckPrepareProposalHandler` in [prepare_proposal_ceremony.go](vote-sdk/app/prepare_proposal_ceremony.go) to branch on DKG vs dealer. Both paths work.
 
-- In `CeremonyAckPrepareProposalHandler`: detect DKG round via `len(round.DkgContributions) > 0`
-- DKG path: load coefficients from disk, compute `own_partial = evalPolynomial(coeffs, shamirIndex)`, iterate `dkg_contributions` to decrypt + verify each contributor's share, sum into `combined_share`, verify against combined commitments, write share to disk, delete coefficients file
-- Dealer path: unchanged (existing code)
-- **Tests**: DKG ack correctly loads coefficients, decrypts all envelopes, verifies per-contributor Feldman, combined share matches combined commitments, rejects if any verification fails, deletes coefficients file after success
+- Detect DKG round via `len(round.DkgContributions) > 0`
+- Extracted `ackDealerRound` (existing dealer logic) and `ackDKGRound` (new DKG logic) into separate functions; common tail (disk write, ack message, injection) shared
+- Exported `shamir.EvalPolynomial` in [shamir.go](vote-sdk/crypto/shamir/shamir.go) for the DKG ack handler to recompute `f_i(shamirIndex)` from persisted coefficients
+- Added `loadCoeffs(path, expectedT)` — reads and parses coefficient file, zeroes raw bytes after parsing
+- Added `zeroAndDeleteCoeffsFile(dir, roundID, logger)` — overwrites with zeros and removes
+- DKG ack path: load coefficients → `EvalPolynomial(coeffs, shamirIndex)` → iterate contributions, decrypt ECIES, verify against each contributor's individual Feldman commitments → sum into `combined_share` → verify against combined commitments → write share → delete coefficients file
+- Dealer path: unchanged (extracted into `ackDealerRound`)
+- **Tests** (3 new + 2 existing pass unchanged, in [ceremony_deal_test.go](vote-sdk/app/ceremony_deal_test.go)):
+  - `TestDKGAckHappyPath`: 3 validators, real crypto — combined share = Σ shares at proposer's index, Feldman-verified, share file written, coefficients file deleted
+  - `TestDKGAckRejectsBadShare`: tampered ECIES payload → no ack injected
+  - `TestDKGAckSingleValidator`: n=1 edge case — combined share = single contributor's own share
+  - `TestCeremonyAckThresholdMode` / `TestCeremonyAckThresholdRejectsBadShare`: existing dealer ack tests pass unchanged after refactor
 
 ### Phase 6: Wire and swap
 
