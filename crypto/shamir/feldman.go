@@ -72,6 +72,59 @@ func VerifyFeldmanShare(G curvey.Point, commitments []curvey.Point, index int, s
 	return actual.Equal(expected), nil
 }
 
+// CombineCommitments performs the point-wise sum of n Feldman commitment
+// vectors, producing the combined commitment vector for a Joint-Feldman DKG.
+//
+// In Joint-Feldman DKG each contributor i publishes commitments
+// C_{i,j} = a_{i,j} * G for j = 0..t-1. The combined commitment vector is:
+//
+//	C_j = sum_i(C_{i,j})   for j = 0..t-1
+//
+// C_0 is the combined public key: ea_pk = (sum of all contributors' secret
+// shares) * G. The result can be used with VerifyFeldmanShare and
+// EvalCommitmentPolynomial exactly like a single-dealer commitment vector,
+// because each validator's combined share s_i = sum_k(s_{k,i}) satisfies:
+//
+//	s_i * G == EvalCommitmentPolynomial(combined, i)
+//
+// All contribution vectors must have the same length (the threshold t).
+// At least one contribution is required.
+func CombineCommitments(contributions [][]curvey.Point) ([]curvey.Point, error) {
+	if len(contributions) == 0 {
+		return nil, fmt.Errorf("shamir: CombineCommitments: contributions must not be empty")
+	}
+
+	t := len(contributions[0])
+	if t == 0 {
+		return nil, fmt.Errorf("shamir: CombineCommitments: commitment vectors must not be empty")
+	}
+
+	for i, vec := range contributions {
+		if len(vec) != t {
+			return nil, fmt.Errorf("shamir: CombineCommitments: contribution %d has length %d, expected %d", i, len(vec), t)
+		}
+		for j, pt := range vec {
+			if pt == nil {
+				return nil, fmt.Errorf("shamir: CombineCommitments: contribution %d commitment %d is nil", i, j)
+			}
+			if !pt.IsOnCurve() {
+				return nil, fmt.Errorf("shamir: CombineCommitments: contribution %d commitment %d is not on the curve", i, j)
+			}
+		}
+	}
+
+	combined := make([]curvey.Point, t)
+	for j := 0; j < t; j++ {
+		sum := contributions[0][j]
+		for i := 1; i < len(contributions); i++ {
+			sum = sum.Add(contributions[i][j])
+		}
+		combined[j] = sum
+	}
+
+	return combined, nil
+}
+
 // EvalCommitmentPolynomial evaluates the Feldman commitment polynomial at a
 // given Shamir index using Horner's method in the group:
 //
