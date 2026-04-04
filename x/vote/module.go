@@ -56,6 +56,7 @@ func init() {
 			ProvideSubmitPartialDecryptionSigner,
 			ProvideRegisterPallasKeySigner,
 			ProvideDealExecutiveAuthorityKeySigner,
+			ProvideContributeDKGSigner,
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
 			ProvideSetVoteManagerSigner,
@@ -186,6 +187,15 @@ func ProvideDealExecutiveAuthorityKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("svote.v1.MsgDealExecutiveAuthorityKey"),
 		Fn:      ceremonyCreatorSignerFn,
+	}
+}
+
+// MsgContributeDKG is auto-injected by PrepareProposal (like ack/partial-decrypt),
+// never submitted via standard Cosmos SDK signing.
+func ProvideContributeDKGSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgContributeDKG"),
+		Fn:      noopSignerFn,
 	}
 }
 

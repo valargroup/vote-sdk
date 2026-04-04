@@ -62,6 +62,8 @@ func ceremonyValidatorRequired(msg sdk.Msg) (string, bool) {
 		return m.Creator, true
 	case *types.MsgDealExecutiveAuthorityKey:
 		return m.Creator, true
+	case *types.MsgContributeDKG:
+		return m.Creator, true
 	default:
 		return "", false
 	}

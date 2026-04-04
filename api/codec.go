@@ -31,6 +31,10 @@ const (
 	TagDealExecutiveAuthorityKey byte = 0x07
 	TagAckExecutiveAuthorityKey  byte = 0x08
 
+	// TagContributeDKG (0x0E) is auto-injected by PrepareProposal during the
+	// Joint-Feldman DKG phase. Like Deal/Ack, it uses the custom wire format.
+	TagContributeDKG byte = 0x0E
+
 	// TagSubmitPartialDecryption (0x0D) is auto-injected by PrepareProposal
 	// during the TALLYING phase of a threshold-mode round. Like MsgAck, it is
 	// never client-signed and uses the custom wire format.
@@ -52,10 +56,11 @@ func IsVoteTag(b byte) bool {
 
 // IsCeremonyTag returns true if b is an auto-injected ceremony/tally
 // transaction type tag that uses the custom wire format and is never
-// client-signed. Currently: Deal (0x07), Ack (0x08), and
-// SubmitPartialDecryption (0x0D).
+// client-signed. Currently: Deal (0x07), ContributeDKG (0x0E), Ack (0x08),
+// and SubmitPartialDecryption (0x0D).
 func IsCeremonyTag(b byte) bool {
 	return b == TagDealExecutiveAuthorityKey ||
+		b == TagContributeDKG ||
 		b == TagAckExecutiveAuthorityKey ||
 		b == TagSubmitPartialDecryption
 }
@@ -142,7 +147,7 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 // client-signed.
 func EncodeCeremonyTx(msg proto.Message, tag byte) ([]byte, error) {
 	if !IsCeremonyTag(tag) {
-		return nil, fmt.Errorf("invalid auto-inject tag: 0x%02x (only 0x07, 0x08, 0x0D use custom wire format)", tag)
+		return nil, fmt.Errorf("invalid auto-inject tag: 0x%02x (only 0x07, 0x08, 0x0D, 0x0E use custom wire format)", tag)
 	}
 
 	body, err := proto.Marshal(msg)
@@ -171,12 +176,14 @@ func DecodeCeremonyTx(raw []byte) (byte, proto.Message, error) {
 	switch tag {
 	case TagDealExecutiveAuthorityKey:
 		msg = &types.MsgDealExecutiveAuthorityKey{}
+	case TagContributeDKG:
+		msg = &types.MsgContributeDKG{}
 	case TagAckExecutiveAuthorityKey:
 		msg = &types.MsgAckExecutiveAuthorityKey{}
 	case TagSubmitPartialDecryption:
 		msg = &types.MsgSubmitPartialDecryption{}
 	default:
-		return 0, nil, fmt.Errorf("invalid auto-inject tx tag: 0x%02x (only 0x07, 0x08, 0x0D use custom wire format)", tag)
+		return 0, nil, fmt.Errorf("invalid auto-inject tx tag: 0x%02x (only 0x07, 0x08, 0x0D, 0x0E use custom wire format)", tag)
 	}
 
 	if err := proto.Unmarshal(body, msg); err != nil {

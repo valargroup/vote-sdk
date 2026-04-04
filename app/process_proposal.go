@@ -46,6 +46,15 @@ func ProcessProposalHandler(
 				continue
 			}
 
+			// Validate injected DKG contribution txs.
+			if tag == voteapi.TagContributeDKG {
+				if err := validateInjectedDKGContribution(ctx, voteKeeper, txBytes, logger); err != nil {
+					logger.Error("ProcessProposal: rejecting block — invalid DKG contribution tx", "err", err)
+					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+				}
+				continue
+			}
+
 			// Validate injected ceremony ack txs.
 			if tag == voteapi.TagAckExecutiveAuthorityKey {
 				if err := validateInjectedAck(ctx, voteKeeper, txBytes, logger); err != nil {
@@ -269,6 +278,44 @@ func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByt
 		return err
 	}
 	if err := voteKeeper.ValidateTallyCompleteness(kvStore, round, tallyMsg.Entries); err != nil {
+		return errInvalidInjectedTx(err.Error())
+	}
+
+	return nil
+}
+
+// validateInjectedDKGContribution checks that an injected MsgContributeDKG is
+// valid: the round is PENDING with ceremony in REGISTERING, the creator is a
+// ceremony validator, and the creator matches the current block proposer.
+func validateInjectedDKGContribution(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
+	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
+	if err != nil {
+		return err
+	}
+
+	dkgMsg, ok := msg.(*types.MsgContributeDKG)
+	if !ok {
+		return errInvalidInjectedTx("expected MsgContributeDKG")
+	}
+
+	kvStore := voteKeeper.OpenKVStore(ctx)
+	round, err := voteKeeper.GetVoteRound(kvStore, dkgMsg.VoteRoundId)
+	if err != nil {
+		return err
+	}
+
+	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
+		return errInvalidInjectedTx("round is not PENDING")
+	}
+	if round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
+		return errInvalidInjectedTx("ceremony is not REGISTERING")
+	}
+
+	if _, found := votekeeper.FindValidatorInRoundCeremony(round, dkgMsg.Creator); !found {
+		return errInvalidInjectedTx("creator is not a ceremony validator")
+	}
+
+	if err := voteKeeper.ValidateProposerIsCreator(ctx, dkgMsg.Creator, "MsgContributeDKG"); err != nil {
 		return errInvalidInjectedTx(err.Error())
 	}
 

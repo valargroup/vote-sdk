@@ -20,6 +20,7 @@ service Msg {
   rpc SubmitPartialDecryption(MsgSubmitPartialDecryption) returns (MsgSubmitPartialDecryptionResponse);
   rpc RegisterPallasKey(MsgRegisterPallasKey) returns (MsgRegisterPallasKeyResponse);
   rpc DealExecutiveAuthorityKey(MsgDealExecutiveAuthorityKey) returns (MsgDealExecutiveAuthorityKeyResponse);
+  rpc ContributeDKG(MsgContributeDKG) returns (MsgContributeDKGResponse);
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
   rpc SetVoteManager(MsgSetVoteManager) returns (MsgSetVoteManagerResponse);
@@ -136,6 +137,18 @@ message MsgDealExecutiveAuthorityKey {
 }
 
 message MsgDealExecutiveAuthorityKeyResponse {}
+
+// MsgContributeDKG is a validator's contribution to the Joint-Feldman DKG.
+// Each validator generates a random polynomial, publishes Feldman commitments,
+// and distributes ECIES-encrypted shares to all ceremony participants.
+message MsgContributeDKG {
+  string                 creator              = 1;
+  bytes                  vote_round_id        = 2;
+  repeated bytes         feldman_commitments  = 3; // C_j = a_j*G for j=0..t-1
+  repeated DealerPayload payloads             = 4; // One ECIES envelope per ceremony validator
+}
+
+message MsgContributeDKGResponse {}
 
 // MsgAckExecutiveAuthorityKey is submitted by a validator to acknowledge receipt of their ea_sk share.
 message MsgAckExecutiveAuthorityKey {

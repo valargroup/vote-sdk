@@ -129,6 +129,11 @@ func handleVoteAnte(
 			if err := k.ValidateProposerIsCreator(ctx, msg.Creator, "MsgDealExecutiveAuthorityKey"); err != nil {
 				return ctx, err
 			}
+		case voteapi.TagContributeDKG:
+			msg := vtx.CeremonyMsg.(*types.MsgContributeDKG)
+			if err := k.ValidateProposerIsCreator(ctx, msg.Creator, "MsgContributeDKG"); err != nil {
+				return ctx, err
+			}
 		case voteapi.TagAckExecutiveAuthorityKey:
 			msg := vtx.CeremonyMsg.(*types.MsgAckExecutiveAuthorityKey)
 			if err := k.ValidateProposerIsCreator(ctx, msg.Creator, "MsgAckExecutiveAuthorityKey"); err != nil {
@@ -209,7 +214,7 @@ func isVoteModuleMsg(msg sdk.Msg) bool {
 	switch msg.(type) {
 	case *types.MsgDelegateVote, *types.MsgCastVote, *types.MsgRevealShare:
 		return true
-	case *types.MsgDealExecutiveAuthorityKey, *types.MsgAckExecutiveAuthorityKey, *types.MsgSubmitPartialDecryption, *types.MsgSubmitTally:
+	case *types.MsgDealExecutiveAuthorityKey, *types.MsgContributeDKG, *types.MsgAckExecutiveAuthorityKey, *types.MsgSubmitPartialDecryption, *types.MsgSubmitTally:
 		return true
 	default:
 		return false

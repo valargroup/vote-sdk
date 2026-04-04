@@ -644,6 +644,11 @@ func TestCeremonySignerProviders(t *testing.T) {
 			msg:     &types.MsgDealExecutiveAuthorityKey{Creator: valAddr.String()},
 		},
 		{
+			name:    "ContributeDKG",
+			signer:  vote.ProvideContributeDKGSigner,
+			wantMsg: "svote.v1.MsgContributeDKG",
+		},
+		{
 			name:    "AckExecutiveAuthorityKey",
 			signer:  vote.ProvideAckExecutiveAuthorityKeySigner,
 			wantMsg: "svote.v1.MsgAckExecutiveAuthorityKey",
@@ -680,6 +685,7 @@ func TestRegisterInterfaces_IncludesCeremonyMsgs(t *testing.T) {
 	ceremonyMsgs := []sdk.Msg{
 		&types.MsgRegisterPallasKey{},
 		&types.MsgDealExecutiveAuthorityKey{},
+		&types.MsgContributeDKG{},
 		&types.MsgAckExecutiveAuthorityKey{},
 	}
 	for _, msg := range ceremonyMsgs {
@@ -701,6 +707,7 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		vote.ProvideSubmitTallySigner(),
 		vote.ProvideRegisterPallasKeySigner(),
 		vote.ProvideDealExecutiveAuthorityKeySigner(),
+		vote.ProvideContributeDKGSigner(),
 		vote.ProvideAckExecutiveAuthorityKeySigner(),
 	}
 
@@ -712,6 +719,7 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		"svote.v1.MsgSubmitTally",
 		"svote.v1.MsgRegisterPallasKey",
 		"svote.v1.MsgDealExecutiveAuthorityKey",
+		"svote.v1.MsgContributeDKG",
 		"svote.v1.MsgAckExecutiveAuthorityKey",
 	}
 

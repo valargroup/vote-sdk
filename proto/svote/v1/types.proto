@@ -64,6 +64,9 @@ message VoteRound {
   uint64 tally_phase_start   = 25; // Unix seconds when TALLYING started
   uint64 tally_phase_timeout = 26; // Timeout duration in seconds (default: 6 hours)
   bool   tally_timed_out     = 27; // True if round was finalized via timeout (no decrypted results)
+
+  // DKG contributions (populated during Joint-Feldman DKG; replaces single-dealer fields once wired).
+  repeated DKGContribution dkg_contributions = 28;
 }
 
 // VoteManagerState stores the singleton vote manager address.
@@ -224,6 +227,15 @@ message ValidatorPallasKey {
   // decrypt injectors and the SubmitPartialDecryption handler must use this
   // field for Lagrange interpolation indices, not the post-stripping array position.
   uint32 shamir_index      = 3;
+}
+
+// DKGContribution holds one validator's contribution to the Joint-Feldman DKG.
+// Each participant generates a random polynomial, publishes Feldman commitments,
+// and ECIES-encrypts a share to every other participant.
+message DKGContribution {
+  string                 validator_address    = 1;
+  repeated bytes         feldman_commitments  = 2; // C_j = a_j*G for j=0..t-1
+  repeated DealerPayload payloads             = 3; // One ECIES envelope per ceremony validator
 }
 
 // DealerPayload is an ECIES envelope from the dealer to a specific validator.

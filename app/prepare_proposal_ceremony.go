@@ -226,6 +226,24 @@ func CeremonyDealPrepareProposalHandler(
 	}
 }
 
+// CeremonyDKGContributionPrepareProposalHandler returns a PrepareProposalInjector
+// that will inject MsgContributeDKG when a PENDING round is REGISTERING.
+//
+// Currently a no-op stub — the full implementation (polynomial generation,
+// Feldman commitments, ECIES share encryption) is Phase 4. The signature
+// matches the final form so callers in app.go don't need to change.
+func CeremonyDKGContributionPrepareProposalHandler(
+	voteKeeper *votekeeper.Keeper,
+	stakingKeeper *stakingkeeper.Keeper,
+	pallasSkPath string,
+	eaSkDir string,
+	logger log.Logger,
+) PrepareProposalInjector {
+	return func(ctx sdk.Context, req *abci.RequestPrepareProposal, txs [][]byte) [][]byte {
+		return txs
+	}
+}
+
 // CeremonyAckPrepareProposalHandler returns a PrepareProposalInjector that
 // checks whether a PENDING round's ceremony is in DEALT state and, if so,
 // injects a MsgAckExecutiveAuthorityKey on behalf of the block proposer.
