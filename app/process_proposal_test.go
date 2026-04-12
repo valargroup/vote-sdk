@@ -531,11 +531,11 @@ func TestValidateInjectedDKGContribution(t *testing.T) {
 				currentRoundID = ta.SeedVotingSession(&types.MsgCreateVotingSession{
 					Creator:           "sv1admin",
 					SnapshotHeight:    900,
-					SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
-					ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
+					SnapshotBlockhash: bytes.Repeat([]byte{0x0A}, 32),
+					ProposalsHash:     bytes.Repeat([]byte{0x0B}, 32),
 					VoteEndTime:       uint64(voteEndTime.Unix()),
-					NullifierImtRoot:  bytes.Repeat([]byte{0xCC}, 32),
-					NcRoot:            bytes.Repeat([]byte{0xDD}, 32),
+					NullifierImtRoot:  bytes.Repeat([]byte{0x08}, 32),
+					NcRoot:            bytes.Repeat([]byte{0x09}, 32),
 					Proposals:         testutil.SampleProposals(),
 				})
 			},
