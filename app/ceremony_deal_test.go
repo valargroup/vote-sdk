@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
@@ -448,5 +449,51 @@ func TestCeremonyAckThresholdRejectsBadShare(t *testing.T) {
 
 	resp := ta.CallPrepareProposal()
 	require.Empty(t, resp.Txs, "ack must be rejected when share_i * G != VK_i")
+}
+
+// ---------------------------------------------------------------------------
+// ProcessProposal: MsgContributeDKG validation
+//
+// Verifies that ProcessProposal accepts a well-formed MsgContributeDKG when
+// the round is REGISTERING and rejects it when the round is not REGISTERING.
+// ---------------------------------------------------------------------------
+
+func TestProcessProposalAcceptsDKGContribution(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	valAddr := ta.ValidatorOperAddr()
+
+	validators := []*types.ValidatorPallasKey{{ValidatorAddress: valAddr}}
+	roundID := ta.SeedRegisteringCeremony(validators)
+
+	msg := &types.MsgContributeDKG{
+		Creator:     valAddr,
+		VoteRoundId: roundID,
+	}
+	txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
+	require.NoError(t, err)
+
+	resp := ta.CallProcessProposal([][]byte{txBytes})
+	require.Equal(t, abci.ResponseProcessProposal_ACCEPT, resp.Status,
+		"ProcessProposal should ACCEPT valid DKG contribution in REGISTERING state")
+}
+
+func TestProcessProposalRejectsDKGContributionWhenDealt(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	valAddr := ta.ValidatorOperAddr()
+
+	validators := []*types.ValidatorPallasKey{{ValidatorAddress: valAddr}}
+	eaPkBytes := make([]byte, 32)
+	roundID := ta.SeedDealtCeremony(make([]byte, 32), eaPkBytes, nil, validators)
+
+	msg := &types.MsgContributeDKG{
+		Creator:     valAddr,
+		VoteRoundId: roundID,
+	}
+	txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
+	require.NoError(t, err)
+
+	resp := ta.CallProcessProposal([][]byte{txBytes})
+	require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status,
+		"ProcessProposal should REJECT DKG contribution when ceremony is DEALT")
 }
 

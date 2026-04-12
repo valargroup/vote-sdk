@@ -3,14 +3,8 @@ name: DKG ceremony design
 overview: Replace the single-dealer ceremony with Joint-Feldman DKG, where each validator generates their own polynomial and distributes shares to all others. The combined ea_sk is never known to any single party. The change reuses all existing ceremony statuses, crypto primitives, and the tally pipeline unchanged.
 todos:
   - id: p1-proto
-    content: "Phase 1: Add DKGContribution type, MsgContributeDKG message, dkg_contributions field on VoteRound to proto files; regenerate Go types"
-    status: pending
-  - id: p1-codec
-    content: "Phase 1: Add TagContributeDKG (0x0E) to codec.go with encode/decode support"
-    status: pending
-  - id: p1-tests
-    content: "Phase 1 tests: codec round-trip for MsgContributeDKG, DKGContribution proto marshal/unmarshal"
-    status: pending
+    content: "Phase 1: Add DKGContribution type, MsgContributeDKG, dkg_contributions field, TagContributeDKG codec, signer, ante/ProcessProposal wiring (additive — existing dealer path untouched)"
+    status: completed
   - id: p2-combine
     content: "Phase 2: Add CombineCommitments helper in shamir/feldman.go (sums per-contributor commitment vectors)"
     status: pending
@@ -46,6 +40,9 @@ todos:
     status: pending
   - id: p8-docs
     content: "Phase 8: Rewrite tss-ceremony.md Step 4 with full DKG design, security rationale (bias analysis, why no COMMITTING phase, why no vote extensions), and updated security properties"
+    status: pending
+  - id: p9-cleanup
+    content: "Phase 9: Remove single-dealer remnants — delete DealExecutiveAuthorityKey handler, CeremonyDealPrepareProposalHandler, CLI command, ceremony_payloads/ceremony_dealer proto fields, TagDealExecutiveAuthorityKey, all dealer-specific tests"
     status: pending
 isProject: false
 ---
@@ -254,24 +251,25 @@ REGISTERING remains without timeout (same as current -- waits indefinitely for c
 
 ## Development Phases
 
-Each phase is a commit. The existing dealer path works throughout phases 1-5. Only phase 6 flips the switch.
+Each phase is a commit. The existing dealer path works throughout phases 1-5. Phase 6 wires the DKG path into the live pipeline. Phase 9 removes the old dealer code after the DKG path is proven end-to-end.
 
-### Phase 1: Proto + codec boilerplate
+### Phase 1: Proto + codec boilerplate (additive only)
 
-Proto additions and deletions. No backward compat -- delete stale fields and messages outright.
+Purely additive — all existing messages, fields, handlers, and tests remain unchanged and functional.
 
 - [types.proto](vote-sdk/proto/svote/v1/types.proto):
-  - Add `DKGContribution` message
+  - Add `DKGContribution` message (validator_address, feldman_commitments, payloads)
   - Add `dkg_contributions` field (28) to `VoteRound`
-  - Delete `ceremony_payloads` (field 17) and `ceremony_dealer` (field 19) from `VoteRound`
-  - Delete `payloads` (field 4) and `dealer` (field 6) from `CeremonyState`
 - [tx.proto](vote-sdk/proto/svote/v1/tx.proto):
   - Add `MsgContributeDKG` + `MsgContributeDKGResponse` message and `ContributeDKG` RPC
-  - Delete `MsgDealExecutiveAuthorityKey`, `MsgDealExecutiveAuthorityKeyResponse`, and `DealExecutiveAuthorityKey` RPC
 - Regenerate Go types
-- Fix all compile errors from deleted fields/messages (remove references in handlers, injectors, helpers, tests)
-- Add `TagContributeDKG = 0x0E` to [codec.go](vote-sdk/api/codec.go), update `IsCeremonyTag`, add encode/decode case in `DecodeCeremonyTx`; remove `TagDealExecutiveAuthorityKey` references
-- **Tests**: codec round-trip for `MsgContributeDKG`, proto marshal/unmarshal for `DKGContribution`
+- Add `TagContributeDKG = 0x0E` to [codec.go](vote-sdk/api/codec.go), update `IsCeremonyTag`, add encode/decode case in `DecodeCeremonyTx` (keep `TagDealExecutiveAuthorityKey`)
+- Register `DKGContribution` and `MsgContributeDKG` in [types/codec.go](vote-sdk/x/vote/types/codec.go)
+- Add `ProvideContributeDKGSigner` (noopSignerFn) in [module.go](vote-sdk/x/vote/module.go) alongside existing `ProvideDealExecutiveAuthorityKeySigner`
+- Add `MsgContributeDKG` cases in ante handler, `ceremonyValidatorRequired`, `isVoteModuleMsg`
+- Add `CeremonyDKGContributionPrepareProposalHandler` stub in [prepare_proposal_ceremony.go](vote-sdk/app/prepare_proposal_ceremony.go) (no-op, not wired into `app.go`)
+- Add `validateInjectedDKGContribution` in [process_proposal.go](vote-sdk/app/process_proposal.go) alongside existing `validateInjectedDeal`
+- **Tests**: codec round-trip for `MsgContributeDKG`, `IsCeremonyTag(TagContributeDKG)`, ProcessProposal accepts/rejects DKG contribution, signer completeness
 
 ### Phase 2: CombineCommitments helper
 
@@ -311,14 +309,16 @@ Modify ack injector to branch on DKG vs dealer. Both paths work.
 
 ### Phase 6: Wire and swap
 
-Replace dealer path with DKG path. Single commit.
+Replace dealer path with DKG path. Remove all single-dealer remnants. Single commit.
 
-- [ante.go](vote-sdk/app/ante.go): add `TagContributeDKG` case, remove `TagDealExecutiveAuthorityKey` case
-- [process_proposal.go](vote-sdk/app/process_proposal.go): add `TagContributeDKG` validation, remove `TagDealExecutiveAuthorityKey` validation
-- [prepare_proposal.go](vote-sdk/app/prepare_proposal.go): swap `dealInjector` for DKG injector in `ComposedPrepareProposalHandler`
-- [module.go](vote-sdk/x/vote/module.go): clear `dkg_contributions` on timeout reset (replace old `ceremony_payloads` clearing)
-- Delete `CeremonyDealPrepareProposalHandler` and `DealExecutiveAuthorityKey` handler
-- Delete `StripNonAckersFromRound` references to `CeremonyPayloads` (field no longer exists)
+- [app.go](vote-sdk/app/app.go): swap `CeremonyDealPrepareProposalHandler` for `CeremonyDKGContributionPrepareProposalHandler` in `ComposedPrepareProposalHandler`
+- [ante.go](vote-sdk/app/ante.go): remove `TagDealExecutiveAuthorityKey` case (TagContributeDKG already present from Phase 1)
+- [process_proposal.go](vote-sdk/app/process_proposal.go): remove `validateInjectedDeal` and `TagDealExecutiveAuthorityKey` check
+- [module.go](vote-sdk/x/vote/module.go): clear `dkg_contributions` on timeout reset (replace old `ceremony_payloads` clearing); remove `ProvideDealExecutiveAuthorityKeySigner`
+- Delete `CeremonyDealPrepareProposalHandler`, `DealExecutiveAuthorityKey` handler, `CmdDealExecutiveAuthorityKey` CLI command
+- Delete `ceremony_payloads`, `ceremony_dealer` proto fields from `VoteRound` and `CeremonyState`; delete `MsgDealExecutiveAuthorityKey` proto message
+- Remove `StripNonAckersFromRound` references to `CeremonyPayloads`; remove `TagDealExecutiveAuthorityKey` from codec
+- Update/delete all tests that exercise the single-dealer path
 - **Tests**: ProcessProposal accepts valid `TagContributeDKG`, rejects malformed; EndBlocker timeout clears `dkg_contributions`
 
 ### Phase 7: Integration test
@@ -331,6 +331,24 @@ Full ceremony end-to-end with DKG.
 ### Phase 8: Documentation
 
 - Rewrite Step 4 section of [tss-ceremony.md](vote-sdk/docs/tss-ceremony.md) with full design, security rationale, and alternatives analysis
+
+### Phase 9: Remove single-dealer remnants
+
+Delete all code that was kept alive during Phases 1-7 for backward compatibility. After Phase 7 the DKG path is proven end-to-end; nothing references the old dealer path.
+
+- **Proto**: delete `ceremony_payloads` (field 17) and `ceremony_dealer` (field 19) from `VoteRound`; delete `payloads` (field 4) and `dealer` (field 6) from `CeremonyState`; delete `MsgDealExecutiveAuthorityKey`, `MsgDealExecutiveAuthorityKeyResponse`, and `DealExecutiveAuthorityKey` RPC
+- **Codec**: remove `TagDealExecutiveAuthorityKey` (0x07) from `IsCeremonyTag`, `DecodeCeremonyTx`, tag constants; update error messages listing valid tags
+- **Handler**: delete `DealExecutiveAuthorityKey` in [msg_server_ceremony.go](vote-sdk/x/vote/keeper/msg_server_ceremony.go)
+- **Injector**: delete `CeremonyDealPrepareProposalHandler` in [prepare_proposal_ceremony.go](vote-sdk/app/prepare_proposal_ceremony.go) (the DKG injector fully replaces it)
+- **Module**: remove `ProvideDealExecutiveAuthorityKeySigner` from init() and signer function
+- **Ante**: remove `TagDealExecutiveAuthorityKey` case and `MsgDealExecutiveAuthorityKey` from `isVoteModuleMsg` / `ceremonyValidatorRequired`
+- **ProcessProposal**: remove `validateInjectedDeal` and its `TagDealExecutiveAuthorityKey` check
+- **CLI**: delete `CmdDealExecutiveAuthorityKey` in [tx.go](vote-sdk/x/vote/client/cli/tx.go)
+- **Query server**: remove `Payloads` and `Dealer` mapping from `CeremonyState` response
+- **Keeper**: remove `CeremonyPayloads` filtering from `StripNonAckersFromRound`
+- **EndBlocker**: remove `CeremonyPayloads = nil` and `CeremonyDealer = ""` from timeout reset (already replaced by `DkgContributions = nil` in Phase 6)
+- **Tests**: delete all dealer-specific unit tests (`TestCeremonyDealThresholdMode`, `TestDealExecutiveAuthorityKey_*`, `TestThresholdDowngrade_*`, etc.); update lifecycle tests that still reference `CeremonyPayloads`/`CeremonyDealer`
+- Regenerate Go types, verify `go vet ./...` and `go test ./...` clean
 
 ## Documentation Update: [tss-ceremony.md](vote-sdk/docs/tss-ceremony.md)
 

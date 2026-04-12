@@ -135,8 +135,8 @@ func TestEncodeDecodeSubmitTally(t *testing.T) {
 }
 
 func TestIsCeremonyTag(t *testing.T) {
-	// Deal (0x07), Ack (0x08), and SubmitPartialDecryption (0x0D) use the custom wire format.
 	require.True(t, IsCeremonyTag(TagDealExecutiveAuthorityKey))
+	require.True(t, IsCeremonyTag(TagContributeDKG))
 	require.True(t, IsCeremonyTag(TagAckExecutiveAuthorityKey))
 	require.True(t, IsCeremonyTag(TagSubmitPartialDecryption))
 
@@ -169,6 +169,26 @@ func TestEncodeDecodeAckExecutiveAuthorityKey(t *testing.T) {
 	require.Equal(t, msg.AckSignature, decodedMsg.AckSignature)
 }
 
+func TestEncodeDecodeContributeDKG(t *testing.T) {
+	msg := &types.MsgContributeDKG{
+		Creator:     "svvaloper1val",
+		VoteRoundId: bytes.Repeat([]byte{0xAA}, 32),
+	}
+
+	raw, err := EncodeCeremonyTx(msg, TagContributeDKG)
+	require.NoError(t, err)
+	require.Equal(t, TagContributeDKG, raw[0])
+
+	tag, decoded, err := DecodeCeremonyTx(raw)
+	require.NoError(t, err)
+	require.Equal(t, TagContributeDKG, tag)
+
+	decodedMsg, ok := decoded.(*types.MsgContributeDKG)
+	require.True(t, ok)
+	require.Equal(t, msg.Creator, decodedMsg.Creator)
+	require.Equal(t, msg.VoteRoundId, decodedMsg.VoteRoundId)
+}
+
 func TestEncodeCeremonyTx_RejectsNonCustomTags(t *testing.T) {
 	msg := &types.MsgSetVoteManager{
 		Creator:    "sv1admin",
@@ -178,7 +198,7 @@ func TestEncodeCeremonyTx_RejectsNonCustomTags(t *testing.T) {
 	// MsgSetVoteManager (0x0C) uses the standard Cosmos Tx path — EncodeCeremonyTx must reject it.
 	_, err := EncodeCeremonyTx(msg, 0x0C)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "only 0x07, 0x08, 0x0D use custom wire format")
+	require.Contains(t, err.Error(), "only 0x07, 0x08, 0x0D, 0x0E use custom wire format")
 }
 
 func TestDecodeVoteTx_TooShort(t *testing.T) {
