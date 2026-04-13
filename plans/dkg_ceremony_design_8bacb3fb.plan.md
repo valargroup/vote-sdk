@@ -6,11 +6,8 @@ todos:
     content: "Phase 1: Add DKGContribution type, MsgContributeDKG, dkg_contributions field, TagContributeDKG codec, signer, ante/ProcessProposal wiring (additive — existing dealer path untouched)"
     status: completed
   - id: p2-combine
-    content: "Phase 2: Add CombineCommitments helper in shamir/feldman.go (sums per-contributor commitment vectors)"
-    status: pending
-  - id: p2-combine-tests
-    content: "Phase 2 tests: CombineCommitments correctness (sum of individual commitments matches combined polynomial commitment)"
-    status: pending
+    content: "Phase 2: Add CombineCommitments helper in shamir/feldman.go — point-wise sum of n commitment vectors, input validation, full test coverage (algebraic equivalence, combined share verification, single contributor, edge cases)"
+    status: completed
   - id: p3-handler
     content: "Phase 3: Implement ContributeDKG on-chain handler in msg_server_ceremony.go (validate, store, call CombineCommitments on last contribution, transition to DEALT)"
     status: pending
