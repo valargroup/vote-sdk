@@ -88,7 +88,7 @@ func CeremonyDealPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	pallasSkPath string,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
 	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "deal")
@@ -226,21 +226,170 @@ func CeremonyDealPrepareProposalHandler(
 	}
 }
 
-// CeremonyDKGContributionPrepareProposalHandler returns a PrepareProposalInjector
-// that will inject MsgContributeDKG when a PENDING round is REGISTERING.
+// coeffsPathForRound returns the file path for DKG polynomial coefficients.
+// The coefficients are persisted so the ack handler (Phase 5) can compute the
+// contributor's own partial share f_i(shamirIndex) without re-deriving the
+// polynomial. The file stores t concatenated 32-byte Pallas scalars.
 //
-// Currently a no-op stub — the full implementation (polynomial generation,
-// Feldman commitments, ECIES share encryption) is Phase 4. The signature
-// matches the final form so callers in app.go don't need to change.
+//	<dir>/coeffs.<hex(round_id)>
+func coeffsPathForRound(dir string, roundID []byte) string {
+	return filepath.Join(dir, "coeffs."+hex.EncodeToString(roundID))
+}
+
+// writeCoeffs serializes polynomial coefficients as concatenated 32-byte
+// Pallas scalars and writes them to path with mode 0600.
+func writeCoeffs(path string, coeffs []curvey.Scalar) error {
+	buf := make([]byte, 0, len(coeffs)*32)
+	for _, c := range coeffs {
+		buf = append(buf, c.Bytes()...)
+	}
+	return os.WriteFile(path, buf, 0600)
+}
+
+// CeremonyDKGContributionPrepareProposalHandler returns a PrepareProposalInjector
+// that generates and injects a MsgContributeDKG when the proposer is a ceremony
+// validator in a REGISTERING round that has not yet received their contribution.
+//
+// Each validator independently:
+//  1. Generates a random secret s_i and splits it into (t, n) Shamir shares
+//  2. Computes Feldman commitments C_{i,j} = a_{i,j} * G for the polynomial
+//  3. ECIES-encrypts share_{i,k} to validator k's Pallas public key (for k ≠ i)
+//  4. Persists polynomial coefficients to disk for the ack handler
+//  5. Injects MsgContributeDKG containing commitments and n-1 encrypted payloads
+//
+// The proposer's own share is not included in the payloads — the ack handler
+// recomputes it from the persisted coefficients as f_i(shamirIndex).
 func CeremonyDKGContributionPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	pallasSkPath string,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
+	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "dkg-contribute")
+
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal, txs [][]byte) [][]byte {
-		return txs
+		if _, err := loadPallasSk(); err != nil {
+			return txs
+		}
+
+		proposerValAddr, err := resolveProposer(ctx, stakingKeeper, req.ProposerAddress)
+		if err != nil {
+			return txs
+		}
+
+		kvStore := voteKeeper.OpenKVStore(ctx)
+
+		round, err := voteKeeper.FindFirstPendingRound(kvStore, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING)
+		if err != nil {
+			logger.Error("PrepareProposal[dkg-contribute]: failed to find pending round", "err", err)
+			return txs
+		}
+		if round == nil {
+			return txs
+		}
+
+		if _, found := votekeeper.FindValidatorInRoundCeremony(round, proposerValAddr); !found {
+			return txs
+		}
+
+		if _, found := votekeeper.FindContributionInRound(round, proposerValAddr); found {
+			return txs
+		}
+
+		G := elgamal.PallasGenerator()
+		n := len(round.CeremonyValidators)
+		t, err := thresholdForN(n)
+		if err != nil {
+			logger.Error("PrepareProposal[dkg-contribute]: threshold computation failed", "err", err)
+			return txs
+		}
+
+		secret := new(curvey.ScalarPallas).Random(rand.Reader)
+		defer zeroScalar(secret)
+
+		shares, coeffs, err := shamir.Split(secret, t, n)
+		if err != nil {
+			logger.Error("PrepareProposal[dkg-contribute]: shamir split failed", "err", err)
+			return txs
+		}
+		defer func() {
+			for _, c := range coeffs {
+				if c != nil {
+					zeroScalar(c)
+				}
+			}
+		}()
+		defer func() {
+			for i := range shares {
+				if shares[i].Value != nil {
+					zeroScalar(shares[i].Value)
+				}
+			}
+		}()
+
+		commitmentPts, err := shamir.FeldmanCommit(G, coeffs)
+		if err != nil {
+			logger.Error("PrepareProposal[dkg-contribute]: Feldman commit failed", "err", err)
+			return txs
+		}
+		feldmanCommitments := make([][]byte, len(commitmentPts))
+		for j, c := range commitmentPts {
+			feldmanCommitments[j] = c.ToAffineCompressed()
+		}
+
+		if ceremonyDir != "" {
+			cp := coeffsPathForRound(ceremonyDir, round.VoteRoundId)
+			if err := writeCoeffs(cp, coeffs); err != nil {
+				logger.Error("PrepareProposal[dkg-contribute]: failed to write coefficients",
+					"path", cp, "err", err)
+				return txs
+			}
+		}
+
+		payloads := make([]*types.DealerPayload, 0, n-1)
+		for i, v := range round.CeremonyValidators {
+			if v.ValidatorAddress == proposerValAddr {
+				continue
+			}
+			recipientPk, err := elgamal.UnmarshalPublicKey(v.PallasPk)
+			if err != nil {
+				logger.Error("PrepareProposal[dkg-contribute]: invalid Pallas PK",
+					"validator", v.ValidatorAddress, "err", err)
+				return txs
+			}
+			env, err := ecies.Encrypt(G, recipientPk.Point, shares[i].Value.Bytes(), rand.Reader)
+			if err != nil {
+				logger.Error("PrepareProposal[dkg-contribute]: ECIES encryption failed",
+					"validator", v.ValidatorAddress, "err", err)
+				return txs
+			}
+			payloads = append(payloads, &types.DealerPayload{
+				ValidatorAddress: v.ValidatorAddress,
+				EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+				Ciphertext:       env.Ciphertext,
+			})
+		}
+
+		msg := &types.MsgContributeDKG{
+			Creator:            proposerValAddr,
+			VoteRoundId:        round.VoteRoundId,
+			FeldmanCommitments: feldmanCommitments,
+			Payloads:           payloads,
+		}
+
+		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
+		if err != nil {
+			logger.Error("PrepareProposal[dkg-contribute]: failed to encode contribution tx", "err", err)
+			return txs
+		}
+
+		logger.Info("PrepareProposal[dkg-contribute]: injecting MsgContributeDKG",
+			"proposer", proposerValAddr,
+			"round", hex.EncodeToString(round.VoteRoundId),
+			"validators", n,
+			"threshold", t)
+		return append([][]byte{txBytes}, txs...)
 	}
 }
 
@@ -253,12 +402,12 @@ func CeremonyDKGContributionPrepareProposalHandler(
 // the proposer has already acked, injection is skipped gracefully.
 //
 // Verifies the share against Feldman commitments and writes it to
-// <eaSkDir>/share.<hex(round_id)>.
+// <ceremonyDir>/share.<hex(round_id)>.
 func CeremonyAckPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	pallasSkPath string,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
 	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "ack")
@@ -375,8 +524,8 @@ func CeremonyAckPrepareProposalHandler(
 			return txs
 		}
 		var diskPath string
-		if eaSkDir != "" {
-			diskPath = sharePathForRound(eaSkDir, round.VoteRoundId)
+		if ceremonyDir != "" {
+			diskPath = sharePathForRound(ceremonyDir, round.VoteRoundId)
 		}
 
 		// Compute ack_signature = SHA256(AckSigDomain || ea_pk || validator_address).
@@ -498,9 +647,10 @@ func bytesEqual(a, b []byte) bool {
 	return true
 }
 
-// eaSkDirFromPath derives a directory for per-round ea_sk files from the
-// legacy ea_sk_path config value. If the path is empty, returns "".
-func eaSkDirFromPath(eaSkPath string) string {
+// ceremonyDirFromPath derives the ceremony data directory (for per-round
+// shares and coefficients) from the legacy ea_sk_path config value.
+// If the path is empty, returns "".
+func ceremonyDirFromPath(eaSkPath string) string {
 	if eaSkPath == "" {
 		return ""
 	}

@@ -12,6 +12,9 @@ import (
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
 
+	"cosmossdk.io/log"
+
+	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
@@ -495,5 +498,250 @@ func TestProcessProposalRejectsDKGContributionWhenDealt(t *testing.T) {
 	resp := ta.CallProcessProposal([][]byte{txBytes})
 	require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status,
 		"ProcessProposal should REJECT DKG contribution when ceremony is DEALT")
+}
+
+// ---------------------------------------------------------------------------
+// CeremonyDKGContributionPrepareProposalHandler
+//
+// The DKG contribution handler is not wired into ComposedPrepareProposalHandler
+// until Phase 6, so these tests instantiate and invoke it directly.
+// ---------------------------------------------------------------------------
+
+// callDKGContributionHandler creates a CeremonyDKGContributionPrepareProposalHandler
+// and invokes it with the TestApp's keepers. Returns the resulting tx list.
+func callDKGContributionHandler(t *testing.T, ta *testutil.TestApp) [][]byte {
+	t.Helper()
+
+	pallasSkPath := filepath.Join(ta.EaSkDir, "pallas.sk")
+	handler := app.CeremonyDKGContributionPrepareProposalHandler(
+		ta.VoteKeeper(),
+		ta.StakingKeeper,
+		pallasSkPath,
+		ta.EaSkDir,
+		log.NewNopLogger(),
+	)
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height + 1})
+	req := &abci.RequestPrepareProposal{
+		Height:          ta.Height + 1,
+		ProposerAddress: ta.ProposerAddress,
+	}
+	return handler(ctx, req, nil)
+}
+
+// TestDKGContributionInjection verifies the happy path: the handler generates
+// a valid MsgContributeDKG with correct Feldman commitments, n-1 ECIES
+// payloads (excluding self), and persists coefficients to disk.
+func TestDKGContributionInjection(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	require.NotEmpty(t, ta.EaSkDir)
+
+	proposerAddr := ta.ValidatorOperAddr()
+
+	sk2, pk2 := elgamal.KeyGen(rand.Reader)
+	sk3, pk3 := elgamal.KeyGen(rand.Reader)
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk3.Point.ToAffineCompressed()},
+	}
+
+	roundID := ta.SeedRegisteringCeremony(validators)
+
+	txs := callDKGContributionHandler(t, ta)
+	require.Len(t, txs, 1, "expected exactly one injected DKG contribution tx")
+
+	tag, protoMsg, err := voteapi.DecodeCeremonyTx(txs[0])
+	require.NoError(t, err)
+	require.Equal(t, voteapi.TagContributeDKG, tag)
+
+	contrib, ok := protoMsg.(*types.MsgContributeDKG)
+	require.True(t, ok)
+	require.Equal(t, proposerAddr, contrib.Creator)
+	require.Equal(t, roundID, contrib.VoteRoundId)
+
+	// n=3 → t = ceil(3/2) = 2
+	require.Len(t, contrib.FeldmanCommitments, 2, "expected t=2 Feldman commitments")
+	for j, c := range contrib.FeldmanCommitments {
+		require.Len(t, c, 32, "FeldmanCommitment[%d] must be 32-byte compressed Pallas point", j)
+	}
+
+	// n-1 = 2 payloads (excludes self).
+	require.Len(t, contrib.Payloads, 2, "expected n-1=2 payloads (excludes self)")
+	for _, p := range contrib.Payloads {
+		require.NotEqual(t, proposerAddr, p.ValidatorAddress,
+			"payload must not include contributor's own address")
+	}
+
+	// Coefficients file must exist on disk with t*32 bytes.
+	coeffsPath := filepath.Join(ta.EaSkDir, "coeffs."+hex.EncodeToString(roundID))
+	coeffsBytes, err := os.ReadFile(coeffsPath)
+	require.NoError(t, err, "coefficients file must exist after injection")
+	require.Len(t, coeffsBytes, 2*32, "coefficients file must contain t*32 bytes (t=2)")
+
+	// Each ECIES envelope must be decryptable by the intended recipient,
+	// and the decrypted share must verify against the published Feldman commitments.
+	G := elgamal.PallasGenerator()
+	commitmentPts := make([]curvey.Point, len(contrib.FeldmanCommitments))
+	for j, c := range contrib.FeldmanCommitments {
+		pt, err := elgamal.DecompressPallasPoint(c)
+		require.NoError(t, err)
+		commitmentPts[j] = pt
+	}
+
+	recipientSKs := map[string]curvey.Scalar{
+		"sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx": sk2.Scalar,
+		"sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx": sk3.Scalar,
+	}
+	shamirIndices := map[string]int{
+		"sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx": 2,
+		"sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx": 3,
+	}
+
+	for _, p := range contrib.Payloads {
+		recipientSk := recipientSKs[p.ValidatorAddress]
+		require.NotNil(t, recipientSk, "unexpected payload for %s", p.ValidatorAddress)
+
+		ephPk, err := elgamal.UnmarshalPublicKey(p.EphemeralPk)
+		require.NoError(t, err)
+
+		decrypted, err := ecies.Decrypt(recipientSk, &ecies.Envelope{
+			Ephemeral:  ephPk.Point,
+			Ciphertext: p.Ciphertext,
+		})
+		require.NoError(t, err, "ECIES decryption must succeed for %s", p.ValidatorAddress)
+		require.Len(t, decrypted, 32, "decrypted share must be 32 bytes")
+
+		shareScalar, err := new(curvey.ScalarPallas).SetBytes(decrypted)
+		require.NoError(t, err)
+
+		shamirIdx := shamirIndices[p.ValidatorAddress]
+		ok, err = shamir.VerifyFeldmanShare(G, commitmentPts, shamirIdx, shareScalar)
+		require.NoError(t, err)
+		require.True(t, ok, "share for %s must verify against Feldman commitments", p.ValidatorAddress)
+	}
+}
+
+// TestDKGContributionCoeffsRoundTrip verifies that persisted coefficients can
+// be parsed back into scalars whose Feldman commitments match the published ones.
+func TestDKGContributionCoeffsRoundTrip(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	proposerAddr := ta.ValidatorOperAddr()
+
+	_, pk2 := elgamal.KeyGen(rand.Reader)
+	_, pk3 := elgamal.KeyGen(rand.Reader)
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk3.Point.ToAffineCompressed()},
+	}
+
+	roundID := ta.SeedRegisteringCeremony(validators)
+
+	txs := callDKGContributionHandler(t, ta)
+	require.Len(t, txs, 1)
+
+	_, protoMsg, err := voteapi.DecodeCeremonyTx(txs[0])
+	require.NoError(t, err)
+	contrib := protoMsg.(*types.MsgContributeDKG)
+
+	coeffsPath := filepath.Join(ta.EaSkDir, "coeffs."+hex.EncodeToString(roundID))
+	raw, err := os.ReadFile(coeffsPath)
+	require.NoError(t, err)
+
+	tVal := len(contrib.FeldmanCommitments)
+	require.Len(t, raw, tVal*32)
+
+	G := elgamal.PallasGenerator()
+	coeffs := make([]curvey.Scalar, tVal)
+	for i := 0; i < tVal; i++ {
+		s, err := new(curvey.ScalarPallas).SetBytes(raw[i*32 : (i+1)*32])
+		require.NoError(t, err)
+		coeffs[i] = s
+	}
+
+	recomputedPts, err := shamir.FeldmanCommit(G, coeffs)
+	require.NoError(t, err)
+
+	for j, pt := range recomputedPts {
+		require.Equal(t, contrib.FeldmanCommitments[j], pt.ToAffineCompressed(),
+			"recomputed commitment[%d] must match published", j)
+	}
+}
+
+func TestDKGContributionSkipsWhenAlreadyContributed(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	proposerAddr := ta.ValidatorOperAddr()
+
+	_, pk2 := elgamal.KeyGen(rand.Reader)
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
+	}
+
+	roundID := ta.SeedRegisteringCeremony(validators)
+
+	// Pre-populate a contribution from the proposer so the handler skips.
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+	round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{
+		ValidatorAddress: proposerAddr,
+	})
+	err = ta.VoteKeeper().SetVoteRound(kvStore, round)
+	require.NoError(t, err)
+	ta.NextBlock()
+
+	txs := callDKGContributionHandler(t, ta)
+	require.Empty(t, txs, "no DKG contribution should be injected when already contributed")
+}
+
+func TestDKGContributionSkipsWhenNotCeremonyValidator(t *testing.T) {
+	ta, _, _, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	_, pkA := elgamal.KeyGen(rand.Reader)
+	_, pkB := elgamal.KeyGen(rand.Reader)
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: "sv1stranger1xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pkA.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1stranger2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pkB.Point.ToAffineCompressed()},
+	}
+	ta.SeedRegisteringCeremony(validators)
+
+	txs := callDKGContributionHandler(t, ta)
+	require.Empty(t, txs, "no DKG contribution when proposer is not a ceremony validator")
+}
+
+func TestDKGContributionSkipsWhenNoPallasKey(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	valAddr := ta.ValidatorOperAddr()
+
+	_, pk := elgamal.KeyGen(rand.Reader)
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: valAddr, PallasPk: pk.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk.Point.ToAffineCompressed()},
+	}
+	ta.SeedRegisteringCeremony(validators)
+
+	handler := app.CeremonyDKGContributionPrepareProposalHandler(
+		ta.VoteKeeper(),
+		ta.StakingKeeper,
+		"",
+		t.TempDir(),
+		log.NewNopLogger(),
+	)
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height + 1})
+	req := &abci.RequestPrepareProposal{
+		Height:          ta.Height + 1,
+		ProposerAddress: ta.ProposerAddress,
+	}
+	txs := handler(ctx, req, nil)
+	require.Empty(t, txs, "no DKG contribution should be injected without a Pallas key")
 }
 
