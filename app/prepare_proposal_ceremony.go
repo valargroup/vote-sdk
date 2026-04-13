@@ -464,7 +464,7 @@ func CeremonyDKGContributionPrepareProposalHandler(
 //     into a combined share, and verifies the result against the round's combined
 //     commitments. The coefficients file is deleted after success.
 //
-// Both paths write the final share to <eaSkDir>/share.<hex(round_id)> and
+// Both paths write the final share to <ceremonyDir>/share.<hex(round_id)> and
 // inject the same MsgAckExecutiveAuthorityKey.
 func CeremonyAckPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
@@ -514,7 +514,7 @@ func CeremonyAckPrepareProposalHandler(
 		var recoveredSk *elgamal.SecretKey
 
 		if len(round.DkgContributions) > 0 {
-			secretBytes, recoveredSk, err = ackDKGRound(pallasSk, round, proposerValAddr, shamirIndex, G, eaSkDir, logger)
+			secretBytes, recoveredSk, err = ackDKGRound(pallasSk, round, proposerValAddr, shamirIndex, G, ceremonyDir, logger)
 		} else {
 			secretBytes, recoveredSk, err = ackDealerRound(pallasSk, round, proposerValAddr, shamirIndex, G)
 		}
@@ -641,12 +641,12 @@ func ackDKGRound(
 	proposerValAddr string,
 	shamirIndex int,
 	G curvey.Point,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) ([]byte, *elgamal.SecretKey, error) {
 	t := int(round.Threshold)
 
-	coeffs, err := loadCoeffs(coeffsPathForRound(eaSkDir, round.VoteRoundId), t)
+	coeffs, err := loadCoeffs(coeffsPathForRound(ceremonyDir, round.VoteRoundId), t)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load coefficients: %w", err)
 	}
@@ -734,7 +734,7 @@ func ackDKGRound(
 		return nil, nil, fmt.Errorf("combined share failed Feldman verification")
 	}
 
-	zeroAndDeleteCoeffsFile(eaSkDir, round.VoteRoundId, logger)
+	zeroAndDeleteCoeffsFile(ceremonyDir, round.VoteRoundId, logger)
 
 	secretBytes := combinedShare.Bytes()
 	return secretBytes, &elgamal.SecretKey{Scalar: combinedShare}, nil
