@@ -10,9 +10,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"cosmossdk.io/log"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
+
+	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/crypto/ecies"
@@ -455,6 +460,145 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			} else {
 				require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status,
 					"expected REJECT for case: %s", tc.name)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Table-driven unit test for validateInjectedDKGContribution
+// ---------------------------------------------------------------------------
+
+// TestValidateInjectedDKGContribution exercises the exported
+// validateInjectedDKGContribution directly with various good and bad inputs.
+func TestValidateInjectedDKGContribution(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	valAddr := ta.ValidatorOperAddr()
+
+	validators := []*types.ValidatorPallasKey{{ValidatorAddress: valAddr}}
+
+	var currentRoundID []byte
+
+	buildDKGTx := func(creator string, roundID []byte) []byte {
+		msg := &types.MsgContributeDKG{
+			Creator:     creator,
+			VoteRoundId: roundID,
+		}
+		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
+		require.NoError(t, err)
+		return txBytes
+	}
+
+	ctxForValidation := func() sdk.Context {
+		return ta.NewUncachedContext(false, cmtproto.Header{
+			Height:          ta.Height,
+			ProposerAddress: ta.ProposerAddress,
+		})
+	}
+
+	logger := log.NewNopLogger()
+
+	tests := []struct {
+		name        string
+		setup       func()
+		txBytes     func() []byte
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid contribution in REGISTERING state",
+			setup: func() {
+				currentRoundID = ta.SeedRegisteringCeremony(validators)
+			},
+			txBytes: func() []byte {
+				return buildDKGTx(valAddr, currentRoundID)
+			},
+		},
+		{
+			name: "non-existent round → error",
+			setup: func() {
+				currentRoundID = bytes.Repeat([]byte{0xFF}, 32)
+			},
+			txBytes: func() []byte {
+				return buildDKGTx(valAddr, currentRoundID)
+			},
+			wantErr: true,
+		},
+		{
+			name: "round not PENDING (ACTIVE) → error",
+			setup: func() {
+				voteEndTime := ta.Time.Add(1 * time.Hour)
+				currentRoundID = ta.SeedVotingSession(&types.MsgCreateVotingSession{
+					Creator:           "sv1admin",
+					SnapshotHeight:    900,
+					SnapshotBlockhash: bytes.Repeat([]byte{0x0A}, 32),
+					ProposalsHash:     bytes.Repeat([]byte{0x0B}, 32),
+					VoteEndTime:       uint64(voteEndTime.Unix()),
+					NullifierImtRoot:  bytes.Repeat([]byte{0x08}, 32),
+					NcRoot:            bytes.Repeat([]byte{0x09}, 32),
+					Proposals:         testutil.SampleProposals(),
+				})
+			},
+			txBytes: func() []byte {
+				return buildDKGTx(valAddr, currentRoundID)
+			},
+			wantErr:     true,
+			errContains: "round is not PENDING",
+		},
+		{
+			name: "ceremony not REGISTERING (DEALT) → error",
+			setup: func() {
+				currentRoundID = ta.SeedDealtCeremony(make([]byte, 32), make([]byte, 32), nil, validators)
+			},
+			txBytes: func() []byte {
+				return buildDKGTx(valAddr, currentRoundID)
+			},
+			wantErr:     true,
+			errContains: "ceremony is not REGISTERING",
+		},
+		{
+			name: "creator not a ceremony validator → error",
+			setup: func() {
+				currentRoundID = ta.SeedRegisteringCeremony(validators)
+			},
+			txBytes: func() []byte {
+				return buildDKGTx("cosmosvaloper1notinceremony", currentRoundID)
+			},
+			wantErr:     true,
+			errContains: "creator is not a ceremony validator",
+		},
+		{
+			name: "creator does not match block proposer → error",
+			setup: func() {
+				other := []*types.ValidatorPallasKey{{ValidatorAddress: "cosmosvaloper1other"}}
+				currentRoundID = ta.SeedRegisteringCeremony(other)
+			},
+			txBytes: func() []byte {
+				return buildDKGTx("cosmosvaloper1other", currentRoundID)
+			},
+			wantErr: true,
+		},
+		{
+			name:  "malformed tx (corrupted protobuf) → error",
+			setup: func() {},
+			txBytes: func() []byte {
+				return []byte{voteapi.TagContributeDKG, 0xFF, 0xFF, 0xFF}
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup()
+			err := app.ValidateInjectedDKGContribution(ctxForValidation(), ta.VoteKeeper(), tc.txBytes(), logger)
+			if tc.wantErr {
+				require.Error(t, err, "expected error for case: %s", tc.name)
+				if tc.errContains != "" {
+					require.Contains(t, err.Error(), tc.errContains)
+				}
+			} else {
+				require.NoError(t, err, "expected no error for case: %s", tc.name)
 			}
 		})
 	}
