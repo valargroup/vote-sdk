@@ -88,7 +88,7 @@ func CeremonyDealPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	pallasSkPath string,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
 	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "deal")
@@ -263,7 +263,7 @@ func CeremonyDKGContributionPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	pallasSkPath string,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
 	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "dkg-contribute")
@@ -338,8 +338,8 @@ func CeremonyDKGContributionPrepareProposalHandler(
 			feldmanCommitments[j] = c.ToAffineCompressed()
 		}
 
-		if eaSkDir != "" {
-			cp := coeffsPathForRound(eaSkDir, round.VoteRoundId)
+		if ceremonyDir != "" {
+			cp := coeffsPathForRound(ceremonyDir, round.VoteRoundId)
 			if err := writeCoeffs(cp, coeffs); err != nil {
 				logger.Error("PrepareProposal[dkg-contribute]: failed to write coefficients",
 					"path", cp, "err", err)
@@ -402,12 +402,12 @@ func CeremonyDKGContributionPrepareProposalHandler(
 // the proposer has already acked, injection is skipped gracefully.
 //
 // Verifies the share against Feldman commitments and writes it to
-// <eaSkDir>/share.<hex(round_id)>.
+// <ceremonyDir>/share.<hex(round_id)>.
 func CeremonyAckPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	pallasSkPath string,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
 	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "ack")
@@ -524,8 +524,8 @@ func CeremonyAckPrepareProposalHandler(
 			return txs
 		}
 		var diskPath string
-		if eaSkDir != "" {
-			diskPath = sharePathForRound(eaSkDir, round.VoteRoundId)
+		if ceremonyDir != "" {
+			diskPath = sharePathForRound(ceremonyDir, round.VoteRoundId)
 		}
 
 		// Compute ack_signature = SHA256(AckSigDomain || ea_pk || validator_address).
@@ -647,9 +647,10 @@ func bytesEqual(a, b []byte) bool {
 	return true
 }
 
-// eaSkDirFromPath derives a directory for per-round ea_sk files from the
-// legacy ea_sk_path config value. If the path is empty, returns "".
-func eaSkDirFromPath(eaSkPath string) string {
+// ceremonyDirFromPath derives the ceremony data directory (for per-round
+// shares and coefficients) from the legacy ea_sk_path config value.
+// If the path is empty, returns "".
+func ceremonyDirFromPath(eaSkPath string) string {
 	if eaSkPath == "" {
 		return ""
 	}
