@@ -13,7 +13,10 @@ import (
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
+	"github.com/mikelodder7/curvey"
+
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/crypto/shamir"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -172,6 +175,178 @@ func (ms msgServer) DealExecutiveAuthorityKey(goCtx context.Context, msg *types.
 	))
 
 	return &types.MsgDealExecutiveAuthorityKeyResponse{}, nil
+}
+
+// ContributeDKG handles MsgContributeDKG.
+// Each ceremony validator contributes their Feldman commitment vector and
+// ECIES-encrypted shares for all other validators. When the final (n-th)
+// contribution arrives, the handler combines all commitment vectors via
+// CombineCommitments, derives the joint ea_pk, and transitions REGISTERING → DEALT.
+//
+// This message can only be injected by the block proposer via PrepareProposal;
+// direct submission through the mempool is rejected by ValidateProposerIsCreator.
+func (ms msgServer) ContributeDKG(goCtx context.Context, msg *types.MsgContributeDKG) (*types.MsgContributeDKGResponse, error) {
+	// Verify creator is the block proposer.
+	if err := ms.k.ValidateProposerIsCreator(goCtx, msg.Creator, "MsgContributeDKG"); err != nil {
+		return nil, err
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := ms.k.OpenKVStore(ctx)
+
+	// Get the pending round.
+	round, err := ms.k.GetPendingRoundWithCeremony(kvStore, msg.VoteRoundId, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate the number of validators in the round.
+	nValidators := len(round.CeremonyValidators)
+	if nValidators == 0 {
+		return nil, fmt.Errorf("%w: no validators in round ceremony", types.ErrCeremonyWrongStatus)
+	}
+
+	// Validate the creator is a registered validator.
+	if _, found := FindValidatorInRoundCeremony(round, msg.Creator); !found {
+		return nil, fmt.Errorf("%w: %s is not a ceremony validator", types.ErrNotRegisteredValidator, msg.Creator)
+	}
+
+	// Validate the creator has not already contributed.
+	if _, found := FindContributionInRound(round, msg.Creator); found {
+		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateContribution, msg.Creator)
+	}
+
+	// Validate the number of Feldman commitments.
+	expectedThreshold, err := ThresholdForN(nValidators)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", types.ErrInvalidThreshold, err)
+	}
+
+	// Validate the number of Feldman commitments matches the threshold.
+	if len(msg.FeldmanCommitments) != expectedThreshold {
+		return nil, fmt.Errorf("%w: expected %d Feldman commitments, got %d",
+			types.ErrInvalidThreshold, expectedThreshold, len(msg.FeldmanCommitments))
+	}
+	// Validate the Feldman commitments are valid Pallas points.
+	for i, c := range msg.FeldmanCommitments {
+		if _, err := elgamal.UnmarshalPublicKey(c); err != nil {
+			return nil, fmt.Errorf("%w: feldman_commitment[%d]: %v",
+				types.ErrInvalidPallasPoint, i, err)
+		}
+	}
+
+	// Validate the number of payloads.
+	expectedPayloads := nValidators - 1
+	if len(msg.Payloads) != expectedPayloads {
+		return nil, fmt.Errorf("%w: got %d payloads, expected %d (all validators except contributor)",
+			types.ErrPayloadMismatch, len(msg.Payloads), expectedPayloads)
+	}
+
+	// Validate the payloads.
+	covered := make(map[string]bool, expectedPayloads)
+	for _, p := range msg.Payloads {
+		// Validate the payload does not include the contributor's own address.
+		if p.ValidatorAddress == msg.Creator {
+			return nil, fmt.Errorf("%w: payload must not include contributor's own address %s",
+				types.ErrPayloadMismatch, msg.Creator)
+		}
+		// Validate the payload references a registered ceremony validator.
+		if _, found := FindValidatorInRoundCeremony(round, p.ValidatorAddress); !found {
+			return nil, fmt.Errorf("%w: payload references unknown validator %s",
+				types.ErrNotRegisteredValidator, p.ValidatorAddress)
+		}
+		// Validate the payload is not a duplicate.
+		if covered[p.ValidatorAddress] {
+			return nil, fmt.Errorf("%w: duplicate payload for validator %s",
+				types.ErrPayloadMismatch, p.ValidatorAddress)
+		}
+		// Mark the payload as covered.
+		covered[p.ValidatorAddress] = true
+
+		// Validate the ephemeral public key is a valid Pallas point.
+		if _, err := elgamal.UnmarshalPublicKey(p.EphemeralPk); err != nil {
+			return nil, fmt.Errorf("%w: ephemeral_pk for %s: %v",
+				types.ErrInvalidPallasPoint, p.ValidatorAddress, err)
+		}
+	}
+
+	// Store the contribution.
+	round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{
+		ValidatorAddress:   msg.Creator,
+		FeldmanCommitments: msg.FeldmanCommitments,
+		Payloads:           msg.Payloads,
+	})
+
+	// If the number of contributions equals the number of validators, finalize the DKG.
+	if len(round.DkgContributions) == nValidators {
+		if err := ms.finalizeDKG(ctx, round, nValidators, expectedThreshold); err != nil {
+			return nil, err
+		}
+	} else {
+		AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+			fmt.Sprintf("DKG contribution from %s (%d/%d)",
+				msg.Creator, len(round.DkgContributions), nValidators))
+	}
+
+	// Set the round.
+	if err := ms.k.SetVoteRound(kvStore, round); err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeContributeDKG,
+		sdk.NewAttribute(types.AttributeKeyRoundID, hex.EncodeToString(msg.VoteRoundId)),
+		sdk.NewAttribute(types.AttributeKeyValidatorAddress, msg.Creator),
+		sdk.NewAttribute(types.AttributeKeyCeremonyStatus, round.CeremonyStatus.String()),
+	))
+
+	return &types.MsgContributeDKGResponse{}, nil
+}
+
+// finalizeDKG deserializes all per-contributor commitment vectors, combines them
+// via CombineCommitments, and transitions the round to DEALT. Called when the
+// n-th DKG contribution arrives.
+func (ms msgServer) finalizeDKG(ctx sdk.Context, round *types.VoteRound, nValidators, threshold int) error {
+	allCommitments := make([][]curvey.Point, nValidators)
+	for i, contrib := range round.DkgContributions {
+		vec := make([]curvey.Point, len(contrib.FeldmanCommitments))
+		for j, raw := range contrib.FeldmanCommitments {
+			pt, err := elgamal.UnmarshalPublicKey(raw)
+			if err != nil {
+				return fmt.Errorf("failed to unmarshal contribution %d commitment %d: %w", i, j, err)
+			}
+			vec[j] = pt.Point
+		}
+		allCommitments[i] = vec
+	}
+
+	combined, err := shamir.CombineCommitments(allCommitments)
+	if err != nil {
+		return fmt.Errorf("failed to combine commitments: %w", err)
+	}
+
+	round.EaPk = combined[0].ToAffineCompressed()
+
+	round.FeldmanCommitments = make([][]byte, len(combined))
+	for j, c := range combined {
+		round.FeldmanCommitments[j] = c.ToAffineCompressed()
+	}
+
+	round.Threshold = uint32(threshold)
+
+	for i := range round.CeremonyValidators {
+		round.CeremonyValidators[i].ShamirIndex = uint32(i + 1)
+	}
+
+	round.CeremonyPhaseStart = uint64(ctx.BlockTime().Unix())
+	round.CeremonyPhaseTimeout = types.DefaultDealTimeout
+	round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_DEALT
+
+	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+		fmt.Sprintf("DKG complete (%d/%d contributions), ea_pk=%s",
+			nValidators, nValidators, hex.EncodeToString(round.EaPk)[:16]))
+
+	return nil
 }
 
 // AckExecutiveAuthorityKey handles MsgAckExecutiveAuthorityKey.

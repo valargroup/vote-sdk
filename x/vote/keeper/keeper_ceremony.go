@@ -92,6 +92,17 @@ func FindValidatorInRoundCeremony(round *types.VoteRound, valAddr string) (*type
 	return nil, false
 }
 
+// FindContributionInRound returns the DKGContribution and true if valAddr has
+// already submitted a contribution in this round, or (nil, false) otherwise.
+func FindContributionInRound(round *types.VoteRound, valAddr string) (*types.DKGContribution, bool) {
+	for _, c := range round.DkgContributions {
+		if c.ValidatorAddress == valAddr {
+			return c, true
+		}
+	}
+	return nil, false
+}
+
 // FindAckInRoundCeremony returns the index and true if valAddr has an ack entry
 // in the round's ceremony, or (-1, false) otherwise.
 func FindAckInRoundCeremony(round *types.VoteRound, valAddr string) (int, bool) {

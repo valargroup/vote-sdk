@@ -25,6 +25,7 @@ var (
 	ErrInvalidPallasPoint     = errors.Register(ModuleName, 23, "invalid pallas point")
 	ErrPayloadMismatch        = errors.Register(ModuleName, 24, "dealer payload count does not match validator count")
 	ErrDuplicateAck           = errors.Register(ModuleName, 25, "validator already acknowledged")
+	ErrDuplicateContribution  = errors.Register(ModuleName, 33, "validator already contributed to DKG")
 	ErrNotRegisteredValidator  = errors.Register(ModuleName, 26, "validator not in ceremony validator list")
 	ErrCeremonySessionActive    = errors.Register(ModuleName, 27, "ceremony session is in progress")
 	ErrInvalidThreshold         = errors.Register(ModuleName, 28, "invalid threshold parameters")

@@ -213,6 +213,32 @@ func (s *KeeperTestSuite) TestFindValidatorInRoundCeremony() {
 	}
 }
 
+func (s *KeeperTestSuite) TestFindContributionInRound() {
+	round := &types.VoteRound{
+		DkgContributions: []*types.DKGContribution{
+			{ValidatorAddress: "val1"},
+			{ValidatorAddress: "val2"},
+		},
+	}
+
+	c, found := keeper.FindContributionInRound(round, "val1")
+	s.Require().True(found)
+	s.Require().Equal("val1", c.ValidatorAddress)
+
+	c, found = keeper.FindContributionInRound(round, "val2")
+	s.Require().True(found)
+	s.Require().Equal("val2", c.ValidatorAddress)
+
+	c, found = keeper.FindContributionInRound(round, "val3")
+	s.Require().False(found)
+	s.Require().Nil(c)
+
+	emptyRound := &types.VoteRound{}
+	c, found = keeper.FindContributionInRound(emptyRound, "val1")
+	s.Require().False(found)
+	s.Require().Nil(c)
+}
+
 func (s *KeeperTestSuite) TestFindAckInRoundCeremony() {
 	round := &types.VoteRound{
 		CeremonyAcks: []*types.AckEntry{

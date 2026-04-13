@@ -9,11 +9,8 @@ todos:
     content: "Phase 2: Add CombineCommitments helper in shamir/feldman.go — point-wise sum of n commitment vectors, input validation, full test coverage (algebraic equivalence, combined share verification, single contributor, edge cases)"
     status: completed
   - id: p3-handler
-    content: "Phase 3: Implement ContributeDKG on-chain handler in msg_server_ceremony.go (validate, store, call CombineCommitments on last contribution, transition to DEALT)"
-    status: pending
-  - id: p3-handler-tests
-    content: "Phase 3 tests: handler validation (reject non-proposer, non-validator, duplicate, wrong counts), partial accumulation stays REGISTERING, final contribution transitions to DEALT with correct combined commitments and ea_pk"
-    status: pending
+    content: "Phase 3: ContributeDKG handler — validate contributions, store in DkgContributions, finalize via CombineCommitments on n-th contribution (REGISTERING→DEALT), FindContributionInRound helper, ErrDuplicateContribution, EventTypeContributeDKG, 20 tests covering happy path, partial accumulation, real-crypto integration, and 13 rejection cases"
+    status: completed
   - id: p4-injector
     content: "Phase 4: Implement CeremonyDKGPrepareProposalHandler (generate polynomial, save coefficients to disk, ECIES encrypt shares, inject MsgContributeDKG). Not wired yet."
     status: pending

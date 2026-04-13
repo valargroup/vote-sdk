@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 
 	"cosmossdk.io/math"
+	"github.com/mikelodder7/curvey"
 	"google.golang.org/protobuf/proto"
 
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
@@ -1123,6 +1124,572 @@ func (s *MsgServerTestSuite) TestCreateValidatorWithPallasKey_ProtoReflectFullNa
 		"svote.v1.MsgCreateValidatorWithPallasKey",
 		string(msg.ProtoReflect().Descriptor().FullName()),
 	)
+}
+
+// ===========================================================================
+// MsgContributeDKG handler tests
+// ===========================================================================
+
+// makeDKGPayloads builds valid DealerPayloads for all addresses except excludeAddr.
+func makeDKGPayloads(allAddrs []string, excludeAddr string) []*types.DealerPayload {
+	var payloads []*types.DealerPayload
+	for i, addr := range allAddrs {
+		if addr == excludeAddr {
+			continue
+		}
+		payloads = append(payloads, &types.DealerPayload{
+			ValidatorAddress: addr,
+			EphemeralPk:      testPallasPK(),
+			Ciphertext:       bytes.Repeat([]byte{byte(i + 1)}, 48),
+		})
+	}
+	return payloads
+}
+
+// makeDKGCommitments generates t valid Pallas points to use as Feldman commitments.
+func makeDKGCommitments(t int) [][]byte {
+	c := make([][]byte, t)
+	for i := range c {
+		c[i] = testPallasPK()
+	}
+	return c
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_SingleValidator() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(1)
+	s.setBlockProposer(addrs[0])
+
+	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: makeDKGCommitments(1),
+		Payloads:           nil,
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
+	s.Require().Len(round.DkgContributions, 1)
+	s.Require().EqualValues(1, round.Threshold)
+	s.Require().Len(round.FeldmanCommitments, 1)
+	s.Require().NotEmpty(round.EaPk)
+	s.Require().EqualValues(1, round.CeremonyValidators[0].ShamirIndex)
+	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), round.CeremonyPhaseStart)
+	s.Require().Equal(types.DefaultDealTimeout, round.CeremonyPhaseTimeout)
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_TwoValidators() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+
+	// ThresholdForN(2) = 2 (the t<2 floor kicks in), so each contributor
+	// must supply 2 Feldman commitments and 1 payload (n-1 = 1).
+	for _, addr := range addrs {
+		s.setBlockProposer(addr)
+		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+			Creator:            addr,
+			VoteRoundId:        roundID,
+			FeldmanCommitments: makeDKGCommitments(2),
+			Payloads:           makeDKGPayloads(addrs, addr),
+		})
+		s.Require().NoError(err)
+	}
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	s.Require().EqualValues(2, round.Threshold)
+	s.Require().Len(round.FeldmanCommitments, 2)
+	s.Require().Len(round.DkgContributions, 2)
+	s.Require().NotEmpty(round.EaPk)
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_PartialAccumulation() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(3)
+
+	// First contribution: stays REGISTERING.
+	s.setBlockProposer(addrs[0])
+	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: makeDKGCommitments(2),
+		Payloads:           makeDKGPayloads(addrs, addrs[0]),
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
+	s.Require().Len(round.DkgContributions, 1)
+	s.Require().Empty(round.EaPk, "ea_pk must not be set before final contribution")
+	s.Require().Empty(round.FeldmanCommitments, "combined commitments must not be set yet")
+
+	// Second contribution: still REGISTERING (need 3).
+	s.setBlockProposer(addrs[1])
+	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[1],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: makeDKGCommitments(2),
+		Payloads:           makeDKGPayloads(addrs, addrs[1]),
+	})
+	s.Require().NoError(err)
+
+	round, err = s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
+	s.Require().Len(round.DkgContributions, 2)
+
+	// Third contribution: transitions to DEALT.
+	s.setBlockProposer(addrs[2])
+	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[2],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: makeDKGCommitments(2),
+		Payloads:           makeDKGPayloads(addrs, addrs[2]),
+	})
+	s.Require().NoError(err)
+
+	round, err = s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	s.Require().Len(round.DkgContributions, 3)
+	s.Require().NotEmpty(round.EaPk)
+	s.Require().Len(round.FeldmanCommitments, 2)
+	s.Require().EqualValues(2, round.Threshold)
+
+	for i, v := range round.CeremonyValidators {
+		s.Require().EqualValues(i+1, v.ShamirIndex, "ShamirIndex for validator %d", i)
+	}
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_FinalComputesCorrectCombinedCommitments() {
+	s.SetupTest()
+
+	G := elgamal.PallasGenerator()
+	const numValidators = 3
+	const threshold = 2
+
+	addrs := make([]string, numValidators)
+	ceremonyVals := make([]*types.ValidatorPallasKey, numValidators)
+	for i := range addrs {
+		addrs[i] = testValoperAddr(byte(i + 1))
+		ceremonyVals[i] = &types.ValidatorPallasKey{
+			ValidatorAddress: addrs[i],
+			PallasPk:         testPallasPK(),
+		}
+	}
+	roundID := s.createPendingRound(ceremonyVals)
+
+	allCoeffs := make([][]shamir.Share, numValidators)
+	allCommitmentPts := make([][]curvey.Point, numValidators)
+	allFeldmanBytes := make([][][]byte, numValidators)
+	secrets := make([]curvey.Scalar, numValidators)
+
+	for i := 0; i < numValidators; i++ {
+		sk, _ := elgamal.KeyGen(rand.Reader)
+		secrets[i] = sk.Scalar
+		shares, coeffs, err := shamir.Split(sk.Scalar, threshold, numValidators)
+		s.Require().NoError(err)
+		_ = shares
+		allCoeffs[i] = nil
+
+		commitPts, err := shamir.FeldmanCommit(G, coeffs)
+		s.Require().NoError(err)
+		allCommitmentPts[i] = commitPts
+
+		feldmanBytes := make([][]byte, threshold)
+		for j, c := range commitPts {
+			feldmanBytes[j] = c.ToAffineCompressed()
+		}
+		allFeldmanBytes[i] = feldmanBytes
+	}
+
+	for i, addr := range addrs {
+		s.setBlockProposer(addr)
+		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+			Creator:            addr,
+			VoteRoundId:        roundID,
+			FeldmanCommitments: allFeldmanBytes[i],
+			Payloads:           makeDKGPayloads(addrs, addr),
+		})
+		s.Require().NoError(err)
+	}
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+
+	expectedCombined, err := shamir.CombineCommitments(allCommitmentPts)
+	s.Require().NoError(err)
+
+	for j, c := range expectedCombined {
+		s.Require().Equal(c.ToAffineCompressed(), round.FeldmanCommitments[j],
+			"combined Feldman commitment[%d] must match", j)
+	}
+
+	expectedEaPk := expectedCombined[0].ToAffineCompressed()
+	s.Require().Equal(expectedEaPk, round.EaPk, "ea_pk must equal combined[0]")
+
+	var secretSum curvey.Scalar
+	for _, sec := range secrets {
+		if secretSum == nil {
+			secretSum = sec
+		} else {
+			secretSum = secretSum.Add(sec)
+		}
+	}
+	expectedPK := G.Mul(secretSum).ToAffineCompressed()
+	s.Require().Equal(expectedPK, round.EaPk, "ea_pk must equal (sum of secrets)*G")
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_EmitsEvent() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(1)
+	s.setBlockProposer(addrs[0])
+
+	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: makeDKGCommitments(1),
+		Payloads:           nil,
+	})
+	s.Require().NoError(err)
+
+	var found bool
+	for _, e := range s.ctx.EventManager().Events() {
+		if e.Type == types.EventTypeContributeDKG {
+			found = true
+			for _, attr := range e.Attributes {
+				if attr.Key == types.AttributeKeyValidatorAddress {
+					s.Require().Equal(addrs[0], attr.Value)
+				}
+			}
+		}
+	}
+	s.Require().True(found, "expected %s event", types.EventTypeContributeDKG)
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_CeremonyLog() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+
+	s.setBlockProposer(addrs[0])
+	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: makeDKGCommitments(2),
+		Payloads:           makeDKGPayloads(addrs, addrs[0]),
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Len(round.CeremonyLog, 1)
+	s.Require().Contains(round.CeremonyLog[0], "DKG contribution from")
+	s.Require().Contains(round.CeremonyLog[0], "1/2")
+
+	s.setBlockProposer(addrs[1])
+	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[1],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: makeDKGCommitments(2),
+		Payloads:           makeDKGPayloads(addrs, addrs[1]),
+	})
+	s.Require().NoError(err)
+
+	round, err = s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Len(round.CeremonyLog, 2)
+	s.Require().Contains(round.CeremonyLog[1], "DKG complete")
+	s.Require().Contains(round.CeremonyLog[1], "ea_pk=")
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_Rejects() {
+	tests := []struct {
+		name        string
+		setup       func() (roundID []byte, addrs []string)
+		msg         func(roundID []byte, addrs []string) *types.MsgContributeDKG
+		errContains string
+	}{
+		{
+			name: "round not found",
+			setup: func() ([]byte, []string) {
+				return bytes.Repeat([]byte{0xDE}, 32), nil
+			},
+			msg: func(roundID []byte, _ []string) *types.MsgContributeDKG {
+				return &types.MsgContributeDKG{
+					Creator:     "val1",
+					VoteRoundId: roundID,
+				}
+			},
+			errContains: "vote round not found",
+		},
+		{
+			name: "ceremony already DEALT",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, _ := s.keeper.GetVoteRound(kv, roundID)
+				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_DEALT
+				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				return &types.MsgContributeDKG{
+					Creator:     addrs[0],
+					VoteRoundId: roundID,
+				}
+			},
+			errContains: "ceremony is CEREMONY_STATUS_DEALT",
+		},
+		{
+			name: "round is ACTIVE (not PENDING)",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, _ := s.keeper.GetVoteRound(kv, roundID)
+				round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
+				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				return &types.MsgContributeDKG{
+					Creator:     addrs[0],
+					VoteRoundId: roundID,
+				}
+			},
+			errContains: "round is SESSION_STATUS_ACTIVE",
+		},
+		{
+			name: "no validators in round ceremony",
+			setup: func() ([]byte, []string) {
+				roundID := s.createPendingRound(nil)
+				return roundID, nil
+			},
+			msg: func(roundID []byte, _ []string) *types.MsgContributeDKG {
+				return &types.MsgContributeDKG{
+					Creator:     "val1",
+					VoteRoundId: roundID,
+				}
+			},
+			errContains: "no validators in round ceremony",
+		},
+		{
+			name: "non-registered validator",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, _ []string) *types.MsgContributeDKG {
+				return &types.MsgContributeDKG{
+					Creator:     "outsider",
+					VoteRoundId: roundID,
+				}
+			},
+			errContains: "is not a ceremony validator",
+		},
+		{
+			name: "duplicate contribution",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(3)
+				s.setBlockProposer(addrs[0])
+				_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: makeDKGCommitments(2),
+					Payloads:           makeDKGPayloads(addrs, addrs[0]),
+				})
+				s.Require().NoError(err)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				return &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: makeDKGCommitments(2),
+					Payloads:           makeDKGPayloads(addrs, addrs[0]),
+				}
+			},
+			errContains: "already contributed",
+		},
+		{
+			name: "wrong Feldman commitment count",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(3)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				return &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: makeDKGCommitments(1),
+					Payloads:           makeDKGPayloads(addrs, addrs[0]),
+				}
+			},
+			errContains: "expected 2 Feldman commitments, got 1",
+		},
+		{
+			name: "invalid Feldman commitment point",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				commitments := makeDKGCommitments(2)
+				commitments[1] = bytes.Repeat([]byte{0xFF}, 32)
+				return &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: commitments,
+					Payloads:           makeDKGPayloads(addrs, addrs[0]),
+				}
+			},
+			errContains: "invalid pallas point",
+		},
+		{
+			name: "payload count mismatch (too few)",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(3)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				return &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: makeDKGCommitments(2),
+					Payloads:           makeDKGPayloads(addrs, addrs[0])[:1],
+				}
+			},
+			errContains: "got 1 payloads, expected 2",
+		},
+		{
+			name: "payload includes contributor's own address",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				payloads := []*types.DealerPayload{{
+					ValidatorAddress: addrs[0],
+					EphemeralPk:      testPallasPK(),
+					Ciphertext:       bytes.Repeat([]byte{0x01}, 48),
+				}}
+				return &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: makeDKGCommitments(2),
+					Payloads:           payloads,
+				}
+			},
+			errContains: "must not include contributor's own address",
+		},
+		{
+			name: "payload references unknown validator",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				payloads := []*types.DealerPayload{{
+					ValidatorAddress: "unknown_val",
+					EphemeralPk:      testPallasPK(),
+					Ciphertext:       bytes.Repeat([]byte{0x01}, 48),
+				}}
+				return &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: makeDKGCommitments(2),
+					Payloads:           payloads,
+				}
+			},
+			errContains: "unknown validator",
+		},
+		{
+			name: "duplicate payload for same validator",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(3)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				payloads := []*types.DealerPayload{
+					{ValidatorAddress: addrs[1], EphemeralPk: testPallasPK(), Ciphertext: bytes.Repeat([]byte{0x01}, 48)},
+					{ValidatorAddress: addrs[1], EphemeralPk: testPallasPK(), Ciphertext: bytes.Repeat([]byte{0x02}, 48)},
+				}
+				return &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: makeDKGCommitments(2),
+					Payloads:           payloads,
+				}
+			},
+			errContains: "duplicate payload",
+		},
+		{
+			name: "invalid ephemeral_pk in payload",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				payloads := []*types.DealerPayload{{
+					ValidatorAddress: addrs[1],
+					EphemeralPk:      make([]byte, 32),
+					Ciphertext:       bytes.Repeat([]byte{0x01}, 48),
+				}}
+				return &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: makeDKGCommitments(2),
+					Payloads:           payloads,
+				}
+			},
+			errContains: "invalid pallas point",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			roundID, addrs := tc.setup()
+			msg := tc.msg(roundID, addrs)
+			if len(addrs) > 0 && msg.Creator == "" {
+				msg.Creator = addrs[0]
+			}
+			s.setBlockProposer(msg.Creator)
+			_, err := s.msgServer.ContributeDKG(s.ctx, msg)
+			s.Require().Error(err)
+			s.Require().Contains(err.Error(), tc.errContains)
+		})
+	}
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_RejectsProposerMismatch() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+	s.setBlockProposer(addrs[1]) // proposer != creator
+	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: makeDKGCommitments(2),
+		Payloads:           makeDKGPayloads(addrs, addrs[0]),
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "does not match block proposer")
 }
 
 // ===========================================================================
