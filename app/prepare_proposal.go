@@ -80,7 +80,7 @@ func ComposedPrepareProposalHandler(
 func TallyPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) sdk.PrepareProposalHandler {
 	var (
@@ -97,14 +97,14 @@ func TallyPrepareProposalHandler(
 		return bsgs
 	}
 
-	if eaSkDir != "" {
+	if ceremonyDir != "" {
 		go loadBSGS()
 	}
 
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
 		txs := req.Txs
 
-		if eaSkDir == "" {
+		if ceremonyDir == "" {
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 

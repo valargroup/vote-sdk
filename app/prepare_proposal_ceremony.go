@@ -88,7 +88,7 @@ func CeremonyDealPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	pallasSkPath string,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
 	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "deal")
@@ -317,7 +317,7 @@ func CeremonyDKGContributionPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	pallasSkPath string,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
 	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "dkg-contribute")
@@ -392,8 +392,8 @@ func CeremonyDKGContributionPrepareProposalHandler(
 			feldmanCommitments[j] = c.ToAffineCompressed()
 		}
 
-		if eaSkDir != "" {
-			cp := coeffsPathForRound(eaSkDir, round.VoteRoundId)
+		if ceremonyDir != "" {
+			cp := coeffsPathForRound(ceremonyDir, round.VoteRoundId)
 			if err := writeCoeffs(cp, coeffs); err != nil {
 				logger.Error("PrepareProposal[dkg-contribute]: failed to write coefficients",
 					"path", cp, "err", err)
@@ -470,7 +470,7 @@ func CeremonyAckPrepareProposalHandler(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
 	pallasSkPath string,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
 	loadPallasSk := pallasSkLoader(pallasSkPath, logger, "ack")
@@ -528,8 +528,8 @@ func CeremonyAckPrepareProposalHandler(
 		defer zeroSecret(secretBytes, recoveredSk)
 
 		var diskPath string
-		if eaSkDir != "" {
-			diskPath = sharePathForRound(eaSkDir, round.VoteRoundId)
+		if ceremonyDir != "" {
+			diskPath = sharePathForRound(ceremonyDir, round.VoteRoundId)
 		}
 
 		h := sha256.New()
@@ -821,9 +821,10 @@ func bytesEqual(a, b []byte) bool {
 	return true
 }
 
-// eaSkDirFromPath derives a directory for per-round ea_sk files from the
-// legacy ea_sk_path config value. If the path is empty, returns "".
-func eaSkDirFromPath(eaSkPath string) string {
+// ceremonyDirFromPath derives the ceremony data directory (for per-round
+// shares and coefficients) from the legacy ea_sk_path config value.
+// If the path is empty, returns "".
+func ceremonyDirFromPath(eaSkPath string) string {
 	if eaSkPath == "" {
 		return ""
 	}

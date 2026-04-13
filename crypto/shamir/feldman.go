@@ -99,20 +99,26 @@ func CombineCommitments(contributions [][]curvey.Point) ([]curvey.Point, error) 
 		return nil, fmt.Errorf("shamir: CombineCommitments: commitment vectors must not be empty")
 	}
 
+	// Validate each contribution vector
 	for i, vec := range contributions {
+		// Validate the length of the contribution vector
 		if len(vec) != t {
 			return nil, fmt.Errorf("shamir: CombineCommitments: contribution %d has length %d, expected %d", i, len(vec), t)
 		}
+		// Validate each point in the contribution vector
 		for j, pt := range vec {
+			// Not nil
 			if pt == nil {
 				return nil, fmt.Errorf("shamir: CombineCommitments: contribution %d commitment %d is nil", i, j)
 			}
+			// On curve
 			if !pt.IsOnCurve() {
 				return nil, fmt.Errorf("shamir: CombineCommitments: contribution %d commitment %d is not on the curve", i, j)
 			}
 		}
 	}
 
+	// Sum the contribution vectors
 	combined := make([]curvey.Point, t)
 	for j := 0; j < t; j++ {
 		sum := contributions[0][j]
