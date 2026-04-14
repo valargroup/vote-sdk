@@ -30,8 +30,8 @@ todos:
     content: "Phase 6 tests (4 new + updated): TestDKGContributionThroughPipeline (CallPrepareProposal injects MsgContributeDKG), TestEndBlockerClearsDKGContributionsOnTimeout (DEALT timeout resets DkgContributions to nil), TestPrepareProposalDKGContributionAcceptedByProcessProposal (n=2..7 pipeline round-trip), StripNonAckersFromRound updated with DkgContributions assertions. All existing dealer integration tests updated to bypass pipeline via callDealHandler — behavior unchanged."
     status: completed
   - id: p7-integration
-    content: "Phase 7: Multi-validator DKG integration test -- n validators contribute, all ack, tally produces correct result"
-    status: pending
+    content: "Phase 7: Multi-validator DKG integration test (TestDKGFullLifecycle) — n=3 validators, 2 phantom DKG contributions pre-seeded + proposer contributes via pipeline → finalizeDKG → DEALT, proposer acks via pipeline + phantom acks seeded → ACTIVE, vote (delegate/cast/reveal with real ElGamal to combined ea_pk), phantom1 partial decrypt seeded + proposer partial via pipeline (phantom2 absent) → Lagrange with t=2 → FINALIZED, decrypted tally = 99"
+    status: completed
   - id: p8-docs
     content: "Phase 8: Rewrite tss-ceremony.md Step 4 with full DKG design, security rationale (bias analysis, why no COMMITTING phase, why no vote extensions), and updated security properties"
     status: pending
@@ -327,12 +327,15 @@ Swap the deal injector for the DKG injector in the pipeline. Dealer code stays f
 - `TestPrepareProposalDealAcceptedByProcessProposal` → renamed to `TestPrepareProposalDKGContributionAcceptedByProcessProposal`, validates `MsgContributeDKG` pipeline round-trip for n=2..7
 - **New tests**: `TestDKGContributionThroughPipeline` (pipeline injects `MsgContributeDKG`), `TestEndBlockerClearsDKGContributionsOnTimeout` (DEALT timeout resets DkgContributions), `StripNonAckersFromRound` DKG assertions
 
-### Phase 7: Integration test
+### Phase 7: Integration test (completed)
 
-Full ceremony end-to-end with DKG.
+Full ceremony end-to-end with DKG — `TestDKGFullLifecycle` in `abci_test.go`.
 
-- Multi-validator test (n=3, t=2): all three contribute via DKG, all three ack, round goes ACTIVE, cast votes, tally produces correct decrypted result
-- Verifies the entire pipeline: DKG contribution -> combined commitments -> ack with combined shares -> partial decryptions with DLEQ -> tally
+- n=3, t=2: phantom1 and phantom2 DKG contributions pre-seeded to state, proposer contributes through the full PrepareProposal → FinalizeBlock → `ContributeDKG` handler pipeline; the 3rd contribution triggers `finalizeDKG` → DEALT
+- Proposer acks through the pipeline (`ackDKGRound` loads coefficients, decrypts phantom payloads, verifies Feldman, sums combined share); phantom acks seeded directly
+- Phantom1's combined share computed manually in the test (decrypt proposer's ECIES payload + own partial + phantom2's known share), Feldman-verified against combined commitments
+- Vote: delegate → cast → reveal with real ElGamal encryption to the combined `ea_pk`
+- Tally: phantom1 partial decryption seeded, proposer partial via pipeline, phantom2 absent (t=2 threshold); Lagrange interpolation → FINALIZED, decrypted value = 99
 
 ### Phase 8: Documentation
 
