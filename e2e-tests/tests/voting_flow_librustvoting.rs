@@ -13,7 +13,8 @@ use blake2b_simd::Params as Blake2bParams;
 use e2e_tests::{
     api::{
         self, broadcast_cosmos_msg, commitment_tree_next_index, default_cosmos_tx_config, get_json,
-        get_round, helper_server_url, import_hex_key, post_helper_json, post_json_accept_committed,
+        get_round, helper_server_url, import_hex_key, key_account_address,
+        post_helper_json, post_json_accept_committed,
         tally_has_proposal, wait_for_round_status, SESSION_STATUS_ACTIVE, SESSION_STATUS_FINALIZED,
         SESSION_STATUS_TALLYING,
     },
@@ -34,9 +35,6 @@ use vote_commitment_tree::TreeClient;
 use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
 
 const BLOCK_WAIT_MS: u64 = 6000;
-
-/// Vote manager address corresponding to the VM_PRIVKEY used in genesis.
-const VOTE_MANAGER_ADDRESS: &str = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3";
 
 fn log_step(step: &str, msg: &str) {
     eprintln!("[E2E-lib] {}: {}", step, msg);
@@ -67,7 +65,10 @@ fn voting_flow_librustvoting_path() {
     log_step("Step 0", "importing vote manager key into keyring...");
     let config = default_cosmos_tx_config();
     import_hex_key("vote-manager", &vm_privkey, &config.home_dir);
-    log_step("Step 0", "vote manager key imported ✓");
+
+    let vote_manager_address = key_account_address("vote-manager", &config.home_dir)
+        .expect("vote-manager key must be in keyring after import");
+    log_step("Step 0", &format!("vote manager address: {}", vote_manager_address));
 
     let mut rng = ChaCha20Rng::seed_from_u64(43);
 
@@ -89,7 +90,7 @@ fn voting_flow_librustvoting_path() {
     // Save fields we need for DB before session_fields is consumed
     let fields_for_db = session_fields.clone();
     let (mut body, _, round_id) =
-        create_voting_session_payload(VOTE_MANAGER_ADDRESS, 120, Some(session_fields));
+        create_voting_session_payload(&vote_manager_address, 120, Some(session_fields));
     let round_id_hex = hex::encode(&round_id);
 
     // ---- Step 1: Create voting session ----
@@ -125,7 +126,7 @@ fn voting_flow_librustvoting_path() {
             &round_id_hex
         ),
     );
-    wait_for_round_status(&round_id_hex, SESSION_STATUS_ACTIVE, 60_000, 2_000)
+    wait_for_round_status(&round_id_hex, SESSION_STATUS_ACTIVE, 180_000, 2_000)
         .expect("round should become ACTIVE via per-round ceremony");
 
     // Read the EA public key from the round (auto-generated during ceremony).

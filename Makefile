@@ -4,7 +4,7 @@ HOME_DIR := $(or $(SVOTED_HOME),$(HOME)/.svoted)
 export GOBIN := $(HOME)/go/bin
 export PATH := $(GOBIN):$(PATH)
 
-.PHONY: install install-ffi init init-benchmark start clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy
+.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy
 
 ## install: Build and install the svoted binary to $GOPATH/bin
 install:
@@ -33,6 +33,20 @@ install-create-val-tx:
 ## init: Initialize a single-validator chain with real RedPallas + Halo2 verification (wipes existing data)
 init: install-ffi
 	bash scripts/init.sh
+
+## init-multi: Initialize a 3-validator chain with real RedPallas + Halo2 verification (wipes existing data)
+init-multi: install-ffi install-create-val-tx
+	bash scripts/init_multi.sh
+
+## start-multi: Start 3 validators in background (use init-multi first)
+start-multi:
+	@for i in 1 2 3; do \
+		home="$$HOME/.svoted-val$${i}"; \
+		log="/tmp/svoted-val$${i}.log"; \
+		echo "Starting val$${i} (home=$$home, log=$$log)..."; \
+		SVOTE_PIR_URL=disabled $(BINARY) start --home "$$home" > "$$log" 2>&1 & \
+	done
+	@echo "All 3 validators started in background."
 
 ## init-benchmark: Initialize a single-validator chain with benchmark helper settings
 init-benchmark: install-ffi
