@@ -272,6 +272,11 @@ func (s *KeeperTestSuite) TestStripNonAckersFromRound() {
 			{ValidatorAddress: "val2", Ciphertext: []byte{0x20}},
 			{ValidatorAddress: "val3", Ciphertext: []byte{0x30}},
 		},
+		DkgContributions: []*types.DKGContribution{
+			{ValidatorAddress: "val1", FeldmanCommitments: [][]byte{{0xA1}}},
+			{ValidatorAddress: "val2", FeldmanCommitments: [][]byte{{0xA2}}},
+			{ValidatorAddress: "val3", FeldmanCommitments: [][]byte{{0xA3}}},
+		},
 		CeremonyAcks: []*types.AckEntry{
 			{ValidatorAddress: "val1"},
 			{ValidatorAddress: "val3"},
@@ -291,6 +296,10 @@ func (s *KeeperTestSuite) TestStripNonAckersFromRound() {
 	s.Require().Len(round.CeremonyPayloads, 2)
 	s.Require().Equal("val1", round.CeremonyPayloads[0].ValidatorAddress)
 	s.Require().Equal("val3", round.CeremonyPayloads[1].ValidatorAddress)
+
+	s.Require().Len(round.DkgContributions, 2)
+	s.Require().Equal("val1", round.DkgContributions[0].ValidatorAddress)
+	s.Require().Equal("val3", round.DkgContributions[1].ValidatorAddress)
 
 	s.Require().Len(round.CeremonyAcks, 2)
 }

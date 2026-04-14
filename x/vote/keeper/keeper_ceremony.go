@@ -115,8 +115,8 @@ func FindAckInRoundCeremony(round *types.VoteRound, valAddr string) (int, bool) 
 }
 
 // StripNonAckersFromRound removes non-acking validators from the round's
-// CeremonyValidators and CeremonyPayloads. After this call, only validators
-// with a matching ack remain.
+// CeremonyValidators, CeremonyPayloads, and DkgContributions. After this
+// call, only validators with a matching ack remain.
 func StripNonAckersFromRound(round *types.VoteRound) {
 	acked := make(map[string]bool, len(round.CeremonyAcks))
 	for _, a := range round.CeremonyAcks {
@@ -138,6 +138,14 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 		}
 	}
 	round.CeremonyPayloads = keptPayloads
+
+	keptContribs := round.DkgContributions[:0]
+	for _, c := range round.DkgContributions {
+		if acked[c.ValidatorAddress] {
+			keptContribs = append(keptContribs, c)
+		}
+	}
+	round.DkgContributions = keptContribs
 }
 
 // GetPendingRoundWithCeremony loads a vote round and verifies it is PENDING

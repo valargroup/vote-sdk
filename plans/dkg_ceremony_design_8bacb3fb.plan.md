@@ -24,11 +24,11 @@ todos:
     content: "Phase 5 tests (5): DKG ack happy path (3 validators, real crypto, combined share = sum of all shares, Feldman-verified, coefficients deleted), bad share rejection (tampered ECIES payload → no ack), single validator (n=1 edge case), plus 2 existing dealer ack tests pass unchanged after refactor"
     status: completed
   - id: p6-wire
-    content: "Phase 6: Wire everything -- add TagContributeDKG to ante.go + process_proposal.go, swap deal injector for DKG injector in ComposedPrepareProposalHandler, EndBlocker clears dkg_contributions, deprecate dealer path"
-    status: pending
+    content: "Phase 6: Wire DKG — swap CeremonyDealPrepareProposalHandler for CeremonyDKGContributionPrepareProposalHandler in ComposedPrepareProposalHandler (app.go), clear DkgContributions on ceremony timeout reset in EndBlocker (both reset paths in module.go), filter DkgContributions in StripNonAckersFromRound (keeper_ceremony.go), add NextBlockWithTxs testutil helper, update dealer-path integration tests to invoke deal handler directly (callDealHandler), update PrepareProposal→ProcessProposal pipeline test to expect MsgContributeDKG"
+    status: completed
   - id: p6-wire-tests
-    content: "Phase 6 tests: ProcessProposal accepts/rejects TagContributeDKG, EndBlocker clears dkg_contributions on timeout reset"
-    status: pending
+    content: "Phase 6 tests (4 new + updated): TestDKGContributionThroughPipeline (CallPrepareProposal injects MsgContributeDKG), TestEndBlockerClearsDKGContributionsOnTimeout (DEALT timeout resets DkgContributions to nil), TestPrepareProposalDKGContributionAcceptedByProcessProposal (n=2..7 pipeline round-trip), StripNonAckersFromRound updated with DkgContributions assertions. All existing dealer integration tests updated to bypass pipeline via callDealHandler — behavior unchanged."
+    status: completed
   - id: p7-integration
     content: "Phase 7: Multi-validator DKG integration test -- n validators contribute, all ack, tally produces correct result"
     status: pending
@@ -315,19 +315,17 @@ Refactored `CeremonyAckPrepareProposalHandler` in [prepare_proposal_ceremony.go]
   - `TestDKGAckSingleValidator`: n=1 edge case — combined share = single contributor's own share
   - `TestCeremonyAckThresholdMode` / `TestCeremonyAckThresholdRejectsBadShare`: existing dealer ack tests pass unchanged after refactor
 
-### Phase 6: Wire and swap
+### Phase 6: Wire and swap (completed)
 
-Replace dealer path with DKG path. Remove all single-dealer remnants. Single commit.
+Swap the deal injector for the DKG injector in the pipeline. Dealer code stays for backward-compat (removed in Phase 9).
 
-- [app.go](vote-sdk/app/app.go): swap `CeremonyDealPrepareProposalHandler` for `CeremonyDKGContributionPrepareProposalHandler` in `ComposedPrepareProposalHandler`
-- [ante.go](vote-sdk/app/ante.go): remove `TagDealExecutiveAuthorityKey` case (TagContributeDKG already present from Phase 1)
-- [process_proposal.go](vote-sdk/app/process_proposal.go): remove `validateInjectedDeal` and `TagDealExecutiveAuthorityKey` check
-- [module.go](vote-sdk/x/vote/module.go): clear `dkg_contributions` on timeout reset (replace old `ceremony_payloads` clearing); remove `ProvideDealExecutiveAuthorityKeySigner`
-- Delete `CeremonyDealPrepareProposalHandler`, `DealExecutiveAuthorityKey` handler, `CmdDealExecutiveAuthorityKey` CLI command
-- Delete `ceremony_payloads`, `ceremony_dealer` proto fields from `VoteRound` and `CeremonyState`; delete `MsgDealExecutiveAuthorityKey` proto message
-- Remove `StripNonAckersFromRound` references to `CeremonyPayloads`; remove `TagDealExecutiveAuthorityKey` from codec
-- Update/delete all tests that exercise the single-dealer path
-- **Tests**: ProcessProposal accepts valid `TagContributeDKG`, rejects malformed; EndBlocker timeout clears `dkg_contributions`
+- [app.go](vote-sdk/app/app.go): replaced `CeremonyDealPrepareProposalHandler` with `CeremonyDKGContributionPrepareProposalHandler` in `ComposedPrepareProposalHandler`
+- [module.go](vote-sdk/x/vote/module.go): both DEALT timeout reset paths now clear `DkgContributions = nil` alongside existing payload/ack clearing
+- [keeper_ceremony.go](vote-sdk/x/vote/keeper/keeper_ceremony.go): `StripNonAckersFromRound` now filters `DkgContributions` (keeps only acked validators' contributions)
+- [testutil/app.go](vote-sdk/testutil/app.go): added `NextBlockWithTxs` helper for delivering pre-built txs without going through PrepareProposal
+- Dealer-path integration tests in `abci_test.go` updated to invoke `callDealHandler` directly + `NextBlockWithTxs` (behaviour unchanged)
+- `TestPrepareProposalDealAcceptedByProcessProposal` → renamed to `TestPrepareProposalDKGContributionAcceptedByProcessProposal`, validates `MsgContributeDKG` pipeline round-trip for n=2..7
+- **New tests**: `TestDKGContributionThroughPipeline` (pipeline injects `MsgContributeDKG`), `TestEndBlockerClearsDKGContributionsOnTimeout` (DEALT timeout resets DkgContributions), `StripNonAckersFromRound` DKG assertions
 
 ### Phase 7: Integration test
 

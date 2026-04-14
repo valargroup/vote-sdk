@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -53,11 +54,12 @@ func TestCeremonyDealThresholdMode(t *testing.T) {
 
 	roundID := ta.SeedRegisteringCeremony(validators)
 
-	// PrepareProposal should inject a single deal tx.
-	resp := ta.CallPrepareProposal()
-	require.Len(t, resp.Txs, 1, "expected exactly one injected deal tx")
+	// Invoke the deal handler directly (no longer wired into
+	// ComposedPrepareProposalHandler after the DKG swap).
+	txs := callDealHandler(t, ta)
+	require.Len(t, txs, 1, "expected exactly one injected deal tx")
 
-	tag, protoMsg, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
+	tag, protoMsg, err := voteapi.DecodeCeremonyTx(txs[0])
 	require.NoError(t, err)
 	require.Equal(t, voteapi.TagDealExecutiveAuthorityKey, tag)
 
@@ -90,9 +92,7 @@ func TestCeremonyDealThresholdMode(t *testing.T) {
 		"deal handler must not write ea_sk in threshold mode")
 
 	// Consistency check: decrypt the dealer's own payload and verify against
-	// Feldman commitments. Decrypt the first payload (dealer) using the pallasSk
-	// returned by SetupTestAppWithPallasKey, recover the share scalar, and verify
-	// it against the published Feldman commitments.
+	// Feldman commitments.
 	dealerPayload := deal.Payloads[0]
 	require.Equal(t, dealerAddr, dealerPayload.ValidatorAddress)
 
@@ -198,11 +198,11 @@ func TestCeremonyDealThresholdStoredOnRound(t *testing.T) {
 
 	roundID := ta.SeedRegisteringCeremony(validators)
 
-	// PrepareProposal injects the deal tx.
-	resp := ta.CallPrepareProposal()
-	require.Len(t, resp.Txs, 1)
+	// Invoke the deal handler directly (bypasses ComposedPrepareProposalHandler).
+	txs := callDealHandler(t, ta)
+	require.Len(t, txs, 1)
 
-	tag, protoMsg, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
+	tag, protoMsg, err := voteapi.DecodeCeremonyTx(txs[0])
 	require.NoError(t, err)
 	require.Equal(t, voteapi.TagDealExecutiveAuthorityKey, tag)
 
@@ -211,7 +211,7 @@ func TestCeremonyDealThresholdStoredOnRound(t *testing.T) {
 	require.Len(t, deal.FeldmanCommitments, 2, "expected t=2 Feldman commitments")
 
 	// Deliver the deal tx through FinalizeBlock + Commit.
-	txResult := ta.DeliverVoteTx(resp.Txs[0])
+	txResult := ta.DeliverVoteTx(txs[0])
 	require.EqualValues(t, 0, txResult.Code,
 		"deal tx must succeed: %s", txResult.Log)
 
@@ -507,6 +507,30 @@ func TestProcessProposalRejectsDKGContributionWhenDealt(t *testing.T) {
 // The DKG contribution handler is not wired into ComposedPrepareProposalHandler
 // until Phase 6, so these tests instantiate and invoke it directly.
 // ---------------------------------------------------------------------------
+
+// callDealHandler creates a CeremonyDealPrepareProposalHandler and invokes it
+// directly with the TestApp's keepers. This bypasses ComposedPrepareProposalHandler
+// (which now wires the DKG handler) so that dealer-specific tests continue to
+// exercise the deal path without depending on the app wiring.
+func callDealHandler(t *testing.T, ta *testutil.TestApp) [][]byte {
+	t.Helper()
+
+	pallasSkPath := filepath.Join(ta.EaSkDir, "pallas.sk")
+	handler := app.CeremonyDealPrepareProposalHandler(
+		ta.VoteKeeper(),
+		ta.StakingKeeper,
+		pallasSkPath,
+		ta.EaSkDir,
+		log.NewNopLogger(),
+	)
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height + 1})
+	req := &abci.RequestPrepareProposal{
+		Height:          ta.Height + 1,
+		ProposerAddress: ta.ProposerAddress,
+	}
+	return handler(ctx, req, nil)
+}
 
 // callDKGContributionHandler creates a CeremonyDKGContributionPrepareProposalHandler
 // and invokes it with the TestApp's keepers. Returns the resulting tx list.
@@ -1011,6 +1035,114 @@ func TestDKGAckSingleValidator(t *testing.T) {
 
 	require.Equal(t, allShares[0][0].Value.Bytes(), shareBytes,
 		"n=1: combined share must equal the single contributor's share")
+}
+
+// ---------------------------------------------------------------------------
+// DKG contribution through the full PrepareProposal pipeline
+//
+// After Phase 6, ComposedPrepareProposalHandler wires the DKG contribution
+// handler instead of the deal handler. This test verifies that calling
+// CallPrepareProposal on a REGISTERING round injects a MsgContributeDKG.
+// ---------------------------------------------------------------------------
+
+func TestDKGContributionThroughPipeline(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	proposerAddr := ta.ValidatorOperAddr()
+
+	_, pk2 := elgamal.KeyGen(rand.Reader)
+	_, pk3 := elgamal.KeyGen(rand.Reader)
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk3.Point.ToAffineCompressed()},
+	}
+	roundID := ta.SeedRegisteringCeremony(validators)
+
+	resp := ta.CallPrepareProposal()
+	require.Len(t, resp.Txs, 1, "pipeline should inject exactly one DKG contribution tx")
+
+	tag, protoMsg, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
+	require.NoError(t, err)
+	require.Equal(t, voteapi.TagContributeDKG, tag,
+		"injected tx must be a DKG contribution, not a deal")
+
+	contrib, ok := protoMsg.(*types.MsgContributeDKG)
+	require.True(t, ok)
+	require.Equal(t, proposerAddr, contrib.Creator)
+	require.Equal(t, roundID, contrib.VoteRoundId)
+	require.Len(t, contrib.FeldmanCommitments, 2, "t=ceil(3/2)=2 commitments")
+	require.Len(t, contrib.Payloads, 2, "n-1=2 ECIES payloads (self excluded)")
+}
+
+// ---------------------------------------------------------------------------
+// EndBlocker clears DkgContributions on ceremony timeout
+//
+// Seeds a DEALT round with DkgContributions populated, then advances past the
+// ceremony phase timeout so the EndBlocker fires. Verifies that the round
+// resets to REGISTERING with DkgContributions = nil.
+// ---------------------------------------------------------------------------
+
+func TestEndBlockerClearsDKGContributionsOnTimeout(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	proposerAddr := ta.ValidatorOperAddr()
+	_, pk2 := elgamal.KeyGen(rand.Reader)
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
+	}
+
+	roundID := make([]byte, 32)
+	roundID[0] = 0xEB
+
+	phaseStart := uint64(ta.Time.Unix())
+	phaseTimeout := uint64(30 * 60)
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	round := &types.VoteRound{
+		VoteRoundId:          roundID,
+		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
+		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+		CeremonyValidators:   validators,
+		CeremonyPhaseStart:   phaseStart,
+		CeremonyPhaseTimeout: phaseTimeout,
+		EaPk:                 make([]byte, 32),
+		Threshold:            1,
+		FeldmanCommitments:   [][]byte{make([]byte, 32)},
+		DkgContributions: []*types.DKGContribution{
+			{ValidatorAddress: proposerAddr, FeldmanCommitments: [][]byte{{0x01}}},
+			{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", FeldmanCommitments: [][]byte{{0x02}}},
+		},
+		VoteEndTime:      uint64(ta.Time.Add(24 * time.Hour).Unix()),
+		Proposals:        testutil.SampleProposals(),
+		NullifierImtRoot: make([]byte, 32),
+		NcRoot:           make([]byte, 32),
+	}
+	require.NoError(t, ta.VoteKeeper().SetVoteRound(kvStore, round))
+	ta.NextBlock()
+
+	// Advance past the ceremony phase timeout to trigger the EndBlocker reset.
+	timeoutTime := time.Unix(int64(phaseStart+phaseTimeout)+1, 0)
+	ta.NextBlockAtTime(timeoutTime)
+
+	ctx = ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore = ta.VoteKeeper().OpenKVStore(ctx)
+	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
+		"ceremony should reset to REGISTERING after timeout")
+	require.Nil(t, round.DkgContributions,
+		"DkgContributions must be cleared on timeout reset")
+	require.Nil(t, round.CeremonyPayloads,
+		"CeremonyPayloads must be cleared on timeout reset")
+	require.Nil(t, round.CeremonyAcks,
+		"CeremonyAcks must be cleared on timeout reset")
 }
 
 // ---------------------------------------------------------------------------

@@ -564,26 +564,27 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 					fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, %d stripped, remaining %d < threshold %d)",
 						nAcks, nVals, stripped, nAcks, round.Threshold))
 
-				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
-				round.CeremonyPayloads = nil
-				round.CeremonyAcks = nil
-				round.CeremonyDealer = ""
-				round.CeremonyPhaseStart = 0
-				round.CeremonyPhaseTimeout = 0
-				round.EaPk = nil
+			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
+			round.CeremonyPayloads = nil
+			round.CeremonyAcks = nil
+			round.CeremonyDealer = ""
+			round.DkgContributions = nil
+			round.CeremonyPhaseStart = 0
+			round.CeremonyPhaseTimeout = 0
+			round.EaPk = nil
 
-				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
-					return err
-				}
+			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+				return err
+			}
 
-				ctx.EventManager().EmitEvent(sdk.NewEvent(
-					types.EventTypeCeremonyStatusChange,
-					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-					sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
-					sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
-				))
-			} else {
-				// >= 1/2 acked and remaining ackers meet threshold: strip
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeCeremonyStatusChange,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+			))
+		} else {
+			// >= 1/2 acked and remaining ackers meet threshold: strip
 				// non-ackers (offline/non-responsive), confirm ceremony, activate round.
 				keeper.StripNonAckersFromRound(round)
 				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
@@ -610,7 +611,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				))
 			}
 		} else {
-			// < 1/2 acks: reset ceremony for re-deal by next proposer.
+			// < 1/2 acks: reset ceremony for re-deal/re-contribute by next proposer.
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 				fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, below threshold)", nAcks, nVals))
 
@@ -618,6 +619,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			round.CeremonyPayloads = nil
 			round.CeremonyAcks = nil
 			round.CeremonyDealer = ""
+			round.DkgContributions = nil
 			round.CeremonyPhaseStart = 0
 			round.CeremonyPhaseTimeout = 0
 			round.EaPk = nil

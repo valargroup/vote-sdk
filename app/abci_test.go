@@ -702,15 +702,16 @@ func TestMultiValidatorCeremony_DealAckConfirm(t *testing.T) {
 	}
 	roundID := app.SeedRegisteringCeremony(validators)
 
-	// Block 1: PrepareProposal fires auto-deal → DEALT with 3 payloads.
-	app.NextBlockWithPrepareProposal()
+	// Block 1: deal handler (invoked directly. The pipeline wires the
+	// DKG handler, so dealer-path tests bypass PrepareProposal).
+	app.NextBlockWithTxs(callDealHandler(t, app))
 
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
 	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"ceremony should be DEALT after auto-deal")
+		"ceremony should be DEALT after deal")
 	require.Len(t, round.CeremonyPayloads, 3, "should have 3 ECIES payloads (one per validator)")
 	require.Equal(t, valAddr, round.CeremonyDealer, "dealer should be the real validator")
 
@@ -817,8 +818,8 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 	roundID := app.SeedRegisteringCeremony(validators)
 
 	for cycle := 1; cycle <= 3; cycle++ {
-		// Step 1: PrepareProposal fires auto-deal → DEALT with 4 payloads.
-		app.NextBlockWithPrepareProposal()
+		// Step 1: deal handler (bypasses PrepareProposal) → DEALT with 4 payloads.
+		app.NextBlockWithTxs(callDealHandler(t, app))
 
 		ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 		kvStore := app.VoteKeeper().OpenKVStore(ctx)
@@ -923,15 +924,15 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	// Cycle 1 — Timeout: only real validator acks, phantoms miss.
 	// -----------------------------------------------------------------------
 
-	// Block 1: PrepareProposal fires auto-deal → DEALT with 4 payloads.
-	app.NextBlockWithPrepareProposal()
+	// Block 1: deal handler (bypasses PrepareProposal) → DEALT with 4 payloads.
+	app.NextBlockWithTxs(callDealHandler(t, app))
 
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
 	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"cycle 1: ceremony should be DEALT after auto-deal")
+		"cycle 1: ceremony should be DEALT after deal")
 	require.Len(t, round.CeremonyPayloads, 4, "cycle 1: should have 4 ECIES payloads")
 
 	// Block 2: PrepareProposal fires auto-ack from real validator → still DEALT.
@@ -960,8 +961,8 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	// Cycle 2 — Recovery: phantom1 acks manually, ceremony confirms.
 	// -----------------------------------------------------------------------
 
-	// Block 4: PrepareProposal fires auto-deal → DEALT with 4 payloads.
-	app.NextBlockWithPrepareProposal()
+	// Block 4: deal handler (bypasses PrepareProposal) → DEALT with 4 payloads.
+	app.NextBlockWithTxs(callDealHandler(t, app))
 
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore = app.VoteKeeper().OpenKVStore(ctx)
@@ -1084,8 +1085,8 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 
 	// --- Ceremony: deal → proposer ack → phantom acks → ACTIVE ---
 
-	// Block 1: auto-deal fires → DEALT with threshold mode (n=3 → t=2).
-	app.NextBlockWithPrepareProposal()
+	// Block 1: deal handler (bypasses PrepareProposal) → DEALT with threshold mode.
+	app.NextBlockWithTxs(callDealHandler(t, app))
 
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore = app.VoteKeeper().OpenKVStore(ctx)
@@ -1093,9 +1094,9 @@ func TestFullLifecycle_Threshold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	require.EqualValues(t, 2, round.Threshold,
-		"threshold should be 2 for n=3 (ceil(3/2) = 2, stored by deal handler)")
+		"threshold should be 2 for n=3 (ceil(3/2) = 2)")
 	require.Len(t, round.FeldmanCommitments, 2,
-		"t=2 Feldman commitments should be stored by deal handler")
+		"t=2 Feldman commitments should be stored")
 
 	// Block 2: auto-ack from proposer → 1/3 acked, stays DEALT.
 	app.NextBlockWithPrepareProposal()
@@ -1300,8 +1301,8 @@ func TestFullLifecycle_SingleValidator(t *testing.T) {
 	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
 	app.NextBlock()
 
-	// Block 1: auto-deal (Shamir t=1, n=1) → DEALT.
-	app.NextBlockWithPrepareProposal()
+	// Block 1: deal handler (bypasses PrepareProposal) → DEALT (Shamir t=1, n=1).
+	app.NextBlockWithTxs(callDealHandler(t, app))
 
 	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore = app.VoteKeeper().OpenKVStore(ctx)
