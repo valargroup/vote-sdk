@@ -366,6 +366,8 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "imt-tree"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d10acb863735c6c82c0c79e8752696096a86eb4d1e2fe0005ded4fae066297e"
 dependencies = [
  "anyhow",
  "ff",
@@ -528,6 +530,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 [[package]]
 name = "orchard"
 version = "0.11.0"
+source = "git+https://github.com/valargroup/voting-circuits.git#ecca2f0e9faf6b077920fd2a2e96020e5f1e7254"
 dependencies = [
  "aes",
  "bitvec",
@@ -778,7 +781,7 @@ dependencies = [
  "halo2_gadgets",
  "halo2_proofs",
  "hex",
- "imt-tree 0.1.0",
+ "imt-tree 0.1.0 (git+https://github.com/valargroup/vote-nullifier-pir.git)",
  "incrementalmerkletree",
  "orchard",
  "pasta_curves",
@@ -941,11 +944,12 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
+source = "git+https://github.com/valargroup/librustvoting.git#126c11d354c28de257d75558f0d88bcee0f2e0d0"
 dependencies = [
  "anyhow",
  "ff",
  "halo2_gadgets",
- "imt-tree 0.1.0 (git+https://github.com/valargroup/vote-nullifier-pir.git)",
+ "imt-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "incrementalmerkletree",
  "lazy_static",
  "libc",
@@ -956,6 +960,7 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.1.0"
+source = "git+https://github.com/valargroup/voting-circuits.git#ecca2f0e9faf6b077920fd2a2e96020e5f1e7254"
 dependencies = [
  "blake2b_simd",
  "ff",

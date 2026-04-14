@@ -36,8 +36,9 @@ type MsgCreateVotingSession struct {
 	NullifierImtRoot  []byte                 `protobuf:"bytes,6,opt,name=nullifier_imt_root,json=nullifierImtRoot,proto3" json:"nullifier_imt_root,omitempty"`
 	NcRoot            []byte                 `protobuf:"bytes,7,opt,name=nc_root,json=ncRoot,proto3" json:"nc_root,omitempty"`
 	Proposals         []*Proposal            `protobuf:"bytes,8,rep,name=proposals,proto3" json:"proposals,omitempty"`
-	Description       string                 `protobuf:"bytes,9,opt,name=description,proto3" json:"description,omitempty"` // Human-readable round description
-	Title             string                 `protobuf:"bytes,10,opt,name=title,proto3" json:"title,omitempty"`            // Short human-readable round title
+	Description       string                 `protobuf:"bytes,9,opt,name=description,proto3" json:"description,omitempty"`                           // Human-readable round description
+	Title             string                 `protobuf:"bytes,10,opt,name=title,proto3" json:"title,omitempty"`                                      // Short human-readable round title
+	DiscussionUrl     string                 `protobuf:"bytes,11,opt,name=discussion_url,json=discussionUrl,proto3" json:"discussion_url,omitempty"` // Overall forum discussion link for the vote round
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -138,6 +139,13 @@ func (x *MsgCreateVotingSession) GetDescription() string {
 func (x *MsgCreateVotingSession) GetTitle() string {
 	if x != nil {
 		return x.Title
+	}
+	return ""
+}
+
+func (x *MsgCreateVotingSession) GetDiscussionUrl() string {
+	if x != nil {
+		return x.DiscussionUrl
 	}
 	return ""
 }
@@ -1556,7 +1564,7 @@ var File_svote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_svote_v1_tx_proto_rawDesc = "" +
 	"\n" +
-	"\x11svote/v1/tx.proto\x12\bsvote.v1\x1a\x17cosmos/msg/v1/msg.proto\x1a\x14svote/v1/types.proto\"\x86\x03\n" +
+	"\x11svote/v1/tx.proto\x12\bsvote.v1\x1a\x17cosmos/msg/v1/msg.proto\x1a\x14svote/v1/types.proto\"\xad\x03\n" +
 	"\x16MsgCreateVotingSession\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -1568,7 +1576,8 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\tproposals\x18\b \x03(\v2\x12.svote.v1.ProposalR\tproposals\x12 \n" +
 	"\vdescription\x18\t \x01(\tR\vdescription\x12\x14\n" +
 	"\x05title\x18\n" +
-	" \x01(\tR\x05title\"D\n" +
+	" \x01(\tR\x05title\x12%\n" +
+	"\x0ediscussion_url\x18\v \x01(\tR\rdiscussionUrl\"D\n" +
 	"\x1eMsgCreateVotingSessionResponse\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xa8\x02\n" +
 	"\x0fMsgDelegateVote\x12\x0e\n" +

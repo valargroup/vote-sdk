@@ -41,6 +41,7 @@ message MsgCreateVotingSession {
   repeated Proposal proposals = 8;
   string description          = 9;  // Human-readable round description
   string title                = 10; // Short human-readable round title
+  string discussion_url       = 11; // Overall forum discussion link for the vote round
 }
 
 message MsgCreateVotingSessionResponse {

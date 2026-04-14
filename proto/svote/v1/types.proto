@@ -24,6 +24,8 @@ message Proposal {
   string title                 = 2;
   string description           = 3;
   repeated VoteOption options  = 4; // 2-8 named choices
+  string zip_number            = 5; // e.g. "ZIP-227"
+  string forum_url             = 6; // Per-proposal forum discussion link
 }
 
 // VoteRound represents a voting session created by MsgCreateVotingSession.
@@ -67,6 +69,8 @@ message VoteRound {
 
   // DKG contributions (populated during Joint-Feldman DKG; replaces single-dealer fields once wired).
   repeated DKGContribution dkg_contributions = 28;
+
+  string discussion_url = 29; // Overall forum discussion link for the vote round
 }
 
 // VoteManagerState stores the singleton vote manager address.

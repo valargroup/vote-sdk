@@ -189,7 +189,9 @@ type Proposal struct {
 	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
 	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
 	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	Options       []*VoteOption          `protobuf:"bytes,4,rep,name=options,proto3" json:"options,omitempty"` // 2-8 named choices
+	Options       []*VoteOption          `protobuf:"bytes,4,rep,name=options,proto3" json:"options,omitempty"`                      // 2-8 named choices
+	ZipNumber     string                 `protobuf:"bytes,5,opt,name=zip_number,json=zipNumber,proto3" json:"zip_number,omitempty"` // e.g. "ZIP-227"
+	ForumUrl      string                 `protobuf:"bytes,6,opt,name=forum_url,json=forumUrl,proto3" json:"forum_url,omitempty"`    // Per-proposal forum discussion link
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -252,6 +254,20 @@ func (x *Proposal) GetOptions() []*VoteOption {
 	return nil
 }
 
+func (x *Proposal) GetZipNumber() string {
+	if x != nil {
+		return x.ZipNumber
+	}
+	return ""
+}
+
+func (x *Proposal) GetForumUrl() string {
+	if x != nil {
+		return x.ForumUrl
+	}
+	return ""
+}
+
 // VoteRound represents a voting session created by MsgCreateVotingSession.
 type VoteRound struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
@@ -288,6 +304,7 @@ type VoteRound struct {
 	TallyTimedOut     bool   `protobuf:"varint,27,opt,name=tally_timed_out,json=tallyTimedOut,proto3" json:"tally_timed_out,omitempty"`             // True if round was finalized via timeout (no decrypted results)
 	// DKG contributions (populated during Joint-Feldman DKG; replaces single-dealer fields once wired).
 	DkgContributions []*DKGContribution `protobuf:"bytes,28,rep,name=dkg_contributions,json=dkgContributions,proto3" json:"dkg_contributions,omitempty"`
+	DiscussionUrl    string             `protobuf:"bytes,29,opt,name=discussion_url,json=discussionUrl,proto3" json:"discussion_url,omitempty"` // Overall forum discussion link for the vote round
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -502,6 +519,13 @@ func (x *VoteRound) GetDkgContributions() []*DKGContribution {
 		return x.DkgContributions
 	}
 	return nil
+}
+
+func (x *VoteRound) GetDiscussionUrl() string {
+	if x != nil {
+		return x.DiscussionUrl
+	}
+	return ""
 }
 
 // VoteManagerState stores the singleton vote manager address.
@@ -1898,12 +1922,16 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\n" +
 	"VoteOption\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\rR\x05index\x12\x14\n" +
-	"\x05label\x18\x02 \x01(\tR\x05label\"\x82\x01\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\"\xbe\x01\n" +
 	"\bProposal\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12.\n" +
-	"\aoptions\x18\x04 \x03(\v2\x14.svote.v1.VoteOptionR\aoptions\"\x8c\t\n" +
+	"\aoptions\x18\x04 \x03(\v2\x14.svote.v1.VoteOptionR\aoptions\x12\x1d\n" +
+	"\n" +
+	"zip_number\x18\x05 \x01(\tR\tzipNumber\x12\x1b\n" +
+	"\tforum_url\x18\x06 \x01(\tR\bforumUrl\"\x96\n" +
+	"\n" +
 	"\tVoteRound\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -1931,7 +1959,8 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x11tally_phase_start\x18\x19 \x01(\x04R\x0ftallyPhaseStart\x12.\n" +
 	"\x13tally_phase_timeout\x18\x1a \x01(\x04R\x11tallyPhaseTimeout\x12&\n" +
 	"\x0ftally_timed_out\x18\x1b \x01(\bR\rtallyTimedOut\x12F\n" +
-	"\x11dkg_contributions\x18\x1c \x03(\v2\x19.svote.v1.DKGContributionR\x10dkgContributionsJ\x04\b\x11\x10\x12J\x04\b\x13\x10\x14\",\n" +
+	"\x11dkg_contributions\x18\x1c \x03(\v2\x19.svote.v1.DKGContributionR\x10dkgContributions\x12%\n" +
+	"\x0ediscussion_url\x18\x1d \x01(\tR\rdiscussionUrl\",\n" +
 	"\x10VoteManagerState\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x8d\x01\n" +
 	"\x13CommitmentTreeState\x12\x1d\n" +
