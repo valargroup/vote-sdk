@@ -55,7 +55,6 @@ func init() {
 			ProvideSubmitTallySigner,
 			ProvideSubmitPartialDecryptionSigner,
 			ProvideRegisterPallasKeySigner,
-			ProvideDealExecutiveAuthorityKeySigner,
 			ProvideContributeDKGSigner,
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
@@ -179,13 +178,6 @@ func ProvideSubmitPartialDecryptionSigner() signing.CustomGetSigner {
 func ProvideRegisterPallasKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("svote.v1.MsgRegisterPallasKey"),
-		Fn:      ceremonyCreatorSignerFn,
-	}
-}
-
-func ProvideDealExecutiveAuthorityKeySigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgDealExecutiveAuthorityKey"),
 		Fn:      ceremonyCreatorSignerFn,
 	}
 }
@@ -565,9 +557,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 						nAcks, nVals, stripped, nAcks, round.Threshold))
 
 			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
-			round.CeremonyPayloads = nil
 			round.CeremonyAcks = nil
-			round.CeremonyDealer = ""
 			round.DkgContributions = nil
 			round.CeremonyPhaseStart = 0
 			round.CeremonyPhaseTimeout = 0
@@ -611,14 +601,12 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				))
 			}
 		} else {
-			// < 1/2 acks: reset ceremony for re-deal/re-contribute by next proposer.
+			// < 1/2 acks: reset ceremony for re-contribute by next proposer.
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 				fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, below threshold)", nAcks, nVals))
 
 			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
-			round.CeremonyPayloads = nil
 			round.CeremonyAcks = nil
-			round.CeremonyDealer = ""
 			round.DkgContributions = nil
 			round.CeremonyPhaseStart = 0
 			round.CeremonyPhaseTimeout = 0

@@ -40,11 +40,11 @@ func resolveProposer(ctx sdk.Context, stakingKeeper *stakingkeeper.Keeper, propo
 	return val.OperatorAddress, nil
 }
 
-// ComposedPrepareProposalHandler composes ceremony deal, ceremony ack,
+// ComposedPrepareProposalHandler composes DKG contribution, ceremony ack,
 // threshold partial decryption, and tally injection into a single
 // sdk.PrepareProposalHandler. Injectors run sequentially:
 //
-//	deal → ack → partialDecrypt → tally
+//	dkg-contribute → ack → partialDecrypt → tally
 func ComposedPrepareProposalHandler(
 	dealInjector PrepareProposalInjector,
 	ackInjector PrepareProposalInjector,
@@ -55,7 +55,7 @@ func ComposedPrepareProposalHandler(
 		// Start with the mempool txs from CometBFT.
 		txs := req.Txs
 
-		// Run ceremony deal injection (may prepend MsgDealExecutiveAuthorityKey).
+		// Run DKG contribution injection (may prepend MsgContributeDKG).
 		txs = dealInjector(ctx, req, txs)
 
 		// Run ceremony ack injection (may prepend MsgAckExecutiveAuthorityKey).

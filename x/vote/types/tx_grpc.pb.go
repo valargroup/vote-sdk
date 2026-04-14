@@ -26,7 +26,6 @@ const (
 	Msg_SubmitTally_FullMethodName                  = "/svote.v1.Msg/SubmitTally"
 	Msg_SubmitPartialDecryption_FullMethodName      = "/svote.v1.Msg/SubmitPartialDecryption"
 	Msg_RegisterPallasKey_FullMethodName            = "/svote.v1.Msg/RegisterPallasKey"
-	Msg_DealExecutiveAuthorityKey_FullMethodName    = "/svote.v1.Msg/DealExecutiveAuthorityKey"
 	Msg_ContributeDKG_FullMethodName                = "/svote.v1.Msg/ContributeDKG"
 	Msg_AckExecutiveAuthorityKey_FullMethodName     = "/svote.v1.Msg/AckExecutiveAuthorityKey"
 	Msg_CreateValidatorWithPallasKey_FullMethodName = "/svote.v1.Msg/CreateValidatorWithPallasKey"
@@ -50,7 +49,6 @@ type MsgClient interface {
 	SubmitTally(ctx context.Context, in *MsgSubmitTally, opts ...grpc.CallOption) (*MsgSubmitTallyResponse, error)
 	SubmitPartialDecryption(ctx context.Context, in *MsgSubmitPartialDecryption, opts ...grpc.CallOption) (*MsgSubmitPartialDecryptionResponse, error)
 	RegisterPallasKey(ctx context.Context, in *MsgRegisterPallasKey, opts ...grpc.CallOption) (*MsgRegisterPallasKeyResponse, error)
-	DealExecutiveAuthorityKey(ctx context.Context, in *MsgDealExecutiveAuthorityKey, opts ...grpc.CallOption) (*MsgDealExecutiveAuthorityKeyResponse, error)
 	ContributeDKG(ctx context.Context, in *MsgContributeDKG, opts ...grpc.CallOption) (*MsgContributeDKGResponse, error)
 	AckExecutiveAuthorityKey(ctx context.Context, in *MsgAckExecutiveAuthorityKey, opts ...grpc.CallOption) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(ctx context.Context, in *MsgCreateValidatorWithPallasKey, opts ...grpc.CallOption) (*MsgCreateValidatorWithPallasKeyResponse, error)
@@ -136,16 +134,6 @@ func (c *msgClient) RegisterPallasKey(ctx context.Context, in *MsgRegisterPallas
 	return out, nil
 }
 
-func (c *msgClient) DealExecutiveAuthorityKey(ctx context.Context, in *MsgDealExecutiveAuthorityKey, opts ...grpc.CallOption) (*MsgDealExecutiveAuthorityKeyResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgDealExecutiveAuthorityKeyResponse)
-	err := c.cc.Invoke(ctx, Msg_DealExecutiveAuthorityKey_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *msgClient) ContributeDKG(ctx context.Context, in *MsgContributeDKG, opts ...grpc.CallOption) (*MsgContributeDKGResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MsgContributeDKGResponse)
@@ -212,7 +200,6 @@ type MsgServer interface {
 	SubmitTally(context.Context, *MsgSubmitTally) (*MsgSubmitTallyResponse, error)
 	SubmitPartialDecryption(context.Context, *MsgSubmitPartialDecryption) (*MsgSubmitPartialDecryptionResponse, error)
 	RegisterPallasKey(context.Context, *MsgRegisterPallasKey) (*MsgRegisterPallasKeyResponse, error)
-	DealExecutiveAuthorityKey(context.Context, *MsgDealExecutiveAuthorityKey) (*MsgDealExecutiveAuthorityKeyResponse, error)
 	ContributeDKG(context.Context, *MsgContributeDKG) (*MsgContributeDKGResponse, error)
 	AckExecutiveAuthorityKey(context.Context, *MsgAckExecutiveAuthorityKey) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(context.Context, *MsgCreateValidatorWithPallasKey) (*MsgCreateValidatorWithPallasKeyResponse, error)
@@ -248,9 +235,6 @@ func (UnimplementedMsgServer) SubmitPartialDecryption(context.Context, *MsgSubmi
 }
 func (UnimplementedMsgServer) RegisterPallasKey(context.Context, *MsgRegisterPallasKey) (*MsgRegisterPallasKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterPallasKey not implemented")
-}
-func (UnimplementedMsgServer) DealExecutiveAuthorityKey(context.Context, *MsgDealExecutiveAuthorityKey) (*MsgDealExecutiveAuthorityKeyResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DealExecutiveAuthorityKey not implemented")
 }
 func (UnimplementedMsgServer) ContributeDKG(context.Context, *MsgContributeDKG) (*MsgContributeDKGResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ContributeDKG not implemented")
@@ -414,24 +398,6 @@ func _Msg_RegisterPallasKey_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_DealExecutiveAuthorityKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgDealExecutiveAuthorityKey)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).DealExecutiveAuthorityKey(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Msg_DealExecutiveAuthorityKey_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).DealExecutiveAuthorityKey(ctx, req.(*MsgDealExecutiveAuthorityKey))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Msg_ContributeDKG_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MsgContributeDKG)
 	if err := dec(in); err != nil {
@@ -556,10 +522,6 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterPallasKey",
 			Handler:    _Msg_RegisterPallasKey_Handler,
-		},
-		{
-			MethodName: "DealExecutiveAuthorityKey",
-			Handler:    _Msg_DealExecutiveAuthorityKey_Handler,
 		},
 		{
 			MethodName: "ContributeDKG",

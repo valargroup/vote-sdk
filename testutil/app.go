@@ -404,10 +404,10 @@ func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
 }
 
 // SeedDealtCeremony creates a PENDING round with DEALT ceremony fields.
-// The round includes the given validators and ECIES payloads. A default
-// threshold and placeholder Feldman commitments are set. Commits via an
-// empty block. Returns the round ID.
-func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads []*types.DealerPayload, validators []*types.ValidatorPallasKey) []byte {
+// The round includes the given validators. A default threshold and
+// placeholder Feldman commitments are set. Commits via an empty block.
+// Returns the round ID.
+func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, validators []*types.ValidatorPallasKey) []byte {
 	ta.t.Helper()
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
@@ -432,9 +432,7 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
 		EaPk:                 eaPkBytes,
 		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
-		CeremonyDealer:       "dealer",
 		CeremonyValidators:   validators,
-		CeremonyPayloads:     payloads,
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
 		Threshold:            uint32(t),
@@ -450,10 +448,9 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 // SeedDealtCeremonyThreshold creates a PENDING round with DEALT ceremony fields.
 // Callers supply pre-computed ECIES payloads, Feldman commitments, and the
 // threshold t. This lets ack handler tests exercise Feldman verification
-// without going through the full deal flow.
+// without going through the full DKG flow.
 func (ta *TestApp) SeedDealtCeremonyThreshold(
 	eaPkBytes []byte,
-	payloads []*types.DealerPayload,
 	validators []*types.ValidatorPallasKey,
 	threshold uint32,
 	feldmanCommitments [][]byte,
@@ -468,7 +465,7 @@ func (ta *TestApp) SeedDealtCeremonyThreshold(
 	roundID := h.Sum(nil)
 
 	// Assign ShamirIndex to any validator that doesn't have one, mirroring
-	// the assignment done by DealExecutiveAuthorityKey in production.
+	// the assignment done by finalizeDKG in production.
 	indexedValidators := make([]*types.ValidatorPallasKey, len(validators))
 	for i, v := range validators {
 		if v.ShamirIndex == 0 && threshold > 0 {
@@ -485,9 +482,7 @@ func (ta *TestApp) SeedDealtCeremonyThreshold(
 		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
 		EaPk:                 eaPkBytes,
 		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
-		CeremonyDealer:       "dealer",
 		CeremonyValidators:   indexedValidators,
-		CeremonyPayloads:     payloads,
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
 		Threshold:            threshold,

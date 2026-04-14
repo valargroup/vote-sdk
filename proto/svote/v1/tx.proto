@@ -19,7 +19,6 @@ service Msg {
   rpc SubmitTally(MsgSubmitTally) returns (MsgSubmitTallyResponse);
   rpc SubmitPartialDecryption(MsgSubmitPartialDecryption) returns (MsgSubmitPartialDecryptionResponse);
   rpc RegisterPallasKey(MsgRegisterPallasKey) returns (MsgRegisterPallasKeyResponse);
-  rpc DealExecutiveAuthorityKey(MsgDealExecutiveAuthorityKey) returns (MsgDealExecutiveAuthorityKeyResponse);
   rpc ContributeDKG(MsgContributeDKG) returns (MsgContributeDKGResponse);
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
@@ -124,20 +123,6 @@ message MsgRegisterPallasKey {
 }
 
 message MsgRegisterPallasKeyResponse {}
-
-// MsgDealExecutiveAuthorityKey is submitted by the bootstrap dealer to distribute encrypted ea_sk shares.
-// In threshold mode, each payload contains ECIES(f(i), pk_i) where f is a degree-(t-1) polynomial
-// with f(0) = ea_sk. feldman_commitments holds C_j = a_j*G for j=0..t-1 (Feldman polynomial commitments).
-message MsgDealExecutiveAuthorityKey {
-  string                 creator               = 1; // Dealer's validator address
-  bytes                  ea_pk                 = 2; // Executive authority public key (Pallas, 32 bytes)
-  repeated DealerPayload payloads              = 3; // One ECIES envelope per registered validator
-  bytes                  vote_round_id         = 4; // Target voting round (per-round ceremony)
-  uint32                 threshold             = 5; // Minimum shares required to reconstruct (t). Always >= 1.
-  repeated bytes         feldman_commitments   = 6; // C_j = a_j*G, t compressed Pallas points (32 bytes each)
-}
-
-message MsgDealExecutiveAuthorityKeyResponse {}
 
 // MsgContributeDKG is a validator's contribution to the Joint-Feldman DKG.
 // Each validator generates a random polynomial, publishes Feldman commitments,

@@ -26,105 +26,6 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// CeremonyDealPrepareProposalHandler — threshold mode
-//
-// With n=3 validators the deal handler must:
-//   - inject a MsgDealExecutiveAuthorityKey
-//   - set Threshold = ceil(3/2) = 2
-//   - include one 32-byte VerificationKey per validator
-//   - write the dealer's Shamir share to share.<hex(round_id)> (not ea_sk)
-//   - ECIES-encrypt a different scalar to each validator (share, not full key)
-// ---------------------------------------------------------------------------
-
-func TestCeremonyDealThresholdMode(t *testing.T) {
-	ta, pallasSk, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-	require.NotEmpty(t, ta.EaSkDir)
-
-	dealerAddr := ta.ValidatorOperAddr()
-
-	// Two extra validators with fresh Pallas keypairs (not the proposer).
-	_, pk2 := elgamal.KeyGen(rand.Reader)
-	_, pk3 := elgamal.KeyGen(rand.Reader)
-
-	validators := []*types.ValidatorPallasKey{
-		{ValidatorAddress: dealerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
-		{ValidatorAddress: "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk3.Point.ToAffineCompressed()},
-	}
-
-	roundID := ta.SeedRegisteringCeremony(validators)
-
-	// Invoke the deal handler directly (no longer wired into
-	// ComposedPrepareProposalHandler after the DKG swap).
-	txs := callDealHandler(t, ta)
-	require.Len(t, txs, 1, "expected exactly one injected deal tx")
-
-	tag, protoMsg, err := voteapi.DecodeCeremonyTx(txs[0])
-	require.NoError(t, err)
-	require.Equal(t, voteapi.TagDealExecutiveAuthorityKey, tag)
-
-	deal, ok := protoMsg.(*types.MsgDealExecutiveAuthorityKey)
-	require.True(t, ok)
-
-	// n=3 → t = ceil(3/2) = 2
-	require.EqualValues(t, 2, deal.Threshold, "threshold should be 2 for n=3")
-
-	// t=2 Feldman commitments, each 32 bytes.
-	require.Len(t, deal.FeldmanCommitments, 2, "expected t=2 Feldman commitments")
-	for j, c := range deal.FeldmanCommitments {
-		require.Len(t, c, 32, "FeldmanCommitment[%d] must be a 32-byte compressed Pallas point", j)
-	}
-
-	// One payload per validator.
-	require.Len(t, deal.Payloads, 3)
-	require.Len(t, deal.EaPk, 32, "ea_pk must be 32 bytes")
-
-	// The deal handler does NOT write anything to disk — the ack handler does that
-	// uniformly for all validators (including the dealer). Verify both files are absent.
-	sharePath := filepath.Join(ta.EaSkDir, "share."+hex.EncodeToString(roundID))
-	_, statErr := os.Stat(sharePath)
-	require.True(t, os.IsNotExist(statErr),
-		"deal handler must not write the share file — ack handler does that")
-
-	eaSkPath := filepath.Join(ta.EaSkDir, "ea_sk."+hex.EncodeToString(roundID))
-	_, statErr2 := os.Stat(eaSkPath)
-	require.True(t, os.IsNotExist(statErr2),
-		"deal handler must not write ea_sk in threshold mode")
-
-	// Consistency check: decrypt the dealer's own payload and verify against
-	// Feldman commitments.
-	dealerPayload := deal.Payloads[0]
-	require.Equal(t, dealerAddr, dealerPayload.ValidatorAddress)
-
-	ephPk, err := elgamal.UnmarshalPublicKey(dealerPayload.EphemeralPk)
-	require.NoError(t, err)
-
-	decrypted, err := ecies.Decrypt(pallasSk.Scalar, &ecies.Envelope{
-		Ephemeral:  ephPk.Point,
-		Ciphertext: dealerPayload.Ciphertext,
-	})
-	require.NoError(t, err, "dealer should be able to decrypt their own payload")
-	require.Len(t, decrypted, 32, "decrypted share should be 32 bytes")
-
-	// Verify the decrypted share against Feldman commitments.
-	shareScalar, err := new(curvey.ScalarPallas).SetBytes(decrypted)
-	require.NoError(t, err)
-	G := elgamal.PallasGenerator()
-	commitmentPts := make([]curvey.Point, len(deal.FeldmanCommitments))
-	for j, c := range deal.FeldmanCommitments {
-		pt, err := elgamal.DecompressPallasPoint(c)
-		require.NoError(t, err)
-		commitmentPts[j] = pt
-	}
-	ok, err = shamir.VerifyFeldmanShare(G, commitmentPts, 1, shareScalar)
-	require.NoError(t, err)
-	require.True(t, ok, "dealer's share must verify against Feldman commitments")
-
-	// The decrypted share must be a valid Pallas scalar (non-zero).
-	require.Len(t, decrypted, 32, "decrypted share must be 32 bytes")
-}
-
-// ---------------------------------------------------------------------------
 // CeremonyDealPrepareProposalHandler — no pallas_sk_path configured
 //
 // Without a Pallas secret key the deal handler must skip injection silently.
@@ -171,66 +72,6 @@ func TestCeremonyDealSkipsWhenProposerNotInValidators(t *testing.T) {
 
 	resp := ta.CallPrepareProposal()
 	require.Empty(t, resp.Txs, "no deal tx should be injected when proposer is not a ceremony validator")
-}
-
-// ---------------------------------------------------------------------------
-// DealExecutiveAuthorityKey — round-trip: deal → FinalizeBlock → read round
-//
-// Exercises the full on-chain path to verify that Threshold and
-// FeldmanCommitments survive the handler and are persisted to KV. This is the
-// test that was missing — all prior threshold tests bypass the handler by
-// seeding state directly.
-// ---------------------------------------------------------------------------
-
-func TestCeremonyDealThresholdStoredOnRound(t *testing.T) {
-	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-
-	dealerAddr := ta.ValidatorOperAddr()
-
-	_, pk2 := elgamal.KeyGen(rand.Reader)
-	_, pk3 := elgamal.KeyGen(rand.Reader)
-
-	validators := []*types.ValidatorPallasKey{
-		{ValidatorAddress: dealerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
-		{ValidatorAddress: "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk3.Point.ToAffineCompressed()},
-	}
-
-	roundID := ta.SeedRegisteringCeremony(validators)
-
-	// Invoke the deal handler directly (bypasses ComposedPrepareProposalHandler).
-	txs := callDealHandler(t, ta)
-	require.Len(t, txs, 1)
-
-	tag, protoMsg, err := voteapi.DecodeCeremonyTx(txs[0])
-	require.NoError(t, err)
-	require.Equal(t, voteapi.TagDealExecutiveAuthorityKey, tag)
-
-	deal := protoMsg.(*types.MsgDealExecutiveAuthorityKey)
-	require.EqualValues(t, 2, deal.Threshold)
-	require.Len(t, deal.FeldmanCommitments, 2, "expected t=2 Feldman commitments")
-
-	// Deliver the deal tx through FinalizeBlock + Commit.
-	txResult := ta.DeliverVoteTx(txs[0])
-	require.EqualValues(t, 0, txResult.Code,
-		"deal tx must succeed: %s", txResult.Log)
-
-	// Read the round back from KV and verify TSS fields were persisted.
-	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
-	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
-
-	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
-
-	require.EqualValues(t, 2, round.Threshold,
-		"round.Threshold must be persisted by DealExecutiveAuthorityKey handler")
-	require.Len(t, round.FeldmanCommitments, 2,
-		"round.FeldmanCommitments must be persisted by DealExecutiveAuthorityKey handler")
-	for j, c := range round.FeldmanCommitments {
-		require.Equal(t, deal.FeldmanCommitments[j], c,
-			"round.FeldmanCommitments[%d] must match deal message", j)
-	}
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 }
 
 // ---------------------------------------------------------------------------
@@ -314,58 +155,16 @@ func TestCeremonyAckThresholdMode(t *testing.T) {
 	proposerAddr := ta.ValidatorOperAddr()
 	G := elgamal.PallasGenerator()
 
-	// Build a (t=2, n=3) Shamir split of a fresh ea_sk.
-	eaSk, eaPkForRound := elgamal.KeyGen(rand.Reader)
-	shares, coeffs, err := shamir.Split(eaSk.Scalar, 2, 3)
-	require.NoError(t, err)
-
-	eaPkBytes := eaPkForRound.Point.ToAffineCompressed()
-
-	// Compute Feldman commitments from the polynomial coefficients.
-	commitmentPts, err := shamir.FeldmanCommit(G, coeffs)
-	require.NoError(t, err)
-	feldmanCommitments := make([][]byte, len(commitmentPts))
-	for j, c := range commitmentPts {
-		feldmanCommitments[j] = c.ToAffineCompressed()
-	}
-
-	// Build per-validator inputs: the proposer is validator index 0 (1-based index 1).
 	_, pk2 := elgamal.KeyGen(rand.Reader)
 	_, pk3 := elgamal.KeyGen(rand.Reader)
 
-	validatorPKs := []curvey.Point{
-		pallasPk.Point,
-		pk2.Point,
-		pk3.Point,
-	}
-	validatorAddrs := []string{
-		proposerAddr,
-		"sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx",
-		"sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx",
-	}
+	addrs := []string{proposerAddr, "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx"}
+	pks := []curvey.Point{pallasPk.Point, pk2.Point, pk3.Point}
 
-	// ECIES-encrypt share_i to validator_i.
-	payloads := make([]*types.DealerPayload, 3)
-	for i := range shares {
-		shareBytes := shares[i].Value.Bytes()
-		env, encErr := ecies.Encrypt(G, validatorPKs[i], shareBytes, rand.Reader)
-		require.NoError(t, encErr)
-		payloads[i] = &types.DealerPayload{
-			ValidatorAddress: validatorAddrs[i],
-			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-			Ciphertext:       env.Ciphertext,
-		}
-	}
+	contributions, combinedSerialized, eaPk, allShares, allCoeffs, combinedPts :=
+		buildDKGDealtRoundState(t, addrs, pks)
 
-	validators := make([]*types.ValidatorPallasKey, 3)
-	for i := range validatorAddrs {
-		validators[i] = &types.ValidatorPallasKey{
-			ValidatorAddress: validatorAddrs[i],
-			PallasPk:         validatorPKs[i].ToAffineCompressed(),
-		}
-	}
-
-	roundID := ta.SeedDealtCeremonyThreshold(eaPkBytes, payloads, validators, 2, feldmanCommitments)
+	roundID := seedDKGDealtRound(t, ta, addrs, pks, contributions, combinedSerialized, eaPk, allCoeffs[0])
 
 	// PrepareProposal should inject one ack tx.
 	resp := ta.CallPrepareProposal()
@@ -381,9 +180,20 @@ func TestCeremonyAckThresholdMode(t *testing.T) {
 	require.NoError(t, err, "share file should have been written by ack handler")
 	require.Len(t, shareBytes, 32)
 
-	// The written share must match share[0] (the proposer's share).
-	require.Equal(t, shares[0].Value.Bytes(), shareBytes,
-		"share on disk must equal the decrypted share for the proposer")
+	// The written share must equal the sum of all contributors' shares for
+	// the proposer (validator index 0, Shamir 1-based index 1).
+	expectedCombined := allShares[0][0].Value
+	for i := 1; i < len(allShares); i++ {
+		expectedCombined = expectedCombined.Add(allShares[i][0].Value)
+	}
+	require.Equal(t, expectedCombined.Bytes(), shareBytes,
+		"share on disk must equal the combined share for the proposer")
+
+	shareScalar, err := new(curvey.ScalarPallas).SetBytes(shareBytes)
+	require.NoError(t, err)
+	ok, err := shamir.VerifyFeldmanShare(G, combinedPts, 1, shareScalar)
+	require.NoError(t, err)
+	require.True(t, ok, "combined share must verify against combined Feldman commitments")
 
 	// ea_sk.<round_id> must NOT exist.
 	eaSkPath := filepath.Join(ta.EaSkDir, "ea_sk."+hex.EncodeToString(roundID))
@@ -399,60 +209,38 @@ func TestCeremonyAckThresholdMode(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCeremonyAckThresholdRejectsBadShare(t *testing.T) {
-	ta, pallasSk, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-	_ = pallasSk
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	proposerAddr := ta.ValidatorOperAddr()
 	G := elgamal.PallasGenerator()
 
-	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
-	shares, _, err := shamir.Split(eaSk.Scalar, 2, 3)
-	require.NoError(t, err)
-
-	wrongShareSk, _ := elgamal.KeyGen(rand.Reader) // random scalar ≠ shares[0]
-
 	_, pk2 := elgamal.KeyGen(rand.Reader)
 	_, pk3 := elgamal.KeyGen(rand.Reader)
 
-	validatorPKs := []curvey.Point{pallasPk.Point, pk2.Point, pk3.Point}
-	validatorAddrs := []string{
-		proposerAddr,
-		"sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx",
-		"sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx",
-	}
+	addrs := []string{proposerAddr, "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx"}
+	pks := []curvey.Point{pallasPk.Point, pk2.Point, pk3.Point}
 
-	// Encrypt the WRONG share to the proposer but publish the correct VK.
-	payloads := make([]*types.DealerPayload, 3)
-	vks := make([][]byte, 3)
-	for i := range shares {
-		var plaintext []byte
-		if i == 0 {
-			plaintext = wrongShareSk.Scalar.Bytes() // bad share for proposer
-		} else {
-			plaintext = shares[i].Value.Bytes()
-		}
-		env, encErr := ecies.Encrypt(G, validatorPKs[i], plaintext, rand.Reader)
-		require.NoError(t, encErr)
-		payloads[i] = &types.DealerPayload{
-			ValidatorAddress: validatorAddrs[i],
-			EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-			Ciphertext:       env.Ciphertext,
-		}
-		vks[i] = G.Mul(shares[i].Value).ToAffineCompressed() // correct VK
-	}
+	contributions, combinedSerialized, eaPk, _, allCoeffs, _ :=
+		buildDKGDealtRoundState(t, addrs, pks)
 
-	validators := make([]*types.ValidatorPallasKey, 3)
-	for i := range validatorAddrs {
-		validators[i] = &types.ValidatorPallasKey{
-			ValidatorAddress: validatorAddrs[i],
-			PallasPk:         validatorPKs[i].ToAffineCompressed(),
+	// Tamper with contributor 1's payload for the proposer: encrypt a random
+	// (wrong) share instead of the correct f_1(1).
+	wrongScalar := new(curvey.ScalarPallas).Random(rand.Reader)
+	env, err := ecies.Encrypt(G, pallasPk.Point, wrongScalar.Bytes(), rand.Reader)
+	require.NoError(t, err)
+
+	for _, p := range contributions[1].Payloads {
+		if p.ValidatorAddress == proposerAddr {
+			p.EphemeralPk = env.Ephemeral.ToAffineCompressed()
+			p.Ciphertext = env.Ciphertext
+			break
 		}
 	}
 
-	ta.SeedDealtCeremonyThreshold(eaPk.Point.ToAffineCompressed(), payloads, validators, 2, vks)
+	seedDKGDealtRound(t, ta, addrs, pks, contributions, combinedSerialized, eaPk, allCoeffs[0])
 
 	resp := ta.CallPrepareProposal()
-	require.Empty(t, resp.Txs, "ack must be rejected when share_i * G != VK_i")
+	require.Empty(t, resp.Txs, "ack must be rejected when share fails Feldman verification")
 }
 
 // ---------------------------------------------------------------------------
@@ -487,7 +275,7 @@ func TestProcessProposalRejectsDKGContributionWhenDealt(t *testing.T) {
 
 	validators := []*types.ValidatorPallasKey{{ValidatorAddress: valAddr}}
 	eaPkBytes := make([]byte, 32)
-	roundID := ta.SeedDealtCeremony(make([]byte, 32), eaPkBytes, nil, validators)
+	roundID := ta.SeedDealtCeremony(make([]byte, 32), eaPkBytes, validators)
 
 	msg := &types.MsgContributeDKG{
 		Creator:     valAddr,
@@ -507,30 +295,6 @@ func TestProcessProposalRejectsDKGContributionWhenDealt(t *testing.T) {
 // The DKG contribution handler is not wired into ComposedPrepareProposalHandler
 // until Phase 6, so these tests instantiate and invoke it directly.
 // ---------------------------------------------------------------------------
-
-// callDealHandler creates a CeremonyDealPrepareProposalHandler and invokes it
-// directly with the TestApp's keepers. This bypasses ComposedPrepareProposalHandler
-// (which now wires the DKG handler) so that dealer-specific tests continue to
-// exercise the deal path without depending on the app wiring.
-func callDealHandler(t *testing.T, ta *testutil.TestApp) [][]byte {
-	t.Helper()
-
-	pallasSkPath := filepath.Join(ta.EaSkDir, "pallas.sk")
-	handler := app.CeremonyDealPrepareProposalHandler(
-		ta.VoteKeeper(),
-		ta.StakingKeeper,
-		pallasSkPath,
-		ta.EaSkDir,
-		log.NewNopLogger(),
-	)
-
-	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height + 1})
-	req := &abci.RequestPrepareProposal{
-		Height:          ta.Height + 1,
-		ProposerAddress: ta.ProposerAddress,
-	}
-	return handler(ctx, req, nil)
-}
 
 // callDKGContributionHandler creates a CeremonyDKGContributionPrepareProposalHandler
 // and invokes it with the TestApp's keepers. Returns the resulting tx list.
@@ -1139,8 +903,6 @@ func TestEndBlockerClearsDKGContributionsOnTimeout(t *testing.T) {
 		"ceremony should reset to REGISTERING after timeout")
 	require.Nil(t, round.DkgContributions,
 		"DkgContributions must be cleared on timeout reset")
-	require.Nil(t, round.CeremonyPayloads,
-		"CeremonyPayloads must be cleared on timeout reset")
 	require.Nil(t, round.CeremonyAcks,
 		"CeremonyAcks must be cleared on timeout reset")
 }

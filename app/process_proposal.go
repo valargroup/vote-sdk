@@ -1,8 +1,6 @@
 package app
 
 import (
-	"fmt"
-
 	abci "github.com/cometbft/cometbft/abci/types"
 
 	"cosmossdk.io/log"
@@ -15,12 +13,12 @@ import (
 )
 
 // ProcessProposalHandler returns a handler that validates injected txs
-// proposed by the block proposer. For deal messages: verifies the round is
-// PENDING with ceremony REGISTERING, payload count matches, creator is a
-// ceremony validator, and creator matches the block proposer. For ack
-// messages: verifies the round is PENDING with ceremony DEALT, creator is a
-// ceremony validator, no duplicate ack, and creator matches the block proposer.
-// For partial decrypt messages: verifies the round is TALLYING in threshold
+// proposed by the block proposer. For DKG contribution messages: verifies
+// the round is PENDING with ceremony REGISTERING, creator is a ceremony
+// validator, and creator matches the block proposer. For ack messages:
+// verifies the round is PENDING with ceremony DEALT, creator is a ceremony
+// validator, no duplicate ack, and creator matches the block proposer. For
+// partial decrypt messages: verifies the round is TALLYING in threshold
 // mode, creator is a ceremony validator with matching ShamirIndex, no
 // duplicate submission, and creator matches the block proposer. For tally
 // messages: verifies the round is TALLYING and creator matches the block
@@ -36,15 +34,6 @@ func ProcessProposalHandler(
 			}
 
 			tag := txBytes[0]
-
-			// Validate injected ceremony deal txs.
-			if tag == voteapi.TagDealExecutiveAuthorityKey {
-				if err := validateInjectedDeal(ctx, voteKeeper, txBytes, logger); err != nil {
-					logger.Error("ProcessProposal: rejecting block — invalid deal tx", "err", err)
-					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
-				}
-				continue
-			}
 
 			// Validate injected DKG contribution txs.
 			if tag == voteapi.TagContributeDKG {
@@ -87,61 +76,6 @@ func ProcessProposalHandler(
 
 		return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}, nil
 	}
-}
-
-// validateInjectedDeal checks that an injected MsgDealExecutiveAuthorityKey
-// is valid: the round is PENDING with ceremony in REGISTERING, the payload
-// count matches the ceremony validator count, the creator is a ceremony
-// validator, and the creator matches the current block proposer.
-func validateInjectedDeal(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
-	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
-	if err != nil {
-		return err
-	}
-
-	dealMsg, ok := msg.(*types.MsgDealExecutiveAuthorityKey)
-	if !ok {
-		return errInvalidInjectedTx("expected MsgDealExecutiveAuthorityKey")
-	}
-
-	kvStore := voteKeeper.OpenKVStore(ctx)
-	round, err := voteKeeper.GetVoteRound(kvStore, dealMsg.VoteRoundId)
-	if err != nil {
-		return err
-	}
-
-	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
-		return errInvalidInjectedTx("round is not PENDING")
-	}
-	if round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
-		return errInvalidInjectedTx("ceremony is not REGISTERING")
-	}
-	if len(dealMsg.Payloads) != len(round.CeremonyValidators) {
-		return errInvalidInjectedTx("payload count does not match validator count")
-	}
-
-	// Verify creator is a ceremony validator.
-	if _, found := votekeeper.FindValidatorInRoundCeremony(round, dealMsg.Creator); !found {
-		return errInvalidInjectedTx("creator is not a ceremony validator")
-	}
-
-	// Verify threshold matches the deterministic policy for n validators.
-	expectedThreshold, err := votekeeper.ThresholdForN(len(round.CeremonyValidators))
-	if err != nil {
-		return errInvalidInjectedTx(fmt.Sprintf("threshold computation failed: %v", err))
-	}
-	if dealMsg.Threshold != uint32(expectedThreshold) {
-		return errInvalidInjectedTx(fmt.Sprintf(
-			"invalid threshold: got %d, expected %d for %d validators",
-			dealMsg.Threshold, expectedThreshold, len(round.CeremonyValidators)))
-	}
-
-	// Verify creator matches the block proposer.
-	if err := voteKeeper.ValidateProposerIsCreator(ctx, dealMsg.Creator, "MsgDealExecutiveAuthorityKey"); err != nil {
-		return errInvalidInjectedTx(err.Error())
-	}
-
-	return nil
 }
 
 // validateInjectedAck checks that an injected MsgAckExecutiveAuthorityKey is

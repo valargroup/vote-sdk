@@ -31,7 +31,6 @@ func GetTxCmd() *cobra.Command {
 	cmd.AddCommand(
 		// Ceremony commands — require standard Cosmos SDK signing by a validator.
 		CmdRegisterPallasKey(),
-		CmdDealExecutiveAuthorityKey(),
 		CmdCreateValidatorWithPallasKey(),
 		// Vote-manager commands — signed by the designated vote manager address.
 		CmdSetVoteManager(),
@@ -76,88 +75,6 @@ Example:
 			msg := &types.MsgRegisterPallasKey{
 				Creator:  clientCtx.GetFromAddress().String(),
 				PallasPk: pallasPk,
-			}
-
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
-		},
-	}
-
-	flags.AddTxFlagsToCmd(cmd)
-	return cmd
-}
-
-// CmdDealExecutiveAuthorityKey broadcasts MsgDealExecutiveAuthorityKey.
-// The bootstrap dealer publishes ea_pk and distributes one ECIES-encrypted
-// ea_sk share per registered validator.
-func CmdDealExecutiveAuthorityKey() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "deal-ea-key [ea-pk-hex] [payloads-json-file]",
-		Short: "Distribute encrypted EA secret-key shares to registered validators",
-		Long: `Submit an MsgDealExecutiveAuthorityKey transaction.
-
-Arguments:
-  ea-pk-hex           32-byte EA public key (Pallas point), hex-encoded
-  payloads-json-file  Path to a JSON file containing an array of per-validator
-                      ECIES payloads.  Each element must have:
-                        "validator_address" — bech32 validator/account address
-                        "ephemeral_pk"      — 32-byte ephemeral Pallas point, hex
-                        "ciphertext"        — 48-byte ChaCha20-Poly1305 ciphertext, hex
-
-Example payloads.json:
-  [
-    {
-      "validator_address": "svvaloper1...",
-      "ephemeral_pk": "02aabb...",
-      "ciphertext": "deadbeef..."
-    }
-  ]`,
-		Args: cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			clientCtx, err := client.GetClientTxContext(cmd)
-			if err != nil {
-				return err
-			}
-
-			eaPk, err := hex.DecodeString(args[0])
-			if err != nil {
-				return fmt.Errorf("invalid ea-pk-hex: %w", err)
-			}
-
-			data, err := os.ReadFile(args[1])
-			if err != nil {
-				return fmt.Errorf("reading payloads file: %w", err)
-			}
-
-			var rawPayloads []struct {
-				ValidatorAddress string `json:"validator_address"`
-				EphemeralPk      string `json:"ephemeral_pk"`
-				Ciphertext       string `json:"ciphertext"`
-			}
-			if err := json.Unmarshal(data, &rawPayloads); err != nil {
-				return fmt.Errorf("parsing payloads JSON: %w", err)
-			}
-
-			payloads := make([]*types.DealerPayload, len(rawPayloads))
-			for i, r := range rawPayloads {
-				ephPk, err := hex.DecodeString(r.EphemeralPk)
-				if err != nil {
-					return fmt.Errorf("payload[%d] invalid ephemeral_pk: %w", i, err)
-				}
-				ciphertext, err := hex.DecodeString(r.Ciphertext)
-				if err != nil {
-					return fmt.Errorf("payload[%d] invalid ciphertext: %w", i, err)
-				}
-				payloads[i] = &types.DealerPayload{
-					ValidatorAddress: r.ValidatorAddress,
-					EphemeralPk:      ephPk,
-					Ciphertext:       ciphertext,
-				}
-			}
-
-			msg := &types.MsgDealExecutiveAuthorityKey{
-				Creator:  clientCtx.GetFromAddress().String(),
-				EaPk:     eaPk,
-				Payloads: payloads,
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)

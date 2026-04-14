@@ -267,11 +267,6 @@ func (s *KeeperTestSuite) TestStripNonAckersFromRound() {
 			{ValidatorAddress: "val2", PallasPk: []byte{0x02}, ShamirIndex: 2},
 			{ValidatorAddress: "val3", PallasPk: []byte{0x03}, ShamirIndex: 3},
 		},
-		CeremonyPayloads: []*types.DealerPayload{
-			{ValidatorAddress: "val1", Ciphertext: []byte{0x10}},
-			{ValidatorAddress: "val2", Ciphertext: []byte{0x20}},
-			{ValidatorAddress: "val3", Ciphertext: []byte{0x30}},
-		},
 		DkgContributions: []*types.DKGContribution{
 			{ValidatorAddress: "val1", FeldmanCommitments: [][]byte{{0xA1}}},
 			{ValidatorAddress: "val2", FeldmanCommitments: [][]byte{{0xA2}}},
@@ -292,10 +287,6 @@ func (s *KeeperTestSuite) TestStripNonAckersFromRound() {
 	// uses the correct original x-coordinate (val3's share is f(3), not f(2)).
 	s.Require().Equal(uint32(1), round.CeremonyValidators[0].ShamirIndex)
 	s.Require().Equal(uint32(3), round.CeremonyValidators[1].ShamirIndex)
-
-	s.Require().Len(round.CeremonyPayloads, 2)
-	s.Require().Equal("val1", round.CeremonyPayloads[0].ValidatorAddress)
-	s.Require().Equal("val3", round.CeremonyPayloads[1].ValidatorAddress)
 
 	s.Require().Len(round.DkgContributions, 2)
 	s.Require().Equal("val1", round.DkgContributions[0].ValidatorAddress)

@@ -135,7 +135,6 @@ func TestEncodeDecodeSubmitTally(t *testing.T) {
 }
 
 func TestIsCeremonyTag(t *testing.T) {
-	require.True(t, IsCeremonyTag(TagDealExecutiveAuthorityKey))
 	require.True(t, IsCeremonyTag(TagContributeDKG))
 	require.True(t, IsCeremonyTag(TagAckExecutiveAuthorityKey))
 	require.True(t, IsCeremonyTag(TagSubmitPartialDecryption))
@@ -198,7 +197,7 @@ func TestEncodeCeremonyTx_RejectsNonCustomTags(t *testing.T) {
 	// MsgSetVoteManager (0x0C) uses the standard Cosmos Tx path — EncodeCeremonyTx must reject it.
 	_, err := EncodeCeremonyTx(msg, 0x0C)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "only 0x07, 0x08, 0x0D, 0x0E use custom wire format")
+	require.Contains(t, err.Error(), "only 0x08, 0x0D, 0x0E use custom wire format")
 }
 
 func TestDecodeVoteTx_TooShort(t *testing.T) {
