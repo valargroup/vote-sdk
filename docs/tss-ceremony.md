@@ -237,7 +237,7 @@ Implementation:
 | Single party can decrypt votes | No — requires `t` partial decryptions |
 | Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor) |
 | Malicious validator sabotages tally | No — DLEQ proof required per partial decryption |
-| Offline validator | Ceremony hangs at REGISTERING (see Roadmap: liveness hardening) |
+| Offline validator | REGISTERING phase times out after `DefaultContributionTimeout` (30 min), contributions are cleared and the phase restarts |
 | Liveness (all honest, n validators) | ~2n blocks (n contributions + n acks) |
 
 ## Roadmap
@@ -246,15 +246,11 @@ Implementation:
 
 Two liveness gaps were identified during DKG review.
 
-#### Issue 1: Offline validator stalls REGISTERING (implement)
+#### Issue 1: Offline validator stalls REGISTERING (implemented)
 
-**Problem.** The DKG requires all `n` contributions before transitioning REGISTERING → DEALT (`len(round.DkgContributions) == nValidators` in `ContributeDKG`). If any validator is offline and never proposes a block, the ceremony hangs indefinitely. The REGISTERING phase currently has no timeout ("REGISTERING persists indefinitely until a deal is injected by a proposer").
+**Problem.** The DKG requires all `n` contributions before transitioning REGISTERING → DEALT (`len(round.DkgContributions) == nValidators` in `ContributeDKG`). If any validator is offline and never proposes a block, the ceremony hangs indefinitely.
 
-**Fix.** Add a `ContributionPhaseTimeout` to the REGISTERING phase. On timeout in EndBlocker:
-- If `>= t` validators have contributed: call `finalizeDKG` with the available contributions. Non-contributing validators are excluded from the ceremony set.
-- If `< t` have contributed: reset the round (clear contributions, restart REGISTERING).
-
-This is a straightforward extension of the existing DEALT-phase timeout pattern.
+**Fix (implemented).** `DefaultContributionTimeout` (30 minutes) is set on `CeremonyPhaseStart` / `CeremonyPhaseTimeout` when a round enters REGISTERING (both on initial creation and when resetting from a DEALT timeout). EndBlocker checks for expired REGISTERING rounds and unconditionally clears contributions, resetting `CeremonyPhaseStart` to the current block time. The ceremony validators are preserved, giving everyone a fresh window to contribute. The same reset-only approach applies when a DEALT timeout resets back to REGISTERING.
 
 #### Issue 2: Corrupted-share DoS vector (documented, deferred)
 
