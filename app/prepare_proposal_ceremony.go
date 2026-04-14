@@ -481,6 +481,7 @@ func CeremonyAckPrepareProposalHandler(
 			return txs
 		}
 
+		// Resolve the proposer validator address.
 		proposerValAddr, err := resolveProposer(ctx, stakingKeeper, req.ProposerAddress)
 		if err != nil {
 			logger.Error("PrepareProposal[ack]: failed to resolve proposer validator", "err", err)
@@ -489,6 +490,7 @@ func CeremonyAckPrepareProposalHandler(
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
+		// Find the first pending round in DEALT status.
 		round, err := voteKeeper.FindFirstPendingRound(kvStore, types.CeremonyStatus_CEREMONY_STATUS_DEALT)
 		if err != nil {
 			logger.Error("PrepareProposal[ack]: failed to find dealt round", "err", err)
@@ -498,10 +500,12 @@ func CeremonyAckPrepareProposalHandler(
 			return txs
 		}
 
+		// Check if the proposer has already acked.
 		if _, found := votekeeper.FindAckInRoundCeremony(round, proposerValAddr); found {
 			return txs
 		}
 
+		// Check if the proposer is a ceremony validator.
 		ceremonyVal, found := votekeeper.FindValidatorInRoundCeremony(round, proposerValAddr)
 		if !found || ceremonyVal.ShamirIndex == 0 {
 			return txs
@@ -513,6 +517,7 @@ func CeremonyAckPrepareProposalHandler(
 		var secretBytes []byte
 		var recoveredSk *elgamal.SecretKey
 
+		// If the round has DKG contributions, use the DKG ack path. Otherwise, use the dealer ack path.
 		if len(round.DkgContributions) > 0 {
 			secretBytes, recoveredSk, err = ackDKGRound(pallasSk, round, proposerValAddr, shamirIndex, G, ceremonyDir, logger)
 		} else {
@@ -658,14 +663,18 @@ func ackDKGRound(
 		}
 	}()
 
+	// Evaluate the proposer's own polynomial at their shamir index.
 	ownPartial := shamir.EvalPolynomial(coeffs, shamirIndex)
 	combinedShare := ownPartial
 
+	// Iterate over the DKG contributions and decrypt each share.
 	for _, contrib := range round.DkgContributions {
+		// Skip the proposer's own contribution.
 		if contrib.ValidatorAddress == proposerValAddr {
 			continue
 		}
 
+		// Find the payload for the proposer.
 		var payload *types.DealerPayload
 		for _, p := range contrib.Payloads {
 			if p.ValidatorAddress == proposerValAddr {
@@ -678,11 +687,13 @@ func ackDKGRound(
 				contrib.ValidatorAddress, proposerValAddr)
 		}
 
+		// Decrypt the share.
 		ephPk, err := elgamal.UnmarshalPublicKey(payload.EphemeralPk)
 		if err != nil {
 			return nil, nil, fmt.Errorf("contributor %s: invalid ephemeral_pk: %w",
 				contrib.ValidatorAddress, err)
 		}
+		// Decrypt the share.
 		shareBytes, err := ecies.Decrypt(pallasSk.Scalar, &ecies.Envelope{
 			Ephemeral:  ephPk.Point,
 			Ciphertext: payload.Ciphertext,
@@ -706,22 +717,26 @@ func ackDKGRound(
 				contrib.ValidatorAddress, err)
 		}
 
+		// Verify the share against the contributor's Feldman commitments.
 		ok, err := shamir.VerifyFeldmanShare(G, contribCommitments, shamirIndex, shareSk.Scalar)
 		if err != nil {
 			zeroScalar(shareSk.Scalar)
 			return nil, nil, fmt.Errorf("contributor %s: Feldman verification error: %w",
 				contrib.ValidatorAddress, err)
 		}
+		// If the share does not verify, return an error.
 		if !ok {
 			zeroScalar(shareSk.Scalar)
 			return nil, nil, fmt.Errorf("contributor %s: share failed Feldman verification",
 				contrib.ValidatorAddress)
 		}
 
+		// Sum the share into the combined share.
 		combinedShare = combinedShare.Add(shareSk.Scalar)
 		zeroScalar(shareSk.Scalar)
 	}
 
+	// Verify the combined share against the round's Feldman commitments.
 	combinedCommitments, err := deserializeFeldmanCommitments(round.FeldmanCommitments)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid combined commitments: %w", err)
@@ -736,6 +751,7 @@ func ackDKGRound(
 
 	zeroAndDeleteCoeffsFile(ceremonyDir, round.VoteRoundId, logger)
 
+	// Return the combined share as a byte slice and the combined secret key.
 	secretBytes := combinedShare.Bytes()
 	return secretBytes, &elgamal.SecretKey{Scalar: combinedShare}, nil
 }
