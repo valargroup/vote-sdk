@@ -138,15 +138,15 @@ fn voting_flow_librustvoting_path() {
         &format!("ea_pk from round: {}", hex::encode(&ea_pk_bytes)),
     );
 
-    // Verify TSS fields when multiple validators are present.
+    // Verify DKG fields when multiple validators are present.
     let round_json = get_round(&round_id_hex).expect("should be able to query ACTIVE round");
     let threshold = round_json
         .get("threshold")
         .and_then(|t| t.as_u64())
         .unwrap_or(0);
-    let vk_count = round_json
-        .get("verificationKeys")
-        .or_else(|| round_json.get("verification_keys"))
+    let feldman_count = round_json
+        .get("feldmanCommitments")
+        .or_else(|| round_json.get("feldman_commitments"))
         .and_then(|v| v.as_array())
         .map(|a| a.len())
         .unwrap_or(0);
@@ -164,21 +164,22 @@ fn voting_flow_librustvoting_path() {
             threshold
         );
         assert_eq!(
-            vk_count, n_validators,
-            "verification_keys count should match validator count"
+            feldman_count, threshold as usize,
+            "feldman_commitments count should equal threshold (got {}, threshold={})",
+            feldman_count, threshold
         );
         log_step(
             "Step 1b",
             &format!(
-                "TSS mode: threshold={}, verification_keys={}, validators={}",
-                threshold, vk_count, n_validators
+                "DKG mode: threshold={}, feldman_commitments={}, validators={}",
+                threshold, feldman_count, n_validators
             ),
         );
     } else {
         log_step(
             "Step 1b",
             &format!(
-                "Legacy mode: threshold={}, validators={}",
+                "Single-validator mode: threshold={}, validators={}",
                 threshold, n_validators
             ),
         );
