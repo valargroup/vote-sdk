@@ -273,6 +273,110 @@ func (s *MsgServerTestSuite) TestRegisterPallasKey_GlobalRegistry() {
 	s.Require().Equal(pk, vpk.PallasPk)
 }
 
+// TestRegisterPallasKey_ReverseLookupPopulated verifies that registration
+// populates the PK -> validator reverse-lookup index used for cross-validator
+// uniqueness enforcement (H-2 fix).
+func (s *MsgServerTestSuite) TestRegisterPallasKey_ReverseLookupPopulated() {
+	s.SetupTest()
+
+	pk := testPallasPK()
+	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+		Creator:  testAccAddr(1),
+		PallasPk: pk,
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	owner, err := s.keeper.GetPallasKeyOwner(kv, pk)
+	s.Require().NoError(err)
+	s.Require().Equal(testValoperAddr(1), owner)
+}
+
+// TestRegisterPallasKey_ReverseLookupUnregisteredReturnsEmpty verifies that
+// GetPallasKeyOwner returns "" for a PK that has not been registered.
+func (s *MsgServerTestSuite) TestRegisterPallasKey_ReverseLookupUnregisteredReturnsEmpty() {
+	s.SetupTest()
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	owner, err := s.keeper.GetPallasKeyOwner(kv, testPallasPK())
+	s.Require().NoError(err)
+	s.Require().Empty(owner)
+}
+
+// TestRegisterPallasKey_DuplicatePKAcrossValidators is an end-to-end scenario
+// test for the H-2 attack vector: two different validators attempt to register
+// the same Pallas public key. The second registration must fail.
+func (s *MsgServerTestSuite) TestRegisterPallasKey_DuplicatePKAcrossValidators() {
+	s.SetupTest()
+
+	sharedPK := testPallasPK()
+
+	// Validator 1 registers successfully.
+	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+		Creator:  testAccAddr(1),
+		PallasPk: sharedPK,
+	})
+	s.Require().NoError(err)
+
+	// Validator 2 tries the same PK — must be rejected.
+	_, err = s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+		Creator:  testAccAddr(2),
+		PallasPk: sharedPK,
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "pallas key already registered by another validator")
+
+	// The error message should include the owning validator.
+	s.Require().Contains(err.Error(), testValoperAddr(1))
+
+	// Verify only validator 1 is in the registry.
+	kv := s.keeper.OpenKVStore(s.ctx)
+	vpk1, err := s.keeper.GetPallasKey(kv, testValoperAddr(1))
+	s.Require().NoError(err)
+	s.Require().NotNil(vpk1)
+
+	vpk2, err := s.keeper.GetPallasKey(kv, testValoperAddr(2))
+	s.Require().NoError(err)
+	s.Require().Nil(vpk2, "validator 2 must not be in the registry")
+
+	// Reverse lookup still points to validator 1.
+	owner, err := s.keeper.GetPallasKeyOwner(kv, sharedPK)
+	s.Require().NoError(err)
+	s.Require().Equal(testValoperAddr(1), owner)
+}
+
+// TestRegisterPallasKey_UniqueKeysSucceed verifies that two different
+// validators registering distinct keys both succeed and both reverse-lookup
+// entries are correct.
+func (s *MsgServerTestSuite) TestRegisterPallasKey_UniqueKeysSucceed() {
+	s.SetupTest()
+
+	pk1 := testPallasPK()
+	pk2 := testPallasPK()
+
+	_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+		Creator:  testAccAddr(1),
+		PallasPk: pk1,
+	})
+	s.Require().NoError(err)
+
+	_, err = s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+		Creator:  testAccAddr(2),
+		PallasPk: pk2,
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	owner1, err := s.keeper.GetPallasKeyOwner(kv, pk1)
+	s.Require().NoError(err)
+	s.Require().Equal(testValoperAddr(1), owner1)
+
+	owner2, err := s.keeper.GetPallasKeyOwner(kv, pk2)
+	s.Require().NoError(err)
+	s.Require().Equal(testValoperAddr(2), owner2)
+}
+
 // ===========================================================================
 // MsgAckExecutiveAuthorityKey handler tests
 // ===========================================================================
