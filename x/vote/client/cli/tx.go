@@ -31,6 +31,7 @@ func GetTxCmd() *cobra.Command {
 	cmd.AddCommand(
 		// Ceremony commands — require standard Cosmos SDK signing by a validator.
 		CmdRegisterPallasKey(),
+		CmdRotatePallasKey(),
 		CmdCreateValidatorWithPallasKey(),
 		// Vote-manager commands — signed by the designated vote manager address.
 		CmdSetVoteManager(),
@@ -75,6 +76,46 @@ Example:
 			msg := &types.MsgRegisterPallasKey{
 				Creator:  clientCtx.GetFromAddress().String(),
 				PallasPk: pallasPk,
+			}
+
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
+// CmdRotatePallasKey broadcasts MsgRotatePallasKey.
+// Replaces the validator's registered Pallas public key with a new one.
+func CmdRotatePallasKey() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rotate-pallas-key",
+		Short: "Replace the registered Pallas public key with a new one",
+		Long: `Rotate the node's Pallas public key in the global ceremony registry.
+
+The new public key is read from <home>/pallas.pk (written by 'svoted pallas-keygen').
+The validator must already have a registered key and must not be participating
+in any in-flight ceremony (PENDING round).
+
+Example:
+  svoted tx vote rotate-pallas-key --from myvalidator --chain-id svote-1`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+
+			pkPath := filepath.Join(clientCtx.HomeDir, "pallas.pk")
+			pallasPk, err := os.ReadFile(pkPath)
+			if err != nil {
+				return fmt.Errorf("reading pallas.pk from %s: %w", pkPath, err)
+			}
+
+			msg := &types.MsgRotatePallasKey{
+				Creator:     clientCtx.GetFromAddress().String(),
+				NewPallasPk: pallasPk,
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)

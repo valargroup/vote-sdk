@@ -32,6 +32,11 @@ var (
 	ErrInvalidThreshold         = errors.Register(ModuleName, 28, "invalid threshold parameters")
 	ErrInsufficientValidators   = errors.Register(ModuleName, 29, "insufficient eligible validators")
 
+	// Pallas key rotation errors.
+	ErrCeremonyInProgress = errors.Register(ModuleName, 35, "cannot rotate key while participating in an active ceremony")
+	ErrNoPallasKey        = errors.Register(ModuleName, 36, "validator has no registered pallas key")
+	ErrSameKey            = errors.Register(ModuleName, 37, "new pallas key is identical to the current key")
+
 	// Vote manager errors.
 	ErrNotAuthorized  = errors.Register(ModuleName, 30, "sender is not authorized")
 	ErrNoVoteManager  = errors.Register(ModuleName, 31, "no vote manager set")

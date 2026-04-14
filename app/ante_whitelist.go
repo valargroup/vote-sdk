@@ -49,6 +49,7 @@ func DefaultAllowedMessages() []string {
 		// use the custom VoteTxWrapper path and are never seen here).
 		"/svote.v1.MsgCreateVotingSession",
 		"/svote.v1.MsgRegisterPallasKey",
+		"/svote.v1.MsgRotatePallasKey",
 		"/svote.v1.MsgCreateValidatorWithPallasKey",
 		"/svote.v1.MsgSetVoteManager",
 		"/svote.v1.MsgAuthorizedSend",

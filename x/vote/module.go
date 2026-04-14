@@ -55,6 +55,7 @@ func init() {
 			ProvideSubmitTallySigner,
 			ProvideSubmitPartialDecryptionSigner,
 			ProvideRegisterPallasKeySigner,
+			ProvideRotatePallasKeySigner,
 			ProvideContributeDKGSigner,
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
@@ -178,6 +179,13 @@ func ProvideSubmitPartialDecryptionSigner() signing.CustomGetSigner {
 func ProvideRegisterPallasKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("svote.v1.MsgRegisterPallasKey"),
+		Fn:      ceremonyCreatorSignerFn,
+	}
+}
+
+func ProvideRotatePallasKeySigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgRotatePallasKey"),
 		Fn:      ceremonyCreatorSignerFn,
 	}
 }

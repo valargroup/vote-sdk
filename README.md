@@ -127,9 +127,11 @@ Key behaviors:
 - **Non-acker stripping** — validators who fail to ack within the timeout are stripped from the round's ceremony (removed from `ceremony_validators` and `ceremony_payloads`). No miss counters or ceremony-based jailing — liveness enforcement is handled by `x/slashing` block-miss detection.
 - **Ceremony log** — each state transition appends a timestamped entry to `ceremony_log` on the round, visible in queries and the admin UI.
 
-#### Pallas Key Registration (One-Time)
+#### Pallas Key Registration and Rotation
 
-Validators register their Pallas key once via `MsgRegisterPallasKey` or `MsgCreateValidatorWithPallasKey`. Keys are stored in a global registry (prefix `0x0C`) and persist across rounds.
+Validators register their Pallas key via `MsgRegisterPallasKey` or `MsgCreateValidatorWithPallasKey`. Keys are stored in a global registry (prefix `0x0C`) and persist across rounds.
+
+A registered key can be replaced via `MsgRotatePallasKey`. Rotation is rejected while the validator is participating in any PENDING round ceremony (the snapshotted key would become stale and ECIES payloads would be undecryptable). The old key's reverse-lookup index is cleaned up so it can be reused.
 
 #### Auto-Deal and Auto-Ack via PrepareProposal
 
@@ -232,6 +234,7 @@ These flow through the standard ante chain: signature verification (`SigVerifica
 | Message                           | Who can submit               | Ante checks                                                            | MsgServer checks                                                                                                         |
 | --------------------------------- | ---------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `MsgRegisterPallasKey`            | Any bonded validator         | secp256k1 sig + `CeremonyValidatorDecorator` (bonded validator gate)   | Valid Pallas point; no duplicate registration                                                                            |
+| `MsgRotatePallasKey`              | Any bonded validator         | secp256k1 sig + `CeremonyValidatorDecorator` (bonded validator gate)   | Valid Pallas point; existing key required; no in-flight ceremony; new PK globally unique                                 |
 | `MsgCreateValidatorWithPallasKey` | Anyone (becomes a validator) | secp256k1 sig; exempt from `CeremonyValidatorDecorator`                | Delegates to `x/staking` `CreateValidator`; registers Pallas key; rejects duplicates                                     |
 | `MsgSetVoteManager`               | Current VoteManager only     | secp256k1 sig; exempt from `CeremonyValidatorDecorator` (has own auth) | `ValidateVoteManagerOnly`: only the current VoteManager can reassign; transfers full `usvote` balance to the new manager |
 | `MsgCreateVotingSession`          | VoteManager only             | secp256k1 sig (standard Cosmos Tx)                                     | `ValidateVoteManagerOnly`: creator must be the on-chain VoteManager address                                              |
@@ -283,7 +286,7 @@ A positive-security allowlist: only messages whose proto type URL appears in `De
 
 | Module   | Allowed messages |
 | -------- | ---------------- |
-| Vote     | `MsgCreateVotingSession`, `MsgRegisterPallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgSetVoteManager`, `MsgAuthorizedSend` |
+| Vote     | `MsgCreateVotingSession`, `MsgRegisterPallasKey`, `MsgRotatePallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgSetVoteManager`, `MsgAuthorizedSend` |
 | Staking  | `MsgCreateValidator` (genesis only — blocked post-genesis by Layer 1), `MsgEditValidator` |
 | Slashing | `MsgUnjail` |
 
@@ -328,7 +331,7 @@ Vote-round messages use the custom wire format and are submitted as JSON POST re
 
 These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`. `MsgSubmitTally`, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` have no REST endpoints — they are proposer-only and auto-injected via PrepareProposal.
 
-Ceremony and management messages (`MsgRegisterPallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgSetVoteManager`, `MsgCreateVotingSession`) are standard Cosmos SDK transactions routed through the MsgServiceRouter. They can be submitted via the Cosmos SDK CLI or gRPC gateway.
+Ceremony and management messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgSetVoteManager`, `MsgCreateVotingSession`) are standard Cosmos SDK transactions routed through the MsgServiceRouter. They can be submitted via the Cosmos SDK CLI or gRPC gateway.
 
 #### Query Endpoints
 

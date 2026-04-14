@@ -238,6 +238,7 @@ Implementation:
 | Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor) |
 | Malicious validator sabotages tally | No — DLEQ proof required per partial decryption |
 | Offline validator | REGISTERING phase times out after `DefaultContributionTimeout` (30 min), contributions are cleared and the phase restarts |
+| Compromised Pallas key | Validator rotates via `MsgRotatePallasKey` (blocked during in-flight ceremonies). Future rounds use the new key. Past ECIES ciphertexts in completed `DkgContributions` remain encrypted to the old key. |
 | Liveness (all honest, n validators) | ~2n blocks (n contributions + n acks) |
 
 ## Roadmap

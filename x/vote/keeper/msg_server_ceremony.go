@@ -54,6 +54,47 @@ func (ms msgServer) RegisterPallasKey(goCtx context.Context, msg *types.MsgRegis
 	return &types.MsgRegisterPallasKeyResponse{}, nil
 }
 
+// RotatePallasKey handles MsgRotatePallasKey.
+// Replaces the validator's registered Pallas public key in the global registry.
+// Requires an existing registration and rejects rotation while the validator
+// is participating in any PENDING round ceremony.
+func (ms msgServer) RotatePallasKey(goCtx context.Context, msg *types.MsgRotatePallasKey) (*types.MsgRotatePallasKeyResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := ms.k.OpenKVStore(ctx)
+
+	if _, err := elgamal.UnmarshalPublicKey(msg.NewPallasPk); err != nil {
+		return nil, fmt.Errorf("%w: %v", types.ErrInvalidPallasPoint, err)
+	}
+
+	accAddr, err := sdk.AccAddressFromBech32(msg.Creator)
+	if err != nil {
+		return nil, fmt.Errorf("invalid creator address %q: %w", msg.Creator, err)
+	}
+	valAddr := sdk.ValAddress(accAddr).String()
+
+	inCeremony, err := ms.k.IsValidatorInPendingCeremony(kvStore, valAddr)
+	if err != nil {
+		return nil, err
+	}
+	if inCeremony {
+		return nil, fmt.Errorf("%w: %s", types.ErrCeremonyInProgress, valAddr)
+	}
+
+	oldPK, err := ms.k.RotatePallasKeyCore(kvStore, valAddr, msg.NewPallasPk)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeRotatePallasKey,
+		sdk.NewAttribute(types.AttributeKeyValidatorAddress, valAddr),
+		sdk.NewAttribute(types.AttributeKeyOldPallasPk, hex.EncodeToString(oldPK)),
+		sdk.NewAttribute(types.AttributeKeyNewPallasPk, hex.EncodeToString(msg.NewPallasPk)),
+	))
+
+	return &types.MsgRotatePallasKeyResponse{}, nil
+}
+
 // ContributeDKG handles MsgContributeDKG.
 // Each ceremony validator contributes their Feldman commitment vector and
 // ECIES-encrypted shares for all other validators. When the final (n-th)
