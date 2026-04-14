@@ -702,7 +702,7 @@ func TestMultiValidatorCeremony_DealAckConfirm(t *testing.T) {
 	}
 	roundID := app.SeedRegisteringCeremony(validators)
 
-	// Block 1: deal handler (invoked directly — the pipeline now wires the
+	// Block 1: deal handler (invoked directly. The pipeline wires the
 	// DKG handler, so dealer-path tests bypass PrepareProposal).
 	app.NextBlockWithTxs(callDealHandler(t, app))
 
