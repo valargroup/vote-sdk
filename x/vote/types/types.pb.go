@@ -1930,8 +1930,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\aoptions\x18\x04 \x03(\v2\x14.svote.v1.VoteOptionR\aoptions\x12\x1d\n" +
 	"\n" +
 	"zip_number\x18\x05 \x01(\tR\tzipNumber\x12\x1b\n" +
-	"\tforum_url\x18\x06 \x01(\tR\bforumUrl\"\x96\n" +
-	"\n" +
+	"\tforum_url\x18\x06 \x01(\tR\bforumUrl\"\xb3\t\n" +
 	"\tVoteRound\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -1960,7 +1959,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x13tally_phase_timeout\x18\x1a \x01(\x04R\x11tallyPhaseTimeout\x12&\n" +
 	"\x0ftally_timed_out\x18\x1b \x01(\bR\rtallyTimedOut\x12F\n" +
 	"\x11dkg_contributions\x18\x1c \x03(\v2\x19.svote.v1.DKGContributionR\x10dkgContributions\x12%\n" +
-	"\x0ediscussion_url\x18\x1d \x01(\tR\rdiscussionUrl\",\n" +
+	"\x0ediscussion_url\x18\x1d \x01(\tR\rdiscussionUrlJ\x04\b\x11\x10\x12J\x04\b\x13\x10\x14\",\n" +
 	"\x10VoteManagerState\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x8d\x01\n" +
 	"\x13CommitmentTreeState\x12\x1d\n" +
