@@ -318,6 +318,29 @@ func (ta *TestApp) VoteKeeper() *votekeeper.Keeper {
 	return ta.SvoteApp.VoteKeeper
 }
 
+// MustGetVoteRound reads the round from committed state, failing the test on error.
+func (ta *TestApp) MustGetVoteRound(roundID []byte) *types.VoteRound {
+	ta.t.Helper()
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(ta.t, err)
+	return round
+}
+
+// RegisterPallasKey registers the given Pallas public key for the genesis
+// validator via a signed MsgRegisterPallasKey delivered through FinalizeBlock.
+func (ta *TestApp) RegisterPallasKey(pallasPk *elgamal.PublicKey) {
+	ta.t.Helper()
+	regMsg := &types.MsgRegisterPallasKey{
+		Creator:  ta.ValidatorAccAddr(),
+		PallasPk: pallasPk.Point.ToAffineCompressed(),
+	}
+	regTx := ta.MustBuildSignedCeremonyTx(regMsg)
+	result := ta.DeliverVoteTx(regTx)
+	require.Equal(ta.t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
+}
+
 // SeedVoteManager writes the vote manager address directly into the module's
 // KV store and commits via an empty block. Must be called before any
 // CreateVotingSession, since that handler requires the creator to be the

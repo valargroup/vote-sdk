@@ -933,10 +933,7 @@ func TestEndBlockerClearsDKGContributionsOnTimeout(t *testing.T) {
 	timeoutTime := time.Unix(int64(phaseStart+phaseTimeout)+1, 0)
 	ta.NextBlockAtTime(timeoutTime)
 
-	ctx = ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
-	kvStore = ta.VoteKeeper().OpenKVStore(ctx)
-	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round = ta.MustGetVoteRound(roundID)
 
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
 		"ceremony should reset to REGISTERING after timeout")
