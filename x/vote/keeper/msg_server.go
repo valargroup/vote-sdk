@@ -119,6 +119,8 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		// Per-round ceremony fields.
 		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		CeremonyValidators: ceremonyValidators,
+		CeremonyPhaseStart:   uint64(ctx.BlockTime().Unix()),
+		CeremonyPhaseTimeout: types.DefaultContributionTimeout,
 	}
 
 	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),

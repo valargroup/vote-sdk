@@ -943,6 +943,114 @@ func TestEndBlockerClearsDKGContributionsOnTimeout(t *testing.T) {
 		"CeremonyAcks must be cleared on timeout reset")
 }
 
+func TestEndBlockerRegistering_TimeoutResetsContributions(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	proposerAddr := ta.ValidatorOperAddr()
+	_, pk2 := elgamal.KeyGen(rand.Reader)
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed(), ShamirIndex: 1},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed(), ShamirIndex: 2},
+	}
+
+	roundID := make([]byte, 32)
+	roundID[0] = 0xEC
+
+	phaseStart := uint64(ta.Time.Unix())
+	phaseTimeout := types.DefaultContributionTimeout
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	round := &types.VoteRound{
+		VoteRoundId:          roundID,
+		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
+		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		CeremonyValidators:   validators,
+		CeremonyPhaseStart:   phaseStart,
+		CeremonyPhaseTimeout: phaseTimeout,
+		DkgContributions: []*types.DKGContribution{
+			{ValidatorAddress: proposerAddr, FeldmanCommitments: [][]byte{{0x01}}},
+		},
+		VoteEndTime:      uint64(ta.Time.Add(24 * time.Hour).Unix()),
+		Proposals:        testutil.SampleProposals(),
+		NullifierImtRoot: make([]byte, 32),
+		NcRoot:           make([]byte, 32),
+	}
+	require.NoError(t, ta.VoteKeeper().SetVoteRound(kvStore, round))
+	ta.NextBlock()
+
+	timeoutTime := time.Unix(int64(phaseStart+phaseTimeout)+1, 0)
+	ta.NextBlockAtTime(timeoutTime)
+
+	round = ta.MustGetVoteRound(roundID)
+
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
+		"ceremony should remain REGISTERING after contribution timeout")
+	require.Nil(t, round.DkgContributions,
+		"DkgContributions must be cleared on contribution timeout")
+	require.Equal(t, 2, len(round.CeremonyValidators),
+		"CeremonyValidators must be preserved after contribution timeout")
+	require.Equal(t, uint64(timeoutTime.Unix()), round.CeremonyPhaseStart,
+		"CeremonyPhaseStart must be refreshed to the timeout block time")
+	require.Equal(t, types.DefaultContributionTimeout, round.CeremonyPhaseTimeout,
+		"CeremonyPhaseTimeout must remain set for next cycle")
+}
+
+func TestEndBlockerRegistering_NoTimeoutBeforeDeadline(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	proposerAddr := ta.ValidatorOperAddr()
+	_, pk2 := elgamal.KeyGen(rand.Reader)
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed(), ShamirIndex: 1},
+		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed(), ShamirIndex: 2},
+	}
+
+	roundID := make([]byte, 32)
+	roundID[0] = 0xED
+
+	phaseStart := uint64(ta.Time.Unix())
+	phaseTimeout := types.DefaultContributionTimeout
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+
+	contribs := []*types.DKGContribution{
+		{ValidatorAddress: proposerAddr, FeldmanCommitments: [][]byte{{0x01}}},
+	}
+
+	round := &types.VoteRound{
+		VoteRoundId:          roundID,
+		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
+		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		CeremonyValidators:   validators,
+		CeremonyPhaseStart:   phaseStart,
+		CeremonyPhaseTimeout: phaseTimeout,
+		DkgContributions:     contribs,
+		VoteEndTime:          uint64(ta.Time.Add(24 * time.Hour).Unix()),
+		Proposals:            testutil.SampleProposals(),
+		NullifierImtRoot:     make([]byte, 32),
+		NcRoot:               make([]byte, 32),
+	}
+	require.NoError(t, ta.VoteKeeper().SetVoteRound(kvStore, round))
+	ta.NextBlock()
+
+	// Advance to 1 second before the deadline — timeout must NOT fire.
+	beforeDeadline := time.Unix(int64(phaseStart+phaseTimeout)-1, 0)
+	ta.NextBlockAtTime(beforeDeadline)
+
+	round = ta.MustGetVoteRound(roundID)
+
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
+	require.Equal(t, 1, len(round.DkgContributions),
+		"contributions must be preserved before timeout fires")
+	require.Equal(t, phaseStart, round.CeremonyPhaseStart,
+		"CeremonyPhaseStart must not change before timeout")
+}
+
 // ---------------------------------------------------------------------------
 // ackDKGRound — unit-level error path coverage
 //

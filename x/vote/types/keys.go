@@ -13,6 +13,11 @@ const (
 	RouterKey = ModuleName
 )
 
+// DefaultContributionTimeout is the REGISTERING phase timeout in seconds (30 minutes).
+// If not all validators have contributed by this deadline, EndBlocker clears
+// contributions and restarts REGISTERING with a fresh timeout.
+const DefaultContributionTimeout uint64 = 1800
+
 // DefaultDealTimeout is the ceremony deal/ack phase timeout in seconds (30 minutes).
 const DefaultDealTimeout uint64 = 1800
 

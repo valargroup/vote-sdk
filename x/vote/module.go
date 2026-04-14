@@ -510,9 +510,52 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		))
 	}
 
-	// --- 3. Per-round ceremony DEALT phase timeout ---
-	// Only the DEALT phase has a timeout. REGISTERING persists indefinitely
-	// until a deal is injected by a proposer.
+	// --- 3. Per-round ceremony REGISTERING phase timeout ---
+	// If a REGISTERING round has not collected all n contributions within its
+	// timeout, clear contributions and restart the phase with a fresh deadline.
+	var contribTimeoutIDs [][]byte
+	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
+		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING &&
+			round.CeremonyPhaseTimeout > 0 &&
+			blockTime >= round.CeremonyPhaseStart+round.CeremonyPhaseTimeout {
+			id := make([]byte, len(round.VoteRoundId))
+			copy(id, round.VoteRoundId)
+			contribTimeoutIDs = append(contribTimeoutIDs, id)
+		}
+		return false
+	}); err != nil {
+		return err
+	}
+
+	for _, roundID := range contribTimeoutIDs {
+		round, err := am.keeper.GetVoteRound(kvStore, roundID)
+		if err != nil {
+			return err
+		}
+		if round == nil {
+			continue
+		}
+
+		keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+			fmt.Sprintf("REGISTERING timeout: reset (%d/%d contributions), restarting",
+				len(round.DkgContributions), len(round.CeremonyValidators)))
+
+		round.DkgContributions = nil
+		round.CeremonyPhaseStart = blockTime
+
+		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+			return err
+		}
+
+		ctx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeCeremonyStatusChange,
+			sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+			sdk.NewAttribute(types.AttributeKeyOldStatus, round.CeremonyStatus.String()),
+			sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+		))
+	}
+
+	// --- 4. Per-round ceremony DEALT phase timeout ---
 	// On DEALT timeout with >= 1/2 acks: strip non-ackers, confirm ceremony,
 	// transition round to ACTIVE.
 	// On DEALT timeout with < 1/2 acks: reset ceremony to REGISTERING for re-deal.
@@ -556,25 +599,25 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 					fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, %d stripped, remaining %d < threshold %d)",
 						nAcks, nVals, stripped, nAcks, round.Threshold))
 
-			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
-			round.CeremonyAcks = nil
-			round.DkgContributions = nil
-			round.CeremonyPhaseStart = 0
-			round.CeremonyPhaseTimeout = 0
-			round.EaPk = nil
+				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
+				round.CeremonyAcks = nil
+				round.DkgContributions = nil
+				round.CeremonyPhaseStart = blockTime
+				round.CeremonyPhaseTimeout = types.DefaultContributionTimeout
+				round.EaPk = nil
 
-			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
-				return err
-			}
+				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+					return err
+				}
 
-			ctx.EventManager().EmitEvent(sdk.NewEvent(
-				types.EventTypeCeremonyStatusChange,
-				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-				sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
-				sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
-			))
-		} else {
-			// >= 1/2 acked and remaining ackers meet threshold: strip
+				ctx.EventManager().EmitEvent(sdk.NewEvent(
+					types.EventTypeCeremonyStatusChange,
+					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+					sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
+					sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+				))
+			} else {
+				// >= 1/2 acked and remaining ackers meet threshold: strip
 				// non-ackers (offline/non-responsive), confirm ceremony, activate round.
 				keeper.StripNonAckersFromRound(round)
 				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
@@ -608,8 +651,8 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
 			round.CeremonyAcks = nil
 			round.DkgContributions = nil
-			round.CeremonyPhaseStart = 0
-			round.CeremonyPhaseTimeout = 0
+			round.CeremonyPhaseStart = blockTime
+			round.CeremonyPhaseTimeout = types.DefaultContributionTimeout
 			round.EaPk = nil
 
 			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
