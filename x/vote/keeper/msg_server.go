@@ -115,6 +115,7 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		Description:     msg.Description,
 		CreatedAtHeight: uint64(ctx.BlockHeight()),
 		Title:           msg.Title,
+		DiscussionUrl:   msg.DiscussionUrl,
 		// Per-round ceremony fields.
 		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		CeremonyValidators: ceremonyValidators,
