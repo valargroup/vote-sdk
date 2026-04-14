@@ -74,6 +74,11 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 // Reads stored partial decryptions from KV, Lagrange-combines them per
 // accumulator, and checks C2 - combined == totalValue * G.
 func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally) (*types.MsgSubmitTallyResponse, error) {
+	// Block mempool submission and verify creator is the block proposer.
+	if err := ms.k.ValidateProposerIsCreator(goCtx, msg.Creator, "MsgSubmitTally"); err != nil {
+		return nil, err
+	}
+
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
