@@ -244,6 +244,45 @@ func TestCeremonyAckThresholdRejectsBadShare(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// CeremonyAckPrepareProposalHandler — share disk write failure
+//
+// If the share file cannot be written (e.g. directory unwritable), the ack
+// handler must bail out without injecting the ack tx. Previously the ack was
+// injected regardless, leaving the validator unable to produce a partial
+// decryption at tally time.
+// ---------------------------------------------------------------------------
+
+func TestCeremonyAckSkipsInjectionOnShareWriteFailure(t *testing.T) {
+	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	require.NotEmpty(t, ta.EaSkDir)
+
+	proposerAddr := ta.ValidatorOperAddr()
+
+	_, pk2 := elgamal.KeyGen(rand.Reader)
+	_, pk3 := elgamal.KeyGen(rand.Reader)
+
+	addrs := []string{proposerAddr, "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx"}
+	pks := []curvey.Point{pallasPk.Point, pk2.Point, pk3.Point}
+
+	contributions, combinedSerialized, eaPk, _, allCoeffs, _ :=
+		buildDKGDealtRoundState(t, addrs, pks)
+
+	roundID := seedDKGDealtRound(t, ta, addrs, pks, contributions, combinedSerialized, eaPk, allCoeffs[0])
+
+	// Make the ceremony directory read-only so the share write fails.
+	require.NoError(t, os.Chmod(ta.EaSkDir, 0500))
+	t.Cleanup(func() { os.Chmod(ta.EaSkDir, 0700) })
+
+	resp := ta.CallPrepareProposal()
+	require.Empty(t, resp.Txs, "ack must not be injected when share write fails")
+
+	// Verify no share file was written.
+	sharePath := filepath.Join(ta.EaSkDir, "share."+hex.EncodeToString(roundID))
+	_, statErr := os.Stat(sharePath)
+	require.True(t, os.IsNotExist(statErr), "share file must not exist after write failure")
+}
+
+// ---------------------------------------------------------------------------
 // ProcessProposal: MsgContributeDKG validation
 //
 // Verifies that ProcessProposal accepts a well-formed MsgContributeDKG when

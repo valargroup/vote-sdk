@@ -363,9 +363,14 @@ func CeremonyAckPrepareProposalHandler(
 		}
 		defer zeroSecret(secretBytes, recoveredSk)
 
-		var diskPath string
 		if ceremonyDir != "" {
-			diskPath = sharePathForRound(ceremonyDir, round.VoteRoundId)
+			diskPath := sharePathForRound(ceremonyDir, round.VoteRoundId)
+			if err := os.WriteFile(diskPath, secretBytes, 0600); err != nil {
+				logger.Error("PrepareProposal[ack]: failed to write secret to disk — skipping ack injection",
+					"path", diskPath, "err", err)
+				return txs
+			}
+			logger.Info("PrepareProposal[ack]: secret written to disk", "path", diskPath)
 		}
 
 		h := sha256.New()
@@ -384,15 +389,6 @@ func CeremonyAckPrepareProposalHandler(
 		if err != nil {
 			logger.Error("PrepareProposal[ack]: failed to encode ack tx", "err", err)
 			return txs
-		}
-
-		if diskPath != "" {
-			if err := os.WriteFile(diskPath, secretBytes, 0600); err != nil {
-				logger.Error("PrepareProposal[ack]: failed to write secret to disk",
-					"path", diskPath, "err", err)
-			} else {
-				logger.Info("PrepareProposal[ack]: secret written to disk", "path", diskPath)
-			}
 		}
 
 		logger.Info("PrepareProposal[ack]: injecting MsgAckExecutiveAuthorityKey",
