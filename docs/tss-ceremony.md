@@ -153,62 +153,19 @@ Prefix scans:
 - `0x12 || round_id` — all entries for a round (used by tally combiner)
 - `0x12 || round_id || validator_index` — check if a validator already submitted
 
-### Security properties
+## Security Guarantees
 
-| Property | DKG |
-|---|---|
-| Who knows `ea_sk` | **Nobody** — `ea_sk = sum(s_i)` is never assembled |
-| Single party can decrypt votes | No — requires `t` partial decryptions |
-| Malicious validator sends bad shares | Detected at ack time (Feldman verification per contributor) |
-| Malicious validator sabotages tally | No (DLEQ proof required per partial decryption) |
-| Offline validator | Ceremony hangs at REGISTERING (timeout resets) |
-| Liveness (all honest, n validators) | ~2n blocks (n contributions + n acks) |
+### No trusted dealer (Joint-Feldman DKG)
 
-## Roadmap
+Each validator generates their own polynomial, publishes Feldman commitments, and distributes ECIES-encrypted shares to all other validators. The combined public key `ea_pk = sum(C_{i,0})` is computed on-chain; `ea_sk = sum(s_i)` is never assembled by any party. No single validator can unilaterally determine or learn the group secret.
 
-### Step 2: DLEQ proofs (correctness vs. validators) — DONE
-
-Each `PartialDecryptionEntry` now includes a Chaum-Pedersen DLEQ proof proving that the validator used the same scalar for their verification key and their partial decryption:
-
-```
-DLEQ: log_G(VK_i) == log_{C1}(D_i)
-```
-
-The chain verifies the proof in `SubmitPartialDecryption` (FinalizeBlock) before storing the partial decryption. A malicious validator with a fake share cannot forge a valid proof against their published `VK_i`.
-
-Implementation:
-- `crypto/elgamal/dleq.go`: `GeneratePartialDecryptDLEQ` / `VerifyPartialDecryptDLEQ` with domain tag `"svote-pd-dleq-v1"`.
-- `app/prepare_proposal_partial_decrypt.go`: generates proof alongside each `D_i`.
-- `x/vote/keeper/msg_server_tally_decrypt.go`: derives `VK_i` via `EvalCommitmentPolynomial(round.FeldmanCommitments, shamirIndex)` and verifies DLEQ proof against it.
-
-### Step 3: Feldman commitments (correctness vs. dealer) — DONE
-
-Replaced per-validator `verification_keys` (n points) with `t` **Feldman polynomial commitments**:
-
-```
-C_j = a_j * G    for j = 0..t-1
-```
-
-Validators verify their share satisfies:
-```
-share_i * G == sum(C_j * i^j)    for j = 0..t-1
-```
-
-This proves consistency across shares — a malicious dealer cannot send conflicting shares to different validators without being detected at ack time.
-
-`ea_pk` becomes derivable as `C_0` (the constant term commitment), so it no longer needs to be published separately.
-
-### Step 4: Joint-Feldman DKG (eliminates the dealer) — DONE
-
-Replaced the single-dealer model with Joint-Feldman distributed key generation. Each validator generates their own polynomial, publishes Feldman commitments, and distributes ECIES-encrypted shares to all other validators. The combined public key `ea_pk = sum(C_{i,0})` is computed on-chain; `ea_sk = sum(s_i)` is never assembled by any party.
-
-The state machine reuses the same ceremony statuses — the only structural change is that REGISTERING → DEALT requires `n` contributions instead of 1:
+The state machine reuses the same ceremony statuses — the only structural change vs. a single-dealer model is that REGISTERING → DEALT requires `n` contributions instead of 1:
 
 ```
 REGISTERING ──[n × MsgContributeDKG]──> DEALT ──[n × MsgAck]──> CONFIRMED ──> ACTIVE
 ```
 
-The tally pipeline (partial decryptions, Lagrange interpolation, BSGS) is completely unchanged from Steps 1–3. Combined Feldman commitments are a drop-in replacement: `VK_i = EvalCommitmentPolynomial(combined_commitments, shamirIndex)` works identically because point-wise addition of commitment vectors corresponds to addition of the underlying polynomials.
+The tally pipeline (partial decryptions, Lagrange interpolation, BSGS) is unchanged. Combined Feldman commitments are a drop-in replacement: `VK_i = EvalCommitmentPolynomial(combined_commitments, shamirIndex)` works identically because point-wise addition of commitment vectors corresponds to addition of the underlying polynomials.
 
 #### Why single-phase (no separate COMMITTING phase)
 
@@ -239,3 +196,91 @@ This approach was rejected because:
 4. **The bias is harmless.** As analyzed above, `ea_pk` bias provides no advantage to the attacker in this protocol. The additional engineering complexity of vote extensions solves a non-problem.
 
 For the current validator set size (n ≤ 9), the `2n`-block contribution + ack latency is negligible relative to the voting period.
+
+### Corrupted shares detected at ack time (Feldman commitments)
+
+Each contributor publishes `t` Feldman polynomial commitments alongside their encrypted shares:
+
+```
+C_j = a_j * G    for j = 0..t-1
+```
+
+During the ack phase, each validator verifies every received share against the contributor's commitments:
+```
+share_i * G == sum(C_j * i^j)    for j = 0..t-1
+```
+
+This proves consistency — a contributor cannot send conflicting or corrupted shares to different validators without being detected. The commitments reveal nothing about the actual coefficients (discrete log hardness).
+
+`ea_pk` is derivable as `C_0` (the constant term commitment), so it does not need to be published separately.
+
+### Tally sabotage prevented (DLEQ proofs)
+
+Each `PartialDecryptionEntry` includes a Chaum-Pedersen DLEQ proof proving that the validator used the same scalar for their verification key and their partial decryption:
+
+```
+DLEQ: log_G(VK_i) == log_{C1}(D_i)
+```
+
+The chain verifies the proof in `SubmitPartialDecryption` (FinalizeBlock) before storing the partial decryption. A malicious validator with a fake share cannot forge a valid proof against their published `VK_i`.
+
+Implementation:
+- `crypto/elgamal/dleq.go`: `GeneratePartialDecryptDLEQ` / `VerifyPartialDecryptDLEQ` with domain tag `"svote-pd-dleq-v1"`.
+- `app/prepare_proposal_partial_decrypt.go`: generates proof alongside each `D_i`.
+- `x/vote/keeper/msg_server_tally_decrypt.go`: derives `VK_i` via `EvalCommitmentPolynomial(round.FeldmanCommitments, shamirIndex)` and verifies DLEQ proof against it.
+
+### Summary
+
+| Property | Guarantee |
+|---|---|
+| Who knows `ea_sk` | **Nobody** — `ea_sk = sum(s_i)` is never assembled |
+| Single party can decrypt votes | No — requires `t` partial decryptions |
+| Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor) |
+| Malicious validator sabotages tally | No — DLEQ proof required per partial decryption |
+| Offline validator | Ceremony hangs at REGISTERING (see Roadmap: liveness hardening) |
+| Liveness (all honest, n validators) | ~2n blocks (n contributions + n acks) |
+
+## Roadmap
+
+### DKG Liveness Hardening
+
+Two liveness gaps were identified during DKG review.
+
+#### Issue 1: Offline validator stalls REGISTERING (implement)
+
+**Problem.** The DKG requires all `n` contributions before transitioning REGISTERING → DEALT (`len(round.DkgContributions) == nValidators` in `ContributeDKG`). If any validator is offline and never proposes a block, the ceremony hangs indefinitely. The REGISTERING phase currently has no timeout ("REGISTERING persists indefinitely until a deal is injected by a proposer").
+
+**Fix.** Add a `ContributionPhaseTimeout` to the REGISTERING phase. On timeout in EndBlocker:
+- If `>= t` validators have contributed: call `finalizeDKG` with the available contributions. Non-contributing validators are excluded from the ceremony set.
+- If `< t` have contributed: reset the round (clear contributions, restart REGISTERING).
+
+This is a straightforward extension of the existing DEALT-phase timeout pattern.
+
+#### Issue 2: Corrupted-share DoS vector (documented, deferred)
+
+**Problem.** A malicious validator can send shares that fail Feldman verification to all other validators. Currently, `ackDKGRound` returns an error on the first failed `VerifyFeldmanShare`, preventing the validator from acking. If every honest validator's ack fails, the DEALT timeout fires and resets to REGISTERING. The malicious validator repeats this on every cycle they propose, stalling the ceremony indefinitely.
+
+**Why naive skipping doesn't work.** If `ackDKGRound` simply skipped a bad contributor and summed the remaining shares, validators would need to agree on who was skipped. A sophisticated attacker can send bad shares to *some* validators and valid shares to others. Validators who received good shares include the attacker in their sum; those who received bad shares exclude them. The two groups end up with shares of different combined polynomials — threshold decryption would fail later.
+
+**Proposed solution: majority-vote skip set.** Each ack carries a `SkippedContributors` list identifying which contributors failed Feldman verification for that validator. At confirmation time (fast path or timeout), the chain determines the majority skip set and only counts acks compatible with it. Combined Feldman commitments and `ea_pk` are recomputed excluding the skipped contributors.
+
+Analysis for a single malicious validator `j` who sends bad shares to `k` out of `n-1` honest validators:
+
+- `k < n/2`: majority says no skip, the `k` validators who reported `{skip j}` are stripped. Remaining `n-k > n/2 >= t`. Confirms.
+- `k >= n/2`: majority says skip `j`, the `n-k` validators who reported `{no skip}` are stripped. Remaining `k >= n/2 >= t`. Confirms without `j`.
+- `k = n-1` (bad to everyone): unanimous `{skip j}`. Confirms trivially.
+
+A single attacker cannot prevent confirmation under honest majority. The attack degrades to requiring two or more colluding validators doing coordinated selective targeting (j1 targets group A, j2 targets group B), which is a strictly harder attack.
+
+**Why we defer.** The majority-vote mechanism requires:
+- Proto change: new `SkippedContributors` field on `MsgAckExecutiveAuthorityKey`.
+- `ackDKGRound` rewrite: skip bad contributors instead of failing, track skip set, recompute combined commitments locally.
+- Confirm/timeout handler: majority-vote logic to determine canonical skip set, filter compatible acks, recompute on-chain commitments and `ea_pk`.
+- Extensive test coverage for all edge cases.
+
+This adds meaningful complexity for an attack that requires a compromised bonded validator. The attack is detectable: every honest validator's logs record the offender's address on Feldman verification failure. Attribution is straightforward.
+
+**Current mitigation.** If the attack is observed in production:
+1. Identify the offending validator from node logs (all honest validators will log the same contributor address).
+2. Chain upgrade to jail the attacker and exclude them from future ceremonies.
+3. Optionally implement the majority-vote mechanism at that point.

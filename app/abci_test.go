@@ -670,14 +670,7 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 
 	valAddr := app.ValidatorOperAddr()
 
-	// Register the real validator's Pallas key.
-	regMsg := &types.MsgRegisterPallasKey{
-		Creator:  app.ValidatorAccAddr(),
-		PallasPk: pallasPk.Point.ToAffineCompressed(),
-	}
-	regTx := app.MustBuildSignedCeremonyTx(regMsg)
-	result := app.DeliverVoteTx(regTx)
-	require.Equal(t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
+	app.RegisterPallasKey(pallasPk)
 
 	// Generate 3 phantom validators (4 total).
 	_, phantomPk1 := elgamal.KeyGen(rand.Reader)
@@ -701,80 +694,19 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 	for cycle := 1; cycle <= 3; cycle++ {
 		// Pre-seed 3 phantom DKG contributions so the proposer's
 		// 4th contribution via PrepareProposal triggers finalizeDKG → DEALT.
-		// Fresh contributions each cycle because timeout reset clears DkgContributions.
-		// Payloads addressed to the real proposer must be real ECIES envelopes
-		// since the ack handler decrypts them. Payloads for phantom↔phantom
-		// are never decrypted and can be dummy bytes.
-		{
-			ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-			kvStore := app.VoteKeeper().OpenKVStore(ctx)
-			round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
-			require.NoError(t, err)
-
-			for _, addr := range phantomAddrs {
-				secret := new(curvey.ScalarPallas).Random(rand.Reader)
-				shares, coeffs, err := shamir.Split(secret, 2, 4)
-				require.NoError(t, err)
-				commitPts, err := shamir.FeldmanCommit(G, coeffs)
-				require.NoError(t, err)
-
-				commitments := make([][]byte, len(commitPts))
-				for j, pt := range commitPts {
-					commitments[j] = pt.ToAffineCompressed()
-				}
-
-				var payloads []*types.DealerPayload
-				for i, v := range validators {
-					if v.ValidatorAddress == addr {
-						continue
-					}
-					if v.ValidatorAddress == valAddr {
-						recipientPk, err := elgamal.UnmarshalPublicKey(v.PallasPk)
-						require.NoError(t, err)
-						env, err := ecies.Encrypt(G, recipientPk.Point, shares[i].Value.Bytes(), rand.Reader)
-						require.NoError(t, err)
-						payloads = append(payloads, &types.DealerPayload{
-							ValidatorAddress: v.ValidatorAddress,
-							EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-							Ciphertext:       env.Ciphertext,
-						})
-					} else {
-						payloads = append(payloads, &types.DealerPayload{
-							ValidatorAddress: v.ValidatorAddress,
-							EphemeralPk:      bytes.Repeat([]byte{0xEE}, 32),
-							Ciphertext:       bytes.Repeat([]byte{0xFF}, 48),
-						})
-					}
-				}
-
-				round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{
-					ValidatorAddress:   addr,
-					FeldmanCommitments: commitments,
-					Payloads:           payloads,
-				})
-			}
-
-			require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
-			app.NextBlock()
-		}
+		seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
 
 		// Step 1: DKG contribution from proposer via pipeline.
 		app.NextBlockWithPrepareProposal()
 
-		ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-		kvStore := app.VoteKeeper().OpenKVStore(ctx)
-		round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
-		require.NoError(t, err)
+		round := app.MustGetVoteRound(roundID)
 		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
 			"cycle %d: ceremony should be DEALT after auto-deal", cycle)
 
 		// Step 2: PrepareProposal fires auto-ack → 1/4 < 1/2 → stays DEALT.
 		app.NextBlockWithPrepareProposal()
 
-		ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-		kvStore = app.VoteKeeper().OpenKVStore(ctx)
-		round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
-		require.NoError(t, err)
+		round = app.MustGetVoteRound(roundID)
 		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
 			"cycle %d: ceremony should still be DEALT (1/4 below threshold)", cycle)
 		require.Len(t, round.CeremonyAcks, 1,
@@ -785,10 +717,7 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 		timeoutTime := time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
 		app.NextBlockAtTime(timeoutTime)
 
-		ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-		kvStore = app.VoteKeeper().OpenKVStore(ctx)
-		round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
-		require.NoError(t, err)
+		round = app.MustGetVoteRound(roundID)
 		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
 			"cycle %d: ceremony should reset to REGISTERING after timeout", cycle)
 		require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, round.Status,
@@ -802,12 +731,7 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 	}
 
 	// After 3 cycles, verify final state.
-	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-
-	// The round should still be PENDING/REGISTERING — ready for another deal attempt.
-	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round := app.MustGetVoteRound(roundID)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
 }
@@ -831,14 +755,7 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 
 	valAddr := app.ValidatorOperAddr()
 
-	// Register the real validator's Pallas key.
-	regMsg := &types.MsgRegisterPallasKey{
-		Creator:  app.ValidatorAccAddr(),
-		PallasPk: pallasPk.Point.ToAffineCompressed(),
-	}
-	regTx := app.MustBuildSignedCeremonyTx(regMsg)
-	result := app.DeliverVoteTx(regTx)
-	require.Equal(t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
+	app.RegisterPallasKey(pallasPk)
 
 	// Generate 3 phantom validators (4 total).
 	_, phantomPk1 := elgamal.KeyGen(rand.Reader)
@@ -864,78 +781,19 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	// -----------------------------------------------------------------------
 
 	// Pre-seed 3 phantom DKG contributions for cycle 1.
-	// Payloads addressed to the real proposer must be real ECIES envelopes
-	// since the ack handler decrypts them.
-	{
-		ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-		kvStore := app.VoteKeeper().OpenKVStore(ctx)
-		round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
-		require.NoError(t, err)
-
-		for _, addr := range phantomAddrs {
-			secret := new(curvey.ScalarPallas).Random(rand.Reader)
-			shares, coeffs, err := shamir.Split(secret, 2, 4)
-			require.NoError(t, err)
-			commitPts, err := shamir.FeldmanCommit(G, coeffs)
-			require.NoError(t, err)
-
-			commitments := make([][]byte, len(commitPts))
-			for j, pt := range commitPts {
-				commitments[j] = pt.ToAffineCompressed()
-			}
-
-			var payloads []*types.DealerPayload
-			for i, v := range validators {
-				if v.ValidatorAddress == addr {
-					continue
-				}
-				if v.ValidatorAddress == valAddr {
-					recipientPk, err := elgamal.UnmarshalPublicKey(v.PallasPk)
-					require.NoError(t, err)
-					env, err := ecies.Encrypt(G, recipientPk.Point, shares[i].Value.Bytes(), rand.Reader)
-					require.NoError(t, err)
-					payloads = append(payloads, &types.DealerPayload{
-						ValidatorAddress: v.ValidatorAddress,
-						EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-						Ciphertext:       env.Ciphertext,
-					})
-				} else {
-					payloads = append(payloads, &types.DealerPayload{
-						ValidatorAddress: v.ValidatorAddress,
-						EphemeralPk:      bytes.Repeat([]byte{0xEE}, 32),
-						Ciphertext:       bytes.Repeat([]byte{0xFF}, 48),
-					})
-				}
-			}
-
-			round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{
-				ValidatorAddress:   addr,
-				FeldmanCommitments: commitments,
-				Payloads:           payloads,
-			})
-		}
-
-		require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
-		app.NextBlock()
-	}
+	seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
 
 	// Block 1: DKG contribution from proposer via pipeline → DEALT.
 	app.NextBlockWithPrepareProposal()
 
-	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round := app.MustGetVoteRound(roundID)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
 		"cycle 1: ceremony should be DEALT after deal")
 
 	// Block 2: PrepareProposal fires auto-ack from real validator → still DEALT.
 	app.NextBlockWithPrepareProposal()
 
-	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round = app.MustGetVoteRound(roundID)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
 		"cycle 1: ceremony should still be DEALT (1/4 below threshold)")
 	require.Len(t, round.CeremonyAcks, 1, "cycle 1: should have 1 ack from real validator")
@@ -944,10 +802,7 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	timeoutTime := time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
 	app.NextBlockAtTime(timeoutTime)
 
-	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round = app.MustGetVoteRound(roundID)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
 		"cycle 1: ceremony should reset to REGISTERING after timeout")
 
@@ -956,75 +811,21 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	// -----------------------------------------------------------------------
 
 	// Pre-seed 3 phantom DKG contributions for cycle 2.
-	{
-		ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-		kvStore := app.VoteKeeper().OpenKVStore(ctx)
-		round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
-		require.NoError(t, err)
-
-		for _, addr := range phantomAddrs {
-			secret := new(curvey.ScalarPallas).Random(rand.Reader)
-			shares, coeffs, err := shamir.Split(secret, 2, 4)
-			require.NoError(t, err)
-			commitPts, err := shamir.FeldmanCommit(G, coeffs)
-			require.NoError(t, err)
-
-			commitments := make([][]byte, len(commitPts))
-			for j, pt := range commitPts {
-				commitments[j] = pt.ToAffineCompressed()
-			}
-
-			var payloads []*types.DealerPayload
-			for i, v := range validators {
-				if v.ValidatorAddress == addr {
-					continue
-				}
-				if v.ValidatorAddress == valAddr {
-					recipientPk, err := elgamal.UnmarshalPublicKey(v.PallasPk)
-					require.NoError(t, err)
-					env, err := ecies.Encrypt(G, recipientPk.Point, shares[i].Value.Bytes(), rand.Reader)
-					require.NoError(t, err)
-					payloads = append(payloads, &types.DealerPayload{
-						ValidatorAddress: v.ValidatorAddress,
-						EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
-						Ciphertext:       env.Ciphertext,
-					})
-				} else {
-					payloads = append(payloads, &types.DealerPayload{
-						ValidatorAddress: v.ValidatorAddress,
-						EphemeralPk:      bytes.Repeat([]byte{0xEE}, 32),
-						Ciphertext:       bytes.Repeat([]byte{0xFF}, 48),
-					})
-				}
-			}
-
-			round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{
-				ValidatorAddress:   addr,
-				FeldmanCommitments: commitments,
-				Payloads:           payloads,
-			})
-		}
-
-		require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
-		app.NextBlock()
-	}
+	seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
 
 	// Block 4: DKG contribution from proposer via pipeline → DEALT.
 	app.NextBlockWithPrepareProposal()
 
-	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round = app.MustGetVoteRound(roundID)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
 		"cycle 2: ceremony should be DEALT after auto-deal")
 
 	// Block 5: PrepareProposal fires auto-ack from real validator → still DEALT.
 	app.NextBlockWithPrepareProposal()
 
-	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
 		"cycle 2: ceremony should still be DEALT (1/4 below threshold)")
@@ -1033,15 +834,7 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	// Block 6: Write phantom1's ack directly to state. In production,
 	// phantom1 would ack when they are the block proposer
 	// (ValidateProposerIsCreator enforces creator == proposer).
-	h := sha256.New()
-	h.Write([]byte(types.AckSigDomain))
-	h.Write(round.EaPk)
-	h.Write([]byte(phantom1Addr))
-	round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
-		ValidatorAddress: phantom1Addr,
-		AckSignature:     h.Sum(nil),
-		AckHeight:        uint64(app.Height),
-	})
+	seedPhantomAcks(round, app.Height, phantom1Addr)
 	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
 	app.NextBlock()
 
@@ -1055,10 +848,7 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	// Assertions: ceremony confirmed via timeout, non-ackers stripped.
 	// -----------------------------------------------------------------------
 
-	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round = app.MustGetVoteRound(roundID)
 
 	// Round should be ACTIVE with ceremony CONFIRMED.
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
@@ -1113,10 +903,7 @@ func TestFullLifecycle_SingleValidator(t *testing.T) {
 	// Block 1: DKG contribution from proposer via pipeline → DEALT (Shamir t=1, n=1).
 	app.NextBlockWithPrepareProposal()
 
-	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round = app.MustGetVoteRound(roundID)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	require.EqualValues(t, 1, round.Threshold, "t=1 for single validator")
 	require.Len(t, round.FeldmanCommitments, 1)
@@ -1124,10 +911,7 @@ func TestFullLifecycle_SingleValidator(t *testing.T) {
 	// Block 2: auto-ack → single validator acks → CONFIRMED + ACTIVE.
 	app.NextBlockWithPrepareProposal()
 
-	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round = app.MustGetVoteRound(roundID)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
 		"round should be ACTIVE after single-validator ceremony")
 	require.Len(t, round.CeremonyAcks, 1)
@@ -1162,10 +946,7 @@ func TestFullLifecycle_SingleValidator(t *testing.T) {
 
 	app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
 
-	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round = app.MustGetVoteRound(roundID)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
 
 	// Block N: partial decrypt (D_1 = share * C1) injected.
@@ -1327,10 +1108,7 @@ func TestDKGFullLifecycle(t *testing.T) {
 
 	app.NextBlockWithPrepareProposal()
 
-	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round = app.MustGetVoteRound(roundID)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
 		"ceremony should be DEALT after 3rd DKG contribution")
 	require.Len(t, round.DkgContributions, 3)
@@ -1394,27 +1172,13 @@ func TestDKGFullLifecycle(t *testing.T) {
 
 	// Write phantom acks directly to state (production: each validator acks
 	// when they propose a block; ValidateProposerIsCreator enforces this).
-	for _, addr := range []string{phantom1Addr, phantom2Addr} {
-		h := sha256.New()
-		h.Write([]byte(types.AckSigDomain))
-		h.Write(round.EaPk)
-		h.Write([]byte(addr))
-
-		round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
-			ValidatorAddress: addr,
-			AckSignature:     h.Sum(nil),
-			AckHeight:        uint64(app.Height),
-		})
-	}
+	seedPhantomAcks(round, app.Height, phantom1Addr, phantom2Addr)
 	round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 	round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
 	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
 	app.NextBlock()
 
-	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
-	kvStore = app.VoteKeeper().OpenKVStore(ctx)
-	round, err = app.VoteKeeper().GetVoteRound(kvStore, roundID)
-	require.NoError(t, err)
+	round = app.MustGetVoteRound(roundID)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
 		"round should be ACTIVE after 3/3 acks")
 
@@ -1512,3 +1276,88 @@ func TestDKGFullLifecycle(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// seedPhantomDKGContributions reads the round, appends one DKG contribution per
+// phantom address (with real ECIES payloads for the proposer, dummy for others),
+// saves the round, and advances a block.
+func seedPhantomDKGContributions(
+	t *testing.T,
+	app *testutil.TestApp,
+	roundID []byte,
+	validators []*types.ValidatorPallasKey,
+	proposerAddr string,
+	phantomAddrs []string,
+	G curvey.Point,
+) {
+	t.Helper()
+
+	n := len(validators)
+	tVal := (n + 1) / 2
+
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(t, err)
+
+	for _, addr := range phantomAddrs {
+		secret := new(curvey.ScalarPallas).Random(rand.Reader)
+		shares, coeffs, err := shamir.Split(secret, tVal, n)
+		require.NoError(t, err)
+		commitPts, err := shamir.FeldmanCommit(G, coeffs)
+		require.NoError(t, err)
+
+		commitments := make([][]byte, len(commitPts))
+		for j, pt := range commitPts {
+			commitments[j] = pt.ToAffineCompressed()
+		}
+
+		var payloads []*types.DealerPayload
+		for i, v := range validators {
+			if v.ValidatorAddress == addr {
+				continue
+			}
+			if v.ValidatorAddress == proposerAddr {
+				recipientPk, err := elgamal.UnmarshalPublicKey(v.PallasPk)
+				require.NoError(t, err)
+				env, err := ecies.Encrypt(G, recipientPk.Point, shares[i].Value.Bytes(), rand.Reader)
+				require.NoError(t, err)
+				payloads = append(payloads, &types.DealerPayload{
+					ValidatorAddress: v.ValidatorAddress,
+					EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+					Ciphertext:       env.Ciphertext,
+				})
+			} else {
+				payloads = append(payloads, &types.DealerPayload{
+					ValidatorAddress: v.ValidatorAddress,
+					EphemeralPk:      bytes.Repeat([]byte{0xEE}, 32),
+					Ciphertext:       bytes.Repeat([]byte{0xFF}, 48),
+				})
+			}
+		}
+
+		round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{
+			ValidatorAddress:   addr,
+			FeldmanCommitments: commitments,
+			Payloads:           payloads,
+		})
+	}
+
+	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
+	app.NextBlock()
+}
+
+// seedPhantomAcks appends ack entries to the round for the given validator
+// addresses, computing the ack signature from the round's EaPk.
+func seedPhantomAcks(round *types.VoteRound, height int64, addrs ...string) {
+	for _, addr := range addrs {
+		h := sha256.New()
+		h.Write([]byte(types.AckSigDomain))
+		h.Write(round.EaPk)
+		h.Write([]byte(addr))
+		round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
+			ValidatorAddress: addr,
+			AckSignature:     h.Sum(nil),
+			AckHeight:        uint64(height),
+		})
+	}
+}
