@@ -34,7 +34,7 @@ todos:
     status: completed
   - id: p8-docs
     content: "Phase 8: Rewrite tss-ceremony.md Step 4 with full DKG design, security rationale (bias analysis, why no COMMITTING phase, why no vote extensions), and updated security properties"
-    status: pending
+    status: completed
   - id: p9-cleanup
     content: "Phase 9: Remove single-dealer remnants — delete DealExecutiveAuthorityKey handler, CeremonyDealPrepareProposalHandler, CLI command, ceremony_payloads/ceremony_dealer proto fields, TagDealExecutiveAuthorityKey, all dealer-specific tests"
     status: pending
