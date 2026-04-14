@@ -22,6 +22,7 @@ var (
 	// EA key ceremony errors.
 	ErrCeremonyWrongStatus    = errors.Register(ModuleName, 21, "operation invalid for current ceremony status")
 	ErrDuplicateRegistration  = errors.Register(ModuleName, 22, "validator already registered pallas key")
+	ErrDuplicatePallasKey     = errors.Register(ModuleName, 34, "pallas key already registered by another validator")
 	ErrInvalidPallasPoint     = errors.Register(ModuleName, 23, "invalid pallas point")
 	ErrPayloadMismatch        = errors.Register(ModuleName, 24, "dealer payload count does not match validator count")
 	ErrDuplicateAck           = errors.Register(ModuleName, 25, "validator already acknowledged")
