@@ -15,7 +15,8 @@ import (
 // ProcessProposalHandler returns a handler that validates injected txs
 // proposed by the block proposer. For DKG contribution messages: verifies
 // the round is PENDING with ceremony REGISTERING, creator is a ceremony
-// validator, and creator matches the block proposer. For ack messages:
+// validator, no duplicate contribution, and creator matches the block
+// proposer. For ack messages:
 // verifies the round is PENDING with ceremony DEALT, creator is a ceremony
 // validator, no duplicate ack, and creator matches the block proposer. For
 // partial decrypt messages: verifies the round is TALLYING in threshold
@@ -220,7 +221,8 @@ func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByt
 
 // validateInjectedDKGContribution checks that an injected MsgContributeDKG is
 // valid: the round is PENDING with ceremony in REGISTERING, the creator is a
-// ceremony validator, and the creator matches the current block proposer.
+// ceremony validator, the creator has not already contributed, and the creator
+// matches the current block proposer.
 func validateInjectedDKGContribution(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
 	if err != nil {
@@ -247,6 +249,11 @@ func validateInjectedDKGContribution(ctx sdk.Context, voteKeeper *votekeeper.Kee
 
 	if _, found := votekeeper.FindValidatorInRoundCeremony(round, dkgMsg.Creator); !found {
 		return errInvalidInjectedTx("creator is not a ceremony validator")
+	}
+
+	// Verify no duplicate contribution.
+	if _, found := votekeeper.FindContributionInRound(round, dkgMsg.Creator); found {
+		return errInvalidInjectedTx("creator has already contributed")
 	}
 
 	if err := voteKeeper.ValidateProposerIsCreator(ctx, dkgMsg.Creator, "MsgContributeDKG"); err != nil {

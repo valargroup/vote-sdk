@@ -100,6 +100,24 @@ func TestProcessProposalDKGContribValidation(t *testing.T) {
 			wantAccept: false,
 		},
 		{
+			name: "duplicate DKG contribution from same validator → reject",
+			setup: func() {
+				currentRoundID = app.SeedRegisteringCeremony(validators)
+				ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+				kvStore := app.VoteKeeper().OpenKVStore(ctx)
+				round, _ := app.VoteKeeper().GetVoteRound(kvStore, currentRoundID)
+				round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{
+					ValidatorAddress: valAddr,
+				})
+				require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
+				app.NextBlock()
+			},
+			txs: func() [][]byte {
+				return [][]byte{buildContribTx(valAddr, currentRoundID)}
+			},
+			wantAccept: false,
+		},
+		{
 			name: "creator does not match block proposer → reject",
 			setup: func() {
 				other := []*types.ValidatorPallasKey{{ValidatorAddress: "cosmosvaloper1other"}}
@@ -503,6 +521,25 @@ func TestValidateInjectedDKGContribution(t *testing.T) {
 			},
 			wantErr:     true,
 			errContains: "creator is not a ceremony validator",
+		},
+		{
+			name: "duplicate contribution from same validator → error",
+			setup: func() {
+				currentRoundID = ta.SeedRegisteringCeremony(validators)
+				ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+				kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+				round, _ := ta.VoteKeeper().GetVoteRound(kvStore, currentRoundID)
+				round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{
+					ValidatorAddress: valAddr,
+				})
+				require.NoError(t, ta.VoteKeeper().SetVoteRound(kvStore, round))
+				ta.NextBlock()
+			},
+			txBytes: func() []byte {
+				return buildDKGTx(valAddr, currentRoundID)
+			},
+			wantErr:     true,
+			errContains: "creator has already contributed",
 		},
 		{
 			name: "creator does not match block proposer → error",
