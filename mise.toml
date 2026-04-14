@@ -43,6 +43,14 @@ run = "make init"
 description = "Start chain daemon (foreground)"
 run = "SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} make start"
 
+[tasks."chain:init-multi"]
+description = "Wipe and reinitialize a 3-validator chain"
+run = "make init-multi"
+
+[tasks."chain:start-multi"]
+description = "Start 3 validator daemons in background"
+run = "make start-multi"
+
 [tasks."chain:clean"]
 description = "Remove chain data directory (~/.svoted)"
 run = "make clean"
