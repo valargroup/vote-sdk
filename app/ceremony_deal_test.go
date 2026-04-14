@@ -12,6 +12,7 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"cosmossdk.io/log"
 
@@ -1142,5 +1143,281 @@ func TestEndBlockerClearsDKGContributionsOnTimeout(t *testing.T) {
 		"CeremonyPayloads must be cleared on timeout reset")
 	require.Nil(t, round.CeremonyAcks,
 		"CeremonyAcks must be cleared on timeout reset")
+}
+
+// ---------------------------------------------------------------------------
+// ackDKGRound — unit-level error path coverage
+//
+// Calls AckDKGRound directly (not through PrepareProposal) with a lightweight
+// golden state, then mutates one thing per table row to trigger each error.
+// ---------------------------------------------------------------------------
+
+// goldenAckState holds everything needed to call AckDKGRound with a valid
+// 3-validator DKG round. Tests clone and mutate individual fields.
+type goldenAckState struct {
+	pallasSk      *elgamal.SecretKey
+	round         *types.VoteRound
+	proposerAddr  string
+	shamirIndex   int
+	G             curvey.Point
+	ceremonyDir   string
+	expectedShare curvey.Scalar
+}
+
+// buildGoldenAckState constructs a fully valid 3-validator DKG round state
+// (keys, Shamir shares, ECIES envelopes, Feldman commitments, and a
+// coefficients file on disk) suitable for calling AckDKGRound directly.
+// Tests clone the returned round and apply targeted mutations to trigger
+// individual error paths.
+func buildGoldenAckState(t *testing.T) goldenAckState {
+	t.Helper()
+
+	G := elgamal.PallasGenerator()
+	const n = 3
+	tVal := 2 // ceil(3/2)
+
+	addrs := []string{
+		"sv1proposer0xxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"sv1validator1xxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx",
+	}
+
+	sks := make([]*elgamal.SecretKey, n)
+	pks := make([]*elgamal.PublicKey, n)
+	for i := 0; i < n; i++ {
+		sks[i], pks[i] = elgamal.KeyGen(rand.Reader)
+	}
+
+	allShares := make([][]shamir.Share, n)
+	allCoeffs := make([][]curvey.Scalar, n)
+	allCommitPts := make([][]curvey.Point, n)
+
+	for i := 0; i < n; i++ {
+		secret := new(curvey.ScalarPallas).Random(rand.Reader)
+		shares, coeffs, err := shamir.Split(secret, tVal, n)
+		require.NoError(t, err)
+		allShares[i] = shares
+		allCoeffs[i] = coeffs
+		commitPts, err := shamir.FeldmanCommit(G, coeffs)
+		require.NoError(t, err)
+		allCommitPts[i] = commitPts
+	}
+
+	contributions := make([]*types.DKGContribution, n)
+	for i := 0; i < n; i++ {
+		commitments := make([][]byte, tVal)
+		for j, pt := range allCommitPts[i] {
+			commitments[j] = pt.ToAffineCompressed()
+		}
+		payloads := make([]*types.DealerPayload, 0, n-1)
+		for j := 0; j < n; j++ {
+			if i == j {
+				continue
+			}
+			env, err := ecies.Encrypt(G, pks[j].Point, allShares[i][j].Value.Bytes(), rand.Reader)
+			require.NoError(t, err)
+			payloads = append(payloads, &types.DealerPayload{
+				ValidatorAddress: addrs[j],
+				EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
+				Ciphertext:       env.Ciphertext,
+			})
+		}
+		contributions[i] = &types.DKGContribution{
+			ValidatorAddress:   addrs[i],
+			FeldmanCommitments: commitments,
+			Payloads:           payloads,
+		}
+	}
+
+	combinedPts, err := shamir.CombineCommitments(allCommitPts)
+	require.NoError(t, err)
+	combinedSerialized := make([][]byte, len(combinedPts))
+	for j, c := range combinedPts {
+		combinedSerialized[j] = c.ToAffineCompressed()
+	}
+
+	dir := t.TempDir()
+	roundID := []byte("ack-dkg-unit-test")
+	coeffsPath := filepath.Join(dir, "coeffs."+hex.EncodeToString(roundID))
+	buf := make([]byte, 0, tVal*32)
+	for _, c := range allCoeffs[0] {
+		buf = append(buf, c.Bytes()...)
+	}
+	require.NoError(t, os.WriteFile(coeffsPath, buf, 0600))
+
+	expectedShare := allShares[0][0].Value
+	for i := 1; i < n; i++ {
+		expectedShare = expectedShare.Add(allShares[i][0].Value)
+	}
+
+	return goldenAckState{
+		pallasSk:     sks[0],
+		proposerAddr: addrs[0],
+		shamirIndex:  1,
+		G:            G,
+		ceremonyDir:  dir,
+		round: &types.VoteRound{
+			VoteRoundId:        roundID,
+			Threshold:          uint32(tVal),
+			DkgContributions:   contributions,
+			FeldmanCommitments: combinedSerialized,
+		},
+		expectedShare: expectedShare,
+	}
+}
+
+func cloneRound(r *types.VoteRound) *types.VoteRound {
+	return proto.Clone(r).(*types.VoteRound)
+}
+
+func proposerPayload(contrib *types.DKGContribution, addr string) *types.DealerPayload {
+	for _, p := range contrib.Payloads {
+		if p.ValidatorAddress == addr {
+			return p
+		}
+	}
+	return nil
+}
+
+func TestAckDKGRound(t *testing.T) {
+	gs := buildGoldenAckState(t)
+	G := gs.G
+	logger := log.NewNopLogger()
+
+	tests := []struct {
+		name    string
+		mutate  func(t *testing.T, round *types.VoteRound, dir string)
+		wantErr string
+	}{
+		{
+			name:   "happy path",
+			mutate: nil,
+		},
+		{
+			name: "missing coefficients file",
+			mutate: func(t *testing.T, _ *types.VoteRound, dir string) {
+				p := filepath.Join(dir, "coeffs."+hex.EncodeToString(gs.round.VoteRoundId))
+				require.NoError(t, os.Remove(p))
+			},
+			wantErr: "load coefficients",
+		},
+		{
+			name: "no payload for proposer",
+			mutate: func(_ *testing.T, round *types.VoteRound, _ string) {
+				c := round.DkgContributions[1]
+				filtered := make([]*types.DealerPayload, 0, len(c.Payloads)-1)
+				for _, p := range c.Payloads {
+					if p.ValidatorAddress != gs.proposerAddr {
+						filtered = append(filtered, p)
+					}
+				}
+				c.Payloads = filtered
+			},
+			wantErr: "no payload for",
+		},
+		{
+			name: "invalid ephemeral pk",
+			mutate: func(_ *testing.T, round *types.VoteRound, _ string) {
+				p := proposerPayload(round.DkgContributions[1], gs.proposerAddr)
+				p.EphemeralPk = []byte{0xff}
+			},
+			wantErr: "invalid ephemeral_pk",
+		},
+		{
+			name: "ECIES decrypt fails",
+			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
+				_, wrongPk := elgamal.KeyGen(rand.Reader)
+				env, err := ecies.Encrypt(G, wrongPk.Point, make([]byte, 32), rand.Reader)
+				require.NoError(t, err)
+				p := proposerPayload(round.DkgContributions[1], gs.proposerAddr)
+				p.EphemeralPk = env.Ephemeral.ToAffineCompressed()
+				p.Ciphertext = env.Ciphertext
+			},
+			wantErr: "ECIES decryption failed",
+		},
+		{
+			name: "zero share scalar",
+			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
+				proposerPk := G.Mul(gs.pallasSk.Scalar)
+				env, err := ecies.Encrypt(G, proposerPk, make([]byte, 32), rand.Reader)
+				require.NoError(t, err)
+				p := proposerPayload(round.DkgContributions[1], gs.proposerAddr)
+				p.EphemeralPk = env.Ephemeral.ToAffineCompressed()
+				p.Ciphertext = env.Ciphertext
+			},
+			wantErr: "invalid share scalar",
+		},
+		{
+			name: "invalid contributor commitments",
+			mutate: func(_ *testing.T, round *types.VoteRound, _ string) {
+				round.DkgContributions[1].FeldmanCommitments[0] = []byte{0xff}
+			},
+			wantErr: "invalid commitments",
+		},
+		{
+			name: "contributor Feldman fails",
+			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
+				wrongScalar := new(curvey.ScalarPallas).Random(rand.Reader)
+				proposerPk := G.Mul(gs.pallasSk.Scalar)
+				env, err := ecies.Encrypt(G, proposerPk, wrongScalar.Bytes(), rand.Reader)
+				require.NoError(t, err)
+				p := proposerPayload(round.DkgContributions[1], gs.proposerAddr)
+				p.EphemeralPk = env.Ephemeral.ToAffineCompressed()
+				p.Ciphertext = env.Ciphertext
+			},
+			wantErr: "share failed Feldman",
+		},
+		{
+			name: "invalid combined commitments",
+			mutate: func(_ *testing.T, round *types.VoteRound, _ string) {
+				round.FeldmanCommitments[0] = []byte{0xff}
+			},
+			wantErr: "invalid combined commitments",
+		},
+		{
+			name: "combined Feldman fails",
+			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
+				secret := new(curvey.ScalarPallas).Random(rand.Reader)
+				_, wrongCoeffs, err := shamir.Split(secret, int(round.Threshold), 3)
+				require.NoError(t, err)
+				wrongPts, err := shamir.FeldmanCommit(G, wrongCoeffs)
+				require.NoError(t, err)
+				for i, pt := range wrongPts {
+					round.FeldmanCommitments[i] = pt.ToAffineCompressed()
+				}
+			},
+			wantErr: "combined share failed Feldman",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			roundClone := cloneRound(gs.round)
+			srcCoeffs := filepath.Join(gs.ceremonyDir, "coeffs."+hex.EncodeToString(gs.round.VoteRoundId))
+			dstCoeffs := filepath.Join(dir, "coeffs."+hex.EncodeToString(gs.round.VoteRoundId))
+			raw, err := os.ReadFile(srcCoeffs)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(dstCoeffs, raw, 0600))
+
+			if tc.mutate != nil {
+				tc.mutate(t, roundClone, dir)
+			}
+
+			secretBytes, sk, err := app.AckDKGRound(gs.pallasSk, roundClone, gs.proposerAddr, gs.shamirIndex, G, dir, logger)
+
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				require.Nil(t, secretBytes)
+				require.Nil(t, sk)
+				return
+			}
+
+			require.NoError(t, err)
+			require.Len(t, secretBytes, 32)
+			require.NotNil(t, sk)
+			require.Equal(t, gs.expectedShare.Bytes(), secretBytes)
+		})
+	}
 }
 

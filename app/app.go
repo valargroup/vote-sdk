@@ -151,8 +151,8 @@ func NewSvoteApp(
 		"vote.pallas_sk_path", pallasSkPath,
 		"vote.comet_rpc", app.cometRPC)
 
-	// Derive per-round ea_sk directory from legacy ea_sk_path.
-	eaSkDir := eaSkDirFromPath(eaSkPath)
+	// Derive ceremony data directory from legacy ea_sk_path.
+	ceremonyDir := ceremonyDirFromPath(eaSkPath)
 
 	// Install composed PrepareProposal handler:
 	// 1. DKG contribution injection: each validator contributes to Joint-Feldman DKG
@@ -163,26 +163,26 @@ func NewSvoteApp(
 		app.VoteKeeper,
 		app.StakingKeeper,
 		pallasSkPath,
-		eaSkDir,
+		ceremonyDir,
 		logger,
 	)
 	ceremonyAckHandler := CeremonyAckPrepareProposalHandler(
 		app.VoteKeeper,
 		app.StakingKeeper,
 		pallasSkPath,
-		eaSkDir,
+		ceremonyDir,
 		logger,
 	)
 	partialDecryptHandler := PartialDecryptPrepareProposalInjector(
 		app.VoteKeeper,
 		app.StakingKeeper,
-		eaSkDir,
+		ceremonyDir,
 		logger,
 	)
 	tallyHandler := TallyPrepareProposalHandler(
 		app.VoteKeeper,
 		app.StakingKeeper,
-		eaSkDir,
+		ceremonyDir,
 		logger,
 	)
 	app.SetPrepareProposal(ComposedPrepareProposalHandler(
