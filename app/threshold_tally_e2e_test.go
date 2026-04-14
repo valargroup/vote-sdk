@@ -32,7 +32,7 @@ import (
 )
 
 func TestThresholdTallyLifecycle(t *testing.T) {
-	// Use SetupTestAppWithPallasKey so eaSkDir is set and the partial decrypt +
+	// Use SetupTestAppWithPallasKey so ceremonyDir is set and the partial decrypt +
 	// tally injectors are active.
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 	require.NotEmpty(t, ta.EaSkDir)

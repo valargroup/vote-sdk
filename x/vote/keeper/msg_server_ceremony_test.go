@@ -1180,6 +1180,35 @@ func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_SingleValidator() {
 	s.Require().NotEmpty(round.EaPk)
 	s.Require().EqualValues(1, round.CeremonyValidators[0].ShamirIndex)
 	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), round.CeremonyPhaseStart)
+	s.Require().Equal(types.DefaultDealTimeout, round.CeremonyPhaseTimeout)
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_TwoValidators() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+
+	// ThresholdForN(2) = 2 (the t<2 floor kicks in), so each contributor
+	// must supply 2 Feldman commitments and 1 payload (n-1 = 1).
+	for _, addr := range addrs {
+		s.setBlockProposer(addr)
+		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+			Creator:            addr,
+			VoteRoundId:        roundID,
+			FeldmanCommitments: makeDKGCommitments(2),
+			Payloads:           makeDKGPayloads(addrs, addr),
+		})
+		s.Require().NoError(err)
+	}
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	s.Require().EqualValues(2, round.Threshold)
+	s.Require().Len(round.FeldmanCommitments, 2)
+	s.Require().Len(round.DkgContributions, 2)
+	s.Require().NotEmpty(round.EaPk)
 }
 
 func (s *MsgServerTestSuite) TestContributeDKG_PartialAccumulation() {
@@ -1646,6 +1675,21 @@ func (s *MsgServerTestSuite) TestContributeDKG_Rejects() {
 			s.Require().Contains(err.Error(), tc.errContains)
 		})
 	}
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_RejectsProposerMismatch() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+	s.setBlockProposer(addrs[1]) // proposer != creator
+	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: makeDKGCommitments(2),
+		Payloads:           makeDKGPayloads(addrs, addrs[0]),
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "does not match block proposer")
 }
 
 // ===========================================================================
