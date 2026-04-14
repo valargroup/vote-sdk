@@ -428,6 +428,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_EmitsEvent() {
 	s.SetupTest()
 	roundID := bytes.Repeat([]byte{0x50}, 32)
 	creator := "sv1creator"
+	s.setBlockProposer(creator)
 
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
@@ -486,6 +487,7 @@ func (s *MsgServerTestSuite) TestRevealShare_RejectsNonActiveRounds() {
 		{
 			name: "rejected during FINALIZED",
 			setup: func(roundID []byte) {
+				s.setBlockProposer("sv1creator")
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
 					VoteRoundId: roundID,
@@ -529,11 +531,55 @@ func (s *MsgServerTestSuite) TestRevealShare_RejectsNonActiveRounds() {
 }
 
 // ---------------------------------------------------------------------------
+// SubmitTally: ValidateProposerIsCreator
+// ---------------------------------------------------------------------------
+
+func (s *MsgServerTestSuite) TestSubmitTally_RejectsCheckTx() {
+	s.SetupTest()
+	ctx := s.ctx.WithIsCheckTx(true)
+	_, err := s.msgServer.SubmitTally(ctx, &types.MsgSubmitTally{
+		VoteRoundId: bytes.Repeat([]byte{0x51}, 32),
+		Creator:     "sv1anyone",
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "cannot be submitted via mempool")
+}
+
+func (s *MsgServerTestSuite) TestSubmitTally_RejectsReCheckTx() {
+	s.SetupTest()
+	ctx := s.ctx.WithIsReCheckTx(true)
+	_, err := s.msgServer.SubmitTally(ctx, &types.MsgSubmitTally{
+		VoteRoundId: bytes.Repeat([]byte{0x52}, 32),
+		Creator:     "sv1anyone",
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "cannot be submitted via mempool")
+}
+
+func (s *MsgServerTestSuite) TestSubmitTally_RejectsNonProposerCreator() {
+	s.SetupTest()
+	s.setBlockProposer("sv1realproposer")
+	roundID := bytes.Repeat([]byte{0x53}, 32)
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: roundID,
+		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+	}))
+	_, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
+		VoteRoundId: roundID,
+		Creator:     "sv1impersonator",
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "creator")
+}
+
+// ---------------------------------------------------------------------------
 // SubmitTally: threshold mode
 // ---------------------------------------------------------------------------
 
 func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 	validators := validatorSet(3)
+	s.setBlockProposer("sv1proposer")
 
 	type testCase struct {
 		name        string
@@ -745,6 +791,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_CompletenessRejections() {
 	validators := validatorSet(2)
 
 	setupRoundWithTwoAccumulators := func() {
+		s.setBlockProposer("sv1proposer")
 		s.setupThresholdTallyRound(roundID, 2, validators)
 		s.storeThresholdPartials(roundID, 2, 2, []int{1, 2}, []tallyAccumulator{
 			{proposalID: 1, decision: 0, value: 100},
