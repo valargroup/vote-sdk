@@ -32,14 +32,14 @@ import (
 )
 
 // initCometBFTConfig helps to override default CometBFT Config values.
-// TimeoutCommit is lowered to 1s (from the CometBFT default 2s) to reduce
+// TimeoutPrecommit is lowered to 1s (from the CometBFT default 5s) to reduce
 // end-to-end block time. TimeoutBroadcastTxCommit is set to 120s so the RPC
 // server's WriteTimeout allows long CheckTx (e.g. ZKP verification ~30–60s);
 // default 10s would close the connection before the response and the API would
 // see EOF.
 func initCometBFTConfig() *cmtcfg.Config {
 	cfg := cmtcfg.DefaultConfig()
-	cfg.Consensus.TimeoutCommit = 1 * time.Second
+	cfg.Consensus.TimeoutPrecommit = 1 * time.Second
 	cfg.RPC.TimeoutBroadcastTxCommit = 120 * time.Second
 	return cfg
 }

@@ -44,7 +44,7 @@ make start
 `svoted` overrides CometBFT defaults at startup to optimize block production and
 long-running tx checks:
 
-- `consensus.timeout_commit = "1s"` (CometBFT default is `2s`)
+- `consensus.timeout_precommit = "1s"` (CometBFT default is `5s`)
 - `rpc.timeout_broadcast_tx_commit = "120s"` (to avoid RPC EOF on long CheckTx)
 
 ### Test
