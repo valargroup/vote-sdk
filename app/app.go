@@ -364,11 +364,11 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 	}
 
 	// Register UI static file server (must be last — catch-all PathPrefix("/")).
-	if app.uiDistPath != "" {
-		if err := ui.RegisterRoutes(apiSvr.Router, app.uiDistPath, app.Logger().With("module", "ui")); err != nil {
-			app.Logger().Error("UI server registration failed", "error", err)
-		}
-	}
+	// Uses a getter so routes work even though PostSetup sets the dist path
+	// after RegisterAPIRoutes runs.
+	ui.RegisterRoutes(apiSvr.Router, func() string {
+		return app.uiDistPath
+	}, app.Logger().With("module", "ui"))
 }
 
 // SetHelper publishes the helper instance for concurrent readers.

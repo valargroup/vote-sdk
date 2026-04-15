@@ -4,10 +4,10 @@
 package ui
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"cosmossdk.io/log"
 	"github.com/gorilla/mux"
@@ -20,37 +20,75 @@ type Config struct {
 }
 
 // RegisterRoutes registers static file serving and SPA fallback routes.
+// The getDistPath function is called at request time so routes can be
+// mounted before PostSetup sets the dist path (same pattern as helper).
 // Must be called AFTER all API routes are registered, since the catch-all
-// PathPrefix("/") would otherwise shadow more specific routes. Gorilla mux
-// matches most-specific first, so explicit routes always win.
-func RegisterRoutes(router *mux.Router, distPath string, logger log.Logger) error {
-	absPath, err := filepath.Abs(distPath)
-	if err != nil {
-		return fmt.Errorf("resolve dist path: %w", err)
+// PathPrefix("/") would otherwise shadow more specific routes.
+func RegisterRoutes(router *mux.Router, getDistPath func() string, logger log.Logger) {
+	h := &uiHandler{getDistPath: getDistPath, logger: logger}
+
+	router.PathPrefix("/assets/").HandlerFunc(h.serveStatic)
+	router.PathPrefix("/").HandlerFunc(h.serveSPAFallback)
+}
+
+type uiHandler struct {
+	getDistPath func() string
+	logger      log.Logger
+
+	// Lazy-init: resolved on first request with a valid dist path.
+	once    sync.Once
+	fs      http.Handler
+	absPath string
+}
+
+func (h *uiHandler) resolve() (http.Handler, string) {
+	distPath := h.getDistPath()
+	if distPath == "" {
+		return nil, ""
 	}
 
-	indexPath := filepath.Join(absPath, "index.html")
-	if _, err := os.Stat(indexPath); os.IsNotExist(err) {
-		return fmt.Errorf("index.html not found in %s", absPath)
-	}
-
-	fs := http.FileServer(http.Dir(absPath))
-
-	// Serve /assets/* directly (Vite's hashed JS/CSS bundles).
-	router.PathPrefix("/assets/").Handler(fs)
-
-	// SPA fallback: serve index.html for all unmatched paths.
-	router.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// If the file exists on disk, serve it (e.g. /vite.svg, /favicon.ico).
-		filePath := filepath.Join(absPath, filepath.Clean(r.URL.Path))
-		if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
-			fs.ServeHTTP(w, r)
+	h.once.Do(func() {
+		abs, err := filepath.Abs(distPath)
+		if err != nil {
+			h.logger.Error("resolve dist path", "error", err)
 			return
 		}
-		// Otherwise serve index.html for SPA client-side routing.
-		http.ServeFile(w, r, indexPath)
+		indexPath := filepath.Join(abs, "index.html")
+		if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+			h.logger.Error("index.html not found", "dist", abs)
+			return
+		}
+		h.absPath = abs
+		h.fs = http.FileServer(http.Dir(abs))
+		h.logger.Info("UI server enabled", "dist", abs)
 	})
 
-	logger.Info("UI server enabled", "dist", absPath)
-	return nil
+	return h.fs, h.absPath
+}
+
+func (h *uiHandler) serveStatic(w http.ResponseWriter, r *http.Request) {
+	fs, _ := h.resolve()
+	if fs == nil {
+		http.NotFound(w, r)
+		return
+	}
+	fs.ServeHTTP(w, r)
+}
+
+func (h *uiHandler) serveSPAFallback(w http.ResponseWriter, r *http.Request) {
+	fs, absPath := h.resolve()
+	if fs == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// If the file exists on disk, serve it directly (e.g. /vite.svg).
+	filePath := filepath.Join(absPath, filepath.Clean(r.URL.Path))
+	if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+		fs.ServeHTTP(w, r)
+		return
+	}
+
+	// SPA fallback: serve index.html for client-side routing.
+	http.ServeFile(w, r, filepath.Join(absPath, "index.html"))
 }

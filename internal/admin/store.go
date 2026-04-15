@@ -305,6 +305,12 @@ func (s *Store) BuildVotingConfig(pirServers []ServiceEntry) (*VotingConfig, err
 	if err != nil {
 		return nil, err
 	}
+	if servers == nil {
+		servers = []ServiceEntry{}
+	}
+	if pirServers == nil {
+		pirServers = []ServiceEntry{}
+	}
 
 	return &VotingConfig{
 		Version:     1,
