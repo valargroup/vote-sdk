@@ -38,7 +38,7 @@ func (s *MsgServerTestSuite) ackSignature(roundID []byte, validator string) []by
 	s.Require().NoError(err)
 
 	h := sha256.New()
-	h.Write([]byte(types.AckSigDomain))
+	h.Write([]byte(types.AckDigestDomain))
 	h.Write(round.EaPk)
 	h.Write([]byte(validator))
 	return h.Sum(nil)

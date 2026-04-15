@@ -638,7 +638,7 @@ func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
 
 	// Encode a MsgAckExecutiveAuthorityKey.
 	h := sha256.New()
-	h.Write([]byte(types.AckSigDomain))
+	h.Write([]byte(types.AckDigestDomain))
 	h.Write(eaPkBytes)
 	h.Write([]byte(valAddr))
 
@@ -1351,7 +1351,7 @@ func seedPhantomDKGContributions(
 func seedPhantomAcks(round *types.VoteRound, height int64, addrs ...string) {
 	for _, addr := range addrs {
 		h := sha256.New()
-		h.Write([]byte(types.AckSigDomain))
+		h.Write([]byte(types.AckDigestDomain))
 		h.Write(round.EaPk)
 		h.Write([]byte(addr))
 		round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
