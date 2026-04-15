@@ -25,19 +25,25 @@ import (
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	"github.com/cosmos/cosmos-sdk/version"
 	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
 
 	votecli "github.com/valargroup/vote-sdk/x/vote/client/cli"
 )
 
-// initCometBFTConfig helps to override default CometBFT Config values.
-// TimeoutBroadcastTxCommit is set to 120s so the RPC server's WriteTimeout allows
-// long CheckTx (e.g. ZKP verification ~30–60s); default 10s would close the connection
-// before the response and the API would see EOF.
+// initCometBFTConfig overrides CometBFT defaults to reduce end-to-end block
+// time, following the Osmosis approach. See docs/blocktimes.md for the full
+// rationale, Osmosis comparison, and benchmark results.
 func initCometBFTConfig() *cmtcfg.Config {
 	cfg := cmtcfg.DefaultConfig()
-	cfg.RPC.TimeoutBroadcastTxCommit = 120 * time.Second
+
+	cfg.Consensus.TimeoutPropose = 1800 * time.Millisecond
+	cfg.Consensus.TimeoutCommit = 400 * time.Millisecond
+	cfg.Consensus.PeerGossipSleepDuration = 50 * time.Millisecond
+
+	cfg.P2P.FlushThrottleTimeout = 80 * time.Millisecond
+
 	return cfg
 }
 
@@ -80,8 +86,8 @@ func initAppConfig() (string, interface{}) {
 	customConfig := CustomAppConfig{
 		Config: *srvCfg,
 		Vote: VoteConfig{
-		EASkPath:     "$HOME/.svoted/ea.sk",
-		PallasSkPath: "$HOME/.svoted/pallas.sk",
+			EASkPath:     "$HOME/.svoted/ea.sk",
+			PallasSkPath: "$HOME/.svoted/pallas.sk",
 			CometRPC:     "http://localhost:26657",
 		},
 	}
@@ -120,6 +126,7 @@ func initRootCmd(
 		debug.Cmd(),
 		pruning.Cmd(newApp, app.DefaultNodeHome),
 		snapshot.Cmd(newApp),
+		version.NewVersionCommand(),
 		EAKeygenCmd(),
 		PallasKeygenCmd(),
 		EncryptEAKeyCmd(),

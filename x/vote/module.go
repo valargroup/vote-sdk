@@ -55,7 +55,8 @@ func init() {
 			ProvideSubmitTallySigner,
 			ProvideSubmitPartialDecryptionSigner,
 			ProvideRegisterPallasKeySigner,
-			ProvideDealExecutiveAuthorityKeySigner,
+			ProvideRotatePallasKeySigner,
+			ProvideContributeDKGSigner,
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
 			ProvideSetVoteManagerSigner,
@@ -182,10 +183,19 @@ func ProvideRegisterPallasKeySigner() signing.CustomGetSigner {
 	}
 }
 
-func ProvideDealExecutiveAuthorityKeySigner() signing.CustomGetSigner {
+func ProvideRotatePallasKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgDealExecutiveAuthorityKey"),
+		MsgType: protoreflect.FullName("svote.v1.MsgRotatePallasKey"),
 		Fn:      ceremonyCreatorSignerFn,
+	}
+}
+
+// MsgContributeDKG is auto-injected by PrepareProposal (like ack/partial-decrypt),
+// never submitted via standard Cosmos SDK signing.
+func ProvideContributeDKGSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgContributeDKG"),
+		Fn:      noopSignerFn,
 	}
 }
 
@@ -508,9 +518,52 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		))
 	}
 
-	// --- 3. Per-round ceremony DEALT phase timeout ---
-	// Only the DEALT phase has a timeout. REGISTERING persists indefinitely
-	// until a deal is injected by a proposer.
+	// --- 3. Per-round ceremony REGISTERING phase timeout ---
+	// If a REGISTERING round has not collected all n contributions within its
+	// timeout, clear contributions and restart the phase with a fresh deadline.
+	var contribTimeoutIDs [][]byte
+	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
+		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING &&
+			round.CeremonyPhaseTimeout > 0 &&
+			blockTime >= round.CeremonyPhaseStart+round.CeremonyPhaseTimeout {
+			id := make([]byte, len(round.VoteRoundId))
+			copy(id, round.VoteRoundId)
+			contribTimeoutIDs = append(contribTimeoutIDs, id)
+		}
+		return false
+	}); err != nil {
+		return err
+	}
+
+	for _, roundID := range contribTimeoutIDs {
+		round, err := am.keeper.GetVoteRound(kvStore, roundID)
+		if err != nil {
+			return err
+		}
+		if round == nil {
+			continue
+		}
+
+		keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+			fmt.Sprintf("REGISTERING timeout: reset (%d/%d contributions), restarting",
+				len(round.DkgContributions), len(round.CeremonyValidators)))
+
+		round.DkgContributions = nil
+		round.CeremonyPhaseStart = blockTime
+
+		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+			return err
+		}
+
+		ctx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeCeremonyStatusChange,
+			sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+			sdk.NewAttribute(types.AttributeKeyOldStatus, round.CeremonyStatus.String()),
+			sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+		))
+	}
+
+	// --- 4. Per-round ceremony DEALT phase timeout ---
 	// On DEALT timeout with >= 1/2 acks: strip non-ackers, confirm ceremony,
 	// transition round to ACTIVE.
 	// On DEALT timeout with < 1/2 acks: reset ceremony to REGISTERING for re-deal.
@@ -555,11 +608,10 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 						nAcks, nVals, stripped, nAcks, round.Threshold))
 
 				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
-				round.CeremonyPayloads = nil
 				round.CeremonyAcks = nil
-				round.CeremonyDealer = ""
-				round.CeremonyPhaseStart = 0
-				round.CeremonyPhaseTimeout = 0
+				round.DkgContributions = nil
+				round.CeremonyPhaseStart = blockTime
+				round.CeremonyPhaseTimeout = types.DefaultContributionTimeout
 				round.EaPk = nil
 
 				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
@@ -600,16 +652,15 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				))
 			}
 		} else {
-			// < 1/2 acks: reset ceremony for re-deal by next proposer.
+			// < 1/2 acks: reset ceremony for re-contribute by next proposer.
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 				fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, below threshold)", nAcks, nVals))
 
 			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
-			round.CeremonyPayloads = nil
 			round.CeremonyAcks = nil
-			round.CeremonyDealer = ""
-			round.CeremonyPhaseStart = 0
-			round.CeremonyPhaseTimeout = 0
+			round.DkgContributions = nil
+			round.CeremonyPhaseStart = blockTime
+			round.CeremonyPhaseTimeout = types.DefaultContributionTimeout
 			round.EaPk = nil
 
 			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {

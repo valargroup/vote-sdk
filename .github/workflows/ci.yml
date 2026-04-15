@@ -189,45 +189,81 @@ jobs:
         run: mise run build:install
         env:
           GOCACHE: ${{ github.workspace }}/.cache/go-build
-      - name: Initialize chain
-        run: mise run chain:init
+      - name: Initialize 3-validator chain
+        run: mise run chain:init-multi
         env:
           VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
-      - name: Start chain in background
+      - name: Start 3 validators in background
         run: |
-          SVOTE_PIR_URL=disabled svoted start --home ~/.svoted > chain.log 2>&1 &
-          echo "Chain PID: $!"
-      - name: Wait for chain readiness
+          for i in 1 2 3; do
+            home="$HOME/.svoted-val${i}"
+            log="/tmp/svoted-val${i}.log"
+            echo "Starting val${i} (home=${home})..."
+            SVOTE_PIR_URL=disabled svoted start --home "${home}" > "${log}" 2>&1 &
+            echo "  PID: $!"
+          done
+      - name: Wait for val1 to produce blocks
         run: |
           for i in $(seq 1 60); do
-            if curl -sf http://localhost:1318/cosmos/base/tendermint/v1beta1/blocks/latest > /dev/null 2>&1; then
-              echo "Chain is producing blocks"
+            if curl -sf http://localhost:1418/cosmos/base/tendermint/v1beta1/blocks/latest > /dev/null 2>&1; then
+              echo "Val1 is producing blocks"
               exit 0
             fi
-            echo "Waiting for chain to start... ($i/60)"
+            echo "Waiting for val1 to start... ($i/60)"
             sleep 2
           done
-          echo "Chain failed to start within 120s"
-          cat chain.log
+          echo "Val1 failed to start within 120s"
+          cat /tmp/svoted-val1.log
+          exit 1
+      - name: Register val2 and val3 as validators
+        run: |
+          create-val-tx --home ~/.svoted-val2 --moniker val2 --amount 10000000usvote --rpc-url tcp://localhost:26157
+          echo "Waiting for val2 registration..."
+          sleep 6
+          create-val-tx --home ~/.svoted-val3 --moniker val3 --amount 10000000usvote --rpc-url tcp://localhost:26157
+          echo "Waiting for val3 registration..."
+          sleep 6
+      - name: Wait for 3-validator set to activate
+        run: |
+          echo "Waiting for all 3 validators to appear in the active set..."
+          for i in $(seq 1 30); do
+            VALS=$(curl -sf http://localhost:1418/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED 2>/dev/null \
+              | jq '.validators | length' 2>/dev/null || echo "0")
+            echo "  Bonded validators: ${VALS} ($i/30)"
+            if [ "$VALS" -ge 3 ]; then
+              echo "All 3 validators are bonded"
+              exit 0
+            fi
+            sleep 4
+          done
+          echo "Only ${VALS}/3 validators bonded after 120s"
           exit 1
       - name: Run E2E test (round_activation)
-        run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test round_activation -- --nocapture --ignored --test-threads=1
+        run: |
+          export SVOTE_HOME="$HOME/.svoted-val1"
+          export SVOTE_PALLAS_PK_PATH="$HOME/.svoted-val1/pallas.pk"
+          cargo test --release --manifest-path e2e-tests/Cargo.toml --test round_activation -- --nocapture --ignored --test-threads=1
         env:
-          SVOTE_API_URL: http://localhost:1318
+          SVOTE_API_URL: http://localhost:1418
+          SVOTE_NODE_URL: tcp://localhost:26157
           VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
       - name: Run E2E test (voting_flow_librustvoting)
-        run: cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1
+        run: |
+          export SVOTE_HOME="$HOME/.svoted-val1"
+          export SVOTE_PALLAS_PK_PATH="$HOME/.svoted-val1/pallas.pk"
+          cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1
         env:
-          SVOTE_API_URL: http://localhost:1318
-          HELPER_SERVER_URL: http://localhost:1318
+          SVOTE_API_URL: http://localhost:1418
+          SVOTE_NODE_URL: tcp://localhost:26157
+          HELPER_SERVER_URL: http://localhost:1418
           SVOTE_E2E_VOTE_WINDOW_SECS: "420"
           VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
-      - name: Upload chain log on failure
+      - name: Upload chain logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: chain-log
-          path: chain.log
+          name: chain-logs
+          path: /tmp/svoted-val*.log
           retention-days: 7
 
   notify-slack:

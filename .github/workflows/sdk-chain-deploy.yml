@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Configure private repo access
         run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
       - name: Install mise
@@ -44,6 +46,8 @@ jobs:
             ${{ runner.os }}-circuits-
       - name: Build SDK binaries
         run: mise run build && mise run build:create-val-tx
+        env:
+          BUILD_TAGS: halo2 redpallas
       - name: Copy init script to build root
         run: cp scripts/init_multi.sh init_multi.sh
       - name: Upload artifacts

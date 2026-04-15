@@ -273,6 +273,11 @@ func TestExportImportGenesis(t *testing.T) {
 	require.NotNil(t, vpk)
 	require.Equal(t, bytes.Repeat([]byte{0xCC}, 32), vpk.PallasPk)
 
+	// Verify Pallas key reverse-lookup index is populated after genesis import.
+	owner, err := k2.GetPallasKeyOwner(kvStore2, bytes.Repeat([]byte{0xCC}, 32))
+	require.NoError(t, err)
+	require.Equal(t, "svvaloper1abc", owner)
+
 	// Verify vote manager.
 	vm, err := k2.GetVoteManager(kvStore2)
 	require.NoError(t, err)
@@ -387,6 +392,45 @@ func TestExportGenesisEmpty(t *testing.T) {
 	require.Empty(t, gs.ShareCounts)
 	require.Empty(t, gs.PartialDecryptions)
 	require.Empty(t, gs.VoteManager)
+}
+
+// TestInitGenesisPopulatesPallasKeyReverseIndex verifies that InitGenesis
+// populates the PK -> validator reverse-lookup index so that duplicate PK
+// registrations are rejected after chain import (H-2 fix).
+func TestInitGenesisPopulatesPallasKeyReverseIndex(t *testing.T) {
+	key := storetypes.NewKVStoreKey(types.StoreKey)
+	tkey := storetypes.NewTransientStoreKey("transient_test")
+	testCtx := testutil.DefaultContextWithDB(t, key, tkey)
+	ctx := testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC())
+	storeService := runtime.NewKVStoreService(key)
+	k := keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
+	kvStore := k.OpenKVStore(ctx)
+
+	pk := bytes.Repeat([]byte{0xDD}, 32)
+	gs := &types.GenesisState{
+		MinCeremonyValidators: 1,
+		PallasKeys: []*types.ValidatorPallasKey{
+			{ValidatorAddress: "svvaloper1first", PallasPk: pk},
+		},
+	}
+
+	require.NoError(t, k.InitGenesis(kvStore, gs))
+
+	// Forward lookup works.
+	vpk, err := k.GetPallasKey(kvStore, "svvaloper1first")
+	require.NoError(t, err)
+	require.NotNil(t, vpk)
+	require.Equal(t, pk, vpk.PallasPk)
+
+	// Reverse lookup works.
+	owner, err := k.GetPallasKeyOwner(kvStore, pk)
+	require.NoError(t, err)
+	require.Equal(t, "svvaloper1first", owner)
+
+	// A second validator trying to register the same PK must be rejected.
+	err = k.RegisterPallasKeyCore(kvStore, "svvaloper1second", pk)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "pallas key already registered by another validator")
 }
 
 func TestInitGenesisNil(t *testing.T) {
