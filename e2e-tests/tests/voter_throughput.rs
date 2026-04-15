@@ -835,7 +835,7 @@ fn voter_throughput_stress() {
                         if retry > 0 {
                             std::thread::sleep(Duration::from_millis(500 * retry as u64));
                         }
-                        match post_helper_json("/api/v1/shares", &payload) {
+                        match post_helper_json("/shielded-vote/v1/shares", &payload) {
                             Ok((status, ref json)) => {
                                 http_status = status;
                                 if status == 200 {

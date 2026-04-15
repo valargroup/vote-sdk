@@ -59,7 +59,7 @@ func validPayloadJSON() string {
 func TestSubmitShare_Success(t *testing.T) {
 	router, store := newTestRouter(t)
 
-	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -104,7 +104,7 @@ func TestShareStatus_PendingThenConfirmed(t *testing.T) {
 		log.NewNopLogger(),
 	)
 
-	path := "/api/v1/share-status/" + roundID + "/" + nfHex
+	path := "/shielded-vote/v1/share-status/" + roundID + "/" + nfHex
 	req1 := httptest.NewRequest("GET", path, nil)
 	w1 := httptest.NewRecorder()
 	router.ServeHTTP(w1, req1)
@@ -125,7 +125,7 @@ func TestShareStatus_PendingThenConfirmed(t *testing.T) {
 func TestSubmitShare_InvalidJSON(t *testing.T) {
 	router, _ := newTestRouter(t)
 
-	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader("not json"))
+	req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader("not json"))
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -168,7 +168,7 @@ func TestSubmitShare_ValidationErrors(t *testing.T) {
 			tc.modify(&p)
 			body, _ := json.Marshal(p)
 
-			req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(string(body)))
+			req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(string(body)))
 			w := httptest.NewRecorder()
 
 			router.ServeHTTP(w, req)
@@ -181,7 +181,7 @@ func TestSubmitShare_ValidationErrors(t *testing.T) {
 func TestStatus_Empty(t *testing.T) {
 	router, _ := newTestRouter(t)
 
-	req := httptest.NewRequest("GET", "/api/v1/status", nil)
+	req := httptest.NewRequest("GET", "/shielded-vote/v1/status", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -199,7 +199,7 @@ func TestStatus_WithShares(t *testing.T) {
 	enqueueInserted(t, store, testPayload(roundID, 0))
 	enqueueInserted(t, store, testPayload(roundID, 1))
 
-	req := httptest.NewRequest("GET", "/api/v1/status", nil)
+	req := httptest.NewRequest("GET", "/shielded-vote/v1/status", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -216,7 +216,7 @@ func TestStatus_WithShares(t *testing.T) {
 func TestQueueStatus_DisabledByDefault(t *testing.T) {
 	router, _ := newTestRouter(t)
 
-	req := httptest.NewRequest("GET", "/api/v1/queue-status", nil)
+	req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-status", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -229,14 +229,14 @@ func TestQueueStatus_RequiresTokenWhenEnabled(t *testing.T) {
 	enqueueInserted(t, store, testPayload(roundID, 0))
 
 	t.Run("missing token rejected", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/v1/queue-status", nil)
+		req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-status", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 
 	t.Run("wrong token rejected", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/v1/queue-status", nil)
+		req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-status", nil)
 		req.Header.Set("X-Helper-Token", "wrong")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -244,7 +244,7 @@ func TestQueueStatus_RequiresTokenWhenEnabled(t *testing.T) {
 	})
 
 	t.Run("valid token returns status", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/v1/queue-status", nil)
+		req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-status", nil)
 		req.Header.Set("X-Helper-Token", "secret-token")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -262,14 +262,14 @@ func TestRoutes_HelperUnavailable(t *testing.T) {
 	RegisterRoutesWithStoreGetter(router, func() *ShareStore { return nil }, log.NewNopLogger())
 
 	t.Run("shares returns 503", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+		req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	})
 
 	t.Run("status returns 503", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/v1/status", nil)
+		req := httptest.NewRequest("GET", "/shielded-vote/v1/status", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
@@ -281,13 +281,13 @@ func TestRoutes_BecomeReadyAfterStoreSet(t *testing.T) {
 	var store *ShareStore
 	RegisterRoutesWithStoreGetter(router, func() *ShareStore { return store }, log.NewNopLogger())
 
-	req1 := httptest.NewRequest("GET", "/api/v1/status", nil)
+	req1 := httptest.NewRequest("GET", "/shielded-vote/v1/status", nil)
 	w1 := httptest.NewRecorder()
 	router.ServeHTTP(w1, req1)
 	assert.Equal(t, http.StatusServiceUnavailable, w1.Code)
 
 	store = newTestStore(t)
-	req2 := httptest.NewRequest("GET", "/api/v1/status", nil)
+	req2 := httptest.NewRequest("GET", "/shielded-vote/v1/status", nil)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 	assert.Equal(t, http.StatusOK, w2.Code)
@@ -297,12 +297,12 @@ func TestSubmitShare_DuplicateIsIdempotent(t *testing.T) {
 	router, _ := newTestRouter(t)
 	body := validPayloadJSON()
 
-	req1 := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(body))
+	req1 := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(body))
 	w1 := httptest.NewRecorder()
 	router.ServeHTTP(w1, req1)
 	require.Equal(t, http.StatusOK, w1.Code)
 
-	req2 := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(body))
+	req2 := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(body))
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 	require.Equal(t, http.StatusOK, w2.Code)
@@ -317,7 +317,7 @@ func TestSubmitShare_ConflictingPayloadReturnsConflict(t *testing.T) {
 
 	first := testPayload("aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd", 0)
 	b1, _ := json.Marshal(first)
-	req1 := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(string(b1)))
+	req1 := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(string(b1)))
 	w1 := httptest.NewRecorder()
 	router.ServeHTTP(w1, req1)
 	require.Equal(t, http.StatusOK, w1.Code)
@@ -325,7 +325,7 @@ func TestSubmitShare_ConflictingPayloadReturnsConflict(t *testing.T) {
 	conflicting := first
 	conflicting.SharesHash = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 	b2, _ := json.Marshal(conflicting)
-	req2 := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(string(b2)))
+	req2 := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(string(b2)))
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 	require.Equal(t, http.StatusConflict, w2.Code)
@@ -346,14 +346,14 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 	)
 
 	t.Run("missing token rejected", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+		req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 
 	t.Run("wrong token rejected", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+		req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 		req.Header.Set("X-Helper-Token", "wrong")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -361,7 +361,7 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 	})
 
 	t.Run("valid token accepted", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+		req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 		req.Header.Set("X-Helper-Token", "secret-token")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -426,7 +426,7 @@ func (m *vcMockTree) LeafAt(position uint64) ([]byte, error) {
 func TestSubmitShare_VCCrossCheck_Match(t *testing.T) {
 	router, store, _ := vcTestRouter(t)
 
-	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -449,7 +449,7 @@ func TestSubmitShare_VCCrossCheck_Mismatch(t *testing.T) {
 	badLeaf[0] = 0xFF
 	tree.leaves[0] = badLeaf
 
-	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -464,7 +464,7 @@ func TestSubmitShare_VCCrossCheck_NoLeaf(t *testing.T) {
 	// Remove the leaf at position 0.
 	delete(tree.leaves, 0)
 
-	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -487,7 +487,7 @@ func TestSubmitShare_UnknownRound(t *testing.T) {
 
 	// The VC check is not wired (nil getVCHash), so we get past that.
 	// The round rejection happens in Enqueue → getRoundTimes.
-	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -511,7 +511,7 @@ func TestSubmitShare_VCCrossCheck_GracefulDegradation(t *testing.T) {
 		log.NewNopLogger(),
 	)
 
-	req := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -597,7 +597,7 @@ func TestSubmitShare_VCCrossCheck_BlocksPositionVariation(t *testing.T) {
 	router, _, _ := vcTestRouter(t)
 
 	// First request at position 0 succeeds (leaf matches).
-	req1 := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(validPayloadJSON()))
+	req1 := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
 	w1 := httptest.NewRecorder()
 	router.ServeHTTP(w1, req1)
 	assert.Equal(t, http.StatusOK, w1.Code)
@@ -607,7 +607,7 @@ func TestSubmitShare_VCCrossCheck_BlocksPositionVariation(t *testing.T) {
 	p.TreePosition = 999
 	body, _ := json.Marshal(p)
 
-	req2 := httptest.NewRequest("POST", "/api/v1/shares", strings.NewReader(string(body)))
+	req2 := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(string(body)))
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 	assert.Equal(t, http.StatusBadRequest, w2.Code)

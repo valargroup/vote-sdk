@@ -186,12 +186,12 @@ jobs:
               sleep 2
             done
             for i in $(seq 1 15); do
-              if curl -sf http://localhost:1418/api/v1/status > /dev/null 2>&1; then
+              if curl -sf http://localhost:1418/shielded-vote/v1/status > /dev/null 2>&1; then
                 echo "Helper server healthy"
                 break
               fi
               if [ "$i" = "15" ]; then
-                echo "FAIL: Helper server /api/v1/status not responding after 30s"
+                echo "FAIL: Helper server /shielded-vote/v1/status not responding after 30s"
                 sudo journalctl -u svoted-val1 --no-pager -n 50
                 exit 1
               fi

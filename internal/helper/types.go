@@ -12,10 +12,10 @@ type Config struct {
 	// Disable turns off the helper server entirely.
 	Disable bool `mapstructure:"disable"`
 
-	// APIToken protects POST /api/v1/shares when set (checked via X-Helper-Token).
+	// APIToken protects POST /shielded-vote/v1/shares when set (checked via X-Helper-Token).
 	APIToken string `mapstructure:"api_token"`
 
-	// ExposeQueueStatus enables the benchmark-only GET /api/v1/queue-status
+	// ExposeQueueStatus enables the benchmark-only GET /shielded-vote/v1/queue-status
 	// endpoint. Keep this off by default to avoid exposing per-round queue
 	// counts to observers.
 	ExposeQueueStatus bool `mapstructure:"expose_queue_status"`

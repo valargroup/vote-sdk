@@ -265,7 +265,7 @@ pub fn create_validator_with_pallas_key_payload(staking_msg: &[u8], pallas_pk: &
     })
 }
 
-/// Build a share payload for the helper server's POST /api/v1/shares endpoint.
+/// Build a share payload for the helper server's POST /shielded-vote/v1/shares endpoint.
 ///
 /// The helper server expects base64 for binary fields and hex for vote_round_id.
 pub fn helper_share_payload(

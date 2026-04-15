@@ -755,7 +755,7 @@ pub fn broadcast_cosmos_msg_with_retries(
     Err(last_err.unwrap())
 }
 
-/// Lightweight per-round helper queue status from `/api/v1/queue-status`.
+/// Lightweight per-round helper queue status from `/shielded-vote/v1/queue-status`.
 #[derive(Clone, Debug, Default)]
 pub struct HelperQueueStatus {
     pub total: u64,
@@ -766,7 +766,7 @@ pub struct HelperQueueStatus {
 
 /// Query the helper's queue-status endpoint for a round.
 pub fn get_helper_queue_status(round_id_hex: &str) -> Option<HelperQueueStatus> {
-    let url = format!("{}/api/v1/queue-status", helper_server_url());
+    let url = format!("{}/shielded-vote/v1/queue-status", helper_server_url());
     let mut request = client().get(&url);
     if let Some(token) = helper_api_token() {
         request = request.header("X-Helper-Token", token);

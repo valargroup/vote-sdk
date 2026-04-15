@@ -63,10 +63,10 @@ func RegisterRoutesWithGetters(
 		getShareNullifier:    getShareNullifier,
 		logger:               logger,
 	}
-	router.HandleFunc("/api/v1/shares", h.handleSubmitShare).Methods("POST")
-	router.HandleFunc("/api/v1/share-status/{roundId}/{nullifier}", h.handleShareStatus).Methods("GET")
-	router.HandleFunc("/api/v1/status", h.handleStatus).Methods("GET")
-	router.HandleFunc("/api/v1/queue-status", h.handleQueueStatus).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/shares", h.handleSubmitShare).Methods("POST")
+	router.HandleFunc("/shielded-vote/v1/share-status/{roundId}/{nullifier}", h.handleShareStatus).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/status", h.handleStatus).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/queue-status", h.handleQueueStatus).Methods("GET")
 }
 
 // ShareNullifierCheckerGetter resolves the checker at request time (nil when helper disabled).
@@ -87,7 +87,7 @@ type submitResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// shareSubmissionStatusResponse is returned by GET /api/v1/share-status/{roundId}/{nullifier}.
+// shareSubmissionStatusResponse is returned by GET /shielded-vote/v1/share-status/{roundId}/{nullifier}.
 type shareSubmissionStatusResponse struct {
 	Status string `json:"status"`
 }
