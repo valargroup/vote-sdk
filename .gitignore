@@ -17,6 +17,10 @@ e2e-tests/target/
 # Docker testnet (auto-generated)
 docker/docker-compose.yml
 
+# Admin UI (build artifacts + local env)
+ui/node_modules/
+ui/dist/
+
 # macOS
 .DS_Store
 
