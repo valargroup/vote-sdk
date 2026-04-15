@@ -88,5 +88,18 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
+	// Validate partial decryptions.
+	for i, pd := range gs.PartialDecryptions {
+		if len(pd.RoundId) != RoundIDLen {
+			return fmt.Errorf("partial_decryptions[%d].round_id is %d bytes, expected %d", i, len(pd.RoundId), RoundIDLen)
+		}
+		if pd.ValidatorIndex == 0 {
+			return fmt.Errorf("partial_decryptions[%d].validator_index must be >= 1", i)
+		}
+		if len(pd.PartialDecrypt) != 32 {
+			return fmt.Errorf("partial_decryptions[%d].partial_decrypt is %d bytes, expected 32", i, len(pd.PartialDecrypt))
+		}
+	}
+
 	return nil
 }

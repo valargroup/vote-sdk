@@ -9,6 +9,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/mikelodder7/curvey"
+
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -72,6 +74,11 @@ func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare
 // Reads stored partial decryptions from KV, Lagrange-combines them per
 // accumulator, and checks C2 - combined == totalValue * G.
 func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally) (*types.MsgSubmitTallyResponse, error) {
+	// Block mempool submission and verify creator is the block proposer.
+	if err := ms.k.ValidateProposerIsCreator(goCtx, msg.Creator, "MsgSubmitTally"); err != nil {
+		return nil, err
+	}
+
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
@@ -239,16 +246,17 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 		return nil, fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
 	}
 
-	// Look up VK_i for DLEQ verification. VerificationKeys uses the original
-	// 0-based array ordering from deal time; ShamirIndex is 1-based.
-	vkIdx := int(msg.ValidatorIndex) - 1
-	if vkIdx < 0 || vkIdx >= len(round.VerificationKeys) {
-		return nil, fmt.Errorf("%w: validator_index %d out of range for verification_keys (len=%d)",
-			types.ErrInvalidField, msg.ValidatorIndex, len(round.VerificationKeys))
-	}
-	vkPk, err := elgamal.UnmarshalPublicKey(round.VerificationKeys[vkIdx])
+	// Derive VK_i from Feldman commitments: VK_i = EvalCommitmentPolynomial(commitments, i).
+	// This replaces the old per-validator VK array with on-the-fly derivation from
+	// the t polynomial commitments stored on the round.
+	commitmentPts, err := deserializeFeldmanCommitments(round.FeldmanCommitments)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to unmarshal VK_%d: %v",
+		return nil, fmt.Errorf("%w: failed to deserialize Feldman commitments: %v",
+			types.ErrInvalidField, err)
+	}
+	vkPoint, err := shamir.EvalCommitmentPolynomial(commitmentPts, int(msg.ValidatorIndex))
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to derive VK_%d from Feldman commitments: %v",
 			types.ErrInvalidField, msg.ValidatorIndex, err)
 	}
 
@@ -277,7 +285,7 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 		}
 
 		// Verify DLEQ proof: log_G(VK_i) == log_{C1}(D_i)
-		if err := elgamal.VerifyPartialDecryptDLEQ(entry.DleqProof, vkPk.Point, ct.C1, Di); err != nil {
+		if err := elgamal.VerifyPartialDecryptDLEQ(entry.DleqProof, vkPoint, ct.C1, Di); err != nil {
 			return nil, fmt.Errorf("%w: entry[%d] DLEQ verification failed for validator %d: %v",
 				types.ErrInvalidField, i, msg.ValidatorIndex, err)
 		}
@@ -296,4 +304,21 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 	))
 
 	return &types.MsgSubmitPartialDecryptionResponse{}, nil
+}
+
+// deserializeFeldmanCommitments converts serialized Feldman commitments (32-byte
+// compressed Pallas points) into curvey.Point values for EvalCommitmentPolynomial.
+func deserializeFeldmanCommitments(raw [][]byte) ([]curvey.Point, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("empty feldman commitments")
+	}
+	pts := make([]curvey.Point, len(raw))
+	for i, b := range raw {
+		pt, err := elgamal.DecompressPallasPoint(b)
+		if err != nil {
+			return nil, fmt.Errorf("feldman commitment %d: %w", i, err)
+		}
+		pts[i] = pt
+	}
+	return pts, nil
 }

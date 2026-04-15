@@ -152,6 +152,9 @@ func (qs queryServer) CommitmentLeaves(goCtx context.Context, req *types.QueryCo
 	if req.ToHeight < req.FromHeight {
 		return nil, status.Errorf(codes.InvalidArgument, "to_height (%d) must be >= from_height (%d)", req.ToHeight, req.FromHeight)
 	}
+	if req.ToHeight-req.FromHeight > types.MaxCommitmentLeafRange {
+		return nil, status.Errorf(codes.InvalidArgument, "block range %d exceeds maximum %d", req.ToHeight-req.FromHeight, types.MaxCommitmentLeafRange)
+	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)
@@ -198,18 +201,16 @@ func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCerem
 		return &types.QueryCeremonyStateResponse{}, nil
 	}
 
-	// Map per-round ceremony fields to legacy CeremonyState shape.
+	// Map per-round ceremony fields to CeremonyState shape.
 	state := &types.CeremonyState{
-		Status:           source.CeremonyStatus,
-		EaPk:             source.EaPk,
-		Validators:       source.CeremonyValidators,
-		Payloads:         source.CeremonyPayloads,
-		Acks:             source.CeremonyAcks,
-		Dealer:           source.CeremonyDealer,
-		PhaseStart:       source.CeremonyPhaseStart,
-		PhaseTimeout:     source.CeremonyPhaseTimeout,
-		Threshold:        source.Threshold,
-		VerificationKeys: source.VerificationKeys,
+		Status:             source.CeremonyStatus,
+		EaPk:               source.EaPk,
+		Validators:         source.CeremonyValidators,
+		Acks:               source.CeremonyAcks,
+		PhaseStart:         source.CeremonyPhaseStart,
+		PhaseTimeout:       source.CeremonyPhaseTimeout,
+		Threshold:          source.Threshold,
+		FeldmanCommitments: source.FeldmanCommitments,
 	}
 
 	return &types.QueryCeremonyStateResponse{Ceremony: state}, nil

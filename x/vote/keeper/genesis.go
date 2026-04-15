@@ -24,6 +24,16 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 	// Restore per-round commitment trees.
 	for _, rt := range genesis.RoundTrees {
 		if rt.TreeState != nil {
+			// Genesis import only carries leaves (0x02) and roots, NOT shard
+			// blobs (0x0F), cap (0x10), or checkpoints (0x11). If we persisted
+			// Height > 0, ensureRoundTreeLoaded would take the restart branch
+			// expecting shard data in KV, produce an empty-tree root, and
+			// EndBlocker would silently corrupt state.Root.
+			// Setting Height = 0 forces the first-boot replay path, which
+			// rebuilds the ShardTree from the imported leaves via AppendFromKV.
+			if rt.TreeState.NextIndex > 0 {
+				rt.TreeState.Height = 0
+			}
 			if err := k.SetCommitmentTreeState(kvStore, rt.VoteRoundId, rt.TreeState); err != nil {
 				return err
 			}
@@ -35,6 +45,11 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 		}
 		for _, cr := range rt.CommitmentRoots {
 			if err := k.SetCommitmentRootAtHeight(kvStore, rt.VoteRoundId, cr.Height, cr.Root); err != nil {
+				return err
+			}
+		}
+		for _, bli := range rt.BlockLeafIndices {
+			if err := k.SetBlockLeafIndex(kvStore, rt.VoteRoundId, bli.Height, bli.StartIndex, bli.Count); err != nil {
 				return err
 			}
 		}
@@ -99,6 +114,19 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 		putUint64BE(val, sc.Count)
 		if err := kvStore.Set(key, val); err != nil {
 			return err
+		}
+	}
+
+	// Restore partial decryptions.
+	for _, pd := range genesis.PartialDecryptions {
+		entry := &types.PartialDecryptionEntry{
+			ProposalId:     pd.ProposalId,
+			VoteDecision:   pd.VoteDecision,
+			PartialDecrypt: pd.PartialDecrypt,
+			DleqProof:      pd.DleqProof,
+		}
+		if err := k.SetPartialDecryptions(kvStore, pd.RoundId, pd.ValidatorIndex, []*types.PartialDecryptionEntry{entry}); err != nil {
+			return fmt.Errorf("partial decryption: %w", err)
 		}
 	}
 
@@ -186,6 +214,13 @@ func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, erro
 	}
 	gs.ShareCounts = shareCounts
 
+	// Partial decryptions (0x12 prefix).
+	partials, err := exportPartialDecryptions(kvStore)
+	if err != nil {
+		return nil, fmt.Errorf("export partial decryptions: %w", err)
+	}
+	gs.PartialDecryptions = partials
+
 	return gs, nil
 }
 
@@ -247,6 +282,32 @@ func exportRoundTree(k *Keeper, kvStore store.KVStore, roundID []byte) (*types.G
 		rt.CommitmentRoots = append(rt.CommitmentRoots, &types.GenesisCommitmentRoot{
 			Height: height,
 			Root:   root,
+		})
+	}
+
+	// Export block leaf indices (0x08 inner prefix, scoped to round).
+	bliPrefix := types.BlockLeafIndexPrefixForRound(roundID)
+	bliEnd := types.PrefixEndBytes(bliPrefix)
+	bliIter, err := kvStore.Iterator(bliPrefix, bliEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer bliIter.Close()
+
+	bliInnerOffset := len(bliPrefix)
+	for ; bliIter.Valid(); bliIter.Next() {
+		key := bliIter.Key()
+		height := getUint64BE(key[bliInnerOffset:])
+		val := bliIter.Value()
+		if len(val) < 16 {
+			continue
+		}
+		startIdx := getUint64BE(val[0:8])
+		count := getUint64BE(val[8:16])
+		rt.BlockLeafIndices = append(rt.BlockLeafIndices, &types.GenesisBlockLeafIndex{
+			Height:     height,
+			StartIndex: startIdx,
+			Count:      count,
 		})
 	}
 
@@ -347,6 +408,49 @@ func exportTallyAccumulators(kvStore store.KVStore) ([]*types.GenesisTallyAccumu
 		})
 	}
 	return accumulators, nil
+}
+
+// exportPartialDecryptions iterates the 0x12 prefix and returns all stored partial decryptions.
+// Key format: 0x12 || round_id (32 B) || uint32 BE validator_index || uint32 BE proposal_id || uint32 BE decision -> PartialDecryptionEntry (protobuf)
+func exportPartialDecryptions(kvStore store.KVStore) ([]*types.GenesisPartialDecryption, error) {
+	prefix := types.PartialDecryptionPrefix
+	end := types.PrefixEndBytes(prefix)
+
+	iter, err := kvStore.Iterator(prefix, end)
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	var partials []*types.GenesisPartialDecryption
+	prefixLen := len(prefix)
+	for ; iter.Valid(); iter.Next() {
+		key := iter.Key()
+		// key layout: prefix(1) || round_id(32) || validator_index(4) || proposal_id(4) || decision(4)
+		if len(key) < prefixLen+types.RoundIDLen+12 {
+			continue
+		}
+		roundID := make([]byte, types.RoundIDLen)
+		copy(roundID, key[prefixLen:prefixLen+types.RoundIDLen])
+		validatorIndex := getUint32BE(key[prefixLen+types.RoundIDLen:])
+		proposalID := getUint32BE(key[prefixLen+types.RoundIDLen+4:])
+		decision := getUint32BE(key[prefixLen+types.RoundIDLen+8:])
+
+		var entry types.PartialDecryptionEntry
+		if err := unmarshal(iter.Value(), &entry); err != nil {
+			return nil, fmt.Errorf("partial decryption unmarshal: %w", err)
+		}
+
+		partials = append(partials, &types.GenesisPartialDecryption{
+			RoundId:        roundID,
+			ValidatorIndex: validatorIndex,
+			ProposalId:     proposalID,
+			VoteDecision:   decision,
+			PartialDecrypt: entry.PartialDecrypt,
+			DleqProof:      entry.DleqProof,
+		})
+	}
+	return partials, nil
 }
 
 // exportShareCounts iterates the 0x0B prefix and returns all share counts.

@@ -335,6 +335,83 @@ func validDelegateVote() *types.MsgDelegateVote {
 // Tests: MsgDelegateVote.ValidateBasic
 // ---------------------------------------------------------------------------
 
+func (s *ValidateBasicTestSuite) TestRotatePallasKey_ValidateBasic() {
+	tests := []struct {
+		name        string
+		msg         *types.MsgRotatePallasKey
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name: "valid: all fields correct",
+			msg: &types.MsgRotatePallasKey{
+				Creator:     "sv1somevalidator",
+				NewPallasPk: bytes.Repeat([]byte{0x01}, 32),
+			},
+		},
+		{
+			name: "invalid: empty creator",
+			msg: &types.MsgRotatePallasKey{
+				Creator:     "",
+				NewPallasPk: bytes.Repeat([]byte{0x01}, 32),
+			},
+			expectErr:   true,
+			errContains: "creator cannot be empty",
+		},
+		{
+			name: "invalid: nil new_pallas_pk",
+			msg: &types.MsgRotatePallasKey{
+				Creator:     "sv1somevalidator",
+				NewPallasPk: nil,
+			},
+			expectErr:   true,
+			errContains: "new_pallas_pk must be 32 bytes",
+		},
+		{
+			name: "invalid: new_pallas_pk too short",
+			msg: &types.MsgRotatePallasKey{
+				Creator:     "sv1somevalidator",
+				NewPallasPk: bytes.Repeat([]byte{0x01}, 16),
+			},
+			expectErr:   true,
+			errContains: "new_pallas_pk must be 32 bytes",
+		},
+		{
+			name: "invalid: new_pallas_pk too long",
+			msg: &types.MsgRotatePallasKey{
+				Creator:     "sv1somevalidator",
+				NewPallasPk: bytes.Repeat([]byte{0x01}, 33),
+			},
+			expectErr:   true,
+			errContains: "new_pallas_pk must be 32 bytes",
+		},
+		{
+			name: "invalid: new_pallas_pk is identity (all zeros)",
+			msg: &types.MsgRotatePallasKey{
+				Creator:     "sv1somevalidator",
+				NewPallasPk: make([]byte, 32),
+			},
+			expectErr:   true,
+			errContains: "identity point",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			err := tc.msg.ValidateBasic()
+			if tc.expectErr {
+				s.Require().Error(err)
+				if tc.errContains != "" {
+					s.Require().Contains(err.Error(), tc.errContains)
+				}
+				s.Require().ErrorIs(err, types.ErrInvalidField)
+			} else {
+				s.Require().NoError(err)
+			}
+		})
+	}
+}
+
 func (s *ValidateBasicTestSuite) TestDelegateVote_ValidateBasic() {
 	tests := []struct {
 		name        string
