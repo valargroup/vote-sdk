@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/mux"
 	protov2 "google.golang.org/protobuf/proto"
 
+	"github.com/valargroup/vote-sdk/sentry"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -322,6 +323,11 @@ type BroadcastResult struct {
 func (h *Handler) broadcastVoteTx(w http.ResponseWriter, msg types.VoteMessage) {
 	raw, err := EncodeVoteTx(msg)
 	if err != nil {
+		sentry.CaptureErr(err, map[string]string{
+			"handler":  "broadcastVoteTx",
+			"stage":    "encode",
+			"msg_type": fmt.Sprintf("%T", msg),
+		})
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("encode failed: %v", err))
 		return
 	}
@@ -334,6 +340,11 @@ func (h *Handler) broadcastVoteTx(w http.ResponseWriter, msg types.VoteMessage) 
 		// 502 = CometBFT rejected the broadcast (RPC error). The error string now includes
 		// CometBFT's error.data when present (e.g. "tx already in cache", "context canceled").
 		log.Printf("[shielded-vote-api] broadcast_tx_sync failed: %v", err)
+		sentry.CaptureErr(err, map[string]string{
+			"handler":  "broadcastVoteTx",
+			"stage":    "broadcast",
+			"msg_type": fmt.Sprintf("%T", msg),
+		})
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("broadcast failed: %v", err))
 		return
 	}

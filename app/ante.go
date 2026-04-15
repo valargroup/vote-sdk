@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
 	"github.com/valargroup/vote-sdk/ffi/zkp"
 	"github.com/valargroup/vote-sdk/ffi/zkp/halo2"
+	"github.com/valargroup/vote-sdk/sentry"
 	voteante "github.com/valargroup/vote-sdk/x/vote/ante"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -158,6 +160,12 @@ func handleVoteAnte(
 			"duration_ms", elapsed.Milliseconds(),
 			"msg_type", fmt.Sprintf("%T", vtx.VoteMsg),
 			"error", err.Error())
+		if errors.Is(err, types.ErrInvalidProof) || errors.Is(err, types.ErrInvalidSignature) {
+			sentry.CaptureErr(err, map[string]string{
+				"handler":  "ante",
+				"msg_type": fmt.Sprintf("%T", vtx.VoteMsg),
+			})
+		}
 		return ctx, err
 	}
 	elapsed := time.Since(start)

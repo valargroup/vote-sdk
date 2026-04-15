@@ -8,6 +8,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/sentry"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -40,6 +41,7 @@ func ProcessProposalHandler(
 			if tag == voteapi.TagContributeDKG {
 				if err := validateInjectedDKGContribution(ctx, voteKeeper, txBytes, logger); err != nil {
 					logger.Error("ProcessProposal: rejecting block — invalid DKG contribution tx", "err", err)
+					sentry.CaptureErr(err, map[string]string{"handler": "ProcessProposal", "tag": "dkg_contribution"})
 					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 				}
 				continue
@@ -49,6 +51,7 @@ func ProcessProposalHandler(
 			if tag == voteapi.TagAckExecutiveAuthorityKey {
 				if err := validateInjectedAck(ctx, voteKeeper, txBytes, logger); err != nil {
 					logger.Error("ProcessProposal: rejecting block — invalid ack tx", "err", err)
+					sentry.CaptureErr(err, map[string]string{"handler": "ProcessProposal", "tag": "ack"})
 					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 				}
 				continue
@@ -58,6 +61,7 @@ func ProcessProposalHandler(
 			if tag == voteapi.TagSubmitPartialDecryption {
 				if err := validateInjectedPartialDecrypt(ctx, voteKeeper, txBytes, logger); err != nil {
 					logger.Error("ProcessProposal: rejecting block — invalid partial decrypt tx", "err", err)
+					sentry.CaptureErr(err, map[string]string{"handler": "ProcessProposal", "tag": "partial_decrypt"})
 					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 				}
 				continue
@@ -67,6 +71,7 @@ func ProcessProposalHandler(
 			if tag == voteapi.TagSubmitTally {
 				if err := validateInjectedTally(ctx, voteKeeper, txBytes, logger); err != nil {
 					logger.Error("ProcessProposal: rejecting block — invalid tally tx", "err", err)
+					sentry.CaptureErr(err, map[string]string{"handler": "ProcessProposal", "tag": "tally"})
 					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 				}
 				continue

@@ -17,6 +17,7 @@ import (
 	voteapi "github.com/valargroup/vote-sdk/api"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
+	"github.com/valargroup/vote-sdk/sentry"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -134,6 +135,7 @@ func TallyPrepareProposalHandler(
 			return true // stop after first
 		}); err != nil {
 			logger.Error("PrepareProposal: failed to iterate tallying rounds", "err", err)
+			sentry.CaptureErr(err, map[string]string{"handler": "PrepareProposal", "stage": "iterate_tallying_rounds"})
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 
@@ -147,6 +149,11 @@ func TallyPrepareProposalHandler(
 		hasAccumulators, err := roundHasAccumulators(kvStore, voteKeeper, tallyRound)
 		if err != nil {
 			logger.Error("PrepareProposal: failed to check tally accumulators", "err", err)
+			sentry.CaptureErr(err, map[string]string{
+				"handler":  "PrepareProposal",
+				"stage":    "check_accumulators",
+				"round_id": hex.EncodeToString(tallyRound.VoteRoundId),
+			})
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 
@@ -154,6 +161,11 @@ func TallyPrepareProposalHandler(
 			validatorCount, err := voteKeeper.CountPartialDecryptionValidators(kvStore, tallyRound.VoteRoundId)
 			if err != nil {
 				logger.Error("PrepareProposal: failed to count partial decryptions", "err", err)
+				sentry.CaptureErr(err, map[string]string{
+					"handler":  "PrepareProposal",
+					"stage":    "count_partial_decryptions",
+					"round_id": hex.EncodeToString(tallyRound.VoteRoundId),
+				})
 				return &abci.ResponsePrepareProposal{Txs: txs}, nil
 			}
 			if validatorCount < int(tallyRound.Threshold) {
@@ -167,6 +179,11 @@ func TallyPrepareProposalHandler(
 			if err != nil {
 				logger.Error("PrepareProposal: threshold tally decryption failed",
 					"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
+				sentry.CaptureErr(err, map[string]string{
+					"handler":  "PrepareProposal",
+					"stage":    "threshold_tally_decryption",
+					"round_id": hex.EncodeToString(tallyRound.VoteRoundId),
+				})
 				return &abci.ResponsePrepareProposal{Txs: txs}, nil
 			}
 		} else {
@@ -184,6 +201,11 @@ func TallyPrepareProposalHandler(
 		if err != nil {
 			logger.Error("PrepareProposal: failed to encode tally tx",
 				"round", hex.EncodeToString(tallyRound.VoteRoundId), "err", err)
+			sentry.CaptureErr(err, map[string]string{
+				"handler":  "PrepareProposal",
+				"stage":    "encode_tally_tx",
+				"round_id": hex.EncodeToString(tallyRound.VoteRoundId),
+			})
 			return &abci.ResponsePrepareProposal{Txs: txs}, nil
 		}
 
