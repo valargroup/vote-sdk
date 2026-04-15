@@ -155,6 +155,8 @@ jobs:
               --moniker val3 \
               --amount 10000000usvote \
               --rpc-url tcp://localhost:26157
+            echo "Waiting for val3 registration tx to be committed..."
+            sleep 6
 
       - name: Restart services to re-register with Edge Config
         if: ${{ inputs.reset_chain == true }}
