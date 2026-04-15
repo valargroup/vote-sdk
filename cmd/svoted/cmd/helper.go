@@ -115,7 +115,7 @@ func helperPostSetup(
 		})
 
 		// Start the heartbeat pulse if configured.
-		if cfg.PulseURL != "" && cfg.HelperURL != "" {
+		if cfg.AdminURL != "" && cfg.HelperURL != "" {
 			pulseCfg, err := buildPulseConfig(cfg, svrCtx, clientCtx, logger)
 			if err != nil {
 				logger.Error("heartbeat: failed to initialize, pulse disabled", "error", err)
@@ -157,8 +157,10 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.max_concurrent_proofs") {
 		cfg.MaxConcurrentProofs = v.GetInt("helper.max_concurrent_proofs")
 	}
-	if v.IsSet("helper.pulse_url") {
-		cfg.PulseURL = v.GetString("helper.pulse_url")
+	if v.IsSet("helper.admin_url") {
+		cfg.AdminURL = v.GetString("helper.admin_url")
+	} else if v.IsSet("helper.pulse_url") {
+		cfg.AdminURL = v.GetString("helper.pulse_url")
 	}
 	if v.IsSet("helper.helper_url") {
 		cfg.HelperURL = v.GetString("helper.helper_url")
@@ -219,7 +221,7 @@ func buildPulseConfig(
 	}
 
 	return helper.PulseConfig{
-		PulseURL:        cfg.PulseURL,
+		AdminURL:        cfg.AdminURL,
 		HelperURL:       cfg.HelperURL,
 		OperatorAddress: operatorAddress,
 		Moniker:         svrCtx.Config.Moniker,

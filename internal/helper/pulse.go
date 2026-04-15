@@ -18,12 +18,12 @@ type SignFn func(payload string) (signature, pubKey string, err error)
 
 // PulseConfig holds the parameters needed for the heartbeat loop.
 type PulseConfig struct {
-	PulseURL         string // Vercel base URL (e.g. "https://shielded-vote.vercel.app")
-	HelperURL        string // Own public URL (e.g. "https://1-2-3-4.sslip.io")
-	OperatorAddress  string // Bech32 operator address derived from validator key
-	Moniker          string // Node moniker from CometBFT config
-	Sign             SignFn
-	Logger           log.Logger
+	AdminURL        string // Admin server base URL (e.g. "https://admin.example.com")
+	HelperURL       string // Own public URL (e.g. "https://1-2-3-4.sslip.io")
+	OperatorAddress string // Bech32 operator address derived from validator key
+	Moniker         string // Node moniker from CometBFT config
+	Sign            SignFn
+	Logger          log.Logger
 }
 
 const pulseInterval = 2 * time.Hour
@@ -102,18 +102,18 @@ func sendSigned(ctx context.Context, client *http.Client, endpoint string, cfg P
 // approved-servers is populated), then sends a heartbeat pulse to
 // server-heartbeat every 2 hours until ctx is cancelled.
 //
-// If the initial registration returns "pending" (e.g. the chain API wasn't
-// reachable yet on Vercel's side), registration is retried on each tick
+// If the initial registration returns "pending" (e.g. the admin server
+// hasn't seen the bonding tx yet), registration is retried on each tick
 // until it succeeds, then the loop switches to heartbeat-only mode.
 func RunPulse(ctx context.Context, cfg PulseConfig) {
-	if cfg.PulseURL == "" || cfg.HelperURL == "" {
-		cfg.Logger.Info("heartbeat disabled: pulse_url or helper_url not configured")
+	if cfg.AdminURL == "" || cfg.HelperURL == "" {
+		cfg.Logger.Info("heartbeat disabled: admin_url or helper_url not configured")
 		return
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	registerEndpoint := cfg.PulseURL + "/api/register-validator"
-	heartbeatEndpoint := cfg.PulseURL + "/api/server-heartbeat"
+	registerEndpoint := cfg.AdminURL + "/api/register-validator"
+	heartbeatEndpoint := cfg.AdminURL + "/api/server-heartbeat"
 
 	// Try to register immediately, then retry a few times with short intervals
 	// to handle the common case where the chain isn't fully ready yet at startup
