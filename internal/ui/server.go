@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"cosmossdk.io/log"
@@ -28,7 +29,23 @@ func RegisterRoutes(router *mux.Router, getDistPath func() string, logger log.Lo
 	h := &uiHandler{getDistPath: getDistPath, logger: logger}
 
 	router.PathPrefix("/assets/").HandlerFunc(h.serveStatic)
-	router.PathPrefix("/").HandlerFunc(h.serveSPAFallback)
+	router.PathPrefix("/").MatcherFunc(notGRPCGateway).HandlerFunc(h.serveSPAFallback)
+}
+
+// grpcGatewayPrefixes are URL prefixes served by the Cosmos SDK gRPC-gateway.
+// The gateway is mounted on the gorilla/mux Router inside api.Server.Start —
+// AFTER RegisterAPIRoutes runs. Without this matcher the UI SPA catch-all
+// (also PathPrefix("/")) shadows the gateway because gorilla/mux uses
+// first-registered-wins ordering.
+var grpcGatewayPrefixes = []string{"/cosmos/", "/ibc/"}
+
+func notGRPCGateway(r *http.Request, _ *mux.RouteMatch) bool {
+	for _, p := range grpcGatewayPrefixes {
+		if strings.HasPrefix(r.URL.Path, p) {
+			return false
+		}
+	}
+	return true
 }
 
 type uiHandler struct {
