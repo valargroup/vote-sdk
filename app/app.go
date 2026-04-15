@@ -33,7 +33,9 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/internal/admin"
 	"github.com/valargroup/vote-sdk/internal/helper"
+	"github.com/valargroup/vote-sdk/internal/ui"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 )
 
@@ -72,6 +74,12 @@ type SvoteApp struct {
 
 	// Helper server (set externally by PostSetup, may be nil).
 	helperRef atomic.Pointer[helper.Helper]
+
+	// Admin server (set externally by PostSetup, may be nil).
+	adminRef atomic.Pointer[admin.Admin]
+
+	// UI dist path (set externally by PostSetup; empty = UI disabled).
+	uiDistPath string
 }
 
 func init() {
@@ -345,10 +353,22 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 		return h.ShareNullifierChecker
 	}, app.Logger().With("module", "helper"))
 
+	// Register admin server routes (server directory, registration, heartbeat).
+	admin.RegisterRoutes(apiSvr.Router, func() *admin.Admin {
+		return app.GetAdmin()
+	}, app.Logger().With("module", "admin"))
+
 	// Register swagger API.
 	if err := server.RegisterSwaggerAPI(apiSvr.ClientCtx, apiSvr.Router, apiConfig.Swagger); err != nil {
 		panic(err)
 	}
+
+	// Register UI static file server (must be last — catch-all PathPrefix("/")).
+	// Uses a getter so routes work even though PostSetup sets the dist path
+	// after RegisterAPIRoutes runs.
+	ui.RegisterRoutes(apiSvr.Router, func() string {
+		return app.uiDistPath
+	}, app.Logger().With("module", "ui"))
 }
 
 // SetHelper publishes the helper instance for concurrent readers.
@@ -359,4 +379,19 @@ func (app *SvoteApp) SetHelper(h *helper.Helper) {
 // GetHelper returns the currently published helper instance.
 func (app *SvoteApp) GetHelper() *helper.Helper {
 	return app.helperRef.Load()
+}
+
+// SetAdmin publishes the admin instance for concurrent readers.
+func (app *SvoteApp) SetAdmin(a *admin.Admin) {
+	app.adminRef.Store(a)
+}
+
+// GetAdmin returns the currently published admin instance.
+func (app *SvoteApp) GetAdmin() *admin.Admin {
+	return app.adminRef.Load()
+}
+
+// SetUIDistPath sets the path to the built UI dist directory.
+func (app *SvoteApp) SetUIDistPath(path string) {
+	app.uiDistPath = path
 }

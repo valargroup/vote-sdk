@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"io"
 	"time"
@@ -9,6 +10,7 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 
 	"cosmossdk.io/log"
 
@@ -134,9 +136,19 @@ func initRootCmd(
 		SignArbitraryCmd(),
 	)
 
+	helperSetup := helperPostSetup(&svoteAppRef)
+	adminSetup := adminPostSetup(&svoteAppRef)
 	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newAppFn, appExport, server.StartCmdOptions{
-		PostSetup: helperPostSetup(&svoteAppRef),
-		AddFlags:  addHelperFlags,
+		PostSetup: func(svrCtx *server.Context, clientCtx client.Context, ctx context.Context, g *errgroup.Group) error {
+			if err := helperSetup(svrCtx, clientCtx, ctx, g); err != nil {
+				return err
+			}
+			return adminSetup(svrCtx, clientCtx, ctx, g)
+		},
+		AddFlags: func(cmd *cobra.Command) {
+			addHelperFlags(cmd)
+			addAdminFlags(cmd)
+		},
 	})
 
 	// add keybase, auxiliary RPC, query, genesis, and tx child commands

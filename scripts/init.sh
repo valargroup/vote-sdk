@@ -110,7 +110,7 @@ HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
 HELPER_MIN_DELAY="${SVOTE_HELPER_MIN_DELAY:-90}"
 HELPER_PROCESS_INTERVAL="${SVOTE_HELPER_PROCESS_INTERVAL:-5}"
 HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-2}"
-HELPER_PULSE_URL="${SVOTE_HELPER_PULSE_URL:-}"
+HELPER_ADMIN_URL="${SVOTE_HELPER_ADMIN_URL:-}"
 HELPER_URL="${SVOTE_HELPER_URL:-}"
 HELPER_SENTRY_DSN="${SVOTE_HELPER_SENTRY_DSN:-}"
 
@@ -149,8 +149,8 @@ chain_api_port = 1318
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = $HELPER_MAX_CONCURRENT_PROOFS
 
-# Heartbeat pulse URL. Empty disables the heartbeat (local dev default).
-pulse_url = "$HELPER_PULSE_URL"
+# Admin server URL for registration and heartbeat. Empty disables (local dev default).
+admin_url = "$HELPER_ADMIN_URL"
 
 # This server's public URL. Empty disables the heartbeat (local dev default).
 helper_url = "$HELPER_URL"
@@ -159,6 +159,55 @@ helper_url = "$HELPER_URL"
 # Can also be set at runtime via the SENTRY_DSN environment variable.
 sentry_dsn = "$HELPER_SENTRY_DSN"
 HELPERCFG
+
+# Append [admin] section.
+ADMIN_ADDRESS="${SVOTE_ADMIN_ADDRESS:-$MANAGER_ADDR}"
+cat >> "$APP_TOML" <<ADMINCFG
+
+###############################################################################
+###                         Admin Server                                    ###
+###############################################################################
+
+[admin]
+
+# Set to true to disable the admin server (server directory, registration,
+# health monitoring).
+disable = true
+
+# Path to the admin SQLite database. Empty = default (\$HOME/.svoted/admin.db).
+db_path = ""
+
+# Bootstrap admin address for approve/reject operations.
+admin_address = "$ADMIN_ADDRESS"
+
+# How often to probe vote servers for health (seconds).
+probe_interval = 1800
+
+# How often to check for stale pulses (seconds).
+evict_interval = 120
+
+# How long a server can go without a pulse before being excluded (seconds).
+stale_threshold = 21600
+
+# PIR server list (JSON array). Included in the voting-config response.
+pir_servers = ""
+ADMINCFG
+
+# Append [ui] section.
+cat >> "$APP_TOML" <<UICFG
+
+###############################################################################
+###                         Admin UI                                        ###
+###############################################################################
+
+[ui]
+
+# Set to true to serve the admin UI from the chain API server.
+enable = false
+
+# Path to the built UI dist directory (output of "npm run build" in ui/).
+dist_path = ""
+UICFG
 
 echo ""
 echo "=== Chain initialized successfully! ==="

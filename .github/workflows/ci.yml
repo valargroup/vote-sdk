@@ -185,17 +185,28 @@ jobs:
           key: ${{ runner.os }}-e2e-go-${{ hashFiles('go.sum') }}
           restore-keys: |
             ${{ runner.os }}-e2e-go-
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Build and install svoted with FFI
         run: mise run build:install
         env:
           GOCACHE: ${{ github.workspace }}/.cache/go-build
+      - name: Build admin UI
+        run: cd ui && npm install && npm run build
       - name: Initialize 3-validator chain
         run: mise run chain:init-multi
         env:
           VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
       - name: Start 3 validators in background
         run: |
-          for i in 1 2 3; do
+          home="$HOME/.svoted-val1"
+          log="/tmp/svoted-val1.log"
+          echo "Starting val1 with admin server + UI (home=${home})..."
+          SVOTE_PIR_URL=disabled svoted start --home "${home}" --serve-ui --ui-dist ui/dist > "${log}" 2>&1 &
+          echo "  PID: $!"
+          for i in 2 3; do
             home="$HOME/.svoted-val${i}"
             log="/tmp/svoted-val${i}.log"
             echo "Starting val${i} (home=${home})..."
@@ -238,6 +249,14 @@ jobs:
           done
           echo "Only ${VALS}/3 validators bonded after 120s"
           exit 1
+      - name: Smoke test admin UI and API
+        run: |
+          echo "Checking UI is served..."
+          curl -sf http://localhost:1418/ | grep -q '<div id="root">' || { echo "UI not served"; exit 1; }
+          echo "  UI: OK"
+          echo "Checking admin API..."
+          curl -sf http://localhost:1418/api/voting-config | jq -e '.vote_servers' > /dev/null || { echo "Admin API not responding"; exit 1; }
+          echo "  Admin API: OK"
       - name: Run E2E test (round_activation)
         run: |
           export SVOTE_HOME="$HOME/.svoted-val1"

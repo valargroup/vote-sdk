@@ -171,7 +171,7 @@ configure_app_toml() {
 configure_helper() {
     local home="$1"
     local api_port="$2"
-    local pulse_url="${3:-}"
+    local admin_url="${3:-}"
     local helper_url="${4:-}"
     local sentry_dsn="${SVOTE_HELPER_SENTRY_DSN:-}"
 
@@ -203,8 +203,8 @@ chain_api_port = ${api_port}
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = 2
 
-# Heartbeat pulse URL. Empty disables the heartbeat (local dev default).
-pulse_url = "${pulse_url}"
+# Admin server URL for registration and heartbeat. Empty disables (local dev default).
+admin_url = "${admin_url}"
 
 # This server's public URL. Empty disables the heartbeat (local dev default).
 helper_url = "${helper_url}"
@@ -227,15 +227,51 @@ set_persistent_peers() {
 }
 
 # ---------------------------------------------------------------------------
+# Helper: append [admin] + [ui] config sections
+# ---------------------------------------------------------------------------
+configure_admin() {
+    local home="$1"
+    local disable="${2:-true}"
+    local admin_address="${3:-}"
+
+    local app_toml="$home/config/app.toml"
+    cat >> "$app_toml" <<ADMINCFG
+
+###############################################################################
+###                         Admin Server                                    ###
+###############################################################################
+
+[admin]
+
+disable = ${disable}
+db_path = ""
+admin_address = "${admin_address}"
+probe_interval = 1800
+evict_interval = 120
+stale_threshold = 21600
+pir_servers = ""
+
+###############################################################################
+###                         Admin UI                                        ###
+###############################################################################
+
+[ui]
+
+enable = false
+dist_path = ""
+ADMINCFG
+}
+
+# ---------------------------------------------------------------------------
 # Detect public IP for heartbeat URLs (CI mode only)
 # ---------------------------------------------------------------------------
-PULSE_URL=""
+ADMIN_SERVER_URL=""
 DASHED_IP=""
 if [ "$CI_MODE" = true ]; then
     PUBLIC_IP=$(curl -4s --connect-timeout 5 ifconfig.me || true)
     if [ -n "$PUBLIC_IP" ]; then
         DASHED_IP=$(echo "$PUBLIC_IP" | tr '.' '-')
-        PULSE_URL="${VOTING_CONFIG_URL:-https://shielded-vote.vercel.app}"
+        ADMIN_SERVER_URL="${SVOTE_ADMIN_URL:-https://val1.$(echo "$PUBLIC_IP" | tr '.' '-').sslip.io}"
     fi
 fi
 
@@ -329,12 +365,17 @@ $BINARY pallas-keygen --home "$HOME_VAL1"
 configure_config_toml "$HOME_VAL1" "${P2P_PORTS[0]}" "${RPC_PORTS[0]}" "${PPROF_PORTS[0]}"
 configure_app_toml "$HOME_VAL1" "${API_PORTS[0]}" "${GRPC_PORTS[0]}" "${GRPC_WEB_PORTS[0]}" "${RPC_PORTS[0]}"
 
+# Val1 runs the admin server. All validators register with it.
+configure_admin "$HOME_VAL1" "false" "$MANAGER_ADDR"
+
 # Helper server on all validators — each needs its own to accept shares when
 # the iOS app distributes encrypted shares across per-validator URLs.
+# In local mode, admin_url points to val1's API port.
+VAL1_ADMIN_URL="${ADMIN_SERVER_URL:-http://localhost:${API_PORTS[0]}}"
 if [ -n "$DASHED_IP" ]; then
-    configure_helper "$HOME_VAL1" "${API_PORTS[0]}" "$PULSE_URL" "https://val1.${DASHED_IP}.sslip.io"
+    configure_helper "$HOME_VAL1" "${API_PORTS[0]}" "$VAL1_ADMIN_URL" "https://val1.${DASHED_IP}.sslip.io"
 else
-    configure_helper "$HOME_VAL1" "${API_PORTS[0]}"
+    configure_helper "$HOME_VAL1" "${API_PORTS[0]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[0]}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -363,10 +404,13 @@ for i in 2 3; do
     configure_config_toml "$home" "${P2P_PORTS[$idx]}" "${RPC_PORTS[$idx]}" "${PPROF_PORTS[$idx]}"
     configure_app_toml "$home" "${API_PORTS[$idx]}" "${GRPC_PORTS[$idx]}" "${GRPC_WEB_PORTS[$idx]}" "${RPC_PORTS[$idx]}"
 
+    # Admin server disabled on non-admin validators (default).
+    configure_admin "$home" "true"
+
     if [ -n "$DASHED_IP" ]; then
-        configure_helper "$home" "${API_PORTS[$idx]}" "$PULSE_URL" "https://val${i}.${DASHED_IP}.sslip.io"
+        configure_helper "$home" "${API_PORTS[$idx]}" "$VAL1_ADMIN_URL" "https://val${i}.${DASHED_IP}.sslip.io"
     else
-        configure_helper "$home" "${API_PORTS[$idx]}"
+        configure_helper "$home" "${API_PORTS[$idx]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[$idx]}"
     fi
 
     # Set persistent_peers to val1.
@@ -406,106 +450,6 @@ else
     echo "Start with: mise run multi:start"
 fi
 
-# ---------------------------------------------------------------------------
-# Edge Config: register per-validator domains (CI mode only)
-# ---------------------------------------------------------------------------
-# Register each validator's sslip.io subdomain as a vote_server in Vercel Edge
-# Config so the iOS app discovers them via service discovery. Only vote_servers
-# are populated — PIR runs on the main domain and is configured separately.
-#
-# Requires: VERCEL_API_TOKEN, EDGE_CONFIG_ID (skipped silently if unset)
-# Optional: VOTING_CONFIG_URL (default: https://shielded-vote.vercel.app)
-
-if [ "$CI_MODE" = true ] && [ -n "$VERCEL_API_TOKEN" ] && [ -n "$EDGE_CONFIG_ID" ]; then
-    echo ""
-    echo "=== Registering validator domains in Edge Config ==="
-
-    if ! command -v jq > /dev/null 2>&1; then
-        echo "Warning: jq not found, skipping domain registration."
-    else
-        # Reuse the public IP detected earlier for heartbeat URLs.
-        if [ -z "$DASHED_IP" ]; then
-            echo "Warning: Could not detect public IP, skipping domain registration."
-        else
-            BASE_DOMAIN="${DASHED_IP}.sslip.io"
-
-            # Fetch current voting-config from the public endpoint.
-            CONFIG_URL="${VOTING_CONFIG_URL:-https://shielded-vote.vercel.app}"
-            CURRENT_CONFIG=$(curl -s "${CONFIG_URL}/api/voting-config" 2>/dev/null)
-            if ! echo "$CURRENT_CONFIG" | jq -e '.vote_servers' > /dev/null 2>&1; then
-                CURRENT_CONFIG='{"version":1,"vote_servers":[],"pir_servers":[]}'
-            fi
-
-            # Upsert each validator's subdomain. Both URL and operator_address are
-            # unique keys — evict any existing entry matching either, then append.
-            UPDATED_CONFIG="$CURRENT_CONFIG"
-            CHANGED=false
-            for i in $(seq 1 $NUM_VALIDATORS); do
-                idx=$((i - 1))
-                URL="https://val${i}.${BASE_DOMAIN}"
-                LABEL="val${i}"
-                ADDR=$(cat "${HOMES[$idx]}/validator_address.txt" 2>/dev/null || echo "")
-
-                # Remove any entry with matching URL or operator_address.
-                UPDATED_CONFIG=$(echo "$UPDATED_CONFIG" | jq \
-                    --arg url "$URL" --arg addr "$ADDR" \
-                    '.vote_servers |= [.[] | select(.url != $url and .operator_address != $addr)]')
-
-                # Append fresh entry.
-                UPDATED_CONFIG=$(echo "$UPDATED_CONFIG" | jq \
-                    --arg url "$URL" \
-                    --arg label "$LABEL" \
-                    --arg addr "$ADDR" \
-                    '.vote_servers += [{"url": $url, "label": $label, "operator_address": $addr}]')
-                echo "  ${LABEL}: ${URL} (${ADDR})"
-                CHANGED=true
-            done
-
-            if [ "$CHANGED" = true ]; then
-                # Build approved-servers from the same entries.
-                APPROVED_SERVERS=$(echo "$UPDATED_CONFIG" | jq '.vote_servers')
-
-                PATCH_BODY=$(jq -n \
-                    --argjson config "$UPDATED_CONFIG" \
-                    --argjson approved "$APPROVED_SERVERS" \
-                    '{items: [
-                        {operation: "upsert", key: "voting-config", value: $config},
-                        {operation: "upsert", key: "approved-servers", value: $approved}
-                    ]}')
-
-                HTTP_STATUS=$(curl -s -o /tmp/edge-config-resp.txt -w "%{http_code}" \
-                    -X PATCH \
-                    "https://api.vercel.com/v1/edge-config/${EDGE_CONFIG_ID}/items" \
-                    -H "Authorization: Bearer ${VERCEL_API_TOKEN}" \
-                    -H "Content-Type: application/json" \
-                    -d "$PATCH_BODY")
-
-                if [ "$HTTP_STATUS" = "200" ]; then
-                    echo "  Edge Config updated successfully (voting-config + approved-servers)."
-                else
-                    echo "  Warning: Edge Config update failed (HTTP ${HTTP_STATUS})."
-                    cat /tmp/edge-config-resp.txt 2>/dev/null
-                    echo ""
-                fi
-                rm -f /tmp/edge-config-resp.txt
-            else
-                echo "  All domains already registered, no changes needed."
-            fi
-
-            # Patch pulse_url and helper_url into each validator's app.toml
-            # so the heartbeat goroutine activates on next start.
-            for i in $(seq 1 $NUM_VALIDATORS); do
-                idx=$((i - 1))
-                VAL_URL="https://val${i}.${BASE_DOMAIN}"
-                VAL_TOML="${HOMES[$idx]}/config/app.toml"
-                sed -i.bak "s|^pulse_url = \"\"$|pulse_url = \"${CONFIG_URL}\"|" "$VAL_TOML"
-                sed -i.bak "s|^helper_url = \"\"$|helper_url = \"${VAL_URL}\"|" "$VAL_TOML"
-                rm -f "${VAL_TOML}.bak"
-                echo "  val${i}: pulse_url=${CONFIG_URL} helper_url=${VAL_URL}"
-            done
-        fi
-    fi
-elif [ "$CI_MODE" = true ]; then
-    echo ""
-    echo "Note: Set VERCEL_API_TOKEN and EDGE_CONFIG_ID to auto-register validator domains in Edge Config."
-fi
+echo ""
+echo "Validators will auto-register with the admin server at:"
+echo "  ${VAL1_ADMIN_URL}/api/register-validator"
