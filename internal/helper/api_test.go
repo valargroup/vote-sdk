@@ -145,16 +145,8 @@ func TestSubmitShare_ValidationErrors(t *testing.T) {
 		},
 		{
 			name:    "share_index out of range",
-			modify:  func(p *SharePayload) { p.EncShare.ShareIndex = 5 },
+			modify:  func(p *SharePayload) { p.EncShare.ShareIndex = 16 },
 			errPart: "share_index",
-		},
-		{
-			name: "share_index mismatch",
-			modify: func(p *SharePayload) {
-				p.ShareIndex = 1
-				p.EncShare.ShareIndex = 0
-			},
-			errPart: "share_index must match",
 		},
 		{
 			name:    "vote_decision out of range",

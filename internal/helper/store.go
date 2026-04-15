@@ -689,7 +689,6 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 
 	q.Payload.VoteRoundID = roundID
 	q.Payload.EncShare.ShareIndex = shareIndex
-	q.Payload.ShareIndex = shareIndex
 	q.State = ShareState(state)
 	q.Attempts = attempts
 
@@ -706,7 +705,6 @@ func payloadEqual(existing, incoming SharePayload) bool {
 		existing.ProposalID != incoming.ProposalID ||
 		existing.VoteDecision != incoming.VoteDecision ||
 		existing.EncShare != incoming.EncShare ||
-		existing.ShareIndex != incoming.ShareIndex ||
 		existing.TreePosition != incoming.TreePosition {
 		return false
 	}

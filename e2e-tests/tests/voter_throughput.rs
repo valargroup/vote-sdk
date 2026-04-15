@@ -495,7 +495,6 @@ fn generate_cast_vote(
                     "c2": B64.encode(&es.c2),
                     "share_index": share_idx,
                 },
-                "share_index": share_idx,
                 "tree_position": 0, // filled at runtime after position resolution
                 "vote_round_id": round_id_hex,
                 "share_comms": bundle.share_comms.iter().map(|c| B64.encode(c.to_repr())).collect::<Vec<_>>(),

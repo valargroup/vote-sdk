@@ -351,9 +351,6 @@ func validatePayload(p *SharePayload) error {
 	if p.EncShare.ShareIndex > types.MaxProposals {
 		return fmt.Errorf("enc_share.share_index must be 0..%d", types.MaxProposals)
 	}
-	if p.ShareIndex != p.EncShare.ShareIndex {
-		return fmt.Errorf("share_index must match enc_share.share_index")
-	}
 	// Protocol allows up to 8 options per proposal (indices 0-7).
 	// The chain keeper validates the exact range per-proposal.
 	if p.VoteDecision >= types.MaxVoteOptions {
