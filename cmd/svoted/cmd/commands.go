@@ -25,6 +25,7 @@ import (
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	"github.com/cosmos/cosmos-sdk/version"
 	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
 
@@ -125,6 +126,7 @@ func initRootCmd(
 		debug.Cmd(),
 		pruning.Cmd(newApp, app.DefaultNodeHome),
 		snapshot.Cmd(newApp),
+		version.NewVersionCommand(),
 		EAKeygenCmd(),
 		PallasKeygenCmd(),
 		EncryptEAKeyCmd(),
