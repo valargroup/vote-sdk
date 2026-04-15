@@ -48,6 +48,8 @@ jobs:
         run: mise run build && mise run build:create-val-tx
         env:
           BUILD_TAGS: halo2 redpallas
+      - name: Build admin UI
+        run: cd ui && npm install && npm run build
       - name: Copy init script to build root
         run: cp scripts/init_multi.sh init_multi.sh
       - name: Upload artifacts
@@ -58,6 +60,10 @@ jobs:
             svoted
             create-val-tx
             init_multi.sh
+            ui/dist
+            docs/svoted-val1.service
+            docs/svoted-val2.service
+            docs/svoted-val3.service
 
   deploy:
     name: Deploy binaries
@@ -83,7 +89,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
-          source: "svoted,create-val-tx,init_multi.sh"
+          source: "svoted,create-val-tx,init_multi.sh,ui/dist,docs/svoted-val1.service,docs/svoted-val2.service,docs/svoted-val3.service"
           target: ${{ env.DEPLOY_PATH }}
 
   restart:

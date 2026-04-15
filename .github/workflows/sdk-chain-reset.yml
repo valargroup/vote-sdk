@@ -51,6 +51,21 @@ jobs:
               sleep 1
             done
 
+      - name: Install updated systemd units
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            for i in 1 2 3; do
+              src="${{ env.DEPLOY_PATH }}/docs/svoted-val${i}.service"
+              if [ -f "$src" ]; then
+                sudo cp "$src" /etc/systemd/system/svoted-val${i}.service
+              fi
+            done
+            sudo systemctl daemon-reload
+
       - name: Reinitialize all validators
         if: ${{ inputs.reset_chain == true }}
         uses: appleboy/ssh-action@v1.0.3
