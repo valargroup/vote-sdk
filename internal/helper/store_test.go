@@ -89,6 +89,18 @@ func TestMarkSubmitted(t *testing.T) {
 	status := s.Status()
 	assert.Equal(t, 1, status["round1"].Submitted)
 	assert.Equal(t, 0, status["round1"].Pending)
+
+	// Witness data must be scrubbed from the row after submission.
+	var c1, c2, comms, blind string
+	err := s.db.QueryRow(
+		"SELECT enc_share_c1, enc_share_c2, share_comms, primary_blind FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		"round1", 0, 1, 0,
+	).Scan(&c1, &c2, &comms, &blind)
+	require.NoError(t, err)
+	assert.Empty(t, c1, "enc_share_c1 should be cleared")
+	assert.Empty(t, c2, "enc_share_c2 should be cleared")
+	assert.Equal(t, "[]", comms, "share_comms should be reset to empty array")
+	assert.Empty(t, blind, "primary_blind should be cleared")
 }
 
 func TestMarkFailed_RetryAndPermanent(t *testing.T) {
@@ -116,6 +128,18 @@ func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	status := s.Status()
 	assert.Equal(t, 1, status["round1"].Failed)
 	assert.Equal(t, 0, status["round1"].Pending)
+
+	// Witness data must be scrubbed after permanent failure.
+	var c1, c2, comms, blind string
+	err := s.db.QueryRow(
+		"SELECT enc_share_c1, enc_share_c2, share_comms, primary_blind FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		"round1", 0, 1, 0,
+	).Scan(&c1, &c2, &comms, &blind)
+	require.NoError(t, err)
+	assert.Empty(t, c1, "enc_share_c1 should be cleared after permanent failure")
+	assert.Empty(t, c2, "enc_share_c2 should be cleared after permanent failure")
+	assert.Equal(t, "[]", comms, "share_comms should be reset after permanent failure")
+	assert.Empty(t, blind, "primary_blind should be cleared after permanent failure")
 }
 
 func TestStatus(t *testing.T) {

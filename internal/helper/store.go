@@ -56,6 +56,13 @@ func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error)
 		return nil, fmt.Errorf("set WAL mode: %w", err)
 	}
 
+	// Overwrite deleted content with zeros so forensic recovery cannot
+	// retrieve witness data (blinds, commitments, encrypted shares).
+	if _, err := db.Exec("PRAGMA secure_delete=ON"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set secure_delete: %w", err)
+	}
+
 	// Run migrations.
 	if err := migrate(db); err != nil {
 		db.Close()
@@ -465,7 +472,10 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 	defer s.mu.Unlock()
 
 	if _, err := s.db.Exec(
-		"UPDATE shares SET state = 2 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
+		`UPDATE shares SET state = 2,
+		        enc_share_c1 = '', enc_share_c2 = '',
+		        share_comms = '[]', primary_blind = ''
+		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1`,
 		roundID, shareIndex, proposalID, treePosition,
 	); err != nil {
 		s.logError("MarkSubmitted: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
@@ -494,9 +504,12 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 
 	if newAttempts >= maxAttempts {
-		// Permanently failed.
+		// Permanently failed — clear witness data.
 		if _, err := s.db.Exec(
-			"UPDATE shares SET state = 3, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+			`UPDATE shares SET state = 3, attempts = ?,
+			        enc_share_c1 = '', enc_share_c2 = '',
+			        share_comms = '[]', primary_blind = ''
+			 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 			newAttempts, roundID, shareIndex, proposalID, treePosition,
 		); err != nil {
 			s.logError("MarkFailed: db update (permanent) failed", "error", err)
