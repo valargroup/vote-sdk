@@ -6,6 +6,10 @@ Helper server.
 
 ## Sentry error tracking
 
+Sentry project: **svote-helper** (slug: `svote-helper-vm`) in the
+`valar-group` org. Dashboard:
+https://valar-group.sentry.io/projects/svote-helper-vm/
+
 The Helper server supports optional [Sentry](https://sentry.io) integration
 for capturing infrastructure errors. When disabled (the default), the Sentry
 SDK is never initialized and adds zero overhead.
