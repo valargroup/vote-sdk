@@ -1,7 +1,8 @@
 # Observability
 
-This document covers error tracking and diagnostic tooling for the Helper
-server that runs inside `svoted`.
+This document covers error tracking and diagnostic tooling for `svoted`,
+including the ABCI consensus handlers, the public vote API, and the
+Helper server.
 
 ## Sentry error tracking
 
@@ -55,6 +56,38 @@ Only unexpected infrastructure errors are reported. Expected conditions
 (bad client input, duplicate nullifiers, inactive rounds) are **not** sent
 to Sentry.
 
+#### ABCI consensus handlers
+
+| Source | Errors captured |
+|--------|----------------|
+| PrepareProposal — tally | KV iteration failures, accumulator check errors, partial decryption count errors, threshold decryption failures (Lagrange / BSGS), tx encoding errors |
+| PrepareProposal — DKG contribution | Round lookup failures, threshold computation errors, Shamir split / Feldman commit failures, coefficient write errors, Pallas PK unmarshal errors, ECIES encryption failures, tx encoding errors |
+| PrepareProposal — ceremony ack | Round lookup failures, share recovery errors (ECIES decryption, Feldman verification), share disk write errors, tx encoding errors |
+| PrepareProposal — partial decrypt | KV iteration failures, existing submission check errors, tally read errors, ciphertext unmarshal errors, off-curve D_i, DLEQ proof generation failures, tx encoding errors |
+| ProcessProposal | Every block REJECT — invalid DKG contribution, invalid ack, invalid partial decrypt, or invalid tally |
+
+#### Ante handler (vote tx validation)
+
+| Source | Errors captured |
+|--------|----------------|
+| `ValidateVoteTx` | `ErrInvalidProof` (ZKP verification failure) and `ErrInvalidSignature` (RedPallas signature failure) only |
+
+Parameter validation errors (`ValidateBasic`, `ErrRoundNotActive`,
+`ErrDuplicateNullifier`, `ErrInvalidAnchorHeight`, etc.) are **not**
+captured — they represent expected invalid client input.
+
+#### Public vote API
+
+| Source | Errors captured |
+|--------|----------------|
+| `broadcastVoteTx` — encode | 500: tx encoding failure (internal bug) |
+| `broadcastVoteTx` — broadcast | 502: CometBFT broadcast RPC error (node unreachable or failing) |
+
+422 CheckTx rejections are **not** captured — they represent expected
+invalid votes.
+
+#### Helper server
+
 | Source | Errors captured |
 |--------|----------------|
 | Processor (`processShare`) | Proof generation failures, tree read errors, chain submission errors |
@@ -64,11 +97,16 @@ to Sentry.
 | HTTP panic recovery | Any panic in a helper HTTP handler |
 | Processor panic recovery | Any panic during share processing |
 
+### Tags
+
 Every captured error includes contextual tags where available:
 
-- `round_id` -- the voting round identifier
-- `share_index` -- the share index within the round
-- `stage` -- processing stage (`round_status_check`, `process_share`, `enqueue`, `nullifier_check`, `panic`)
+- `handler` -- which handler produced the error (`PrepareProposal`, `ProcessProposal`, `ante`, `broadcastVoteTx`)
+- `stage` -- processing stage within the handler (e.g. `threshold_tally_decryption`, `ack_dkg_round`, `encode_pd_tx`)
+- `tag` -- injected tx type for ProcessProposal rejections (`dkg_contribution`, `ack`, `partial_decrypt`, `tally`)
+- `msg_type` -- Go type of the vote message (ante and API errors)
+- `round_id` -- the voting round identifier (hex)
+- `share_index` -- the share index within the round (helper only)
 
 ### Release tracking
 
