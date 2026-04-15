@@ -4,7 +4,7 @@ HOME_DIR := $(or $(SVOTED_HOME),$(HOME)/.svoted)
 export GOBIN := $(HOME)/go/bin
 export PATH := $(GOBIN):$(PATH)
 
-.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy
+.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down
 
 ## install: Build and install the svoted binary to $GOPATH/bin
 install:
@@ -152,3 +152,28 @@ caddy:
 	sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
 	sudo systemctl restart caddy
 	@echo "Caddy restarted — HTTPS at https://46-101-255-48.sslip.io"
+
+# ---------------------------------------------------------------------------
+# Docker testnet targets
+# ---------------------------------------------------------------------------
+
+DOCKER_TESTNET_VALIDATORS ?= 30
+
+## docker-build: Build the svoted-testnet Docker image (Rust + Go multi-stage)
+docker-build:
+	docker build -t svoted-testnet -f docker/Dockerfile .
+
+## docker-testnet: Generate compose file and start N-validator testnet (default 30)
+docker-testnet: docker-build
+	bash docker/generate-compose.sh $(DOCKER_TESTNET_VALIDATORS)
+	docker compose -f docker/docker-compose.yml up -d
+	@echo ""
+	@echo "Testnet starting with $(DOCKER_TESTNET_VALIDATORS) validators."
+	@echo "  RPC: http://localhost:26157"
+	@echo "  API: http://localhost:1318"
+	@echo "  Logs: docker compose -f docker/docker-compose.yml logs -f"
+
+## docker-testnet-down: Stop and remove the testnet containers and volumes
+docker-testnet-down:
+	docker compose -f docker/docker-compose.yml down -v
+	@echo "Testnet stopped and volumes removed."

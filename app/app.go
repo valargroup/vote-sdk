@@ -190,6 +190,7 @@ func NewSvoteApp(
 		ceremonyAckHandler,
 		partialDecryptHandler,
 		tallyHandler,
+		logger,
 	))
 
 	// Install ProcessProposal handler that validates injected ack and tally txs.

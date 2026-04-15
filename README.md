@@ -41,11 +41,10 @@ make start
 
 ### Consensus timing defaults
 
-`svoted` overrides CometBFT defaults at startup to optimize block production and
-long-running tx checks:
-
-- `consensus.timeout_precommit = "1s"` (CometBFT default is `5s`)
-- `rpc.timeout_broadcast_tx_commit = "120s"` (to avoid RPC EOF on long CheckTx)
+`svoted` overrides CometBFT defaults at startup to reduce block time (~0.91s
+with 30 validators vs ~4-6s with defaults). See
+[docs/blocktimes.md](docs/blocktimes.md) for the full parameter table, Osmosis
+comparison, and benchmark results confirming safety.
 
 ### Test
 
