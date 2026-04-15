@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 
 	"cosmossdk.io/math"
 	"github.com/mikelodder7/curvey"
@@ -1373,4 +1374,256 @@ func (s *MsgServerTestSuite) TestContributeDKG_RejectsProposerMismatch() {
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "does not match block proposer")
+}
+
+// ===========================================================================
+// RotatePallasKey
+// ===========================================================================
+
+func (s *MsgServerTestSuite) TestRotatePallasKey_Rejects() {
+	tests := []struct {
+		name        string
+		setup       func()
+		msg         func() *types.MsgRotatePallasKey
+		wantErr     error
+		errContains string
+		checkAfter  func() // optional post-error state assertion
+	}{
+		{
+			name: "no existing key",
+			msg: func() *types.MsgRotatePallasKey {
+				return &types.MsgRotatePallasKey{
+					Creator:     testAccAddr(1),
+					NewPallasPk: testPallasPK(),
+				}
+			},
+			wantErr: types.ErrNoPallasKey,
+		},
+		{
+			name: "invalid pallas point (off-curve)",
+			setup: func() {
+				_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+					Creator: testAccAddr(1), PallasPk: testPallasPK(),
+				})
+				s.Require().NoError(err)
+			},
+			msg: func() *types.MsgRotatePallasKey {
+				return &types.MsgRotatePallasKey{
+					Creator:     testAccAddr(1),
+					NewPallasPk: bytes.Repeat([]byte{0xFF}, 32),
+				}
+			},
+			wantErr: types.ErrInvalidPallasPoint,
+		},
+		{
+			name: "new PK already owned by another validator",
+			setup: func() {
+				_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+					Creator: testAccAddr(1), PallasPk: testPallasPK(),
+				})
+				s.Require().NoError(err)
+			},
+			msg: func() *types.MsgRotatePallasKey {
+				// Register a second validator and try to rotate to their PK.
+				pk2 := testPallasPK()
+				_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+					Creator: testAccAddr(2), PallasPk: pk2,
+				})
+				s.Require().NoError(err)
+				return &types.MsgRotatePallasKey{
+					Creator:     testAccAddr(1),
+					NewPallasPk: pk2,
+				}
+			},
+			wantErr: types.ErrDuplicatePallasKey,
+		},
+		{
+			name: "same key as current (no-op rotation)",
+			setup: func() {
+				_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+					Creator: testAccAddr(1), PallasPk: testPallasPK(),
+				})
+				s.Require().NoError(err)
+			},
+			msg: func() *types.MsgRotatePallasKey {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				vpk, err := s.keeper.GetPallasKey(kv, testValoperAddr(1))
+				s.Require().NoError(err)
+				return &types.MsgRotatePallasKey{
+					Creator:     testAccAddr(1),
+					NewPallasPk: vpk.PallasPk,
+				}
+			},
+			wantErr: types.ErrSameKey,
+		},
+		{
+			name: "validator in PENDING ceremony",
+			setup: func() {
+				s.createPendingRoundWithValidators(3)
+			},
+			msg: func() *types.MsgRotatePallasKey {
+				// Validator 1 (seed byte 1) was registered by createPendingRoundWithValidators.
+				valAddr, err := sdk.ValAddressFromBech32(testValoperAddr(1))
+				s.Require().NoError(err)
+				return &types.MsgRotatePallasKey{
+					Creator:     sdk.AccAddress(valAddr).String(),
+					NewPallasPk: testPallasPK(),
+				}
+			},
+			wantErr: types.ErrCeremonyInProgress,
+			checkAfter: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				vpk, err := s.keeper.GetPallasKey(kv, testValoperAddr(1))
+				s.Require().NoError(err)
+				s.Require().NotNil(vpk, "original key should be unchanged")
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			if tc.setup != nil {
+				tc.setup()
+			}
+			_, err := s.msgServer.RotatePallasKey(s.ctx, tc.msg())
+			s.Require().Error(err)
+			if tc.wantErr != nil {
+				s.Require().ErrorIs(err, tc.wantErr)
+			}
+			if tc.errContains != "" {
+				s.Require().Contains(err.Error(), tc.errContains)
+			}
+			if tc.checkAfter != nil {
+				tc.checkAfter()
+			}
+		})
+	}
+}
+
+func (s *MsgServerTestSuite) TestRotatePallasKey_HappyPaths() {
+	tests := []struct {
+		name       string
+		setup      func() (creator string, oldPK []byte)
+		checkAfter func(creator string, oldPK, newPK []byte)
+	}{
+		{
+			name: "basic rotation updates forward and reverse indexes",
+			setup: func() (string, []byte) {
+				pk := testPallasPK()
+				_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+					Creator: testAccAddr(1), PallasPk: pk,
+				})
+				s.Require().NoError(err)
+				return testAccAddr(1), pk
+			},
+			checkAfter: func(creator string, oldPK, newPK []byte) {
+				valAddr := testValoperAddr(1)
+				kv := s.keeper.OpenKVStore(s.ctx)
+
+				vpk, err := s.keeper.GetPallasKey(kv, valAddr)
+				s.Require().NoError(err)
+				s.Require().Equal(newPK, vpk.PallasPk, "forward index should point to new PK")
+
+				oldOwner, err := s.keeper.GetPallasKeyOwner(kv, oldPK)
+				s.Require().NoError(err)
+				s.Require().Empty(oldOwner, "old reverse index should be deleted")
+
+				newOwner, err := s.keeper.GetPallasKeyOwner(kv, newPK)
+				s.Require().NoError(err)
+				s.Require().Equal(valAddr, newOwner, "new reverse index should exist")
+			},
+		},
+		{
+			name: "emits rotate_pallas_key event with old and new PK",
+			setup: func() (string, []byte) {
+				pk := testPallasPK()
+				_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+					Creator: testAccAddr(1), PallasPk: pk,
+				})
+				s.Require().NoError(err)
+				return testAccAddr(1), pk
+			},
+			checkAfter: func(_ string, oldPK, newPK []byte) {
+				var found bool
+				for _, e := range s.ctx.EventManager().Events() {
+					if e.Type != types.EventTypeRotatePallasKey {
+						continue
+					}
+					found = true
+					attrs := make(map[string]string, len(e.Attributes))
+					for _, a := range e.Attributes {
+						attrs[a.Key] = a.Value
+					}
+					s.Require().Equal(hex.EncodeToString(oldPK), attrs[types.AttributeKeyOldPallasPk],
+						"event should contain hex-encoded old PK")
+					s.Require().Equal(hex.EncodeToString(newPK), attrs[types.AttributeKeyNewPallasPk],
+						"event should contain hex-encoded new PK")
+				}
+				s.Require().True(found, "expected rotate_pallas_key event")
+			},
+		},
+		{
+			name: "allowed after ceremony confirmed (no longer PENDING)",
+			setup: func() (string, []byte) {
+				addrs, pks := s.registerValidators(1)
+				validators := []*types.ValidatorPallasKey{
+					{ValidatorAddress: addrs[0], PallasPk: pks[0]},
+				}
+				roundID := s.createPendingRound(validators)
+
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, err := s.keeper.GetVoteRound(kv, roundID)
+				s.Require().NoError(err)
+				round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
+				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+
+				valAddr, err := sdk.ValAddressFromBech32(addrs[0])
+				s.Require().NoError(err)
+				return sdk.AccAddress(valAddr).String(), pks[0]
+			},
+			checkAfter: func(_ string, _, newPK []byte) {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				vpk, err := s.keeper.GetPallasKey(kv, testValoperAddr(1))
+				s.Require().NoError(err)
+				s.Require().Equal(newPK, vpk.PallasPk)
+			},
+		},
+		{
+			name: "old PK freed for reuse by another validator",
+			setup: func() (string, []byte) {
+				pk := testPallasPK()
+				_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+					Creator: testAccAddr(1), PallasPk: pk,
+				})
+				s.Require().NoError(err)
+				return testAccAddr(1), pk
+			},
+			checkAfter: func(_ string, oldPK, _ []byte) {
+				_, err := s.msgServer.RegisterPallasKey(s.ctx, &types.MsgRegisterPallasKey{
+					Creator: testAccAddr(2), PallasPk: oldPK,
+				})
+				s.Require().NoError(err, "another validator should be able to claim the old PK")
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			creator, oldPK := tc.setup()
+			newPK := testPallasPK()
+
+			_, err := s.msgServer.RotatePallasKey(s.ctx, &types.MsgRotatePallasKey{
+				Creator:     creator,
+				NewPallasPk: newPK,
+			})
+			s.Require().NoError(err)
+
+			if tc.checkAfter != nil {
+				tc.checkAfter(creator, oldPK, newPK)
+			}
+		})
+	}
 }

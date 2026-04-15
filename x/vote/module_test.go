@@ -673,6 +673,7 @@ func TestRegisterInterfaces_IncludesCeremonyMsgs(t *testing.T) {
 
 	ceremonyMsgs := []sdk.Msg{
 		&types.MsgRegisterPallasKey{},
+		&types.MsgRotatePallasKey{},
 		&types.MsgContributeDKG{},
 		&types.MsgAckExecutiveAuthorityKey{},
 	}
@@ -694,6 +695,7 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		vote.ProvideRevealShareSigner(),
 		vote.ProvideSubmitTallySigner(),
 		vote.ProvideRegisterPallasKeySigner(),
+		vote.ProvideRotatePallasKeySigner(),
 		vote.ProvideContributeDKGSigner(),
 		vote.ProvideAckExecutiveAuthorityKeySigner(),
 	}
@@ -705,6 +707,7 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		"svote.v1.MsgRevealShare",
 		"svote.v1.MsgSubmitTally",
 		"svote.v1.MsgRegisterPallasKey",
+		"svote.v1.MsgRotatePallasKey",
 		"svote.v1.MsgContributeDKG",
 		"svote.v1.MsgAckExecutiveAuthorityKey",
 	}

@@ -140,6 +140,21 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 	round.DkgContributions = keptContribs
 }
 
+// IsValidatorInPendingCeremony returns true if the given validator address
+// appears in the ceremony_validators list of any PENDING round. Used to block
+// Pallas key rotation while the validator is participating in an active ceremony.
+func (k *Keeper) IsValidatorInPendingCeremony(kvStore store.KVStore, valAddr string) (bool, error) {
+	found := false
+	err := k.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
+		if _, ok := FindValidatorInRoundCeremony(round, valAddr); ok {
+			found = true
+			return true
+		}
+		return false
+	})
+	return found, err
+}
+
 // GetPendingRoundWithCeremony loads a vote round and verifies it is PENDING
 // with the specified ceremony status. Used by Deal (REGISTERING) and Ack (DEALT).
 func (k *Keeper) GetPendingRoundWithCeremony(kvStore store.KVStore, roundID []byte, wantCeremony types.CeremonyStatus) (*types.VoteRound, error) {

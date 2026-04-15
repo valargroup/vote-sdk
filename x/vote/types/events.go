@@ -10,6 +10,7 @@ const (
 	EventTypeRoundStatusChange            = "round_status_change"
 	EventTypeSubmitTally                  = "submit_tally"
 	EventTypeRegisterPallasKey            = "register_pallas_key"
+	EventTypeRotatePallasKey              = "rotate_pallas_key"
 	EventTypeContributeDKG               = "contribute_dkg"
 	EventTypeAckExecutiveAuthorityKey     = "ack_executive_authority_key"
 	EventTypeCeremonyStatusChange             = "ceremony_status_change"
@@ -42,4 +43,6 @@ const (
 	AttributeKeySender             = "sender"
 	AttributeKeyRecipient          = "recipient"
 	AttributeKeyAmount             = "amount"
+	AttributeKeyOldPallasPk        = "old_pallas_pk"
+	AttributeKeyNewPallasPk        = "new_pallas_pk"
 )

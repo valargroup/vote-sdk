@@ -38,6 +38,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgSubmitTally{},
 		&MsgSubmitPartialDecryption{},
 		&MsgRegisterPallasKey{},
+		&MsgRotatePallasKey{},
 		&MsgContributeDKG{},
 		&MsgAckExecutiveAuthorityKey{},
 		&MsgCreateValidatorWithPallasKey{},

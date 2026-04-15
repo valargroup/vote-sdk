@@ -26,6 +26,7 @@ const (
 	Msg_SubmitTally_FullMethodName                  = "/svote.v1.Msg/SubmitTally"
 	Msg_SubmitPartialDecryption_FullMethodName      = "/svote.v1.Msg/SubmitPartialDecryption"
 	Msg_RegisterPallasKey_FullMethodName            = "/svote.v1.Msg/RegisterPallasKey"
+	Msg_RotatePallasKey_FullMethodName              = "/svote.v1.Msg/RotatePallasKey"
 	Msg_ContributeDKG_FullMethodName                = "/svote.v1.Msg/ContributeDKG"
 	Msg_AckExecutiveAuthorityKey_FullMethodName     = "/svote.v1.Msg/AckExecutiveAuthorityKey"
 	Msg_CreateValidatorWithPallasKey_FullMethodName = "/svote.v1.Msg/CreateValidatorWithPallasKey"
@@ -49,6 +50,7 @@ type MsgClient interface {
 	SubmitTally(ctx context.Context, in *MsgSubmitTally, opts ...grpc.CallOption) (*MsgSubmitTallyResponse, error)
 	SubmitPartialDecryption(ctx context.Context, in *MsgSubmitPartialDecryption, opts ...grpc.CallOption) (*MsgSubmitPartialDecryptionResponse, error)
 	RegisterPallasKey(ctx context.Context, in *MsgRegisterPallasKey, opts ...grpc.CallOption) (*MsgRegisterPallasKeyResponse, error)
+	RotatePallasKey(ctx context.Context, in *MsgRotatePallasKey, opts ...grpc.CallOption) (*MsgRotatePallasKeyResponse, error)
 	ContributeDKG(ctx context.Context, in *MsgContributeDKG, opts ...grpc.CallOption) (*MsgContributeDKGResponse, error)
 	AckExecutiveAuthorityKey(ctx context.Context, in *MsgAckExecutiveAuthorityKey, opts ...grpc.CallOption) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(ctx context.Context, in *MsgCreateValidatorWithPallasKey, opts ...grpc.CallOption) (*MsgCreateValidatorWithPallasKeyResponse, error)
@@ -134,6 +136,16 @@ func (c *msgClient) RegisterPallasKey(ctx context.Context, in *MsgRegisterPallas
 	return out, nil
 }
 
+func (c *msgClient) RotatePallasKey(ctx context.Context, in *MsgRotatePallasKey, opts ...grpc.CallOption) (*MsgRotatePallasKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgRotatePallasKeyResponse)
+	err := c.cc.Invoke(ctx, Msg_RotatePallasKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *msgClient) ContributeDKG(ctx context.Context, in *MsgContributeDKG, opts ...grpc.CallOption) (*MsgContributeDKGResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MsgContributeDKGResponse)
@@ -200,6 +212,7 @@ type MsgServer interface {
 	SubmitTally(context.Context, *MsgSubmitTally) (*MsgSubmitTallyResponse, error)
 	SubmitPartialDecryption(context.Context, *MsgSubmitPartialDecryption) (*MsgSubmitPartialDecryptionResponse, error)
 	RegisterPallasKey(context.Context, *MsgRegisterPallasKey) (*MsgRegisterPallasKeyResponse, error)
+	RotatePallasKey(context.Context, *MsgRotatePallasKey) (*MsgRotatePallasKeyResponse, error)
 	ContributeDKG(context.Context, *MsgContributeDKG) (*MsgContributeDKGResponse, error)
 	AckExecutiveAuthorityKey(context.Context, *MsgAckExecutiveAuthorityKey) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(context.Context, *MsgCreateValidatorWithPallasKey) (*MsgCreateValidatorWithPallasKeyResponse, error)
@@ -235,6 +248,9 @@ func (UnimplementedMsgServer) SubmitPartialDecryption(context.Context, *MsgSubmi
 }
 func (UnimplementedMsgServer) RegisterPallasKey(context.Context, *MsgRegisterPallasKey) (*MsgRegisterPallasKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterPallasKey not implemented")
+}
+func (UnimplementedMsgServer) RotatePallasKey(context.Context, *MsgRotatePallasKey) (*MsgRotatePallasKeyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RotatePallasKey not implemented")
 }
 func (UnimplementedMsgServer) ContributeDKG(context.Context, *MsgContributeDKG) (*MsgContributeDKGResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ContributeDKG not implemented")
@@ -398,6 +414,24 @@ func _Msg_RegisterPallasKey_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_RotatePallasKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgRotatePallasKey)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).RotatePallasKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_RotatePallasKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).RotatePallasKey(ctx, req.(*MsgRotatePallasKey))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Msg_ContributeDKG_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MsgContributeDKG)
 	if err := dec(in); err != nil {
@@ -522,6 +556,10 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterPallasKey",
 			Handler:    _Msg_RegisterPallasKey_Handler,
+		},
+		{
+			MethodName: "RotatePallasKey",
+			Handler:    _Msg_RotatePallasKey_Handler,
 		},
 		{
 			MethodName: "ContributeDKG",

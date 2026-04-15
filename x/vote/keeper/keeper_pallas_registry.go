@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -119,6 +120,50 @@ func (k Keeper) RegisterPallasKeyCore(kvStore store.KVStore, valAddr string, pal
 		ValidatorAddress: valAddr,
 		PallasPk:         pallasPk,
 	})
+}
+
+// DeletePallasKeyReverse removes the reverse-lookup index entry for the given
+// Pallas public key. Used during key rotation to clean up the old PK's entry.
+func (k Keeper) DeletePallasKeyReverse(kvStore store.KVStore, pallasPk []byte) error {
+	return kvStore.Delete(types.PallasKeyReverseLookupKey(pallasPk))
+}
+
+// RotatePallasKeyCore replaces a validator's registered Pallas PK with a new one.
+// The validator must already have a registered key (use RegisterPallasKeyCore for
+// first-time registration). The new PK must differ from the current one and pass
+// global uniqueness checks. Returns the old PK for audit logging.
+func (k Keeper) RotatePallasKeyCore(kvStore store.KVStore, valAddr string, newPallasPk []byte) (oldPallasPk []byte, err error) {
+	existing, err := k.GetPallasKey(kvStore, valAddr)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, fmt.Errorf("%w: %s", types.ErrNoPallasKey, valAddr)
+	}
+
+	if bytes.Equal(existing.PallasPk, newPallasPk) {
+		return nil, fmt.Errorf("%w: %s", types.ErrSameKey, valAddr)
+	}
+
+	owner, err := k.GetPallasKeyOwner(kvStore, newPallasPk)
+	if err != nil {
+		return nil, err
+	}
+	if owner != "" {
+		return nil, fmt.Errorf("%w: already registered by %s", types.ErrDuplicatePallasKey, owner)
+	}
+
+	if err := k.DeletePallasKeyReverse(kvStore, existing.PallasPk); err != nil {
+		return nil, err
+	}
+
+	if err := k.SetPallasKey(kvStore, &types.ValidatorPallasKey{
+		ValidatorAddress: valAddr,
+		PallasPk:         newPallasPk,
+	}); err != nil {
+		return nil, err
+	}
+	return existing.PallasPk, nil
 }
 
 // GetEligibleValidators returns all bonded validators that have a registered Pallas PK.

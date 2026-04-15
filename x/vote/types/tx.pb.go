@@ -882,6 +882,96 @@ func (*MsgRegisterPallasKeyResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{12}
 }
 
+// MsgRotatePallasKey replaces a validator's registered Pallas public key.
+// Requires an existing registration and no in-flight ceremony for this validator.
+type MsgRotatePallasKey struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                              // Validator account address (same as RegisterPallasKey)
+	NewPallasPk   []byte                 `protobuf:"bytes,2,opt,name=new_pallas_pk,json=newPallasPk,proto3" json:"new_pallas_pk,omitempty"` // New compressed Pallas point (32 bytes)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgRotatePallasKey) Reset() {
+	*x = MsgRotatePallasKey{}
+	mi := &file_svote_v1_tx_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgRotatePallasKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgRotatePallasKey) ProtoMessage() {}
+
+func (x *MsgRotatePallasKey) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgRotatePallasKey.ProtoReflect.Descriptor instead.
+func (*MsgRotatePallasKey) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *MsgRotatePallasKey) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+func (x *MsgRotatePallasKey) GetNewPallasPk() []byte {
+	if x != nil {
+		return x.NewPallasPk
+	}
+	return nil
+}
+
+type MsgRotatePallasKeyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgRotatePallasKeyResponse) Reset() {
+	*x = MsgRotatePallasKeyResponse{}
+	mi := &file_svote_v1_tx_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgRotatePallasKeyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgRotatePallasKeyResponse) ProtoMessage() {}
+
+func (x *MsgRotatePallasKeyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgRotatePallasKeyResponse.ProtoReflect.Descriptor instead.
+func (*MsgRotatePallasKeyResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{14}
+}
+
 // MsgContributeDKG is a validator's contribution to the Joint-Feldman DKG.
 // Each validator generates a random polynomial, publishes Feldman commitments,
 // and distributes ECIES-encrypted shares to all ceremony participants.
@@ -897,7 +987,7 @@ type MsgContributeDKG struct {
 
 func (x *MsgContributeDKG) Reset() {
 	*x = MsgContributeDKG{}
-	mi := &file_svote_v1_tx_proto_msgTypes[13]
+	mi := &file_svote_v1_tx_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -909,7 +999,7 @@ func (x *MsgContributeDKG) String() string {
 func (*MsgContributeDKG) ProtoMessage() {}
 
 func (x *MsgContributeDKG) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[13]
+	mi := &file_svote_v1_tx_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -922,7 +1012,7 @@ func (x *MsgContributeDKG) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgContributeDKG.ProtoReflect.Descriptor instead.
 func (*MsgContributeDKG) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{13}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *MsgContributeDKG) GetCreator() string {
@@ -961,7 +1051,7 @@ type MsgContributeDKGResponse struct {
 
 func (x *MsgContributeDKGResponse) Reset() {
 	*x = MsgContributeDKGResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[14]
+	mi := &file_svote_v1_tx_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -973,7 +1063,7 @@ func (x *MsgContributeDKGResponse) String() string {
 func (*MsgContributeDKGResponse) ProtoMessage() {}
 
 func (x *MsgContributeDKGResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[14]
+	mi := &file_svote_v1_tx_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -986,7 +1076,7 @@ func (x *MsgContributeDKGResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgContributeDKGResponse.ProtoReflect.Descriptor instead.
 func (*MsgContributeDKGResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{14}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{16}
 }
 
 // MsgAckExecutiveAuthorityKey is submitted by a validator to acknowledge receipt of their ea_sk share.
@@ -1001,7 +1091,7 @@ type MsgAckExecutiveAuthorityKey struct {
 
 func (x *MsgAckExecutiveAuthorityKey) Reset() {
 	*x = MsgAckExecutiveAuthorityKey{}
-	mi := &file_svote_v1_tx_proto_msgTypes[15]
+	mi := &file_svote_v1_tx_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1013,7 +1103,7 @@ func (x *MsgAckExecutiveAuthorityKey) String() string {
 func (*MsgAckExecutiveAuthorityKey) ProtoMessage() {}
 
 func (x *MsgAckExecutiveAuthorityKey) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[15]
+	mi := &file_svote_v1_tx_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1026,7 +1116,7 @@ func (x *MsgAckExecutiveAuthorityKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgAckExecutiveAuthorityKey.ProtoReflect.Descriptor instead.
 func (*MsgAckExecutiveAuthorityKey) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{15}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *MsgAckExecutiveAuthorityKey) GetCreator() string {
@@ -1058,7 +1148,7 @@ type MsgAckExecutiveAuthorityKeyResponse struct {
 
 func (x *MsgAckExecutiveAuthorityKeyResponse) Reset() {
 	*x = MsgAckExecutiveAuthorityKeyResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[16]
+	mi := &file_svote_v1_tx_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1070,7 +1160,7 @@ func (x *MsgAckExecutiveAuthorityKeyResponse) String() string {
 func (*MsgAckExecutiveAuthorityKeyResponse) ProtoMessage() {}
 
 func (x *MsgAckExecutiveAuthorityKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[16]
+	mi := &file_svote_v1_tx_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1083,7 +1173,7 @@ func (x *MsgAckExecutiveAuthorityKeyResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use MsgAckExecutiveAuthorityKeyResponse.ProtoReflect.Descriptor instead.
 func (*MsgAckExecutiveAuthorityKeyResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{16}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{18}
 }
 
 // MsgCreateValidatorWithPallasKey wraps standard MsgCreateValidator with a Pallas public key.
@@ -1099,7 +1189,7 @@ type MsgCreateValidatorWithPallasKey struct {
 
 func (x *MsgCreateValidatorWithPallasKey) Reset() {
 	*x = MsgCreateValidatorWithPallasKey{}
-	mi := &file_svote_v1_tx_proto_msgTypes[17]
+	mi := &file_svote_v1_tx_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1111,7 +1201,7 @@ func (x *MsgCreateValidatorWithPallasKey) String() string {
 func (*MsgCreateValidatorWithPallasKey) ProtoMessage() {}
 
 func (x *MsgCreateValidatorWithPallasKey) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[17]
+	mi := &file_svote_v1_tx_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1124,7 +1214,7 @@ func (x *MsgCreateValidatorWithPallasKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgCreateValidatorWithPallasKey.ProtoReflect.Descriptor instead.
 func (*MsgCreateValidatorWithPallasKey) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{17}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *MsgCreateValidatorWithPallasKey) GetStakingMsg() []byte {
@@ -1149,7 +1239,7 @@ type MsgCreateValidatorWithPallasKeyResponse struct {
 
 func (x *MsgCreateValidatorWithPallasKeyResponse) Reset() {
 	*x = MsgCreateValidatorWithPallasKeyResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[18]
+	mi := &file_svote_v1_tx_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1161,7 +1251,7 @@ func (x *MsgCreateValidatorWithPallasKeyResponse) String() string {
 func (*MsgCreateValidatorWithPallasKeyResponse) ProtoMessage() {}
 
 func (x *MsgCreateValidatorWithPallasKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[18]
+	mi := &file_svote_v1_tx_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1174,7 +1264,7 @@ func (x *MsgCreateValidatorWithPallasKeyResponse) ProtoReflect() protoreflect.Me
 
 // Deprecated: Use MsgCreateValidatorWithPallasKeyResponse.ProtoReflect.Descriptor instead.
 func (*MsgCreateValidatorWithPallasKeyResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{18}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{20}
 }
 
 // MsgSubmitPartialDecryption is submitted by a validator during the TALLYING phase.
@@ -1193,7 +1283,7 @@ type MsgSubmitPartialDecryption struct {
 
 func (x *MsgSubmitPartialDecryption) Reset() {
 	*x = MsgSubmitPartialDecryption{}
-	mi := &file_svote_v1_tx_proto_msgTypes[19]
+	mi := &file_svote_v1_tx_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1205,7 +1295,7 @@ func (x *MsgSubmitPartialDecryption) String() string {
 func (*MsgSubmitPartialDecryption) ProtoMessage() {}
 
 func (x *MsgSubmitPartialDecryption) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[19]
+	mi := &file_svote_v1_tx_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1218,7 +1308,7 @@ func (x *MsgSubmitPartialDecryption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSubmitPartialDecryption.ProtoReflect.Descriptor instead.
 func (*MsgSubmitPartialDecryption) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{19}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *MsgSubmitPartialDecryption) GetVoteRoundId() []byte {
@@ -1264,7 +1354,7 @@ type PartialDecryptionEntry struct {
 
 func (x *PartialDecryptionEntry) Reset() {
 	*x = PartialDecryptionEntry{}
-	mi := &file_svote_v1_tx_proto_msgTypes[20]
+	mi := &file_svote_v1_tx_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1276,7 +1366,7 @@ func (x *PartialDecryptionEntry) String() string {
 func (*PartialDecryptionEntry) ProtoMessage() {}
 
 func (x *PartialDecryptionEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[20]
+	mi := &file_svote_v1_tx_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1289,7 +1379,7 @@ func (x *PartialDecryptionEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartialDecryptionEntry.ProtoReflect.Descriptor instead.
 func (*PartialDecryptionEntry) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{20}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *PartialDecryptionEntry) GetProposalId() uint32 {
@@ -1328,7 +1418,7 @@ type MsgSubmitPartialDecryptionResponse struct {
 
 func (x *MsgSubmitPartialDecryptionResponse) Reset() {
 	*x = MsgSubmitPartialDecryptionResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[21]
+	mi := &file_svote_v1_tx_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1340,7 +1430,7 @@ func (x *MsgSubmitPartialDecryptionResponse) String() string {
 func (*MsgSubmitPartialDecryptionResponse) ProtoMessage() {}
 
 func (x *MsgSubmitPartialDecryptionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[21]
+	mi := &file_svote_v1_tx_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1353,7 +1443,7 @@ func (x *MsgSubmitPartialDecryptionResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use MsgSubmitPartialDecryptionResponse.ProtoReflect.Descriptor instead.
 func (*MsgSubmitPartialDecryptionResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{21}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{23}
 }
 
 // MsgSetVoteManager reassigns the vote manager role.
@@ -1369,7 +1459,7 @@ type MsgSetVoteManager struct {
 
 func (x *MsgSetVoteManager) Reset() {
 	*x = MsgSetVoteManager{}
-	mi := &file_svote_v1_tx_proto_msgTypes[22]
+	mi := &file_svote_v1_tx_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1381,7 +1471,7 @@ func (x *MsgSetVoteManager) String() string {
 func (*MsgSetVoteManager) ProtoMessage() {}
 
 func (x *MsgSetVoteManager) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[22]
+	mi := &file_svote_v1_tx_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1394,7 +1484,7 @@ func (x *MsgSetVoteManager) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSetVoteManager.ProtoReflect.Descriptor instead.
 func (*MsgSetVoteManager) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{22}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *MsgSetVoteManager) GetCreator() string {
@@ -1419,7 +1509,7 @@ type MsgSetVoteManagerResponse struct {
 
 func (x *MsgSetVoteManagerResponse) Reset() {
 	*x = MsgSetVoteManagerResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[23]
+	mi := &file_svote_v1_tx_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1431,7 +1521,7 @@ func (x *MsgSetVoteManagerResponse) String() string {
 func (*MsgSetVoteManagerResponse) ProtoMessage() {}
 
 func (x *MsgSetVoteManagerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[23]
+	mi := &file_svote_v1_tx_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1444,7 +1534,7 @@ func (x *MsgSetVoteManagerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSetVoteManagerResponse.ProtoReflect.Descriptor instead.
 func (*MsgSetVoteManagerResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{23}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{25}
 }
 
 // MsgAuthorizedSend is the only way to transfer coins on this chain.
@@ -1468,7 +1558,7 @@ type MsgAuthorizedSend struct {
 
 func (x *MsgAuthorizedSend) Reset() {
 	*x = MsgAuthorizedSend{}
-	mi := &file_svote_v1_tx_proto_msgTypes[24]
+	mi := &file_svote_v1_tx_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1480,7 +1570,7 @@ func (x *MsgAuthorizedSend) String() string {
 func (*MsgAuthorizedSend) ProtoMessage() {}
 
 func (x *MsgAuthorizedSend) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[24]
+	mi := &file_svote_v1_tx_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1493,7 +1583,7 @@ func (x *MsgAuthorizedSend) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgAuthorizedSend.ProtoReflect.Descriptor instead.
 func (*MsgAuthorizedSend) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{24}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *MsgAuthorizedSend) GetFromAddress() string {
@@ -1532,7 +1622,7 @@ type MsgAuthorizedSendResponse struct {
 
 func (x *MsgAuthorizedSendResponse) Reset() {
 	*x = MsgAuthorizedSendResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[25]
+	mi := &file_svote_v1_tx_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1544,7 +1634,7 @@ func (x *MsgAuthorizedSendResponse) String() string {
 func (*MsgAuthorizedSendResponse) ProtoMessage() {}
 
 func (x *MsgAuthorizedSendResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[25]
+	mi := &file_svote_v1_tx_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1557,7 +1647,7 @@ func (x *MsgAuthorizedSendResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgAuthorizedSendResponse.ProtoReflect.Descriptor instead.
 func (*MsgAuthorizedSendResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{25}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{27}
 }
 
 var File_svote_v1_tx_proto protoreflect.FileDescriptor
@@ -1632,7 +1722,11 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x14MsgRegisterPallasKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\x1b\n" +
 	"\tpallas_pk\x18\x02 \x01(\fR\bpallasPk\"\x1e\n" +
-	"\x1cMsgRegisterPallasKeyResponse\"\xb6\x01\n" +
+	"\x1cMsgRegisterPallasKeyResponse\"R\n" +
+	"\x12MsgRotatePallasKey\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\x12\"\n" +
+	"\rnew_pallas_pk\x18\x02 \x01(\fR\vnewPallasPk\"\x1c\n" +
+	"\x1aMsgRotatePallasKeyResponse\"\xb6\x01\n" +
 	"\x10MsgContributeDKG\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\"\n" +
 	"\rvote_round_id\x18\x02 \x01(\fR\vvoteRoundId\x12/\n" +
@@ -1673,7 +1767,7 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"to_address\x18\x02 \x01(\tR\ttoAddress\x12\x16\n" +
 	"\x06amount\x18\x03 \x01(\tR\x06amount\x12\x14\n" +
 	"\x05denom\x18\x04 \x01(\tR\x05denom\"\x1b\n" +
-	"\x19MsgAuthorizedSendResponse2\xca\b\n" +
+	"\x19MsgAuthorizedSendResponse2\xa1\t\n" +
 	"\x03Msg\x12a\n" +
 	"\x13CreateVotingSession\x12 .svote.v1.MsgCreateVotingSession\x1a(.svote.v1.MsgCreateVotingSessionResponse\x12L\n" +
 	"\fDelegateVote\x12\x19.svote.v1.MsgDelegateVote\x1a!.svote.v1.MsgDelegateVoteResponse\x12@\n" +
@@ -1681,7 +1775,8 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\vRevealShare\x12\x18.svote.v1.MsgRevealShare\x1a .svote.v1.MsgRevealShareResponse\x12I\n" +
 	"\vSubmitTally\x12\x18.svote.v1.MsgSubmitTally\x1a .svote.v1.MsgSubmitTallyResponse\x12m\n" +
 	"\x17SubmitPartialDecryption\x12$.svote.v1.MsgSubmitPartialDecryption\x1a,.svote.v1.MsgSubmitPartialDecryptionResponse\x12[\n" +
-	"\x11RegisterPallasKey\x12\x1e.svote.v1.MsgRegisterPallasKey\x1a&.svote.v1.MsgRegisterPallasKeyResponse\x12O\n" +
+	"\x11RegisterPallasKey\x12\x1e.svote.v1.MsgRegisterPallasKey\x1a&.svote.v1.MsgRegisterPallasKeyResponse\x12U\n" +
+	"\x0fRotatePallasKey\x12\x1c.svote.v1.MsgRotatePallasKey\x1a$.svote.v1.MsgRotatePallasKeyResponse\x12O\n" +
 	"\rContributeDKG\x12\x1a.svote.v1.MsgContributeDKG\x1a\".svote.v1.MsgContributeDKGResponse\x12p\n" +
 	"\x18AckExecutiveAuthorityKey\x12%.svote.v1.MsgAckExecutiveAuthorityKey\x1a-.svote.v1.MsgAckExecutiveAuthorityKeyResponse\x12|\n" +
 	"\x1cCreateValidatorWithPallasKey\x12).svote.v1.MsgCreateValidatorWithPallasKey\x1a1.svote.v1.MsgCreateValidatorWithPallasKeyResponse\x12R\n" +
@@ -1700,7 +1795,7 @@ func file_svote_v1_tx_proto_rawDescGZIP() []byte {
 	return file_svote_v1_tx_proto_rawDescData
 }
 
-var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgCreateVotingSession)(nil),                  // 0: svote.v1.MsgCreateVotingSession
 	(*MsgCreateVotingSessionResponse)(nil),          // 1: svote.v1.MsgCreateVotingSessionResponse
@@ -1715,53 +1810,57 @@ var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgSubmitTallyResponse)(nil),                  // 10: svote.v1.MsgSubmitTallyResponse
 	(*MsgRegisterPallasKey)(nil),                    // 11: svote.v1.MsgRegisterPallasKey
 	(*MsgRegisterPallasKeyResponse)(nil),            // 12: svote.v1.MsgRegisterPallasKeyResponse
-	(*MsgContributeDKG)(nil),                        // 13: svote.v1.MsgContributeDKG
-	(*MsgContributeDKGResponse)(nil),                // 14: svote.v1.MsgContributeDKGResponse
-	(*MsgAckExecutiveAuthorityKey)(nil),             // 15: svote.v1.MsgAckExecutiveAuthorityKey
-	(*MsgAckExecutiveAuthorityKeyResponse)(nil),     // 16: svote.v1.MsgAckExecutiveAuthorityKeyResponse
-	(*MsgCreateValidatorWithPallasKey)(nil),         // 17: svote.v1.MsgCreateValidatorWithPallasKey
-	(*MsgCreateValidatorWithPallasKeyResponse)(nil), // 18: svote.v1.MsgCreateValidatorWithPallasKeyResponse
-	(*MsgSubmitPartialDecryption)(nil),              // 19: svote.v1.MsgSubmitPartialDecryption
-	(*PartialDecryptionEntry)(nil),                  // 20: svote.v1.PartialDecryptionEntry
-	(*MsgSubmitPartialDecryptionResponse)(nil),      // 21: svote.v1.MsgSubmitPartialDecryptionResponse
-	(*MsgSetVoteManager)(nil),                       // 22: svote.v1.MsgSetVoteManager
-	(*MsgSetVoteManagerResponse)(nil),               // 23: svote.v1.MsgSetVoteManagerResponse
-	(*MsgAuthorizedSend)(nil),                       // 24: svote.v1.MsgAuthorizedSend
-	(*MsgAuthorizedSendResponse)(nil),               // 25: svote.v1.MsgAuthorizedSendResponse
-	(*Proposal)(nil),                                // 26: svote.v1.Proposal
-	(*DealerPayload)(nil),                           // 27: svote.v1.DealerPayload
+	(*MsgRotatePallasKey)(nil),                      // 13: svote.v1.MsgRotatePallasKey
+	(*MsgRotatePallasKeyResponse)(nil),              // 14: svote.v1.MsgRotatePallasKeyResponse
+	(*MsgContributeDKG)(nil),                        // 15: svote.v1.MsgContributeDKG
+	(*MsgContributeDKGResponse)(nil),                // 16: svote.v1.MsgContributeDKGResponse
+	(*MsgAckExecutiveAuthorityKey)(nil),             // 17: svote.v1.MsgAckExecutiveAuthorityKey
+	(*MsgAckExecutiveAuthorityKeyResponse)(nil),     // 18: svote.v1.MsgAckExecutiveAuthorityKeyResponse
+	(*MsgCreateValidatorWithPallasKey)(nil),         // 19: svote.v1.MsgCreateValidatorWithPallasKey
+	(*MsgCreateValidatorWithPallasKeyResponse)(nil), // 20: svote.v1.MsgCreateValidatorWithPallasKeyResponse
+	(*MsgSubmitPartialDecryption)(nil),              // 21: svote.v1.MsgSubmitPartialDecryption
+	(*PartialDecryptionEntry)(nil),                  // 22: svote.v1.PartialDecryptionEntry
+	(*MsgSubmitPartialDecryptionResponse)(nil),      // 23: svote.v1.MsgSubmitPartialDecryptionResponse
+	(*MsgSetVoteManager)(nil),                       // 24: svote.v1.MsgSetVoteManager
+	(*MsgSetVoteManagerResponse)(nil),               // 25: svote.v1.MsgSetVoteManagerResponse
+	(*MsgAuthorizedSend)(nil),                       // 26: svote.v1.MsgAuthorizedSend
+	(*MsgAuthorizedSendResponse)(nil),               // 27: svote.v1.MsgAuthorizedSendResponse
+	(*Proposal)(nil),                                // 28: svote.v1.Proposal
+	(*DealerPayload)(nil),                           // 29: svote.v1.DealerPayload
 }
 var file_svote_v1_tx_proto_depIdxs = []int32{
-	26, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
+	28, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
 	9,  // 1: svote.v1.MsgSubmitTally.entries:type_name -> svote.v1.TallyEntry
-	27, // 2: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
-	20, // 3: svote.v1.MsgSubmitPartialDecryption.entries:type_name -> svote.v1.PartialDecryptionEntry
+	29, // 2: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
+	22, // 3: svote.v1.MsgSubmitPartialDecryption.entries:type_name -> svote.v1.PartialDecryptionEntry
 	0,  // 4: svote.v1.Msg.CreateVotingSession:input_type -> svote.v1.MsgCreateVotingSession
 	2,  // 5: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
 	4,  // 6: svote.v1.Msg.CastVote:input_type -> svote.v1.MsgCastVote
 	6,  // 7: svote.v1.Msg.RevealShare:input_type -> svote.v1.MsgRevealShare
 	8,  // 8: svote.v1.Msg.SubmitTally:input_type -> svote.v1.MsgSubmitTally
-	19, // 9: svote.v1.Msg.SubmitPartialDecryption:input_type -> svote.v1.MsgSubmitPartialDecryption
+	21, // 9: svote.v1.Msg.SubmitPartialDecryption:input_type -> svote.v1.MsgSubmitPartialDecryption
 	11, // 10: svote.v1.Msg.RegisterPallasKey:input_type -> svote.v1.MsgRegisterPallasKey
-	13, // 11: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
-	15, // 12: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
-	17, // 13: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
-	22, // 14: svote.v1.Msg.SetVoteManager:input_type -> svote.v1.MsgSetVoteManager
-	24, // 15: svote.v1.Msg.AuthorizedSend:input_type -> svote.v1.MsgAuthorizedSend
-	1,  // 16: svote.v1.Msg.CreateVotingSession:output_type -> svote.v1.MsgCreateVotingSessionResponse
-	3,  // 17: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
-	5,  // 18: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
-	7,  // 19: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
-	10, // 20: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
-	21, // 21: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
-	12, // 22: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
-	14, // 23: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
-	16, // 24: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
-	18, // 25: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
-	23, // 26: svote.v1.Msg.SetVoteManager:output_type -> svote.v1.MsgSetVoteManagerResponse
-	25, // 27: svote.v1.Msg.AuthorizedSend:output_type -> svote.v1.MsgAuthorizedSendResponse
-	16, // [16:28] is the sub-list for method output_type
-	4,  // [4:16] is the sub-list for method input_type
+	13, // 11: svote.v1.Msg.RotatePallasKey:input_type -> svote.v1.MsgRotatePallasKey
+	15, // 12: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
+	17, // 13: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
+	19, // 14: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
+	24, // 15: svote.v1.Msg.SetVoteManager:input_type -> svote.v1.MsgSetVoteManager
+	26, // 16: svote.v1.Msg.AuthorizedSend:input_type -> svote.v1.MsgAuthorizedSend
+	1,  // 17: svote.v1.Msg.CreateVotingSession:output_type -> svote.v1.MsgCreateVotingSessionResponse
+	3,  // 18: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
+	5,  // 19: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
+	7,  // 20: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
+	10, // 21: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
+	23, // 22: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
+	12, // 23: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
+	14, // 24: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
+	16, // 25: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
+	18, // 26: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
+	20, // 27: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
+	25, // 28: svote.v1.Msg.SetVoteManager:output_type -> svote.v1.MsgSetVoteManagerResponse
+	27, // 29: svote.v1.Msg.AuthorizedSend:output_type -> svote.v1.MsgAuthorizedSendResponse
+	17, // [17:30] is the sub-list for method output_type
+	4,  // [4:17] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -1779,7 +1878,7 @@ func file_svote_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_tx_proto_rawDesc), len(file_svote_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   26,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
