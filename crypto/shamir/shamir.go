@@ -139,8 +139,14 @@ func Reconstruct(shares []Share, t int) (curvey.Scalar, error) {
 	return result, nil
 }
 
-// evalPolynomial evaluates f(x) = coeffs[0] + coeffs[1]*x + ... + coeffs[d]*x^d
-// at the given integer point using Horner's method.
+// EvalPolynomial evaluates f(x) = coeffs[0] + coeffs[1]*x + ... + coeffs[d]*x^d
+// at the given integer point x using Horner's method in O(d) multiplications.
+// Used by the DKG ack handler to recompute a contributor's own partial share
+// from persisted polynomial coefficients.
+func EvalPolynomial(coeffs []curvey.Scalar, x int) curvey.Scalar {
+	return evalPolynomial(coeffs, x)
+}
+
 func evalPolynomial(coeffs []curvey.Scalar, x int) curvey.Scalar {
 	xScalar := intToScalar(x)
 
