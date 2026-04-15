@@ -112,6 +112,7 @@ HELPER_PROCESS_INTERVAL="${SVOTE_HELPER_PROCESS_INTERVAL:-5}"
 HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-2}"
 HELPER_PULSE_URL="${SVOTE_HELPER_PULSE_URL:-}"
 HELPER_URL="${SVOTE_HELPER_URL:-}"
+HELPER_SENTRY_DSN="${SVOTE_HELPER_SENTRY_DSN:-}"
 
 # Append [helper] section (not in the default template).
 cat >> "$APP_TOML" <<HELPERCFG
@@ -153,6 +154,10 @@ pulse_url = "$HELPER_PULSE_URL"
 
 # This server's public URL. Empty disables the heartbeat (local dev default).
 helper_url = "$HELPER_URL"
+
+# Sentry DSN for error tracking. Empty disables Sentry.
+# Can also be set at runtime via the SENTRY_DSN environment variable.
+sentry_dsn = "$HELPER_SENTRY_DSN"
 HELPERCFG
 
 echo ""

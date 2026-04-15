@@ -58,14 +58,16 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
-          envs: VM_PRIVKEY
+          envs: VM_PRIVKEY,SVOTE_HELPER_SENTRY_DSN
           script: |
             export HOME=${{ env.DEPLOY_PATH }} PATH=${{ env.DEPLOY_PATH }}:$PATH
             export VM_PRIVKEY="$VM_PRIVKEY"
+            export SVOTE_HELPER_SENTRY_DSN="$SVOTE_HELPER_SENTRY_DSN"
             chmod +x ${{ env.DEPLOY_PATH }}/svoted ${{ env.DEPLOY_PATH }}/create-val-tx
             bash ${{ env.DEPLOY_PATH }}/init_multi.sh --ci
         env:
           VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
+          SVOTE_HELPER_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Reset Edge Config (clear stale validator state)
         if: ${{ inputs.reset_chain == true }}
