@@ -176,6 +176,20 @@ func (msg *MsgRevealShare) ValidateBasic() error {
 	return nil
 }
 
+// ValidateBasic performs stateless validation for MsgRotatePallasKey.
+func (msg *MsgRotatePallasKey) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if len(msg.NewPallasPk) != 32 {
+		return fmt.Errorf("%w: new_pallas_pk must be 32 bytes, got %d", ErrInvalidField, len(msg.NewPallasPk))
+	}
+	if bytes.Equal(msg.NewPallasPk, zeroPoint32[:]) {
+		return fmt.Errorf("%w: new_pallas_pk must not be the identity point (all zeros)", ErrInvalidField)
+	}
+	return nil
+}
+
 // VoteMessage is an interface that all vote module messages implement,
 // used by the validation pipeline.
 type VoteMessage interface {

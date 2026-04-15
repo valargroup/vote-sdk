@@ -119,14 +119,14 @@ func handleVoteAnte(
 	// All custom txs (vote + ceremony) are free — infinite gas meter.
 	ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
 
-	// Ceremony messages (Deal 0x07, Ack 0x08, PartialDecrypt 0x0D) use the
-	// custom wire format and are auto-injected by PrepareProposal. Each tag
+	// Ceremony messages (ContributeDKG 0x0E, Ack 0x08, PartialDecrypt 0x0D) use
+	// the custom wire format and are auto-injected by PrepareProposal. Each tag
 	// gets its own proposer identity check to prevent forged submissions.
 	if vtx.CeremonyMsg != nil {
 		switch vtx.Tag {
-		case voteapi.TagDealExecutiveAuthorityKey:
-			msg := vtx.CeremonyMsg.(*types.MsgDealExecutiveAuthorityKey)
-			if err := k.ValidateProposerIsCreator(ctx, msg.Creator, "MsgDealExecutiveAuthorityKey"); err != nil {
+		case voteapi.TagContributeDKG:
+			msg := vtx.CeremonyMsg.(*types.MsgContributeDKG)
+			if err := k.ValidateProposerIsCreator(ctx, msg.Creator, "MsgContributeDKG"); err != nil {
 				return ctx, err
 			}
 		case voteapi.TagAckExecutiveAuthorityKey:
@@ -209,7 +209,7 @@ func isVoteModuleMsg(msg sdk.Msg) bool {
 	switch msg.(type) {
 	case *types.MsgDelegateVote, *types.MsgCastVote, *types.MsgRevealShare:
 		return true
-	case *types.MsgDealExecutiveAuthorityKey, *types.MsgAckExecutiveAuthorityKey, *types.MsgSubmitPartialDecryption, *types.MsgSubmitTally:
+	case *types.MsgContributeDKG, *types.MsgAckExecutiveAuthorityKey, *types.MsgSubmitPartialDecryption, *types.MsgSubmitTally:
 		return true
 	default:
 		return false

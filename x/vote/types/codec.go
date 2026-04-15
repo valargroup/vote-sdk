@@ -15,6 +15,7 @@ func init() {
 	// nested messages inside transaction Msg types into the gogoproto registry
 	// so that standard Cosmos SDK tx decoding succeeds.
 	gogoproto.RegisterType((*DealerPayload)(nil), "svote.v1.DealerPayload")
+	gogoproto.RegisterType((*DKGContribution)(nil), "svote.v1.DKGContribution")
 	gogoproto.RegisterType((*Proposal)(nil), "svote.v1.Proposal")
 	gogoproto.RegisterType((*VoteOption)(nil), "svote.v1.VoteOption")
 	gogoproto.RegisterType((*TallyEntry)(nil), "svote.v1.TallyEntry")
@@ -37,7 +38,8 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgSubmitTally{},
 		&MsgSubmitPartialDecryption{},
 		&MsgRegisterPallasKey{},
-		&MsgDealExecutiveAuthorityKey{},
+		&MsgRotatePallasKey{},
+		&MsgContributeDKG{},
 		&MsgAckExecutiveAuthorityKey{},
 		&MsgCreateValidatorWithPallasKey{},
 		&MsgSetVoteManager{},

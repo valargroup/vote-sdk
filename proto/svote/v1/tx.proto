@@ -19,7 +19,8 @@ service Msg {
   rpc SubmitTally(MsgSubmitTally) returns (MsgSubmitTallyResponse);
   rpc SubmitPartialDecryption(MsgSubmitPartialDecryption) returns (MsgSubmitPartialDecryptionResponse);
   rpc RegisterPallasKey(MsgRegisterPallasKey) returns (MsgRegisterPallasKeyResponse);
-  rpc DealExecutiveAuthorityKey(MsgDealExecutiveAuthorityKey) returns (MsgDealExecutiveAuthorityKeyResponse);
+  rpc RotatePallasKey(MsgRotatePallasKey) returns (MsgRotatePallasKeyResponse);
+  rpc ContributeDKG(MsgContributeDKG) returns (MsgContributeDKGResponse);
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
   rpc SetVoteManager(MsgSetVoteManager) returns (MsgSetVoteManagerResponse);
@@ -41,6 +42,7 @@ message MsgCreateVotingSession {
   repeated Proposal proposals = 8;
   string description          = 9;  // Human-readable round description
   string title                = 10; // Short human-readable round title
+  string discussion_url       = 11; // Overall forum discussion link for the vote round
 }
 
 message MsgCreateVotingSessionResponse {
@@ -123,19 +125,26 @@ message MsgRegisterPallasKey {
 
 message MsgRegisterPallasKeyResponse {}
 
-// MsgDealExecutiveAuthorityKey is submitted by the bootstrap dealer to distribute encrypted ea_sk shares.
-// In threshold mode, each payload contains ECIES(f(i), pk_i) where f is a degree-(t-1) polynomial
-// with f(0) = ea_sk. verification_keys holds VK_i = f(i)*G for each validator (one per payload).
-message MsgDealExecutiveAuthorityKey {
-  string                 creator            = 1; // Dealer's validator address
-  bytes                  ea_pk              = 2; // Executive authority public key (Pallas, 32 bytes)
-  repeated DealerPayload payloads           = 3; // One ECIES envelope per registered validator
-  bytes                  vote_round_id      = 4; // Target voting round (per-round ceremony)
-  uint32                 threshold          = 5; // Minimum shares required to reconstruct (t). Always >= 2.
-  repeated bytes         verification_keys  = 6; // VK_i = f(i)*G per validator (32-byte compressed Pallas points, same order as payloads)
+// MsgRotatePallasKey replaces a validator's registered Pallas public key.
+// Requires an existing registration and no in-flight ceremony for this validator.
+message MsgRotatePallasKey {
+  string creator       = 1; // Validator account address (same as RegisterPallasKey)
+  bytes  new_pallas_pk = 2; // New compressed Pallas point (32 bytes)
 }
 
-message MsgDealExecutiveAuthorityKeyResponse {}
+message MsgRotatePallasKeyResponse {}
+
+// MsgContributeDKG is a validator's contribution to the Joint-Feldman DKG.
+// Each validator generates a random polynomial, publishes Feldman commitments,
+// and distributes ECIES-encrypted shares to all ceremony participants.
+message MsgContributeDKG {
+  string                 creator              = 1;
+  bytes                  vote_round_id        = 2;
+  repeated bytes         feldman_commitments  = 3; // C_j = a_j*G for j=0..t-1
+  repeated DealerPayload payloads             = 4; // One ECIES envelope per ceremony validator
+}
+
+message MsgContributeDKGResponse {}
 
 // MsgAckExecutiveAuthorityKey is submitted by a validator to acknowledge receipt of their ea_sk share.
 message MsgAckExecutiveAuthorityKey {

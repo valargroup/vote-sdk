@@ -70,9 +70,8 @@ func NewHandler(cfg HandlerConfig) *Handler {
 // the vote manager) and should be submitted via svoted tx sign/broadcast
 // or /cosmos/tx/v1beta1/txs.
 //
-// Ceremony messages (MsgRegisterPallasKey, MsgDealExecutiveAuthorityKey,
-// MsgCreateValidatorWithPallasKey, MsgSetVoteManager) are also standard
-// Cosmos SDK transactions.
+// Ceremony messages (MsgRegisterPallasKey, MsgCreateValidatorWithPallasKey,
+// MsgSetVoteManager) are also standard Cosmos SDK transactions.
 //
 // MsgAckExecutiveAuthorityKey and MsgSubmitPartialDecryption have no REST
 // endpoints — they are injected in-protocol via PrepareProposal.
