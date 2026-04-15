@@ -1,10 +1,10 @@
 // Chain API client for the Shielded-Vote chain REST endpoints.
 
 const CHAIN_URL_KEY = "shielded-vote-chain-url";
-const DEFAULT_CHAIN_URL = import.meta.env.VITE_CHAIN_URL || "http://localhost:1318";
+const DEFAULT_CHAIN_URL = import.meta.env.VITE_CHAIN_URL || "";
 
 export function getChainUrl(): string {
-  return localStorage.getItem(CHAIN_URL_KEY) || DEFAULT_CHAIN_URL;
+  return localStorage.getItem(CHAIN_URL_KEY) || import.meta.env.VITE_CHAIN_URL || window.location.origin;
 }
 
 export function setChainUrl(url: string) {
