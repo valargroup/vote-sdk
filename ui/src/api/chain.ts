@@ -1,7 +1,15 @@
 // Chain API client for the Shielded-Vote chain REST endpoints.
 
 const CHAIN_URL_KEY = "shielded-vote-chain-url";
-const DEFAULT_CHAIN_URL = import.meta.env.VITE_CHAIN_URL || "";
+
+// Clear stale localhost defaults saved by earlier builds. The UI is now served
+// in-process by svoted, so same-origin (empty base) is the correct default.
+if (typeof window !== "undefined") {
+  const stored = localStorage.getItem(CHAIN_URL_KEY);
+  if (stored && /^https?:\/\/localhost[:/]/.test(stored)) {
+    localStorage.removeItem(CHAIN_URL_KEY);
+  }
+}
 
 export function getChainUrl(): string {
   return localStorage.getItem(CHAIN_URL_KEY) || import.meta.env.VITE_CHAIN_URL || window.location.origin;
@@ -11,19 +19,11 @@ export function setChainUrl(url: string) {
   localStorage.setItem(CHAIN_URL_KEY, url);
 }
 
-// In dev mode the Vite proxy forwards /shielded-vote/* and /cosmos/* to the chain
-// (relative paths). The proxy target is set at Vite startup from VITE_CHAIN_URL.
-// If the user has explicitly saved a chain URL via the Settings UI, use it
-// directly so that changing the URL at runtime actually takes effect (the Vite
-// proxy target is static and won't follow runtime changes).
+// The UI is served in-process by the same svoted that hosts the API, so
+// same-origin (empty base) works for both dev and production. A localStorage
+// override is still respected for advanced/remote setups.
 function apiBase(): string {
-  // In dev mode always use the Vite proxy (relative paths). The proxy
-  // forwards /shielded-vote/* and /cosmos/* server-side to the chain, so a stored
-  // "localhost:1318" from the Settings UI would be wrong for remote browsers.
-  if (import.meta.env.DEV) {
-    return "";
-  }
-  return localStorage.getItem(CHAIN_URL_KEY) || DEFAULT_CHAIN_URL;
+  return localStorage.getItem(CHAIN_URL_KEY) || "";
 }
 
 /** Return the resolved API base URL for use by other modules (e.g. cosmosTx). */
