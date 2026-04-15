@@ -98,7 +98,7 @@ func (s *KeeperTestSuite) TestHalfAcked() {
 			expect: true,
 		},
 		{
-			name: "exactly 1/2 (2 of 4)",
+			name: "exactly 1/2 (2 of 4) — strict majority requires > half",
 			round: &types.VoteRound{
 				CeremonyValidators: []*types.ValidatorPallasKey{
 					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
@@ -108,7 +108,7 @@ func (s *KeeperTestSuite) TestHalfAcked() {
 					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"},
 				},
 			},
-			expect: true,
+			expect: false,
 		},
 		{
 			name: "exactly ceil(n/2) (2 of 3)",

@@ -1,6 +1,8 @@
 package types
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"hash"
 
 	"golang.org/x/crypto/blake2b"
@@ -10,9 +12,45 @@ import (
 // sighash. Must match the e2e-tests encoding.
 const CastVoteSighashDomain = "SVOTE_CAST_VOTE_SIGHASH_V0"
 
-// AckSigDomain is the domain prefix for the ceremony ack signature hash:
-// SHA256(AckSigDomain || ea_pk || validator_address).
-const AckSigDomain = "ack"
+// AckBindingDomain is the domain prefix for the ceremony ack binding hash.
+// Despite the proto field being named "ack_signature" for historical reasons,
+// this is a deterministic binding hash (not a cryptographic signature).
+// Authentication is provided by CometBFT's proposer enforcement via
+// ValidateProposerIsCreator; the hash only binds the ack to its inputs.
+const AckBindingDomain = "ack"
+
+// ComputeAckBinding computes a domain-separated SHA-256 binding hash that
+// commits an ack to the ea_pk, validator address, and skip set. This is NOT
+// a cryptographic signature — it contains no secret-key material. It prevents
+// post-hoc modification of the ack fields, but authentication relies on
+// CometBFT proposer enforcement (ValidateProposerIsCreator).
+//
+// Every variable-length field is length-prefixed (4-byte LE uint32) so that
+// field boundaries are unambiguous and no two distinct inputs can produce the
+// same hash pre-image.
+//
+// Layout: AckBindingDomain | len(eaPk) | eaPk | len(addr) | addr | count | (len(s) | s)...
+func ComputeAckBinding(eaPk []byte, validatorAddress string, skippedContributors []string) []byte {
+	h := sha256.New()
+	h.Write([]byte(AckBindingDomain))
+	writeLP(h, eaPk)
+	writeLP(h, []byte(validatorAddress))
+	var countBuf [4]byte
+	binary.LittleEndian.PutUint32(countBuf[:], uint32(len(skippedContributors)))
+	h.Write(countBuf[:])
+	for _, s := range skippedContributors {
+		writeLP(h, []byte(s))
+	}
+	return h.Sum(nil)
+}
+
+// writeLP writes a 4-byte little-endian length prefix followed by data.
+func writeLP(h hash.Hash, data []byte) {
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], uint32(len(data)))
+	h.Write(buf[:])
+	h.Write(data)
+}
 
 // ComputeCastVoteSighash returns the 32-byte Blake2b-256 hash of the
 // canonical signable payload for MsgCastVote. The chain computes this

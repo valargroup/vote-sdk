@@ -3,7 +3,6 @@ package app_test
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/sha256"
 	"testing"
 	"time"
 
@@ -637,14 +636,9 @@ func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
 	app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
 
 	// Encode a MsgAckExecutiveAuthorityKey.
-	h := sha256.New()
-	h.Write([]byte(types.AckSigDomain))
-	h.Write(eaPkBytes)
-	h.Write([]byte(valAddr))
-
 	ackMsg := &types.MsgAckExecutiveAuthorityKey{
 		Creator:      valAddr,
-		AckSignature: h.Sum(nil),
+		AckSignature: types.ComputeAckBinding(eaPkBytes, valAddr, nil),
 	}
 
 	txBytes, err := voteapi.EncodeCeremonyTx(ackMsg, voteapi.TagAckExecutiveAuthorityKey)
@@ -1350,13 +1344,9 @@ func seedPhantomDKGContributions(
 // addresses, computing the ack signature from the round's EaPk.
 func seedPhantomAcks(round *types.VoteRound, height int64, addrs ...string) {
 	for _, addr := range addrs {
-		h := sha256.New()
-		h.Write([]byte(types.AckSigDomain))
-		h.Write(round.EaPk)
-		h.Write([]byte(addr))
 		round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
 			ValidatorAddress: addr,
-			AckSignature:     h.Sum(nil),
+			AckSignature:     types.ComputeAckBinding(round.EaPk, addr, nil),
 			AckHeight:        uint64(height),
 		})
 	}

@@ -251,7 +251,8 @@ message DealerPayload {
 
 // AckEntry records a validator's acknowledgement of receiving their share.
 message AckEntry {
-  string validator_address = 1;
-  bytes  ack_signature     = 2; // Signature over H("ack" || ea_pk || validator_address)
-  uint64 ack_height        = 3;
+  string validator_address       = 1;
+  bytes  ack_signature           = 2; // Binding hash H("ack" || ea_pk || validator_address || skipped...). NOT a cryptographic signature; authentication is via proposer enforcement.
+  uint64 ack_height              = 3;
+  repeated string skipped_contributors = 4; // Sorted valoper addresses of contributors that failed Feldman verification
 }

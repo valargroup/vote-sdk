@@ -3,10 +3,17 @@ package keeper
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sort"
 
 	"cosmossdk.io/core/store"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+
+	"github.com/mikelodder7/curvey"
+
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/crypto/shamir"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -44,9 +51,9 @@ func (k *Keeper) SetCeremonyState(kvStore store.KVStore, state *types.CeremonySt
 }
 
 // ThresholdForN computes the required threshold t = ceil(n/2) for n validators.
-// This matches the ack requirement (HalfAcked) so that the set of validators
-// that survives ceremony stripping is always large enough to reconstruct the
-// EA key during tally.
+// The confirmation quorum (HalfAcked, strict majority) is always >= t, so the
+// set of validators that survives ceremony stripping is always large enough to
+// reconstruct the EA key during tally.
 //
 // For n = 1 returns t = 1 (trivial single-share scheme with no threshold
 // security — used for local testing). Returns an error if n < 1.
@@ -68,14 +75,17 @@ func ThresholdForN(n int) (int, error) {
 // Per-round ceremony helpers (operate on VoteRound ceremony fields)
 // ---------------------------------------------------------------------------
 
-// HalfAcked returns true if at least 1/2 of round ceremony validators have
-// acknowledged. Uses integer arithmetic: acks * 2 >= validators.
+// HalfAcked returns true if strictly more than half of round ceremony
+// validators have acknowledged. Uses integer arithmetic: acks * 2 > validators.
+// Strict inequality ensures that when n is even, exactly n/2 acks are
+// insufficient — preventing a scenario where n/2 colluding validators
+// confirm a ceremony using only their own contributions.
 func HalfAcked(round *types.VoteRound) bool {
 	n := len(round.CeremonyValidators)
 	if n == 0 {
 		return false
 	}
-	return len(round.CeremonyAcks)*2 >= n
+	return len(round.CeremonyAcks)*2 > n
 }
 
 // FindValidatorInRoundCeremony returns the ValidatorPallasKey and true if
@@ -138,6 +148,168 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 		}
 	}
 	round.DkgContributions = keptContribs
+}
+
+// ---------------------------------------------------------------------------
+// Majority-vote skip set helpers
+// ---------------------------------------------------------------------------
+
+// ValidateSkippedContributors checks structural validity of a skip set:
+// sorted, no duplicates, all addresses are ceremony contributors, the acker
+// does not include themselves, and the remaining contributors (after
+// skipping) still meet the round threshold.
+func ValidateSkippedContributors(round *types.VoteRound, acker string, skipped []string) error {
+	if len(skipped) == 0 {
+		return nil
+	}
+	if !sort.StringsAreSorted(skipped) {
+		return fmt.Errorf("%w: skipped_contributors must be sorted", types.ErrInvalidField)
+	}
+	nContributors := len(round.DkgContributions)
+	maxSkip := nContributors - int(round.Threshold)
+	if len(skipped) > maxSkip {
+		return fmt.Errorf("%w: skipped_contributors length %d exceeds maximum %d (n=%d, threshold=%d)",
+			types.ErrInvalidField, len(skipped), maxSkip, nContributors, round.Threshold)
+	}
+	seen := make(map[string]bool, len(skipped))
+	for _, addr := range skipped {
+		if addr == acker {
+			return fmt.Errorf("%w: skipped_contributors must not include self", types.ErrInvalidField)
+		}
+		if seen[addr] {
+			return fmt.Errorf("%w: duplicate in skipped_contributors: %s", types.ErrInvalidField, addr)
+		}
+		seen[addr] = true
+		if _, found := FindContributionInRound(round, addr); !found {
+			return fmt.Errorf("%w: skipped_contributors references non-contributor %s",
+				types.ErrNotRegisteredValidator, addr)
+		}
+	}
+	return nil
+}
+
+// ComputeCanonicalSkipSet determines the majority-vote skip set from all acks.
+// A contributor is in the canonical set if strictly more than half of the acks
+// include it in their skip set.
+func ComputeCanonicalSkipSet(acks []*types.AckEntry) []string {
+	if len(acks) == 0 {
+		return nil
+	}
+	counts := make(map[string]int)
+	// Count the number of times each contributor is skipped.
+	for _, a := range acks {
+		for _, s := range a.SkippedContributors {
+			counts[s]++
+		}
+	}
+	nAcks := len(acks)
+	// Compute the canonical skip set.
+	var canonical []string
+	for addr, cnt := range counts {
+		// If the contributor is skipped in strictly more than half of the acks,
+		// include them in the canonical skip set.
+		if cnt*2 > nAcks {
+			canonical = append(canonical, addr)
+		}
+	}
+	sort.Strings(canonical)
+	return canonical
+}
+
+// FilterCompatibleAcks returns only acks whose SkippedContributors exactly
+// matches the canonical skip set.
+func FilterCompatibleAcks(acks []*types.AckEntry, canonical []string) []*types.AckEntry {
+	var out []*types.AckEntry
+	for _, a := range acks {
+		if slices.Equal(a.SkippedContributors, canonical) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// RecomputeCommitmentsExcluding recomputes combined Feldman commitments and
+// ea_pk from the round's DKG contributions, excluding the given skip set.
+// Returns the new ea_pk and serialized commitment vector.
+func RecomputeCommitmentsExcluding(round *types.VoteRound, skipSet []string) ([]byte, [][]byte, error) {
+	// Create a map of skipped contributors to exclude from the recomputation.
+	excluded := make(map[string]bool, len(skipSet))
+	for _, s := range skipSet {
+		excluded[s] = true
+	}
+
+	// Recompute the combined Feldman commitments.
+	var allCommitments [][]curvey.Point
+	for _, contrib := range round.DkgContributions {
+		if excluded[contrib.ValidatorAddress] {
+			continue
+		}
+		vec := make([]curvey.Point, len(contrib.FeldmanCommitments))
+		for j, raw := range contrib.FeldmanCommitments {
+			pt, err := elgamal.UnmarshalPublicKey(raw)
+			if err != nil {
+				return nil, nil, fmt.Errorf("contributor %s commitment %d: %w",
+					contrib.ValidatorAddress, j, err)
+			}
+			vec[j] = pt.Point
+		}
+		allCommitments = append(allCommitments, vec)
+	}
+	if len(allCommitments) == 0 {
+		return nil, nil, fmt.Errorf("no contributions remain after excluding skip set")
+	}
+
+	combined, err := shamir.CombineCommitments(allCommitments)
+	if err != nil {
+		return nil, nil, fmt.Errorf("combine commitments: %w", err)
+	}
+
+	eaPk := combined[0].ToAffineCompressed()
+	commitments := make([][]byte, len(combined))
+	for j, c := range combined {
+		commitments[j] = c.ToAffineCompressed()
+	}
+	return eaPk, commitments, nil
+}
+
+// StripRoundToCompatible removes all validators and contributions that are
+// not in the compatible ack set OR are in the canonical skip set. This is a
+// superset of StripNonAckersFromRound: it also removes malicious contributors
+// even if they themselves acked (their combined share would be incompatible).
+func StripRoundToCompatible(round *types.VoteRound, compatible []*types.AckEntry, skipSet []string) {
+	keep := make(map[string]bool, len(compatible))
+	for _, a := range compatible {
+		keep[a.ValidatorAddress] = true
+	}
+	excluded := make(map[string]bool, len(skipSet))
+	for _, s := range skipSet {
+		excluded[s] = true
+		delete(keep, s)
+	}
+
+	kept := round.CeremonyValidators[:0]
+	for _, v := range round.CeremonyValidators {
+		if keep[v.ValidatorAddress] {
+			kept = append(kept, v)
+		}
+	}
+	round.CeremonyValidators = kept
+
+	keptContribs := round.DkgContributions[:0]
+	for _, c := range round.DkgContributions {
+		if keep[c.ValidatorAddress] {
+			keptContribs = append(keptContribs, c)
+		}
+	}
+	round.DkgContributions = keptContribs
+
+	keptAcks := round.CeremonyAcks[:0]
+	for _, a := range round.CeremonyAcks {
+		if keep[a.ValidatorAddress] {
+			keptAcks = append(keptAcks, a)
+		}
+	}
+	round.CeremonyAcks = keptAcks
 }
 
 // IsValidatorInPendingCeremony returns true if the given validator address

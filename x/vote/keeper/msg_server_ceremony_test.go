@@ -3,7 +3,6 @@ package keeper_test
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 
 	"cosmossdk.io/math"
@@ -37,11 +36,7 @@ func (s *MsgServerTestSuite) ackSignature(roundID []byte, validator string) []by
 	round, err := s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
 
-	h := sha256.New()
-	h.Write([]byte(types.AckSigDomain))
-	h.Write(round.EaPk)
-	h.Write([]byte(validator))
-	return h.Sum(nil)
+	return types.ComputeAckBinding(round.EaPk, validator, nil)
 }
 
 var testValoperAddr = svtest.TestValAddr

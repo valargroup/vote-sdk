@@ -3,7 +3,6 @@ package app_test
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/sha256"
 	"fmt"
 	"testing"
 	"time"
@@ -173,11 +172,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 
 	// Helper to build a valid ack tx targeting the current round.
 	validAckTx := func() []byte {
-		h := sha256.New()
-		h.Write([]byte(types.AckSigDomain))
-		h.Write(eaPkBytes)
-		h.Write([]byte(valAddr))
-		sig := h.Sum(nil)
+		sig := types.ComputeAckBinding(eaPkBytes, valAddr, nil)
 
 		msg := &types.MsgAckExecutiveAuthorityKey{
 			Creator:      valAddr,

@@ -3,7 +3,6 @@ package keeper
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 
@@ -298,31 +297,47 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateAck, msg.Creator)
 	}
 
-	// Verify ack_signature = SHA256("ack" || ea_pk || validator_address).
-	expectedSig := sha256AckSig(round.EaPk, msg.Creator)
-	if !bytes.Equal(msg.AckSignature, expectedSig) {
-		return nil, fmt.Errorf("%w: ack_signature mismatch", types.ErrInvalidField)
+	// Validate skipped_contributors: sorted, no duplicates, all must be
+	// ceremony validators, must not include self.
+	if err := ValidateSkippedContributors(round, msg.Creator, msg.SkippedContributors); err != nil {
+		return nil, err
+	}
+
+	// Verify ack binding hash = SHA256("ack" || ea_pk || validator_address || skipped...).
+	expectedBinding := types.ComputeAckBinding(round.EaPk, msg.Creator, msg.SkippedContributors)
+	if !bytes.Equal(msg.AckSignature, expectedBinding) {
+		return nil, fmt.Errorf("%w: ack binding mismatch", types.ErrInvalidField)
 	}
 
 	// Record ack.
 	round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
-		ValidatorAddress: msg.Creator,
-		AckSignature:     msg.AckSignature,
-		AckHeight:        uint64(ctx.BlockHeight()),
+		ValidatorAddress:    msg.Creator,
+		AckSignature:        msg.AckSignature,
+		AckHeight:           uint64(ctx.BlockHeight()),
+		SkippedContributors: msg.SkippedContributors,
 	})
 
 	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-		fmt.Sprintf("ack from %s (%d/%d acked)", msg.Creator, len(round.CeremonyAcks), len(round.CeremonyValidators)))
+		fmt.Sprintf("ack from %s (%d/%d acked, skipped=%v)", msg.Creator, len(round.CeremonyAcks), len(round.CeremonyValidators), msg.SkippedContributors))
 
-	// Fast path: confirm only when ALL validators have acked. This gives
-	// every validator a chance to ack via PrepareProposal before the ceremony
-	// closes. If some validators are offline, the timeout path in EndBlocker
-	// handles confirmation with >= 1/2 acks and strips non-ackers.
-	if len(round.CeremonyAcks) == len(round.CeremonyValidators) {
+	// Fast path: confirm only when ALL validators have acked AND all skip
+	// sets are empty. If any ack carries a non-empty skip set, we defer to
+	// the timeout path in EndBlocker which runs majority-vote logic.
+	allAcked := len(round.CeremonyAcks) == len(round.CeremonyValidators)
+	allClean := allAcked
+	if allAcked {
+		for _, a := range round.CeremonyAcks {
+			if len(a.SkippedContributors) > 0 {
+				allClean = false
+				break
+			}
+		}
+	}
+	if allClean {
 		round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 		round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
 		AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-			fmt.Sprintf("ceremony confirmed (%d/%d acked), round ACTIVE", len(round.CeremonyAcks), len(round.CeremonyValidators)))
+			fmt.Sprintf("ceremony confirmed (%d/%d acked, no skips), round ACTIVE", len(round.CeremonyAcks), len(round.CeremonyValidators)))
 	}
 
 	if err := ms.k.SetVoteRound(kvStore, round); err != nil {
@@ -395,11 +410,3 @@ func (ms msgServer) CreateValidatorWithPallasKey(goCtx context.Context, msg *typ
 	return &types.MsgCreateValidatorWithPallasKeyResponse{}, nil
 }
 
-// sha256AckSig computes SHA256(AckSigDomain || eaPk || validatorAddress).
-func sha256AckSig(eaPk []byte, validatorAddress string) []byte {
-	h := sha256.New()
-	h.Write([]byte(types.AckSigDomain))
-	h.Write(eaPk)
-	h.Write([]byte(validatorAddress))
-	return h.Sum(nil)
-}

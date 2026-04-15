@@ -2,11 +2,11 @@ package app
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -354,7 +354,7 @@ func CeremonyAckPrepareProposalHandler(
 		shamirIndex := int(ceremonyVal.ShamirIndex)
 		G := elgamal.PallasGenerator()
 
-		secretBytes, recoveredSk, err := ackDKGRound(pallasSk, round, proposerValAddr, shamirIndex, G, ceremonyDir, logger)
+		secretBytes, recoveredSk, skippedContributors, err := ackDKGRound(pallasSk, round, proposerValAddr, shamirIndex, G, ceremonyDir, logger)
 		if err != nil {
 			logger.Error("PrepareProposal[ack]: share recovery failed",
 				"err", err, "proposer", proposerValAddr,
@@ -362,6 +362,12 @@ func CeremonyAckPrepareProposalHandler(
 			return txs
 		}
 		defer zeroSecret(secretBytes, recoveredSk)
+
+		if len(skippedContributors) > 0 {
+			logger.Warn("PrepareProposal[ack]: skipped bad contributors",
+				"skipped", skippedContributors,
+				"round", hex.EncodeToString(round.VoteRoundId))
+		}
 
 		if ceremonyDir != "" {
 			diskPath := sharePathForRound(ceremonyDir, round.VoteRoundId)
@@ -373,16 +379,13 @@ func CeremonyAckPrepareProposalHandler(
 			logger.Info("PrepareProposal[ack]: secret written to disk", "path", diskPath)
 		}
 
-		h := sha256.New()
-		h.Write([]byte(types.AckSigDomain))
-		h.Write(round.EaPk)
-		h.Write([]byte(proposerValAddr))
-		ackSig := h.Sum(nil)
+		ackBinding := types.ComputeAckBinding(round.EaPk, proposerValAddr, skippedContributors)
 
 		ackMsg := &types.MsgAckExecutiveAuthorityKey{
-			Creator:      proposerValAddr,
-			VoteRoundId:  round.VoteRoundId,
-			AckSignature: ackSig,
+			Creator:             proposerValAddr,
+			VoteRoundId:         round.VoteRoundId,
+			AckSignature:        ackBinding,
+			SkippedContributors: skippedContributors,
 		}
 
 		txBytes, err := voteapi.EncodeCeremonyTx(ackMsg, voteapi.TagAckExecutiveAuthorityKey)
@@ -405,9 +408,14 @@ func CeremonyAckPrepareProposalHandler(
 //   - Other contributors: decrypts their ECIES payload and verifies against
 //     that contributor's individual Feldman commitments
 //
-// The partial shares are summed into combined_share, which is verified against
-// the round's combined Feldman commitments. On success the coefficients file is
-// securely deleted and the combined share bytes are returned.
+// Contributors whose shares fail decryption or Feldman verification are added
+// to a skip set rather than causing a hard failure. The combined share is
+// computed from only the non-skipped contributors, and verified against
+// locally recomputed combined Feldman commitments (excluding the skipped set).
+//
+// Returns (shareBytes, secretKey, skippedContributors, error). The caller
+// must include the sorted skip set in the ack message so the chain can
+// determine a canonical skip set by majority vote.
 func ackDKGRound(
 	pallasSk *elgamal.SecretKey,
 	round *types.VoteRound,
@@ -416,12 +424,12 @@ func ackDKGRound(
 	G curvey.Point,
 	ceremonyDir string,
 	logger log.Logger,
-) ([]byte, *elgamal.SecretKey, error) {
+) ([]byte, *elgamal.SecretKey, []string, error) {
 	t := int(round.Threshold)
 
 	coeffs, err := loadCoeffs(coeffsPathForRound(ceremonyDir, round.VoteRoundId), t)
 	if err != nil {
-		return nil, nil, fmt.Errorf("load coefficients: %w", err)
+		return nil, nil, nil, fmt.Errorf("load coefficients: %w", err)
 	}
 	defer func() {
 		for _, c := range coeffs {
@@ -435,93 +443,132 @@ func ackDKGRound(
 	ownPartial := shamir.EvalPolynomial(coeffs, shamirIndex)
 	combinedShare := ownPartial
 
-	// Iterate over the DKG contributions and decrypt each share.
+	var skipped []string
+
 	for _, contrib := range round.DkgContributions {
 		// Skip the proposer's own contribution.
 		if contrib.ValidatorAddress == proposerValAddr {
 			continue
 		}
 
-		// Find the payload for the proposer.
-		var payload *types.DealerPayload
-		for _, p := range contrib.Payloads {
-			if p.ValidatorAddress == proposerValAddr {
-				payload = p
-				break
-			}
-		}
-		if payload == nil {
-			return nil, nil, fmt.Errorf("contributor %s: no payload for %s",
-				contrib.ValidatorAddress, proposerValAddr)
-		}
-
-		// Decrypt the share.
-		ephPk, err := elgamal.UnmarshalPublicKey(payload.EphemeralPk)
-		if err != nil {
-			return nil, nil, fmt.Errorf("contributor %s: invalid ephemeral_pk: %w",
-				contrib.ValidatorAddress, err)
-		}
-		// Decrypt the share.
-		shareBytes, err := ecies.Decrypt(pallasSk.Scalar, &ecies.Envelope{
-			Ephemeral:  ephPk.Point,
-			Ciphertext: payload.Ciphertext,
-		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("contributor %s: ECIES decryption failed: %w",
-				contrib.ValidatorAddress, err)
+		// Decrypt and verify the share.
+		shareScalar, skipReason := decryptAndVerifyShare(
+			pallasSk, contrib, proposerValAddr, shamirIndex, G,
+		)
+		if skipReason != "" {
+			logger.Warn("PrepareProposal[ack]: skipping bad contributor",
+				"contributor", contrib.ValidatorAddress,
+				"reason", skipReason)
+			skipped = append(skipped, contrib.ValidatorAddress)
+			continue
 		}
 
-		shareSk, err := elgamal.UnmarshalSecretKey(shareBytes)
-		zeroBytes(shareBytes)
-		if err != nil {
-			return nil, nil, fmt.Errorf("contributor %s: invalid share scalar: %w",
-				contrib.ValidatorAddress, err)
-		}
-
-		contribCommitments, err := deserializeFeldmanCommitments(contrib.FeldmanCommitments)
-		if err != nil {
-			zeroScalar(shareSk.Scalar)
-			return nil, nil, fmt.Errorf("contributor %s: invalid commitments: %w",
-				contrib.ValidatorAddress, err)
-		}
-
-		// Verify the share against the contributor's Feldman commitments.
-		ok, err := shamir.VerifyFeldmanShare(G, contribCommitments, shamirIndex, shareSk.Scalar)
-		if err != nil {
-			zeroScalar(shareSk.Scalar)
-			return nil, nil, fmt.Errorf("contributor %s: Feldman verification error: %w",
-				contrib.ValidatorAddress, err)
-		}
-		// If the share does not verify, return an error.
-		if !ok {
-			zeroScalar(shareSk.Scalar)
-			return nil, nil, fmt.Errorf("contributor %s: share failed Feldman verification",
-				contrib.ValidatorAddress)
-		}
-
-		// Sum the share into the combined share.
-		combinedShare = combinedShare.Add(shareSk.Scalar)
-		zeroScalar(shareSk.Scalar)
+		combinedShare = combinedShare.Add(shareScalar)
+		zeroScalar(shareScalar)
 	}
 
-	// Verify the combined share against the round's Feldman commitments.
-	combinedCommitments, err := deserializeFeldmanCommitments(round.FeldmanCommitments)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid combined commitments: %w", err)
+	sort.Strings(skipped)
+
+	// Recompute combined commitments locally, excluding skipped contributors.
+	skipSet := make(map[string]bool, len(skipped))
+	for _, s := range skipped {
+		skipSet[s] = true
 	}
-	ok, err := shamir.VerifyFeldmanShare(G, combinedCommitments, shamirIndex, combinedShare)
+	var keptCommitments [][]curvey.Point
+	for _, contrib := range round.DkgContributions {
+		if skipSet[contrib.ValidatorAddress] {
+			continue
+		}
+		pts, err := deserializeFeldmanCommitments(contrib.FeldmanCommitments)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("recompute commitments: contributor %s: %w",
+				contrib.ValidatorAddress, err)
+		}
+		keptCommitments = append(keptCommitments, pts)
+	}
+	if len(keptCommitments) < t {
+		return nil, nil, nil, fmt.Errorf("remaining contributors (%d) below threshold (%d) — cannot form combined share",
+			len(keptCommitments), t)
+	}
+
+	recomputed, err := shamir.CombineCommitments(keptCommitments)
 	if err != nil {
-		return nil, nil, fmt.Errorf("combined Feldman verification error: %w", err)
+		return nil, nil, nil, fmt.Errorf("recompute combined commitments: %w", err)
+	}
+
+	ok, err := shamir.VerifyFeldmanShare(G, recomputed, shamirIndex, combinedShare)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("combined Feldman verification error: %w", err)
 	}
 	if !ok {
-		return nil, nil, fmt.Errorf("combined share failed Feldman verification")
+		return nil, nil, nil, fmt.Errorf("combined share failed Feldman verification")
 	}
 
 	zeroAndDeleteCoeffsFile(ceremonyDir, round.VoteRoundId, logger)
 
-	// Return the combined share as a byte slice and the combined secret key.
 	secretBytes := combinedShare.Bytes()
-	return secretBytes, &elgamal.SecretKey{Scalar: combinedShare}, nil
+	return secretBytes, &elgamal.SecretKey{Scalar: combinedShare}, skipped, nil
+}
+
+// decryptAndVerifyShare decrypts a single contributor's ECIES payload and
+// verifies it against that contributor's Feldman commitments. Returns the
+// share scalar on success, or ("", skipReason) on any failure.
+func decryptAndVerifyShare(
+	pallasSk *elgamal.SecretKey,
+	contrib *types.DKGContribution,
+	proposerValAddr string,
+	shamirIndex int,
+	G curvey.Point,
+) (curvey.Scalar, string) {
+	var payload *types.DealerPayload
+	for _, p := range contrib.Payloads {
+		if p.ValidatorAddress == proposerValAddr {
+			payload = p
+			break
+		}
+	}
+	if payload == nil {
+		return nil, fmt.Sprintf("no payload for %s", proposerValAddr)
+	}
+
+	// Decrypt the share.
+	ephPk, err := elgamal.UnmarshalPublicKey(payload.EphemeralPk)
+	if err != nil {
+		return nil, fmt.Sprintf("invalid ephemeral_pk: %v", err)
+	}
+
+	shareBytes, err := ecies.Decrypt(pallasSk.Scalar, &ecies.Envelope{
+		Ephemeral:  ephPk.Point,
+		Ciphertext: payload.Ciphertext,
+	})
+	if err != nil {
+		return nil, fmt.Sprintf("ECIES decryption failed: %v", err)
+	}
+
+	shareSk, err := elgamal.UnmarshalSecretKey(shareBytes)
+	zeroBytes(shareBytes)
+	if err != nil {
+		return nil, fmt.Sprintf("invalid share scalar: %v", err)
+	}
+
+	contribCommitments, err := deserializeFeldmanCommitments(contrib.FeldmanCommitments)
+	if err != nil {
+		zeroScalar(shareSk.Scalar)
+		return nil, fmt.Sprintf("invalid commitments: %v", err)
+	}
+
+	// Verify the share against the contributor's Feldman commitments.
+	ok, err := shamir.VerifyFeldmanShare(G, contribCommitments, shamirIndex, shareSk.Scalar)
+	if err != nil {
+		zeroScalar(shareSk.Scalar)
+		return nil, fmt.Sprintf("Feldman verification error: %v", err)
+	}
+	if !ok {
+		zeroScalar(shareSk.Scalar)
+		return nil, "share failed Feldman verification"
+	}
+
+	return shareSk.Scalar, ""
 }
 
 // deserializeFeldmanCommitments converts serialized Feldman commitments (32-byte
@@ -591,6 +638,7 @@ func zeroSecret(raw []byte, sk *elgamal.SecretKey) {
 		zeroScalar(sk.Scalar)
 	}
 }
+
 
 // bytesEqual compares two byte slices for equality.
 func bytesEqual(a, b []byte) bool {

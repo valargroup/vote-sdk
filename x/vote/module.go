@@ -563,11 +563,14 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		))
 	}
 
-	// --- 4. Per-round ceremony DEALT phase timeout ---
-	// On DEALT timeout with >= 1/2 acks: strip non-ackers, confirm ceremony,
-	// transition round to ACTIVE.
-	// On DEALT timeout with < 1/2 acks: reset ceremony to REGISTERING for re-deal.
-	// Collect round IDs with expired ceremony deadlines (avoid mutating store during iteration).
+	// --- 4. Per-round ceremony DEALT phase timeout (majority-vote skip set) ---
+	//
+	// When the DEALT timeout fires:
+	// 1. Compute the canonical skip set by majority vote across all acks.
+	// 2. Filter to compatible acks (those whose skip set matches canonical).
+	// 3. If compatible >= threshold: recompute commitments excluding the skip
+	//    set, strip round to compatible validators, confirm and activate.
+	// 4. Otherwise: reset to REGISTERING.
 	var ceremonyTimeoutIDs [][]byte
 	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
 		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_DEALT &&
@@ -591,78 +594,71 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			continue
 		}
 		oldCeremonyStatus := round.CeremonyStatus
-
-		nAcks := len(round.CeremonyAcks)
 		nVals := len(round.CeremonyValidators)
 
-		if keeper.HalfAcked(round) {
-			stripped := nVals - nAcks
+		// Compute the canonical skip set by majority vote across all acks.
+		canonical := keeper.ComputeCanonicalSkipSet(round.CeremonyAcks)
+		// Filter to compatible acks (those whose skip set matches canonical).
+		compatible := keeper.FilterCompatibleAcks(round.CeremonyAcks, canonical)
+		nCompatible := len(compatible)
 
-			// Safety check: the ack quorum (>= 1/2) was designed to match the
-			// TSS threshold (ceil(n/2)), so this branch should never trigger
-			// with a correctly-computed threshold. It guards against a dealer
-			// that published an unusually high threshold value.
-			if nAcks < int(round.Threshold) {
-				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-					fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, %d stripped, remaining %d < threshold %d)",
-						nAcks, nVals, stripped, nAcks, round.Threshold))
-
-				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
-				round.CeremonyAcks = nil
-				round.DkgContributions = nil
-				round.CeremonyPhaseStart = blockTime
-				round.CeremonyPhaseTimeout = types.DefaultContributionTimeout
-				round.EaPk = nil
-
-				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
-					return err
+		// Require both: compatible acks must be at least half of the
+		// original validator set AND meet the stored threshold.
+		halfAcked := nVals > 0 && nCompatible*2 > nVals
+		meetsThreshold := nCompatible >= int(round.Threshold)
+		if halfAcked && meetsThreshold {
+			// Recompute combined commitments and ea_pk if any contributors are skipped.
+			if len(canonical) > 0 {
+				eaPk, commitments, err := keeper.RecomputeCommitmentsExcluding(round, canonical)
+				if err != nil {
+					keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+						fmt.Sprintf("DEALT timeout: recompute failed (%v), reset to REGISTERING", err))
+					resetCeremonyToRegistering(round, blockTime)
+					if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+						return err
+					}
+					ctx.EventManager().EmitEvent(sdk.NewEvent(
+						types.EventTypeCeremonyStatusChange,
+						sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+						sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
+						sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+					))
+					continue
 				}
-
-				ctx.EventManager().EmitEvent(sdk.NewEvent(
-					types.EventTypeCeremonyStatusChange,
-					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-					sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
-					sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
-				))
-			} else {
-				// >= 1/2 acked and remaining ackers meet threshold: strip
-				// non-ackers (offline/non-responsive), confirm ceremony, activate round.
-				keeper.StripNonAckersFromRound(round)
-				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
-				round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
-
-				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-					fmt.Sprintf("DEALT timeout: confirmed with %d/%d acks, %d stripped", nAcks, nVals, stripped))
-
-				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
-					return err
-				}
-
-				ctx.EventManager().EmitEvent(sdk.NewEvent(
-					types.EventTypeCeremonyStatusChange,
-					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-					sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
-					sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
-				))
-				ctx.EventManager().EmitEvent(sdk.NewEvent(
-					types.EventTypeRoundStatusChange,
-					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-					sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_PENDING.String()),
-					sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_ACTIVE.String()),
-				))
+				round.EaPk = eaPk
+				round.FeldmanCommitments = commitments
 			}
-		} else {
-			// < 1/2 acks: reset ceremony for re-contribute by next proposer.
+
+			keeper.StripRoundToCompatible(round, compatible, canonical)
+			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+			round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
+
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-				fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, below threshold)", nAcks, nVals))
+				fmt.Sprintf("DEALT timeout: confirmed with %d/%d compatible acks (skip_set=%v, stripped %d)",
+					nCompatible, nVals, canonical, nVals-len(round.CeremonyValidators)))
 
-			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
-			round.CeremonyAcks = nil
-			round.DkgContributions = nil
-			round.CeremonyPhaseStart = blockTime
-			round.CeremonyPhaseTimeout = types.DefaultContributionTimeout
-			round.EaPk = nil
+			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+				return err
+			}
 
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeCeremonyStatusChange,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+			))
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeRoundStatusChange,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_PENDING.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_ACTIVE.String()),
+			))
+		} else {
+			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+				fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d compatible acks < threshold %d, skip_set=%v)",
+					nCompatible, round.Threshold, canonical))
+
+			resetCeremonyToRegistering(round, blockTime)
 			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 				return err
 			}
@@ -715,6 +711,18 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	}
 
 	return nil
+}
+
+// resetCeremonyToRegistering clears ceremony state and resets the round
+// to REGISTERING for a fresh DKG contribution phase.
+func resetCeremonyToRegistering(round *types.VoteRound, blockTime uint64) {
+	round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
+	round.CeremonyAcks = nil
+	round.DkgContributions = nil
+	round.CeremonyPhaseStart = blockTime
+	round.CeremonyPhaseTimeout = types.DefaultContributionTimeout
+	round.EaPk = nil
+	round.FeldmanCommitments = nil
 }
 
 // DefaultVoteManagerAddress is the default vote manager used in genesis.

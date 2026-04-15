@@ -204,8 +204,8 @@ func TestCeremonyAckThresholdMode(t *testing.T) {
 // ---------------------------------------------------------------------------
 // CeremonyAckPrepareProposalHandler — threshold mode, bad share
 //
-// If the dealer sends a share inconsistent with the published VK, the ack
-// handler must reject it silently (no ack tx injected).
+// If a contributor sends a share inconsistent with the published VK, the ack
+// handler skips that contributor and injects an ack with a non-empty skip set.
 // ---------------------------------------------------------------------------
 
 func TestCeremonyAckThresholdRejectsBadShare(t *testing.T) {
@@ -217,7 +217,8 @@ func TestCeremonyAckThresholdRejectsBadShare(t *testing.T) {
 	_, pk2 := elgamal.KeyGen(rand.Reader)
 	_, pk3 := elgamal.KeyGen(rand.Reader)
 
-	addrs := []string{proposerAddr, "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx"}
+	badContributor := "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx"
+	addrs := []string{proposerAddr, badContributor, "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx"}
 	pks := []curvey.Point{pallasPk.Point, pk2.Point, pk3.Point}
 
 	contributions, combinedSerialized, eaPk, _, allCoeffs, _ :=
@@ -240,7 +241,14 @@ func TestCeremonyAckThresholdRejectsBadShare(t *testing.T) {
 	seedDKGDealtRound(t, ta, addrs, pks, contributions, combinedSerialized, eaPk, allCoeffs[0])
 
 	resp := ta.CallPrepareProposal()
-	require.Empty(t, resp.Txs, "ack must be rejected when share fails Feldman verification")
+	require.Len(t, resp.Txs, 1, "ack must be injected with bad contributor in skip set")
+
+	_, msg, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
+	require.NoError(t, err)
+	ackMsg, ok := msg.(*types.MsgAckExecutiveAuthorityKey)
+	require.True(t, ok)
+	require.Equal(t, []string{badContributor}, ackMsg.SkippedContributors,
+		"skip set must contain the bad contributor")
 }
 
 // ---------------------------------------------------------------------------
@@ -777,7 +785,8 @@ func TestDKGAckRejectsBadShare(t *testing.T) {
 	_, pk2 := elgamal.KeyGen(rand.Reader)
 	_, pk3 := elgamal.KeyGen(rand.Reader)
 
-	addrs := []string{proposerAddr, "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx"}
+	badContributor := "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx"
+	addrs := []string{proposerAddr, badContributor, "sv1validator3xxxxxxxxxxxxxxxxxxxxxxxxxx"}
 	pks := []curvey.Point{pallasPk.Point, pk2.Point, pk3.Point}
 
 	contributions, combinedSerialized, eaPk, _, allCoeffs, _ :=
@@ -800,7 +809,14 @@ func TestDKGAckRejectsBadShare(t *testing.T) {
 	seedDKGDealtRound(t, ta, addrs, pks, contributions, combinedSerialized, eaPk, allCoeffs[0])
 
 	resp := ta.CallPrepareProposal()
-	require.Empty(t, resp.Txs, "ack must not be injected when a contributor's share fails Feldman verification")
+	require.Len(t, resp.Txs, 1, "ack must be injected with bad contributor in skip set")
+
+	_, msg, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
+	require.NoError(t, err)
+	ackMsg, ok := msg.(*types.MsgAckExecutiveAuthorityKey)
+	require.True(t, ok)
+	require.Equal(t, []string{badContributor}, ackMsg.SkippedContributors,
+		"skip set must contain the bad contributor")
 }
 
 func TestDKGAckSingleValidator(t *testing.T) {
@@ -1191,9 +1207,10 @@ func TestAckDKGRound(t *testing.T) {
 	logger := log.NewNopLogger()
 
 	tests := []struct {
-		name    string
-		mutate  func(t *testing.T, round *types.VoteRound, dir string)
-		wantErr string
+		name        string
+		mutate      func(t *testing.T, round *types.VoteRound, dir string)
+		wantErr     string
+		wantSkipped int // expected number of skipped contributors (0 for happy path / hard errors)
 	}{
 		{
 			name:   "happy path",
@@ -1208,7 +1225,7 @@ func TestAckDKGRound(t *testing.T) {
 			wantErr: "load coefficients",
 		},
 		{
-			name: "no payload for proposer",
+			name: "no payload for proposer — contributor skipped",
 			mutate: func(_ *testing.T, round *types.VoteRound, _ string) {
 				c := round.DkgContributions[1]
 				filtered := make([]*types.DealerPayload, 0, len(c.Payloads)-1)
@@ -1219,18 +1236,18 @@ func TestAckDKGRound(t *testing.T) {
 				}
 				c.Payloads = filtered
 			},
-			wantErr: "no payload for",
+			wantSkipped: 1,
 		},
 		{
-			name: "invalid ephemeral pk",
+			name: "invalid ephemeral pk — contributor skipped",
 			mutate: func(_ *testing.T, round *types.VoteRound, _ string) {
 				p := proposerPayload(round.DkgContributions[1], gs.proposerAddr)
 				p.EphemeralPk = []byte{0xff}
 			},
-			wantErr: "invalid ephemeral_pk",
+			wantSkipped: 1,
 		},
 		{
-			name: "ECIES decrypt fails",
+			name: "ECIES decrypt fails — contributor skipped",
 			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
 				_, wrongPk := elgamal.KeyGen(rand.Reader)
 				env, err := ecies.Encrypt(G, wrongPk.Point, make([]byte, 32), rand.Reader)
@@ -1239,10 +1256,10 @@ func TestAckDKGRound(t *testing.T) {
 				p.EphemeralPk = env.Ephemeral.ToAffineCompressed()
 				p.Ciphertext = env.Ciphertext
 			},
-			wantErr: "ECIES decryption failed",
+			wantSkipped: 1,
 		},
 		{
-			name: "zero share scalar",
+			name: "zero share scalar — contributor skipped",
 			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
 				proposerPk := G.Mul(gs.pallasSk.Scalar)
 				env, err := ecies.Encrypt(G, proposerPk, make([]byte, 32), rand.Reader)
@@ -1251,17 +1268,17 @@ func TestAckDKGRound(t *testing.T) {
 				p.EphemeralPk = env.Ephemeral.ToAffineCompressed()
 				p.Ciphertext = env.Ciphertext
 			},
-			wantErr: "invalid share scalar",
+			wantSkipped: 1,
 		},
 		{
-			name: "invalid contributor commitments",
+			name: "invalid contributor commitments — contributor skipped",
 			mutate: func(_ *testing.T, round *types.VoteRound, _ string) {
 				round.DkgContributions[1].FeldmanCommitments[0] = []byte{0xff}
 			},
-			wantErr: "invalid commitments",
+			wantSkipped: 1,
 		},
 		{
-			name: "contributor Feldman fails",
+			name: "contributor Feldman fails — contributor skipped",
 			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
 				wrongScalar := new(curvey.ScalarPallas).Random(rand.Reader)
 				proposerPk := G.Mul(gs.pallasSk.Scalar)
@@ -1271,28 +1288,19 @@ func TestAckDKGRound(t *testing.T) {
 				p.EphemeralPk = env.Ephemeral.ToAffineCompressed()
 				p.Ciphertext = env.Ciphertext
 			},
-			wantErr: "share failed Feldman",
+			wantSkipped: 1,
 		},
 		{
-			name: "invalid combined commitments",
-			mutate: func(_ *testing.T, round *types.VoteRound, _ string) {
-				round.FeldmanCommitments[0] = []byte{0xff}
-			},
-			wantErr: "invalid combined commitments",
-		},
-		{
-			name: "combined Feldman fails",
+			name: "all other contributors corrupted — below threshold",
 			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
-				secret := new(curvey.ScalarPallas).Random(rand.Reader)
-				_, wrongCoeffs, err := shamir.Split(secret, int(round.Threshold), 3)
-				require.NoError(t, err)
-				wrongPts, err := shamir.FeldmanCommit(G, wrongCoeffs)
-				require.NoError(t, err)
-				for i, pt := range wrongPts {
-					round.FeldmanCommitments[i] = pt.ToAffineCompressed()
+				for _, c := range round.DkgContributions {
+					if c.ValidatorAddress == gs.proposerAddr {
+						continue
+					}
+					c.FeldmanCommitments[0] = []byte{0xff}
 				}
 			},
-			wantErr: "combined share failed Feldman",
+			wantErr: "below threshold",
 		},
 	}
 
@@ -1310,7 +1318,7 @@ func TestAckDKGRound(t *testing.T) {
 				tc.mutate(t, roundClone, dir)
 			}
 
-			secretBytes, sk, err := app.AckDKGRound(gs.pallasSk, roundClone, gs.proposerAddr, gs.shamirIndex, G, dir, logger)
+			secretBytes, sk, skipped, err := app.AckDKGRound(gs.pallasSk, roundClone, gs.proposerAddr, gs.shamirIndex, G, dir, logger)
 
 			if tc.wantErr != "" {
 				require.ErrorContains(t, err, tc.wantErr)
@@ -1322,7 +1330,12 @@ func TestAckDKGRound(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, secretBytes, 32)
 			require.NotNil(t, sk)
-			require.Equal(t, gs.expectedShare.Bytes(), secretBytes)
+			require.Len(t, skipped, tc.wantSkipped)
+
+			if tc.wantSkipped == 0 {
+				require.Equal(t, gs.expectedShare.Bytes(), secretBytes,
+					"combined share must match golden state when no contributors are skipped")
+			}
 		})
 	}
 }

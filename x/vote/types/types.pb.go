@@ -1855,12 +1855,13 @@ func (x *DealerPayload) GetCiphertext() []byte {
 
 // AckEntry records a validator's acknowledgement of receiving their share.
 type AckEntry struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	ValidatorAddress string                 `protobuf:"bytes,1,opt,name=validator_address,json=validatorAddress,proto3" json:"validator_address,omitempty"`
-	AckSignature     []byte                 `protobuf:"bytes,2,opt,name=ack_signature,json=ackSignature,proto3" json:"ack_signature,omitempty"` // Signature over H("ack" || ea_pk || validator_address)
-	AckHeight        uint64                 `protobuf:"varint,3,opt,name=ack_height,json=ackHeight,proto3" json:"ack_height,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ValidatorAddress    string                 `protobuf:"bytes,1,opt,name=validator_address,json=validatorAddress,proto3" json:"validator_address,omitempty"`
+	AckSignature        []byte                 `protobuf:"bytes,2,opt,name=ack_signature,json=ackSignature,proto3" json:"ack_signature,omitempty"` // Binding hash H("ack" || ea_pk || validator_address || skipped...). NOT a cryptographic signature; authentication is via proposer enforcement.
+	AckHeight           uint64                 `protobuf:"varint,3,opt,name=ack_height,json=ackHeight,proto3" json:"ack_height,omitempty"`
+	SkippedContributors []string               `protobuf:"bytes,4,rep,name=skipped_contributors,json=skippedContributors,proto3" json:"skipped_contributors,omitempty"` // Sorted valoper addresses of contributors that failed Feldman verification
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *AckEntry) Reset() {
@@ -1912,6 +1913,13 @@ func (x *AckEntry) GetAckHeight() uint64 {
 		return x.AckHeight
 	}
 	return 0
+}
+
+func (x *AckEntry) GetSkippedContributors() []string {
+	if x != nil {
+		return x.SkippedContributors
+	}
+	return nil
 }
 
 var File_svote_v1_types_proto protoreflect.FileDescriptor
@@ -2077,12 +2085,13 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\fephemeral_pk\x18\x02 \x01(\fR\vephemeralPk\x12\x1e\n" +
 	"\n" +
 	"ciphertext\x18\x03 \x01(\fR\n" +
-	"ciphertext\"{\n" +
+	"ciphertext\"\xae\x01\n" +
 	"\bAckEntry\x12+\n" +
 	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12#\n" +
 	"\rack_signature\x18\x02 \x01(\fR\fackSignature\x12\x1d\n" +
 	"\n" +
-	"ack_height\x18\x03 \x01(\x04R\tackHeight*\xa1\x01\n" +
+	"ack_height\x18\x03 \x01(\x04R\tackHeight\x121\n" +
+	"\x14skipped_contributors\x18\x04 \x03(\tR\x13skippedContributors*\xa1\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1b\n" +

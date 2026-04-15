@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 
 	"cosmossdk.io/log"
@@ -115,6 +117,17 @@ func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes
 	// Verify no duplicate ack.
 	if _, found := votekeeper.FindAckInRoundCeremony(round, ackMsg.Creator); found {
 		return errInvalidInjectedTx("creator has already acked")
+	}
+
+	// Validate skipped_contributors structural integrity.
+	if err := votekeeper.ValidateSkippedContributors(round, ackMsg.Creator, ackMsg.SkippedContributors); err != nil {
+		return errInvalidInjectedTx(err.Error())
+	}
+
+	// Verify ack binding hash matches expected value.
+	expectedBinding := types.ComputeAckBinding(round.EaPk, ackMsg.Creator, ackMsg.SkippedContributors)
+	if !bytes.Equal(ackMsg.AckSignature, expectedBinding) {
+		return errInvalidInjectedTx("ack binding mismatch")
 	}
 
 	// Verify creator matches the block proposer.

@@ -1081,12 +1081,13 @@ func (*MsgContributeDKGResponse) Descriptor() ([]byte, []int) {
 
 // MsgAckExecutiveAuthorityKey is submitted by a validator to acknowledge receipt of their ea_sk share.
 type MsgAckExecutiveAuthorityKey struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                               // Validator address
-	AckSignature  []byte                 `protobuf:"bytes,2,opt,name=ack_signature,json=ackSignature,proto3" json:"ack_signature,omitempty"` // Signature over H("ack" || ea_pk || validator_address)
-	VoteRoundId   []byte                 `protobuf:"bytes,3,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`  // Target voting round (per-round ceremony)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Creator             string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                                    // Validator address
+	AckSignature        []byte                 `protobuf:"bytes,2,opt,name=ack_signature,json=ackSignature,proto3" json:"ack_signature,omitempty"`                      // Binding hash H("ack" || ea_pk || validator_address || skipped...). NOT a cryptographic signature; authentication is via proposer enforcement.
+	VoteRoundId         []byte                 `protobuf:"bytes,3,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`                       // Target voting round (per-round ceremony)
+	SkippedContributors []string               `protobuf:"bytes,4,rep,name=skipped_contributors,json=skippedContributors,proto3" json:"skipped_contributors,omitempty"` // Sorted valoper addresses of contributors that failed Feldman verification
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *MsgAckExecutiveAuthorityKey) Reset() {
@@ -1136,6 +1137,13 @@ func (x *MsgAckExecutiveAuthorityKey) GetAckSignature() []byte {
 func (x *MsgAckExecutiveAuthorityKey) GetVoteRoundId() []byte {
 	if x != nil {
 		return x.VoteRoundId
+	}
+	return nil
+}
+
+func (x *MsgAckExecutiveAuthorityKey) GetSkippedContributors() []string {
+	if x != nil {
+		return x.SkippedContributors
 	}
 	return nil
 }
@@ -1732,11 +1740,12 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\rvote_round_id\x18\x02 \x01(\fR\vvoteRoundId\x12/\n" +
 	"\x13feldman_commitments\x18\x03 \x03(\fR\x12feldmanCommitments\x123\n" +
 	"\bpayloads\x18\x04 \x03(\v2\x17.svote.v1.DealerPayloadR\bpayloads\"\x1a\n" +
-	"\x18MsgContributeDKGResponse\"\x80\x01\n" +
+	"\x18MsgContributeDKGResponse\"\xb3\x01\n" +
 	"\x1bMsgAckExecutiveAuthorityKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12#\n" +
 	"\rack_signature\x18\x02 \x01(\fR\fackSignature\x12\"\n" +
-	"\rvote_round_id\x18\x03 \x01(\fR\vvoteRoundId\"%\n" +
+	"\rvote_round_id\x18\x03 \x01(\fR\vvoteRoundId\x121\n" +
+	"\x14skipped_contributors\x18\x04 \x03(\tR\x13skippedContributors\"%\n" +
 	"#MsgAckExecutiveAuthorityKeyResponse\"_\n" +
 	"\x1fMsgCreateValidatorWithPallasKey\x12\x1f\n" +
 	"\vstaking_msg\x18\x01 \x01(\fR\n" +

@@ -74,8 +74,9 @@ func PartialDecryptPrepareProposalInjector(
 
 		kvStore := voteKeeper.OpenKVStore(ctx)
 
-		// Evict share cache entries for finalized rounds to bound growth,
-		// and zero-and-delete the corresponding on-disk share files.
+		// Evict share cache entries to bound growth and zero stale secret
+		// material. A share is stale when the round is finalized OR the
+		// proposer was stripped from the round (incompatible skip set).
 		shareCacheMu.Lock()
 		for roundHex, share := range shareCache {
 			roundID, err := hex.DecodeString(roundHex)
@@ -83,8 +84,7 @@ func PartialDecryptPrepareProposalInjector(
 				delete(shareCache, roundHex)
 				continue
 			}
-			r, err := voteKeeper.GetVoteRound(kvStore, roundID)
-			if err != nil || r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
+			if isShareStale(voteKeeper, kvStore, roundID, proposerValAddr) {
 				zeroScalar(share.Scalar)
 				delete(shareCache, roundHex)
 				zeroAndDeleteShareFile(ceremonyDir, roundID, logger)
@@ -92,7 +92,7 @@ func PartialDecryptPrepareProposalInjector(
 		}
 		shareCacheMu.Unlock()
 
-		cleanOrphanedShareFiles(ceremonyDir, voteKeeper, kvStore, logger)
+		cleanOrphanedShareFiles(ceremonyDir, voteKeeper, kvStore, proposerValAddr, logger)
 
 		// Find the first TALLYING round.
 		var tallyRound *types.VoteRound
@@ -209,13 +209,32 @@ func PartialDecryptPrepareProposalInjector(
 	}
 }
 
+// isShareStale returns true if a share file for roundID should be cleaned up:
+// the round is finalized, no longer exists, or the validator was stripped from
+// the round's CeremonyValidators (incompatible skip set).
+func isShareStale(
+	voteKeeper *votekeeper.Keeper,
+	kvStore store.KVStore,
+	roundID []byte,
+	proposerValAddr string,
+) bool {
+	r, err := voteKeeper.GetVoteRound(kvStore, roundID)
+	if err != nil || r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
+		return true
+	}
+	_, found := votekeeper.FindValidatorInRoundCeremony(r, proposerValAddr)
+	return !found
+}
+
 // cleanOrphanedShareFiles scans ceremonyDir for share.<hex> files belonging to
-// rounds that are finalized or no longer exist, and zero-and-deletes them.
-// This catches files that were never loaded into the in-memory cache.
+// rounds that are finalized, no longer exist, or from which the proposer was
+// stripped, and zero-and-deletes them. This catches files that were never
+// loaded into the in-memory cache.
 func cleanOrphanedShareFiles(
 	ceremonyDir string,
 	voteKeeper *votekeeper.Keeper,
 	kvStore store.KVStore,
+	proposerValAddr string,
 	logger log.Logger,
 ) {
 	if ceremonyDir == "" {
@@ -235,8 +254,7 @@ func cleanOrphanedShareFiles(
 		if err != nil {
 			continue
 		}
-		r, err := voteKeeper.GetVoteRound(kvStore, roundID)
-		if err != nil || r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
+		if isShareStale(voteKeeper, kvStore, roundID, proposerValAddr) {
 			zeroAndDeleteShareFile(ceremonyDir, roundID, logger)
 		}
 	}
