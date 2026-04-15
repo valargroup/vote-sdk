@@ -15,7 +15,7 @@ LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
            -X $(VERSION_PKG).Commit=$(COMMIT) \
            -X "$(VERSION_PKG).BuildTags=$(BUILD_TAGS_LIST)"
 
-.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down
+.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
 
 ## install: Build and install the svoted binary to $GOPATH/bin
 install:
@@ -188,3 +188,15 @@ docker-testnet: docker-build
 docker-testnet-down:
 	docker compose -f docker/docker-compose.yml down -v
 	@echo "Testnet stopped and volumes removed."
+
+# ---------------------------------------------------------------------------
+# Admin UI targets
+# ---------------------------------------------------------------------------
+
+## ui-build: Build the admin UI (requires Node.js + npm)
+ui-build:
+	cd ui && npm install --silent && npm run build
+
+## start-admin: Start svoted with admin server + UI
+start-admin: ui-build
+	SVOTE_PIR_URL=$${SVOTE_PIR_URL:-http://localhost:3000} $(BINARY) start --home $(HOME_DIR) --serve-ui --ui-dist ui/dist

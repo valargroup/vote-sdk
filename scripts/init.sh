@@ -160,6 +160,55 @@ helper_url = "$HELPER_URL"
 sentry_dsn = "$HELPER_SENTRY_DSN"
 HELPERCFG
 
+# Append [admin] section.
+ADMIN_ADDRESS="${SVOTE_ADMIN_ADDRESS:-$MANAGER_ADDR}"
+cat >> "$APP_TOML" <<ADMINCFG
+
+###############################################################################
+###                         Admin Server                                    ###
+###############################################################################
+
+[admin]
+
+# Set to true to disable the admin server (server directory, registration,
+# health monitoring).
+disable = true
+
+# Path to the admin SQLite database. Empty = default (\$HOME/.svoted/admin.db).
+db_path = ""
+
+# Bootstrap admin address for approve/reject operations.
+admin_address = "$ADMIN_ADDRESS"
+
+# How often to probe vote servers for health (seconds).
+probe_interval = 1800
+
+# How often to check for stale pulses (seconds).
+evict_interval = 120
+
+# How long a server can go without a pulse before being excluded (seconds).
+stale_threshold = 21600
+
+# PIR server list (JSON array). Included in the voting-config response.
+pir_servers = ""
+ADMINCFG
+
+# Append [ui] section.
+cat >> "$APP_TOML" <<UICFG
+
+###############################################################################
+###                         Admin UI                                        ###
+###############################################################################
+
+[ui]
+
+# Set to true to serve the admin UI from the chain API server.
+enable = false
+
+# Path to the built UI dist directory (output of "npm run build" in ui/).
+dist_path = ""
+UICFG
+
 echo ""
 echo "=== Chain initialized successfully! ==="
 echo "Validator valoper: $VALIDATOR_VALOPER"
