@@ -40,6 +40,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Configure private repo access
         run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
       - name: Install mise
@@ -57,8 +59,19 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.platform }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.platform }}-circuits-
-      - name: Build SDK binaries
+      - name: Set build metadata
         run: |
+          echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          echo "COMMIT=${GITHUB_SHA}" >> "$GITHUB_ENV"
+      - name: Build SDK binaries
+        env:
+          BUILD_TAGS: halo2 redpallas
+        run: |
+          LDFLAGS="-X github.com/cosmos/cosmos-sdk/version.Name=shielded-vote \
+                   -X github.com/cosmos/cosmos-sdk/version.AppName=svoted \
+                   -X github.com/cosmos/cosmos-sdk/version.Version=${VERSION} \
+                   -X github.com/cosmos/cosmos-sdk/version.Commit=${COMMIT} \
+                   -X 'github.com/cosmos/cosmos-sdk/version.BuildTags=${BUILD_TAGS}'"
           if [ "${{ matrix.cross }}" = "true" ]; then
             cargo build --release --manifest-path circuits/Cargo.toml --target ${{ matrix.rust_target }}
             mkdir -p circuits/target/release
@@ -68,8 +81,8 @@ jobs:
             CGO_CFLAGS="-target x86_64-apple-macosx" \
             CGO_LDFLAGS="-target x86_64-apple-macosx" \
             CGO_ENABLED=1 GOOS=darwin GOARCH=${{ matrix.goarch }} \
-              go build -tags "halo2,redpallas" -o svoted ./cmd/svoted
-            CGO_ENABLED=0 GOOS=darwin GOARCH=${{ matrix.goarch }} go build -o create-val-tx ./scripts/create-val-tx
+              go build -tags "halo2,redpallas" -ldflags "${LDFLAGS}" -o svoted ./cmd/svoted
+            CGO_ENABLED=0 GOOS=darwin GOARCH=${{ matrix.goarch }} go build -ldflags "${LDFLAGS}" -o create-val-tx ./scripts/create-val-tx
           else
             mise run build
             mise run build:create-val-tx
