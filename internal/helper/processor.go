@@ -134,7 +134,24 @@ func (p *Processor) processBatch(ctx context.Context) {
 
 	for _, queued := range ready {
 		share := queued
-		g.Go(func() error {
+		g.Go(func() (retErr error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err := fmt.Errorf("panic in processShare: %v", r)
+					CaptureErr(err, map[string]string{
+						"round_id":    share.Payload.VoteRoundID,
+						"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+						"stage":       "panic",
+					})
+					p.logger.Error("panic in share processing",
+						"round_id", share.Payload.VoteRoundID,
+						"share_index", share.Payload.EncShare.ShareIndex,
+						"panic", r,
+					)
+					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+				}
+			}()
+
 			select {
 			case <-gctx.Done():
 				return nil
@@ -292,6 +309,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	copy(encC2[:], c2Bytes)
 
 	// Generate ZKP #3 proof.
+	proofStart := time.Now()
 	proof, nullifier, _, err := p.prover.GenerateShareRevealProof(
 		merklePath,
 		shareComms,
@@ -303,9 +321,15 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		share.Payload.VoteDecision,
 		roundID,
 	)
+	proofDuration := time.Since(proofStart)
 	if err != nil {
 		return fmt.Errorf("generate proof: %w", err)
 	}
+	p.logger.Info("proof generated",
+		"round_id", share.Payload.VoteRoundID,
+		"share_index", share.Payload.EncShare.ShareIndex,
+		"duration", proofDuration,
+	)
 
 	// Build enc_share: C1 || C2 (64 bytes).
 	encShareBytes := make([]byte, 64)

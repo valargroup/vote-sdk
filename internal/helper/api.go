@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"cosmossdk.io/log"
+	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/gorilla/mux"
 
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -63,10 +64,11 @@ func RegisterRoutesWithGetters(
 		getShareNullifier:    getShareNullifier,
 		logger:               logger,
 	}
-	router.HandleFunc("/shielded-vote/v1/shares", h.handleSubmitShare).Methods("POST")
-	router.HandleFunc("/shielded-vote/v1/share-status/{roundId}/{nullifier}", h.handleShareStatus).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/status", h.handleStatus).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/queue-status", h.handleQueueStatus).Methods("GET")
+	recover := sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle
+	router.Handle("/shielded-vote/v1/shares", recover(http.HandlerFunc(h.handleSubmitShare))).Methods("POST")
+	router.Handle("/shielded-vote/v1/share-status/{roundId}/{nullifier}", recover(http.HandlerFunc(h.handleShareStatus))).Methods("GET")
+	router.Handle("/shielded-vote/v1/status", recover(http.HandlerFunc(h.handleStatus))).Methods("GET")
+	router.Handle("/shielded-vote/v1/queue-status", recover(http.HandlerFunc(h.handleQueueStatus))).Methods("GET")
 }
 
 // ShareNullifierCheckerGetter resolves the checker at request time (nil when helper disabled).

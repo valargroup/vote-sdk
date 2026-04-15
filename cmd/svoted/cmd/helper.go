@@ -14,6 +14,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	"github.com/cosmos/cosmos-sdk/server"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/version"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
@@ -68,7 +69,7 @@ func helperPostSetup(
 		if cfg.SentryDSN == "" {
 			cfg.SentryDSN = os.Getenv("SENTRY_DSN")
 		}
-		if err := helper.InitSentry(cfg.SentryDSN, logger); err != nil {
+		if err := helper.InitSentry(cfg.SentryDSN, version.Version, logger); err != nil {
 			logger.Error("sentry initialization failed", "error", err)
 		}
 

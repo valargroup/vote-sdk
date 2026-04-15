@@ -12,13 +12,16 @@ import (
 var sentryEnabled atomic.Bool
 
 // InitSentry initializes the Sentry SDK with the given DSN. If dsn is empty,
-// Sentry remains disabled and all capture calls become no-ops.
-func InitSentry(dsn string, logger log.Logger) error {
+// Sentry remains disabled and all capture calls become no-ops. The release
+// string is attached to every event for deploy correlation (typically the
+// binary version from ldflags).
+func InitSentry(dsn, release string, logger log.Logger) error {
 	if dsn == "" {
 		return nil
 	}
 	err := sentry.Init(sentry.ClientOptions{
 		Dsn:              dsn,
+		Release:          release,
 		SampleRate:       1.0,
 		AttachStacktrace: true,
 	})
