@@ -235,6 +235,110 @@ func TestFeldmanRejectsOffCurveCommitments(t *testing.T) {
 	require.Contains(t, err.Error(), "not on the curve")
 }
 
+// ---------------------------------------------------------------------------
+// CombineCommitments
+// ---------------------------------------------------------------------------
+
+func TestCombineCommitments(t *testing.T) {
+	G := pallasG()
+
+	for _, tc := range []struct {
+		name         string
+		t, n, numCtb int
+	}{
+		{"3-of-5 x3", 3, 5, 3},
+		{"2-of-4 x5", 2, 4, 5},
+		{"4-of-7 x2", 4, 7, 2},
+		{"3-of-5 x1 (single contributor)", 3, 5, 1},
+		{"2-of-4 x4", 2, 4, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			allCoeffs := make([][]curvey.Scalar, tc.numCtb)
+			allShares := make([][]Share, tc.numCtb)
+			allCommitments := make([][]curvey.Point, tc.numCtb)
+
+			var secretSum curvey.Scalar
+			for i := 0; i < tc.numCtb; i++ {
+				secret := new(curvey.ScalarPallas).Random(rand.Reader)
+				if secretSum == nil {
+					secretSum = secret
+				} else {
+					secretSum = secretSum.Add(secret)
+				}
+				shares, coeffs, err := Split(secret, tc.t, tc.n)
+				require.NoError(t, err)
+				allCoeffs[i] = coeffs
+				allShares[i] = shares
+
+				commitments, err := FeldmanCommit(G, coeffs)
+				require.NoError(t, err)
+				allCommitments[i] = commitments
+			}
+
+			combined, err := CombineCommitments(allCommitments)
+			require.NoError(t, err)
+			require.Len(t, combined, tc.t)
+
+			// Combined commitments must match commitments of summed coefficients.
+			summedCoeffs := make([]curvey.Scalar, tc.t)
+			for j := 0; j < tc.t; j++ {
+				summedCoeffs[j] = allCoeffs[0][j]
+				for i := 1; i < tc.numCtb; i++ {
+					summedCoeffs[j] = summedCoeffs[j].Add(allCoeffs[i][j])
+				}
+			}
+			expected, err := FeldmanCommit(G, summedCoeffs)
+			require.NoError(t, err)
+			for j := 0; j < tc.t; j++ {
+				require.True(t, combined[j].Equal(expected[j]),
+					"combined[%d] should match commitment of summed coefficients", j)
+			}
+
+			// combined[0] must equal the sum-of-secrets times G.
+			expectedPK := G.Mul(secretSum)
+			require.True(t, combined[0].Equal(expectedPK),
+				"combined[0] should equal the sum-of-secrets times G")
+
+			// Each combined share must verify against the combined commitments.
+			for j := 0; j < tc.n; j++ {
+				combinedShare := allShares[0][j].Value
+				for i := 1; i < tc.numCtb; i++ {
+					combinedShare = combinedShare.Add(allShares[i][j].Value)
+				}
+				ok, err := VerifyFeldmanShare(G, combined, allShares[0][j].Index, combinedShare)
+				require.NoError(t, err)
+				require.True(t, ok, "combined share for validator %d should verify", j+1)
+			}
+		})
+	}
+}
+
+func TestCombineCommitmentsValidation(t *testing.T) {
+	G := pallasG()
+	bad := offCurvePallas()
+	validVec := []curvey.Point{G}
+
+	for _, tc := range []struct {
+		name    string
+		input   [][]curvey.Point
+		wantErr string
+	}{
+		{"nil input", nil, "contributions must not be empty"},
+		{"empty input", [][]curvey.Point{}, "contributions must not be empty"},
+		{"empty vector", [][]curvey.Point{{}}, "commitment vectors must not be empty"},
+		{"length mismatch", [][]curvey.Point{validVec, {G, G}}, "contribution 1 has length 2, expected 1"},
+		{"nil commitment", [][]curvey.Point{{nil}}, "contribution 0 commitment 0 is nil"},
+		{"off-curve single", [][]curvey.Point{{bad}}, "contribution 0 commitment 0 is not on the curve"},
+		{"off-curve second contributor", [][]curvey.Point{validVec, {bad}}, "contribution 1 commitment 0 is not on the curve"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := CombineCommitments(tc.input)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
 func TestFeldmanRejectsIdentityGenerator(t *testing.T) {
 	identity := new(curvey.PointPallas).Identity()
 	secret := new(curvey.ScalarPallas).Random(rand.Reader)

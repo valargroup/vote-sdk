@@ -92,6 +92,17 @@ func FindValidatorInRoundCeremony(round *types.VoteRound, valAddr string) (*type
 	return nil, false
 }
 
+// FindContributionInRound returns the DKGContribution and true if valAddr has
+// already submitted a contribution in this round, or (nil, false) otherwise.
+func FindContributionInRound(round *types.VoteRound, valAddr string) (*types.DKGContribution, bool) {
+	for _, c := range round.DkgContributions {
+		if c.ValidatorAddress == valAddr {
+			return c, true
+		}
+	}
+	return nil, false
+}
+
 // FindAckInRoundCeremony returns the index and true if valAddr has an ack entry
 // in the round's ceremony, or (-1, false) otherwise.
 func FindAckInRoundCeremony(round *types.VoteRound, valAddr string) (int, bool) {
@@ -104,7 +115,7 @@ func FindAckInRoundCeremony(round *types.VoteRound, valAddr string) (int, bool) 
 }
 
 // StripNonAckersFromRound removes non-acking validators from the round's
-// CeremonyValidators and CeremonyPayloads. After this call, only validators
+// CeremonyValidators and DkgContributions. After this call, only validators
 // with a matching ack remain.
 func StripNonAckersFromRound(round *types.VoteRound) {
 	acked := make(map[string]bool, len(round.CeremonyAcks))
@@ -120,13 +131,28 @@ func StripNonAckersFromRound(round *types.VoteRound) {
 	}
 	round.CeremonyValidators = kept
 
-	keptPayloads := round.CeremonyPayloads[:0]
-	for _, p := range round.CeremonyPayloads {
-		if acked[p.ValidatorAddress] {
-			keptPayloads = append(keptPayloads, p)
+	keptContribs := round.DkgContributions[:0]
+	for _, c := range round.DkgContributions {
+		if acked[c.ValidatorAddress] {
+			keptContribs = append(keptContribs, c)
 		}
 	}
-	round.CeremonyPayloads = keptPayloads
+	round.DkgContributions = keptContribs
+}
+
+// IsValidatorInPendingCeremony returns true if the given validator address
+// appears in the ceremony_validators list of any PENDING round. Used to block
+// Pallas key rotation while the validator is participating in an active ceremony.
+func (k *Keeper) IsValidatorInPendingCeremony(kvStore store.KVStore, valAddr string) (bool, error) {
+	found := false
+	err := k.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
+		if _, ok := FindValidatorInRoundCeremony(round, valAddr); ok {
+			found = true
+			return true
+		}
+		return false
+	})
+	return found, err
 }
 
 // GetPendingRoundWithCeremony loads a vote round and verifies it is PENDING
@@ -152,7 +178,7 @@ func (k *Keeper) GetPendingRoundWithCeremony(kvStore store.KVStore, roundID []by
 // ValidateProposerIsCreator checks that a proposer-injected message is only
 // submitted during block execution (not via mempool) and that creator matches
 // the current block proposer. msgName is used in error messages for diagnostics
-// (e.g. "MsgDealExecutiveAuthorityKey").
+// (e.g. "MsgContributeDKG").
 func (k *Keeper) ValidateProposerIsCreator(ctx context.Context, creator, msgName string) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 

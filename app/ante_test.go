@@ -205,10 +205,9 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 				}},
 			},
 			{
-				name: "MsgSend+MsgDealExecutiveAuthorityKey",
-				msgs: []sdk.Msg{carrier, &votetypes.MsgDealExecutiveAuthorityKey{
-					Creator: signerAddr.String(), EaPk: bytes.Repeat([]byte{0xAA}, 32),
-					Threshold: 2,
+				name: "MsgSend+MsgContributeDKG",
+				msgs: []sdk.Msg{carrier, &votetypes.MsgContributeDKG{
+					Creator: signerAddr.String(), VoteRoundId: roundID,
 				}},
 			},
 		}
@@ -260,10 +259,9 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 				},
 			},
 			{
-				name: "MsgDealExecutiveAuthorityKey",
-				msg: &votetypes.MsgDealExecutiveAuthorityKey{
-					Creator: signerAddr.String(), EaPk: bytes.Repeat([]byte{0xAA}, 32),
-					Threshold: 2,
+				name: "MsgContributeDKG",
+				msg: &votetypes.MsgContributeDKG{
+					Creator: signerAddr.String(), VoteRoundId: roundID,
 				},
 			},
 			{
@@ -657,23 +655,18 @@ func TestAuthzExecBypass_DelegateVote(t *testing.T) {
 // Noop-signer bypass: ceremony messages in multi-message standard Tx
 // ---------------------------------------------------------------------------
 
-// TestNoopSignerBypass_DealExecutiveAuthorityKey verifies that a ceremony
-// message (MsgDealExecutiveAuthorityKey) cannot be smuggled into a standard
+// TestNoopSignerBypass_ContributeDKG verifies that a ceremony
+// message (MsgContributeDKG) cannot be smuggled into a standard
 // Cosmos tx via the noop-signer multi-message vector.
 //
 // Like vote messages, ceremony messages have no cosmos.msg.v1.signer proto
-// annotation, so GetSigners() returns []. A multi-msg tx [MsgSend, MsgDeal]
+// annotation, so GetSigners() returns []. A multi-msg tx [MsgSend, MsgContributeDKG]
 // would pass the standard ante chain with 1 signer / 1 signature.
-//
-// Without the isVoteModuleMsg check and MessageWhitelistDecorator, the only
-// remaining defense is the handler-level ValidateProposerIsCreator call,
-// which rejects during DeliverTx (creator != proposer). But CheckTx would
-// still accept the tx into the mempool — a DoS vector.
 //
 // Two layers block this: isVoteModuleMsg in NewDualAnteHandler fires first
 // (before any decorator), and MessageWhitelistDecorator in the standard
 // ante chain provides a second barrier.
-func TestNoopSignerBypass_DealExecutiveAuthorityKey(t *testing.T) {
+func TestNoopSignerBypass_ContributeDKG(t *testing.T) {
 	ta := testutil.SetupTestApp(t)
 
 	signerAddr := sdk.AccAddress(ta.ValPrivKey.PubKey().Address())
@@ -684,14 +677,12 @@ func TestNoopSignerBypass_DealExecutiveAuthorityKey(t *testing.T) {
 		Amount:      sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 1)),
 	}
 
-	fakeDeal := &votetypes.MsgDealExecutiveAuthorityKey{
-		Creator:   signerAddr.String(),
-		EaPk:      bytes.Repeat([]byte{0xAA}, 32),
-		Payloads:  nil,
-		Threshold: 2,
+	fakeContrib := &votetypes.MsgContributeDKG{
+		Creator:     signerAddr.String(),
+		VoteRoundId: bytes.Repeat([]byte{0xCC}, 32),
 	}
 
-	txBytes := mustBuildMultiMsgSignedTx(t, ta, sendMsg, fakeDeal)
+	txBytes := mustBuildMultiMsgSignedTx(t, ta, sendMsg, fakeContrib)
 
 	checkResp := ta.CheckTxSync(txBytes)
 	result := ta.DeliverVoteTx(txBytes)
@@ -700,7 +691,7 @@ func TestNoopSignerBypass_DealExecutiveAuthorityKey(t *testing.T) {
 	t.Logf("DeliverTx code=%d log=%q", result.Code, result.Log)
 
 	require.NotEqual(t, uint32(0), checkResp.Code,
-		"MsgDealExecutiveAuthorityKey should be rejected in CheckTx")
+		"MsgContributeDKG should be rejected in CheckTx")
 	require.Contains(t, checkResp.Log, "multi-message transactions are not supported")
 }
 

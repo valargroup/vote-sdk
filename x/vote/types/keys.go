@@ -13,6 +13,11 @@ const (
 	RouterKey = ModuleName
 )
 
+// DefaultContributionTimeout is the REGISTERING phase timeout in seconds (30 minutes).
+// If not all validators have contributed by this deadline, EndBlocker clears
+// contributions and restarts REGISTERING with a fresh timeout.
+const DefaultContributionTimeout uint64 = 1800
+
 // DefaultDealTimeout is the ceremony deal/ack phase timeout in seconds (30 minutes).
 const DefaultDealTimeout uint64 = 1800
 
@@ -149,6 +154,12 @@ var (
 	// MinCeremonyValidatorsKey stores the minimum number of eligible validators
 	// required to create a voting session: single key -> uint32 big-endian.
 	MinCeremonyValidatorsKey = []byte{0x13}
+
+	// PallasKeyReverseLookupPrefix is a reverse index from compressed Pallas PK
+	// bytes to the validator address that registered it. Enforces cross-validator
+	// PK uniqueness — two validators cannot register the same public key.
+	//   0x15 || pk_bytes -> valoper_address_bytes
+	PallasKeyReverseLookupPrefix = []byte{0x15}
 
 	// RoundTreePrefix scopes all commitment-tree KV entries to a specific
 	// voting round. Per-round keys have the form:
@@ -405,6 +416,15 @@ func ShareCountKey(roundID []byte, proposalID uint32, decision uint32) ([]byte, 
 // Format: 0x0C || valoper_address_bytes
 func PallasKeyKey(valoperAddr string) []byte {
 	return append(PallasKeyPrefix, []byte(valoperAddr)...)
+}
+
+// PallasKeyReverseLookupKey returns the store key for the PK -> validator reverse index.
+// Format: 0x15 || pk_bytes
+func PallasKeyReverseLookupKey(pk []byte) []byte {
+	key := make([]byte, len(PallasKeyReverseLookupPrefix)+len(pk))
+	copy(key, PallasKeyReverseLookupPrefix)
+	copy(key[len(PallasKeyReverseLookupPrefix):], pk)
+	return key
 }
 
 // ShardKey returns the store key for a vote commitment tree shard.
