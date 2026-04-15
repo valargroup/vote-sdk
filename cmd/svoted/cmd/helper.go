@@ -69,7 +69,7 @@ func helperPostSetup(
 		if cfg.SentryDSN == "" {
 			cfg.SentryDSN = os.Getenv("SENTRY_DSN")
 		}
-		if err := helper.InitSentry(cfg.SentryDSN, version.Version, logger); err != nil {
+		if err := helper.InitSentry(cfg.SentryDSN, version.Version, svrCtx.Config.Moniker, logger); err != nil {
 			logger.Error("sentry initialization failed", "error", err)
 		}
 
