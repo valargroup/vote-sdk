@@ -374,7 +374,7 @@ func CeremonyAckPrepareProposalHandler(
 		}
 
 		h := sha256.New()
-		h.Write([]byte(types.AckSigDomain))
+		h.Write([]byte(types.AckDigestDomain))
 		h.Write(round.EaPk)
 		h.Write([]byte(proposerValAddr))
 		ackSig := h.Sum(nil)
