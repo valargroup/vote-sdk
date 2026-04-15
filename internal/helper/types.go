@@ -40,6 +40,11 @@ type Config struct {
 	// HelperURL is this server's own public URL as seen by clients
 	// (e.g. "https://1-2-3-4.sslip.io"). When empty, heartbeat is disabled.
 	HelperURL string `mapstructure:"helper_url"`
+
+	// SentryDSN is the Sentry DSN for error tracking. When empty, Sentry is
+	// disabled. Can also be set via the SENTRY_DSN environment variable at
+	// runtime (app.toml takes precedence if set).
+	SentryDSN string `mapstructure:"sentry_dsn"`
 }
 
 // DefaultConfig returns the default helper configuration.

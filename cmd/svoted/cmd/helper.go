@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 
 	"cosmossdk.io/log"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -63,6 +64,14 @@ func helperPostSetup(
 			cfg.DBPath = dbPath
 		}
 
+		// Env var fallback for Sentry DSN (app.toml takes precedence).
+		if cfg.SentryDSN == "" {
+			cfg.SentryDSN = os.Getenv("SENTRY_DSN")
+		}
+		if err := helper.InitSentry(cfg.SentryDSN, logger); err != nil {
+			logger.Error("sentry initialization failed", "error", err)
+		}
+
 		// Create the tree accessor that reads directly from the keeper's KV store.
 		treeReader := &keeperTreeReader{
 			app:    *svoteApp,
@@ -98,6 +107,7 @@ func helperPostSetup(
 		// Close the store after the processor exits to avoid
 		// "database is closed" errors from concurrent queries.
 		g.Go(func() error {
+			defer helper.FlushSentry()
 			err := h.Start(ctx)
 			h.Close()
 			return err
@@ -151,6 +161,9 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	}
 	if v.IsSet("helper.helper_url") {
 		cfg.HelperURL = v.GetString("helper.helper_url")
+	}
+	if v.IsSet("helper.sentry_dsn") {
+		cfg.SentryDSN = v.GetString("helper.sentry_dsn")
 	}
 
 	return cfg

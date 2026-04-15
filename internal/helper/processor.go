@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	"cosmossdk.io/log"
@@ -148,6 +149,11 @@ func (p *Processor) processBatch(ctx context.Context) {
 						"share_index", share.Payload.EncShare.ShareIndex,
 						"error", err,
 					)
+					CaptureErr(err, map[string]string{
+						"round_id":    share.Payload.VoteRoundID,
+						"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+						"stage":       "round_status_check",
+					})
 					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 					return nil
 				}
@@ -179,6 +185,11 @@ func (p *Processor) processBatch(ctx context.Context) {
 					"share_index", share.Payload.EncShare.ShareIndex,
 					"error", err,
 				)
+				CaptureErr(err, map[string]string{
+					"round_id":    share.Payload.VoteRoundID,
+					"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+					"stage":       "process_share",
+				})
 				p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 				return nil
 			}

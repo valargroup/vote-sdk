@@ -149,6 +149,10 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Error("failed to enqueue share", "error", err)
+		CaptureErr(err, map[string]string{
+			"round_id": payload.VoteRoundID,
+			"stage":    "enqueue",
+		})
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -213,6 +217,10 @@ func (h *apiHandler) handleShareStatus(w http.ResponseWriter, r *http.Request) {
 	onChain, err := checker(roundID, nf)
 	if err != nil {
 		h.logger.Error("share nullifier check failed", "error", err)
+		CaptureErr(err, map[string]string{
+			"round_id": roundID,
+			"stage":    "nullifier_check",
+		})
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}

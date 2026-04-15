@@ -173,6 +173,7 @@ configure_helper() {
     local api_port="$2"
     local pulse_url="${3:-}"
     local helper_url="${4:-}"
+    local sentry_dsn="${SVOTE_HELPER_SENTRY_DSN:-}"
 
     local app_toml="$home/config/app.toml"
     cat >> "$app_toml" <<HELPERCFG
@@ -207,6 +208,9 @@ pulse_url = "${pulse_url}"
 
 # This server's public URL. Empty disables the heartbeat (local dev default).
 helper_url = "${helper_url}"
+
+# Sentry DSN for error tracking. Empty disables Sentry.
+sentry_dsn = "${sentry_dsn}"
 HELPERCFG
 }
 
