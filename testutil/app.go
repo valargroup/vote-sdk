@@ -161,7 +161,7 @@ func (ta *TestApp) SeedTallyingRoundThreshold(
 	threshold uint32,
 	proposals []*types.Proposal,
 	validators []*types.ValidatorPallasKey,
-	verificationKeys [][]byte,
+	feldmanCommitments [][]byte,
 ) []byte {
 	ta.t.Helper()
 
@@ -188,7 +188,7 @@ func (ta *TestApp) SeedTallyingRoundThreshold(
 		Proposals:          proposals,
 		CeremonyValidators: indexedValidators,
 		Threshold:          threshold,
-		VerificationKeys:   verificationKeys,
+		FeldmanCommitments: feldmanCommitments,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
@@ -318,6 +318,29 @@ func (ta *TestApp) VoteKeeper() *votekeeper.Keeper {
 	return ta.SvoteApp.VoteKeeper
 }
 
+// MustGetVoteRound reads the round from committed state, failing the test on error.
+func (ta *TestApp) MustGetVoteRound(roundID []byte) *types.VoteRound {
+	ta.t.Helper()
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+	round, err := ta.VoteKeeper().GetVoteRound(kvStore, roundID)
+	require.NoError(ta.t, err)
+	return round
+}
+
+// RegisterPallasKey registers the given Pallas public key for the genesis
+// validator via a signed MsgRegisterPallasKey delivered through FinalizeBlock.
+func (ta *TestApp) RegisterPallasKey(pallasPk *elgamal.PublicKey) {
+	ta.t.Helper()
+	regMsg := &types.MsgRegisterPallasKey{
+		Creator:  ta.ValidatorAccAddr(),
+		PallasPk: pallasPk.Point.ToAffineCompressed(),
+	}
+	regTx := ta.MustBuildSignedCeremonyTx(regMsg)
+	result := ta.DeliverVoteTx(regTx)
+	require.Equal(ta.t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
+}
+
 // SeedVoteManager writes the vote manager address directly into the module's
 // KV store and commits via an empty block. Must be called before any
 // CreateVotingSession, since that handler requires the creator to be the
@@ -404,10 +427,10 @@ func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
 }
 
 // SeedDealtCeremony creates a PENDING round with DEALT ceremony fields.
-// The round includes the given validators and ECIES payloads. A default
-// threshold of 2 and placeholder VKs are set (threshold mode is always
-// required). Commits via an empty block. Returns the round ID.
-func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads []*types.DealerPayload, validators []*types.ValidatorPallasKey) []byte {
+// The round includes the given validators. A default threshold and
+// placeholder Feldman commitments are set. Commits via an empty block.
+// Returns the round ID.
+func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, validators []*types.ValidatorPallasKey) []byte {
 	ta.t.Helper()
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
@@ -422,9 +445,9 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 	if t < 2 {
 		t = 2
 	}
-	vks := make([][]byte, n)
-	for i := range vks {
-		vks[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
+	commitments := make([][]byte, t)
+	for i := range commitments {
+		commitments[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
 	}
 
 	round := &types.VoteRound{
@@ -432,13 +455,11 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
 		EaPk:                 eaPkBytes,
 		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
-		CeremonyDealer:       "dealer",
 		CeremonyValidators:   validators,
-		CeremonyPayloads:     payloads,
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
 		Threshold:            uint32(t),
-		VerificationKeys:     vks,
+		FeldmanCommitments:   commitments,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
@@ -447,16 +468,15 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, payloads [
 	return roundID
 }
 
-// SeedDealtCeremonyThreshold creates a PENDING round with DEALT ceremony fields
-// in threshold mode. Callers supply pre-computed ECIES payloads, VK_i points,
-// and the threshold t. This lets ack handler tests exercise threshold-mode
-// verification (share_i * G == VK_i) without going through the full deal flow.
+// SeedDealtCeremonyThreshold creates a PENDING round with DEALT ceremony fields.
+// Callers supply pre-computed ECIES payloads, Feldman commitments, and the
+// threshold t. This lets ack handler tests exercise Feldman verification
+// without going through the full DKG flow.
 func (ta *TestApp) SeedDealtCeremonyThreshold(
 	eaPkBytes []byte,
-	payloads []*types.DealerPayload,
 	validators []*types.ValidatorPallasKey,
 	threshold uint32,
-	verificationKeys [][]byte,
+	feldmanCommitments [][]byte,
 ) []byte {
 	ta.t.Helper()
 
@@ -467,18 +487,29 @@ func (ta *TestApp) SeedDealtCeremonyThreshold(
 	h.Write(eaPkBytes)
 	roundID := h.Sum(nil)
 
+	// Assign ShamirIndex to any validator that doesn't have one, mirroring
+	// the assignment done by finalizeDKG in production.
+	indexedValidators := make([]*types.ValidatorPallasKey, len(validators))
+	for i, v := range validators {
+		if v.ShamirIndex == 0 && threshold > 0 {
+			vCopy := proto.Clone(v).(*types.ValidatorPallasKey)
+			vCopy.ShamirIndex = uint32(i + 1)
+			indexedValidators[i] = vCopy
+		} else {
+			indexedValidators[i] = v
+		}
+	}
+
 	round := &types.VoteRound{
 		VoteRoundId:          roundID,
 		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
 		EaPk:                 eaPkBytes,
 		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_DEALT,
-		CeremonyDealer:       "dealer",
-		CeremonyValidators:   validators,
-		CeremonyPayloads:     payloads,
+		CeremonyValidators:   indexedValidators,
 		CeremonyPhaseStart:   uint64(ta.Time.Unix()),
 		CeremonyPhaseTimeout: types.DefaultDealTimeout,
 		Threshold:            threshold,
-		VerificationKeys:     verificationKeys,
+		FeldmanCommitments:   feldmanCommitments,
 	}
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
@@ -712,6 +743,27 @@ func (ta *TestApp) NextBlockWithPrepareProposal() {
 		Height:          ta.Height,
 		Time:            ta.Time,
 		Txs:             ppResp.Txs,
+		ProposerAddress: ta.ProposerAddress,
+	})
+	require.NoError(ta.t, err)
+
+	_, err = ta.Commit()
+	require.NoError(ta.t, err)
+}
+
+// NextBlockWithTxs advances the block by 5 s and runs FinalizeBlock + Commit
+// with the given pre-built txs. Use this when you need to deliver specific txs
+// (e.g. from a directly-invoked handler) without going through PrepareProposal.
+func (ta *TestApp) NextBlockWithTxs(txs [][]byte) {
+	ta.t.Helper()
+
+	ta.Height++
+	ta.Time = ta.Time.Add(5 * time.Second)
+
+	_, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height:          ta.Height,
+		Time:            ta.Time,
+		Txs:             txs,
 		ProposerAddress: ta.ProposerAddress,
 	})
 	require.NoError(ta.t, err)

@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -29,13 +30,34 @@ func (k Keeper) GetPallasKey(kvStore store.KVStore, valoperAddr string) (*types.
 	return &vpk, nil
 }
 
-// SetPallasKey stores a validator's Pallas PK in the global registry.
+// SetPallasKey stores a validator's Pallas PK in the global registry and
+// writes the reverse-lookup index (PK -> validator address) used to enforce
+// cross-validator key uniqueness.
 func (k Keeper) SetPallasKey(kvStore store.KVStore, vpk *types.ValidatorPallasKey) error {
 	bz, err := marshal(vpk)
 	if err != nil {
 		return err
 	}
-	return kvStore.Set(types.PallasKeyKey(vpk.ValidatorAddress), bz)
+	if err := kvStore.Set(types.PallasKeyKey(vpk.ValidatorAddress), bz); err != nil {
+		return err
+	}
+	return kvStore.Set(
+		types.PallasKeyReverseLookupKey(vpk.PallasPk),
+		[]byte(vpk.ValidatorAddress),
+	)
+}
+
+// GetPallasKeyOwner returns the validator address that registered the given
+// Pallas public key, or "" if the key is not registered.
+func (k Keeper) GetPallasKeyOwner(kvStore store.KVStore, pallasPk []byte) (string, error) {
+	bz, err := kvStore.Get(types.PallasKeyReverseLookupKey(pallasPk))
+	if err != nil {
+		return "", err
+	}
+	if bz == nil {
+		return "", nil
+	}
+	return string(bz), nil
 }
 
 // HasPallasKey returns true if the validator has a registered Pallas PK.
@@ -70,6 +92,13 @@ func (k Keeper) IterateAllPallasKeys(kvStore store.KVStore, cb func(vpk *types.V
 // RegisterPallasKeyCore validates, deduplicates, and stores a Pallas PK for
 // the given validator address. Shared by RegisterPallasKey and
 // CreateValidatorWithPallasKey.
+//
+// Uniqueness is enforced in two dimensions:
+//  1. A validator address may only register once (forward index).
+//  2. A Pallas public key may only be registered by one validator (reverse index).
+//
+// Rejecting duplicate PKs prevents colluding validators from sharing a secret
+// key and breaking threshold security during DKG.
 func (k Keeper) RegisterPallasKeyCore(kvStore store.KVStore, valAddr string, pallasPk []byte) error {
 	has, err := k.HasPallasKey(kvStore, valAddr)
 	if err != nil {
@@ -78,10 +107,63 @@ func (k Keeper) RegisterPallasKeyCore(kvStore store.KVStore, valAddr string, pal
 	if has {
 		return fmt.Errorf("%w: %s", types.ErrDuplicateRegistration, valAddr)
 	}
+
+	owner, err := k.GetPallasKeyOwner(kvStore, pallasPk)
+	if err != nil {
+		return err
+	}
+	if owner != "" {
+		return fmt.Errorf("%w: already registered by %s", types.ErrDuplicatePallasKey, owner)
+	}
+
 	return k.SetPallasKey(kvStore, &types.ValidatorPallasKey{
 		ValidatorAddress: valAddr,
 		PallasPk:         pallasPk,
 	})
+}
+
+// DeletePallasKeyReverse removes the reverse-lookup index entry for the given
+// Pallas public key. Used during key rotation to clean up the old PK's entry.
+func (k Keeper) DeletePallasKeyReverse(kvStore store.KVStore, pallasPk []byte) error {
+	return kvStore.Delete(types.PallasKeyReverseLookupKey(pallasPk))
+}
+
+// RotatePallasKeyCore replaces a validator's registered Pallas PK with a new one.
+// The validator must already have a registered key (use RegisterPallasKeyCore for
+// first-time registration). The new PK must differ from the current one and pass
+// global uniqueness checks. Returns the old PK for audit logging.
+func (k Keeper) RotatePallasKeyCore(kvStore store.KVStore, valAddr string, newPallasPk []byte) (oldPallasPk []byte, err error) {
+	existing, err := k.GetPallasKey(kvStore, valAddr)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, fmt.Errorf("%w: %s", types.ErrNoPallasKey, valAddr)
+	}
+
+	if bytes.Equal(existing.PallasPk, newPallasPk) {
+		return nil, fmt.Errorf("%w: %s", types.ErrSameKey, valAddr)
+	}
+
+	owner, err := k.GetPallasKeyOwner(kvStore, newPallasPk)
+	if err != nil {
+		return nil, err
+	}
+	if owner != "" {
+		return nil, fmt.Errorf("%w: already registered by %s", types.ErrDuplicatePallasKey, owner)
+	}
+
+	if err := k.DeletePallasKeyReverse(kvStore, existing.PallasPk); err != nil {
+		return nil, err
+	}
+
+	if err := k.SetPallasKey(kvStore, &types.ValidatorPallasKey{
+		ValidatorAddress: valAddr,
+		PallasPk:         newPallasPk,
+	}); err != nil {
+		return nil, err
+	}
+	return existing.PallasPk, nil
 }
 
 // GetEligibleValidators returns all bonded validators that have a registered Pallas PK.

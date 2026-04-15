@@ -26,17 +26,17 @@ import (
 // When a round is in TALLYING state and the block proposer has not yet
 // submitted a partial decryption for that round, it:
 //
-//  1. Loads the proposer's Shamir share from <eaSkDir>/share.<hex(round_id)>
+//  1. Loads the proposer's Shamir share from <ceremonyDir>/share.<hex(round_id)>
 //  2. Finds the proposer's 1-based validator_index in ceremony_validators
 //  3. Computes D_i = share_i * C1 for every non-empty tally accumulator
 //  4. Injects MsgSubmitPartialDecryption (tag 0x0D)
 //
-// If eaSkDir is empty, the share file is absent, or the proposer is not a
+// If ceremonyDir is empty, the share file is absent, or the proposer is not a
 // ceremony validator, injection is skipped gracefully.
 func PartialDecryptPrepareProposalInjector(
 	voteKeeper *votekeeper.Keeper,
 	stakingKeeper *stakingkeeper.Keeper,
-	eaSkDir string,
+	ceremonyDir string,
 	logger log.Logger,
 ) PrepareProposalInjector {
 	var (
@@ -54,7 +54,7 @@ func PartialDecryptPrepareProposalInjector(
 		if share, ok := shareCache[roundHex]; ok {
 			return share, nil
 		}
-		share, err := loadShareForRound(eaSkDir, roundID)
+		share, err := loadShareForRound(ceremonyDir, roundID)
 		if err != nil {
 			return nil, err
 		}
@@ -63,7 +63,7 @@ func PartialDecryptPrepareProposalInjector(
 	}
 
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal, txs [][]byte) [][]byte {
-		if eaSkDir == "" {
+		if ceremonyDir == "" {
 			return txs
 		}
 
@@ -87,16 +87,12 @@ func PartialDecryptPrepareProposalInjector(
 			if err != nil || r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
 				zeroScalar(share.Scalar)
 				delete(shareCache, roundHex)
-				zeroAndDeleteShareFile(eaSkDir, roundID, logger)
+				zeroAndDeleteShareFile(ceremonyDir, roundID, logger)
 			}
 		}
 		shareCacheMu.Unlock()
 
-		// Scan eaSkDir for orphaned share files whose rounds are finalized
-		// (or no longer exist). This catches files that were never loaded
-		// into the in-memory cache (e.g. the validator was never proposer
-		// during TALLYING).
-		cleanOrphanedShareFiles(eaSkDir, voteKeeper, kvStore, logger)
+		cleanOrphanedShareFiles(ceremonyDir, voteKeeper, kvStore, logger)
 
 		// Find the first TALLYING round.
 		var tallyRound *types.VoteRound
@@ -213,19 +209,19 @@ func PartialDecryptPrepareProposalInjector(
 	}
 }
 
-// cleanOrphanedShareFiles scans eaSkDir for share.<hex> files belonging to
+// cleanOrphanedShareFiles scans ceremonyDir for share.<hex> files belonging to
 // rounds that are finalized or no longer exist, and zero-and-deletes them.
 // This catches files that were never loaded into the in-memory cache.
 func cleanOrphanedShareFiles(
-	eaSkDir string,
+	ceremonyDir string,
 	voteKeeper *votekeeper.Keeper,
 	kvStore store.KVStore,
 	logger log.Logger,
 ) {
-	if eaSkDir == "" {
+	if ceremonyDir == "" {
 		return
 	}
-	entries, err := os.ReadDir(eaSkDir)
+	entries, err := os.ReadDir(ceremonyDir)
 	if err != nil {
 		return
 	}
@@ -241,7 +237,7 @@ func cleanOrphanedShareFiles(
 		}
 		r, err := voteKeeper.GetVoteRound(kvStore, roundID)
 		if err != nil || r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
-			zeroAndDeleteShareFile(eaSkDir, roundID, logger)
+			zeroAndDeleteShareFile(ceremonyDir, roundID, logger)
 		}
 	}
 }

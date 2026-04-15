@@ -74,8 +74,9 @@ func validatorSet(n int) []*types.ValidatorPallasKey {
 }
 
 // setupTallyingRoundThreshold creates a TALLYING round with the given threshold
-// and ceremony_validators in the KV store. VK_i values are deterministic
-// on-curve points (i*G). The round has two proposals, each with two vote options.
+// and ceremony_validators in the KV store. Feldman commitments are dummy
+// on-curve points (j*G for j=1..threshold). The round has two proposals, each
+// with two vote options.
 // For tests that need real DLEQ verification, use setupTallyingRoundWithCrypto.
 func (s *MsgServerTestSuite) setupTallyingRoundThreshold(
 	roundID []byte,
@@ -83,10 +84,10 @@ func (s *MsgServerTestSuite) setupTallyingRoundThreshold(
 	validators []*types.ValidatorPallasKey,
 ) {
 	G := elgamal.PallasGenerator()
-	vks := make([][]byte, len(validators))
-	for i := range vks {
-		sc := new(curvey.ScalarPallas).New(i + 1)
-		vks[i] = G.Mul(sc).ToAffineCompressed()
+	commitments := make([][]byte, threshold)
+	for j := range commitments {
+		sc := new(curvey.ScalarPallas).New(j + 1)
+		commitments[j] = G.Mul(sc).ToAffineCompressed()
 	}
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
@@ -96,7 +97,7 @@ func (s *MsgServerTestSuite) setupTallyingRoundThreshold(
 		Threshold:   threshold,
 		Proposals:   pdProposals(),
 		CeremonyValidators: validators,
-		VerificationKeys:   vks,
+		FeldmanCommitments: commitments,
 	}))
 }
 
@@ -120,14 +121,13 @@ type cryptoRoundState struct {
 	eaSk   *elgamal.SecretKey
 	eaPk   *elgamal.PublicKey
 	shares []shamir.Share
-	vks    [][]byte
 	// accumulatorCts maps AccumulatorKey(proposalID, decision) → *Ciphertext.
 	accumulatorCts map[uint64]*elgamal.Ciphertext
 }
 
 // setupTallyingRoundWithCrypto creates a TALLYING round with real Shamir shares,
-// VK_i, and tally accumulators. Returns the cryptoRoundState so callers can
-// compute correct D_i and DLEQ proofs.
+// Feldman commitments, and tally accumulators. Returns the cryptoRoundState so
+// callers can compute correct D_i and DLEQ proofs.
 func (s *MsgServerTestSuite) setupTallyingRoundWithCrypto(
 	roundID []byte,
 	threshold int,
@@ -137,12 +137,15 @@ func (s *MsgServerTestSuite) setupTallyingRoundWithCrypto(
 	G := elgamal.PallasGenerator()
 
 	eaSk, eaPk := elgamal.KeyGen(rand.Reader)
-	shares, _, err := shamir.Split(eaSk.Scalar, threshold, len(validators))
+	shares, coeffs, err := shamir.Split(eaSk.Scalar, threshold, len(validators))
 	s.Require().NoError(err)
 
-	vks := make([][]byte, len(validators))
-	for i, sh := range shares {
-		vks[i] = G.Mul(sh.Value).ToAffineCompressed()
+	commitmentPts, err := shamir.FeldmanCommit(G, coeffs)
+	s.Require().NoError(err)
+
+	feldmanCommitments := make([][]byte, len(commitmentPts))
+	for j, c := range commitmentPts {
+		feldmanCommitments[j] = c.ToAffineCompressed()
 	}
 
 	proposals := pdProposals()
@@ -154,7 +157,7 @@ func (s *MsgServerTestSuite) setupTallyingRoundWithCrypto(
 		Threshold:          uint32(threshold),
 		Proposals:          proposals,
 		CeremonyValidators: validators,
-		VerificationKeys:   vks,
+		FeldmanCommitments: feldmanCommitments,
 	}))
 
 	accCts := make(map[uint64]*elgamal.Ciphertext)
@@ -173,7 +176,6 @@ func (s *MsgServerTestSuite) setupTallyingRoundWithCrypto(
 		eaSk:           eaSk,
 		eaPk:           eaPk,
 		shares:         shares,
-		vks:            vks,
 		accumulatorCts: accCts,
 	}
 }
@@ -426,6 +428,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_EmitsEvent() {
 	s.SetupTest()
 	roundID := bytes.Repeat([]byte{0x50}, 32)
 	creator := "sv1creator"
+	s.setBlockProposer(creator)
 
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
@@ -484,6 +487,7 @@ func (s *MsgServerTestSuite) TestRevealShare_RejectsNonActiveRounds() {
 		{
 			name: "rejected during FINALIZED",
 			setup: func(roundID []byte) {
+				s.setBlockProposer("sv1creator")
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
 					VoteRoundId: roundID,
@@ -527,11 +531,55 @@ func (s *MsgServerTestSuite) TestRevealShare_RejectsNonActiveRounds() {
 }
 
 // ---------------------------------------------------------------------------
+// SubmitTally: ValidateProposerIsCreator
+// ---------------------------------------------------------------------------
+
+func (s *MsgServerTestSuite) TestSubmitTally_RejectsCheckTx() {
+	s.SetupTest()
+	ctx := s.ctx.WithIsCheckTx(true)
+	_, err := s.msgServer.SubmitTally(ctx, &types.MsgSubmitTally{
+		VoteRoundId: bytes.Repeat([]byte{0x51}, 32),
+		Creator:     "sv1anyone",
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "cannot be submitted via mempool")
+}
+
+func (s *MsgServerTestSuite) TestSubmitTally_RejectsReCheckTx() {
+	s.SetupTest()
+	ctx := s.ctx.WithIsReCheckTx(true)
+	_, err := s.msgServer.SubmitTally(ctx, &types.MsgSubmitTally{
+		VoteRoundId: bytes.Repeat([]byte{0x52}, 32),
+		Creator:     "sv1anyone",
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "cannot be submitted via mempool")
+}
+
+func (s *MsgServerTestSuite) TestSubmitTally_RejectsNonProposerCreator() {
+	s.SetupTest()
+	s.setBlockProposer("sv1realproposer")
+	roundID := bytes.Repeat([]byte{0x53}, 32)
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: roundID,
+		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+	}))
+	_, err := s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
+		VoteRoundId: roundID,
+		Creator:     "sv1impersonator",
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "creator")
+}
+
+// ---------------------------------------------------------------------------
 // SubmitTally: threshold mode
 // ---------------------------------------------------------------------------
 
 func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 	validators := validatorSet(3)
+	s.setBlockProposer("sv1proposer")
 
 	type testCase struct {
 		name        string
@@ -743,6 +791,7 @@ func (s *MsgServerTestSuite) TestSubmitTally_CompletenessRejections() {
 	validators := validatorSet(2)
 
 	setupRoundWithTwoAccumulators := func() {
+		s.setBlockProposer("sv1proposer")
 		s.setupThresholdTallyRound(roundID, 2, validators)
 		s.storeThresholdPartials(roundID, 2, 2, []int{1, 2}, []tallyAccumulator{
 			{proposalID: 1, decision: 0, value: 100},

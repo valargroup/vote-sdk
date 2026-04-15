@@ -22,13 +22,20 @@ var (
 	// EA key ceremony errors.
 	ErrCeremonyWrongStatus    = errors.Register(ModuleName, 21, "operation invalid for current ceremony status")
 	ErrDuplicateRegistration  = errors.Register(ModuleName, 22, "validator already registered pallas key")
+	ErrDuplicatePallasKey     = errors.Register(ModuleName, 34, "pallas key already registered by another validator")
 	ErrInvalidPallasPoint     = errors.Register(ModuleName, 23, "invalid pallas point")
 	ErrPayloadMismatch        = errors.Register(ModuleName, 24, "dealer payload count does not match validator count")
 	ErrDuplicateAck           = errors.Register(ModuleName, 25, "validator already acknowledged")
+	ErrDuplicateContribution  = errors.Register(ModuleName, 33, "validator already contributed to DKG")
 	ErrNotRegisteredValidator  = errors.Register(ModuleName, 26, "validator not in ceremony validator list")
 	ErrCeremonySessionActive    = errors.Register(ModuleName, 27, "ceremony session is in progress")
 	ErrInvalidThreshold         = errors.Register(ModuleName, 28, "invalid threshold parameters")
 	ErrInsufficientValidators   = errors.Register(ModuleName, 29, "insufficient eligible validators")
+
+	// Pallas key rotation errors.
+	ErrCeremonyInProgress = errors.Register(ModuleName, 35, "cannot rotate key while participating in an active ceremony")
+	ErrNoPallasKey        = errors.Register(ModuleName, 36, "validator has no registered pallas key")
+	ErrSameKey            = errors.Register(ModuleName, 37, "new pallas key is identical to the current key")
 
 	// Vote manager errors.
 	ErrNotAuthorized  = errors.Register(ModuleName, 30, "sender is not authorized")
