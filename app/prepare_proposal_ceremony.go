@@ -22,6 +22,7 @@ import (
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
+	"github.com/valargroup/vote-sdk/sentry"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -184,6 +185,7 @@ func CeremonyDKGContributionPrepareProposalHandler(
 		round, err := voteKeeper.FindFirstPendingRound(kvStore, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING)
 		if err != nil {
 			logger.Error("PrepareProposal[dkg-contribute]: failed to find pending round", "err", err)
+			sentry.CaptureErr(err, map[string]string{"handler": "PrepareProposal", "stage": "find_pending_round_registering"})
 			return txs
 		}
 		if round == nil {
@@ -203,6 +205,7 @@ func CeremonyDKGContributionPrepareProposalHandler(
 		t, err := thresholdForN(n)
 		if err != nil {
 			logger.Error("PrepareProposal[dkg-contribute]: threshold computation failed", "err", err)
+			sentry.CaptureErr(err, map[string]string{"handler": "PrepareProposal", "stage": "dkg_threshold"})
 			return txs
 		}
 
@@ -212,6 +215,7 @@ func CeremonyDKGContributionPrepareProposalHandler(
 		shares, coeffs, err := shamir.Split(secret, t, n)
 		if err != nil {
 			logger.Error("PrepareProposal[dkg-contribute]: shamir split failed", "err", err)
+			sentry.CaptureErr(err, map[string]string{"handler": "PrepareProposal", "stage": "shamir_split"})
 			return txs
 		}
 		defer func() {
@@ -232,6 +236,7 @@ func CeremonyDKGContributionPrepareProposalHandler(
 		commitmentPts, err := shamir.FeldmanCommit(G, coeffs)
 		if err != nil {
 			logger.Error("PrepareProposal[dkg-contribute]: Feldman commit failed", "err", err)
+			sentry.CaptureErr(err, map[string]string{"handler": "PrepareProposal", "stage": "feldman_commit"})
 			return txs
 		}
 		feldmanCommitments := make([][]byte, len(commitmentPts))
@@ -244,6 +249,11 @@ func CeremonyDKGContributionPrepareProposalHandler(
 			if err := writeCoeffs(cp, coeffs); err != nil {
 				logger.Error("PrepareProposal[dkg-contribute]: failed to write coefficients",
 					"path", cp, "err", err)
+				sentry.CaptureErr(err, map[string]string{
+					"handler":  "PrepareProposal",
+					"stage":    "write_coefficients",
+					"round_id": hex.EncodeToString(round.VoteRoundId),
+				})
 				return txs
 			}
 		}
@@ -257,12 +267,22 @@ func CeremonyDKGContributionPrepareProposalHandler(
 			if err != nil {
 				logger.Error("PrepareProposal[dkg-contribute]: invalid Pallas PK",
 					"validator", v.ValidatorAddress, "err", err)
+				sentry.CaptureErr(err, map[string]string{
+					"handler":  "PrepareProposal",
+					"stage":    "unmarshal_pallas_pk",
+					"round_id": hex.EncodeToString(round.VoteRoundId),
+				})
 				return txs
 			}
 			env, err := ecies.Encrypt(G, recipientPk.Point, shares[i].Value.Bytes(), rand.Reader)
 			if err != nil {
 				logger.Error("PrepareProposal[dkg-contribute]: ECIES encryption failed",
 					"validator", v.ValidatorAddress, "err", err)
+				sentry.CaptureErr(err, map[string]string{
+					"handler":  "PrepareProposal",
+					"stage":    "ecies_encrypt",
+					"round_id": hex.EncodeToString(round.VoteRoundId),
+				})
 				return txs
 			}
 			payloads = append(payloads, &types.DealerPayload{
@@ -282,6 +302,11 @@ func CeremonyDKGContributionPrepareProposalHandler(
 		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
 		if err != nil {
 			logger.Error("PrepareProposal[dkg-contribute]: failed to encode contribution tx", "err", err)
+			sentry.CaptureErr(err, map[string]string{
+				"handler":  "PrepareProposal",
+				"stage":    "encode_dkg_tx",
+				"round_id": hex.EncodeToString(round.VoteRoundId),
+			})
 			return txs
 		}
 
@@ -334,6 +359,7 @@ func CeremonyAckPrepareProposalHandler(
 		round, err := voteKeeper.FindFirstPendingRound(kvStore, types.CeremonyStatus_CEREMONY_STATUS_DEALT)
 		if err != nil {
 			logger.Error("PrepareProposal[ack]: failed to find dealt round", "err", err)
+			sentry.CaptureErr(err, map[string]string{"handler": "PrepareProposal", "stage": "find_pending_round_dealt"})
 			return txs
 		}
 		if round == nil {
@@ -359,6 +385,11 @@ func CeremonyAckPrepareProposalHandler(
 			logger.Error("PrepareProposal[ack]: share recovery failed",
 				"err", err, "proposer", proposerValAddr,
 				"round", hex.EncodeToString(round.VoteRoundId))
+			sentry.CaptureErr(err, map[string]string{
+				"handler":  "PrepareProposal",
+				"stage":    "ack_dkg_round",
+				"round_id": hex.EncodeToString(round.VoteRoundId),
+			})
 			return txs
 		}
 		defer zeroSecret(secretBytes, recoveredSk)
@@ -368,6 +399,11 @@ func CeremonyAckPrepareProposalHandler(
 			if err := os.WriteFile(diskPath, secretBytes, 0600); err != nil {
 				logger.Error("PrepareProposal[ack]: failed to write secret to disk — skipping ack injection",
 					"path", diskPath, "err", err)
+				sentry.CaptureErr(err, map[string]string{
+					"handler":  "PrepareProposal",
+					"stage":    "write_share_to_disk",
+					"round_id": hex.EncodeToString(round.VoteRoundId),
+				})
 				return txs
 			}
 			logger.Info("PrepareProposal[ack]: secret written to disk", "path", diskPath)
@@ -388,6 +424,11 @@ func CeremonyAckPrepareProposalHandler(
 		txBytes, err := voteapi.EncodeCeremonyTx(ackMsg, voteapi.TagAckExecutiveAuthorityKey)
 		if err != nil {
 			logger.Error("PrepareProposal[ack]: failed to encode ack tx", "err", err)
+			sentry.CaptureErr(err, map[string]string{
+				"handler":  "PrepareProposal",
+				"stage":    "encode_ack_tx",
+				"round_id": hex.EncodeToString(round.VoteRoundId),
+			})
 			return txs
 		}
 

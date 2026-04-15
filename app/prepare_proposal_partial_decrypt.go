@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 	voteapi "github.com/valargroup/vote-sdk/api"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/sentry"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -101,6 +103,7 @@ func PartialDecryptPrepareProposalInjector(
 			return true // stop at first match
 		}); err != nil {
 			logger.Error("PrepareProposal[partial-decrypt]: failed to iterate tallying rounds", "err", err)
+			sentry.CaptureErr(err, map[string]string{"handler": "PrepareProposal", "stage": "iterate_tallying_rounds_pd"})
 			return txs
 		}
 		if tallyRound == nil {
@@ -121,6 +124,11 @@ func PartialDecryptPrepareProposalInjector(
 		has, err := voteKeeper.HasPartialDecryptionsFromValidator(kvStore, tallyRound.VoteRoundId, validatorIndex)
 		if err != nil {
 			logger.Error("PrepareProposal[partial-decrypt]: failed to check existing submission", "err", err)
+			sentry.CaptureErr(err, map[string]string{
+				"handler":  "PrepareProposal",
+				"stage":    "check_existing_pd",
+				"round_id": hex.EncodeToString(tallyRound.VoteRoundId),
+			})
 			return txs
 		}
 		if has {
@@ -138,12 +146,18 @@ func PartialDecryptPrepareProposalInjector(
 		// Compute D_i = share * C1 for every non-empty tally accumulator.
 		var entries []*types.PartialDecryptionEntry
 
+		roundHex := hex.EncodeToString(tallyRound.VoteRoundId)
 		for _, proposal := range tallyRound.Proposals {
 			tallyMap, err := voteKeeper.GetProposalTally(kvStore, tallyRound.VoteRoundId, proposal.Id)
 			if err != nil {
 				logger.Error("PrepareProposal[partial-decrypt]: failed to read tally",
-					"round", hex.EncodeToString(tallyRound.VoteRoundId),
+					"round", roundHex,
 					"proposal", proposal.Id, "err", err)
+				sentry.CaptureErr(err, map[string]string{
+					"handler":  "PrepareProposal",
+					"stage":    "read_tally",
+					"round_id": roundHex,
+				})
 				return txs
 			}
 
@@ -152,14 +166,25 @@ func PartialDecryptPrepareProposalInjector(
 				if err != nil {
 					logger.Error("PrepareProposal[partial-decrypt]: failed to unmarshal ciphertext",
 						"proposal", proposal.Id, "decision", decision, "err", err)
+					sentry.CaptureErr(err, map[string]string{
+						"handler":  "PrepareProposal",
+						"stage":    "unmarshal_ciphertext",
+						"round_id": roundHex,
+					})
 					return txs
 				}
 
 				// D_i = share_i * C1  (partial ElGamal decryption)
 				Di := ct.C1.Mul(share.Scalar)
 				if !Di.IsOnCurve() {
+					offCurveErr := fmt.Errorf("D_i not on curve (proposal=%d, decision=%d)", proposal.Id, decision)
 					logger.Error("PrepareProposal[partial-decrypt]: D_i is not on curve",
 						"proposal", proposal.Id, "decision", decision)
+					sentry.CaptureErr(offCurveErr, map[string]string{
+						"handler":  "PrepareProposal",
+						"stage":    "di_off_curve",
+						"round_id": roundHex,
+					})
 					return txs
 				}
 
@@ -168,6 +193,11 @@ func PartialDecryptPrepareProposalInjector(
 				if err != nil {
 					logger.Error("PrepareProposal[partial-decrypt]: DLEQ proof generation failed",
 						"proposal", proposal.Id, "decision", decision, "err", err)
+					sentry.CaptureErr(err, map[string]string{
+						"handler":  "PrepareProposal",
+						"stage":    "dleq_proof",
+						"round_id": roundHex,
+					})
 					return txs
 				}
 
@@ -195,6 +225,11 @@ func PartialDecryptPrepareProposalInjector(
 		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagSubmitPartialDecryption)
 		if err != nil {
 			logger.Error("PrepareProposal[partial-decrypt]: failed to encode tx", "err", err)
+			sentry.CaptureErr(err, map[string]string{
+				"handler":  "PrepareProposal",
+				"stage":    "encode_pd_tx",
+				"round_id": roundHex,
+			})
 			return txs
 		}
 
