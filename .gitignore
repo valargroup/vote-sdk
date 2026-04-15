@@ -14,6 +14,9 @@ e2e-tests/target/
 .env.*
 !.env.example
 
+# Docker testnet (auto-generated)
+docker/docker-compose.yml
+
 # macOS
 .DS_Store
 

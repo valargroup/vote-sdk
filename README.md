@@ -39,6 +39,13 @@ make init
 make start
 ```
 
+### Consensus timing defaults
+
+`svoted` overrides CometBFT defaults at startup to reduce block time (~0.91s
+with 30 validators vs ~4-6s with defaults). See
+[docs/blocktimes.md](docs/blocktimes.md) for the full parameter table, Osmosis
+comparison, and benchmark results confirming safety.
+
 ### Test
 
 ```bash

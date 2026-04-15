@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
@@ -50,24 +51,33 @@ func ComposedPrepareProposalHandler(
 	ackInjector PrepareProposalInjector,
 	partialDecryptInjector PrepareProposalInjector,
 	tallyHandler sdk.PrepareProposalHandler,
+	logger log.Logger,
 ) sdk.PrepareProposalHandler {
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
-		// Start with the mempool txs from CometBFT.
+		totalStart := time.Now()
+
 		txs := req.Txs
 
-		// Run DKG contribution injection (may prepend MsgContributeDKG).
+		start := time.Now()
 		txs = dealInjector(ctx, req, txs)
+		logger.Info("PrepareProposal: dkg-contribute injector done", "duration_ms", time.Since(start).Milliseconds())
 
-		// Run ceremony ack injection (may prepend MsgAckExecutiveAuthorityKey).
+		start = time.Now()
 		txs = ackInjector(ctx, req, txs)
+		logger.Info("PrepareProposal: ack injector done", "duration_ms", time.Since(start).Milliseconds())
 
-		// Run threshold partial decryption injection (may prepend MsgSubmitPartialDecryption).
+		start = time.Now()
 		txs = partialDecryptInjector(ctx, req, txs)
+		logger.Info("PrepareProposal: partial-decrypt injector done", "duration_ms", time.Since(start).Milliseconds())
 
-		// Run tally injection by creating a modified request with the updated txs.
+		start = time.Now()
 		modifiedReq := *req
 		modifiedReq.Txs = txs
-		return tallyHandler(ctx, &modifiedReq)
+		resp, err := tallyHandler(ctx, &modifiedReq)
+		logger.Info("PrepareProposal: tally injector done", "duration_ms", time.Since(start).Milliseconds())
+
+		logger.Info("PrepareProposal: total duration", "duration_ms", time.Since(totalStart).Milliseconds())
+		return resp, err
 	}
 }
 
