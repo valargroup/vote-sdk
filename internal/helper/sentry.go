@@ -7,8 +7,8 @@ import (
 )
 
 // InitSentry delegates to the shared sentry package.
-func InitSentry(dsn, release string, logger log.Logger) error {
-	return sentry.InitSentry(dsn, release, logger)
+func InitSentry(dsn, release, serverName string, logger log.Logger) error {
+	return sentry.InitSentry(dsn, release, serverName, logger)
 }
 
 // FlushSentry delegates to the shared sentry package.

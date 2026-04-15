@@ -14,22 +14,30 @@ var sentryEnabled atomic.Bool
 // InitSentry initializes the Sentry SDK with the given DSN. If dsn is empty,
 // Sentry remains disabled and all capture calls become no-ops. The release
 // string is attached to every event for deploy correlation (typically the
-// binary version from ldflags).
-func InitSentry(dsn, release string, logger log.Logger) error {
+// binary version from ldflags). serverName identifies the specific node
+// (e.g. the CometBFT moniker "val1") so events from different validators
+// can be distinguished in the Sentry dashboard.
+func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 	if dsn == "" {
 		return nil
 	}
 	err := sentrylib.Init(sentrylib.ClientOptions{
 		Dsn:              dsn,
 		Release:          release,
+		ServerName:       serverName,
 		SampleRate:       1.0,
 		AttachStacktrace: true,
 	})
 	if err != nil {
 		return fmt.Errorf("sentry init: %w", err)
 	}
+	if serverName != "" {
+		sentrylib.ConfigureScope(func(scope *sentrylib.Scope) {
+			scope.SetTag("validator", serverName)
+		})
+	}
 	sentryEnabled.Store(true)
-	logger.Info("sentry error tracking enabled")
+	logger.Info("sentry error tracking enabled", "server_name", serverName)
 	return nil
 }
 
