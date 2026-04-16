@@ -1,29 +1,27 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
+	"io"
+	"net/http"
+	"sync"
 	"time"
 
 	"cosmossdk.io/log"
-	"golang.org/x/sync/errgroup"
 )
 
-// Admin manages the server directory lifecycle.
+// Admin fetches and caches the voting-config from the GitHub Pages CDN.
 type Admin struct {
-	Store          *Store
-	AdminAddress   string
-	StaleThreshold int
-	PIRServers     []ServiceEntry
-	CheckBonding   BondingChecker
-	GetVoteManager VoteManagerGetter
-	Logger         log.Logger
+	configURL string
+	logger    log.Logger
+
+	mu     sync.RWMutex
+	cached *VotingConfig
 }
 
 // New creates a new Admin from the given configuration.
-func New(cfg Config, checkBonding BondingChecker, getVoteManager VoteManagerGetter, homeDir string, logger log.Logger) (*Admin, error) {
+func New(cfg Config, logger log.Logger) (*Admin, error) {
 	logger = logger.With("module", "admin")
 
 	if cfg.Disable {
@@ -31,54 +29,64 @@ func New(cfg Config, checkBonding BondingChecker, getVoteManager VoteManagerGett
 		return nil, nil
 	}
 
-	dbPath := cfg.DBPath
-	if dbPath == "" {
-		dbPath = filepath.Join(homeDir, "admin.db")
+	configURL := cfg.ConfigURL
+	if configURL == "" {
+		configURL = DefaultConfig().ConfigURL
 	}
 
-	store, err := NewStore(dbPath)
+	a := &Admin{
+		configURL: configURL,
+		logger:    logger,
+	}
+
+	if err := a.refresh(); err != nil {
+		logger.Error("initial config fetch failed, will retry", "error", err)
+	}
+
+	return a, nil
+}
+
+// GetVotingConfig returns the cached voting config, refreshing if stale.
+func (a *Admin) GetVotingConfig() (*VotingConfig, error) {
+	a.mu.RLock()
+	cfg := a.cached
+	a.mu.RUnlock()
+
+	if cfg != nil {
+		return cfg, nil
+	}
+
+	if err := a.refresh(); err != nil {
+		return nil, err
+	}
+
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.cached, nil
+}
+
+func (a *Admin) refresh() error {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(a.configURL)
 	if err != nil {
-		return nil, fmt.Errorf("create admin store: %w", err)
+		return fmt.Errorf("fetch config: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("fetch config: HTTP %d – %s", resp.StatusCode, string(body))
 	}
 
-	var pirServers []ServiceEntry
-	if cfg.PIRServers != "" {
-		if err := json.Unmarshal([]byte(cfg.PIRServers), &pirServers); err != nil {
-			logger.Error("invalid pir_servers config, using empty list", "error", err)
-		}
+	var cfg VotingConfig
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		return fmt.Errorf("decode config: %w", err)
 	}
 
-	return &Admin{
-		Store:          store,
-		AdminAddress:   cfg.AdminAddress,
-		StaleThreshold: cfg.StaleThreshold,
-		PIRServers:     pirServers,
-		CheckBonding:   checkBonding,
-		GetVoteManager: getVoteManager,
-		Logger:         logger,
-	}, nil
-}
+	a.mu.Lock()
+	a.cached = &cfg
+	a.mu.Unlock()
 
-// Start launches the background monitor goroutines. It blocks until the
-// context is cancelled.
-func (a *Admin) Start(ctx context.Context, cfg Config) error {
-	a.Logger.Info("starting admin server")
-
-	g, ctx := errgroup.WithContext(ctx)
-
-	g.Go(func() error {
-		RunHealthProber(ctx, a.Store, time.Duration(cfg.ProbeInterval)*time.Second, a.Logger)
-		return nil
-	})
-	g.Go(func() error {
-		RunStaleEvictor(ctx, a.Store, time.Duration(cfg.EvictInterval)*time.Second, cfg.StaleThreshold, a.Logger)
-		return nil
-	})
-
-	return g.Wait()
-}
-
-// Close shuts down the admin server and releases resources.
-func (a *Admin) Close() error {
-	return a.Store.Close()
+	a.logger.Info("voting config loaded", "vote_servers", len(cfg.VoteServers), "pir_servers", len(cfg.PIRServers))
+	return nil
 }
