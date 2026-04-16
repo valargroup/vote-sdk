@@ -6,11 +6,11 @@ The workflow `.github/workflows/sdk-chain-deploy.yml` builds svoted (with circui
 
 All three validators run on the same host with non-overlapping port sets:
 
-| Validator | P2P   | RPC   | REST API | pprof |
-|-----------|-------|-------|----------|-------|
-| val1      | 26156 | 26157 | 1418     | 6160  |
-| val2      | 26256 | 26257 | 1518     | 6260  |
-| val3      | 26356 | 26357 | 1618     | 6360  |
+| Validator | P2P   | RPC   | REST API | pprof | PIR  |
+|-----------|-------|-------|----------|-------|------|
+| val1      | 26156 | 26157 | 1418     | 6160  | 3000 |
+| val2      | 26256 | 26257 | 1518     | 6260  | —    |
+| val3      | 26356 | 26357 | 1618     | 6360  | —    |
 
 Val1 is the genesis validator and is the primary API endpoint (reverse-proxied by Caddy). Val2 and val3 join after chain start via `MsgCreateValidatorWithPallasKey`.
 
@@ -63,7 +63,7 @@ Each unit starts `svoted` with a separate `--home` directory. Val1 additionally 
 
 | Unit          | Home directory                   | Notes                                     |
 |---------------|----------------------------------|--------------------------------------------|
-| svoted-val1   | /opt/shielded-vote/.svoted-val1  | `--serve-ui --ui-dist /opt/shielded-vote/ui/dist` |
+| svoted-val1   | /opt/shielded-vote/.svoted-val1  | `--serve-ui --ui-dist /opt/shielded-vote/ui/dist --pir` |
 | svoted-val2   | /opt/shielded-vote/.svoted-val2  |                                            |
 | svoted-val3   | /opt/shielded-vote/.svoted-val3  |                                            |
 
@@ -176,6 +176,65 @@ sudo journalctl -u svoted-val3 -f
 tail -f /opt/shielded-vote/.svoted-val1/node.log
 ```
 
-## 11. Same host as nullifier-ingest
+## 11. Embedded PIR server (nf-server)
+
+The `nf-server` binary from [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) is bundled inside `svoted` at build time via `go:embed`. At runtime, passing `--pir` on the start command extracts and spawns it as a managed child process on port 3000.
+
+### Enabling PIR
+
+Only val1 runs PIR in deployment. The val1 systemd unit includes `--pir` in its `ExecStart`:
+
+```
+ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted-val1 --serve-ui --ui-dist /opt/shielded-vote/ui/dist --pir
+```
+
+Val2 and val3 omit `--pir` — they set `SVOTE_PIR_URL=http://localhost:3000` to query val1's PIR server.
+
+### Port reservation
+
+| Port | Service                   |
+|------|---------------------------|
+| 3000 | PIR server (val1 only)    |
+
+Port 3000 does not conflict with any existing validator port in the matrix (P2P, RPC, gRPC, REST, pprof all use different ranges).
+
+### `[pir]` section in `app.toml`
+
+Written to all three validators by `init_multi.sh`. Settings only — no enable/disable key (the `--pir` CLI flag controls enablement).
+
+| Key            | Default                                 | Description                                               |
+|----------------|-----------------------------------------|-----------------------------------------------------------|
+| `port`         | `3000`                                  | Listen port for nf-server.                                |
+| `data_dir`     | `$HOME/<val>/nullifiers`                | Directory with `nullifiers.bin`, `.checkpoint`, `.index`. |
+| `pir_data_dir` | `$HOME/<val>/nullifiers/pir-data`       | Directory with tier files (`tier0.bin`, `tier1.bin`, etc). |
+| `lwd_url`      | `https://zec.rocks:443`                 | Lightwalletd URL for `/snapshot/prepare` rebuilds.        |
+| `chain_url`    | `""`                                    | Optional chain REST URL (blocks rebuilds during active rounds). |
+
+CLI flags `--pir-port`, `--pir-data-dir`, `--pir-pir-data-dir`, `--pir-lwd-url` override the config file values.
+
+### `svoted pir` subcommands
+
+The embedded `nf-server` binary can be run directly for operational tasks:
+
+```bash
+svoted pir ingest --data-dir /opt/shielded-vote/nullifiers
+svoted pir export --pir-data-dir /opt/shielded-vote/nullifiers/pir-data
+svoted pir serve --port 3000 --data-dir /opt/shielded-vote/nullifiers
+```
+
+### Data bootstrap
+
+The ~6 GB of PIR tier data must be present on val1's disk before `--pir` can serve queries. After first deploy:
+
+1. `svoted pir ingest --data-dir /opt/shielded-vote/.svoted-val1/nullifiers`
+2. `svoted pir export --pir-data-dir /opt/shielded-vote/.svoted-val1/nullifiers/pir-data`
+
+If tier files are missing at startup, `nf-server` exits with an error; `svoted` continues running normally.
+
+### CI build
+
+The `vote-nullifier-pir` repo is checked out at a pinned ref (`VOTE_NULLIFIER_PIR_REF` in the workflow `env` block). When bumping `imt-tree` in `circuits/Cargo.lock`, bump this ref to the matching tag to avoid protocol-version mismatches.
+
+## 12. Same host as nullifier-ingest
 
 If the same machine is used for both nullifier-ingest and the SDK chain, that's fine — they use different deploy paths (`/opt/nullifier-ingest` vs `/opt/shielded-vote`) and different systemd units.

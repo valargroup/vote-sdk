@@ -39,13 +39,13 @@ jobs:
             done
             sudo pkill -9 -x svoted || true
             for i in $(seq 1 20); do
-              if ! ss -tlnp | grep -qE ':26156|:26256|:26356|:6160|:6260|:6360'; then
+              if ! ss -tlnp | grep -qE ':26156|:26256|:26356|:6160|:6260|:6360|:3000'; then
                 echo "Ports freed"
                 break
               fi
               if [ "$i" = "20" ]; then
                 echo "WARN: ports still bound after 20s, forcing..."
-                sudo fuser -k 26156/tcp 26256/tcp 26356/tcp 6160/tcp 6260/tcp 6360/tcp || true
+                sudo fuser -k 26156/tcp 26256/tcp 26356/tcp 6160/tcp 6260/tcp 6360/tcp 3000/tcp || true
                 sleep 1
               fi
               sleep 1

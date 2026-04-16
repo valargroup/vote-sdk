@@ -134,20 +134,26 @@ func initRootCmd(
 		EncryptEAKeyCmd(),
 		InitValidatorKeysCmd(),
 		SignArbitraryCmd(),
+		PIRCmd(),
 	)
 
 	helperSetup := helperPostSetup(&svoteAppRef)
 	adminSetup := adminPostSetup(&svoteAppRef)
+	pirSetup := pirPostSetup(&svoteAppRef)
 	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newAppFn, appExport, server.StartCmdOptions{
 		PostSetup: func(svrCtx *server.Context, clientCtx client.Context, ctx context.Context, g *errgroup.Group) error {
 			if err := helperSetup(svrCtx, clientCtx, ctx, g); err != nil {
 				return err
 			}
-			return adminSetup(svrCtx, clientCtx, ctx, g)
+			if err := adminSetup(svrCtx, clientCtx, ctx, g); err != nil {
+				return err
+			}
+			return pirSetup(svrCtx, clientCtx, ctx, g)
 		},
 		AddFlags: func(cmd *cobra.Command) {
 			addHelperFlags(cmd)
 			addAdminFlags(cmd)
+			addPIRFlags(cmd)
 		},
 	})
 

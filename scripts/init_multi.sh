@@ -61,6 +61,7 @@ HOMES=("$HOME_VAL1" "$HOME_VAL2" "$HOME_VAL3")
 # gRPC-web:              9391    9491    9591
 # REST API:              1418    1518    1618
 # pprof:                 6160    6260    6360
+# PIR (val1 only):       3000    —       —
 P2P_PORTS=(26156 26256 26356)
 RPC_PORTS=(26157 26257 26357)
 GRPC_PORTS=(9390 9490 9590)
@@ -263,6 +264,39 @@ ADMINCFG
 }
 
 # ---------------------------------------------------------------------------
+# Helper: append [pir] config section
+# ---------------------------------------------------------------------------
+configure_pir() {
+    local home="$1"
+    local port="${2:-3000}"
+
+    local app_toml="$home/config/app.toml"
+    cat >> "$app_toml" <<PIRCFG
+
+###############################################################################
+###                         PIR Server                                      ###
+###############################################################################
+
+[pir]
+
+# Listen port for the embedded nf-server (only bound when --pir is passed).
+port = ${port}
+
+# Directory containing nullifiers.bin, .checkpoint, .index.
+data_dir = "${home}/nullifiers"
+
+# Directory containing PIR tier files (tier0.bin, tier1.bin, tier2.bin).
+pir_data_dir = "${home}/nullifiers/pir-data"
+
+# Lightwalletd URL for /snapshot/prepare rebuilds.
+lwd_url = "https://zec.rocks:443"
+
+# Optional chain REST URL (blocks /snapshot/prepare during active rounds).
+chain_url = ""
+PIRCFG
+}
+
+# ---------------------------------------------------------------------------
 # Detect public IP for heartbeat URLs (CI mode only)
 # ---------------------------------------------------------------------------
 ADMIN_SERVER_URL=""
@@ -378,6 +412,8 @@ else
     configure_helper "$HOME_VAL1" "${API_PORTS[0]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[0]}"
 fi
 
+configure_pir "$HOME_VAL1" 3000
+
 # ---------------------------------------------------------------------------
 # Step 2: Configure Validators 2 and 3 (copy genesis, set peers)
 # ---------------------------------------------------------------------------
@@ -412,6 +448,8 @@ for i in 2 3; do
     else
         configure_helper "$home" "${API_PORTS[$idx]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[$idx]}"
     fi
+
+    configure_pir "$home" 3000
 
     # Set persistent_peers to val1.
     set_persistent_peers "$home" "$VAL1_PEER"

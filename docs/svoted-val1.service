@@ -6,8 +6,8 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/shielded-vote
-Environment="SVOTE_PIR_URL=http://157.180.63.235:3000"
-ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted-val1 --serve-ui --ui-dist /opt/shielded-vote/ui/dist
+Environment="SVOTE_PIR_URL=http://localhost:3000"
+ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted-val1 --serve-ui --ui-dist /opt/shielded-vote/ui/dist --pir
 Restart=on-failure
 
 [Install]

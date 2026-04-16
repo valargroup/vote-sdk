@@ -1,6 +1,6 @@
 # Go binary
-svoted
-create-val-tx
+/svoted
+/create-val-tx
 
 # Go build cache
 .cache/
@@ -8,6 +8,9 @@ create-val-tx
 # Rust build artifacts
 circuits/target/
 e2e-tests/target/
+
+# Embedded PIR binary (built by make pir-binary)
+ffi/pir/bin/nf-server
 
 # Environment (secrets live here — never commit)
 .env

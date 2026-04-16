@@ -8,6 +8,11 @@ VERSION := $(or $(VERSION),$(shell git describe --tags --always --dirty 2>/dev/n
 COMMIT  := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_TAGS_LIST := $(if $(BUILD_TAGS),$(BUILD_TAGS),)
 
+FFI_TAGS := halo2,redpallas
+ifdef EMBED_PIR
+FFI_TAGS := $(FFI_TAGS),embed_pir
+endif
+
 VERSION_PKG := github.com/cosmos/cosmos-sdk/version
 LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
            -X $(VERSION_PKG).AppName=svoted \
@@ -15,23 +20,23 @@ LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
            -X $(VERSION_PKG).Commit=$(COMMIT) \
            -X "$(VERSION_PKG).BuildTags=$(BUILD_TAGS_LIST)"
 
-.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
+.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin pir-binary
 
 ## install: Build and install the svoted binary to $GOPATH/bin
 install:
 	go install -ldflags '$(LDFLAGS)' ./cmd/svoted
 
-## install-ffi: Build and install svoted with real RedPallas + Halo2 verification (requires: make circuits)
+## install-ffi: Build and install svoted with real RedPallas + Halo2 verification (requires: make circuits; set EMBED_PIR=1 after make pir-binary to bundle PIR)
 install-ffi: circuits
-	go install -tags "halo2,redpallas" -ldflags '$(LDFLAGS)' ./cmd/svoted
+	go install -tags "$(FFI_TAGS)" -ldflags '$(LDFLAGS)' ./cmd/svoted
 
 ## build: Build the svoted binary locally
 build:
 	go build -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/svoted
 
-## build-ffi: Build svoted with real RedPallas + Halo2 (requires: make circuits). Use this or run "make circuits" before go build -tags halo2,redpallas.
+## build-ffi: Build svoted with real RedPallas + Halo2 (requires: make circuits; set EMBED_PIR=1 after make pir-binary to bundle PIR)
 build-ffi: circuits
-	go build -tags "halo2,redpallas" -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/svoted
+	go build -tags "$(FFI_TAGS)" -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/svoted
 
 ## build-create-val-tx: Build the create-val-tx helper binary locally
 build-create-val-tx:
@@ -125,6 +130,19 @@ fixtures-ts: fixtures
 ## circuits: Build the Rust static library (requires cargo)
 circuits:
 	cargo build --release --manifest-path circuits/Cargo.toml
+
+# ---------------------------------------------------------------------------
+# Embedded PIR server
+# ---------------------------------------------------------------------------
+
+PIR_REPO ?= $(or $(VOTE_NULLIFIER_PIR_DIR),../vote-nullifier-pir)
+PIR_EMBED_DIR := ffi/pir/bin
+
+## pir-binary: Build the nf-server Rust binary and copy it into the go:embed directory
+pir-binary:
+	cargo build --release --features serve -p nf-server --manifest-path $(PIR_REPO)/Cargo.toml
+	mkdir -p $(PIR_EMBED_DIR)
+	cp $(PIR_REPO)/target/release/nf-server $(PIR_EMBED_DIR)/nf-server
 
 ## circuits-test: Run Rust circuit unit tests
 circuits-test:
