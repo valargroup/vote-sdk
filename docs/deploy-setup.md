@@ -63,7 +63,7 @@ Each unit starts `svoted` with a separate `--home` directory. Val1 additionally 
 
 | Unit          | Home directory                   | Notes                                     |
 |---------------|----------------------------------|--------------------------------------------|
-| svoted-val1   | /opt/shielded-vote/.svoted-val1  | `--serve-ui --ui-dist /opt/shielded-vote/ui/dist --pir` |
+| svoted-val1   | /opt/shielded-vote/.svoted-val1  | `--serve-ui --ui-dist /opt/shielded-vote/ui/dist --serve-pir` |
 | svoted-val2   | /opt/shielded-vote/.svoted-val2  |                                            |
 | svoted-val3   | /opt/shielded-vote/.svoted-val3  |                                            |
 
@@ -178,17 +178,17 @@ tail -f /opt/shielded-vote/.svoted-val1/node.log
 
 ## 11. Embedded PIR server (nf-server)
 
-The `nf-server` binary from [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) is bundled inside `svoted` at build time via `go:embed`. At runtime, passing `--pir` on the start command extracts and spawns it as a managed child process on port 3000.
+The `nf-server` binary from [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) is bundled inside `svoted` at build time via `go:embed`. At runtime, passing `--serve-pir` on the start command extracts and spawns it as a managed child process on port 3000.
 
 ### Enabling PIR
 
-Only val1 runs PIR in deployment. The val1 systemd unit includes `--pir` in its `ExecStart`:
+Only val1 runs PIR in deployment. The val1 systemd unit includes `--serve-pir` in its `ExecStart`:
 
 ```
-ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted-val1 --serve-ui --ui-dist /opt/shielded-vote/ui/dist --pir
+ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted-val1 --serve-ui --ui-dist /opt/shielded-vote/ui/dist --serve-pir
 ```
 
-Val2 and val3 omit `--pir` — they set `SVOTE_PIR_URL=http://localhost:3000` to query val1's PIR server.
+Val2 and val3 omit `--serve-pir` — they set `SVOTE_PIR_URL=http://localhost:3000` to query val1's PIR server.
 
 ### Port reservation
 
@@ -200,7 +200,7 @@ Port 3000 does not conflict with any existing validator port in the matrix (P2P,
 
 ### `[pir]` section in `app.toml`
 
-Written to all three validators by `init_multi.sh`. Settings only — no enable/disable key (the `--pir` CLI flag controls enablement).
+Written to all three validators by `init_multi.sh`. Settings only — no enable/disable key (the `--serve-pir` CLI flag controls enablement).
 
 | Key            | Default                                 | Description                                               |
 |----------------|-----------------------------------------|-----------------------------------------------------------|
@@ -224,7 +224,7 @@ svoted pir serve --port 3000 --data-dir /opt/shielded-vote/nullifiers
 
 ### Data bootstrap
 
-The ~6 GB of PIR tier data must be present on val1's disk before `--pir` can serve queries. After first deploy:
+The ~6 GB of PIR tier data must be present on val1's disk before `--serve-pir` can serve queries. After first deploy:
 
 1. `svoted pir ingest --data-dir /opt/shielded-vote/.svoted-val1/nullifiers`
 2. `svoted pir export --pir-data-dir /opt/shielded-vote/.svoted-val1/nullifiers/pir-data`
