@@ -18,7 +18,7 @@ import (
 
 // addPIRFlags registers PIR-related CLI flags on the start command.
 func addPIRFlags(cmd *cobra.Command) {
-	cmd.Flags().Bool("pir", false, "Enable the embedded PIR server")
+	cmd.Flags().Bool("serve-pir", false, "Enable the embedded PIR server")
 	cmd.Flags().Int("pir-port", 0, "PIR server listen port (default: from [pir].port or 3000)")
 	cmd.Flags().String("pir-data-dir", "", "Directory containing nullifiers.bin, .checkpoint, .index")
 	cmd.Flags().String("pir-pir-data-dir", "", "Directory containing PIR tier files")
@@ -121,13 +121,13 @@ func extractPort(addr string) int {
 	return 0
 }
 
-// pirPostSetup starts the embedded PIR server when --pir is passed.
+// pirPostSetup starts the embedded PIR server when --serve-pir is passed.
 func pirPostSetup(
 	_ **app.SvoteApp,
 ) func(svrCtx *server.Context, clientCtx client.Context, ctx context.Context, g *errgroup.Group) error {
 	return func(svrCtx *server.Context, _ client.Context, ctx context.Context, g *errgroup.Group) error {
-		if !svrCtx.Viper.GetBool("pir") {
-			svrCtx.Logger.Info("embedded PIR disabled (pass --pir to enable)")
+		if !svrCtx.Viper.GetBool("serve-pir") {
+			svrCtx.Logger.Info("embedded PIR disabled (pass --serve-pir to enable)")
 			return nil
 		}
 
