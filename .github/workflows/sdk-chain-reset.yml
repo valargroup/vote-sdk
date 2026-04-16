@@ -84,29 +84,6 @@ jobs:
           VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
           SVOTE_HELPER_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
-      - name: Reset Edge Config (clear stale validator state)
-        if: ${{ inputs.reset_chain == true }}
-        env:
-          VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
-          EDGE_CONFIG_ID: ${{ secrets.EDGE_CONFIG_ID }}
-        run: |
-          # Chain reset generates fresh validator keys, so all previous
-          # entries in Edge Config are stale. Clear them so the helpers
-          # register into a clean slate.
-          curl -sf -X PATCH \
-            "https://api.vercel.com/v1/edge-config/${EDGE_CONFIG_ID}/items" \
-            -H "Authorization: Bearer ${VERCEL_API_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "items": [
-                {"operation": "upsert", "key": "voting-config", "value": {"version": 1, "vote_servers": [], "pir_servers": [{"url": "https://46-101-255-48.sslip.io/nullifier", "label": "Primary"}]}},
-                {"operation": "upsert", "key": "approved-servers", "value": []},
-                {"operation": "upsert", "key": "pending-registrations", "value": []},
-                {"operation": "upsert", "key": "server-pulses", "value": {}}
-              ]
-            }'
-          echo "Edge Config reset"
-
       - name: Start services
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -157,24 +134,6 @@ jobs:
               --rpc-url tcp://localhost:26157
             echo "Waiting for val3 registration tx to be committed..."
             sleep 6
-
-      - name: Restart services to re-register with Edge Config
-        if: ${{ inputs.reset_chain == true }}
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          script: |
-            # Helpers tried to register on first start but validators weren't
-            # bonded yet. Now that create-val-tx has run, restart so the
-            # helpers re-run tryRegister against bonded validators.
-            # Stagger restarts so each helper's Edge Config write completes
-            # before the next one starts (avoids read-modify-write races).
-            for svc in svoted-val1 svoted-val2 svoted-val3; do
-              sudo systemctl restart "$svc"
-              sleep 5
-            done
 
       - name: Verify services healthy
         uses: appleboy/ssh-action@v1.0.3
