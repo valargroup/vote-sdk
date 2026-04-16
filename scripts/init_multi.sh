@@ -233,24 +233,17 @@ set_persistent_peers() {
 configure_admin() {
     local home="$1"
     local disable="${2:-true}"
-    local admin_address="${3:-}"
 
     local app_toml="$home/config/app.toml"
     cat >> "$app_toml" <<ADMINCFG
 
 ###############################################################################
-###                         Admin Server                                    ###
+###                         Admin Server (CDN config proxy)                 ###
 ###############################################################################
 
 [admin]
 
 disable = ${disable}
-db_path = ""
-admin_address = "${admin_address}"
-probe_interval = 1800
-evict_interval = 120
-stale_threshold = 21600
-pir_servers = ""
 
 ###############################################################################
 ###                         Admin UI                                        ###
@@ -399,8 +392,8 @@ $BINARY pallas-keygen --home "$HOME_VAL1"
 configure_config_toml "$HOME_VAL1" "${P2P_PORTS[0]}" "${RPC_PORTS[0]}" "${PPROF_PORTS[0]}"
 configure_app_toml "$HOME_VAL1" "${API_PORTS[0]}" "${GRPC_PORTS[0]}" "${GRPC_WEB_PORTS[0]}" "${RPC_PORTS[0]}"
 
-# Val1 runs the admin server. All validators register with it.
-configure_admin "$HOME_VAL1" "false" "$MANAGER_ADDR"
+# Val1 runs the admin config proxy (CDN → /api/voting-config).
+configure_admin "$HOME_VAL1" "false"
 
 # Helper server on all validators — each needs its own to accept shares when
 # the iOS app distributes encrypted shares across per-validator URLs.
@@ -489,5 +482,5 @@ else
 fi
 
 echo ""
-echo "Validators will auto-register with the admin server at:"
-echo "  ${VAL1_ADMIN_URL}/api/register-validator"
+echo "Voting config served from GitHub Pages CDN at:"
+echo "  GET ${VAL1_ADMIN_URL}/api/voting-config"

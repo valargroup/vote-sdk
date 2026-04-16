@@ -137,19 +137,16 @@ make start-admin   # builds UI then starts svoted with --serve-ui
 
 ## 8. Admin server configuration
 
-The admin server manages the validator directory (registration, heartbeat, approved servers). It runs inside `svoted` on **all validators** and shares each validator's REST API port. It is configured in `app.toml` under `[admin]` (written by `init_multi.sh --ci`):
+The admin server is a thin proxy that fetches the voting-config JSON from the GitHub Pages CDN (`valargroup/token-holder-voting-config`). Server registration, approval, and removal happen via PRs on that config repo — no write endpoints here.
 
-| Key                | Default  | Description                                                                          |
-| ------------------ | -------- | ------------------------------------------------------------------------------------ |
-| `disable`          | `false`  | Set to `true` to disable the admin server entirely.                                  |
-| `db_path`          | `""`     | Path to SQLite database. Empty = `$HOME/<val>/admin.db`.                             |
-| `admin_address`    | `""`     | Bech32 address authorized to approve registrations.                                  |
-| `probe_interval`   | `1800`   | How often to probe registered servers (seconds).                                     |
-| `evict_interval`   | `120`    | How often to check for stale servers to evict (seconds).                             |
-| `stale_threshold`  | `21600`  | Seconds without a heartbeat before a server is considered stale.                     |
-| `pir_servers`      | `""`     | Comma-separated PIR server URLs to include in the voting config.                     |
+It runs inside `svoted` on **val1 only** and shares val1's REST API port. It is configured in `app.toml` under `[admin]` (written by `init_multi.sh --ci`):
 
-API routes are served under `/api/` (e.g. `/api/voting-config`, `/api/approved-servers`, `/api/pending-registrations`).
+| Key          | Default  | Description                                                                                |
+| ------------ | -------- | ------------------------------------------------------------------------------------------ |
+| `disable`    | `true`   | Set to `false` to enable the config proxy on this validator.                               |
+| `config_url` | staging  | GitHub Pages CDN URL for the voting-config JSON. Defaults to the staging environment.      |
+
+A single read-only endpoint is served: `GET /api/voting-config`.
 
 ## 9. Deploy health checks
 
