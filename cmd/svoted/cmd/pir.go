@@ -163,7 +163,10 @@ func pirPostSetup(
 			if ctx.Err() != nil {
 				return nil
 			}
-			return err
+			if err != nil {
+				logger.Error("nf-server exited", "error", err)
+			}
+			return nil
 		})
 
 		return nil
