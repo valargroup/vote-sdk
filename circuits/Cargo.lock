@@ -317,6 +317,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "halo2_gadgets"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45824ce0dd12e91ec0c68ebae2a7ed8ae19b70946624c849add59f1d1a62a143"
+dependencies = [
+ "arrayvec",
+ "bitvec",
+ "ff",
+ "group",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "lazy_static",
+ "pasta_curves",
+ "rand",
+ "sinsemilla",
+ "subtle",
+ "uint",
+]
+
+[[package]]
 name = "halo2_legacy_pdqsort"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -371,7 +391,7 @@ checksum = "7d10acb863735c6c82c0c79e8752696096a86eb4d1e2fe0005ded4fae066297e"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets",
+ "halo2_gadgets 0.3.1",
  "hex",
  "pasta_curves",
  "rayon",
@@ -384,7 +404,7 @@ source = "git+https://github.com/valargroup/vote-nullifier-pir.git#a7b30464b6ba7
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets",
+ "halo2_gadgets 0.3.1",
  "hex",
  "pasta_curves",
  "rayon",
@@ -529,8 +549,8 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "orchard"
-version = "0.11.0"
-source = "git+https://github.com/valargroup/voting-circuits.git#ecca2f0e9faf6b077920fd2a2e96020e5f1e7254"
+version = "0.12.0"
+source = "git+https://github.com/valargroup/voting-circuits.git?branch=greg%2Forchard-0.12#5df812dab06f901cfbbd1daeb76d65f8c059c490"
 dependencies = [
  "aes",
  "bitvec",
@@ -540,7 +560,7 @@ dependencies = [
  "fpe",
  "getset",
  "group",
- "halo2_gadgets",
+ "halo2_gadgets 0.4.0",
  "halo2_poseidon",
  "halo2_proofs",
  "hex",
@@ -550,6 +570,7 @@ dependencies = [
  "nonempty",
  "pasta_curves",
  "rand",
+ "rand_core",
  "reddsa",
  "serde",
  "sinsemilla",
@@ -778,7 +799,7 @@ dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "halo2_gadgets",
+ "halo2_gadgets 0.4.0",
  "halo2_proofs",
  "hex",
  "imt-tree 0.1.0 (git+https://github.com/valargroup/vote-nullifier-pir.git)",
@@ -944,11 +965,11 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/zcash_voting.git#eb5ac7860847cb278506abf60abe9619b153fa26"
+source = "git+https://github.com/valargroup/zcash_voting.git?branch=greg%2Forchard-0.12#2711a5685fe47ac79450877d9814eee1aebd9524"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets",
+ "halo2_gadgets 0.3.1",
  "imt-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "incrementalmerkletree",
  "lazy_static",
@@ -960,12 +981,12 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/voting-circuits.git#ecca2f0e9faf6b077920fd2a2e96020e5f1e7254"
+source = "git+https://github.com/valargroup/voting-circuits.git?branch=greg%2Forchard-0.12#5df812dab06f901cfbbd1daeb76d65f8c059c490"
 dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "halo2_gadgets",
+ "halo2_gadgets 0.4.0",
  "halo2_poseidon",
  "halo2_proofs",
  "incrementalmerkletree",
