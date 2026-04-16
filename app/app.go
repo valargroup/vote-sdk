@@ -353,7 +353,7 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 		return h.ShareNullifierChecker
 	}, app.Logger().With("module", "helper"))
 
-	// Register admin server routes (server directory, registration, heartbeat).
+	// Register admin server routes (voting-config proxy from GitHub Pages CDN).
 	admin.RegisterRoutes(apiSvr.Router, func() *admin.Admin {
 		return app.GetAdmin()
 	}, app.Logger().With("module", "admin"))
