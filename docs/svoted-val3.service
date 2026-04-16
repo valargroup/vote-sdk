@@ -6,7 +6,7 @@ After=network.target svoted-val1.service
 Type=simple
 User=root
 WorkingDirectory=/opt/shielded-vote
-Environment="SVOTE_PIR_URL=http://157.180.63.235:3000"
+Environment="SVOTE_PIR_URL=http://localhost:3000"
 ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted-val3
 Restart=on-failure
 

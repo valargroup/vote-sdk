@@ -18,6 +18,7 @@ permissions:
 
 env:
   DEPLOY_PATH: /opt/shielded-vote
+  VOTE_NULLIFIER_PIR_REF: v0.0.7
 
 jobs:
   build:
@@ -44,10 +45,26 @@ jobs:
           key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-circuits-
+      - name: Checkout vote-nullifier-pir
+        uses: actions/checkout@v4
+        with:
+          repository: valargroup/vote-nullifier-pir
+          ref: ${{ env.VOTE_NULLIFIER_PIR_REF }}
+          path: vote-nullifier-pir
+      - name: Cache nf-server build
+        uses: actions/cache@v4
+        with:
+          path: vote-nullifier-pir/target
+          key: ${{ runner.os }}-nfserver-${{ env.VOTE_NULLIFIER_PIR_REF }}
+      - name: Build embedded nf-server
+        run: make pir-binary
+        env:
+          VOTE_NULLIFIER_PIR_DIR: vote-nullifier-pir
       - name: Build SDK binaries
         run: mise run build && mise run build:create-val-tx
         env:
-          BUILD_TAGS: halo2 redpallas
+          BUILD_TAGS: halo2 redpallas embed_pir
+          EMBED_PIR: "1"
       - name: Build admin UI
         run: cd ui && npm install && npm run build
       - name: Copy init script to build root

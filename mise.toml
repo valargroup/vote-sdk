@@ -33,6 +33,10 @@ run = "make build-create-val-tx"
 description = "Build Rust circuit static library"
 run = "make circuits"
 
+[tasks."build:pir"]
+description = "Build embedded nf-server PIR binary"
+run = "make pir-binary"
+
 # ── chain:* ─────────────────────────────────────────────────────────
 
 [tasks."chain:init"]
