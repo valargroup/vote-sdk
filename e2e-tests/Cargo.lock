@@ -600,7 +600,6 @@ dependencies = [
  "halo2_gadgets",
  "hex",
  "incrementalmerkletree",
- "librustvoting",
  "orchard",
  "pasta_curves",
  "rand",
@@ -614,6 +613,7 @@ dependencies = [
  "vote-commitment-tree",
  "vote-commitment-tree-client",
  "voting-circuits",
+ "zcash_voting",
 ]
 
 [[package]]
@@ -1313,7 +1313,8 @@ dependencies = [
 [[package]]
 name = "imt-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/vote-nullifier-pir.git?branch=main#cb71caf89120e47f9ad07c5bd7de9afab4f3668b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d10acb863735c6c82c0c79e8752696096a86eb4d1e2fe0005ded4fae066297e"
 dependencies = [
  "anyhow",
  "ff",
@@ -1480,38 +1481,6 @@ name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
-
-[[package]]
-name = "librustvoting"
-version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git#48af429ad7898aac776fbec31268fffd175554f1"
-dependencies = [
- "blake2b_simd",
- "ff",
- "group",
- "halo2_gadgets",
- "halo2_proofs",
- "hex",
- "incrementalmerkletree",
- "nonempty",
- "orchard",
- "pasta_curves",
- "pczt",
- "pir-client",
- "rand",
- "rusqlite",
- "serde",
- "serde_json",
- "subtle",
- "thiserror 2.0.18",
- "vote-commitment-tree",
- "vote-commitment-tree-client",
- "voting-circuits",
- "zcash_keys",
- "zcash_primitives",
- "zcash_protocol",
- "zip32",
-]
 
 [[package]]
 name = "libsqlite3-sys"
@@ -1841,30 +1810,30 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 [[package]]
 name = "pir-client"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/vote-nullifier-pir.git?branch=main#cb71caf89120e47f9ad07c5bd7de9afab4f3668b"
+source = "git+https://github.com/valargroup/vote-nullifier-pir.git?rev=d976e13#d976e13e5a69e5f03f0cede235af18c1257a6895"
 dependencies = [
  "anyhow",
  "ff",
  "futures",
  "hex",
- "imt-tree 0.1.0 (git+https://github.com/valargroup/vote-nullifier-pir.git?branch=main)",
+ "imt-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log",
  "pasta_curves",
  "pir-types",
  "reqwest",
  "serde_json",
  "tokio",
- "ypir",
+ "valar-ypir",
 ]
 
 [[package]]
 name = "pir-types"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/vote-nullifier-pir.git?branch=main#cb71caf89120e47f9ad07c5bd7de9afab4f3668b"
+source = "git+https://github.com/valargroup/vote-nullifier-pir.git?rev=d976e13#d976e13e5a69e5f03f0cede235af18c1257a6895"
 dependencies = [
  "anyhow",
  "ff",
- "imt-tree 0.1.0 (git+https://github.com/valargroup/vote-nullifier-pir.git?branch=main)",
+ "imt-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "pasta_curves",
  "serde",
 ]
@@ -2553,20 +2522,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 
 [[package]]
-name = "spiral-rs"
-version = "0.4.0"
-source = "git+https://github.com/valargroup/spiral-rs.git?branch=valar%2Favoid-avx512#e06c730f958ddd0717fda43ae43eb7c628290bd4"
-dependencies = [
- "fastrand",
- "getrandom 0.2.17",
- "rand",
- "rand_chacha",
- "serde_json",
- "sha2 0.10.9",
- "subtle",
-]
-
-[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3017,6 +2972,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
+name = "valar-spiral-rs"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce897de77f8b80c06e3457da2db3585333d2882f9e9f420ac8a79ab6e6a43f09"
+dependencies = [
+ "fastrand",
+ "getrandom 0.2.17",
+ "rand",
+ "rand_chacha",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+]
+
+[[package]]
+name = "valar-ypir"
+version = "0.1.0"
+source = "git+https://github.com/valargroup/ypir.git?branch=valar%2Fartifact#970156c297df90bb1871b39e04f0d03b8036f4f9"
+dependencies = [
+ "cc",
+ "clap",
+ "env_logger",
+ "fastrand",
+ "log",
+ "rand",
+ "rand_chacha",
+ "serde",
+ "serde_json",
+ "sha1",
+ "test-log",
+ "valar-spiral-rs",
+]
+
+[[package]]
 name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3048,12 +3037,12 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git#48af429ad7898aac776fbec31268fffd175554f1"
+source = "git+https://github.com/valargroup/zcash_voting.git#eb5ac7860847cb278506abf60abe9619b153fa26"
 dependencies = [
  "anyhow",
  "ff",
  "halo2_gadgets",
- "imt-tree 0.1.0 (git+https://github.com/valargroup/vote-nullifier-pir.git)",
+ "imt-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "incrementalmerkletree",
  "lazy_static",
  "libc",
@@ -3064,7 +3053,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree-client"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git#48af429ad7898aac776fbec31268fffd175554f1"
+source = "git+https://github.com/valargroup/zcash_voting.git#eb5ac7860847cb278506abf60abe9619b153fa26"
 dependencies = [
  "base64",
  "clap",
@@ -3473,25 +3462,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ypir"
-version = "0.1.0"
-source = "git+https://github.com/valargroup/ypir.git?branch=valar%2Fartifact#bb4d68bf0022b1b6cefc1fda8bf25ea8bce36fef"
-dependencies = [
- "cc",
- "clap",
- "env_logger",
- "fastrand",
- "log",
- "rand",
- "rand_chacha",
- "serde",
- "serde_json",
- "sha1",
- "spiral-rs",
- "test-log",
-]
-
-[[package]]
 name = "zcash_address"
 version = "0.10.1"
 source = "git+https://github.com/valargroup/librustzcash.git?branch=valargroup%2Fpczt-governance-extensions-0.11#b167c8d4b9827e185675f9cf538bb66abaae1349"
@@ -3650,6 +3620,38 @@ dependencies = [
  "zcash_protocol",
  "zcash_script",
  "zcash_spec",
+ "zip32",
+]
+
+[[package]]
+name = "zcash_voting"
+version = "0.1.0"
+source = "git+https://github.com/valargroup/zcash_voting.git#eb5ac7860847cb278506abf60abe9619b153fa26"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "group",
+ "halo2_gadgets",
+ "halo2_proofs",
+ "hex",
+ "incrementalmerkletree",
+ "nonempty",
+ "orchard",
+ "pasta_curves",
+ "pczt",
+ "pir-client",
+ "rand",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "subtle",
+ "thiserror 2.0.18",
+ "vote-commitment-tree",
+ "vote-commitment-tree-client",
+ "voting-circuits",
+ "zcash_keys",
+ "zcash_primitives",
+ "zcash_protocol",
  "zip32",
 ]
 
