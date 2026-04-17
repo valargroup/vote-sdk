@@ -51,7 +51,7 @@ func DefaultAllowedMessages() []string {
 		"/svote.v1.MsgRegisterPallasKey",
 		"/svote.v1.MsgRotatePallasKey",
 		"/svote.v1.MsgCreateValidatorWithPallasKey",
-		"/svote.v1.MsgUpdateAdmins",
+		"/svote.v1.MsgUpdateVoteManagers",
 		"/svote.v1.MsgAuthorizedSend",
 
 		// Staking — only validator creation and metadata edits are allowed.

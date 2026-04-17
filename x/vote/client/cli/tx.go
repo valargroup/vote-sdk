@@ -33,8 +33,8 @@ func GetTxCmd() *cobra.Command {
 		CmdRegisterPallasKey(),
 		CmdRotatePallasKey(),
 		CmdCreateValidatorWithPallasKey(),
-		// Admin commands — signed by any current admin (any-of-N).
-		CmdUpdateAdmins(),
+		// Admin commands — signed by any current vote manager (any-of-N).
+		CmdUpdateVoteManagers(),
 		CmdCreateVotingSession(),
 		CmdSubmitTally(),
 		// Token transfer — uses whitelisted MsgAuthorizedSend.
@@ -187,21 +187,21 @@ the Pallas key.`,
 	return cmd
 }
 
-// CmdUpdateAdmins broadcasts MsgUpdateAdmins.
-// Atomically replaces the admin set with the given addresses. Callable by any
-// current admin (any-of-N).
-func CmdUpdateAdmins() *cobra.Command {
+// CmdUpdateVoteManagers broadcasts MsgUpdateVoteManagers.
+// Atomically replaces the vote-manager set with the given addresses. Callable by any
+// current vote manager (any-of-N).
+func CmdUpdateVoteManagers() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "update-admins --admin <addr> [--admin <addr> ...]",
-		Short: "Atomically replace the admin set",
-		Long: `Broadcast an MsgUpdateAdmins transaction.
+		Use:   "update-vote-managers --vote-manager <addr> [--vote-manager <addr> ...]",
+		Short: "Atomically replace the vote-manager set",
+		Long: `Broadcast an MsgUpdateVoteManagers transaction.
 
 Flags:
-  --admin  Repeatable. Bech32 account address (sv1...) that should be in the
-           new admin set. Pass the flag once per admin. The full list replaces
-           the existing set atomically.
+  --vote-manager  Repeatable. Bech32 account address (sv1...) of a vote manager
+           in the new set. Pass the flag once per vote manager. The full
+           list replaces the existing set atomically.
 
-The --from signer must be a current admin. Balances are not moved — each admin
+The --from signer must be a current vote manager. Balances are not moved — each vote manager
 holds their own funds.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -210,24 +210,24 @@ holds their own funds.`,
 				return err
 			}
 
-			newAdmins, err := cmd.Flags().GetStringArray("admin")
+			newVoteManagers, err := cmd.Flags().GetStringArray("vote-manager")
 			if err != nil {
 				return err
 			}
-			if len(newAdmins) == 0 {
-				return fmt.Errorf("at least one --admin flag is required")
+			if len(newVoteManagers) == 0 {
+				return fmt.Errorf("at least one --vote-manager flag is required")
 			}
 
-			msg := &types.MsgUpdateAdmins{
+			msg := &types.MsgUpdateVoteManagers{
 				Creator:   clientCtx.GetFromAddress().String(),
-				NewAdmins: newAdmins,
+				NewVoteManagers: newVoteManagers,
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
-	cmd.Flags().StringArray("admin", nil, "Admin bech32 address (repeatable; all specified addresses form the new admin set)")
+	cmd.Flags().StringArray("vote-manager", nil, "Admin bech32 address (repeatable; all specified addresses form the new admin set)")
 	flags.AddTxFlagsToCmd(cmd)
 	return cmd
 }
@@ -274,12 +274,12 @@ Example:
 }
 
 // CmdCreateVotingSession broadcasts MsgCreateVotingSession.
-// Callable by any current admin. Accepts a JSON file because the message
+// Callable by any current vote manager. Accepts a JSON file because the message
 // carries a structured proposal list and large binary blobs.
 func CmdCreateVotingSession() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create-voting-session [msg-json-file]",
-		Short: "Create a new voting session (admin only)",
+		Short: "Create a new voting session (vote-manager only)",
 		Long: `Broadcast an MsgCreateVotingSession from a JSON description file.
 
 All byte fields are hex-encoded in the JSON.  Required fields:
@@ -415,7 +415,7 @@ Example:
 func CmdSubmitTally() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "submit-tally [vote-round-id-hex] [entries-json-file]",
-		Short: "Submit finalized tally results for a vote round (admin only)",
+		Short: "Submit finalized tally results for a vote round (vote-manager only)",
 		Long: `Broadcast an MsgSubmitTally transaction.
 
 Arguments:

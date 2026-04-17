@@ -142,7 +142,7 @@ func TestIsCeremonyTag(t *testing.T) {
 	// Standard Cosmos Tx ceremony messages are not ceremony tags.
 	require.False(t, IsCeremonyTag(0x06)) // MsgRegisterPallasKey
 	require.False(t, IsCeremonyTag(0x09)) // MsgCreateValidatorWithPallasKey
-	require.False(t, IsCeremonyTag(0x0C)) // MsgUpdateAdmins
+	require.False(t, IsCeremonyTag(0x0C)) // MsgUpdateVoteManagers
 	require.False(t, IsCeremonyTag(0x00))
 	require.False(t, IsCeremonyTag(0x0A)) // reserved: collides with Cosmos Tx protobuf
 	require.False(t, IsCeremonyTag(0x01)) // MsgCreateVotingSession — standard Cosmos Tx
@@ -189,12 +189,12 @@ func TestEncodeDecodeContributeDKG(t *testing.T) {
 }
 
 func TestEncodeCeremonyTx_RejectsNonCustomTags(t *testing.T) {
-	msg := &types.MsgUpdateAdmins{
+	msg := &types.MsgUpdateVoteManagers{
 		Creator:   "sv1admin",
-		NewAdmins: []string{"sv1manager"},
+		NewVoteManagers: []string{"sv1manager"},
 	}
 
-	// MsgUpdateAdmins (0x0C) uses the standard Cosmos Tx path — EncodeCeremonyTx must reject it.
+	// MsgUpdateVoteManagers (0x0C) uses the standard Cosmos Tx path — EncodeCeremonyTx must reject it.
 	_, err := EncodeCeremonyTx(msg, 0x0C)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "only 0x08, 0x0D, 0x0E use custom wire format")

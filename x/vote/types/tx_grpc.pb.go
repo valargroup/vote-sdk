@@ -30,7 +30,7 @@ const (
 	Msg_ContributeDKG_FullMethodName                = "/svote.v1.Msg/ContributeDKG"
 	Msg_AckExecutiveAuthorityKey_FullMethodName     = "/svote.v1.Msg/AckExecutiveAuthorityKey"
 	Msg_CreateValidatorWithPallasKey_FullMethodName = "/svote.v1.Msg/CreateValidatorWithPallasKey"
-	Msg_UpdateAdmins_FullMethodName                 = "/svote.v1.Msg/UpdateAdmins"
+	Msg_UpdateVoteManagers_FullMethodName           = "/svote.v1.Msg/UpdateVoteManagers"
 	Msg_AuthorizedSend_FullMethodName               = "/svote.v1.Msg/AuthorizedSend"
 )
 
@@ -54,7 +54,7 @@ type MsgClient interface {
 	ContributeDKG(ctx context.Context, in *MsgContributeDKG, opts ...grpc.CallOption) (*MsgContributeDKGResponse, error)
 	AckExecutiveAuthorityKey(ctx context.Context, in *MsgAckExecutiveAuthorityKey, opts ...grpc.CallOption) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(ctx context.Context, in *MsgCreateValidatorWithPallasKey, opts ...grpc.CallOption) (*MsgCreateValidatorWithPallasKeyResponse, error)
-	UpdateAdmins(ctx context.Context, in *MsgUpdateAdmins, opts ...grpc.CallOption) (*MsgUpdateAdminsResponse, error)
+	UpdateVoteManagers(ctx context.Context, in *MsgUpdateVoteManagers, opts ...grpc.CallOption) (*MsgUpdateVoteManagersResponse, error)
 	AuthorizedSend(ctx context.Context, in *MsgAuthorizedSend, opts ...grpc.CallOption) (*MsgAuthorizedSendResponse, error)
 }
 
@@ -176,10 +176,10 @@ func (c *msgClient) CreateValidatorWithPallasKey(ctx context.Context, in *MsgCre
 	return out, nil
 }
 
-func (c *msgClient) UpdateAdmins(ctx context.Context, in *MsgUpdateAdmins, opts ...grpc.CallOption) (*MsgUpdateAdminsResponse, error) {
+func (c *msgClient) UpdateVoteManagers(ctx context.Context, in *MsgUpdateVoteManagers, opts ...grpc.CallOption) (*MsgUpdateVoteManagersResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgUpdateAdminsResponse)
-	err := c.cc.Invoke(ctx, Msg_UpdateAdmins_FullMethodName, in, out, cOpts...)
+	out := new(MsgUpdateVoteManagersResponse)
+	err := c.cc.Invoke(ctx, Msg_UpdateVoteManagers_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ type MsgServer interface {
 	ContributeDKG(context.Context, *MsgContributeDKG) (*MsgContributeDKGResponse, error)
 	AckExecutiveAuthorityKey(context.Context, *MsgAckExecutiveAuthorityKey) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(context.Context, *MsgCreateValidatorWithPallasKey) (*MsgCreateValidatorWithPallasKeyResponse, error)
-	UpdateAdmins(context.Context, *MsgUpdateAdmins) (*MsgUpdateAdminsResponse, error)
+	UpdateVoteManagers(context.Context, *MsgUpdateVoteManagers) (*MsgUpdateVoteManagersResponse, error)
 	AuthorizedSend(context.Context, *MsgAuthorizedSend) (*MsgAuthorizedSendResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
@@ -261,8 +261,8 @@ func (UnimplementedMsgServer) AckExecutiveAuthorityKey(context.Context, *MsgAckE
 func (UnimplementedMsgServer) CreateValidatorWithPallasKey(context.Context, *MsgCreateValidatorWithPallasKey) (*MsgCreateValidatorWithPallasKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateValidatorWithPallasKey not implemented")
 }
-func (UnimplementedMsgServer) UpdateAdmins(context.Context, *MsgUpdateAdmins) (*MsgUpdateAdminsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpdateAdmins not implemented")
+func (UnimplementedMsgServer) UpdateVoteManagers(context.Context, *MsgUpdateVoteManagers) (*MsgUpdateVoteManagersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateVoteManagers not implemented")
 }
 func (UnimplementedMsgServer) AuthorizedSend(context.Context, *MsgAuthorizedSend) (*MsgAuthorizedSendResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AuthorizedSend not implemented")
@@ -486,20 +486,20 @@ func _Msg_CreateValidatorWithPallasKey_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_UpdateAdmins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgUpdateAdmins)
+func _Msg_UpdateVoteManagers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgUpdateVoteManagers)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).UpdateAdmins(ctx, in)
+		return srv.(MsgServer).UpdateVoteManagers(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Msg_UpdateAdmins_FullMethodName,
+		FullMethod: Msg_UpdateVoteManagers_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).UpdateAdmins(ctx, req.(*MsgUpdateAdmins))
+		return srv.(MsgServer).UpdateVoteManagers(ctx, req.(*MsgUpdateVoteManagers))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -574,8 +574,8 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Msg_CreateValidatorWithPallasKey_Handler,
 		},
 		{
-			MethodName: "UpdateAdmins",
-			Handler:    _Msg_UpdateAdmins_Handler,
+			MethodName: "UpdateVoteManagers",
+			Handler:    _Msg_UpdateVoteManagers_Handler,
 		},
 		{
 			MethodName: "AuthorizedSend",

@@ -196,8 +196,8 @@ export async function getLatestBlock(): Promise<LatestBlockInfo> {
   };
 }
 
-export async function getAdmins(): Promise<{ admin_addresses: string[] }> {
-  return fetchJson<{ admin_addresses: string[] }>("/shielded-vote/v1/admins");
+export async function getVoteManagers(): Promise<{ vote_manager_addresses: string[] }> {
+  return fetchJson<{ vote_manager_addresses: string[] }>("/shielded-vote/v1/vote-managers");
 }
 
 export async function getHelperStatus(): Promise<HelperStatus> {
@@ -359,7 +359,7 @@ export interface UpdateVotingConfigParams {
 
 /**
  * Update the voting-config in Edge Config via the authenticated Vercel API route.
- * Requires a wallet signature for admin authorization.
+ * Requires a wallet signature for vote-manager authorization.
  */
 export async function updateVotingConfig(params: UpdateVotingConfigParams): Promise<{ status: string }> {
   return fetchJson<{ status: string }>("/api/update-voting-config", {
@@ -390,7 +390,7 @@ export interface ApproveRegistrationParams {
 }
 
 /**
- * Approve a pending validator registration (admin only).
+ * Approve a pending validator registration (vote-manager only).
  * Moves the entry from pending-registrations to vote_servers in voting-config.
  */
 export async function approveRegistration(params: ApproveRegistrationParams): Promise<{ status: string }> {
@@ -402,7 +402,7 @@ export async function approveRegistration(params: ApproveRegistrationParams): Pr
 }
 
 /**
- * Reject a pending validator registration (admin only).
+ * Reject a pending validator registration (vote-manager only).
  * Removes the entry from pending-registrations without adding to vote_servers.
  */
 export async function rejectRegistration(params: ApproveRegistrationParams): Promise<{ status: string }> {
@@ -433,7 +433,7 @@ export interface RemoveApprovedServerParams {
 
 /**
  * Remove a server from approved-servers (and vote_servers + server-pulses).
- * Requires a wallet signature for admin authorization.
+ * Requires a wallet signature for vote-manager authorization.
  */
 export async function removeApprovedServer(params: RemoveApprovedServerParams): Promise<{ status: string }> {
   return fetchJson<{ status: string }>("/api/remove-approved-server", {

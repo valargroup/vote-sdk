@@ -77,7 +77,7 @@ SELF_DELEGATION="10000000${DENOM}"
 
 # Validator genesis balance (covers the 10M self-delegation).
 GENESIS_BALANCE="10000000${DENOM}"
-# Bootstrap admin balance (enough to fund up to 100 validators at 10M each).
+# Bootstrap vote-manager pool (enough to fund up to 100 validators at 10M each).
 ADMIN_BALANCE="1000000000${DENOM}"
 
 # ---------------------------------------------------------------------------
@@ -322,9 +322,9 @@ $BINARY keys add validator --keyring-backend test --home "$HOME_VAL1"
 VAL1_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_VAL1")
 echo "Val1 address: $VAL1_ADDR"
 
-# Import the bootstrap admin keys. VM_PRIVKEYS is a comma-separated list of
-# 64-char hex secp256k1 private keys; every derived address becomes an admin
-# at genesis (any-of-N). The stake pool is split evenly across the set.
+# Import the bootstrap vote-manager keys. VM_PRIVKEYS is a comma-separated list
+# of 64-char hex secp256k1 private keys; every derived address becomes a vote
+# manager at genesis (any-of-N). The stake pool is split evenly across the set.
 if [ -z "$VM_PRIVKEYS" ]; then
     echo "ERROR: VM_PRIVKEYS is not set."
     echo "  Local dev:  add VM_PRIVKEYS=<hex>[,<hex>...] to .env (see .env.example)"
@@ -332,15 +332,15 @@ if [ -z "$VM_PRIVKEYS" ]; then
     exit 1
 fi
 
-ADMIN_ADDRS=()
+VOTE_MANAGER_ADDRS=()
 IFS=',' read -ra VM_PRIVKEY_LIST <<< "$VM_PRIVKEYS"
 for i in "${!VM_PRIVKEY_LIST[@]}"; do
     key="${VM_PRIVKEY_LIST[$i]}"
-    name="admin-$((i + 1))"
+    name="vote-manager-$((i + 1))"
     $BINARY keys import-hex "$name" "$key" --keyring-backend test --home "$HOME_VAL1"
     addr=$($BINARY keys show "$name" -a --keyring-backend test --home "$HOME_VAL1")
-    ADMIN_ADDRS+=("$addr")
-    echo "Admin ${name}:     $addr"
+    VOTE_MANAGER_ADDRS+=("$addr")
+    echo "Vote-manager ${name}:     $addr"
 done
 
 # Initialize keys for validators 2 and 3 (separate home dirs, but we need
@@ -373,16 +373,16 @@ echo "$VAL1_ADDR" > "$HOME_VAL1/validator_address.txt"
 $BINARY genesis add-genesis-account "$VAL1_ADDR" "$VAL1_SELF_DELEGATION" \
     --keyring-backend test --home "$HOME_VAL1"
 
-ADMIN_POOL_INT=${ADMIN_BALANCE%${DENOM}}
-NUM_ADMINS=${#ADMIN_ADDRS[@]}
-PER_ADMIN_STAKE=$((ADMIN_POOL_INT / NUM_ADMINS))
-REMAINDER=$((ADMIN_POOL_INT - PER_ADMIN_STAKE * NUM_ADMINS))
-for i in "${!ADMIN_ADDRS[@]}"; do
-    addr="${ADMIN_ADDRS[$i]}"
+VOTE_MANAGER_POOL_INT=${ADMIN_BALANCE%${DENOM}}
+NUM_VOTE_MANAGERS=${#VOTE_MANAGER_ADDRS[@]}
+PER_VOTE_MANAGER_STAKE=$((VOTE_MANAGER_POOL_INT / NUM_VOTE_MANAGERS))
+REMAINDER=$((VOTE_MANAGER_POOL_INT - PER_VOTE_MANAGER_STAKE * NUM_VOTE_MANAGERS))
+for i in "${!VOTE_MANAGER_ADDRS[@]}"; do
+    addr="${VOTE_MANAGER_ADDRS[$i]}"
     if [ "$i" -eq 0 ]; then
-        stake=$((PER_ADMIN_STAKE + REMAINDER))
+        stake=$((PER_VOTE_MANAGER_STAKE + REMAINDER))
     else
-        stake=$PER_ADMIN_STAKE
+        stake=$PER_VOTE_MANAGER_STAKE
     fi
     $BINARY genesis add-genesis-account "$addr" "${stake}${DENOM}" \
         --keyring-backend test --home "$HOME_VAL1"
@@ -405,14 +405,14 @@ $BINARY genesis gentx validator "$VAL1_SELF_DELEGATION" \
 # Collect genesis transactions and validate.
 $BINARY genesis collect-gentxs --home "$HOME_VAL1"
 
-# Build the admin_addresses JSON array for the genesis patch.
-ADMIN_JSON=$(printf '%s\n' "${ADMIN_ADDRS[@]}" | jq -R . | jq -s .)
+# Build the vote_manager_addresses JSON array for the genesis patch.
+VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .)
 
-# Patch genesis: set admin_addresses to the imported keys' addresses and zero
+# Patch genesis: set vote_manager_addresses to the imported keys' addresses and zero
 # out slashing slash fractions (no token burn).
 GENESIS="$HOME_VAL1/config/genesis.json"
-jq --argjson admins "$ADMIN_JSON" '
-  .app_state.vote.admin_addresses = $admins
+jq --argjson admins "$VOTE_MANAGER_JSON" '
+  .app_state.vote.vote_manager_addresses = $admins
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"

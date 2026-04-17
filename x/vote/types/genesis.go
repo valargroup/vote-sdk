@@ -6,16 +6,16 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-// ValidateAndNormalizeAdminSet parses each address through bech32, rejects
+// ValidateAndNormalizeVoteManagerSet parses each address through bech32, rejects
 // duplicates (on the canonical form, so mixed-case variants don't slip
 // through), and returns the canonical list. The input list is not mutated.
-// Returns ErrEmptyAdminSet when the list is empty.
+// Returns ErrEmptyVoteManagerSet when the list is empty.
 //
-// Shared by ValidateGenesisState and the MsgUpdateAdmins handler so both
+// Shared by ValidateGenesisState and the MsgUpdateVoteManagers handler so both
 // paths apply the same admissibility rules.
-func ValidateAndNormalizeAdminSet(addrs []string) ([]string, error) {
+func ValidateAndNormalizeVoteManagerSet(addrs []string) ([]string, error) {
 	if len(addrs) == 0 {
-		return nil, fmt.Errorf("%w", ErrEmptyAdminSet)
+		return nil, fmt.Errorf("%w", ErrEmptyVoteManagerSet)
 	}
 	seen := make(map[string]struct{}, len(addrs))
 	normalized := make([]string, 0, len(addrs))
@@ -26,7 +26,7 @@ func ValidateAndNormalizeAdminSet(addrs []string) ([]string, error) {
 		}
 		canonical := acc.String()
 		if _, dup := seen[canonical]; dup {
-			return nil, fmt.Errorf("%w: %s", ErrDuplicateAdmin, canonical)
+			return nil, fmt.Errorf("%w: %s", ErrDuplicateVoteManager, canonical)
 		}
 		seen[canonical] = struct{}{}
 		normalized = append(normalized, canonical)
@@ -70,8 +70,8 @@ func ValidateGenesisState(gs *GenesisState) error {
 	}
 
 	// Admin set is required in genesis — there is no bootstrap path.
-	if _, err := ValidateAndNormalizeAdminSet(gs.AdminAddresses); err != nil {
-		return fmt.Errorf("admin_addresses: %w", err)
+	if _, err := ValidateAndNormalizeVoteManagerSet(gs.VoteManagerAddresses); err != nil {
+		return fmt.Errorf("vote_manager_addresses: %w", err)
 	}
 
 	// min_ceremony_validators must be at least 1 when explicitly set.

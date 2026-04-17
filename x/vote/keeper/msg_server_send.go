@@ -16,8 +16,8 @@ import (
 // validator, undermining the controlled validator set.
 //
 // Authorization rules (admin membership = any-of-N):
-//   - Any admin can send to anyone (used to distribute stake to new validators).
-//   - Bonded validators can send to any admin or to other bonded validators
+//   - Any vote manager can send to anyone (used to distribute stake to new validators).
+//   - Bonded validators can send to any vote manager or to other bonded validators
 //     (allows operational redistribution within the trusted set).
 //   - All other senders are rejected.
 func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend) (*types.MsgAuthorizedSendResponse, error) {
@@ -42,24 +42,24 @@ func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthoriz
 
 	coins := sdk.NewCoins(sdk.NewCoin(msg.Denom, amt))
 
-	senderIsAdmin, err := ms.k.IsAdmin(ctx, msg.FromAddress)
+	senderIsVoteManager, err := ms.k.IsVoteManager(ctx, msg.FromAddress)
 	if err != nil {
 		return nil, err
 	}
-	if !senderIsAdmin {
+	if !senderIsVoteManager {
 		senderValAddr := sdk.ValAddress(fromAddr).String()
 		if !ms.k.IsValidator(ctx, senderValAddr) {
-			return nil, fmt.Errorf("%w: %s is neither an admin nor a bonded validator",
+			return nil, fmt.Errorf("%w: %s is neither a vote manager nor a bonded validator",
 				types.ErrUnauthorizedSend, msg.FromAddress)
 		}
 
-		recipientIsAdmin, err := ms.k.IsAdmin(ctx, msg.ToAddress)
+		recipientIsVoteManager, err := ms.k.IsVoteManager(ctx, msg.ToAddress)
 		if err != nil {
 			return nil, err
 		}
 		recipientValAddr := sdk.ValAddress(toAddr).String()
-		if !recipientIsAdmin && !ms.k.IsValidator(ctx, recipientValAddr) {
-			return nil, fmt.Errorf("%w: validator %s can only send to an admin or another bonded validator",
+		if !recipientIsVoteManager && !ms.k.IsValidator(ctx, recipientValAddr) {
+			return nil, fmt.Errorf("%w: validator %s can only send to a vote manager or another bonded validator",
 				types.ErrUnauthorizedSend, msg.FromAddress)
 		}
 	}

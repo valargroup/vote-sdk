@@ -31,8 +31,8 @@ use orchard::tree::MerkleHashOrchard;
 use serde_json::json;
 use std::io::{self, Read};
 
-/// Admin address corresponding to VM_PRIVKEYS[0] used in genesis.
-const ADMIN_ADDRESS: &str = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3";
+/// Vote-manager address corresponding to VM_PRIVKEYS[0] used in genesis.
+const VOTE_MANAGER_ADDRESS: &str = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3";
 
 fn log(msg: &str) {
     eprintln!("[create-round] {}", msg);
@@ -321,7 +321,7 @@ fn create_round_for_zashi() {
         .to_string();
     log("importing vote manager key...");
     let config = default_cosmos_tx_config();
-    import_hex_key("admin-1", &vm_privkey, &config.home_dir);
+    import_hex_key("vote-manager-1", &vm_privkey, &config.home_dir);
     log("vote manager key ready ✓");
 
     // ---- Step 2: Get snapshot height ----
@@ -361,7 +361,7 @@ fn create_round_for_zashi() {
     log("creating voting session...");
     let body = json!({
         "@type": "/svote.v1.MsgCreateVotingSession",
-        "creator": ADMIN_ADDRESS,
+        "creator": VOTE_MANAGER_ADDRESS,
         "snapshot_height": snap_height,
         "snapshot_blockhash": to_base64(&snapshot_blockhash),
         "proposals_hash": to_base64(&proposals_hash),
@@ -372,7 +372,7 @@ fn create_round_for_zashi() {
     });
 
     let vm_config = api::CosmosTxConfig {
-        key_name: "admin-1".to_string(),
+        key_name: "vote-manager-1".to_string(),
         home_dir: config.home_dir.clone(),
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),

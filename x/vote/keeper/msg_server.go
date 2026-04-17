@@ -38,7 +38,7 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
 	// Only an admin can create voting sessions (any-of-N).
-	if err := ms.k.ValidateAdminOnly(goCtx, msg.Creator); err != nil {
+	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
 		return nil, err
 	}
 
@@ -217,33 +217,33 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 	return &types.MsgCastVoteResponse{}, nil
 }
 
-// UpdateAdmins atomically replaces the admin set. See proto for semantics.
+// UpdateVoteManagers atomically replaces the vote-manager set. See proto for semantics.
 // Allows the caller to remove themselves from the new set — the non-empty
 // check is the only liveness guarantee.
-func (ms msgServer) UpdateAdmins(goCtx context.Context, msg *types.MsgUpdateAdmins) (*types.MsgUpdateAdminsResponse, error) {
+func (ms msgServer) UpdateVoteManagers(goCtx context.Context, msg *types.MsgUpdateVoteManagers) (*types.MsgUpdateVoteManagersResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
-	if err := ms.k.ValidateAdminOnly(goCtx, msg.Creator); err != nil {
+	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
 		return nil, err
 	}
 
-	normalized, err := types.ValidateAndNormalizeAdminSet(msg.NewAdmins)
+	normalized, err := types.ValidateAndNormalizeVoteManagerSet(msg.NewVoteManagers)
 	if err != nil {
-		return nil, fmt.Errorf("new_admins: %w", err)
+		return nil, fmt.Errorf("new_vote_managers: %w", err)
 	}
 
 	kvStore := ms.k.OpenKVStore(ctx)
-	if err := ms.k.SetAdmins(kvStore, &types.AdminSet{Addresses: normalized}); err != nil {
+	if err := ms.k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: normalized}); err != nil {
 		return nil, err
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeUpdateAdmins,
-		sdk.NewAttribute(types.AttributeKeyAdmins, strings.Join(normalized, ",")),
+		types.EventTypeUpdateVoteManagers,
+		sdk.NewAttribute(types.AttributeKeyVoteManagers, strings.Join(normalized, ",")),
 		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
 	))
 
-	return &types.MsgUpdateAdminsResponse{}, nil
+	return &types.MsgUpdateVoteManagersResponse{}, nil
 }
 
 // deriveRoundID computes a deterministic vote_round_id from the setup fields

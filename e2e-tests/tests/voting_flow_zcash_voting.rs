@@ -69,11 +69,11 @@ fn voting_flow_zcash_voting_path() {
     e2e_tests::setup::ensure_pallas_key_registered();
     log_step("Step 0", "importing vote manager key into keyring...");
     let config = default_cosmos_tx_config();
-    import_hex_key("admin-1", &vm_privkey, &config.home_dir);
+    import_hex_key("vote-manager-1", &vm_privkey, &config.home_dir);
 
-    let admin_address = key_account_address("admin-1", &config.home_dir)
-        .expect("admin-1 key must be in keyring after import");
-    log_step("Step 0", &format!("vote manager address: {}", admin_address));
+    let vote_manager_address = key_account_address("vote-manager-1", &config.home_dir)
+        .expect("vote-manager-1 key must be in keyring after import");
+    log_step("Step 0", &format!("vote manager address: {}", vote_manager_address));
 
     let mut rng = ChaCha20Rng::seed_from_u64(43);
 
@@ -95,7 +95,7 @@ fn voting_flow_zcash_voting_path() {
     // Save fields we need for DB before session_fields is consumed
     let fields_for_db = session_fields.clone();
     let (mut body, _, round_id) =
-        create_voting_session_payload(&admin_address, 120, Some(session_fields));
+        create_voting_session_payload(&vote_manager_address, 120, Some(session_fields));
     let round_id_hex = hex::encode(&round_id);
 
     // ---- Step 1: Create voting session ----
@@ -103,7 +103,7 @@ fn voting_flow_zcash_voting_path() {
     log_step("Step 1", "create voting session (Cosmos SDK tx)");
     body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
     let vm_config = e2e_tests::api::CosmosTxConfig {
-        key_name: "admin-1".to_string(),
+        key_name: "vote-manager-1".to_string(),
         home_dir: config.home_dir.clone(),
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),

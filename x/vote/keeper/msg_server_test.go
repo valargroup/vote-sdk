@@ -153,10 +153,10 @@ func (s *MsgServerTestSuite) setupWithMockStaking(valAddrs ...string) {
 	s.setupWithMockStakingKeeper(newMockStakingKeeper(valAddrs...))
 }
 
-// seedAdmins installs an admin set with the given addresses in the KV store.
-func (s *MsgServerTestSuite) seedAdmins(addrs ...string) {
+// seedVoteManagers installs an admin set with the given addresses in the KV store.
+func (s *MsgServerTestSuite) seedVoteManagers(addrs ...string) {
 	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetAdmins(kv, &types.AdminSet{Addresses: addrs}))
+	s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{Addresses: addrs}))
 }
 
 // setBlockProposer configures the mock staking keeper so that
@@ -231,7 +231,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: round created with PENDING status and validator snapshot",
 			setup: func() {
 				s.seedEligibleValidators(3)
-				s.seedAdmins(svtest.DefaultAdminAddress)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -265,7 +265,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "duplicate round rejected",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedAdmins(svtest.DefaultAdminAddress)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 				_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 				s.Require().NoError(err)
 			},
@@ -277,10 +277,10 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "different fields produce different round ID",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedAdmins(svtest.DefaultAdminAddress)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 			},
 			msg: &types.MsgCreateVotingSession{
-				Creator:           svtest.DefaultAdminAddress,
+				Creator:           svtest.DefaultVoteManagerAddress,
 				SnapshotHeight:    999,
 				SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
 				ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
@@ -300,7 +300,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 		{
 			name: "rejected: no validators have registered Pallas keys",
 			setup: func() {
-				s.seedAdmins(svtest.DefaultAdminAddress)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 				s.setupWithMockStaking()
 			},
 			msg:         msg,
@@ -311,7 +311,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "rejected: 1 validator below min_ceremony_validators=2",
 			setup: func() {
 				s.seedEligibleValidators(1)
-				s.seedAdmins(svtest.DefaultAdminAddress)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 2))
 			},
@@ -323,7 +323,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: 1 validator with default min_ceremony_validators=1",
 			setup: func() {
 				s.seedEligibleValidators(1)
-				s.seedAdmins(svtest.DefaultAdminAddress)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -339,7 +339,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: exactly 2 validators",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedAdmins(svtest.DefaultAdminAddress)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -355,10 +355,10 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "rejected: another PENDING round already exists",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedAdmins(svtest.DefaultAdminAddress)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 				// Create a different round first to put it in PENDING.
 				_, err := s.msgServer.CreateVotingSession(s.ctx, &types.MsgCreateVotingSession{
-					Creator:           svtest.DefaultAdminAddress,
+					Creator:           svtest.DefaultVoteManagerAddress,
 					SnapshotHeight:    999,
 					SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
 					ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
@@ -399,7 +399,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 	s.SetupTest()
 	s.seedEligibleValidators(2)
-	s.seedAdmins(svtest.DefaultAdminAddress)
+	s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 	msg := validSetupMsg()
 
 	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
@@ -414,7 +414,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
 	s.SetupTest()
 	s.seedEligibleValidators(2)
-	s.seedAdmins(svtest.DefaultAdminAddress)
+	s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 	msg := validSetupMsg()
 
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
@@ -644,10 +644,10 @@ func (s *MsgServerTestSuite) TestCastVote() {
 }
 
 // ---------------------------------------------------------------------------
-// UpdateAdmins (any-of-N atomic replace; no balance transfer)
+// UpdateVoteManagers (any-of-N atomic replace; no balance transfer)
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_AnyAdminCanUpdate() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_AnyAdminCanUpdate() {
 	adminA := testAccAddr(20)
 	adminB := testAccAddr(21)
 	replacement := testAccAddr(22)
@@ -656,207 +656,207 @@ func (s *MsgServerTestSuite) TestUpdateAdmins_AnyAdminCanUpdate() {
 	for _, caller := range []string{adminA, adminB} {
 		s.Run("caller="+caller, func() {
 			s.SetupTest()
-			s.seedAdmins(adminA, adminB)
+			s.seedVoteManagers(adminA, adminB)
 
-			_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+			_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 				Creator:   caller,
-				NewAdmins: []string{caller, replacement},
+				NewVoteManagers: []string{caller, replacement},
 			})
 			s.Require().NoError(err)
 
 			kv := s.keeper.OpenKVStore(s.ctx)
-			set, err := s.keeper.GetAdmins(kv)
+			set, err := s.keeper.GetVoteManagers(kv)
 			s.Require().NoError(err)
 			s.Require().Equal([]string{caller, replacement}, set.Addresses)
 		})
 	}
 }
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_NonAdminRejected() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_NonAdminRejected() {
 	s.SetupTest()
-	s.seedAdmins(testAccAddr(40))
+	s.seedVoteManagers(testAccAddr(40))
 
-	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   testAccAddr(99), // not in the set
-		NewAdmins: []string{testAccAddr(41)},
+		NewVoteManagers: []string{testAccAddr(41)},
 	})
 	s.Require().ErrorIs(err, types.ErrNotAuthorized)
 }
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_MalformedCreatorRejected() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_MalformedCreatorRejected() {
 	s.SetupTest()
-	s.seedAdmins(testAccAddr(40))
+	s.seedVoteManagers(testAccAddr(40))
 
 	// Creator that fails bech32 parse at the canonicalization step must
 	// surface as ErrNotAuthorized with the "not a valid bech32 address"
 	// message, so the branch distinct from the membership-fail branch is
 	// exercised.
-	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   "not_a_bech32",
-		NewAdmins: []string{testAccAddr(41)},
+		NewVoteManagers: []string{testAccAddr(41)},
 	})
 	s.Require().ErrorIs(err, types.ErrNotAuthorized)
 	s.Require().Contains(err.Error(), "not a valid bech32 address")
 }
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_NoAdminsRejected() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_NoAdminsRejected() {
 	s.SetupTest()
 
-	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   testAccAddr(1),
-		NewAdmins: []string{testAccAddr(2)},
+		NewVoteManagers: []string{testAccAddr(2)},
 	})
-	s.Require().ErrorIs(err, types.ErrNoAdmins)
+	s.Require().ErrorIs(err, types.ErrNoVoteManagers)
 }
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_EmptySetRejected() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmptySetRejected() {
 	s.SetupTest()
 	adminA := testAccAddr(10)
-	s.seedAdmins(adminA)
+	s.seedVoteManagers(adminA)
 
-	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   adminA,
-		NewAdmins: nil,
+		NewVoteManagers: nil,
 	})
-	s.Require().ErrorIs(err, types.ErrEmptyAdminSet)
+	s.Require().ErrorIs(err, types.ErrEmptyVoteManagerSet)
 }
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_DuplicatesRejected() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_DuplicatesRejected() {
 	s.SetupTest()
 	adminA := testAccAddr(10)
-	s.seedAdmins(adminA)
+	s.seedVoteManagers(adminA)
 
-	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   adminA,
-		NewAdmins: []string{adminA, adminA},
+		NewVoteManagers: []string{adminA, adminA},
 	})
-	s.Require().ErrorIs(err, types.ErrDuplicateAdmin)
+	s.Require().ErrorIs(err, types.ErrDuplicateVoteManager)
 }
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_InvalidBech32Rejected() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_InvalidBech32Rejected() {
 	s.SetupTest()
 	adminA := testAccAddr(10)
-	s.seedAdmins(adminA)
+	s.seedVoteManagers(adminA)
 
 	// Non-bech32 string.
-	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   adminA,
-		NewAdmins: []string{"not_a_valid_address"},
+		NewVoteManagers: []string{"not_a_valid_address"},
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not a valid bech32 address")
 
 	// Validator operator address (valoper HRP ≠ account HRP).
-	_, err = s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err = s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   adminA,
-		NewAdmins: []string{testValAddr(2)},
+		NewVoteManagers: []string{testValAddr(2)},
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not a valid bech32 address")
 }
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_DoesNotTouchBalances() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_DoesNotTouchBalances() {
 	s.SetupTest()
 	adminA := testAccAddr(20)
 	adminB := testAccAddr(21)
 
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedAdmins(adminA)
+	s.seedVoteManagers(adminA)
 
-	// Replace {A} with {B}; under the per-admin balance model UpdateAdmins
+	// Replace {A} with {B}; under the per-admin balance model UpdateVoteManagers
 	// must never move coins. The single load-bearing check is that no
 	// SendCoins call was made.
-	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   adminA,
-		NewAdmins: []string{adminB},
+		NewVoteManagers: []string{adminB},
 	})
 	s.Require().NoError(err)
-	s.Require().Empty(bk.sendCalls, "UpdateAdmins must not call SendCoins")
+	s.Require().Empty(bk.sendCalls, "UpdateVoteManagers must not call SendCoins")
 }
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_CreatorRemovingSelfAllowed() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_CreatorRemovingSelfAllowed() {
 	s.SetupTest()
 	adminA := testAccAddr(50)
 	adminB := testAccAddr(51)
-	s.seedAdmins(adminA, adminB)
+	s.seedVoteManagers(adminA, adminB)
 
-	// adminA calls UpdateAdmins and removes themselves — allowed as long as
+	// adminA calls UpdateVoteManagers and removes themselves — allowed as long as
 	// the new set is non-empty.
-	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   adminA,
-		NewAdmins: []string{adminB},
+		NewVoteManagers: []string{adminB},
 	})
 	s.Require().NoError(err)
 
 	kv := s.keeper.OpenKVStore(s.ctx)
-	set, err := s.keeper.GetAdmins(kv)
+	set, err := s.keeper.GetVoteManagers(kv)
 	s.Require().NoError(err)
 	s.Require().Equal([]string{adminB}, set.Addresses)
 
 	// A subsequent call by adminA must now fail (they're no longer in the set).
-	_, err = s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err = s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   adminA,
-		NewAdmins: []string{adminA},
+		NewVoteManagers: []string{adminA},
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not authorized")
 }
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_EmitsEvent() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmitsEvent() {
 	s.SetupTest()
 	adminA := testAccAddr(60)
 	adminB := testAccAddr(61)
-	s.seedAdmins(adminA)
+	s.seedVoteManagers(adminA)
 
-	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 		Creator:   adminA,
-		NewAdmins: []string{adminA, adminB},
+		NewVoteManagers: []string{adminA, adminB},
 	})
 	s.Require().NoError(err)
 
 	var found bool
 	for _, e := range s.ctx.EventManager().Events() {
-		if e.Type == types.EventTypeUpdateAdmins {
+		if e.Type == types.EventTypeUpdateVoteManagers {
 			found = true
 			for _, attr := range e.Attributes {
-				if attr.Key == types.AttributeKeyAdmins {
+				if attr.Key == types.AttributeKeyVoteManagers {
 					s.Require().Contains(attr.Value, adminA)
 					s.Require().Contains(attr.Value, adminB)
 				}
 			}
 		}
 	}
-	s.Require().True(found, "expected %s event", types.EventTypeUpdateAdmins)
+	s.Require().True(found, "expected %s event", types.EventTypeUpdateVoteManagers)
 }
 
 // ---------------------------------------------------------------------------
 // CreateVotingSession: admin gating tests
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWithNoAdmins() {
+func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWithNoVoteManagers() {
 	s.SetupTest()
 	s.seedEligibleValidators(1)
 
 	msg := validSetupMsg()
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "no admin set configured")
+	s.Require().Contains(err.Error(), "no vote-manager set configured")
 }
 
-func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotAdmin() {
+func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotVoteManager() {
 	s.SetupTest()
 	s.seedEligibleValidators(1)
-	s.seedAdmins(testAccAddr(80))
+	s.seedVoteManagers(testAccAddr(80))
 
 	msg := validSetupMsg()
-	msg.Creator = testAccAddr(81) // not in the admin set
+	msg.Creator = testAccAddr(81) // not in the vote-manager set
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not authorized")
 }
 
-func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsForEachAdmin() {
+func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsForEachVoteManager() {
 	adminA := testAccAddr(90)
 	adminB := testAccAddr(91)
 	adminC := testAccAddr(92)
@@ -865,7 +865,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsForEachAdmin() {
 		s.Run("admin="+admin, func() {
 			s.SetupTest()
 			s.seedEligibleValidators(2)
-			s.seedAdmins(adminA, adminB, adminC)
+			s.seedVoteManagers(adminA, adminB, adminC)
 
 			msg := validSetupMsg()
 			msg.Creator = admin
@@ -880,7 +880,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	s.SetupTest()
 	s.seedEligibleValidators(2)
 	admin := testAccAddr(95)
-	s.seedAdmins(admin)
+	s.seedVoteManagers(admin)
 
 	msg := validSetupMsg()
 	msg.Creator = admin
@@ -899,27 +899,27 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 // Bech32 canonicalization
 // ---------------------------------------------------------------------------
 //
-// SetAdmins normalizes every admin address through AccAddressFromBech32 →
+// SetVoteManagers normalizes every admin address through AccAddressFromBech32 →
 // .String() before persist, so reads always return canonical (lowercase)
-// bech32. ValidateAdminOnly / IsAdmin normalize the caller the same way.
+// bech32. ValidateVoteManagerOnly / IsVoteManager normalize the caller the same way.
 // An admin submitting an uppercase variant of their stored lowercase
 // address must still authenticate.
 
-func (s *MsgServerTestSuite) TestAdmins_CanonicalizedOnSetAndMatchedOnCall() {
+func (s *MsgServerTestSuite) TestVoteManagers_CanonicalizedOnSetAndMatchedOnCall() {
 	s.SetupTest()
 
-	// Seed via the uppercase form; SetAdmins must store the canonical lowercase.
+	// Seed via the uppercase form; SetVoteManagers must store the canonical lowercase.
 	canonical := testAccAddr(42)
 	upper := strings.ToUpper(canonical)
 
 	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetAdmins(kv, &types.AdminSet{Addresses: []string{upper}}))
+	s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{Addresses: []string{upper}}))
 
-	set, err := s.keeper.GetAdmins(kv)
+	set, err := s.keeper.GetVoteManagers(kv)
 	s.Require().NoError(err)
-	s.Require().Equal([]string{canonical}, set.Addresses, "SetAdmins must canonicalize")
+	s.Require().Equal([]string{canonical}, set.Addresses, "SetVoteManagers must canonicalize")
 
-	// Caller authenticates via ValidateAdminOnly regardless of case variant.
-	s.Require().NoError(s.keeper.ValidateAdminOnly(s.ctx, canonical))
-	s.Require().NoError(s.keeper.ValidateAdminOnly(s.ctx, upper))
+	// Caller authenticates via ValidateVoteManagerOnly regardless of case variant.
+	s.Require().NoError(s.keeper.ValidateVoteManagerOnly(s.ctx, canonical))
+	s.Require().NoError(s.keeper.ValidateVoteManagerOnly(s.ctx, upper))
 }

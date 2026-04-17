@@ -72,7 +72,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 // or /cosmos/tx/v1beta1/txs.
 //
 // Ceremony messages (MsgRegisterPallasKey, MsgCreateValidatorWithPallasKey,
-// MsgUpdateAdmins) are also standard Cosmos SDK transactions.
+// MsgUpdateVoteManagers) are also standard Cosmos SDK transactions.
 //
 // MsgAckExecutiveAuthorityKey and MsgSubmitPartialDecryption have no REST
 // endpoints — they are injected in-protocol via PrepareProposal.

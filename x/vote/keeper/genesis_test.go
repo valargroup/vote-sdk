@@ -33,7 +33,7 @@ func TestExportImportGenesis(t *testing.T) {
 	// --- Populate state ---
 
 	// Admin set.
-	require.NoError(t, k.SetAdmins(kvStore, &types.AdminSet{Addresses: []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}}))
+	require.NoError(t, k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}}))
 
 	// Vote rounds.
 	round := &types.VoteRound{
@@ -145,7 +145,7 @@ func TestExportImportGenesis(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify export contents.
-	require.Equal(t, []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}, gs.AdminAddresses)
+	require.Equal(t, []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}, gs.VoteManagerAddresses)
 	require.Len(t, gs.Rounds, 2)
 	require.Len(t, gs.Nullifiers, 3)
 	require.Len(t, gs.TallyResults, 1)
@@ -279,7 +279,7 @@ func TestExportImportGenesis(t *testing.T) {
 	require.Equal(t, "svvaloper1abc", owner)
 
 	// Verify admin set.
-	admins, err := k2.GetAdmins(kvStore2)
+	admins, err := k2.GetVoteManagers(kvStore2)
 	require.NoError(t, err)
 	require.Equal(t, []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}, admins.Addresses)
 
@@ -391,7 +391,7 @@ func TestExportGenesisEmpty(t *testing.T) {
 	require.Empty(t, gs.TallyAccumulators)
 	require.Empty(t, gs.ShareCounts)
 	require.Empty(t, gs.PartialDecryptions)
-	require.Empty(t, gs.AdminAddresses)
+	require.Empty(t, gs.VoteManagerAddresses)
 }
 
 // TestInitGenesisPopulatesPallasKeyReverseIndex verifies that InitGenesis

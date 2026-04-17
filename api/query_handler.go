@@ -30,7 +30,7 @@ import (
 //	GET /shielded-vote/v1/vote-summary/{round_id}
 //	GET /shielded-vote/v1/ceremony
 //	GET /shielded-vote/v1/pallas-keys
-//	GET /shielded-vote/v1/admins
+//	GET /shielded-vote/v1/vote-managers
 //	GET /shielded-vote/v1/genesis
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
 	qh := &queryHandler{clientCtx: clientCtx}
@@ -48,7 +48,7 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.HandleFunc("/shielded-vote/v1/vote-summary/{round_id}", qh.handleVoteSummary).Methods("GET")
 	router.HandleFunc("/shielded-vote/v1/ceremony", qh.handleCeremonyState).Methods("GET")
 	router.HandleFunc("/shielded-vote/v1/pallas-keys", qh.handlePallasKeys).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/admins", qh.handleAdmins).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/vote-managers", qh.handleVoteManagers).Methods("GET")
 	router.HandleFunc("/shielded-vote/v1/genesis", qh.handleGenesis).Methods("GET")
 }
 
@@ -295,11 +295,11 @@ func (qh *queryHandler) handleGenesis(w http.ResponseWriter, _ *http.Request) {
 	w.Write(data) //nolint:errcheck
 }
 
-func (qh *queryHandler) handleAdmins(w http.ResponseWriter, _ *http.Request) {
-	req := &types.QueryAdminsRequest{}
-	resp := &types.QueryAdminsResponse{}
+func (qh *queryHandler) handleVoteManagers(w http.ResponseWriter, _ *http.Request) {
+	req := &types.QueryVoteManagersRequest{}
+	resp := &types.QueryVoteManagersResponse{}
 
-	if err := qh.abciQuery("/svote.v1.Query/Admins", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/VoteManagers", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}

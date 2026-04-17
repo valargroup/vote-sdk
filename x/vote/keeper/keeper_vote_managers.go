@@ -11,10 +11,10 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// GetAdmins retrieves the admin set (singleton) from the KV store.
-// Returns nil, nil if no admin set has been installed yet.
-func (k *Keeper) GetAdmins(kvStore store.KVStore) (*types.AdminSet, error) {
-	bz, err := kvStore.Get(types.AdminSetKey)
+// GetVoteManagers retrieves the vote-manager set (singleton) from the KV store.
+// Returns nil, nil if no vote-manager set has been installed yet.
+func (k *Keeper) GetVoteManagers(kvStore store.KVStore) (*types.VoteManagerSet, error) {
+	bz, err := kvStore.Get(types.VoteManagerSetKey)
 	if err != nil {
 		return nil, err
 	}
@@ -22,26 +22,26 @@ func (k *Keeper) GetAdmins(kvStore store.KVStore) (*types.AdminSet, error) {
 		return nil, nil
 	}
 
-	var set types.AdminSet
+	var set types.VoteManagerSet
 	if err := unmarshal(bz, &set); err != nil {
 		return nil, err
 	}
 	return &set, nil
 }
 
-// SetAdmins stores the admin set (singleton) in the KV store. Addresses are
+// SetVoteManagers stores the vote-manager set (singleton) in the KV store. Addresses are
 // normalized and deduplicated before persist so every read returns canonical
 // bech32, even if callers passed mixed-case or uncanonical forms.
-func (k *Keeper) SetAdmins(kvStore store.KVStore, set *types.AdminSet) error {
-	normalized, err := types.ValidateAndNormalizeAdminSet(set.Addresses)
+func (k *Keeper) SetVoteManagers(kvStore store.KVStore, set *types.VoteManagerSet) error {
+	normalized, err := types.ValidateAndNormalizeVoteManagerSet(set.Addresses)
 	if err != nil {
 		return err
 	}
-	bz, err := marshal(&types.AdminSet{Addresses: normalized})
+	bz, err := marshal(&types.VoteManagerSet{Addresses: normalized})
 	if err != nil {
 		return err
 	}
-	return kvStore.Set(types.AdminSetKey, bz)
+	return kvStore.Set(types.VoteManagerSetKey, bz)
 }
 
 // IsValidator checks whether the given address is a bonded validator.
@@ -57,11 +57,11 @@ func (k *Keeper) IsValidator(ctx context.Context, address string) bool {
 	return val.GetStatus() == stakingtypes.Bonded
 }
 
-// IsAdmin reports whether addr is a current admin. Comparison is on the
+// IsVoteManager reports whether addr is a current vote manager. Comparison is on the
 // canonical bech32 form; invalid bech32 returns (false, nil).
-func (k *Keeper) IsAdmin(ctx context.Context, addr string) (bool, error) {
+func (k *Keeper) IsVoteManager(ctx context.Context, addr string) (bool, error) {
 	kvStore := k.OpenKVStore(ctx)
-	set, err := k.GetAdmins(kvStore)
+	set, err := k.GetVoteManagers(kvStore)
 	if err != nil {
 		return false, err
 	}
@@ -80,17 +80,17 @@ func (k *Keeper) IsAdmin(ctx context.Context, addr string) (bool, error) {
 	return false, nil
 }
 
-// ValidateAdminOnly returns nil iff creator is in the current admin set.
-// Distinguishes ErrNoAdmins (empty set) from ErrNotAuthorized (non-member).
-func (k *Keeper) ValidateAdminOnly(ctx context.Context, creator string) error {
+// ValidateVoteManagerOnly returns nil iff creator is in the current vote manager set.
+// Distinguishes ErrNoVoteManagers (empty set) from ErrNotAuthorized (non-member).
+func (k *Keeper) ValidateVoteManagerOnly(ctx context.Context, creator string) error {
 	kvStore := k.OpenKVStore(ctx)
-	set, err := k.GetAdmins(kvStore)
+	set, err := k.GetVoteManagers(kvStore)
 	if err != nil {
 		return err
 	}
 
 	if set == nil || len(set.Addresses) == 0 {
-		return fmt.Errorf("%w", types.ErrNoAdmins)
+		return fmt.Errorf("%w", types.ErrNoVoteManagers)
 	}
 
 	normalized, err := normalizeBech32Addr(creator)
@@ -104,7 +104,7 @@ func (k *Keeper) ValidateAdminOnly(ctx context.Context, creator string) error {
 		}
 	}
 
-	return fmt.Errorf("%w: sender %s is not in the admin set", types.ErrNotAuthorized, normalized)
+	return fmt.Errorf("%w: sender %s is not in the vote-manager set", types.ErrNotAuthorized, normalized)
 }
 
 // normalizeBech32Addr parses the address and returns its canonical bech32 form.

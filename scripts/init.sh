@@ -34,9 +34,9 @@ VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend 
 echo "Validator address: $VALIDATOR_ADDR"
 echo "Validator valoper: $VALIDATOR_VALOPER"
 
-# Import the bootstrap admin keys. VM_PRIVKEYS is a comma-separated list of
-# 64-char hex secp256k1 private keys; every derived address becomes an admin
-# at genesis (any-of-N). The stake pool is split evenly across the set.
+# Import the bootstrap vote-manager keys. VM_PRIVKEYS is a comma-separated list
+# of 64-char hex secp256k1 private keys; every derived address becomes a vote
+# manager at genesis (any-of-N). The stake pool is split evenly across the set.
 if [ -z "$VM_PRIVKEYS" ]; then
     echo "ERROR: VM_PRIVKEYS is not set."
     echo "  Local dev:  add VM_PRIVKEYS=<hex>[,<hex>...] to .env (see .env.example)"
@@ -44,27 +44,27 @@ if [ -z "$VM_PRIVKEYS" ]; then
     exit 1
 fi
 
-# Total stake pool divided evenly across admins (preserves total supply).
-TOTAL_ADMIN_POOL=1000000000
-ADMIN_ADDRS=()
+# Total stake pool divided evenly across vote managers (preserves total supply).
+TOTAL_VOTE_MANAGER_POOL=1000000000
+VOTE_MANAGER_ADDRS=()
 IFS=',' read -ra VM_PRIVKEY_LIST <<< "$VM_PRIVKEYS"
-NUM_ADMINS=${#VM_PRIVKEY_LIST[@]}
-PER_ADMIN_STAKE=$((TOTAL_ADMIN_POOL / NUM_ADMINS))
-REMAINDER=$((TOTAL_ADMIN_POOL - PER_ADMIN_STAKE * NUM_ADMINS))
+NUM_VOTE_MANAGERS=${#VM_PRIVKEY_LIST[@]}
+PER_VOTE_MANAGER_STAKE=$((TOTAL_VOTE_MANAGER_POOL / NUM_VOTE_MANAGERS))
+REMAINDER=$((TOTAL_VOTE_MANAGER_POOL - PER_VOTE_MANAGER_STAKE * NUM_VOTE_MANAGERS))
 
 for i in "${!VM_PRIVKEY_LIST[@]}"; do
     key="${VM_PRIVKEY_LIST[$i]}"
-    name="admin-$((i + 1))"
+    name="vote-manager-$((i + 1))"
     $BINARY keys import-hex "$name" "$key" --keyring-backend test --home "$HOME_DIR"
     addr=$($BINARY keys show "$name" -a --keyring-backend test --home "$HOME_DIR")
-    ADMIN_ADDRS+=("$addr")
-    # Admin 1 receives any remainder from the integer division.
+    VOTE_MANAGER_ADDRS+=("$addr")
+    # Vote manager 1 receives any remainder from the integer division.
     if [ "$i" -eq 0 ]; then
-        stake=$((PER_ADMIN_STAKE + REMAINDER))
+        stake=$((PER_VOTE_MANAGER_STAKE + REMAINDER))
     else
-        stake=$PER_ADMIN_STAKE
+        stake=$PER_VOTE_MANAGER_STAKE
     fi
-    echo "Admin ${name}:     $addr (balance: ${stake}${DENOM})"
+    echo "Vote-manager ${name}:     $addr (balance: ${stake}${DENOM})"
     $BINARY genesis add-genesis-account "$addr" "${stake}${DENOM}" \
         --keyring-backend test --home "$HOME_DIR"
 done
@@ -82,16 +82,16 @@ $BINARY genesis gentx validator "10000000${DENOM}" \
 # Collect genesis transactions
 $BINARY genesis collect-gentxs --home "$HOME_DIR"
 
-# Build the admin_addresses JSON array for the genesis patch.
-ADMIN_JSON=$(printf '%s\n' "${ADMIN_ADDRS[@]}" | jq -R . | jq -s .)
+# Build the vote_manager_addresses JSON array for the genesis patch.
+VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .)
 
-# Patch genesis: set admin_addresses to the imported keys' addresses and zero
+# Patch genesis: set vote_manager_addresses to the imported keys' addresses and zero
 # out slashing slash fractions (no token burn). Defaults for
 # signed_blocks_window (100), min_signed_per_window (0.5), and
 # downtime_jail_duration (600s) are acceptable.
 GENESIS="$HOME_DIR/config/genesis.json"
-jq --argjson admins "$ADMIN_JSON" '
-  .app_state.vote.admin_addresses = $admins
+jq --argjson admins "$VOTE_MANAGER_JSON" '
+  .app_state.vote.vote_manager_addresses = $admins
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"
@@ -185,7 +185,7 @@ sentry_dsn = "$HELPER_SENTRY_DSN"
 HELPERCFG
 
 # Append [admin] section.
-ADMIN_ADDRESS="${SVOTE_ADMIN_ADDRESS:-${ADMIN_ADDRS[0]}}"
+ADMIN_ADDRESS="${SVOTE_ADMIN_ADDRESS:-${VOTE_MANAGER_ADDRS[0]}}"
 cat >> "$APP_TOML" <<ADMINCFG
 
 ###############################################################################
@@ -269,8 +269,8 @@ PIRCFG
 echo ""
 echo "=== Chain initialized successfully! ==="
 echo "Validator valoper: $VALIDATOR_VALOPER"
-echo "Admin addresses (any-of-N):"
-for addr in "${ADMIN_ADDRS[@]}"; do
+echo "Vote-manager addresses (any-of-N):"
+for addr in "${VOTE_MANAGER_ADDRS[@]}"; do
     echo "  $addr"
 done
 echo ""

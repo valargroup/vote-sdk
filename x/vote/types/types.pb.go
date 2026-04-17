@@ -528,29 +528,29 @@ func (x *VoteRound) GetDiscussionUrl() string {
 	return ""
 }
 
-// AdminSet stores the admin addresses. Any-of-N: any member may authorize
-// admin-gated operations. See README for the full rationale.
-type AdminSet struct {
+// VoteManagerSet stores the vote-manager addresses. Any-of-N: any member may authorize
+// vote-manager-gated operations. See README for the full rationale.
+type VoteManagerSet struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Addresses     []string               `protobuf:"bytes,1,rep,name=addresses,proto3" json:"addresses,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *AdminSet) Reset() {
-	*x = AdminSet{}
+func (x *VoteManagerSet) Reset() {
+	*x = VoteManagerSet{}
 	mi := &file_svote_v1_types_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AdminSet) String() string {
+func (x *VoteManagerSet) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AdminSet) ProtoMessage() {}
+func (*VoteManagerSet) ProtoMessage() {}
 
-func (x *AdminSet) ProtoReflect() protoreflect.Message {
+func (x *VoteManagerSet) ProtoReflect() protoreflect.Message {
 	mi := &file_svote_v1_types_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -562,12 +562,12 @@ func (x *AdminSet) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AdminSet.ProtoReflect.Descriptor instead.
-func (*AdminSet) Descriptor() ([]byte, []int) {
+// Deprecated: Use VoteManagerSet.ProtoReflect.Descriptor instead.
+func (*VoteManagerSet) Descriptor() ([]byte, []int) {
 	return file_svote_v1_types_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *AdminSet) GetAddresses() []string {
+func (x *VoteManagerSet) GetAddresses() []string {
 	if x != nil {
 		return x.Addresses
 	}
@@ -648,7 +648,7 @@ type GenesisState struct {
 	state                 protoimpl.MessageState      `protogen:"open.v1"`
 	Rounds                []*VoteRound                `protobuf:"bytes,1,rep,name=rounds,proto3" json:"rounds,omitempty"`
 	Nullifiers            []*NullifierEntry           `protobuf:"bytes,4,rep,name=nullifiers,proto3" json:"nullifiers,omitempty"`
-	AdminAddresses        []string                    `protobuf:"bytes,5,rep,name=admin_addresses,json=adminAddresses,proto3" json:"admin_addresses,omitempty"`
+	VoteManagerAddresses  []string                    `protobuf:"bytes,5,rep,name=vote_manager_addresses,json=voteManagerAddresses,proto3" json:"vote_manager_addresses,omitempty"`
 	TallyResults          []*TallyResult              `protobuf:"bytes,6,rep,name=tally_results,json=tallyResults,proto3" json:"tally_results,omitempty"`
 	PallasKeys            []*ValidatorPallasKey       `protobuf:"bytes,7,rep,name=pallas_keys,json=pallasKeys,proto3" json:"pallas_keys,omitempty"`
 	TallyAccumulators     []*GenesisTallyAccumulator  `protobuf:"bytes,8,rep,name=tally_accumulators,json=tallyAccumulators,proto3" json:"tally_accumulators,omitempty"`
@@ -704,9 +704,9 @@ func (x *GenesisState) GetNullifiers() []*NullifierEntry {
 	return nil
 }
 
-func (x *GenesisState) GetAdminAddresses() []string {
+func (x *GenesisState) GetVoteManagerAddresses() []string {
 	if x != nil {
-		return x.AdminAddresses
+		return x.VoteManagerAddresses
 	}
 	return nil
 }
@@ -1960,21 +1960,21 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x13tally_phase_timeout\x18\x1a \x01(\x04R\x11tallyPhaseTimeout\x12&\n" +
 	"\x0ftally_timed_out\x18\x1b \x01(\bR\rtallyTimedOut\x12F\n" +
 	"\x11dkg_contributions\x18\x1c \x03(\v2\x19.svote.v1.DKGContributionR\x10dkgContributions\x12%\n" +
-	"\x0ediscussion_url\x18\x1d \x01(\tR\rdiscussionUrlJ\x04\b\x11\x10\x12J\x04\b\x13\x10\x14\"(\n" +
-	"\bAdminSet\x12\x1c\n" +
+	"\x0ediscussion_url\x18\x1d \x01(\tR\rdiscussionUrlJ\x04\b\x11\x10\x12J\x04\b\x13\x10\x14\".\n" +
+	"\x0eVoteManagerSet\x12\x1c\n" +
 	"\taddresses\x18\x01 \x03(\tR\taddresses\"\x8d\x01\n" +
 	"\x13CommitmentTreeState\x12\x1d\n" +
 	"\n" +
 	"next_index\x18\x01 \x01(\x04R\tnextIndex\x12\x12\n" +
 	"\x04root\x18\x02 \x01(\fR\x04root\x12\x16\n" +
 	"\x06height\x18\x03 \x01(\x04R\x06height\x12+\n" +
-	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xf5\x04\n" +
+	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\x82\x05\n" +
 	"\fGenesisState\x12+\n" +
 	"\x06rounds\x18\x01 \x03(\v2\x13.svote.v1.VoteRoundR\x06rounds\x128\n" +
 	"\n" +
 	"nullifiers\x18\x04 \x03(\v2\x18.svote.v1.NullifierEntryR\n" +
-	"nullifiers\x12'\n" +
-	"\x0fadmin_addresses\x18\x05 \x03(\tR\x0eadminAddresses\x12:\n" +
+	"nullifiers\x124\n" +
+	"\x16vote_manager_addresses\x18\x05 \x03(\tR\x14voteManagerAddresses\x12:\n" +
 	"\rtally_results\x18\x06 \x03(\v2\x15.svote.v1.TallyResultR\ftallyResults\x12=\n" +
 	"\vpallas_keys\x18\a \x03(\v2\x1c.svote.v1.ValidatorPallasKeyR\n" +
 	"pallasKeys\x12P\n" +
@@ -2116,7 +2116,7 @@ var file_svote_v1_types_proto_goTypes = []any{
 	(*VoteOption)(nil),               // 2: svote.v1.VoteOption
 	(*Proposal)(nil),                 // 3: svote.v1.Proposal
 	(*VoteRound)(nil),                // 4: svote.v1.VoteRound
-	(*AdminSet)(nil),                 // 5: svote.v1.AdminSet
+	(*VoteManagerSet)(nil),           // 5: svote.v1.VoteManagerSet
 	(*CommitmentTreeState)(nil),      // 6: svote.v1.CommitmentTreeState
 	(*GenesisState)(nil),             // 7: svote.v1.GenesisState
 	(*GenesisRoundTree)(nil),         // 8: svote.v1.GenesisRoundTree

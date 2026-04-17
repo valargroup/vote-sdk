@@ -38,20 +38,20 @@ fn round_activation() {
 
     // Import vote manager key into keyring.
     let config = default_cosmos_tx_config();
-    import_hex_key("admin-1", &vm_privkey, &config.home_dir);
+    import_hex_key("vote-manager-1", &vm_privkey, &config.home_dir);
 
-    let admin_address = key_account_address("admin-1", &config.home_dir)
-        .expect("admin-1 key must be in keyring after import");
-    eprintln!("[E2E] Vote manager address: {}", admin_address);
+    let vote_manager_address = key_account_address("vote-manager-1", &config.home_dir)
+        .expect("vote-manager-1 key must be in keyring after import");
+    eprintln!("[E2E] Vote manager address: {}", vote_manager_address);
 
     // Create a voting round — starts as PENDING, triggers per-round ceremony.
     let (mut body, _, round_id) =
-        create_voting_session_payload(&admin_address, 300, None);
+        create_voting_session_payload(&vote_manager_address, 300, None);
     let round_id_hex = hex::encode(round_id);
     body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
 
     let vm_config = e2e_tests::api::CosmosTxConfig {
-        key_name: "admin-1".to_string(),
+        key_name: "vote-manager-1".to_string(),
         home_dir: config.home_dir.clone(),
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),

@@ -216,9 +216,9 @@ func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCerem
 	return &types.QueryCeremonyStateResponse{Ceremony: state}, nil
 }
 
-// Admins returns the current admin set. Any member of the set can authorize
-// admin-gated operations (any-of-N).
-func (qs queryServer) Admins(goCtx context.Context, req *types.QueryAdminsRequest) (*types.QueryAdminsResponse, error) {
+// VoteManagers returns the current vote-manager set. Any member can
+// authorize vote-manager-gated operations (any-of-N).
+func (qs queryServer) VoteManagers(goCtx context.Context, req *types.QueryVoteManagersRequest) (*types.QueryVoteManagersResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
@@ -226,14 +226,14 @@ func (qs queryServer) Admins(goCtx context.Context, req *types.QueryAdminsReques
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)
 
-	set, err := qs.k.GetAdmins(kvStore)
+	set, err := qs.k.GetVoteManagers(kvStore)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get admin set: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to get vote-manager set: %v", err)
 	}
 
-	resp := &types.QueryAdminsResponse{}
+	resp := &types.QueryVoteManagersResponse{}
 	if set != nil {
-		resp.AdminAddresses = set.Addresses
+		resp.VoteManagerAddresses = set.Addresses
 	}
 	return resp, nil
 }

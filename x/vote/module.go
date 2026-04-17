@@ -59,7 +59,7 @@ func init() {
 			ProvideContributeDKGSigner,
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
-			ProvideUpdateAdminsSigner,
+			ProvideUpdateVoteManagersSigner,
 			ProvideAuthorizedSendSigner,
 		),
 	)
@@ -215,9 +215,9 @@ func ProvideCreateValidatorWithPallasKeySigner() signing.CustomGetSigner {
 	}
 }
 
-func ProvideUpdateAdminsSigner() signing.CustomGetSigner {
+func ProvideUpdateVoteManagersSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgUpdateAdmins"),
+		MsgType: protoreflect.FullName("svote.v1.MsgUpdateVoteManagers"),
 		Fn:      ceremonyCreatorSignerFn,
 	}
 }
@@ -390,9 +390,9 @@ func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					Short:     "Query the current EA key ceremony lifecycle state",
 				},
 				{
-					RpcMethod: "Admins",
-					Use:       "admins",
-					Short:     "Query the current admin set (any-of-N — any member may act)",
+					RpcMethod: "VoteManagers",
+					Use:       "vote-managers",
+					Short:     "Query the current vote-manager set (any-of-N — any member may act)",
 				},
 				{
 					RpcMethod: "ListRounds",
@@ -717,16 +717,16 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	return nil
 }
 
-// DefaultAdminAddresses is the default admin set used in DefaultGenesis.
+// DefaultVoteManagerAddresses is the default admin set used in DefaultGenesis.
 // Init scripts overwrite it with the addresses derived from VM_PRIVKEYS.
-var DefaultAdminAddresses = []string{
+var DefaultVoteManagerAddresses = []string{
 	"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
 }
 
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {
 	gs := &types.GenesisState{
-		AdminAddresses:        append([]string(nil), DefaultAdminAddresses...),
+		VoteManagerAddresses:        append([]string(nil), DefaultVoteManagerAddresses...),
 		MinCeremonyValidators: 1,
 	}
 	bz, err := json.Marshal(gs)

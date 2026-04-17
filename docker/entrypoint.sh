@@ -68,10 +68,10 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
     done
     echo "[$MONIKER] All $NUM_VALIDATORS addresses collected."
 
-    # Generate a throwaway admin key for this ephemeral testnet.
-    ADMIN_PRIVKEY=$(cat /dev/urandom | head -c 32 | od -An -tx1 | tr -d ' \n')
-    svoted keys import-hex admin-1 "$ADMIN_PRIVKEY" --keyring-backend test --home "$HOME_DIR" 2>/dev/null
-    ADMIN_ADDR=$(svoted keys show admin-1 -a --keyring-backend test --home "$HOME_DIR")
+    # Generate a throwaway vote-manager key for this ephemeral testnet.
+    VM_PRIVKEY=$(cat /dev/urandom | head -c 32 | od -An -tx1 | tr -d ' \n')
+    svoted keys import-hex vote-manager-1 "$VM_PRIVKEY" --keyring-backend test --home "$HOME_DIR" 2>/dev/null
+    VM_ADDR=$(svoted keys show vote-manager-1 -a --keyring-backend test --home "$HOME_DIR")
 
     # Add genesis accounts for all validators.
     for i in $(seq 1 "$NUM_VALIDATORS"); do
@@ -80,8 +80,8 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
             --keyring-backend test --home "$HOME_DIR"
     done
 
-    # Add admin account.
-    svoted genesis add-genesis-account "$ADMIN_ADDR" "$ADMIN_BALANCE" \
+    # Add vote-manager account.
+    svoted genesis add-genesis-account "$VM_ADDR" "$ADMIN_BALANCE" \
         --keyring-backend test --home "$HOME_DIR"
 
     # Genesis transaction (self-delegation for val1).
@@ -92,10 +92,10 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
 
     svoted genesis collect-gentxs --home "$HOME_DIR"
 
-    # Patch genesis: set admin_addresses (single-admin here), disable slashing.
+    # Patch genesis: set vote_manager_addresses (single vote manager here), disable slashing.
     GENESIS="$HOME_DIR/config/genesis.json"
-    jq --arg admin "$ADMIN_ADDR" '
-      .app_state.vote.admin_addresses = [$admin]
+    jq --arg admin "$VM_ADDR" '
+      .app_state.vote.vote_manager_addresses = [$admin]
       | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
       | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
       "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"

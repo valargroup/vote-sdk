@@ -742,26 +742,26 @@ func (x *QueryCeremonyStateResponse) GetCeremony() *CeremonyState {
 	return nil
 }
 
-type QueryAdminsRequest struct {
+type QueryVoteManagersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *QueryAdminsRequest) Reset() {
-	*x = QueryAdminsRequest{}
+func (x *QueryVoteManagersRequest) Reset() {
+	*x = QueryVoteManagersRequest{}
 	mi := &file_svote_v1_query_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *QueryAdminsRequest) String() string {
+func (x *QueryVoteManagersRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*QueryAdminsRequest) ProtoMessage() {}
+func (*QueryVoteManagersRequest) ProtoMessage() {}
 
-func (x *QueryAdminsRequest) ProtoReflect() protoreflect.Message {
+func (x *QueryVoteManagersRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_svote_v1_query_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -773,32 +773,32 @@ func (x *QueryAdminsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use QueryAdminsRequest.ProtoReflect.Descriptor instead.
-func (*QueryAdminsRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use QueryVoteManagersRequest.ProtoReflect.Descriptor instead.
+func (*QueryVoteManagersRequest) Descriptor() ([]byte, []int) {
 	return file_svote_v1_query_proto_rawDescGZIP(), []int{16}
 }
 
-type QueryAdminsResponse struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	AdminAddresses []string               `protobuf:"bytes,1,rep,name=admin_addresses,json=adminAddresses,proto3" json:"admin_addresses,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+type QueryVoteManagersResponse struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	VoteManagerAddresses []string               `protobuf:"bytes,1,rep,name=vote_manager_addresses,json=voteManagerAddresses,proto3" json:"vote_manager_addresses,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
-func (x *QueryAdminsResponse) Reset() {
-	*x = QueryAdminsResponse{}
+func (x *QueryVoteManagersResponse) Reset() {
+	*x = QueryVoteManagersResponse{}
 	mi := &file_svote_v1_query_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *QueryAdminsResponse) String() string {
+func (x *QueryVoteManagersResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*QueryAdminsResponse) ProtoMessage() {}
+func (*QueryVoteManagersResponse) ProtoMessage() {}
 
-func (x *QueryAdminsResponse) ProtoReflect() protoreflect.Message {
+func (x *QueryVoteManagersResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_svote_v1_query_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -810,14 +810,14 @@ func (x *QueryAdminsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use QueryAdminsResponse.ProtoReflect.Descriptor instead.
-func (*QueryAdminsResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use QueryVoteManagersResponse.ProtoReflect.Descriptor instead.
+func (*QueryVoteManagersResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_query_proto_rawDescGZIP(), []int{17}
 }
 
-func (x *QueryAdminsResponse) GetAdminAddresses() []string {
+func (x *QueryVoteManagersResponse) GetVoteManagerAddresses() []string {
 	if x != nil {
-		return x.AdminAddresses
+		return x.VoteManagerAddresses
 	}
 	return nil
 }
@@ -1146,10 +1146,10 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\x05round\x18\x01 \x01(\v2\x13.svote.v1.VoteRoundR\x05round\"\x1b\n" +
 	"\x19QueryCeremonyStateRequest\"Q\n" +
 	"\x1aQueryCeremonyStateResponse\x123\n" +
-	"\bceremony\x18\x01 \x01(\v2\x17.svote.v1.CeremonyStateR\bceremony\"\x14\n" +
-	"\x12QueryAdminsRequest\">\n" +
-	"\x13QueryAdminsResponse\x12'\n" +
-	"\x0fadmin_addresses\x18\x01 \x03(\tR\x0eadminAddresses\"=\n" +
+	"\bceremony\x18\x01 \x01(\v2\x17.svote.v1.CeremonyStateR\bceremony\"\x1a\n" +
+	"\x18QueryVoteManagersRequest\"Q\n" +
+	"\x19QueryVoteManagersResponse\x124\n" +
+	"\x16vote_manager_addresses\x18\x01 \x03(\tR\x14voteManagerAddresses\"=\n" +
 	"\x17QueryVoteSummaryRequest\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xee\x01\n" +
 	"\x18QueryVoteSummaryResponse\x12\"\n" +
@@ -1165,7 +1165,7 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\x17QueryPallasKeysResponse\x12<\n" +
 	"\n" +
 	"validators\x18\x01 \x03(\v2\x1c.svote.v1.ValidatorPallasKeyR\n" +
-	"validators2\xaa\b\n" +
+	"validators2\xbc\b\n" +
 	"\x05Query\x12e\n" +
 	"\x16CommitmentTreeAtHeight\x12$.svote.v1.QueryCommitmentTreeRequest\x1a%.svote.v1.QueryCommitmentTreeResponse\x12[\n" +
 	"\x14LatestCommitmentTree\x12 .svote.v1.QueryLatestTreeRequest\x1a!.svote.v1.QueryLatestTreeResponse\x12N\n" +
@@ -1174,8 +1174,8 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\fTallyResults\x12\".svote.v1.QueryTallyResultsRequest\x1a#.svote.v1.QueryTallyResultsResponse\x12c\n" +
 	"\x10CommitmentLeaves\x12&.svote.v1.QueryCommitmentLeavesRequest\x1a'.svote.v1.QueryCommitmentLeavesResponse\x12T\n" +
 	"\vActiveRound\x12!.svote.v1.QueryActiveRoundRequest\x1a\".svote.v1.QueryActiveRoundResponse\x12Z\n" +
-	"\rCeremonyState\x12#.svote.v1.QueryCeremonyStateRequest\x1a$.svote.v1.QueryCeremonyStateResponse\x12E\n" +
-	"\x06Admins\x12\x1c.svote.v1.QueryAdminsRequest\x1a\x1d.svote.v1.QueryAdminsResponse\x12T\n" +
+	"\rCeremonyState\x12#.svote.v1.QueryCeremonyStateRequest\x1a$.svote.v1.QueryCeremonyStateResponse\x12W\n" +
+	"\fVoteManagers\x12\".svote.v1.QueryVoteManagersRequest\x1a#.svote.v1.QueryVoteManagersResponse\x12T\n" +
 	"\vVoteSummary\x12!.svote.v1.QueryVoteSummaryRequest\x1a\".svote.v1.QueryVoteSummaryResponse\x12Q\n" +
 	"\n" +
 	"ListRounds\x12 .svote.v1.QueryListRoundsRequest\x1a!.svote.v1.QueryListRoundsResponse\x12Q\n" +
@@ -1212,8 +1212,8 @@ var file_svote_v1_query_proto_goTypes = []any{
 	(*QueryActiveRoundResponse)(nil),      // 13: svote.v1.QueryActiveRoundResponse
 	(*QueryCeremonyStateRequest)(nil),     // 14: svote.v1.QueryCeremonyStateRequest
 	(*QueryCeremonyStateResponse)(nil),    // 15: svote.v1.QueryCeremonyStateResponse
-	(*QueryAdminsRequest)(nil),            // 16: svote.v1.QueryAdminsRequest
-	(*QueryAdminsResponse)(nil),           // 17: svote.v1.QueryAdminsResponse
+	(*QueryVoteManagersRequest)(nil),      // 16: svote.v1.QueryVoteManagersRequest
+	(*QueryVoteManagersResponse)(nil),     // 17: svote.v1.QueryVoteManagersResponse
 	(*QueryVoteSummaryRequest)(nil),       // 18: svote.v1.QueryVoteSummaryRequest
 	(*QueryVoteSummaryResponse)(nil),      // 19: svote.v1.QueryVoteSummaryResponse
 	(*QueryListRoundsRequest)(nil),        // 20: svote.v1.QueryListRoundsRequest
@@ -1251,7 +1251,7 @@ var file_svote_v1_query_proto_depIdxs = []int32{
 	10, // 17: svote.v1.Query.CommitmentLeaves:input_type -> svote.v1.QueryCommitmentLeavesRequest
 	12, // 18: svote.v1.Query.ActiveRound:input_type -> svote.v1.QueryActiveRoundRequest
 	14, // 19: svote.v1.Query.CeremonyState:input_type -> svote.v1.QueryCeremonyStateRequest
-	16, // 20: svote.v1.Query.Admins:input_type -> svote.v1.QueryAdminsRequest
+	16, // 20: svote.v1.Query.VoteManagers:input_type -> svote.v1.QueryVoteManagersRequest
 	18, // 21: svote.v1.Query.VoteSummary:input_type -> svote.v1.QueryVoteSummaryRequest
 	20, // 22: svote.v1.Query.ListRounds:input_type -> svote.v1.QueryListRoundsRequest
 	22, // 23: svote.v1.Query.PallasKeys:input_type -> svote.v1.QueryPallasKeysRequest
@@ -1263,7 +1263,7 @@ var file_svote_v1_query_proto_depIdxs = []int32{
 	11, // 29: svote.v1.Query.CommitmentLeaves:output_type -> svote.v1.QueryCommitmentLeavesResponse
 	13, // 30: svote.v1.Query.ActiveRound:output_type -> svote.v1.QueryActiveRoundResponse
 	15, // 31: svote.v1.Query.CeremonyState:output_type -> svote.v1.QueryCeremonyStateResponse
-	17, // 32: svote.v1.Query.Admins:output_type -> svote.v1.QueryAdminsResponse
+	17, // 32: svote.v1.Query.VoteManagers:output_type -> svote.v1.QueryVoteManagersResponse
 	19, // 33: svote.v1.Query.VoteSummary:output_type -> svote.v1.QueryVoteSummaryResponse
 	21, // 34: svote.v1.Query.ListRounds:output_type -> svote.v1.QueryListRoundsResponse
 	23, // 35: svote.v1.Query.PallasKeys:output_type -> svote.v1.QueryPallasKeysResponse

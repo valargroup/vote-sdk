@@ -16,17 +16,17 @@ func accToValoper(accBech32 string) string {
 }
 
 // ---------------------------------------------------------------------------
-// AuthorizedSend — admin sender tests
+// AuthorizedSend — vote-manager sender tests
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToAnyone() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToAnyone() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
 	admin := testAccAddr(1)
 	recipient := testAccAddr(2)
-	s.seedAdmins(admin)
+	s.seedVoteManagers(admin)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: admin,
@@ -47,14 +47,14 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToAnyone() {
 	)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToValidator() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToValidator() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
 	admin := testAccAddr(1)
 	valAcc := testAccAddr(10)
-	s.seedAdmins(admin)
+	s.seedVoteManagers(admin)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -67,14 +67,14 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToValidator() {
 	s.Require().Len(bk.sendCalls, 1)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToOtherAdmin() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToOtherVoteManager() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
 	adminA := testAccAddr(1)
 	adminB := testAccAddr(2)
-	s.seedAdmins(adminA, adminB)
+	s.seedVoteManagers(adminA, adminB)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: adminA,
@@ -90,7 +90,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToOtherAdmin() {
 // AuthorizedSend — validator tests
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToAdmin() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToVoteManager() {
 	// Parametrize over every admin in a multi-admin set — proves the recipient
 	// check iterates the full set (not e.g. only admins[0]).
 	adminA := testAccAddr(1)
@@ -103,7 +103,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToAdmin() {
 			s.SetupTest()
 			bk := newMockBankKeeper()
 			s.setupWithMockBankKeeper(bk)
-			s.seedAdmins(adminA, adminB, adminC)
+			s.seedVoteManagers(adminA, adminB, adminC)
 			s.setupWithMockStaking(accToValoper(valAcc))
 
 			_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -126,7 +126,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToOtherValidator
 	admin := testAccAddr(1)
 	val1Acc := testAccAddr(10)
 	val2Acc := testAccAddr(11)
-	s.seedAdmins(admin)
+	s.seedVoteManagers(admin)
 	s.setupWithMockStaking(accToValoper(val1Acc), accToValoper(val2Acc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -147,7 +147,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToNonValidato
 	admin := testAccAddr(1)
 	valAcc := testAccAddr(10)
 	random := testAccAddr(99)
-	s.seedAdmins(admin)
+	s.seedVoteManagers(admin)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -157,7 +157,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToNonValidato
 		Denom:       "usvote",
 	})
 	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "can only send to an admin or another bonded validator")
+	s.Require().Contains(err.Error(), "can only send to a vote manager or another bonded validator")
 	s.Require().Empty(bk.sendCalls)
 }
 
@@ -172,7 +172,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonPrivilegedSenderRejected() {
 
 	admin := testAccAddr(1)
 	random := testAccAddr(50)
-	s.seedAdmins(admin)
+	s.seedVoteManagers(admin)
 	s.setupWithMockStaking() // no validators
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -182,18 +182,18 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonPrivilegedSenderRejected() {
 		Denom:       "usvote",
 	})
 	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "neither an admin nor a bonded validator")
+	s.Require().Contains(err.Error(), "neither a vote manager nor a bonded validator")
 	s.Require().Empty(bk.sendCalls)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_NoAdminsSet_ValidatorRejected() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_NoVoteManagersSet_ValidatorRejected() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
 	valAcc := testAccAddr(10)
 	recipient := testAccAddr(20)
-	// No admin set seeded.
+	// No vote-manager set seeded.
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -203,8 +203,8 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NoAdminsSet_ValidatorRejected() 
 		Denom:       "usvote",
 	})
 	s.Require().Error(err)
-	// Validator sending to non-validator, non-admin should fail.
-	s.Require().Contains(err.Error(), "can only send to an admin or another bonded validator")
+	// Validator sending to non-validator, non-vote-manager should fail.
+	s.Require().Contains(err.Error(), "can only send to a vote manager or another bonded validator")
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +230,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidToAddress() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedAdmins(testAccAddr(1))
+	s.seedVoteManagers(testAccAddr(1))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
@@ -246,7 +246,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ZeroAmount() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedAdmins(testAccAddr(1))
+	s.seedVoteManagers(testAccAddr(1))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
@@ -262,7 +262,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NegativeAmount() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedAdmins(testAccAddr(1))
+	s.seedVoteManagers(testAccAddr(1))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
@@ -278,7 +278,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmptyDenom() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedAdmins(testAccAddr(1))
+	s.seedVoteManagers(testAccAddr(1))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
@@ -294,7 +294,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonNumericAmount() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedAdmins(testAccAddr(1))
+	s.seedVoteManagers(testAccAddr(1))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
@@ -317,7 +317,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 
 	admin := testAccAddr(1)
 	recipient := testAccAddr(2)
-	s.seedAdmins(admin)
+	s.seedVoteManagers(admin)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: admin,
@@ -348,12 +348,12 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 // AuthorizedSend — revoked-admin balance freeze
 // ---------------------------------------------------------------------------
 //
-// After MsgUpdateAdmins removes an admin, the ex-admin's remaining balance
+// After MsgUpdateVoteManagers removes an admin, the ex-admin's remaining balance
 // is one-way frozen: they can't send to anyone (not an admin, not a
 // validator), and bonded validators can't send to them either. Active
 // admins can still send to them. These three tests pin that behavior.
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_RevokedAdminCannotSend() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_RevokedVoteManagerCannotSend() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -361,7 +361,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_RevokedAdminCannotSend() {
 
 	adminA := testAccAddr(1)
 	revoked := testAccAddr(2)
-	s.seedAdmins(adminA) // revoked was previously an admin but isn't now
+	s.seedVoteManagers(adminA) // revoked was previously an admin but isn't now
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: revoked,
@@ -373,14 +373,14 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_RevokedAdminCannotSend() {
 	s.Require().Empty(bk.sendCalls)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToRevokedAdmin() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToRevokedVoteManager() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
 	adminA := testAccAddr(1)
 	revoked := testAccAddr(2)
-	s.seedAdmins(adminA)
+	s.seedVoteManagers(adminA)
 
 	// Admins-send-to-anyone takes the early-return path; no validator check.
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -393,7 +393,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToRevokedAdmin() {
 	s.Require().Len(bk.sendCalls, 1)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToRevokedAdmin() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToRevokedVoteManager() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -401,7 +401,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToRevokedAdmi
 	adminA := testAccAddr(1)
 	valAcc := testAccAddr(10)
 	revoked := testAccAddr(2)
-	s.seedAdmins(adminA)
+	s.seedVoteManagers(adminA)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
