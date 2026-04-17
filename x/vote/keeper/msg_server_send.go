@@ -15,9 +15,9 @@ import (
 // unrestricted transfers would allow anyone to accumulate stake and create a
 // validator, undermining the controlled validator set.
 //
-// Authorization rules:
-//   - Vote manager can send to anyone (used to distribute stake to new validators).
-//   - Bonded validators can send to the vote manager or other bonded validators
+// Authorization rules (admin membership = any-of-N):
+//   - Any admin can send to anyone (used to distribute stake to new validators).
+//   - Bonded validators can send to any admin or to other bonded validators
 //     (allows operational redistribution within the trusted set).
 //   - All other senders are rejected.
 func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend) (*types.MsgAuthorizedSendResponse, error) {
@@ -42,27 +42,33 @@ func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthoriz
 
 	coins := sdk.NewCoins(sdk.NewCoin(msg.Denom, amt))
 
-	kvStore := ms.k.OpenKVStore(ctx)
-	mgr, err := ms.k.GetVoteManager(kvStore)
+	// Fetch the admin set once and do both membership checks in-memory.
+	adminSet, err := ms.k.GetAdmins(ms.k.OpenKVStore(ctx))
 	if err != nil {
 		return nil, err
 	}
+	isAdmin := func(addr string) bool {
+		if adminSet == nil {
+			return false
+		}
+		for _, a := range adminSet.Addresses {
+			if a == addr {
+				return true
+			}
+		}
+		return false
+	}
 
-	senderIsManager := mgr != nil && mgr.Address == msg.FromAddress
-
-	if !senderIsManager {
+	if !isAdmin(msg.FromAddress) {
 		senderValAddr := sdk.ValAddress(fromAddr).String()
 		if !ms.k.IsValidator(ctx, senderValAddr) {
-			return nil, fmt.Errorf("%w: %s is neither the vote manager nor a bonded validator",
+			return nil, fmt.Errorf("%w: %s is neither an admin nor a bonded validator",
 				types.ErrUnauthorizedSend, msg.FromAddress)
 		}
 
-		recipientIsManager := mgr != nil && mgr.Address == msg.ToAddress
 		recipientValAddr := sdk.ValAddress(toAddr).String()
-		recipientIsValidator := ms.k.IsValidator(ctx, recipientValAddr)
-
-		if !recipientIsManager && !recipientIsValidator {
-			return nil, fmt.Errorf("%w: validator %s can only send to the vote manager or another bonded validator",
+		if !isAdmin(msg.ToAddress) && !ms.k.IsValidator(ctx, recipientValAddr) {
+			return nil, fmt.Errorf("%w: validator %s can only send to an admin or another bonded validator",
 				types.ErrUnauthorizedSend, msg.FromAddress)
 		}
 	}

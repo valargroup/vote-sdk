@@ -216,7 +216,30 @@ func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCerem
 	return &types.QueryCeremonyStateResponse{Ceremony: state}, nil
 }
 
-// VoteManager returns the current vote manager address.
+// Admins returns the current admin set. Any member of the set can authorize
+// admin-gated operations (any-of-N).
+func (qs queryServer) Admins(goCtx context.Context, req *types.QueryAdminsRequest) (*types.QueryAdminsResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	set, err := qs.k.GetAdmins(kvStore)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get admin set: %v", err)
+	}
+
+	resp := &types.QueryAdminsResponse{}
+	if set != nil {
+		resp.AdminAddresses = set.Addresses
+	}
+	return resp, nil
+}
+
+// VoteManager returns the first admin address in the set. Deprecated compat
+// shim for pre-multi-admin clients; prefer Admins.
 func (qs queryServer) VoteManager(goCtx context.Context, req *types.QueryVoteManagerRequest) (*types.QueryVoteManagerResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
@@ -225,14 +248,14 @@ func (qs queryServer) VoteManager(goCtx context.Context, req *types.QueryVoteMan
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)
 
-	state, err := qs.k.GetVoteManager(kvStore)
+	set, err := qs.k.GetAdmins(kvStore)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get vote manager: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to get admin set: %v", err)
 	}
 
 	var addr string
-	if state != nil {
-		addr = state.Address
+	if set != nil && len(set.Addresses) > 0 {
+		addr = set.Addresses[0]
 	}
 
 	return &types.QueryVoteManagerResponse{Address: addr}, nil

@@ -888,17 +888,16 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [ceremony, setCeremony] = useState<chainApi.CeremonyState | null>(null);
   const [latestBlock, setLatestBlock] = useState<chainApi.LatestBlockInfo | null>(null);
   const [helperStatus, setHelperStatus] = useState<chainApi.HelperStatus | null>(null);
-  const [voteManager, setVoteManagerAddr] = useState<string>(
-    () => localStorage.getItem("sv-vm-address") ?? ""
-  );
+  const [admins, setAdmins] = useState<string[]>([]);
   const [chainDetailsOpen, setChainDetailsOpen] = useState(false);
 
   // Dev private key connection (collapsible section)
   const [devKey, setDevKey] = useState(DEFAULT_DEV_KEY);
   const [devKeyVisible, setDevKeyVisible] = useState(false);
 
-  // Set VoteManager flow
-  const [vmNewAddr, setVmNewAddr] = useState("");
+  // Update admin set flow. The UI accepts a comma- or newline-separated list
+  // of bech32 addresses; submission atomically replaces the entire set.
+  const [vmNewAddrs, setVmNewAddrs] = useState("");
   const [vmStatus, setVmStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
   const [vmError, setVmError] = useState("");
   const [vmTxHash, setVmTxHash] = useState("");
@@ -925,13 +924,13 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
       const block = await chainApi.getLatestBlock();
       setLatestBlock(block);
 
-      const [state, vm, helper] = await Promise.all([
+      const [state, adminResp, helper] = await Promise.all([
         chainApi.testConnection(),
-        chainApi.getVoteManager(),
+        chainApi.getAdmins(),
         chainApi.getHelperStatus().catch(() => null),
       ]);
       setCeremony(state);
-      setVoteManagerAddr(vm.address || "");
+      setAdmins(adminResp.admin_addresses ?? []);
       setHelperStatus(helper);
       setConnStatus("ok");
     } catch (err) {
@@ -944,21 +943,30 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
     await wallet.connectDev(devKey);
   };
 
-  const handleSetVoteManager = async () => {
+  const handleUpdateAdmins = async () => {
     if (!wallet.signer) return;
     setVmStatus("sending");
     setVmError("");
     setVmTxHash("");
     try {
+      const newAdmins = vmNewAddrs
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (newAdmins.length === 0) {
+        setVmError("Enter at least one admin address");
+        setVmStatus("error");
+        return;
+      }
       const base = chainApi.getApiBase();
-      const result = await cosmosTx.setVoteManager(base, wallet.signer, vmNewAddr);
+      const result = await cosmosTx.updateAdmins(base, wallet.signer, newAdmins);
       if (result.code !== 0) {
         setVmError(result.log || `tx failed with code ${result.code}`);
         setVmStatus("error");
       } else {
         setVmTxHash(result.tx_hash);
         setVmStatus("ok");
-        setVoteManagerAddr(vmNewAddr);
+        setAdmins(newAdmins);
       }
     } catch (err) {
       setVmError(err instanceof Error ? err.message : String(err));
@@ -1335,20 +1343,31 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                 </div>
               )}
 
-              {/* Vote manager */}
+              {/* Admin set (any-of-N) */}
               {connStatus === "ok" && (
                 <div className="border-t border-border-subtle pt-3 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-text-secondary">VoteManager</span>
-                    <span className="text-[11px] font-mono text-text-primary">
-                      {voteManager || <span className="text-text-muted italic">not set</span>}
-                    </span>
+                  <div>
+                    <div className="text-xs text-text-secondary mb-1.5">Admins (any-of-N)</div>
+                    {admins.length === 0 ? (
+                      <span className="text-[11px] text-text-muted italic">none set</span>
+                    ) : (
+                      <ul className="space-y-1">
+                        {admins.map((addr) => (
+                          <li
+                            key={addr}
+                            className="text-[11px] font-mono text-text-primary break-all"
+                          >
+                            {addr}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
 
                   {wallet.signer && (
                     <details className="group">
                       <summary className="text-[11px] text-accent cursor-pointer hover:text-accent-glow">
-                        Set VoteManager address
+                        Replace admin set
                       </summary>
                       <div className="mt-3 space-y-3">
                         <div className="bg-surface-2 rounded-lg px-3 py-2">
@@ -1359,19 +1378,22 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                         </div>
                         <div>
                           <label className="block text-[11px] text-text-secondary mb-1">
-                            New VoteManager address
+                            New admin addresses (comma- or newline-separated)
                           </label>
-                          <input
-                            type="text"
-                            value={vmNewAddr}
-                            onChange={(e) => setVmNewAddr(e.target.value)}
-                            placeholder="sv1..."
+                          <textarea
+                            value={vmNewAddrs}
+                            onChange={(e) => setVmNewAddrs(e.target.value)}
+                            placeholder="sv1..., sv1..., sv1..."
+                            rows={3}
                             className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
                           />
+                          <p className="text-[10px] text-text-muted mt-1">
+                            Replaces the entire admin set atomically. Balances are not moved.
+                          </p>
                         </div>
                         <button
-                          onClick={handleSetVoteManager}
-                          disabled={!vmNewAddr || vmStatus === "sending"}
+                          onClick={handleUpdateAdmins}
+                          disabled={!vmNewAddrs.trim() || vmStatus === "sending"}
                           className="px-3 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
                         >
                           {vmStatus === "sending" ? (
@@ -1385,7 +1407,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                         {vmStatus === "ok" && (
                           <div className="bg-success/10 border border-success/30 rounded-lg p-2.5">
                             <p className="text-[11px] text-success font-semibold">
-                              VoteManager updated
+                              Admin set updated
                             </p>
                             {vmTxHash && (
                               <p className="text-[10px] text-text-secondary font-mono mt-0.5 break-all">
@@ -1404,7 +1426,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                   )}
                   {!wallet.signer && connStatus === "ok" && (
                     <p className="text-[10px] text-text-muted">
-                      Connect a wallet above to sign VoteManager transactions.
+                      Connect a wallet above to sign admin-set updates.
                     </p>
                   )}
                 </div>

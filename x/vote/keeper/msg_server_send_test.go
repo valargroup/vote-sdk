@@ -130,7 +130,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToNonValidato
 		Denom:       "usvote",
 	})
 	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "can only send to the vote manager or another bonded validator")
+	s.Require().Contains(err.Error(), "can only send to an admin or another bonded validator")
 	s.Require().Empty(bk.sendCalls)
 }
 
@@ -155,7 +155,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonPrivilegedSenderRejected() {
 		Denom:       "usvote",
 	})
 	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "neither the vote manager nor a bonded validator")
+	s.Require().Contains(err.Error(), "neither an admin nor a bonded validator")
 	s.Require().Empty(bk.sendCalls)
 }
 
@@ -177,7 +177,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NoVoteManagerSet_ValidatorReject
 	})
 	s.Require().Error(err)
 	// Validator sending to non-validator, non-manager should fail.
-	s.Require().Contains(err.Error(), "can only send to the vote manager or another bonded validator")
+	s.Require().Contains(err.Error(), "can only send to an admin or another bonded validator")
 }
 
 // ---------------------------------------------------------------------------

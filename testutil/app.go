@@ -91,7 +91,7 @@ func SetupTestApp(t *testing.T) *TestApp {
 	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
 
 	// Seed the vote manager so CreateVotingSession passes authorization.
-	ta.SeedVoteManager("sv1admin")
+	ta.SeedVoteManager(DefaultAdminAddress)
 
 	return ta
 }
@@ -119,7 +119,7 @@ func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey, []byte) 
 	ta := setupTestApp(t, appOpts)
 	ta.EaSkDir = tmpDir
 	ta.EaPk = pk.Point.ToAffineCompressed()
-	ta.SeedVoteManager("sv1admin")
+	ta.SeedVoteManager(DefaultAdminAddress)
 
 	return ta, pk, skBytes
 }
@@ -341,20 +341,25 @@ func (ta *TestApp) RegisterPallasKey(pallasPk *elgamal.PublicKey) {
 	require.Equal(ta.t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
 }
 
-// SeedVoteManager writes the vote manager address directly into the module's
-// KV store and commits via an empty block. Must be called before any
-// CreateVotingSession, since that handler requires the creator to be the
-// vote manager.
-func (ta *TestApp) SeedVoteManager(addr string) {
+// SeedAdmins writes the admin set directly into the module's KV store and
+// commits via an empty block. Must be called before any CreateVotingSession,
+// since that handler requires the creator to be in the admin set.
+func (ta *TestApp) SeedAdmins(addrs ...string) {
 	ta.t.Helper()
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
 
-	err := ta.VoteKeeper().SetVoteManager(kvStore, &types.VoteManagerState{Address: addr})
+	err := ta.VoteKeeper().SetAdmins(kvStore, &types.AdminSet{Addresses: addrs})
 	require.NoError(ta.t, err)
 
 	ta.NextBlock()
+}
+
+// SeedVoteManager is a backwards-compatible alias that seeds a single-admin
+// set. Prefer SeedAdmins for new tests.
+func (ta *TestApp) SeedVoteManager(addr string) {
+	ta.SeedAdmins(addr)
 }
 
 // SeedConfirmedCeremony is a no-op retained for test compatibility.

@@ -30,9 +30,11 @@ make build
 ### Run a Local Chain
 
 ```bash
-# 1. Create .env with the vote-manager private key (one-time)
+# 1. Create .env with the admin private key(s) (one-time)
 cp .env.example .env
-# Edit .env and set VM_PRIVKEY (generate with: openssl rand -hex 32)
+# Edit .env and set VM_PRIVKEYS (comma-separated 64-char hex keys; generate each with: openssl rand -hex 32)
+# For a single-admin chain, provide exactly one key. Any-of-N semantics: any
+# admin in the list can authorize admin-gated operations.
 
 # 2. Initialize a single-validator devnet and start
 make init
@@ -161,28 +163,31 @@ Each validator's `ea_sk` share is encrypted using ECIES over the Pallas curve wi
 3. `k = SHA256(E_compressed || S.x)` (symmetric key)
 4. `ct = ChaCha20-Poly1305(k, nonce=0, ea_sk)` (authenticated encryption)
 
-### VoteManager Role
+### Admin Set (any-of-N)
 
-The VoteManager is a singleton on-chain address that gates who can create voting sessions. Before any `MsgCreateVotingSession` is accepted, a VoteManager must be set.
+The admin set is a list of on-chain account addresses that gate who can create voting sessions and authorize unrestricted sends. Any member of the set can act alone (any-of-N semantics — strict membership, no threshold, no multi-sig aggregation). The admin set must be non-empty at genesis (no bootstrap path).
 
-**`MsgSetVoteManager`** -- Reassigns the VoteManager role.
-- Only the current VoteManager can call this — validators cannot reassign it
-- Transfers the caller's full `usvote` balance to the new manager atomically
-- The VoteManager must be set in genesis (no bootstrap path)
-- Uses custom wire format tag `0x0C` and REST endpoint `POST /shielded-vote/v1/set-vote-manager`
-- Stored as a singleton `VoteManagerState` in the KV store (key `0x0A`)
+**`MsgUpdateAdmins`** -- Atomically replaces the admin set.
+- Callable by any current admin
+- Validation: the new set must be non-empty, each address must be valid bech32, and no duplicates
+- **Does not move balances** — each admin holds their own funds (the bank-module per-account balance). Removed admins keep whatever `usvote` they had, but their sends become rejected because they are no longer admins and are not bonded validators (see "Drain before removal" below)
+- Stored as a singleton `AdminSet { repeated string addresses }` in the KV store (key `0x0A`)
+
+**`QueryAdmins`** returns the current admin set. A deprecated `QueryVoteManager` RPC returns `admins[0]` as `{address: ...}` for clients that predate the multi-admin change — it will be removed after one release.
+
+**Drain before removal.** When an admin is removed via `MsgUpdateAdmins`, their remaining `usvote` balance stays in their account but becomes one-way frozen: they cannot `MsgAuthorizedSend` (no longer an admin, not a validator), but can still receive from active admins. To avoid stranded balance, an active admin should `MsgAuthorizedSend` to drain a departing admin's balance *before* calling `MsgUpdateAdmins` to remove them.
 
 ### Voting Rounds
 
-After the ceremony reaches CONFIRMED and a VoteManager is set, voting sessions can be created.
+After the ceremony reaches CONFIRMED and at least one admin is set, voting sessions can be created.
 
 ```
 ACTIVE ──> TALLYING ──> FINALIZED
   ^
-  │ (gated: requires CONFIRMED ceremony + VoteManager)
+  │ (gated: requires CONFIRMED ceremony + non-empty admin set)
 ```
 
-**`MsgCreateVotingSession`** reads `ea_pk` from the confirmed ceremony state (not from the message). The round stores its own copy of `ea_pk` for future key rotation support. Only the VoteManager can create voting sessions. An optional `description` field provides human-readable context for the round.
+**`MsgCreateVotingSession`** reads `ea_pk` from the confirmed ceremony state (not from the message). The round stores its own copy of `ea_pk` for future key rotation support. Any admin can create voting sessions. An optional `description` field provides human-readable context for the round.
 
 **`MsgSubmitPartialDecryption`** is auto-injected via `PrepareProposal` when a round is in TALLYING state and threshold mode is active. Each validator submits `D_i = share_i * C1` per accumulator. Cannot be submitted through the mempool.
 
@@ -225,7 +230,7 @@ Each custom transaction is a 1-byte tag followed by a protobuf-encoded message b
 | `0x07` | `MsgDealExecutiveAuthorityKey`    | Ceremony (injected)     | Proposer identity check     |
 | `0x08` | `MsgAckExecutiveAuthorityKey`     | Ceremony (injected)     | Proposer identity check     |
 | `0x09` | `MsgCreateValidatorWithPallasKey` | Ceremony                | Standard Cosmos Tx (signed) |
-| `0x0C` | `MsgSetVoteManager`               | Management              | Standard Cosmos Tx (signed) |
+| `0x0C` | `MsgUpdateAdmins`                 | Management              | Standard Cosmos Tx (signed) |
 | `0x0D` | `MsgSubmitPartialDecryption`      | Tallying (injected)     | Proposer identity check     |
 
 Any transaction whose first byte does not match a known tag is decoded as a standard Cosmos SDK `Tx`. Tag `0x0A` is deliberately skipped because it collides with the standard Cosmos Tx protobuf encoding (field 1, wire type 2) — this collision is what makes the two decoders unambiguously distinguishable by a single byte peek. Note that raw `MsgCreateValidator` is blocked by the ante handler for live transactions -- post-genesis validators must use `MsgCreateValidatorWithPallasKey` (tag `0x09`) instead.
@@ -243,9 +248,9 @@ These flow through the standard ante chain: signature verification (`SigVerifica
 | `MsgRegisterPallasKey`            | Any bonded validator         | secp256k1 sig + `CeremonyValidatorDecorator` (bonded validator gate)   | Valid Pallas point; no duplicate registration                                                                            |
 | `MsgRotatePallasKey`              | Any bonded validator         | secp256k1 sig + `CeremonyValidatorDecorator` (bonded validator gate)   | Valid Pallas point; existing key required; no in-flight ceremony; new PK globally unique                                 |
 | `MsgCreateValidatorWithPallasKey` | Anyone (becomes a validator) | secp256k1 sig; exempt from `CeremonyValidatorDecorator`                | Delegates to `x/staking` `CreateValidator`; registers Pallas key; rejects duplicates                                     |
-| `MsgSetVoteManager`               | Current VoteManager only     | secp256k1 sig; exempt from `CeremonyValidatorDecorator` (has own auth) | `ValidateVoteManagerOnly`: only the current VoteManager can reassign; transfers full `usvote` balance to the new manager |
-| `MsgCreateVotingSession`          | VoteManager only             | secp256k1 sig (standard Cosmos Tx)                                     | `ValidateVoteManagerOnly`: creator must be the on-chain VoteManager address                                              |
-| `MsgAuthorizedSend`               | VoteManager or bonded validators | secp256k1 sig (standard Cosmos Tx)                                 | VoteManager can send to anyone; validators can only send to VoteManager or other bonded validators; all others rejected  |
+| `MsgUpdateAdmins`                 | Any current admin            | secp256k1 sig; exempt from `CeremonyValidatorDecorator` (has own auth) | `ValidateAdminOnly`: creator must be in the admin set; atomic replace of the whole set; no balance movement              |
+| `MsgCreateVotingSession`          | Any current admin            | secp256k1 sig (standard Cosmos Tx)                                     | `ValidateAdminOnly`: creator must be in the admin set                                                                    |
+| `MsgAuthorizedSend`               | Any admin or bonded validator | secp256k1 sig (standard Cosmos Tx)                                    | Any admin can send to anyone; validators can send to any admin or another bonded validator; all other senders rejected   |
 | `MsgCreateValidator`              | **Blocked** post-genesis     | Ante handler rejects at `BlockHeight > 0`                              | N/A — never reaches MsgServer                                                                                            |
 | `MsgSend` / `MsgMultiSend`       | **Blocked**                  | Not in message whitelist                                               | N/A — never reaches MsgServer                                                                                            |
 
@@ -293,7 +298,7 @@ A positive-security allowlist: only messages whose proto type URL appears in `De
 
 | Module   | Allowed messages |
 | -------- | ---------------- |
-| Vote     | `MsgCreateVotingSession`, `MsgRegisterPallasKey`, `MsgRotatePallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgSetVoteManager`, `MsgAuthorizedSend` |
+| Vote     | `MsgCreateVotingSession`, `MsgRegisterPallasKey`, `MsgRotatePallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgUpdateAdmins`, `MsgAuthorizedSend` |
 | Staking  | `MsgCreateValidator` (genesis only — blocked post-genesis by Layer 1), `MsgEditValidator` |
 | Slashing | `MsgUnjail` |
 
@@ -302,8 +307,8 @@ A positive-security allowlist: only messages whose proto type URL appears in `De
 | Excluded messages | Reason |
 | ----------------- | ------ |
 | `MsgSend`, `MsgMultiSend` | Replaced by `MsgAuthorizedSend` with role-based restrictions. Unrestricted transfers would let anyone accumulate stake and create a validator, bypassing the controlled validator set. |
-| `MsgDelegate`, `MsgUndelegate`, `MsgBeginRedelegate` | Prevents validators from reorganizing stake without the vote manager. Initial self-delegation is handled atomically by `MsgCreateValidatorWithPallasKey`. |
-| `MsgWithdrawDelegatorReward`, `MsgWithdrawValidatorCommission` | Prevents extracting staking rewards as liquid tokens that could be transferred outside the vote manager's control. |
+| `MsgDelegate`, `MsgUndelegate`, `MsgBeginRedelegate` | Prevents validators from reorganizing stake without an admin. Initial self-delegation is handled atomically by `MsgCreateValidatorWithPallasKey`. |
+| `MsgWithdrawDelegatorReward`, `MsgWithdrawValidatorCommission` | Prevents extracting staking rewards as liquid tokens that could be transferred outside of admin control. |
 | `MsgFundCommunityPool`, `MsgSetWithdrawAddress`, `MsgUpdateParams` | No governance module; these have no legitimate use on this chain. |
 | All vote/ceremony ZKP messages | Must use the custom `VoteTxWrapper` wire format with ZKP/RedPallas authentication. Blocked by both Layer 1 and Layer 2. |
 
@@ -311,13 +316,13 @@ A positive-security allowlist: only messages whose proto type URL appears in `De
 
 `MsgAuthorizedSend` is the **only** coin-transfer path on this chain. Authorization is enforced in the MsgServer handler (`x/vote/keeper/msg_server_send.go`):
 
-- **Vote manager** can send to anyone (distributes stake to new validators).
-- **Bonded validators** can send to the vote manager or other bonded validators (operational redistribution within the trusted set).
-- **All other senders** are rejected.
+- **Any admin** can send to anyone (distributes stake to new validators).
+- **Bonded validators** can send to any admin or other bonded validators (operational redistribution within the trusted set).
+- **All other senders** are rejected. Note that a former admin who has been removed from the set is neither an admin nor a validator, so their remaining balance becomes one-way frozen — drain before removal.
 
 #### Design assumptions
 
-1. The vote manager has full control over stake distribution. Validators receive tokens via `MsgAuthorizedSend` and bond them during `MsgCreateValidatorWithPallasKey`.
+1. The admin set has full control over stake distribution. Validators receive tokens via `MsgAuthorizedSend` and bond them during `MsgCreateValidatorWithPallasKey`. Each admin holds their own pre-funded balance; the genesis stake pool is split evenly across admins to preserve total supply.
 2. The whitelist is a compile-time constant. Adding a new message type requires a code change, rebuild, and coordinated chain upgrade.
 3. Custom wire format messages (`VoteTxWrapper`) are never subject to the whitelist — they are routed to the ZKP/RedPallas validation pipeline before the standard ante chain runs.
 4. If a custom wire format message is somehow removed from `isVoteModuleMsg` (Layer 1), the whitelist (Layer 2) still blocks it since it is not in `DefaultAllowedMessages()`.
@@ -338,7 +343,7 @@ Vote-round messages use the custom wire format and are submitted as JSON POST re
 
 These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`. `MsgSubmitTally`, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` have no REST endpoints — they are proposer-only and auto-injected via PrepareProposal.
 
-Ceremony and management messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgSetVoteManager`, `MsgCreateVotingSession`) are standard Cosmos SDK transactions routed through the MsgServiceRouter. They can be submitted via the Cosmos SDK CLI or gRPC gateway.
+Ceremony and management messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgUpdateAdmins`, `MsgCreateVotingSession`) are standard Cosmos SDK transactions routed through the MsgServiceRouter. They can be submitted via the Cosmos SDK CLI or gRPC gateway.
 
 #### Query Endpoints
 
@@ -355,7 +360,8 @@ Ceremony and management messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`, 
 | GET    | `/shielded-vote/v1/commitment-tree/{round_id}/latest`   | Latest vote commitment tree           |
 | GET    | `/shielded-vote/v1/commitment-tree/{round_id}/leaves`   | Tree leaves (`?from_height=X&to_height=Y`) |
 | GET    | `/shielded-vote/v1/pallas-keys`                    | All registered Pallas keys                 |
-| GET    | `/shielded-vote/v1/vote-manager`                   | Current VoteManager address                |
+| GET    | `/shielded-vote/v1/admins`                         | Current admin set (any-of-N)               |
+| GET    | `/shielded-vote/v1/vote-manager`                   | Deprecated — first admin as `{address}`    |
 | GET    | `/shielded-vote/v1/genesis`                        | Chain genesis JSON                         |
 | GET    | `/shielded-vote/v1/snapshot-data/{height}`         | Nullifier snapshot data at block height    |
 | GET    | `/shielded-vote/v1/tx/{hash}`                      | Transaction status by hash                 |
@@ -365,7 +371,7 @@ Ceremony and management messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`, 
 | Key         | Type                           | Description                                |
 | ----------- | ------------------------------ | ------------------------------------------ |
 | `0x09`      | `CeremonyState` (singleton)    | EA key ceremony lifecycle                  |
-| `0x0A`      | `VoteManagerState` (singleton) | VoteManager address                        |
+| `0x0A`      | `AdminSet` (singleton)         | Admin addresses (any-of-N)                 |
 | `0x01`      | `VoteRound` (per round)        | Voting session state                       |
 | `0x02-0x08` | Various                        | Nullifiers, tallies, commitment tree, etc. |
 

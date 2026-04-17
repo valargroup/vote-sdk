@@ -152,11 +152,14 @@ func (s *MsgServerTestSuite) setupWithMockStaking(valAddrs ...string) {
 	s.setupWithMockStakingKeeper(newMockStakingKeeper(valAddrs...))
 }
 
-// seedVoteManager sets the vote manager address in the KV store for tests.
-func (s *MsgServerTestSuite) seedVoteManager(addr string) {
+// seedAdmins installs an admin set with the given addresses in the KV store.
+func (s *MsgServerTestSuite) seedAdmins(addrs ...string) {
 	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: addr}))
+	s.Require().NoError(s.keeper.SetAdmins(kv, &types.AdminSet{Addresses: addrs}))
 }
+
+// seedVoteManager is a single-admin convenience alias for seedAdmins.
+func (s *MsgServerTestSuite) seedVoteManager(addr string) { s.seedAdmins(addr) }
 
 // setBlockProposer configures the mock staking keeper so that
 // ValidateProposerIsCreator sees creator as the block proposer.
@@ -230,7 +233,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: round created with PENDING status and validator snapshot",
 			setup: func() {
 				s.seedEligibleValidators(3)
-				s.seedVoteManager("sv1admin")
+				s.seedVoteManager(svtest.DefaultAdminAddress)
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -264,7 +267,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "duplicate round rejected",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedVoteManager("sv1admin")
+				s.seedVoteManager(svtest.DefaultAdminAddress)
 				_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 				s.Require().NoError(err)
 			},
@@ -276,10 +279,10 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "different fields produce different round ID",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedVoteManager("sv1admin")
+				s.seedVoteManager(svtest.DefaultAdminAddress)
 			},
 			msg: &types.MsgCreateVotingSession{
-				Creator:           "sv1admin",
+				Creator:           svtest.DefaultAdminAddress,
 				SnapshotHeight:    999,
 				SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
 				ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
@@ -299,7 +302,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 		{
 			name: "rejected: no validators have registered Pallas keys",
 			setup: func() {
-				s.seedVoteManager("sv1admin")
+				s.seedVoteManager(svtest.DefaultAdminAddress)
 				s.setupWithMockStaking()
 			},
 			msg:         msg,
@@ -310,7 +313,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "rejected: 1 validator below min_ceremony_validators=2",
 			setup: func() {
 				s.seedEligibleValidators(1)
-				s.seedVoteManager("sv1admin")
+				s.seedVoteManager(svtest.DefaultAdminAddress)
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 2))
 			},
@@ -322,7 +325,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: 1 validator with default min_ceremony_validators=1",
 			setup: func() {
 				s.seedEligibleValidators(1)
-				s.seedVoteManager("sv1admin")
+				s.seedVoteManager(svtest.DefaultAdminAddress)
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -338,7 +341,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: exactly 2 validators",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedVoteManager("sv1admin")
+				s.seedVoteManager(svtest.DefaultAdminAddress)
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -354,10 +357,10 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "rejected: another PENDING round already exists",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedVoteManager("sv1admin")
+				s.seedVoteManager(svtest.DefaultAdminAddress)
 				// Create a different round first to put it in PENDING.
 				_, err := s.msgServer.CreateVotingSession(s.ctx, &types.MsgCreateVotingSession{
-					Creator:           "sv1admin",
+					Creator:           svtest.DefaultAdminAddress,
 					SnapshotHeight:    999,
 					SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
 					ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
@@ -398,7 +401,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 	s.SetupTest()
 	s.seedEligibleValidators(2)
-	s.seedVoteManager("sv1admin")
+	s.seedVoteManager(svtest.DefaultAdminAddress)
 	msg := validSetupMsg()
 
 	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
@@ -413,7 +416,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
 	s.SetupTest()
 	s.seedEligibleValidators(2)
-	s.seedVoteManager("sv1admin")
+	s.seedVoteManager(svtest.DefaultAdminAddress)
 	msg := validSetupMsg()
 
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
@@ -643,246 +646,255 @@ func (s *MsgServerTestSuite) TestCastVote() {
 }
 
 // ---------------------------------------------------------------------------
-// SetVoteManager
+// UpdateAdmins (any-of-N atomic replace; no balance transfer)
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestSetVoteManager_VoteManagerCanChange() {
-	s.SetupTest()
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
+func (s *MsgServerTestSuite) TestUpdateAdmins_AnyAdminCanUpdate() {
+	adminA := testAccAddr(20)
+	adminB := testAccAddr(21)
+	replacement := testAccAddr(22)
 
-	currentMgr := testAccAddr(20)
-	newMgr := testAccAddr(21)
+	// Run once per member of the initial {A, B} set to prove any-of-N.
+	for _, caller := range []string{adminA, adminB} {
+		s.Run("caller="+caller, func() {
+			s.SetupTest()
+			s.seedAdmins(adminA, adminB)
 
-	s.seedVoteManager(currentMgr)
+			_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+				Creator:   caller,
+				NewAdmins: []string{caller, replacement},
+			})
+			s.Require().NoError(err)
 
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    currentMgr,
-		NewManager: newMgr,
-	})
-	s.Require().NoError(err)
-
-	kv := s.keeper.OpenKVStore(s.ctx)
-	mgr, err := s.keeper.GetVoteManager(kv)
-	s.Require().NoError(err)
-	s.Require().Equal(newMgr, mgr.Address)
+			kv := s.keeper.OpenKVStore(s.ctx)
+			set, err := s.keeper.GetAdmins(kv)
+			s.Require().NoError(err)
+			s.Require().Equal([]string{caller, replacement}, set.Addresses)
+		})
+	}
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_NonManagerRejected() {
+func (s *MsgServerTestSuite) TestUpdateAdmins_NonAdminRejected() {
 	s.SetupTest()
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
 
-	currentMgr := testAccAddr(40)
-	newMgr := testAccAddr(41)
+	adminA := testAccAddr(40)
+	s.seedAdmins(adminA)
 
-	s.seedVoteManager(currentMgr)
-
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    "random_address",
-		NewManager: newMgr,
+	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   testAccAddr(99), // not in the set
+		NewAdmins: []string{testAccAddr(41)},
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not authorized")
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_ValidatorCannotChange() {
+func (s *MsgServerTestSuite) TestUpdateAdmins_ValidatorRejected() {
 	s.SetupTest()
 	val1 := testValAddr(1)
-	currentMgr := testAccAddr(30)
-	newMgr := testAccAddr(31)
 	s.setupWithMockStaking(val1)
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
 
-	s.seedVoteManager(currentMgr)
+	adminA := testAccAddr(30)
+	s.seedAdmins(adminA)
 
-	// A bonded validator that is not the vote manager must be rejected.
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    val1,
-		NewManager: newMgr,
+	// A bonded validator that is not an admin must be rejected.
+	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   val1,
+		NewAdmins: []string{testAccAddr(31)},
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not authorized")
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_NoVoteManagerRejected() {
+func (s *MsgServerTestSuite) TestUpdateAdmins_NoAdminsRejected() {
 	s.SetupTest()
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
 
-	// No vote manager set — calling SetVoteManager should fail with ErrNoVoteManager.
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    testAccAddr(1),
-		NewManager: testAccAddr(2),
+	// No admin set installed — UpdateAdmins should fail with ErrNoAdmins.
+	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   testAccAddr(1),
+		NewAdmins: []string{testAccAddr(2)},
 	})
 	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "no vote manager set")
+	s.Require().Contains(err.Error(), "no admin set configured")
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_EmptyNewManagerRejected() {
+func (s *MsgServerTestSuite) TestUpdateAdmins_EmptySetRejected() {
 	s.SetupTest()
-	currentMgr := testAccAddr(10)
-	s.seedVoteManager(currentMgr)
+	adminA := testAccAddr(10)
+	s.seedAdmins(adminA)
 
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    currentMgr,
-		NewManager: "",
+	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   adminA,
+		NewAdmins: nil,
 	})
 	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "new_manager cannot be empty")
+	s.Require().Contains(err.Error(), "admin set must be non-empty")
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_InvalidAddressRejected() {
+func (s *MsgServerTestSuite) TestUpdateAdmins_DuplicatesRejected() {
 	s.SetupTest()
-	currentMgr := testAccAddr(10)
-	s.seedVoteManager(currentMgr)
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
+	adminA := testAccAddr(10)
+	s.seedAdmins(adminA)
 
-	// Reject non-bech32 string.
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    currentMgr,
-		NewManager: "not_a_valid_address",
+	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   adminA,
+		NewAdmins: []string{adminA, adminA},
 	})
 	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "not a valid account address")
-
-	// Reject validator operator address (valoper).
-	_, err = s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    currentMgr,
-		NewManager: testValAddr(2),
-	})
-	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "not a valid account address")
+	s.Require().Contains(err.Error(), "admin address appears more than once")
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_TransfersFunds() {
+func (s *MsgServerTestSuite) TestUpdateAdmins_InvalidBech32Rejected() {
 	s.SetupTest()
-	currentMgr := testAccAddr(20)
-	newMgr := testAccAddr(21)
+	adminA := testAccAddr(10)
+	s.seedAdmins(adminA)
+
+	// Non-bech32 string.
+	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   adminA,
+		NewAdmins: []string{"not_a_valid_address"},
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not a valid bech32 address")
+
+	// Validator operator address (valoper) — different bech32 HRP, rejected.
+	_, err = s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   adminA,
+		NewAdmins: []string{testValAddr(2)},
+	})
+	s.Require().Error(err)
+}
+
+func (s *MsgServerTestSuite) TestUpdateAdmins_DoesNotTouchBalances() {
+	s.SetupTest()
+	adminA := testAccAddr(20)
+	adminB := testAccAddr(21)
 
 	bk := newMockBankKeeper()
-	bk.balances[currentMgr] = sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.NewInt(1_000_000_000))
+	bk.balances[adminA] = sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.NewInt(1_000_000_000))
 	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManager(currentMgr)
+	s.seedAdmins(adminA)
 
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    currentMgr,
-		NewManager: newMgr,
+	// Replace {A} with {B}; A's balance must remain untouched because under
+	// the per-admin balance model UpdateAdmins never moves funds.
+	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   adminA,
+		NewAdmins: []string{adminB},
 	})
 	s.Require().NoError(err)
 
-	// Verify SendCoins was called with the full balance.
-	s.Require().Len(bk.sendCalls, 1)
-	call := bk.sendCalls[0]
-
-	fromAddr, _ := sdk.AccAddressFromBech32(currentMgr)
-	toAddr, _ := sdk.AccAddressFromBech32(newMgr)
-	s.Require().Equal(fromAddr, call.From)
-	s.Require().Equal(toAddr, call.To)
-	s.Require().Equal(sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.NewInt(1_000_000_000))), call.Amt)
+	s.Require().Empty(bk.sendCalls, "UpdateAdmins must not call SendCoins")
+	s.Require().Equal(sdkmath.NewInt(1_000_000_000), bk.balances[adminA].Amount)
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_ZeroBalanceNoTransfer() {
+func (s *MsgServerTestSuite) TestUpdateAdmins_CreatorRemovingSelfAllowed() {
 	s.SetupTest()
-	currentMgr := testAccAddr(20)
-	newMgr := testAccAddr(21)
+	adminA := testAccAddr(50)
+	adminB := testAccAddr(51)
+	s.seedAdmins(adminA, adminB)
 
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManager(currentMgr)
-
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    currentMgr,
-		NewManager: newMgr,
+	// adminA calls UpdateAdmins and removes themselves — allowed as long as
+	// the new set is non-empty.
+	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   adminA,
+		NewAdmins: []string{adminB},
 	})
 	s.Require().NoError(err)
 
-	// No SendCoins call when balance is zero.
-	s.Require().Empty(bk.sendCalls)
-
-	// Role still transferred.
 	kv := s.keeper.OpenKVStore(s.ctx)
-	mgr, err := s.keeper.GetVoteManager(kv)
+	set, err := s.keeper.GetAdmins(kv)
 	s.Require().NoError(err)
-	s.Require().Equal(newMgr, mgr.Address)
+	s.Require().Equal([]string{adminB}, set.Addresses)
+
+	// A subsequent call by adminA must now fail (they're no longer in the set).
+	_, err = s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   adminA,
+		NewAdmins: []string{adminA},
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not authorized")
 }
 
-func (s *MsgServerTestSuite) TestSetVoteManager_EmitsEvent() {
+func (s *MsgServerTestSuite) TestUpdateAdmins_EmitsEvent() {
 	s.SetupTest()
-	currentMgr := testAccAddr(60)
-	newMgr := testAccAddr(61)
+	adminA := testAccAddr(60)
+	adminB := testAccAddr(61)
+	s.seedAdmins(adminA)
 
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManager(currentMgr)
-
-	_, err := s.msgServer.SetVoteManager(s.ctx, &types.MsgSetVoteManager{
-		Creator:    currentMgr,
-		NewManager: newMgr,
+	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
+		Creator:   adminA,
+		NewAdmins: []string{adminA, adminB},
 	})
 	s.Require().NoError(err)
 
 	var found bool
 	for _, e := range s.ctx.EventManager().Events() {
-		if e.Type == types.EventTypeSetVoteManager {
+		if e.Type == types.EventTypeUpdateAdmins {
 			found = true
 			for _, attr := range e.Attributes {
-				if attr.Key == types.AttributeKeyVoteManager {
-					s.Require().Equal(newMgr, attr.Value)
+				if attr.Key == types.AttributeKeyAdmins {
+					s.Require().Contains(attr.Value, adminA)
+					s.Require().Contains(attr.Value, adminB)
 				}
 			}
 		}
 	}
-	s.Require().True(found, "expected %s event", types.EventTypeSetVoteManager)
+	s.Require().True(found, "expected %s event", types.EventTypeUpdateAdmins)
 }
 
 // ---------------------------------------------------------------------------
-// CreateVotingSession: VoteManager gating tests
+// CreateVotingSession: admin gating tests
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWithNoVoteManager() {
+func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWithNoAdmins() {
 	s.SetupTest()
 	s.seedEligibleValidators(1)
 
 	msg := validSetupMsg()
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "no vote manager set")
+	s.Require().Contains(err.Error(), "no admin set configured")
 }
 
-func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotVoteManager() {
+func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotAdmin() {
 	s.SetupTest()
 	s.seedEligibleValidators(1)
-	s.seedVoteManager("the_real_manager")
+	s.seedAdmins(testAccAddr(80))
 
 	msg := validSetupMsg()
-	msg.Creator = "not_the_manager"
+	msg.Creator = testAccAddr(81) // not in the admin set
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not authorized")
 }
 
-func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsWithVoteManager() {
-	s.SetupTest()
-	s.seedEligibleValidators(2)
-	s.seedVoteManager("sv1admin")
+func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsForEachAdmin() {
+	adminA := testAccAddr(90)
+	adminB := testAccAddr(91)
+	adminC := testAccAddr(92)
 
-	msg := validSetupMsg()
-	msg.Creator = "sv1admin"
-	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
-	s.Require().NoError(err)
-	s.Require().NotEmpty(resp.VoteRoundId)
+	for _, admin := range []string{adminA, adminB, adminC} {
+		s.Run("admin="+admin, func() {
+			s.SetupTest()
+			s.seedEligibleValidators(2)
+			s.seedAdmins(adminA, adminB, adminC)
+
+			msg := validSetupMsg()
+			msg.Creator = admin
+			resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+			s.Require().NoError(err)
+			s.Require().NotEmpty(resp.VoteRoundId)
+		})
+	}
 }
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	s.SetupTest()
 	s.seedEligibleValidators(2)
-	s.seedVoteManager("sv1admin")
+	admin := testAccAddr(95)
+	s.seedAdmins(admin)
 
 	msg := validSetupMsg()
-	msg.Creator = "sv1admin"
+	msg.Creator = admin
 	msg.Description = "Test round description"
 	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().NoError(err)
@@ -893,77 +905,3 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	s.Require().Equal("Test round description", round.Description)
 }
 
-// ---------------------------------------------------------------------------
-// VoteManager CRUD tests (on KeeperTestSuite)
-// ---------------------------------------------------------------------------
-
-func (s *KeeperTestSuite) TestVoteManager_ReturnsNilWhenEmpty() {
-	s.SetupTest()
-	kv := s.keeper.OpenKVStore(s.ctx)
-
-	state, err := s.keeper.GetVoteManager(kv)
-	s.Require().NoError(err)
-	s.Require().Nil(state, "should return nil when no vote manager exists")
-}
-
-func (s *KeeperTestSuite) TestVoteManager_RoundTrip() {
-	s.SetupTest()
-	kv := s.keeper.OpenKVStore(s.ctx)
-
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "sv1manager"}))
-
-	got, err := s.keeper.GetVoteManager(kv)
-	s.Require().NoError(err)
-	s.Require().NotNil(got)
-	s.Require().Equal("sv1manager", got.Address)
-}
-
-func (s *KeeperTestSuite) TestVoteManager_Overwrite() {
-	s.SetupTest()
-	kv := s.keeper.OpenKVStore(s.ctx)
-
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "first"}))
-	s.Require().NoError(s.keeper.SetVoteManager(kv, &types.VoteManagerState{Address: "second"}))
-
-	got, err := s.keeper.GetVoteManager(kv)
-	s.Require().NoError(err)
-	s.Require().Equal("second", got.Address)
-}
-
-// ---------------------------------------------------------------------------
-// Genesis: VoteManager restoration (on KeeperTestSuite)
-// ---------------------------------------------------------------------------
-
-func (s *KeeperTestSuite) TestGenesis_VoteManagerRestored() {
-	s.SetupTest()
-	kv := s.keeper.OpenKVStore(s.ctx)
-
-	genesis := &types.GenesisState{
-		VoteManager: "sv1genesis_manager",
-	}
-
-	s.Require().NoError(s.keeper.InitGenesis(kv, genesis))
-
-	mgr, err := s.keeper.GetVoteManager(kv)
-	s.Require().NoError(err)
-	s.Require().NotNil(mgr)
-	s.Require().Equal("sv1genesis_manager", mgr.Address)
-}
-
-// TestGenesis_EmptyVoteManagerNotSet verifies keeper-level InitGenesis
-// handles empty VoteManager gracefully. In practice, ValidateGenesisState
-// rejects empty vote_manager before InitGenesis is called.
-func (s *KeeperTestSuite) TestGenesis_EmptyVoteManagerNotSet() {
-	s.SetupTest()
-	kv := s.keeper.OpenKVStore(s.ctx)
-
-	genesis := &types.GenesisState{
-		VoteManager: "",
-	}
-
-	s.Require().NoError(s.keeper.InitGenesis(kv, genesis))
-
-	mgr, err := s.keeper.GetVoteManager(kv)
-	s.Require().NoError(err)
-	s.Require().Nil(mgr)
-}

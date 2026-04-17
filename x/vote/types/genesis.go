@@ -6,6 +6,34 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
+// ValidateAndNormalizeAdminSet parses each address through bech32, rejects
+// duplicates (on the canonical form, so mixed-case variants don't slip
+// through), and returns the canonical list. The input list is not mutated.
+// Returns ErrEmptyAdminSet when the list is empty.
+//
+// Shared by ValidateGenesisState and the MsgUpdateAdmins handler so both
+// paths apply the same admissibility rules.
+func ValidateAndNormalizeAdminSet(addrs []string) ([]string, error) {
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("%w", ErrEmptyAdminSet)
+	}
+	seen := make(map[string]struct{}, len(addrs))
+	normalized := make([]string, 0, len(addrs))
+	for i, addr := range addrs {
+		acc, err := sdk.AccAddressFromBech32(addr)
+		if err != nil {
+			return nil, fmt.Errorf("[%d] %q is not a valid bech32 address: %w", i, addr, err)
+		}
+		canonical := acc.String()
+		if _, dup := seen[canonical]; dup {
+			return nil, fmt.Errorf("%w: %s", ErrDuplicateAdmin, canonical)
+		}
+		seen[canonical] = struct{}{}
+		normalized = append(normalized, canonical)
+	}
+	return normalized, nil
+}
+
 // ValidateGenesisState performs structural validation of the vote module genesis state.
 func ValidateGenesisState(gs *GenesisState) error {
 	if gs == nil {
@@ -41,12 +69,9 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
-	// Vote manager is required in genesis — there is no bootstrap path.
-	if gs.VoteManager == "" {
-		return fmt.Errorf("vote_manager is required in genesis")
-	}
-	if _, err := sdk.AccAddressFromBech32(gs.VoteManager); err != nil {
-		return fmt.Errorf("vote_manager %q is not a valid bech32 address: %w", gs.VoteManager, err)
+	// Admin set is required in genesis — there is no bootstrap path.
+	if _, err := ValidateAndNormalizeAdminSet(gs.AdminAddresses); err != nil {
+		return fmt.Errorf("admin_addresses: %w", err)
 	}
 
 	// min_ceremony_validators must be at least 1 when explicitly set.

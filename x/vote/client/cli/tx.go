@@ -34,7 +34,7 @@ func GetTxCmd() *cobra.Command {
 		CmdRotatePallasKey(),
 		CmdCreateValidatorWithPallasKey(),
 		// Vote-manager commands — signed by the designated vote manager address.
-		CmdSetVoteManager(),
+		CmdUpdateAdmins(),
 		CmdCreateVotingSession(),
 		CmdSubmitTally(),
 		// Token transfer — uses whitelisted MsgAuthorizedSend.
@@ -187,37 +187,47 @@ the Pallas key.`,
 	return cmd
 }
 
-// CmdSetVoteManager broadcasts MsgSetVoteManager.
-// Sets or rotates the vote manager address. Callable by the current vote
-// manager or any bonded validator (first-time bootstrap).
-func CmdSetVoteManager() *cobra.Command {
+// CmdUpdateAdmins broadcasts MsgUpdateAdmins.
+// Atomically replaces the admin set with the given addresses. Callable by any
+// current admin (any-of-N).
+func CmdUpdateAdmins() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "set-vote-manager [new-manager-addr]",
-		Short: "Set or change the vote manager address",
-		Long: `Broadcast an MsgSetVoteManager transaction.
+		Use:   "update-admins --admin <addr> [--admin <addr> ...]",
+		Short: "Atomically replace the admin set",
+		Long: `Broadcast an MsgUpdateAdmins transaction.
 
-Argument:
-  new-manager-addr  Bech32 account address (sv1...) of the new vote manager.
+Flags:
+  --admin  Repeatable. Bech32 account address (sv1...) that should be in the
+           new admin set. Pass the flag once per admin. The full list replaces
+           the existing set atomically.
 
-The --from signer must be either the current vote manager or a bonded
-validator.  On first call (no vote manager configured), any bonded validator
-may set the initial manager.`,
-		Args: cobra.ExactArgs(1),
+The --from signer must be a current admin. Balances are not moved — each admin
+holds their own funds.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientTxContext(cmd)
 			if err != nil {
 				return err
 			}
 
-			msg := &types.MsgSetVoteManager{
-				Creator:    clientCtx.GetFromAddress().String(),
-				NewManager: args[0],
+			newAdmins, err := cmd.Flags().GetStringArray("admin")
+			if err != nil {
+				return err
+			}
+			if len(newAdmins) == 0 {
+				return fmt.Errorf("at least one --admin flag is required")
+			}
+
+			msg := &types.MsgUpdateAdmins{
+				Creator:   clientCtx.GetFromAddress().String(),
+				NewAdmins: newAdmins,
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
+	cmd.Flags().StringArray("admin", nil, "Admin bech32 address (repeatable; all specified addresses form the new admin set)")
 	flags.AddTxFlagsToCmd(cmd)
 	return cmd
 }

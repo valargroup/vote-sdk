@@ -528,28 +528,29 @@ func (x *VoteRound) GetDiscussionUrl() string {
 	return ""
 }
 
-// VoteManagerState stores the singleton vote manager address.
-type VoteManagerState struct {
+// AdminSet stores the admin addresses. Any-of-N: any member may authorize
+// admin-gated operations. See README for the full rationale.
+type AdminSet struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Addresses     []string               `protobuf:"bytes,1,rep,name=addresses,proto3" json:"addresses,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *VoteManagerState) Reset() {
-	*x = VoteManagerState{}
+func (x *AdminSet) Reset() {
+	*x = AdminSet{}
 	mi := &file_svote_v1_types_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *VoteManagerState) String() string {
+func (x *AdminSet) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*VoteManagerState) ProtoMessage() {}
+func (*AdminSet) ProtoMessage() {}
 
-func (x *VoteManagerState) ProtoReflect() protoreflect.Message {
+func (x *AdminSet) ProtoReflect() protoreflect.Message {
 	mi := &file_svote_v1_types_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -561,16 +562,16 @@ func (x *VoteManagerState) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use VoteManagerState.ProtoReflect.Descriptor instead.
-func (*VoteManagerState) Descriptor() ([]byte, []int) {
+// Deprecated: Use AdminSet.ProtoReflect.Descriptor instead.
+func (*AdminSet) Descriptor() ([]byte, []int) {
 	return file_svote_v1_types_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *VoteManagerState) GetAddress() string {
+func (x *AdminSet) GetAddresses() []string {
 	if x != nil {
-		return x.Address
+		return x.Addresses
 	}
-	return ""
+	return nil
 }
 
 // CommitmentTreeState holds the current state of the append-only commitment tree.
@@ -647,7 +648,7 @@ type GenesisState struct {
 	state                 protoimpl.MessageState      `protogen:"open.v1"`
 	Rounds                []*VoteRound                `protobuf:"bytes,1,rep,name=rounds,proto3" json:"rounds,omitempty"`
 	Nullifiers            []*NullifierEntry           `protobuf:"bytes,4,rep,name=nullifiers,proto3" json:"nullifiers,omitempty"`
-	VoteManager           string                      `protobuf:"bytes,5,opt,name=vote_manager,json=voteManager,proto3" json:"vote_manager,omitempty"`
+	AdminAddresses        []string                    `protobuf:"bytes,5,rep,name=admin_addresses,json=adminAddresses,proto3" json:"admin_addresses,omitempty"` // any-of-N admin set (was: singular vote_manager)
 	TallyResults          []*TallyResult              `protobuf:"bytes,6,rep,name=tally_results,json=tallyResults,proto3" json:"tally_results,omitempty"`
 	PallasKeys            []*ValidatorPallasKey       `protobuf:"bytes,7,rep,name=pallas_keys,json=pallasKeys,proto3" json:"pallas_keys,omitempty"`
 	TallyAccumulators     []*GenesisTallyAccumulator  `protobuf:"bytes,8,rep,name=tally_accumulators,json=tallyAccumulators,proto3" json:"tally_accumulators,omitempty"`
@@ -703,11 +704,11 @@ func (x *GenesisState) GetNullifiers() []*NullifierEntry {
 	return nil
 }
 
-func (x *GenesisState) GetVoteManager() string {
+func (x *GenesisState) GetAdminAddresses() []string {
 	if x != nil {
-		return x.VoteManager
+		return x.AdminAddresses
 	}
-	return ""
+	return nil
 }
 
 func (x *GenesisState) GetTallyResults() []*TallyResult {
@@ -1857,7 +1858,7 @@ func (x *DealerPayload) GetCiphertext() []byte {
 type AckEntry struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	ValidatorAddress string                 `protobuf:"bytes,1,opt,name=validator_address,json=validatorAddress,proto3" json:"validator_address,omitempty"`
-	AckSignature     []byte                 `protobuf:"bytes,2,opt,name=ack_signature,json=ackSignature,proto3" json:"ack_signature,omitempty"` // Signature over H("ack" || ea_pk || validator_address)
+	AckSignature     []byte                 `protobuf:"bytes,2,opt,name=ack_signature,json=ackSignature,proto3" json:"ack_signature,omitempty"` // Commitment digest: SHA256("ack" || ea_pk || validator_address). Not a cryptographic signature; field name kept for wire compatibility.
 	AckHeight        uint64                 `protobuf:"varint,3,opt,name=ack_height,json=ackHeight,proto3" json:"ack_height,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -1959,21 +1960,21 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x13tally_phase_timeout\x18\x1a \x01(\x04R\x11tallyPhaseTimeout\x12&\n" +
 	"\x0ftally_timed_out\x18\x1b \x01(\bR\rtallyTimedOut\x12F\n" +
 	"\x11dkg_contributions\x18\x1c \x03(\v2\x19.svote.v1.DKGContributionR\x10dkgContributions\x12%\n" +
-	"\x0ediscussion_url\x18\x1d \x01(\tR\rdiscussionUrlJ\x04\b\x11\x10\x12J\x04\b\x13\x10\x14\",\n" +
-	"\x10VoteManagerState\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x8d\x01\n" +
+	"\x0ediscussion_url\x18\x1d \x01(\tR\rdiscussionUrlJ\x04\b\x11\x10\x12J\x04\b\x13\x10\x14\"(\n" +
+	"\bAdminSet\x12\x1c\n" +
+	"\taddresses\x18\x01 \x03(\tR\taddresses\"\x8d\x01\n" +
 	"\x13CommitmentTreeState\x12\x1d\n" +
 	"\n" +
 	"next_index\x18\x01 \x01(\x04R\tnextIndex\x12\x12\n" +
 	"\x04root\x18\x02 \x01(\fR\x04root\x12\x16\n" +
 	"\x06height\x18\x03 \x01(\x04R\x06height\x12+\n" +
-	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xef\x04\n" +
+	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xf5\x04\n" +
 	"\fGenesisState\x12+\n" +
 	"\x06rounds\x18\x01 \x03(\v2\x13.svote.v1.VoteRoundR\x06rounds\x128\n" +
 	"\n" +
 	"nullifiers\x18\x04 \x03(\v2\x18.svote.v1.NullifierEntryR\n" +
-	"nullifiers\x12!\n" +
-	"\fvote_manager\x18\x05 \x01(\tR\vvoteManager\x12:\n" +
+	"nullifiers\x12'\n" +
+	"\x0fadmin_addresses\x18\x05 \x03(\tR\x0eadminAddresses\x12:\n" +
 	"\rtally_results\x18\x06 \x03(\v2\x15.svote.v1.TallyResultR\ftallyResults\x12=\n" +
 	"\vpallas_keys\x18\a \x03(\v2\x1c.svote.v1.ValidatorPallasKeyR\n" +
 	"pallasKeys\x12P\n" +
@@ -2115,7 +2116,7 @@ var file_svote_v1_types_proto_goTypes = []any{
 	(*VoteOption)(nil),               // 2: svote.v1.VoteOption
 	(*Proposal)(nil),                 // 3: svote.v1.Proposal
 	(*VoteRound)(nil),                // 4: svote.v1.VoteRound
-	(*VoteManagerState)(nil),         // 5: svote.v1.VoteManagerState
+	(*AdminSet)(nil),                 // 5: svote.v1.AdminSet
 	(*CommitmentTreeState)(nil),      // 6: svote.v1.CommitmentTreeState
 	(*GenesisState)(nil),             // 7: svote.v1.GenesisState
 	(*GenesisRoundTree)(nil),         // 8: svote.v1.GenesisRoundTree

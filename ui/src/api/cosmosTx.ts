@@ -1,6 +1,6 @@
 // Client-side Cosmos SDK transaction signing and REST broadcasting.
 //
-// MsgSetVoteManager, MsgCreateVotingSession, and MsgAuthorizedSend are
+// MsgUpdateAdmins, MsgCreateVotingSession, and MsgAuthorizedSend are
 // standard Cosmos SDK transactions. Instead of relying on a server-side
 // handler, we sign them directly in the browser using cosmjs and broadcast
 // via the chain's REST API (/cosmos/tx/v1beta1/txs).
@@ -95,25 +95,33 @@ class ProtoWriter {
   }
 }
 
-// ── Protobuf type: MsgSetVoteManager ────────────────────────────
-
-// message MsgSetVoteManager { string creator = 1; string new_manager = 2; }
-const MsgSetVoteManagerProto = {
+// ── Protobuf type: MsgUpdateAdmins ─────────────────────────────
+//
+// message MsgUpdateAdmins {
+//   string creator          = 1;
+//   repeated string new_admins = 2;
+// }
+// Atomically replaces the admin set. Any current admin may call it; the new
+// set must be non-empty and contain only valid bech32 addresses with no
+// duplicates. Balances are not touched.
+const MsgUpdateAdminsProto = {
   encode(
-    message: { creator: string; newManager: string },
+    message: { creator: string; newAdmins: string[] },
     writer: ProtoWriter = ProtoWriter.create(),
   ): ProtoWriter {
     if (message.creator !== "") writer.uint32(10).string(message.creator);
-    if (message.newManager !== "") writer.uint32(18).string(message.newManager);
+    for (const admin of message.newAdmins) {
+      writer.uint32(18).string(admin);
+    }
     return writer;
   },
-  decode(): { creator: string; newManager: string } {
+  decode(): { creator: string; newAdmins: string[] } {
     throw new Error("decode not implemented");
   },
   fromPartial(
-    object: Partial<{ creator: string; newManager: string }>,
-  ): { creator: string; newManager: string } {
-    return { creator: object.creator ?? "", newManager: object.newManager ?? "" };
+    object: Partial<{ creator: string; newAdmins: string[] }>,
+  ): { creator: string; newAdmins: string[] } {
+    return { creator: object.creator ?? "", newAdmins: object.newAdmins ?? [] };
   },
 };
 
@@ -270,7 +278,7 @@ const MsgAuthorizedSendProto = {
 function createRegistry(): Registry {
   const registry = new Registry();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registry.register("/svote.v1.MsgSetVoteManager", MsgSetVoteManagerProto as any);
+  registry.register("/svote.v1.MsgUpdateAdmins", MsgUpdateAdminsProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/svote.v1.MsgCreateVotingSession", MsgCreateVotingSessionProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -499,15 +507,15 @@ async function fetchSnapshotData(
 // ── Public API ──────────────────────────────────────────────────
 
 /**
- * Sign and broadcast a MsgSetVoteManager transaction.
+ * Sign and broadcast a MsgUpdateAdmins transaction.
  *
- * The `creator` field is derived from the signer (must be the current vote
- * manager or a bonded validator).
+ * Atomically replaces the admin set with `newAdmins`. The `creator` field is
+ * derived from the signer (must be a current admin). Balances are not moved.
  */
-export async function setVoteManager(
+export async function updateAdmins(
   apiBase: string,
   signer: OfflineDirectSigner,
-  newManager: string,
+  newAdmins: string[],
 ): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
   return signAndBroadcast({
@@ -515,8 +523,8 @@ export async function setVoteManager(
     signer,
     messages: [
       {
-        typeUrl: "/svote.v1.MsgSetVoteManager",
-        value: { creator: account.address, newManager },
+        typeUrl: "/svote.v1.MsgUpdateAdmins",
+        value: { creator: account.address, newAdmins },
       },
     ],
   });

@@ -33,7 +33,13 @@ service Query {
   // CeremonyState returns the current EA key ceremony lifecycle state.
   rpc CeremonyState(QueryCeremonyStateRequest) returns (QueryCeremonyStateResponse);
 
-  // VoteManager returns the current vote manager address.
+  // Admins returns the current admin set (any member can authorize
+  // admin-gated operations — any-of-N semantics).
+  rpc Admins(QueryAdminsRequest) returns (QueryAdminsResponse);
+
+  // VoteManager returns the first admin address in the set. Deprecated
+  // compat shim for clients expecting a single "vote manager" address —
+  // will be removed in a future release. Prefer the Admins RPC.
   rpc VoteManager(QueryVoteManagerRequest) returns (QueryVoteManagerResponse);
 
   // VoteSummary returns a denormalized view of a vote round with proposals,
@@ -112,8 +118,17 @@ message QueryCeremonyStateResponse {
   CeremonyState ceremony = 1;
 }
 
+message QueryAdminsRequest {}
+
+message QueryAdminsResponse {
+  repeated string admin_addresses = 1;
+}
+
 message QueryVoteManagerRequest {}
 
+// QueryVoteManagerResponse carries a single address for compatibility with
+// clients that predate the multi-admin change. The address returned is the
+// first admin in the current set. Deprecated — prefer QueryAdminsResponse.
 message QueryVoteManagerResponse {
   string address = 1;
 }

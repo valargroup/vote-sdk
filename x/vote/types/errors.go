@@ -37,9 +37,11 @@ var (
 	ErrNoPallasKey        = errors.Register(ModuleName, 36, "validator has no registered pallas key")
 	ErrSameKey            = errors.Register(ModuleName, 37, "new pallas key is identical to the current key")
 
-	// Vote manager errors.
-	ErrNotAuthorized  = errors.Register(ModuleName, 30, "sender is not authorized")
-	ErrNoVoteManager  = errors.Register(ModuleName, 31, "no vote manager set")
+	// Admin authorization errors.
+	ErrNotAuthorized   = errors.Register(ModuleName, 30, "sender is not authorized")
+	ErrNoAdmins        = errors.Register(ModuleName, 31, "no admin set configured")
+	ErrEmptyAdminSet   = errors.Register(ModuleName, 38, "admin set must be non-empty")
+	ErrDuplicateAdmin  = errors.Register(ModuleName, 39, "admin address appears more than once")
 
 	// Authorized send errors.
 	ErrUnauthorizedSend = errors.Register(ModuleName, 32, "sender not authorized to send to recipient")

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"google.golang.org/protobuf/proto"
@@ -36,8 +37,8 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
-	// Only the vote manager can create voting sessions.
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
+	// Only an admin can create voting sessions (any-of-N).
+	if err := ms.k.ValidateAdminOnly(goCtx, msg.Creator); err != nil {
 		return nil, err
 	}
 
@@ -216,52 +217,33 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 	return &types.MsgCastVoteResponse{}, nil
 }
 
-// SetVoteManager handles MsgSetVoteManager.
-// Only the current vote manager can reassign the role. Transfers the caller's
-// full usvote balance to the new manager atomically.
-func (ms msgServer) SetVoteManager(goCtx context.Context, msg *types.MsgSetVoteManager) (*types.MsgSetVoteManagerResponse, error) {
+// UpdateAdmins atomically replaces the admin set. See proto for semantics.
+// Allows the caller to remove themselves from the new set — the non-empty
+// check is the only liveness guarantee.
+func (ms msgServer) UpdateAdmins(goCtx context.Context, msg *types.MsgUpdateAdmins) (*types.MsgUpdateAdminsResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
-	if msg.NewManager == "" {
-		return nil, fmt.Errorf("%w: new_manager cannot be empty", types.ErrInvalidField)
-	}
-
-	newManagerAddr, err := sdk.AccAddressFromBech32(msg.NewManager)
-	if err != nil {
-		return nil, fmt.Errorf("%w: new_manager is not a valid account address: %v", types.ErrInvalidField, err)
-	}
-
-	// Only the current vote manager can reassign.
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
+	if err := ms.k.ValidateAdminOnly(goCtx, msg.Creator); err != nil {
 		return nil, err
 	}
 
-	// Transfer the current VM's entire bond-denom balance to the new manager.
-	creatorAddr, err := sdk.AccAddressFromBech32(msg.Creator)
+	normalized, err := types.ValidateAndNormalizeAdminSet(msg.NewAdmins)
 	if err != nil {
-		return nil, fmt.Errorf("%w: creator is not a valid account address: %v", types.ErrInvalidField, err)
-	}
-	balance := ms.k.bankKeeper.GetBalance(ctx, creatorAddr, sdk.DefaultBondDenom)
-	if balance.IsPositive() {
-		if err := ms.k.bankKeeper.SendCoins(ctx, creatorAddr, newManagerAddr, sdk.NewCoins(balance)); err != nil {
-			return nil, fmt.Errorf("failed to transfer funds to new vote manager: %w", err)
-		}
+		return nil, fmt.Errorf("new_admins: %w", err)
 	}
 
 	kvStore := ms.k.OpenKVStore(ctx)
-	if err := ms.k.SetVoteManager(kvStore, &types.VoteManagerState{
-		Address: msg.NewManager,
-	}); err != nil {
+	if err := ms.k.SetAdmins(kvStore, &types.AdminSet{Addresses: normalized}); err != nil {
 		return nil, err
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeSetVoteManager,
-		sdk.NewAttribute(types.AttributeKeyVoteManager, msg.NewManager),
+		types.EventTypeUpdateAdmins,
+		sdk.NewAttribute(types.AttributeKeyAdmins, strings.Join(normalized, ",")),
 		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
 	))
 
-	return &types.MsgSetVoteManagerResponse{}, nil
+	return &types.MsgUpdateAdminsResponse{}, nil
 }
 
 // deriveRoundID computes a deterministic vote_round_id from the setup fields

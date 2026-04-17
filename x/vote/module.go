@@ -59,7 +59,7 @@ func init() {
 			ProvideContributeDKGSigner,
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
-			ProvideSetVoteManagerSigner,
+			ProvideUpdateAdminsSigner,
 			ProvideAuthorizedSendSigner,
 		),
 	)
@@ -215,9 +215,9 @@ func ProvideCreateValidatorWithPallasKeySigner() signing.CustomGetSigner {
 	}
 }
 
-func ProvideSetVoteManagerSigner() signing.CustomGetSigner {
+func ProvideUpdateAdminsSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgSetVoteManager"),
+		MsgType: protoreflect.FullName("svote.v1.MsgUpdateAdmins"),
 		Fn:      ceremonyCreatorSignerFn,
 	}
 }
@@ -390,9 +390,14 @@ func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					Short:     "Query the current EA key ceremony lifecycle state",
 				},
 				{
+					RpcMethod: "Admins",
+					Use:       "admins",
+					Short:     "Query the current admin set (any-of-N — any member may act)",
+				},
+				{
 					RpcMethod: "VoteManager",
 					Use:       "vote-manager",
-					Short:     "Query the current vote manager address",
+					Short:     "Deprecated — returns the first admin address. Use `admins` instead.",
 				},
 				{
 					RpcMethod: "ListRounds",
@@ -717,14 +722,17 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	return nil
 }
 
-// DefaultVoteManagerAddress is the default vote manager used in genesis.
-// Corresponds to the VM_PRIVKEY set via .env (local) or GitHub secret (CI).
-const DefaultVoteManagerAddress = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"
+// DefaultAdminAddresses is the default admin set used in genesis. A single
+// entry here preserves the single-admin behavior of the pre-change default.
+// Init scripts replace this list with the addresses derived from VM_PRIVKEYS.
+var DefaultAdminAddresses = []string{
+	"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
+}
 
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {
 	gs := &types.GenesisState{
-		VoteManager:           DefaultVoteManagerAddress,
+		AdminAddresses:        append([]string(nil), DefaultAdminAddresses...),
 		MinCeremonyValidators: 1,
 	}
 	bz, err := json.Marshal(gs)

@@ -73,14 +73,18 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
-          envs: VM_PRIVKEY,SVOTE_HELPER_SENTRY_DSN
+          envs: VM_PRIVKEYS,VM_PRIVKEY,SVOTE_HELPER_SENTRY_DSN
           script: |
             export HOME=${{ env.DEPLOY_PATH }} PATH=${{ env.DEPLOY_PATH }}:$PATH
+            export VM_PRIVKEYS="$VM_PRIVKEYS"
             export VM_PRIVKEY="$VM_PRIVKEY"
             export SVOTE_HELPER_SENTRY_DSN="$SVOTE_HELPER_SENTRY_DSN"
             chmod +x ${{ env.DEPLOY_PATH }}/svoted ${{ env.DEPLOY_PATH }}/create-val-tx
             bash ${{ env.DEPLOY_PATH }}/init_multi.sh --ci
         env:
+          # VM_PRIVKEYS (comma-separated) is preferred; VM_PRIVKEY is the
+          # legacy single-admin fallback recognized by init_multi.sh.
+          VM_PRIVKEYS: ${{ secrets.VM_PRIVKEYS }}
           VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
           SVOTE_HELPER_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 

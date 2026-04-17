@@ -196,6 +196,14 @@ export async function getLatestBlock(): Promise<LatestBlockInfo> {
   };
 }
 
+export async function getAdmins(): Promise<{ admin_addresses: string[] }> {
+  return fetchJson<{ admin_addresses: string[] }>("/shielded-vote/v1/admins");
+}
+
+/**
+ * @deprecated Use getAdmins(). Returns the first admin address for clients
+ * that predate the multi-admin change. Will be removed in a future release.
+ */
 export async function getVoteManager(): Promise<{ address: string }> {
   return fetchJson<{ address: string }>("/shielded-vote/v1/vote-manager");
 }

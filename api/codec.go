@@ -17,7 +17,7 @@ import (
 //
 // Tags 0x01, 0x06, 0x09, 0x0C are reserved for messages that use the standard
 // Cosmos SDK Tx envelope (MsgCreateVotingSession, MsgRegisterPallasKey,
-// MsgCreateValidatorWithPallasKey, MsgSetVoteManager). They are not used by
+// MsgCreateValidatorWithPallasKey, MsgUpdateAdmins). They are not used by
 // any encoder or decoder here — see sdk/README.md for the full byte map.
 // Tag 0x0A is deliberately absent: it collides with the standard Cosmos Tx
 // protobuf encoding (field 1, wire type 2).

@@ -176,7 +176,7 @@ func TestDefaultAllowedMessages_ContainsExpectedTypes(t *testing.T) {
 	require.True(t, allowed["/svote.v1.MsgRegisterPallasKey"])
 	require.True(t, allowed["/svote.v1.MsgRotatePallasKey"])
 	require.True(t, allowed["/svote.v1.MsgCreateValidatorWithPallasKey"])
-	require.True(t, allowed["/svote.v1.MsgSetVoteManager"])
+	require.True(t, allowed["/svote.v1.MsgUpdateAdmins"])
 	require.True(t, allowed["/cosmos.staking.v1beta1.MsgCreateValidator"])
 	require.True(t, allowed["/cosmos.staking.v1beta1.MsgEditValidator"])
 	require.True(t, allowed["/cosmos.slashing.v1beta1.MsgUnjail"])

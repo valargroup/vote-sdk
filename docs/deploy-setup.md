@@ -23,10 +23,11 @@ In the repo: **Settings → Secrets and variables → Actions**, add:
 | `DEPLOY_HOST`      | Repository  | Remote hostname or IP (e.g. `chain.example.com`).                    |
 | `DEPLOY_USER`      | Repository  | SSH user on that host (e.g. `deploy` or `root`).                     |
 | `SSH_PASSWORD`     | Repository  | SSH password for that user.                                          |
-| `VM_PRIVKEY`       | Repository  | 64-char hex secp256k1 private key for the bootstrap vote-manager.    |
+| `VM_PRIVKEYS`      | Repository  | Comma-separated 64-char hex secp256k1 private keys for the bootstrap admin set (any-of-N). Each derived address becomes an admin; the ~1B usvote stake pool is split evenly across the set. |
+| `VM_PRIVKEY`       | Repository  | Deprecated — recognized as a single-admin fallback when `VM_PRIVKEYS` is unset. Will be removed after one release. |
 | `CEREMONY_SSH_KEY` | Environment (`production`) | Ed25519 private key for ceremony bootstrap SSH.       |
 
-Generate `VM_PRIVKEY` with `openssl rand -hex 32`. This key is imported as the vote-manager account during chain initialization. **Never commit it to the repository** — locally it is loaded from `.env` (see `.env.example`).
+Generate each admin key with `openssl rand -hex 32` and join them with commas: `VM_PRIVKEYS=<hex1>,<hex2>,<hex3>`. Each derived address is imported as an admin account during chain initialization; any one of them can authorize admin-gated operations (any-of-N). The stake pool is split evenly across admins to preserve total chain supply regardless of `N`. **Never commit these keys to the repository** — locally they are loaded from `.env` (see `.env.example`).
 
 The `CEREMONY_SSH_KEY` secret lives in the GitHub **production** environment (Settings → Environments → production). Generate the keypair and authorize it on the remote:
 

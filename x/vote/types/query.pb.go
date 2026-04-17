@@ -742,6 +742,86 @@ func (x *QueryCeremonyStateResponse) GetCeremony() *CeremonyState {
 	return nil
 }
 
+type QueryAdminsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryAdminsRequest) Reset() {
+	*x = QueryAdminsRequest{}
+	mi := &file_svote_v1_query_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryAdminsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryAdminsRequest) ProtoMessage() {}
+
+func (x *QueryAdminsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryAdminsRequest.ProtoReflect.Descriptor instead.
+func (*QueryAdminsRequest) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{16}
+}
+
+type QueryAdminsResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	AdminAddresses []string               `protobuf:"bytes,1,rep,name=admin_addresses,json=adminAddresses,proto3" json:"admin_addresses,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *QueryAdminsResponse) Reset() {
+	*x = QueryAdminsResponse{}
+	mi := &file_svote_v1_query_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryAdminsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryAdminsResponse) ProtoMessage() {}
+
+func (x *QueryAdminsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryAdminsResponse.ProtoReflect.Descriptor instead.
+func (*QueryAdminsResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *QueryAdminsResponse) GetAdminAddresses() []string {
+	if x != nil {
+		return x.AdminAddresses
+	}
+	return nil
+}
+
 type QueryVoteManagerRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -750,7 +830,7 @@ type QueryVoteManagerRequest struct {
 
 func (x *QueryVoteManagerRequest) Reset() {
 	*x = QueryVoteManagerRequest{}
-	mi := &file_svote_v1_query_proto_msgTypes[16]
+	mi := &file_svote_v1_query_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +842,7 @@ func (x *QueryVoteManagerRequest) String() string {
 func (*QueryVoteManagerRequest) ProtoMessage() {}
 
 func (x *QueryVoteManagerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_query_proto_msgTypes[16]
+	mi := &file_svote_v1_query_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,9 +855,12 @@ func (x *QueryVoteManagerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryVoteManagerRequest.ProtoReflect.Descriptor instead.
 func (*QueryVoteManagerRequest) Descriptor() ([]byte, []int) {
-	return file_svote_v1_query_proto_rawDescGZIP(), []int{16}
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{18}
 }
 
+// QueryVoteManagerResponse carries a single address for compatibility with
+// clients that predate the multi-admin change. The address returned is the
+// first admin in the current set. Deprecated — prefer QueryAdminsResponse.
 type QueryVoteManagerResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
@@ -787,7 +870,7 @@ type QueryVoteManagerResponse struct {
 
 func (x *QueryVoteManagerResponse) Reset() {
 	*x = QueryVoteManagerResponse{}
-	mi := &file_svote_v1_query_proto_msgTypes[17]
+	mi := &file_svote_v1_query_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -799,7 +882,7 @@ func (x *QueryVoteManagerResponse) String() string {
 func (*QueryVoteManagerResponse) ProtoMessage() {}
 
 func (x *QueryVoteManagerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_query_proto_msgTypes[17]
+	mi := &file_svote_v1_query_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -812,7 +895,7 @@ func (x *QueryVoteManagerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryVoteManagerResponse.ProtoReflect.Descriptor instead.
 func (*QueryVoteManagerResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_query_proto_rawDescGZIP(), []int{17}
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *QueryVoteManagerResponse) GetAddress() string {
@@ -831,7 +914,7 @@ type QueryVoteSummaryRequest struct {
 
 func (x *QueryVoteSummaryRequest) Reset() {
 	*x = QueryVoteSummaryRequest{}
-	mi := &file_svote_v1_query_proto_msgTypes[18]
+	mi := &file_svote_v1_query_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -843,7 +926,7 @@ func (x *QueryVoteSummaryRequest) String() string {
 func (*QueryVoteSummaryRequest) ProtoMessage() {}
 
 func (x *QueryVoteSummaryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_query_proto_msgTypes[18]
+	mi := &file_svote_v1_query_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -856,7 +939,7 @@ func (x *QueryVoteSummaryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryVoteSummaryRequest.ProtoReflect.Descriptor instead.
 func (*QueryVoteSummaryRequest) Descriptor() ([]byte, []int) {
-	return file_svote_v1_query_proto_rawDescGZIP(), []int{18}
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *QueryVoteSummaryRequest) GetVoteRoundId() []byte {
@@ -879,7 +962,7 @@ type QueryVoteSummaryResponse struct {
 
 func (x *QueryVoteSummaryResponse) Reset() {
 	*x = QueryVoteSummaryResponse{}
-	mi := &file_svote_v1_query_proto_msgTypes[19]
+	mi := &file_svote_v1_query_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -891,7 +974,7 @@ func (x *QueryVoteSummaryResponse) String() string {
 func (*QueryVoteSummaryResponse) ProtoMessage() {}
 
 func (x *QueryVoteSummaryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_query_proto_msgTypes[19]
+	mi := &file_svote_v1_query_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -904,7 +987,7 @@ func (x *QueryVoteSummaryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryVoteSummaryResponse.ProtoReflect.Descriptor instead.
 func (*QueryVoteSummaryResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_query_proto_rawDescGZIP(), []int{19}
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *QueryVoteSummaryResponse) GetVoteRoundId() []byte {
@@ -950,7 +1033,7 @@ type QueryListRoundsRequest struct {
 
 func (x *QueryListRoundsRequest) Reset() {
 	*x = QueryListRoundsRequest{}
-	mi := &file_svote_v1_query_proto_msgTypes[20]
+	mi := &file_svote_v1_query_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -962,7 +1045,7 @@ func (x *QueryListRoundsRequest) String() string {
 func (*QueryListRoundsRequest) ProtoMessage() {}
 
 func (x *QueryListRoundsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_query_proto_msgTypes[20]
+	mi := &file_svote_v1_query_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -975,7 +1058,7 @@ func (x *QueryListRoundsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryListRoundsRequest.ProtoReflect.Descriptor instead.
 func (*QueryListRoundsRequest) Descriptor() ([]byte, []int) {
-	return file_svote_v1_query_proto_rawDescGZIP(), []int{20}
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{22}
 }
 
 type QueryListRoundsResponse struct {
@@ -987,7 +1070,7 @@ type QueryListRoundsResponse struct {
 
 func (x *QueryListRoundsResponse) Reset() {
 	*x = QueryListRoundsResponse{}
-	mi := &file_svote_v1_query_proto_msgTypes[21]
+	mi := &file_svote_v1_query_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -999,7 +1082,7 @@ func (x *QueryListRoundsResponse) String() string {
 func (*QueryListRoundsResponse) ProtoMessage() {}
 
 func (x *QueryListRoundsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_query_proto_msgTypes[21]
+	mi := &file_svote_v1_query_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1012,7 +1095,7 @@ func (x *QueryListRoundsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryListRoundsResponse.ProtoReflect.Descriptor instead.
 func (*QueryListRoundsResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_query_proto_rawDescGZIP(), []int{21}
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *QueryListRoundsResponse) GetRounds() []*VoteRound {
@@ -1030,7 +1113,7 @@ type QueryPallasKeysRequest struct {
 
 func (x *QueryPallasKeysRequest) Reset() {
 	*x = QueryPallasKeysRequest{}
-	mi := &file_svote_v1_query_proto_msgTypes[22]
+	mi := &file_svote_v1_query_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1042,7 +1125,7 @@ func (x *QueryPallasKeysRequest) String() string {
 func (*QueryPallasKeysRequest) ProtoMessage() {}
 
 func (x *QueryPallasKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_query_proto_msgTypes[22]
+	mi := &file_svote_v1_query_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1055,7 +1138,7 @@ func (x *QueryPallasKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryPallasKeysRequest.ProtoReflect.Descriptor instead.
 func (*QueryPallasKeysRequest) Descriptor() ([]byte, []int) {
-	return file_svote_v1_query_proto_rawDescGZIP(), []int{22}
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{24}
 }
 
 type QueryPallasKeysResponse struct {
@@ -1067,7 +1150,7 @@ type QueryPallasKeysResponse struct {
 
 func (x *QueryPallasKeysResponse) Reset() {
 	*x = QueryPallasKeysResponse{}
-	mi := &file_svote_v1_query_proto_msgTypes[23]
+	mi := &file_svote_v1_query_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1079,7 +1162,7 @@ func (x *QueryPallasKeysResponse) String() string {
 func (*QueryPallasKeysResponse) ProtoMessage() {}
 
 func (x *QueryPallasKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_query_proto_msgTypes[23]
+	mi := &file_svote_v1_query_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1092,7 +1175,7 @@ func (x *QueryPallasKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryPallasKeysResponse.ProtoReflect.Descriptor instead.
 func (*QueryPallasKeysResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_query_proto_rawDescGZIP(), []int{23}
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *QueryPallasKeysResponse) GetValidators() []*ValidatorPallasKey {
@@ -1146,7 +1229,10 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\x05round\x18\x01 \x01(\v2\x13.svote.v1.VoteRoundR\x05round\"\x1b\n" +
 	"\x19QueryCeremonyStateRequest\"Q\n" +
 	"\x1aQueryCeremonyStateResponse\x123\n" +
-	"\bceremony\x18\x01 \x01(\v2\x17.svote.v1.CeremonyStateR\bceremony\"\x19\n" +
+	"\bceremony\x18\x01 \x01(\v2\x17.svote.v1.CeremonyStateR\bceremony\"\x14\n" +
+	"\x12QueryAdminsRequest\">\n" +
+	"\x13QueryAdminsResponse\x12'\n" +
+	"\x0fadmin_addresses\x18\x01 \x03(\tR\x0eadminAddresses\"\x19\n" +
 	"\x17QueryVoteManagerRequest\"4\n" +
 	"\x18QueryVoteManagerResponse\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"=\n" +
@@ -1165,7 +1251,7 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\x17QueryPallasKeysResponse\x12<\n" +
 	"\n" +
 	"validators\x18\x01 \x03(\v2\x1c.svote.v1.ValidatorPallasKeyR\n" +
-	"validators2\xb9\b\n" +
+	"validators2\x80\t\n" +
 	"\x05Query\x12e\n" +
 	"\x16CommitmentTreeAtHeight\x12$.svote.v1.QueryCommitmentTreeRequest\x1a%.svote.v1.QueryCommitmentTreeResponse\x12[\n" +
 	"\x14LatestCommitmentTree\x12 .svote.v1.QueryLatestTreeRequest\x1a!.svote.v1.QueryLatestTreeResponse\x12N\n" +
@@ -1174,7 +1260,8 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\fTallyResults\x12\".svote.v1.QueryTallyResultsRequest\x1a#.svote.v1.QueryTallyResultsResponse\x12c\n" +
 	"\x10CommitmentLeaves\x12&.svote.v1.QueryCommitmentLeavesRequest\x1a'.svote.v1.QueryCommitmentLeavesResponse\x12T\n" +
 	"\vActiveRound\x12!.svote.v1.QueryActiveRoundRequest\x1a\".svote.v1.QueryActiveRoundResponse\x12Z\n" +
-	"\rCeremonyState\x12#.svote.v1.QueryCeremonyStateRequest\x1a$.svote.v1.QueryCeremonyStateResponse\x12T\n" +
+	"\rCeremonyState\x12#.svote.v1.QueryCeremonyStateRequest\x1a$.svote.v1.QueryCeremonyStateResponse\x12E\n" +
+	"\x06Admins\x12\x1c.svote.v1.QueryAdminsRequest\x1a\x1d.svote.v1.QueryAdminsResponse\x12T\n" +
 	"\vVoteManager\x12!.svote.v1.QueryVoteManagerRequest\x1a\".svote.v1.QueryVoteManagerResponse\x12T\n" +
 	"\vVoteSummary\x12!.svote.v1.QueryVoteSummaryRequest\x1a\".svote.v1.QueryVoteSummaryResponse\x12Q\n" +
 	"\n" +
@@ -1194,7 +1281,7 @@ func file_svote_v1_query_proto_rawDescGZIP() []byte {
 	return file_svote_v1_query_proto_rawDescData
 }
 
-var file_svote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_svote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_svote_v1_query_proto_goTypes = []any{
 	(*QueryCommitmentTreeRequest)(nil),    // 0: svote.v1.QueryCommitmentTreeRequest
 	(*QueryCommitmentTreeResponse)(nil),   // 1: svote.v1.QueryCommitmentTreeResponse
@@ -1212,37 +1299,39 @@ var file_svote_v1_query_proto_goTypes = []any{
 	(*QueryActiveRoundResponse)(nil),      // 13: svote.v1.QueryActiveRoundResponse
 	(*QueryCeremonyStateRequest)(nil),     // 14: svote.v1.QueryCeremonyStateRequest
 	(*QueryCeremonyStateResponse)(nil),    // 15: svote.v1.QueryCeremonyStateResponse
-	(*QueryVoteManagerRequest)(nil),       // 16: svote.v1.QueryVoteManagerRequest
-	(*QueryVoteManagerResponse)(nil),      // 17: svote.v1.QueryVoteManagerResponse
-	(*QueryVoteSummaryRequest)(nil),       // 18: svote.v1.QueryVoteSummaryRequest
-	(*QueryVoteSummaryResponse)(nil),      // 19: svote.v1.QueryVoteSummaryResponse
-	(*QueryListRoundsRequest)(nil),        // 20: svote.v1.QueryListRoundsRequest
-	(*QueryListRoundsResponse)(nil),       // 21: svote.v1.QueryListRoundsResponse
-	(*QueryPallasKeysRequest)(nil),        // 22: svote.v1.QueryPallasKeysRequest
-	(*QueryPallasKeysResponse)(nil),       // 23: svote.v1.QueryPallasKeysResponse
-	nil,                                   // 24: svote.v1.QueryProposalTallyResponse.TallyEntry
-	(*CommitmentTreeState)(nil),           // 25: svote.v1.CommitmentTreeState
-	(*VoteRound)(nil),                     // 26: svote.v1.VoteRound
-	(*TallyResult)(nil),                   // 27: svote.v1.TallyResult
-	(*BlockCommitments)(nil),              // 28: svote.v1.BlockCommitments
-	(*CeremonyState)(nil),                 // 29: svote.v1.CeremonyState
-	(SessionStatus)(0),                    // 30: svote.v1.SessionStatus
-	(*ProposalSummary)(nil),               // 31: svote.v1.ProposalSummary
-	(*ValidatorPallasKey)(nil),            // 32: svote.v1.ValidatorPallasKey
+	(*QueryAdminsRequest)(nil),            // 16: svote.v1.QueryAdminsRequest
+	(*QueryAdminsResponse)(nil),           // 17: svote.v1.QueryAdminsResponse
+	(*QueryVoteManagerRequest)(nil),       // 18: svote.v1.QueryVoteManagerRequest
+	(*QueryVoteManagerResponse)(nil),      // 19: svote.v1.QueryVoteManagerResponse
+	(*QueryVoteSummaryRequest)(nil),       // 20: svote.v1.QueryVoteSummaryRequest
+	(*QueryVoteSummaryResponse)(nil),      // 21: svote.v1.QueryVoteSummaryResponse
+	(*QueryListRoundsRequest)(nil),        // 22: svote.v1.QueryListRoundsRequest
+	(*QueryListRoundsResponse)(nil),       // 23: svote.v1.QueryListRoundsResponse
+	(*QueryPallasKeysRequest)(nil),        // 24: svote.v1.QueryPallasKeysRequest
+	(*QueryPallasKeysResponse)(nil),       // 25: svote.v1.QueryPallasKeysResponse
+	nil,                                   // 26: svote.v1.QueryProposalTallyResponse.TallyEntry
+	(*CommitmentTreeState)(nil),           // 27: svote.v1.CommitmentTreeState
+	(*VoteRound)(nil),                     // 28: svote.v1.VoteRound
+	(*TallyResult)(nil),                   // 29: svote.v1.TallyResult
+	(*BlockCommitments)(nil),              // 30: svote.v1.BlockCommitments
+	(*CeremonyState)(nil),                 // 31: svote.v1.CeremonyState
+	(SessionStatus)(0),                    // 32: svote.v1.SessionStatus
+	(*ProposalSummary)(nil),               // 33: svote.v1.ProposalSummary
+	(*ValidatorPallasKey)(nil),            // 34: svote.v1.ValidatorPallasKey
 }
 var file_svote_v1_query_proto_depIdxs = []int32{
-	25, // 0: svote.v1.QueryCommitmentTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
-	25, // 1: svote.v1.QueryLatestTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
-	26, // 2: svote.v1.QueryVoteRoundResponse.round:type_name -> svote.v1.VoteRound
-	24, // 3: svote.v1.QueryProposalTallyResponse.tally:type_name -> svote.v1.QueryProposalTallyResponse.TallyEntry
-	27, // 4: svote.v1.QueryTallyResultsResponse.results:type_name -> svote.v1.TallyResult
-	28, // 5: svote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> svote.v1.BlockCommitments
-	26, // 6: svote.v1.QueryActiveRoundResponse.round:type_name -> svote.v1.VoteRound
-	29, // 7: svote.v1.QueryCeremonyStateResponse.ceremony:type_name -> svote.v1.CeremonyState
-	30, // 8: svote.v1.QueryVoteSummaryResponse.status:type_name -> svote.v1.SessionStatus
-	31, // 9: svote.v1.QueryVoteSummaryResponse.proposals:type_name -> svote.v1.ProposalSummary
-	26, // 10: svote.v1.QueryListRoundsResponse.rounds:type_name -> svote.v1.VoteRound
-	32, // 11: svote.v1.QueryPallasKeysResponse.validators:type_name -> svote.v1.ValidatorPallasKey
+	27, // 0: svote.v1.QueryCommitmentTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
+	27, // 1: svote.v1.QueryLatestTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
+	28, // 2: svote.v1.QueryVoteRoundResponse.round:type_name -> svote.v1.VoteRound
+	26, // 3: svote.v1.QueryProposalTallyResponse.tally:type_name -> svote.v1.QueryProposalTallyResponse.TallyEntry
+	29, // 4: svote.v1.QueryTallyResultsResponse.results:type_name -> svote.v1.TallyResult
+	30, // 5: svote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> svote.v1.BlockCommitments
+	28, // 6: svote.v1.QueryActiveRoundResponse.round:type_name -> svote.v1.VoteRound
+	31, // 7: svote.v1.QueryCeremonyStateResponse.ceremony:type_name -> svote.v1.CeremonyState
+	32, // 8: svote.v1.QueryVoteSummaryResponse.status:type_name -> svote.v1.SessionStatus
+	33, // 9: svote.v1.QueryVoteSummaryResponse.proposals:type_name -> svote.v1.ProposalSummary
+	28, // 10: svote.v1.QueryListRoundsResponse.rounds:type_name -> svote.v1.VoteRound
+	34, // 11: svote.v1.QueryPallasKeysResponse.validators:type_name -> svote.v1.ValidatorPallasKey
 	0,  // 12: svote.v1.Query.CommitmentTreeAtHeight:input_type -> svote.v1.QueryCommitmentTreeRequest
 	2,  // 13: svote.v1.Query.LatestCommitmentTree:input_type -> svote.v1.QueryLatestTreeRequest
 	4,  // 14: svote.v1.Query.VoteRound:input_type -> svote.v1.QueryVoteRoundRequest
@@ -1251,24 +1340,26 @@ var file_svote_v1_query_proto_depIdxs = []int32{
 	10, // 17: svote.v1.Query.CommitmentLeaves:input_type -> svote.v1.QueryCommitmentLeavesRequest
 	12, // 18: svote.v1.Query.ActiveRound:input_type -> svote.v1.QueryActiveRoundRequest
 	14, // 19: svote.v1.Query.CeremonyState:input_type -> svote.v1.QueryCeremonyStateRequest
-	16, // 20: svote.v1.Query.VoteManager:input_type -> svote.v1.QueryVoteManagerRequest
-	18, // 21: svote.v1.Query.VoteSummary:input_type -> svote.v1.QueryVoteSummaryRequest
-	20, // 22: svote.v1.Query.ListRounds:input_type -> svote.v1.QueryListRoundsRequest
-	22, // 23: svote.v1.Query.PallasKeys:input_type -> svote.v1.QueryPallasKeysRequest
-	1,  // 24: svote.v1.Query.CommitmentTreeAtHeight:output_type -> svote.v1.QueryCommitmentTreeResponse
-	3,  // 25: svote.v1.Query.LatestCommitmentTree:output_type -> svote.v1.QueryLatestTreeResponse
-	5,  // 26: svote.v1.Query.VoteRound:output_type -> svote.v1.QueryVoteRoundResponse
-	7,  // 27: svote.v1.Query.ProposalTally:output_type -> svote.v1.QueryProposalTallyResponse
-	9,  // 28: svote.v1.Query.TallyResults:output_type -> svote.v1.QueryTallyResultsResponse
-	11, // 29: svote.v1.Query.CommitmentLeaves:output_type -> svote.v1.QueryCommitmentLeavesResponse
-	13, // 30: svote.v1.Query.ActiveRound:output_type -> svote.v1.QueryActiveRoundResponse
-	15, // 31: svote.v1.Query.CeremonyState:output_type -> svote.v1.QueryCeremonyStateResponse
-	17, // 32: svote.v1.Query.VoteManager:output_type -> svote.v1.QueryVoteManagerResponse
-	19, // 33: svote.v1.Query.VoteSummary:output_type -> svote.v1.QueryVoteSummaryResponse
-	21, // 34: svote.v1.Query.ListRounds:output_type -> svote.v1.QueryListRoundsResponse
-	23, // 35: svote.v1.Query.PallasKeys:output_type -> svote.v1.QueryPallasKeysResponse
-	24, // [24:36] is the sub-list for method output_type
-	12, // [12:24] is the sub-list for method input_type
+	16, // 20: svote.v1.Query.Admins:input_type -> svote.v1.QueryAdminsRequest
+	18, // 21: svote.v1.Query.VoteManager:input_type -> svote.v1.QueryVoteManagerRequest
+	20, // 22: svote.v1.Query.VoteSummary:input_type -> svote.v1.QueryVoteSummaryRequest
+	22, // 23: svote.v1.Query.ListRounds:input_type -> svote.v1.QueryListRoundsRequest
+	24, // 24: svote.v1.Query.PallasKeys:input_type -> svote.v1.QueryPallasKeysRequest
+	1,  // 25: svote.v1.Query.CommitmentTreeAtHeight:output_type -> svote.v1.QueryCommitmentTreeResponse
+	3,  // 26: svote.v1.Query.LatestCommitmentTree:output_type -> svote.v1.QueryLatestTreeResponse
+	5,  // 27: svote.v1.Query.VoteRound:output_type -> svote.v1.QueryVoteRoundResponse
+	7,  // 28: svote.v1.Query.ProposalTally:output_type -> svote.v1.QueryProposalTallyResponse
+	9,  // 29: svote.v1.Query.TallyResults:output_type -> svote.v1.QueryTallyResultsResponse
+	11, // 30: svote.v1.Query.CommitmentLeaves:output_type -> svote.v1.QueryCommitmentLeavesResponse
+	13, // 31: svote.v1.Query.ActiveRound:output_type -> svote.v1.QueryActiveRoundResponse
+	15, // 32: svote.v1.Query.CeremonyState:output_type -> svote.v1.QueryCeremonyStateResponse
+	17, // 33: svote.v1.Query.Admins:output_type -> svote.v1.QueryAdminsResponse
+	19, // 34: svote.v1.Query.VoteManager:output_type -> svote.v1.QueryVoteManagerResponse
+	21, // 35: svote.v1.Query.VoteSummary:output_type -> svote.v1.QueryVoteSummaryResponse
+	23, // 36: svote.v1.Query.ListRounds:output_type -> svote.v1.QueryListRoundsResponse
+	25, // 37: svote.v1.Query.PallasKeys:output_type -> svote.v1.QueryPallasKeysResponse
+	25, // [25:38] is the sub-list for method output_type
+	12, // [12:25] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name
 	12, // [12:12] is the sub-list for extension extendee
 	0,  // [0:12] is the sub-list for field type_name
@@ -1286,7 +1377,7 @@ func file_svote_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_query_proto_rawDesc), len(file_svote_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

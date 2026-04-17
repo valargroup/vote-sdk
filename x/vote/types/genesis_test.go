@@ -24,7 +24,7 @@ func validGenesis() *types.GenesisState {
 			{NullifierType: 1, RoundId: roundID, Nullifier: bytes.Repeat([]byte{0xB2}, 32)},
 			{NullifierType: 2, RoundId: roundID, Nullifier: bytes.Repeat([]byte{0xB3}, 32)},
 		},
-		VoteManager: "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
+		AdminAddresses: []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"},
 		TallyResults: []*types.TallyResult{
 			{VoteRoundId: roundID, ProposalId: 1, VoteDecision: 0, TotalValue: 100},
 		},
@@ -91,12 +91,27 @@ func TestValidateGenesisState_NullifierEmpty(t *testing.T) {
 	require.Contains(t, err.Error(), "nullifiers[0].nullifier is empty")
 }
 
-func TestValidateGenesisState_VoteManagerBadAddress(t *testing.T) {
+func TestValidateGenesisState_AdminBadAddress(t *testing.T) {
 	gs := validGenesis()
-	gs.VoteManager = "not-a-valid-address"
+	gs.AdminAddresses = []string{"not-a-valid-address"}
 	err := types.ValidateGenesisState(gs)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "vote_manager")
+	require.Contains(t, err.Error(), "not a valid bech32 address")
+}
+
+func TestValidateGenesisState_AdminsEmpty(t *testing.T) {
+	gs := validGenesis()
+	gs.AdminAddresses = nil
+	err := types.ValidateGenesisState(gs)
+	require.ErrorIs(t, err, types.ErrEmptyAdminSet)
+}
+
+func TestValidateGenesisState_AdminsDuplicate(t *testing.T) {
+	gs := validGenesis()
+	addr := "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"
+	gs.AdminAddresses = []string{addr, addr}
+	err := types.ValidateGenesisState(gs)
+	require.ErrorIs(t, err, types.ErrDuplicateAdmin)
 }
 
 func TestValidateGenesisState_TallyResultBadRoundID(t *testing.T) {
@@ -147,8 +162,3 @@ func TestValidateGenesisState_ShareCountBadRoundID(t *testing.T) {
 	require.Contains(t, err.Error(), "share_counts[0].round_id")
 }
 
-func TestValidateGenesisState_EmptyVoteManagerRejected(t *testing.T) {
-	err := types.ValidateGenesisState(&types.GenesisState{})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "vote_manager is required")
-}

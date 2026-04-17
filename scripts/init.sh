@@ -34,22 +34,54 @@ VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend 
 echo "Validator address: $VALIDATOR_ADDR"
 echo "Validator valoper: $VALIDATOR_VALOPER"
 
-# Import the bootstrap admin key used as the vote-manager.
-# Must be set via .env (local) or as a GitHub/CI secret (remote).
-if [ -z "$VM_PRIVKEY" ]; then
-    echo "ERROR: VM_PRIVKEY is not set."
-    echo "  Local dev:  add VM_PRIVKEY=<64-char-hex> to .env (see .env.example)"
-    echo "  CI/deploy:  set the VM_PRIVKEY secret in GitHub Actions"
+# Import the bootstrap admin key(s). VM_PRIVKEYS is a comma-separated list of
+# 64-char hex secp256k1 private keys; every address derived from the list
+# becomes an admin at genesis (any-of-N). Back-compat: if only VM_PRIVKEY is
+# set, treat it as a single-admin set.
+if [ -z "$VM_PRIVKEYS" ] && [ -n "$VM_PRIVKEY" ]; then
+    VM_PRIVKEYS="$VM_PRIVKEY"
+fi
+if [ -z "$VM_PRIVKEYS" ]; then
+    echo "ERROR: VM_PRIVKEYS is not set."
+    echo "  Local dev:  add VM_PRIVKEYS=<hex>[,<hex>...] to .env (see .env.example)"
+    echo "  CI/deploy:  set the VM_PRIVKEYS secret in GitHub Actions"
     exit 1
 fi
-$BINARY keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_DIR"
-MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_DIR")
-echo "Admin address:     $MANAGER_ADDR"
 
-# Add genesis accounts with tokens
+# Total stake pool divided evenly across admins (preserves total supply).
+TOTAL_ADMIN_POOL=1000000000
+ADMIN_ADDRS=()
+IFS=',' read -ra VM_PRIVKEY_LIST <<< "$VM_PRIVKEYS"
+NUM_ADMINS=${#VM_PRIVKEY_LIST[@]}
+PER_ADMIN_STAKE=$((TOTAL_ADMIN_POOL / NUM_ADMINS))
+REMAINDER=$((TOTAL_ADMIN_POOL - PER_ADMIN_STAKE * NUM_ADMINS))
+
+for i in "${!VM_PRIVKEY_LIST[@]}"; do
+    key="${VM_PRIVKEY_LIST[$i]}"
+    name="admin-$((i + 1))"
+    # Keep "manager" as the keyring alias for admin-1 so existing scripts that
+    # reference `--from manager` continue to work during the deprecation
+    # window.
+    if [ "$i" -eq 0 ]; then
+        name="manager"
+    fi
+    $BINARY keys import-hex "$name" "$key" --keyring-backend test --home "$HOME_DIR"
+    addr=$($BINARY keys show "$name" -a --keyring-backend test --home "$HOME_DIR")
+    ADMIN_ADDRS+=("$addr")
+    # Admin 1 receives any remainder from the integer division.
+    if [ "$i" -eq 0 ]; then
+        stake=$((PER_ADMIN_STAKE + REMAINDER))
+    else
+        stake=$PER_ADMIN_STAKE
+    fi
+    echo "Admin ${name}:     $addr (balance: ${stake}${DENOM})"
+    $BINARY genesis add-genesis-account "$addr" "${stake}${DENOM}" \
+        --keyring-backend test --home "$HOME_DIR"
+done
+MANAGER_ADDR="${ADMIN_ADDRS[0]}"
+
+# Add validator's genesis account (needed for self-delegation).
 $BINARY genesis add-genesis-account "$VALIDATOR_ADDR" "10000000${DENOM}" \
-    --keyring-backend test --home "$HOME_DIR"
-$BINARY genesis add-genesis-account "$MANAGER_ADDR" "1000000000${DENOM}" \
     --keyring-backend test --home "$HOME_DIR"
 
 # Create genesis transaction (self-delegation)
@@ -61,13 +93,16 @@ $BINARY genesis gentx validator "10000000${DENOM}" \
 # Collect genesis transactions
 $BINARY genesis collect-gentxs --home "$HOME_DIR"
 
-# Patch genesis: set vote manager to the imported key's address and zero out
-# slashing slash fractions (no token burn). Defaults for signed_blocks_window
-# (100), min_signed_per_window (0.5), and downtime_jail_duration (600s) are
-# acceptable.
+# Build the admin_addresses JSON array for the genesis patch.
+ADMIN_JSON=$(printf '%s\n' "${ADMIN_ADDRS[@]}" | jq -R . | jq -s .)
+
+# Patch genesis: set admin_addresses to the imported keys' addresses and zero
+# out slashing slash fractions (no token burn). Defaults for
+# signed_blocks_window (100), min_signed_per_window (0.5), and
+# downtime_jail_duration (600s) are acceptable.
 GENESIS="$HOME_DIR/config/genesis.json"
-jq --arg mgr "$MANAGER_ADDR" '
-  .app_state.vote.vote_manager = $mgr
+jq --argjson admins "$ADMIN_JSON" '
+  .app_state.vote.admin_addresses = $admins
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"
@@ -245,6 +280,9 @@ PIRCFG
 echo ""
 echo "=== Chain initialized successfully! ==="
 echo "Validator valoper: $VALIDATOR_VALOPER"
-echo "Manager address:   $MANAGER_ADDR"
+echo "Admin addresses (any-of-N):"
+for addr in "${ADMIN_ADDRS[@]}"; do
+    echo "  $addr"
+done
 echo ""
 echo "Start with: $BINARY start --home $HOME_DIR"

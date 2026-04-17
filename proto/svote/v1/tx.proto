@@ -23,7 +23,7 @@ service Msg {
   rpc ContributeDKG(MsgContributeDKG) returns (MsgContributeDKGResponse);
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
-  rpc SetVoteManager(MsgSetVoteManager) returns (MsgSetVoteManagerResponse);
+  rpc UpdateAdmins(MsgUpdateAdmins) returns (MsgUpdateAdminsResponse);
   rpc AuthorizedSend(MsgAuthorizedSend) returns (MsgAuthorizedSendResponse);
 }
 
@@ -188,15 +188,17 @@ message PartialDecryptionEntry {
 
 message MsgSubmitPartialDecryptionResponse {}
 
-// MsgSetVoteManager reassigns the vote manager role.
-// Only callable by the current vote manager. Transfers the caller's full
-// usvote balance to new_manager atomically.
-message MsgSetVoteManager {
-  string creator     = 1; // Sender address (must be the current vote manager)
-  string new_manager = 2; // New vote manager address
+// MsgUpdateAdmins atomically replaces the admin set with new_admins.
+// Callable by any current admin. Does NOT move balances — each admin holds
+// their own funds (the bank-module per-account balance). Validation:
+// new_admins must be non-empty, each entry a valid bech32 address, and no
+// duplicates (addresses normalized before compare).
+message MsgUpdateAdmins {
+  string          creator    = 1; // Sender address (must be in the current admin set)
+  repeated string new_admins = 2; // Full replacement set
 }
 
-message MsgSetVoteManagerResponse {}
+message MsgUpdateAdminsResponse {}
 
 // MsgAuthorizedSend is the only way to transfer coins on this chain.
 // Standard bank MsgSend and MsgMultiSend are disabled at the ante-handler
@@ -204,8 +206,8 @@ message MsgSetVoteManagerResponse {}
 // stake to create a validator, bypassing the controlled validator set.
 //
 // Authorization rules:
-//   - Vote manager can send to anyone (distributes stake to new validators).
-//   - Bonded validators can send to the vote manager or other bonded validators.
+//   - Any admin can send to anyone (distributes stake to new validators).
+//   - Bonded validators can send to any admin or to other bonded validators.
 //   - All other senders are rejected.
 message MsgAuthorizedSend {
   string from_address = 1;

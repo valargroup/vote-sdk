@@ -48,6 +48,8 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.HandleFunc("/shielded-vote/v1/vote-summary/{round_id}", qh.handleVoteSummary).Methods("GET")
 	router.HandleFunc("/shielded-vote/v1/ceremony", qh.handleCeremonyState).Methods("GET")
 	router.HandleFunc("/shielded-vote/v1/pallas-keys", qh.handlePallasKeys).Methods("GET")
+	router.HandleFunc("/shielded-vote/v1/admins", qh.handleAdmins).Methods("GET")
+	// Deprecated — returns {address: admins[0]} for pre-multi-admin clients.
 	router.HandleFunc("/shielded-vote/v1/vote-manager", qh.handleVoteManager).Methods("GET")
 	router.HandleFunc("/shielded-vote/v1/genesis", qh.handleGenesis).Methods("GET")
 }
@@ -295,6 +297,21 @@ func (qh *queryHandler) handleGenesis(w http.ResponseWriter, _ *http.Request) {
 	w.Write(data) //nolint:errcheck
 }
 
+func (qh *queryHandler) handleAdmins(w http.ResponseWriter, _ *http.Request) {
+	req := &types.QueryAdminsRequest{}
+	resp := &types.QueryAdminsResponse{}
+
+	if err := qh.abciQuery("/svote.v1.Query/Admins", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+// handleVoteManager is a deprecated compat shim that returns the first admin
+// address ({address: admins[0]}) for clients that predate the multi-admin
+// change. Prefer /admins.
 func (qh *queryHandler) handleVoteManager(w http.ResponseWriter, _ *http.Request) {
 	req := &types.QueryVoteManagerRequest{}
 	resp := &types.QueryVoteManagerResponse{}

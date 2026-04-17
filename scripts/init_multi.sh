@@ -322,17 +322,34 @@ $BINARY keys add validator --keyring-backend test --home "$HOME_VAL1"
 VAL1_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_VAL1")
 echo "Val1 address: $VAL1_ADDR"
 
-# Import the bootstrap admin key used as the vote-manager.
-# Must be set via .env (local) or as a GitHub/CI secret (remote).
-if [ -z "$VM_PRIVKEY" ]; then
-    echo "ERROR: VM_PRIVKEY is not set."
-    echo "  Local dev:  add VM_PRIVKEY=<64-char-hex> to .env (see .env.example)"
-    echo "  CI/deploy:  set the VM_PRIVKEY secret in GitHub Actions"
+# Import the bootstrap admin key(s). VM_PRIVKEYS is a comma-separated list of
+# 64-char hex secp256k1 private keys; every address derived from the list
+# becomes an admin at genesis (any-of-N). Back-compat: if only VM_PRIVKEY is
+# set, treat it as a single-admin set.
+if [ -z "$VM_PRIVKEYS" ] && [ -n "$VM_PRIVKEY" ]; then
+    VM_PRIVKEYS="$VM_PRIVKEY"
+fi
+if [ -z "$VM_PRIVKEYS" ]; then
+    echo "ERROR: VM_PRIVKEYS is not set."
+    echo "  Local dev:  add VM_PRIVKEYS=<hex>[,<hex>...] to .env (see .env.example)"
+    echo "  CI/deploy:  set the VM_PRIVKEYS secret in GitHub Actions"
     exit 1
 fi
-$BINARY keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_VAL1"
-MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_VAL1")
-echo "Manager address:   $MANAGER_ADDR"
+
+ADMIN_ADDRS=()
+IFS=',' read -ra VM_PRIVKEY_LIST <<< "$VM_PRIVKEYS"
+for i in "${!VM_PRIVKEY_LIST[@]}"; do
+    key="${VM_PRIVKEY_LIST[$i]}"
+    name="admin-$((i + 1))"
+    if [ "$i" -eq 0 ]; then
+        name="manager"
+    fi
+    $BINARY keys import-hex "$name" "$key" --keyring-backend test --home "$HOME_VAL1"
+    addr=$($BINARY keys show "$name" -a --keyring-backend test --home "$HOME_VAL1")
+    ADMIN_ADDRS+=("$addr")
+    echo "Admin ${name}:     $addr"
+done
+MANAGER_ADDR="${ADMIN_ADDRS[0]}"
 
 # Initialize keys for validators 2 and 3 (separate home dirs, but we need
 # their addresses now to add as genesis accounts).
@@ -358,11 +375,26 @@ done
 # Save val1 address too.
 echo "$VAL1_ADDR" > "$HOME_VAL1/validator_address.txt"
 
-# Add genesis accounts for all 3 validators and the bootstrap admin.
+# Add genesis accounts for all 3 validators and every admin. The admin stake
+# pool (ADMIN_BALANCE) is split evenly across admins to preserve total supply
+# regardless of N.
 $BINARY genesis add-genesis-account "$VAL1_ADDR" "$VAL1_SELF_DELEGATION" \
     --keyring-backend test --home "$HOME_VAL1"
-$BINARY genesis add-genesis-account "$MANAGER_ADDR" "$ADMIN_BALANCE" \
-    --keyring-backend test --home "$HOME_VAL1"
+
+ADMIN_POOL_INT=${ADMIN_BALANCE%${DENOM}}
+NUM_ADMINS=${#ADMIN_ADDRS[@]}
+PER_ADMIN_STAKE=$((ADMIN_POOL_INT / NUM_ADMINS))
+REMAINDER=$((ADMIN_POOL_INT - PER_ADMIN_STAKE * NUM_ADMINS))
+for i in "${!ADMIN_ADDRS[@]}"; do
+    addr="${ADMIN_ADDRS[$i]}"
+    if [ "$i" -eq 0 ]; then
+        stake=$((PER_ADMIN_STAKE + REMAINDER))
+    else
+        stake=$PER_ADMIN_STAKE
+    fi
+    $BINARY genesis add-genesis-account "$addr" "${stake}${DENOM}" \
+        --keyring-backend test --home "$HOME_VAL1"
+done
 
 for i in 2 3; do
     idx=$((i - 1))
@@ -381,11 +413,14 @@ $BINARY genesis gentx validator "$VAL1_SELF_DELEGATION" \
 # Collect genesis transactions and validate.
 $BINARY genesis collect-gentxs --home "$HOME_VAL1"
 
-# Patch genesis: set vote manager to the imported key's address and zero out
-# slashing slash fractions (no token burn).
+# Build the admin_addresses JSON array for the genesis patch.
+ADMIN_JSON=$(printf '%s\n' "${ADMIN_ADDRS[@]}" | jq -R . | jq -s .)
+
+# Patch genesis: set admin_addresses to the imported keys' addresses and zero
+# out slashing slash fractions (no token burn).
 GENESIS="$HOME_VAL1/config/genesis.json"
-jq --arg mgr "$MANAGER_ADDR" '
-  .app_state.vote.vote_manager = $mgr
+jq --argjson admins "$ADMIN_JSON" '
+  .app_state.vote.admin_addresses = $admins
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"

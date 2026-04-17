@@ -115,8 +115,9 @@ var (
 	// Written by EndBlocker when tree root changes. Used by the CommitmentLeaves query.
 	BlockLeafIndexPrefix = []byte{0x08}
 
-	// VoteManagerKey stores the singleton vote manager address: single key -> VoteManagerState (protobuf)
-	VoteManagerKey = []byte{0x0A}
+	// AdminSetKey stores the singleton admin set: single key -> AdminSet (protobuf).
+	// Any address in the set may authorize admin-gated operations (any-of-N semantics).
+	AdminSetKey = []byte{0x0A}
 
 	// ShareCountPrefix stores share reveal counts per (round, proposal, decision):
 	//   0x0B || round_id || big-endian uint32 proposal_id || big-endian uint32 decision -> uint64 BE

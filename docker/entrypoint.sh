@@ -68,7 +68,9 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
     done
     echo "[$MONIKER] All $NUM_VALIDATORS addresses collected."
 
-    # Generate a throwaway vote-manager key.
+    # Generate a throwaway admin key. Docker testnet currently uses a single
+    # admin; extend with comma-separated VM_PRIVKEYS from the environment if
+    # multi-admin is wanted.
     VM_PRIVKEY=$(cat /dev/urandom | head -c 32 | od -An -tx1 | tr -d ' \n')
     svoted keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_DIR" 2>/dev/null
     MANAGER_ADDR=$(svoted keys show manager -a --keyring-backend test --home "$HOME_DIR")
@@ -80,7 +82,7 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
             --keyring-backend test --home "$HOME_DIR"
     done
 
-    # Add manager account.
+    # Add admin account.
     svoted genesis add-genesis-account "$MANAGER_ADDR" "$ADMIN_BALANCE" \
         --keyring-backend test --home "$HOME_DIR"
 
@@ -92,10 +94,10 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
 
     svoted genesis collect-gentxs --home "$HOME_DIR"
 
-    # Patch genesis: set vote manager, disable slashing penalties.
+    # Patch genesis: set admin_addresses (single-admin here), disable slashing.
     GENESIS="$HOME_DIR/config/genesis.json"
-    jq --arg mgr "$MANAGER_ADDR" '
-      .app_state.vote.vote_manager = $mgr
+    jq --arg admin "$MANAGER_ADDR" '
+      .app_state.vote.admin_addresses = [$admin]
       | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
       | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
       "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"

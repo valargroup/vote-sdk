@@ -27,6 +27,7 @@ const (
 	Query_CommitmentLeaves_FullMethodName       = "/svote.v1.Query/CommitmentLeaves"
 	Query_ActiveRound_FullMethodName            = "/svote.v1.Query/ActiveRound"
 	Query_CeremonyState_FullMethodName          = "/svote.v1.Query/CeremonyState"
+	Query_Admins_FullMethodName                 = "/svote.v1.Query/Admins"
 	Query_VoteManager_FullMethodName            = "/svote.v1.Query/VoteManager"
 	Query_VoteSummary_FullMethodName            = "/svote.v1.Query/VoteSummary"
 	Query_ListRounds_FullMethodName             = "/svote.v1.Query/ListRounds"
@@ -57,7 +58,12 @@ type QueryClient interface {
 	ActiveRound(ctx context.Context, in *QueryActiveRoundRequest, opts ...grpc.CallOption) (*QueryActiveRoundResponse, error)
 	// CeremonyState returns the current EA key ceremony lifecycle state.
 	CeremonyState(ctx context.Context, in *QueryCeremonyStateRequest, opts ...grpc.CallOption) (*QueryCeremonyStateResponse, error)
-	// VoteManager returns the current vote manager address.
+	// Admins returns the current admin set (any member can authorize
+	// admin-gated operations — any-of-N semantics).
+	Admins(ctx context.Context, in *QueryAdminsRequest, opts ...grpc.CallOption) (*QueryAdminsResponse, error)
+	// VoteManager returns the first admin address in the set. Deprecated
+	// compat shim for clients expecting a single "vote manager" address —
+	// will be removed in a future release. Prefer the Admins RPC.
 	VoteManager(ctx context.Context, in *QueryVoteManagerRequest, opts ...grpc.CallOption) (*QueryVoteManagerResponse, error)
 	// VoteSummary returns a denormalized view of a vote round with proposals,
 	// ballot counts, and (if finalized) decrypted totals. Single query for frontend display.
@@ -156,6 +162,16 @@ func (c *queryClient) CeremonyState(ctx context.Context, in *QueryCeremonyStateR
 	return out, nil
 }
 
+func (c *queryClient) Admins(ctx context.Context, in *QueryAdminsRequest, opts ...grpc.CallOption) (*QueryAdminsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryAdminsResponse)
+	err := c.cc.Invoke(ctx, Query_Admins_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryClient) VoteManager(ctx context.Context, in *QueryVoteManagerRequest, opts ...grpc.CallOption) (*QueryVoteManagerResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(QueryVoteManagerResponse)
@@ -220,7 +236,12 @@ type QueryServer interface {
 	ActiveRound(context.Context, *QueryActiveRoundRequest) (*QueryActiveRoundResponse, error)
 	// CeremonyState returns the current EA key ceremony lifecycle state.
 	CeremonyState(context.Context, *QueryCeremonyStateRequest) (*QueryCeremonyStateResponse, error)
-	// VoteManager returns the current vote manager address.
+	// Admins returns the current admin set (any member can authorize
+	// admin-gated operations — any-of-N semantics).
+	Admins(context.Context, *QueryAdminsRequest) (*QueryAdminsResponse, error)
+	// VoteManager returns the first admin address in the set. Deprecated
+	// compat shim for clients expecting a single "vote manager" address —
+	// will be removed in a future release. Prefer the Admins RPC.
 	VoteManager(context.Context, *QueryVoteManagerRequest) (*QueryVoteManagerResponse, error)
 	// VoteSummary returns a denormalized view of a vote round with proposals,
 	// ballot counts, and (if finalized) decrypted totals. Single query for frontend display.
@@ -262,6 +283,9 @@ func (UnimplementedQueryServer) ActiveRound(context.Context, *QueryActiveRoundRe
 }
 func (UnimplementedQueryServer) CeremonyState(context.Context, *QueryCeremonyStateRequest) (*QueryCeremonyStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CeremonyState not implemented")
+}
+func (UnimplementedQueryServer) Admins(context.Context, *QueryAdminsRequest) (*QueryAdminsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Admins not implemented")
 }
 func (UnimplementedQueryServer) VoteManager(context.Context, *QueryVoteManagerRequest) (*QueryVoteManagerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method VoteManager not implemented")
@@ -440,6 +464,24 @@ func _Query_CeremonyState_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_Admins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryAdminsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).Admins(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_Admins_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).Admins(ctx, req.(*QueryAdminsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Query_VoteManager_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(QueryVoteManagerRequest)
 	if err := dec(in); err != nil {
@@ -550,6 +592,10 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CeremonyState",
 			Handler:    _Query_CeremonyState_Handler,
+		},
+		{
+			MethodName: "Admins",
+			Handler:    _Query_Admins_Handler,
 		},
 		{
 			MethodName: "VoteManager",

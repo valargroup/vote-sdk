@@ -55,9 +55,10 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 		}
 	}
 
-	// Restore vote manager.
-	if genesis.VoteManager != "" {
-		if err := k.SetVoteManager(kvStore, &types.VoteManagerState{Address: genesis.VoteManager}); err != nil {
+	// Restore admin set (any-of-N). ValidateGenesisState has already checked
+	// that the list is non-empty, bech32, and deduped; persist as-is.
+	if len(genesis.AdminAddresses) > 0 {
+		if err := k.SetAdmins(kvStore, &types.AdminSet{Addresses: genesis.AdminAddresses}); err != nil {
 			return err
 		}
 	}
@@ -139,13 +140,13 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, error) {
 	gs := &types.GenesisState{}
 
-	// Vote manager (singleton).
-	vm, err := k.GetVoteManager(kvStore)
+	// Admin set (singleton).
+	admins, err := k.GetAdmins(kvStore)
 	if err != nil {
 		return nil, err
 	}
-	if vm != nil {
-		gs.VoteManager = vm.Address
+	if admins != nil {
+		gs.AdminAddresses = admins.Addresses
 	}
 
 	// Min ceremony validators (singleton).
