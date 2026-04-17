@@ -254,7 +254,8 @@ Then open port `3000` in your firewall if iOS clients should reach this PIR serv
 
 | Command | Description |
 |---|---|
-| `mise run chain:clean` | Reset the chain home directory |
+| `mise run chain:clean` | Reset chain state (preserves nullifier/PIR data in `~/.svoted/nullifiers`) |
+| `mise run chain:clean:all` | Reset chain state **and** delete nullifier/PIR data |
 | `mise tasks` | List all available mise tasks |
 | `svoted status --home ~/.svoted` | Show sync info + latest block height |
 | `mise run install` | Reinstall `svoted` + `create-val-tx` with FFI + embedded PIR (alias: `mise run build:install-pir`) |

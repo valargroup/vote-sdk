@@ -95,7 +95,9 @@ if [ "$CI_MODE" = false ]; then
 fi
 
 for home in "${HOMES[@]}"; do
-    rm -rf "$home"
+    if [ -d "$home" ]; then
+        find "$home" -mindepth 1 -maxdepth 1 ! -name nullifiers -exec rm -rf {} +
+    fi
 done
 
 # ---------------------------------------------------------------------------
@@ -142,6 +144,10 @@ configure_app_toml() {
     local rpc_port="$5"
 
     local app_toml="$home/config/app.toml"
+
+    # Ensure minimum-gas-prices is set (the Go default template writes "0usvote"
+    # but older inits or manual edits may leave it blank, which aborts `svoted start`).
+    sed -i.bak 's/^minimum-gas-prices = ""/minimum-gas-prices = "0usvote"/' "$app_toml"
 
     # Enable the REST API and set port.
     sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$app_toml"

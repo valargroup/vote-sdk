@@ -79,9 +79,14 @@ description = "Start 3 validator daemons in background"
 run = "make start-multi"
 
 [tasks."chain:clean"]
-description = "Remove chain data directory (~/.svoted)"
+description = "Remove chain state but preserve nullifier/PIR data (~/.svoted/nullifiers)"
 run = "make clean"
-confirm = "This will delete ~/.svoted and the local svoted binary. Continue?"
+confirm = "This will delete chain state in ~/.svoted (nullifier data is preserved). Continue?"
+
+[tasks."chain:clean:all"]
+description = "Remove chain data directory INCLUDING nullifier/PIR data (~/.svoted)"
+run = "make clean-all"
+confirm = "This will delete ALL of ~/.svoted including nullifier/PIR data (~6 GB). Continue?"
 
 # chain:start-pir is identical to chain:start but also spawns the embedded
 # nf-server as a managed child process. Requires a populated tier-data dir at
