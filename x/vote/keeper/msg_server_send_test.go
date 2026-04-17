@@ -91,23 +91,31 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToOtherAdmin() {
 // ---------------------------------------------------------------------------
 
 func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToAdmin() {
-	s.SetupTest()
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
-
-	admin := testAccAddr(1)
+	// Parametrize over every admin in a multi-admin set — proves the recipient
+	// check iterates the full set (not e.g. only admins[0]).
+	adminA := testAccAddr(1)
+	adminB := testAccAddr(2)
+	adminC := testAccAddr(3)
 	valAcc := testAccAddr(10)
-	s.seedAdmins(admin)
-	s.setupWithMockStaking(accToValoper(valAcc))
 
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: valAcc,
-		ToAddress:   admin,
-		Amount:      "100",
-		Denom:       "usvote",
-	})
-	s.Require().NoError(err)
-	s.Require().Len(bk.sendCalls, 1)
+	for _, recipient := range []string{adminA, adminB, adminC} {
+		s.Run("recipient="+recipient, func() {
+			s.SetupTest()
+			bk := newMockBankKeeper()
+			s.setupWithMockBankKeeper(bk)
+			s.seedAdmins(adminA, adminB, adminC)
+			s.setupWithMockStaking(accToValoper(valAcc))
+
+			_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+				FromAddress: valAcc,
+				ToAddress:   recipient,
+				Amount:      "100",
+				Denom:       "usvote",
+			})
+			s.Require().NoError(err)
+			s.Require().Len(bk.sendCalls, 1)
+		})
+	}
 }
 
 func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToOtherValidator() {
@@ -334,4 +342,74 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 		}
 	}
 	s.Require().True(found, "expected %s event", types.EventTypeAuthorizedSend)
+}
+
+// ---------------------------------------------------------------------------
+// AuthorizedSend — revoked-admin balance freeze
+// ---------------------------------------------------------------------------
+//
+// After MsgUpdateAdmins removes an admin, the ex-admin's remaining balance
+// is one-way frozen: they can't send to anyone (not an admin, not a
+// validator), and bonded validators can't send to them either. Active
+// admins can still send to them. These three tests pin that behavior.
+
+func (s *MsgServerTestSuite) TestAuthorizedSend_RevokedAdminCannotSend() {
+	s.SetupTest()
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
+	s.setupWithMockStaking() // no validators bonded
+
+	adminA := testAccAddr(1)
+	revoked := testAccAddr(2)
+	s.seedAdmins(adminA) // revoked was previously an admin but isn't now
+
+	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+		FromAddress: revoked,
+		ToAddress:   adminA,
+		Amount:      "1",
+		Denom:       "usvote",
+	})
+	s.Require().ErrorIs(err, types.ErrUnauthorizedSend)
+	s.Require().Empty(bk.sendCalls)
+}
+
+func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToRevokedAdmin() {
+	s.SetupTest()
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
+
+	adminA := testAccAddr(1)
+	revoked := testAccAddr(2)
+	s.seedAdmins(adminA)
+
+	// Admins-send-to-anyone takes the early-return path; no validator check.
+	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+		FromAddress: adminA,
+		ToAddress:   revoked,
+		Amount:      "1",
+		Denom:       "usvote",
+	})
+	s.Require().NoError(err)
+	s.Require().Len(bk.sendCalls, 1)
+}
+
+func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToRevokedAdmin() {
+	s.SetupTest()
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
+
+	adminA := testAccAddr(1)
+	valAcc := testAccAddr(10)
+	revoked := testAccAddr(2)
+	s.seedAdmins(adminA)
+	s.setupWithMockStaking(accToValoper(valAcc))
+
+	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+		FromAddress: valAcc,
+		ToAddress:   revoked,
+		Amount:      "1",
+		Denom:       "usvote",
+	})
+	s.Require().ErrorIs(err, types.ErrUnauthorizedSend)
+	s.Require().Empty(bk.sendCalls)
 }

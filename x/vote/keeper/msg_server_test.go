@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -893,3 +894,32 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	s.Require().Equal("Test round description", round.Description)
 }
 
+
+// ---------------------------------------------------------------------------
+// Bech32 canonicalization
+// ---------------------------------------------------------------------------
+//
+// SetAdmins normalizes every admin address through AccAddressFromBech32 →
+// .String() before persist, so reads always return canonical (lowercase)
+// bech32. ValidateAdminOnly / IsAdmin normalize the caller the same way.
+// An admin submitting an uppercase variant of their stored lowercase
+// address must still authenticate.
+
+func (s *MsgServerTestSuite) TestAdmins_CanonicalizedOnSetAndMatchedOnCall() {
+	s.SetupTest()
+
+	// Seed via the uppercase form; SetAdmins must store the canonical lowercase.
+	canonical := testAccAddr(42)
+	upper := strings.ToUpper(canonical)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetAdmins(kv, &types.AdminSet{Addresses: []string{upper}}))
+
+	set, err := s.keeper.GetAdmins(kv)
+	s.Require().NoError(err)
+	s.Require().Equal([]string{canonical}, set.Addresses, "SetAdmins must canonicalize")
+
+	// Caller authenticates via ValidateAdminOnly regardless of case variant.
+	s.Require().NoError(s.keeper.ValidateAdminOnly(s.ctx, canonical))
+	s.Require().NoError(s.keeper.ValidateAdminOnly(s.ctx, upper))
+}
