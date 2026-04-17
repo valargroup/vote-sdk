@@ -266,11 +266,11 @@ jobs:
           SVOTE_API_URL: http://localhost:1418
           SVOTE_NODE_URL: tcp://localhost:26157
           VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
-      - name: Run E2E test (voting_flow_librustvoting)
+      - name: Run E2E test (voting_flow_zcash_voting)
         run: |
           export SVOTE_HOME="$HOME/.svoted-val1"
           export SVOTE_PALLAS_PK_PATH="$HOME/.svoted-val1/pallas.pk"
-          cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1
+          cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_zcash_voting -- --nocapture --ignored --test-threads=1
         env:
           SVOTE_API_URL: http://localhost:1418
           SVOTE_NODE_URL: tcp://localhost:26157

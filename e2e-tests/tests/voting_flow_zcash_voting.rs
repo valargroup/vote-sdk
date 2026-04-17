@@ -3,7 +3,7 @@
 //!
 //! Validates that the full library stack works: DB persistence of delegation
 //! data, HTTP tree sync, witness generation, and proof generation all through
-//! the librustvoting / vote-commitment-tree-client APIs.
+//! the zcash_voting / vote-commitment-tree-client APIs.
 //!
 //! Share payloads are sent to the helper (integrated into svoted), which
 //! generates ZKP #3 and submits reveal-share TXs to the chain.
@@ -26,7 +26,7 @@ use e2e_tests::{
 };
 use ff::PrimeField;
 use group::{Curve, GroupEncoding};
-use librustvoting::{NoopProgressReporter, VotingRoundParams, WireEncryptedShare};
+use zcash_voting::{NoopProgressReporter, VotingRoundParams, WireEncryptedShare};
 use orchard::keys::SpendAuthorizingKey;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
 use rand::SeedableRng;
@@ -45,10 +45,10 @@ fn block_wait() {
 }
 
 /// E2E test: delegation → tree sync → ZKP #2 → cast-vote → helper server → tally,
-/// all through the librustvoting VotingDb + vote-commitment-tree-client path.
+/// all through the zcash_voting VotingDb + vote-commitment-tree-client path.
 #[test]
 #[ignore = "requires running chain + helper server"]
-fn voting_flow_librustvoting_path() {
+fn voting_flow_zcash_voting_path() {
     // ---- Setup: derive SpendingKey from seed (same ZIP-32 path as production) ----
     log_step(
         "Setup",
@@ -56,7 +56,7 @@ fn voting_flow_librustvoting_path() {
     );
     let seed = [0x42u8; 64];
     let sk =
-        librustvoting::zkp2::derive_spending_key(&seed, 1).expect("derive_spending_key from seed");
+        zcash_voting::zkp2::derive_spending_key(&seed, 1).expect("derive_spending_key from seed");
 
     // ---- Step 0: Ensure Pallas key registered + import vote manager key ----
     let vm_privkey = std::env::var("VM_PRIVKEY")
@@ -245,7 +245,7 @@ fn voting_flow_librustvoting_path() {
 
     // ---- Step 4: Create VotingDb and persist delegation data ----
     log_step("Step 4", "creating VotingDb, persisting delegation data");
-    let db = librustvoting::storage::VotingDb::open(":memory:").expect("open VotingDb");
+    let db = zcash_voting::storage::VotingDb::open(":memory:").expect("open VotingDb");
     db.set_wallet_id("test");
     db.init_round(
         &VotingRoundParams {
@@ -264,9 +264,9 @@ fn voting_flow_librustvoting_path() {
     // for delegation proof reconstruction, not ZKP #2.
     {
         let conn = db.conn();
-        librustvoting::storage::queries::insert_bundle(&conn, &round_id_hex, "test", 0, &[])
+        zcash_voting::storage::queries::insert_bundle(&conn, &round_id_hex, "test", 0, &[])
             .expect("insert_bundle");
-        librustvoting::storage::queries::store_delegation_data(
+        zcash_voting::storage::queries::store_delegation_data(
             &conn,
             &round_id_hex,
             "test", // wallet_id
@@ -851,6 +851,6 @@ fn voting_flow_librustvoting_path() {
 
     log_step(
         "Done",
-        "librustvoting path: VotingDb → TreeClient → ZKP #2 → helper-server → tally ✓",
+        "zcash_voting path: VotingDb → TreeClient → ZKP #2 → helper-server → tally ✓",
     );
 }

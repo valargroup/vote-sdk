@@ -43,7 +43,7 @@ tree_build_real_proof_load_cmd() {
   tx_env="$(tree_build_tx_env_prefix)"
   sync_cmd="${tx_env}"'SVOTE_API_URL="'"${REAL_PROOF_API_URL}"'" HELPER_SERVER_URL="'"${REAL_PROOF_HELPER_URL}"'" SVOTE_STRESS_DELEGATION_COUNT="'"${REAL_PROOF_DELEGATION_COUNT}"'" SVOTE_E2E_VOTE_WINDOW_SECS="'"${REAL_PROOF_VOTE_WINDOW_SECS}"'" cargo test --release --manifest-path e2e-tests/Cargo.toml --test sync_stress -- --nocapture --ignored --test-threads='"${REAL_PROOF_TEST_THREADS}"
   if [[ "${REAL_PROOF_INCLUDE_VC_FLOW:-0}" == "1" ]]; then
-    vc_cmd="${tx_env}"'SVOTE_API_URL="'"${REAL_PROOF_API_URL}"'" HELPER_SERVER_URL="'"${REAL_PROOF_HELPER_URL}"'" SVOTE_E2E_VOTE_WINDOW_SECS="'"${REAL_PROOF_VOTE_WINDOW_SECS}"'" cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_librustvoting -- --nocapture --ignored --test-threads=1'
+    vc_cmd="${tx_env}"'SVOTE_API_URL="'"${REAL_PROOF_API_URL}"'" HELPER_SERVER_URL="'"${REAL_PROOF_HELPER_URL}"'" SVOTE_E2E_VOTE_WINDOW_SECS="'"${REAL_PROOF_VOTE_WINDOW_SECS}"'" cargo test --release --manifest-path e2e-tests/Cargo.toml --test voting_flow_zcash_voting -- --nocapture --ignored --test-threads=1'
     cat <<EOF
 ${sync_cmd} && ${vc_cmd}
 EOF

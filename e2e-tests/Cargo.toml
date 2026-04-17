@@ -11,9 +11,9 @@ shielded-vote-circuits = { path = "../circuits" }
 # Git deps from fork repos
 orchard = { git = "https://github.com/valargroup/voting-circuits.git" }
 voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", features = ["share-reveal"] }
-vote-commitment-tree = { git = "https://github.com/valargroup/librustvoting.git" }
-vote-commitment-tree-client = { git = "https://github.com/valargroup/librustvoting.git" }
-librustvoting = { git = "https://github.com/valargroup/librustvoting.git" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git" }
+vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting.git" }
+zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git" }
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }

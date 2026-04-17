@@ -56,7 +56,7 @@ pub struct VoteProofDelegationData {
 /// to transition to TALLYING within a specific window.
 ///
 /// If `sk_override` is Some, uses that SpendingKey (e.g. derived from a hotkey seed
-/// via ZIP-32, for testing the librustvoting path). Otherwise generates a random key.
+/// via ZIP-32, for testing the zcash_voting path). Otherwise generates a random key.
 pub fn build_delegation_bundle_for_test(
     sk_override: Option<SpendingKey>,
     vote_end_time_override: Option<u64>,
