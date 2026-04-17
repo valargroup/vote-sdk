@@ -258,10 +258,17 @@ ADMINCFG
 
 # ---------------------------------------------------------------------------
 # Helper: append [pir] config section
+#
+# Only written for validators that actually run --serve-pir (val1 in CI).
+# data_dir / pir_data_dir default to the validator's own home, but in CI
+# they point at /opt/nf-ingest which is populated out-of-band by the
+# vote-nullifier-pir ingestion pipeline and is NOT wiped by chain reset.
 # ---------------------------------------------------------------------------
 configure_pir() {
     local home="$1"
     local port="${2:-3000}"
+    local data_dir="${3:-${home}/nullifiers}"
+    local pir_data_dir="${4:-${data_dir}/pir-data}"
 
     local app_toml="$home/config/app.toml"
     cat >> "$app_toml" <<PIRCFG
@@ -272,14 +279,14 @@ configure_pir() {
 
 [pir]
 
-# Listen port for the embedded nf-server (only bound when --pir is passed).
+# Listen port for the embedded nf-server (only bound when --serve-pir is passed).
 port = ${port}
 
 # Directory containing nullifiers.bin, .checkpoint, .index.
-data_dir = "${home}/nullifiers"
+data_dir = "${data_dir}"
 
 # Directory containing PIR tier files (tier0.bin, tier1.bin, tier2.bin).
-pir_data_dir = "${home}/nullifiers/pir-data"
+pir_data_dir = "${pir_data_dir}"
 
 # Lightwalletd URL for /snapshot/prepare rebuilds.
 lwd_url = "https://zec.rocks:443"
@@ -405,7 +412,15 @@ else
     configure_helper "$HOME_VAL1" "${API_PORTS[0]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[0]}"
 fi
 
-configure_pir "$HOME_VAL1" 3000
+# Only val1 runs --serve-pir. In CI the PIR data lives at /opt/nf-ingest
+# (populated by the vote-nullifier-pir ingestion pipeline, not by us) so
+# chain reset doesn't destroy it. Locally, fall back to the validator's
+# own home — users need to drop tier files into it manually to test PIR.
+if [ "$CI_MODE" = true ]; then
+    configure_pir "$HOME_VAL1" 3000 "/opt/nf-ingest" "/opt/nf-ingest/pir-data"
+else
+    configure_pir "$HOME_VAL1" 3000
+fi
 
 # ---------------------------------------------------------------------------
 # Step 2: Configure Validators 2 and 3 (copy genesis, set peers)
@@ -442,7 +457,7 @@ for i in 2 3; do
         configure_helper "$home" "${API_PORTS[$idx]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[$idx]}"
     fi
 
-    configure_pir "$home" 3000
+    # Val2/val3 don't run --serve-pir; no [pir] section needed.
 
     # Set persistent_peers to val1.
     set_persistent_peers "$home" "$VAL1_PEER"

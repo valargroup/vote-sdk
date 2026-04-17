@@ -105,13 +105,32 @@ jobs:
           script: |
             export HOME=${{ env.DEPLOY_PATH }} PATH=${{ env.DEPLOY_PATH }}:$PATH
             for i in $(seq 1 30); do
-              if curl -sf http://localhost:1418/shielded-vote/v1/rounds > /dev/null 2>&1; then
+              if curl -sf http://127.0.0.1:1418/shielded-vote/v1/rounds > /dev/null 2>&1; then
                 echo "Val1 API ready"
                 break
               fi
               if [ "$i" = "30" ]; then
                 echo "FAIL: val1 API not responding after 60s"
-                sudo journalctl -u svoted-val1 --no-pager -n 50
+                echo "--- curl -v (last attempt) ---"
+                curl -v --max-time 5 http://127.0.0.1:1418/shielded-vote/v1/rounds || true
+                echo "--- systemctl status svoted-val1 ---"
+                sudo systemctl status svoted-val1 --no-pager || true
+                echo "--- listening ports ---"
+                sudo ss -tlnp | grep -E ':1418|:1518|:1618|:1317|:26157|:3000' || echo "(none matched)"
+                echo "--- app.toml [api] section ---"
+                sed -n '/\[api\]/,/^\[/p' "$HOME/.svoted-val1/config/app.toml"
+                echo "--- app.toml [pir] section ---"
+                sed -n '/\[pir\]/,/^\[/p' "$HOME/.svoted-val1/config/app.toml"
+                echo "--- svoted-val1 unit file (as installed) ---"
+                cat /etc/systemd/system/svoted-val1.service || true
+                echo "--- journal: full since svoted-val1 last (re)start ---"
+                # InactiveExitTimestamp is when the unit last transitioned to active.
+                since_ts=$(systemctl show -p InactiveExitTimestamp --value svoted-val1.service)
+                if [ -n "$since_ts" ]; then
+                  sudo journalctl -u svoted-val1 --no-pager --since "$since_ts"
+                else
+                  sudo journalctl -u svoted-val1 --no-pager -n 500
+                fi
                 exit 1
               fi
               sleep 2
@@ -142,35 +161,54 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
+            dump_val1_diag() {
+              echo "--- systemctl status svoted-val1 ---"
+              sudo systemctl status svoted-val1 --no-pager || true
+              echo "--- listening ports ---"
+              sudo ss -tlnp | grep -E ':1418|:1518|:1618|:26157|:3000' || echo "(none matched)"
+              since_ts=$(systemctl show -p InactiveExitTimestamp --value svoted-val1.service)
+              if [ -n "$since_ts" ]; then
+                echo "--- journal since last svoted-val1 start ($since_ts) ---"
+                sudo journalctl -u svoted-val1 --no-pager --since "$since_ts"
+              else
+                sudo journalctl -u svoted-val1 --no-pager -n 500
+              fi
+            }
+
             sleep 5
             for svc in svoted-val1 svoted-val2 svoted-val3; do
               if ! sudo systemctl is-active --quiet "$svc"; then
                 echo "FAIL: $svc not active"
                 sudo systemctl status "$svc" --no-pager
-                sudo journalctl -u "$svc" --no-pager -n 100
+                since_ts=$(systemctl show -p InactiveExitTimestamp --value "$svc.service")
+                if [ -n "$since_ts" ]; then
+                  sudo journalctl -u "$svc" --no-pager --since "$since_ts"
+                else
+                  sudo journalctl -u "$svc" --no-pager -n 500
+                fi
                 exit 1
               fi
             done
             for i in $(seq 1 30); do
-              if curl -sf http://localhost:1418/shielded-vote/v1/rounds > /dev/null 2>&1; then
+              if curl -sf http://127.0.0.1:1418/shielded-vote/v1/rounds > /dev/null 2>&1; then
                 echo "Chain API healthy (val1 port 1418)"
                 break
               fi
               if [ "$i" = "30" ]; then
                 echo "FAIL: Chain API not responding after 60s"
-                sudo journalctl -u svoted-val1 --no-pager -n 50
+                dump_val1_diag
                 exit 1
               fi
               sleep 2
             done
             for i in $(seq 1 15); do
-              if curl -sf http://localhost:1418/shielded-vote/v1/status > /dev/null 2>&1; then
+              if curl -sf http://127.0.0.1:1418/shielded-vote/v1/status > /dev/null 2>&1; then
                 echo "Helper server healthy"
                 break
               fi
               if [ "$i" = "15" ]; then
                 echo "FAIL: Helper server /shielded-vote/v1/status not responding after 30s"
-                sudo journalctl -u svoted-val1 --no-pager -n 50
+                dump_val1_diag
                 exit 1
               fi
               sleep 2

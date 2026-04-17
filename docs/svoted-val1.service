@@ -7,7 +7,18 @@ Type=simple
 User=root
 WorkingDirectory=/opt/shielded-vote
 Environment="SVOTE_PIR_URL=http://localhost:3000"
-ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted-val1 --serve-ui --ui-dist /opt/shielded-vote/ui/dist --serve-pir
+# PIR data lives under /opt/nf-ingest on this host (populated by the
+# vote-nullifier-pir ingestion pipeline, not by svoted itself). The
+# --pir-data-dir / --pir-pir-data-dir flags override the [pir] section
+# in app.toml, so the chain reset wiping $HOME/.svoted-val1 doesn't
+# matter for PIR.
+ExecStart=/opt/shielded-vote/svoted start \
+    --home /opt/shielded-vote/.svoted-val1 \
+    --serve-ui --ui-dist /opt/shielded-vote/ui/dist \
+    --serve-pir \
+    --pir-data-dir /opt/nf-ingest \
+    --pir-pir-data-dir /opt/nf-ingest/pir-data \
+    --pir-lwd-url https://zec.rocks:443
 Restart=on-failure
 
 [Install]
