@@ -209,6 +209,39 @@ enable = false
 dist_path = ""
 UICFG
 
+# Append [pir] section. The embedded nf-server only binds a port when svoted
+# is started with --serve-pir; these are the settings it uses when it does.
+# data_dir / pir_data_dir default to this validator's home; override to point
+# at an out-of-band ingestion directory (see vote-nullifier-pir) if desired.
+PIR_PORT="${SVOTE_PIR_PORT:-3000}"
+PIR_DATA_DIR="${SVOTE_PIR_DATA_DIR:-$HOME_DIR/nullifiers}"
+PIR_TIER_DIR="${SVOTE_PIR_TIER_DIR:-$PIR_DATA_DIR/pir-data}"
+PIR_LWD_URL="${SVOTE_PIR_LWD_URL:-https://zec.rocks:443}"
+PIR_CHAIN_URL="${SVOTE_PIR_CHAIN_URL:-}"
+cat >> "$APP_TOML" <<PIRCFG
+
+###############################################################################
+###                         PIR Server                                      ###
+###############################################################################
+
+[pir]
+
+# Listen port for the embedded nf-server (only bound when --serve-pir is passed).
+port = $PIR_PORT
+
+# Directory containing nullifiers.bin, .checkpoint, .index.
+data_dir = "$PIR_DATA_DIR"
+
+# Directory containing PIR tier files (tier0.bin, tier1.bin, tier2.bin).
+pir_data_dir = "$PIR_TIER_DIR"
+
+# Lightwalletd URL for /snapshot/prepare rebuilds.
+lwd_url = "$PIR_LWD_URL"
+
+# Optional chain REST URL (blocks /snapshot/prepare during active rounds).
+chain_url = "$PIR_CHAIN_URL"
+PIRCFG
+
 echo ""
 echo "=== Chain initialized successfully! ==="
 echo "Validator valoper: $VALIDATOR_VALOPER"
