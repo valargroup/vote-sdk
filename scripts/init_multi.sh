@@ -261,8 +261,10 @@ ADMINCFG
 #
 # Only written for validators that actually run --serve-pir (val1 in CI).
 # data_dir / pir_data_dir default to the validator's own home, but in CI
-# they point at /opt/nf-ingest which is populated out-of-band by the
-# vote-nullifier-pir ingestion pipeline and is NOT wiped by chain reset.
+# they point at a pre-populated out-of-band mount (default /opt/nf-ingest,
+# override via $SVOTE_PIR_VAL1_DATA_DIR / $SVOTE_PIR_VAL1_TIER_DIR) which
+# is populated by the vote-nullifier-pir ingestion pipeline and is NOT
+# wiped by chain reset.
 # ---------------------------------------------------------------------------
 configure_pir() {
     local home="$1"
@@ -412,12 +414,18 @@ else
     configure_helper "$HOME_VAL1" "${API_PORTS[0]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[0]}"
 fi
 
-# Only val1 runs --serve-pir. In CI the PIR data lives at /opt/nf-ingest
-# (populated by the vote-nullifier-pir ingestion pipeline, not by us) so
-# chain reset doesn't destroy it. Locally, fall back to the validator's
-# own home — users need to drop tier files into it manually to test PIR.
+# Only val1 runs --serve-pir. In CI the PIR data lives on a pre-populated,
+# out-of-band mount (populated by the vote-nullifier-pir ingestion pipeline,
+# not by us) so that chain reset doesn't destroy it. The mount path defaults
+# to /opt/nf-ingest and can be overridden via $SVOTE_PIR_VAL1_DATA_DIR /
+# $SVOTE_PIR_VAL1_TIER_DIR (the val1 systemd unit sets matching --pir-*-dir
+# flags — keep them in sync). Locally, fall back to the validator's own home
+# — users typically run `mise run pir:bootstrap` to fill it with ~6 GB of
+# tier data.
 if [ "$CI_MODE" = true ]; then
-    configure_pir "$HOME_VAL1" 3000 "/opt/nf-ingest" "/opt/nf-ingest/pir-data"
+    VAL1_PIR_DATA_DIR="${SVOTE_PIR_VAL1_DATA_DIR:-/opt/nf-ingest}"
+    VAL1_PIR_TIER_DIR="${SVOTE_PIR_VAL1_TIER_DIR:-${VAL1_PIR_DATA_DIR}/pir-data}"
+    configure_pir "$HOME_VAL1" 3000 "$VAL1_PIR_DATA_DIR" "$VAL1_PIR_TIER_DIR"
 else
     configure_pir "$HOME_VAL1" 3000
 fi

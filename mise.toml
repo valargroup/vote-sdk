@@ -9,20 +9,36 @@ jq = "latest"
 
 [env]
 GOBIN = "{{env.HOME}}/go/bin"
-_.path = ["{{env.HOME}}/go/bin", "/usr/local/go/bin"]
+_.path = ["{{env.HOME}}/go/bin"]
 
 # ── build:* ─────────────────────────────────────────────────────────
 
+# Every FFI build here embeds the nf-server binary via go:embed so that
+# `svoted start --serve-pir` works out of the box after any `install` / `build`
+# / `chain:init*` task. The Rust source is auto-resolved via `make pir-source`
+# (see Makefile): $VOTE_NULLIFIER_PIR_DIR → ../vote-nullifier-pir → shallow
+# clone of valargroup/vote-nullifier-pir at the pinned PIR_REF tag into
+# .cache/vote-nullifier-pir. Pass EMBED_PIR=0 to skip the nf-server build when
+# iterating on non-PIR code (svoted still builds, but --serve-pir will error).
+
 [tasks."build"]
-description = "Build svoted with FFI (Halo2 + RedPallas)"
+description = "Build svoted locally with FFI (Halo2 + RedPallas) + embedded PIR into ./svoted"
 run = "make build-ffi"
 
 [tasks."build:quick"]
-description = "Build svoted without FFI (Go only, no ZK verification)"
+description = "Build svoted without FFI/PIR (Go only, no ZK verification, no --serve-pir)"
 run = "make build"
 
-[tasks."build:install"]
-description = "Install svoted + create-val-tx with FFI to $GOBIN"
+# `install` puts svoted + create-val-tx into $GOBIN (~/go/bin), which mise
+# already adds to PATH (see [env] above). After running this, `svoted` is
+# immediately invokable from any mise-activated shell — no need to use
+# ./svoted from the repo root.
+#
+# Invoke as `mise run install` (the bare `mise install` is reserved by mise
+# itself for installing tools listed in [tools]).
+[tasks."install"]
+description = "Install svoted + create-val-tx to $GOBIN with FFI + embedded PIR (on PATH)"
+alias = "build:install"
 run = "make install-ffi install-create-val-tx"
 
 [tasks."build:create-val-tx"]
@@ -34,13 +50,20 @@ description = "Build Rust circuit static library"
 run = "make circuits"
 
 [tasks."build:pir"]
-description = "Build embedded nf-server PIR binary"
+description = "Build just the nf-server Rust binary into ffi/pir/bin/ (without reinstalling svoted)"
 run = "make pir-binary"
+
+# Retained as an explicit alias so existing docs / muscle memory still work.
+# Equivalent to `mise run install` since EMBED_PIR=1 is now the Makefile
+# default; the explicit EMBED_PIR=1 here is just a belt-and-braces guard.
+[tasks."build:install-pir"]
+description = "Alias for `install` (PIR is embedded by default; kept for back-compat)"
+run = "EMBED_PIR=1 make install-ffi install-create-val-tx"
 
 # ── chain:* ─────────────────────────────────────────────────────────
 
 [tasks."chain:init"]
-description = "Wipe and reinitialize a single-validator chain"
+description = "Wipe and reinitialize a single-validator chain (reinstalls svoted with embedded PIR)"
 run = "make init"
 
 [tasks."chain:start"]
@@ -48,7 +71,7 @@ description = "Start chain daemon (foreground)"
 run = "SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} make start"
 
 [tasks."chain:init-multi"]
-description = "Wipe and reinitialize a 3-validator chain"
+description = "Wipe and reinitialize a 3-validator chain (reinstalls svoted with embedded PIR)"
 run = "make init-multi"
 
 [tasks."chain:start-multi"]
@@ -59,6 +82,49 @@ run = "make start-multi"
 description = "Remove chain data directory (~/.svoted)"
 run = "make clean"
 confirm = "This will delete ~/.svoted and the local svoted binary. Continue?"
+
+# chain:start-pir is identical to chain:start but also spawns the embedded
+# nf-server as a managed child process. Requires a populated tier-data dir at
+# $SVOTE_PIR_TIER_DIR (see pir:bootstrap); without tier files the chain keeps
+# running but nf-server exits on startup. The nf-server payload itself is
+# bundled into svoted by every FFI install/build path (see [env] note above),
+# so no separate `build:install-pir` step is needed anymore.
+[tasks."chain:start-pir"]
+description = "Start chain daemon with embedded PIR server (--serve-pir)"
+run = "SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} svoted start --home ${SVOTED_HOME:-$HOME/.svoted} --serve-pir"
+
+# ── pir:* ───────────────────────────────────────────────────────────
+#
+# PIR data lifecycle on a validator:
+#   1. pir:ingest    — pulls nullifiers from lwd_url into nullifiers.bin
+#   2. pir:export    — turns nullifiers.bin into tier0/1/2.bin (~6 GB)
+#   3. pir:serve     — (optional) runs nf-server standalone for debugging
+#   4. chain:start-pir — normal path: run as a managed child of svoted
+#
+# All tasks honour the same env overrides that scripts/init.sh writes into
+# app.toml's [pir] section:
+#   SVOTE_PIR_PORT      (default 3000)
+#   SVOTE_PIR_DATA_DIR  (default ~/.svoted/nullifiers)
+#   SVOTE_PIR_TIER_DIR  (default $SVOTE_PIR_DATA_DIR/pir-data)
+
+[tasks."pir:ingest"]
+description = "Build nullifiers.bin from the configured lightwalletd source"
+run = "svoted pir ingest --data-dir ${SVOTE_PIR_DATA_DIR:-$HOME/.svoted/nullifiers}"
+
+[tasks."pir:export"]
+description = "Generate PIR tier files (tier0/1/2.bin) from nullifiers.bin"
+run = "svoted pir export --pir-data-dir ${SVOTE_PIR_TIER_DIR:-$HOME/.svoted/nullifiers/pir-data}"
+
+# Convenience: one-shot data bootstrap. Run before the first chain:start-pir.
+[tasks."pir:bootstrap"]
+description = "Run pir:ingest then pir:export (~6 GB on disk)"
+run = "mise run pir:ingest && mise run pir:export"
+
+# Standalone server, intended for operational/debug use. For normal operation
+# prefer chain:start-pir so nf-server shares svoted's lifecycle.
+[tasks."pir:serve"]
+description = "Run nf-server standalone (no chain) for operational debugging"
+run = "svoted pir serve --port ${SVOTE_PIR_PORT:-3000} --data-dir ${SVOTE_PIR_DATA_DIR:-$HOME/.svoted/nullifiers}"
 
 # ── test:* ──────────────────────────────────────────────────────────
 

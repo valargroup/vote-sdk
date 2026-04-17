@@ -82,6 +82,16 @@ sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
 sed -i.bak 's|address = "tcp://localhost:1317"|address = "tcp://0.0.0.0:1318"|' "$APP_TOML"
 # Enable CORS for dev (Vite dev server on port 5173).
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP_TOML"
+
+# Move gRPC and gRPC-Web off their Cosmos defaults for the same reason we
+# move the REST API off 1317: Cursor IDE's Remote-SSH auto-port-forwarding
+# (and some Node.js `--inspect` tooling) listens on 9090/9091 locally, so
+# the default bind fails and cascades into the errgroup, which in turn
+# aborts the embedded PIR supervisor. init_multi.sh assigns per-validator
+# ports (9390/9490/9590); the single-validator script uses 9190/9191 to
+# match scripts/test_join_ci.sh.
+sed -i.bak 's|address = "localhost:9090"|address = "localhost:9190"|' "$APP_TOML"
+sed -i.bak 's|address = "localhost:9091"|address = "localhost:9191"|' "$APP_TOML"
 rm -f "${APP_TOML}.bak"
 
 # Allow long CheckTx (ZKP verification ~30–60s). Default 10s closes the RPC connection

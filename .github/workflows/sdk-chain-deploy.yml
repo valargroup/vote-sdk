@@ -56,15 +56,18 @@ jobs:
         with:
           path: vote-nullifier-pir/target
           key: ${{ runner.os }}-nfserver-${{ env.VOTE_NULLIFIER_PIR_REF }}
-      - name: Build embedded nf-server
-        run: make pir-binary
-        env:
-          VOTE_NULLIFIER_PIR_DIR: vote-nullifier-pir
-      - name: Build SDK binaries
+      # mise run build invokes `make pir-binary` as a transitive prereq
+      # (install-ffi / build-ffi depend on it when EMBED_PIR != 0, the default),
+      # so the nf-server build happens inline with the svoted build — no
+      # separate step needed. VOTE_NULLIFIER_PIR_DIR points the Makefile at the
+      # CI-cached checkout so cargo reuses the cached vote-nullifier-pir/target
+      # instead of cloning + rebuilding into .cache/vote-nullifier-pir.
+      - name: Build SDK binaries (Rust circuits + nf-server + Go)
         run: mise run build && mise run build:create-val-tx
         env:
           BUILD_TAGS: halo2 redpallas embed_pir
           EMBED_PIR: "1"
+          VOTE_NULLIFIER_PIR_DIR: vote-nullifier-pir
       - name: Build admin UI
         run: cd ui && npm install && npm run build
       - name: Copy init script to build root
