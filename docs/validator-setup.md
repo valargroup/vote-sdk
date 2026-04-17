@@ -57,21 +57,28 @@ Never commit `.env` — in CI the same value is supplied via the `VM_PRIVKEY` se
 
 ## Step 1 — Clone and Install the Binary
 
-The `svoted` binary must be built with the `halo2` and `redpallas` FFI tags, which requires the Rust circuits to be compiled first.
+The `svoted` binary is built with the `halo2`, `redpallas`, and `embed_pir` FFI tags. This requires the Rust circuits and the [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) `nf-server` binary (embedded via `go:embed`) to be compiled first — both are built automatically by the install step.
 
 ```bash
 git clone https://github.com/valargroup/shielded-vote
 cd shielded-vote
-mise run build:install   # builds Rust circuits, then: go install -tags "halo2,redpallas"
+mise run install   # builds Rust circuits + nf-server, then: go install -tags "halo2,redpallas,embed_pir"
 ```
 
-This places `svoted` at `~/go/bin/svoted`.
+This places `svoted` at `~/go/bin/svoted` with `nf-server` bundled, so `svoted start --serve-pir` works without a separate install step. The `nf-server` source is auto-cloned into `.cache/vote-nullifier-pir` at the `PIR_REF` tag pinned in the Makefile (kept in sync with `VOTE_NULLIFIER_PIR_REF` in `.github/workflows/sdk-chain-deploy.yml`); set `VOTE_NULLIFIER_PIR_DIR` to point at a sibling working tree if you're iterating on PIR locally.
+
+If you don't plan to run `--serve-pir` and want to skip the `nf-server` Rust build on this machine, pass `EMBED_PIR=0`:
+
+```bash
+EMBED_PIR=0 mise run install   # FFI build, no PIR embed; --serve-pir will error
+```
 
 <details><summary>Without mise</summary>
 
 ```bash
 cd shielded-vote/sdk
-make install-ffi
+make install-ffi                # embeds PIR (default)
+# or: EMBED_PIR=0 make install-ffi
 ```
 
 </details>
@@ -193,24 +200,48 @@ The genesis validator can also serve Private Information Retrieval (PIR) queries
 
 CLI flags `--pir-port`, `--pir-data-dir`, `--pir-pir-data-dir`, `--pir-lwd-url` override the file values at start time.
 
-### Data bootstrap
+### Build-time embedding
 
-The ~6 GB of PIR tier data must exist on disk before `--serve-pir` can answer queries. Populate it from an existing nullifier source:
+The `nf-server` binary is bundled into `svoted` automatically by every FFI build path — `mise run install`, `mise run build`, `mise run chain:init`, and `mise run chain:init-multi` all compile `nf-server` and link it in via the `embed_pir` build tag. No separate step is needed to make `--serve-pir` available; you just need data on disk (see [Data bootstrap](#data-bootstrap) below).
+
+`make pir-binary` resolves the `vote-nullifier-pir` source in this order: `$VOTE_NULLIFIER_PIR_DIR`, then `../vote-nullifier-pir`, then (fallback) a shallow clone of [`valargroup/vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) at the pinned `PIR_REF` tag into `.cache/vote-nullifier-pir`. The same tag is used in CI (`VOTE_NULLIFIER_PIR_REF` in `.github/workflows/sdk-chain-deploy.yml`); bump both together when upgrading.
+
+To opt out of the embed (e.g. for a machine that will never run `--serve-pir`), set `EMBED_PIR=0`:
 
 ```bash
-svoted pir ingest --data-dir ~/.svoted/nullifiers
-svoted pir export --pir-data-dir ~/.svoted/nullifiers/pir-data
+EMBED_PIR=0 mise run install           # skips the nf-server build
+EMBED_PIR=0 mise run chain:init        # ditto, and reinit with a stub svoted
 ```
 
-If tier files are missing at startup, `nf-server` exits with an error; `svoted` itself continues running normally (just without PIR). For operational tasks `nf-server` can also be run directly:
+With `EMBED_PIR=0` the binary still builds and serves the chain normally; only `svoted start --serve-pir` will error (`ErrNotEmbedded`).
+
+### Data bootstrap
+
+The ~6 GB of PIR tier data must exist on disk before `--serve-pir` can answer queries. Populate it from the configured lightwalletd source:
 
 ```bash
-svoted pir serve --port 3000 --data-dir ~/.svoted/nullifiers
+mise run pir:bootstrap       # == pir:ingest + pir:export
+```
+
+The two steps are also exposed individually as `mise run pir:ingest` and `mise run pir:export`. Both honour `SVOTE_PIR_DATA_DIR` / `SVOTE_PIR_TIER_DIR` overrides; defaults match what `scripts/init.sh` writes into `[pir]` (`~/.svoted/nullifiers` and `~/.svoted/nullifiers/pir-data`).
+
+> **Multi-validator / CI deploys.** `scripts/init_multi.sh --ci` reads `SVOTE_PIR_VAL1_DATA_DIR` / `SVOTE_PIR_VAL1_TIER_DIR` instead, defaulting to `/opt/nf-ingest` and `/opt/nf-ingest/pir-data`. Those paths are pre-populated out-of-band by the `vote-nullifier-pir` ingestion pipeline and are *not* wiped by chain reset. The matching flags live in `docs/svoted-val1.service` — see `docs/deploy-setup.md` for details.
+
+If tier files are missing at startup, `nf-server` exits with an error; `svoted` itself continues running normally (just without PIR). For operational/debug use `nf-server` can also be run directly without the chain:
+
+```bash
+mise run pir:serve           # svoted pir serve --port 3000 --data-dir ~/.svoted/nullifiers
 ```
 
 ### Enabling at startup
 
-Add `--serve-pir` to your start command:
+Use the dedicated task, which adds `--serve-pir` and sets `SVOTE_PIR_URL` to the embedded server:
+
+```bash
+mise run chain:start-pir
+```
+
+Or run the daemon detached:
 
 ```bash
 nohup svoted start --home ~/.svoted --serve-pir \
@@ -226,5 +257,10 @@ Then open port `3000` in your firewall if iOS clients should reach this PIR serv
 | `mise run chain:clean` | Reset the chain home directory |
 | `mise tasks` | List all available mise tasks |
 | `svoted status --home ~/.svoted` | Show sync info + latest block height |
-| `svoted pir ingest`  | Build `nullifiers.bin` from a nullifier source |
-| `svoted pir export`  | Generate PIR tier files from `nullifiers.bin` |
+| `mise run install` | Reinstall `svoted` + `create-val-tx` with FFI + embedded PIR (alias: `mise run build:install-pir`) |
+| `EMBED_PIR=0 mise run install` | Reinstall `svoted` skipping the `nf-server` build (no `--serve-pir` support) |
+| `mise run pir:ingest` | Build `nullifiers.bin` from the configured lightwalletd source |
+| `mise run pir:export` | Generate PIR tier files (`tier0/1/2.bin`) from `nullifiers.bin` |
+| `mise run pir:bootstrap` | `pir:ingest` + `pir:export` in one shot (~6 GB on disk) |
+| `mise run pir:serve` | Run `nf-server` standalone (no chain) for operational debugging |
+| `mise run chain:start-pir` | Start chain daemon with the embedded PIR server (`--serve-pir`) |

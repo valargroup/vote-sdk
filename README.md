@@ -20,7 +20,10 @@ A Cosmos SDK application chain for **private on-chain voting** using Zcash-deriv
 # Build the Rust circuit static library (required for full verification)
 make circuits
 
-# Build the chain binary with ZKP + signature verification
+# Build the chain binary with ZKP + signature verification + embedded PIR
+#   also auto-fetches and compiles nf-server (~1-2 min on cold cache);
+#   skip the PIR bundle for faster iteration with EMBED_PIR=0 — this
+#   builds svoted but `svoted start --serve-pir` will return ErrNotEmbedded
 make build-ffi
 
 # Or build without FFI (stubs out Halo2/RedPallas verification — dev only)

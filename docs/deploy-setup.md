@@ -179,10 +179,18 @@ The `nf-server` binary from [`vote-nullifier-pir`](https://github.com/valargroup
 
 ### Enabling PIR
 
-Only val1 runs PIR in deployment. The val1 systemd unit includes `--serve-pir` in its `ExecStart`:
+Only val1 runs PIR in deployment. The val1 systemd unit includes `--serve-pir` in its `ExecStart` and points the server at a pre-populated out-of-band mount (see [Data bootstrap](#data-bootstrap) below):
 
 ```
-ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted-val1 --serve-ui --ui-dist /opt/shielded-vote/ui/dist --serve-pir
+Environment="SVOTE_PIR_VAL1_DATA_DIR=/opt/nf-ingest"
+Environment="SVOTE_PIR_VAL1_TIER_DIR=/opt/nf-ingest/pir-data"
+ExecStart=/opt/shielded-vote/svoted start \
+    --home /opt/shielded-vote/.svoted-val1 \
+    --serve-ui --ui-dist /opt/shielded-vote/ui/dist \
+    --serve-pir \
+    --pir-data-dir ${SVOTE_PIR_VAL1_DATA_DIR} \
+    --pir-pir-data-dir ${SVOTE_PIR_VAL1_TIER_DIR} \
+    --pir-lwd-url https://zec.rocks:443
 ```
 
 Val2 and val3 omit `--serve-pir` — they set `SVOTE_PIR_URL=http://localhost:3000` to query val1's PIR server.
@@ -197,34 +205,38 @@ Port 3000 does not conflict with any existing validator port in the matrix (P2P,
 
 ### `[pir]` section in `app.toml`
 
-Written to all three validators by `init_multi.sh`. Settings only — no enable/disable key (the `--serve-pir` CLI flag controls enablement).
+Written to val1 by `init_multi.sh` (val2/val3 don't serve PIR). Settings only — no enable/disable key (the `--serve-pir` CLI flag controls enablement).
 
-| Key            | Default                                 | Description                                               |
-|----------------|-----------------------------------------|-----------------------------------------------------------|
-| `port`         | `3000`                                  | Listen port for nf-server.                                |
-| `data_dir`     | `$HOME/<val>/nullifiers`                | Directory with `nullifiers.bin`, `.checkpoint`, `.index`. |
-| `pir_data_dir` | `$HOME/<val>/nullifiers/pir-data`       | Directory with tier files (`tier0.bin`, `tier1.bin`, etc). |
-| `lwd_url`      | `https://zec.rocks:443`                 | Lightwalletd URL for `/snapshot/prepare` rebuilds.        |
-| `chain_url`    | `""`                                    | Optional chain REST URL (blocks rebuilds during active rounds). |
+| Key            | Local default (`init_multi.sh`)      | CI default (`init_multi.sh --ci`)   | Description                                                     |
+|----------------|--------------------------------------|-------------------------------------|-----------------------------------------------------------------|
+| `port`         | `3000`                               | `3000`                              | Listen port for nf-server.                                      |
+| `data_dir`     | `$HOME/.svoted-val1/nullifiers`      | `/opt/nf-ingest`                    | Directory with `nullifiers.bin`, `.checkpoint`, `.index`.       |
+| `pir_data_dir` | `$HOME/.svoted-val1/nullifiers/pir-data` | `/opt/nf-ingest/pir-data`       | Directory with tier files (`tier0.bin`, `tier1.bin`, etc).      |
+| `lwd_url`      | `https://zec.rocks:443`              | `https://zec.rocks:443`             | Lightwalletd URL for `/snapshot/prepare` rebuilds.              |
+| `chain_url`    | `""`                                 | `""`                                | Optional chain REST URL (blocks rebuilds during active rounds). |
 
-CLI flags `--pir-port`, `--pir-data-dir`, `--pir-pir-data-dir`, `--pir-lwd-url` override the config file values.
+In CI mode, the paths are controlled by the env vars `SVOTE_PIR_VAL1_DATA_DIR` / `SVOTE_PIR_VAL1_TIER_DIR` read by `init_multi.sh --ci`; `/opt/nf-ingest` is the fallback when they're unset. These must match the `--pir-data-dir` / `--pir-pir-data-dir` flags in `docs/svoted-val1.service` — both are sourced from the same `Environment=` block there. Changing the mount location is therefore a two-step edit: bump the systemd unit's `Environment=` lines and re-export the env vars before `init_multi.sh --ci` writes `app.toml`.
+
+CLI flags `--pir-port`, `--pir-data-dir`, `--pir-pir-data-dir`, `--pir-lwd-url` override the config file values, which is how the systemd unit decouples `--serve-pir` from whatever `init_multi.sh` wrote.
 
 ### `svoted pir` subcommands
 
-The embedded `nf-server` binary can be run directly for operational tasks:
+The embedded `nf-server` binary can be run directly for operational tasks (target the same mount the systemd unit's `--pir-*-dir` flags point at):
 
 ```bash
-svoted pir ingest --data-dir /opt/shielded-vote/nullifiers
-svoted pir export --pir-data-dir /opt/shielded-vote/nullifiers/pir-data
-svoted pir serve --port 3000 --data-dir /opt/shielded-vote/nullifiers
+svoted pir ingest --data-dir /opt/nf-ingest
+svoted pir export --pir-data-dir /opt/nf-ingest/pir-data
+svoted pir serve  --port 3000 --data-dir /opt/nf-ingest
 ```
 
 ### Data bootstrap
 
-The ~6 GB of PIR tier data must be present on val1's disk before `--serve-pir` can serve queries. After first deploy:
+The ~6 GB of PIR tier data must be present on val1's disk before `--serve-pir` can serve queries. In the standard deploy the data lives at `/opt/nf-ingest` (the default for `SVOTE_PIR_VAL1_DATA_DIR`) and is populated **out-of-band** by the `vote-nullifier-pir` ingestion pipeline, not by `svoted`. Chain reset (`init_multi.sh --ci`) wipes `$HOME/.svoted-val*` but leaves `/opt/nf-ingest` intact — that's the whole point of using an out-of-band mount.
 
-1. `svoted pir ingest --data-dir /opt/shielded-vote/.svoted-val1/nullifiers`
-2. `svoted pir export --pir-data-dir /opt/shielded-vote/.svoted-val1/nullifiers/pir-data`
+If you're bringing up a fresh host (or pointing `SVOTE_PIR_VAL1_*` at a new, empty mount), seed it once:
+
+1. `svoted pir ingest --data-dir /opt/nf-ingest`
+2. `svoted pir export --pir-data-dir /opt/nf-ingest/pir-data`
 
 If tier files are missing at startup, `nf-server` exits with an error; `svoted` continues running normally.
 
