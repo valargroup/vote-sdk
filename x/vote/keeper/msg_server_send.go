@@ -42,32 +42,23 @@ func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthoriz
 
 	coins := sdk.NewCoins(sdk.NewCoin(msg.Denom, amt))
 
-	// Fetch the admin set once and do both membership checks in-memory.
-	adminSet, err := ms.k.GetAdmins(ms.k.OpenKVStore(ctx))
+	senderIsAdmin, err := ms.k.IsAdmin(ctx, msg.FromAddress)
 	if err != nil {
 		return nil, err
 	}
-	isAdmin := func(addr string) bool {
-		if adminSet == nil {
-			return false
-		}
-		for _, a := range adminSet.Addresses {
-			if a == addr {
-				return true
-			}
-		}
-		return false
-	}
-
-	if !isAdmin(msg.FromAddress) {
+	if !senderIsAdmin {
 		senderValAddr := sdk.ValAddress(fromAddr).String()
 		if !ms.k.IsValidator(ctx, senderValAddr) {
 			return nil, fmt.Errorf("%w: %s is neither an admin nor a bonded validator",
 				types.ErrUnauthorizedSend, msg.FromAddress)
 		}
 
+		recipientIsAdmin, err := ms.k.IsAdmin(ctx, msg.ToAddress)
+		if err != nil {
+			return nil, err
+		}
 		recipientValAddr := sdk.ValAddress(toAddr).String()
-		if !isAdmin(msg.ToAddress) && !ms.k.IsValidator(ctx, recipientValAddr) {
+		if !recipientIsAdmin && !ms.k.IsValidator(ctx, recipientValAddr) {
 			return nil, fmt.Errorf("%w: validator %s can only send to an admin or another bonded validator",
 				types.ErrUnauthorizedSend, msg.FromAddress)
 		}

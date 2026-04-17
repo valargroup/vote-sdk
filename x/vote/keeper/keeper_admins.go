@@ -29,9 +29,15 @@ func (k *Keeper) GetAdmins(kvStore store.KVStore) (*types.AdminSet, error) {
 	return &set, nil
 }
 
-// SetAdmins stores the admin set (singleton) in the KV store.
+// SetAdmins stores the admin set (singleton) in the KV store. Addresses are
+// normalized and deduplicated before persist so every read returns canonical
+// bech32, even if callers passed mixed-case or uncanonical forms.
 func (k *Keeper) SetAdmins(kvStore store.KVStore, set *types.AdminSet) error {
-	bz, err := marshal(set)
+	normalized, err := types.ValidateAndNormalizeAdminSet(set.Addresses)
+	if err != nil {
+		return err
+	}
+	bz, err := marshal(&types.AdminSet{Addresses: normalized})
 	if err != nil {
 		return err
 	}

@@ -54,8 +54,8 @@ use voting_circuits::vote_proof::{
     builder::build_vote_proof_from_delegation, circuit::VOTE_COMM_TREE_DEPTH,
 };
 
-/// Vote manager address corresponding to the VM_PRIVKEY used in genesis.
-const VOTE_MANAGER_ADDRESS: &str = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3";
+/// Admin address corresponding to VM_PRIVKEYS[0] used in genesis.
+const ADMIN_ADDRESS: &str = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3";
 
 // ---------------------------------------------------------------------------
 // Fixture deserialization types (must match generate_fixtures.rs)
@@ -559,12 +559,17 @@ fn voter_throughput_stress() {
     // Setup: create round on-chain with matching round_fields
     // -----------------------------------------------------------------------
     eprintln!("\n--- Setup: creating voting round on-chain ---");
-    let vm_privkey = std::env::var("VM_PRIVKEY")
-        .expect("VM_PRIVKEY env var must be set (64-char hex secp256k1 private key)");
+    let vm_privkey = std::env::var("VM_PRIVKEYS")
+        .expect("VM_PRIVKEYS env var must be set (comma-separated 64-char hex keys)")
+        .split(',')
+        .next()
+        .expect("VM_PRIVKEYS must contain at least one key")
+        .trim()
+        .to_string();
     ensure_pallas_key_registered();
 
     let config = default_cosmos_tx_config();
-    import_hex_key("vote-manager", &vm_privkey, &config.home_dir);
+    import_hex_key("admin-1", &vm_privkey, &config.home_dir);
 
     let rf = &manifest.round_fields;
     let setup_round_fields = e2e_tests::payloads::SetupRoundFields {
@@ -577,11 +582,11 @@ fn voter_throughput_stress() {
     };
 
     let (mut body, _, _derived_round_id) =
-        create_voting_session_payload(VOTE_MANAGER_ADDRESS, 600, Some(setup_round_fields));
+        create_voting_session_payload(ADMIN_ADDRESS, 600, Some(setup_round_fields));
     body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
 
     let vm_config = CosmosTxConfig {
-        key_name: "vote-manager".to_string(),
+        key_name: "admin-1".to_string(),
         home_dir: config.home_dir.clone(),
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),

@@ -24,8 +24,13 @@ use e2e_tests::{
 #[test]
 #[ignore = "requires running chain"]
 fn round_activation() {
-    let vm_privkey = std::env::var("VM_PRIVKEY")
-        .expect("VM_PRIVKEY env var must be set (64-char hex secp256k1 private key)");
+    let vm_privkey = std::env::var("VM_PRIVKEYS")
+        .expect("VM_PRIVKEYS env var must be set (comma-separated 64-char hex keys)")
+        .split(',')
+        .next()
+        .expect("VM_PRIVKEYS must contain at least one key")
+        .trim()
+        .to_string();
 
     // Ensure the validator's Pallas key is in the global registry.
     // (Usually already registered via MsgCreateValidatorWithPallasKey during init.)
@@ -33,20 +38,20 @@ fn round_activation() {
 
     // Import vote manager key into keyring.
     let config = default_cosmos_tx_config();
-    import_hex_key("vote-manager", &vm_privkey, &config.home_dir);
+    import_hex_key("admin-1", &vm_privkey, &config.home_dir);
 
-    let vote_manager_address = key_account_address("vote-manager", &config.home_dir)
-        .expect("vote-manager key must be in keyring after import");
-    eprintln!("[E2E] Vote manager address: {}", vote_manager_address);
+    let admin_address = key_account_address("admin-1", &config.home_dir)
+        .expect("admin-1 key must be in keyring after import");
+    eprintln!("[E2E] Vote manager address: {}", admin_address);
 
     // Create a voting round — starts as PENDING, triggers per-round ceremony.
     let (mut body, _, round_id) =
-        create_voting_session_payload(&vote_manager_address, 300, None);
+        create_voting_session_payload(&admin_address, 300, None);
     let round_id_hex = hex::encode(round_id);
     body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
 
     let vm_config = e2e_tests::api::CosmosTxConfig {
-        key_name: "vote-manager".to_string(),
+        key_name: "admin-1".to_string(),
         home_dir: config.home_dir.clone(),
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),

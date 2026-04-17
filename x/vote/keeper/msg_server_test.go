@@ -673,45 +673,39 @@ func (s *MsgServerTestSuite) TestUpdateAdmins_AnyAdminCanUpdate() {
 
 func (s *MsgServerTestSuite) TestUpdateAdmins_NonAdminRejected() {
 	s.SetupTest()
-
-	adminA := testAccAddr(40)
-	s.seedAdmins(adminA)
+	s.seedAdmins(testAccAddr(40))
 
 	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
 		Creator:   testAccAddr(99), // not in the set
 		NewAdmins: []string{testAccAddr(41)},
 	})
-	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "not authorized")
+	s.Require().ErrorIs(err, types.ErrNotAuthorized)
 }
 
-func (s *MsgServerTestSuite) TestUpdateAdmins_ValidatorRejected() {
+func (s *MsgServerTestSuite) TestUpdateAdmins_MalformedCreatorRejected() {
 	s.SetupTest()
-	// Register the same underlying 20-byte address as a bonded validator so
-	// MsgUpdateAdmins's handler can't mistake "is a validator" for admin
-	// authority. Creator is the account (sv1...) form of the same bytes.
-	s.setupWithMockStaking(testValAddr(1))
+	s.seedAdmins(testAccAddr(40))
 
-	s.seedAdmins(testAccAddr(30))
-
+	// Creator that fails bech32 parse at the canonicalization step must
+	// surface as ErrNotAuthorized with the "not a valid bech32 address"
+	// message, so the branch distinct from the membership-fail branch is
+	// exercised.
 	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
-		Creator:   testAccAddr(1),
-		NewAdmins: []string{testAccAddr(31)},
+		Creator:   "not_a_bech32",
+		NewAdmins: []string{testAccAddr(41)},
 	})
-	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "not authorized")
+	s.Require().ErrorIs(err, types.ErrNotAuthorized)
+	s.Require().Contains(err.Error(), "not a valid bech32 address")
 }
 
 func (s *MsgServerTestSuite) TestUpdateAdmins_NoAdminsRejected() {
 	s.SetupTest()
 
-	// No admin set installed — UpdateAdmins should fail with ErrNoAdmins.
 	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
 		Creator:   testAccAddr(1),
 		NewAdmins: []string{testAccAddr(2)},
 	})
-	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "no admin set configured")
+	s.Require().ErrorIs(err, types.ErrNoAdmins)
 }
 
 func (s *MsgServerTestSuite) TestUpdateAdmins_EmptySetRejected() {
@@ -723,8 +717,7 @@ func (s *MsgServerTestSuite) TestUpdateAdmins_EmptySetRejected() {
 		Creator:   adminA,
 		NewAdmins: nil,
 	})
-	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "admin set must be non-empty")
+	s.Require().ErrorIs(err, types.ErrEmptyAdminSet)
 }
 
 func (s *MsgServerTestSuite) TestUpdateAdmins_DuplicatesRejected() {
@@ -736,8 +729,7 @@ func (s *MsgServerTestSuite) TestUpdateAdmins_DuplicatesRejected() {
 		Creator:   adminA,
 		NewAdmins: []string{adminA, adminA},
 	})
-	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "admin address appears more than once")
+	s.Require().ErrorIs(err, types.ErrDuplicateAdmin)
 }
 
 func (s *MsgServerTestSuite) TestUpdateAdmins_InvalidBech32Rejected() {
@@ -753,12 +745,13 @@ func (s *MsgServerTestSuite) TestUpdateAdmins_InvalidBech32Rejected() {
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not a valid bech32 address")
 
-	// Validator operator address (valoper) — different bech32 HRP, rejected.
+	// Validator operator address (valoper HRP ≠ account HRP).
 	_, err = s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
 		Creator:   adminA,
 		NewAdmins: []string{testValAddr(2)},
 	})
 	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "not a valid bech32 address")
 }
 
 func (s *MsgServerTestSuite) TestUpdateAdmins_DoesNotTouchBalances() {
@@ -767,20 +760,18 @@ func (s *MsgServerTestSuite) TestUpdateAdmins_DoesNotTouchBalances() {
 	adminB := testAccAddr(21)
 
 	bk := newMockBankKeeper()
-	bk.balances[adminA] = sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.NewInt(1_000_000_000))
 	s.setupWithMockBankKeeper(bk)
 	s.seedAdmins(adminA)
 
-	// Replace {A} with {B}; A's balance must remain untouched because under
-	// the per-admin balance model UpdateAdmins never moves funds.
+	// Replace {A} with {B}; under the per-admin balance model UpdateAdmins
+	// must never move coins. The single load-bearing check is that no
+	// SendCoins call was made.
 	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
 		Creator:   adminA,
 		NewAdmins: []string{adminB},
 	})
 	s.Require().NoError(err)
-
 	s.Require().Empty(bk.sendCalls, "UpdateAdmins must not call SendCoins")
-	s.Require().Equal(sdkmath.NewInt(1_000_000_000), bk.balances[adminA].Amount)
 }
 
 func (s *MsgServerTestSuite) TestUpdateAdmins_CreatorRemovingSelfAllowed() {

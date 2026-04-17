@@ -25,8 +25,8 @@ use pasta_curves::pallas;
 use vote_commitment_tree::TreeClient;
 use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
 
-/// Vote manager address corresponding to the VM_PRIVKEY used in genesis.
-const VOTE_MANAGER_ADDRESS: &str = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3";
+/// Admin address corresponding to VM_PRIVKEYS[0] used in genesis.
+const ADMIN_ADDRESS: &str = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3";
 
 struct SyncClientResult {
     client_id: usize,
@@ -64,19 +64,24 @@ fn sync_stress_multi_delegation() {
     eprintln!("[stress] Phase 1 complete: {} bundles ready", bundles.len());
 
     // ---- Phase 2: Create round + wait for ACTIVE ----
-    let vm_privkey = std::env::var("VM_PRIVKEY")
-        .expect("VM_PRIVKEY env var must be set (64-char hex secp256k1 private key)");
+    let vm_privkey = std::env::var("VM_PRIVKEYS")
+        .expect("VM_PRIVKEYS env var must be set (comma-separated 64-char hex keys)")
+        .split(',')
+        .next()
+        .expect("VM_PRIVKEYS must contain at least one key")
+        .trim()
+        .to_string();
     ensure_pallas_key_registered();
     let config = default_cosmos_tx_config();
-    import_hex_key("vote-manager", &vm_privkey, &config.home_dir);
+    import_hex_key("admin-1", &vm_privkey, &config.home_dir);
 
     let (mut body, _, round_id) =
-        create_voting_session_payload(VOTE_MANAGER_ADDRESS, 300, Some(round_fields));
+        create_voting_session_payload(ADMIN_ADDRESS, 300, Some(round_fields));
     let round_id_hex = hex::encode(&round_id);
 
     body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
     let vm_config = CosmosTxConfig {
-        key_name: "vote-manager".to_string(),
+        key_name: "admin-1".to_string(),
         home_dir: config.home_dir.clone(),
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),

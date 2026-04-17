@@ -648,7 +648,7 @@ type GenesisState struct {
 	state                 protoimpl.MessageState      `protogen:"open.v1"`
 	Rounds                []*VoteRound                `protobuf:"bytes,1,rep,name=rounds,proto3" json:"rounds,omitempty"`
 	Nullifiers            []*NullifierEntry           `protobuf:"bytes,4,rep,name=nullifiers,proto3" json:"nullifiers,omitempty"`
-	AdminAddresses        []string                    `protobuf:"bytes,5,rep,name=admin_addresses,json=adminAddresses,proto3" json:"admin_addresses,omitempty"` // any-of-N admin set (was: singular vote_manager)
+	AdminAddresses        []string                    `protobuf:"bytes,5,rep,name=admin_addresses,json=adminAddresses,proto3" json:"admin_addresses,omitempty"`
 	TallyResults          []*TallyResult              `protobuf:"bytes,6,rep,name=tally_results,json=tallyResults,proto3" json:"tally_results,omitempty"`
 	PallasKeys            []*ValidatorPallasKey       `protobuf:"bytes,7,rep,name=pallas_keys,json=pallasKeys,proto3" json:"pallas_keys,omitempty"`
 	TallyAccumulators     []*GenesisTallyAccumulator  `protobuf:"bytes,8,rep,name=tally_accumulators,json=tallyAccumulators,proto3" json:"tally_accumulators,omitempty"`

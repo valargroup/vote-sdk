@@ -24,12 +24,12 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToAnyone() {
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	mgr := testAccAddr(1)
+	admin := testAccAddr(1)
 	recipient := testAccAddr(2)
-	s.seedAdmins(mgr)
+	s.seedAdmins(admin)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: mgr,
+		FromAddress: admin,
 		ToAddress:   recipient,
 		Amount:      "1000000",
 		Denom:       "usvote",
@@ -37,7 +37,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToAnyone() {
 	s.Require().NoError(err)
 	s.Require().Len(bk.sendCalls, 1)
 
-	from, _ := sdk.AccAddressFromBech32(mgr)
+	from, _ := sdk.AccAddressFromBech32(admin)
 	to, _ := sdk.AccAddressFromBech32(recipient)
 	s.Require().Equal(from, bk.sendCalls[0].From)
 	s.Require().Equal(to, bk.sendCalls[0].To)
@@ -52,15 +52,34 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToValidator() {
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	mgr := testAccAddr(1)
+	admin := testAccAddr(1)
 	valAcc := testAccAddr(10)
-	s.seedAdmins(mgr)
+	s.seedAdmins(admin)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: mgr,
+		FromAddress: admin,
 		ToAddress:   valAcc,
 		Amount:      "500",
+		Denom:       "usvote",
+	})
+	s.Require().NoError(err)
+	s.Require().Len(bk.sendCalls, 1)
+}
+
+func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToOtherAdmin() {
+	s.SetupTest()
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
+
+	adminA := testAccAddr(1)
+	adminB := testAccAddr(2)
+	s.seedAdmins(adminA, adminB)
+
+	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+		FromAddress: adminA,
+		ToAddress:   adminB,
+		Amount:      "100",
 		Denom:       "usvote",
 	})
 	s.Require().NoError(err)
@@ -76,14 +95,14 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToAdmin() {
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	mgr := testAccAddr(1)
+	admin := testAccAddr(1)
 	valAcc := testAccAddr(10)
-	s.seedAdmins(mgr)
+	s.seedAdmins(admin)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: valAcc,
-		ToAddress:   mgr,
+		ToAddress:   admin,
 		Amount:      "100",
 		Denom:       "usvote",
 	})
@@ -96,10 +115,10 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToOtherValidator
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	mgr := testAccAddr(1)
+	admin := testAccAddr(1)
 	val1Acc := testAccAddr(10)
 	val2Acc := testAccAddr(11)
-	s.seedAdmins(mgr)
+	s.seedAdmins(admin)
 	s.setupWithMockStaking(accToValoper(val1Acc), accToValoper(val2Acc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -117,10 +136,10 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToNonValidato
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	mgr := testAccAddr(1)
+	admin := testAccAddr(1)
 	valAcc := testAccAddr(10)
 	random := testAccAddr(99)
-	s.seedAdmins(mgr)
+	s.seedAdmins(admin)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -143,14 +162,14 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonPrivilegedSenderRejected() {
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	mgr := testAccAddr(1)
+	admin := testAccAddr(1)
 	random := testAccAddr(50)
-	s.seedAdmins(mgr)
+	s.seedAdmins(admin)
 	s.setupWithMockStaking() // no validators
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: random,
-		ToAddress:   mgr,
+		ToAddress:   admin,
 		Amount:      "100",
 		Denom:       "usvote",
 	})
@@ -288,12 +307,12 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	mgr := testAccAddr(1)
+	admin := testAccAddr(1)
 	recipient := testAccAddr(2)
-	s.seedAdmins(mgr)
+	s.seedAdmins(admin)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: mgr,
+		FromAddress: admin,
 		ToAddress:   recipient,
 		Amount:      "42",
 		Denom:       "usvote",
@@ -307,7 +326,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 			for _, attr := range e.Attributes {
 				switch attr.Key {
 				case types.AttributeKeySender:
-					s.Require().Equal(mgr, attr.Value)
+					s.Require().Equal(admin, attr.Value)
 				case types.AttributeKeyRecipient:
 					s.Require().Equal(recipient, attr.Value)
 				}

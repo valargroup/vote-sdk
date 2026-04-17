@@ -244,14 +244,6 @@ pub fn register_pallas_key_payload(creator: &str, pallas_pk: &[u8]) -> Value {
 // DealerPayloadInput and deal_ea_key_payload removed: dealing is now automatic
 // via PrepareProposal (auto-deal). MsgReInitializeElectionAuthority also removed.
 
-/// Build MsgSetVoteManager JSON body.
-pub fn set_vote_manager_payload(creator: &str, new_manager: &str) -> Value {
-    json!({
-        "creator": creator,
-        "new_manager": new_manager,
-    })
-}
-
 // Note: MsgAckExecutiveAuthorityKey has no payload builder — acks are injected
 // in-protocol via PrepareProposal (auto-ack).
 
