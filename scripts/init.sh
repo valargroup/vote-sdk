@@ -19,8 +19,12 @@ DENOM="usvote"
 
 echo "=== Initializing Shielded-Vote Chain ==="
 
-# Remove existing data
-rm -rf "$HOME_DIR"
+# Remove existing data but preserve nullifier/PIR tier files (~6 GB).
+if [ -d "$HOME_DIR" ]; then
+    find "$HOME_DIR" -mindepth 1 -maxdepth 1 ! -name nullifiers -exec rm -rf {} +
+else
+    mkdir -p "$HOME_DIR"
+fi
 
 # Init chain
 $BINARY init "$MONIKER" --chain-id "$CHAIN_ID" --home "$HOME_DIR"
@@ -75,9 +79,13 @@ jq --arg mgr "$MANAGER_ADDR" '
 # Validate genesis
 $BINARY genesis validate-genesis --home "$HOME_DIR"
 
+# Ensure minimum-gas-prices is set (the Go default template writes "0usvote"
+# but older inits or manual edits may leave it blank, which aborts `svoted start`).
+APP_TOML="$HOME_DIR/config/app.toml"
+sed -i.bak 's/^minimum-gas-prices = ""/minimum-gas-prices = "0usvote"/' "$APP_TOML"
+
 # Enable the REST API server (default: disabled).
 # Use port 1318 to avoid Cursor IDE occupying 1317.
-APP_TOML="$HOME_DIR/config/app.toml"
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
 sed -i.bak 's|address = "tcp://localhost:1317"|address = "tcp://0.0.0.0:1318"|' "$APP_TOML"
 # Enable CORS for dev (Vite dev server on port 5173).
