@@ -33,7 +33,7 @@ func GetTxCmd() *cobra.Command {
 		CmdRegisterPallasKey(),
 		CmdRotatePallasKey(),
 		CmdCreateValidatorWithPallasKey(),
-		// Vote-manager commands — signed by the designated vote manager address.
+		// Admin commands — signed by any current admin (any-of-N).
 		CmdUpdateAdmins(),
 		CmdCreateVotingSession(),
 		CmdSubmitTally(),
@@ -274,12 +274,12 @@ Example:
 }
 
 // CmdCreateVotingSession broadcasts MsgCreateVotingSession.
-// Only callable by the current vote manager.  Accepts a JSON file because the
-// message carries a structured proposal list and large binary blobs.
+// Callable by any current admin. Accepts a JSON file because the message
+// carries a structured proposal list and large binary blobs.
 func CmdCreateVotingSession() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create-voting-session [msg-json-file]",
-		Short: "Create a new voting session (vote manager only)",
+		Short: "Create a new voting session (admin only)",
 		Long: `Broadcast an MsgCreateVotingSession from a JSON description file.
 
 All byte fields are hex-encoded in the JSON.  Required fields:
@@ -411,11 +411,11 @@ Example:
 }
 
 // CmdSubmitTally broadcasts MsgSubmitTally.
-// Called by the vote manager after off-chain tally computation.
+// Called by an admin after off-chain tally computation.
 func CmdSubmitTally() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "submit-tally [vote-round-id-hex] [entries-json-file]",
-		Short: "Submit finalized tally results for a vote round (vote manager only)",
+		Short: "Submit finalized tally results for a vote round (admin only)",
 		Long: `Broadcast an MsgSubmitTally transaction.
 
 Arguments:

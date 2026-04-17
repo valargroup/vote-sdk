@@ -368,9 +368,9 @@ func (ta *TestApp) SeedConfirmedCeremony(_ []byte) {
 // MsgCreateVotingSession, bypassing the ABCI pipeline. The round is committed
 // via an empty block. Returns the derived vote_round_id.
 //
-// MsgCreateVotingSession is now a standard Cosmos SDK tx (signed by the vote
-// manager), so it can no longer be submitted via the custom vote tx wire
-// format. For integration tests that need an active round to test other vote
+// MsgCreateVotingSession is a standard Cosmos SDK tx (signed by an admin),
+// so it can't be submitted via the custom vote tx wire format. For
+// integration tests that need an active round to exercise other vote
 // messages (delegation, cast, reveal, tally), this helper seeds the round
 // directly — the session creation itself is not under test here.
 func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {

@@ -91,7 +91,7 @@ message CommitmentTreeState {
 message GenesisState {
   repeated VoteRound               rounds              = 1;
   repeated NullifierEntry          nullifiers           = 4;
-  repeated string                  admin_addresses      = 5; // any-of-N admin set (was: singular vote_manager)
+  repeated string                  admin_addresses      = 5;
   repeated TallyResult             tally_results        = 6;
   repeated ValidatorPallasKey      pallas_keys          = 7;
   repeated GenesisTallyAccumulator tally_accumulators   = 8;

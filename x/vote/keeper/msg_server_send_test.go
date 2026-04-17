@@ -16,10 +16,10 @@ func accToValoper(accBech32 string) string {
 }
 
 // ---------------------------------------------------------------------------
-// AuthorizedSend — vote manager tests
+// AuthorizedSend — admin sender tests
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToAnyone() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToAnyone() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -47,7 +47,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToAnyone() {
 	)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToValidator() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_AdminCanSendToValidator() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -71,7 +71,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToValidator() 
 // AuthorizedSend — validator tests
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToVoteManager() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToAdmin() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -159,14 +159,14 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonPrivilegedSenderRejected() {
 	s.Require().Empty(bk.sendCalls)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_NoVoteManagerSet_ValidatorRejected() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_NoAdminsSet_ValidatorRejected() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
 	valAcc := testAccAddr(10)
 	recipient := testAccAddr(20)
-	// No vote manager seeded.
+	// No admin set seeded.
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -176,7 +176,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NoVoteManagerSet_ValidatorReject
 		Denom:       "usvote",
 	})
 	s.Require().Error(err)
-	// Validator sending to non-validator, non-manager should fail.
+	// Validator sending to non-validator, non-admin should fail.
 	s.Require().Contains(err.Error(), "can only send to an admin or another bonded validator")
 }
 

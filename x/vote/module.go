@@ -717,9 +717,8 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	return nil
 }
 
-// DefaultAdminAddresses is the default admin set used in genesis. A single
-// entry here preserves the single-admin behavior of the pre-change default.
-// Init scripts replace this list with the addresses derived from VM_PRIVKEYS.
+// DefaultAdminAddresses is the default admin set used in DefaultGenesis.
+// Init scripts overwrite it with the addresses derived from VM_PRIVKEYS.
 var DefaultAdminAddresses = []string{
 	"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
 }

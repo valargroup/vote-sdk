@@ -592,9 +592,9 @@ export async function createVotingSession(
 /**
  * Sign and broadcast an svote.v1.MsgAuthorizedSend transaction.
  *
- * Used by the "Fund validator" UI to transfer stake tokens from the
- * vote manager to a validator address. Only the vote manager (or bonded
- * validators sending to each other / the manager) is authorized.
+ * Used by the "Fund validator" UI to transfer stake tokens from an admin
+ * to a validator address. Any admin can send to anyone; bonded validators
+ * can send to other admins or bonded validators; all other senders rejected.
  *
  * @param amountUsvote - amount in micro-tokens (usvote), e.g. "1000000" for 1 SVOTE
  */

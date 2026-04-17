@@ -32,7 +32,7 @@ func TestExportImportGenesis(t *testing.T) {
 
 	// --- Populate state ---
 
-	// Admin set (single-admin case for backwards-compatible coverage).
+	// Admin set.
 	require.NoError(t, k.SetAdmins(kvStore, &types.AdminSet{Addresses: []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}}))
 
 	// Vote rounds.

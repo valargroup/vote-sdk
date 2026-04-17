@@ -687,15 +687,15 @@ func (s *MsgServerTestSuite) TestUpdateAdmins_NonAdminRejected() {
 
 func (s *MsgServerTestSuite) TestUpdateAdmins_ValidatorRejected() {
 	s.SetupTest()
-	val1 := testValAddr(1)
-	s.setupWithMockStaking(val1)
+	// Register the same underlying 20-byte address as a bonded validator so
+	// MsgUpdateAdmins's handler can't mistake "is a validator" for admin
+	// authority. Creator is the account (sv1...) form of the same bytes.
+	s.setupWithMockStaking(testValAddr(1))
 
-	adminA := testAccAddr(30)
-	s.seedAdmins(adminA)
+	s.seedAdmins(testAccAddr(30))
 
-	// A bonded validator that is not an admin must be rejected.
 	_, err := s.msgServer.UpdateAdmins(s.ctx, &types.MsgUpdateAdmins{
-		Creator:   val1,
+		Creator:   testAccAddr(1),
 		NewAdmins: []string{testAccAddr(31)},
 	})
 	s.Require().Error(err)

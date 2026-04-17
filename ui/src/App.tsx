@@ -897,10 +897,10 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
 
   // Update admin set flow. The UI accepts a comma- or newline-separated list
   // of bech32 addresses; submission atomically replaces the entire set.
-  const [vmNewAddrs, setVmNewAddrs] = useState("");
-  const [vmStatus, setVmStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
-  const [vmError, setVmError] = useState("");
-  const [vmTxHash, setVmTxHash] = useState("");
+  const [adminNewAddrs, setAdminNewAddrs] = useState("");
+  const [adminTxStatus, setAdminTxStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
+  const [adminTxError, setAdminTxError] = useState("");
+  const [adminTxHash, setAdminTxHash] = useState("");
 
   const handleRpcChange = (url: string) => {
     setRpcUrl(url);
@@ -945,32 +945,32 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
 
   const handleUpdateAdmins = async () => {
     if (!wallet.signer) return;
-    setVmStatus("sending");
-    setVmError("");
-    setVmTxHash("");
+    setAdminTxStatus("sending");
+    setAdminTxError("");
+    setAdminTxHash("");
     try {
-      const newAdmins = vmNewAddrs
+      const newAdmins = adminNewAddrs
         .split(/[\s,]+/)
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
       if (newAdmins.length === 0) {
-        setVmError("Enter at least one admin address");
-        setVmStatus("error");
+        setAdminTxError("Enter at least one admin address");
+        setAdminTxStatus("error");
         return;
       }
       const base = chainApi.getApiBase();
       const result = await cosmosTx.updateAdmins(base, wallet.signer, newAdmins);
       if (result.code !== 0) {
-        setVmError(result.log || `tx failed with code ${result.code}`);
-        setVmStatus("error");
+        setAdminTxError(result.log || `tx failed with code ${result.code}`);
+        setAdminTxStatus("error");
       } else {
-        setVmTxHash(result.tx_hash);
-        setVmStatus("ok");
+        setAdminTxHash(result.tx_hash);
+        setAdminTxStatus("ok");
         setAdmins(newAdmins);
       }
     } catch (err) {
-      setVmError(err instanceof Error ? err.message : String(err));
-      setVmStatus("error");
+      setAdminTxError(err instanceof Error ? err.message : String(err));
+      setAdminTxStatus("error");
     }
   };
 
@@ -1381,8 +1381,8 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                             New admin addresses (comma- or newline-separated)
                           </label>
                           <textarea
-                            value={vmNewAddrs}
-                            onChange={(e) => setVmNewAddrs(e.target.value)}
+                            value={adminNewAddrs}
+                            onChange={(e) => setAdminNewAddrs(e.target.value)}
                             placeholder="sv1..., sv1..., sv1..."
                             rows={3}
                             className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
@@ -1393,10 +1393,10 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                         </div>
                         <button
                           onClick={handleUpdateAdmins}
-                          disabled={!vmNewAddrs.trim() || vmStatus === "sending"}
+                          disabled={!adminNewAddrs.trim() || adminTxStatus === "sending"}
                           className="px-3 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
                         >
-                          {vmStatus === "sending" ? (
+                          {adminTxStatus === "sending" ? (
                             <span className="flex items-center gap-1.5">
                               <Loader2 size={12} className="animate-spin" /> Signing & broadcasting...
                             </span>
@@ -1404,21 +1404,21 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                             "Sign & broadcast on-chain"
                           )}
                         </button>
-                        {vmStatus === "ok" && (
+                        {adminTxStatus === "ok" && (
                           <div className="bg-success/10 border border-success/30 rounded-lg p-2.5">
                             <p className="text-[11px] text-success font-semibold">
                               Admin set updated
                             </p>
-                            {vmTxHash && (
+                            {adminTxHash && (
                               <p className="text-[10px] text-text-secondary font-mono mt-0.5 break-all">
-                                TX: {vmTxHash}
+                                TX: {adminTxHash}
                               </p>
                             )}
                           </div>
                         )}
-                        {vmStatus === "error" && (
+                        {adminTxStatus === "error" && (
                           <div className="bg-danger/10 border border-danger/30 rounded-lg p-2.5">
-                            <p className="text-[11px] text-danger">{vmError}</p>
+                            <p className="text-[11px] text-danger">{adminTxError}</p>
                           </div>
                         )}
                       </div>

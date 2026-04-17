@@ -405,7 +405,7 @@ fi
 
 # ─── Phase 1: Register as pending validator ─────────────────────────────────
 # The validator exists (keys generated) but isn't bonded yet. Register with
-# the Vercel API so the vote-manager can see and approve it.
+# the Vercel API so the admin can see and approve it.
 
 if [ -n "$VALIDATOR_URL" ]; then
   echo ""
@@ -427,7 +427,7 @@ if [ -n "$VALIDATOR_URL" ]; then
     if [ -n "$REG_RESULT" ]; then
       REG_STATUS=$(echo "$REG_RESULT" | jq -r '.status // empty' 2>/dev/null || echo "")
       if [ "$REG_STATUS" = "pending" ] || [ "$REG_STATUS" = "registered" ]; then
-        echo "Registered (${REG_STATUS}). The vote-manager will see your request."
+        echo "Registered (${REG_STATUS}). The admin will see your request."
       else
         echo "WARNING: Registration response: ${REG_RESULT}"
       fi
