@@ -370,7 +370,7 @@ Ceremony and management messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`, 
 | Key         | Type                           | Description                                |
 | ----------- | ------------------------------ | ------------------------------------------ |
 | `0x09`      | `CeremonyState` (singleton)    | EA key ceremony lifecycle                  |
-| `0x0A`      | `VoteManagerSet` (singleton)         | Admin addresses (any-of-N)                 |
+| `0x0A`      | `VoteManagerSet` (singleton)         | Vote-manager addresses (any-of-N)          |
 | `0x01`      | `VoteRound` (per round)        | Voting session state                       |
 | `0x02-0x08` | Various                        | Nullifiers, tallies, commitment tree, etc. |
 

@@ -411,7 +411,7 @@ Example:
 }
 
 // CmdSubmitTally broadcasts MsgSubmitTally.
-// Called by an admin after off-chain tally computation.
+// Called by a vote manager after off-chain tally computation.
 func CmdSubmitTally() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "submit-tally [vote-round-id-hex] [entries-json-file]",

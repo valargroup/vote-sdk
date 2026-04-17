@@ -332,8 +332,26 @@ if [ -z "$VM_PRIVKEYS" ]; then
     exit 1
 fi
 
+# Parse VM_PRIVKEYS: split on commas, trim whitespace per entry, reject empties.
+# Matches the hardening in scripts/init.sh; mirrored here because the two
+# scripts don't share code.
+VM_PRIVKEY_LIST=()
+IFS=',' read -ra _VM_PRIVKEYS_RAW <<< "$VM_PRIVKEYS"
+for raw in "${_VM_PRIVKEYS_RAW[@]}"; do
+    key="${raw#"${raw%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+    if [ -z "$key" ]; then
+        echo "ERROR: VM_PRIVKEYS contains an empty entry (leading/trailing/double comma?)."
+        exit 1
+    fi
+    VM_PRIVKEY_LIST+=("$key")
+done
+if [ ${#VM_PRIVKEY_LIST[@]} -eq 0 ]; then
+    echo "ERROR: VM_PRIVKEYS parsed to zero keys."
+    exit 1
+fi
+
 VOTE_MANAGER_ADDRS=()
-IFS=',' read -ra VM_PRIVKEY_LIST <<< "$VM_PRIVKEYS"
 for i in "${!VM_PRIVKEY_LIST[@]}"; do
     key="${VM_PRIVKEY_LIST[$i]}"
     name="vote-manager-$((i + 1))"
