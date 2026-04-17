@@ -56,7 +56,7 @@ func DefaultAllowedMessages() []string {
 
 		// Staking — only validator creation and metadata edits are allowed.
 		// MsgDelegate/MsgUndelegate/MsgBeginRedelegate are excluded so
-		// validators cannot reorganize stake without an admin.
+		// validators cannot reorganize stake without a vote manager.
 		// Initial self-delegation is handled by MsgCreateValidatorWithPallasKey.
 		// NOTE: MsgCreateValidator post-genesis is disallowed at the DualAnteHandler.
 		"/cosmos.staking.v1beta1.MsgCreateValidator",

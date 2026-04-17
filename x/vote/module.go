@@ -717,7 +717,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	return nil
 }
 
-// DefaultVoteManagerAddresses is the default admin set used in DefaultGenesis.
+// DefaultVoteManagerAddresses is the default vote-manager set used in DefaultGenesis.
 // Init scripts overwrite it with the addresses derived from VM_PRIVKEYS.
 var DefaultVoteManagerAddresses = []string{
 	"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
@@ -726,7 +726,7 @@ var DefaultVoteManagerAddresses = []string{
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {
 	gs := &types.GenesisState{
-		VoteManagerAddresses:        append([]string(nil), DefaultVoteManagerAddresses...),
+		VoteManagerAddresses:  append([]string(nil), DefaultVoteManagerAddresses...),
 		MinCeremonyValidators: 1,
 	}
 	bz, err := json.Marshal(gs)

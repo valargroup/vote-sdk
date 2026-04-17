@@ -17,7 +17,7 @@ DENOM="usvote"
 HOME_DIR="/root/.svoted"
 MONIKER="val${VALIDATOR_INDEX}"
 SELF_DELEGATION="10000000${DENOM}"
-ADMIN_BALANCE="1000000000${DENOM}"
+VOTE_MANAGER_BALANCE="1000000000${DENOM}"
 
 # ---------------------------------------------------------------------------
 # Phase 1: Initialize node and publish address
@@ -81,7 +81,7 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
     done
 
     # Add vote-manager account.
-    svoted genesis add-genesis-account "$VM_ADDR" "$ADMIN_BALANCE" \
+    svoted genesis add-genesis-account "$VM_ADDR" "$VOTE_MANAGER_BALANCE" \
         --keyring-backend test --home "$HOME_DIR"
 
     # Genesis transaction (self-delegation for val1).

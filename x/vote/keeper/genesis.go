@@ -55,8 +55,8 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 		}
 	}
 
-	// Restore admin set (any-of-N). ValidateGenesisState has already checked
-	// that the list is non-empty, bech32, and deduped; persist as-is.
+	// Restore vote-manager set (any-of-N). ValidateGenesisState has already
+	// checked that the list is non-empty, bech32, and deduped; persist as-is.
 	if len(genesis.VoteManagerAddresses) > 0 {
 		if err := k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: genesis.VoteManagerAddresses}); err != nil {
 			return err
@@ -140,7 +140,7 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, error) {
 	gs := &types.GenesisState{}
 
-	// Admin set (singleton).
+	// Vote-manager set (singleton).
 	admins, err := k.GetVoteManagers(kvStore)
 	if err != nil {
 		return nil, err
@@ -494,4 +494,3 @@ func exportShareCounts(kvStore store.KVStore) ([]*types.GenesisShareCount, error
 	}
 	return counts, nil
 }
-

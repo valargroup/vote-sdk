@@ -219,7 +219,7 @@ holds their own funds.`,
 			}
 
 			msg := &types.MsgUpdateVoteManagers{
-				Creator:   clientCtx.GetFromAddress().String(),
+				Creator:         clientCtx.GetFromAddress().String(),
 				NewVoteManagers: newVoteManagers,
 			}
 
@@ -227,7 +227,7 @@ holds their own funds.`,
 		},
 	}
 
-	cmd.Flags().StringArray("vote-manager", nil, "Admin bech32 address (repeatable; all specified addresses form the new admin set)")
+	cmd.Flags().StringArray("vote-manager", nil, "Vote-manager bech32 address (repeatable; all specified addresses form the new set)")
 	flags.AddTxFlagsToCmd(cmd)
 	return cmd
 }

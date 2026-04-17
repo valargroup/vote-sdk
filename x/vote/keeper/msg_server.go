@@ -37,7 +37,7 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
-	// Only an admin can create voting sessions (any-of-N).
+	// Only a vote manager can create voting sessions (any-of-N).
 	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
 		return nil, err
 	}
@@ -118,8 +118,8 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		Title:           msg.Title,
 		DiscussionUrl:   msg.DiscussionUrl,
 		// Per-round ceremony fields.
-		CeremonyStatus:     types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-		CeremonyValidators: ceremonyValidators,
+		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		CeremonyValidators:   ceremonyValidators,
 		CeremonyPhaseStart:   uint64(ctx.BlockTime().Unix()),
 		CeremonyPhaseTimeout: types.DefaultContributionTimeout,
 	}

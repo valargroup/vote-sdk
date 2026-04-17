@@ -90,7 +90,7 @@ func SetupTestApp(t *testing.T) *TestApp {
 	_, pk := elgamal.KeyGen(rand.Reader)
 	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
 
-	// Seed the admin set so CreateVotingSession passes authorization.
+	// Seed the vote-manager set so CreateVotingSession passes authorization.
 	ta.SeedVoteManagers(DefaultVoteManagerAddress)
 
 	return ta
@@ -341,9 +341,9 @@ func (ta *TestApp) RegisterPallasKey(pallasPk *elgamal.PublicKey) {
 	require.Equal(ta.t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
 }
 
-// SeedVoteManagers writes the admin set directly into the module's KV store and
-// commits via an empty block. Must be called before any CreateVotingSession,
-// since that handler requires the creator to be in the vote-manager set.
+// SeedVoteManagers writes the vote-manager set directly into the module's KV
+// store and commits via an empty block. Must be called before any
+// CreateVotingSession, since the handler requires the creator to be in the set.
 func (ta *TestApp) SeedVoteManagers(addrs ...string) {
 	ta.t.Helper()
 
@@ -368,7 +368,7 @@ func (ta *TestApp) SeedConfirmedCeremony(_ []byte) {
 // MsgCreateVotingSession, bypassing the ABCI pipeline. The round is committed
 // via an empty block. Returns the derived vote_round_id.
 //
-// MsgCreateVotingSession is a standard Cosmos SDK tx (signed by an admin),
+// MsgCreateVotingSession is a standard Cosmos SDK tx (signed by a vote manager),
 // so it can't be submitted via the custom vote tx wire format. For
 // integration tests that need an active round to exercise other vote
 // messages (delegation, cast, reveal, tally), this helper seeds the round

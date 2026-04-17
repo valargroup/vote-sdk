@@ -15,7 +15,7 @@ import (
 // unrestricted transfers would allow anyone to accumulate stake and create a
 // validator, undermining the controlled validator set.
 //
-// Authorization rules (admin membership = any-of-N):
+// Authorization rules (vote-manager membership = any-of-N):
 //   - Any vote manager can send to anyone (used to distribute stake to new validators).
 //   - Bonded validators can send to any vote manager or to other bonded validators
 //     (allows operational redistribution within the trusted set).

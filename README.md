@@ -170,7 +170,7 @@ The vote-manager set is a list of on-chain account addresses that gate who can c
 **`MsgUpdateVoteManagers`** -- Atomically replaces the vote-manager set.
 - Callable by any current vote manager
 - Validation: the new set must be non-empty, each address must be valid bech32, and no duplicates
-- **Does not move balances** — each vote manager holds their own funds (the bank-module per-account balance). Removed admins keep whatever `usvote` they had, but their sends become rejected because they are no longer admins and are not bonded validators (see "Drain before removal" below)
+- **Does not move balances** — each vote manager holds their own funds (the bank-module per-account balance). Removed vote managers keep whatever `usvote` they had, but their sends become rejected because they are no longer vote managers and are not bonded validators (see "Drain before removal" below)
 - Stored as a singleton `VoteManagerSet { repeated string addresses }` in the KV store (key `0x0A`)
 
 **`QueryVoteManagers`** returns the current vote-manager set.
@@ -322,7 +322,7 @@ A positive-security allowlist: only messages whose proto type URL appears in `De
 
 #### Design assumptions
 
-1. The admin set has full control over stake distribution. Validators receive tokens via `MsgAuthorizedSend` and bond them during `MsgCreateValidatorWithPallasKey`. Each admin holds their own pre-funded balance; the genesis stake pool is split evenly across admins to preserve total supply.
+1. The vote-manager set has full control over stake distribution. Validators receive tokens via `MsgAuthorizedSend` and bond them during `MsgCreateValidatorWithPallasKey`. Each vote manager holds their own pre-funded balance; the genesis stake pool is split evenly across the set to preserve total supply.
 2. The whitelist is a compile-time constant. Adding a new message type requires a code change, rebuild, and coordinated chain upgrade.
 3. Custom wire format messages (`VoteTxWrapper`) are never subject to the whitelist — they are routed to the ZKP/RedPallas validation pipeline before the standard ante chain runs.
 4. If a custom wire format message is somehow removed from `isVoteModuleMsg` (Layer 1), the whitelist (Layer 2) still blocks it since it is not in `DefaultAllowedMessages()`.

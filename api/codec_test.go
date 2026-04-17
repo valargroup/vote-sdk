@@ -190,7 +190,7 @@ func TestEncodeDecodeContributeDKG(t *testing.T) {
 
 func TestEncodeCeremonyTx_RejectsNonCustomTags(t *testing.T) {
 	msg := &types.MsgUpdateVoteManagers{
-		Creator:   "sv1admin",
+		Creator:         "sv1admin",
 		NewVoteManagers: []string{"sv1manager"},
 	}
 

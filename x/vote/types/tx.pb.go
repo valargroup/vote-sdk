@@ -1446,7 +1446,7 @@ func (*MsgSubmitPartialDecryptionResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{23}
 }
 
-// MsgUpdateVoteManagers atomically replaces the admin set with new_vote_managers.
+// MsgUpdateVoteManagers atomically replaces the vote-manager set with new_vote_managers.
 // Callable by any current vote manager. Does NOT move balances — each vote manager holds
 // their own funds (the bank-module per-account balance). Validation:
 // new_vote_managers must be non-empty, each entry a valid bech32 address, and no

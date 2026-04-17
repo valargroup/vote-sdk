@@ -69,7 +69,7 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
-	// Admin set is required in genesis — there is no bootstrap path.
+	// Vote-manager set is required in genesis — there is no bootstrap path.
 	if _, err := ValidateAndNormalizeVoteManagerSet(gs.VoteManagerAddresses); err != nil {
 		return fmt.Errorf("vote_manager_addresses: %w", err)
 	}

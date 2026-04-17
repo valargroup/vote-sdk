@@ -35,7 +35,7 @@ type BankKeeper interface {
 // Each active round gets its own proxy (with a round-scoped Prefix) and a
 // lazily-initialized tree handle.
 type roundTree struct {
-	handle *votetree.TreeHandle    // lazy-initialized; nil until first EndBlock for this round
+	handle *votetree.TreeHandle   // lazy-initialized; nil until first EndBlock for this round
 	proxy  *votetree.KvStoreProxy // Prefix = RoundTreeKey(roundID)
 }
 

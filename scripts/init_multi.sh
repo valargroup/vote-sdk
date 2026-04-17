@@ -78,7 +78,7 @@ SELF_DELEGATION="10000000${DENOM}"
 # Validator genesis balance (covers the 10M self-delegation).
 GENESIS_BALANCE="10000000${DENOM}"
 # Bootstrap vote-manager pool (enough to fund up to 100 validators at 10M each).
-ADMIN_BALANCE="1000000000${DENOM}"
+VOTE_MANAGER_BALANCE="1000000000${DENOM}"
 
 # ---------------------------------------------------------------------------
 # Cleanup
@@ -368,12 +368,12 @@ done
 echo "$VAL1_ADDR" > "$HOME_VAL1/validator_address.txt"
 
 # Add genesis accounts for all 3 validators and every admin. The admin stake
-# pool (ADMIN_BALANCE) is split evenly across admins to preserve total supply
+# pool (VOTE_MANAGER_BALANCE) is split evenly across vote managers to preserve total supply
 # regardless of N.
 $BINARY genesis add-genesis-account "$VAL1_ADDR" "$VAL1_SELF_DELEGATION" \
     --keyring-backend test --home "$HOME_VAL1"
 
-VOTE_MANAGER_POOL_INT=${ADMIN_BALANCE%${DENOM}}
+VOTE_MANAGER_POOL_INT=${VOTE_MANAGER_BALANCE%${DENOM}}
 NUM_VOTE_MANAGERS=${#VOTE_MANAGER_ADDRS[@]}
 PER_VOTE_MANAGER_STAKE=$((VOTE_MANAGER_POOL_INT / NUM_VOTE_MANAGERS))
 REMAINDER=$((VOTE_MANAGER_POOL_INT - PER_VOTE_MANAGER_STAKE * NUM_VOTE_MANAGERS))

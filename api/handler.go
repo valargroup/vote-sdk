@@ -68,7 +68,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 // has no REST endpoint.
 //
 // MsgCreateVotingSession is a standard Cosmos SDK transaction (signed by
-// any admin) and should be submitted via svoted tx sign/broadcast
+// any vote manager) and should be submitted via svoted tx sign/broadcast
 // or /cosmos/tx/v1beta1/txs.
 //
 // Ceremony messages (MsgRegisterPallasKey, MsgCreateValidatorWithPallasKey,

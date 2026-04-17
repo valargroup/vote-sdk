@@ -1519,7 +1519,7 @@ function PublishModal({
       <div className="bg-surface-1 border border-border rounded-xl shadow-xl max-w-md w-full mx-4">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
           <h3 className="text-sm font-semibold text-text-primary">
-            {walletConnected ? "Publish to chain" : "Connect admin wallet"}
+            {walletConnected ? "Publish to chain" : "Connect wallet"}
           </h3>
           <button
             onClick={onClose}
@@ -2500,7 +2500,7 @@ function FundValidatorModal({
       <div className="bg-surface-1 border border-border rounded-xl shadow-xl max-w-md w-full mx-4">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
           <h3 className="text-sm font-semibold text-text-primary">
-            {walletConnected ? "Fund validator" : "Connect admin wallet"}
+            {walletConnected ? "Fund validator" : "Connect wallet"}
           </h3>
           <button
             onClick={onClose}

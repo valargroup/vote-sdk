@@ -37,7 +37,7 @@ func TestAccAddr(seed byte) string {
 	return sdk.AccAddress(addr).String()
 }
 
-// DefaultVoteManagerAddress is the canonical test admin address (valid bech32, seed 99).
+// DefaultVoteManagerAddress is the canonical test vote-manager address (valid bech32, seed 99).
 var DefaultVoteManagerAddress = TestAccAddr(99)
 
 // FpLE returns a 32-byte little-endian encoding of v as a Pallas Fp element.

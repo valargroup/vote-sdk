@@ -37,15 +37,15 @@ func TestExportImportGenesis(t *testing.T) {
 
 	// Vote rounds.
 	round := &types.VoteRound{
-		VoteRoundId:      roundID,
-		SnapshotHeight:   100,
+		VoteRoundId:       roundID,
+		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x11}, 32),
-		ProposalsHash:    bytes.Repeat([]byte{0x22}, 32),
-		VoteEndTime:      2_000_000,
-		NullifierImtRoot: bytes.Repeat([]byte{0x33}, 32),
-		NcRoot:           bytes.Repeat([]byte{0x44}, 32),
-		Creator:          "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
-		Status:           types.SessionStatus_SESSION_STATUS_ACTIVE,
+		ProposalsHash:     bytes.Repeat([]byte{0x22}, 32),
+		VoteEndTime:       2_000_000,
+		NullifierImtRoot:  bytes.Repeat([]byte{0x33}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x44}, 32),
+		Creator:           "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
+		Status:            types.SessionStatus_SESSION_STATUS_ACTIVE,
 		Proposals: []*types.Proposal{
 			{Id: 1, Title: "Prop 1", Options: []*types.VoteOption{
 				{Index: 0, Label: "Yes"},

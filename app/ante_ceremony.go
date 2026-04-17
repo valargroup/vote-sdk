@@ -16,7 +16,7 @@ import (
 // that requires validator authorization, the first signer must be a bonded
 // validator. MsgCreateValidatorWithPallasKey is exempt because the sender
 // is becoming a validator. MsgUpdateVoteManagers is also exempt because its
-// handler already implements its own authorization check (any-of-N admin).
+// handler already implements its own authorization check (any-of-N vote manager).
 type CeremonyValidatorDecorator struct {
 	voteKeeper *votekeeper.Keeper
 }
