@@ -69,8 +69,8 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
     echo "[$MONIKER] All $NUM_VALIDATORS addresses collected."
 
     # Generate a throwaway vote-manager key for this ephemeral testnet.
-    VM_PRIVKEY=$(cat /dev/urandom | head -c 32 | od -An -tx1 | tr -d ' \n')
-    svoted keys import-hex vote-manager-1 "$VM_PRIVKEY" --keyring-backend test --home "$HOME_DIR" 2>/dev/null
+    RANDOM_KEY=$(cat /dev/urandom | head -c 32 | od -An -tx1 | tr -d ' \n')
+    svoted keys import-hex vote-manager-1 "$RANDOM_KEY" --keyring-backend test --home "$HOME_DIR" 2>/dev/null
     VM_ADDR=$(svoted keys show vote-manager-1 -a --keyring-backend test --home "$HOME_DIR")
 
     # Add genesis accounts for all validators.

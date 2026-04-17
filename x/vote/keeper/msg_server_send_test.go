@@ -24,12 +24,12 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToAnyone() {
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	admin := testAccAddr(1)
+	vm := testAccAddr(1)
 	recipient := testAccAddr(2)
-	s.seedVoteManagers(admin)
+	s.seedVoteManagers(vm)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: admin,
+		FromAddress: vm,
 		ToAddress:   recipient,
 		Amount:      "1000000",
 		Denom:       "usvote",
@@ -37,7 +37,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToAnyone() {
 	s.Require().NoError(err)
 	s.Require().Len(bk.sendCalls, 1)
 
-	from, _ := sdk.AccAddressFromBech32(admin)
+	from, _ := sdk.AccAddressFromBech32(vm)
 	to, _ := sdk.AccAddressFromBech32(recipient)
 	s.Require().Equal(from, bk.sendCalls[0].From)
 	s.Require().Equal(to, bk.sendCalls[0].To)
@@ -52,13 +52,13 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToValidator() 
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	admin := testAccAddr(1)
+	vm := testAccAddr(1)
 	valAcc := testAccAddr(10)
-	s.seedVoteManagers(admin)
+	s.seedVoteManagers(vm)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: admin,
+		FromAddress: vm,
 		ToAddress:   valAcc,
 		Amount:      "500",
 		Denom:       "usvote",
@@ -72,13 +72,13 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToOtherVoteMan
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	adminA := testAccAddr(1)
-	adminB := testAccAddr(2)
-	s.seedVoteManagers(adminA, adminB)
+	vmA := testAccAddr(1)
+	vmB := testAccAddr(2)
+	s.seedVoteManagers(vmA, vmB)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: adminA,
-		ToAddress:   adminB,
+		FromAddress: vmA,
+		ToAddress:   vmB,
 		Amount:      "100",
 		Denom:       "usvote",
 	})
@@ -91,19 +91,19 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToOtherVoteMan
 // ---------------------------------------------------------------------------
 
 func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToVoteManager() {
-	// Parametrize over every admin in a multi-admin set — proves the recipient
+	// Parametrize over every vm in a multi-vm set — proves the recipient
 	// check iterates the full set (not e.g. only admins[0]).
-	adminA := testAccAddr(1)
-	adminB := testAccAddr(2)
-	adminC := testAccAddr(3)
+	vmA := testAccAddr(1)
+	vmB := testAccAddr(2)
+	vmC := testAccAddr(3)
 	valAcc := testAccAddr(10)
 
-	for _, recipient := range []string{adminA, adminB, adminC} {
+	for _, recipient := range []string{vmA, vmB, vmC} {
 		s.Run("recipient="+recipient, func() {
 			s.SetupTest()
 			bk := newMockBankKeeper()
 			s.setupWithMockBankKeeper(bk)
-			s.seedVoteManagers(adminA, adminB, adminC)
+			s.seedVoteManagers(vmA, vmB, vmC)
 			s.setupWithMockStaking(accToValoper(valAcc))
 
 			_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -123,10 +123,10 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToOtherValidator
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	admin := testAccAddr(1)
+	vm := testAccAddr(1)
 	val1Acc := testAccAddr(10)
 	val2Acc := testAccAddr(11)
-	s.seedVoteManagers(admin)
+	s.seedVoteManagers(vm)
 	s.setupWithMockStaking(accToValoper(val1Acc), accToValoper(val2Acc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -144,10 +144,10 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToNonValidato
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	admin := testAccAddr(1)
+	vm := testAccAddr(1)
 	valAcc := testAccAddr(10)
 	random := testAccAddr(99)
-	s.seedVoteManagers(admin)
+	s.seedVoteManagers(vm)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -170,14 +170,14 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonPrivilegedSenderRejected() {
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	admin := testAccAddr(1)
+	vm := testAccAddr(1)
 	random := testAccAddr(50)
-	s.seedVoteManagers(admin)
+	s.seedVoteManagers(vm)
 	s.setupWithMockStaking() // no validators
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: random,
-		ToAddress:   admin,
+		ToAddress:   vm,
 		Amount:      "100",
 		Denom:       "usvote",
 	})
@@ -315,12 +315,12 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	admin := testAccAddr(1)
+	vm := testAccAddr(1)
 	recipient := testAccAddr(2)
-	s.seedVoteManagers(admin)
+	s.seedVoteManagers(vm)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: admin,
+		FromAddress: vm,
 		ToAddress:   recipient,
 		Amount:      "42",
 		Denom:       "usvote",
@@ -334,7 +334,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 			for _, attr := range e.Attributes {
 				switch attr.Key {
 				case types.AttributeKeySender:
-					s.Require().Equal(admin, attr.Value)
+					s.Require().Equal(vm, attr.Value)
 				case types.AttributeKeyRecipient:
 					s.Require().Equal(recipient, attr.Value)
 				}
@@ -345,11 +345,11 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 }
 
 // ---------------------------------------------------------------------------
-// AuthorizedSend — revoked-admin balance freeze
+// AuthorizedSend — revoked-vm balance freeze
 // ---------------------------------------------------------------------------
 //
-// After MsgUpdateVoteManagers removes an admin, the ex-admin's remaining balance
-// is one-way frozen: they can't send to anyone (not an admin, not a
+// After MsgUpdateVoteManagers removes an vm, the ex-vm's remaining balance
+// is one-way frozen: they can't send to anyone (not an vm, not a
 // validator), and bonded validators can't send to them either. Active
 // admins can still send to them. These three tests pin that behavior.
 
@@ -359,13 +359,13 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_RevokedVoteManagerCannotSend() {
 	s.setupWithMockBankKeeper(bk)
 	s.setupWithMockStaking() // no validators bonded
 
-	adminA := testAccAddr(1)
+	vmA := testAccAddr(1)
 	revoked := testAccAddr(2)
-	s.seedVoteManagers(adminA) // revoked was previously an admin but isn't now
+	s.seedVoteManagers(vmA) // revoked was previously an vm but isn't now
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: revoked,
-		ToAddress:   adminA,
+		ToAddress:   vmA,
 		Amount:      "1",
 		Denom:       "usvote",
 	})
@@ -378,13 +378,13 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToRevokedVoteM
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	adminA := testAccAddr(1)
+	vmA := testAccAddr(1)
 	revoked := testAccAddr(2)
-	s.seedVoteManagers(adminA)
+	s.seedVoteManagers(vmA)
 
 	// Admins-send-to-anyone takes the early-return path; no validator check.
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: adminA,
+		FromAddress: vmA,
 		ToAddress:   revoked,
 		Amount:      "1",
 		Denom:       "usvote",
@@ -398,10 +398,10 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToRevokedVote
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
-	adminA := testAccAddr(1)
+	vmA := testAccAddr(1)
 	valAcc := testAccAddr(10)
 	revoked := testAccAddr(2)
-	s.seedVoteManagers(adminA)
+	s.seedVoteManagers(vmA)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
