@@ -395,11 +395,6 @@ func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					Short:     "Query the current admin set (any-of-N — any member may act)",
 				},
 				{
-					RpcMethod: "VoteManager",
-					Use:       "vote-manager",
-					Short:     "Deprecated — returns the first admin address. Use `admins` instead.",
-				},
-				{
 					RpcMethod: "ListRounds",
 					Use:       "list-rounds",
 					Short:     "List all stored vote rounds",

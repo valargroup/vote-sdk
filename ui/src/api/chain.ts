@@ -200,14 +200,6 @@ export async function getAdmins(): Promise<{ admin_addresses: string[] }> {
   return fetchJson<{ admin_addresses: string[] }>("/shielded-vote/v1/admins");
 }
 
-/**
- * @deprecated Use getAdmins(). Returns the first admin address for clients
- * that predate the multi-admin change. Will be removed in a future release.
- */
-export async function getVoteManager(): Promise<{ address: string }> {
-  return fetchJson<{ address: string }>("/shielded-vote/v1/vote-manager");
-}
-
 export async function getHelperStatus(): Promise<HelperStatus> {
   return fetchJson<HelperStatus>("/shielded-vote/v1/status");
 }
@@ -226,9 +218,6 @@ export async function getNullifierStatus(): Promise<NullifierStatus> {
     nullifier_count: pir.num_ranges,
   };
 }
-
-// setVoteManager was removed: MsgSetVoteManager is now a standard Cosmos SDK
-// transaction signed client-side. See cosmosTx.ts.
 
 export async function listRounds(): Promise<{ rounds: ChainRound[] | null }> {
   return fetchJson<{ rounds: ChainRound[] | null }>("/shielded-vote/v1/rounds");
@@ -370,7 +359,7 @@ export interface UpdateVotingConfigParams {
 
 /**
  * Update the voting-config in Edge Config via the authenticated Vercel API route.
- * Requires a wallet signature for vote-manager authorization.
+ * Requires a wallet signature for admin authorization.
  */
 export async function updateVotingConfig(params: UpdateVotingConfigParams): Promise<{ status: string }> {
   return fetchJson<{ status: string }>("/api/update-voting-config", {
@@ -401,7 +390,7 @@ export interface ApproveRegistrationParams {
 }
 
 /**
- * Approve a pending validator registration (vote-manager only).
+ * Approve a pending validator registration (admin only).
  * Moves the entry from pending-registrations to vote_servers in voting-config.
  */
 export async function approveRegistration(params: ApproveRegistrationParams): Promise<{ status: string }> {
@@ -413,7 +402,7 @@ export async function approveRegistration(params: ApproveRegistrationParams): Pr
 }
 
 /**
- * Reject a pending validator registration (vote-manager only).
+ * Reject a pending validator registration (admin only).
  * Removes the entry from pending-registrations without adding to vote_servers.
  */
 export async function rejectRegistration(params: ApproveRegistrationParams): Promise<{ status: string }> {
@@ -444,7 +433,7 @@ export interface RemoveApprovedServerParams {
 
 /**
  * Remove a server from approved-servers (and vote_servers + server-pulses).
- * Requires a wallet signature for vote-manager authorization.
+ * Requires a wallet signature for admin authorization.
  */
 export async function removeApprovedServer(params: RemoveApprovedServerParams): Promise<{ status: string }> {
   return fetchJson<{ status: string }>("/api/remove-approved-server", {

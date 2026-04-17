@@ -173,7 +173,7 @@ The admin set is a list of on-chain account addresses that gate who can create v
 - **Does not move balances** — each admin holds their own funds (the bank-module per-account balance). Removed admins keep whatever `usvote` they had, but their sends become rejected because they are no longer admins and are not bonded validators (see "Drain before removal" below)
 - Stored as a singleton `AdminSet { repeated string addresses }` in the KV store (key `0x0A`)
 
-**`QueryAdmins`** returns the current admin set. A deprecated `QueryVoteManager` RPC returns `admins[0]` as `{address: ...}` for clients that predate the multi-admin change — it will be removed after one release.
+**`QueryAdmins`** returns the current admin set.
 
 **Drain before removal.** When an admin is removed via `MsgUpdateAdmins`, their remaining `usvote` balance stays in their account but becomes one-way frozen: they cannot `MsgAuthorizedSend` (no longer an admin, not a validator), but can still receive from active admins. To avoid stranded balance, an active admin should `MsgAuthorizedSend` to drain a departing admin's balance *before* calling `MsgUpdateAdmins` to remove them.
 
@@ -361,7 +361,6 @@ Ceremony and management messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`, 
 | GET    | `/shielded-vote/v1/commitment-tree/{round_id}/leaves`   | Tree leaves (`?from_height=X&to_height=Y`) |
 | GET    | `/shielded-vote/v1/pallas-keys`                    | All registered Pallas keys                 |
 | GET    | `/shielded-vote/v1/admins`                         | Current admin set (any-of-N)               |
-| GET    | `/shielded-vote/v1/vote-manager`                   | Deprecated — first admin as `{address}`    |
 | GET    | `/shielded-vote/v1/genesis`                        | Chain genesis JSON                         |
 | GET    | `/shielded-vote/v1/snapshot-data/{height}`         | Nullifier snapshot data at block height    |
 | GET    | `/shielded-vote/v1/tx/{hash}`                      | Transaction status by hash                 |

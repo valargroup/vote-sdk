@@ -12,7 +12,7 @@ import * as chainApi from "../api/chain";
 type WalletSource = "keplr" | "privkey";
 
 const SOURCE_KEY = "sv-wallet-source";
-export const DEFAULT_DEV_KEY = import.meta.env.VITE_VM_PRIVKEY ?? "";
+export const DEFAULT_DEV_KEY = import.meta.env.VITE_ADMIN_PRIVKEY ?? "";
 
 // Tendermint RPC — defaults to same host as REST but on the standard RPC port.
 const DEFAULT_RPC_URL = "http://localhost:26657";

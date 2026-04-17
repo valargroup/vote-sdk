@@ -198,10 +198,7 @@ jobs:
       - name: Initialize 3-validator chain
         run: mise run chain:init-multi
         env:
-          # VM_PRIVKEYS (comma-separated) is the new multi-admin secret; falls
-          # back to the legacy single-admin VM_PRIVKEY for continuity.
           VM_PRIVKEYS: ${{ secrets.VM_PRIVKEYS }}
-          VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
       - name: Start 3 validators in background
         run: |
           home="$HOME/.svoted-val1"
@@ -268,10 +265,7 @@ jobs:
         env:
           SVOTE_API_URL: http://localhost:1418
           SVOTE_NODE_URL: tcp://localhost:26157
-          # VM_PRIVKEYS (comma-separated) is the new multi-admin secret; falls
-          # back to the legacy single-admin VM_PRIVKEY for continuity.
           VM_PRIVKEYS: ${{ secrets.VM_PRIVKEYS }}
-          VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
       - name: Run E2E test (voting_flow_zcash_voting)
         run: |
           export SVOTE_HOME="$HOME/.svoted-val1"
@@ -282,10 +276,7 @@ jobs:
           SVOTE_NODE_URL: tcp://localhost:26157
           HELPER_SERVER_URL: http://localhost:1418
           SVOTE_E2E_VOTE_WINDOW_SECS: "420"
-          # VM_PRIVKEYS (comma-separated) is the new multi-admin secret; falls
-          # back to the legacy single-admin VM_PRIVKEY for continuity.
           VM_PRIVKEYS: ${{ secrets.VM_PRIVKEYS }}
-          VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
       - name: Upload chain logs on failure
         if: failure()
         uses: actions/upload-artifact@v4

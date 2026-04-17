@@ -158,9 +158,6 @@ func (s *MsgServerTestSuite) seedAdmins(addrs ...string) {
 	s.Require().NoError(s.keeper.SetAdmins(kv, &types.AdminSet{Addresses: addrs}))
 }
 
-// seedVoteManager is a single-admin convenience alias for seedAdmins.
-func (s *MsgServerTestSuite) seedVoteManager(addr string) { s.seedAdmins(addr) }
-
 // setBlockProposer configures the mock staking keeper so that
 // ValidateProposerIsCreator sees creator as the block proposer.
 func (s *MsgServerTestSuite) setBlockProposer(creator string) {
@@ -233,7 +230,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: round created with PENDING status and validator snapshot",
 			setup: func() {
 				s.seedEligibleValidators(3)
-				s.seedVoteManager(svtest.DefaultAdminAddress)
+				s.seedAdmins(svtest.DefaultAdminAddress)
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -267,7 +264,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "duplicate round rejected",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedVoteManager(svtest.DefaultAdminAddress)
+				s.seedAdmins(svtest.DefaultAdminAddress)
 				_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 				s.Require().NoError(err)
 			},
@@ -279,7 +276,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "different fields produce different round ID",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedVoteManager(svtest.DefaultAdminAddress)
+				s.seedAdmins(svtest.DefaultAdminAddress)
 			},
 			msg: &types.MsgCreateVotingSession{
 				Creator:           svtest.DefaultAdminAddress,
@@ -302,7 +299,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 		{
 			name: "rejected: no validators have registered Pallas keys",
 			setup: func() {
-				s.seedVoteManager(svtest.DefaultAdminAddress)
+				s.seedAdmins(svtest.DefaultAdminAddress)
 				s.setupWithMockStaking()
 			},
 			msg:         msg,
@@ -313,7 +310,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "rejected: 1 validator below min_ceremony_validators=2",
 			setup: func() {
 				s.seedEligibleValidators(1)
-				s.seedVoteManager(svtest.DefaultAdminAddress)
+				s.seedAdmins(svtest.DefaultAdminAddress)
 				kv := s.keeper.OpenKVStore(s.ctx)
 				s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 2))
 			},
@@ -325,7 +322,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: 1 validator with default min_ceremony_validators=1",
 			setup: func() {
 				s.seedEligibleValidators(1)
-				s.seedVoteManager(svtest.DefaultAdminAddress)
+				s.seedAdmins(svtest.DefaultAdminAddress)
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -341,7 +338,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "happy path: exactly 2 validators",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedVoteManager(svtest.DefaultAdminAddress)
+				s.seedAdmins(svtest.DefaultAdminAddress)
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
@@ -357,7 +354,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			name: "rejected: another PENDING round already exists",
 			setup: func() {
 				s.seedEligibleValidators(2)
-				s.seedVoteManager(svtest.DefaultAdminAddress)
+				s.seedAdmins(svtest.DefaultAdminAddress)
 				// Create a different round first to put it in PENDING.
 				_, err := s.msgServer.CreateVotingSession(s.ctx, &types.MsgCreateVotingSession{
 					Creator:           svtest.DefaultAdminAddress,
@@ -401,7 +398,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 	s.SetupTest()
 	s.seedEligibleValidators(2)
-	s.seedVoteManager(svtest.DefaultAdminAddress)
+	s.seedAdmins(svtest.DefaultAdminAddress)
 	msg := validSetupMsg()
 
 	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
@@ -416,7 +413,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
 	s.SetupTest()
 	s.seedEligibleValidators(2)
-	s.seedVoteManager(svtest.DefaultAdminAddress)
+	s.seedAdmins(svtest.DefaultAdminAddress)
 	msg := validSetupMsg()
 
 	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)

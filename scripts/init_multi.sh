@@ -322,13 +322,9 @@ $BINARY keys add validator --keyring-backend test --home "$HOME_VAL1"
 VAL1_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_VAL1")
 echo "Val1 address: $VAL1_ADDR"
 
-# Import the bootstrap admin key(s). VM_PRIVKEYS is a comma-separated list of
-# 64-char hex secp256k1 private keys; every address derived from the list
-# becomes an admin at genesis (any-of-N). Back-compat: if only VM_PRIVKEY is
-# set, treat it as a single-admin set.
-if [ -z "$VM_PRIVKEYS" ] && [ -n "$VM_PRIVKEY" ]; then
-    VM_PRIVKEYS="$VM_PRIVKEY"
-fi
+# Import the bootstrap admin keys. VM_PRIVKEYS is a comma-separated list of
+# 64-char hex secp256k1 private keys; every derived address becomes an admin
+# at genesis (any-of-N). The stake pool is split evenly across the set.
 if [ -z "$VM_PRIVKEYS" ]; then
     echo "ERROR: VM_PRIVKEYS is not set."
     echo "  Local dev:  add VM_PRIVKEYS=<hex>[,<hex>...] to .env (see .env.example)"
@@ -341,15 +337,11 @@ IFS=',' read -ra VM_PRIVKEY_LIST <<< "$VM_PRIVKEYS"
 for i in "${!VM_PRIVKEY_LIST[@]}"; do
     key="${VM_PRIVKEY_LIST[$i]}"
     name="admin-$((i + 1))"
-    if [ "$i" -eq 0 ]; then
-        name="manager"
-    fi
     $BINARY keys import-hex "$name" "$key" --keyring-backend test --home "$HOME_VAL1"
     addr=$($BINARY keys show "$name" -a --keyring-backend test --home "$HOME_VAL1")
     ADMIN_ADDRS+=("$addr")
     echo "Admin ${name}:     $addr"
 done
-MANAGER_ADDR="${ADMIN_ADDRS[0]}"
 
 # Initialize keys for validators 2 and 3 (separate home dirs, but we need
 # their addresses now to add as genesis accounts).

@@ -24,7 +24,6 @@ In the repo: **Settings → Secrets and variables → Actions**, add:
 | `DEPLOY_USER`      | Repository  | SSH user on that host (e.g. `deploy` or `root`).                     |
 | `SSH_PASSWORD`     | Repository  | SSH password for that user.                                          |
 | `VM_PRIVKEYS`      | Repository  | Comma-separated 64-char hex secp256k1 private keys for the bootstrap admin set (any-of-N). Each derived address becomes an admin; the ~1B usvote stake pool is split evenly across the set. |
-| `VM_PRIVKEY`       | Repository  | Deprecated — recognized as a single-admin fallback when `VM_PRIVKEYS` is unset. Will be removed after one release. |
 | `CEREMONY_SSH_KEY` | Environment (`production`) | Ed25519 private key for ceremony bootstrap SSH.       |
 
 Generate each admin key with `openssl rand -hex 32` and join them with commas: `VM_PRIVKEYS=<hex1>,<hex2>,<hex3>`. Each derived address is imported as an admin account during chain initialization; any one of them can authorize admin-gated operations (any-of-N). The stake pool is split evenly across admins to preserve total chain supply regardless of `N`. **Never commit these keys to the repository** — locally they are loaded from `.env` (see `.env.example`).

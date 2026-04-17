@@ -34,13 +34,9 @@ VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend 
 echo "Validator address: $VALIDATOR_ADDR"
 echo "Validator valoper: $VALIDATOR_VALOPER"
 
-# Import the bootstrap admin key(s). VM_PRIVKEYS is a comma-separated list of
-# 64-char hex secp256k1 private keys; every address derived from the list
-# becomes an admin at genesis (any-of-N). Back-compat: if only VM_PRIVKEY is
-# set, treat it as a single-admin set.
-if [ -z "$VM_PRIVKEYS" ] && [ -n "$VM_PRIVKEY" ]; then
-    VM_PRIVKEYS="$VM_PRIVKEY"
-fi
+# Import the bootstrap admin keys. VM_PRIVKEYS is a comma-separated list of
+# 64-char hex secp256k1 private keys; every derived address becomes an admin
+# at genesis (any-of-N). The stake pool is split evenly across the set.
 if [ -z "$VM_PRIVKEYS" ]; then
     echo "ERROR: VM_PRIVKEYS is not set."
     echo "  Local dev:  add VM_PRIVKEYS=<hex>[,<hex>...] to .env (see .env.example)"
@@ -59,12 +55,6 @@ REMAINDER=$((TOTAL_ADMIN_POOL - PER_ADMIN_STAKE * NUM_ADMINS))
 for i in "${!VM_PRIVKEY_LIST[@]}"; do
     key="${VM_PRIVKEY_LIST[$i]}"
     name="admin-$((i + 1))"
-    # Keep "manager" as the keyring alias for admin-1 so existing scripts that
-    # reference `--from manager` continue to work during the deprecation
-    # window.
-    if [ "$i" -eq 0 ]; then
-        name="manager"
-    fi
     $BINARY keys import-hex "$name" "$key" --keyring-backend test --home "$HOME_DIR"
     addr=$($BINARY keys show "$name" -a --keyring-backend test --home "$HOME_DIR")
     ADMIN_ADDRS+=("$addr")
@@ -78,7 +68,6 @@ for i in "${!VM_PRIVKEY_LIST[@]}"; do
     $BINARY genesis add-genesis-account "$addr" "${stake}${DENOM}" \
         --keyring-backend test --home "$HOME_DIR"
 done
-MANAGER_ADDR="${ADMIN_ADDRS[0]}"
 
 # Add validator's genesis account (needed for self-delegation).
 $BINARY genesis add-genesis-account "$VALIDATOR_ADDR" "10000000${DENOM}" \
@@ -196,7 +185,7 @@ sentry_dsn = "$HELPER_SENTRY_DSN"
 HELPERCFG
 
 # Append [admin] section.
-ADMIN_ADDRESS="${SVOTE_ADMIN_ADDRESS:-$MANAGER_ADDR}"
+ADMIN_ADDRESS="${SVOTE_ADMIN_ADDRESS:-${ADMIN_ADDRS[0]}}"
 cat >> "$APP_TOML" <<ADMINCFG
 
 ###############################################################################

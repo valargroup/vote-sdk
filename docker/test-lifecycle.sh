@@ -33,7 +33,7 @@ val1_exec() {
 wait_for_api() {
     log "Waiting for REST API at $API..."
     for i in $(seq 1 60); do
-        if curl -sf "$API/shielded-vote/v1/vote-manager" > /dev/null 2>&1; then
+        if curl -sf "$API/shielded-vote/v1/admins" > /dev/null 2>&1; then
             log "API is ready."
             return 0
         fi
@@ -69,8 +69,8 @@ log "Bonded validators: $BONDED"
 log ""
 log "=== Phase 1: Create voting session ==="
 
-MANAGER_ADDR=$(api_get "/shielded-vote/v1/vote-manager" | python3 -c "import sys,json; print(json.load(sys.stdin)['address'])")
-log "Vote manager: $MANAGER_ADDR"
+ADMIN_ADDR=$(api_get "/shielded-vote/v1/admins" | python3 -c "import sys,json; print(json.load(sys.stdin)['admin_addresses'][0])")
+log "Admin: $ADMIN_ADDR"
 
 VOTE_END_TIME=$(python3 -c "import time; print(int(time.time()) + $VOTE_DURATION)")
 log "Vote end time: $VOTE_END_TIME ($(python3 -c "import datetime; print(datetime.datetime.fromtimestamp($VOTE_END_TIME).strftime('%H:%M:%S'))"))"
@@ -113,7 +113,7 @@ log "Submitting MsgCreateVotingSession..."
 CREATE_START=$(date +%s)
 
 val1_exec svoted tx vote create-voting-session /tmp/session.json \
-    --from manager \
+    --from admin-1 \
     --keyring-backend test \
     --home /root/.svoted \
     --chain-id "$CHAIN_ID" \

@@ -90,8 +90,8 @@ func SetupTestApp(t *testing.T) *TestApp {
 	_, pk := elgamal.KeyGen(rand.Reader)
 	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
 
-	// Seed the vote manager so CreateVotingSession passes authorization.
-	ta.SeedVoteManager(DefaultAdminAddress)
+	// Seed the admin set so CreateVotingSession passes authorization.
+	ta.SeedAdmins(DefaultAdminAddress)
 
 	return ta
 }
@@ -119,7 +119,7 @@ func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey, []byte) 
 	ta := setupTestApp(t, appOpts)
 	ta.EaSkDir = tmpDir
 	ta.EaPk = pk.Point.ToAffineCompressed()
-	ta.SeedVoteManager(DefaultAdminAddress)
+	ta.SeedAdmins(DefaultAdminAddress)
 
 	return ta, pk, skBytes
 }
@@ -354,12 +354,6 @@ func (ta *TestApp) SeedAdmins(addrs ...string) {
 	require.NoError(ta.t, err)
 
 	ta.NextBlock()
-}
-
-// SeedVoteManager is a backwards-compatible alias that seeds a single-admin
-// set. Prefer SeedAdmins for new tests.
-func (ta *TestApp) SeedVoteManager(addr string) {
-	ta.SeedAdmins(addr)
 }
 
 // SeedConfirmedCeremony is a no-op retained for test compatibility.

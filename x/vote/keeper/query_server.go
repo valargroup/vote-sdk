@@ -238,29 +238,6 @@ func (qs queryServer) Admins(goCtx context.Context, req *types.QueryAdminsReques
 	return resp, nil
 }
 
-// VoteManager returns the first admin address in the set. Deprecated compat
-// shim for pre-multi-admin clients; prefer Admins.
-func (qs queryServer) VoteManager(goCtx context.Context, req *types.QueryVoteManagerRequest) (*types.QueryVoteManagerResponse, error) {
-	if req == nil {
-		return nil, status.Error(codes.InvalidArgument, "empty request")
-	}
-
-	ctx := sdk.UnwrapSDKContext(goCtx)
-	kvStore := qs.k.OpenKVStore(ctx)
-
-	set, err := qs.k.GetAdmins(kvStore)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get admin set: %v", err)
-	}
-
-	var addr string
-	if set != nil && len(set.Addresses) > 0 {
-		addr = set.Addresses[0]
-	}
-
-	return &types.QueryVoteManagerResponse{Address: addr}, nil
-}
-
 // ListRounds returns all stored vote rounds.
 func (qs queryServer) ListRounds(goCtx context.Context, req *types.QueryListRoundsRequest) (*types.QueryListRoundsResponse, error) {
 	if req == nil {

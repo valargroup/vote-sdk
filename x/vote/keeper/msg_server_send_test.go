@@ -26,7 +26,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToAnyone() {
 
 	mgr := testAccAddr(1)
 	recipient := testAccAddr(2)
-	s.seedVoteManager(mgr)
+	s.seedAdmins(mgr)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: mgr,
@@ -54,7 +54,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToValidator() 
 
 	mgr := testAccAddr(1)
 	valAcc := testAccAddr(10)
-	s.seedVoteManager(mgr)
+	s.seedAdmins(mgr)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -78,7 +78,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToVoteManager() 
 
 	mgr := testAccAddr(1)
 	valAcc := testAccAddr(10)
-	s.seedVoteManager(mgr)
+	s.seedAdmins(mgr)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -99,7 +99,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToOtherValidator
 	mgr := testAccAddr(1)
 	val1Acc := testAccAddr(10)
 	val2Acc := testAccAddr(11)
-	s.seedVoteManager(mgr)
+	s.seedAdmins(mgr)
 	s.setupWithMockStaking(accToValoper(val1Acc), accToValoper(val2Acc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -120,7 +120,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCannotSendToNonValidato
 	mgr := testAccAddr(1)
 	valAcc := testAccAddr(10)
 	random := testAccAddr(99)
-	s.seedVoteManager(mgr)
+	s.seedAdmins(mgr)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -145,7 +145,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonPrivilegedSenderRejected() {
 
 	mgr := testAccAddr(1)
 	random := testAccAddr(50)
-	s.seedVoteManager(mgr)
+	s.seedAdmins(mgr)
 	s.setupWithMockStaking() // no validators
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
@@ -203,7 +203,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidToAddress() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManager(testAccAddr(1))
+	s.seedAdmins(testAccAddr(1))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
@@ -219,7 +219,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ZeroAmount() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManager(testAccAddr(1))
+	s.seedAdmins(testAccAddr(1))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
@@ -235,7 +235,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NegativeAmount() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManager(testAccAddr(1))
+	s.seedAdmins(testAccAddr(1))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
@@ -251,7 +251,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmptyDenom() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManager(testAccAddr(1))
+	s.seedAdmins(testAccAddr(1))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
@@ -267,7 +267,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonNumericAmount() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManager(testAccAddr(1))
+	s.seedAdmins(testAccAddr(1))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
@@ -290,7 +290,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 
 	mgr := testAccAddr(1)
 	recipient := testAccAddr(2)
-	s.seedVoteManager(mgr)
+	s.seedAdmins(mgr)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: mgr,

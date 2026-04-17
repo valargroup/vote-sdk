@@ -28,7 +28,6 @@ const (
 	Query_ActiveRound_FullMethodName            = "/svote.v1.Query/ActiveRound"
 	Query_CeremonyState_FullMethodName          = "/svote.v1.Query/CeremonyState"
 	Query_Admins_FullMethodName                 = "/svote.v1.Query/Admins"
-	Query_VoteManager_FullMethodName            = "/svote.v1.Query/VoteManager"
 	Query_VoteSummary_FullMethodName            = "/svote.v1.Query/VoteSummary"
 	Query_ListRounds_FullMethodName             = "/svote.v1.Query/ListRounds"
 	Query_PallasKeys_FullMethodName             = "/svote.v1.Query/PallasKeys"
@@ -61,10 +60,6 @@ type QueryClient interface {
 	// Admins returns the current admin set (any member can authorize
 	// admin-gated operations — any-of-N semantics).
 	Admins(ctx context.Context, in *QueryAdminsRequest, opts ...grpc.CallOption) (*QueryAdminsResponse, error)
-	// VoteManager returns the first admin address in the set. Deprecated
-	// compat shim for clients expecting a single "vote manager" address —
-	// will be removed in a future release. Prefer the Admins RPC.
-	VoteManager(ctx context.Context, in *QueryVoteManagerRequest, opts ...grpc.CallOption) (*QueryVoteManagerResponse, error)
 	// VoteSummary returns a denormalized view of a vote round with proposals,
 	// ballot counts, and (if finalized) decrypted totals. Single query for frontend display.
 	VoteSummary(ctx context.Context, in *QueryVoteSummaryRequest, opts ...grpc.CallOption) (*QueryVoteSummaryResponse, error)
@@ -172,16 +167,6 @@ func (c *queryClient) Admins(ctx context.Context, in *QueryAdminsRequest, opts .
 	return out, nil
 }
 
-func (c *queryClient) VoteManager(ctx context.Context, in *QueryVoteManagerRequest, opts ...grpc.CallOption) (*QueryVoteManagerResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(QueryVoteManagerResponse)
-	err := c.cc.Invoke(ctx, Query_VoteManager_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *queryClient) VoteSummary(ctx context.Context, in *QueryVoteSummaryRequest, opts ...grpc.CallOption) (*QueryVoteSummaryResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(QueryVoteSummaryResponse)
@@ -239,10 +224,6 @@ type QueryServer interface {
 	// Admins returns the current admin set (any member can authorize
 	// admin-gated operations — any-of-N semantics).
 	Admins(context.Context, *QueryAdminsRequest) (*QueryAdminsResponse, error)
-	// VoteManager returns the first admin address in the set. Deprecated
-	// compat shim for clients expecting a single "vote manager" address —
-	// will be removed in a future release. Prefer the Admins RPC.
-	VoteManager(context.Context, *QueryVoteManagerRequest) (*QueryVoteManagerResponse, error)
 	// VoteSummary returns a denormalized view of a vote round with proposals,
 	// ballot counts, and (if finalized) decrypted totals. Single query for frontend display.
 	VoteSummary(context.Context, *QueryVoteSummaryRequest) (*QueryVoteSummaryResponse, error)
@@ -286,9 +267,6 @@ func (UnimplementedQueryServer) CeremonyState(context.Context, *QueryCeremonySta
 }
 func (UnimplementedQueryServer) Admins(context.Context, *QueryAdminsRequest) (*QueryAdminsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Admins not implemented")
-}
-func (UnimplementedQueryServer) VoteManager(context.Context, *QueryVoteManagerRequest) (*QueryVoteManagerResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method VoteManager not implemented")
 }
 func (UnimplementedQueryServer) VoteSummary(context.Context, *QueryVoteSummaryRequest) (*QueryVoteSummaryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method VoteSummary not implemented")
@@ -482,24 +460,6 @@ func _Query_Admins_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Query_VoteManager_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QueryVoteManagerRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(QueryServer).VoteManager(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Query_VoteManager_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(QueryServer).VoteManager(ctx, req.(*QueryVoteManagerRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Query_VoteSummary_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(QueryVoteSummaryRequest)
 	if err := dec(in); err != nil {
@@ -596,10 +556,6 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Admins",
 			Handler:    _Query_Admins_Handler,
-		},
-		{
-			MethodName: "VoteManager",
-			Handler:    _Query_VoteManager_Handler,
 		},
 		{
 			MethodName: "VoteSummary",
