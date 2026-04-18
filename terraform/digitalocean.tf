@@ -120,13 +120,12 @@ resource "digitalocean_firewall" "primary" {
   name        = "vote-primary-fw"
   droplet_ids = [digitalocean_droplet.primary.id]
 
-  dynamic "inbound_rule" {
-    for_each = var.admin_ips
-    content {
-      protocol         = "tcp"
-      port_range       = "22"
-      source_addresses = [inbound_rule.value]
-    }
+  # SSH - open to all (key-based auth provides security; GitHub Actions
+  # runners use unpredictable IPs so IP whitelisting is not feasible)
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "22"
+    source_addresses = ["0.0.0.0/0", "::/0"]
   }
 
   # CometBFT P2P
@@ -172,13 +171,10 @@ resource "digitalocean_firewall" "secondary" {
   name        = "vote-secondary-fw"
   droplet_ids = [digitalocean_droplet.secondary.id]
 
-  dynamic "inbound_rule" {
-    for_each = var.admin_ips
-    content {
-      protocol         = "tcp"
-      port_range       = "22"
-      source_addresses = [inbound_rule.value]
-    }
+  inbound_rule {
+    protocol         = "tcp"
+    port_range       = "22"
+    source_addresses = ["0.0.0.0/0", "::/0"]
   }
 
   inbound_rule {
