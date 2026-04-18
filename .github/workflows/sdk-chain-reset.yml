@@ -95,7 +95,7 @@ jobs:
             echo "Genesis fetched ($(wc -c < /tmp/genesis.json) bytes)."
 
             # Install s3cmd if not present
-            which s3cmd > /dev/null 2>&1 || pip3 install --quiet s3cmd
+            which s3cmd > /dev/null 2>&1 || apt-get install -y -qq s3cmd
 
             # Upload directly to DO Spaces
             cat > /tmp/do-spaces.s3cfg <<EOCFG
