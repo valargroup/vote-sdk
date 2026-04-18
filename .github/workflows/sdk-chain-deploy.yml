@@ -1,129 +1,89 @@
-# Deploy a 3-validator svoted chain to a single remote host on every push to
-# main, then restart services. Optionally reset chain state.
+# Deploy a tagged shielded-vote release to both production hosts.
+# Manual-only: triggered via workflow_dispatch with a release tag.
 
-name: Deploy SDK chain
+name: Deploy SDK
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
-      reset_chain:
-        description: "Reset chain state (wipes existing data and reinitializes all 3 validators)"
-        type: boolean
-        default: false
+      tag:
+        description: "Release tag to deploy (e.g. v1.2.3). Must already exist in DO Spaces."
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 env:
-  DEPLOY_PATH: /opt/shielded-vote
-  VOTE_NULLIFIER_PIR_REF: v0.0.7
+  TAG: ${{ inputs.tag }}
 
 jobs:
-  build:
-    name: Build
+  deploy-primary:
+    name: Deploy primary
     runs-on: ubuntu-latest
-    env:
-      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Configure private repo access
-        run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
-      - name: Install mise
-        uses: jdx/mise-action@v2
-      - name: Cache Rust build
-        uses: actions/cache@v4
-        with:
-          path: |
-            circuits/target
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-circuits-
-      - name: Checkout vote-nullifier-pir
-        uses: actions/checkout@v4
-        with:
-          repository: valargroup/vote-nullifier-pir
-          ref: ${{ env.VOTE_NULLIFIER_PIR_REF }}
-          path: vote-nullifier-pir
-      - name: Cache nf-server build
-        uses: actions/cache@v4
-        with:
-          path: vote-nullifier-pir/target
-          key: ${{ runner.os }}-nfserver-${{ env.VOTE_NULLIFIER_PIR_REF }}
-      # mise run build invokes `make pir-binary` as a transitive prereq
-      # (install-ffi / build-ffi depend on it when EMBED_PIR != 0, the default),
-      # so the nf-server build happens inline with the svoted build — no
-      # separate step needed. VOTE_NULLIFIER_PIR_DIR points the Makefile at the
-      # CI-cached checkout so cargo reuses the cached vote-nullifier-pir/target
-      # instead of cloning + rebuilding into .cache/vote-nullifier-pir.
-      - name: Build SDK binaries (Rust circuits + nf-server + Go)
-        run: mise run build && mise run build:create-val-tx
-        env:
-          BUILD_TAGS: halo2 redpallas embed_pir
-          EMBED_PIR: "1"
-          VOTE_NULLIFIER_PIR_DIR: vote-nullifier-pir
-      - name: Build admin UI
-        run: cd ui && npm install && npm run build
-      - name: Copy init script to build root
-        run: cp scripts/init_multi.sh init_multi.sh
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: sdk-chain-binaries
-          path: |
-            svoted
-            create-val-tx
-            init_multi.sh
-            ui/dist
-            docs/svoted-val1.service
-            docs/svoted-val2.service
-            docs/svoted-val3.service
-
-  deploy:
-    name: Deploy binaries
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: sdk-chain-binaries
-      - name: Make binaries executable
-        run: chmod +x svoted create-val-tx
-      - name: Create deploy directory
+      - name: Deploy to primary Droplet
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
+          host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          script: mkdir -p ${{ env.DEPLOY_PATH }}
-      - name: Deploy via SCP
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          source: "svoted,create-val-tx,init_multi.sh,ui/dist,docs/svoted-val1.service,docs/svoted-val2.service,docs/svoted-val3.service"
-          target: ${{ env.DEPLOY_PATH }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}"
 
-  restart:
-    name: Restart chain
-    needs: deploy
-    uses: ./.github/workflows/sdk-chain-reset.yml
-    with:
-      reset_chain: ${{ inputs.reset_chain == true }}
-    secrets: inherit
+      - name: Verify primary health
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRIMARY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:1317/shielded-vote/v1/rounds > /dev/null 2>&1; then
+                echo "Primary REST API healthy."
+                exit 0
+              fi
+              echo "Waiting for primary REST API... ($i/30)"
+              sleep 10
+            done
+            echo "ERROR: Primary REST API not healthy after 5 minutes."
+            exit 1
+
+  deploy-secondary:
+    name: Deploy secondary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to secondary Droplet
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SECONDARY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}"
+
+      - name: Verify secondary health
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SECONDARY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:1317/shielded-vote/v1/rounds > /dev/null 2>&1; then
+                echo "Secondary REST API healthy."
+                exit 0
+              fi
+              echo "Waiting for secondary REST API... ($i/30)"
+              sleep 10
+            done
+            echo "ERROR: Secondary REST API not healthy after 5 minutes."
+            exit 1
 
   notify-slack:
     name: Slack Notification
-    if: ${{ always() && github.ref == 'refs/heads/main' && contains(join(needs.*.result, ','), 'failure') }}
-    needs: [build, deploy, restart]
+    if: ${{ always() && contains(join(needs.*.result, ','), 'failure') }}
+    needs: [deploy-primary, deploy-secondary]
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
@@ -133,24 +93,22 @@ jobs:
           webhook-type: incoming-webhook
           payload: |
             {
-              "text": "SDK Chain Deploy failed on main",
+              "text": "SDK Deploy failed",
               "blocks": [
                 {
                   "type": "header",
-                  "text": { "type": "plain_text", "text": "SDK Chain Deploy Failed on main", "emoji": true }
+                  "text": { "type": "plain_text", "text": "SDK Deploy Failed", "emoji": true }
                 },
                 {
                   "type": "section",
                   "fields": [
-                    { "type": "mrkdwn", "text": "*Workflow:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Deploy SDK chain>" },
-                    { "type": "mrkdwn", "text": "*Branch:*\nmain" },
-                    { "type": "mrkdwn", "text": "*Commit:*\n<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|`${{ github.sha }}`>" },
-                    { "type": "mrkdwn", "text": "*Author:*\n${{ github.actor }}" }
+                    { "type": "mrkdwn", "text": "*Workflow:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Deploy SDK>" },
+                    { "type": "mrkdwn", "text": "*Tag:*\n`${{ env.TAG }}`" }
                   ]
                 },
                 {
                   "type": "section",
-                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nBuild: `${{ needs.build.result }}` | Deploy: `${{ needs.deploy.result }}` | Restart: `${{ needs.restart.result }}`" }
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nPrimary: `${{ needs.deploy-primary.result }}` | Secondary: `${{ needs.deploy-secondary.result }}`" }
                 }
               ]
             }

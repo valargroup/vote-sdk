@@ -1,216 +1,267 @@
-# Reset the deployed 3-validator chain: stop, reinitialize, start, register.
-# When reset_chain is false, just restarts services without wiping state.
+# Reset both validators from genesis: wipe state, re-init primary with
+# deterministic keys, upload genesis to DO Spaces, fund the secondary
+# from the vote-manager, then join secondary.
+# Manual-only: triggered via workflow_dispatch with a release tag.
 
-name: Reset SDK chain
+name: Reset SDK Chain
 
 on:
   workflow_dispatch:
     inputs:
-      reset_chain:
-        description: "Wipe and reinitialize all validator data before starting"
-        type: boolean
-        default: true
-  workflow_call:
-    inputs:
-      reset_chain:
-        type: boolean
-        default: false
+      tag:
+        description: "Release tag to deploy (e.g. v1.2.3). Must already exist in DO Spaces."
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 env:
-  DEPLOY_PATH: /opt/shielded-vote
+  TAG: ${{ inputs.tag }}
+  DO_SPACES_BASE: https://vote.fra1.digitaloceanspaces.com
 
 jobs:
-  reset:
-    name: Reset chain
+  reset-primary:
+    name: Reset primary (bootstrap)
     runs-on: ubuntu-latest
     steps:
-      - name: Stop services
+      - name: Install tag and reset primary
         uses: appleboy/ssh-action@v1.0.3
+        timeout-minutes: 15
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
+          host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: TAG
           script: |
-            for svc in svoted-val1 svoted-val2 svoted-val3; do
-              sudo systemctl stop "$svc" || true
-            done
-            sudo pkill -9 -x svoted || true
-            for i in $(seq 1 20); do
-              if ! ss -tlnp | grep -qE ':26156|:26256|:26356|:6160|:6260|:6360|:3000'; then
-                echo "Ports freed"
-                break
-              fi
-              if [ "$i" = "20" ]; then
-                echo "WARN: ports still bound after 20s, forcing..."
-                sudo fuser -k 26156/tcp 26256/tcp 26356/tcp 6160/tcp 6260/tcp 6360/tcp 3000/tcp || true
-                sleep 1
-              fi
-              sleep 1
-            done
+            set -euo pipefail
+            export PATH="/opt/shielded-vote/current/bin:$PATH"
 
-      - name: Install updated systemd units
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          script: |
-            for i in 1 2 3; do
-              src="${{ env.DEPLOY_PATH }}/docs/svoted-val${i}.service"
-              if [ -f "$src" ]; then
-                sudo cp "$src" /etc/systemd/system/svoted-val${i}.service
-              fi
-            done
-            sudo systemctl daemon-reload
+            # Install the release
+            /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
 
-      - name: Reinitialize all validators
-        if: ${{ inputs.reset_chain == true }}
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          envs: VM_PRIVKEY,SVOTE_HELPER_SENTRY_DSN
-          script: |
-            export HOME=${{ env.DEPLOY_PATH }} PATH=${{ env.DEPLOY_PATH }}:$PATH
-            export VM_PRIVKEY="$VM_PRIVKEY"
-            export SVOTE_HELPER_SENTRY_DSN="$SVOTE_HELPER_SENTRY_DSN"
-            chmod +x ${{ env.DEPLOY_PATH }}/svoted ${{ env.DEPLOY_PATH }}/create-val-tx
-            bash ${{ env.DEPLOY_PATH }}/init_multi.sh --ci
-        env:
-          VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
-          SVOTE_HELPER_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+            # Stop svoted
+            systemctl stop svoted || true
 
-      - name: Start services
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          script: |
-            for svc in svoted-val1 svoted-val2 svoted-val3; do
-              sudo systemctl start "$svc"
-            done
+            # Wipe chain state (preserve the releases dir)
+            rm -rf /opt/shielded-vote/.svoted/*
 
-      - name: Register post-genesis validators
-        if: ${{ inputs.reset_chain == true }}
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          script: |
-            export HOME=${{ env.DEPLOY_PATH }} PATH=${{ env.DEPLOY_PATH }}:$PATH
+            # Run init.sh with deterministic validator key
+            export SVOTED_HOME=/opt/shielded-vote/.svoted
+            export VM_PRIVKEY="${{ secrets.VM_PRIVKEY }}"
+            export VAL_PRIVKEY="${{ secrets.PRIMARY_VAL_PRIVKEY }}"
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/init.sh" -o /tmp/init.sh
+            bash /tmp/init.sh
+
+            # init.sh sets REST API to port 1318 (local dev); fix to 1317 for production
+            APP_TOML="/opt/shielded-vote/.svoted/config/app.toml"
+            sed -i 's|address = "tcp://0.0.0.0:1318"|address = "tcp://0.0.0.0:1317"|' "$APP_TOML"
+            sed -i 's|chain_api_port = 1318|chain_api_port = 1317|' "$APP_TOML"
+
+            # Start svoted
+            systemctl daemon-reload
+            systemctl start svoted
+
+            # Wait for REST API
             for i in $(seq 1 30); do
-              if curl -sf http://127.0.0.1:1418/shielded-vote/v1/rounds > /dev/null 2>&1; then
-                echo "Val1 API ready"
-                break
+              if curl -sf http://localhost:1317/shielded-vote/v1/rounds > /dev/null 2>&1; then
+                echo "Primary REST API healthy."
+                exit 0
               fi
-              if [ "$i" = "30" ]; then
-                echo "FAIL: val1 API not responding after 60s"
-                echo "--- curl -v (last attempt) ---"
-                curl -v --max-time 5 http://127.0.0.1:1418/shielded-vote/v1/rounds || true
-                echo "--- systemctl status svoted-val1 ---"
-                sudo systemctl status svoted-val1 --no-pager || true
-                echo "--- listening ports ---"
-                sudo ss -tlnp | grep -E ':1418|:1518|:1618|:1317|:26157|:3000' || echo "(none matched)"
-                echo "--- app.toml [api] section ---"
-                sed -n '/\[api\]/,/^\[/p' "$HOME/.svoted-val1/config/app.toml"
-                echo "--- app.toml [pir] section ---"
-                sed -n '/\[pir\]/,/^\[/p' "$HOME/.svoted-val1/config/app.toml"
-                echo "--- svoted-val1 unit file (as installed) ---"
-                cat /etc/systemd/system/svoted-val1.service || true
-                echo "--- journal: full since svoted-val1 last (re)start ---"
-                # InactiveExitTimestamp is when the unit last transitioned to active.
-                since_ts=$(systemctl show -p InactiveExitTimestamp --value svoted-val1.service)
-                if [ -n "$since_ts" ]; then
-                  sudo journalctl -u svoted-val1 --no-pager --since "$since_ts"
-                else
-                  sudo journalctl -u svoted-val1 --no-pager -n 500
-                fi
-                exit 1
-              fi
-              sleep 2
+              echo "Waiting for primary REST API... ($i/30)"
+              sleep 10
             done
-            ${{ env.DEPLOY_PATH }}/svoted tx vote register-pallas-key \
-              --from validator --keyring-backend test \
-              --home "$HOME/.svoted-val1" \
-              --chain-id svote-1 --node tcp://localhost:26157 --yes
-            sleep 2
-            ${{ env.DEPLOY_PATH }}/create-val-tx \
-              --home "$HOME/.svoted-val2" \
-              --moniker val2 \
-              --amount 10000000usvote \
-              --rpc-url tcp://localhost:26157
-            sleep 2
-            ${{ env.DEPLOY_PATH }}/create-val-tx \
-              --home "$HOME/.svoted-val3" \
-              --moniker val3 \
-              --amount 10000000usvote \
-              --rpc-url tcp://localhost:26157
-            echo "Waiting for val3 registration tx to be committed..."
+            echo "ERROR: Primary REST API not healthy after 5 minutes."
+            exit 1
+
+  upload-genesis:
+    name: Upload genesis to DO Spaces
+    runs-on: ubuntu-latest
+    needs: reset-primary
+    steps:
+      - name: Fetch genesis from primary
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRIMARY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            curl -fsSL http://localhost:1317/shielded-vote/v1/genesis > /tmp/genesis.json
+            echo "Genesis fetched ($(wc -c < /tmp/genesis.json) bytes)."
+
+      - name: Download genesis from primary to runner
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.PRIMARY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: /tmp/genesis.json
+          target: .
+          strip_components: 1
+
+      - name: Upload genesis to DO Spaces
+        env:
+          DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
+          DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
+        run: |
+          pip install --quiet s3cmd
+          cat > /tmp/do-spaces.s3cfg <<EOF
+          [default]
+          access_key = ${DO_ACCESS_KEY}
+          secret_key = ${DO_SECRET_KEY}
+          host_base = fra1.digitaloceanspaces.com
+          host_bucket = %(bucket)s.fra1.digitaloceanspaces.com
+          bucket_location = fra1
+          use_https = True
+          EOF
+          s3cmd -c /tmp/do-spaces.s3cfg put genesis.json s3://vote/genesis.json --acl-public --force
+          echo "Genesis uploaded to s3://vote/genesis.json"
+
+  fund-secondary:
+    name: Fund secondary validator
+    runs-on: ubuntu-latest
+    needs: upload-genesis
+    steps:
+      - name: Send tokens from vote-manager to secondary address
+        uses: appleboy/ssh-action@v1.0.3
+        timeout-minutes: 5
+        with:
+          host: ${{ secrets.PRIMARY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            export PATH="/opt/shielded-vote/current/bin:$PATH"
+            HOME_DIR=/opt/shielded-vote/.svoted
+
+            # Derive the secondary address from its private key without importing
+            # it into the primary's keyring: import into a temp keyring, read
+            # address, delete.
+            TMPKR=$(mktemp -d)
+            svoted keys import-hex secondary-tmp "${{ secrets.SECONDARY_VAL_PRIVKEY }}" \
+              --keyring-backend test --home "$TMPKR"
+            SECONDARY_ADDR=$(svoted keys show secondary-tmp -a --keyring-backend test --home "$TMPKR")
+            rm -rf "$TMPKR"
+
+            echo "Funding secondary address: ${SECONDARY_ADDR}"
+
+            svoted tx vote authorized-send "${SECONDARY_ADDR}" 100000000 usvote \
+              --from manager \
+              --keyring-backend test \
+              --home "$HOME_DIR" \
+              --chain-id svote-1 \
+              --yes
+
+            echo "Waiting for tx to be included..."
             sleep 6
 
-      - name: Verify services healthy
+            BALANCE=$(svoted query bank balances "${SECONDARY_ADDR}" --home "$HOME_DIR" --output json \
+              | jq -r '.balances[] | select(.denom == "usvote") | .amount')
+            echo "Secondary balance: ${BALANCE} usvote"
+
+  reset-secondary:
+    name: Reset secondary (join)
+    runs-on: ubuntu-latest
+    needs: fund-secondary
+    steps:
+      - name: Install tag and join
+        uses: appleboy/ssh-action@v1.0.3
+        timeout-minutes: 30
+        with:
+          host: ${{ secrets.SECONDARY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: TAG
+          script: |
+            set -euo pipefail
+            export PATH="/opt/shielded-vote/current/bin:$PATH"
+
+            # Install the release
+            /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+
+            # Run reset-join with deterministic validator key
+            export GENESIS_URL="${{ env.DO_SPACES_BASE }}/genesis.json"
+            export PRIMARY_REST_URL="https://vote-chain-primary.${{ secrets.DOMAIN }}"
+            export VAL_PRIVKEY="${{ secrets.SECONDARY_VAL_PRIVKEY }}"
+            export HOME_DIR=/opt/shielded-vote/.svoted
+            export CHAIN_ID=svote-1
+            export MONIKER=secondary
+
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-join.sh" -o /tmp/reset-join.sh
+            bash /tmp/reset-join.sh
+
+      - name: Verify secondary health
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
+          host: ${{ secrets.SECONDARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            dump_val1_diag() {
-              echo "--- systemctl status svoted-val1 ---"
-              sudo systemctl status svoted-val1 --no-pager || true
-              echo "--- listening ports ---"
-              sudo ss -tlnp | grep -E ':1418|:1518|:1618|:26157|:3000' || echo "(none matched)"
-              since_ts=$(systemctl show -p InactiveExitTimestamp --value svoted-val1.service)
-              if [ -n "$since_ts" ]; then
-                echo "--- journal since last svoted-val1 start ($since_ts) ---"
-                sudo journalctl -u svoted-val1 --no-pager --since "$since_ts"
-              else
-                sudo journalctl -u svoted-val1 --no-pager -n 500
+            for i in $(seq 1 20); do
+              if curl -sf http://localhost:1317/shielded-vote/v1/rounds > /dev/null 2>&1; then
+                echo "Secondary REST API healthy."
+                exit 0
               fi
-            }
+              echo "Waiting for secondary REST API... ($i/20)"
+              sleep 15
+            done
+            echo "ERROR: Secondary REST API not healthy."
+            exit 1
 
-            sleep 5
-            for svc in svoted-val1 svoted-val2 svoted-val3; do
-              if ! sudo systemctl is-active --quiet "$svc"; then
-                echo "FAIL: $svc not active"
-                sudo systemctl status "$svc" --no-pager
-                since_ts=$(systemctl show -p InactiveExitTimestamp --value "$svc.service")
-                if [ -n "$since_ts" ]; then
-                  sudo journalctl -u "$svc" --no-pager --since "$since_ts"
-                else
-                  sudo journalctl -u "$svc" --no-pager -n 500
-                fi
-                exit 1
-              fi
-            done
-            for i in $(seq 1 30); do
-              if curl -sf http://127.0.0.1:1418/shielded-vote/v1/rounds > /dev/null 2>&1; then
-                echo "Chain API healthy (val1 port 1418)"
+  verify:
+    name: Post-reset verification
+    runs-on: ubuntu-latest
+    needs: reset-secondary
+    steps:
+      - name: Check both validators
+        run: |
+          FAILED=0
+          for HOST in "vote-chain-primary" "vote-chain-secondary"; do
+            URL="https://${HOST}.${{ secrets.DOMAIN }}/shielded-vote/v1/rounds"
+            for i in $(seq 1 10); do
+              STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$URL" || echo "000")
+              if [ "$STATUS" = "200" ]; then
+                echo "[OK] ${HOST} healthy"
                 break
               fi
-              if [ "$i" = "30" ]; then
-                echo "FAIL: Chain API not responding after 60s"
-                dump_val1_diag
-                exit 1
+              if [ "$i" -eq 10 ]; then
+                echo "[FAIL] ${HOST} not healthy (HTTP ${STATUS})"
+                FAILED=1
               fi
-              sleep 2
+              sleep 10
             done
-            for i in $(seq 1 15); do
-              if curl -sf http://127.0.0.1:1418/shielded-vote/v1/status > /dev/null 2>&1; then
-                echo "Helper server healthy"
-                break
-              fi
-              if [ "$i" = "15" ]; then
-                echo "FAIL: Helper server /shielded-vote/v1/status not responding after 30s"
-                dump_val1_diag
-                exit 1
-              fi
-              sleep 2
-            done
-            echo "Chain + helper server both healthy"
+          done
+          exit $FAILED
+
+  notify-slack:
+    name: Slack Notification
+    if: ${{ always() && contains(join(needs.*.result, ','), 'failure') }}
+    needs: [reset-primary, upload-genesis, fund-secondary, reset-secondary, verify]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Slack on failure
+        uses: slackapi/slack-github-action@v2.1.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "SDK Chain Reset failed",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": { "type": "plain_text", "text": "SDK Chain Reset Failed", "emoji": true }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    { "type": "mrkdwn", "text": "*Workflow:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Reset SDK Chain>" },
+                    { "type": "mrkdwn", "text": "*Tag:*\n`${{ env.TAG }}`" }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nReset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Verify: `${{ needs.verify.result }}`" }
+                }
+              ]
+            }

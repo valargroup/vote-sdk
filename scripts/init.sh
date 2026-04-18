@@ -29,10 +29,15 @@ fi
 # Init chain
 $BINARY init "$MONIKER" --chain-id "$CHAIN_ID" --home "$HOME_DIR"
 
-# Create a validator key
-$BINARY keys add validator --keyring-backend test --home "$HOME_DIR"
+# Import or generate the validator key. When VAL_PRIVKEY is set (CI/production),
+# import the deterministic key so the address is known ahead of time. Otherwise
+# generate a fresh key (local dev).
+if [ -n "${VAL_PRIVKEY:-}" ]; then
+    $BINARY keys import-hex validator "$VAL_PRIVKEY" --keyring-backend test --home "$HOME_DIR"
+else
+    $BINARY keys add validator --keyring-backend test --home "$HOME_DIR"
+fi
 
-# Get the validator address
 VALIDATOR_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_DIR")
 VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend test --home "$HOME_DIR")
 echo "Validator address: $VALIDATOR_ADDR"
