@@ -47,10 +47,8 @@ fi
 
 # ─── Wipe existing state ─────────────────────────────────────────────────────
 
-if [ -d "${HOME_DIR}" ]; then
-  echo "Wiping ${HOME_DIR}..."
-  rm -rf "${HOME_DIR}"
-fi
+echo "Wiping ${HOME_DIR} contents..."
+rm -rf "${HOME_DIR:?}"/*
 mkdir -p "${HOME_DIR}"
 
 # ─── Initialize node ─────────────────────────────────────────────────────────
