@@ -29,6 +29,15 @@ resource "cloudflare_record" "rpc_primary" {
   proxied = false
 }
 
+resource "cloudflare_record" "svote_ui" {
+  zone_id = var.cf_zone_id
+  name    = "svote"
+  content = digitalocean_droplet.primary.ipv4_address
+  type    = "A"
+  ttl     = 1
+  proxied = false
+}
+
 # -----------------------------------------------------------------------------
 # Data sources
 # -----------------------------------------------------------------------------
