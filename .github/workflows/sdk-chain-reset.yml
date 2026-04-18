@@ -50,6 +50,7 @@ jobs:
             export SVOTED_HOME=/opt/shielded-vote/.svoted
             export VM_PRIVKEY="${{ secrets.VM_PRIVKEY }}"
             export VAL_PRIVKEY="${{ secrets.PRIMARY_VAL_PRIVKEY }}"
+            export SVOTE_ADMIN_DISABLE=false
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/init.sh" -o /tmp/init.sh
             bash /tmp/init.sh
 
@@ -57,6 +58,11 @@ jobs:
             APP_TOML="/opt/shielded-vote/.svoted/config/app.toml"
             sed -i 's|address = "tcp://0.0.0.0:1318"|address = "tcp://0.0.0.0:1317"|' "$APP_TOML"
             sed -i 's|chain_api_port = 1318|chain_api_port = 1317|' "$APP_TOML"
+
+            # Ensure the primary systemd drop-in exists (serves admin UI)
+            mkdir -p /etc/systemd/system/svoted.service.d
+            printf '[Service]\nExecStart=\nExecStart=/opt/shielded-vote/current/bin/svoted start --home /opt/shielded-vote/.svoted --serve-ui --ui-dist /opt/shielded-vote/current/ui/dist\n' \
+              > /etc/systemd/system/svoted.service.d/primary.conf
 
             # Start svoted
             systemctl daemon-reload

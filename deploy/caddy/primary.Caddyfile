@@ -5,3 +5,7 @@ vote-chain-primary.{$DOMAIN} {
 vote-rpc-primary.{$DOMAIN} {
 	reverse_proxy 127.0.0.1:26657
 }
+
+svote.{$DOMAIN} {
+	reverse_proxy 127.0.0.1:1317
+}

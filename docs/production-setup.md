@@ -22,7 +22,7 @@
 
 Two DigitalOcean Droplets in the same region + VPC, running native binaries under systemd (no Docker):
 
-- **vote-primary** (`vote-chain-primary.<domain>`): 4 vCPU / 16 GB RAM / 100 GB NVMe. Bootstrap validator — creates genesis via `scripts/init.sh`.
+- **vote-primary** (`vote-chain-primary.<domain>`): 4 vCPU / 16 GB RAM / 100 GB NVMe. Bootstrap validator — creates genesis via `scripts/init.sh`. Also runs the admin server and serves the admin UI at `https://vote-chain-primary.<domain>/` via `--serve-ui --ui-dist`.
 - **vote-secondary** (`vote-chain-secondary.<domain>`): 2 vCPU / 8 GB RAM / 50 GB NVMe. Joining validator — fetches genesis, syncs, and self-registers via `scripts/reset-join.sh`.
 
 Both nodes run the same `svoted` binary. Caddy on each host terminates TLS via Let's Encrypt.
