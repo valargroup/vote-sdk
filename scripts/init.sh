@@ -184,6 +184,7 @@ sentry_dsn = "$HELPER_SENTRY_DSN"
 HELPERCFG
 
 # Append [admin] section.
+ADMIN_DISABLE="${SVOTE_ADMIN_DISABLE:-true}"
 ADMIN_ADDRESS="${SVOTE_ADMIN_ADDRESS:-$MANAGER_ADDR}"
 cat >> "$APP_TOML" <<ADMINCFG
 
@@ -195,7 +196,7 @@ cat >> "$APP_TOML" <<ADMINCFG
 
 # Set to true to disable the admin server (server directory, registration,
 # health monitoring).
-disable = true
+disable = $ADMIN_DISABLE
 
 # Path to the admin SQLite database. Empty = default (\$HOME/.svoted/admin.db).
 db_path = ""

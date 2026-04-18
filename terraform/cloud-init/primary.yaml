@@ -47,6 +47,13 @@ write_files:
     content: |
       ${indent(6, install_script)}
 
+  - path: /etc/systemd/system/svoted.service.d/primary.conf
+    permissions: "0644"
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/opt/shielded-vote/current/bin/svoted start --home /opt/shielded-vote/.svoted --serve-ui --ui-dist /opt/shielded-vote/current/ui/dist
+
 runcmd:
   # Install Caddy from official apt repo
   - curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg

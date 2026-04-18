@@ -50,6 +50,7 @@ jobs:
             export SVOTED_HOME=/opt/shielded-vote/.svoted
             export VM_PRIVKEY="${{ secrets.VM_PRIVKEY }}"
             export VAL_PRIVKEY="${{ secrets.PRIMARY_VAL_PRIVKEY }}"
+            export SVOTE_ADMIN_DISABLE=false
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/init.sh" -o /tmp/init.sh
             bash /tmp/init.sh
 
