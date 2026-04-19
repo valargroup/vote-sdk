@@ -6,11 +6,11 @@ The workflow `.github/workflows/sdk-chain-deploy.yml` builds svoted (with circui
 
 All three validators run on the same host with non-overlapping port sets:
 
-| Validator | P2P   | RPC   | REST API | pprof | PIR  |
-|-----------|-------|-------|----------|-------|------|
-| val1      | 26156 | 26157 | 1418     | 6160  | 3000 |
-| val2      | 26256 | 26257 | 1518     | 6260  | —    |
-| val3      | 26356 | 26357 | 1618     | 6360  | —    |
+| Validator | P2P   | RPC   | REST API | pprof |
+|-----------|-------|-------|----------|-------|
+| val1      | 26156 | 26157 | 1418     | 6160  |
+| val2      | 26256 | 26257 | 1518     | 6260  |
+| val3      | 26356 | 26357 | 1618     | 6360  |
 
 Val1 is the genesis validator and is the primary API endpoint (reverse-proxied by Caddy). Val2 and val3 join after chain start via `MsgCreateValidatorWithPallasKey`.
 
@@ -63,7 +63,7 @@ Each unit starts `svoted` with a separate `--home` directory. Val1 additionally 
 
 | Unit          | Home directory                   | Notes                                     |
 |---------------|----------------------------------|--------------------------------------------|
-| svoted-val1   | /opt/shielded-vote/.svoted-val1  | `--serve-ui --ui-dist /opt/shielded-vote/ui/dist --serve-pir` |
+| svoted-val1   | /opt/shielded-vote/.svoted-val1  | `--serve-ui --ui-dist /opt/shielded-vote/ui/dist` |
 | svoted-val2   | /opt/shielded-vote/.svoted-val2  |                                            |
 | svoted-val3   | /opt/shielded-vote/.svoted-val3  |                                            |
 
@@ -173,76 +173,11 @@ sudo journalctl -u svoted-val3 -f
 tail -f /opt/shielded-vote/.svoted-val1/node.log
 ```
 
-## 11. Embedded PIR server (nf-server)
+## 11. PIR server (nf-server)
 
-The `nf-server` binary from [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) is bundled inside `svoted` at build time via `go:embed`. At runtime, passing `--serve-pir` on the start command extracts and spawns it as a managed child process on port 3000.
+The `nf-server` binary from [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) runs as a separate service (not embedded in `svoted`). See that repo for build, data bootstrap, and systemd setup instructions.
 
-### Enabling PIR
-
-Only val1 runs PIR in deployment. The val1 systemd unit includes `--serve-pir` in its `ExecStart` and points the server at a pre-populated out-of-band mount (see [Data bootstrap](#data-bootstrap) below):
-
-```
-Environment="SVOTE_PIR_VAL1_DATA_DIR=/opt/nf-ingest"
-Environment="SVOTE_PIR_VAL1_TIER_DIR=/opt/nf-ingest/pir-data"
-ExecStart=/opt/shielded-vote/svoted start \
-    --home /opt/shielded-vote/.svoted-val1 \
-    --serve-ui --ui-dist /opt/shielded-vote/ui/dist \
-    --serve-pir \
-    --pir-data-dir ${SVOTE_PIR_VAL1_DATA_DIR} \
-    --pir-pir-data-dir ${SVOTE_PIR_VAL1_TIER_DIR} \
-    --pir-lwd-url https://zec.rocks:443
-```
-
-Val2 and val3 omit `--serve-pir` — they set `SVOTE_PIR_URL=http://localhost:3000` to query val1's PIR server.
-
-### Port reservation
-
-| Port | Service                   |
-|------|---------------------------|
-| 3000 | PIR server (val1 only)    |
-
-Port 3000 does not conflict with any existing validator port in the matrix (P2P, RPC, gRPC, REST, pprof all use different ranges).
-
-### `[pir]` section in `app.toml`
-
-Written to val1 by `init_multi.sh` (val2/val3 don't serve PIR). Settings only — no enable/disable key (the `--serve-pir` CLI flag controls enablement).
-
-| Key            | Local default (`init_multi.sh`)      | CI default (`init_multi.sh --ci`)   | Description                                                     |
-|----------------|--------------------------------------|-------------------------------------|-----------------------------------------------------------------|
-| `port`         | `3000`                               | `3000`                              | Listen port for nf-server.                                      |
-| `data_dir`     | `$HOME/.svoted-val1/nullifiers`      | `/opt/nf-ingest`                    | Directory with `nullifiers.bin`, `.checkpoint`, `.index`.       |
-| `pir_data_dir` | `$HOME/.svoted-val1/nullifiers/pir-data` | `/opt/nf-ingest/pir-data`       | Directory with tier files (`tier0.bin`, `tier1.bin`, etc).      |
-| `lwd_url`      | `https://zec.rocks:443`              | `https://zec.rocks:443`             | Lightwalletd URL for `/snapshot/prepare` rebuilds.              |
-| `chain_url`    | `""`                                 | `""`                                | Optional chain REST URL (blocks rebuilds during active rounds). |
-
-In CI mode, the paths are controlled by the env vars `SVOTE_PIR_VAL1_DATA_DIR` / `SVOTE_PIR_VAL1_TIER_DIR` read by `init_multi.sh --ci`; `/opt/nf-ingest` is the fallback when they're unset. These must match the `--pir-data-dir` / `--pir-pir-data-dir` flags in `docs/svoted-val1.service` — both are sourced from the same `Environment=` block there. Changing the mount location is therefore a two-step edit: bump the systemd unit's `Environment=` lines and re-export the env vars before `init_multi.sh --ci` writes `app.toml`.
-
-CLI flags `--pir-port`, `--pir-data-dir`, `--pir-pir-data-dir`, `--pir-lwd-url` override the config file values, which is how the systemd unit decouples `--serve-pir` from whatever `init_multi.sh` wrote.
-
-### `svoted pir` subcommands
-
-The embedded `nf-server` binary can be run directly for operational tasks (target the same mount the systemd unit's `--pir-*-dir` flags point at):
-
-```bash
-svoted pir ingest --data-dir /opt/nf-ingest
-svoted pir export --pir-data-dir /opt/nf-ingest/pir-data
-svoted pir serve  --port 3000 --data-dir /opt/nf-ingest
-```
-
-### Data bootstrap
-
-The ~6 GB of PIR tier data must be present on val1's disk before `--serve-pir` can serve queries. In the standard deploy the data lives at `/opt/nf-ingest` (the default for `SVOTE_PIR_VAL1_DATA_DIR`) and is populated **out-of-band** by the `vote-nullifier-pir` ingestion pipeline, not by `svoted`. Chain reset (`init_multi.sh --ci`) wipes `$HOME/.svoted-val*` but leaves `/opt/nf-ingest` intact — that's the whole point of using an out-of-band mount.
-
-If you're bringing up a fresh host (or pointing `SVOTE_PIR_VAL1_*` at a new, empty mount), seed it once:
-
-1. `svoted pir ingest --data-dir /opt/nf-ingest`
-2. `svoted pir export --pir-data-dir /opt/nf-ingest/pir-data`
-
-If tier files are missing at startup, `nf-server` exits with an error; `svoted` continues running normally.
-
-### CI build
-
-The `vote-nullifier-pir` repo is checked out at a pinned ref (`VOTE_NULLIFIER_PIR_REF` in the workflow `env` block). When bumping `imt-tree` in `circuits/Cargo.lock`, bump this ref to the matching tag to avoid protocol-version mismatches.
+`svoted` communicates with `nf-server` over HTTP via the `SVOTE_PIR_URL` environment variable. The val1 systemd unit sets `SVOTE_PIR_URL=http://localhost:3000` by default. If `nf-server` runs on a different host or port, update the variable accordingly.
 
 ## 12. Same host as nullifier-ingest
 

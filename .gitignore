@@ -9,9 +9,6 @@
 circuits/target/
 e2e-tests/target/
 
-# Embedded PIR binary (built by make pir-binary)
-ffi/pir/bin/nf-server
-
 # Environment (secrets live here — never commit)
 .env
 .env.*

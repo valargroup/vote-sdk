@@ -8,20 +8,7 @@ VERSION := $(or $(VERSION),$(shell git describe --tags --always --dirty 2>/dev/n
 COMMIT  := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_TAGS_LIST := $(if $(BUILD_TAGS),$(BUILD_TAGS),)
 
-# PIR embedding is ON by default: every FFI build bundles the nf-server binary
-# into svoted via go:embed so `svoted start --serve-pir` works out of the box,
-# and running `chain:init` / `chain:init-multi` can never silently ship a stub
-# build. Set EMBED_PIR=0 to skip the Rust nf-server build when iterating on
-# non-PIR code (svoted still builds, but --serve-pir will return ErrNotEmbedded).
-EMBED_PIR ?= 1
-
 FFI_TAGS := halo2,redpallas
-ifneq ($(EMBED_PIR),0)
-FFI_TAGS := $(FFI_TAGS),embed_pir
-FFI_PIR_PREREQ := pir-binary
-else
-FFI_PIR_PREREQ :=
-endif
 
 VERSION_PKG := github.com/cosmos/cosmos-sdk/version
 LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
@@ -30,22 +17,22 @@ LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
            -X $(VERSION_PKG).Commit=$(COMMIT) \
            -X "$(VERSION_PKG).BuildTags=$(BUILD_TAGS_LIST)"
 
-.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin pir-binary pir-source
+.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
 
 ## install: Build and install the svoted binary to $GOPATH/bin
 install:
 	go install -ldflags '$(LDFLAGS)' ./cmd/svoted
 
-## install-ffi: Build and install svoted with Halo2 + RedPallas + embedded PIR (set EMBED_PIR=0 to skip the nf-server build)
-install-ffi: circuits $(FFI_PIR_PREREQ)
+## install-ffi: Build and install svoted with Halo2 + RedPallas
+install-ffi: circuits
 	go install -tags "$(FFI_TAGS)" -ldflags '$(LDFLAGS)' ./cmd/svoted
 
 ## build: Build the svoted binary locally
 build:
 	go build -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/svoted
 
-## build-ffi: Build svoted locally with Halo2 + RedPallas + embedded PIR (set EMBED_PIR=0 to skip the nf-server build)
-build-ffi: circuits $(FFI_PIR_PREREQ)
+## build-ffi: Build svoted locally with Halo2 + RedPallas
+build-ffi: circuits
 	go build -tags "$(FFI_TAGS)" -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/svoted
 
 ## build-create-val-tx: Build the create-val-tx helper binary locally
@@ -56,11 +43,11 @@ build-create-val-tx:
 install-create-val-tx:
 	go install -ldflags '$(LDFLAGS)' ./scripts/create-val-tx
 
-## init: Initialize a single-validator chain with FFI + embedded PIR (wipes existing data)
+## init: Initialize a single-validator chain with FFI (wipes existing data)
 init: install-ffi
 	bash scripts/init.sh
 
-## init-multi: Initialize a 3-validator chain with FFI + embedded PIR (wipes existing data)
+## init-multi: Initialize a 3-validator chain with FFI (wipes existing data)
 init-multi: install-ffi install-create-val-tx
 	bash scripts/init_multi.sh
 
@@ -82,14 +69,14 @@ init-benchmark: install-ffi
 start:
 	SVOTE_PIR_URL=$${SVOTE_PIR_URL:-http://localhost:3000} $(BINARY) start --home $(HOME_DIR)
 
-## clean: Remove chain state but preserve nullifier/PIR data (~/.svoted/nullifiers)
+## clean: Remove chain state but preserve nullifier data (~/.svoted/nullifiers)
 clean:
 	@if [ -d "$(HOME_DIR)" ]; then \
 		find "$(HOME_DIR)" -mindepth 1 -maxdepth 1 ! -name nullifiers -exec rm -rf {} +; \
 	fi
 	rm -f $(BINARY)
 
-## clean-all: Remove chain data directory including nullifier/PIR data
+## clean-all: Remove chain data directory including nullifier data
 clean-all:
 	rm -rf $(HOME_DIR)
 	rm -f $(BINARY)
@@ -147,48 +134,6 @@ fixtures-ts: fixtures
 ## circuits: Build the Rust static library (requires cargo)
 circuits:
 	cargo build --release --manifest-path circuits/Cargo.toml
-
-# ---------------------------------------------------------------------------
-# Embedded PIR server
-# ---------------------------------------------------------------------------
-# The nf-server binary lives in valargroup/vote-nullifier-pir. Source resolution
-# order (first hit wins):
-#   1. $VOTE_NULLIFIER_PIR_DIR (explicit override; matches CI)
-#   2. ../vote-nullifier-pir    (sibling checkout, for active development)
-#   3. .cache/vote-nullifier-pir (auto-cloned at $PIR_REF — same tag CI uses)
-# Keep PIR_REF in sync with VOTE_NULLIFIER_PIR_REF in .github/workflows/sdk-chain-deploy.yml.
-
-PIR_REF      ?= v0.0.7
-PIR_REPO_URL ?= https://github.com/valargroup/vote-nullifier-pir.git
-PIR_CACHE    := .cache/vote-nullifier-pir
-PIR_REPO     ?= $(or $(VOTE_NULLIFIER_PIR_DIR),$(if $(wildcard ../vote-nullifier-pir/Cargo.toml),../vote-nullifier-pir,$(PIR_CACHE)))
-PIR_EMBED_DIR := ffi/pir/bin
-
-## pir-source: Ensure the vote-nullifier-pir source tree is available at $(PIR_REPO)
-pir-source:
-	@if [ -f "$(PIR_REPO)/Cargo.toml" ]; then \
-		echo "Using vote-nullifier-pir at $(PIR_REPO)"; \
-	elif [ "$(PIR_REPO)" = "$(PIR_CACHE)" ]; then \
-		if [ -d "$(PIR_CACHE)/.git" ]; then \
-			echo "Updating $(PIR_CACHE) to $(PIR_REF)"; \
-			git -C "$(PIR_CACHE)" fetch --tags --quiet origin && \
-			git -C "$(PIR_CACHE)" checkout --quiet "$(PIR_REF)"; \
-		else \
-			echo "Cloning $(PIR_REPO_URL) @ $(PIR_REF) into $(PIR_CACHE)"; \
-			mkdir -p "$(dir $(PIR_CACHE))" && \
-			git clone --depth 1 --branch "$(PIR_REF)" "$(PIR_REPO_URL)" "$(PIR_CACHE)"; \
-		fi; \
-	else \
-		echo "ERROR: vote-nullifier-pir not found at $(PIR_REPO)" >&2; \
-		echo "       unset VOTE_NULLIFIER_PIR_DIR to auto-clone from $(PIR_REPO_URL)" >&2; \
-		exit 1; \
-	fi
-
-## pir-binary: Build the nf-server Rust binary and copy it into the go:embed directory
-pir-binary: pir-source
-	cargo build --release --features serve -p nf-server --manifest-path $(PIR_REPO)/Cargo.toml
-	mkdir -p $(PIR_EMBED_DIR)
-	cp $(PIR_REPO)/target/release/nf-server $(PIR_EMBED_DIR)/nf-server
 
 ## circuits-test: Run Rust circuit unit tests
 circuits-test:
