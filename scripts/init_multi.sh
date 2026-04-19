@@ -61,7 +61,6 @@ HOMES=("$HOME_VAL1" "$HOME_VAL2" "$HOME_VAL3")
 # gRPC-web:              9391    9491    9591
 # REST API:              1418    1518    1618
 # pprof:                 6160    6260    6360
-# PIR (val1 only):       3000    —       —
 P2P_PORTS=(26156 26256 26356)
 RPC_PORTS=(26157 26257 26357)
 GRPC_PORTS=(9390 9490 9590)
@@ -263,48 +262,6 @@ ADMINCFG
 }
 
 # ---------------------------------------------------------------------------
-# Helper: append [pir] config section
-#
-# Only written for validators that actually run --serve-pir (val1 in CI).
-# data_dir / pir_data_dir default to the validator's own home, but in CI
-# they point at a pre-populated out-of-band mount (default /opt/nf-ingest,
-# override via $SVOTE_PIR_VAL1_DATA_DIR / $SVOTE_PIR_VAL1_TIER_DIR) which
-# is populated by the vote-nullifier-pir ingestion pipeline and is NOT
-# wiped by chain reset.
-# ---------------------------------------------------------------------------
-configure_pir() {
-    local home="$1"
-    local port="${2:-3000}"
-    local data_dir="${3:-${home}/nullifiers}"
-    local pir_data_dir="${4:-${data_dir}/pir-data}"
-
-    local app_toml="$home/config/app.toml"
-    cat >> "$app_toml" <<PIRCFG
-
-###############################################################################
-###                         PIR Server                                      ###
-###############################################################################
-
-[pir]
-
-# Listen port for the embedded nf-server (only bound when --serve-pir is passed).
-port = ${port}
-
-# Directory containing nullifiers.bin, .checkpoint, .index.
-data_dir = "${data_dir}"
-
-# Directory containing PIR tier files (tier0.bin, tier1.bin, tier2.bin).
-pir_data_dir = "${pir_data_dir}"
-
-# Lightwalletd URL for /snapshot/prepare rebuilds.
-lwd_url = "https://zec.rocks:443"
-
-# Optional chain REST URL (blocks /snapshot/prepare during active rounds).
-chain_url = ""
-PIRCFG
-}
-
-# ---------------------------------------------------------------------------
 # Detect public IP for heartbeat URLs (CI mode only)
 # ---------------------------------------------------------------------------
 ADMIN_SERVER_URL=""
@@ -420,22 +377,6 @@ else
     configure_helper "$HOME_VAL1" "${API_PORTS[0]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[0]}"
 fi
 
-# Only val1 runs --serve-pir. In CI the PIR data lives on a pre-populated,
-# out-of-band mount (populated by the vote-nullifier-pir ingestion pipeline,
-# not by us) so that chain reset doesn't destroy it. The mount path defaults
-# to /opt/nf-ingest and can be overridden via $SVOTE_PIR_VAL1_DATA_DIR /
-# $SVOTE_PIR_VAL1_TIER_DIR (the val1 systemd unit sets matching --pir-*-dir
-# flags — keep them in sync). Locally, fall back to the validator's own home
-# — users typically run `mise run pir:bootstrap` to fill it with ~6 GB of
-# tier data.
-if [ "$CI_MODE" = true ]; then
-    VAL1_PIR_DATA_DIR="${SVOTE_PIR_VAL1_DATA_DIR:-/opt/nf-ingest}"
-    VAL1_PIR_TIER_DIR="${SVOTE_PIR_VAL1_TIER_DIR:-${VAL1_PIR_DATA_DIR}/pir-data}"
-    configure_pir "$HOME_VAL1" 3000 "$VAL1_PIR_DATA_DIR" "$VAL1_PIR_TIER_DIR"
-else
-    configure_pir "$HOME_VAL1" 3000
-fi
-
 # ---------------------------------------------------------------------------
 # Step 2: Configure Validators 2 and 3 (copy genesis, set peers)
 # ---------------------------------------------------------------------------
@@ -470,8 +411,6 @@ for i in 2 3; do
     else
         configure_helper "$home" "${API_PORTS[$idx]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[$idx]}"
     fi
-
-    # Val2/val3 don't run --serve-pir; no [pir] section needed.
 
     # Set persistent_peers to val1.
     set_persistent_peers "$home" "$VAL1_PEER"

@@ -7,23 +7,9 @@ Type=simple
 User=root
 WorkingDirectory=/opt/shielded-vote
 Environment="SVOTE_PIR_URL=http://localhost:3000"
-# PIR data lives on a pre-populated, out-of-band mount (populated by the
-# vote-nullifier-pir ingestion pipeline, not by svoted itself). These
-# Environment= values are the single source of truth for the ExecStart
-# flags below; keep them in sync with SVOTE_PIR_VAL1_DATA_DIR /
-# SVOTE_PIR_VAL1_TIER_DIR in scripts/init_multi.sh so that the `[pir]`
-# section written into app.toml points at the same location. The --pir-*
-# CLI flags override the [pir] section, so chain reset wiping
-# $HOME/.svoted-val1 doesn't matter for PIR.
-Environment="SVOTE_PIR_VAL1_DATA_DIR=/opt/nf-ingest"
-Environment="SVOTE_PIR_VAL1_TIER_DIR=/opt/nf-ingest/pir-data"
 ExecStart=/opt/shielded-vote/svoted start \
     --home /opt/shielded-vote/.svoted-val1 \
-    --serve-ui --ui-dist /opt/shielded-vote/ui/dist \
-    --serve-pir \
-    --pir-data-dir ${SVOTE_PIR_VAL1_DATA_DIR} \
-    --pir-pir-data-dir ${SVOTE_PIR_VAL1_TIER_DIR} \
-    --pir-lwd-url https://zec.rocks:443
+    --serve-ui --ui-dist /opt/shielded-vote/ui/dist
 Restart=on-failure
 
 [Install]

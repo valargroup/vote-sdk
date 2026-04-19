@@ -77,3 +77,43 @@ variable "chain_id" {
   type        = string
   default     = "svote-1"
 }
+
+# -----------------------------------------------------------------------------
+# PIR hosts (vote-nullifier-pir)
+# -----------------------------------------------------------------------------
+
+variable "pir_primary_size" {
+  description = "Droplet size slug for the PIR primary host (needs AVX-512 — Premium Intel)"
+  type        = string
+  default     = "g-8vcpu-32gb-intel"
+}
+
+variable "pir_backup_size" {
+  description = "Droplet size slug for the PIR backup host (needs AVX-512 — Premium Intel)"
+  type        = string
+  default     = "m-4vcpu-32gb-intel"
+}
+
+variable "pir_volume_size" {
+  description = "Size in GB for each PIR data block volume"
+  type        = number
+  default     = 100
+}
+
+variable "pir_release_tag" {
+  description = "vote-nullifier-pir GitHub release tag for the nf-server binary"
+  type        = string
+  default     = "latest"
+}
+
+variable "pir_snapshot_url" {
+  description = "Base URL of the DO Spaces bucket hosting nullifier snapshots"
+  type        = string
+  default     = "https://vote.fra1.digitaloceanspaces.com"
+}
+
+variable "pir_resync_on_calendar" {
+  description = "systemd OnCalendar= spec for periodic snapshot re-pull on PIR hosts"
+  type        = string
+  default     = "*-*-* 03:00:00"
+}
