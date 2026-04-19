@@ -85,10 +85,12 @@ func init() {
 // standard Cosmos signers.
 func noopSignerFn(proto.Message) ([][]byte, error) { return nil, nil }
 
-// ceremonyCreatorSignerFn extracts the signer from a ceremony message's
-// "creator" field (a valoper bech32 address) and returns the corresponding
-// account address bytes. Used for all ceremony messages that have a creator
-// field and go through standard Cosmos SDK signature verification.
+// ceremonyCreatorSignerFn extracts the signer from a message's "creator"
+// field (a valoper or account bech32 address) and returns the corresponding
+// account address bytes. Used by ceremony messages with a creator field
+// (RegisterPallasKey, RotatePallasKey, CreateVotingSession) and by the
+// management message MsgUpdateVoteManagers, all of which go through standard
+// Cosmos SDK signature verification.
 func ceremonyCreatorSignerFn(msg proto.Message) ([][]byte, error) {
 	fd := msg.ProtoReflect().Descriptor().Fields().ByName("creator")
 	if fd == nil {

@@ -115,7 +115,7 @@ var (
 	// Written by EndBlocker when tree root changes. Used by the CommitmentLeaves query.
 	BlockLeafIndexPrefix = []byte{0x08}
 
-	// VoteManagerSetKey stores the singleton vote-manager set: single key -> VoteManagerSet (protobuf).
+	// VoteManagerSetKey stores the vote-manager set under a single KV entry: VoteManagerSet (protobuf).
 	// Any address in the set may authorize vote-manager-gated operations (any-of-N semantics).
 	VoteManagerSetKey = []byte{0x0A}
 

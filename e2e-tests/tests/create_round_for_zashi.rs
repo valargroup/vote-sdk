@@ -21,8 +21,8 @@
 
 use e2e_tests::{
     api::{
-        self, broadcast_cosmos_msg, default_cosmos_tx_config, import_hex_key,
-        wait_for_round_status, SESSION_STATUS_ACTIVE,
+        self, broadcast_cosmos_msg, default_cosmos_tx_config, import_first_vote_manager_key,
+        wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
     },
     payloads::{self, SetupRoundFields},
 };
@@ -30,9 +30,6 @@ use incrementalmerkletree::{Hashable, Level};
 use orchard::tree::MerkleHashOrchard;
 use serde_json::json;
 use std::io::{self, Read};
-
-/// Vote-manager address corresponding to VM_PRIVKEYS[0] used in genesis.
-const VOTE_MANAGER_ADDRESS: &str = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3";
 
 fn log(msg: &str) {
     eprintln!("[create-round] {}", msg);
@@ -312,16 +309,9 @@ fn create_round_for_zashi() {
     e2e_tests::setup::ensure_pallas_key_registered();
 
     // ---- Step 1: Import vote manager key ----
-    let vm_privkey = std::env::var("VM_PRIVKEYS")
-        .expect("VM_PRIVKEYS env var must be set (comma-separated 64-char hex keys)")
-        .split(',')
-        .next()
-        .expect("VM_PRIVKEYS must contain at least one key")
-        .trim()
-        .to_string();
     log("importing vote manager key...");
     let config = default_cosmos_tx_config();
-    import_hex_key("vote-manager-1", &vm_privkey, &config.home_dir);
+    let vote_manager_address = import_first_vote_manager_key(&config.home_dir);
     log("vote manager key ready ✓");
 
     // ---- Step 2: Get snapshot height ----
@@ -361,7 +351,7 @@ fn create_round_for_zashi() {
     log("creating voting session...");
     let body = json!({
         "@type": "/svote.v1.MsgCreateVotingSession",
-        "creator": VOTE_MANAGER_ADDRESS,
+        "creator": vote_manager_address,
         "snapshot_height": snap_height,
         "snapshot_blockhash": to_base64(&snapshot_blockhash),
         "proposals_hash": to_base64(&proposals_hash),
@@ -372,7 +362,7 @@ fn create_round_for_zashi() {
     });
 
     let vm_config = api::CosmosTxConfig {
-        key_name: "vote-manager-1".to_string(),
+        key_name: FIRST_VOTE_MANAGER_KEY_NAME.to_string(),
         home_dir: config.home_dir.clone(),
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),

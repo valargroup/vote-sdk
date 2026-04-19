@@ -720,6 +720,28 @@ pub fn import_hex_key(name: &str, hex_privkey: &str, home_dir: &str) {
     eprintln!("[E2E] Imported key '{}' into keyring at {}", name, home_dir);
 }
 
+/// Keyring name that init.sh assigns to the first vote-manager key (VM_PRIVKEYS[0]).
+pub const FIRST_VOTE_MANAGER_KEY_NAME: &str = "vote-manager-1";
+
+/// Imports the first key from VM_PRIVKEYS into the keyring under
+/// [`FIRST_VOTE_MANAGER_KEY_NAME`] and returns its bech32 account address.
+///
+/// Panics if VM_PRIVKEYS is unset, empty, or the keyring import fails to surface
+/// the imported address. Every e2e test that needs to sign as a vote manager
+/// uses this helper.
+pub fn import_first_vote_manager_key(home_dir: &str) -> String {
+    let vm_privkey = std::env::var("VM_PRIVKEYS")
+        .expect("VM_PRIVKEYS env var must be set (comma-separated 64-char hex keys)")
+        .split(',')
+        .next()
+        .expect("VM_PRIVKEYS must contain at least one key")
+        .trim()
+        .to_string();
+    import_hex_key(FIRST_VOTE_MANAGER_KEY_NAME, &vm_privkey, home_dir);
+    key_account_address(FIRST_VOTE_MANAGER_KEY_NAME, home_dir)
+        .expect("vote-manager-1 key must be in keyring after import")
+}
+
 /// Sign and broadcast a ceremony message via standard Cosmos SDK tx flow,
 /// with retries on transient failures (same retry logic as post_json).
 pub fn broadcast_cosmos_msg_with_retries(

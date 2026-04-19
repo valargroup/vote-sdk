@@ -38,8 +38,9 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use e2e_tests::api::{
     broadcast_cosmos_msg, commitment_tree_latest, commitment_tree_next_index,
     default_cosmos_tx_config, get_all_validator_operator_addresses, get_helper_queue_status,
-    get_round_ea_pk, import_hex_key, post_helper_json, post_json, wait_for_round_status,
-    CosmosTxConfig, HelperQueueStatus, SESSION_STATUS_ACTIVE,
+    get_round_ea_pk, import_first_vote_manager_key, post_helper_json, post_json,
+    wait_for_round_status, CosmosTxConfig, HelperQueueStatus, FIRST_VOTE_MANAGER_KEY_NAME,
+    SESSION_STATUS_ACTIVE,
 };
 use e2e_tests::fixtures::{ensure_voter_fixture_files, resolve_voter_fixture_dir};
 use e2e_tests::metrics::{self, MetricsCollector, Sample};
@@ -53,9 +54,6 @@ use serde::Deserialize;
 use voting_circuits::vote_proof::{
     builder::build_vote_proof_from_delegation, circuit::VOTE_COMM_TREE_DEPTH,
 };
-
-/// Vote-manager address corresponding to VM_PRIVKEYS[0] used in genesis.
-const VOTE_MANAGER_ADDRESS: &str = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3";
 
 // ---------------------------------------------------------------------------
 // Fixture deserialization types (must match generate_fixtures.rs)
@@ -559,17 +557,10 @@ fn voter_throughput_stress() {
     // Setup: create round on-chain with matching round_fields
     // -----------------------------------------------------------------------
     eprintln!("\n--- Setup: creating voting round on-chain ---");
-    let vm_privkey = std::env::var("VM_PRIVKEYS")
-        .expect("VM_PRIVKEYS env var must be set (comma-separated 64-char hex keys)")
-        .split(',')
-        .next()
-        .expect("VM_PRIVKEYS must contain at least one key")
-        .trim()
-        .to_string();
     ensure_pallas_key_registered();
 
     let config = default_cosmos_tx_config();
-    import_hex_key("vote-manager-1", &vm_privkey, &config.home_dir);
+    let vote_manager_address = import_first_vote_manager_key(&config.home_dir);
 
     let rf = &manifest.round_fields;
     let setup_round_fields = e2e_tests::payloads::SetupRoundFields {
@@ -582,11 +573,11 @@ fn voter_throughput_stress() {
     };
 
     let (mut body, _, _derived_round_id) =
-        create_voting_session_payload(VOTE_MANAGER_ADDRESS, 600, Some(setup_round_fields));
+        create_voting_session_payload(&vote_manager_address, 600, Some(setup_round_fields));
     body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
 
     let vm_config = CosmosTxConfig {
-        key_name: "vote-manager-1".to_string(),
+        key_name: FIRST_VOTE_MANAGER_KEY_NAME.to_string(),
         home_dir: config.home_dir.clone(),
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),

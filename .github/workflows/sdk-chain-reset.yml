@@ -1,6 +1,6 @@
 # Reset both validators from genesis: wipe state, re-init primary with
 # deterministic keys, upload genesis to DO Spaces, fund the secondary
-# from the vote-manager, then join secondary.
+# from a vote manager, then join secondary.
 # Manual-only: triggered via workflow_dispatch with a release tag.
 
 name: Reset SDK Chain

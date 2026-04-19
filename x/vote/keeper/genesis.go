@@ -140,7 +140,7 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, error) {
 	gs := &types.GenesisState{}
 
-	// Vote-manager set (singleton).
+	// Vote-manager set.
 	vms, err := k.GetVoteManagers(kvStore)
 	if err != nil {
 		return nil, err

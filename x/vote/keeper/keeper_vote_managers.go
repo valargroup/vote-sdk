@@ -11,7 +11,7 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// GetVoteManagers retrieves the vote-manager set (singleton) from the KV store.
+// GetVoteManagers retrieves the vote-manager set from the KV store.
 // Returns nil, nil if no vote-manager set has been installed yet.
 func (k *Keeper) GetVoteManagers(kvStore store.KVStore) (*types.VoteManagerSet, error) {
 	bz, err := kvStore.Get(types.VoteManagerSetKey)
@@ -29,7 +29,7 @@ func (k *Keeper) GetVoteManagers(kvStore store.KVStore) (*types.VoteManagerSet, 
 	return &set, nil
 }
 
-// SetVoteManagers stores the vote-manager set (singleton) in the KV store. Addresses are
+// SetVoteManagers stores the vote-manager set in the KV store. Addresses are
 // normalized and deduplicated before persist so every read returns canonical
 // bech32, even if callers passed mixed-case or uncanonical forms.
 func (k *Keeper) SetVoteManagers(kvStore store.KVStore, set *types.VoteManagerSet) error {

@@ -27,7 +27,7 @@ flowchart LR
 |----------|---------|-------------|
 | [`release.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/release.yml) | `v*` tag push | Builds `svoted` + admin UI for linux/darwin x amd64/arm64. Creates a GitHub Release with tarballs, uploads to DO Spaces (`s3://vote/`). |
 | [`sdk-chain-deploy.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-deploy.yml) | Manual `workflow_dispatch` | SSHes to both production hosts, runs `install-release.sh --tag <tag>` (download from Spaces, verify checksum, swap symlink, restart `svoted`), polls `localhost:1317` until healthy. Notifies Slack on failure. |
-| [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Full chain reset from genesis. Wipes state on primary, runs `init.sh`, uploads genesis to DO Spaces, funds secondary from the vote-manager, joins secondary via `reset-join.sh`, verifies both hosts. |
+| [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Full chain reset from genesis. Wipes state on primary, runs `init.sh`, uploads genesis to DO Spaces, funds secondary from a vote manager, joins secondary via `reset-join.sh`, verifies both hosts. |
 
 ### GitHub repository secrets
 
