@@ -32,7 +32,9 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 		Environment:      env,
 		ServerName:       serverName,
 		SampleRate:       1.0,
+		TracesSampleRate: 1.0,
 		AttachStacktrace: true,
+		EnableTracing:    true,
 	})
 	if err != nil {
 		return fmt.Errorf("sentry init: %w", err)
