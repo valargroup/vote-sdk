@@ -648,15 +648,15 @@ func (s *MsgServerTestSuite) TestCastVote() {
 // ---------------------------------------------------------------------------
 
 func (s *MsgServerTestSuite) TestUpdateVoteManagers_AnyVoteManagerCanUpdate() {
-	adminA := testAccAddr(20)
-	adminB := testAccAddr(21)
+	vmA := testAccAddr(20)
+	vmB := testAccAddr(21)
 	replacement := testAccAddr(22)
 
 	// Run once per member of the initial {A, B} set to prove any-of-N.
-	for _, caller := range []string{adminA, adminB} {
+	for _, caller := range []string{vmA, vmB} {
 		s.Run("caller="+caller, func() {
 			s.SetupTest()
-			s.seedVoteManagers(adminA, adminB)
+			s.seedVoteManagers(vmA, vmB)
 
 			_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
 				Creator:         caller,
@@ -711,11 +711,11 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_NoVoteManagersRejected() {
 
 func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmptySetRejected() {
 	s.SetupTest()
-	adminA := testAccAddr(10)
-	s.seedVoteManagers(adminA)
+	vmA := testAccAddr(10)
+	s.seedVoteManagers(vmA)
 
 	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
-		Creator:         adminA,
+		Creator:         vmA,
 		NewVoteManagers: nil,
 	})
 	s.Require().ErrorIs(err, types.ErrEmptyVoteManagerSet)
@@ -723,24 +723,24 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmptySetRejected() {
 
 func (s *MsgServerTestSuite) TestUpdateVoteManagers_DuplicatesRejected() {
 	s.SetupTest()
-	adminA := testAccAddr(10)
-	s.seedVoteManagers(adminA)
+	vmA := testAccAddr(10)
+	s.seedVoteManagers(vmA)
 
 	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
-		Creator:         adminA,
-		NewVoteManagers: []string{adminA, adminA},
+		Creator:         vmA,
+		NewVoteManagers: []string{vmA, vmA},
 	})
 	s.Require().ErrorIs(err, types.ErrDuplicateVoteManager)
 }
 
 func (s *MsgServerTestSuite) TestUpdateVoteManagers_InvalidBech32Rejected() {
 	s.SetupTest()
-	adminA := testAccAddr(10)
-	s.seedVoteManagers(adminA)
+	vmA := testAccAddr(10)
+	s.seedVoteManagers(vmA)
 
 	// Non-bech32 string.
 	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
-		Creator:         adminA,
+		Creator:         vmA,
 		NewVoteManagers: []string{"not_a_valid_address"},
 	})
 	s.Require().Error(err)
@@ -748,7 +748,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_InvalidBech32Rejected() {
 
 	// Validator operator address (valoper HRP ≠ account HRP).
 	_, err = s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
-		Creator:         adminA,
+		Creator:         vmA,
 		NewVoteManagers: []string{testValAddr(2)},
 	})
 	s.Require().Error(err)
@@ -757,19 +757,19 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_InvalidBech32Rejected() {
 
 func (s *MsgServerTestSuite) TestUpdateVoteManagers_DoesNotTouchBalances() {
 	s.SetupTest()
-	adminA := testAccAddr(20)
-	adminB := testAccAddr(21)
+	vmA := testAccAddr(20)
+	vmB := testAccAddr(21)
 
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManagers(adminA)
+	s.seedVoteManagers(vmA)
 
 	// Replace {A} with {B}; under the per-vote-manager balance model UpdateVoteManagers
 	// must never move coins. The single load-bearing check is that no
 	// SendCoins call was made.
 	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
-		Creator:         adminA,
-		NewVoteManagers: []string{adminB},
+		Creator:         vmA,
+		NewVoteManagers: []string{vmB},
 	})
 	s.Require().NoError(err)
 	s.Require().Empty(bk.sendCalls, "UpdateVoteManagers must not call SendCoins")
@@ -777,27 +777,27 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_DoesNotTouchBalances() {
 
 func (s *MsgServerTestSuite) TestUpdateVoteManagers_CreatorRemovingSelfAllowed() {
 	s.SetupTest()
-	adminA := testAccAddr(50)
-	adminB := testAccAddr(51)
-	s.seedVoteManagers(adminA, adminB)
+	vmA := testAccAddr(50)
+	vmB := testAccAddr(51)
+	s.seedVoteManagers(vmA, vmB)
 
-	// adminA calls UpdateVoteManagers and removes themselves — allowed as long as
+	// vmA calls UpdateVoteManagers and removes themselves — allowed as long as
 	// the new set is non-empty.
 	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
-		Creator:         adminA,
-		NewVoteManagers: []string{adminB},
+		Creator:         vmA,
+		NewVoteManagers: []string{vmB},
 	})
 	s.Require().NoError(err)
 
 	kv := s.keeper.OpenKVStore(s.ctx)
 	set, err := s.keeper.GetVoteManagers(kv)
 	s.Require().NoError(err)
-	s.Require().Equal([]string{adminB}, set.Addresses)
+	s.Require().Equal([]string{vmB}, set.Addresses)
 
-	// A subsequent call by adminA must now fail (they're no longer in the set).
+	// A subsequent call by vmA must now fail (they're no longer in the set).
 	_, err = s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
-		Creator:         adminA,
-		NewVoteManagers: []string{adminA},
+		Creator:         vmA,
+		NewVoteManagers: []string{vmA},
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not authorized")
@@ -805,13 +805,13 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_CreatorRemovingSelfAllowed()
 
 func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmitsEvent() {
 	s.SetupTest()
-	adminA := testAccAddr(60)
-	adminB := testAccAddr(61)
-	s.seedVoteManagers(adminA)
+	vmA := testAccAddr(60)
+	vmB := testAccAddr(61)
+	s.seedVoteManagers(vmA)
 
 	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
-		Creator:         adminA,
-		NewVoteManagers: []string{adminA, adminB},
+		Creator:         vmA,
+		NewVoteManagers: []string{vmA, vmB},
 	})
 	s.Require().NoError(err)
 
@@ -821,8 +821,8 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmitsEvent() {
 			found = true
 			for _, attr := range e.Attributes {
 				if attr.Key == types.AttributeKeyVoteManagers {
-					s.Require().Contains(attr.Value, adminA)
-					s.Require().Contains(attr.Value, adminB)
+					s.Require().Contains(attr.Value, vmA)
+					s.Require().Contains(attr.Value, vmB)
 				}
 			}
 		}

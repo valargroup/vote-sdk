@@ -44,16 +44,16 @@ apt install -y build-essential
 
 </details>
 
-### Bootstrap vote-manager key
+### Bootstrap vote-manager keys
 
-`scripts/init.sh` imports a 64-char hex secp256k1 key as the `manager` account and writes its address into `app_state.vote.vote_manager` in genesis. Without it the init step exits. Set it via `.env` in the repo root:
+`scripts/init.sh` imports one or more 64-char hex secp256k1 keys as `vote-manager-N` accounts and writes their addresses into `app_state.vote.vote_manager_addresses` in genesis as the any-of-N vote-manager set. Without it the init step exits. Set it via `.env` in the repo root:
 
 ```bash
 cp .env.example .env
-echo "VM_PRIVKEY=$(openssl rand -hex 32)" >> .env
+echo "VM_PRIVKEYS=$(openssl rand -hex 32)" >> .env  # single-VM: one hex key; multi-VM: comma-separated
 ```
 
-Never commit `.env` — in CI the same value is supplied via the `VM_PRIVKEY` secret.
+Never commit `.env` — in CI the same value is supplied via the `VM_PRIVKEYS` secret.
 
 ## Step 1 — Clone and Install the Binary
 
@@ -81,10 +81,10 @@ make install-ffi
 `mise run chain:init` wipes any existing chain data, then runs `scripts/init.sh` which:
 
 1. Runs `svoted init validator --chain-id svote-1`
-2. Creates a `validator` Cosmos key (fresh, per-node) and imports the `manager` account from `VM_PRIVKEY` in `.env`
-3. Adds both accounts to genesis with initial balances (10 000 000 usvote validator, 1 000 000 000 usvote manager)
+2. Creates a `validator` Cosmos key (fresh, per-node) and imports each `vote-manager-N` account from `VM_PRIVKEYS` in `.env`
+3. Adds every account to genesis with initial balances (10 000 000 usvote validator, 1 000 000 000 usvote split evenly across the vote-manager set)
 4. Creates and collects the genesis transaction (10 000 000 usvote self-delegation)
-5. Patches genesis: sets `app_state.vote.vote_manager` to the manager address and zeroes out slashing slash fractions (no token burning)
+5. Patches genesis: sets `app_state.vote.vote_manager_addresses` to the imported addresses and zeroes out slashing slash fractions (no token burning)
 6. Validates `genesis.json`
 7. Enables the REST API on port `1318` with CORS
 8. Sets `timeout_broadcast_tx_commit = 120s` (required for ZKP verification ≈ 30–60 s)
@@ -99,7 +99,7 @@ mise run chain:init
 To inspect what was created:
 
 ```bash
-# Validator and manager addresses
+# Validator and vote-manager addresses
 svoted keys list --keyring-backend test --home ~/.svoted
 
 # Confirm genesis is valid

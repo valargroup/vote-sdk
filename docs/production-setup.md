@@ -99,11 +99,11 @@ Use this for routine upgrades. Chain state is preserved; only the binary is swap
 
 1. **reset-primary**: installs tag, stops svoted, wipes chain state, runs `init.sh` (imports `PRIMARY_VAL_PRIVKEY`) to create fresh genesis, starts svoted
 2. **upload-genesis**: fetches genesis from primary's REST API, uploads to DO Spaces (`s3://vote/genesis.json`)
-3. **fund-secondary**: derives the secondary address from `SECONDARY_VAL_PRIVKEY`, sends 100M usvote from the vote-manager on the primary
+3. **fund-secondary**: derives the secondary address from `SECONDARY_VAL_PRIVKEY`, sends 100M usvote from a vote manager on the primary
 4. **reset-secondary**: installs tag, runs `reset-join.sh` (imports `SECONDARY_VAL_PRIVKEY`), syncs, verifies funding, registers as validator
 5. **verify**: checks both REST APIs
 
-Required secrets: `PRIMARY_HOST`, `SECONDARY_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEY`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SLACK_WEBHOOK_URL`.
+Required secrets: `PRIMARY_HOST`, `SECONDARY_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SLACK_WEBHOOK_URL`.
 
 ## First-Time Bootstrap
 
@@ -111,7 +111,7 @@ After `terraform apply`, run the Reset workflow to initialize the chain:
 
 1. Add GitHub secrets: `PRIMARY_VAL_PRIVKEY` and `SECONDARY_VAL_PRIVKEY` (64-char hex private keys for each validator)
 2. Trigger "Reset SDK Chain" with the desired release tag
-3. The workflow bootstraps genesis on primary, uploads it, funds the secondary from the vote-manager, and joins secondary
+3. The workflow bootstraps genesis on primary, uploads it, funds the secondary from a vote manager, and joins secondary
 4. Verify: `DOMAIN=<your-domain> bash scripts/healthcheck.sh`
 
 ## Manual Operations
@@ -122,7 +122,7 @@ After `terraform apply`, run the Reset workflow to initialize the chain:
 ssh root@<primary-ip>
 export PATH="/opt/shielded-vote/current/bin:$PATH"
 export SVOTED_HOME=/opt/shielded-vote/.svoted
-export VM_PRIVKEY=<64-char-hex>
+export VM_PRIVKEYS=<64-char-hex>  # comma-separated for multi-VM
 export VAL_PRIVKEY=<64-char-hex>  # omit to generate a fresh key
 systemctl stop svoted
 rm -rf /opt/shielded-vote/.svoted/*

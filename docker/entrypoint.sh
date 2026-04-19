@@ -94,8 +94,8 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
 
     # Patch genesis: set vote_manager_addresses (single vote manager here), disable slashing.
     GENESIS="$HOME_DIR/config/genesis.json"
-    jq --arg admin "$VM_ADDR" '
-      .app_state.vote.vote_manager_addresses = [$admin]
+    jq --arg vm "$VM_ADDR" '
+      .app_state.vote.vote_manager_addresses = [$vm]
       | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
       | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
       "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"
