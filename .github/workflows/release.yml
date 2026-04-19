@@ -143,7 +143,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           DIR="shielded-vote-${VERSION}-${{ matrix.platform }}"
-          mkdir -p "${DIR}/bin" "${DIR}/scripts" "${DIR}/config"
+          mkdir -p "${DIR}/bin" "${DIR}/ui" "${DIR}/scripts" "${DIR}/config"
           cp sdk-binaries/svoted sdk-binaries/create-val-tx "${DIR}/bin/"
           chmod +x "${DIR}/bin/"*
           cp -r ui/dist "${DIR}/ui/dist"
