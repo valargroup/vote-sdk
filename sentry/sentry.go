@@ -2,6 +2,7 @@ package sentry
 
 import (
 	"fmt"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -21,9 +22,14 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 	if dsn == "" {
 		return nil
 	}
+	env := os.Getenv("SENTRY_ENVIRONMENT")
+	if env == "" {
+		env = "production"
+	}
 	err := sentrylib.Init(sentrylib.ClientOptions{
 		Dsn:              dsn,
 		Release:          release,
+		Environment:      env,
 		ServerName:       serverName,
 		SampleRate:       1.0,
 		AttachStacktrace: true,
