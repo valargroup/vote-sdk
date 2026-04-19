@@ -46,35 +46,9 @@ echo "Validator valoper: $VALIDATOR_VALOPER"
 # Import the bootstrap vote-manager keys. VM_PRIVKEYS is a comma-separated list
 # of 64-char hex secp256k1 private keys; every derived address becomes a vote
 # manager at genesis (any-of-N). The stake pool is split evenly across the set.
-if [ -z "$VM_PRIVKEYS" ]; then
-    echo "ERROR: VM_PRIVKEYS is not set."
-    echo "  Local dev:  add VM_PRIVKEYS=<hex>[,<hex>...] to .env (see .env.example)"
-    echo "  CI/deploy:  set the VM_PRIVKEYS secret in GitHub Actions"
-    exit 1
-fi
-
-# Parse VM_PRIVKEYS into a clean array: split on commas, trim whitespace on
-# each entry, reject empties. Without this, a leading/trailing/double comma
-# would slip an empty string into the list and `svoted keys import-hex name
-# ""` panics; whitespace inside values passes through untouched and confuses
-# the CLI into printing generic Usage help.
-VM_PRIVKEY_LIST=()
-IFS=',' read -ra _VM_PRIVKEYS_RAW <<< "$VM_PRIVKEYS"
-for raw in "${_VM_PRIVKEYS_RAW[@]}"; do
-    # Bash parameter expansion to trim leading/trailing whitespace.
-    key="${raw#"${raw%%[![:space:]]*}"}"
-    key="${key%"${key##*[![:space:]]}"}"
-    if [ -z "$key" ]; then
-        echo "ERROR: VM_PRIVKEYS contains an empty entry (leading/trailing/double comma?)."
-        echo "       Fix the .env value to be a comma-separated list of non-empty 64-char hex keys."
-        exit 1
-    fi
-    VM_PRIVKEY_LIST+=("$key")
-done
-if [ ${#VM_PRIVKEY_LIST[@]} -eq 0 ]; then
-    echo "ERROR: VM_PRIVKEYS parsed to zero keys."
-    exit 1
-fi
+# shellcheck source=scripts/_vote_manager_keys_lib.sh
+. "$(dirname "$0")/_vote_manager_keys_lib.sh"
+parse_vm_privkeys
 
 # Total stake pool divided evenly across vote managers (preserves total supply).
 TOTAL_VOTE_MANAGER_POOL=1000000000

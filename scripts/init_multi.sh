@@ -290,31 +290,9 @@ echo "Val1 address: $VAL1_ADDR"
 # Import the bootstrap vote-manager keys. VM_PRIVKEYS is a comma-separated list
 # of 64-char hex secp256k1 private keys; every derived address becomes a vote
 # manager at genesis (any-of-N). The stake pool is split evenly across the set.
-if [ -z "$VM_PRIVKEYS" ]; then
-    echo "ERROR: VM_PRIVKEYS is not set."
-    echo "  Local dev:  add VM_PRIVKEYS=<hex>[,<hex>...] to .env (see .env.example)"
-    echo "  CI/deploy:  set the VM_PRIVKEYS secret in GitHub Actions"
-    exit 1
-fi
-
-# Parse VM_PRIVKEYS: split on commas, trim whitespace per entry, reject empties.
-# Matches the hardening in scripts/init.sh; mirrored here because the two
-# scripts don't share code.
-VM_PRIVKEY_LIST=()
-IFS=',' read -ra _VM_PRIVKEYS_RAW <<< "$VM_PRIVKEYS"
-for raw in "${_VM_PRIVKEYS_RAW[@]}"; do
-    key="${raw#"${raw%%[![:space:]]*}"}"
-    key="${key%"${key##*[![:space:]]}"}"
-    if [ -z "$key" ]; then
-        echo "ERROR: VM_PRIVKEYS contains an empty entry (leading/trailing/double comma?)."
-        exit 1
-    fi
-    VM_PRIVKEY_LIST+=("$key")
-done
-if [ ${#VM_PRIVKEY_LIST[@]} -eq 0 ]; then
-    echo "ERROR: VM_PRIVKEYS parsed to zero keys."
-    exit 1
-fi
+# shellcheck source=scripts/_vote_manager_keys_lib.sh
+. "$(dirname "$0")/_vote_manager_keys_lib.sh"
+parse_vm_privkeys
 
 VOTE_MANAGER_ADDRS=()
 for i in "${!VM_PRIVKEY_LIST[@]}"; do
