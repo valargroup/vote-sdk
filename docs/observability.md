@@ -47,8 +47,8 @@ If `app.toml` has a non-empty `sentry_dsn`, it takes precedence over the
 ### CI / deploy
 
 Both the `sdk-chain-deploy` and `sdk-chain-reset` workflows read
-`SENTRY_DSN` from repository secrets and write it to
-`/opt/shielded-vote/.env` on each host. The `svoted.service` systemd unit
+`SENTRY_DSN` from repository secrets and append it to
+`/etc/default/svoted` on each host. The `svoted.service` systemd unit
 loads this file via `EnvironmentFile=`, and the Go binary picks up
 `SENTRY_DSN` at runtime as a fallback when `app.toml` has no `sentry_dsn`.
 

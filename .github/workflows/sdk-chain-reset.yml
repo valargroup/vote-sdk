@@ -46,9 +46,9 @@ jobs:
             # Wipe chain state (preserve the releases dir)
             rm -rf /opt/shielded-vote/.svoted/*
 
-            # Write Sentry DSN for systemd EnvironmentFile
-            echo "SENTRY_DSN=$SENTRY_DSN" > /opt/shielded-vote/.env
-            chmod 600 /opt/shielded-vote/.env
+            # Write Sentry DSN into the systemd EnvironmentFile
+            sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
+            echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
 
             # Run init.sh with deterministic validator key
             export SVOTED_HOME=/opt/shielded-vote/.svoted

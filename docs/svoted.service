@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/shielded-vote
-EnvironmentFile=-/opt/shielded-vote/.env
+EnvironmentFile=-/etc/default/svoted
 ExecStart=/opt/shielded-vote/svoted start --home /opt/shielded-vote/.svoted
 Restart=on-failure
 

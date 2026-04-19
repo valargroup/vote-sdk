@@ -30,8 +30,8 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: SENTRY_DSN
           script: |
-            echo "SENTRY_DSN=$SENTRY_DSN" > /opt/shielded-vote/.env
-            chmod 600 /opt/shielded-vote/.env
+            sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
+            echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -66,8 +66,8 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: SENTRY_DSN
           script: |
-            echo "SENTRY_DSN=$SENTRY_DSN" > /opt/shielded-vote/.env
-            chmod 600 /opt/shielded-vote/.env
+            sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
+            echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
