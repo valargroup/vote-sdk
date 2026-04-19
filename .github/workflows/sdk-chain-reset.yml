@@ -32,7 +32,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG
+          envs: TAG,SENTRY_DSN
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -45,6 +45,10 @@ jobs:
 
             # Wipe chain state (preserve the releases dir)
             rm -rf /opt/shielded-vote/.svoted/*
+
+            # Write Sentry DSN for systemd EnvironmentFile
+            echo "SENTRY_DSN=$SENTRY_DSN" > /opt/shielded-vote/.env
+            chmod 600 /opt/shielded-vote/.env
 
             # Run init.sh with deterministic validator key
             export SVOTED_HOME=/opt/shielded-vote/.svoted
@@ -79,6 +83,8 @@ jobs:
             done
             echo "ERROR: Primary REST API not healthy after 5 minutes."
             exit 1
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
   upload-genesis:
     name: Upload genesis to DO Spaces

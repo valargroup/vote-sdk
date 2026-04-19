@@ -46,9 +46,13 @@ If `app.toml` has a non-empty `sentry_dsn`, it takes precedence over the
 
 ### CI / deploy
 
-The `sdk-chain-reset` GitHub Actions workflow reads `SENTRY_DSN` from
-repository secrets and passes it as `SVOTE_HELPER_SENTRY_DSN` to
-`init_multi.sh` during chain reinitialization. Add the secret at:
+Both the `sdk-chain-deploy` and `sdk-chain-reset` workflows read
+`SENTRY_DSN` from repository secrets and write it to
+`/opt/shielded-vote/.env` on each host. The `svoted.service` systemd unit
+loads this file via `EnvironmentFile=`, and the Go binary picks up
+`SENTRY_DSN` at runtime as a fallback when `app.toml` has no `sentry_dsn`.
+
+Add the secret at:
 
 ```
 Settings > Secrets and variables > Actions > SENTRY_DSN
