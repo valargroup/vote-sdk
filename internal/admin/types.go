@@ -34,5 +34,5 @@ type ServiceEntry struct {
 type VotingConfig struct {
 	Version     int            `json:"version"`
 	VoteServers []ServiceEntry `json:"vote_servers"`
-	PIRServers  []ServiceEntry `json:"pir_servers"`
+	PIRServers  []ServiceEntry `json:"pir_endpoints"`
 }

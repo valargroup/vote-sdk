@@ -87,6 +87,6 @@ func (a *Admin) refresh() error {
 	a.cached = &cfg
 	a.mu.Unlock()
 
-	a.logger.Info("voting config loaded", "vote_servers", len(cfg.VoteServers), "pir_servers", len(cfg.PIRServers))
+	a.logger.Info("voting config loaded", "vote_servers", len(cfg.VoteServers), "pir_endpoints", len(cfg.PIRServers))
 	return nil
 }
