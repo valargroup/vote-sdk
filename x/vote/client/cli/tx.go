@@ -33,7 +33,7 @@ func GetTxCmd() *cobra.Command {
 		CmdRegisterPallasKey(),
 		CmdRotatePallasKey(),
 		CmdCreateValidatorWithPallasKey(),
-		// Admin commands — signed by any current vote manager (any-of-N).
+		// Vote-manager commands — signed by any current vote manager (any-of-N).
 		CmdUpdateVoteManagers(),
 		CmdCreateVotingSession(),
 		CmdSubmitTally(),

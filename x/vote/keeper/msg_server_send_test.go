@@ -92,7 +92,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToOtherVoteMan
 
 func (s *MsgServerTestSuite) TestAuthorizedSend_ValidatorCanSendToVoteManager() {
 	// Parametrize over every vm in a multi-vm set — proves the recipient
-	// check iterates the full set (not e.g. only admins[0]).
+	// check iterates the full set (not e.g. only vms[0]).
 	vmA := testAccAddr(1)
 	vmB := testAccAddr(2)
 	vmC := testAccAddr(3)
@@ -348,10 +348,10 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 // AuthorizedSend — revoked-vm balance freeze
 // ---------------------------------------------------------------------------
 //
-// After MsgUpdateVoteManagers removes an vm, the ex-vm's remaining balance
-// is one-way frozen: they can't send to anyone (not an vm, not a
-// validator), and bonded validators can't send to them either. Active
-// admins can still send to them. These three tests pin that behavior.
+// After MsgUpdateVoteManagers removes a vote manager, their remaining balance
+// is one-way frozen: they can't send to anyone (not a vote manager, not a
+// validator), and bonded validators can't send to them either. Active vote
+// managers can still send to them. These three tests pin that behavior.
 
 func (s *MsgServerTestSuite) TestAuthorizedSend_RevokedVoteManagerCannotSend() {
 	s.SetupTest()
@@ -361,7 +361,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_RevokedVoteManagerCannotSend() {
 
 	vmA := testAccAddr(1)
 	revoked := testAccAddr(2)
-	s.seedVoteManagers(vmA) // revoked was previously an vm but isn't now
+	s.seedVoteManagers(vmA)
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: revoked,
@@ -382,7 +382,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToRevokedVoteM
 	revoked := testAccAddr(2)
 	s.seedVoteManagers(vmA)
 
-	// Admins-send-to-anyone takes the early-return path; no validator check.
+	// Vote-managers-send-to-anyone takes the early-return path; no validator check.
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
 		FromAddress: vmA,
 		ToAddress:   revoked,

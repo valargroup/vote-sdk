@@ -141,12 +141,12 @@ func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, erro
 	gs := &types.GenesisState{}
 
 	// Vote-manager set (singleton).
-	admins, err := k.GetVoteManagers(kvStore)
+	vms, err := k.GetVoteManagers(kvStore)
 	if err != nil {
 		return nil, err
 	}
-	if admins != nil {
-		gs.VoteManagerAddresses = admins.Addresses
+	if vms != nil {
+		gs.VoteManagerAddresses = vms.Addresses
 	}
 
 	// Min ceremony validators (singleton).

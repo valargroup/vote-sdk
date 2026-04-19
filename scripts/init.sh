@@ -121,8 +121,8 @@ VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .
 # signed_blocks_window (100), min_signed_per_window (0.5), and
 # downtime_jail_duration (600s) are acceptable.
 GENESIS="$HOME_DIR/config/genesis.json"
-jq --argjson admins "$VOTE_MANAGER_JSON" '
-  .app_state.vote.vote_manager_addresses = $admins
+jq --argjson vms "$VOTE_MANAGER_JSON" '
+  .app_state.vote.vote_manager_addresses = $vms
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"

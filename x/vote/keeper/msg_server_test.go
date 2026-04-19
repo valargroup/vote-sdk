@@ -153,7 +153,7 @@ func (s *MsgServerTestSuite) setupWithMockStaking(valAddrs ...string) {
 	s.setupWithMockStakingKeeper(newMockStakingKeeper(valAddrs...))
 }
 
-// seedVoteManagers installs an admin set with the given addresses in the KV store.
+// seedVoteManagers installs a vote-manager set with the given addresses in the KV store.
 func (s *MsgServerTestSuite) seedVoteManagers(addrs ...string) {
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{Addresses: addrs}))
@@ -764,7 +764,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_DoesNotTouchBalances() {
 	s.setupWithMockBankKeeper(bk)
 	s.seedVoteManagers(adminA)
 
-	// Replace {A} with {B}; under the per-admin balance model UpdateVoteManagers
+	// Replace {A} with {B}; under the per-vote-manager balance model UpdateVoteManagers
 	// must never move coins. The single load-bearing check is that no
 	// SendCoins call was made.
 	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
@@ -831,7 +831,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmitsEvent() {
 }
 
 // ---------------------------------------------------------------------------
-// CreateVotingSession: admin gating tests
+// CreateVotingSession: vote-manager gating tests
 // ---------------------------------------------------------------------------
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWithNoVoteManagers() {
@@ -857,18 +857,18 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotVoteM
 }
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsForEachVoteManager() {
-	adminA := testAccAddr(90)
-	adminB := testAccAddr(91)
-	adminC := testAccAddr(92)
+	vmA := testAccAddr(90)
+	vmB := testAccAddr(91)
+	vmC := testAccAddr(92)
 
-	for _, admin := range []string{adminA, adminB, adminC} {
-		s.Run("admin="+admin, func() {
+	for _, vm := range []string{vmA, vmB, vmC} {
+		s.Run("vm="+vm, func() {
 			s.SetupTest()
 			s.seedEligibleValidators(2)
-			s.seedVoteManagers(adminA, adminB, adminC)
+			s.seedVoteManagers(vmA, vmB, vmC)
 
 			msg := validSetupMsg()
-			msg.Creator = admin
+			msg.Creator = vm
 			resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 			s.Require().NoError(err)
 			s.Require().NotEmpty(resp.VoteRoundId)
@@ -879,11 +879,11 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsForEachVoteManager(
 func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	s.SetupTest()
 	s.seedEligibleValidators(2)
-	admin := testAccAddr(95)
-	s.seedVoteManagers(admin)
+	vm := testAccAddr(95)
+	s.seedVoteManagers(vm)
 
 	msg := validSetupMsg()
-	msg.Creator = admin
+	msg.Creator = vm
 	msg.Description = "Test round description"
 	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().NoError(err)
@@ -898,11 +898,11 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 // Bech32 canonicalization
 // ---------------------------------------------------------------------------
 //
-// SetVoteManagers normalizes every admin address through AccAddressFromBech32 →
-// .String() before persist, so reads always return canonical (lowercase)
-// bech32. ValidateVoteManagerOnly / IsVoteManager normalize the caller the same way.
-// An admin submitting an uppercase variant of their stored lowercase
-// address must still authenticate.
+// SetVoteManagers normalizes every vote-manager address through
+// AccAddressFromBech32 → .String() before persist, so reads always return
+// canonical (lowercase) bech32. ValidateVoteManagerOnly / IsVoteManager
+// normalize the caller the same way. A vote manager submitting an uppercase
+// variant of their stored lowercase address must still authenticate.
 
 func (s *MsgServerTestSuite) TestVoteManagers_CanonicalizedOnSetAndMatchedOnCall() {
 	s.SetupTest()

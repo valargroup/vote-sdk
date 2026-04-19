@@ -350,9 +350,9 @@ done
 # Save val1 address too.
 echo "$VAL1_ADDR" > "$HOME_VAL1/validator_address.txt"
 
-# Add genesis accounts for all 3 validators and every admin. The admin stake
-# pool (VOTE_MANAGER_BALANCE) is split evenly across vote managers to preserve total supply
-# regardless of N.
+# Add genesis accounts for all 3 validators and every vote manager. The
+# vote-manager stake pool (VOTE_MANAGER_BALANCE) is split evenly across vote
+# managers to preserve total supply regardless of N.
 $BINARY genesis add-genesis-account "$VAL1_ADDR" "$VAL1_SELF_DELEGATION" \
     --keyring-backend test --home "$HOME_VAL1"
 
@@ -394,8 +394,8 @@ VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .
 # Patch genesis: set vote_manager_addresses to the imported keys' addresses and zero
 # out slashing slash fractions (no token burn).
 GENESIS="$HOME_VAL1/config/genesis.json"
-jq --argjson admins "$VOTE_MANAGER_JSON" '
-  .app_state.vote.vote_manager_addresses = $admins
+jq --argjson vms "$VOTE_MANAGER_JSON" '
+  .app_state.vote.vote_manager_addresses = $vms
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"

@@ -32,7 +32,7 @@ func TestExportImportGenesis(t *testing.T) {
 
 	// --- Populate state ---
 
-	// Admin set.
+	// Vote-manager set.
 	require.NoError(t, k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}}))
 
 	// Vote rounds.
@@ -278,10 +278,10 @@ func TestExportImportGenesis(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "svvaloper1abc", owner)
 
-	// Verify admin set.
-	admins, err := k2.GetVoteManagers(kvStore2)
+	// Verify vote-manager set.
+	vms, err := k2.GetVoteManagers(kvStore2)
 	require.NoError(t, err)
-	require.Equal(t, []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}, admins.Addresses)
+	require.Equal(t, []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}, vms.Addresses)
 
 	// Verify commitment roots (per-round).
 	rootVal, err := k2.GetCommitmentRootAtHeight(kvStore2, roundID, 10)
