@@ -3,6 +3,7 @@ package sentry
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -11,6 +12,12 @@ import (
 )
 
 var sentryEnabled atomic.Bool
+
+// knownNoisyErrorSignatures are non-actionable error strings observed in
+// Sentry that do not originate from vote-sdk runtime code.
+var knownNoisyErrorSignatures = []string{
+	"has no method 'updatefrom'",
+}
 
 // InitSentry initializes the Sentry SDK with the given DSN. If dsn is empty,
 // Sentry remains disabled and all capture calls become no-ops. The release
@@ -35,6 +42,7 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 		TracesSampleRate: 1.0,
 		AttachStacktrace: true,
 		EnableTracing:    true,
+		BeforeSend:       filterNoisyErrorEvents,
 	})
 	if err != nil {
 		return fmt.Errorf("sentry init: %w", err)
@@ -48,6 +56,41 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 	logger.Info("sentry error tracking enabled", "server_name", serverName)
 
 	return nil
+}
+
+func filterNoisyErrorEvents(event *sentrylib.Event, _ *sentrylib.EventHint) *sentrylib.Event {
+	if event == nil {
+		return nil
+	}
+	if shouldDropEvent(event) {
+		return nil
+	}
+	return event
+}
+
+func shouldDropEvent(event *sentrylib.Event) bool {
+	if matchesNoisySignature(event.Message) {
+		return true
+	}
+	for _, ex := range event.Exception {
+		if matchesNoisySignature(ex.Value) || matchesNoisySignature(ex.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesNoisySignature(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	for _, sig := range knownNoisyErrorSignatures {
+		if strings.Contains(lower, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 // FlushSentry drains buffered events before shutdown.
