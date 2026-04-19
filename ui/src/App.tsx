@@ -974,7 +974,10 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
       } else {
         setVmTxHash(result.tx_hash);
         setVmTxStatus("ok");
-        setVoteManagers(newVoteManagers);
+        // Re-fetch to get the canonical (lowercase) form the chain stored,
+        // not the user-typed form which may be mixed-case.
+        const vmResp = await chainApi.getVoteManagers();
+        setVoteManagers(vmResp.vote_manager_addresses ?? []);
       }
     } catch (err) {
       setVmTxError(err instanceof Error ? err.message : String(err));

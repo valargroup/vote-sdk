@@ -203,38 +203,18 @@ helper_url = "$HELPER_URL"
 sentry_dsn = "$HELPER_SENTRY_DSN"
 HELPERCFG
 
-# Append [admin] section.
+# Append [admin] section. The admin server is a thin CDN-config proxy; the
+# only recognized key is `disable`. See internal/admin/types.go Config struct.
 ADMIN_DISABLE="${SVOTE_ADMIN_DISABLE:-true}"
-ADMIN_ADDRESS="${SVOTE_ADMIN_ADDRESS:-${VOTE_MANAGER_ADDRS[0]}}"
 cat >> "$APP_TOML" <<ADMINCFG
 
 ###############################################################################
-###                         Admin Server                                    ###
+###                         Admin Server (CDN config proxy)                 ###
 ###############################################################################
 
 [admin]
 
-# Set to true to disable the admin server (server directory, registration,
-# health monitoring).
 disable = $ADMIN_DISABLE
-
-# Path to the admin SQLite database. Empty = default (\$HOME/.svoted/admin.db).
-db_path = ""
-
-# Bootstrap admin address for approve/reject operations.
-admin_address = "$ADMIN_ADDRESS"
-
-# How often to probe vote servers for health (seconds).
-probe_interval = 1800
-
-# How often to check for stale pulses (seconds).
-evict_interval = 120
-
-# How long a server can go without a pulse before being excluded (seconds).
-stale_threshold = 21600
-
-# PIR server list (JSON array). Included in the voting-config response.
-pir_servers = ""
 ADMINCFG
 
 # Append [ui] section.
