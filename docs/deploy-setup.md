@@ -1,10 +1,88 @@
-# Auto-deploy setup for SDK chain (svoted) — 3-validator
+# Deploy setup for svoted
 
-The workflow `.github/workflows/sdk-chain-deploy.yml` builds svoted (with circuits FFI) and the admin UI on every push to `main` and deploys a 3-validator chain to a single remote host via SSH. On `reset_chain`, the chain is fully re-initialized and validators are registered so the chain is immediately ready for use.
+This guide covers the production two-host deployment and the dev single-host
+three-validator setup.
 
-## Port layout
+- **Production**: Two DigitalOcean Droplets (primary + secondary), each running
+  one validator. Infrastructure managed by [vote-infrastructure](https://github.com/valargroup/vote-infrastructure).
+  See also [production-setup.md](production-setup.md) for bootstrap and manual operations.
+- **Dev / staging**: Three validators on a single host with non-overlapping
+  ports, for local development and CI testing.
 
-All three validators run on the same host with non-overlapping port sets:
+---
+
+## CI/CD workflows
+
+```mermaid
+flowchart LR
+    tag["git tag v*"] --> release["release.yml\nbuild + GitHub Release\n+ DO Spaces"]
+    release --> deploy["sdk-chain-deploy.yml\nSSH install-release.sh\non both validators"]
+    deploy --> health["health check\nlocalhost:1317"]
+    manual["workflow_dispatch"] -.-> deploy
+    reset["sdk-chain-reset.yml\nwipe + re-init genesis"] -.-> primary["primary"]
+    reset -.-> secondary["secondary"]
+```
+
+| Workflow | Trigger | What it does |
+|----------|---------|-------------|
+| [`release.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/release.yml) | `v*` tag push | Builds `svoted` + admin UI for linux/darwin x amd64/arm64. Creates a GitHub Release with tarballs, uploads to DO Spaces (`s3://vote/`). |
+| [`sdk-chain-deploy.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-deploy.yml) | Manual `workflow_dispatch` | SSHes to both production hosts, runs `install-release.sh --tag <tag>` (download from Spaces, verify checksum, swap symlink, restart `svoted`), polls `localhost:1317` until healthy. Notifies Slack on failure. |
+| [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Full chain reset from genesis. Wipes state on primary, runs `init.sh`, uploads genesis to DO Spaces, funds secondary from the vote-manager, joins secondary via `reset-join.sh`, verifies both hosts. |
+
+### GitHub repository secrets
+
+| Secret | Used by | Description |
+|--------|---------|-------------|
+| `PRIMARY_HOST` | deploy, reset | Hostname or IP of the primary validator. |
+| `SECONDARY_HOST` | deploy, reset | Hostname or IP of the secondary validator. |
+| `DEPLOY_USER` | deploy, reset | SSH username on both hosts. |
+| `SSH_PRIVATE_KEY` | deploy, reset | SSH private key for authentication. |
+| `VM_PRIVKEY` | reset | 64-char hex secp256k1 private key for the vote-manager account. |
+| `PRIMARY_VAL_PRIVKEY` | reset | 64-char hex private key for the primary validator. |
+| `SECONDARY_VAL_PRIVKEY` | reset | 64-char hex private key for the secondary validator. |
+| `DOMAIN` | reset | Base domain (e.g. `valargroup.org`). |
+| `DO_ACCESS_KEY` | release, reset | DigitalOcean Spaces access key. |
+| `DO_SECRET_KEY` | release, reset | DigitalOcean Spaces secret key. |
+| `SLACK_WEBHOOK_URL` | deploy, reset | Slack incoming webhook for failure notifications. |
+
+---
+
+## Production layout
+
+Two hosts, each running a single `svoted` process under systemd with Caddy for
+TLS termination. Infrastructure is provisioned by Terraform in
+[vote-infrastructure](https://github.com/valargroup/vote-infrastructure).
+
+```
+/opt/shielded-vote/
+  current -> releases/v1.2.3     # symlink, swapped atomically
+  releases/
+    v1.2.3/
+      bin/svoted
+      ui/dist/                   # admin UI (primary only)
+  .svoted/                       # chain data (on block volume)
+  install-release.sh
+```
+
+| Host | Systemd unit | REST API | Caddy hostnames |
+|------|-------------|----------|-----------------|
+| vote-primary | `svoted.service` + `primary.conf` override | `:1317` | `vote-chain-primary.<domain>`, `svote.<domain>`, `vote-rpc-primary.<domain>` |
+| vote-secondary | `svoted.service` | `:1317` | `vote-chain-secondary.<domain>` |
+
+The primary override adds `--serve-ui --ui-dist /opt/shielded-vote/current/ui/dist`
+to serve the admin UI. The secondary runs the chain only.
+
+See [production-setup.md](production-setup.md) for first-time bootstrap, manual
+operations, and failover runbook.
+
+---
+
+## Dev single-host setup (3 validators)
+
+For local development and CI testing, three validators run on the same host with
+non-overlapping port sets.
+
+### Port layout
 
 | Validator | P2P   | RPC   | REST API | pprof |
 |-----------|-------|-------|----------|-------|
@@ -12,122 +90,67 @@ All three validators run on the same host with non-overlapping port sets:
 | val2      | 26256 | 26257 | 1518     | 6260  |
 | val3      | 26356 | 26357 | 1618     | 6360  |
 
-Val1 is the genesis validator and is the primary API endpoint (reverse-proxied by Caddy). Val2 and val3 join after chain start via `MsgCreateValidatorWithPallasKey`.
-
-## 1. GitHub repository secrets
-
-In the repo: **Settings → Secrets and variables → Actions**, add:
-
-| Secret             | Scope       | Description                                                          |
-| ------------------ | ----------- | -------------------------------------------------------------------- |
-| `DEPLOY_HOST`      | Repository  | Remote hostname or IP (e.g. `chain.example.com`).                    |
-| `DEPLOY_USER`      | Repository  | SSH user on that host (e.g. `deploy` or `root`).                     |
-| `SSH_PASSWORD`     | Repository  | SSH password for that user.                                          |
-| `VM_PRIVKEY`       | Repository  | 64-char hex secp256k1 private key for the bootstrap vote-manager.    |
-| `CEREMONY_SSH_KEY` | Environment (`production`) | Ed25519 private key for ceremony bootstrap SSH.       |
-
-Generate `VM_PRIVKEY` with `openssl rand -hex 32`. This key is imported as the vote-manager account during chain initialization. **Never commit it to the repository** — locally it is loaded from `.env` (see `.env.example`).
-
-The `CEREMONY_SSH_KEY` secret lives in the GitHub **production** environment (Settings → Environments → production). Generate the keypair and authorize it on the remote:
-
-```bash
-ssh-keygen -t ed25519 -C "github-actions-ceremony" -f /tmp/shielded-vote-ci-key -N ""
-# Add public key to remote
-cat /tmp/shielded-vote-ci-key.pub | ssh root@<DEPLOY_HOST> 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys'
-# Copy private key contents into the CEREMONY_SSH_KEY secret
-cat /tmp/shielded-vote-ci-key
-```
-
-## 2. One-time setup on the remote host
-
-### Deploy directory
-
-```bash
-sudo mkdir -p /opt/shielded-vote
-sudo chown $DEPLOY_USER:$DEPLOY_USER /opt/shielded-vote
-```
+Val1 is the genesis validator and primary API endpoint. Val2 and val3 join after
+chain start via `MsgCreateValidatorWithPallasKey`.
 
 ### Systemd units
 
-Install all three validator unit files and enable them:
+Unit files in `docs/svoted-val{1,2,3}.service`:
+
+| Unit | Home directory | Notes |
+|------|---------------|-------|
+| svoted-val1 | `/opt/shielded-vote/.svoted-val1` | `--serve-ui --ui-dist /opt/shielded-vote/ui/dist` |
+| svoted-val2 | `/opt/shielded-vote/.svoted-val2` | |
+| svoted-val3 | `/opt/shielded-vote/.svoted-val3` | |
+
+Install:
 
 ```bash
-sudo cp sdk/docs/svoted-val1.service /etc/systemd/system/
-sudo cp sdk/docs/svoted-val2.service /etc/systemd/system/
-sudo cp sdk/docs/svoted-val3.service /etc/systemd/system/
+sudo cp docs/svoted-val{1,2,3}.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable svoted-val1 svoted-val2 svoted-val3
 ```
 
-Each unit starts `svoted` with a separate `--home` directory. Val1 additionally serves the admin UI via `--serve-ui --ui-dist`:
+No pre-existing chain data is needed -- `init_multi.sh --ci` initializes
+everything.
 
-| Unit          | Home directory                   | Notes                                     |
-|---------------|----------------------------------|--------------------------------------------|
-| svoted-val1   | /opt/shielded-vote/.svoted-val1  | `--serve-ui --ui-dist /opt/shielded-vote/ui/dist` |
-| svoted-val2   | /opt/shielded-vote/.svoted-val2  |                                            |
-| svoted-val3   | /opt/shielded-vote/.svoted-val3  |                                            |
+### Caddy reverse proxy
 
-Service files are **auto-deployed** by the CI pipeline on each deploy (copied from `docs/svoted-val*.service` in the repo to `/etc/systemd/system/` with `daemon-reload`). The manual `cp` above is only needed for the initial `systemctl enable`.
-
-No pre-existing chain data is needed — the first deploy with `reset_chain=true` will initialize everything.
-
-## 3. What happens on each deploy
-
-### Binary-only update (default, `reset_chain=false`)
-
-1. **Build**: Go + Rust circuits are compiled, producing `svoted`, `create-val-tx`, and `init_multi.sh`. The admin UI is built (`cd ui && npm install && npm run build`).
-2. **Deploy**: Binaries, scripts, `ui/dist`, and `docs/svoted-val*.service` files are SCP'd to `/opt/shielded-vote`.
-3. **Stop**: `svoted-val1/2/3` are stopped and ports confirmed free.
-4. **Install units**: Updated service files are copied to `/etc/systemd/system/` and `systemctl daemon-reload` runs.
-5. **Start**: All three services are restarted with the new binary and UI.
-6. **Verify**: Val1's API (port 1418), helper server, and admin UI are checked.
-
-### Full reset (`reset_chain=true`)
-
-Steps 1–4 are the same, then:
-
-5. **Init**: `init_multi.sh --ci` runs with `HOME=/opt/shielded-vote`, initializing fresh home directories for all three validators. Val2 and val3 get their genesis, keys, and port config; val1 also gets the helper and admin servers configured.
-6. **Start**: All three services started.
-7. **Register**: `create-val-tx` registers val2 and val3 as post-genesis validators via val1's REST API. A 6-second wait follows the last registration to ensure the tx is committed before restarts.
-8. **Restart**: All three services are restarted (staggered, 5s apart) so helpers re-register with bonded validators.
-9. **Verify**: Service health + chain API + helper server + admin UI checked.
-
-## 4. Caddy reverse proxy
-
-Caddy proxies HTTPS traffic to val1's REST API (port 1418), which also serves the admin UI. Update and reload:
+Caddy proxies HTTPS traffic to val1's REST API (port 1418), which also serves
+the admin UI:
 
 ```bash
-make caddy   # from the sdk/ directory
+sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+sudo systemctl restart caddy
 ```
 
-Or manually:
+---
 
-```bash
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl restart caddy
-```
+## Helper server configuration
 
-## 5. Manual runs
+The helper server runs inside `svoted` on **val1 / primary only** and shares
+the REST API port. It is configured in `app.toml` under `[helper]` (written by
+`init_multi.sh --ci` in dev, or `init.sh` in production):
 
-The workflow has `workflow_dispatch`, so you can run it from **Actions → Deploy SDK chain → Run workflow** without pushing to `main`. Enable `reset_chain` to wipe and reinitialize the chain.
+| Key | Default | Description |
+|-----|---------|-------------|
+| `disable` | `false` | Set to `true` to disable the helper server entirely. |
+| `api_token` | `""` | Optional token for `POST /shielded-vote/v1/shares` (`X-Helper-Token` header). |
+| `db_path` | `""` | Path to SQLite database. Empty = `$HOME/helper.db`. |
+| `process_interval` | `5` | How often to check for ready shares (seconds). |
+| `chain_api_port` | `1418` | Port of the REST API (for `MsgRevealShare` submission). In production this is `1317`. |
+| `max_concurrent_proofs` | `2` | Maximum parallel proof generation goroutines (~500 MB RAM each). |
 
-## 6. Helper server configuration
+## Admin UI
 
-The helper server runs inside `svoted` on **val1 only** and shares val1's REST API port (1418). It is configured in `/opt/shielded-vote/.svoted-val1/config/app.toml` under `[helper]` (written by `init_multi.sh --ci`):
+The admin UI is a React SPA (Vite + TypeScript) in `ui/`. It is served
+in-process by `svoted` via the `--serve-ui --ui-dist` flags. In production,
+Caddy reverse-proxies it at `https://svote.<domain>/`.
 
-| Key                     | Default | Description                                                                                               |
-| ----------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
-| `disable`               | `false` | Set to `true` to disable the helper server entirely.                                                      |
-| `api_token`             | `""`    | Optional token for `POST /shielded-vote/v1/shares` (`X-Helper-Token` header).                              |
-| `db_path`               | `""`    | Path to SQLite database. Empty = `$HOME/.svoted-val1/helper.db`.                                          |
-| `process_interval`      | `5`     | How often to check for ready shares (seconds).                                                            |
-| `chain_api_port`        | `1418`  | Port of val1's REST API (for `MsgRevealShare` submission).                                                 |
-| `max_concurrent_proofs` | `2`     | Maximum parallel proof generation goroutines (~500MB RAM each).                                           |
-
-## 7. Admin UI
-
-The admin UI is a React SPA (Vite + TypeScript) that lives in `ui/` and is built during CI. It is served **in-process** by `svoted` on val1's REST API port (1418) via the `--serve-ui --ui-dist` flags. Caddy reverse-proxies it at `https://46-101-255-48.sslip.io/`.
-
-The UI uses same-origin relative paths for all API calls (`/cosmos/...`, `/shielded-vote/...`, `/api/...`), so it works without any hardcoded server URLs. A `[ui]` section exists in `app.toml` (`enable`, `dist_path`) but is superseded by the CLI flags on the systemd unit.
+The UI uses same-origin relative paths for all API calls (`/cosmos/...`,
+`/shielded-vote/...`, `/api/...`), so it works without hardcoded server URLs.
+A `[ui]` section in `app.toml` (`enable`, `dist_path`) exists but is superseded
+by the CLI flags on the systemd unit.
 
 To build and test locally:
 
@@ -135,50 +158,57 @@ To build and test locally:
 make start-admin   # builds UI then starts svoted with --serve-ui
 ```
 
-## 8. Admin server configuration
+## Admin server configuration
 
-The admin server is a thin proxy that fetches the voting-config JSON from the GitHub Pages CDN (`valargroup/token-holder-voting-config`). Server registration, approval, and removal happen via PRs on that config repo — no write endpoints here.
+The admin server is a thin proxy that fetches the
+[voting-config JSON](https://valargroup.github.io/token-holder-voting-config/voting-config.json)
+from the GitHub Pages CDN. Server registration, approval, and removal happen via
+PRs on the [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config)
+repo -- no write endpoints here.
 
-It runs inside `svoted` on **val1 only** and shares val1's REST API port. It is configured in `app.toml` under `[admin]` (written by `init_multi.sh --ci`):
+It runs inside `svoted` on **val1 / primary only** and shares the REST API
+port. It is configured in `app.toml` under `[admin]`:
 
-| Key          | Default  | Description                                                                                |
-| ------------ | -------- | ------------------------------------------------------------------------------------------ |
-| `disable`    | `true`   | Set to `false` to enable the config proxy on this validator.                               |
-| `config_url` | (CDN)    | GitHub Pages CDN URL for the voting-config JSON.                                           |
+| Key | Default | Description |
+|-----|---------|-------------|
+| `disable` | `true` | Set to `false` to enable the config proxy. |
+| `config_url` | (CDN) | GitHub Pages CDN URL for the voting-config JSON. |
 
 A single read-only endpoint is served: `GET /api/voting-config`.
 
-## 9. Deploy health checks
+## Health checks
 
-After services are started, the workflow verifies:
-1. All three systemd services (`svoted-val1/2/3`) are active
-2. Val1's chain API responds at `http://localhost:1418/shielded-vote/v1/rounds`
-3. Val1's helper server responds at `http://localhost:1418/shielded-vote/v1/status`
-4. Val1's admin UI responds at `http://localhost:1418/` (contains `<div id="root">`)
-5. Val1's admin API responds at `http://localhost:1418/api/voting-config`
+After services are started, CI verifies:
 
-If any check fails, the deploy step fails with `journalctl` output for debugging.
+1. Systemd services are active
+2. Chain REST API responds at `/shielded-vote/v1/rounds`
+3. Helper server responds at `/shielded-vote/v1/status`
+4. Admin UI responds at `/` (contains `<div id="root">`)
+5. Admin API responds at `/api/voting-config`
 
-## 10. Checking logs on the remote
+## Checking logs
 
 ```bash
-# Val1 (primary — chain API, helper server)
-sudo journalctl -u svoted-val1 -f
+# Production (single validator per host)
+journalctl -u svoted -f
+journalctl -u caddy -f
 
-# Val2 / Val3
-sudo journalctl -u svoted-val2 -f
-sudo journalctl -u svoted-val3 -f
-
-# Or tail log files directly
-tail -f /opt/shielded-vote/.svoted-val1/node.log
+# Dev (3 validators on one host)
+journalctl -u svoted-val1 -f
+journalctl -u svoted-val2 -f
+journalctl -u svoted-val3 -f
 ```
 
-## 11. PIR server (nf-server)
+## PIR server (nf-server)
 
-The `nf-server` binary from [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) runs as a separate service (not embedded in `svoted`). See that repo for build, data bootstrap, and systemd setup instructions.
+The `nf-server` binary from [vote-nullifier-pir](https://github.com/valargroup/vote-nullifier-pir)
+runs as a separate service (not embedded in `svoted`). See that repo's
+[deploy-setup.md](https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/deploy-setup.md)
+for build, data bootstrap, and systemd setup.
 
-`svoted` communicates with `nf-server` over HTTP via the `SVOTE_PIR_URL` environment variable. The val1 systemd unit sets `SVOTE_PIR_URL=http://localhost:3000` by default. If `nf-server` runs on a different host or port, update the variable accordingly.
+In production, the PIR servers run on dedicated hosts (`pir-primary.<domain>`,
+`pir-backup.<domain>`) managed by [vote-infrastructure](https://github.com/valargroup/vote-infrastructure).
 
-## 12. Same host as nullifier-ingest
-
-If the same machine is used for both nullifier-ingest and the SDK chain, that's fine — they use different deploy paths (`/opt/nullifier-ingest` vs `/opt/shielded-vote`) and different systemd units.
+In the dev single-host setup, `nf-server` listens on `localhost:3000` and
+`svoted` communicates with it via `SVOTE_PIR_URL=http://localhost:3000` (set in
+the val1 systemd unit).
