@@ -217,7 +217,6 @@ function App() {
         snapshotHeight,
         voteEndTime,
         proposals,
-        nullifierApiBase: nullifierApiBase(),
         description: round.settings.description || round.name,
         title: round.name,
         discussionURL: round.settings.discussionURL || "",
@@ -837,24 +836,17 @@ interface NullifierStatus {
   nullifier_count: number;
 }
 
-const NULLIFIER_BASE_URL = import.meta.env.VITE_NULLIFIER_URL || "";
-
-function nullifierApiBase(): string {
-  if (!NULLIFIER_BASE_URL && import.meta.env.DEV) {
-    return "/nullifier";
-  }
-  return NULLIFIER_BASE_URL || "/nullifier";
-}
-
-function useNullifierStatus() {
+function useNullifierStatus(baseUrl?: string) {
   const [data, setData] = useState<NullifierStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const base = baseUrl ?? chainApi.getNullifierApiBase();
+
   const refresh = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetch(`${nullifierApiBase()}/root`)
+    fetch(`${base}/root`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -867,9 +859,8 @@ function useNullifierStatus() {
         setError(err instanceof Error ? err.message : String(err));
         setLoading(false);
       });
-  }, []);
+  }, [base]);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch on mount
   useEffect(() => { refresh(); }, [refresh]);
 
   return { data, loading, error, refresh };
@@ -878,11 +869,28 @@ function useNullifierStatus() {
 function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [rpcUrl, setRpcUrl] = useState(getStoredRpc);
   const chain = useChainInfo();
-  const nullifier = useNullifierStatus();
+  const [selectedNullifierUrl, setSelectedNullifierUrl] = useState(chainApi.getNullifierUrl);
+  const nullifier = useNullifierStatus(selectedNullifierUrl || undefined);
   const isCustom = !LIGHTWALLETD_ENDPOINTS.some((e) => e.url === rpcUrl);
+
+  // Voting config (PIR endpoints + vote servers)
+  const [votingConfig, setVotingConfig] = useState<chainApi.VotingConfig | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
+  const pirEndpoints = votingConfig?.pir_endpoints ?? [];
+  const voteServers = votingConfig?.vote_servers ?? [];
+  const isCustomNullifier = configLoaded && selectedNullifierUrl !== "" && !pirEndpoints.some((e) => e.url === selectedNullifierUrl);
+
+  useEffect(() => {
+    chainApi.getVotingConfig().then((cfg) => {
+      if (cfg) setVotingConfig(cfg);
+      setConfigLoaded(true);
+    });
+  }, []);
 
   // Voting chain state
   const [chainUrl, setChainUrlLocal] = useState(chainApi.getChainUrl);
+  const isCustomChain = configLoaded && chainUrl !== "" && chainUrl !== window.location.origin
+    && !voteServers.some((e) => e.url === chainUrl);
   const [connStatus, setConnStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [connError, setConnError] = useState("");
   const [ceremony, setCeremony] = useState<chainApi.CeremonyState | null>(null);
@@ -1083,9 +1091,56 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
 
         {/* Nullifier service */}
         <h2 className="text-xs font-semibold text-text-primary mb-3">
-          Nullifier service
+          Nullifier service (PIR)
         </h2>
         <div className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-4 mb-6">
+          <div>
+            <label className="block text-[11px] text-text-secondary mb-1.5">
+              Server
+            </label>
+            <select
+              value={isCustomNullifier ? "__custom__" : selectedNullifierUrl}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === "__custom__") {
+                  setSelectedNullifierUrl("https://");
+                  chainApi.setNullifierUrl("https://");
+                  return;
+                }
+                setSelectedNullifierUrl(val);
+                chainApi.setNullifierUrl(val);
+              }}
+              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary focus:outline-none focus:border-accent/50 cursor-pointer [color-scheme:dark]"
+            >
+              <option value="">Default (same-origin)</option>
+              {pirEndpoints.map((ep) => (
+                <option key={ep.url} value={ep.url}>
+                  {ep.label} — {ep.url}
+                </option>
+              ))}
+              <option value="__custom__">Custom URL...</option>
+            </select>
+          </div>
+
+          {isCustomNullifier && (
+            <div>
+              <label className="block text-[11px] text-text-secondary mb-1">
+                Custom URL
+              </label>
+              <input
+                type="text"
+                value={selectedNullifierUrl}
+                onChange={(e) => {
+                  const url = e.target.value;
+                  setSelectedNullifierUrl(url);
+                  chainApi.setNullifierUrl(url);
+                }}
+                placeholder="https://pir.example.com"
+                className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+              />
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Database size={14} className="text-text-secondary" />
@@ -1233,6 +1288,47 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
           Voting chain
         </h2>
         <div className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-4 mb-6">
+          <div>
+            <label className="block text-[11px] text-text-secondary mb-1.5">
+              Server
+            </label>
+            <select
+              value={isCustomChain ? "__custom__" : chainUrl}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === "__custom__") {
+                  handleChainUrlChange("https://");
+                  return;
+                }
+                handleChainUrlChange(val);
+              }}
+              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary focus:outline-none focus:border-accent/50 cursor-pointer [color-scheme:dark]"
+            >
+              <option value="">Default (same-origin)</option>
+              {voteServers.map((ep) => (
+                <option key={ep.url} value={ep.url}>
+                  {ep.label} — {ep.url}
+                </option>
+              ))}
+              <option value="__custom__">Custom URL...</option>
+            </select>
+          </div>
+
+          {isCustomChain && (
+            <div>
+              <label className="block text-[11px] text-text-secondary mb-1">
+                Custom URL
+              </label>
+              <input
+                type="text"
+                value={chainUrl}
+                onChange={(e) => handleChainUrlChange(e.target.value)}
+                placeholder="https://vote-chain.example.com"
+                className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+              />
+            </div>
+          )}
+
           {/* Compact status line — always visible */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1291,32 +1387,6 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
               {chainDetailsOpen ? "Hide details" : "Show details"}
             </summary>
             <div className="mt-3 space-y-4">
-              {/* Chain API URL */}
-              <div>
-                <label className="block text-[11px] text-text-secondary mb-1">
-                  Chain API URL
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={chainUrl}
-                    onChange={(e) => handleChainUrlChange(e.target.value)}
-                    placeholder="http://localhost:1318"
-                    className="flex-1 px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
-                  />
-                  <button
-                    onClick={handleTestConnection}
-                    disabled={connStatus === "testing"}
-                    className="px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    {connStatus === "testing" ? (
-                      <RefreshCw size={12} className="animate-spin" />
-                    ) : (
-                      "Test"
-                    )}
-                  </button>
-                </div>
-              </div>
 
               {/* Connection info */}
               {connStatus === "ok" && latestBlock && (
@@ -1768,7 +1838,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
     setNetworkUpdating(true);
     setNetworkResult(null);
     try {
-      const current = votingConfig ?? { version: 1, vote_servers: [], pir_servers: [] };
+      const current = votingConfig ?? { version: 1, vote_servers: [], pir_endpoints: [] };
       let updated: chainApi.VotingConfig;
 
       if (action === "add" && url) {
@@ -1779,9 +1849,9 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
           updated = {
             ...current,
             vote_servers: [...current.vote_servers, { url, label }],
-            pir_servers: includePir
-              ? [...current.pir_servers, { url, label }]
-              : current.pir_servers,
+            pir_endpoints: includePir
+              ? [...current.pir_endpoints, { url, label }]
+              : current.pir_endpoints,
           };
         } else {
           updated = current;
@@ -1791,7 +1861,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
         updated = {
           ...current,
           vote_servers: current.vote_servers.filter((s) => s.label !== moniker),
-          pir_servers: current.pir_servers.filter((s) => s.label !== moniker),
+          pir_endpoints: current.pir_endpoints.filter((s) => s.label !== moniker),
         };
       } else {
         return;
@@ -2323,7 +2393,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                   const registeredUrl = votingConfig?.vote_servers.find(
                     (s) => s.label === moniker
                   )?.url;
-                  const isPir = votingConfig?.pir_servers.some(
+                  const isPir = votingConfig?.pir_endpoints.some(
                     (s) => s.label === moniker
                   );
 

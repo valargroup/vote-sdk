@@ -2,6 +2,7 @@ package sentry
 
 import (
 	"fmt"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -21,12 +22,19 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 	if dsn == "" {
 		return nil
 	}
+	env := os.Getenv("SENTRY_ENVIRONMENT")
+	if env == "" {
+		env = "production"
+	}
 	err := sentrylib.Init(sentrylib.ClientOptions{
 		Dsn:              dsn,
 		Release:          release,
+		Environment:      env,
 		ServerName:       serverName,
 		SampleRate:       1.0,
+		TracesSampleRate: 1.0,
 		AttachStacktrace: true,
+		EnableTracing:    true,
 	})
 	if err != nil {
 		return fmt.Errorf("sentry init: %w", err)
@@ -38,13 +46,6 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 	}
 	sentryEnabled.Store(true)
 	logger.Info("sentry error tracking enabled", "server_name", serverName)
-
-	sentrylib.CaptureMessage(fmt.Sprintf("sentry initialized on %s", serverName))
-	if !sentrylib.Flush(5 * time.Second) {
-		logger.Warn("sentry startup check: flush timed out — event may not have been delivered")
-	} else {
-		logger.Info("sentry startup check: event delivered")
-	}
 
 	return nil
 }

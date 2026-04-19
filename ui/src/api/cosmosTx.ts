@@ -546,7 +546,6 @@ export async function createVotingSession(
     description: string;
     title: string;
     discussionURL: string;
-    nullifierApiBase: string;
     proposals: Array<{
       id: number;
       title: string;

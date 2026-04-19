@@ -11,6 +11,7 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cosmos/cosmos-sdk/client"
+	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/gorilla/mux"
 	"google.golang.org/protobuf/proto"
 
@@ -34,22 +35,23 @@ import (
 //	GET /shielded-vote/v1/genesis
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
 	qh := &queryHandler{clientCtx: clientCtx}
+	trace := sentryhttp.New(sentryhttp.Options{Repanic: true}).Handle
 
 	// Register "latest" and "leaves" before "{height}" to avoid gorilla/mux
 	// treating them as a height param.
-	router.HandleFunc("/shielded-vote/v1/commitment-tree/{round_id}/latest", qh.handleLatestCommitmentTree).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/commitment-tree/{round_id}/leaves", qh.handleCommitmentLeaves).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/commitment-tree/{round_id}/{height}", qh.handleCommitmentTreeAtHeight).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/rounds/active", qh.handleActiveRound).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/rounds", qh.handleListRounds).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/round/{round_id}", qh.handleVoteRound).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/tally/{round_id}/{proposal_id}", qh.handleProposalTally).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/tally-results/{round_id}", qh.handleTallyResults).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/vote-summary/{round_id}", qh.handleVoteSummary).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/ceremony", qh.handleCeremonyState).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/pallas-keys", qh.handlePallasKeys).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/vote-managers", qh.handleVoteManagers).Methods("GET")
-	router.HandleFunc("/shielded-vote/v1/genesis", qh.handleGenesis).Methods("GET")
+	router.Handle("/shielded-vote/v1/commitment-tree/{round_id}/latest", trace(http.HandlerFunc(qh.handleLatestCommitmentTree))).Methods("GET")
+	router.Handle("/shielded-vote/v1/commitment-tree/{round_id}/leaves", trace(http.HandlerFunc(qh.handleCommitmentLeaves))).Methods("GET")
+	router.Handle("/shielded-vote/v1/commitment-tree/{round_id}/{height}", trace(http.HandlerFunc(qh.handleCommitmentTreeAtHeight))).Methods("GET")
+	router.Handle("/shielded-vote/v1/rounds/active", trace(http.HandlerFunc(qh.handleActiveRound))).Methods("GET")
+	router.Handle("/shielded-vote/v1/rounds", trace(http.HandlerFunc(qh.handleListRounds))).Methods("GET")
+	router.Handle("/shielded-vote/v1/round/{round_id}", trace(http.HandlerFunc(qh.handleVoteRound))).Methods("GET")
+	router.Handle("/shielded-vote/v1/tally/{round_id}/{proposal_id}", trace(http.HandlerFunc(qh.handleProposalTally))).Methods("GET")
+	router.Handle("/shielded-vote/v1/tally-results/{round_id}", trace(http.HandlerFunc(qh.handleTallyResults))).Methods("GET")
+	router.Handle("/shielded-vote/v1/vote-summary/{round_id}", trace(http.HandlerFunc(qh.handleVoteSummary))).Methods("GET")
+	router.Handle("/shielded-vote/v1/ceremony", trace(http.HandlerFunc(qh.handleCeremonyState))).Methods("GET")
+	router.Handle("/shielded-vote/v1/pallas-keys", trace(http.HandlerFunc(qh.handlePallasKeys))).Methods("GET")
+	router.Handle("/shielded-vote/v1/vote-managers", trace(http.HandlerFunc(qh.handleVoteManagers))).Methods("GET")
+	router.Handle("/shielded-vote/v1/genesis", trace(http.HandlerFunc(qh.handleGenesis))).Methods("GET")
 }
 
 // queryHandler handles query REST endpoints by delegating to the gRPC query

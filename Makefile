@@ -9,9 +9,6 @@ COMMIT  := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_TAGS_LIST := $(if $(BUILD_TAGS),$(BUILD_TAGS),)
 
 FFI_TAGS := halo2,redpallas
-ifdef EMBED_PIR
-FFI_TAGS := $(FFI_TAGS),embed_pir
-endif
 
 VERSION_PKG := github.com/cosmos/cosmos-sdk/version
 LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
@@ -20,13 +17,13 @@ LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
            -X $(VERSION_PKG).Commit=$(COMMIT) \
            -X "$(VERSION_PKG).BuildTags=$(BUILD_TAGS_LIST)"
 
-.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin pir-binary
+.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
 
 ## install: Build and install the svoted binary to $GOPATH/bin
 install:
 	go install -ldflags '$(LDFLAGS)' ./cmd/svoted
 
-## install-ffi: Build and install svoted with real RedPallas + Halo2 verification (requires: make circuits; set EMBED_PIR=1 after make pir-binary to bundle PIR)
+## install-ffi: Build and install svoted with Halo2 + RedPallas
 install-ffi: circuits
 	go install -tags "$(FFI_TAGS)" -ldflags '$(LDFLAGS)' ./cmd/svoted
 
@@ -34,7 +31,7 @@ install-ffi: circuits
 build:
 	go build -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/svoted
 
-## build-ffi: Build svoted with real RedPallas + Halo2 (requires: make circuits; set EMBED_PIR=1 after make pir-binary to bundle PIR)
+## build-ffi: Build svoted locally with Halo2 + RedPallas
 build-ffi: circuits
 	go build -tags "$(FFI_TAGS)" -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/svoted
 
@@ -46,11 +43,11 @@ build-create-val-tx:
 install-create-val-tx:
 	go install -ldflags '$(LDFLAGS)' ./scripts/create-val-tx
 
-## init: Initialize a single-validator chain with real RedPallas + Halo2 verification (wipes existing data)
+## init: Initialize a single-validator chain with FFI (wipes existing data)
 init: install-ffi
 	bash scripts/init.sh
 
-## init-multi: Initialize a 3-validator chain with real RedPallas + Halo2 verification (wipes existing data)
+## init-multi: Initialize a 3-validator chain with FFI (wipes existing data)
 init-multi: install-ffi install-create-val-tx
 	bash scripts/init_multi.sh
 
@@ -72,8 +69,15 @@ init-benchmark: install-ffi
 start:
 	SVOTE_PIR_URL=$${SVOTE_PIR_URL:-http://localhost:3000} $(BINARY) start --home $(HOME_DIR)
 
-## clean: Remove chain data directory
+## clean: Remove chain state but preserve nullifier data (~/.svoted/nullifiers)
 clean:
+	@if [ -d "$(HOME_DIR)" ]; then \
+		find "$(HOME_DIR)" -mindepth 1 -maxdepth 1 ! -name nullifiers -exec rm -rf {} +; \
+	fi
+	rm -f $(BINARY)
+
+## clean-all: Remove chain data directory including nullifier data
+clean-all:
 	rm -rf $(HOME_DIR)
 	rm -f $(BINARY)
 
@@ -130,19 +134,6 @@ fixtures-ts: fixtures
 ## circuits: Build the Rust static library (requires cargo)
 circuits:
 	cargo build --release --manifest-path circuits/Cargo.toml
-
-# ---------------------------------------------------------------------------
-# Embedded PIR server
-# ---------------------------------------------------------------------------
-
-PIR_REPO ?= $(or $(VOTE_NULLIFIER_PIR_DIR),../vote-nullifier-pir)
-PIR_EMBED_DIR := ffi/pir/bin
-
-## pir-binary: Build the nf-server Rust binary and copy it into the go:embed directory
-pir-binary:
-	cargo build --release --features serve -p nf-server --manifest-path $(PIR_REPO)/Cargo.toml
-	mkdir -p $(PIR_EMBED_DIR)
-	cp $(PIR_REPO)/target/release/nf-server $(PIR_EMBED_DIR)/nf-server
 
 ## circuits-test: Run Rust circuit unit tests
 circuits-test:

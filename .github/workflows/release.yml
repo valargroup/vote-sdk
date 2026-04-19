@@ -3,6 +3,7 @@
 # Tarball layout:
 #   shielded-vote-<version>-<platform>/
 #     bin/svoted, create-val-tx
+#     ui/dist/          (admin UI SPA)
 #     systemd/svoted-val{1,2,3}.service  (Linux only)
 #     scripts/init_multi.sh
 #     config/Caddyfile
@@ -124,6 +125,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build admin UI
+        working-directory: ui
+        run: npm ci && npm run build
       - name: Download SDK binaries
         uses: actions/download-artifact@v4
         with:
@@ -133,9 +143,10 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           DIR="shielded-vote-${VERSION}-${{ matrix.platform }}"
-          mkdir -p "${DIR}/bin" "${DIR}/scripts" "${DIR}/config"
+          mkdir -p "${DIR}/bin" "${DIR}/ui" "${DIR}/scripts" "${DIR}/config"
           cp sdk-binaries/svoted sdk-binaries/create-val-tx "${DIR}/bin/"
           chmod +x "${DIR}/bin/"*
+          cp -r ui/dist "${DIR}/ui/dist"
           if [ "${{ matrix.os_family }}" = "linux" ]; then
             mkdir -p "${DIR}/systemd"
             for f in docs/svoted-val{1,2,3}.service; do
@@ -211,3 +222,11 @@ jobs:
           echo "${VERSION}" > /tmp/version.txt
           s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put join.sh s3://vote/join.sh --acl-public --force
+
+  deploy:
+    name: Deploy
+    needs: distribute
+    uses: ./.github/workflows/sdk-chain-deploy.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

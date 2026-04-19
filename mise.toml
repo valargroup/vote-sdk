@@ -9,20 +9,28 @@ jq = "latest"
 
 [env]
 GOBIN = "{{env.HOME}}/go/bin"
-_.path = ["{{env.HOME}}/go/bin", "/usr/local/go/bin"]
+_.path = ["{{env.HOME}}/go/bin"]
 
 # ── build:* ─────────────────────────────────────────────────────────
 
 [tasks."build"]
-description = "Build svoted with FFI (Halo2 + RedPallas)"
+description = "Build svoted locally with FFI (Halo2 + RedPallas) into ./svoted"
 run = "make build-ffi"
 
 [tasks."build:quick"]
 description = "Build svoted without FFI (Go only, no ZK verification)"
 run = "make build"
 
-[tasks."build:install"]
-description = "Install svoted + create-val-tx with FFI to $GOBIN"
+# `install` puts svoted + create-val-tx into $GOBIN (~/go/bin), which mise
+# already adds to PATH (see [env] above). After running this, `svoted` is
+# immediately invokable from any mise-activated shell — no need to use
+# ./svoted from the repo root.
+#
+# Invoke as `mise run install` (the bare `mise install` is reserved by mise
+# itself for installing tools listed in [tools]).
+[tasks."install"]
+description = "Install svoted + create-val-tx to $GOBIN with FFI (on PATH)"
+alias = "build:install"
 run = "make install-ffi install-create-val-tx"
 
 [tasks."build:create-val-tx"]
@@ -33,14 +41,10 @@ run = "make build-create-val-tx"
 description = "Build Rust circuit static library"
 run = "make circuits"
 
-[tasks."build:pir"]
-description = "Build embedded nf-server PIR binary"
-run = "make pir-binary"
-
 # ── chain:* ─────────────────────────────────────────────────────────
 
 [tasks."chain:init"]
-description = "Wipe and reinitialize a single-validator chain"
+description = "Wipe and reinitialize a single-validator chain (reinstalls svoted with FFI)"
 run = "make init"
 
 [tasks."chain:start"]
@@ -48,7 +52,7 @@ description = "Start chain daemon (foreground)"
 run = "SVOTE_PIR_URL=${SVOTE_PIR_URL:-http://localhost:3000} make start"
 
 [tasks."chain:init-multi"]
-description = "Wipe and reinitialize a 3-validator chain"
+description = "Wipe and reinitialize a 3-validator chain (reinstalls svoted with FFI)"
 run = "make init-multi"
 
 [tasks."chain:start-multi"]
@@ -56,9 +60,14 @@ description = "Start 3 validator daemons in background"
 run = "make start-multi"
 
 [tasks."chain:clean"]
-description = "Remove chain data directory (~/.svoted)"
+description = "Remove chain state but preserve nullifier data (~/.svoted/nullifiers)"
 run = "make clean"
-confirm = "This will delete ~/.svoted and the local svoted binary. Continue?"
+confirm = "This will delete chain state in ~/.svoted (nullifier data is preserved). Continue?"
+
+[tasks."chain:clean:all"]
+description = "Remove chain data directory INCLUDING nullifier data (~/.svoted)"
+run = "make clean-all"
+confirm = "This will delete ALL of ~/.svoted including nullifier data. Continue?"
 
 # ── test:* ──────────────────────────────────────────────────────────
 

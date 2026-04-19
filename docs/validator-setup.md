@@ -57,12 +57,12 @@ Never commit `.env` — in CI the same value is supplied via the `VM_PRIVKEY` se
 
 ## Step 1 — Clone and Install the Binary
 
-The `svoted` binary must be built with the `halo2` and `redpallas` FFI tags, which requires the Rust circuits to be compiled first.
+The `svoted` binary is built with the `halo2` and `redpallas` FFI tags. This requires the Rust circuits to be compiled first — they are built automatically by the install step.
 
 ```bash
 git clone https://github.com/valargroup/shielded-vote
 cd shielded-vote
-mise run build:install   # builds Rust circuits, then: go install -tags "halo2,redpallas"
+mise run install   # builds Rust circuits, then: go install -tags "halo2,redpallas"
 ```
 
 This places `svoted` at `~/go/bin/svoted`.
@@ -90,7 +90,7 @@ make install-ffi
 8. Sets `timeout_broadcast_tx_commit = 120s` (required for ZKP verification ≈ 30–60 s)
 9. Generates a Pallas keypair for ECIES ceremony key distribution → `~/.svoted/pallas.sk` / `pallas.pk`
 10. Sets `ea_sk_path` as a directory placeholder — the actual EA key is generated per-round by auto-deal
-11. Writes the `[vote]`, `[helper]`, `[admin]`, `[ui]`, and `[pir]` sections into `~/.svoted/config/app.toml`
+11. Writes the `[vote]`, `[helper]`, `[admin]`, and `[ui]` sections into `~/.svoted/config/app.toml`
 
 ```bash
 mise run chain:init
@@ -120,8 +120,6 @@ iptables -A INPUT -p tcp --dport 26656 -j ACCEPT
 
 The RPC port (`26657`) and REST API port (`1318`) do **not** need to be publicly reachable unless you want remote CLI access or are exposing the API. For HTTPS exposure of the REST API, use a reverse proxy such as Caddy (see `deploy/Caddyfile` for the production example).
 
-If you enable the embedded PIR server (see Step 7 below), also open port `3000` or keep it local and proxy it through the REST API host.
-
 ## Step 4 — Start the Chain
 
 ```bash
@@ -133,9 +131,7 @@ SVOTE_PIR_URL=http://localhost:3000 \
   nohup svoted start --home ~/.svoted > ~/.svoted/node.log 2>&1 &
 ```
 
-`mise run chain:start` sets `SVOTE_PIR_URL=http://localhost:3000` automatically. This is the URL the chain uses to query the nullifier PIR server — if you run PIR on a different host/port, override it before invoking `svoted start`.
-
-To also run the embedded PIR server on this node, add `--serve-pir` to the start command (see Step 7).
+`mise run chain:start` sets `SVOTE_PIR_URL=http://localhost:3000` automatically. This is the URL the chain uses to query the nullifier PIR server — if you run `nf-server` on a different host/port, override `SVOTE_PIR_URL` before invoking `svoted start`. See the [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) repo for instructions on running `nf-server` as a standalone service.
 
 Wait for the first block to be produced before proceeding:
 
@@ -153,7 +149,7 @@ Every node serves its own `genesis.json` at `/shielded-vote/v1/genesis`, so manu
 2. Navigate to **Validators**
 3. On the genesis validator's card, click **Register public URL**
 4. Enter the validator's public HTTPS endpoint (e.g. `https://46-101-255-48.sslip.io`)
-5. Optionally check "Also register as PIR server" if this node runs the nullifier PIR server (see Step 7)
+5. Optionally check "Also register as PIR server" if this node runs `nf-server` (see the [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) repo)
 
 This writes to the `voting-config` Edge Config key, which iOS clients and `join.sh` use for service discovery.
 
@@ -177,54 +173,16 @@ make ceremony
 
 ## Step 7 — PIR Server (optional)
 
-The genesis validator can also serve Private Information Retrieval (PIR) queries for nullifier checks. The `nf-server` binary from [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) is embedded in `svoted` at build time via `go:embed`; passing `--serve-pir` on startup extracts and spawns it as a managed child process.
+The genesis validator can also serve Private Information Retrieval (PIR) queries for nullifier checks. The `nf-server` binary from [`vote-nullifier-pir`](https://github.com/valargroup/vote-nullifier-pir) runs as a separate service — see that repo for build, data bootstrap, and systemd setup instructions.
 
-### `[pir]` section in `app.toml`
-
-`scripts/init.sh` writes a `[pir]` section to `~/.svoted/config/app.toml` with sensible defaults. Override any of these before running `chain:init` via environment variables:
-
-| Key            | Default                            | Env override            | Description                                                     |
-|----------------|------------------------------------|-------------------------|-----------------------------------------------------------------|
-| `port`         | `3000`                             | `SVOTE_PIR_PORT`        | Listen port for `nf-server` (bound only when `--serve-pir`).    |
-| `data_dir`     | `~/.svoted/nullifiers`             | `SVOTE_PIR_DATA_DIR`    | Directory with `nullifiers.bin`, `.checkpoint`, `.index`.        |
-| `pir_data_dir` | `~/.svoted/nullifiers/pir-data`    | `SVOTE_PIR_TIER_DIR`    | Directory with tier files (`tier0.bin`, `tier1.bin`, …).         |
-| `lwd_url`      | `https://zec.rocks:443`            | `SVOTE_PIR_LWD_URL`     | Lightwalletd URL for `/snapshot/prepare` rebuilds.               |
-| `chain_url`    | `""`                               | `SVOTE_PIR_CHAIN_URL`   | Optional chain REST URL (blocks rebuilds during active rounds).  |
-
-CLI flags `--pir-port`, `--pir-data-dir`, `--pir-pir-data-dir`, `--pir-lwd-url` override the file values at start time.
-
-### Data bootstrap
-
-The ~6 GB of PIR tier data must exist on disk before `--serve-pir` can answer queries. Populate it from an existing nullifier source:
-
-```bash
-svoted pir ingest --data-dir ~/.svoted/nullifiers
-svoted pir export --pir-data-dir ~/.svoted/nullifiers/pir-data
-```
-
-If tier files are missing at startup, `nf-server` exits with an error; `svoted` itself continues running normally (just without PIR). For operational tasks `nf-server` can also be run directly:
-
-```bash
-svoted pir serve --port 3000 --data-dir ~/.svoted/nullifiers
-```
-
-### Enabling at startup
-
-Add `--serve-pir` to your start command:
-
-```bash
-nohup svoted start --home ~/.svoted --serve-pir \
-  > ~/.svoted/node.log 2>&1 &
-```
-
-Then open port `3000` in your firewall if iOS clients should reach this PIR server directly, and tick **Also register as PIR server** in Step 5 so the Edge Config advertises it. Validators that do **not** run PIR locally should set `SVOTE_PIR_URL` to the URL of a node that does.
+`svoted` talks to `nf-server` over HTTP via the `SVOTE_PIR_URL` environment variable (default `http://localhost:3000`). Validators that do **not** run PIR locally should set `SVOTE_PIR_URL` to the URL of a node that does.
 
 ## Useful Commands
 
 | Command | Description |
 |---|---|
-| `mise run chain:clean` | Reset the chain home directory |
+| `mise run chain:clean` | Reset chain state (preserves nullifier data in `~/.svoted/nullifiers`) |
+| `mise run chain:clean:all` | Reset chain state **and** delete nullifier data |
 | `mise tasks` | List all available mise tasks |
 | `svoted status --home ~/.svoted` | Show sync info + latest block height |
-| `svoted pir ingest`  | Build `nullifiers.bin` from a nullifier source |
-| `svoted pir export`  | Generate PIR tier files from `nullifiers.bin` |
+| `mise run install` | Reinstall `svoted` + `create-val-tx` with FFI |

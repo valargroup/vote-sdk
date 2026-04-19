@@ -19,16 +19,25 @@ DENOM="usvote"
 
 echo "=== Initializing Shielded-Vote Chain ==="
 
-# Remove existing data
-rm -rf "$HOME_DIR"
+# Remove existing data but preserve nullifier/PIR tier files (~6 GB).
+if [ -d "$HOME_DIR" ]; then
+    find "$HOME_DIR" -mindepth 1 -maxdepth 1 ! -name nullifiers -exec rm -rf {} +
+else
+    mkdir -p "$HOME_DIR"
+fi
 
 # Init chain
 $BINARY init "$MONIKER" --chain-id "$CHAIN_ID" --home "$HOME_DIR"
 
-# Create a validator key
-$BINARY keys add validator --keyring-backend test --home "$HOME_DIR"
+# Import or generate the validator key. When VAL_PRIVKEY is set (CI/production),
+# import the deterministic key so the address is known ahead of time. Otherwise
+# generate a fresh key (local dev).
+if [ -n "${VAL_PRIVKEY:-}" ]; then
+    $BINARY keys import-hex validator "$VAL_PRIVKEY" --keyring-backend test --home "$HOME_DIR"
+else
+    $BINARY keys add validator --keyring-backend test --home "$HOME_DIR"
+fi
 
-# Get the validator address
 VALIDATOR_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_DIR")
 VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend test --home "$HOME_DIR")
 echo "Validator address: $VALIDATOR_ADDR"
@@ -121,13 +130,27 @@ jq --argjson admins "$VOTE_MANAGER_JSON" '
 # Validate genesis
 $BINARY genesis validate-genesis --home "$HOME_DIR"
 
+# Ensure minimum-gas-prices is set (the Go default template writes "0usvote"
+# but older inits or manual edits may leave it blank, which aborts `svoted start`).
+APP_TOML="$HOME_DIR/config/app.toml"
+sed -i.bak 's/^minimum-gas-prices = ""/minimum-gas-prices = "0usvote"/' "$APP_TOML"
+
 # Enable the REST API server (default: disabled).
 # Use port 1318 to avoid Cursor IDE occupying 1317.
-APP_TOML="$HOME_DIR/config/app.toml"
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
 sed -i.bak 's|address = "tcp://localhost:1317"|address = "tcp://0.0.0.0:1318"|' "$APP_TOML"
 # Enable CORS for dev (Vite dev server on port 5173).
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP_TOML"
+
+# Move gRPC and gRPC-Web off their Cosmos defaults for the same reason we
+# move the REST API off 1317: Cursor IDE's Remote-SSH auto-port-forwarding
+# (and some Node.js `--inspect` tooling) listens on 9090/9091 locally, so
+# the default bind fails and cascades into the errgroup, which in turn
+# aborts the embedded PIR supervisor. init_multi.sh assigns per-validator
+# ports (9390/9490/9590); the single-validator script uses 9190/9191 to
+# match scripts/test_join_ci.sh.
+sed -i.bak 's|address = "localhost:9090"|address = "localhost:9190"|' "$APP_TOML"
+sed -i.bak 's|address = "localhost:9091"|address = "localhost:9191"|' "$APP_TOML"
 rm -f "${APP_TOML}.bak"
 
 # Allow long CheckTx (ZKP verification ~30–60s). Default 10s closes the RPC connection
@@ -207,6 +230,7 @@ sentry_dsn = "$HELPER_SENTRY_DSN"
 HELPERCFG
 
 # Append [admin] section.
+ADMIN_DISABLE="${SVOTE_ADMIN_DISABLE:-true}"
 ADMIN_ADDRESS="${SVOTE_ADMIN_ADDRESS:-${VOTE_MANAGER_ADDRS[0]}}"
 cat >> "$APP_TOML" <<ADMINCFG
 
@@ -218,7 +242,7 @@ cat >> "$APP_TOML" <<ADMINCFG
 
 # Set to true to disable the admin server (server directory, registration,
 # health monitoring).
-disable = true
+disable = $ADMIN_DISABLE
 
 # Path to the admin SQLite database. Empty = default (\$HOME/.svoted/admin.db).
 db_path = ""
@@ -254,39 +278,6 @@ enable = false
 # Path to the built UI dist directory (output of "npm run build" in ui/).
 dist_path = ""
 UICFG
-
-# Append [pir] section. The embedded nf-server only binds a port when svoted
-# is started with --serve-pir; these are the settings it uses when it does.
-# data_dir / pir_data_dir default to this validator's home; override to point
-# at an out-of-band ingestion directory (see vote-nullifier-pir) if desired.
-PIR_PORT="${SVOTE_PIR_PORT:-3000}"
-PIR_DATA_DIR="${SVOTE_PIR_DATA_DIR:-$HOME_DIR/nullifiers}"
-PIR_TIER_DIR="${SVOTE_PIR_TIER_DIR:-$PIR_DATA_DIR/pir-data}"
-PIR_LWD_URL="${SVOTE_PIR_LWD_URL:-https://zec.rocks:443}"
-PIR_CHAIN_URL="${SVOTE_PIR_CHAIN_URL:-}"
-cat >> "$APP_TOML" <<PIRCFG
-
-###############################################################################
-###                         PIR Server                                      ###
-###############################################################################
-
-[pir]
-
-# Listen port for the embedded nf-server (only bound when --serve-pir is passed).
-port = $PIR_PORT
-
-# Directory containing nullifiers.bin, .checkpoint, .index.
-data_dir = "$PIR_DATA_DIR"
-
-# Directory containing PIR tier files (tier0.bin, tier1.bin, tier2.bin).
-pir_data_dir = "$PIR_TIER_DIR"
-
-# Lightwalletd URL for /snapshot/prepare rebuilds.
-lwd_url = "$PIR_LWD_URL"
-
-# Optional chain REST URL (blocks /snapshot/prepare during active rounds).
-chain_url = "$PIR_CHAIN_URL"
-PIRCFG
 
 echo ""
 echo "=== Chain initialized successfully! ==="

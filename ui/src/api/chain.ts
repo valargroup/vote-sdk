@@ -16,7 +16,11 @@ export function getChainUrl(): string {
 }
 
 export function setChainUrl(url: string) {
-  localStorage.setItem(CHAIN_URL_KEY, url);
+  if (url) {
+    localStorage.setItem(CHAIN_URL_KEY, url);
+  } else {
+    localStorage.removeItem(CHAIN_URL_KEY);
+  }
 }
 
 // The UI is served in-process by the same svoted that hosts the API, so
@@ -31,11 +35,45 @@ export function getApiBase(): string {
   return apiBase();
 }
 
+const NULLIFIER_URL_KEY = "shielded-vote-nullifier-url";
+
+export function getNullifierUrl(): string {
+  return localStorage.getItem(NULLIFIER_URL_KEY) || "";
+}
+
+export function setNullifierUrl(url: string) {
+  if (url) {
+    localStorage.setItem(NULLIFIER_URL_KEY, url);
+  } else {
+    localStorage.removeItem(NULLIFIER_URL_KEY);
+  }
+}
+
+function nullifierBase(): string {
+  if (typeof window !== "undefined") {
+    const stored = localStorage.getItem(NULLIFIER_URL_KEY);
+    if (stored) return stored;
+  }
+  return "";
+}
+
+/** Resolved nullifier API base for direct fetch calls (always returns a usable value). */
+export function getNullifierApiBase(): string {
+  const stored = getNullifierUrl();
+  if (stored) return stored;
+  return "/nullifier";
+}
+
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  // /api/* routes are Vercel Edge Functions served from the same origin —
-  // never prefix them with the chain URL.
-  const base = path.startsWith("/api/") ? "" : apiBase();
-  const resp = await fetch(`${base}${path}`, init);
+  let url: string;
+  if (path.startsWith("/nullifier/") && nullifierBase()) {
+    url = `${nullifierBase()}${path.replace(/^\/nullifier/, "")}`;
+  } else if (path.startsWith("/api/")) {
+    url = path;
+  } else {
+    url = `${apiBase()}${path}`;
+  }
+  const resp = await fetch(url, init);
   if (!resp.ok) {
     const body = await resp.text();
     let msg = `HTTP ${resp.status}`;
@@ -325,7 +363,7 @@ export interface ServiceEntry {
 export interface VotingConfig {
   version: number;
   vote_servers: ServiceEntry[];
-  pir_servers: ServiceEntry[];
+  pir_endpoints: ServiceEntry[];
 }
 
 export interface PendingRegistration {

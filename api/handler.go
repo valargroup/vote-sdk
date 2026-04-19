@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/gorilla/mux"
 	protov2 "google.golang.org/protobuf/proto"
 
@@ -77,17 +78,14 @@ func NewHandler(cfg HandlerConfig) *Handler {
 // MsgAckExecutiveAuthorityKey and MsgSubmitPartialDecryption have no REST
 // endpoints — they are injected in-protocol via PrepareProposal.
 func (h *Handler) RegisterTxRoutes(router *mux.Router) {
-	router.HandleFunc("/shielded-vote/v1/delegate-vote", h.handleDelegateVote).Methods("POST")
-	router.HandleFunc("/shielded-vote/v1/cast-vote", h.handleCastVote).Methods("POST")
-	router.HandleFunc("/shielded-vote/v1/reveal-share", h.handleRevealShare).Methods("POST")
+	trace := sentryhttp.New(sentryhttp.Options{Repanic: true}).Handle
+	router.Handle("/shielded-vote/v1/delegate-vote", trace(http.HandlerFunc(h.handleDelegateVote))).Methods("POST")
+	router.Handle("/shielded-vote/v1/cast-vote", trace(http.HandlerFunc(h.handleCastVote))).Methods("POST")
+	router.Handle("/shielded-vote/v1/reveal-share", trace(http.HandlerFunc(h.handleRevealShare))).Methods("POST")
 
-	// Snapshot data endpoint: fetches real nc_root and nullifier_imt_root
-	// for session creation. Used by the admin UI to replace stub values.
-	router.HandleFunc("/shielded-vote/v1/snapshot-data/{height}", h.handleSnapshotData).Methods("GET")
+	router.Handle("/shielded-vote/v1/snapshot-data/{height}", trace(http.HandlerFunc(h.handleSnapshotData))).Methods("GET")
 
-	// TX confirmation endpoint: checks whether a TX has been included in a block.
-	// Used by iOS app to verify vote commitment TXs landed after tree growth timeout.
-	router.HandleFunc("/shielded-vote/v1/tx/{hash}", h.handleTxStatus).Methods("GET")
+	router.Handle("/shielded-vote/v1/tx/{hash}", trace(http.HandlerFunc(h.handleTxStatus))).Methods("GET")
 }
 
 // --- Tx submission handlers ---
