@@ -56,6 +56,7 @@ jobs:
             export VAL_PRIVKEY="${{ secrets.PRIMARY_VAL_PRIVKEY }}"
             export SVOTE_ADMIN_DISABLE=false
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/init.sh" -o /tmp/init.sh
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/_vote_manager_keys_lib.sh" -o /tmp/_vote_manager_keys_lib.sh
             bash /tmp/init.sh
 
             # init.sh sets REST API to port 1318 (local dev); fix to 1317 for production

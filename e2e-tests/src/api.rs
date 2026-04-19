@@ -738,8 +738,9 @@ pub fn import_first_vote_manager_key(home_dir: &str) -> String {
         .trim()
         .to_string();
     import_hex_key(FIRST_VOTE_MANAGER_KEY_NAME, &vm_privkey, home_dir);
-    key_account_address(FIRST_VOTE_MANAGER_KEY_NAME, home_dir)
-        .expect("vote-manager-1 key must be in keyring after import")
+    key_account_address(FIRST_VOTE_MANAGER_KEY_NAME, home_dir).unwrap_or_else(|| {
+        panic!("{} key must be in keyring after import", FIRST_VOTE_MANAGER_KEY_NAME)
+    })
 }
 
 /// Sign and broadcast a ceremony message via standard Cosmos SDK tx flow,

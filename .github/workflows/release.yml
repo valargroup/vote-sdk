@@ -156,7 +156,7 @@ jobs:
                   "$f" > "${DIR}/systemd/${name}"
             done
           fi
-          cp scripts/init_multi.sh "${DIR}/scripts/"
+          cp scripts/init_multi.sh scripts/_vote_manager_keys_lib.sh "${DIR}/scripts/"
           cp deploy/Caddyfile "${DIR}/config/"
           tar czf "${DIR}.tar.gz" "${DIR}"
           sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
