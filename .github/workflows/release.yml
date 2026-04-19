@@ -222,3 +222,11 @@ jobs:
           echo "${VERSION}" > /tmp/version.txt
           s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put join.sh s3://vote/join.sh --acl-public --force
+
+  deploy:
+    name: Deploy
+    needs: distribute
+    uses: ./.github/workflows/sdk-chain-deploy.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
