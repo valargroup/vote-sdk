@@ -144,7 +144,7 @@ It runs inside `svoted` on **val1 only** and shares val1's REST API port. It is 
 | Key          | Default  | Description                                                                                |
 | ------------ | -------- | ------------------------------------------------------------------------------------------ |
 | `disable`    | `true`   | Set to `false` to enable the config proxy on this validator.                               |
-| `config_url` | staging  | GitHub Pages CDN URL for the voting-config JSON. Defaults to the staging environment.      |
+| `config_url` | (CDN)    | GitHub Pages CDN URL for the voting-config JSON.                                           |
 
 A single read-only endpoint is served: `GET /api/voting-config`.
 

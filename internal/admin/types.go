@@ -11,7 +11,6 @@ type Config struct {
 	Disable bool `mapstructure:"disable"`
 
 	// ConfigURL is the GitHub Pages CDN URL for the voting-config JSON.
-	// Defaults to the staging environment.
 	ConfigURL string `mapstructure:"config_url"`
 }
 
@@ -19,7 +18,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Disable:   true,
-		ConfigURL: "https://valargroup.github.io/token-holder-voting-config/staging/voting-config.json",
+		ConfigURL: "https://valargroup.github.io/token-holder-voting-config/voting-config.json",
 	}
 }
 
