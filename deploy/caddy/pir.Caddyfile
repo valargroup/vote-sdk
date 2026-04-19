@@ -1,3 +1,0 @@
-{$PIR_HOSTNAME} {
-	reverse_proxy localhost:3000
-}
