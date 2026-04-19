@@ -47,13 +47,6 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 	sentryEnabled.Store(true)
 	logger.Info("sentry error tracking enabled", "server_name", serverName)
 
-	sentrylib.CaptureMessage(fmt.Sprintf("sentry initialized on %s", serverName))
-	if !sentrylib.Flush(5 * time.Second) {
-		logger.Warn("sentry startup check: flush timed out — event may not have been delivered")
-	} else {
-		logger.Info("sentry startup check: event delivered")
-	}
-
 	return nil
 }
 
