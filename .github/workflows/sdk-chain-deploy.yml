@@ -1,5 +1,5 @@
 # Deploy a tagged shielded-vote release to both production hosts.
-# Manual-only: triggered via workflow_dispatch with a release tag.
+# Triggered automatically after a release build, or manually via workflow_dispatch.
 
 name: Deploy SDK
 
@@ -10,6 +10,11 @@ on:
         description: "Release tag to deploy (e.g. v1.2.3). Must already exist in DO Spaces."
         type: string
         required: true
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
 
 permissions:
   contents: read
