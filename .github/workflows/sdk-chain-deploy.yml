@@ -28,8 +28,13 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SENTRY_DSN
           script: |
+            echo "SENTRY_DSN=$SENTRY_DSN" > /opt/shielded-vote/.env
+            chmod 600 /opt/shielded-vote/.env
             /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}"
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Verify primary health
         uses: appleboy/ssh-action@v1.0.3
@@ -59,8 +64,13 @@ jobs:
           host: ${{ secrets.SECONDARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SENTRY_DSN
           script: |
+            echo "SENTRY_DSN=$SENTRY_DSN" > /opt/shielded-vote/.env
+            chmod 600 /opt/shielded-vote/.env
             /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}"
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Verify secondary health
         uses: appleboy/ssh-action@v1.0.3
