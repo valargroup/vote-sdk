@@ -46,6 +46,39 @@ EOF
     echo "" >> "$OUT"
 done
 
+# Block explorer: archive node (historical queries) + ping-pub frontend.
+cat >> "$OUT" <<EOF
+  archive:
+    image: svoted-testnet
+    container_name: archive
+    hostname: archive
+    environment:
+      - ROLE=archive
+      - NUM_VALIDATORS=${NUM}
+      - CHAIN_ID=svote-1
+    volumes:
+      - shared:/shared
+    networks:
+      - testnet
+    ports:
+      - "1917:1317"
+      - "27657:26657"
+    depends_on:
+      - val1
+
+  explorer:
+    build: ./ping-pub
+    container_name: explorer
+    hostname: explorer
+    ports:
+      - "8080:80"
+    networks:
+      - testnet
+    depends_on:
+      - archive
+
+EOF
+
 cat >> "$OUT" <<'FOOTER'
 volumes:
   shared:
@@ -55,4 +88,4 @@ networks:
     driver: bridge
 FOOTER
 
-echo "Generated $OUT with $NUM validators."
+echo "Generated $OUT with $NUM validators + archive + explorer."
