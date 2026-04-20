@@ -34,18 +34,18 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            for svc in svoted-val1 svoted-val2 svoted-val3; do
+            for svc in svoted-archive svoted-val1 svoted-val2 svoted-val3; do
               sudo systemctl stop "$svc" || true
             done
             sudo pkill -9 -x svoted || true
             for i in $(seq 1 20); do
-              if ! ss -tlnp | grep -qE ':26156|:26256|:26356|:6160|:6260|:6360|:3000'; then
+              if ! ss -tlnp | grep -qE ':26156|:26256|:26356|:26456|:6160|:6260|:6360|:6460|:3000'; then
                 echo "Ports freed"
                 break
               fi
               if [ "$i" = "20" ]; then
                 echo "WARN: ports still bound after 20s, forcing..."
-                sudo fuser -k 26156/tcp 26256/tcp 26356/tcp 6160/tcp 6260/tcp 6360/tcp 3000/tcp || true
+                sudo fuser -k 26156/tcp 26256/tcp 26356/tcp 26456/tcp 6160/tcp 6260/tcp 6360/tcp 6460/tcp 3000/tcp || true
                 sleep 1
               fi
               sleep 1
@@ -64,6 +64,10 @@ jobs:
                 sudo cp "$src" /etc/systemd/system/svoted-val${i}.service
               fi
             done
+            if [ -f "${{ env.DEPLOY_PATH }}/docs/svoted-archive.service" ]; then
+              sudo cp "${{ env.DEPLOY_PATH }}/docs/svoted-archive.service" /etc/systemd/system/svoted-archive.service
+              sudo systemctl enable svoted-archive
+            fi
             sudo systemctl daemon-reload
 
       - name: Reinitialize all validators
@@ -80,6 +84,7 @@ jobs:
             export SVOTE_HELPER_SENTRY_DSN="$SVOTE_HELPER_SENTRY_DSN"
             chmod +x ${{ env.DEPLOY_PATH }}/svoted ${{ env.DEPLOY_PATH }}/create-val-tx
             bash ${{ env.DEPLOY_PATH }}/init_multi.sh --ci
+            bash ${{ env.DEPLOY_PATH }}/init-archive.sh
         env:
           VM_PRIVKEY: ${{ secrets.VM_PRIVKEY }}
           SVOTE_HELPER_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -94,6 +99,12 @@ jobs:
             for svc in svoted-val1 svoted-val2 svoted-val3; do
               sudo systemctl start "$svc"
             done
+            if [ -d "${{ env.DEPLOY_PATH }}/.svoted-archive" ]; then
+              sudo systemctl start svoted-archive
+            else
+              echo "NOTE: ${{ env.DEPLOY_PATH }}/.svoted-archive does not exist yet — skipping archive start."
+              echo "      Run this workflow with reset_chain=true to initialize the archive."
+            fi
 
       - name: Register post-genesis validators
         if: ${{ inputs.reset_chain == true }}
@@ -176,7 +187,11 @@ jobs:
             }
 
             sleep 5
-            for svc in svoted-val1 svoted-val2 svoted-val3; do
+            services_to_check="svoted-val1 svoted-val2 svoted-val3"
+            if [ -d "${{ env.DEPLOY_PATH }}/.svoted-archive" ]; then
+              services_to_check="$services_to_check svoted-archive"
+            fi
+            for svc in $services_to_check; do
               if ! sudo systemctl is-active --quiet "$svc"; then
                 echo "FAIL: $svc not active"
                 sudo systemctl status "$svc" --no-pager
@@ -213,4 +228,27 @@ jobs:
               fi
               sleep 2
             done
-            echo "Chain + helper server both healthy"
+            if [ -d "${{ env.DEPLOY_PATH }}/.svoted-archive" ]; then
+              for i in $(seq 1 30); do
+                if curl -sf http://127.0.0.1:1718/cosmos/base/tendermint/v1beta1/blocks/latest > /dev/null 2>&1; then
+                  echo "Archive LCD healthy (port 1718)"
+                  break
+                fi
+                if [ "$i" = "30" ]; then
+                  echo "FAIL: Archive LCD not responding on 1718 after 60s"
+                  echo "--- systemctl status svoted-archive ---"
+                  sudo systemctl status svoted-archive --no-pager
+                  since_ts=$(systemctl show -p InactiveExitTimestamp --value svoted-archive.service)
+                  if [ -n "$since_ts" ]; then
+                    sudo journalctl -u svoted-archive --no-pager --since "$since_ts"
+                  else
+                    sudo journalctl -u svoted-archive --no-pager -n 500
+                  fi
+                  exit 1
+                fi
+                sleep 2
+              done
+              echo "Chain + helper server + archive all healthy"
+            else
+              echo "Chain + helper server healthy (archive not initialized — run reset_chain=true)"
+            fi
