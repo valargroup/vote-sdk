@@ -6,6 +6,7 @@ import {
   estimateTimestamp,
 } from "../store/rpc";
 import { getSnapshotStatus } from "../api/chain";
+import { useUIConfig } from "../store/uiConfigContext";
 
 interface RoundEditorProps {
   round: VotingRound;
@@ -111,19 +112,25 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
   const [nhLoading, setNhLoading] = useState(false);
   const [nhError, setNhError] = useState<string | null>(null);
   const [pirRebuilding, setPirRebuilding] = useState(false);
+  // PIR server's actually-served height; only used to warn when it disagrees
+  // with the canonical published height.
+  const [pirServedHeight, setPirServedHeight] = useState<number | null>(null);
   const endTime = round.settings.endTime;
   const hasEndTime = endTime.length > 0;
 
   const chain = useChainInfo();
+  const { publishedConfig, publishedConfigLoaded } = useUIConfig();
+  const publishedHeight = publishedConfig?.snapshot_height ?? null;
 
   // Ref to avoid stale closure — parent passes an inline arrow that changes
   // every render, but the callback logic should always use the latest version.
   const onUpdateSettingsRef = useRef(onUpdateSettings);
   useEffect(() => { onUpdateSettingsRef.current = onUpdateSettings; });
 
-  // Fetch snapshot height from PIR server. Manages its own loading/error
-  // state so callers don't need synchronous setState in effect bodies.
-  // Returns true if the server is serving (not rebuilding).
+  // Fetch snapshot height from PIR server. The published voting-config is the
+  // source of truth for round drafts, but we still poll PIR so we can surface
+  // a mismatch warning (and so we have a fallback for older configs that
+  // don't yet declare snapshot_height).
   const fetchSnapshotHeight = useCallback(async (setLoading: boolean) => {
     if (setLoading) {
       setNhLoading(true);
@@ -136,11 +143,7 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
         return false;
       }
       setPirRebuilding(false);
-      if (status.height != null) {
-        onUpdateSettingsRef.current({ snapshotHeight: String(status.height) });
-      } else {
-        setNhError("PIR server has no checkpoint height");
-      }
+      setPirServedHeight(status.height);
       return true;
     } catch (err) {
       setNhError(err instanceof Error ? err.message : "Failed to fetch");
@@ -149,6 +152,23 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
       if (setLoading) setNhLoading(false);
     }
   }, []);
+
+  // Auto-populate snapshot height from the published voting-config when set,
+  // otherwise fall back to whatever the PIR server reports.
+  useEffect(() => {
+    if (isReadonly) return;
+    if (!publishedConfigLoaded) return;
+    if (publishedHeight != null) {
+      onUpdateSettingsRef.current({ snapshotHeight: String(publishedHeight) });
+    } else if (pirServedHeight != null) {
+      onUpdateSettingsRef.current({ snapshotHeight: String(pirServedHeight) });
+    } else if (round.settings.snapshotHeight === "") {
+      // Surface "no source of truth" only once a fetch has completed.
+      if (publishedConfigLoaded && pirServedHeight === null && !pirRebuilding && !nhLoading) {
+        setNhError((e) => e ?? "No snapshot height in published config and PIR server has no checkpoint");
+      }
+    }
+  }, [publishedHeight, pirServedHeight, publishedConfigLoaded, pirRebuilding, nhLoading, isReadonly, round.id, round.settings.snapshotHeight]);
 
   // Auto-populate snapshot height from PIR server on mount and round switch.
   useEffect(() => {
@@ -165,6 +185,9 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
 
   const snapshotHeight = parseInt(round.settings.snapshotHeight, 10);
   const isValidHeight = !isNaN(snapshotHeight) && snapshotHeight > 0;
+  // PIR is "behind" the canonical config — typically a deploy-in-progress.
+  const pirMismatch =
+    publishedHeight != null && pirServedHeight != null && pirServedHeight !== publishedHeight;
 
   // Estimated timestamp for the snapshot height
   const estimatedDate =
@@ -232,6 +255,33 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
             </div>
           )}
 
+          {/* PIR vs published-config height mismatch */}
+          {pirMismatch && !pirRebuilding && (
+            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-warning/10 border border-warning/40 rounded-md">
+              <AlertTriangle size={12} className="text-warning shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-warning font-semibold leading-snug">
+                  PIR server height differs from published config
+                </p>
+                <p className="text-[10px] text-text-muted leading-snug mt-0.5">
+                  Config wants <span className="font-mono">{publishedHeight!.toLocaleString()}</span>,
+                  PIR is serving <span className="font-mono">{pirServedHeight!.toLocaleString()}</span>.
+                  This is normal during a snapshot deploy; the PIR server will
+                  catch up automatically. Wait before publishing.
+                </p>
+                {onNavigate && (
+                  <button
+                    onClick={() => onNavigate("snapshot")}
+                    className="text-[10px] text-accent hover:text-accent-glow mt-1 flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <ExternalLink size={10} />
+                    Open Snapshot Settings
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* PIR server rebuilding */}
           {pirRebuilding && (
             <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-accent/10 border border-accent/40 rounded-md">
@@ -288,7 +338,9 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
           )}
 
           <p className="text-[10px] text-text-muted mt-1">
-            Auto-populated from PIR server. The block height at which balances are captured for vote weighting.
+            Auto-populated from the published voting-config (falls back to the
+            PIR server). The block height at which balances are captured for
+            vote weighting.
           </p>
         </div>
 
