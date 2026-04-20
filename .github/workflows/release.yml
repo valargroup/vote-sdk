@@ -3,9 +3,10 @@
 # Tarball layout:
 #   shielded-vote-<version>-<platform>/
 #     bin/svoted, create-val-tx
-#     ui/dist/          (admin UI SPA)
-#     systemd/svoted-val{1,2,3}.service  (Linux only)
-#     scripts/init_multi.sh
+#     ui/dist/                             (admin UI SPA)
+#     explorer/dist/                       (ping-pub block explorer SPA)
+#     systemd/svoted-val{1,2,3}.service    (Linux only)
+#     scripts/init_multi.sh, reset-archive.sh, _vote_manager_keys_lib.sh
 #     config/Caddyfile
 
 name: Release
@@ -96,10 +97,62 @@ jobs:
             svoted
             create-val-tx
 
+  build-explorer:
+    name: Build explorer frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy/explorer
+          sparse-checkout-cone-mode: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Enable corepack (yarn 1.x)
+        run: corepack enable
+      - name: Cache yarn packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yarn
+          key: yarn-pingpub-ee1ca5ee54d7bd2dc4c5b4df8f3b93595440e9c8
+      - name: Clone ping-pub and build static bundle
+        env:
+          DOMAIN: ${{ secrets.DOMAIN }}
+        run: |
+          set -euo pipefail
+          git clone https://github.com/ping-pub/explorer.git /tmp/ping-pub
+          cd /tmp/ping-pub
+          git checkout ee1ca5ee54d7bd2dc4c5b4df8f3b93595440e9c8
+
+          # Drop all upstream chain configs so the UI shows only our chain.
+          rm -f chains/mainnet/*.json chains/testnet/*.json
+
+          # Substitute {{DOMAIN}} in the chain config and drop it in.
+          # ping-pub defaults to "mainnet" when the hostname doesn't contain
+          # "testnet"; our svote config lives under chains/mainnet/ so it's
+          # discoverable on explorer.<domain>.
+          sed "s|{{DOMAIN}}|${DOMAIN}|g" \
+            "$GITHUB_WORKSPACE/deploy/explorer/svote.json" \
+            > chains/mainnet/svote.json
+
+          # Bundle the Zcash logo so the chain icon resolves to our asset.
+          cp "$GITHUB_WORKSPACE/deploy/explorer/zcash.svg" public/logos/zcash.svg
+
+          yarn install
+          yarn build
+          tar czf "$GITHUB_WORKSPACE/explorer-dist.tar.gz" -C dist .
+      - name: Upload explorer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: explorer-dist
+          path: explorer-dist.tar.gz
+
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-sdk]
+    needs: [build-sdk, build-explorer]
     steps:
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -139,14 +192,20 @@ jobs:
         with:
           name: sdk-binaries-${{ matrix.platform }}
           path: sdk-binaries
+      - name: Download explorer dist
+        uses: actions/download-artifact@v4
+        with:
+          name: explorer-dist
+          path: explorer-artifact
       - name: Assemble tarball
         run: |
           VERSION="${GITHUB_REF_NAME}"
           DIR="shielded-vote-${VERSION}-${{ matrix.platform }}"
-          mkdir -p "${DIR}/bin" "${DIR}/ui" "${DIR}/scripts" "${DIR}/config"
+          mkdir -p "${DIR}/bin" "${DIR}/ui" "${DIR}/explorer/dist" "${DIR}/scripts" "${DIR}/config"
           cp sdk-binaries/svoted sdk-binaries/create-val-tx "${DIR}/bin/"
           chmod +x "${DIR}/bin/"*
           cp -r ui/dist "${DIR}/ui/dist"
+          tar xzf explorer-artifact/explorer-dist.tar.gz -C "${DIR}/explorer/dist"
           if [ "${{ matrix.os_family }}" = "linux" ]; then
             mkdir -p "${DIR}/systemd"
             for f in docs/svoted-val{1,2,3}.service; do
@@ -157,6 +216,8 @@ jobs:
             done
           fi
           cp scripts/init_multi.sh scripts/_vote_manager_keys_lib.sh "${DIR}/scripts/"
+          cp scripts/reset-archive.sh "${DIR}/scripts/"
+          chmod +x "${DIR}/scripts/reset-archive.sh"
           cp deploy/Caddyfile "${DIR}/config/"
           tar czf "${DIR}.tar.gz" "${DIR}"
           sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
