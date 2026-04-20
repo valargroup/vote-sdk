@@ -27,7 +27,7 @@ flowchart LR
 |----------|---------|-------------|
 | [`release.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/release.yml) | `v*` tag push | Builds `svoted` + admin UI for linux/darwin x amd64/arm64. Creates a GitHub Release with tarballs, uploads to DO Spaces (`s3://vote/`). |
 | [`sdk-chain-deploy.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-deploy.yml) | Manual `workflow_dispatch` | SSHes to both production hosts, runs `install-release.sh --tag <tag>` (download from Spaces, verify checksum, swap symlink, restart `svoted`), polls `localhost:1317` until healthy. Notifies Slack on failure. |
-| [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Full chain reset from genesis. Wipes state on primary, runs `init.sh`, uploads genesis to DO Spaces, funds secondary from the vote-manager, joins secondary via `reset-join.sh`, verifies both hosts. |
+| [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Full chain reset from genesis. Wipes state on primary, runs `init.sh`, uploads genesis to DO Spaces, funds secondary from a vote manager, joins secondary via `reset-join.sh`, verifies both hosts. |
 
 ### GitHub repository secrets
 
@@ -37,7 +37,7 @@ flowchart LR
 | `SECONDARY_HOST` | deploy, reset | Hostname or IP of the secondary validator. |
 | `DEPLOY_USER` | deploy, reset | SSH username on both hosts. |
 | `SSH_PRIVATE_KEY` | deploy, reset | SSH private key for authentication. |
-| `VM_PRIVKEY` | reset | 64-char hex secp256k1 private key for the vote-manager account. |
+| `VM_PRIVKEYS` | reset | Comma-separated 64-char hex secp256k1 private keys for the vote-manager set (any-of-N). Each derived address becomes a vote manager at genesis; the 1B usvote stake pool is split evenly across the set. For a single-vote-manager chain, provide exactly one key. |
 | `PRIMARY_VAL_PRIVKEY` | reset | 64-char hex private key for the primary validator. |
 | `SECONDARY_VAL_PRIVKEY` | reset | 64-char hex private key for the secondary validator. |
 | `DOMAIN` | reset | Base domain (e.g. `valargroup.org`). |

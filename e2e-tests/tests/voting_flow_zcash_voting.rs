@@ -13,9 +13,9 @@ use blake2b_simd::Params as Blake2bParams;
 use e2e_tests::{
     api::{
         self, broadcast_cosmos_msg, commitment_tree_next_index, default_cosmos_tx_config, get_json,
-        get_round, helper_server_url, import_hex_key, key_account_address,
-        post_helper_json, post_json_accept_committed,
-        tally_has_proposal, wait_for_round_status, SESSION_STATUS_ACTIVE, SESSION_STATUS_FINALIZED,
+        get_round, helper_server_url, import_first_vote_manager_key,
+        post_helper_json, post_json_accept_committed, tally_has_proposal, wait_for_round_status,
+        FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE, SESSION_STATUS_FINALIZED,
         SESSION_STATUS_TALLYING,
     },
     payloads::{
@@ -59,15 +59,10 @@ fn voting_flow_zcash_voting_path() {
         zcash_voting::zkp2::derive_spending_key(&seed, 1).expect("derive_spending_key from seed");
 
     // ---- Step 0: Ensure Pallas key registered + import vote manager key ----
-    let vm_privkey = std::env::var("VM_PRIVKEY")
-        .expect("VM_PRIVKEY env var must be set (64-char hex secp256k1 private key)");
     e2e_tests::setup::ensure_pallas_key_registered();
     log_step("Step 0", "importing vote manager key into keyring...");
     let config = default_cosmos_tx_config();
-    import_hex_key("vote-manager", &vm_privkey, &config.home_dir);
-
-    let vote_manager_address = key_account_address("vote-manager", &config.home_dir)
-        .expect("vote-manager key must be in keyring after import");
+    let vote_manager_address = import_first_vote_manager_key(&config.home_dir);
     log_step("Step 0", &format!("vote manager address: {}", vote_manager_address));
 
     let mut rng = ChaCha20Rng::seed_from_u64(43);
@@ -94,11 +89,11 @@ fn voting_flow_zcash_voting_path() {
     let round_id_hex = hex::encode(&round_id);
 
     // ---- Step 1: Create voting session ----
-    // MsgCreateVotingSession is a standard Cosmos SDK tx signed by the vote manager.
+    // MsgCreateVotingSession is a standard Cosmos SDK tx signed by a vote manager.
     log_step("Step 1", "create voting session (Cosmos SDK tx)");
     body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
     let vm_config = e2e_tests::api::CosmosTxConfig {
-        key_name: "vote-manager".to_string(),
+        key_name: FIRST_VOTE_MANAGER_KEY_NAME.to_string(),
         home_dir: config.home_dir.clone(),
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),

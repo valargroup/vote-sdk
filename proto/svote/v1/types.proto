@@ -73,9 +73,10 @@ message VoteRound {
   string discussion_url = 29; // Overall forum discussion link for the vote round
 }
 
-// VoteManagerState stores the singleton vote manager address.
-message VoteManagerState {
-  string address = 1;
+// VoteManagerSet stores the vote-manager addresses. Any-of-N: any member may authorize
+// vote-manager-gated operations. See README for the full rationale.
+message VoteManagerSet {
+  repeated string addresses = 1;
 }
 
 // CommitmentTreeState holds the current state of the append-only commitment tree.
@@ -90,7 +91,7 @@ message CommitmentTreeState {
 message GenesisState {
   repeated VoteRound               rounds              = 1;
   repeated NullifierEntry          nullifiers           = 4;
-  string                           vote_manager         = 5;
+  repeated string                  vote_manager_addresses      = 5;
   repeated TallyResult             tally_results        = 6;
   repeated ValidatorPallasKey      pallas_keys          = 7;
   repeated GenesisTallyAccumulator tally_accumulators   = 8;

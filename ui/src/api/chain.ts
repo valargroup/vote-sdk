@@ -234,8 +234,8 @@ export async function getLatestBlock(): Promise<LatestBlockInfo> {
   };
 }
 
-export async function getVoteManager(): Promise<{ address: string }> {
-  return fetchJson<{ address: string }>("/shielded-vote/v1/vote-manager");
+export async function getVoteManagers(): Promise<{ vote_manager_addresses: string[] }> {
+  return fetchJson<{ vote_manager_addresses: string[] }>("/shielded-vote/v1/vote-managers");
 }
 
 export async function getHelperStatus(): Promise<HelperStatus> {
@@ -256,9 +256,6 @@ export async function getNullifierStatus(): Promise<NullifierStatus> {
     nullifier_count: pir.num_ranges,
   };
 }
-
-// setVoteManager was removed: MsgSetVoteManager is now a standard Cosmos SDK
-// transaction signed client-side. See cosmosTx.ts.
 
 export async function listRounds(): Promise<{ rounds: ChainRound[] | null }> {
   return fetchJson<{ rounds: ChainRound[] | null }>("/shielded-vote/v1/rounds");

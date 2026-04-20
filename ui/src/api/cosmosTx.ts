@@ -1,6 +1,6 @@
 // Client-side Cosmos SDK transaction signing and REST broadcasting.
 //
-// MsgSetVoteManager, MsgCreateVotingSession, and MsgAuthorizedSend are
+// MsgUpdateVoteManagers, MsgCreateVotingSession, and MsgAuthorizedSend are
 // standard Cosmos SDK transactions. Instead of relying on a server-side
 // handler, we sign them directly in the browser using cosmjs and broadcast
 // via the chain's REST API (/cosmos/tx/v1beta1/txs).
@@ -95,25 +95,33 @@ class ProtoWriter {
   }
 }
 
-// ── Protobuf type: MsgSetVoteManager ────────────────────────────
-
-// message MsgSetVoteManager { string creator = 1; string new_manager = 2; }
-const MsgSetVoteManagerProto = {
+// ── Protobuf type: MsgUpdateVoteManagers ─────────────────────────────
+//
+// message MsgUpdateVoteManagers {
+//   string creator          = 1;
+//   repeated string new_vote_managers = 2;
+// }
+// Atomically replaces the vote-manager set. Any current vote manager may call it; the new
+// set must be non-empty and contain only valid bech32 addresses with no
+// duplicates. Balances are not touched.
+const MsgUpdateVoteManagersProto = {
   encode(
-    message: { creator: string; newManager: string },
+    message: { creator: string; newVoteManagers: string[] },
     writer: ProtoWriter = ProtoWriter.create(),
   ): ProtoWriter {
     if (message.creator !== "") writer.uint32(10).string(message.creator);
-    if (message.newManager !== "") writer.uint32(18).string(message.newManager);
+    for (const vm of message.newVoteManagers) {
+      writer.uint32(18).string(vm);
+    }
     return writer;
   },
-  decode(): { creator: string; newManager: string } {
+  decode(): { creator: string; newVoteManagers: string[] } {
     throw new Error("decode not implemented");
   },
   fromPartial(
-    object: Partial<{ creator: string; newManager: string }>,
-  ): { creator: string; newManager: string } {
-    return { creator: object.creator ?? "", newManager: object.newManager ?? "" };
+    object: Partial<{ creator: string; newVoteManagers: string[] }>,
+  ): { creator: string; newVoteManagers: string[] } {
+    return { creator: object.creator ?? "", newVoteManagers: object.newVoteManagers ?? [] };
   },
 };
 
@@ -270,7 +278,7 @@ const MsgAuthorizedSendProto = {
 function createRegistry(): Registry {
   const registry = new Registry();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registry.register("/svote.v1.MsgSetVoteManager", MsgSetVoteManagerProto as any);
+  registry.register("/svote.v1.MsgUpdateVoteManagers", MsgUpdateVoteManagersProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/svote.v1.MsgCreateVotingSession", MsgCreateVotingSessionProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -499,15 +507,15 @@ async function fetchSnapshotData(
 // ── Public API ──────────────────────────────────────────────────
 
 /**
- * Sign and broadcast a MsgSetVoteManager transaction.
+ * Sign and broadcast a MsgUpdateVoteManagers transaction.
  *
- * The `creator` field is derived from the signer (must be the current vote
- * manager or a bonded validator).
+ * Atomically replaces the vote-manager set with `newVoteManagers`. The `creator` field is
+ * derived from the signer (must be a current vote manager). Balances are not moved.
  */
-export async function setVoteManager(
+export async function updateVoteManagers(
   apiBase: string,
   signer: OfflineDirectSigner,
-  newManager: string,
+  newVoteManagers: string[],
 ): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
   return signAndBroadcast({
@@ -515,8 +523,8 @@ export async function setVoteManager(
     signer,
     messages: [
       {
-        typeUrl: "/svote.v1.MsgSetVoteManager",
-        value: { creator: account.address, newManager },
+        typeUrl: "/svote.v1.MsgUpdateVoteManagers",
+        value: { creator: account.address, newVoteManagers },
       },
     ],
   });
@@ -583,9 +591,9 @@ export async function createVotingSession(
 /**
  * Sign and broadcast an svote.v1.MsgAuthorizedSend transaction.
  *
- * Used by the "Fund validator" UI to transfer stake tokens from the
- * vote manager to a validator address. Only the vote manager (or bonded
- * validators sending to each other / the manager) is authorized.
+ * Used by the "Fund validator" UI to transfer stake tokens from a vote manager
+ * to a validator address. Any vote manager can send to anyone; bonded validators
+ * can send to other vote managers or bonded validators; all other senders rejected.
  *
  * @param amountUsvote - amount in micro-tokens (usvote), e.g. "1000000" for 1 SVOTE
  */

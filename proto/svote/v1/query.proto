@@ -33,8 +33,9 @@ service Query {
   // CeremonyState returns the current EA key ceremony lifecycle state.
   rpc CeremonyState(QueryCeremonyStateRequest) returns (QueryCeremonyStateResponse);
 
-  // VoteManager returns the current vote manager address.
-  rpc VoteManager(QueryVoteManagerRequest) returns (QueryVoteManagerResponse);
+  // VoteManagers returns the current vote-manager set (any member can
+  // authorize vote-manager-gated operations — any-of-N semantics).
+  rpc VoteManagers(QueryVoteManagersRequest) returns (QueryVoteManagersResponse);
 
   // VoteSummary returns a denormalized view of a vote round with proposals,
   // ballot counts, and (if finalized) decrypted totals. Single query for frontend display.
@@ -112,10 +113,10 @@ message QueryCeremonyStateResponse {
   CeremonyState ceremony = 1;
 }
 
-message QueryVoteManagerRequest {}
+message QueryVoteManagersRequest {}
 
-message QueryVoteManagerResponse {
-  string address = 1;
+message QueryVoteManagersResponse {
+  repeated string vote_manager_addresses = 1;
 }
 
 message QueryVoteSummaryRequest {

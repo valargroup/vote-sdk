@@ -897,19 +897,18 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [ceremony, setCeremony] = useState<chainApi.CeremonyState | null>(null);
   const [latestBlock, setLatestBlock] = useState<chainApi.LatestBlockInfo | null>(null);
   const [helperStatus, setHelperStatus] = useState<chainApi.HelperStatus | null>(null);
-  const [voteManager, setVoteManagerAddr] = useState<string>(
-    () => localStorage.getItem("sv-vm-address") ?? ""
-  );
+  const [voteManagers, setVoteManagers] = useState<string[]>([]);
   const [chainDetailsOpen, setChainDetailsOpen] = useState(false);
 
   // Dev private key connection (collapsible section)
   const [devKey, setDevKey] = useState(DEFAULT_DEV_KEY);
   const [devKeyVisible, setDevKeyVisible] = useState(false);
 
-  // Set VoteManager flow
-  const [vmNewAddr, setVmNewAddr] = useState("");
-  const [vmStatus, setVmStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
-  const [vmError, setVmError] = useState("");
+  // Update vote-manager set flow. The UI accepts a comma- or newline-separated list
+  // of bech32 addresses; submission atomically replaces the entire set.
+  const [vmNewAddrs, setVmNewAddrs] = useState("");
+  const [vmTxStatus, setVmTxStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
+  const [vmTxError, setVmTxError] = useState("");
   const [vmTxHash, setVmTxHash] = useState("");
 
   const handleRpcChange = (url: string) => {
@@ -934,13 +933,13 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
       const block = await chainApi.getLatestBlock();
       setLatestBlock(block);
 
-      const [state, vm, helper] = await Promise.all([
+      const [state, vmResp, helper] = await Promise.all([
         chainApi.testConnection(),
-        chainApi.getVoteManager(),
+        chainApi.getVoteManagers(),
         chainApi.getHelperStatus().catch(() => null),
       ]);
       setCeremony(state);
-      setVoteManagerAddr(vm.address || "");
+      setVoteManagers(vmResp.vote_manager_addresses ?? []);
       setHelperStatus(helper);
       setConnStatus("ok");
     } catch (err) {
@@ -953,25 +952,44 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
     await wallet.connectDev(devKey);
   };
 
-  const handleSetVoteManager = async () => {
+  const handleUpdateVoteManagers = async () => {
     if (!wallet.signer) return;
-    setVmStatus("sending");
-    setVmError("");
+    setVmTxStatus("sending");
+    setVmTxError("");
     setVmTxHash("");
     try {
+      const newVoteManagers = vmNewAddrs
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (newVoteManagers.length === 0) {
+        setVmTxError("Enter at least one vote-manager address");
+        setVmTxStatus("error");
+        return;
+      }
       const base = chainApi.getApiBase();
-      const result = await cosmosTx.setVoteManager(base, wallet.signer, vmNewAddr);
+      const result = await cosmosTx.updateVoteManagers(base, wallet.signer, newVoteManagers);
       if (result.code !== 0) {
-        setVmError(result.log || `tx failed with code ${result.code}`);
-        setVmStatus("error");
+        setVmTxError(result.log || `tx failed with code ${result.code}`);
+        setVmTxStatus("error");
       } else {
         setVmTxHash(result.tx_hash);
-        setVmStatus("ok");
-        setVoteManagerAddr(vmNewAddr);
+        setVmTxStatus("ok");
+        // Re-fetch to get the canonical (lowercase) form the chain stored,
+        // not the user-typed form which may be mixed-case. A refetch failure
+        // here must not downgrade the tx's "ok" status — the tx succeeded.
+        try {
+          const vmResp = await chainApi.getVoteManagers();
+          setVoteManagers(vmResp.vote_manager_addresses ?? []);
+        } catch {
+          // Keep the user-typed list on failure; the next connection test
+          // will sync to canonical form.
+          setVoteManagers(newVoteManagers);
+        }
       }
     } catch (err) {
-      setVmError(err instanceof Error ? err.message : String(err));
-      setVmStatus("error");
+      setVmTxError(err instanceof Error ? err.message : String(err));
+      setVmTxStatus("error");
     }
   };
 
@@ -1421,20 +1439,31 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                 </div>
               )}
 
-              {/* Vote manager */}
+              {/* Vote-manager set (any-of-N) */}
               {connStatus === "ok" && (
                 <div className="border-t border-border-subtle pt-3 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-text-secondary">VoteManager</span>
-                    <span className="text-[11px] font-mono text-text-primary">
-                      {voteManager || <span className="text-text-muted italic">not set</span>}
-                    </span>
+                  <div>
+                    <div className="text-xs text-text-secondary mb-1.5">Vote Managers (any-of-N)</div>
+                    {voteManagers.length === 0 ? (
+                      <span className="text-[11px] text-text-muted italic">none set</span>
+                    ) : (
+                      <ul className="space-y-1">
+                        {voteManagers.map((addr) => (
+                          <li
+                            key={addr}
+                            className="text-[11px] font-mono text-text-primary break-all"
+                          >
+                            {addr}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
 
                   {wallet.signer && (
                     <details className="group">
                       <summary className="text-[11px] text-accent cursor-pointer hover:text-accent-glow">
-                        Set VoteManager address
+                        Replace vote-manager set
                       </summary>
                       <div className="mt-3 space-y-3">
                         <div className="bg-surface-2 rounded-lg px-3 py-2">
@@ -1445,22 +1474,25 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                         </div>
                         <div>
                           <label className="block text-[11px] text-text-secondary mb-1">
-                            New VoteManager address
+                            New vote-manager addresses (comma- or newline-separated)
                           </label>
-                          <input
-                            type="text"
-                            value={vmNewAddr}
-                            onChange={(e) => setVmNewAddr(e.target.value)}
-                            placeholder="sv1..."
+                          <textarea
+                            value={vmNewAddrs}
+                            onChange={(e) => setVmNewAddrs(e.target.value)}
+                            placeholder="sv1..., sv1..., sv1..."
+                            rows={3}
                             className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
                           />
+                          <p className="text-[10px] text-text-muted mt-1">
+                            Replaces the entire vote-manager set atomically. Balances are not moved.
+                          </p>
                         </div>
                         <button
-                          onClick={handleSetVoteManager}
-                          disabled={!vmNewAddr || vmStatus === "sending"}
+                          onClick={handleUpdateVoteManagers}
+                          disabled={!vmNewAddrs.trim() || vmTxStatus === "sending"}
                           className="px-3 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
                         >
-                          {vmStatus === "sending" ? (
+                          {vmTxStatus === "sending" ? (
                             <span className="flex items-center gap-1.5">
                               <Loader2 size={12} className="animate-spin" /> Signing & broadcasting...
                             </span>
@@ -1468,10 +1500,10 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                             "Sign & broadcast on-chain"
                           )}
                         </button>
-                        {vmStatus === "ok" && (
+                        {vmTxStatus === "ok" && (
                           <div className="bg-success/10 border border-success/30 rounded-lg p-2.5">
                             <p className="text-[11px] text-success font-semibold">
-                              VoteManager updated
+                              Vote-manager set updated
                             </p>
                             {vmTxHash && (
                               <p className="text-[10px] text-text-secondary font-mono mt-0.5 break-all">
@@ -1480,9 +1512,9 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                             )}
                           </div>
                         )}
-                        {vmStatus === "error" && (
+                        {vmTxStatus === "error" && (
                           <div className="bg-danger/10 border border-danger/30 rounded-lg p-2.5">
-                            <p className="text-[11px] text-danger">{vmError}</p>
+                            <p className="text-[11px] text-danger">{vmTxError}</p>
                           </div>
                         )}
                       </div>
@@ -1490,7 +1522,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                   )}
                   {!wallet.signer && connStatus === "ok" && (
                     <p className="text-[10px] text-text-muted">
-                      Connect a wallet above to sign VoteManager transactions.
+                      Connect a wallet above to sign vote-manager-set updates.
                     </p>
                   )}
                 </div>
@@ -1583,7 +1615,7 @@ function PublishModal({
       <div className="bg-surface-1 border border-border rounded-xl shadow-xl max-w-md w-full mx-4">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
           <h3 className="text-sm font-semibold text-text-primary">
-            {walletConnected ? "Publish to chain" : "Connect admin wallet"}
+            {walletConnected ? "Publish to chain" : "Connect wallet"}
           </h3>
           <button
             onClick={onClose}
@@ -2564,7 +2596,7 @@ function FundValidatorModal({
       <div className="bg-surface-1 border border-border rounded-xl shadow-xl max-w-md w-full mx-4">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
           <h3 className="text-sm font-semibold text-text-primary">
-            {walletConnected ? "Fund validator" : "Connect admin wallet"}
+            {walletConnected ? "Fund validator" : "Connect wallet"}
           </h3>
           <button
             onClick={onClose}

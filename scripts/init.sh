@@ -43,22 +43,39 @@ VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend 
 echo "Validator address: $VALIDATOR_ADDR"
 echo "Validator valoper: $VALIDATOR_VALOPER"
 
-# Import the bootstrap admin key used as the vote-manager.
-# Must be set via .env (local) or as a GitHub/CI secret (remote).
-if [ -z "$VM_PRIVKEY" ]; then
-    echo "ERROR: VM_PRIVKEY is not set."
-    echo "  Local dev:  add VM_PRIVKEY=<64-char-hex> to .env (see .env.example)"
-    echo "  CI/deploy:  set the VM_PRIVKEY secret in GitHub Actions"
-    exit 1
-fi
-$BINARY keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_DIR"
-MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_DIR")
-echo "Admin address:     $MANAGER_ADDR"
+# Import the bootstrap vote-manager keys. VM_PRIVKEYS is a comma-separated list
+# of 64-char hex secp256k1 private keys; every derived address becomes a vote
+# manager at genesis (any-of-N). The stake pool is split evenly across the set.
+# shellcheck source=scripts/_vote_manager_keys_lib.sh
+. "$(dirname "$0")/_vote_manager_keys_lib.sh"
+parse_vm_privkeys
 
-# Add genesis accounts with tokens
+# Total stake pool divided evenly across vote managers (preserves total supply).
+TOTAL_VOTE_MANAGER_POOL=1000000000
+VOTE_MANAGER_ADDRS=()
+NUM_VOTE_MANAGERS=${#VM_PRIVKEY_LIST[@]}
+PER_VOTE_MANAGER_STAKE=$((TOTAL_VOTE_MANAGER_POOL / NUM_VOTE_MANAGERS))
+REMAINDER=$((TOTAL_VOTE_MANAGER_POOL - PER_VOTE_MANAGER_STAKE * NUM_VOTE_MANAGERS))
+
+for i in "${!VM_PRIVKEY_LIST[@]}"; do
+    key="${VM_PRIVKEY_LIST[$i]}"
+    name="vote-manager-$((i + 1))"
+    $BINARY keys import-hex "$name" "$key" --keyring-backend test --home "$HOME_DIR"
+    addr=$($BINARY keys show "$name" -a --keyring-backend test --home "$HOME_DIR")
+    VOTE_MANAGER_ADDRS+=("$addr")
+    # Vote manager 1 receives any remainder from the integer division.
+    if [ "$i" -eq 0 ]; then
+        stake=$((PER_VOTE_MANAGER_STAKE + REMAINDER))
+    else
+        stake=$PER_VOTE_MANAGER_STAKE
+    fi
+    echo "Vote-manager ${name}:     $addr (balance: ${stake}${DENOM})"
+    $BINARY genesis add-genesis-account "$addr" "${stake}${DENOM}" \
+        --keyring-backend test --home "$HOME_DIR"
+done
+
+# Add validator's genesis account (needed for self-delegation).
 $BINARY genesis add-genesis-account "$VALIDATOR_ADDR" "10000000${DENOM}" \
-    --keyring-backend test --home "$HOME_DIR"
-$BINARY genesis add-genesis-account "$MANAGER_ADDR" "1000000000${DENOM}" \
     --keyring-backend test --home "$HOME_DIR"
 
 # Create genesis transaction (self-delegation)
@@ -70,13 +87,16 @@ $BINARY genesis gentx validator "10000000${DENOM}" \
 # Collect genesis transactions
 $BINARY genesis collect-gentxs --home "$HOME_DIR"
 
-# Patch genesis: set vote manager to the imported key's address and zero out
-# slashing slash fractions (no token burn). Defaults for signed_blocks_window
-# (100), min_signed_per_window (0.5), and downtime_jail_duration (600s) are
-# acceptable.
+# Build the vote_manager_addresses JSON array for the genesis patch.
+VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .)
+
+# Patch genesis: set vote_manager_addresses to the imported keys' addresses and zero
+# out slashing slash fractions (no token burn). Defaults for
+# signed_blocks_window (100), min_signed_per_window (0.5), and
+# downtime_jail_duration (600s) are acceptable.
 GENESIS="$HOME_DIR/config/genesis.json"
-jq --arg mgr "$MANAGER_ADDR" '
-  .app_state.vote.vote_manager = $mgr
+jq --argjson vms "$VOTE_MANAGER_JSON" '
+  .app_state.vote.vote_manager_addresses = $vms
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"
@@ -183,38 +203,18 @@ helper_url = "$HELPER_URL"
 sentry_dsn = "$HELPER_SENTRY_DSN"
 HELPERCFG
 
-# Append [admin] section.
+# Append [admin] section. The admin server is a thin CDN-config proxy; the
+# only recognized key is `disable`. See internal/admin/types.go Config struct.
 ADMIN_DISABLE="${SVOTE_ADMIN_DISABLE:-true}"
-ADMIN_ADDRESS="${SVOTE_ADMIN_ADDRESS:-$MANAGER_ADDR}"
 cat >> "$APP_TOML" <<ADMINCFG
 
 ###############################################################################
-###                         Admin Server                                    ###
+###                         Admin Server (CDN config proxy)                 ###
 ###############################################################################
 
 [admin]
 
-# Set to true to disable the admin server (server directory, registration,
-# health monitoring).
 disable = $ADMIN_DISABLE
-
-# Path to the admin SQLite database. Empty = default (\$HOME/.svoted/admin.db).
-db_path = ""
-
-# Bootstrap admin address for approve/reject operations.
-admin_address = "$ADMIN_ADDRESS"
-
-# How often to probe vote servers for health (seconds).
-probe_interval = 1800
-
-# How often to check for stale pulses (seconds).
-evict_interval = 120
-
-# How long a server can go without a pulse before being excluded (seconds).
-stale_threshold = 21600
-
-# PIR server list (JSON array). Included in the voting-config response.
-pir_servers = ""
 ADMINCFG
 
 # Append [ui] section.
@@ -236,6 +236,9 @@ UICFG
 echo ""
 echo "=== Chain initialized successfully! ==="
 echo "Validator valoper: $VALIDATOR_VALOPER"
-echo "Manager address:   $MANAGER_ADDR"
+echo "Vote-manager addresses (any-of-N):"
+for addr in "${VOTE_MANAGER_ADDRS[@]}"; do
+    echo "  $addr"
+done
 echo ""
 echo "Start with: $BINARY start --home $HOME_DIR"

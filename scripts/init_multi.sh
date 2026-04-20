@@ -76,8 +76,8 @@ SELF_DELEGATION="10000000${DENOM}"
 
 # Validator genesis balance (covers the 10M self-delegation).
 GENESIS_BALANCE="10000000${DENOM}"
-# Bootstrap admin balance (enough to fund up to 100 validators at 10M each).
-ADMIN_BALANCE="1000000000${DENOM}"
+# Bootstrap vote-manager pool (enough to fund up to 100 validators at 10M each).
+VOTE_MANAGER_BALANCE="1000000000${DENOM}"
 
 # ---------------------------------------------------------------------------
 # Cleanup
@@ -287,17 +287,22 @@ $BINARY keys add validator --keyring-backend test --home "$HOME_VAL1"
 VAL1_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_VAL1")
 echo "Val1 address: $VAL1_ADDR"
 
-# Import the bootstrap admin key used as the vote-manager.
-# Must be set via .env (local) or as a GitHub/CI secret (remote).
-if [ -z "$VM_PRIVKEY" ]; then
-    echo "ERROR: VM_PRIVKEY is not set."
-    echo "  Local dev:  add VM_PRIVKEY=<64-char-hex> to .env (see .env.example)"
-    echo "  CI/deploy:  set the VM_PRIVKEY secret in GitHub Actions"
-    exit 1
-fi
-$BINARY keys import-hex manager "$VM_PRIVKEY" --keyring-backend test --home "$HOME_VAL1"
-MANAGER_ADDR=$($BINARY keys show manager -a --keyring-backend test --home "$HOME_VAL1")
-echo "Manager address:   $MANAGER_ADDR"
+# Import the bootstrap vote-manager keys. VM_PRIVKEYS is a comma-separated list
+# of 64-char hex secp256k1 private keys; every derived address becomes a vote
+# manager at genesis (any-of-N). The stake pool is split evenly across the set.
+# shellcheck source=scripts/_vote_manager_keys_lib.sh
+. "$(dirname "$0")/_vote_manager_keys_lib.sh"
+parse_vm_privkeys
+
+VOTE_MANAGER_ADDRS=()
+for i in "${!VM_PRIVKEY_LIST[@]}"; do
+    key="${VM_PRIVKEY_LIST[$i]}"
+    name="vote-manager-$((i + 1))"
+    $BINARY keys import-hex "$name" "$key" --keyring-backend test --home "$HOME_VAL1"
+    addr=$($BINARY keys show "$name" -a --keyring-backend test --home "$HOME_VAL1")
+    VOTE_MANAGER_ADDRS+=("$addr")
+    echo "Vote-manager ${name}:     $addr"
+done
 
 # Initialize keys for validators 2 and 3 (separate home dirs, but we need
 # their addresses now to add as genesis accounts).
@@ -323,11 +328,26 @@ done
 # Save val1 address too.
 echo "$VAL1_ADDR" > "$HOME_VAL1/validator_address.txt"
 
-# Add genesis accounts for all 3 validators and the bootstrap admin.
+# Add genesis accounts for all 3 validators and every vote manager. The
+# vote-manager stake pool (VOTE_MANAGER_BALANCE) is split evenly across vote
+# managers to preserve total supply regardless of N.
 $BINARY genesis add-genesis-account "$VAL1_ADDR" "$VAL1_SELF_DELEGATION" \
     --keyring-backend test --home "$HOME_VAL1"
-$BINARY genesis add-genesis-account "$MANAGER_ADDR" "$ADMIN_BALANCE" \
-    --keyring-backend test --home "$HOME_VAL1"
+
+VOTE_MANAGER_POOL_INT=${VOTE_MANAGER_BALANCE%"${DENOM}"}
+NUM_VOTE_MANAGERS=${#VOTE_MANAGER_ADDRS[@]}
+PER_VOTE_MANAGER_STAKE=$((VOTE_MANAGER_POOL_INT / NUM_VOTE_MANAGERS))
+REMAINDER=$((VOTE_MANAGER_POOL_INT - PER_VOTE_MANAGER_STAKE * NUM_VOTE_MANAGERS))
+for i in "${!VOTE_MANAGER_ADDRS[@]}"; do
+    addr="${VOTE_MANAGER_ADDRS[$i]}"
+    if [ "$i" -eq 0 ]; then
+        stake=$((PER_VOTE_MANAGER_STAKE + REMAINDER))
+    else
+        stake=$PER_VOTE_MANAGER_STAKE
+    fi
+    $BINARY genesis add-genesis-account "$addr" "${stake}${DENOM}" \
+        --keyring-backend test --home "$HOME_VAL1"
+done
 
 for i in 2 3; do
     idx=$((i - 1))
@@ -346,11 +366,14 @@ $BINARY genesis gentx validator "$VAL1_SELF_DELEGATION" \
 # Collect genesis transactions and validate.
 $BINARY genesis collect-gentxs --home "$HOME_VAL1"
 
-# Patch genesis: set vote manager to the imported key's address and zero out
-# slashing slash fractions (no token burn).
+# Build the vote_manager_addresses JSON array for the genesis patch.
+VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .)
+
+# Patch genesis: set vote_manager_addresses to the imported keys' addresses and zero
+# out slashing slash fractions (no token burn).
 GENESIS="$HOME_VAL1/config/genesis.json"
-jq --arg mgr "$MANAGER_ADDR" '
-  .app_state.vote.vote_manager = $mgr
+jq --argjson vms "$VOTE_MANAGER_JSON" '
+  .app_state.vote.vote_manager_addresses = $vms
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"

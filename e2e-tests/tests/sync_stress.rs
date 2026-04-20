@@ -14,8 +14,8 @@ use base64::Engine;
 use e2e_tests::{
     api::{
         self, broadcast_cosmos_msg, commitment_tree_next_index, default_cosmos_tx_config, get_json,
-        import_hex_key, post_json_accept_committed, wait_for_round_status, CosmosTxConfig,
-        SESSION_STATUS_ACTIVE,
+        import_first_vote_manager_key, post_json_accept_committed, wait_for_round_status,
+        CosmosTxConfig, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
     },
     payloads::{create_voting_session_payload, delegate_vote_payload},
     setup::{build_multi_delegation_bundles, ensure_pallas_key_registered},
@@ -24,9 +24,6 @@ use ff::PrimeField;
 use pasta_curves::pallas;
 use vote_commitment_tree::TreeClient;
 use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
-
-/// Vote manager address corresponding to the VM_PRIVKEY used in genesis.
-const VOTE_MANAGER_ADDRESS: &str = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3";
 
 struct SyncClientResult {
     client_id: usize,
@@ -64,19 +61,17 @@ fn sync_stress_multi_delegation() {
     eprintln!("[stress] Phase 1 complete: {} bundles ready", bundles.len());
 
     // ---- Phase 2: Create round + wait for ACTIVE ----
-    let vm_privkey = std::env::var("VM_PRIVKEY")
-        .expect("VM_PRIVKEY env var must be set (64-char hex secp256k1 private key)");
     ensure_pallas_key_registered();
     let config = default_cosmos_tx_config();
-    import_hex_key("vote-manager", &vm_privkey, &config.home_dir);
+    let vote_manager_address = import_first_vote_manager_key(&config.home_dir);
 
     let (mut body, _, round_id) =
-        create_voting_session_payload(VOTE_MANAGER_ADDRESS, 300, Some(round_fields));
+        create_voting_session_payload(&vote_manager_address, 300, Some(round_fields));
     let round_id_hex = hex::encode(&round_id);
 
     body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
     let vm_config = CosmosTxConfig {
-        key_name: "vote-manager".to_string(),
+        key_name: FIRST_VOTE_MANAGER_KEY_NAME.to_string(),
         home_dir: config.home_dir.clone(),
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),

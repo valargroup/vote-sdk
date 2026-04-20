@@ -145,7 +145,7 @@ fi
 
 echo "Funding joiner account..."
 svoted tx vote authorized-send "$JOINER_ADDR" 200000 usvote \
-    --from manager --home "$VAL1_HOME" --keyring-backend test --chain-id "$CHAIN_ID" -y
+    --from vote-manager-1 --home "$VAL1_HOME" --keyring-backend test --chain-id "$CHAIN_ID" -y
 
 # Wait for the transfer to commit.
 echo "Waiting for balance..."

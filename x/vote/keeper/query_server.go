@@ -216,8 +216,9 @@ func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCerem
 	return &types.QueryCeremonyStateResponse{Ceremony: state}, nil
 }
 
-// VoteManager returns the current vote manager address.
-func (qs queryServer) VoteManager(goCtx context.Context, req *types.QueryVoteManagerRequest) (*types.QueryVoteManagerResponse, error) {
+// VoteManagers returns the current vote-manager set. Any member can
+// authorize vote-manager-gated operations (any-of-N).
+func (qs queryServer) VoteManagers(goCtx context.Context, req *types.QueryVoteManagersRequest) (*types.QueryVoteManagersResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
@@ -225,17 +226,16 @@ func (qs queryServer) VoteManager(goCtx context.Context, req *types.QueryVoteMan
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)
 
-	state, err := qs.k.GetVoteManager(kvStore)
+	set, err := qs.k.GetVoteManagers(kvStore)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get vote manager: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to get vote-manager set: %v", err)
 	}
 
-	var addr string
-	if state != nil {
-		addr = state.Address
+	resp := &types.QueryVoteManagersResponse{}
+	if set != nil {
+		resp.VoteManagerAddresses = set.Addresses
 	}
-
-	return &types.QueryVoteManagerResponse{Address: addr}, nil
+	return resp, nil
 }
 
 // ListRounds returns all stored vote rounds.

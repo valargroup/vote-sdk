@@ -1,6 +1,6 @@
 # Reset both validators from genesis: wipe state, re-init primary with
 # deterministic keys, upload genesis to DO Spaces, fund the secondary
-# from the vote-manager, then join secondary.
+# from a vote manager, then join secondary.
 # Manual-only: triggered via workflow_dispatch with a release tag.
 
 name: Reset SDK Chain
@@ -50,12 +50,13 @@ jobs:
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
 
-            # Run init.sh with deterministic validator key
+            # Run init.sh with deterministic validator key and vote-manager set.
             export SVOTED_HOME=/opt/shielded-vote/.svoted
-            export VM_PRIVKEY="${{ secrets.VM_PRIVKEY }}"
+            export VM_PRIVKEYS="${{ secrets.VM_PRIVKEYS }}"
             export VAL_PRIVKEY="${{ secrets.PRIMARY_VAL_PRIVKEY }}"
             export SVOTE_ADMIN_DISABLE=false
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/init.sh" -o /tmp/init.sh
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/_vote_manager_keys_lib.sh" -o /tmp/_vote_manager_keys_lib.sh
             bash /tmp/init.sh
 
             # init.sh sets REST API to port 1318 (local dev); fix to 1317 for production
@@ -155,7 +156,7 @@ jobs:
             echo "Funding secondary address: ${SECONDARY_ADDR}"
 
             svoted tx vote authorized-send "${SECONDARY_ADDR}" 100000000 usvote \
-              --from manager \
+              --from vote-manager-1 \
               --keyring-backend test \
               --home "$HOME_DIR" \
               --chain-id svote-1 \

@@ -32,20 +32,20 @@ func TestExportImportGenesis(t *testing.T) {
 
 	// --- Populate state ---
 
-	// Vote manager.
-	require.NoError(t, k.SetVoteManager(kvStore, &types.VoteManagerState{Address: "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}))
+	// Vote-manager set.
+	require.NoError(t, k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}}))
 
 	// Vote rounds.
 	round := &types.VoteRound{
-		VoteRoundId:      roundID,
-		SnapshotHeight:   100,
+		VoteRoundId:       roundID,
+		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x11}, 32),
-		ProposalsHash:    bytes.Repeat([]byte{0x22}, 32),
-		VoteEndTime:      2_000_000,
-		NullifierImtRoot: bytes.Repeat([]byte{0x33}, 32),
-		NcRoot:           bytes.Repeat([]byte{0x44}, 32),
-		Creator:          "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
-		Status:           types.SessionStatus_SESSION_STATUS_ACTIVE,
+		ProposalsHash:     bytes.Repeat([]byte{0x22}, 32),
+		VoteEndTime:       2_000_000,
+		NullifierImtRoot:  bytes.Repeat([]byte{0x33}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x44}, 32),
+		Creator:           "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
+		Status:            types.SessionStatus_SESSION_STATUS_ACTIVE,
 		Proposals: []*types.Proposal{
 			{Id: 1, Title: "Prop 1", Options: []*types.VoteOption{
 				{Index: 0, Label: "Yes"},
@@ -145,7 +145,7 @@ func TestExportImportGenesis(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify export contents.
-	require.Equal(t, "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3", gs.VoteManager)
+	require.Equal(t, []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}, gs.VoteManagerAddresses)
 	require.Len(t, gs.Rounds, 2)
 	require.Len(t, gs.Nullifiers, 3)
 	require.Len(t, gs.TallyResults, 1)
@@ -278,10 +278,10 @@ func TestExportImportGenesis(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "svvaloper1abc", owner)
 
-	// Verify vote manager.
-	vm, err := k2.GetVoteManager(kvStore2)
+	// Verify vote-manager set.
+	vms, err := k2.GetVoteManagers(kvStore2)
 	require.NoError(t, err)
-	require.Equal(t, "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3", vm.Address)
+	require.Equal(t, []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}, vms.Addresses)
 
 	// Verify commitment roots (per-round).
 	rootVal, err := k2.GetCommitmentRootAtHeight(kvStore2, roundID, 10)
@@ -391,7 +391,7 @@ func TestExportGenesisEmpty(t *testing.T) {
 	require.Empty(t, gs.TallyAccumulators)
 	require.Empty(t, gs.ShareCounts)
 	require.Empty(t, gs.PartialDecryptions)
-	require.Empty(t, gs.VoteManager)
+	require.Empty(t, gs.VoteManagerAddresses)
 }
 
 // TestInitGenesisPopulatesPallasKeyReverseIndex verifies that InitGenesis

@@ -24,8 +24,8 @@ type StakingKeeper interface {
 }
 
 // BankKeeper defines the bank module interface needed by the vote module.
-// Used by MsgSetVoteManager to transfer the treasury balance atomically
-// when reassigning the vote manager role.
+// Used by MsgAuthorizedSend to move coins; standard bank.MsgSend is blocked
+// at the ante handler so all transfers flow through this path.
 type BankKeeper interface {
 	GetBalance(ctx context.Context, addr sdk.AccAddress, denom string) sdk.Coin
 	SendCoins(ctx context.Context, fromAddr, toAddr sdk.AccAddress, amt sdk.Coins) error
@@ -35,7 +35,7 @@ type BankKeeper interface {
 // Each active round gets its own proxy (with a round-scoped Prefix) and a
 // lazily-initialized tree handle.
 type roundTree struct {
-	handle *votetree.TreeHandle    // lazy-initialized; nil until first EndBlock for this round
+	handle *votetree.TreeHandle   // lazy-initialized; nil until first EndBlock for this round
 	proxy  *votetree.KvStoreProxy // Prefix = RoundTreeKey(roundID)
 }
 

@@ -31,12 +31,14 @@ import (
 //	GET /shielded-vote/v1/vote-summary/{round_id}
 //	GET /shielded-vote/v1/ceremony
 //	GET /shielded-vote/v1/pallas-keys
-//	GET /shielded-vote/v1/vote-manager
+//	GET /shielded-vote/v1/vote-managers
 //	GET /shielded-vote/v1/genesis
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
 	qh := &queryHandler{clientCtx: clientCtx}
 	trace := sentryhttp.New(sentryhttp.Options{Repanic: true}).Handle
 
+	// Register "latest" and "leaves" before "{height}" to avoid gorilla/mux
+	// treating them as a height param.
 	router.Handle("/shielded-vote/v1/commitment-tree/{round_id}/latest", trace(http.HandlerFunc(qh.handleLatestCommitmentTree))).Methods("GET")
 	router.Handle("/shielded-vote/v1/commitment-tree/{round_id}/leaves", trace(http.HandlerFunc(qh.handleCommitmentLeaves))).Methods("GET")
 	router.Handle("/shielded-vote/v1/commitment-tree/{round_id}/{height}", trace(http.HandlerFunc(qh.handleCommitmentTreeAtHeight))).Methods("GET")
@@ -48,7 +50,7 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.Handle("/shielded-vote/v1/vote-summary/{round_id}", trace(http.HandlerFunc(qh.handleVoteSummary))).Methods("GET")
 	router.Handle("/shielded-vote/v1/ceremony", trace(http.HandlerFunc(qh.handleCeremonyState))).Methods("GET")
 	router.Handle("/shielded-vote/v1/pallas-keys", trace(http.HandlerFunc(qh.handlePallasKeys))).Methods("GET")
-	router.Handle("/shielded-vote/v1/vote-manager", trace(http.HandlerFunc(qh.handleVoteManager))).Methods("GET")
+	router.Handle("/shielded-vote/v1/vote-managers", trace(http.HandlerFunc(qh.handleVoteManagers))).Methods("GET")
 	router.Handle("/shielded-vote/v1/genesis", trace(http.HandlerFunc(qh.handleGenesis))).Methods("GET")
 }
 
@@ -295,11 +297,11 @@ func (qh *queryHandler) handleGenesis(w http.ResponseWriter, _ *http.Request) {
 	w.Write(data) //nolint:errcheck
 }
 
-func (qh *queryHandler) handleVoteManager(w http.ResponseWriter, _ *http.Request) {
-	req := &types.QueryVoteManagerRequest{}
-	resp := &types.QueryVoteManagerResponse{}
+func (qh *queryHandler) handleVoteManagers(w http.ResponseWriter, _ *http.Request) {
+	req := &types.QueryVoteManagersRequest{}
+	resp := &types.QueryVoteManagersResponse{}
 
-	if err := qh.abciQuery("/svote.v1.Query/VoteManager", req, resp); err != nil {
+	if err := qh.abciQuery("/svote.v1.Query/VoteManagers", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}

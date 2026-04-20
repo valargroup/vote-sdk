@@ -33,8 +33,8 @@ func GetTxCmd() *cobra.Command {
 		CmdRegisterPallasKey(),
 		CmdRotatePallasKey(),
 		CmdCreateValidatorWithPallasKey(),
-		// Vote-manager commands — signed by the designated vote manager address.
-		CmdSetVoteManager(),
+		// Vote-manager commands — signed by any current vote manager (any-of-N).
+		CmdUpdateVoteManagers(),
 		CmdCreateVotingSession(),
 		CmdSubmitTally(),
 		// Token transfer — uses whitelisted MsgAuthorizedSend.
@@ -187,37 +187,47 @@ the Pallas key.`,
 	return cmd
 }
 
-// CmdSetVoteManager broadcasts MsgSetVoteManager.
-// Sets or rotates the vote manager address. Callable by the current vote
-// manager or any bonded validator (first-time bootstrap).
-func CmdSetVoteManager() *cobra.Command {
+// CmdUpdateVoteManagers broadcasts MsgUpdateVoteManagers.
+// Atomically replaces the vote-manager set with the given addresses. Callable by any
+// current vote manager (any-of-N).
+func CmdUpdateVoteManagers() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "set-vote-manager [new-manager-addr]",
-		Short: "Set or change the vote manager address",
-		Long: `Broadcast an MsgSetVoteManager transaction.
+		Use:   "update-vote-managers --vote-manager <addr> [--vote-manager <addr> ...]",
+		Short: "Atomically replace the vote-manager set",
+		Long: `Broadcast an MsgUpdateVoteManagers transaction.
 
-Argument:
-  new-manager-addr  Bech32 account address (sv1...) of the new vote manager.
+Flags:
+  --vote-manager  Repeatable. Bech32 account address (sv1...) of a vote manager
+           in the new set. Pass the flag once per vote manager. The full
+           list replaces the existing set atomically.
 
-The --from signer must be either the current vote manager or a bonded
-validator.  On first call (no vote manager configured), any bonded validator
-may set the initial manager.`,
-		Args: cobra.ExactArgs(1),
+The --from signer must be a current vote manager. Balances are not moved — each vote manager
+holds their own funds.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientTxContext(cmd)
 			if err != nil {
 				return err
 			}
 
-			msg := &types.MsgSetVoteManager{
-				Creator:    clientCtx.GetFromAddress().String(),
-				NewManager: args[0],
+			newVoteManagers, err := cmd.Flags().GetStringArray("vote-manager")
+			if err != nil {
+				return err
+			}
+			if len(newVoteManagers) == 0 {
+				return fmt.Errorf("at least one --vote-manager flag is required")
+			}
+
+			msg := &types.MsgUpdateVoteManagers{
+				Creator:         clientCtx.GetFromAddress().String(),
+				NewVoteManagers: newVoteManagers,
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
+	cmd.Flags().StringArray("vote-manager", nil, "Vote-manager bech32 address (repeatable; all specified addresses form the new set)")
 	flags.AddTxFlagsToCmd(cmd)
 	return cmd
 }
@@ -264,12 +274,12 @@ Example:
 }
 
 // CmdCreateVotingSession broadcasts MsgCreateVotingSession.
-// Only callable by the current vote manager.  Accepts a JSON file because the
-// message carries a structured proposal list and large binary blobs.
+// Callable by any current vote manager. Accepts a JSON file because the message
+// carries a structured proposal list and large binary blobs.
 func CmdCreateVotingSession() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create-voting-session [msg-json-file]",
-		Short: "Create a new voting session (vote manager only)",
+		Short: "Create a new voting session (vote-manager only)",
 		Long: `Broadcast an MsgCreateVotingSession from a JSON description file.
 
 All byte fields are hex-encoded in the JSON.  Required fields:
@@ -401,11 +411,11 @@ Example:
 }
 
 // CmdSubmitTally broadcasts MsgSubmitTally.
-// Called by the vote manager after off-chain tally computation.
+// Called by a vote manager after off-chain tally computation.
 func CmdSubmitTally() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "submit-tally [vote-round-id-hex] [entries-json-file]",
-		Short: "Submit finalized tally results for a vote round (vote manager only)",
+		Short: "Submit finalized tally results for a vote round (vote-manager only)",
 		Long: `Broadcast an MsgSubmitTally transaction.
 
 Arguments:

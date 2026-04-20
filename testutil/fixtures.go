@@ -37,6 +37,12 @@ func TestAccAddr(seed byte) string {
 	return sdk.AccAddress(addr).String()
 }
 
+// DefaultVoteManagerAddress is the canonical test vote-manager address used
+// in fixtures and integration helpers (valid bech32, seed 99). Not to be
+// confused with x/vote/module.go's DefaultVoteManagerAddresses, which is
+// the production default-genesis list.
+var DefaultVoteManagerAddress = TestAccAddr(99)
+
 // FpLE returns a 32-byte little-endian encoding of v as a Pallas Fp element.
 // Values 0 <= v < 2^64 are always canonical. Use for commitment tree leaves in tests.
 func FpLE(v uint64) []byte {
@@ -81,7 +87,7 @@ func SampleProposals() []*types.Proposal {
 // The VoteEndTime is set 1 hour in the future from the reference time.
 func ValidCreateVotingSession() *types.MsgCreateVotingSession {
 	return &types.MsgCreateVotingSession{
-		Creator:           "sv1admin",
+		Creator:           DefaultVoteManagerAddress,
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
@@ -96,7 +102,7 @@ func ValidCreateVotingSession() *types.MsgCreateVotingSession {
 // to the given reference time. Use this when the block time is deterministic.
 func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession {
 	return &types.MsgCreateVotingSession{
-		Creator:           "sv1admin",
+		Creator:           DefaultVoteManagerAddress,
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
@@ -111,7 +117,7 @@ func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession
 // VoteEndTime. Use when you need a specific end time (e.g. 10 seconds from block time).
 func ValidCreateVotingSessionWithEndTime(endTime time.Time) *types.MsgCreateVotingSession {
 	return &types.MsgCreateVotingSession{
-		Creator:           "sv1admin",
+		Creator:           DefaultVoteManagerAddress,
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
@@ -126,7 +132,7 @@ func ValidCreateVotingSessionWithEndTime(endTime time.Time) *types.MsgCreateVoti
 // relative to the given reference time.
 func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession {
 	return &types.MsgCreateVotingSession{
-		Creator:           "sv1admin",
+		Creator:           DefaultVoteManagerAddress,
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
 		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),

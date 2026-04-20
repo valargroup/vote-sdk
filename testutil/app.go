@@ -90,8 +90,8 @@ func SetupTestApp(t *testing.T) *TestApp {
 	_, pk := elgamal.KeyGen(rand.Reader)
 	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
 
-	// Seed the vote manager so CreateVotingSession passes authorization.
-	ta.SeedVoteManager("sv1admin")
+	// Seed the vote-manager set so CreateVotingSession passes authorization.
+	ta.SeedVoteManagers(DefaultVoteManagerAddress)
 
 	return ta
 }
@@ -119,7 +119,7 @@ func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey, []byte) 
 	ta := setupTestApp(t, appOpts)
 	ta.EaSkDir = tmpDir
 	ta.EaPk = pk.Point.ToAffineCompressed()
-	ta.SeedVoteManager("sv1admin")
+	ta.SeedVoteManagers(DefaultVoteManagerAddress)
 
 	return ta, pk, skBytes
 }
@@ -341,17 +341,16 @@ func (ta *TestApp) RegisterPallasKey(pallasPk *elgamal.PublicKey) {
 	require.Equal(ta.t, uint32(0), result.Code, "RegisterPallasKey should succeed, got: %s", result.Log)
 }
 
-// SeedVoteManager writes the vote manager address directly into the module's
-// KV store and commits via an empty block. Must be called before any
-// CreateVotingSession, since that handler requires the creator to be the
-// vote manager.
-func (ta *TestApp) SeedVoteManager(addr string) {
+// SeedVoteManagers writes the vote-manager set directly into the module's KV
+// store and commits via an empty block. Must be called before any
+// CreateVotingSession, since the handler requires the creator to be in the set.
+func (ta *TestApp) SeedVoteManagers(addrs ...string) {
 	ta.t.Helper()
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
 
-	err := ta.VoteKeeper().SetVoteManager(kvStore, &types.VoteManagerState{Address: addr})
+	err := ta.VoteKeeper().SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: addrs})
 	require.NoError(ta.t, err)
 
 	ta.NextBlock()
@@ -369,9 +368,9 @@ func (ta *TestApp) SeedConfirmedCeremony(_ []byte) {
 // MsgCreateVotingSession, bypassing the ABCI pipeline. The round is committed
 // via an empty block. Returns the derived vote_round_id.
 //
-// MsgCreateVotingSession is now a standard Cosmos SDK tx (signed by the vote
-// manager), so it can no longer be submitted via the custom vote tx wire
-// format. For integration tests that need an active round to test other vote
+// MsgCreateVotingSession is a standard Cosmos SDK tx (signed by a vote manager),
+// so it can't be submitted via the custom vote tx wire format. For
+// integration tests that need an active round to exercise other vote
 // messages (delegation, cast, reveal, tally), this helper seeds the round
 // directly — the session creation itself is not under test here.
 func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {

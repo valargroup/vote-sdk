@@ -59,7 +59,7 @@ func init() {
 			ProvideContributeDKGSigner,
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
-			ProvideSetVoteManagerSigner,
+			ProvideUpdateVoteManagersSigner,
 			ProvideAuthorizedSendSigner,
 		),
 	)
@@ -85,10 +85,12 @@ func init() {
 // standard Cosmos signers.
 func noopSignerFn(proto.Message) ([][]byte, error) { return nil, nil }
 
-// ceremonyCreatorSignerFn extracts the signer from a ceremony message's
-// "creator" field (a valoper bech32 address) and returns the corresponding
-// account address bytes. Used for all ceremony messages that have a creator
-// field and go through standard Cosmos SDK signature verification.
+// ceremonyCreatorSignerFn extracts the signer from a message's "creator"
+// field (a valoper or account bech32 address) and returns the corresponding
+// account address bytes. Used by ceremony messages with a creator field
+// (RegisterPallasKey, RotatePallasKey, CreateVotingSession) and by the
+// management message MsgUpdateVoteManagers, all of which go through standard
+// Cosmos SDK signature verification.
 func ceremonyCreatorSignerFn(msg proto.Message) ([][]byte, error) {
 	fd := msg.ProtoReflect().Descriptor().Fields().ByName("creator")
 	if fd == nil {
@@ -215,9 +217,9 @@ func ProvideCreateValidatorWithPallasKeySigner() signing.CustomGetSigner {
 	}
 }
 
-func ProvideSetVoteManagerSigner() signing.CustomGetSigner {
+func ProvideUpdateVoteManagersSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgSetVoteManager"),
+		MsgType: protoreflect.FullName("svote.v1.MsgUpdateVoteManagers"),
 		Fn:      ceremonyCreatorSignerFn,
 	}
 }
@@ -390,9 +392,9 @@ func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					Short:     "Query the current EA key ceremony lifecycle state",
 				},
 				{
-					RpcMethod: "VoteManager",
-					Use:       "vote-manager",
-					Short:     "Query the current vote manager address",
+					RpcMethod: "VoteManagers",
+					Use:       "vote-managers",
+					Short:     "Query the current vote-manager set (any-of-N — any member may act)",
 				},
 				{
 					RpcMethod: "ListRounds",
@@ -717,14 +719,15 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	return nil
 }
 
-// DefaultVoteManagerAddress is the default vote manager used in genesis.
-// Corresponds to the VM_PRIVKEY set via .env (local) or GitHub secret (CI).
-const DefaultVoteManagerAddress = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"
+// DefaultVoteManagerAddresses is the default vote-manager set used in DefaultGenesis.
+var DefaultVoteManagerAddresses = []string{
+	"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
+}
 
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {
 	gs := &types.GenesisState{
-		VoteManager:           DefaultVoteManagerAddress,
+		VoteManagerAddresses:  append([]string(nil), DefaultVoteManagerAddresses...),
 		MinCeremonyValidators: 1,
 	}
 	bz, err := json.Marshal(gs)

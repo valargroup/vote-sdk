@@ -62,8 +62,8 @@ docker exec val1 curl -sf http://localhost:26657/status | \
 curl -sf 'http://localhost:1318/cosmos/staking/v1beta1/validators?pagination.limit=100' | \
   python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for v in d['validators'] if v['status']=='BOND_STATUS_BONDED'))"
 
-# Check vote manager address
-curl -sf http://localhost:1318/shielded-vote/v1/vote-manager | python3 -m json.tool
+# Check vote-manager set (any-of-N)
+curl -sf http://localhost:1318/shielded-vote/v1/vote-managers | python3 -m json.tool
 ```
 
 ## Running the lifecycle test

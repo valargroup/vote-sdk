@@ -4,7 +4,7 @@
 # Exercises the same path that CI (sdk-chain-reset.yml) uses:
 #   1. init.sh with VAL_PRIVKEY (primary imports a known key)
 #   2. Secondary imports its own VAL_PRIVKEY + generates Pallas/EA keys
-#   3. Funding from manager to secondary address
+#   3. Funding from vote-manager-1 to secondary address
 #   4. create-val-tx registration
 #
 # Prerequisites: svoted + create-val-tx on PATH (mise run install).
@@ -46,7 +46,7 @@ echo ""
 echo "--- Step 1: Init primary ---"
 rm -rf "$PRIMARY_HOME"
 
-# Load VM_PRIVKEY from .env
+# Load VM_PRIVKEYS from .env
 set -a
 # shellcheck disable=SC1091
 . "$REPO_ROOT/.env"
@@ -176,14 +176,14 @@ for i in $(seq 1 90); do
     sleep 2
 done
 
-# ─── Step 5: Fund secondary from manager (mimics CI fund-secondary job) ──────
+# ─── Step 5: Fund secondary from vote manager (mimics CI fund-secondary job) ──
 
 echo ""
-echo "--- Step 5: Fund secondary from manager ---"
+echo "--- Step 5: Fund secondary from vote-manager-1 ---"
 echo "Sending tokens to $SECONDARY_ADDR..."
 
 svoted tx vote authorized-send "$SECONDARY_ADDR" 200000 usvote \
-    --from manager --home "$PRIMARY_HOME" --keyring-backend test \
+    --from vote-manager-1 --home "$PRIMARY_HOME" --keyring-backend test \
     --chain-id "$CHAIN_ID" -y
 
 echo "Waiting for balance..."

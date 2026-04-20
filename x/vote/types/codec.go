@@ -42,7 +42,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgContributeDKG{},
 		&MsgAckExecutiveAuthorityKey{},
 		&MsgCreateValidatorWithPallasKey{},
-		&MsgSetVoteManager{},
+		&MsgUpdateVoteManagers{},
 		&MsgAuthorizedSend{},
 	)
 }

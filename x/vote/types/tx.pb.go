@@ -1083,7 +1083,7 @@ func (*MsgContributeDKGResponse) Descriptor() ([]byte, []int) {
 type MsgAckExecutiveAuthorityKey struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                               // Validator address
-	AckSignature  []byte                 `protobuf:"bytes,2,opt,name=ack_signature,json=ackSignature,proto3" json:"ack_signature,omitempty"` // Signature over H("ack" || ea_pk || validator_address)
+	AckSignature  []byte                 `protobuf:"bytes,2,opt,name=ack_signature,json=ackSignature,proto3" json:"ack_signature,omitempty"` // Commitment digest: SHA256("ack" || ea_pk || validator_address). Not a cryptographic signature; field name kept for wire compatibility.
 	VoteRoundId   []byte                 `protobuf:"bytes,3,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`  // Target voting round (per-round ceremony)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1446,31 +1446,33 @@ func (*MsgSubmitPartialDecryptionResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{23}
 }
 
-// MsgSetVoteManager reassigns the vote manager role.
-// Only callable by the current vote manager. Transfers the caller's full
-// usvote balance to new_manager atomically.
-type MsgSetVoteManager struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                         // Sender address (must be the current vote manager)
-	NewManager    string                 `protobuf:"bytes,2,opt,name=new_manager,json=newManager,proto3" json:"new_manager,omitempty"` // New vote manager address
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+// MsgUpdateVoteManagers atomically replaces the vote-manager set with new_vote_managers.
+// Callable by any current vote manager. Does NOT move balances — each vote manager holds
+// their own funds (the bank-module per-account balance). Validation:
+// new_vote_managers must be non-empty, each entry a valid bech32 address, and no
+// duplicates (addresses normalized before compare).
+type MsgUpdateVoteManagers struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Creator         string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                          // Sender address (must be in the current vote manager set)
+	NewVoteManagers []string               `protobuf:"bytes,2,rep,name=new_vote_managers,json=newVoteManagers,proto3" json:"new_vote_managers,omitempty"` // Full replacement set
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
-func (x *MsgSetVoteManager) Reset() {
-	*x = MsgSetVoteManager{}
+func (x *MsgUpdateVoteManagers) Reset() {
+	*x = MsgUpdateVoteManagers{}
 	mi := &file_svote_v1_tx_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MsgSetVoteManager) String() string {
+func (x *MsgUpdateVoteManagers) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MsgSetVoteManager) ProtoMessage() {}
+func (*MsgUpdateVoteManagers) ProtoMessage() {}
 
-func (x *MsgSetVoteManager) ProtoReflect() protoreflect.Message {
+func (x *MsgUpdateVoteManagers) ProtoReflect() protoreflect.Message {
 	mi := &file_svote_v1_tx_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1482,45 +1484,45 @@ func (x *MsgSetVoteManager) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MsgSetVoteManager.ProtoReflect.Descriptor instead.
-func (*MsgSetVoteManager) Descriptor() ([]byte, []int) {
+// Deprecated: Use MsgUpdateVoteManagers.ProtoReflect.Descriptor instead.
+func (*MsgUpdateVoteManagers) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{24}
 }
 
-func (x *MsgSetVoteManager) GetCreator() string {
+func (x *MsgUpdateVoteManagers) GetCreator() string {
 	if x != nil {
 		return x.Creator
 	}
 	return ""
 }
 
-func (x *MsgSetVoteManager) GetNewManager() string {
+func (x *MsgUpdateVoteManagers) GetNewVoteManagers() []string {
 	if x != nil {
-		return x.NewManager
+		return x.NewVoteManagers
 	}
-	return ""
+	return nil
 }
 
-type MsgSetVoteManagerResponse struct {
+type MsgUpdateVoteManagersResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MsgSetVoteManagerResponse) Reset() {
-	*x = MsgSetVoteManagerResponse{}
+func (x *MsgUpdateVoteManagersResponse) Reset() {
+	*x = MsgUpdateVoteManagersResponse{}
 	mi := &file_svote_v1_tx_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MsgSetVoteManagerResponse) String() string {
+func (x *MsgUpdateVoteManagersResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MsgSetVoteManagerResponse) ProtoMessage() {}
+func (*MsgUpdateVoteManagersResponse) ProtoMessage() {}
 
-func (x *MsgSetVoteManagerResponse) ProtoReflect() protoreflect.Message {
+func (x *MsgUpdateVoteManagersResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_svote_v1_tx_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1532,8 +1534,8 @@ func (x *MsgSetVoteManagerResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MsgSetVoteManagerResponse.ProtoReflect.Descriptor instead.
-func (*MsgSetVoteManagerResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use MsgUpdateVoteManagersResponse.ProtoReflect.Descriptor instead.
+func (*MsgUpdateVoteManagersResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{25}
 }
 
@@ -1543,8 +1545,8 @@ func (*MsgSetVoteManagerResponse) Descriptor() ([]byte, []int) {
 // stake to create a validator, bypassing the controlled validator set.
 //
 // Authorization rules:
-//   - Vote manager can send to anyone (distributes stake to new validators).
-//   - Bonded validators can send to the vote manager or other bonded validators.
+//   - Any vote manager can send to anyone (distributes stake to new validators).
+//   - Bonded validators can send to any vote manager or to other bonded validators.
 //   - All other senders are rejected.
 type MsgAuthorizedSend struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1755,19 +1757,18 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x0fpartial_decrypt\x18\x03 \x01(\fR\x0epartialDecrypt\x12\x1d\n" +
 	"\n" +
 	"dleq_proof\x18\x04 \x01(\fR\tdleqProof\"$\n" +
-	"\"MsgSubmitPartialDecryptionResponse\"N\n" +
-	"\x11MsgSetVoteManager\x12\x18\n" +
-	"\acreator\x18\x01 \x01(\tR\acreator\x12\x1f\n" +
-	"\vnew_manager\x18\x02 \x01(\tR\n" +
-	"newManager\"\x1b\n" +
-	"\x19MsgSetVoteManagerResponse\"\x83\x01\n" +
+	"\"MsgSubmitPartialDecryptionResponse\"]\n" +
+	"\x15MsgUpdateVoteManagers\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\x12*\n" +
+	"\x11new_vote_managers\x18\x02 \x03(\tR\x0fnewVoteManagers\"\x1f\n" +
+	"\x1dMsgUpdateVoteManagersResponse\"\x83\x01\n" +
 	"\x11MsgAuthorizedSend\x12!\n" +
 	"\ffrom_address\x18\x01 \x01(\tR\vfromAddress\x12\x1d\n" +
 	"\n" +
 	"to_address\x18\x02 \x01(\tR\ttoAddress\x12\x16\n" +
 	"\x06amount\x18\x03 \x01(\tR\x06amount\x12\x14\n" +
 	"\x05denom\x18\x04 \x01(\tR\x05denom\"\x1b\n" +
-	"\x19MsgAuthorizedSendResponse2\xa1\t\n" +
+	"\x19MsgAuthorizedSendResponse2\xad\t\n" +
 	"\x03Msg\x12a\n" +
 	"\x13CreateVotingSession\x12 .svote.v1.MsgCreateVotingSession\x1a(.svote.v1.MsgCreateVotingSessionResponse\x12L\n" +
 	"\fDelegateVote\x12\x19.svote.v1.MsgDelegateVote\x1a!.svote.v1.MsgDelegateVoteResponse\x12@\n" +
@@ -1779,8 +1780,8 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x0fRotatePallasKey\x12\x1c.svote.v1.MsgRotatePallasKey\x1a$.svote.v1.MsgRotatePallasKeyResponse\x12O\n" +
 	"\rContributeDKG\x12\x1a.svote.v1.MsgContributeDKG\x1a\".svote.v1.MsgContributeDKGResponse\x12p\n" +
 	"\x18AckExecutiveAuthorityKey\x12%.svote.v1.MsgAckExecutiveAuthorityKey\x1a-.svote.v1.MsgAckExecutiveAuthorityKeyResponse\x12|\n" +
-	"\x1cCreateValidatorWithPallasKey\x12).svote.v1.MsgCreateValidatorWithPallasKey\x1a1.svote.v1.MsgCreateValidatorWithPallasKeyResponse\x12R\n" +
-	"\x0eSetVoteManager\x12\x1b.svote.v1.MsgSetVoteManager\x1a#.svote.v1.MsgSetVoteManagerResponse\x12R\n" +
+	"\x1cCreateValidatorWithPallasKey\x12).svote.v1.MsgCreateValidatorWithPallasKey\x1a1.svote.v1.MsgCreateValidatorWithPallasKeyResponse\x12^\n" +
+	"\x12UpdateVoteManagers\x12\x1f.svote.v1.MsgUpdateVoteManagers\x1a'.svote.v1.MsgUpdateVoteManagersResponse\x12R\n" +
 	"\x0eAuthorizedSend\x12\x1b.svote.v1.MsgAuthorizedSend\x1a#.svote.v1.MsgAuthorizedSendResponse\x1a\x05\x80\xe7\xb0*\x01B-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
 
 var (
@@ -1821,8 +1822,8 @@ var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgSubmitPartialDecryption)(nil),              // 21: svote.v1.MsgSubmitPartialDecryption
 	(*PartialDecryptionEntry)(nil),                  // 22: svote.v1.PartialDecryptionEntry
 	(*MsgSubmitPartialDecryptionResponse)(nil),      // 23: svote.v1.MsgSubmitPartialDecryptionResponse
-	(*MsgSetVoteManager)(nil),                       // 24: svote.v1.MsgSetVoteManager
-	(*MsgSetVoteManagerResponse)(nil),               // 25: svote.v1.MsgSetVoteManagerResponse
+	(*MsgUpdateVoteManagers)(nil),                   // 24: svote.v1.MsgUpdateVoteManagers
+	(*MsgUpdateVoteManagersResponse)(nil),           // 25: svote.v1.MsgUpdateVoteManagersResponse
 	(*MsgAuthorizedSend)(nil),                       // 26: svote.v1.MsgAuthorizedSend
 	(*MsgAuthorizedSendResponse)(nil),               // 27: svote.v1.MsgAuthorizedSendResponse
 	(*Proposal)(nil),                                // 28: svote.v1.Proposal
@@ -1844,7 +1845,7 @@ var file_svote_v1_tx_proto_depIdxs = []int32{
 	15, // 12: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
 	17, // 13: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
 	19, // 14: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
-	24, // 15: svote.v1.Msg.SetVoteManager:input_type -> svote.v1.MsgSetVoteManager
+	24, // 15: svote.v1.Msg.UpdateVoteManagers:input_type -> svote.v1.MsgUpdateVoteManagers
 	26, // 16: svote.v1.Msg.AuthorizedSend:input_type -> svote.v1.MsgAuthorizedSend
 	1,  // 17: svote.v1.Msg.CreateVotingSession:output_type -> svote.v1.MsgCreateVotingSessionResponse
 	3,  // 18: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
@@ -1857,7 +1858,7 @@ var file_svote_v1_tx_proto_depIdxs = []int32{
 	16, // 25: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
 	18, // 26: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
 	20, // 27: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
-	25, // 28: svote.v1.Msg.SetVoteManager:output_type -> svote.v1.MsgSetVoteManagerResponse
+	25, // 28: svote.v1.Msg.UpdateVoteManagers:output_type -> svote.v1.MsgUpdateVoteManagersResponse
 	27, // 29: svote.v1.Msg.AuthorizedSend:output_type -> svote.v1.MsgAuthorizedSendResponse
 	17, // [17:30] is the sub-list for method output_type
 	4,  // [4:17] is the sub-list for method input_type
