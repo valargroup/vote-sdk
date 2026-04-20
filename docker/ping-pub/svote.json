@@ -1,0 +1,24 @@
+{
+  "chain_name": "svote-local",
+  "registry_name": "svote",
+  "api": ["http://localhost:1917"],
+  "rpc": ["http://localhost:27657"],
+  "sdk_version": "0.50.0",
+  "coin_type": "118",
+  "min_tx_fee": "0",
+  "addr_prefix": "sv",
+  "logo": "http://localhost:8080/logos/zcash.svg",
+  "theme_color": "#2f4858",
+  "assets": [
+    {
+      "base": "usvote",
+      "symbol": "SVOTE",
+      "exponent": "6",
+      "coingecko_id": "",
+      "logo": "http://localhost:8080/logos/zcash.svg"
+    }
+  ],
+  "chain_id": "svote-1",
+  "pretty_name": "Zcash Vote (local)",
+  "features": ["blocks", "tx", "staking", "governance", "supply", "parameters", "consensus"]
+}
