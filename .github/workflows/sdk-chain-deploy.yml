@@ -96,10 +96,60 @@ jobs:
             echo "ERROR: Secondary REST API not healthy after 5 minutes."
             exit 1
 
+  deploy-explorer:
+    name: Deploy explorer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to explorer Droplet
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EXPLORER_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SENTRY_DSN,TAG
+          script: |
+            set -euo pipefail
+            sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
+            echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
+
+            # On first deploy (before sdk-chain-reset.yml runs reset-archive),
+            # .svoted/config/genesis.json doesn't exist yet — svoted can't
+            # start, so skip the restart. Subsequent deploys restart normally
+            # to pick up the new binary.
+            if [ -f /opt/shielded-vote/.svoted/config/genesis.json ]; then
+              /opt/shielded-vote/install-release.sh --tag "${TAG}"
+            else
+              /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+              echo "NOTE: archive has no genesis yet. Run sdk-chain-reset.yml with this tag to initialize it."
+            fi
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+      - name: Verify explorer frontend healthy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EXPLORER_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Caddy serves the static explorer dist regardless of archive
+            # state, so this check only verifies the frontend is reachable.
+            # Archive health is verified in sdk-chain-reset.yml.
+            for i in $(seq 1 15); do
+              if curl -sf http://localhost/ > /dev/null 2>&1; then
+                echo "Explorer frontend healthy."
+                exit 0
+              fi
+              echo "Waiting for explorer frontend... ($i/15)"
+              sleep 10
+            done
+            echo "ERROR: Explorer frontend not healthy after 2.5 minutes."
+            exit 1
+
   notify-slack:
     name: Slack Notification
     if: ${{ always() && contains(join(needs.*.result, ','), 'failure') }}
-    needs: [deploy-primary, deploy-secondary]
+    needs: [deploy-primary, deploy-secondary, deploy-explorer]
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
@@ -124,7 +174,7 @@ jobs:
                 },
                 {
                   "type": "section",
-                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nPrimary: `${{ needs.deploy-primary.result }}` | Secondary: `${{ needs.deploy-secondary.result }}`" }
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nPrimary: `${{ needs.deploy-primary.result }}` | Secondary: `${{ needs.deploy-secondary.result }}` | Explorer: `${{ needs.deploy-explorer.result }}`" }
                 }
               ]
             }

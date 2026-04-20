@@ -1,20 +1,70 @@
 #!/bin/bash
 #
-# entrypoint.sh — Docker entrypoint for the 30-validator local testnet.
+# entrypoint.sh — Docker entrypoint for the local testnet (validators + archive).
 #
 # Environment variables (set by docker-compose):
-#   VALIDATOR_INDEX   1-based index (1 = genesis validator)
+#   ROLE              "validator" (default) or "archive"
+#   VALIDATOR_INDEX   1-based index (validator role only; 1 = genesis validator)
 #   NUM_VALIDATORS    total number of validators (default 30)
 #   CHAIN_ID          chain ID (default svote-1)
 #
 # Shared volume at /shared is used for genesis distribution and key exchange.
 set -e
 
-VALIDATOR_INDEX="${VALIDATOR_INDEX:?VALIDATOR_INDEX must be set}"
+ROLE="${ROLE:-validator}"
 NUM_VALIDATORS="${NUM_VALIDATORS:-30}"
 CHAIN_ID="${CHAIN_ID:-svote-1}"
 DENOM="usvote"
 HOME_DIR="/root/.svoted"
+
+# ---------------------------------------------------------------------------
+# Archive role: non-validator full node that preserves full history. Peers
+# with val1 over the internal docker network and serves LCD/RPC for the
+# local block explorer. Does not participate in consensus.
+# ---------------------------------------------------------------------------
+if [ "$ROLE" = "archive" ]; then
+    MONIKER="archive"
+    svoted init "$MONIKER" --chain-id "$CHAIN_ID" --home "$HOME_DIR" 2>/dev/null
+    svoted pallas-keygen --home "$HOME_DIR"
+
+    APP_TOML="$HOME_DIR/config/app.toml"
+    sed -i "s|^ea_sk_path = .*|ea_sk_path = \"$HOME_DIR/ea.sk\"|" "$APP_TOML"
+    sed -i "s|^pallas_sk_path = .*|pallas_sk_path = \"$HOME_DIR/pallas.sk\"|" "$APP_TOML"
+    sed -i "s|^comet_rpc = .*|comet_rpc = \"http://localhost:26657\"|" "$APP_TOML"
+
+    sed -i '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
+    sed -i '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP_TOML"
+    sed -i 's|address = "tcp://localhost:1317"|address = "tcp://0.0.0.0:1317"|' "$APP_TOML"
+
+    sed -i 's|^pruning = ".*"|pruning = "nothing"|' "$APP_TOML"
+    sed -i 's|^min-retain-blocks = .*|min-retain-blocks = 0|' "$APP_TOML"
+
+    CONFIG_TOML="$HOME_DIR/config/config.toml"
+    sed -i 's|laddr = "tcp://127.0.0.1:26657"|laddr = "tcp://0.0.0.0:26657"|' "$CONFIG_TOML"
+    sed -i 's/^addr_book_strict = true/addr_book_strict = false/' "$CONFIG_TOML"
+    sed -i 's/^allow_duplicate_ip = false/allow_duplicate_ip = true/' "$CONFIG_TOML"
+
+    # Enable CORS on Tendermint RPC so the browser-based explorer can query it.
+    sed -i 's|^cors_allowed_origins = .*|cors_allowed_origins = ["*"]|' "$CONFIG_TOML"
+
+    echo "[archive] Waiting for genesis from val1..."
+    while [ ! -f /shared/genesis-ready ]; do
+        sleep 0.5
+    done
+    cp /shared/genesis.json "$HOME_DIR/config/genesis.json"
+
+    VAL1_NODE_ID=$(cat /shared/val1_node_id)
+    VAL1_PEER="${VAL1_NODE_ID}@val1:26656"
+    sed -i "s|persistent_peers = \"\"|persistent_peers = \"${VAL1_PEER}\"|" "$CONFIG_TOML"
+
+    echo "[archive] Starting archive node (pruning=nothing). Peer: $VAL1_PEER"
+    exec svoted start --home "$HOME_DIR"
+fi
+
+# ---------------------------------------------------------------------------
+# Validator role (default). Requires VALIDATOR_INDEX.
+# ---------------------------------------------------------------------------
+VALIDATOR_INDEX="${VALIDATOR_INDEX:?VALIDATOR_INDEX must be set for validator role}"
 MONIKER="val${VALIDATOR_INDEX}"
 SELF_DELEGATION="10000000${DENOM}"
 VOTE_MANAGER_BALANCE="1000000000${DENOM}"

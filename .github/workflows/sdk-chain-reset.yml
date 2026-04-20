@@ -218,10 +218,59 @@ jobs:
             echo "ERROR: Secondary REST API not healthy."
             exit 1
 
+  reset-archive:
+    name: Reset archive (join)
+    runs-on: ubuntu-latest
+    needs: reset-secondary
+    steps:
+      - name: Install tag and join as archive
+        uses: appleboy/ssh-action@v1.0.3
+        timeout-minutes: 30
+        with:
+          host: ${{ secrets.EXPLORER_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: TAG
+          script: |
+            set -euo pipefail
+            export PATH="/opt/shielded-vote/current/bin:$PATH"
+
+            # Install the release (skip restart — reset-archive.sh starts svoted).
+            /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+
+            # Run reset-archive: wipe state, download genesis, configure peering
+            # with primary, start svoted in archive mode (pruning=nothing).
+            export GENESIS_URL="${{ env.DO_SPACES_BASE }}/genesis.json"
+            export PRIMARY_REST_URL="https://vote-chain-primary.${{ secrets.DOMAIN }}"
+            export HOME_DIR=/opt/shielded-vote/.svoted
+            export CHAIN_ID=svote-1
+            export MONIKER=archive
+
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-archive.sh" -o /tmp/reset-archive.sh
+            bash /tmp/reset-archive.sh
+
+      - name: Verify archive health
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EXPLORER_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            for i in $(seq 1 20); do
+              if curl -sf http://localhost:1317/cosmos/base/tendermint/v1beta1/blocks/latest > /dev/null 2>&1; then
+                echo "Archive REST API healthy."
+                exit 0
+              fi
+              echo "Waiting for archive REST API... ($i/20)"
+              sleep 15
+            done
+            echo "ERROR: Archive REST API not healthy."
+            exit 1
+
   verify:
     name: Post-reset verification
     runs-on: ubuntu-latest
-    needs: reset-secondary
+    needs: reset-archive
     steps:
       - name: Check both validators
         run: |
@@ -241,12 +290,26 @@ jobs:
               sleep 10
             done
           done
+          # Explorer archive exposes the Cosmos LCD at explorer-api.<domain>.
+          ARCHIVE_URL="https://explorer-api.${{ secrets.DOMAIN }}/cosmos/base/tendermint/v1beta1/blocks/latest"
+          for i in $(seq 1 10); do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$ARCHIVE_URL" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "[OK] explorer archive healthy"
+              break
+            fi
+            if [ "$i" -eq 10 ]; then
+              echo "[FAIL] explorer archive not healthy (HTTP ${STATUS})"
+              FAILED=1
+            fi
+            sleep 10
+          done
           exit $FAILED
 
   notify-slack:
     name: Slack Notification
     if: ${{ always() && contains(join(needs.*.result, ','), 'failure') }}
-    needs: [reset-primary, upload-genesis, fund-secondary, reset-secondary, verify]
+    needs: [reset-primary, upload-genesis, fund-secondary, reset-secondary, reset-archive, verify]
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
@@ -271,7 +334,7 @@ jobs:
                 },
                 {
                   "type": "section",
-                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nReset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Verify: `${{ needs.verify.result }}`" }
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nReset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Reset Archive: `${{ needs.reset-archive.result }}` | Verify: `${{ needs.verify.result }}`" }
                 }
               ]
             }

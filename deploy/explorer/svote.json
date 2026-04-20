@@ -1,0 +1,24 @@
+{
+  "chain_name": "svote",
+  "registry_name": "svote",
+  "api": ["https://explorer-api.{{DOMAIN}}"],
+  "rpc": ["https://explorer-rpc.{{DOMAIN}}"],
+  "sdk_version": "0.50.0",
+  "coin_type": "118",
+  "min_tx_fee": "0",
+  "addr_prefix": "sv",
+  "logo": "https://explorer.{{DOMAIN}}/logos/zcash.svg",
+  "theme_color": "#F4B728",
+  "assets": [
+    {
+      "base": "usvote",
+      "symbol": "SVOTE",
+      "exponent": "6",
+      "coingecko_id": "",
+      "logo": "https://explorer.{{DOMAIN}}/logos/zcash.svg"
+    }
+  ],
+  "chain_id": "svote-1",
+  "pretty_name": "Zcash Vote",
+  "features": ["blocks", "tx", "staking", "governance", "supply", "parameters", "consensus"]
+}
