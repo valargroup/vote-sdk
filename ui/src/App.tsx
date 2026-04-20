@@ -975,9 +975,16 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
         setVmTxHash(result.tx_hash);
         setVmTxStatus("ok");
         // Re-fetch to get the canonical (lowercase) form the chain stored,
-        // not the user-typed form which may be mixed-case.
-        const vmResp = await chainApi.getVoteManagers();
-        setVoteManagers(vmResp.vote_manager_addresses ?? []);
+        // not the user-typed form which may be mixed-case. A refetch failure
+        // here must not downgrade the tx's "ok" status — the tx succeeded.
+        try {
+          const vmResp = await chainApi.getVoteManagers();
+          setVoteManagers(vmResp.vote_manager_addresses ?? []);
+        } catch {
+          // Keep the user-typed list on failure; the next connection test
+          // will sync to canonical form.
+          setVoteManagers(newVoteManagers);
+        }
       }
     } catch (err) {
       setVmTxError(err instanceof Error ? err.message : String(err));
