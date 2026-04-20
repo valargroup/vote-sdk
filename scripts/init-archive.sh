@@ -56,9 +56,10 @@ echo ""
 echo "=== Initializing archive node ==="
 $BINARY init archive --chain-id "$CHAIN_ID" --home "$HOME_ARCHIVE"
 
-# Generate a Pallas keypair. Archive doesn't use it — but app.toml validates
-# pallas_sk_path at startup and svoted refuses to boot if the path is empty
-# or unreadable. The file exists and is ignored.
+# Generate a Pallas keypair. Archive doesn't use it — the archive never runs
+# PrepareProposal. Matches the validator init pattern, and keeps
+# pallas_sk_path pointing at a readable file so any future strict-validation
+# on this path won't break the archive.
 $BINARY pallas-keygen --home "$HOME_ARCHIVE"
 
 # Copy val1's finalized genesis — THIS is what makes the archive part of the
