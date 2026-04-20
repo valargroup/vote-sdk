@@ -7,6 +7,7 @@ import { ProposalEditor } from "./components/ProposalEditor";
 import { JsonView } from "./components/JsonView";
 import { RoundEditor } from "./components/RoundEditor";
 import { SnapshotSettingsPage } from "./components/SnapshotSettingsPage";
+import { PirFleetStatus } from "./components/PirFleetStatus";
 import { RoundsList } from "./components/RoundsList";
 import { useStore } from "./store/useStore";
 import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown } from "lucide-react";
@@ -1177,6 +1178,21 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
             <p className="text-[10px] text-text-muted">
               Fetching nullifier service status...
             </p>
+          )}
+
+          {/* Fleet-wide status across every endpoint in the published
+              voting-config. The selector above is about "which endpoint
+              does my wallet use?" — this table is the operator's view
+              of "are all replicas converged on the same snapshot?",
+              used as step 5 of the snapshot-bumps runbook. */}
+          {pirEndpoints.length > 0 && (
+            <div className="pt-4 border-t border-border-subtle/50">
+              <PirFleetStatus
+                endpoints={pirEndpoints}
+                selectedUrl={selectedNullifierUrl || undefined}
+                expectedHeight={votingConfig?.snapshot_height}
+              />
+            </div>
           )}
         </div>
 
