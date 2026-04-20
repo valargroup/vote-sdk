@@ -126,6 +126,9 @@ export VM_PRIVKEYS=<64-char-hex>  # comma-separated for multi-VM
 export VAL_PRIVKEY=<64-char-hex>  # omit to generate a fresh key
 systemctl stop svoted
 rm -rf /opt/shielded-vote/.svoted/*
+# init.sh sources scripts/_vote_manager_keys_lib.sh; both must be
+# present in the same directory (run from a repo checkout, or copy both
+# files side-by-side onto the host first).
 bash scripts/init.sh
 systemctl start svoted
 ```

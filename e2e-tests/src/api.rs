@@ -730,12 +730,16 @@ pub const FIRST_VOTE_MANAGER_KEY_NAME: &str = "vote-manager-1";
 /// the imported address. Every e2e test that needs to sign as a vote manager
 /// uses this helper.
 pub fn import_first_vote_manager_key(home_dir: &str) -> String {
-    let vm_privkey = std::env::var("VM_PRIVKEYS")
-        .expect("VM_PRIVKEYS env var must be set (comma-separated 64-char hex keys)")
+    // Mirror the bash helper in scripts/_vote_manager_keys_lib.sh: skip empty
+    // entries (leading/trailing/double comma) so ",abc" or " , abc" takes
+    // "abc" rather than silently passing "" to svoted keys import-hex.
+    let raw = std::env::var("VM_PRIVKEYS")
+        .expect("VM_PRIVKEYS env var must be set (comma-separated 64-char hex keys)");
+    let vm_privkey = raw
         .split(',')
-        .next()
-        .expect("VM_PRIVKEYS must contain at least one key")
-        .trim()
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .expect("VM_PRIVKEYS must contain at least one non-empty key")
         .to_string();
     import_hex_key(FIRST_VOTE_MANAGER_KEY_NAME, &vm_privkey, home_dir);
     key_account_address(FIRST_VOTE_MANAGER_KEY_NAME, home_dir).unwrap_or_else(|| {
