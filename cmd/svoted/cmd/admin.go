@@ -67,6 +67,13 @@ func adminPostSetup(
 
 		(*svoteApp).SetAdmin(a)
 
+		if cfg.WatchdogInterval > 0 {
+			g.Go(func() error {
+				admin.RunWatchdog(ctx, a, cfg.WatchdogInterval, logger)
+				return nil
+			})
+		}
+
 		logger.Info("admin config proxy initialized")
 		return nil
 	}
@@ -81,6 +88,9 @@ func readAdminConfig(v *viper.Viper) admin.Config {
 	}
 	if v.IsSet("admin.config_url") {
 		cfg.ConfigURL = v.GetString("admin.config_url")
+	}
+	if v.IsSet("admin.watchdog_interval") {
+		cfg.WatchdogInterval = v.GetDuration("admin.watchdog_interval")
 	}
 
 	return cfg

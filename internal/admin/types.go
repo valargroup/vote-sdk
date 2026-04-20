@@ -5,6 +5,8 @@
 // on the config repo — no write endpoints here.
 package admin
 
+import "time"
+
 // Config holds the admin server configuration, read from app.toml [admin].
 type Config struct {
 	// Disable turns off the admin server entirely.
@@ -12,13 +14,19 @@ type Config struct {
 
 	// ConfigURL is the GitHub Pages CDN URL for the voting-config JSON.
 	ConfigURL string `mapstructure:"config_url"`
+
+	// WatchdogInterval is how often the fleet health watchdog probes all
+	// vote servers and PIR endpoints listed in voting-config.json. Set to
+	// 0 to disable the watchdog. Default: 5 minutes.
+	WatchdogInterval time.Duration `mapstructure:"watchdog_interval"`
 }
 
 // DefaultConfig returns the default admin configuration.
 func DefaultConfig() Config {
 	return Config{
-		Disable:   true,
-		ConfigURL: "https://valargroup.github.io/token-holder-voting-config/voting-config.json",
+		Disable:          true,
+		ConfigURL:        "https://valargroup.github.io/token-holder-voting-config/voting-config.json",
+		WatchdogInterval: 5 * time.Minute,
 	}
 }
 
