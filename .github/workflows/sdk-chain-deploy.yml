@@ -67,8 +67,10 @@ jobs:
           EMBED_PIR: "1"
       - name: Build admin UI
         run: cd ui && npm install && npm run build
-      - name: Copy init script to build root
-        run: cp scripts/init_multi.sh init_multi.sh
+      - name: Copy init scripts to build root
+        run: |
+          cp scripts/init_multi.sh init_multi.sh
+          cp scripts/init-archive.sh init-archive.sh
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -77,20 +79,61 @@ jobs:
             svoted
             create-val-tx
             init_multi.sh
+            init-archive.sh
             ui/dist
             docs/svoted-val1.service
             docs/svoted-val2.service
             docs/svoted-val3.service
+            docs/svoted-archive.service
+
+  build-explorer:
+    name: Build explorer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy/explorer
+          sparse-checkout-cone-mode: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Enable corepack (yarn 1.x)
+        run: corepack enable
+      - name: Cache yarn packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yarn
+          key: yarn-pingpub-ee1ca5ee54d7bd2dc4c5b4df8f3b93595440e9c8
+      - name: Clone ping-pub and build
+        run: |
+          git clone https://github.com/ping-pub/explorer.git /tmp/ping-pub
+          cd /tmp/ping-pub
+          git checkout ee1ca5ee54d7bd2dc4c5b4df8f3b93595440e9c8
+          cp "$GITHUB_WORKSPACE/deploy/explorer/svote.json" chains/testnet/svote.json
+          yarn install
+          yarn build
+          tar czf "$GITHUB_WORKSPACE/explorer-dist.tar.gz" -C dist .
+      - name: Upload explorer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-explorer-dist
+          path: explorer-dist.tar.gz
 
   deploy:
     name: Deploy binaries
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, build-explorer]
     steps:
-      - name: Download artifacts
+      - name: Download chain artifacts
         uses: actions/download-artifact@v4
         with:
           name: sdk-chain-binaries
+      - name: Download explorer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sdk-explorer-dist
       - name: Make binaries executable
         run: chmod +x svoted create-val-tx
       - name: Create deploy directory
@@ -106,8 +149,19 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
-          source: "svoted,create-val-tx,init_multi.sh,ui/dist,docs/svoted-val1.service,docs/svoted-val2.service,docs/svoted-val3.service"
+          source: "svoted,create-val-tx,init_multi.sh,init-archive.sh,ui/dist,explorer-dist.tar.gz,docs/svoted-val1.service,docs/svoted-val2.service,docs/svoted-val3.service,docs/svoted-archive.service"
           target: ${{ env.DEPLOY_PATH }}
+      - name: Install explorer bundle on host
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            sudo mkdir -p /opt/shielded-vote/explorer/dist
+            sudo rm -rf /opt/shielded-vote/explorer/dist/*
+            sudo tar xzf /opt/shielded-vote/explorer-dist.tar.gz -C /opt/shielded-vote/explorer/dist
+            sudo rm -f /opt/shielded-vote/explorer-dist.tar.gz
 
   restart:
     name: Restart chain
@@ -120,7 +174,7 @@ jobs:
   notify-slack:
     name: Slack Notification
     if: ${{ always() && github.ref == 'refs/heads/main' && contains(join(needs.*.result, ','), 'failure') }}
-    needs: [build, deploy, restart]
+    needs: [build, build-explorer, deploy, restart]
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
@@ -147,7 +201,7 @@ jobs:
                 },
                 {
                   "type": "section",
-                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nBuild: `${{ needs.build.result }}` | Deploy: `${{ needs.deploy.result }}` | Restart: `${{ needs.restart.result }}`" }
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nBuild: `${{ needs.build.result }}` | Build-Explorer: `${{ needs.build-explorer.result }}` | Deploy: `${{ needs.deploy.result }}` | Restart: `${{ needs.restart.result }}`" }
                 }
               ]
             }
