@@ -358,6 +358,10 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 		return app.GetAdmin()
 	}, app.Logger().With("module", "admin"))
 
+	// Register UI runtime config (resolves SVOTE_UI_MODE; default "prod" hides
+	// developer-only widgets so an unset env var can never leak them in prod).
+	admin.RegisterUIConfigRoutes(apiSvr.Router, app.Logger().With("module", "admin"))
+
 	// Register swagger API.
 	if err := server.RegisterSwaggerAPI(apiSvr.ClientCtx, apiSvr.Router, apiConfig.Swagger); err != nil {
 		panic(err)

@@ -34,4 +34,8 @@ type VotingConfig struct {
 	Version     int            `json:"version"`
 	VoteServers []ServiceEntry `json:"vote_servers"`
 	PIRServers  []ServiceEntry `json:"pir_endpoints"`
+	// SnapshotHeight is the canonical Orchard nullifier-tree snapshot height
+	// for the current voting round. PIR servers must serve this exact height,
+	// and the admin UI auto-populates round drafts from it.
+	SnapshotHeight *uint64 `json:"snapshot_height,omitempty"`
 }

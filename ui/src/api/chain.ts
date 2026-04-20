@@ -355,6 +355,76 @@ export async function getActiveRound(): Promise<{ round: ChainRound | null }> {
   }
 }
 
+// -- UI runtime config --
+
+export type UIMode = "dev" | "prod";
+
+export interface UIConfig {
+  mode: UIMode;
+  dev_pir_controls: boolean;
+  /**
+   * Bucket origin this svoted's PIR siblings fetch snapshots from
+   * (no trailing slash). Resolved server-side from SVOTE_PRECOMPUTED_BASE_URL
+   * with a production-bucket default. Compose with {@link PIR_SNAPSHOTS_PATH}.
+   *
+   * Optional in the type so an older svoted that doesn't yet expose it
+   * leaves the UI rendering an "unknown bucket" fallback rather than crashing.
+   */
+  precomputed_base_url?: string;
+}
+
+/**
+ * Fetch the runtime UI config resolved by svoted from its environment.
+ * Returns prod-safe defaults if the endpoint is unreachable so an older
+ * svoted (or a misconfigured proxy) cannot accidentally expose dev controls.
+ */
+export async function getUIConfig(): Promise<UIConfig> {
+  try {
+    return await fetchJson<UIConfig>("/api/ui-config");
+  } catch {
+    return { mode: "prod", dev_pir_controls: false };
+  }
+}
+
+// -- Published snapshot manifest (DigitalOcean Spaces) --
+
+export interface PublishedSnapshotFile {
+  size: number;
+  sha256: string;
+}
+
+export interface PublishedSnapshotManifest {
+  schema_version: number;
+  height: number;
+  created_at: string;
+  nf_server_sha256?: string;
+  publisher?: { git_ref?: string; git_sha?: string };
+  files: Record<string, PublishedSnapshotFile>;
+}
+
+/**
+ * Fetch the manifest.json for a pre-computed PIR snapshot at the given height.
+ * The manifest is uploaded last by the publisher CI, so its presence implies
+ * a complete snapshot directory.
+ *
+ * `precomputedBase` is the bucket-level base URL exposed by svoted via
+ * /api/ui-config (it's a per-deployment service config, not a wallet-facing
+ * one). The PIR-specific subpath is appended here so callers don't have to
+ * hard-code it.
+ */
+export async function getPublishedSnapshotManifest(
+  precomputedBase: string,
+  height: number
+): Promise<PublishedSnapshotManifest> {
+  const base = precomputedBase.replace(/\/+$/, "");
+  const url = `${base}${PIR_SNAPSHOTS_PATH}/${height}/manifest.json`;
+  const resp = await fetch(url, { cache: "no-cache" });
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status} fetching ${url}`);
+  }
+  return resp.json();
+}
+
 // -- Edge Config management --
 
 export interface ServiceEntry {
@@ -367,7 +437,16 @@ export interface VotingConfig {
   version: number;
   vote_servers: ServiceEntry[];
   pir_endpoints: ServiceEntry[];
+  /** Canonical Orchard nullifier-tree snapshot height for the current round. */
+  snapshot_height?: number;
 }
+
+/**
+ * Subpath under the service-level precomputed_base_url where PIR snapshots
+ * live. The base itself is per-deployment (svoted exposes it via
+ * /api/ui-config); the path is a fleet-wide convention.
+ */
+export const PIR_SNAPSHOTS_PATH = "/snapshots";
 
 export interface PendingRegistration {
   operator_address: string;
