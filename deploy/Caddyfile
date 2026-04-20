@@ -39,3 +39,20 @@ val2.46-101-255-48.sslip.io {
 val3.46-101-255-48.sslip.io {
 	reverse_proxy localhost:1618
 }
+
+# Block explorer frontend — static ping-pub Vue bundle served from disk.
+explorer.46-101-255-48.sslip.io {
+	root * /opt/shielded-vote/explorer/dist
+	file_server
+	try_files {path} /index.html
+}
+
+# Archive node LCD — ping-pub's browser calls land here.
+explorer-api.46-101-255-48.sslip.io {
+	reverse_proxy localhost:1718
+}
+
+# Archive node Tendermint RPC — also called directly by the ping-pub frontend.
+explorer-rpc.46-101-255-48.sslip.io {
+	reverse_proxy localhost:26457
+}
