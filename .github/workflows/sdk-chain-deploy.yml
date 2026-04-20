@@ -111,7 +111,13 @@ jobs:
           git clone https://github.com/ping-pub/explorer.git /tmp/ping-pub
           cd /tmp/ping-pub
           git checkout ee1ca5ee54d7bd2dc4c5b4df8f3b93595440e9c8
-          cp "$GITHUB_WORKSPACE/deploy/explorer/svote.json" chains/testnet/svote.json
+          # Drop all upstream chain configs so the UI shows only our chain.
+          rm -f chains/mainnet/*.json chains/testnet/*.json
+          # ping-pub defaults to "mainnet" when the hostname doesn't contain
+          # "testnet" — our svote config goes in mainnet/ to be discoverable.
+          cp "$GITHUB_WORKSPACE/deploy/explorer/svote.json" chains/mainnet/svote.json
+          # Bundle the zcash logo so the chain icon resolves to an asset we control.
+          cp "$GITHUB_WORKSPACE/deploy/explorer/zcash.svg" public/logos/zcash.svg
           yarn install
           yarn build
           tar czf "$GITHUB_WORKSPACE/explorer-dist.tar.gz" -C dist .

@@ -3,11 +3,11 @@
   "registry_name": "svote",
   "api": ["https://explorer-api.46-101-255-48.sslip.io"],
   "rpc": ["https://explorer-rpc.46-101-255-48.sslip.io"],
-  "sdk_version": "0.50",
+  "sdk_version": "0.50.0",
   "coin_type": "118",
   "min_tx_fee": "0",
   "addr_prefix": "sv",
-  "logo": "/logos/cosmos.svg",
+  "logo": "https://explorer.46-101-255-48.sslip.io/logos/zcash.svg",
   "theme_color": "#2f4858",
   "assets": [
     {
@@ -15,10 +15,10 @@
       "symbol": "SVOTE",
       "exponent": "6",
       "coingecko_id": "",
-      "logo": "/logos/cosmos.svg"
+      "logo": "https://explorer.46-101-255-48.sslip.io/logos/zcash.svg"
     }
   ],
   "chain_id": "svote-1",
   "pretty_name": "Zcash Vote",
-  "features": ["staking", "gov"]
+  "features": ["blocks", "tx", "staking", "governance", "supply", "parameters", "consensus"]
 }

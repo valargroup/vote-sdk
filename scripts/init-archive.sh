@@ -79,6 +79,10 @@ sed -i.bak "s|pprof_laddr = \"localhost:6060\"|pprof_laddr = \"localhost:${PPROF
 sed -i.bak 's/^addr_book_strict = true/addr_book_strict = false/' "$CONFIG_TOML"
 sed -i.bak 's/^allow_duplicate_ip = false/allow_duplicate_ip = true/' "$CONFIG_TOML"
 
+# Enable CORS on Tendermint RPC so the browser-based explorer can query it.
+# (The LCD's CORS is handled separately via enabled-unsafe-cors in app.toml.)
+sed -i.bak 's|^cors_allowed_origins = .*|cors_allowed_origins = ["*"]|' "$CONFIG_TOML"
+
 # Peer with val1 at its p2p port (26156).
 VAL1_NODE_ID=$($BINARY comet show-node-id --home "$HOME_VAL1")
 VAL1_PEER="${VAL1_NODE_ID}@127.0.0.1:26156"
