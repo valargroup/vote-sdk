@@ -138,6 +138,8 @@ jobs:
             > chains/mainnet/svote.json
 
           # Bundle the Zcash logo so the chain icon resolves to our asset.
+          # ping-pub's repo doesn't ship a public/logos/ directory -- create it.
+          mkdir -p public/logos
           cp "$GITHUB_WORKSPACE/deploy/explorer/zcash.svg" public/logos/zcash.svg
 
           yarn install
