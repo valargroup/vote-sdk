@@ -65,6 +65,18 @@ func (a *Admin) GetVotingConfig() (*VotingConfig, error) {
 	return a.cached, nil
 }
 
+// RefreshConfig forces a reload of voting-config from the CDN and returns
+// the new value. Used by the fleet health watchdog on every tick so it
+// picks up newly added/removed servers without a process restart.
+func (a *Admin) RefreshConfig() (*VotingConfig, error) {
+	if err := a.refresh(); err != nil {
+		return nil, err
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.cached, nil
+}
+
 func (a *Admin) refresh() error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(a.configURL)
