@@ -279,8 +279,8 @@ jobs:
           EOF
           for PLATFORM in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
             TARBALL="shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
-            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" s3://vote/ --acl-public --force
-            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}.sha256" s3://vote/ --acl-public --force
+            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" s3://vote/binaries/vote-sdk/ --acl-public --force
+            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}.sha256" s3://vote/binaries/vote-sdk/ --acl-public --force
           done
           echo "${VERSION}" > /tmp/version.txt
           s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force

@@ -22,6 +22,7 @@ permissions:
 
 env:
   TAG: ${{ inputs.tag }}
+  RELEASE_BASE_URL: https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk
 
 jobs:
   deploy-primary:
@@ -38,7 +39,7 @@ jobs:
           script: |
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
-            /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}"
+            /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}" --base "${{ env.RELEASE_BASE_URL }}"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
@@ -74,7 +75,7 @@ jobs:
           script: |
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
-            /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}"
+            /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}" --base "${{ env.RELEASE_BASE_URL }}"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
