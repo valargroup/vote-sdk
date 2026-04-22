@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const chainUrl = env.VITE_CHAIN_URL || 'http://localhost:1318'
+  const chainUrl = env.VITE_CHAIN_URL || 'http://localhost:1317'
 
   return {
     plugins: [react(), tailwindcss()],

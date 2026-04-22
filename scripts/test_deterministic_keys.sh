@@ -66,14 +66,13 @@ echo "Primary validator address: $PRIMARY_ADDR"
 echo ""
 echo "--- Step 2: Start primary ---"
 
-# Patch REST API to 1318 (init.sh already does this), gRPC off defaults.
 svoted start --home "$PRIMARY_HOME" > /tmp/svoted-test-primary.log 2>&1 &
 PRIMARY_PID=$!
 echo "Primary PID: $PRIMARY_PID (log: /tmp/svoted-test-primary.log)"
 
-echo "Waiting for primary REST API (port 1318)..."
+echo "Waiting for primary REST API (port 1317)..."
 for i in $(seq 1 30); do
-    if curl -sf http://localhost:1318/shielded-vote/v1/rounds > /dev/null 2>&1; then
+    if curl -sf http://localhost:1317/shielded-vote/v1/rounds > /dev/null 2>&1; then
         echo "Primary REST API healthy."
         break
     fi

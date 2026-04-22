@@ -106,11 +106,11 @@ test: test-unit test-integration test-helper
 
 ## ceremony: Register Pallas key + create round + wait for ACTIVE (per-round auto-ceremony)
 ceremony:
-	SVOTE_API_URL=http://localhost:1318 cargo test --release --manifest-path e2e-tests/Cargo.toml round_activation -- --nocapture --ignored
+	SVOTE_API_URL=http://localhost:1317 cargo test --release --manifest-path e2e-tests/Cargo.toml round_activation -- --nocapture --ignored
 
 ## test-api: Rust E2E API tests against a running chain (requires: make init && make start)
 test-api:
-	SVOTE_API_URL=http://localhost:1318 HELPER_SERVER_URL=http://127.0.0.1:1318 cargo test --release --manifest-path e2e-tests/Cargo.toml -- --nocapture --ignored
+	SVOTE_API_URL=http://localhost:1317 HELPER_SERVER_URL=http://127.0.0.1:1317 cargo test --release --manifest-path e2e-tests/Cargo.toml -- --nocapture --ignored
 
 ## test-e2e: Alias for test-api (Rust E2E tests)
 test-e2e: test-api
@@ -190,7 +190,7 @@ docker-testnet: docker-build
 	@echo ""
 	@echo "Testnet starting with $(DOCKER_TESTNET_VALIDATORS) validators."
 	@echo "  RPC: http://localhost:26157"
-	@echo "  API: http://localhost:1318"
+	@echo "  API: http://localhost:1317"
 	@echo "  Logs: docker compose -f docker/docker-compose.yml logs -f"
 
 ## docker-testnet-down: Stop and remove the testnet containers and volumes

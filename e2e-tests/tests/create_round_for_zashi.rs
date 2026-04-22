@@ -8,7 +8,7 @@
 //! that Zashi can actually delegate to.
 //!
 //! Prerequisites:
-//!   - Local svoted chain running (port 1318)
+//!   - Local svoted chain running (port 1317)
 //!   - `grpcurl` installed (brew install grpcurl)
 //!   - Validator Pallas key registered (done during chain init)
 //!   - IMT server reachable (default: http://46.101.255.48:3000)

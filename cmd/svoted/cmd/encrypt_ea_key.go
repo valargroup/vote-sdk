@@ -16,7 +16,7 @@ import (
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 )
 
-const defaultRESTAddr = "http://localhost:1318"
+const defaultRESTAddr = "http://localhost:1317"
 
 // EncryptEAKeyCmd produces a payloads.json for use with "svoted tx vote deal-ea-key".
 // It reads ea.sk from disk, fetches all registered validators and their Pallas
@@ -40,7 +40,7 @@ can be passed directly to "svoted tx vote deal-ea-key".
 
 Example:
   svoted encrypt-ea-key ~/.svoted/ea.sk \
-    --node http://localhost:1318 \
+    --node http://localhost:1317 \
     --output /tmp/payloads.json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

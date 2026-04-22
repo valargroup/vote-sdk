@@ -8,7 +8,7 @@
 #   4. Validator appearing in the staking module
 #
 # Expects: svoted + create-val-tx in PATH, val1 running on default ports
-# (API 1318, RPC 26657, P2P 26656).
+# (API 1317, RPC 26657, P2P 26656).
 #
 # Usage:
 #   mise run test:join

@@ -214,8 +214,8 @@ jobs:
             echo "  PID: $!"
           done
       - name: Wait for val1 to produce blocks
-        # :1418 is val1's REST API port (init_multi.sh assigns 1418/1518/1618
-        # for val1/2/3 to avoid collision with the single-validator :1318).
+        # :1418 is val1's REST API port. init_multi.sh assigns 1418/1518/1618
+        # to val1/val2/val3 so a 3-node local rig doesn't collide on a single host.
         run: |
           for i in $(seq 1 60); do
             if curl -sf http://localhost:1418/cosmos/base/tendermint/v1beta1/blocks/latest > /dev/null 2>&1; then
