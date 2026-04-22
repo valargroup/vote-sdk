@@ -10,33 +10,43 @@ A Cosmos SDK application chain for **private on-chain voting** using Zcash-deriv
 
 ### Prerequisites
 
-- [Go](https://go.dev/) 1.24+
-- [Rust](https://rustup.rs/) stable (for ZKP circuits)
-- [mise](https://mise.jdx.dev/) (optional, for task orchestration)
+- [mise](https://mise.jdx.dev/) — task runner + toolchain installer (recommended)
+- Alternatively, install [Go](https://go.dev/) 1.24+ and [Rust](https://rustup.rs/) stable directly
 
-### Build
+### Run a local chain with mise
 
 ```bash
-# Build the Rust circuit static library (required for full verification)
-make circuits
+# 1. Install the toolchain listed in mise.toml (Go, Rust, Node, buf, jq).
+mise install
 
-# Build the chain binary with ZKP + signature verification
-make build-ffi
+# 2. Build + install svoted and create-val-tx into $GOBIN (on PATH).
+mise run install
 
-# Or build without FFI (stubs out Halo2/RedPallas verification — dev only)
-make build
+# 3. Create .env with the vote-manager private key(s) (one-time).
+cp .env.example .env
+# Edit .env and set VM_PRIVKEYS (comma-separated 64-char hex keys; generate
+# each with: openssl rand -hex 32). For a single-vote-manager chain, provide
+# exactly one key — any-of-N means any vote manager in the list can authorize
+# vote-manager-gated operations.
+
+# 4. Wipe + init a single-validator devnet, then start the daemon.
+mise run chain:init
+mise run chain:start
 ```
 
-### Run a Local Chain
+Other useful tasks: `mise run chain:init-multi` + `mise run chain:start-multi`
+for a 3-validator local chain, `mise run test:go` for the Go test suite,
+`mise tasks` to list everything.
+
+### Without mise (direct make)
 
 ```bash
-# 1. Create .env with the vote-manager private key(s) (one-time)
-cp .env.example .env
-# Edit .env and set VM_PRIVKEYS (comma-separated 64-char hex keys; generate each with: openssl rand -hex 32)
-# For a single-vote-manager chain, provide exactly one key. Any-of-N: any
-# vote manager in the list can authorize vote-manager-gated operations.
+# Build and install
+make circuits      # Rust ZKP circuit static library
+make build-ffi     # svoted with ZKP + signature verification
+# (or) make build  # no FFI — stubs Halo2/RedPallas verification; dev only
 
-# 2. Initialize a single-validator devnet and start
+# Init + start (same .env step as above applies)
 make init
 make start
 ```

@@ -59,7 +59,11 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/_vote_manager_keys_lib.sh" -o /tmp/_vote_manager_keys_lib.sh
             bash /tmp/init.sh
 
-            # init.sh sets REST API to port 1318 (local dev); fix to 1317 for production
+            # scripts/init.sh writes REST API on port 1318 (local-dev convention
+            # that dodges a Cursor IDE port collision on 1317). Production joins
+            # the Cosmos SDK default by flipping both the [api] address and the
+            # [helper] chain_api_port back to 1317. Kept in sync with join.sh,
+            # which also lands on 1317.
             APP_TOML="/opt/shielded-vote/.svoted/config/app.toml"
             sed -i 's|address = "tcp://0.0.0.0:1318"|address = "tcp://0.0.0.0:1317"|' "$APP_TOML"
             sed -i 's|chain_api_port = 1318|chain_api_port = 1317|' "$APP_TOML"

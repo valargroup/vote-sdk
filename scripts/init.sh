@@ -111,6 +111,9 @@ sed -i.bak 's/^minimum-gas-prices = ""/minimum-gas-prices = "0usvote"/' "$APP_TO
 
 # Enable the REST API server (default: disabled).
 # Use port 1318 to avoid Cursor IDE occupying 1317.
+# Prod reverts this to 1317 via the sed block in .github/workflows/sdk-chain-reset.yml
+# (so the public REST surface matches the Cosmos SDK default); the join.sh
+# flow also runs on 1317 for the same reason.
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
 sed -i.bak 's|address = "tcp://localhost:1317"|address = "tcp://0.0.0.0:1318"|' "$APP_TOML"
 # Enable CORS for dev (Vite dev server on port 5173).
