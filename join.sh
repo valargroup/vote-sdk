@@ -10,7 +10,7 @@
 #
 # What it does:
 #   1. Acquires svoted + create-val-tx (always downloads latest; set SVOTE_LOCAL_BINARIES=1 to use local)
-#   2. Discovers the network via the Vercel API (voting-config endpoint)
+#   2. Discovers the network via the published voting-config.json
 #   3. Fetches node identity from a live seed validator (for PEX bootstrap)
 #   4. Downloads genesis.json from DO Spaces (s3://vote/genesis.json, written by sdk-chain-reset)
 #   5. Initializes a node, generates cryptographic keys
@@ -26,7 +26,7 @@ CHAIN_ID="svote-1"
 INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
-VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://shielded-vote.vercel.app}"
+VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://valargroup.github.io/token-holder-voting-config}"
 
 # Parse --domain flag for TLS hostname override.
 SVOTE_DOMAIN="${SVOTE_DOMAIN:-}"
@@ -171,20 +171,20 @@ case ":${PATH}:" in
   *) export PATH="${INSTALL_DIR}:${PATH}" ;;
 esac
 
-# ─── Discover network via Vercel API ─────────────────────────────────────────
-# The voting-config endpoint returns the same data iOS clients use for service
-# discovery. We pick a vote_server, fetch its node identity, and use it as our
-# initial peer. CometBFT's PEX handles further peer discovery.
+# ─── Discover network via voting-config.json ────────────────────────────────
+# The published voting-config.json returns the same data iOS clients use for
+# service discovery. We pick a vote_server, fetch its node identity, and use it
+# as our initial peer. CometBFT's PEX handles further peer discovery.
 
 echo ""
 echo "=== Discovering network ==="
 
-VOTING_CONFIG=$(curl -fsSL "${VOTING_CONFIG_URL}/api/voting-config")
-SEED_URL=$(echo "$VOTING_CONFIG" | jq -r '.vote_servers[0].url')
+VOTING_CONFIG=$(curl -fsSL "${VOTING_CONFIG_URL}/voting-config.json")
+SEED_URL=$(jq -r '.vote_servers[0].url' <<< "$VOTING_CONFIG")
 
 if [ -z "$SEED_URL" ] || [ "$SEED_URL" = "null" ]; then
-  echo "ERROR: No vote_servers found in voting-config at ${VOTING_CONFIG_URL}/api/voting-config"
-  echo "  The bootstrap operator needs to register at least one validator URL in the admin UI."
+  echo "ERROR: No vote_servers found in voting-config at ${VOTING_CONFIG_URL}/voting-config.json"
+  echo "  The bootstrap operator needs to publish at least one validator URL in the voting-config."
   exit 1
 fi
 
@@ -192,8 +192,8 @@ echo "Seed node: ${SEED_URL}"
 
 # Fetch the node's P2P identity.
 NODE_INFO=$(curl -fsSL "${SEED_URL}/cosmos/base/tendermint/v1beta1/node_info")
-NODE_ID=$(echo "$NODE_INFO" | jq -r '.default_node_info.default_node_id // .default_node_info.id // empty')
-LISTEN_ADDR=$(echo "$NODE_INFO" | jq -r '.default_node_info.listen_addr // empty')
+NODE_ID=$(jq -r '.default_node_info.default_node_id // .default_node_info.id // empty' <<< "$NODE_INFO")
+LISTEN_ADDR=$(jq -r '.default_node_info.listen_addr // empty' <<< "$NODE_INFO")
 
 if [ -z "$NODE_ID" ]; then
   echo "ERROR: Could not fetch node_id from ${SEED_URL}"
@@ -422,8 +422,8 @@ if [ -n "$VALIDATOR_URL" ]; then
   REG_PAYLOAD="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${TIMESTAMP}}"
 
   if SIG_JSON=$(svoted sign-arbitrary "$REG_PAYLOAD" --from validator --keyring-backend test --home "${HOME_DIR}" 2>/dev/null); then
-    SIG=$(echo "$SIG_JSON" | jq -r '.signature')
-    PUB_KEY=$(echo "$SIG_JSON" | jq -r '.pub_key')
+    SIG=$(jq -r '.signature' <<< "$SIG_JSON")
+    PUB_KEY=$(jq -r '.pub_key' <<< "$SIG_JSON")
 
     REG_BODY="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${TIMESTAMP},\"signature\":\"${SIG}\",\"pub_key\":\"${PUB_KEY}\"}"
 
@@ -432,7 +432,7 @@ if [ -n "$VALIDATOR_URL" ]; then
       -d "$REG_BODY" 2>/dev/null || echo "")
 
     if [ -n "$REG_RESULT" ]; then
-      REG_STATUS=$(echo "$REG_RESULT" | jq -r '.status // empty' 2>/dev/null || echo "")
+      REG_STATUS=$(jq -r '.status // empty' <<< "$REG_RESULT" 2>/dev/null || echo "")
       if [ "$REG_STATUS" = "pending" ] || [ "$REG_STATUS" = "registered" ]; then
         echo "Registered (${REG_STATUS}). The admin will see your request."
       else
@@ -465,8 +465,8 @@ register_url() {
   local payload="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${ts}}"
   local sig_json
   sig_json=$(svoted sign-arbitrary "$payload" --from validator --keyring-backend test --home "${HOME_DIR}" 2>/dev/null) || return 0
-  local sig=$(echo "$sig_json" | jq -r '.signature')
-  local pub_key=$(echo "$sig_json" | jq -r '.pub_key')
+  local sig=$(jq -r '.signature' <<< "$sig_json")
+  local pub_key=$(jq -r '.pub_key' <<< "$sig_json")
   local body="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${ts},\"signature\":\"${sig}\",\"pub_key\":\"${pub_key}\"}"
   curl -fsSL -X POST "${VOTING_CONFIG_URL}/api/register-validator" \
     -H "Content-Type: application/json" \
@@ -606,8 +606,8 @@ while true; do
     continue
   fi
 
-  CATCHING_UP=$(echo "$STATUS" | jq -r '.sync_info.catching_up' 2>/dev/null || echo "true")
-  HEIGHT=$(echo "$STATUS" | jq -r '.sync_info.latest_block_height' 2>/dev/null || echo "0")
+  CATCHING_UP=$(jq -r '.sync_info.catching_up' <<< "$STATUS" 2>/dev/null || echo "true")
+  HEIGHT=$(jq -r '.sync_info.latest_block_height' <<< "$STATUS" 2>/dev/null || echo "0")
   echo "  height: ${HEIGHT}, catching_up: ${CATCHING_UP}"
 
   if [ "$CATCHING_UP" = "false" ]; then
