@@ -109,10 +109,9 @@ $BINARY genesis validate-genesis --home "$HOME_DIR"
 APP_TOML="$HOME_DIR/config/app.toml"
 sed -i.bak 's/^minimum-gas-prices = ""/minimum-gas-prices = "0usvote"/' "$APP_TOML"
 
-# Enable the REST API server (default: disabled).
-# Use port 1318 to avoid Cursor IDE occupying 1317.
+# Enable the REST API server (default: disabled) and bind on all interfaces.
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
-sed -i.bak 's|address = "tcp://localhost:1317"|address = "tcp://0.0.0.0:1318"|' "$APP_TOML"
+sed -i.bak 's|address = "tcp://localhost:1317"|address = "tcp://0.0.0.0:1317"|' "$APP_TOML"
 # Enable CORS for dev (Vite dev server on port 5173).
 sed -i.bak '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP_TOML"
 
@@ -187,7 +186,7 @@ min_delay = $HELPER_MIN_DELAY
 process_interval = $HELPER_PROCESS_INTERVAL
 
 # Port of the chain's REST API (used for MsgRevealShare submission).
-chain_api_port = 1318
+chain_api_port = 1317
 
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = $HELPER_MAX_CONCURRENT_PROOFS

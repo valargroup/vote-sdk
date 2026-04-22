@@ -42,7 +42,7 @@ the internal Docker network.
 
 | Port | Service |
 |---|---|
-| `localhost:1318` | REST API (Cosmos SDK + custom vote endpoints) |
+| `localhost:1317` | REST API (Cosmos SDK + custom vote endpoints) |
 | `localhost:26157` | CometBFT RPC |
 
 ## Monitoring
@@ -59,11 +59,11 @@ docker exec val1 curl -sf http://localhost:26657/status | \
   python3 -c "import sys,json; d=json.load(sys.stdin)['result']['sync_info']; print(f\"height={d['latest_block_height']}\")"
 
 # Count bonded validators
-curl -sf 'http://localhost:1318/cosmos/staking/v1beta1/validators?pagination.limit=100' | \
+curl -sf 'http://localhost:1317/cosmos/staking/v1beta1/validators?pagination.limit=100' | \
   python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for v in d['validators'] if v['status']=='BOND_STATUS_BONDED'))"
 
 # Check vote-manager set (any-of-N)
-curl -sf http://localhost:1318/shielded-vote/v1/vote-managers | python3 -m json.tool
+curl -sf http://localhost:1317/shielded-vote/v1/vote-managers | python3 -m json.tool
 ```
 
 ## Running the lifecycle test
@@ -112,7 +112,7 @@ done
 │                                                      │
 │  val1 (genesis) ◄──► val2  ◄──► val3  ... val30     │
 │    │                                                 │
-│    │ ports: 26657→26157, 1317→1318                   │
+│    │ ports: 26657→26157, 1317→1317                   │
 └────┼─────────────────────────────────────────────────┘
      │
      ▼

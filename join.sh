@@ -11,10 +11,11 @@
 # What it does:
 #   1. Acquires svoted + create-val-tx (always downloads latest; set SVOTE_LOCAL_BINARIES=1 to use local)
 #   2. Discovers the network via the Vercel API (voting-config endpoint)
-#   3. Fetches genesis.json + node identity from a live validator
-#   4. Initializes a node, generates cryptographic keys
-#   5. Configures the node to connect to the existing network
-#   6. Starts the node, waits for sync + funding, and registers as validator
+#   3. Fetches node identity from a live seed validator (for PEX bootstrap)
+#   4. Downloads genesis.json from DO Spaces (s3://vote/genesis.json, written by sdk-chain-reset)
+#   5. Initializes a node, generates cryptographic keys
+#   6. Configures the node to connect to the existing network
+#   7. Starts the node, waits for sync + funding, and registers as validator
 #
 # Requirements: curl, jq
 # Dependency (binary path): release.yml must have run to upload binaries to DO Spaces.
@@ -107,10 +108,12 @@ else
 
   echo "Version: ${VERSION}"
   echo "Platform: ${PLATFORM}"
-  curl -fsSL -o /tmp/shielded-vote-release.tar.gz "${DO_BASE}/shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
+  # Tarballs live under binaries/vote-sdk/ since release.yml commit b30573d8.
+  # version.txt and join.sh itself stay at the bucket root.
+  curl -fsSL -o /tmp/shielded-vote-release.tar.gz "${DO_BASE}/binaries/vote-sdk/shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
 
   # Verify tarball integrity via SHA-256 checksum.
-  CHECKSUM_URL="${DO_BASE}/shielded-vote-${VERSION}-${PLATFORM}.tar.gz.sha256"
+  CHECKSUM_URL="${DO_BASE}/binaries/vote-sdk/shielded-vote-${VERSION}-${PLATFORM}.tar.gz.sha256"
   if curl -fsSL -o /tmp/shielded-vote-release.tar.gz.sha256 "${CHECKSUM_URL}" 2>/dev/null; then
     EXPECTED=$(awk '{print $1}' /tmp/shielded-vote-release.tar.gz.sha256)
     if command -v sha256sum > /dev/null 2>&1; then
@@ -217,10 +220,14 @@ fi
 
 svoted init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}" > /dev/null 2>&1
 
-# ─── Fetch genesis from the seed node ────────────────────────────────────────
+# ─── Fetch genesis from DO Spaces ────────────────────────────────────────────
+# sdk-chain-reset.yml's upload-genesis job writes the canonical genesis to
+# s3://vote/genesis.json after every reset. That's the single source of truth
+# that reset-join.sh and reset-archive.sh already consume, so join.sh matches.
 
-echo "Fetching genesis.json from ${SEED_URL}..."
-curl -fsSL -o "${HOME_DIR}/config/genesis.json" "${SEED_URL}/shielded-vote/v1/genesis"
+GENESIS_URL="${DO_BASE}/genesis.json"
+echo "Fetching genesis.json from ${GENESIS_URL}..."
+curl -fsSL -o "${HOME_DIR}/config/genesis.json" "${GENESIS_URL}"
 svoted genesis validate-genesis --home "${HOME_DIR}" > /dev/null 2>&1
 echo "Genesis validated."
 

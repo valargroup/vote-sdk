@@ -66,7 +66,7 @@ function buildChainInfo(chainId: string, restUrl: string, rpcUrl: string): Keplr
 /**
  * Connect via the Keplr browser extension.
  *
- * `restUrl` should be the fully-qualified chain REST URL (e.g. http://localhost:1318).
+ * `restUrl` should be the fully-qualified chain REST URL (e.g. http://localhost:1317).
  * For dev-mode proxy, pass the origin (window.location.origin) so that Keplr can
  * reach the node. `rpcUrl` is the Tendermint RPC endpoint (e.g. http://localhost:26657).
  */

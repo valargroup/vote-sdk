@@ -9,7 +9,7 @@
 #   bash docker/test-lifecycle.sh
 set -e
 
-API="http://localhost:1318"
+API="http://localhost:1317"
 CHAIN_ID="svote-1"
 
 # Time in seconds from now until voting closes.

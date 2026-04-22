@@ -9,7 +9,7 @@ After completing these steps the genesis node will be reachable at:
 - Binary: `~/go/bin/svoted` (add `$HOME/go/bin` to `$PATH`)
 - P2P: `0.0.0.0:26656` (externally accessible — open this port in your firewall)
 - RPC: `127.0.0.1:26657` (local only)
-- REST API: `0.0.0.0:1318`
+- REST API: `0.0.0.0:1317`
 
 ## Step 0 — Prerequisites
 
@@ -86,7 +86,7 @@ make install-ffi
 4. Creates and collects the genesis transaction (10 000 000 usvote self-delegation)
 5. Patches genesis: sets `app_state.vote.vote_manager_addresses` to the imported addresses and zeroes out slashing slash fractions (no token burning)
 6. Validates `genesis.json`
-7. Enables the REST API on port `1318` with CORS
+7. Enables the REST API on port `1317` with CORS
 8. Sets `timeout_broadcast_tx_commit = 120s` (required for ZKP verification ≈ 30–60 s)
 9. Generates a Pallas keypair for ECIES ceremony key distribution → `~/.svoted/pallas.sk` / `pallas.pk`
 10. Sets `ea_sk_path` as a directory placeholder — the actual EA key is generated per-round by auto-deal
@@ -118,7 +118,7 @@ ufw allow 26656/tcp
 iptables -A INPUT -p tcp --dport 26656 -j ACCEPT
 ```
 
-The RPC port (`26657`) and REST API port (`1318`) do **not** need to be publicly reachable unless you want remote CLI access or are exposing the API. For HTTPS exposure of the REST API, use a reverse proxy such as Caddy (see `deploy/Caddyfile` for the production example).
+The RPC port (`26657`) and REST API port (`1317`) do **not** need to be publicly reachable unless you want remote CLI access or are exposing the API. For HTTPS exposure of the REST API, use a reverse proxy such as Caddy (see `deploy/Caddyfile` for the production example).
 
 ## Step 4 — Start the Chain
 
@@ -145,7 +145,7 @@ watch -n2 'svoted status --home ~/.svoted 2>/dev/null | python3 -c \
 
 Every node serves its own `genesis.json` at `/shielded-vote/v1/genesis`, so manual upload is no longer needed. Instead, register the genesis node's public URL in Edge Config so that joining validators can discover it.
 
-1. Open the admin UI at `https://shielded-vote.vercel.app` (or the in-process UI served by val1 on port 1318 when started with `--serve-ui`)
+1. Open the admin UI at `https://shielded-vote.vercel.app` (or the in-process UI served by val1 on port 1317 when started with `--serve-ui`)
 2. Navigate to **Validators**
 3. On the genesis validator's card, click **Register public URL**
 4. Enter the validator's public HTTPS endpoint (e.g. `https://46-101-255-48.sslip.io`)

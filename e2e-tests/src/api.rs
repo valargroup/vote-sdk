@@ -6,14 +6,13 @@
 use serde_json::Value;
 
 /// Base URL for the chain REST API.
-/// Default port 1318 matches init.sh (moved from 1317 to avoid Cursor IDE conflict).
 /// Uses 127.0.0.1 instead of localhost to avoid IPv6 resolution issues on macOS.
 pub fn base_url() -> String {
-    std::env::var("SVOTE_API_URL").unwrap_or_else(|_| "http://127.0.0.1:1318".to_string())
+    std::env::var("SVOTE_API_URL").unwrap_or_else(|_| "http://127.0.0.1:1317".to_string())
 }
 
 /// Helper server URL. Since the helper is now integrated into svoted, it
-/// serves on the same port as the chain REST API (default 1318).
+/// serves on the same port as the chain REST API (default 1317).
 /// Uses 127.0.0.1 instead of localhost to avoid IPv6 resolution issues on macOS.
 pub fn helper_server_url() -> String {
     std::env::var("HELPER_SERVER_URL")

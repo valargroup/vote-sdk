@@ -59,11 +59,6 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/_vote_manager_keys_lib.sh" -o /tmp/_vote_manager_keys_lib.sh
             bash /tmp/init.sh
 
-            # init.sh sets REST API to port 1318 (local dev); fix to 1317 for production
-            APP_TOML="/opt/shielded-vote/.svoted/config/app.toml"
-            sed -i 's|address = "tcp://0.0.0.0:1318"|address = "tcp://0.0.0.0:1317"|' "$APP_TOML"
-            sed -i 's|chain_api_port = 1318|chain_api_port = 1317|' "$APP_TOML"
-
             # Ensure the primary systemd drop-in exists (serves admin UI)
             mkdir -p /etc/systemd/system/svoted.service.d
             printf '[Service]\nExecStart=\nExecStart=/opt/shielded-vote/current/bin/svoted start --home /opt/shielded-vote/.svoted --serve-ui --ui-dist /opt/shielded-vote/current/ui/dist\n' \
