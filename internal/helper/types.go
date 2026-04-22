@@ -27,7 +27,12 @@ type Config struct {
 	ProcessInterval int `mapstructure:"process_interval"`
 
 	// ChainAPIPort is the port of the chain's REST API (localhost).
-	// Used for submitting MsgRevealShare via POST.
+	// Used for submitting MsgRevealShare via POST. Defaults to 1317 — the
+	// standard Cosmos SDK [api] address port that svoted serves. Setting
+	// this to a port where no server listens causes every share to fail
+	// broadcast silently (`connection refused` warnings in the log while
+	// the helper keeps accepting and proving new shares), which surfaces
+	// to voters as zero-value tallies with no user-visible error.
 	ChainAPIPort int `mapstructure:"chain_api_port"`
 
 	// MaxConcurrentProofs limits concurrent proof generation goroutines.
@@ -56,7 +61,7 @@ func DefaultConfig() Config {
 		ExposeQueueStatus:   false,
 		DBPath:              "",
 		ProcessInterval:     30,
-		ChainAPIPort:        1318,
+		ChainAPIPort:        1317,
 		MaxConcurrentProofs: 2,
 	}
 }
