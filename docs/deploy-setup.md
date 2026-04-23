@@ -160,21 +160,30 @@ make start-admin   # builds UI then starts svoted with --serve-ui
 
 ## Admin server configuration
 
-The admin server is a thin proxy that fetches the
+The admin server fetches the
 [voting-config JSON](https://valargroup.github.io/token-holder-voting-config/voting-config.json)
-from the GitHub Pages CDN. Server registration, approval, and removal happen via
-PRs on the [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config)
-repo -- no write endpoints here.
+from the GitHub Pages CDN (`GET /api/voting-config`) and stores **pending validator
+join requests** in SQLite (`POST /api/register-validator`, `GET /api/pending-validators`).
+Publishing a validator's public URL to `vote_servers` still happens via a manual PR on
+[token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config).
 
 It runs inside `svoted` on **val1 / primary only** and shares the REST API
-port. It is configured in `app.toml` under `[admin]`:
+port. It is configured in `app.toml` under `[admin]`. Fresh `svoted init` configs
+ship with `disable = true`; enable the module only on that host (set
+`disable = false` or run `scripts/init.sh` with `SVOTE_ADMIN_DISABLE=false` on
+production primary; `scripts/init_multi.sh` turns it on for val1 and leaves val2/3
+off).
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `disable` | `true` | Set to `false` to enable the config proxy. |
+| `disable` | `true` | Set to `false` to enable the admin module. |
 | `config_url` | (CDN) | GitHub Pages CDN URL for the voting-config JSON. |
+| `watchdog_interval` | `5m` | Fleet health probe interval (`0` = off). |
+| `db_path` | `""` | SQLite path for pending registrations. Empty = `$HOME/.svoted/admin.db`. |
 
-A single read-only endpoint is served: `GET /api/voting-config`.
+Pending join rows expire after **7 days**; expired rows are removed by a background sweeper that runs every **hour** (both are fixed in code, not `app.toml` keys).
+
+Endpoints: `GET /api/voting-config`, `POST /api/register-validator`, `GET /api/pending-validators`.
 
 ## Health checks
 
@@ -184,7 +193,7 @@ After services are started, CI verifies:
 2. Chain REST API responds at `/shielded-vote/v1/rounds`
 3. Helper server responds at `/shielded-vote/v1/status`
 4. Admin UI responds at `/` (contains `<div id="root">`)
-5. Admin API responds at `/api/voting-config`
+5. Admin API responds at `/api/voting-config` (and join-queue routes if enabled)
 
 ## Checking logs
 

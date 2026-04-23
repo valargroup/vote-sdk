@@ -7,6 +7,7 @@ import { ProposalEditor } from "./components/ProposalEditor";
 import { JsonView } from "./components/JsonView";
 import { RoundEditor } from "./components/RoundEditor";
 import { SnapshotSettingsPage } from "./components/SnapshotSettingsPage";
+import { PendingOperatorsPage } from "./components/PendingOperatorsPage";
 import { PirFleetStatus } from "./components/PirFleetStatus";
 import { RoundsList } from "./components/RoundsList";
 import { useStore } from "./store/useStore";
@@ -43,7 +44,18 @@ function optionColor(index: number, total: number): string {
   return VOTE_OPTION_COLORS[index % VOTE_OPTION_COLORS.length];
 }
 
-type Section = "about" | "rounds" | "builder" | "json" | "downloads" | "preview" | "settings" | "vote-status" | "validators" | "snapshot";
+type Section =
+  | "about"
+  | "rounds"
+  | "builder"
+  | "json"
+  | "downloads"
+  | "preview"
+  | "settings"
+  | "vote-status"
+  | "validators"
+  | "validator-join"
+  | "snapshot";
 
 const SECTION_PATHS: Record<Section, string> = {
   about: "/",
@@ -55,6 +67,7 @@ const SECTION_PATHS: Record<Section, string> = {
   settings: "/settings",
   "vote-status": "/vote-status",
   validators: "/validators",
+  "validator-join": "/validator-join",
   snapshot: "/snapshot",
 };
 
@@ -394,6 +407,8 @@ function App() {
 
         {/* Validators */}
         {section === "validators" && <ValidatorsView wallet={wallet} />}
+
+        {section === "validator-join" && <PendingOperatorsPage wallet={wallet} />}
 
         {/* Vote status */}
         {section === "vote-status" && <VoteStatusView expectRoundCount={expectedRoundCount} />}
@@ -1790,19 +1805,6 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
   const [unjailing, setUnjailing] = useState<string | null>(null); // operator_address being unjailed
   const [unjailResult, setUnjailResult] = useState<{ addr: string; ok: boolean; msg: string } | null>(null);
 
-  // Pending validator registrations.
-  const [pendingRegistrations, setPendingRegistrations] = useState<chainApi.PendingRegistration[]>([]);
-  const [approvingAddr, setApprovingAddr] = useState<string | null>(null);
-  const [rejectingAddr, setRejectingAddr] = useState<string | null>(null);
-  const [approveAmounts, setApproveAmounts] = useState<Record<string, string>>({});
-  const [approveResult, setApproveResult] = useState<{ addr: string; ok: boolean; msg: string } | null>(null);
-
-  // Approved servers + pulse status.
-  const [approvedServers, setApprovedServers] = useState<chainApi.ServiceEntry[]>([]);
-  const [serverPulses, setServerPulses] = useState<chainApi.ServerPulses>({});
-  const [removingServer, setRemovingServer] = useState<string | null>(null);
-  const [removeResult, setRemoveResult] = useState<{ addr: string; ok: boolean; msg: string } | null>(null);
-
   // Edge Config network management state.
   const [votingConfig, setVotingConfig] = useState<chainApi.VotingConfig | null>(null);
   const [urlInputFor, setUrlInputFor] = useState<string | null>(null); // moniker being edited
@@ -1835,22 +1837,16 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
     if (!silent) setLoading(true);
     setError("");
     try {
-      const [valResp, ceremonyResp, pallasResp, vcResp, pendingResp, approvedResp, pulsesResp] = await Promise.all([
+      const [valResp, ceremonyResp, pallasResp, vcResp] = await Promise.all([
         chainApi.getValidators(),
         chainApi.getCeremonyState().catch(() => null),
         chainApi.getPallasKeys().catch(() => ({ validators: [] })),
         chainApi.getVotingConfig().catch(() => null),
-        chainApi.getPendingRegistrations().catch(() => []),
-        chainApi.getApprovedServers().catch(() => []),
-        chainApi.getServerPulses().catch(() => ({})),
       ]);
       setValidators(valResp.validators ?? []);
       setCeremony(ceremonyResp);
       setPallasKeys(new Set(pallasResp.validators.map((v) => v.validator_address)));
       setVotingConfig(vcResp);
-      setPendingRegistrations(pendingResp);
-      setApprovedServers(approvedResp);
-      setServerPulses(pulsesResp);
     } catch (err) {
       if (!silent) setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1858,164 +1854,42 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
     }
   };
 
-  // Register or remove a validator's public URL in Edge Config.
+  // Register or remove a validator's public URL via manual PR on token-holder-voting-config.
   const updateNetwork = async (action: "add" | "remove", moniker: string, url?: string) => {
-    if (!wallet.address) return;
     setNetworkUpdating(true);
     setNetworkResult(null);
     try {
-      const current = votingConfig ?? { version: 1, vote_servers: [], pir_endpoints: [] };
-      let updated: chainApi.VotingConfig;
-
       if (action === "add" && url) {
-        const label = moniker;
-        // Add to vote_servers if not already present.
-        const existing = current.vote_servers.find((s) => s.url === url);
-        if (!existing) {
-          updated = {
-            ...current,
-            vote_servers: [...current.vote_servers, { url, label }],
-            pir_endpoints: includePir
-              ? [...current.pir_endpoints, { url, label }]
-              : current.pir_endpoints,
-          };
-        } else {
-          updated = current;
-        }
-      } else if (action === "remove") {
-        // Remove all entries with this label from both server lists.
-        updated = {
-          ...current,
-          vote_servers: current.vote_servers.filter((s) => s.label !== moniker),
-          pir_endpoints: current.pir_endpoints.filter((s) => s.label !== moniker),
-        };
-      } else {
+        window.open(
+          "https://github.com/valargroup/token-holder-voting-config/edit/main/voting-config.json",
+          "_blank",
+          "noopener,noreferrer",
+        );
+        setUrlInputFor(null);
+        setUrlInput("");
+        setIncludePir(false);
+        setNetworkResult({
+          moniker,
+          ok: true,
+          msg: `Add vote_servers entry { "url": "${url}", "label": "${moniker}" } in the PR (and pir_endpoints if needed).`,
+        });
         return;
       }
-
-      const payloadStr = JSON.stringify(updated);
-      const sig = await wallet.signPayload(payloadStr);
-      await chainApi.updateVotingConfig({
-        payload: updated,
-        signature: sig.signature,
-        pubKey: sig.pubKey,
-        signerAddress: wallet.address,
-      });
-
-      setVotingConfig(updated);
-      setUrlInputFor(null);
-      setUrlInput("");
-      setIncludePir(false);
-      setNetworkResult({ moniker, ok: true, msg: action === "add" ? "Registered" : "Removed" });
-    } catch (err) {
-      setNetworkResult({ moniker, ok: false, msg: err instanceof Error ? err.message : String(err) });
+      if (action === "remove") {
+        window.open(
+          "https://github.com/valargroup/token-holder-voting-config/edit/main/voting-config.json",
+          "_blank",
+          "noopener,noreferrer",
+        );
+        setNetworkResult({
+          moniker,
+          ok: true,
+          msg: `Remove entries labeled "${moniker}" from vote_servers / pir_endpoints in a PR.`,
+        });
+        return;
+      }
     } finally {
       setNetworkUpdating(false);
-    }
-  };
-
-  // Approve a pending registration: sign approval, call edge function, then fund on-chain.
-  const handleApproveRegistration = async (reg: chainApi.PendingRegistration) => {
-    if (!wallet.address || !wallet.signer) return;
-    setApprovingAddr(reg.operator_address);
-    setApproveResult(null);
-    try {
-      // 1. Approve registration (moves URL to vote_servers).
-      const approvePayload = { action: "approve" as const, operator_address: reg.operator_address };
-      const payloadStr = JSON.stringify(approvePayload);
-      const sig = await wallet.signPayload(payloadStr);
-      await chainApi.approveRegistration({
-        payload: approvePayload,
-        signature: sig.signature,
-        pubKey: sig.pubKey,
-        signerAddress: wallet.address,
-      });
-
-      // 2. Fund the validator on-chain.
-      const amount = approveAmounts[reg.operator_address] || "10000000";
-      const base = chainApi.getApiBase();
-      const fundRes = await cosmosTx.fundValidator(base, wallet.signer, reg.operator_address, amount);
-      if (fundRes.code !== 0) {
-        setApproveResult({
-          addr: reg.operator_address,
-          ok: false,
-          msg: `Approved but funding failed: ${fundRes.log || `code ${fundRes.code}`}`,
-        });
-      } else {
-        setApproveResult({
-          addr: reg.operator_address,
-          ok: true,
-          msg: `Approved & funded (tx ${fundRes.tx_hash.slice(0, 12)}…)`,
-        });
-      }
-      fetchValidators(); // refresh
-    } catch (err) {
-      setApproveResult({
-        addr: reg.operator_address,
-        ok: false,
-        msg: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setApprovingAddr(null);
-    }
-  };
-
-  // Reject a pending registration: sign rejection, call edge function to remove from pending.
-  const handleRejectRegistration = async (reg: chainApi.PendingRegistration) => {
-    if (!wallet.address || !wallet.signer) return;
-    setRejectingAddr(reg.operator_address);
-    setApproveResult(null);
-    try {
-      const rejectPayload = { action: "reject" as const, operator_address: reg.operator_address };
-      const payloadStr = JSON.stringify(rejectPayload);
-      const sig = await wallet.signPayload(payloadStr);
-      await chainApi.rejectRegistration({
-        payload: rejectPayload,
-        signature: sig.signature,
-        pubKey: sig.pubKey,
-        signerAddress: wallet.address,
-      });
-      setApproveResult({
-        addr: reg.operator_address,
-        ok: true,
-        msg: "Registration rejected",
-      });
-      fetchValidators(); // refresh
-    } catch (err) {
-      setApproveResult({
-        addr: reg.operator_address,
-        ok: false,
-        msg: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setRejectingAddr(null);
-    }
-  };
-
-  const handleRemoveApprovedServer = async (srv: chainApi.ServiceEntry) => {
-    if (!wallet.address || !srv.operator_address) return;
-    setRemovingServer(srv.operator_address);
-    setRemoveResult(null);
-    try {
-      const removePayload = { action: "remove-approved" as const, operator_address: srv.operator_address };
-      const payloadStr = JSON.stringify(removePayload);
-      const sig = await wallet.signPayload(payloadStr);
-      await chainApi.removeApprovedServer({
-        payload: removePayload,
-        signature: sig.signature,
-        pubKey: sig.pubKey,
-        signerAddress: wallet.address,
-      });
-      setApprovedServers((prev) => prev.filter((s) => s.operator_address !== srv.operator_address));
-      setRemoveResult({ addr: srv.operator_address, ok: true, msg: "Removed" });
-    } catch (err) {
-      setRemoveResult({
-        addr: srv.operator_address,
-        ok: false,
-        msg: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setRemovingServer(null);
     }
   };
 
@@ -2067,182 +1941,6 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
-
-        {/* Pending validator registrations */}
-        {pendingRegistrations.length > 0 && wallet.address && (
-          <div className="mb-6">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-[10px] text-text-muted uppercase tracking-wider">
-                Pending registrations
-              </span>
-              <span className="text-[9px] bg-warning/20 text-warning px-1.5 py-0.5 rounded-full">
-                {pendingRegistrations.length}
-              </span>
-            </div>
-            <div className="space-y-2">
-              {pendingRegistrations.map((reg) => {
-                const submitted = Math.floor(Date.now() / 1000) - reg.timestamp;
-                const hours = Math.floor(submitted / 3600);
-                const days = Math.floor(hours / 24);
-                const timeAgo = days > 0 ? `${days}d ago` : hours > 0 ? `${hours}h ago` : "just now";
-
-                return (
-                  <div
-                    key={reg.operator_address}
-                    className="bg-warning/5 border border-warning/20 rounded-xl p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-text-primary truncate">
-                            {reg.moniker}
-                          </span>
-                          <span className="text-[9px] px-2 py-0.5 rounded-full bg-warning/20 text-warning">
-                            Pending
-                          </span>
-                          <span className="text-[9px] text-text-muted">{timeAgo}</span>
-                        </div>
-                        <p className="text-[10px] text-text-muted font-mono mt-1 truncate">
-                          {reg.operator_address}
-                        </p>
-                        <div className="flex items-center gap-1 mt-1">
-                          <Server size={9} className="text-text-muted" />
-                          <span className="text-[10px] text-text-secondary truncate">{reg.url}</span>
-                        </div>
-                      </div>
-                      <div className="shrink-0 flex flex-col items-end gap-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="text"
-                            value={approveAmounts[reg.operator_address] ?? "10000000"}
-                            onChange={(e) =>
-                              setApproveAmounts((prev) => ({
-                                ...prev,
-                                [reg.operator_address]: e.target.value,
-                              }))
-                            }
-                            className="w-24 px-1.5 py-0.5 bg-surface-2 border border-border-subtle rounded text-[10px] text-text-primary text-right font-mono focus:outline-none focus:border-accent/50"
-                            placeholder="amount"
-                          />
-                          <span className="text-[9px] text-text-muted">usvote</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-accent/90 hover:bg-accent text-surface-0 text-[10px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                            disabled={approvingAddr === reg.operator_address || rejectingAddr === reg.operator_address}
-                            onClick={() => handleApproveRegistration(reg)}
-                          >
-                            {approvingAddr === reg.operator_address ? (
-                              <>
-                                <Loader2 size={10} className="animate-spin" /> Approving…
-                              </>
-                            ) : (
-                              "Approve & Fund"
-                            )}
-                          </button>
-                          <button
-                            className="flex items-center gap-1 px-2 py-1 rounded-md bg-danger/15 hover:bg-danger/25 text-danger text-[10px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                            disabled={approvingAddr === reg.operator_address || rejectingAddr === reg.operator_address}
-                            onClick={() => handleRejectRegistration(reg)}
-                          >
-                            {rejectingAddr === reg.operator_address ? (
-                              <>
-                                <Loader2 size={10} className="animate-spin" /> Rejecting…
-                              </>
-                            ) : (
-                              <>
-                                <Trash2 size={10} /> Reject
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                    {approveResult?.addr === reg.operator_address && (
-                      <p className={`text-[10px] mt-2 ${approveResult.ok ? "text-success" : "text-danger"}`}>
-                        {approveResult.msg}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Approved submission servers with pulse status */}
-        {approvedServers.length > 0 && (
-          <div className="mb-6">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] text-text-muted uppercase tracking-wider">
-                Approved Submission Servers
-              </span>
-              <span className="text-[9px] bg-accent/20 text-accent px-1.5 py-0.5 rounded-full">
-                {approvedServers.length}
-              </span>
-            </div>
-            <p className="text-[10px] text-text-secondary mb-3">
-              Servers that ZODL and other client apps connect to for share submission and chain interaction. Admins can remove unreliable validators from this list without unbonding them.
-            </p>
-            <div className="space-y-1.5">
-              {approvedServers.map((srv) => {
-                const pulseTime = serverPulses[srv.url];
-                const now = Math.floor(Date.now() / 1000);
-                const isActive = pulseTime != null && now - pulseTime <= 21600;
-                const lastSeen = pulseTime
-                  ? `${Math.floor((now - pulseTime) / 60)}m ${(now - pulseTime) % 60}s ago`
-                  : "never";
-
-                return (
-                  <div key={srv.url}>
-                    <div className="flex items-center justify-between bg-surface-1 border border-border-subtle rounded-lg px-3 py-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-success" : "bg-text-muted"}`} />
-                          <span className="text-[11px] font-semibold text-text-primary truncate">
-                            {srv.label}
-                          </span>
-                          <span className="text-[9px] text-text-muted font-mono truncate">
-                            {srv.operator_address ? `${srv.operator_address.slice(0, 12)}…` : ""}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-text-secondary truncate ml-3.5 mt-0.5">
-                          {srv.url}
-                        </p>
-                      </div>
-                      <div className="shrink-0 flex items-center gap-2 ml-3">
-                        <div className="text-right">
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
-                            isActive
-                              ? "bg-success/15 text-success"
-                              : "bg-text-muted/15 text-text-muted"
-                          }`}>
-                            {isActive ? "Active" : "Inactive"}
-                          </span>
-                          <p className="text-[9px] text-text-muted mt-0.5">
-                            {pulseTime ? `Pulse: ${lastSeen}` : "No pulse"}
-                          </p>
-                        </div>
-                        {wallet.address && srv.operator_address && (
-                          <button
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-danger/15 text-danger hover:bg-danger/25 transition-colors cursor-pointer disabled:opacity-50"
-                            disabled={removingServer === srv.operator_address}
-                            onClick={() => handleRemoveApprovedServer(srv)}
-                          >
-                            {removingServer === srv.operator_address ? "…" : "Remove"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {removeResult && removeResult.addr === srv.operator_address && !removeResult.ok && (
-                      <p className="text-[9px] text-danger mt-1 px-3">{removeResult.msg}</p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         {error && (
           <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 rounded-lg p-3 mb-4">
@@ -2431,15 +2129,14 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                         {isPir && (
                           <span className="text-[8px] bg-accent/15 text-accent px-1.5 py-0.5 rounded-full shrink-0">PIR</span>
                         )}
-                        {wallet.address && (
-                          <button
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-danger/15 text-danger hover:bg-danger/25 transition-colors shrink-0 disabled:opacity-50"
-                            disabled={networkUpdating}
-                            onClick={() => updateNetwork("remove", moniker)}
-                          >
-                            Remove
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="text-[9px] px-1.5 py-0.5 rounded bg-danger/15 text-danger hover:bg-danger/25 transition-colors shrink-0 disabled:opacity-50"
+                          disabled={networkUpdating}
+                          onClick={() => void updateNetwork("remove", moniker)}
+                        >
+                          Remove (PR)
+                        </button>
                         {networkResult?.moniker === moniker && (
                           <span className={`text-[9px] ${networkResult.ok ? "text-success" : "text-danger"}`}>
                             {networkResult.msg}
@@ -2493,21 +2190,21 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                     );
                   }
 
-                  if (wallet.address) {
-                    return (
-                      <div className="mt-2">
-                        <button
-                          className="inline-flex items-center gap-1 text-[10px] text-text-muted hover:text-accent transition-colors cursor-pointer"
-                          onClick={() => { setUrlInputFor(moniker); setNetworkResult(null); }}
-                        >
-                          <Server size={9} />
-                          Register public URL
-                        </button>
-                      </div>
-                    );
-                  }
-
-                  return null;
+                  return (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-[10px] text-text-muted hover:text-accent transition-colors cursor-pointer"
+                        onClick={() => {
+                          setUrlInputFor(moniker);
+                          setNetworkResult(null);
+                        }}
+                      >
+                        <Server size={9} />
+                        Register public URL (PR)
+                      </button>
+                    </div>
+                  );
                 })()}
               </div>
             );

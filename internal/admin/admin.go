@@ -5,23 +5,33 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"cosmossdk.io/log"
 )
 
-// Admin fetches and caches the voting-config from the GitHub Pages CDN.
+// BondingChecker returns whether the validator with the given valoper bech32
+// is currently bonded.
+type BondingChecker func(valoper string) bool
+
+// Admin fetches and caches voting-config from the CDN and stores pending
+// validator registrations in SQLite.
 type Admin struct {
-	configURL string
-	logger    log.Logger
+	configURL   string
+	logger      log.Logger
+	store       *Store
+	checkBonded BondingChecker
 
 	mu     sync.RWMutex
 	cached *VotingConfig
 }
 
 // New creates a new Admin from the given configuration.
-func New(cfg Config, logger log.Logger) (*Admin, error) {
+// homeDir is used to resolve default DBPath when cfg.DBPath is empty.
+// checkBonded may be nil; in that case bonding checks always return false.
+func New(cfg Config, homeDir string, checkBonded BondingChecker, logger log.Logger) (*Admin, error) {
 	logger = logger.With("module", "admin")
 
 	if cfg.Disable {
@@ -34,9 +44,21 @@ func New(cfg Config, logger log.Logger) (*Admin, error) {
 		configURL = DefaultConfig().ConfigURL
 	}
 
+	dbPath := cfg.DBPath
+	if dbPath == "" {
+		dbPath = filepath.Join(homeDir, "admin.db")
+	}
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("create admin store: %w", err)
+	}
+
 	a := &Admin{
-		configURL: configURL,
-		logger:    logger,
+		configURL:   configURL,
+		logger:      logger,
+		store:       store,
+		checkBonded: checkBonded,
 	}
 
 	if err := a.refresh(); err != nil {
@@ -44,6 +66,31 @@ func New(cfg Config, logger log.Logger) (*Admin, error) {
 	}
 
 	return a, nil
+}
+
+// Store returns the SQLite store (never nil when Admin is non-nil).
+func (a *Admin) Store() *Store {
+	return a.store
+}
+
+// Close releases the SQLite store.
+func (a *Admin) Close() error {
+	if a == nil || a.store == nil {
+		return nil
+	}
+	return a.store.Close()
+}
+
+// IsBonded reports whether the operator account (bech32) is bonded as a validator.
+func (a *Admin) IsBonded(operatorAddress string) bool {
+	if a.checkBonded == nil {
+		return false
+	}
+	valoper, err := AddressToValoper(operatorAddress)
+	if err != nil {
+		return false
+	}
+	return a.checkBonded(valoper)
 }
 
 // GetVotingConfig returns the cached voting config, refreshing if stale.

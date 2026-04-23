@@ -16,16 +16,18 @@ func RegisterRoutes(
 ) {
 	h := &apiHandler{getAdmin: getAdmin, logger: logger}
 	router.HandleFunc("/api/voting-config", h.handleGetVotingConfig).Methods("GET", "OPTIONS")
+	router.HandleFunc("/api/register-validator", h.handleRegisterValidator).Methods("POST", "OPTIONS")
+	router.HandleFunc("/api/pending-validators", h.handleGetPendingValidators).Methods("GET", "OPTIONS")
 }
 
 type apiHandler struct {
 	getAdmin func() *Admin
-	logger   log.Logger
+	logger     log.Logger
 }
 
 func corsHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 

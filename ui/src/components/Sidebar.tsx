@@ -8,6 +8,7 @@ import {
   BarChart3,
   Trash2,
   Users,
+  UserPlus,
   Database,
 } from "lucide-react";
 import type { VotingRound, RoundStatus } from "../types";
@@ -132,6 +133,18 @@ export function Sidebar({
         >
           <Users size={15} />
           Validators
+        </button>
+
+        <button
+          onClick={() => onNavigate("validator-join")}
+          className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs transition-colors cursor-pointer ${
+            currentSection === "validator-join"
+              ? "bg-surface-3 text-text-primary"
+              : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
+          }`}
+        >
+          <UserPlus size={15} />
+          Join queue
         </button>
 
         <button
