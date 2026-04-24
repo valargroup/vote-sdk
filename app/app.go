@@ -8,6 +8,7 @@ import (
 
 	dbm "github.com/cosmos/cosmos-db"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	clienthelpers "cosmossdk.io/client/v2/helpers"
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
@@ -22,6 +23,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/server/api"
 	"github.com/cosmos/cosmos-sdk/server/config"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
@@ -281,6 +283,21 @@ func (app *SvoteApp) kvStoreKeys() map[string]*storetypes.KVStoreKey {
 // LoadHeight loads a particular height.
 func (app *SvoteApp) LoadHeight(height int64) error {
 	return app.LoadVersion(height)
+}
+
+// ValidatorValoperBonded returns true if the staking module reports the given
+// valoper bech32 address as bonded.
+func (app *SvoteApp) ValidatorValoperBonded(valoper string) bool {
+	valAddr, err := sdk.ValAddressFromBech32(valoper)
+	if err != nil {
+		return false
+	}
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.LastBlockHeight()})
+	val, err := app.StakingKeeper.GetValidator(ctx, valAddr)
+	if err != nil {
+		return false
+	}
+	return val.IsBonded()
 }
 
 // SimulationManager implements the SimulationApp interface (required by runtime.AppI).

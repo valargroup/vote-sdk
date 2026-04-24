@@ -233,22 +233,21 @@ set_persistent_peers() {
 }
 
 # ---------------------------------------------------------------------------
-# Helper: append [admin] + [ui] config sections
+# Helper: patch [admin] from svoted init template; append [ui] if missing
 # ---------------------------------------------------------------------------
 configure_admin() {
     local home="$1"
     local disable="${2:-true}"
 
     local app_toml="$home/config/app.toml"
-    cat >> "$app_toml" <<ADMINCFG
+    # svoted init emits [admin] with disable = true; do not match [helper] disable = false.
+    sed -i.bak "s/^disable = true\$/disable = ${disable}/" "$app_toml"
+    rm -f "${app_toml}.bak"
 
-###############################################################################
-###                         Admin Server (CDN config proxy)                 ###
-###############################################################################
-
-[admin]
-
-disable = ${disable}
+    if grep -qE '^\[ui\]' "$app_toml"; then
+        return 0
+    fi
+    cat >> "$app_toml" <<UICFG
 
 ###############################################################################
 ###                         Admin UI                                        ###
@@ -258,7 +257,7 @@ disable = ${disable}
 
 enable = false
 dist_path = ""
-ADMINCFG
+UICFG
 }
 
 # ---------------------------------------------------------------------------

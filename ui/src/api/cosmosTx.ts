@@ -621,6 +621,22 @@ export async function fundValidator(
   });
 }
 
+/** Default fund amount for validator self-delegation (10 USVOTE) plus headroom. */
+export const VALIDATOR_JOIN_FUND_USVOTE = "10500000";
+
+/**
+ * Fund a pending validator operator account (MsgAuthorizedSend).
+ * Vote managers use this from the Join queue UI.
+ */
+export async function fundValidatorJoin(
+  apiBase: string,
+  signer: OfflineDirectSigner,
+  operatorAddress: string,
+  amountUsvote: string = VALIDATOR_JOIN_FUND_USVOTE,
+): Promise<BroadcastResult> {
+  return fundValidator(apiBase, signer, operatorAddress, amountUsvote);
+}
+
 /**
  * Sign and broadcast a standard cosmos.slashing.v1beta1.MsgUnjail transaction.
  *

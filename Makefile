@@ -206,6 +206,6 @@ docker-testnet-down:
 ui-build:
 	cd ui && npm install --silent && npm run build
 
-## start-admin: Start svoted with admin server + UI
+## start-admin: Start svoted with admin UI static files (/api/* needs [admin] disable = false in app.toml; e.g. SVOTE_ADMIN_DISABLE=false bash scripts/init.sh, or init-multi for val1)
 start-admin: ui-build
 	SVOTE_PIR_URL=$${SVOTE_PIR_URL:-http://localhost:3000} $(BINARY) start --home $(HOME_DIR) --serve-ui --ui-dist ui/dist

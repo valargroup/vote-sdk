@@ -79,6 +79,29 @@ pallas_sk_path = "{{ .Vote.PallasSkPath }}"
 comet_rpc = "{{ .Vote.CometRPC }}"
 `
 
+const adminConfigTemplate = `
+###############################################################################
+###                         Admin Configuration                             ###
+###############################################################################
+
+[admin]
+
+# When true, disables voting-config CDN proxy and pending-validator endpoints.
+# Default true so only the designated admin host runs the join-queue SQLite DB.
+# Enable (false) only on the node that serves the admin UI: production primary
+# (SVOTE_ADMIN_DISABLE=false in init.sh / reset workflow), or val1 from init_multi.sh.
+disable = true
+
+# GitHub Pages URL for voting-config.json (wallet / operator discovery).
+config_url = "https://valargroup.github.io/token-holder-voting-config/voting-config.json"
+
+# How often to probe vote_servers and pir_endpoints (0 = disabled).
+watchdog_interval = "5m"
+
+# SQLite database path for pending validator join requests (empty = $HOME/.svoted/admin.db).
+# db_path = ""
+`
+
 // initAppConfig helps to override default appConfig template and configs.
 func initAppConfig() (string, interface{}) {
 	srvCfg := serverconfig.DefaultConfig()
@@ -94,7 +117,7 @@ func initAppConfig() (string, interface{}) {
 		},
 	}
 
-	return serverconfig.DefaultConfigTemplate + voteConfigTemplate, customConfig
+	return serverconfig.DefaultConfigTemplate + voteConfigTemplate + adminConfigTemplate, customConfig
 }
 
 func initRootCmd(

@@ -10,12 +10,15 @@
 #
 # What it does:
 #   1. Acquires svoted + create-val-tx (always downloads latest; set SVOTE_LOCAL_BINARIES=1 to use local)
-#   2. Discovers the network via the Vercel API (voting-config endpoint)
-#   3. Fetches node identity from a live seed validator (for PEX bootstrap)
-#   4. Downloads genesis.json from DO Spaces (s3://vote/genesis.json, written by sdk-chain-reset)
+#   2. Fetches voting-config (CDN JSON, then primary /api/voting-config), unless VOTING_CONFIG_URL overrides
+#   3. Fetches node identity from the first vote_servers[] URL (PEX seed)
+#   4. Downloads genesis.json from DO Spaces (canonical file from sdk-chain-reset)
 #   5. Initializes a node, generates cryptographic keys
 #   6. Configures the node to connect to the existing network
-#   7. Starts the node, waits for sync + funding, and registers as validator
+#   7. Starts svoted, waits for sync, registers with the admin join queue, installs svoted-join (poll + bond)
+#
+# Optional: SVOTE_JOIN_LOOP_SCRIPT=/path/to/join-loop.sh when join.sh is piped from curl and
+# join-loop.sh is not beside join.sh (see vote-sdk/scripts/join-loop.sh).
 #
 # Requirements: curl, jq
 # Dependency (binary path): release.yml must have run to upload binaries to DO Spaces.
@@ -26,7 +29,16 @@ CHAIN_ID="svote-1"
 INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
-VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://shielded-vote.vercel.app}"
+# Public voting-config.json (same CDN as wallet discovery). Override for mirrors.
+CDN_VOTING_CONFIG_JSON="${CDN_VOTING_CONFIG_JSON:-https://valargroup.github.io/token-holder-voting-config/voting-config.json}"
+# Fallback when CDN is unreachable: primary chain REST + admin API host.
+DEFAULT_PRIMARY_API_BASE="${DEFAULT_PRIMARY_API_BASE:-https://vote-chain-primary.valargroup.org}"
+# Optional: fetch voting-config from ${VOTING_CONFIG_URL}/api/voting-config instead of CDN→primary bootstrap.
+# VOTING_CONFIG_URL=
+# Optional: POST /api/register-validator target (defaults to first vote_servers[].url after fetch).
+# SVOTE_ADMIN_URL=
+# Optional: [helper] pulse_url (defaults: SVOTE_PULSE_URL, else VOTING_CONFIG_URL, else Vercel).
+DEFAULT_PULSE_URL="${DEFAULT_PULSE_URL:-https://shielded-vote.vercel.app}"
 
 # Parse --domain flag for TLS hostname override.
 SVOTE_DOMAIN="${SVOTE_DOMAIN:-}"
@@ -171,24 +183,47 @@ case ":${PATH}:" in
   *) export PATH="${INSTALL_DIR}:${PATH}" ;;
 esac
 
-# ─── Discover network via Vercel API ─────────────────────────────────────────
-# The voting-config endpoint returns the same data iOS clients use for service
-# discovery. We pick a vote_server, fetch its node identity, and use it as our
-# initial peer. CometBFT's PEX handles further peer discovery.
+# ─── Discover network via voting-config ─────────────────────────────────────
+# Same JSON shape as token-holder-voting-config/voting-config.json. We use the
+# first vote_servers[] entry as the seed peer and (unless SVOTE_ADMIN_URL is set)
+# as the admin API base for POST /api/register-validator.
 
 echo ""
 echo "=== Discovering network ==="
 
-VOTING_CONFIG=$(curl -fsSL "${VOTING_CONFIG_URL}/api/voting-config")
-SEED_URL=$(echo "$VOTING_CONFIG" | jq -r '.vote_servers[0].url')
+if [ -n "${VOTING_CONFIG_URL:-}" ]; then
+  echo "Fetching voting-config from VOTING_CONFIG_URL: ${VOTING_CONFIG_URL%/}/api/voting-config"
+  if ! VOTING_CONFIG=$(curl -fsSL --connect-timeout 15 --max-time 60 "${VOTING_CONFIG_URL%/}/api/voting-config"); then
+    echo "ERROR: Could not fetch voting-config from VOTING_CONFIG_URL"
+    exit 1
+  fi
+else
+  echo "Fetching voting-config (CDN, then ${DEFAULT_PRIMARY_API_BASE} fallback)..."
+  if VOTING_CONFIG=$(curl -fsSL --connect-timeout 15 --max-time 60 "${CDN_VOTING_CONFIG_JSON}"); then
+    echo "  Source: ${CDN_VOTING_CONFIG_JSON}"
+  elif VOTING_CONFIG=$(curl -fsSL --connect-timeout 15 --max-time 60 "${DEFAULT_PRIMARY_API_BASE}/api/voting-config"); then
+    echo "  Source: ${DEFAULT_PRIMARY_API_BASE}/api/voting-config"
+  else
+    echo "ERROR: Could not fetch voting-config from CDN or primary fallback."
+    echo "  Set VOTING_CONFIG_URL to a host that serves GET /api/voting-config, or fix network access."
+    exit 1
+  fi
+fi
+
+SEED_URL=$(echo "$VOTING_CONFIG" | jq -r '.vote_servers[0].url // empty')
 
 if [ -z "$SEED_URL" ] || [ "$SEED_URL" = "null" ]; then
-  echo "ERROR: No vote_servers found in voting-config at ${VOTING_CONFIG_URL}/api/voting-config"
-  echo "  The bootstrap operator needs to register at least one validator URL in the admin UI."
+  echo "ERROR: No vote_servers[0].url in voting-config (bootstrap succeeded but list is empty)."
+  echo "  The bootstrap operator needs at least one validator URL in token-holder-voting-config."
   exit 1
 fi
 
+if [ -z "${SVOTE_ADMIN_URL:-}" ]; then
+  SVOTE_ADMIN_URL="$SEED_URL"
+fi
+
 echo "Seed node: ${SEED_URL}"
+echo "Admin / join API base: ${SVOTE_ADMIN_URL}"
 
 # Fetch the node's P2P identity.
 NODE_INFO=$(curl -fsSL "${SEED_URL}/cosmos/base/tendermint/v1beta1/node_info")
@@ -268,6 +303,9 @@ sed -i.bak "s|\\\$HOME/.svoted|${HOME_DIR}|g" "${APP_TOML}"
 
 rm -f "${APP_TOML}.bak"
 
+# Helper heartbeat target: SVOTE_PULSE_URL, else VOTING_CONFIG_URL if set for discovery, else Vercel.
+PULSE_URL="${SVOTE_PULSE_URL:-${VOTING_CONFIG_URL:-${DEFAULT_PULSE_URL}}}"
+
 # Append [helper] section (not in the default template).
 cat >> "${APP_TOML}" <<HELPERCFG
 
@@ -296,9 +334,9 @@ chain_api_port = 1317
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = 2
 
-# Heartbeat pulse URL (Vercel base URL for server-heartbeat endpoint).
+# Heartbeat pulse URL (server-heartbeat endpoint).
 # Empty disables the heartbeat.
-pulse_url = "${VOTING_CONFIG_URL}"
+pulse_url = "${PULSE_URL}"
 
 # This server's public URL as seen by clients (set after Caddy TLS setup).
 # Empty disables the heartbeat.
@@ -412,7 +450,7 @@ fi
 
 # ─── Phase 1: Register as pending validator ─────────────────────────────────
 # The validator exists (keys generated) but isn't bonded yet. Register with
-# the Vercel API so the admin can see and approve it.
+# the admin API so operators appear in the Join queue UI.
 
 if [ -n "$VALIDATOR_URL" ]; then
   echo ""
@@ -427,7 +465,7 @@ if [ -n "$VALIDATOR_URL" ]; then
 
     REG_BODY="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${TIMESTAMP},\"signature\":\"${SIG}\",\"pub_key\":\"${PUB_KEY}\"}"
 
-    REG_RESULT=$(curl -fsSL -X POST "${VOTING_CONFIG_URL}/api/register-validator" \
+    REG_RESULT=$(curl -fsSL -X POST "${SVOTE_ADMIN_URL%/}/api/register-validator" \
       -H "Content-Type: application/json" \
       -d "$REG_BODY" 2>/dev/null || echo "")
 
@@ -455,10 +493,9 @@ LOG_FILE="${HOME_DIR}/node.log"
 SVOTED_BIN=$(command -v svoted)
 SERVICE_NAME="svoted"
 
-# Re-register URL with the vote network (idempotent).
-# Once bonded, this promotes the pending entry to vote_servers directly.
+# Re-register with the admin join queue (idempotent).
 register_url() {
-  if [ -z "${VALIDATOR_URL}" ] || [ -z "${VOTING_CONFIG_URL}" ]; then
+  if [ -z "${VALIDATOR_URL}" ] || [ -z "${SVOTE_ADMIN_URL}" ]; then
     return 0
   fi
   local ts=$(date +%s)
@@ -468,10 +505,24 @@ register_url() {
   local sig=$(echo "$sig_json" | jq -r '.signature')
   local pub_key=$(echo "$sig_json" | jq -r '.pub_key')
   local body="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${ts},\"signature\":\"${sig}\",\"pub_key\":\"${pub_key}\"}"
-  curl -fsSL -X POST "${VOTING_CONFIG_URL}/api/register-validator" \
+  curl -fsSL -X POST "${SVOTE_ADMIN_URL%/}/api/register-validator" \
     -H "Content-Type: application/json" \
     -d "$body" > /dev/null 2>&1 || true
 }
+
+# Install join-loop.sh next to svoted/create-val-tx.
+JOIN_LOOP_BIN="${INSTALL_DIR}/join-loop.sh"
+if [ -n "${SVOTE_JOIN_LOOP_SCRIPT:-}" ] && [ -f "${SVOTE_JOIN_LOOP_SCRIPT}" ]; then
+  cp "${SVOTE_JOIN_LOOP_SCRIPT}" "${JOIN_LOOP_BIN}"
+elif [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "bash" ] && [ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/join-loop.sh" ]; then
+  cp "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/join-loop.sh" "${JOIN_LOOP_BIN}"
+elif curl -fsSL "${DO_BASE}/join-loop.sh" -o "${JOIN_LOOP_BIN}" 2>/dev/null; then
+  :
+else
+  echo "ERROR: join-loop.sh not found. Clone vote-sdk and run ./join.sh from the repo, set SVOTE_JOIN_LOOP_SCRIPT, or publish join-loop.sh to ${DO_BASE}/join-loop.sh" >&2
+  exit 1
+fi
+chmod +x "${JOIN_LOOP_BIN}"
 
 echo ""
 OS_NAME=$(uname -s)
@@ -565,6 +616,56 @@ CADDYPLISTEOF
     echo "Caddy service started: ${VALIDATOR_URL} → localhost:1317"
   fi
 
+  # Join loop: poll admin + fund + create-val-tx until bonded.
+  JOIN_LOG="${HOME_DIR}/join.log"
+  JOIN_LABEL="com.shielded-vote.join"
+  JOIN_PLIST="${PLIST_DIR}/${JOIN_LABEL}.plist"
+  launchctl bootout "gui/$(id -u)/${JOIN_LABEL}" 2>/dev/null || true
+  cat > "${JOIN_PLIST}" <<JOINPLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${JOIN_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${JOIN_LOOP_BIN}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>${JOIN_LOG}</string>
+    <key>StandardErrorPath</key>
+    <string>${JOIN_LOG}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${INSTALL_DIR}:/usr/local/bin:/usr/bin:/bin</string>
+        <key>SVOTE_HOME</key>
+        <string>${HOME_DIR}</string>
+        <key>VALIDATOR_ADDR</key>
+        <string>${VALIDATOR_ADDR}</string>
+        <key>MONIKER</key>
+        <string>${MONIKER}</string>
+        <key>VALIDATOR_URL</key>
+        <string>${VALIDATOR_URL}</string>
+        <key>SVOTE_ADMIN_URL</key>
+        <string>${SVOTE_ADMIN_URL}</string>
+        <key>SVOTE_INSTALL_DIR</key>
+        <string>${INSTALL_DIR}</string>
+    </dict>
+</dict>
+</plist>
+JOINPLISTEOF
+  launchctl bootstrap "gui/$(id -u)" "${JOIN_PLIST}"
+  echo "Join loop service started: ${JOIN_LABEL} (logs: ${JOIN_LOG})"
+
 else
   # ── Linux: systemd ──────────────────────────────────────────────────────────
   echo "=== Installing systemd service ==="
@@ -592,6 +693,42 @@ SVCEOF
   sudo systemctl start ${SERVICE_NAME}
   echo "Service ${SERVICE_NAME} started (survives SSH disconnect and reboots)."
   echo "Logs: ${LOG_FILE}"
+
+  JOIN_LOG="${HOME_DIR}/join.log"
+  sudo tee /etc/default/svoted-join > /dev/null <<ENVEOF
+SVOTE_HOME=${HOME_DIR}
+VALIDATOR_ADDR=${VALIDATOR_ADDR}
+MONIKER=${MONIKER}
+VALIDATOR_URL=${VALIDATOR_URL}
+SVOTE_ADMIN_URL=${SVOTE_ADMIN_URL}
+SVOTE_INSTALL_DIR=${INSTALL_DIR}
+ENVEOF
+
+  sudo tee /etc/systemd/system/svoted-join.service > /dev/null <<JOINUNIT
+[Unit]
+Description=Shielded-Vote validator join loop (${MONIKER})
+After=network.target ${SERVICE_NAME}.service
+Requires=${SERVICE_NAME}.service
+
+[Service]
+Type=simple
+User=$(whoami)
+EnvironmentFile=/etc/default/svoted-join
+ExecStart=${JOIN_LOOP_BIN}
+Restart=on-failure
+RestartSec=30
+SuccessExitStatus=0
+StandardOutput=append:${JOIN_LOG}
+StandardError=append:${JOIN_LOG}
+
+[Install]
+WantedBy=multi-user.target
+JOINUNIT
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable svoted-join
+  sudo systemctl start svoted-join
+  echo "Join loop svoted-join started (logs: ${JOIN_LOG})"
 fi
 
 # Give the node a moment to start up.
@@ -617,66 +754,35 @@ while true; do
   sleep 5
 done
 
-# Check if already a validator (e.g. re-running after a restart).
-IS_VALIDATOR=$(svoted query staking validators --home "${HOME_DIR}" --output json 2>/dev/null \
-  | jq -r ".validators[] | select(.description.moniker == \"${MONIKER}\") | .operator_address" 2>/dev/null || echo "")
-
-if [ -n "$IS_VALIDATOR" ]; then
-  echo "Already registered as validator: ${IS_VALIDATOR}"
-  register_url
-else
-  # Wait for the account to be funded before attempting registration.
-  echo "Waiting for account ${VALIDATOR_ADDR} to be funded..."
-  echo "  (ask the bootstrap operator to fund your address in the admin UI)"
-  while true; do
-    BALANCE=$(svoted query bank balances "${VALIDATOR_ADDR}" --home "${HOME_DIR}" --output json 2>/dev/null \
-      | jq -r '.balances[] | select(.denom == "usvote") | .amount' 2>/dev/null || echo "")
-    if [ -n "$BALANCE" ] && [ "$BALANCE" != "0" ]; then
-      echo "Account funded (${BALANCE} usvote)."
-      break
-    fi
-    sleep 5
-  done
-
-  echo "Registering as validator..."
-  if ! create-val-tx --moniker "${MONIKER}" --amount 10000000usvote --home "${HOME_DIR}" --rpc-url tcp://localhost:26657; then
-    echo ""
-    echo "ERROR: create-val-tx exited with a non-zero status." >&2
-    echo "  Check node logs for details: ${LOG_FILE}" >&2
-    exit 1
-  fi
-
-  # Verify the validator actually appeared on-chain.
-  echo "Verifying registration on-chain (waiting ~6s for block commit)..."
-  sleep 6
-  IS_NOW_VALIDATOR=$(svoted query staking validators --home "${HOME_DIR}" --output json 2>/dev/null \
-    | jq -r ".validators[] | select(.description.moniker == \"${MONIKER}\") | .operator_address" 2>/dev/null || echo "")
-  if [ -z "${IS_NOW_VALIDATOR}" ]; then
-    echo ""
-    echo "ERROR: Validator registration failed — '${MONIKER}' not found in the validator set." >&2
-    echo "  Check node logs for details: ${LOG_FILE}" >&2
-    exit 1
-  fi
-  echo "Validator registered: ${IS_NOW_VALIDATOR}"
-  # Re-register now that we're bonded — promotes to vote_servers.
-  register_url
-fi
-
 echo ""
 echo "============================================="
-echo "  Validator is running"
+echo "  Validator node is running; join loop handles bonding"
 echo "============================================="
+echo ""
+echo "  Operator address (fund this in the admin Join queue UI):"
+echo "    ${VALIDATOR_ADDR}"
+echo ""
+echo "  After bonding, add your public URL to vote_servers via a PR:"
+echo "    https://github.com/valargroup/token-holder-voting-config"
+echo "  Suggested JSON entry:"
+echo "    {\"url\":\"${VALIDATOR_URL}\",\"label\":\"${MONIKER}\"}"
 echo ""
 if [ "$(uname -s)" = "Darwin" ]; then
-  echo "  Service:  ${PLIST_LABEL} (launchd)"
-  echo "  Logs:     tail -f ${LOG_FILE}"
-  echo "  Status:   launchctl print gui/$(id -u)/${PLIST_LABEL}"
-  echo "  Stop:     launchctl bootout gui/$(id -u)/${PLIST_LABEL}"
-  echo "  Restart:  launchctl kickstart -k gui/$(id -u)/${PLIST_LABEL}"
+  echo "  Chain service:  ${PLIST_LABEL} (launchd)"
+  echo "  Chain logs:     tail -f ${LOG_FILE}"
+  echo "  Join loop:      com.shielded-vote.join (launchd)"
+  echo "  Join logs:      tail -f ${HOME_DIR}/join.log"
+  echo ""
+  echo "  svoted-join exits automatically after bonding; it stays enabled and is a"
+  echo "  no-op on reboot. To remove it:"
+  echo "    launchctl bootout gui/$(id -u)/com.shielded-vote.join"
 else
-  echo "  Service:  ${SERVICE_NAME} (systemd)"
-  echo "  Logs:     journalctl -u ${SERVICE_NAME} -f"
-  echo "  Status:   sudo systemctl status ${SERVICE_NAME}"
-  echo "  Stop:     sudo systemctl stop ${SERVICE_NAME}"
-  echo "  Restart:  sudo systemctl restart ${SERVICE_NAME}"
+  echo "  Chain service:  ${SERVICE_NAME} (systemd)"
+  echo "  Chain logs:     journalctl -u ${SERVICE_NAME} -f"
+  echo "  Join loop:      svoted-join (systemd)"
+  echo "  Join logs:      tail -f ${HOME_DIR}/join.log"
+  echo ""
+  echo "  svoted-join exits automatically after bonding; it stays enabled and is a"
+  echo "  no-op on reboot. To remove it:"
+  echo "    sudo systemctl disable svoted-join"
 fi

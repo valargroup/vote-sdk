@@ -1,11 +1,20 @@
 // Package admin serves the voting-config endpoint by proxying the
-// GitHub Pages CDN (valargroup/token-holder-voting-config).
+// GitHub Pages CDN (valargroup/token-holder-voting-config) and exposes
+// HTTP endpoints for validator join registration (pending queue in SQLite).
 //
-// Server registration, approval, and removal happen via GitHub PRs
-// on the config repo — no write endpoints here.
+// Published vote_servers URLs are updated via manual PRs on the config repo;
+// this package does not write to GitHub.
 package admin
 
 import "time"
+
+// PendingRegistrationTTL is how long an operator remains in the pending join
+// queue before the row expires (SQLite; not configurable).
+const PendingRegistrationTTL = 7 * 24 * time.Hour
+
+// PendingEvictionSweepInterval is how often expired pending_registrations rows
+// are deleted (not configurable).
+const PendingEvictionSweepInterval = time.Hour
 
 // Config holds the admin server configuration, read from app.toml [admin].
 type Config struct {
@@ -19,6 +28,10 @@ type Config struct {
 	// vote servers and PIR endpoints listed in voting-config.json. Set to
 	// 0 to disable the watchdog. Default: 5 minutes.
 	WatchdogInterval time.Duration `mapstructure:"watchdog_interval"`
+
+	// DBPath is the SQLite path for pending validator registrations.
+	// Default: $HOME/.svoted/admin.db (resolved in New).
+	DBPath string `mapstructure:"db_path"`
 }
 
 // DefaultConfig returns the default admin configuration.
@@ -46,4 +59,18 @@ type VotingConfig struct {
 	// for the current voting round. PIR servers must serve this exact height,
 	// and the admin UI auto-populates round drafts from it.
 	SnapshotHeight *uint64 `json:"snapshot_height,omitempty"`
+}
+
+// PendingRegistration is a row in pending_registrations and the API shape
+// for GET /api/pending-validators.
+type PendingRegistration struct {
+	OperatorAddress string `json:"operator_address"`
+	URL             string `json:"url"`
+	Moniker         string `json:"moniker"`
+	Timestamp       int64  `json:"timestamp"`
+	Signature       string `json:"signature,omitempty"`
+	PubKey          string `json:"pub_key,omitempty"`
+	FirstSeenAt     int64  `json:"first_seen_at"`
+	LastSeenAt      int64  `json:"last_seen_at"`
+	ExpiresAt       int64  `json:"expires_at"`
 }

@@ -57,7 +57,12 @@ func adminPostSetup(
 			return nil
 		}
 
-		a, err := admin.New(cfg, logger)
+		homeDir := clientCtx.HomeDir
+		checkBonded := func(valoper string) bool {
+			return (*svoteApp).ValidatorValoperBonded(valoper)
+		}
+
+		a, err := admin.New(cfg, homeDir, checkBonded, logger)
 		if err != nil {
 			return fmt.Errorf("admin: %w", err)
 		}
@@ -73,6 +78,11 @@ func adminPostSetup(
 				return nil
 			})
 		}
+
+		g.Go(func() error {
+			admin.RunPendingSweeper(ctx, a, admin.PendingEvictionSweepInterval, logger)
+			return nil
+		})
 
 		logger.Info("admin config proxy initialized")
 		return nil
@@ -91,6 +101,9 @@ func readAdminConfig(v *viper.Viper) admin.Config {
 	}
 	if v.IsSet("admin.watchdog_interval") {
 		cfg.WatchdogInterval = v.GetDuration("admin.watchdog_interval")
+	}
+	if v.IsSet("admin.db_path") {
+		cfg.DBPath = v.GetString("admin.db_path")
 	}
 
 	return cfg

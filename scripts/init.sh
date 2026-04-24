@@ -202,19 +202,13 @@ helper_url = "$HELPER_URL"
 sentry_dsn = "$HELPER_SENTRY_DSN"
 HELPERCFG
 
-# Append [admin] section. The admin server is a thin CDN-config proxy; the
-# only recognized key is `disable`. See internal/admin/types.go Config struct.
+# Patch [admin] from svoted init template (do not append a second [admin] table).
+# Defaults to disabled. Set SVOTE_ADMIN_DISABLE=false when this node is the sole
+# admin/UI host (production primary — see sdk-chain-reset.yml — or local dev).
 ADMIN_DISABLE="${SVOTE_ADMIN_DISABLE:-true}"
-cat >> "$APP_TOML" <<ADMINCFG
-
-###############################################################################
-###                         Admin Server (CDN config proxy)                 ###
-###############################################################################
-
-[admin]
-
-disable = $ADMIN_DISABLE
-ADMINCFG
+# svoted init emits [admin] with disable = true; only that line matches here ([helper] uses disable = false).
+sed -i.bak "s/^disable = true\$/disable = ${ADMIN_DISABLE}/" "$APP_TOML"
+rm -f "${APP_TOML}.bak"
 
 # Append [ui] section.
 cat >> "$APP_TOML" <<UICFG

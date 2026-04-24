@@ -455,6 +455,17 @@ export interface PendingRegistration {
   expires_at: number;
 }
 
+/** Row from GET /api/pending-validators (SQLite-backed join queue). */
+export interface PendingValidatorPublic {
+  operator_address: string;
+  url: string;
+  moniker: string;
+  timestamp: number;
+  first_seen_at: number;
+  last_seen_at: number;
+  expires_at: number;
+}
+
 /**
  * Fetch the current voting-config from the Vercel API.
  * Works in both dev (proxied) and production (direct) mode.
@@ -489,14 +500,30 @@ export async function updateVotingConfig(params: UpdateVotingConfigParams): Prom
 // -- Validator self-registration --
 
 /**
- * Fetch pending validator registrations from Edge Config.
+ * Fetch pending validator join requests from svoted (SQLite-backed).
  */
-export async function getPendingRegistrations(): Promise<PendingRegistration[]> {
+export async function getPendingValidators(): Promise<PendingValidatorPublic[]> {
   try {
-    return await fetchJson<PendingRegistration[]>("/api/pending-registrations");
+    return await fetchJson<PendingValidatorPublic[]>("/api/pending-validators");
   } catch {
     return [];
   }
+}
+
+/**
+ * @deprecated Use {@link getPendingValidators}. Kept for older callers.
+ */
+export async function getPendingRegistrations(): Promise<PendingRegistration[]> {
+  const rows = await getPendingValidators();
+  return rows.map((r) => ({
+    operator_address: r.operator_address,
+    url: r.url,
+    moniker: r.moniker,
+    timestamp: r.timestamp,
+    signature: "",
+    pub_key: "",
+    expires_at: r.expires_at,
+  }));
 }
 
 export interface ApproveRegistrationParams {
