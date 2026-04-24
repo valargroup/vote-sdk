@@ -12,6 +12,11 @@
 #
 # Darwin platforms use native macOS GitHub runners (Docker cannot run macOS).
 # Linux platforms additionally have a local Docker test in scripts/test-join-docker.sh.
+#
+# Note: darwin/amd64 is not tested in CI. GitHub's macos-13 (Intel) runners are
+# effectively unavailable (phased out). The darwin-amd64 binary is cross-compiled
+# from the same macos-latest (arm64) host in release.yml; the script logic
+# (sed, launchctl, brew) is identical across Darwin architectures.
 
 name: test-join
 
@@ -51,8 +56,10 @@ jobs:
             label: linux/arm64
           - os: macos-latest
             label: darwin/arm64
-          - os: macos-13
-            label: darwin/amd64
+          # darwin/amd64 omitted: macos-13 (Intel) runners are effectively
+          # unavailable on GitHub Actions (phased out). The darwin-amd64 binary
+          # is cross-compiled from macos-latest (arm64) in release.yml; the
+          # script logic is identical across Darwin architectures.
 
     steps:
       - uses: actions/checkout@v4
