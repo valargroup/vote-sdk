@@ -348,11 +348,17 @@ echo "Node configured."
 # ─── TLS reverse proxy (Caddy) ──────────────────────────────────────────────
 # Sets up Caddy as a TLS reverse proxy in front of the chain REST API (port 1317).
 # Caddy auto-provisions Let's Encrypt certificates.
+#
+# Set SVOTE_SKIP_CADDY=1 to skip Caddy setup entirely (e.g. Docker/CI environments
+# without a public IP or systemd, or when TLS is handled externally).
 
 echo ""
 echo "=== Setting up TLS reverse proxy ==="
 
-if [ -z "$SVOTE_DOMAIN" ]; then
+if [ "${SVOTE_SKIP_CADDY:-0}" = "1" ]; then
+  echo "SVOTE_SKIP_CADDY=1: skipping Caddy setup."
+  VALIDATOR_URL=""
+elif [ -z "$SVOTE_DOMAIN" ]; then
   # Auto-detect public IP and use sslip.io for a valid TLS hostname.
   PUBLIC_IP=$(curl -fsSL --connect-timeout 5 https://ifconfig.me 2>/dev/null || echo "")
   if [ -z "$PUBLIC_IP" ]; then
@@ -488,6 +494,24 @@ fi
 # ─── Service installation ─────────────────────────────────────────────────────
 # Install a persistent service so svoted survives terminal closes and reboots.
 # Uses systemd on Linux and launchd on macOS.
+#
+# Set SVOTE_SKIP_SERVICE=1 to skip service installation and the sync wait.
+# Useful for Docker-based smoke tests and CI environments where systemd/launchd
+# is not available. The script exits 0 after printing the node summary.
+
+if [ "${SVOTE_SKIP_SERVICE:-0}" = "1" ]; then
+  echo ""
+  echo "============================================="
+  echo "  Node configured (SVOTE_SKIP_SERVICE=1)"
+  echo "  Service install and sync wait skipped."
+  echo "============================================="
+  echo ""
+  echo "  Operator address: ${VALIDATOR_ADDR}"
+  echo "  Home dir:         ${HOME_DIR}"
+  echo "  Config:           ${CONFIG_TOML}"
+  echo "  App config:       ${APP_TOML}"
+  exit 0
+fi
 
 LOG_FILE="${HOME_DIR}/node.log"
 SVOTED_BIN=$(command -v svoted)
