@@ -2,7 +2,6 @@ package admin
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -58,9 +57,10 @@ func TestJoinAdminFlow_PendingThenBonded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Sign the raw amino doc — priv.Sign hashes internally, matching the
+	// production `svoted sign-arbitrary` CLI path used by join.sh.
 	signDoc := makeSignArbitraryDoc(operator, string(payloadBytes))
-	msgHash := sha256.Sum256(signDoc)
-	sig, err := priv.Sign(msgHash[:])
+	sig, err := priv.Sign(signDoc)
 	if err != nil {
 		t.Fatal(err)
 	}

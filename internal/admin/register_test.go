@@ -2,7 +2,6 @@ package admin
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -40,9 +39,12 @@ func newSignedRegisterParts(t *testing.T, url, moniker string, timestamp int64) 
 		t.Fatal(err)
 	}
 
+	// Sign exactly the way the production `svoted sign-arbitrary` CLI does:
+	// hand priv.Sign the raw amino doc and let it SHA-256 internally. Pre-
+	// hashing here would cause the verifier to double-hash and false-pass —
+	// which masked the bug that broke `join.sh` for every external operator.
 	signDoc := makeSignArbitraryDoc(operator, string(payloadBytes))
-	msgHash := sha256.Sum256(signDoc)
-	sig, err := priv.Sign(msgHash[:])
+	sig, err := priv.Sign(signDoc)
 	if err != nil {
 		t.Fatal(err)
 	}

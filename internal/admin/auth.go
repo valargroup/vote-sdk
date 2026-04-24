@@ -19,6 +19,12 @@ const valoperPrefix = "svvaloper"
 // signature. It checks that:
 //  1. The secp256k1 signature is valid over the amino sign doc.
 //  2. The public key derives to the claimed signer address.
+//
+// Hashing note: secp256k1.PubKey.VerifySignature already SHA-256s its input
+// before ECDSA verification, mirroring secp256k1.PrivKey.Sign on the signing
+// side (which is what `svoted sign-arbitrary` and any Keplr/ADR-036 signer
+// invoke via Keyring.Sign). We therefore pass the raw amino sign doc here —
+// pre-hashing it would cause a double-hash and reject every real signature.
 func VerifyArbitrarySignature(signerAddress, payload string, signatureB64, pubKeyB64 string) error {
 	sigBytes, err := base64.StdEncoding.DecodeString(signatureB64)
 	if err != nil {
@@ -30,10 +36,9 @@ func VerifyArbitrarySignature(signerAddress, payload string, signatureB64, pubKe
 	}
 
 	signDoc := makeSignArbitraryDoc(signerAddress, payload)
-	msgHash := sha256.Sum256(signDoc)
 
 	pk := &secp256k1.PubKey{Key: pubKeyBytes}
-	if !pk.VerifySignature(msgHash[:], sigBytes) {
+	if !pk.VerifySignature(signDoc, sigBytes) {
 		return fmt.Errorf("invalid signature")
 	}
 
