@@ -1,0 +1,40 @@
+# Dockerfile.join-test — smoke-tests join.sh inside a clean Linux container.
+#
+# Covers: linux/amd64 and linux/arm64.
+# Darwin (amd64/arm64) is covered by CI: .github/workflows/test-join.yml
+#
+# Tests (per arch):
+#   - Binary download + SHA-256 checksum from DO Spaces
+#   - svoted init + genesis fetch + genesis validation
+#   - init-validator-keys (Cosmos + Pallas + EA keypairs)
+#   - config.toml / app.toml patching
+#
+# Skips: Caddy/TLS setup, service installation (systemd), sync wait.
+#
+# Usage:
+#   docker build --platform linux/amd64 -f Dockerfile.join-test -t join-test:amd64 .
+#   docker build --platform linux/arm64 -f Dockerfile.join-test -t join-test:arm64 .
+#   docker run --rm join-test:amd64
+#   docker run --rm join-test:arm64
+#
+# Or via the helper script (also runs verification):
+#   ./scripts/test-join-docker.sh
+
+FROM ubuntu:24.04
+
+RUN apt-get update -q && \
+    apt-get install -y -q --no-install-recommends \
+      curl \
+      jq \
+      ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY join.sh /join.sh
+COPY scripts/join-loop.sh /scripts/join-loop.sh
+RUN chmod +x /join.sh
+
+ENV SVOTE_MONIKER=docker-test
+ENV SVOTE_SKIP_SERVICE=1
+ENV SVOTE_SKIP_CADDY=1
+
+CMD ["/join.sh"]

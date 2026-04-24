@@ -1,0 +1,128 @@
+# Smoke-tests join.sh across all four release platforms.
+#
+# Runs join.sh with SVOTE_SKIP_SERVICE=1 + SVOTE_SKIP_CADDY=1, which exercises:
+#   - Binary download + SHA-256 checksum (arch-specific tarball from DO Spaces)
+#   - voting-config CDN discovery + P2P peer resolution
+#   - svoted init + genesis fetch + genesis validation
+#   - init-validator-keys (Cosmos account + Pallas + EA keypairs)
+#   - config.toml / app.toml patching
+#
+# Does NOT test: service installation (systemd/launchd) or chain sync.
+# Those are covered by the full E2E test (test-e2e job in ci.yml).
+#
+# Darwin platforms use native macOS GitHub runners (Docker cannot run macOS).
+# Linux platforms additionally have a local Docker test in scripts/test-join-docker.sh.
+
+name: test-join
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - join.sh
+      - scripts/join-loop.sh
+      - Dockerfile.join-test
+      - scripts/test-join-docker.sh
+      - .github/workflows/test-join.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - join.sh
+      - scripts/join-loop.sh
+      - Dockerfile.join-test
+      - scripts/test-join-docker.sh
+      - .github/workflows/test-join.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: join.sh (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux/amd64
+          - os: ubuntu-24.04-arm
+            label: linux/arm64
+          - os: macos-latest
+            label: darwin/arm64
+          - os: macos-13
+            label: darwin/amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq (macOS)
+        if: runner.os == 'macOS'
+        run: command -v jq || brew install jq
+
+      - name: Run join.sh smoke test
+        env:
+          SVOTE_MONIKER: ci-test
+          SVOTE_SKIP_SERVICE: "1"
+          SVOTE_SKIP_CADDY: "1"
+        run: bash join.sh
+
+      - name: Verify output files and config
+        shell: bash
+        run: |
+          set -euo pipefail
+          D="${SVOTE_HOME:-$HOME/.svoted}"
+          fail=0
+
+          check_file() {
+            if [ -f "$1" ]; then
+              echo "  OK  $1"
+            else
+              echo "  MISSING  $1"
+              fail=1
+            fi
+          }
+
+          echo "=== Checking files in ${D} ==="
+          check_file "${D}/config/config.toml"
+          check_file "${D}/config/app.toml"
+          check_file "${D}/config/genesis.json"
+          check_file "${D}/pallas.sk"
+          check_file "${D}/pallas.pk"
+          check_file "${D}/ea.sk"
+          check_file "${D}/ea.pk"
+
+          echo "=== Checking config.toml contents ==="
+          # persistent_peers must have been set (not left empty).
+          if grep -qE 'persistent_peers = ".+"' "${D}/config/config.toml"; then
+            echo "  OK  persistent_peers set"
+          else
+            echo "  FAIL  persistent_peers is empty"
+            fail=1
+          fi
+          # broadcast timeout patch.
+          if grep -q 'timeout_broadcast_tx_commit = "120s"' "${D}/config/config.toml"; then
+            echo "  OK  timeout_broadcast_tx_commit patched"
+          else
+            echo "  FAIL  timeout_broadcast_tx_commit not patched"
+            fail=1
+          fi
+
+          echo "=== Checking app.toml contents ==="
+          # REST API must be enabled.
+          if grep -q 'enable = true' "${D}/config/app.toml"; then
+            echo "  OK  REST API enabled"
+          else
+            echo "  FAIL  REST API not enabled"
+            fail=1
+          fi
+          # [helper] section must have been appended.
+          if grep -q '\[helper\]' "${D}/config/app.toml"; then
+            echo "  OK  [helper] section present"
+          else
+            echo "  FAIL  [helper] section missing"
+            fail=1
+          fi
+
+          [ "$fail" -eq 0 ] && echo "=== All checks passed ===" || { echo "=== CHECKS FAILED ==="; exit 1; }
