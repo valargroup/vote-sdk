@@ -220,6 +220,8 @@ jobs:
           cp scripts/init_multi.sh scripts/_vote_manager_keys_lib.sh "${DIR}/scripts/"
           cp scripts/reset-archive.sh "${DIR}/scripts/"
           chmod +x "${DIR}/scripts/reset-archive.sh"
+          cp scripts/join-loop.sh "${DIR}/scripts/"
+          chmod +x "${DIR}/scripts/join-loop.sh"
           cp deploy/Caddyfile "${DIR}/config/"
           tar czf "${DIR}.tar.gz" "${DIR}"
           sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
@@ -285,6 +287,7 @@ jobs:
           echo "${VERSION}" > /tmp/version.txt
           s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put join.sh s3://vote/join.sh --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/join-loop.sh s3://vote/join-loop.sh --acl-public --force
 
   deploy:
     name: Deploy
