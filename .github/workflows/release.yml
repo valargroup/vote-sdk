@@ -288,6 +288,10 @@ jobs:
           s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put join.sh s3://vote/join.sh --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/join-loop.sh s3://vote/join-loop.sh --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join.sh \
+            "s3://vote/scripts/join/${VERSION}/join.sh"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/join-loop.sh \
+            "s3://vote/scripts/join-loop/${VERSION}/join-loop.sh"
 
   deploy:
     name: Deploy
