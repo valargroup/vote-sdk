@@ -295,26 +295,6 @@ dependencies = [
 
 [[package]]
 name = "halo2_gadgets"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73a5e510d58a07d8ed238a5a8a436fe6c2c79e1bb2611f62688bc65007b4e6e7"
-dependencies = [
- "arrayvec",
- "bitvec",
- "ff",
- "group",
- "halo2_poseidon",
- "halo2_proofs",
- "lazy_static",
- "pasta_curves",
- "rand",
- "sinsemilla",
- "subtle",
- "uint",
-]
-
-[[package]]
-name = "halo2_gadgets"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45824ce0dd12e91ec0c68ebae2a7ed8ae19b70946624c849add59f1d1a62a143"
@@ -382,13 +362,13 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "imt-tree"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d10acb863735c6c82c0c79e8752696096a86eb4d1e2fe0005ded4fae066297e"
+checksum = "c378a3c5c44b985233906c966bd82a4f775a83aa4e1bde1635961c2eb8673d7b"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets 0.3.1",
+ "halo2_gadgets",
  "hex",
  "pasta_curves",
  "rayon",
@@ -396,12 +376,12 @@ dependencies = [
 
 [[package]]
 name = "imt-tree"
-version = "0.1.0"
-source = "git+https://github.com/valargroup/vote-nullifier-pir.git#334626177daed161bd0bbcdee008cddc244b5e37"
+version = "0.1.1"
+source = "git+https://github.com/valargroup/vote-nullifier-pir.git#22f15a9078173494d13212c92dfe5a20c24bdffc"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets 0.3.1",
+ "halo2_gadgets",
  "hex",
  "pasta_curves",
  "rayon",
@@ -557,7 +537,7 @@ dependencies = [
  "fpe",
  "getset",
  "group",
- "halo2_gadgets 0.4.0",
+ "halo2_gadgets",
  "halo2_poseidon",
  "halo2_proofs",
  "hex",
@@ -796,10 +776,10 @@ dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "halo2_gadgets 0.4.0",
+ "halo2_gadgets",
  "halo2_proofs",
  "hex",
- "imt-tree 0.1.0 (git+https://github.com/valargroup/vote-nullifier-pir.git)",
+ "imt-tree 0.1.1 (git+https://github.com/valargroup/vote-nullifier-pir.git)",
  "incrementalmerkletree",
  "orchard",
  "pasta_curves",
@@ -966,8 +946,8 @@ source = "git+https://github.com/valargroup/zcash_voting.git?branch=valar%2Forch
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets 0.4.0",
- "imt-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "halo2_gadgets",
+ "imt-tree 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "incrementalmerkletree",
  "lazy_static",
  "libc",
@@ -983,7 +963,7 @@ dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "halo2_gadgets 0.4.0",
+ "halo2_gadgets",
  "halo2_poseidon",
  "halo2_proofs",
  "incrementalmerkletree",

@@ -26,7 +26,7 @@ base64 = "0.22"
 hex = "0.4"
 
 # Round ID derivation (Poseidon hash)
-halo2_gadgets = "0.3"
+halo2_gadgets = "0.4"
 
 # Blake2b (still used for sighash in e2e setup)
 blake2b_simd = "1"
