@@ -270,7 +270,12 @@ if [ -d "${HOME_DIR}" ]; then
   rm -rf "${HOME_DIR}"
 fi
 
-svoted init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}" > /dev/null 2>&1
+echo "Running: svoted init --home ${HOME_DIR} ..."
+# Do not silence stderr: with set -e, a failed init would otherwise exit with no explanation.
+if ! svoted init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}"; then
+  echo "ERROR: svoted init failed. Typical causes: missing dynamic libraries (ldd on the svoted binary), disk full, or invalid moniker."
+  exit 1
+fi
 
 # ─── Fetch genesis from DO Spaces ────────────────────────────────────────────
 # sdk-chain-reset.yml's upload-genesis job writes the canonical genesis to
@@ -280,7 +285,10 @@ svoted init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}" > /dev/nu
 GENESIS_URL="${DO_BASE}/genesis.json"
 echo "Fetching genesis.json from ${GENESIS_URL}..."
 curl -fsSL -o "${HOME_DIR}/config/genesis.json" "${GENESIS_URL}"
-svoted genesis validate-genesis --home "${HOME_DIR}" > /dev/null 2>&1
+if ! svoted genesis validate-genesis --home "${HOME_DIR}"; then
+  echo "ERROR: genesis.json failed validation against this svoted build."
+  exit 1
+fi
 echo "Genesis validated."
 
 # ─── Generate keys ────────────────────────────────────────────────────────────
