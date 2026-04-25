@@ -130,21 +130,22 @@ For custom layouts, non-Linux platforms, or when debugging the installer:
 sudo apt-get update && sudo apt-get install -y curl jq ca-certificates
 ```
 
-1. **Download and install the binaries.** `join.sh` always pulls the latest; pin a specific `TAG` here if you want a reproducible install:
+1. **Download and install the binaries.** `join.sh` always pulls the latest; pin a specific `TAG` here if you want a reproducible install. The tarball is downloaded under its published name so `sha256sum -c` can validate it against the companion `.sha256` file, which lists the original filename:
 
    ```bash
    PLATFORM=linux-amd64        # or linux-arm64, darwin-arm64, darwin-amd64
    TAG=$(curl -fsSL https://vote.fra1.digitaloceanspaces.com/version.txt | tr -d '[:space:]')
    INSTALL_DIR="$HOME/.local/bin"
+   TARBALL="shielded-vote-${TAG}-${PLATFORM}.tar.gz"
 
    mkdir -p "$INSTALL_DIR"
-   curl -fsSL -o /tmp/svote.tar.gz \
-     "https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk/shielded-vote-${TAG}-${PLATFORM}.tar.gz"
-   curl -fsSL -o /tmp/svote.tar.gz.sha256 \
-     "https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk/shielded-vote-${TAG}-${PLATFORM}.tar.gz.sha256"
-   ( cd /tmp && sha256sum -c svote.tar.gz.sha256 )
+   curl -fsSL -o "/tmp/${TARBALL}" \
+     "https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk/${TARBALL}"
+   curl -fsSL -o "/tmp/${TARBALL}.sha256" \
+     "https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk/${TARBALL}.sha256"
+   ( cd /tmp && sha256sum -c "${TARBALL}.sha256" )
 
-   tar xzf /tmp/svote.tar.gz -C /tmp \
+   tar xzf "/tmp/${TARBALL}" -C /tmp \
      "shielded-vote-${TAG}-${PLATFORM}/bin/svoted" \
      "shielded-vote-${TAG}-${PLATFORM}/bin/create-val-tx"
    install -m 0755 "/tmp/shielded-vote-${TAG}-${PLATFORM}/bin/svoted"        "$INSTALL_DIR/svoted"
@@ -199,7 +200,27 @@ sudo apt-get update && sudo apt-get install -y curl jq ca-certificates
    rm -f "$CONFIG_TOML.bak" "$APP_TOML.bak"
    ```
 
-   Append the `[helper]` block (the shipped template doesn't include it) — see the canonical layout in [join.sh](../../join.sh) (search for `HELPERCFG`). Leave `helper_url` empty until the Caddy hostname is known; it's re-patched in step 7.
+   Append the `[helper]` block — the shipped template doesn't include it. Leave `helper_url` empty until the Caddy hostname is known; it's re-patched in step 7. This matches the `HELPERCFG` block written by [join.sh](../../join.sh):
+
+   ```bash
+   cat >> "$APP_TOML" <<'HELPERCFG'
+
+   ###############################################################################
+   ###                         Helper Server                                   ###
+   ###############################################################################
+
+   [helper]
+
+   disable = false
+   api_token = ""
+   db_path = ""
+   process_interval = 5
+   chain_api_port = 1317
+   max_concurrent_proofs = 2
+   pulse_url = "https://shielded-vote.vercel.app"
+   helper_url = ""
+   HELPERCFG
+   ```
 
 6. **Install the systemd unit and start `svoted`**:
 
@@ -289,7 +310,13 @@ curl -fsS https://<your-domain>/shielded-vote/v1/genesis > /dev/null && echo "ca
 tail -n 20 ~/.svoted/join.log   # or: journalctl -u svoted-join -n 20 --no-pager
 ```
 
-The join loop logs one line per iteration (every 30 s). Absence of lines means the service isn't running; repeated `balance=0` lines mean you're registered and waiting for funding — see [Join lifecycle](#join-lifecycle).
+The join loop is deliberately quiet. It only writes three kinds of lines to `join.log`:
+
+1. `join-loop starting (moniker=...)` — once at startup.
+2. `balance=<amount> usvote — attempting create-val-tx` — once funding is detected.
+3. `register-validator returned bonded — exiting 0` — right before exit 0 when bonded.
+
+A healthy unfunded validator produces **only** the startup line. To confirm the loop is alive while waiting for funding, check the service itself (`systemctl is-active svoted-join` / `pgrep -f join-loop.sh`) and look for your `operator_address` on the primary's pending list (`curl "${SVOTE_ADMIN_URL%/}/api/pending-validators" | jq`); `last_seen_at` should advance by ~30 s each iteration. See [Join lifecycle](#join-lifecycle).
 
 ## Join lifecycle
 
@@ -321,7 +348,7 @@ Funding happens off-loop: an existing vote manager (any member of the any-of-N v
 
 **Operator checklist while waiting:**
 
-- Watch `tail -f ~/.svoted/join.log` (or `journalctl -u svoted-join -f`) — you should see `register-validator` responses with `status=pending` or `status=registered`.
+- Confirm the loop is alive with `systemctl is-active svoted-join` (or `pgrep -f join-loop.sh` on macOS). `join.log` stays quiet after the startup line until funding arrives — see the log-behavior note under [Smoke test](#smoke-test).
 - Verify the admin UI at the seed node's public URL (`https://<seed>/`, or `https://shielded-vote.vercel.app/` if configured) shows your moniker and operator address in the **Validators → Join queue** list.
 - After bonding, open a PR against [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) to add your URL to `vote_servers[]` so iOS clients discover you. The suggested JSON entry is printed on the final line of `join.sh`.
 
