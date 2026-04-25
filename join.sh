@@ -10,7 +10,7 @@
 #
 # What it does:
 #   1. Acquires svoted + create-val-tx (always downloads latest; set SVOTE_LOCAL_BINARIES=1 to use local)
-#   2. Fetches voting-config (CDN JSON, then primary /api/voting-config), unless VOTING_CONFIG_URL overrides
+#   2. Fetches voting-config from the GitHub Pages CDN (canonical source; same one wallets use)
 #   3. Fetches node identity from the first vote_servers[] URL (PEX seed)
 #   4. Downloads genesis.json from DO Spaces (canonical file from sdk-chain-reset)
 #   5. Initializes a node, generates cryptographic keys
@@ -29,16 +29,14 @@ CHAIN_ID="svote-1"
 INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
-# Public voting-config.json (same CDN as wallet discovery). Override for mirrors.
-CDN_VOTING_CONFIG_JSON="${CDN_VOTING_CONFIG_JSON:-https://valargroup.github.io/token-holder-voting-config/voting-config.json}"
-# Fallback when CDN is unreachable: primary chain REST + admin API host.
-DEFAULT_PRIMARY_API_BASE="${DEFAULT_PRIMARY_API_BASE:-https://vote-chain-primary.valargroup.org}"
-# Optional: fetch voting-config from ${VOTING_CONFIG_URL}/api/voting-config instead of CDN→primary bootstrap.
-# VOTING_CONFIG_URL=
-# Optional: POST /api/register-validator target (defaults to first vote_servers[].url after fetch).
-# SVOTE_ADMIN_URL=
-# Optional: [helper] pulse_url (defaults: SVOTE_PULSE_URL, else VOTING_CONFIG_URL, else Vercel).
-DEFAULT_PULSE_URL="${DEFAULT_PULSE_URL:-https://shielded-vote.vercel.app}"
+# Canonical voting-config (same payload wallets fetch). Override for staging
+# mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
+VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://valargroup.github.io/token-holder-voting-config/voting-config.json}"
+# Admin API base — POST /api/register-validator (join queue) and
+# POST /api/server-heartbeat (helper liveness). Override via SVOTE_ADMIN_URL
+# when joining a non-default deployment.
+DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-https://vote-chain-primary.valargroup.org}"
+SVOTE_ADMIN_URL="${SVOTE_ADMIN_URL:-${DEFAULT_ADMIN_API_BASE}}"
 
 # Parse --domain flag for TLS hostname override.
 SVOTE_DOMAIN="${SVOTE_DOMAIN:-}"
@@ -183,43 +181,28 @@ case ":${PATH}:" in
   *) export PATH="${INSTALL_DIR}:${PATH}" ;;
 esac
 
-# ─── Discover network via voting-config ─────────────────────────────────────
-# Same JSON shape as token-holder-voting-config/voting-config.json. We use the
-# first vote_servers[] entry as the seed peer and (unless SVOTE_ADMIN_URL is set)
-# as the admin API base for POST /api/register-validator.
+# ─── Discover network via voting-config (CDN) ───────────────────────────────
+# The voting-config JSON is the same one wallets fetch from
+# valargroup.github.io/token-holder-voting-config (ZIP 1244 §Vote Configuration
+# Format). We use vote_servers[0] as the seed peer for P2P; SVOTE_ADMIN_URL is
+# a separate base for the join queue and helper heartbeat.
 
 echo ""
 echo "=== Discovering network ==="
 
-if [ -n "${VOTING_CONFIG_URL:-}" ]; then
-  echo "Fetching voting-config from VOTING_CONFIG_URL: ${VOTING_CONFIG_URL%/}/api/voting-config"
-  if ! VOTING_CONFIG=$(curl -fsSL --connect-timeout 15 --max-time 60 "${VOTING_CONFIG_URL%/}/api/voting-config"); then
-    echo "ERROR: Could not fetch voting-config from VOTING_CONFIG_URL"
-    exit 1
-  fi
-else
-  echo "Fetching voting-config (CDN, then ${DEFAULT_PRIMARY_API_BASE} fallback)..."
-  if VOTING_CONFIG=$(curl -fsSL --connect-timeout 15 --max-time 60 "${CDN_VOTING_CONFIG_JSON}"); then
-    echo "  Source: ${CDN_VOTING_CONFIG_JSON}"
-  elif VOTING_CONFIG=$(curl -fsSL --connect-timeout 15 --max-time 60 "${DEFAULT_PRIMARY_API_BASE}/api/voting-config"); then
-    echo "  Source: ${DEFAULT_PRIMARY_API_BASE}/api/voting-config"
-  else
-    echo "ERROR: Could not fetch voting-config from CDN or primary fallback."
-    echo "  Set VOTING_CONFIG_URL to a host that serves GET /api/voting-config, or fix network access."
-    exit 1
-  fi
+echo "Fetching voting-config from ${VOTING_CONFIG_URL}..."
+if ! VOTING_CONFIG=$(curl -fsSL --connect-timeout 15 --max-time 60 "${VOTING_CONFIG_URL}"); then
+  echo "ERROR: Could not fetch voting-config from ${VOTING_CONFIG_URL}"
+  echo "  Set VOTING_CONFIG_URL to a reachable mirror, or fix network access."
+  exit 1
 fi
 
 SEED_URL=$(echo "$VOTING_CONFIG" | jq -r '.vote_servers[0].url // empty')
 
 if [ -z "$SEED_URL" ] || [ "$SEED_URL" = "null" ]; then
-  echo "ERROR: No vote_servers[0].url in voting-config (bootstrap succeeded but list is empty)."
-  echo "  The bootstrap operator needs at least one validator URL in token-holder-voting-config."
+  echo "ERROR: No vote_servers[0].url in voting-config (upstream returned an empty list)."
+  echo "  The maintainers of token-holder-voting-config need to publish at least one validator URL."
   exit 1
-fi
-
-if [ -z "${SVOTE_ADMIN_URL:-}" ]; then
-  SVOTE_ADMIN_URL="$SEED_URL"
 fi
 
 echo "Seed node: ${SEED_URL}"
@@ -300,9 +283,6 @@ sed -i.bak "s|\\\$HOME/.svoted|${HOME_DIR}|g" "${APP_TOML}"
 
 rm -f "${APP_TOML}.bak"
 
-# Helper heartbeat target: SVOTE_PULSE_URL, else VOTING_CONFIG_URL if set for discovery, else Vercel.
-PULSE_URL="${SVOTE_PULSE_URL:-${VOTING_CONFIG_URL:-${DEFAULT_PULSE_URL}}}"
-
 # Append [helper] section (not in the default template).
 cat >> "${APP_TOML}" <<HELPERCFG
 
@@ -331,9 +311,9 @@ chain_api_port = 1317
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = 2
 
-# Heartbeat pulse URL (server-heartbeat endpoint).
-# Empty disables the heartbeat.
-pulse_url = "${PULSE_URL}"
+# Admin server base URL — used for POST /api/register-validator on startup
+# and POST /api/server-heartbeat every 2h. Empty disables the heartbeat.
+admin_url = "${SVOTE_ADMIN_URL}"
 
 # This server's public URL as seen by clients (set after Caddy TLS setup).
 # Empty disables the heartbeat.

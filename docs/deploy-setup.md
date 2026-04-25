@@ -140,6 +140,8 @@ the REST API port. It is configured in `app.toml` under `[helper]` (written by
 | `process_interval` | `5` | How often to check for ready shares (seconds). |
 | `chain_api_port` | `1418` | Port of the REST API (for `MsgRevealShare` submission). In production this is `1317`. |
 | `max_concurrent_proofs` | `2` | Maximum parallel proof generation goroutines (~500 MB RAM each). |
+| `admin_url` | `""` | Admin server base URL for `POST /api/register-validator` and `POST /api/server-heartbeat` (heartbeat). `join.sh` writes the value of `SVOTE_ADMIN_URL` here. Empty disables the heartbeat. Legacy key `pulse_url` is still read as a fallback. |
+| `helper_url` | `""` | This host's public URL as seen by clients. Set after Caddy/TLS is up. Empty disables the heartbeat. |
 
 ## Admin UI
 
@@ -160,12 +162,24 @@ make start-admin   # builds UI then starts svoted with --serve-ui
 
 ## Admin server configuration
 
-The admin server fetches the
+The admin server polls the
 [voting-config JSON](https://valargroup.github.io/token-holder-voting-config/voting-config.json)
-from the GitHub Pages CDN (`GET /api/voting-config`) and stores **pending validator
-join requests** in SQLite (`POST /api/register-validator`, `GET /api/pending-validators`).
-Publishing a validator's public URL to `vote_servers` still happens via a manual PR on
-[token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config).
+from the GitHub Pages CDN every `watchdog_interval` to feed its fleet-health
+watchdog (and re-serves the cached copy at `GET /api/voting-config` for tooling
+that wants the same payload from a chain host). It also stores **pending
+validator join requests** in SQLite (`POST /api/register-validator`,
+`GET /api/pending-validators`) and accepts helper liveness pulses
+(`POST /api/server-heartbeat`).
+
+The CDN — not the admin — is the canonical discovery path. iOS wallets,
+`join.sh`, and the helper module all fetch
+`voting-config.json` directly from
+[valargroup/token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config)
+(see [the README there](https://github.com/valargroup/token-holder-voting-config#cdn)).
+The admin only needs to be reached for register-validator + heartbeat traffic.
+Publishing a validator's public URL to `vote_servers` happens via a manual PR
+on the config repo; once merged, the CDN serves the new entry within ~30 s and
+the admin's watchdog picks it up on the next refresh tick.
 
 It runs inside `svoted` on **val1 / primary only** and shares the REST API
 port. It is configured in `app.toml` under `[admin]`. Fresh `svoted init` configs
@@ -177,13 +191,13 @@ off).
 | Key | Default | Description |
 |-----|---------|-------------|
 | `disable` | `true` | Set to `false` to enable the admin module. |
-| `config_url` | (CDN) | GitHub Pages CDN URL for the voting-config JSON. |
+| `config_url` | (CDN) | URL the admin polls for the voting-config payload feeding the watchdog. Same URL clients hit directly — pointing it at a mirror only changes what the admin watchdog observes, not what wallets/`join.sh` discover. |
 | `watchdog_interval` | `5m` | Fleet health probe interval (`0` = off). |
 | `db_path` | `""` | SQLite path for pending registrations. Empty = `$HOME/.svoted/admin.db`. |
 
 Pending join rows expire after **7 days**; expired rows are removed by a background sweeper that runs every **hour** (both are fixed in code, not `app.toml` keys).
 
-Endpoints: `GET /api/voting-config`, `POST /api/register-validator`, `GET /api/pending-validators`.
+Endpoints: `POST /api/register-validator`, `GET /api/pending-validators`, `POST /api/server-heartbeat`, plus `GET /api/voting-config` (cached watchdog snapshot, not the canonical client path — see above).
 
 ## Health checks
 
