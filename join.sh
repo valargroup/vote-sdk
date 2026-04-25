@@ -20,7 +20,7 @@
 # Optional: SVOTE_JOIN_LOOP_SCRIPT=/path/to/join-loop.sh when join.sh is piped from curl and
 # join-loop.sh is not beside join.sh (see vote-sdk/scripts/join-loop.sh).
 #
-# Requirements: curl, jq
+# Requirements: curl. jq is installed automatically when missing (apt/dnf/yum/apk/Homebrew).
 # Dependency (binary path): release.yml must have run to upload binaries to DO Spaces.
 
 set -euo pipefail
@@ -53,12 +53,46 @@ done
 echo "=== Shielded-Vote validator join ==="
 echo ""
 
-for cmd in curl jq; do
-  if ! command -v "$cmd" > /dev/null 2>&1; then
-    echo "ERROR: $cmd is required. Install it and re-run."
+if ! command -v curl > /dev/null 2>&1; then
+  echo "ERROR: curl is required. Install it and re-run."
+  exit 1
+fi
+
+if ! command -v jq > /dev/null 2>&1; then
+  echo "jq not found — installing..."
+  OS_NAME=$(uname -s)
+  if [ "$OS_NAME" = "Linux" ]; then
+    if command -v apt-get > /dev/null 2>&1; then
+      export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+      sudo -E apt-get update -qq
+      sudo -E apt-get install -y jq
+    elif command -v dnf > /dev/null 2>&1; then
+      sudo dnf install -y jq
+    elif command -v yum > /dev/null 2>&1; then
+      sudo yum install -y jq
+    elif command -v apk > /dev/null 2>&1; then
+      sudo apk add --no-cache jq
+    else
+      echo "ERROR: jq is required. No supported package manager found (apt, dnf, yum, apk)."
+      exit 1
+    fi
+  elif [ "$OS_NAME" = "Darwin" ]; then
+    if command -v brew > /dev/null 2>&1; then
+      brew install jq
+    else
+      echo "ERROR: jq is required. Install with: brew install jq"
+      exit 1
+    fi
+  else
+    echo "ERROR: jq is required. Install jq for your OS and re-run."
     exit 1
   fi
-done
+fi
+
+if ! command -v jq > /dev/null 2>&1; then
+  echo "ERROR: jq is still not available after install attempt."
+  exit 1
+fi
 
 # ─── Prompt for moniker ──────────────────────────────────────────────────────
 
