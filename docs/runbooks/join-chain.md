@@ -10,7 +10,7 @@ This runbook covers the operator side: standing up an `svoted` host that syncs w
 
 - Joining the live `svote-1` chain — continue here.
 - Bootstrapping the first (genesis) validator and building `genesis.json` from scratch — see [genesis-setup.md](genesis-setup.md). Intentionally out of scope here.
-- Local development from a source checkout (`mise run install`, `mise run chain:init`, `SVOTE_LOCAL_BINARIES=1 ./join.sh`) — see the repo [README](../../README.md) and `mise tasks`.
+- Local development from a source checkout see [CONTRIBUTING.md](../../CONTRIBUTING.md).
 - Custom layouts, non-Linux platforms, or auditing what `join.sh` does — see [Reference > Manual install](#manual-install-no-joinsh).
 
 ## Prerequisites

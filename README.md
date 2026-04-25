@@ -38,6 +38,8 @@ Other useful tasks: `mise run chain:init-multi` + `mise run chain:start-multi`
 for a 3-validator local chain, `mise run test:go` for the Go test suite,
 `mise tasks` to list everything.
 
+**Contributing from a clone** (local binaries, join script with `SVOTE_LOCAL_BINARIES`, task reference): see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ### Without mise (direct make)
 
 ```bash
