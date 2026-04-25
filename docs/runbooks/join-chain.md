@@ -60,6 +60,40 @@ tail -f ~/.svoted/join.log
 
 See [Smoke test](#smoke-test) for a post-install check and [Join lifecycle](#join-lifecycle) for what happens until you reach bonded.
 
+## Join lifecycle
+
+From install to bonded, the validator moves through three states: **registered** (pending), **funded** (balance > 0), **bonded** (part of the validator set).
+
+```mermaid
+flowchart LR
+  installed["join.sh finishes"] --> registered["Registered: POST /api/register-validator"]
+  registered --> poll["svoted-join polls every 30s"]
+  poll --> funded["Funded: balance greater than 0 usvote"]
+  funded --> createValTx["create-val-tx: MsgCreateValidatorWithPallasKey"]
+  createValTx --> bonded["Bonded: BOND_STATUS_BONDED"]
+  bonded --> done["svoted-join exits 0; service stays enabled"]
+  poll --> poll
+```
+
+The loop in [scripts/join-loop.sh](../../scripts/join-loop.sh) runs forever until it observes bonded status. On each iteration:
+
+1. **Re-register.** Build `{operator_address, url, moniker, timestamp}`, sign it with `svoted sign-arbitrary --from validator --keyring-backend test`, POST to `${SVOTE_ADMIN_URL}/api/register-validator`. Idempotent — the admin stores one row per operator, updating URL/moniker on later POSTs. If the response reports `status=bonded`, exit 0 immediately.
+2. **Check bonded.** `svoted query staking validators` filtered by moniker; if `BOND_STATUS_BONDED`, exit 0.
+3. **If not bonded, check balance.** `svoted query bank balances $VALIDATOR_ADDR`. If there is any `usvote` balance, run:
+   ```bash
+   create-val-tx --moniker "$MONIKER" --amount 10000000usvote --home "$SVOTE_HOME" --rpc-url tcp://localhost:26657
+   ```
+   `create-val-tx` signs `MsgCreateValidatorWithPallasKey` (wire tag `0x09`) — the **only** message type that can create a validator post-genesis. Raw `MsgCreateValidator` is blocked by the ante handler.
+4. **Sleep 30 s** and loop.
+
+Funding happens off-loop: an existing vote manager (any member of the any-of-N vote-manager set) observes the pending registration in the admin UI and sends `usvote` via `MsgAuthorizedSend` — the only authorized transfer path on this chain. See the [MsgAuthorizedSend authorization rules](../../README.md#msgauthorizedsend-authorization-rules) in the README.
+
+**Operator checklist while waiting:**
+
+- Confirm the loop is alive with `systemctl is-active svoted-join` (or `pgrep -f join-loop.sh` on macOS). `join.log` stays quiet after the startup line until funding arrives — see the log-behavior note under [Smoke test](#smoke-test).
+- Verify the admin UI at the seed node's public URL (`https://<seed>/`, or `https://shielded-vote.vercel.app/` if configured) shows your moniker and operator address in the **Validators → Join queue** list.
+- After bonding, open a PR against [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) to add your URL to `vote_servers[]` so iOS clients discover you. The suggested JSON entry is printed on the final line of `join.sh`.
+
 ## Recommended hardware
 
 **Production target: `linux-amd64` with 2 vCPU, 8 GB RAM, and at least 50 GB SSD.**
@@ -71,26 +105,6 @@ Why these numbers:
 - 50 GB SSD holds the growing block store and the helper's SQLite database.
 
 Other profiles build but are not recommended for production serving; see [Platform support](#platform-support).
-
-## Network requirements
-
-`join.sh` and the running validator need the following network access:
-
-| Direction | Destination | Purpose |
-|-----------|-------------|---------|
-| Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `join-loop.sh` fallback |
-| Outbound 443 | `valargroup.github.io` | `token-holder-voting-config/voting-config.json` (seed-peer discovery) |
-| Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` and `POST /api/register-validator` |
-| Outbound 443 | `vote-chain-primary.valargroup.org` | Fallback `/api/voting-config` when the CDN is unreachable (override via `DEFAULT_PRIMARY_API_BASE`) |
-| Outbound 443 | `ifconfig.me` | Public-IP auto-detection (only when neither `--domain` nor `SVOTE_DOMAIN` is set) |
-| Outbound 443 | `dl.cloudsmith.io`, Let's Encrypt | Caddy apt-repo install + ACME certificate issuance |
-| Outbound 443 | `shielded-vote.vercel.app` | Helper heartbeat pulse (override via `SVOTE_PULSE_URL`, disable by setting it empty in `app.toml`) |
-| Outbound TCP 26656 | Seed validator's P2P | CometBFT peer handshake + gossip |
-| Inbound TCP 26656 | Public | CometBFT P2P — **must be reachable**; open it in your firewall/security group. Peers cannot connect if this is blocked |
-| Inbound TCP 80 + 443 | Public | Caddy (HTTPS reverse proxy for the REST API, used by iOS clients and admin UI). 80 is required for Let's Encrypt HTTP-01 challenges |
-| Local only | `127.0.0.1:1317` (REST), `127.0.0.1:26657` (RPC), `127.0.0.1:6060` (pprof) | Do not expose directly; Caddy proxies `1317` over TLS |
-
-If the validator will answer PIR queries itself, also open inbound 443 for the `nf-server` routes — see [vote-nullifier-pir's server-setup runbook](https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/runbooks/server-setup.md).
 
 ## Platform support
 
@@ -318,40 +332,6 @@ The join loop is deliberately quiet. It only writes three kinds of lines to `joi
 
 A healthy unfunded validator produces **only** the startup line. To confirm the loop is alive while waiting for funding, check the service itself (`systemctl is-active svoted-join` / `pgrep -f join-loop.sh`) and look for your `operator_address` on the primary's pending list (`curl "${SVOTE_ADMIN_URL%/}/api/pending-validators" | jq`); `last_seen_at` should advance by ~30 s each iteration. See [Join lifecycle](#join-lifecycle).
 
-## Join lifecycle
-
-From install to bonded, the validator moves through three states: **registered** (pending), **funded** (balance > 0), **bonded** (part of the validator set).
-
-```mermaid
-flowchart LR
-  installed["join.sh finishes"] --> registered["Registered: POST /api/register-validator"]
-  registered --> poll["svoted-join polls every 30s"]
-  poll --> funded["Funded: balance greater than 0 usvote"]
-  funded --> createValTx["create-val-tx: MsgCreateValidatorWithPallasKey"]
-  createValTx --> bonded["Bonded: BOND_STATUS_BONDED"]
-  bonded --> done["svoted-join exits 0; service stays enabled"]
-  poll --> poll
-```
-
-The loop in [scripts/join-loop.sh](../../scripts/join-loop.sh) runs forever until it observes bonded status. On each iteration:
-
-1. **Re-register.** Build `{operator_address, url, moniker, timestamp}`, sign it with `svoted sign-arbitrary --from validator --keyring-backend test`, POST to `${SVOTE_ADMIN_URL}/api/register-validator`. Idempotent — the admin stores one row per operator, updating URL/moniker on later POSTs. If the response reports `status=bonded`, exit 0 immediately.
-2. **Check bonded.** `svoted query staking validators` filtered by moniker; if `BOND_STATUS_BONDED`, exit 0.
-3. **If not bonded, check balance.** `svoted query bank balances $VALIDATOR_ADDR`. If there is any `usvote` balance, run:
-   ```bash
-   create-val-tx --moniker "$MONIKER" --amount 10000000usvote --home "$SVOTE_HOME" --rpc-url tcp://localhost:26657
-   ```
-   `create-val-tx` signs `MsgCreateValidatorWithPallasKey` (wire tag `0x09`) — the **only** message type that can create a validator post-genesis. Raw `MsgCreateValidator` is blocked by the ante handler.
-4. **Sleep 30 s** and loop.
-
-Funding happens off-loop: an existing vote manager (any member of the any-of-N vote-manager set) observes the pending registration in the admin UI and sends `usvote` via `MsgAuthorizedSend` — the only authorized transfer path on this chain. See the [MsgAuthorizedSend authorization rules](../../README.md#msgauthorizedsend-authorization-rules) in the README.
-
-**Operator checklist while waiting:**
-
-- Confirm the loop is alive with `systemctl is-active svoted-join` (or `pgrep -f join-loop.sh` on macOS). `join.log` stays quiet after the startup line until funding arrives — see the log-behavior note under [Smoke test](#smoke-test).
-- Verify the admin UI at the seed node's public URL (`https://<seed>/`, or `https://shielded-vote.vercel.app/` if configured) shows your moniker and operator address in the **Validators → Join queue** list.
-- After bonding, open a PR against [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) to add your URL to `vote_servers[]` so iOS clients discover you. The suggested JSON entry is printed on the final line of `join.sh`.
-
 ## Configuring the service
 
 `join.sh` installs two services so `svoted` and the bonding loop survive SSH disconnects, reboots, and operator shell exits.
@@ -556,6 +536,26 @@ When in doubt for a joining validator with no important keys yet, `rm -rf ~/.svo
 | `POST /shielded-vote/v1/delegate-vote`, `/cast-vote`, `/reveal-share` | Clients | Custom-wire vote messages. |
 | `POST /api/register-validator` | `svoted-join` | Pending-join queue (admin module; primary only). |
 | `GET /api/pending-validators`, `GET /api/voting-config` | Admin UI / join scripts | Join-queue view + CDN-proxied discovery (primary only). |
+
+## Network requirements
+
+`join.sh` and the running validator need the following network access:
+
+| Direction | Destination | Purpose |
+|-----------|-------------|---------|
+| Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `join-loop.sh` fallback |
+| Outbound 443 | `valargroup.github.io` | `token-holder-voting-config/voting-config.json` (seed-peer discovery) |
+| Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` and `POST /api/register-validator` |
+| Outbound 443 | `vote-chain-primary.valargroup.org` | Fallback `/api/voting-config` when the CDN is unreachable (override via `DEFAULT_PRIMARY_API_BASE`) |
+| Outbound 443 | `ifconfig.me` | Public-IP auto-detection (only when neither `--domain` nor `SVOTE_DOMAIN` is set) |
+| Outbound 443 | `dl.cloudsmith.io`, Let's Encrypt | Caddy apt-repo install + ACME certificate issuance |
+| Outbound 443 | `shielded-vote.vercel.app` | Helper heartbeat pulse (override via `SVOTE_PULSE_URL`, disable by setting it empty in `app.toml`) |
+| Outbound TCP 26656 | Seed validator's P2P | CometBFT peer handshake + gossip |
+| Inbound TCP 26656 | Public | CometBFT P2P — **must be reachable**; open it in your firewall/security group. Peers cannot connect if this is blocked |
+| Inbound TCP 80 + 443 | Public | Caddy (HTTPS reverse proxy for the REST API, used by iOS clients and admin UI). 80 is required for Let's Encrypt HTTP-01 challenges |
+| Local only | `127.0.0.1:1317` (REST), `127.0.0.1:26657` (RPC), `127.0.0.1:6060` (pprof) | Do not expose directly; Caddy proxies `1317` over TLS |
+
+If the validator will answer PIR queries itself, also open inbound 443 for the `nf-server` routes — see [vote-nullifier-pir's server-setup runbook](https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/runbooks/server-setup.md).
 
 ## Troubleshooting
 
