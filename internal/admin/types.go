@@ -21,7 +21,12 @@ type Config struct {
 	// Disable turns off the admin server entirely.
 	Disable bool `mapstructure:"disable"`
 
-	// ConfigURL is the GitHub Pages CDN URL for the voting-config JSON.
+	// ConfigURL is the voting-config JSON the admin polls every
+	// WatchdogInterval to feed the fleet-health watchdog (and re-serves the
+	// cached copy at GET /api/voting-config). It points at the same canonical
+	// CDN URL that wallets and join.sh fetch directly
+	// (valargroup.github.io/token-holder-voting-config/voting-config.json) —
+	// override only for staging mirrors or fork testing.
 	ConfigURL string `mapstructure:"config_url"`
 
 	// WatchdogInterval is how often the fleet health watchdog probes all

@@ -86,13 +86,16 @@ const adminConfigTemplate = `
 
 [admin]
 
-# When true, disables voting-config CDN proxy and pending-validator endpoints.
+# When true, disables the join-queue API (register-validator, pending-validators,
+# server-heartbeat), the watchdog, and the cached /api/voting-config endpoint.
 # Default true so only the designated admin host runs the join-queue SQLite DB.
 # Enable (false) only on the node that serves the admin UI: production primary
 # (SVOTE_ADMIN_DISABLE=false in init.sh / reset workflow), or val1 from init_multi.sh.
 disable = true
 
-# GitHub Pages URL for voting-config.json (wallet / operator discovery).
+# Voting-config JSON polled by the admin watchdog (and re-served on
+# GET /api/voting-config as a cached copy). Same canonical CDN URL that
+# wallets and join.sh fetch directly — override only for staging mirrors.
 config_url = "https://valargroup.github.io/token-holder-voting-config/voting-config.json"
 
 # How often to probe vote_servers and pir_endpoints (0 = disabled).

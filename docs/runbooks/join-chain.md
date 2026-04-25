@@ -49,12 +49,11 @@ See [TLS / reverse proxy](#tls--reverse-proxy) for the Caddy layout `join.sh` in
 | Direction | Destination | Purpose |
 |-----------|-------------|---------|
 | Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `join-loop.sh` fallback |
-| Outbound 443 | `valargroup.github.io` | `token-holder-voting-config/voting-config.json` (seed-peer discovery) |
-| Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` and `POST /api/register-validator` |
-| Outbound 443 | `vote-chain-primary.valargroup.org` | Fallback `/api/voting-config` when the CDN is unreachable (override via `DEFAULT_PRIMARY_API_BASE`) |
+| Outbound 443 | `valargroup.github.io` | [`token-holder-voting-config/voting-config.json`](https://github.com/valargroup/token-holder-voting-config) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
+| Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue) and `POST /api/server-heartbeat` (helper liveness). Override via `SVOTE_ADMIN_URL` / `DEFAULT_ADMIN_API_BASE`. |
+| Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` (P2P seed) |
 | Outbound 443 | `ifconfig.me` | Public-IP auto-detection (only when neither `--domain` nor `SVOTE_DOMAIN` is set) |
 | Outbound 443 | `dl.cloudsmith.io`, Let's Encrypt | Caddy apt-repo install + ACME certificate issuance |
-| Outbound 443 | `shielded-vote.vercel.app` | Helper heartbeat pulse (override via `SVOTE_PULSE_URL`, disable by setting it empty in `app.toml`) |
 | Outbound TCP 26656 | Seed validator's P2P | CometBFT peer handshake + gossip |
 | Inbound TCP 26656 | Public | CometBFT P2P — **must be reachable**; open it in your firewall/security group. Peers cannot connect if this is blocked |
 | Inbound TCP 80 + 443 | Public | Caddy (HTTPS reverse proxy for the REST API, used by iOS clients and admin UI). 80 is required for Let's Encrypt HTTP-01 challenges |
@@ -133,7 +132,7 @@ Funding happens off-loop: an existing vote manager (any member of the any-of-N v
 **Operator checklist while waiting:**
 
 - Confirm the loop is alive with `systemctl is-active svoted-join` (or `pgrep -f join-loop.sh` on macOS).
-- Verify the admin UI at the seed node's public URL (`https://<seed>/`, or `https://shielded-vote.vercel.app/` if configured) shows your moniker and operator address in the **Validators → Join queue** list. `last_seen_at` should advance by ~30 s each iteration (`curl "${SVOTE_ADMIN_URL%/}/api/pending-validators" | jq`).
+- Verify the admin UI at the admin host's public URL (`${SVOTE_ADMIN_URL}/`) shows your moniker and operator address in the **Validators → Join queue** list. `last_seen_at` should advance by ~30 s each iteration (`curl "${SVOTE_ADMIN_URL%/}/api/pending-validators" | jq`).
 - After bonding, open a PR against [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) to add your URL to `vote_servers[]` so iOS clients discover you. The suggested JSON entry is printed on the final line of `join.sh`.
 
 ## Smoke test
@@ -198,9 +197,9 @@ launchctl bootout   gui/$(id -u)/com.shielded-vote.join           # stop join lo
 
 ### Helper heartbeat and admin UI
 
-Each validator POSTs periodic pulses to `pulse_url` with its height + last-seen timestamp. The default target is the public dashboard at [shielded-vote.vercel.app](https://shielded-vote.vercel.app/); override via `SVOTE_PULSE_URL` or by editing `[helper] pulse_url` in `app.toml`. Leave empty to disable.
+Each validator POSTs a signed registration to `${admin_url}/api/register-validator` on startup, then a heartbeat to `${admin_url}/api/server-heartbeat` every 2 hours. `admin_url` defaults to `SVOTE_ADMIN_URL` (the admin host the join script discovered through). Edit `[helper] admin_url` in `app.toml` to retarget; leave empty to disable the heartbeat entirely. The pulse only runs once `helper_url` (this node's public URL) is also set.
 
-The primary validator serves the admin UI at its public HTTPS endpoint (`https://<primary>/`). The Validators page lists every bonded validator and every pending join request, with the operator address, moniker, last heartbeat, and bonding state. Joining operators watch this page to confirm their registration landed and to coordinate funding with the vote-manager.
+The primary validator serves the admin UI at its public HTTPS endpoint (`${SVOTE_ADMIN_URL}/`). The Validators page lists every bonded validator and every pending join request, with the operator address, moniker, last heartbeat, and bonding state. Joining operators watch this page to confirm their registration landed and to coordinate funding with the vote-manager.
 
 Sentry is not shipped in `svoted` itself; add if your ops playbook requires it. For structural observability, see [observability.md](../observability.md).
 
@@ -216,7 +215,7 @@ Sentry is not shipped in `svoted` itself; add if your ops playbook requires it. 
 | `process_interval` | `5` | Seconds between share-processing ticks. |
 | `chain_api_port` | `1317` | REST port the helper submits `MsgRevealShare` to. |
 | `max_concurrent_proofs` | `2` | Parallel proof goroutines (~500 MB each). |
-| `pulse_url` | `https://shielded-vote.vercel.app` | Heartbeat target; empty disables. |
+| `admin_url` | `${SVOTE_ADMIN_URL}` | Admin server base for `POST /api/register-validator` and `POST /api/server-heartbeat`. Empty disables the heartbeat. Legacy key `pulse_url` is still read as a fallback. |
 | `helper_url` | `https://<SVOTE_DOMAIN>` | This host's public URL as seen by clients; empty disables the heartbeat. |
 
 See [deploy-setup.md § Helper server configuration](../deploy-setup.md#helper-server-configuration) for the production reference. `[admin]` and the admin UI are disabled by default for joining validators; only the primary runs them.
@@ -330,10 +329,11 @@ sudo apt-get update && sudo apt-get install -y curl jq ca-certificates
    export PATH="$INSTALL_DIR:$PATH"
    ```
 
-2. **Discover the network** and capture the seed peer:
+2. **Discover the network** and capture the seed peer. The voting-config payload lives in [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) (GitHub Pages CDN) — same source wallets use; override `VOTING_CONFIG_URL` for staging mirrors:
 
    ```bash
-   VOTING_CONFIG=$(curl -fsSL https://valargroup.github.io/token-holder-voting-config/voting-config.json)
+   VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://valargroup.github.io/token-holder-voting-config/voting-config.json}"
+   VOTING_CONFIG=$(curl -fsSL "$VOTING_CONFIG_URL")
    SEED_URL=$(echo "$VOTING_CONFIG" | jq -r '.vote_servers[0].url')
 
    NODE_INFO=$(curl -fsSL "$SEED_URL/cosmos/base/tendermint/v1beta1/node_info")
@@ -401,13 +401,10 @@ All variables are read from the environment by `join.sh`, `join-loop.sh`, or the
 | `SVOTE_LOCAL_BINARIES` | `0` | When `1` and both binaries are on `$PATH`, skip the download. Used by source developers with `mise run build:install`. |
 | `SVOTE_SKIP_CADDY` | `0` | `1` skips Caddy install + config. Use when TLS is handled externally. |
 | `SVOTE_SKIP_SERVICE` | `0` | `1` skips service install and the sync wait — node is initialized but not started. Useful for Docker smoke tests / CI. |
-| `VOTING_CONFIG_URL` | — | If set, fetch `voting-config` from `${VOTING_CONFIG_URL}/api/voting-config` instead of the CDN → primary bootstrap. |
-| `SVOTE_ADMIN_URL` | first `vote_servers[].url` | Base for `POST /api/register-validator`. |
-| `SVOTE_PULSE_URL` | `VOTING_CONFIG_URL` if set, else `https://shielded-vote.vercel.app` | Helper heartbeat target; written into `app.toml [helper] pulse_url`. |
+| `VOTING_CONFIG_URL` | `https://valargroup.github.io/token-holder-voting-config/voting-config.json` | Canonical voting-config (same payload wallets fetch). Override for staging mirrors or fork testing. |
+| `SVOTE_ADMIN_URL` | `${DEFAULT_ADMIN_API_BASE}` | Admin server base URL. Used for `POST /api/register-validator` (join queue) and written into `app.toml [helper] admin_url` for the heartbeat. Not used for voting-config discovery — that comes from `VOTING_CONFIG_URL`. |
 | `SVOTE_JOIN_LOOP_SCRIPT` | bundled path → `${DO_BASE}/join-loop.sh` fallback | Override path to `join-loop.sh`; useful when `join.sh` is piped via curl and the repo's `scripts/join-loop.sh` isn't reachable. |
-| `CDN_VOTING_CONFIG_JSON` | `https://valargroup.github.io/token-holder-voting-config/voting-config.json` | Primary CDN URL for discovery. |
-| `DEFAULT_PRIMARY_API_BASE` | `https://vote-chain-primary.valargroup.org` | Fallback for `/api/voting-config` if the CDN fails. |
-| `DEFAULT_PULSE_URL` | `https://shielded-vote.vercel.app` | Ultimate fallback for `pulse_url`. |
+| `DEFAULT_ADMIN_API_BASE` | `https://vote-chain-primary.valargroup.org` | Default value for `SVOTE_ADMIN_URL` when not explicitly set. |
 
 #### `join-loop.sh`
 
@@ -431,9 +428,10 @@ Read from `/etc/default/svoted-join` (Linux) or the launchd `EnvironmentVariable
 | `GET /cosmos/base/tendermint/v1beta1/node_info` | Ops / peers | Chain ID, node ID, P2P listen addr. Used by the seed discovery step in `join.sh`. |
 | `GET /cosmos/staking/v1beta1/validators` | Ops | Validator set + bond status. |
 | `GET /cosmos/bank/v1beta1/balances/{addr}` | Ops | Account balance; `svoted-join` hits this to detect funding. |
-| `POST /api/register-validator` | `svoted-join` | Pending-join queue (admin module; primary only). |
+| `POST /api/register-validator` | `svoted-join`, helper heartbeat | Pending-join queue (admin module; primary only). |
+| `POST /api/server-heartbeat` | helper heartbeat | Bonded-validator liveness pulse (primary only). |
 | `GET /api/pending-validators` | Admin UI / join scripts | Join-queue view (primary only). |
-| `GET /api/voting-config` | `join.sh` | CDN-proxied discovery fallback (primary only). |
+| `GET /api/voting-config` | Admin watchdog | Cached copy of the GitHub Pages voting-config the admin polls for the watchdog. **Not** the canonical client path — wallets and `join.sh` fetch the same payload directly from [valargroup.github.io/token-holder-voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json). |
 
 ## Troubleshooting
 
@@ -441,13 +439,13 @@ Start with `journalctl -u svoted -n 200 --no-pager` / `tail -n 200 ~/.svoted/nod
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| `catching_up` stays `true` for >10 min, log shows "Dialing" / no peers connecting | Inbound 26656 blocked, or seed peer is unreachable | Verify firewall lets in 26656 (`ss -ltn | grep 26656`, then test from off-host); check `persistent_peers` in `~/.svoted/config/config.toml`; confirm the seed from `voting-config.json` is up by hitting its `/cosmos/base/tendermint/v1beta1/node_info`. |
+| `catching_up` stays `true` for >10 min, log shows "Dialing" / no peers connecting | Inbound 26656 blocked, or seed peer is unreachable | Verify firewall lets in 26656 (`ss -ltn | grep 26656`, then test from off-host); check `persistent_peers` in `~/.svoted/config/config.toml`; confirm the seed listed under `vote_servers[0].url` in [the voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json) is up by hitting its `/cosmos/base/tendermint/v1beta1/node_info`. |
 | `svoted` exits with "error initializing application: genesis doc mismatch" | Local `genesis.json` doesn't match the live chain | `rm -rf ~/.svoted && join.sh` (pulls canonical genesis fresh); or `curl -fsSL -o ~/.svoted/config/genesis.json https://vote.fra1.digitaloceanspaces.com/genesis.json && svoted genesis validate-genesis --home ~/.svoted`. |
 | `join.log` repeatedly shows `balance=` (empty) | Not yet funded | Wait. The vote-manager funds from the admin UI join queue. Ping the operator running the primary and confirm your address is listed. |
 | `create-val-tx` fails with `key not found: validator` | Keyring backend mismatch (os vs test) | `svoted-join` always uses `--keyring-backend test`. Confirm `svoted keys show validator -a --keyring-backend test --home ~/.svoted` returns the expected address. If you re-keyed manually, re-run `svoted init-validator-keys`. |
 | `create-val-tx` fails with `account does not exist on chain` | Tx raced funding; balance hasn't settled yet | Retry — the loop re-runs every 30 s. If it persists, check `svoted query bank balances $VALIDATOR_ADDR` directly. |
 | Caddy fails to obtain a certificate (`acme: error 403` or similar) | DNS doesn't resolve to this host, or 80/443 blocked | `dig <SVOTE_DOMAIN>` against a public resolver; ensure inbound 80 AND 443 are open. For automatic sslip.io, confirm `curl -fsSL https://ifconfig.me` returns your actual public IP. |
-| `ERROR: No vote_servers[0].url in voting-config` | Upstream config is empty (usually during/after a chain reset) | Wait ~1 h or set `VOTING_CONFIG_URL` to a host you know is up (e.g. the primary's REST URL); `/api/voting-config` on the primary returns the current snapshot. |
+| `ERROR: No vote_servers[0].url in voting-config` | The published voting-config has an empty `vote_servers` list (usually during/after a chain reset) | Wait ~1 h, or set `VOTING_CONFIG_URL` to a mirror with a populated list and re-run. The fix is in [valargroup/token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) — a maintainer needs to add at least one server URL. |
 | `ERROR: Could not fetch version from …/version.txt` | Outbound 443 to DO Spaces blocked | Test `curl -I https://vote.fra1.digitaloceanspaces.com/version.txt`; fix egress; consider `SVOTE_LOCAL_BINARIES=1` if you already have pinned binaries on `$PATH`. |
 | Checksum mismatch on tarball | Corrupt download or MITM | Retry once; if it keeps happening, pull from the GitHub Release for the same tag and compare against `SHA256SUMS`. |
 | `svoted` SIGILLs immediately at startup | Binary/arch mismatch | `file ~/.local/bin/svoted` — must match `uname -m`. Re-run `join.sh` so it picks the right `PLATFORM`. |
