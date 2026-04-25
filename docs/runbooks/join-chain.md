@@ -2,7 +2,7 @@
 
 ## Overview
 
-Shielded-Vote is a Cosmos SDK application chain for private on-chain voting. The chain launches with a single genesis validator; everyone else joins post-genesis via `MsgCreateValidatorWithPallasKey`, which atomically creates the validator *and* registers its Pallas key for the EA-key ceremony. Raw `MsgCreateValidator` is blocked in the ante handler for live transactions — see the [protocol README](../../README.md#protocol-documentation) for the full rules.
+Shielded-Vote is a Cosmos SDK application chain for private on-chain voting. The chain launches with a single genesis validator. Everyone else joins post-genesis via a custom message `MsgCreateValidatorWithPallasKey`, which atomically creates the validator *and* registers its Pallas key for the EA-key ceremony. See the [protocol README](../../README.md#protocol-documentation) for the full rules.
 
 This runbook covers the operator side: standing up an `svoted` host that syncs with the live chain, reaches bonded status, and exposes a TLS-fronted REST API that iOS clients and peers can reach. A validator is a single `svoted` process plus a `svoted-join` bonding loop and a Caddy reverse proxy on the same host; see [Recommended hardware](#recommended-hardware) for the target SKU.
 
@@ -10,8 +10,7 @@ This runbook covers the operator side: standing up an `svoted` host that syncs w
 
 - **Operators** joining the existing `svote-1` chain as a new validator. Use the one-liner below and follow the runbook as written.
 - **Custom-layout / non-Linux**: see [Manual install](#manual-install-no-joinsh).
-- **Genesis bootstrap** (first validator, builds `genesis.json` from scratch): use [validator-setup.md](../validator-setup.md) instead — that flow runs `scripts/init.sh`, generates the `VM_PRIVKEYS` vote-manager set, and is intentionally out of scope here.
-- **First-party DO Droplet deployment** (primary + secondary hosts provisioned via Terraform + `sdk-chain-reset.yml`): see [production-setup.md](../production-setup.md) and [deploy-setup.md](../deploy-setup.md). Those hosts use `install-release.sh` + `reset-join.sh`, not `join.sh`.
+- **Genesis primary bootstrap** (standing up the first validator and building `genesis.json` from scratch: use [genesis-setup.md](genesis-setup.md) instead — that flow is intentionally out of scope here.
 - **Developers** iterating from a source checkout (`mise run install`, `mise run chain:init`, `SVOTE_LOCAL_BINARIES=1 ./join.sh`): see the repo [README](../../README.md) and `mise tasks`.
 
 `join.sh` drives the joining flow in two phases:
@@ -580,7 +579,7 @@ For deeper investigation, raise `svoted` log verbosity (`--log_level debug` in t
 ## See also
 
 - [vote-nullifier-pir runbooks/server-setup.md](https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/runbooks/server-setup.md) — running `nf-server`, which `svoted` queries via `SVOTE_PIR_URL` for nullifier non-membership proofs. Validators can either co-locate `nf-server` or point at a shared one.
-- [validator-setup.md](../validator-setup.md) — genesis-validator bootstrap (`svoted init validator`, `scripts/init.sh`, `gentx`). Different flow; do not mix with `join.sh`.
+- [genesis-setup.md](genesis-setup.md) — genesis-primary bootstrap (CI-driven `sdk-chain-reset.yml` + `scripts/init.sh`). Different flow; do not mix with `join.sh`.
 - [production-setup.md](../production-setup.md) — Terraform + CI-driven DO Droplet deployment for the primary / secondary pair.
 - [deploy-setup.md](../deploy-setup.md) — CI/CD workflows, GitHub secrets, helper/admin configuration reference.
 - [observability.md](../observability.md) — logging and metrics conventions across the fleet.
