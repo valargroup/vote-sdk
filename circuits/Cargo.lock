@@ -962,7 +962,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/zcash_voting.git?branch=valar%2Forchard-0.13#9ea83d4c62b9a6773de03ccb2df29a88497cceac"
+source = "git+https://github.com/valargroup/zcash_voting.git?branch=valar%2Forchard-0.13#214163da9c204b1d5c45c0a96fc9d88b45a38315"
 dependencies = [
  "anyhow",
  "ff",
@@ -978,7 +978,7 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.2.0"
-source = "git+https://github.com/valargroup/voting-circuits.git?branch=valar%2Forchard-0.13#ec6d3adbe6928b5a52f3f0306dd3bcf7f1a8f514"
+source = "git+https://github.com/valargroup/voting-circuits.git?branch=valar%2Forchard-0.13#84726847c17add95cb55390c3d649b779adb0ebe"
 dependencies = [
  "blake2b_simd",
  "ff",
