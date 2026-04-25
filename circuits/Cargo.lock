@@ -545,6 +545,41 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
+name = "orchard"
+version = "0.13.0"
+source = "git+https://github.com/valargroup/orchard.git?branch=valar%2F0.13-spend-auth-g#7fa213ae7057eb959e5aba4a4195d6ca2e26b252"
+dependencies = [
+ "aes",
+ "bitvec",
+ "blake2b_simd",
+ "corez",
+ "ff",
+ "fpe",
+ "getset",
+ "group",
+ "halo2_gadgets 0.4.0",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "hex",
+ "incrementalmerkletree",
+ "lazy_static",
+ "memuse",
+ "nonempty",
+ "pasta_curves",
+ "rand",
+ "rand_core",
+ "reddsa",
+ "serde",
+ "sinsemilla",
+ "subtle",
+ "tracing",
+ "visibility",
+ "zcash_note_encryption",
+ "zcash_spec",
+ "zip32",
+]
+
+[[package]]
 name = "pasta_curves"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -766,12 +801,12 @@ dependencies = [
  "hex",
  "imt-tree 0.1.0 (git+https://github.com/valargroup/vote-nullifier-pir.git)",
  "incrementalmerkletree",
+ "orchard",
  "pasta_curves",
  "rand",
  "rand_core",
  "reddsa",
  "serde_json",
- "valar-orchard",
  "vote-commitment-tree",
  "voting-circuits",
 ]
@@ -908,42 +943,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "valar-orchard"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0415fc8aba029019c974bb0b0cc47e0bca53a27fdc2da263a2e6c99c9b3727f8"
-dependencies = [
- "aes",
- "bitvec",
- "blake2b_simd",
- "corez",
- "ff",
- "fpe",
- "getset",
- "group",
- "halo2_gadgets 0.4.0",
- "halo2_poseidon",
- "halo2_proofs",
- "hex",
- "incrementalmerkletree",
- "lazy_static",
- "memuse",
- "nonempty",
- "pasta_curves",
- "rand",
- "rand_core",
- "reddsa",
- "serde",
- "sinsemilla",
- "subtle",
- "tracing",
- "visibility",
- "zcash_note_encryption",
- "zcash_spec",
- "zip32",
-]
-
-[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -963,8 +962,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d152295bc010c024dddd310c8a58ffbd6b1fdb547d557ff09c628bc1cc614ac"
+source = "git+https://github.com/valargroup/zcash_voting.git?branch=valar%2Forchard-0.13#9ea83d4c62b9a6773de03ccb2df29a88497cceac"
 dependencies = [
  "anyhow",
  "ff",
@@ -980,8 +978,7 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ce96b6c906e2df417f66e0bbef5d61ec0931d03e5951e7e36c5e292b17b40b"
+source = "git+https://github.com/valargroup/voting-circuits.git?branch=valar%2Forchard-0.13#ec6d3adbe6928b5a52f3f0306dd3bcf7f1a8f514"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -991,10 +988,10 @@ dependencies = [
  "halo2_proofs",
  "incrementalmerkletree",
  "lazy_static",
+ "orchard",
  "pasta_curves",
  "rand",
  "sinsemilla",
- "valar-orchard",
 ]
 
 [[package]]
