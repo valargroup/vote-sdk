@@ -14,7 +14,7 @@ group = "0.13"
 rand_core = { version = "0.6", features = ["getrandom"] }
 reddsa = { version = "0.5", default-features = false }
 vote-commitment-tree = "0.1.0"
-orchard = { version = "0.12.0", package = "valar-orchard" }
+orchard = { version = "0.13", features = ["unstable-voting-circuits"] }
 voting-circuits = { version = "0.2.0", features = ["share-reveal"] }
 imt-tree = { git = "https://github.com/valargroup/vote-nullifier-pir.git" }
 incrementalmerkletree = "0.8"
@@ -32,3 +32,12 @@ blake2b_simd = "1"
 serde_json = "1"
 
 [workspace]
+
+# Redirect orchard / voting-circuits / vote-commitment-tree to the migration
+# branches so this crate, the inner zcash_voting crate, and the e2e-tests crate
+# all converge on a single set of source revisions. Mirrors the patches in
+# `zcash_voting/Cargo.toml` and `e2e-tests/Cargo.toml`.
+[patch.crates-io]
+orchard = { git = "https://github.com/valargroup/orchard.git", branch = "valar/0.13-spend-auth-g" }
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", branch = "valar/orchard-0.13" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", branch = "valar/orchard-0.13" }
