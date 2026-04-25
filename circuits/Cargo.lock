@@ -527,7 +527,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 [[package]]
 name = "orchard"
 version = "0.13.0"
-source = "git+https://github.com/valargroup/orchard.git?branch=valar%2F0.13-spend-auth-g#7fa213ae7057eb959e5aba4a4195d6ca2e26b252"
+source = "git+https://github.com/valargroup/orchard.git?rev=c26a6ec6860cc62bb15d208c3d790dfb616bfbe7#c26a6ec6860cc62bb15d208c3d790dfb616bfbe7"
 dependencies = [
  "aes",
  "bitvec",
@@ -942,7 +942,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/zcash_voting.git?branch=valar%2Forchard-0.13#63eae822bee7aa5d294b0e1a518e86e43ffcd12c"
+source = "git+https://github.com/valargroup/zcash_voting.git?rev=d351e9dc13baa623b95883e0815b194358604c54#d351e9dc13baa623b95883e0815b194358604c54"
 dependencies = [
  "anyhow",
  "ff",
@@ -958,7 +958,7 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.2.0"
-source = "git+https://github.com/valargroup/voting-circuits.git?branch=valar%2Forchard-0.13#84726847c17add95cb55390c3d649b779adb0ebe"
+source = "git+https://github.com/valargroup/voting-circuits.git?rev=66777e27e10970c38dc1ebb93d8c7715a5b984c7#66777e27e10970c38dc1ebb93d8c7715a5b984c7"
 dependencies = [
  "blake2b_simd",
  "ff",

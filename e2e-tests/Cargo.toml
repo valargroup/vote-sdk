@@ -56,11 +56,11 @@ rand_chacha = "0.3"
 # matching valargroup/zcash_voting branch; librustzcash crates pin to upstream
 # zcash/main HEAD now that all governance PRs are merged.
 [patch.crates-io]
-orchard = { git = "https://github.com/valargroup/orchard.git", branch = "valar/0.13-spend-auth-g" }
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", branch = "valar/orchard-0.13" }
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", branch = "valar/orchard-0.13" }
-vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting.git", branch = "valar/orchard-0.13" }
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", branch = "valar/orchard-0.13" }
+orchard = { git = "https://github.com/valargroup/orchard.git", rev = "c26a6ec6860cc62bb15d208c3d790dfb616bfbe7" }
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "66777e27e10970c38dc1ebb93d8c7715a5b984c7" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "d351e9dc13baa623b95883e0815b194358604c54" }
+vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting.git", rev = "d351e9dc13baa623b95883e0815b194358604c54" }
+zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", rev = "d351e9dc13baa623b95883e0815b194358604c54" }
 pczt = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
 zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
 zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }

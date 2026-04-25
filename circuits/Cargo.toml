@@ -38,6 +38,6 @@ serde_json = "1"
 # all converge on a single set of source revisions. Mirrors the patches in
 # `zcash_voting/Cargo.toml` and `e2e-tests/Cargo.toml`.
 [patch.crates-io]
-orchard = { git = "https://github.com/valargroup/orchard.git", branch = "valar/0.13-spend-auth-g" }
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", branch = "valar/orchard-0.13" }
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", branch = "valar/orchard-0.13" }
+orchard = { git = "https://github.com/valargroup/orchard.git", rev = "c26a6ec6860cc62bb15d208c3d790dfb616bfbe7" }
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "66777e27e10970c38dc1ebb93d8c7715a5b984c7" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "d351e9dc13baa623b95883e0815b194358604c54" }
