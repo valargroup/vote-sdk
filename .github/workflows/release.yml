@@ -26,7 +26,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # ubuntu-22.04 (glibc 2.35): linux-amd64 must not be built on 24.04+ or
+          # binaries require GLIBC_2.39+ and fail on common 22.04 LTS hosts / DO images.
+          - os: ubuntu-22.04
             platform: linux-amd64
           - os: ubuntu-24.04-arm
             platform: linux-arm64
