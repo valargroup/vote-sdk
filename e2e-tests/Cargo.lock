@@ -436,6 +436,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "corez"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4df6f98652d30167eaeea34d77b730e07c8caba6df17bd4551842b9b8da01deb"
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -597,7 +603,7 @@ dependencies = [
  "chacha20poly1305",
  "ff",
  "group",
- "halo2_gadgets",
+ "halo2_gadgets 0.3.1",
  "hex",
  "incrementalmerkletree",
  "orchard",
@@ -610,9 +616,9 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "shielded-vote-circuits",
- "vote-commitment-tree",
+ "vote-commitment-tree 0.1.0 (git+https://github.com/valargroup/zcash_voting.git)",
  "vote-commitment-tree-client",
- "voting-circuits",
+ "voting-circuits 0.1.0",
  "zcash_voting",
 ]
 
@@ -978,6 +984,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "halo2_gadgets"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45824ce0dd12e91ec0c68ebae2a7ed8ae19b70946624c849add59f1d1a62a143"
+dependencies = [
+ "arrayvec",
+ "bitvec",
+ "ff",
+ "group",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "lazy_static",
+ "pasta_curves",
+ "rand",
+ "sinsemilla",
+ "subtle",
+ "uint",
+]
+
+[[package]]
 name = "halo2_legacy_pdqsort"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1318,7 +1344,7 @@ checksum = "7d10acb863735c6c82c0c79e8752696096a86eb4d1e2fe0005ded4fae066297e"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets",
+ "halo2_gadgets 0.3.1",
  "hex",
  "pasta_curves",
  "rayon",
@@ -1331,7 +1357,7 @@ source = "git+https://github.com/valargroup/vote-nullifier-pir.git#cb71caf89120e
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets",
+ "halo2_gadgets 0.3.1",
  "hex",
  "pasta_curves",
  "rayon",
@@ -1716,7 +1742,7 @@ dependencies = [
  "fpe",
  "getset",
  "group",
- "halo2_gadgets",
+ "halo2_gadgets 0.3.1",
  "halo2_poseidon",
  "halo2_proofs",
  "hex",
@@ -2463,17 +2489,17 @@ version = "0.1.0"
 dependencies = [
  "ff",
  "group",
- "halo2_gadgets",
+ "halo2_gadgets 0.4.0",
  "halo2_proofs",
  "hex",
  "imt-tree 0.1.0 (git+https://github.com/valargroup/vote-nullifier-pir.git)",
  "incrementalmerkletree",
- "orchard",
  "pasta_curves",
  "rand_core",
  "reddsa",
- "vote-commitment-tree",
- "voting-circuits",
+ "valar-orchard",
+ "vote-commitment-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "voting-circuits 0.2.0",
 ]
 
 [[package]]
@@ -2972,6 +2998,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
+name = "valar-orchard"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0415fc8aba029019c974bb0b0cc47e0bca53a27fdc2da263a2e6c99c9b3727f8"
+dependencies = [
+ "aes",
+ "bitvec",
+ "blake2b_simd",
+ "corez",
+ "ff",
+ "fpe",
+ "getset",
+ "group",
+ "halo2_gadgets 0.4.0",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "hex",
+ "incrementalmerkletree",
+ "lazy_static",
+ "memuse",
+ "nonempty",
+ "pasta_curves",
+ "rand",
+ "rand_core",
+ "reddsa",
+ "serde",
+ "sinsemilla",
+ "subtle",
+ "tracing",
+ "visibility",
+ "zcash_note_encryption",
+ "zcash_spec",
+ "zip32",
+]
+
+[[package]]
 name = "valar-spiral-rs"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3037,11 +3099,28 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d152295bc010c024dddd310c8a58ffbd6b1fdb547d557ff09c628bc1cc614ac"
+dependencies = [
+ "anyhow",
+ "ff",
+ "halo2_gadgets 0.3.1",
+ "imt-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "incrementalmerkletree",
+ "lazy_static",
+ "libc",
+ "pasta_curves",
+ "shardtree",
+]
+
+[[package]]
+name = "vote-commitment-tree"
+version = "0.1.0"
 source = "git+https://github.com/valargroup/zcash_voting.git#eb5ac7860847cb278506abf60abe9619b153fa26"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets",
+ "halo2_gadgets 0.3.1",
  "imt-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "incrementalmerkletree",
  "lazy_static",
@@ -3064,7 +3143,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "vote-commitment-tree",
+ "vote-commitment-tree 0.1.0 (git+https://github.com/valargroup/zcash_voting.git)",
 ]
 
 [[package]]
@@ -3075,7 +3154,7 @@ dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "halo2_gadgets",
+ "halo2_gadgets 0.3.1",
  "halo2_poseidon",
  "halo2_proofs",
  "incrementalmerkletree",
@@ -3084,6 +3163,26 @@ dependencies = [
  "pasta_curves",
  "rand",
  "sinsemilla",
+]
+
+[[package]]
+name = "voting-circuits"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92ce96b6c906e2df417f66e0bbef5d61ec0931d03e5951e7e36c5e292b17b40b"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "group",
+ "halo2_gadgets 0.4.0",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "incrementalmerkletree",
+ "lazy_static",
+ "pasta_curves",
+ "rand",
+ "sinsemilla",
+ "valar-orchard",
 ]
 
 [[package]]
@@ -3631,7 +3730,7 @@ dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "halo2_gadgets",
+ "halo2_gadgets 0.3.1",
  "halo2_proofs",
  "hex",
  "incrementalmerkletree",
@@ -3646,9 +3745,9 @@ dependencies = [
  "serde_json",
  "subtle",
  "thiserror 2.0.18",
- "vote-commitment-tree",
+ "vote-commitment-tree 0.1.0 (git+https://github.com/valargroup/zcash_voting.git)",
  "vote-commitment-tree-client",
- "voting-circuits",
+ "voting-circuits 0.1.0",
  "zcash_keys",
  "zcash_primitives",
  "zcash_protocol",
