@@ -295,26 +295,6 @@ dependencies = [
 
 [[package]]
 name = "halo2_gadgets"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73a5e510d58a07d8ed238a5a8a436fe6c2c79e1bb2611f62688bc65007b4e6e7"
-dependencies = [
- "arrayvec",
- "bitvec",
- "ff",
- "group",
- "halo2_poseidon",
- "halo2_proofs",
- "lazy_static",
- "pasta_curves",
- "rand",
- "sinsemilla",
- "subtle",
- "uint",
-]
-
-[[package]]
-name = "halo2_gadgets"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45824ce0dd12e91ec0c68ebae2a7ed8ae19b70946624c849add59f1d1a62a143"
@@ -382,13 +362,13 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "imt-tree"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d10acb863735c6c82c0c79e8752696096a86eb4d1e2fe0005ded4fae066297e"
+checksum = "c378a3c5c44b985233906c966bd82a4f775a83aa4e1bde1635961c2eb8673d7b"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets 0.3.1",
+ "halo2_gadgets",
  "hex",
  "pasta_curves",
  "rayon",
@@ -396,12 +376,12 @@ dependencies = [
 
 [[package]]
 name = "imt-tree"
-version = "0.1.0"
-source = "git+https://github.com/valargroup/vote-nullifier-pir.git#334626177daed161bd0bbcdee008cddc244b5e37"
+version = "0.1.1"
+source = "git+https://github.com/valargroup/vote-nullifier-pir.git#22f15a9078173494d13212c92dfe5a20c24bdffc"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets 0.3.1",
+ "halo2_gadgets",
  "hex",
  "pasta_curves",
  "rayon",
@@ -543,6 +523,41 @@ name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
+
+[[package]]
+name = "orchard"
+version = "0.13.0"
+source = "git+https://github.com/valargroup/orchard.git?rev=c26a6ec6860cc62bb15d208c3d790dfb616bfbe7#c26a6ec6860cc62bb15d208c3d790dfb616bfbe7"
+dependencies = [
+ "aes",
+ "bitvec",
+ "blake2b_simd",
+ "corez",
+ "ff",
+ "fpe",
+ "getset",
+ "group",
+ "halo2_gadgets",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "hex",
+ "incrementalmerkletree",
+ "lazy_static",
+ "memuse",
+ "nonempty",
+ "pasta_curves",
+ "rand",
+ "rand_core",
+ "reddsa",
+ "serde",
+ "sinsemilla",
+ "subtle",
+ "tracing",
+ "visibility",
+ "zcash_note_encryption",
+ "zcash_spec",
+ "zip32",
+]
 
 [[package]]
 name = "pasta_curves"
@@ -761,17 +776,17 @@ dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "halo2_gadgets 0.4.0",
+ "halo2_gadgets",
  "halo2_proofs",
  "hex",
- "imt-tree 0.1.0 (git+https://github.com/valargroup/vote-nullifier-pir.git)",
+ "imt-tree 0.1.1 (git+https://github.com/valargroup/vote-nullifier-pir.git)",
  "incrementalmerkletree",
+ "orchard",
  "pasta_curves",
  "rand",
  "rand_core",
  "reddsa",
  "serde_json",
- "valar-orchard",
  "vote-commitment-tree",
  "voting-circuits",
 ]
@@ -908,42 +923,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "valar-orchard"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0415fc8aba029019c974bb0b0cc47e0bca53a27fdc2da263a2e6c99c9b3727f8"
-dependencies = [
- "aes",
- "bitvec",
- "blake2b_simd",
- "corez",
- "ff",
- "fpe",
- "getset",
- "group",
- "halo2_gadgets 0.4.0",
- "halo2_poseidon",
- "halo2_proofs",
- "hex",
- "incrementalmerkletree",
- "lazy_static",
- "memuse",
- "nonempty",
- "pasta_curves",
- "rand",
- "rand_core",
- "reddsa",
- "serde",
- "sinsemilla",
- "subtle",
- "tracing",
- "visibility",
- "zcash_note_encryption",
- "zcash_spec",
- "zip32",
-]
-
-[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -963,13 +942,12 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d152295bc010c024dddd310c8a58ffbd6b1fdb547d557ff09c628bc1cc614ac"
+source = "git+https://github.com/valargroup/zcash_voting.git?rev=d351e9dc13baa623b95883e0815b194358604c54#d351e9dc13baa623b95883e0815b194358604c54"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets 0.3.1",
- "imt-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "halo2_gadgets",
+ "imt-tree 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "incrementalmerkletree",
  "lazy_static",
  "libc",
@@ -980,21 +958,20 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ce96b6c906e2df417f66e0bbef5d61ec0931d03e5951e7e36c5e292b17b40b"
+source = "git+https://github.com/valargroup/voting-circuits.git?rev=66777e27e10970c38dc1ebb93d8c7715a5b984c7#66777e27e10970c38dc1ebb93d8c7715a5b984c7"
 dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "halo2_gadgets 0.4.0",
+ "halo2_gadgets",
  "halo2_poseidon",
  "halo2_proofs",
  "incrementalmerkletree",
  "lazy_static",
+ "orchard",
  "pasta_curves",
  "rand",
  "sinsemilla",
- "valar-orchard",
 ]
 
 [[package]]
