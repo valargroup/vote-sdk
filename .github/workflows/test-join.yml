@@ -108,13 +108,6 @@ jobs:
             echo "  FAIL  persistent_peers is empty"
             fail=1
           fi
-          # broadcast timeout patch.
-          if grep -q 'timeout_broadcast_tx_commit = "120s"' "${D}/config/config.toml"; then
-            echo "  OK  timeout_broadcast_tx_commit patched"
-          else
-            echo "  FAIL  timeout_broadcast_tx_commit not patched"
-            fail=1
-          fi
 
           echo "=== Checking app.toml contents ==="
           # REST API must be enabled.

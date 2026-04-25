@@ -285,9 +285,6 @@ CONFIG_TOML="${HOME_DIR}/config/config.toml"
 # Set persistent peers.
 sed -i.bak "s|persistent_peers = \"\"|persistent_peers = \"${PERSISTENT_PEERS}\"|" "${CONFIG_TOML}"
 
-# Increase broadcast timeout for ZKP verification (~30-60s).
-sed -i.bak 's/^timeout_broadcast_tx_commit = .*/timeout_broadcast_tx_commit = "120s"/' "${CONFIG_TOML}"
-
 rm -f "${CONFIG_TOML}.bak"
 
 # ─── Configure app.toml ──────────────────────────────────────────────────────

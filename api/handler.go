@@ -49,9 +49,10 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	if endpoint == "" {
 		endpoint = "http://localhost:26657"
 	}
-	// Allow long waits for broadcast_tx_sync when CheckTx is slow (e.g. ZKP ~30–60s).
-	// CometBFT RPC server must also have a large enough WriteTimeout (see initCometBFTConfig).
-	client := &http.Client{Timeout: 120 * time.Second}
+	// broadcast_tx_sync only blocks on CheckTx (ZKP verification is ~13ms; the
+	// 30-60s figure is client-side proof generation, not validator-side verify).
+	// 30s gives ample headroom over CometBFT's default 10s timeout_broadcast_tx_commit.
+	client := &http.Client{Timeout: 30 * time.Second}
 	return &Handler{
 		cometRPC: endpoint,
 		client:   client,

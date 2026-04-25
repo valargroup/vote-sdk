@@ -126,12 +126,6 @@ sed -i.bak 's|address = "localhost:9090"|address = "localhost:9190"|' "$APP_TOML
 sed -i.bak 's|address = "localhost:9091"|address = "localhost:9191"|' "$APP_TOML"
 rm -f "${APP_TOML}.bak"
 
-# Allow long CheckTx (ZKP verification ~30–60s). Default 10s closes the RPC connection
-# before the response, causing "EOF" at the API.
-CONFIG_TOML="$HOME_DIR/config/config.toml"
-sed -i.bak 's/^timeout_broadcast_tx_commit = .*/timeout_broadcast_tx_commit = "120s"/' "$CONFIG_TOML"
-rm -f "${CONFIG_TOML}.bak"
-
 # Generate Pallas keypair for ECIES (ceremony key distribution).
 # The secret key is used by PrepareProposal to decrypt the EA key share
 # and auto-inject MsgAckExecutiveAuthorityKey.

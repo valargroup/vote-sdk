@@ -57,7 +57,6 @@ APP_TOML="$JOINER_HOME/config/app.toml"
 sed -i.bak "s|laddr = \"tcp://0.0.0.0:26656\"|laddr = \"tcp://0.0.0.0:26756\"|" "$CONFIG_TOML"
 sed -i.bak "s|laddr = \"tcp://127.0.0.1:26657\"|laddr = \"tcp://127.0.0.1:26757\"|" "$CONFIG_TOML"
 sed -i.bak "s|pprof_laddr = \"localhost:6060\"|pprof_laddr = \"localhost:6070\"|" "$CONFIG_TOML"
-sed -i.bak 's/^timeout_broadcast_tx_commit = .*/timeout_broadcast_tx_commit = "120s"/' "$CONFIG_TOML"
 rm -f "${CONFIG_TOML}.bak"
 
 # Set persistent_peers to val1.
