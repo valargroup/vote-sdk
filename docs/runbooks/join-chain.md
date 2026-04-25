@@ -75,6 +75,8 @@ If you have a real DNS name pointed at this host, skip the auto-detected `sslip.
 curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --domain val.example.org
 ```
 
+**NOTE: Most users should use this one-line command to get started and not install anything manually**
+
 The installer prompts for a validator moniker unless `SVOTE_MONIKER` is set. See [Join lifecycle](#join-lifecycle) for the timeline from install to bonded, [Operating the service](#operating-the-service) for what gets installed on the host, and [Reference > Manual install](#manual-install-no-joinsh) for the equivalent manual steps.
 
 After install, operate the service with:
@@ -116,7 +118,7 @@ The loop in [scripts/join-loop.sh](../../scripts/join-loop.sh) runs forever unti
    ```bash
    create-val-tx --moniker "$MONIKER" --amount 10000000usvote --home "$SVOTE_HOME" --rpc-url tcp://localhost:26657
    ```
-   `create-val-tx` signs `MsgCreateValidatorWithPallasKey` (wire tag `0x09`) — the **only** message type that can create a validator post-genesis. Raw `MsgCreateValidator` is blocked by the ante handler.
+   `create-val-tx` signs `MsgCreateValidatorWithPallasKey` - the **only** message type that can create a validator post-genesis.
 4. **Sleep 30 s** and loop.
 
 The loop is deliberately quiet. It only writes three kinds of lines to `join.log`:
@@ -127,7 +129,7 @@ The loop is deliberately quiet. It only writes three kinds of lines to `join.log
 
 A healthy unfunded validator produces **only** the startup line.
 
-Funding happens off-loop: an existing vote manager (any member of the any-of-N vote-manager set) observes the pending registration in the admin UI and sends `usvote` via `MsgAuthorizedSend` — the only authorized transfer path on this chain. See the [MsgAuthorizedSend authorization rules](../../README.md#msgauthorizedsend-authorization-rules) in the README.
+Funding happens off-loop: an existing vote manager (any member of the any-of-N vote-manager set) observes the pending registration in the [admin UI](https://svote.valargroup.org/validator-join) and authorized the validator to join.
 
 **Operator checklist while waiting:**
 
@@ -298,7 +300,10 @@ The GitHub Release for the tag also mirrors the tarballs, so operators who want 
 
 ### Manual install (no `join.sh`)
 
-For custom layouts, non-Linux platforms, or when debugging the installer.
+
+**NOTE: Most users should use this one-line command to get started and not install anything manually. The manual install is provided for background on what happens under the hood**
+
+It is also useful for custom layouts, non-Linux platforms, or when debugging the installer.
 
 **Prerequisites:** `curl`, `jq`, and `sudo`. On minimal Ubuntu/Debian images install them first:
 
@@ -457,7 +462,5 @@ For deeper investigation, raise `svoted` log verbosity (`--log_level debug` in t
 
 - [vote-nullifier-pir runbooks/server-setup.md](https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/runbooks/server-setup.md) — running `nf-server`, which `svoted` queries via `SVOTE_PIR_URL` for nullifier non-membership proofs. Validators can either co-locate `nf-server` or point at a shared one.
 - [genesis-setup.md](genesis-setup.md) — genesis-primary bootstrap (CI-driven `sdk-chain-reset.yml` + `scripts/init.sh`). Different flow; do not mix with `join.sh`.
-- [production-setup.md](../production-setup.md) — Terraform + CI-driven DO Droplet deployment for the primary / secondary pair.
-- [deploy-setup.md](../deploy-setup.md) — CI/CD workflows, GitHub secrets, helper/admin configuration reference.
 - [observability.md](../observability.md) — logging and metrics conventions across the fleet.
 - [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) — where operators PR their public URL into `vote_servers[]` after bonding, so iOS clients discover them.
