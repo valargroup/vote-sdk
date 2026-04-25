@@ -118,9 +118,9 @@ jobs:
             # start, so skip the restart. Subsequent deploys restart normally
             # to pick up the new binary.
             if [ -f /opt/shielded-vote/.svoted/config/genesis.json ]; then
-              /opt/shielded-vote/install-release.sh --tag "${TAG}"
+              /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${{ env.RELEASE_BASE_URL }}"
             else
-              /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+              /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${{ env.RELEASE_BASE_URL }}" --skip-restart
               echo "NOTE: archive has no genesis yet. Run sdk-chain-reset.yml with this tag to initialize it."
             fi
         env:
