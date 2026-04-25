@@ -96,7 +96,6 @@ svoted ea-keygen --home "${HOME_DIR}"
 
 CONFIG_TOML="${HOME_DIR}/config/config.toml"
 sed -i "s|persistent_peers = \"\"|persistent_peers = \"${PERSISTENT_PEERS}\"|" "${CONFIG_TOML}"
-sed -i 's/^timeout_broadcast_tx_commit = .*/timeout_broadcast_tx_commit = "120s"/' "${CONFIG_TOML}"
 
 # ─── Configure app.toml ──────────────────────────────────────────────────────
 

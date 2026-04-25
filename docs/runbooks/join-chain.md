@@ -20,6 +20,8 @@ This runbook covers the operator side: standing up an `svoted` host that syncs w
 
 ## Quick start
 
+**We strongly recommend running on [Recommended hardware](#recommended-hardware)**
+
 On Linux or macOS, run:
 
 ```bash
@@ -37,7 +39,7 @@ What it does:
 - Downloads the latest `svoted` + `create-val-tx` release tarball from DigitalOcean Spaces and verifies it against the published SHA-256 checksum.
 - Discovers the live chain via `voting-config.json` (CDN, then primary REST fallback) and pins the first `vote_servers[].url` as the seed peer.
 - Pulls the canonical `genesis.json` from Spaces, validates it, runs `svoted init`, and generates the Cosmos / Pallas / EA keys.
-- Configures `config.toml` (`persistent_peers`, `timeout_broadcast_tx_commit = 120s`) and `app.toml` (`[api]` + `[helper]`).
+- Configures `config.toml` with recommended parameters.
 - Installs Caddy (apt on Linux, Homebrew on macOS), writes a Caddyfile for `${SVOTE_DOMAIN} { reverse_proxy localhost:1317 }`, and starts it.
 - Signs and POSTs a registration payload to `${SVOTE_ADMIN_URL}/api/register-validator` so the operator shows up in the admin UI join queue.
 - Installs a systemd unit (Linux) or launchd plist (macOS) for `svoted`, plus a matching `svoted-join` service that loops until bonded.
@@ -60,13 +62,13 @@ See [Smoke test](#smoke-test) for a post-install check and [Join lifecycle](#joi
 
 ## Recommended hardware
 
-**Production target: `linux-amd64` with 2 vCPU, 8 GB RAM, and at least 50 GB SSD.** This matches the `vote-secondary` SKU in [production-setup.md](../production-setup.md) (`s-2vcpu-8gb-amd` + 50 GB block volume, ~\$36/mo on DigitalOcean).
+**Production target: `linux-amd64` with 2 vCPU, 8 GB RAM, and at least 50 GB SSD.**
 
 Why these numbers:
 
-- 2 vCPU is enough to verify incoming ZKPs and participate in ceremony/tally proposer injection without starving the CometBFT consensus thread. ZKP verification is ~30–60 s on a standard core; the 120 s `timeout_broadcast_tx_commit` in `config.toml` exists specifically for this reason.
+- 2 vCPU is enough to verify incoming ZKPs and participate in ceremony/tally proposer injection without starving the CometBFT consensus thread.
 - 8 GB RAM covers the helper server's concurrent proof generation (`max_concurrent_proofs = 2`, ~500 MB each) plus the chain's working set with headroom.
-- 50 GB SSD holds the growing block store and the helper's SQLite database. Plan for growth proportional to traffic.
+- 50 GB SSD holds the growing block store and the helper's SQLite database.
 
 Other profiles build but are not recommended for production serving; see [Platform support](#platform-support).
 
@@ -93,9 +95,9 @@ If the validator will answer PIR queries itself, also open inbound 443 for the `
 ## Platform support
 
 - **`linux-amd64`** — recommended production target.
-- **`linux-arm64`** — supported; useful for ARM VMs (Hetzner, Oracle Ampere). Similar performance profile to amd64 for this workload.
+- **`linux-arm64`** — supported but not recommended; useful for ARM VMs (Hetzner, Oracle Ampere). Similar performance profile to amd64 for this workload.
 - **`darwin-arm64`** — recommended for local dev on Apple Silicon. Uses `launchd` instead of `systemd`.
-- **`darwin-amd64`** — dev-only; the release tarball still ships it, but Intel Macs are not a production target.
+- **`darwin-amd64`** — dev-only. Discouraged for production.
 
 `join.sh` auto-detects the platform via `uname -s` + `uname -m`; anything outside the matrix above exits with an error.
 
@@ -191,7 +193,6 @@ sudo apt-get update && sudo apt-get install -y curl jq ca-certificates
    APP_TOML="$HOME_DIR/config/app.toml"
 
    sed -i.bak "s|persistent_peers = \"\"|persistent_peers = \"${PERSISTENT_PEERS}\"|" "$CONFIG_TOML"
-   sed -i.bak 's/^timeout_broadcast_tx_commit = .*/timeout_broadcast_tx_commit = "120s"/' "$CONFIG_TOML"
 
    sed -i.bak '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
    sed -i.bak '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP_TOML"
@@ -527,7 +528,7 @@ The `SVOTE_HOME` directory (default `~/.svoted`) groups everything a joining val
 | `config/genesis.json` | `svoted init` → `curl` | Canonical chain genesis; must match the on-chain state. |
 | `config/node_key.json` | `svoted init` | CometBFT P2P identity. |
 | `config/priv_validator_key.json` | `svoted init` | Consensus signing key. Double-signing = slash. |
-| `config/config.toml` | `svoted init` + `sed` patches | CometBFT runtime; `persistent_peers` and `timeout_broadcast_tx_commit` are what `join.sh` tweaks. |
+| `config/config.toml` | `svoted init` + `sed` patches | CometBFT runtime; `persistent_peers` is what `join.sh` tweaks. |
 | `config/app.toml` | `svoted init` + `sed` patches + `[helper]` append | App runtime; `[api]`, `[helper]`, and on the primary `[admin]` + `[ui]`. |
 | `data/` | `svoted start` | Block store, LevelDB state, CometBFT WAL. Growing. |
 | `keyring-test/` | `svoted init-validator-keys` | `validator` Cosmos account key; mnemonic printed at install. |

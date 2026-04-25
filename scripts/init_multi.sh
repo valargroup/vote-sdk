@@ -119,9 +119,6 @@ configure_config_toml() {
     # pprof listen address.
     sed -i.bak "s|pprof_laddr = \"localhost:6060\"|pprof_laddr = \"localhost:${pprof_port}\"|" "$config_toml"
 
-    # Broadcast timeout for long CheckTx (ZKP verification).
-    sed -i.bak 's/^timeout_broadcast_tx_commit = .*/timeout_broadcast_tx_commit = "120s"/' "$config_toml"
-
     # Allow non-routable addresses (127.0.0.1) in the address book.
     # Required for local multi-validator setups where all nodes run on localhost.
     sed -i.bak 's/^addr_book_strict = true/addr_book_strict = false/' "$config_toml"
