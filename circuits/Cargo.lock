@@ -962,11 +962,11 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/zcash_voting.git?branch=valar%2Forchard-0.13#214163da9c204b1d5c45c0a96fc9d88b45a38315"
+source = "git+https://github.com/valargroup/zcash_voting.git?branch=valar%2Forchard-0.13#63eae822bee7aa5d294b0e1a518e86e43ffcd12c"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets 0.3.1",
+ "halo2_gadgets 0.4.0",
  "imt-tree 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "incrementalmerkletree",
  "lazy_static",
