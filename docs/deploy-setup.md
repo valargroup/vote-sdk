@@ -162,11 +162,10 @@ make start-admin   # builds UI then starts svoted with --serve-ui
 
 ## Admin server configuration
 
-The admin server polls the
+The admin server re-serves a cached copy of the
 [voting-config JSON](https://valargroup.github.io/token-holder-voting-config/voting-config.json)
-from the GitHub Pages CDN every `watchdog_interval` to feed its fleet-health
-watchdog (and re-serves the cached copy at `GET /api/voting-config` for tooling
-that wants the same payload from a chain host). It also stores **pending
+at `GET /api/voting-config` for tooling that wants the same payload from a
+chain host (refreshed in-process every minute). It also stores **pending
 validator join requests** in SQLite (`POST /api/register-validator`,
 `GET /api/pending-validators`) and accepts helper liveness pulses
 (`POST /api/server-heartbeat`).
@@ -179,7 +178,8 @@ The CDN — not the admin — is the canonical discovery path. iOS wallets,
 The admin only needs to be reached for register-validator + heartbeat traffic.
 Publishing a validator's public URL to `vote_servers` happens via a manual PR
 on the config repo; once merged, the CDN serves the new entry within ~30 s and
-the admin's watchdog picks it up on the next refresh tick.
+the cached `/api/voting-config` snapshot picks it up on the next refresh
+tick.
 
 It runs inside `svoted` on **val1 / primary only** and shares the REST API
 port. It is configured in `app.toml` under `[admin]`. Fresh `svoted init` configs
@@ -191,13 +191,18 @@ off).
 | Key | Default | Description |
 |-----|---------|-------------|
 | `disable` | `true` | Set to `false` to enable the admin module. |
-| `config_url` | (CDN) | URL the admin polls for the voting-config payload feeding the watchdog. Same URL clients hit directly — pointing it at a mirror only changes what the admin watchdog observes, not what wallets/`join.sh` discover. |
-| `watchdog_interval` | `5m` | Fleet health probe interval (`0` = off). |
+| `config_url` | (CDN) | URL the admin re-serves at `GET /api/voting-config`. Same URL clients hit directly — pointing it at a mirror only changes the cached copy served from this host, not what wallets/`join.sh` discover. |
 | `db_path` | `""` | SQLite path for pending registrations. Empty = `$HOME/.svoted/admin.db`. |
 
 Pending join rows expire after **7 days**; expired rows are removed by a background sweeper that runs every **hour** (both are fixed in code, not `app.toml` keys).
 
-Endpoints: `POST /api/register-validator`, `GET /api/pending-validators`, `POST /api/server-heartbeat`, plus `GET /api/voting-config` (cached watchdog snapshot, not the canonical client path — see above).
+Endpoints: `POST /api/register-validator`, `GET /api/pending-validators`, `POST /api/server-heartbeat`, plus `GET /api/voting-config` (cached CDN snapshot, not the canonical client path — see above).
+
+> Older configs may include an `[admin].watchdog_interval` key — that field
+> is ignored. Fleet health probing of `vote_servers` and `pir_endpoints`
+> moved out of `svoted` and into a standalone Rust binary deployed
+> alongside `vote-explorer`. See
+> [`vote-infrastructure/watchdog/`](https://github.com/valargroup/vote-infrastructure/tree/main/watchdog).
 
 ## Health checks
 

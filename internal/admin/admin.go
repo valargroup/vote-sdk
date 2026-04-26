@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -112,16 +113,34 @@ func (a *Admin) GetVotingConfig() (*VotingConfig, error) {
 	return a.cached, nil
 }
 
-// RefreshConfig forces a reload of voting-config from the CDN and returns
-// the new value. Used by the fleet health watchdog on every tick so it
-// picks up newly added/removed servers without a process restart.
-func (a *Admin) RefreshConfig() (*VotingConfig, error) {
-	if err := a.refresh(); err != nil {
-		return nil, err
+// RunConfigRefresher periodically re-fetches voting-config so the cached
+// GET /api/voting-config response stays warm and picks up newly added or
+// removed servers without a process restart. Blocks until ctx is cancelled.
+//
+// This used to be a side effect of the in-process fleet health watchdog,
+// which now lives in vote-infrastructure/watchdog/ as a standalone Rust
+// service. The refresher remains in-process because the cached endpoint
+// only matters when the admin HTTP server is up.
+func RunConfigRefresher(ctx context.Context, a *Admin, interval time.Duration, logger log.Logger) {
+	if a == nil || interval <= 0 {
+		return
 	}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.cached, nil
+	logger.Info("voting-config refresher started", "interval", interval.String())
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("voting-config refresher stopped")
+			return
+		case <-ticker.C:
+			if err := a.refresh(); err != nil {
+				logger.Error("voting-config refresh failed", "error", err)
+			}
+		}
+	}
 }
 
 func (a *Admin) refresh() error {
