@@ -15,7 +15,7 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 reddsa = { version = "0.5", default-features = false }
 vote-commitment-tree = "0.1.0"
 orchard = { version = "0.13", features = ["unstable-voting-circuits"] }
-voting-circuits = { version = "0.2.0", features = ["share-reveal"] }
+voting-circuits = { version = "0.3.0", features = ["share-reveal"] }
 imt-tree = { git = "https://github.com/valargroup/vote-nullifier-pir.git" }
 incrementalmerkletree = "0.8"
 hex = "0.4"
@@ -38,6 +38,6 @@ serde_json = "1"
 # all converge on a single set of source revisions. Mirrors the patches in
 # `zcash_voting/Cargo.toml` and `e2e-tests/Cargo.toml`.
 [patch.crates-io]
-orchard = { git = "https://github.com/valargroup/orchard.git", rev = "c26a6ec6860cc62bb15d208c3d790dfb616bfbe7" }
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "66777e27e10970c38dc1ebb93d8c7715a5b984c7" }
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "d351e9dc13baa623b95883e0815b194358604c54" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "2d88d48d1d86a1b49c3cee00d67dbbfd57f89d0d" }
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "70497dab0b3c676f5e9fbe4407d14b21e898eaad" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "dfadde2a508291cdb274431d85ec6c9684f53479" }

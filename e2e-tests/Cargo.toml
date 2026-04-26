@@ -11,7 +11,7 @@ shielded-vote-circuits = { path = "../circuits" }
 # Crates resolved through `[patch.crates-io]` below — see the patch block at
 # the bottom for migration-branch git pins.
 orchard = { version = "0.13", features = ["unstable-voting-circuits"] }
-voting-circuits = { version = "0.2.0", features = ["share-reveal"] }
+voting-circuits = { version = "0.3.0", features = ["share-reveal"] }
 vote-commitment-tree = "0.1.0"
 vote-commitment-tree-client = "0.1.0"
 zcash_voting = "0.1.0"
@@ -51,16 +51,15 @@ incrementalmerkletree = "0.8"
 rand = "0.8"
 rand_chacha = "0.3"
 
-# Migration-branch git pins. orchard/voting-circuits go to the valargroup
-# migration branches; vote-commitment-tree* and zcash_voting come from the
-# matching valargroup/zcash_voting branch; librustzcash crates pin to upstream
-# zcash/main HEAD now that all governance PRs are merged.
+# Migration-branch git pins. orchard pins to upstream zcash/orchard; voting-circuits
+# pins to valargroup/voting-circuits v0.3.0; vote-commitment-tree* / zcash_voting use
+# valargroup migration branches; librustzcash crates pin to upstream zcash/main HEAD.
 [patch.crates-io]
-orchard = { git = "https://github.com/valargroup/orchard.git", rev = "c26a6ec6860cc62bb15d208c3d790dfb616bfbe7" }
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "66777e27e10970c38dc1ebb93d8c7715a5b984c7" }
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "d351e9dc13baa623b95883e0815b194358604c54" }
-vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting.git", rev = "d351e9dc13baa623b95883e0815b194358604c54" }
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", rev = "d351e9dc13baa623b95883e0815b194358604c54" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "2d88d48d1d86a1b49c3cee00d67dbbfd57f89d0d" }
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "70497dab0b3c676f5e9fbe4407d14b21e898eaad" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "dfadde2a508291cdb274431d85ec6c9684f53479" }
+vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting.git", rev = "dfadde2a508291cdb274431d85ec6c9684f53479" }
+zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", rev = "dfadde2a508291cdb274431d85ec6c9684f53479" }
 pczt = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
 zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
 zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
