@@ -942,7 +942,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/zcash_voting.git?rev=dfadde2a508291cdb274431d85ec6c9684f53479#dfadde2a508291cdb274431d85ec6c9684f53479"
+source = "git+https://github.com/valargroup/zcash_voting.git?rev=ea9fabef3597355631aecbe872a4e10733eb361b#ea9fabef3597355631aecbe872a4e10733eb361b"
 dependencies = [
  "anyhow",
  "ff",
