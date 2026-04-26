@@ -40,4 +40,4 @@ serde_json = "1"
 [patch.crates-io]
 orchard = { git = "https://github.com/zcash/orchard.git", rev = "2d88d48d1d86a1b49c3cee00d67dbbfd57f89d0d" }
 voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "70497dab0b3c676f5e9fbe4407d14b21e898eaad" }
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "dfadde2a508291cdb274431d85ec6c9684f53479" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "4a3b07b032beb6d886c48f6e27ce68c571b0c9f6" }
