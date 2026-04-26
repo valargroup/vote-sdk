@@ -16,23 +16,24 @@ const PendingRegistrationTTL = 7 * 24 * time.Hour
 // are deleted (not configurable).
 const PendingEvictionSweepInterval = time.Hour
 
+// VotingConfigRefreshInterval is how often the admin re-fetches voting-config
+// from ConfigURL so the cached GET /api/voting-config response stays warm.
+// Not configurable — the CDN is small, this is purely a freshness window.
+const VotingConfigRefreshInterval = time.Minute
+
 // Config holds the admin server configuration, read from app.toml [admin].
 type Config struct {
 	// Disable turns off the admin server entirely.
 	Disable bool `mapstructure:"disable"`
 
-	// ConfigURL is the voting-config JSON the admin polls every
-	// WatchdogInterval to feed the fleet-health watchdog (and re-serves the
-	// cached copy at GET /api/voting-config). It points at the same canonical
+	// ConfigURL is the voting-config JSON the admin re-serves at the
+	// cached GET /api/voting-config endpoint. It points at the same canonical
 	// CDN URL that wallets and join.sh fetch directly
 	// (valargroup.github.io/token-holder-voting-config/voting-config.json) —
-	// override only for staging mirrors or fork testing.
+	// override only for staging mirrors or fork testing. Fleet health
+	// probing of these endpoints is handled by the standalone watchdog
+	// service in vote-infrastructure/watchdog/.
 	ConfigURL string `mapstructure:"config_url"`
-
-	// WatchdogInterval is how often the fleet health watchdog probes all
-	// vote servers and PIR endpoints listed in voting-config.json. Set to
-	// 0 to disable the watchdog. Default: 5 minutes.
-	WatchdogInterval time.Duration `mapstructure:"watchdog_interval"`
 
 	// DBPath is the SQLite path for pending validator registrations.
 	// Default: $HOME/.svoted/admin.db (resolved in New).
@@ -42,9 +43,8 @@ type Config struct {
 // DefaultConfig returns the default admin configuration.
 func DefaultConfig() Config {
 	return Config{
-		Disable:          true,
-		ConfigURL:        "https://valargroup.github.io/token-holder-voting-config/voting-config.json",
-		WatchdogInterval: 5 * time.Minute,
+		Disable:   true,
+		ConfigURL: "https://valargroup.github.io/token-holder-voting-config/voting-config.json",
 	}
 }
 

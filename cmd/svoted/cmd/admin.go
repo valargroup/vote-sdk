@@ -72,12 +72,10 @@ func adminPostSetup(
 
 		(*svoteApp).SetAdmin(a)
 
-		if cfg.WatchdogInterval > 0 {
-			g.Go(func() error {
-				admin.RunWatchdog(ctx, a, cfg.WatchdogInterval, logger)
-				return nil
-			})
-		}
+		g.Go(func() error {
+			admin.RunConfigRefresher(ctx, a, admin.VotingConfigRefreshInterval, logger)
+			return nil
+		})
 
 		g.Go(func() error {
 			admin.RunPendingSweeper(ctx, a, admin.PendingEvictionSweepInterval, logger)
@@ -98,9 +96,6 @@ func readAdminConfig(v *viper.Viper) admin.Config {
 	}
 	if v.IsSet("admin.config_url") {
 		cfg.ConfigURL = v.GetString("admin.config_url")
-	}
-	if v.IsSet("admin.watchdog_interval") {
-		cfg.WatchdogInterval = v.GetDuration("admin.watchdog_interval")
 	}
 	if v.IsSet("admin.db_path") {
 		cfg.DBPath = v.GetString("admin.db_path")

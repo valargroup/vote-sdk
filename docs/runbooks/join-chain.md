@@ -436,7 +436,7 @@ Read from `/etc/default/svoted-join` (Linux) or the launchd `EnvironmentVariable
 | `POST /api/register-validator` | `svoted-join`, helper heartbeat | Pending-join queue (admin module; primary only). |
 | `POST /api/server-heartbeat` | helper heartbeat | Bonded-validator liveness pulse (primary only). |
 | `GET /api/pending-validators` | Admin UI / join scripts | Join-queue view (primary only). |
-| `GET /api/voting-config` | Admin watchdog | Cached copy of the GitHub Pages voting-config the admin polls for the watchdog. **Not** the canonical client path — wallets and `join.sh` fetch the same payload directly from [valargroup.github.io/token-holder-voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json). |
+| `GET /api/voting-config` | Tooling / standalone watchdog | Cached copy of the GitHub Pages voting-config (refreshed in-process every minute). **Not** the canonical client path — wallets and `join.sh` fetch the same payload directly from [valargroup.github.io/token-holder-voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json). The fleet health watchdog ([`vote-infrastructure/watchdog/`](https://github.com/valargroup/vote-infrastructure/tree/main/watchdog)) hits the CDN, not this endpoint, so it stays up if the primary `svoted` wedges. |
 
 ## Troubleshooting
 
