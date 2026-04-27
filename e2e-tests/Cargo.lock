@@ -1701,8 +1701,9 @@ dependencies = [
 
 [[package]]
 name = "orchard"
-version = "0.13.0"
-source = "git+https://github.com/zcash/orchard.git?rev=2d88d48d1d86a1b49c3cee00d67dbbfd57f89d0d#2d88d48d1d86a1b49c3cee00d67dbbfd57f89d0d"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "497e74492624a1d1cc8c9675a7afb17b430d32fd9efc171513d0840140b5f0c7"
 dependencies = [
  "aes",
  "bitvec",
@@ -3041,7 +3042,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/zcash_voting.git?rev=4a3b07b032beb6d886c48f6e27ce68c571b0c9f6#4a3b07b032beb6d886c48f6e27ce68c571b0c9f6"
+source = "git+https://github.com/valargroup/zcash_voting.git?rev=116dfaf7fe505a1b7c781b1baf929dca43417c65#116dfaf7fe505a1b7c781b1baf929dca43417c65"
 dependencies = [
  "anyhow",
  "ff",
@@ -3057,7 +3058,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree-client"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/zcash_voting.git?rev=4a3b07b032beb6d886c48f6e27ce68c571b0c9f6#4a3b07b032beb6d886c48f6e27ce68c571b0c9f6"
+source = "git+https://github.com/valargroup/zcash_voting.git?rev=116dfaf7fe505a1b7c781b1baf929dca43417c65#116dfaf7fe505a1b7c781b1baf929dca43417c65"
 dependencies = [
  "base64",
  "clap",
@@ -3073,8 +3074,9 @@ dependencies = [
 
 [[package]]
 name = "voting-circuits"
-version = "0.3.0"
-source = "git+https://github.com/valargroup/voting-circuits.git?rev=70497dab0b3c676f5e9fbe4407d14b21e898eaad#70497dab0b3c676f5e9fbe4407d14b21e898eaad"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7830eca6c294cff758bc4885ca8bd2fbdf90f9998f586c5c4cfe2d1b559555f6"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3628,7 +3630,7 @@ dependencies = [
 [[package]]
 name = "zcash_voting"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/zcash_voting.git?rev=4a3b07b032beb6d886c48f6e27ce68c571b0c9f6#4a3b07b032beb6d886c48f6e27ce68c571b0c9f6"
+source = "git+https://github.com/valargroup/zcash_voting.git?rev=116dfaf7fe505a1b7c781b1baf929dca43417c65#116dfaf7fe505a1b7c781b1baf929dca43417c65"
 dependencies = [
  "blake2b_simd",
  "ff",
