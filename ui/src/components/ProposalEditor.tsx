@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Plus, Trash2, ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import type { Proposal, ProposalType } from "../types";
+import { MAX_VOTE_OPTIONS } from "../constants/vote";
 
 // Matches the iOS voteOptionColor palette in VotingComponents.swift.
 // For 2-option proposals: green, red. For 3+: cycles through 8 colors.
@@ -30,6 +31,9 @@ interface ProposalEditorProps {
 export function ProposalEditor({ proposal, onUpdate, readonly = false }: ProposalEditorProps) {
   const [descTab, setDescTab] = useState<"write" | "preview">("write");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const effectiveOptionCount = proposal.options.length + (proposal.allowAbstain ? 1 : 0);
+  const canAddOption = effectiveOptionCount < MAX_VOTE_OPTIONS;
+  const canEnableAbstain = proposal.allowAbstain || proposal.options.length < MAX_VOTE_OPTIONS;
 
   const handleTypeChange = (type: ProposalType) => {
     const options =
@@ -54,6 +58,7 @@ export function ProposalEditor({ proposal, onUpdate, readonly = false }: Proposa
   };
 
   const handleAddOption = () => {
+    if (!canAddOption) return;
     onUpdate({
       options: [
         ...proposal.options,
@@ -222,7 +227,13 @@ export function ProposalEditor({ proposal, onUpdate, readonly = false }: Proposa
           {!readonly && proposal.type === "multi-choice" && (
             <button
               onClick={handleAddOption}
-              className="flex items-center gap-1 mt-2 text-[11px] text-text-muted hover:text-accent-glow transition-colors cursor-pointer"
+              disabled={!canAddOption}
+              title={!canAddOption ? `Maximum ${MAX_VOTE_OPTIONS} choices` : undefined}
+              className={`flex items-center gap-1 mt-2 text-[11px] transition-colors ${
+                canAddOption
+                  ? "text-text-muted hover:text-accent-glow cursor-pointer"
+                  : "text-text-muted/50 cursor-not-allowed"
+              }`}
             >
               <Plus size={12} /> Add choice
             </button>
@@ -290,9 +301,13 @@ export function ProposalEditor({ proposal, onUpdate, readonly = false }: Proposa
                 <input
                   type="checkbox"
                   checked={proposal.allowAbstain}
-                  onChange={(e) => onUpdate({ allowAbstain: e.target.checked })}
-                  disabled={readonly}
-                  className={`accent-accent ${readonly ? "opacity-60 cursor-default" : ""}`}
+                  onChange={(e) => {
+                    if (e.target.checked && !canEnableAbstain) return;
+                    onUpdate({ allowAbstain: e.target.checked });
+                  }}
+                  disabled={readonly || !canEnableAbstain}
+                  title={!canEnableAbstain ? `Maximum ${MAX_VOTE_OPTIONS} choices` : undefined}
+                  className={`accent-accent ${readonly || !canEnableAbstain ? "opacity-60 cursor-default" : ""}`}
                 />
                 <label className="text-[11px] text-text-secondary">
                   Allow abstain

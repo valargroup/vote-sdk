@@ -293,6 +293,64 @@ func (s *KeeperTestSuite) TestCommitmentRoot_MultipleHeights() {
 // Voting validation
 // ---------------------------------------------------------------------------
 
+func (s *KeeperTestSuite) TestValidateVoteDecision() {
+	tests := []struct {
+		name        string
+		proposalID  uint32
+		decision    uint32
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name:       "valid: first option",
+			proposalID: 1,
+			decision:   0,
+		},
+		{
+			name:       "valid: last option",
+			proposalID: 1,
+			decision:   1,
+		},
+		{
+			name:        "invalid: decision equal to option count",
+			proposalID:  1,
+			decision:    2,
+			expectErr:   true,
+			errContains: "vote_decision 2 out of range [0, 1] for proposal 1",
+		},
+		{
+			name:        "invalid: decision greater than option count",
+			proposalID:  1,
+			decision:    9,
+			expectErr:   true,
+			errContains: "vote_decision 9 out of range [0, 1] for proposal 1",
+		},
+		{
+			name:        "invalid: proposal id out of range",
+			proposalID:  99,
+			decision:    0,
+			expectErr:   true,
+			errContains: "proposal_id 99 out of range",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			kv := s.keeper.OpenKVStore(s.ctx)
+			s.Require().NoError(s.keeper.SetVoteRound(kv, svtest.ActiveRoundFixture(testRoundID)))
+
+			err := s.keeper.ValidateVoteDecision(kv, testRoundID, tc.proposalID, tc.decision)
+			if tc.expectErr {
+				s.Require().Error(err)
+				s.Require().Contains(err.Error(), tc.errContains)
+			} else {
+				s.Require().NoError(err)
+			}
+		})
+	}
+}
+
 func (s *KeeperTestSuite) TestValidateRoundForVoting() {
 	tests := []struct {
 		name        string

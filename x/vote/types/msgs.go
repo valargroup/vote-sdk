@@ -37,25 +37,17 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 		return fmt.Errorf("%w: proposals count must be between 1 and %d, got %d", ErrInvalidField, MaxProposals, len(msg.Proposals))
 	}
 	for i, p := range msg.Proposals {
+		if p == nil {
+			return fmt.Errorf("%w: proposal %d cannot be nil", ErrInvalidField, i)
+		}
 		if p.Title == "" {
 			return fmt.Errorf("%w: proposal %d title cannot be empty", ErrInvalidField, i)
 		}
 		if p.Id != uint32(i+1) {
 			return fmt.Errorf("%w: proposal id mismatch at index %d: expected %d, got %d", ErrInvalidField, i, i+1, p.Id)
 		}
-		if len(p.Options) < 2 || len(p.Options) > MaxVoteOptions {
-			return fmt.Errorf("%w: proposal %d must have 2-%d options, got %d", ErrInvalidField, i, MaxVoteOptions, len(p.Options))
-		}
-		for j, opt := range p.Options {
-			if opt.Index != uint32(j) {
-				return fmt.Errorf("%w: proposal %d option index mismatch at position %d: expected %d, got %d", ErrInvalidField, i, j, j, opt.Index)
-			}
-			if opt.Label == "" {
-				return fmt.Errorf("%w: proposal %d option %d label cannot be empty", ErrInvalidField, i, j)
-			}
-			if !isASCII(opt.Label) {
-				return fmt.Errorf("%w: proposal %d option %d label must contain only ASCII characters", ErrInvalidField, i, j)
-			}
+		if err := ValidateProposalOptions(i, p.Options); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -161,8 +153,8 @@ func (msg *MsgRevealShare) ValidateBasic() error {
 	if msg.ProposalId < MinProposalID || msg.ProposalId > MaxProposals {
 		return fmt.Errorf("%w: proposal_id must be %d..%d, got %d", ErrInvalidField, MinProposalID, MaxProposals, msg.ProposalId)
 	}
-	if msg.VoteDecision >= MaxVoteOptions {
-		return fmt.Errorf("%w: vote_decision must be 0..%d, got %d", ErrInvalidField, MaxVoteOptions-1, msg.VoteDecision)
+	if err := ValidateVoteChoiceUpperBound(msg.VoteDecision); err != nil {
+		return err
 	}
 	if len(msg.Proof) == 0 || len(msg.Proof) > MaxProofSize {
 		return fmt.Errorf("%w: proof must be 1..%d bytes, got %d", ErrInvalidField, MaxProofSize, len(msg.Proof))

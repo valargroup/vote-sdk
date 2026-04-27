@@ -18,6 +18,14 @@ import { TxRaw } from "cosmjs-types/cosmos/tx/v1beta1/tx";
 import { SignMode } from "cosmjs-types/cosmos/tx/signing/v1beta1/signing";
 import { sha256 } from "@noble/hashes/sha2.js";
 import type { BroadcastResult } from "./chain";
+import { validateProposalOptions } from "../constants/vote";
+
+export {
+  MAX_VOTE_OPTIONS,
+  MIN_VOTE_OPTIONS,
+  validateProposalOptions,
+  validateVoteChoice,
+} from "../constants/vote";
 
 // All transactions are fee-exempt on this chain. Setting gas to "0" means
 // Keplr computes fee = gasPrice × 0 = 0, so the user sees a zero fee.
@@ -556,6 +564,10 @@ export async function createVotingSession(
     }>;
   },
 ): Promise<BroadcastResult> {
+  params.proposals.forEach((proposal, index) => {
+    validateProposalOptions(`proposal ${proposal.id || index + 1}`, proposal.options);
+  });
+
   const [account] = await signer.getAccounts();
 
   // Fetch real snapshot data (nc_root, nullifier_imt_root, blockhash).

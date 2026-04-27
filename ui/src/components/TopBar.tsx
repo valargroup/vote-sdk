@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Eye, Code2, MoreHorizontal, Copy, Trash2, Check } from "lucide-react";
 import { StatusPill } from "./StatusPill";
 import type { VotingRound } from "../types";
+import { MAX_VOTE_OPTIONS, MIN_VOTE_OPTIONS } from "../constants/vote";
 
 interface TopBarProps {
   round: VotingRound;
@@ -51,7 +52,15 @@ export function TopBar({
   const hasSnapshot = parseInt(round.settings.snapshotHeight, 10) > 0;
   const hasProposals = round.proposals.length > 0;
   const proposalsValid = round.proposals.every(
-    (p) => p.title.trim().length > 0 && p.options.length >= 2
+    (p) => {
+      const optionCount = p.options.length + (p.allowAbstain ? 1 : 0);
+      return (
+        p.title.trim().length > 0 &&
+        optionCount >= MIN_VOTE_OPTIONS &&
+        optionCount <= MAX_VOTE_OPTIONS &&
+        p.options.every((option) => option.label.trim().length > 0)
+      );
+    }
   );
   const canPublish = hasEndTime && hasSnapshot && hasProposals && proposalsValid && round.status !== "published";
 

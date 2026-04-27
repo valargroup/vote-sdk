@@ -235,9 +235,11 @@ func (k *Keeper) ValidateVoteDecision(kvStore store.KVStore, roundID []byte, pro
 		return fmt.Errorf("%w: proposal_id %d out of range [1, %d]", types.ErrInvalidProposalID, proposalId, len(round.Proposals))
 	}
 	proposal := round.Proposals[proposalId-1]
-	if int(voteDecision) >= len(proposal.Options) {
-		return fmt.Errorf("%w: vote_decision %d out of range [0, %d) for proposal %d",
-			types.ErrInvalidField, voteDecision, len(proposal.Options), proposalId)
+	if proposal == nil {
+		return fmt.Errorf("%w: proposal_id %d is nil", types.ErrInvalidProposalID, proposalId)
+	}
+	if err := types.ValidateVoteChoice(proposalId, voteDecision, proposal.Options); err != nil {
+		return err
 	}
 	return nil
 }
@@ -252,9 +254,11 @@ func ValidateEntryBounds(round *types.VoteRound, proposalId, voteDecision uint32
 			types.ErrInvalidProposalID, proposalId, len(round.Proposals))
 	}
 	proposal := round.Proposals[proposalId-1]
-	if int(voteDecision) >= len(proposal.Options) {
-		return fmt.Errorf("%w: vote_decision %d out of range [0, %d) for proposal %d",
-			types.ErrInvalidField, voteDecision, len(proposal.Options), proposalId)
+	if proposal == nil {
+		return fmt.Errorf("%w: proposal_id %d is nil", types.ErrInvalidProposalID, proposalId)
+	}
+	if err := types.ValidateVoteChoice(proposalId, voteDecision, proposal.Options); err != nil {
+		return err
 	}
 	return nil
 }

@@ -39,8 +39,12 @@ const MinProposalID = 1
 // as a sentinel (rejected by the non-zero gate), leaving bits 1-15 usable.
 const MaxProposals = 15
 
-// MaxVoteOptions is the maximum number of options per proposal (0-indexed).
-// Circuit-constrained by the vote decision encoding.
+// MinVoteOptions is the minimum number of options per proposal.
+const MinVoteOptions = 2
+
+// MaxVoteOptions is the maximum number of options per proposal.
+// This is SDK/chain policy; the circuit commits vote_decision as a field
+// element and does not enforce this bound.
 const MaxVoteOptions = 8
 
 // MaxProofSize is the maximum allowed byte length for a Halo2 ZKP.
