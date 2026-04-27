@@ -14,8 +14,8 @@ group = "0.13"
 rand_core = { version = "0.6", features = ["getrandom"] }
 reddsa = { version = "0.5", default-features = false }
 vote-commitment-tree = "0.1.0"
-orchard = { version = "0.13", features = ["unstable-voting-circuits"] }
-voting-circuits = { version = "0.3.0", features = ["share-reveal"] }
+orchard = { version = "=0.13.1", features = ["unstable-voting-circuits"] }
+voting-circuits = { version = "0.3.1", features = ["share-reveal"] }
 imt-tree = { git = "https://github.com/valargroup/vote-nullifier-pir.git" }
 incrementalmerkletree = "0.8"
 hex = "0.4"
@@ -33,11 +33,8 @@ serde_json = "1"
 
 [workspace]
 
-# Redirect orchard / voting-circuits / vote-commitment-tree to the migration
-# branches so this crate, the inner zcash_voting crate, and the e2e-tests crate
-# all converge on a single set of source revisions. Mirrors the patches in
-# `zcash_voting/Cargo.toml` and `e2e-tests/Cargo.toml`.
+# Redirect unreleased zcash_voting crates so this crate and the e2e-tests crate
+# converge on the same source revision. Orchard and voting-circuits resolve
+# from crates.io.
 [patch.crates-io]
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "2d88d48d1d86a1b49c3cee00d67dbbfd57f89d0d" }
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "70497dab0b3c676f5e9fbe4407d14b21e898eaad" }
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "4a3b07b032beb6d886c48f6e27ce68c571b0c9f6" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "116dfaf7fe505a1b7c781b1baf929dca43417c65" }
