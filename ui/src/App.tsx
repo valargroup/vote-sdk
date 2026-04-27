@@ -13,6 +13,7 @@ import { RoundsList } from "./components/RoundsList";
 import { useStore } from "./store/useStore";
 import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown } from "lucide-react";
 import type { Proposal, RoundSettings, RoundStatus, VotingRound } from "./types";
+import { MAX_VOTE_OPTIONS, MIN_VOTE_OPTIONS } from "./constants/vote";
 import {
   LIGHTWALLETD_ENDPOINTS,
   getStoredRpc,
@@ -171,6 +172,15 @@ function App() {
       return;
     }
 
+    const invalidProposalIndex = round.proposals.findIndex((p) => !isProposalValid(p));
+    if (invalidProposalIndex !== -1) {
+      setPublishStatus("error");
+      setPublishError(
+        `Proposal ${invalidProposalIndex + 1} must have ${MIN_VOTE_OPTIONS}-${MAX_VOTE_OPTIONS} non-empty options, including abstain when enabled.`
+      );
+      return;
+    }
+
     // Snapshot height is auto-populated from the PIR server (read-only in the editor).
     // Verify it's still current before publishing.
     let snapshotHeight = parseInt(round.settings.snapshotHeight, 10) || 0;
@@ -215,13 +225,14 @@ function App() {
 
     const voteEndTime = Math.floor(new Date(round.settings.endTime).getTime() / 1000);
 
-    const proposals = round.proposals.map((p, i) => {
-      const options = p.options.map((opt, j) => ({ index: j, label: opt.label }));
-      if (p.allowAbstain) {
-        options.push({ index: options.length, label: "Abstain" });
-      }
-      return { id: i + 1, title: p.title, description: p.description, options, zipNumber: p.zipNumber || undefined, forumURL: p.forumURL || undefined };
-    });
+    const proposals = round.proposals.map((p, i) => ({
+      id: i + 1,
+      title: p.title,
+      description: p.description,
+      options: buildChainOptions(p),
+      zipNumber: p.zipNumber || undefined,
+      forumURL: p.forumURL || undefined,
+    }));
 
     setPublishStatus("publishing");
     setPublishError("");
@@ -443,7 +454,21 @@ function App() {
 /* ── Unified builder view (single scrollable column) ─────────── */
 
 function isProposalValid(p: Proposal): boolean {
-  return p.title.trim().length > 0 && p.options.length >= 2;
+  const options = buildChainOptions(p);
+  return (
+    p.title.trim().length > 0 &&
+    options.length >= MIN_VOTE_OPTIONS &&
+    options.length <= MAX_VOTE_OPTIONS &&
+    options.every((option) => option.label.trim().length > 0)
+  );
+}
+
+function buildChainOptions(p: Proposal): Array<{ index: number; label: string }> {
+  const options = p.options.map((opt, j) => ({ index: j, label: opt.label }));
+  if (p.allowAbstain) {
+    options.push({ index: options.length, label: "Abstain" });
+  }
+  return options;
 }
 
 function BuilderView({

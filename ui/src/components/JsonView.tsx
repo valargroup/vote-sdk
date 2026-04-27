@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Copy, Download, CheckCircle2, AlertTriangle, Check, ArrowLeft } from "lucide-react";
 import type { VotingRound } from "../types";
+import { MAX_VOTE_OPTIONS, MIN_VOTE_OPTIONS } from "../constants/vote";
 
 interface JsonViewProps {
   round: VotingRound;
@@ -37,8 +38,10 @@ function validateRound(round: VotingRound): string[] {
   if (!round.name.trim()) issues.push("Round name is empty");
   if (round.proposals.length === 0) issues.push("No proposals added");
   round.proposals.forEach((p, i) => {
+    const optionCount = p.options.length + (p.allowAbstain ? 1 : 0);
     if (!p.title.trim()) issues.push(`round.proposals[${i}].title is empty`);
-    if (p.options.length < 2) issues.push(`round.proposals[${i}].options has fewer than 2 choices`);
+    if (optionCount < MIN_VOTE_OPTIONS) issues.push(`round.proposals[${i}].options has fewer than ${MIN_VOTE_OPTIONS} choices`);
+    if (optionCount > MAX_VOTE_OPTIONS) issues.push(`round.proposals[${i}].options has more than ${MAX_VOTE_OPTIONS} choices`);
     p.options.forEach((o, j) => {
       if (!o.label.trim()) issues.push(`round.proposals[${i}].options[${j}].label is empty`);
     });

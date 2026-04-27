@@ -42,6 +42,14 @@ func validCreateSession() *types.MsgCreateVotingSession {
 	}
 }
 
+func voteOptions(n int) []*types.VoteOption {
+	opts := make([]*types.VoteOption, n)
+	for i := range opts {
+		opts[i] = &types.VoteOption{Index: uint32(i), Label: "Option"}
+	}
+	return opts
+}
+
 // ---------------------------------------------------------------------------
 // Tests: MsgCreateVotingSession.ValidateBasic — new session fields
 // ---------------------------------------------------------------------------
@@ -56,6 +64,14 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 		{
 			name:   "valid: all fields correct",
 			modify: func(m *types.MsgCreateVotingSession) {},
+		},
+		{
+			name: "valid: proposal with 2 options (min)",
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{
+					{Id: 1, Title: "A", Description: "ok", Options: voteOptions(types.MinVoteOptions)},
+				}
+			},
 		},
 		// ea_pk is no longer in MsgCreateVotingSession; sourced from CeremonyState.
 		// vk_zkp1/2/3 removed: verifying keys are compiled into the Rust Halo2
@@ -183,12 +199,8 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 		{
 			name: "valid: 8 options (max)",
 			modify: func(m *types.MsgCreateVotingSession) {
-				opts := make([]*types.VoteOption, 8)
-				for i := range opts {
-					opts[i] = &types.VoteOption{Index: uint32(i), Label: "Candidate"}
-				}
 				m.Proposals = []*types.Proposal{
-					{Id: 1, Title: "A", Description: "ok", Options: opts},
+					{Id: 1, Title: "A", Description: "ok", Options: voteOptions(types.MaxVoteOptions)},
 				}
 			},
 		},
@@ -201,6 +213,82 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			err := msg.ValidateBasic()
 			if tc.expectErr {
 				s.Require().Error(err)
+				if tc.errContains != "" {
+					s.Require().Contains(err.Error(), tc.errContains)
+				}
+			} else {
+				s.Require().NoError(err)
+			}
+		})
+	}
+}
+
+func (s *ValidateBasicTestSuite) TestValidateVoteChoice() {
+	tests := []struct {
+		name        string
+		options     []*types.VoteOption
+		decision    uint32
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name:     "valid: first option",
+			options:  voteOptions(2),
+			decision: 0,
+		},
+		{
+			name:     "valid: last option",
+			options:  voteOptions(2),
+			decision: 1,
+		},
+		{
+			name:        "invalid: equal to option count",
+			options:     voteOptions(2),
+			decision:    2,
+			expectErr:   true,
+			errContains: "vote_decision 2 out of range [0, 1] for proposal 1",
+		},
+		{
+			name:        "invalid: greater than option count",
+			options:     voteOptions(2),
+			decision:    9,
+			expectErr:   true,
+			errContains: "vote_decision 9 out of range [0, 1] for proposal 1",
+		},
+		{
+			name:     "valid: max option index for 8 choices",
+			options:  voteOptions(types.MaxVoteOptions),
+			decision: types.MaxVoteOptions - 1,
+		},
+		{
+			name:        "invalid: equal to max option count",
+			options:     voteOptions(types.MaxVoteOptions),
+			decision:    types.MaxVoteOptions,
+			expectErr:   true,
+			errContains: "vote_decision 8 out of range [0, 7] for proposal 1",
+		},
+		{
+			name:        "invalid: proposal has too few options",
+			options:     voteOptions(types.MinVoteOptions - 1),
+			decision:    0,
+			expectErr:   true,
+			errContains: "invalid option count 1",
+		},
+		{
+			name:        "invalid: proposal has too many options",
+			options:     voteOptions(types.MaxVoteOptions + 1),
+			decision:    0,
+			expectErr:   true,
+			errContains: "invalid option count 9",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			err := types.ValidateVoteChoice(1, tc.decision, tc.options)
+			if tc.expectErr {
+				s.Require().Error(err)
+				s.Require().ErrorIs(err, types.ErrInvalidField)
 				if tc.errContains != "" {
 					s.Require().Contains(err.Error(), tc.errContains)
 				}
@@ -313,11 +401,11 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 
 func validDelegateVote() *types.MsgDelegateVote {
 	return &types.MsgDelegateVote{
-		Rk:                 bytes.Repeat([]byte{0x01}, 32),
-		SpendAuthSig:       bytes.Repeat([]byte{0x02}, 64),
+		Rk:                  bytes.Repeat([]byte{0x01}, 32),
+		SpendAuthSig:        bytes.Repeat([]byte{0x02}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0x03}, 32),
-		CmxNew:             bytes.Repeat([]byte{0x04}, 32),
-		VanCmx:             bytes.Repeat([]byte{0x05}, 32),
+		CmxNew:              bytes.Repeat([]byte{0x04}, 32),
+		VanCmx:              bytes.Repeat([]byte{0x05}, 32),
 		GovNullifiers: [][]byte{
 			bytes.Repeat([]byte{0x10}, 32),
 			bytes.Repeat([]byte{0x11}, 32),

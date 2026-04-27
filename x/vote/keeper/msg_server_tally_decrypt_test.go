@@ -91,11 +91,11 @@ func (s *MsgServerTestSuite) setupTallyingRoundThreshold(
 	}
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
-		VoteRoundId: roundID,
-		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
-		EaPk:        bytes.Repeat([]byte{0x10}, 32),
-		Threshold:   threshold,
-		Proposals:   pdProposals(),
+		VoteRoundId:        roundID,
+		Status:             types.SessionStatus_SESSION_STATUS_TALLYING,
+		EaPk:               bytes.Repeat([]byte{0x10}, 32),
+		Threshold:          threshold,
+		Proposals:          pdProposals(),
 		CeremonyValidators: validators,
 		FeldmanCommitments: commitments,
 	}))
@@ -371,6 +371,23 @@ func (s *MsgServerTestSuite) TestRevealShare() {
 			errContains: "invalid proposal ID",
 		},
 		{
+			name:  "invalid vote_decision rejected",
+			setup: func() { s.setupActiveRound(roundID) },
+			msg: func() *types.MsgRevealShare {
+				return &types.MsgRevealShare{
+					ShareNullifier:           bytes.Repeat([]byte{0xF9}, 32),
+					EncShare:                 testEncShare(s, 100),
+					ProposalId:               1,
+					VoteDecision:             2,
+					Proof:                    bytes.Repeat([]byte{0xF8}, 64),
+					VoteRoundId:              roundID,
+					VoteCommTreeAnchorHeight: 10,
+				}
+			},
+			expectErr:   true,
+			errContains: "vote_decision 2 out of range [0, 1] for proposal 1",
+		},
+		{
 			name: "duplicate share nullifier rejected (double-count)",
 			setup: func() {
 				s.setupActiveRound(roundID)
@@ -639,7 +656,10 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 			},
 			check: func(rid []byte) {
 				kv := s.keeper.OpenKVStore(s.ctx)
-				for _, want := range []struct{ pid, dec uint32; val uint64 }{
+				for _, want := range []struct {
+					pid, dec uint32
+					val      uint64
+				}{
 					{1, 0, 10}, {1, 1, 20}, {2, 0, 30},
 				} {
 					r, err := s.keeper.GetTallyResult(kv, rid, want.pid, want.dec)
@@ -943,10 +963,10 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_Rejections() {
 
 	cases := []rejectCase{
 		{
-			name:     "CheckTx rejected",
-			buildCtx: func(s *MsgServerTestSuite) sdk.Context { return s.ctx.WithIsCheckTx(true) },
-			buildMsg: defaultMsg,
-			wantErr:  types.ErrInvalidField,
+			name:        "CheckTx rejected",
+			buildCtx:    func(s *MsgServerTestSuite) sdk.Context { return s.ctx.WithIsCheckTx(true) },
+			buildMsg:    defaultMsg,
+			wantErr:     types.ErrInvalidField,
 			errContains: "mempool",
 		},
 		{
