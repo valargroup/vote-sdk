@@ -31,6 +31,28 @@ jobs:
       - name: Run go vet
         run: mise run lint
 
+  admin-ui:
+    name: Admin UI Lint and Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Run UI lint
+        working-directory: ui
+        run: npm run lint
+      - name: Build UI
+        working-directory: ui
+        run: npm run build
+
   test-unit:
     name: Unit Tests
     runs-on: ubuntu-latest

@@ -113,13 +113,13 @@ function App() {
       store.setActiveProposalId(null);
       setSection("builder");
     },
-    [store]
+    [store, setSection]
   );
 
   const handleCreateRound = useCallback(() => {
     store.createRound();
     setSection("builder");
-  }, [store]);
+  }, [store, setSection]);
 
   const handleFileImport = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -145,7 +145,7 @@ function App() {
       reader.readAsText(file);
       e.target.value = "";
     },
-    [store]
+    [store, setSection]
   );
 
   const handlePublish = useCallback(
@@ -155,7 +155,7 @@ function App() {
       setPublishResult("");
       setPublishError("");
     },
-    [store]
+    []
   );
 
   const handlePublishConfirm = useCallback(async () => {
@@ -266,7 +266,7 @@ function App() {
   const handleCreateSampleRound = useCallback(() => {
     store.createSampleRound();
     setSection("builder");
-  }, [store]);
+  }, [store, setSection]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface-0">
@@ -877,7 +877,10 @@ function useNullifierStatus(baseUrl?: string) {
       });
   }, [base]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    const timer = window.setTimeout(refresh, 0);
+    return () => window.clearTimeout(timer);
+  }, [refresh]);
 
   return { data, loading, error, refresh };
 }

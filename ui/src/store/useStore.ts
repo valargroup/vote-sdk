@@ -148,12 +148,15 @@ export function useStore() {
   const [saveState, setSaveState] = useState<"saved" | "saving">("saved");
 
   useEffect(() => {
-    setSaveState("saving");
-    const t = setTimeout(() => {
+    const markSavingTimer = window.setTimeout(() => setSaveState("saving"), 0);
+    const saveTimer = window.setTimeout(() => {
       saveRounds(rounds);
       setSaveState("saved");
     }, 300);
-    return () => clearTimeout(t);
+    return () => {
+      window.clearTimeout(markSavingTimer);
+      window.clearTimeout(saveTimer);
+    };
   }, [rounds]);
 
   const activeRound = rounds.find((r) => r.id === activeRoundId) ?? null;
