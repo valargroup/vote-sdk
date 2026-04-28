@@ -25,10 +25,11 @@ import (
 	consensustypes "github.com/cosmos/cosmos-sdk/x/consensus/types"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
-	_ "github.com/cosmos/cosmos-sdk/x/slashing" // import for side-effects
-	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	_ "github.com/cosmos/cosmos-sdk/x/staking" // import for side-effects
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+
+	_ "github.com/valargroup/vote-sdk/x/liveness" // import for side-effects
+	livenesstypes "github.com/valargroup/vote-sdk/x/liveness/types"
 
 	// Vote module: import for depinject side-effects (registers module provider).
 	_ "github.com/valargroup/vote-sdk/x/vote"
@@ -77,7 +78,7 @@ var (
 					authtypes.ModuleName,
 				},
 				BeginBlockers: []string{
-					slashingtypes.ModuleName,
+					livenesstypes.ModuleName,
 					stakingtypes.ModuleName,
 				},
 				EndBlockers: []string{
@@ -100,7 +101,7 @@ var (
 					authtypes.ModuleName,
 					banktypes.ModuleName,
 					stakingtypes.ModuleName,
-					slashingtypes.ModuleName,
+					livenesstypes.ModuleName,
 					genutiltypes.ModuleName,
 					votetypes.ModuleName,
 				},
@@ -109,7 +110,7 @@ var (
 					authtypes.ModuleName,
 					banktypes.ModuleName,
 					stakingtypes.ModuleName,
-					slashingtypes.ModuleName,
+					livenesstypes.ModuleName,
 					genutiltypes.ModuleName,
 					votetypes.ModuleName,
 				},
@@ -136,7 +137,7 @@ var (
 			}),
 		},
 		{
-			Name:   slashingtypes.ModuleName,
+			Name:   livenesstypes.ModuleName,
 			Config: appconfig.WrapAny(&slashingmodulev1.Module{}),
 		},
 		{
