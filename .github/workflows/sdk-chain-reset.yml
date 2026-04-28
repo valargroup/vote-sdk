@@ -147,8 +147,11 @@ jobs:
             use_https = True
             EOCFG
             s3cmd -c /tmp/do-spaces.s3cfg put /tmp/genesis.json s3://vote/genesis.json --acl-public --force
+            echo "Clearing old snapshot artifacts from s3://vote/snapshots/svote-1/..."
+            s3cmd -c /tmp/do-spaces.s3cfg del --recursive s3://vote/snapshots/svote-1/
             rm -f /tmp/do-spaces.s3cfg
             echo "Genesis uploaded to s3://vote/genesis.json"
+            echo "Old snapshots cleared from s3://vote/snapshots/svote-1/"
         env:
           DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
           DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
@@ -218,7 +221,7 @@ jobs:
 
             # Run reset-snapshot: wipe state, download genesis, configure peering
             # with primary, start svoted as a pruned non-validator, and enable
-            # the daily snapshot timer.
+            # the snapshot timer.
             export GENESIS_URL="${{ env.DO_SPACES_BASE }}/genesis.json"
             export PRIMARY_REST_URL="https://vote-chain-primary.${{ secrets.DOMAIN }}"
             export HOME_DIR=/opt/shielded-vote/.svoted

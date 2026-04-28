@@ -6,7 +6,7 @@
 # Tests (per arch):
 #   - Binary download + SHA-256 checksum from DO Spaces
 #   - svoted init + genesis fetch + genesis validation
-#   - latest chain snapshot download + SHA-256 checksum + restore
+#   - latest chain snapshot download + SHA-256 checksum + restore when published
 #   - init-validator-keys (Cosmos + Pallas + EA keypairs)
 #   - config.toml / app.toml patching
 #
