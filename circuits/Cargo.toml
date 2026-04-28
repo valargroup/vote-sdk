@@ -13,7 +13,7 @@ pasta_curves = "0.5"
 group = "0.13"
 rand_core = { version = "0.6", features = ["getrandom"] }
 reddsa = { version = "0.5", default-features = false }
-vote-commitment-tree = "0.1.0"
+vote-commitment-tree = "0.1.1"
 orchard = { version = "=0.13.1", features = ["unstable-voting-circuits"] }
 voting-circuits = { version = "0.3.1", features = ["share-reveal"] }
 imt-tree = { git = "https://github.com/valargroup/vote-nullifier-pir.git" }
@@ -32,9 +32,3 @@ blake2b_simd = "1"
 serde_json = "1"
 
 [workspace]
-
-# Redirect unreleased zcash_voting crates so this crate and the e2e-tests crate
-# converge on the same source revision. Orchard and voting-circuits resolve
-# from crates.io.
-[patch.crates-io]
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting.git", rev = "116dfaf7fe505a1b7c781b1baf929dca43417c65" }

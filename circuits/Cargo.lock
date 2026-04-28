@@ -942,8 +942,9 @@ dependencies = [
 
 [[package]]
 name = "vote-commitment-tree"
-version = "0.1.0"
-source = "git+https://github.com/valargroup/zcash_voting.git?rev=116dfaf7fe505a1b7c781b1baf929dca43417c65#116dfaf7fe505a1b7c781b1baf929dca43417c65"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0fb2456313f571003c0bed8d38fb166d78da85653caf828823c1a82f4e1aef1"
 dependencies = [
  "anyhow",
  "ff",
