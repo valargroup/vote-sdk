@@ -13,8 +13,8 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
   const [rows, setRows] = useState<chainApi.PendingValidatorPublic[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [fundingAddr, setFundingAddr] = useState<string | null>(null);
-  const [fundedLocal, setFundedLocal] = useState<Record<string, boolean>>({});
+  const [approvingAddr, setApprovingAddr] = useState<string | null>(null);
+  const [approvedLocal, setApprovedLocal] = useState<Record<string, boolean>>({});
   const [resultMsg, setResultMsg] = useState<{ addr: string; ok: boolean; msg: string } | null>(null);
 
   const load = useCallback(async (silent = false) => {
@@ -36,19 +36,19 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
     return () => clearInterval(id);
   }, [load]);
 
-  const handleFund = async (operatorAddress: string) => {
+  const handleApprove = async (operatorAddress: string) => {
     if (!wallet.signer) return;
-    setFundingAddr(operatorAddress);
+    setApprovingAddr(operatorAddress);
     setResultMsg(null);
     try {
       const base = chainApi.getApiBase();
       const res = await cosmosTx.fundValidatorJoin(base, wallet.signer, operatorAddress);
       if (res.code === 0) {
-        setFundedLocal((prev) => ({ ...prev, [operatorAddress]: true }));
+        setApprovedLocal((prev) => ({ ...prev, [operatorAddress]: true }));
         setResultMsg({
           addr: operatorAddress,
           ok: true,
-          msg: `Funded (tx ${res.tx_hash.slice(0, 12)}…). Row clears when the operator bonds.`,
+          msg: `Approved (tx ${res.tx_hash.slice(0, 12)}...). Row clears when the operator bonds.`,
         });
       } else {
         setResultMsg({
@@ -65,7 +65,7 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
         msg: e instanceof Error ? e.message : String(e),
       });
     } finally {
-      setFundingAddr(null);
+      setApprovingAddr(null);
     }
   };
 
@@ -80,8 +80,8 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
             <div>
               <h1 className="text-lg font-bold text-text-primary">Validator join queue</h1>
               <p className="text-[11px] text-text-muted">
-                Operators who ran <code className="text-[10px]">join.sh</code> and are waiting for stake.
-                Fund their operator address; their node bonds and exits the queue automatically.
+                Operators who ran <code className="text-[10px]">join.sh</code> and are waiting for manual approval.
+                Approving an operator sends their join stake; their node bonds and exits the queue automatically.
               </p>
             </div>
           </div>
@@ -115,7 +115,7 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
         {!wallet.address && (
           <div className="flex items-center gap-2 bg-warning/10 border border-warning/30 rounded-lg p-3 mb-4">
             <AlertCircle size={14} className="text-warning shrink-0" />
-            <p className="text-[11px] text-text-secondary">Connect a vote-manager wallet to fund operators.</p>
+            <p className="text-[11px] text-text-secondary">Connect a vote-manager wallet to approve operators.</p>
           </div>
         )}
 
@@ -141,7 +141,7 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
             <table className="w-full text-left text-[11px]">
               <thead className="bg-surface-2 text-text-muted uppercase tracking-wider">
                 <tr>
-                  <th className="sticky left-0 z-20 bg-surface-2 px-3 py-2 font-medium border-r border-border-subtle">Fund</th>
+                  <th className="sticky left-0 z-20 bg-surface-2 px-3 py-2 font-medium border-r border-border-subtle">Manual Approval</th>
                   <th className="px-3 py-2 font-medium">Moniker</th>
                   <th className="px-3 py-2 font-medium">Operator</th>
                   <th className="px-3 py-2 font-medium">URL</th>
@@ -156,18 +156,18 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
                     <td className="sticky left-0 z-10 bg-surface-0 group-hover:bg-surface-2 px-3 py-2 border-r border-border-subtle whitespace-nowrap">
                       <button
                         type="button"
-                        disabled={!wallet.signer || fundingAddr === r.operator_address}
-                        onClick={() => void handleFund(r.operator_address)}
+                        disabled={!wallet.signer || approvingAddr === r.operator_address}
+                        onClick={() => void handleApprove(r.operator_address)}
                         className="px-2 py-1 rounded-md bg-accent/90 hover:bg-accent text-surface-0 text-[10px] font-semibold disabled:opacity-40 cursor-pointer"
                       >
-                        {fundingAddr === r.operator_address ? (
+                        {approvingAddr === r.operator_address ? (
                           <span className="inline-flex items-center gap-1">
-                            <Loader2 size={10} className="animate-spin" /> Funding…
+                            <Loader2 size={10} className="animate-spin" /> Approving…
                           </span>
-                        ) : fundedLocal[r.operator_address] ? (
-                          "Fund again"
+                        ) : approvedLocal[r.operator_address] ? (
+                          "Approve again"
                         ) : (
-                          `Fund (${cosmosTx.VALIDATOR_JOIN_FUND_USVOTE} usvote)`
+                          `Approve (${cosmosTx.VALIDATOR_JOIN_FUND_USVOTE} usvote)`
                         )}
                       </button>
                     </td>
