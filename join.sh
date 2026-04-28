@@ -13,14 +13,15 @@
 #   2. Fetches voting-config from the GitHub Pages CDN (canonical source; same one wallets use)
 #   3. Fetches node identity from the first vote_servers[] URL (PEX seed)
 #   4. Downloads genesis.json from DO Spaces (canonical file from sdk-chain-reset)
-#   5. Initializes a node, generates cryptographic keys
-#   6. Configures the node to connect to the existing network
-#   7. Starts svoted, waits for sync, registers with the admin join queue, installs svoted-join (poll + bond)
+#   5. Restores the latest pruned chain-data snapshot
+#   6. Generates cryptographic keys
+#   7. Configures the node to connect to the existing network
+#   8. Starts svoted, waits for sync, registers with the admin join queue, installs svoted-join (poll + bond)
 #
 # Optional: SVOTE_JOIN_LOOP_SCRIPT=/path/to/join-loop.sh when join.sh is piped from curl and
 # join-loop.sh is not beside join.sh (see vote-sdk/scripts/join-loop.sh).
 #
-# Requirements: curl. jq is installed automatically when missing (apt/dnf/yum/apk/Homebrew).
+# Requirements: curl. jq and lz4 are installed automatically when missing (apt/dnf/yum/apk/Homebrew).
 # Dependency (binary path): release.yml must have run to upload binaries to DO Spaces.
 
 set -euo pipefail
@@ -29,6 +30,7 @@ CHAIN_ID="svote-1"
 INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
+SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-https://snapshots.valargroup.org}"
 # Canonical voting-config (same payload wallets fetch). Override for staging
 # mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
 VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://valargroup.github.io/token-holder-voting-config/voting-config.json}"
@@ -62,41 +64,58 @@ if ! command -v curl > /dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v jq > /dev/null 2>&1; then
-  echo "jq not found — installing..."
+install_missing_tools() {
+  local missing=()
+  local tool
+
+  for tool in jq lz4; do
+    if ! command -v "$tool" > /dev/null 2>&1; then
+      missing+=("$tool")
+    fi
+  done
+
+  if [ "${#missing[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  echo "Missing tools: ${missing[*]} — installing..."
   OS_NAME=$(uname -s)
   if [ "$OS_NAME" = "Linux" ]; then
     if command -v apt-get > /dev/null 2>&1; then
       export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
       sudo -E apt-get update -qq
-      sudo -E apt-get install -y jq
+      sudo -E apt-get install -y "${missing[@]}"
     elif command -v dnf > /dev/null 2>&1; then
-      sudo dnf install -y jq
+      sudo dnf install -y "${missing[@]}"
     elif command -v yum > /dev/null 2>&1; then
-      sudo yum install -y jq
+      sudo yum install -y "${missing[@]}"
     elif command -v apk > /dev/null 2>&1; then
-      sudo apk add --no-cache jq
+      sudo apk add --no-cache "${missing[@]}"
     else
-      echo "ERROR: jq is required. No supported package manager found (apt, dnf, yum, apk)."
+      echo "ERROR: ${missing[*]} required. No supported package manager found (apt, dnf, yum, apk)."
       exit 1
     fi
   elif [ "$OS_NAME" = "Darwin" ]; then
     if command -v brew > /dev/null 2>&1; then
-      brew install jq
+      brew install "${missing[@]}"
     else
-      echo "ERROR: jq is required. Install with: brew install jq"
+      echo "ERROR: ${missing[*]} required. Install with: brew install ${missing[*]}"
       exit 1
     fi
   else
-    echo "ERROR: jq is required. Install jq for your OS and re-run."
+    echo "ERROR: ${missing[*]} required. Install them for your OS and re-run."
     exit 1
   fi
-fi
+}
 
-if ! command -v jq > /dev/null 2>&1; then
-  echo "ERROR: jq is still not available after install attempt."
-  exit 1
-fi
+install_missing_tools
+
+for REQUIRED_TOOL in jq lz4; do
+  if ! command -v "$REQUIRED_TOOL" > /dev/null 2>&1; then
+    echo "ERROR: ${REQUIRED_TOOL} is still not available after install attempt."
+    exit 1
+  fi
+done
 
 build_register_payload() {
   local ts="$1"
@@ -157,6 +176,136 @@ systemd_env_quote() {
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
   printf '"%s"' "$value"
+}
+
+sha256_file() {
+  local file="$1"
+
+  if command -v sha256sum > /dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum > /dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  else
+    echo "ERROR: sha256sum or shasum is required to verify the snapshot archive."
+    return 1
+  fi
+}
+
+cleanup_snapshot_tmp() {
+  if [ -n "${SNAPSHOT_TMP_DIR:-}" ]; then
+    rm -rf "${SNAPSHOT_TMP_DIR}"
+  fi
+}
+
+restore_latest_snapshot() {
+  if [ "${SVOTE_SKIP_SNAPSHOT:-0}" = "1" ]; then
+    echo "SVOTE_SKIP_SNAPSHOT=1: skipping snapshot restore; node will sync from genesis."
+    return 0
+  fi
+
+  echo ""
+  echo "=== Restoring latest chain snapshot ==="
+
+  local metadata_url="${SNAPSHOT_BASE_URL%/}/latest.json"
+  local metadata_file
+  local archive_file
+  local listing_file
+  local snapshot_chain_id
+  local snapshot_url
+  local snapshot_checksum
+  local snapshot_height
+  local snapshot_date
+  local expected_checksum
+  local actual_checksum
+
+  SNAPSHOT_TMP_DIR=$(mktemp -d)
+  trap cleanup_snapshot_tmp EXIT
+
+  metadata_file="${SNAPSHOT_TMP_DIR}/latest.json"
+  archive_file="${SNAPSHOT_TMP_DIR}/snapshot.tar.lz4"
+  listing_file="${SNAPSHOT_TMP_DIR}/snapshot.files"
+
+  echo "Fetching snapshot metadata from ${metadata_url}..."
+  if ! curl -fsSL --connect-timeout 15 --max-time 60 -o "${metadata_file}" "${metadata_url}"; then
+    echo "ERROR: Could not fetch snapshot metadata from ${metadata_url}"
+    exit 1
+  fi
+
+  if ! jq empty "${metadata_file}" > /dev/null 2>&1; then
+    echo "ERROR: Snapshot metadata is not valid JSON."
+    exit 1
+  fi
+
+  snapshot_chain_id=$(jq -r '.chain_id // empty' "${metadata_file}")
+  snapshot_url=$(jq -r '.url // empty' "${metadata_file}")
+  snapshot_checksum=$(jq -r '.checksum // empty' "${metadata_file}")
+  snapshot_height=$(jq -r '.height // empty' "${metadata_file}")
+  snapshot_date=$(jq -r '.date // empty' "${metadata_file}")
+
+  if [ "${snapshot_chain_id}" != "${CHAIN_ID}" ]; then
+    echo "ERROR: Snapshot chain_id mismatch. Expected ${CHAIN_ID}, got ${snapshot_chain_id:-<empty>}."
+    exit 1
+  fi
+
+  case "${snapshot_url}" in
+    http://*|https://*) ;;
+    *)
+      echo "ERROR: Snapshot metadata does not contain a valid archive URL."
+      exit 1
+      ;;
+  esac
+
+  if ! printf '%s\n' "${snapshot_checksum}" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+    echo "ERROR: Snapshot metadata does not contain a valid SHA-256 checksum."
+    exit 1
+  fi
+
+  echo "Latest snapshot: height ${snapshot_height:-unknown} (${snapshot_date:-unknown date})"
+  echo "Downloading ${snapshot_url}..."
+  if ! curl -fsSL --retry 3 --connect-timeout 15 -o "${archive_file}" "${snapshot_url}"; then
+    echo "ERROR: Could not download snapshot archive."
+    exit 1
+  fi
+
+  expected_checksum=$(printf '%s' "${snapshot_checksum}" | tr 'A-F' 'a-f')
+  actual_checksum=$(sha256_file "${archive_file}" | tr 'A-F' 'a-f')
+  if [ "${actual_checksum}" != "${expected_checksum}" ]; then
+    echo "ERROR: Snapshot checksum mismatch."
+    echo "  Expected: ${expected_checksum}"
+    echo "  Actual:   ${actual_checksum}"
+    exit 1
+  fi
+  echo "Snapshot checksum verified."
+
+  if ! lz4 -dc "${archive_file}" | tar -tf - > "${listing_file}"; then
+    echo "ERROR: Snapshot archive is not readable by lz4 + tar."
+    exit 1
+  fi
+
+  if ! awk 'BEGIN { ok=1 } !/^data(\/|$)/ || /(^|\/)\.\.(\/|$)/ { print; ok=0 } END { exit ok ? 0 : 1 }' "${listing_file}" > /dev/null; then
+    echo "ERROR: Snapshot archive contains unsafe paths."
+    exit 1
+  fi
+
+  echo "Extracting snapshot data into ${HOME_DIR}/data..."
+  rm -rf "${HOME_DIR}/data"
+  if ! lz4 -dc "${archive_file}" | tar -C "${HOME_DIR}" -xf -; then
+    echo "ERROR: Snapshot extraction failed."
+    exit 1
+  fi
+
+  if [ ! -d "${HOME_DIR}/data" ]; then
+    echo "ERROR: Snapshot archive did not restore ${HOME_DIR}/data."
+    exit 1
+  fi
+
+  rm -f "${HOME_DIR}/data/priv_validator_state.json"
+  rm -rf "${HOME_DIR}/data/cs.wal"
+
+  echo "Snapshot restored. Removed runtime-local consensus state."
+  cleanup_snapshot_tmp
+  SNAPSHOT_TMP_DIR=""
+  trap - EXIT
 }
 
 # ─── Prompt for moniker ──────────────────────────────────────────────────────
@@ -375,6 +524,10 @@ fi
 echo "Genesis validated."
 cleanup_genesis_tmp
 trap - EXIT
+
+# ─── Restore latest chain snapshot ───────────────────────────────────────────
+
+restore_latest_snapshot
 
 # ─── Generate keys ────────────────────────────────────────────────────────────
 
@@ -662,13 +815,17 @@ register_url() {
   if [ -z "${SVOTE_ADMIN_URL}" ]; then
     return 0
   fi
-  local ts=$(date +%s)
+  local ts
   local payload
+  local sig
+  local pub_key
+
+  ts=$(date +%s)
   payload=$(build_register_payload "${ts}")
   local sig_json
   sig_json=$(svoted sign-arbitrary "$payload" --from validator --keyring-backend test --home "${HOME_DIR}" 2>/dev/null) || return 0
-  local sig=$(echo "$sig_json" | jq -r '.signature')
-  local pub_key=$(echo "$sig_json" | jq -r '.pub_key')
+  sig=$(echo "$sig_json" | jq -r '.signature')
+  pub_key=$(echo "$sig_json" | jq -r '.pub_key')
   local body
   body=$(build_register_body "${ts}" "${sig}" "${pub_key}")
   curl -fsSL -X POST "${SVOTE_ADMIN_URL%/}/api/register-validator" \

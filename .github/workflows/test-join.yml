@@ -4,6 +4,7 @@
 #   - Binary download + SHA-256 checksum (arch-specific tarball from DO Spaces)
 #   - voting-config CDN discovery + P2P peer resolution
 #   - svoted init + genesis fetch + genesis validation
+#   - latest chain snapshot download + SHA-256 checksum + restore
 #   - init-validator-keys (Cosmos account + Pallas + EA keypairs)
 #   - config.toml / app.toml patching
 #
@@ -64,15 +65,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install jq (macOS)
+      - name: Install jq and lz4 (macOS)
         if: runner.os == 'macOS'
-        run: command -v jq || brew install jq
+        run: |
+          command -v jq || brew install jq
+          command -v lz4 || brew install lz4
 
       - name: Run join.sh smoke test
         env:
           SVOTE_MONIKER: ci-test
           SVOTE_SKIP_SERVICE: "1"
           SVOTE_SKIP_CADDY: "1"
+          SVOTE_ADMIN_URL: http://127.0.0.1:9
         run: bash join.sh
 
       - name: Verify output files and config
@@ -95,6 +99,7 @@ jobs:
           check_file "${D}/config/config.toml"
           check_file "${D}/config/app.toml"
           check_file "${D}/config/genesis.json"
+          check_file "${D}/data/application.db/CURRENT"
           check_file "${D}/pallas.sk"
           check_file "${D}/pallas.pk"
           check_file "${D}/ea.sk"
