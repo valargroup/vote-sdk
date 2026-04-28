@@ -34,11 +34,8 @@ cleanup_launchd_join_service() {
   local join_plist="${home_dir}/Library/LaunchAgents/${join_label}.plist"
 
   echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") removing launchd join service ${join_label}"
-  (
-    sleep 1
-    rm -f "${join_plist}"
-    launchctl bootout "gui/$(id -u)/${join_label}" >/dev/null 2>&1 || true
-  ) >/dev/null 2>&1 &
+  rm -f "${join_plist}"
+  launchctl bootout "gui/$(id -u)/${join_label}" >/dev/null 2>&1 || true
 }
 
 exit_bonded() {
