@@ -365,11 +365,13 @@ $BINARY genesis collect-gentxs --home "$HOME_VAL1"
 # Build the vote_manager_addresses JSON array for the genesis patch.
 VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .)
 
-# Patch genesis: set vote_manager_addresses to the imported keys' addresses and zero
-# out slashing slash fractions (no token burn).
+# Patch genesis: set vote_manager_addresses to the imported keys' addresses,
+# disable staking historical-info retention, and zero out slashing slash
+# fractions (no token burn).
 GENESIS="$HOME_VAL1/config/genesis.json"
 jq --argjson vms "$VOTE_MANAGER_JSON" '
   .app_state.vote.vote_manager_addresses = $vms
+  | .app_state.staking.params.historical_entries = 0
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"
