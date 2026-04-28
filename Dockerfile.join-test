@@ -6,6 +6,7 @@
 # Tests (per arch):
 #   - Binary download + SHA-256 checksum from DO Spaces
 #   - svoted init + genesis fetch + genesis validation
+#   - latest chain snapshot download + SHA-256 checksum + restore
 #   - init-validator-keys (Cosmos + Pallas + EA keypairs)
 #   - config.toml / app.toml patching
 #
@@ -26,6 +27,7 @@ RUN apt-get update -q && \
     apt-get install -y -q --no-install-recommends \
       curl \
       jq \
+      lz4 \
       ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
@@ -36,5 +38,6 @@ RUN chmod +x /join.sh
 ENV SVOTE_MONIKER=docker-test
 ENV SVOTE_SKIP_SERVICE=1
 ENV SVOTE_SKIP_CADDY=1
+ENV SVOTE_ADMIN_URL=http://127.0.0.1:9
 
 CMD ["/join.sh"]

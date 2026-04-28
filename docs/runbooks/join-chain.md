@@ -4,7 +4,7 @@
 
 Shielded-Vote is a Cosmos SDK application chain for private on-chain voting. The chain launches with a single genesis validator. Everyone else joins post-genesis via a custom message `MsgCreateValidatorWithPallasKey`, which atomically creates the validator *and* registers its Pallas key for the EA-key ceremony. See the [protocol README](../../README.md#protocol-documentation) for the full rules.
 
-This runbook covers the operator side: standing up an `svoted` host that syncs with the live chain, reaches bonded status, and exposes a TLS-fronted REST API that iOS clients and peers can reach. A validator is a single `svoted` process plus a `svoted-join` bonding loop and a Caddy reverse proxy on the same host.
+This runbook covers the operator side: standing up an `svoted` host that restores the latest Zvote snapshot, catches up with the live chain, reaches bonded status, and exposes a TLS-fronted REST API that iOS clients and peers can reach. A validator is a single `svoted` process plus a `svoted-join` bonding loop and a Caddy reverse proxy on the same host.
 
 **Scope:**
 
@@ -51,6 +51,7 @@ See [TLS / reverse proxy](#tls--reverse-proxy) for the Caddy layout `join.sh` in
 | Direction | Destination | Purpose |
 |-----------|-------------|---------|
 | Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `join-loop.sh` fallback |
+| Outbound 443 | `snapshots.valargroup.org` | Latest Zvote snapshot metadata and archive URL used to bootstrap chain data before peer catch-up |
 | Outbound 443 | `valargroup.github.io` | [`token-holder-voting-config/voting-config.json`](https://github.com/valargroup/token-holder-voting-config) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
 | Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue) and `POST /api/server-heartbeat` (helper liveness). Override via `SVOTE_ADMIN_URL` / `DEFAULT_ADMIN_API_BASE`. |
 | Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` (P2P seed) |
@@ -79,7 +80,7 @@ curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --domai
 
 **NOTE: Most users should use this one-line command to get started and not install anything manually**
 
-The installer prompts for a validator moniker unless `SVOTE_MONIKER` is set. See [Join lifecycle](#join-lifecycle) for the timeline from install to bonded, [Operating the service](#operating-the-service) for what gets installed on the host, and [Reference > Manual install](#manual-install-no-joinsh) for the equivalent manual steps.
+The installer prompts for a validator moniker unless `SVOTE_MONIKER` is set, restores the latest Zvote snapshot, then catches up from peers. See [Join lifecycle](#join-lifecycle) for the timeline from install to bonded, [Operating the service](#operating-the-service) for what gets installed on the host, and [Reference > Manual install](#manual-install-no-joinsh) for the equivalent manual steps.
 
 After install, operate the service with:
 
@@ -253,7 +254,7 @@ The validator identity lives under `~/.svoted/`. Losing these files without a ba
 | `keyring-test/` | BIP39-derived secp256k1 account key (`validator`) used to sign Cosmos txs including `MsgCreateValidatorWithPallasKey`. | Restore from the mnemonic printed by `svoted init-validator-keys`. |
 | `pallas.sk` / `pallas.pk` | EA-ceremony Pallas keypair. Required to participate in ceremony auto-ack. | Can be rotated via `MsgRotatePallasKey` (when not in an active ceremony) — see the [Pallas Key Registration and Rotation](../../README.md#pallas-key-registration-and-rotation) section of the README. |
 | `ea.sk` / `ea.pk` | Auto-deal EA keypair placeholder; overwritten per-round by the ceremony. | Regenerated on next round. |
-| `data/` | Block store + app state. | Re-sync from peers; authoritative state lives on-chain. |
+| `data/` | Block store + app state. | Restore the latest Zvote snapshot, then catch up from peers; authoritative state lives on-chain. |
 
 Back these up encrypted off-host, keeping `priv_validator_key.json` exclusive to a single live host at any time.
 
@@ -310,10 +311,10 @@ The GitHub Release for the tag also mirrors the tarballs, so operators who want 
 
 It is also useful for custom layouts, non-Linux platforms, or when debugging the installer.
 
-**Prerequisites:** `curl`, `jq`, and `sudo`. On minimal Ubuntu/Debian images install them first:
+**Prerequisites:** `curl`, `jq`, `lz4`, and `sudo`. On minimal Ubuntu/Debian images install them first:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y curl jq ca-certificates
+sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
 ```
 
 1. **Download and install the binaries.** `join.sh` always pulls the latest; pin a specific `TAG` here if you want a reproducible install. The tarball is downloaded under its published name so `sha256sum -c` can validate it against the companion `.sha256` file, which lists the original filename:
@@ -365,21 +366,43 @@ sudo apt-get update && sudo apt-get install -y curl jq ca-certificates
    svoted genesis validate-genesis --home "$HOME_DIR"
    ```
 
-4. **Generate the validator, Pallas, and EA keys** (single command; see `svoted init-validator-keys --help`). Record the mnemonic — it is the only way to recover the Cosmos account key:
+4. **Restore the latest Zvote snapshot** before generating validator keys:
+
+   ```bash
+   SNAPSHOT_META=$(mktemp)
+   SNAPSHOT_ARCHIVE=$(mktemp)
+   curl -fsSL -o "$SNAPSHOT_META" https://snapshots.valargroup.org/latest.json
+   test "$(jq -r '.chain_id' "$SNAPSHOT_META")" = "svote-1"
+   SNAPSHOT_URL=$(jq -r '.url' "$SNAPSHOT_META")
+   SNAPSHOT_SUM=$(jq -r '.checksum' "$SNAPSHOT_META")
+   curl -fL -o "$SNAPSHOT_ARCHIVE" "$SNAPSHOT_URL"
+   if command -v sha256sum >/dev/null 2>&1; then
+     ACTUAL_SUM=$(sha256sum "$SNAPSHOT_ARCHIVE" | awk '{print $1}')
+   else
+     ACTUAL_SUM=$(shasum -a 256 "$SNAPSHOT_ARCHIVE" | awk '{print $1}')
+   fi
+   test "$ACTUAL_SUM" = "$SNAPSHOT_SUM"
+   rm -rf "$HOME_DIR/data"
+   lz4 -dc "$SNAPSHOT_ARCHIVE" | tar -C "$HOME_DIR" -xf -
+   rm -f "$HOME_DIR/data/priv_validator_state.json"
+   rm -rf "$HOME_DIR/data/cs.wal"
+   ```
+
+5. **Generate the validator, Pallas, and EA keys** (single command; see `svoted init-validator-keys --help`). Record the mnemonic — it is the only way to recover the Cosmos account key:
 
    ```bash
    svoted init-validator-keys --home "$HOME_DIR"
    VALIDATOR_ADDR=$(svoted keys show validator -a --keyring-backend test --home "$HOME_DIR")
    ```
 
-5. **Configure and start the services** to match what `join.sh` does:
+6. **Configure and start the services** to match what `join.sh` does:
 
    - Set `persistent_peers = "${PERSISTENT_PEERS}"` in `config.toml`; enable `[api]` with `enabled-unsafe-cors = true` in `app.toml`; append the `[helper]` block — keys and defaults are in [`[helper]` and `[api]` reference](#helper-and-api-reference). Leave `helper_url` empty until the public URL is known.
    - Install Caddy (or your TLS terminator) — see [TLS / reverse proxy](#tls--reverse-proxy). Once the hostname is live, set `helper_url` in `app.toml` and restart `svoted`.
    - Install the systemd / launchd units described in [Operating the service](#operating-the-service): `svoted.service` runs `svoted start --home "$HOME_DIR"`; `svoted-join.service` requires `svoted.service` and runs `${INSTALL_DIR}/join-loop.sh` with `EnvironmentFile=/etc/default/svoted-join` (the file holds `SVOTE_HOME`, `VALIDATOR_ADDR`, `MONIKER`, `VALIDATOR_URL`, `SVOTE_ADMIN_URL`, `SVOTE_INSTALL_DIR`).
    - Copy [scripts/join-loop.sh](../../scripts/join-loop.sh) to `${INSTALL_DIR}/join-loop.sh`, then `systemctl enable --now svoted svoted-join`.
 
-6. **Proceed to [Smoke test](#smoke-test)** and [Join lifecycle](#join-lifecycle).
+7. **Proceed to [Smoke test](#smoke-test)** and [Join lifecycle](#join-lifecycle).
 
 ### Files under `~/.svoted`
 
@@ -408,6 +431,8 @@ All variables are read from the environment by `join.sh`, `join-loop.sh`, or the
 | `SVOTE_MONIKER` | interactive prompt | Validator moniker; required for unattended installs. |
 | `SVOTE_INSTALL_DIR` | `$HOME/.local/bin` | Where `svoted`, `create-val-tx`, and `join-loop.sh` are installed. |
 | `SVOTE_HOME` | `$HOME/.svoted` | Chain data + config + keys. |
+| `SVOTE_SNAPSHOT_BASE_URL` | `https://snapshots.valargroup.org` | Snapshot service base URL. `join.sh` fetches `${SVOTE_SNAPSHOT_BASE_URL}/latest.json` and restores the archive it declares. |
+| `SVOTE_SKIP_SNAPSHOT` | `0` | When `1`, skip snapshot restore and sync from genesis. Default installs fail fast if snapshot metadata, checksum verification, or extraction fails. |
 | `SVOTE_LOCAL_BINARIES` | `0` | When `1` and both binaries are on `$PATH`, skip the download. Used by source developers with `mise run build:install`. |
 | `SVOTE_SKIP_CADDY` | `0` | `1` skips Caddy install + config. Use when TLS is handled externally. |
 | `SVOTE_ALLOW_NO_PUBLIC_URL` | `0` | When `1`, explicit-domain Caddy failures continue with an empty `VALIDATOR_URL` so the operator can still enter the funding queue. |
@@ -459,6 +484,7 @@ Start with `journalctl -u svoted -n 200 --no-pager` / `tail -n 200 ~/.svoted/nod
 | `ERROR: No vote_servers[0].url in voting-config` | The published voting-config has an empty `vote_servers` list (usually during/after a chain reset) | Wait ~1 h, or set `VOTING_CONFIG_URL` to a mirror with a populated list and re-run. The fix is in [valargroup/token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) — a maintainer needs to add at least one server URL. |
 | `ERROR: Could not fetch version from …/version.txt` | Outbound 443 to DO Spaces blocked | Test `curl -I https://vote.fra1.digitaloceanspaces.com/version.txt`; fix egress; consider `SVOTE_LOCAL_BINARIES=1` if you already have pinned binaries on `$PATH`. |
 | Checksum mismatch on tarball | Corrupt download or MITM | Retry once; if it keeps happening, pull from the GitHub Release for the same tag and compare against `SHA256SUMS`. |
+| Snapshot metadata, checksum, or extraction fails | Snapshot service unreachable, stale metadata, corrupt download, or missing `lz4` | Confirm `curl -fsS https://snapshots.valargroup.org/latest.json | jq` works from the host. Re-run after fixing egress or the snapshot service. Use `SVOTE_SKIP_SNAPSHOT=1` only for explicit genesis-sync debugging. |
 | `svoted` SIGILLs immediately at startup | Binary/arch mismatch | `file ~/.local/bin/svoted` — must match `uname -m`. Re-run `join.sh` so it picks the right `PLATFORM`. |
 | `svoted-join` keeps running after you see `BOND_STATUS_BONDED` in `svoted query staking validators` | The moniker in `/etc/default/svoted-join` doesn't match the on-chain description | Confirm `MONIKER` matches `.validators[].description.moniker` exactly; edit the env file and restart `svoted-join`. |
 
