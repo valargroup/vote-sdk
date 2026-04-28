@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { fromBech32 } from "@cosmjs/encoding";
 import { Loader2, RefreshCw, Users, AlertCircle, ExternalLink } from "lucide-react";
 import * as chainApi from "../api/chain";
 import * as cosmosTx from "../api/cosmosTx";
@@ -15,6 +16,8 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
   const [error, setError] = useState("");
   const [approvingAddr, setApprovingAddr] = useState<string | null>(null);
   const [approvedLocal, setApprovedLocal] = useState<Record<string, boolean>>({});
+  const [manualOperatorAddress, setManualOperatorAddress] = useState("");
+  const [manualAddressError, setManualAddressError] = useState("");
   const [resultMsg, setResultMsg] = useState<{ addr: string; ok: boolean; msg: string } | null>(null);
 
   const load = useCallback(async (silent = false) => {
@@ -36,23 +39,39 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
     return () => clearInterval(id);
   }, [load]);
 
+  const handleManualAddressChange = (value: string) => {
+    const trimmed = value.trim();
+    setManualOperatorAddress(trimmed);
+    if (!trimmed) {
+      setManualAddressError("");
+      return;
+    }
+    try {
+      fromBech32(trimmed);
+      setManualAddressError("");
+    } catch {
+      setManualAddressError("Invalid bech32 address");
+    }
+  };
+
   const handleApprove = async (operatorAddress: string) => {
-    if (!wallet.signer) return;
-    setApprovingAddr(operatorAddress);
+    const address = operatorAddress.trim();
+    if (!wallet.signer || !address) return;
+    setApprovingAddr(address);
     setResultMsg(null);
     try {
       const base = chainApi.getApiBase();
-      const res = await cosmosTx.fundValidatorJoin(base, wallet.signer, operatorAddress);
+      const res = await cosmosTx.fundValidatorJoin(base, wallet.signer, address);
       if (res.code === 0) {
-        setApprovedLocal((prev) => ({ ...prev, [operatorAddress]: true }));
+        setApprovedLocal((prev) => ({ ...prev, [address]: true }));
         setResultMsg({
-          addr: operatorAddress,
+          addr: address,
           ok: true,
           msg: `Approved (tx ${res.tx_hash.slice(0, 12)}...). Row clears when the operator bonds.`,
         });
       } else {
         setResultMsg({
-          addr: operatorAddress,
+          addr: address,
           ok: false,
           msg: res.log || `tx failed (code ${res.code})`,
         });
@@ -60,7 +79,7 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
       await load(true);
     } catch (e) {
       setResultMsg({
-        addr: operatorAddress,
+        addr: address,
         ok: false,
         msg: e instanceof Error ? e.message : String(e),
       });
@@ -68,6 +87,9 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
       setApprovingAddr(null);
     }
   };
+
+  const manualAddressValid = manualOperatorAddress.length > 0 && !manualAddressError;
+  const manualApproving = approvingAddr === manualOperatorAddress;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -125,6 +147,55 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
             <p className="text-[11px] text-danger">{error}</p>
           </div>
         )}
+
+        <div className="mb-6 p-4 rounded-xl border border-border-subtle bg-surface-1">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-xs font-semibold text-text-primary">Manual validator approval</h2>
+              <p className="mt-1 text-[11px] text-text-muted">
+                Enter an operator address to approve a validator manually, even if it is not visible in the queue.
+              </p>
+            </div>
+            <form
+              className="flex flex-col gap-2 sm:w-[420px]"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (manualAddressValid) void handleApprove(manualOperatorAddress);
+              }}
+            >
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={manualOperatorAddress}
+                  onChange={(e) => handleManualAddressChange(e.target.value)}
+                  placeholder="sv1..."
+                  spellCheck={false}
+                  autoComplete="off"
+                  className={`min-w-0 flex-1 px-3 py-2 bg-surface-2 border rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none font-mono ${
+                    manualAddressError ? "border-danger/50 focus:border-danger/70" : "border-border-subtle focus:border-accent/50"
+                  }`}
+                />
+                <button
+                  type="submit"
+                  disabled={!wallet.signer || !manualAddressValid || manualApproving}
+                  className="px-3 py-2 rounded-lg bg-accent/90 hover:bg-accent text-surface-0 text-xs font-semibold disabled:opacity-40 cursor-pointer whitespace-nowrap"
+                  title={`Approve with ${cosmosTx.VALIDATOR_JOIN_FUND_USVOTE} usvote`}
+                >
+                  {manualApproving ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Loader2 size={12} className="animate-spin" /> Approving...
+                    </span>
+                  ) : (
+                    "Approve"
+                  )}
+                </button>
+              </div>
+              {manualAddressError && (
+                <p className="text-[10px] text-danger">{manualAddressError}</p>
+              )}
+            </form>
+          </div>
+        </div>
 
         {loading && rows.length === 0 && (
           <div className="flex items-center justify-center py-16">
