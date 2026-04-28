@@ -603,8 +603,8 @@ export async function createVotingSession(
 /**
  * Sign and broadcast an svote.v1.MsgAuthorizedSend transaction.
  *
- * Used by the "Fund validator" UI to transfer stake tokens from a vote manager
- * to a validator address. Any vote manager can send to anyone; bonded validators
+ * Used to transfer stake tokens from a vote manager to a validator address.
+ * Any vote manager can send to anyone; bonded validators
  * can send to other vote managers or bonded validators; all other senders rejected.
  *
  * @param amountUsvote - amount in micro-tokens (usvote), e.g. "1000000" for 1 SVOTE
@@ -633,11 +633,11 @@ export async function fundValidator(
   });
 }
 
-/** Default fund amount for validator self-delegation (10 USVOTE) plus headroom. */
+/** Default manual approval amount for validator self-delegation (10 USVOTE) plus headroom. */
 export const VALIDATOR_JOIN_FUND_USVOTE = "10500000";
 
 /**
- * Fund a pending validator operator account (MsgAuthorizedSend).
+ * Manually approve a pending validator operator account by sending its join stake.
  * Vote managers use this from the Join queue UI.
  */
 export async function fundValidatorJoin(
