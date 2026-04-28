@@ -1835,7 +1835,6 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
   const [votingConfig, setVotingConfig] = useState<chainApi.VotingConfig | null>(null);
   const [urlInputFor, setUrlInputFor] = useState<string | null>(null); // moniker being edited
   const [urlInput, setUrlInput] = useState("");
-  const [includePir, setIncludePir] = useState(false);
   const [networkUpdating, setNetworkUpdating] = useState(false);
   const [networkResult, setNetworkResult] = useState<{ moniker: string; ok: boolean; msg: string } | null>(null);
 
@@ -1893,11 +1892,10 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
         );
         setUrlInputFor(null);
         setUrlInput("");
-        setIncludePir(false);
         setNetworkResult({
           moniker,
           ok: true,
-          msg: `Add vote_servers entry { "url": "${url}", "label": "${moniker}" } in the PR (and pir_endpoints if needed).`,
+          msg: `Add vote_servers entry { "url": "${url}", "label": "${moniker}" } in the config PR.`,
         });
         return;
       }
@@ -1910,7 +1908,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
         setNetworkResult({
           moniker,
           ok: true,
-          msg: `Remove entries labeled "${moniker}" from vote_servers / pir_endpoints in a PR.`,
+          msg: `Remove the vote_servers entry labeled "${moniker}" in the config PR.`,
         });
         return;
       }
@@ -2004,6 +2002,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
             </div>
             <p className="text-[10px] text-text-secondary mb-1">
               All bonded validators on-chain. A validator can be bonded and producing blocks but not listed as an approved submission server if it has been taken out of client rotation by an admin.
+              Vote server registration opens a config edit so operators can submit a PR against the published vote_servers list.
             </p>
             {pallasKeys.size > 0 && (
               <p className="text-[10px] text-text-secondary">
@@ -2136,25 +2135,18 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                   const registeredUrl = votingConfig?.vote_servers.find(
                     (s) => s.label === moniker
                   )?.url;
-                  const isPir = votingConfig?.pir_endpoints.some(
-                    (s) => s.label === moniker
-                  );
-
                   if (registeredUrl) {
                     return (
                       <div className="mt-2 flex items-center gap-2">
                         <Server size={10} className="text-success shrink-0" />
                         <span className="text-[10px] text-text-secondary truncate">{registeredUrl}</span>
-                        {isPir && (
-                          <span className="text-[8px] bg-accent/15 text-accent px-1.5 py-0.5 rounded-full shrink-0">PIR</span>
-                        )}
                         <button
                           type="button"
                           className="text-[9px] px-1.5 py-0.5 rounded bg-danger/15 text-danger hover:bg-danger/25 transition-colors shrink-0 disabled:opacity-50"
                           disabled={networkUpdating}
                           onClick={() => void updateNetwork("remove", moniker)}
                         >
-                          Remove (PR)
+                          Remove vote URL (PR)
                         </button>
                         {networkResult?.moniker === moniker && (
                           <span className={`text-[9px] ${networkResult.ok ? "text-success" : "text-danger"}`}>
@@ -2178,19 +2170,13 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                           className="w-full px-2 py-1 bg-surface-2 border border-border-subtle rounded text-[10px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
                         />
                         <div className="flex items-center gap-3">
-                          <label className="flex items-center gap-1 text-[10px] text-text-secondary cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={includePir}
-                              onChange={(e) => setIncludePir(e.target.checked)}
-                              className="rounded"
-                            />
-                            Also register as PIR server
-                          </label>
+                          <p className="text-[10px] text-text-muted">
+                            Opens GitHub to add this validator to vote_servers. PIR endpoints are managed separately in the config repo.
+                          </p>
                           <div className="flex-1" />
                           <button
                             className="text-[10px] text-text-muted hover:text-text-secondary cursor-pointer"
-                            onClick={() => { setUrlInputFor(null); setUrlInput(""); setIncludePir(false); }}
+                            onClick={() => { setUrlInputFor(null); setUrlInput(""); }}
                           >
                             Cancel
                           </button>
@@ -2220,7 +2206,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                         }}
                       >
                         <Server size={9} />
-                        Register public URL (PR)
+                        Register vote server URL (PR)
                       </button>
                     </div>
                   );
