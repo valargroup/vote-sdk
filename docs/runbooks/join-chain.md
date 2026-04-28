@@ -371,6 +371,7 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    ```bash
    SNAPSHOT_META=$(mktemp)
    SNAPSHOT_ARCHIVE=$(mktemp)
+   VALIDATOR_STATE=$(mktemp)
    curl -fsSL -o "$SNAPSHOT_META" https://snapshots.valargroup.org/latest.json
    test "$(jq -r '.chain_id' "$SNAPSHOT_META")" = "svote-1"
    SNAPSHOT_URL=$(jq -r '.url' "$SNAPSHOT_META")
@@ -382,9 +383,10 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
      ACTUAL_SUM=$(shasum -a 256 "$SNAPSHOT_ARCHIVE" | awk '{print $1}')
    fi
    test "$ACTUAL_SUM" = "$SNAPSHOT_SUM"
+   cp "$HOME_DIR/data/priv_validator_state.json" "$VALIDATOR_STATE"
    rm -rf "$HOME_DIR/data"
    lz4 -dc "$SNAPSHOT_ARCHIVE" | tar -C "$HOME_DIR" -xf -
-   rm -f "$HOME_DIR/data/priv_validator_state.json"
+   cp "$VALIDATOR_STATE" "$HOME_DIR/data/priv_validator_state.json"
    rm -rf "$HOME_DIR/data/cs.wal"
    ```
 
