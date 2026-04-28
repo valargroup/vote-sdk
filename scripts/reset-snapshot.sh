@@ -83,9 +83,9 @@ sed -i 's|^pruning-interval = ".*"|pruning-interval = "10"|' "${APP_TOML}"
 sed -i 's|^min-retain-blocks = .*|min-retain-blocks = 0|' "${APP_TOML}"
 sed -i 's|^discard_abci_responses = .*|discard_abci_responses = true|' "${APP_TOML}"
 
-echo "Starting svoted..."
+echo "Starting and enabling svoted..."
 systemctl daemon-reload
-systemctl start svoted
+systemctl enable --now svoted
 
 for i in $(seq 1 30); do
   if svoted status --home "${HOME_DIR}" > /dev/null 2>&1; then
