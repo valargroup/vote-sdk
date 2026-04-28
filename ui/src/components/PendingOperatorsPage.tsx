@@ -154,22 +154,27 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
                 {rows.map((r) => (
                   <tr key={r.operator_address} className="group border-t border-border-subtle hover:bg-surface-2/50">
                     <td className="sticky left-0 z-10 bg-surface-0 group-hover:bg-surface-2 px-3 py-2 border-r border-border-subtle whitespace-nowrap">
-                      <button
-                        type="button"
-                        disabled={!wallet.signer || approvingAddr === r.operator_address}
-                        onClick={() => void handleApprove(r.operator_address)}
-                        className="px-2 py-1 rounded-md bg-accent/90 hover:bg-accent text-surface-0 text-[10px] font-semibold disabled:opacity-40 cursor-pointer"
-                      >
-                        {approvingAddr === r.operator_address ? (
-                          <span className="inline-flex items-center gap-1">
-                            <Loader2 size={10} className="animate-spin" /> Approving…
-                          </span>
-                        ) : approvedLocal[r.operator_address] ? (
-                          "Approve again"
-                        ) : (
-                          `Approve (${cosmosTx.VALIDATOR_JOIN_FUND_USVOTE} usvote)`
-                        )}
-                      </button>
+                      {approvedLocal[r.operator_address] ? (
+                        <span className="px-2 py-1 rounded-md bg-success/15 text-success text-[10px] font-semibold">
+                          Approved
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!wallet.signer || approvingAddr === r.operator_address}
+                          onClick={() => void handleApprove(r.operator_address)}
+                          className="px-2 py-1 rounded-md bg-accent/90 hover:bg-accent text-surface-0 text-[10px] font-semibold disabled:opacity-40 cursor-pointer"
+                          title={`Approve with ${cosmosTx.VALIDATOR_JOIN_FUND_USVOTE} usvote`}
+                        >
+                          {approvingAddr === r.operator_address ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Loader2 size={10} className="animate-spin" /> Approving…
+                            </span>
+                          ) : (
+                            "Approve"
+                          )}
+                        </button>
+                      )}
                     </td>
                     <td className="px-3 py-2 font-semibold text-text-primary">{r.moniker}</td>
                     <td className="px-3 py-2 font-mono text-text-muted truncate max-w-[140px]" title={r.operator_address}>
