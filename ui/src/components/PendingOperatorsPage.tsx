@@ -240,15 +240,22 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
                     )}
                   </div>
 
-                  <div className="grid min-w-0 gap-3 px-3 pb-3 pt-0 sm:py-3 lg:grid-cols-[minmax(100px,0.7fr)_minmax(140px,0.8fr)_minmax(0,1.35fr)_minmax(0,1.15fr)] lg:items-center">
+                  <div className="grid min-w-0 gap-3 px-3 pb-3 pt-0 sm:py-3 lg:grid-cols-[minmax(90px,0.65fr)_minmax(130px,0.78fr)_minmax(130px,0.78fr)_minmax(0,1.3fr)_minmax(0,1.05fr)] lg:items-center">
                     <div className="min-w-0">
                       <div className="mb-1 text-[10px] uppercase tracking-wider text-text-muted">Moniker</div>
                       <div className="font-semibold text-text-primary break-words">{r.moniker || "—"}</div>
                     </div>
 
                     <div className="min-w-0">
-                      <div className="mb-1 text-[10px] uppercase tracking-wider text-text-muted">Seen</div>
-                      <div className="text-text-secondary break-words" title={`First seen: ${formatUnix(r.first_seen_at)}. Expires: ${formatUnix(r.expires_at)}.`}>
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-text-muted">First seen</div>
+                      <div className="text-text-secondary break-words">
+                        {formatUnix(r.first_seen_at)}
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-text-muted">Last seen</div>
+                      <div className="text-text-secondary break-words">
                         {formatUnix(r.last_seen_at)}
                       </div>
                     </div>
