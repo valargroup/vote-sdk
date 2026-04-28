@@ -748,7 +748,7 @@ CADDYPLISTEOF
 </plist>
 JOINPLISTEOF
   launchctl bootstrap "gui/$(id -u)" "${JOIN_PLIST}"
-  echo "Join loop service started: ${JOIN_LABEL} (logs: ${JOIN_LOG})"
+  echo "Background join watcher started: ${JOIN_LABEL} (logs: ${JOIN_LOG})"
 
 else
   # ── Linux: systemd ──────────────────────────────────────────────────────────
@@ -813,7 +813,7 @@ JOINUNIT
   sudo systemctl daemon-reload
   sudo systemctl enable svoted-join
   sudo systemctl start svoted-join
-  echo "Join loop svoted-join started (logs: ${JOIN_LOG})"
+  echo "Background join watcher started: svoted-join (logs: ${JOIN_LOG})"
 fi
 
 # Give the node a moment to start up.
@@ -841,29 +841,41 @@ done
 
 echo ""
 echo "============================================="
-echo "  Validator node is running; join loop handles bonding"
+echo "  Congratulations, your node is synced"
 echo "============================================="
 echo ""
-echo "  Operator address (fund this in the admin Join queue UI):"
-echo "    ${VALIDATOR_ADDR}"
+echo "Environment data:"
+echo "  Validator name:    ${MONIKER}"
+echo "  Node hash:         ${VALIDATOR_ADDR}"
+echo "  Public URL:        ${VALIDATOR_URL:-not configured}"
+echo "  Chain home:        ${HOME_DIR}"
 echo ""
-echo "  After bonding, add your public URL to vote_servers via a PR:"
-echo "    https://github.com/valargroup/token-holder-voting-config"
-echo "  Suggested JSON entry:"
-echo "    {\"url\":\"${VALIDATOR_URL}\",\"label\":\"${MONIKER}\"}"
-echo ""
+echo "How to monitor:"
 if [ "$(uname -s)" = "Darwin" ]; then
-  echo "  Chain service:  ${PLIST_LABEL} (launchd)"
   echo "  Chain logs:     tail -f ${LOG_FILE}"
-  echo "  Join loop:      com.shielded-vote.join (launchd)"
-  echo "  Join logs:      tail -f ${HOME_DIR}/join.log"
-  echo ""
-  echo "  svoted-join exits and removes its launchd service automatically after bonding."
+  echo "  Join watcher:   tail -f ${HOME_DIR}/join.log"
+  JOIN_WATCHER_NAME="com.shielded-vote.join (launchd)"
+  JOIN_WATCHER_REMOVE="launchctl bootout gui/$(id -u)/com.shielded-vote.join"
 else
-  echo "  Chain service:  ${SERVICE_NAME} (systemd)"
   echo "  Chain logs:     journalctl -u ${SERVICE_NAME} -f"
-  echo "  Join loop:      svoted-join (systemd)"
-  echo "  Join logs:      tail -f ${HOME_DIR}/join.log"
-  echo ""
-  echo "  svoted-join exits and removes its systemd unit automatically after bonding."
+  echo "  Join watcher:   tail -f ${HOME_DIR}/join.log"
+  JOIN_WATCHER_NAME="svoted-join (systemd)"
+  JOIN_WATCHER_REMOVE="sudo systemctl stop svoted-join"
 fi
+echo ""
+echo "Next step: message the voting admin and ask them to approve you as a validator."
+echo "Send this message:"
+echo ""
+echo "  Please approve my Shielded-Vote validator."
+echo "  Name: ${MONIKER}"
+echo "  Node hash: ${VALIDATOR_ADDR}"
+echo "  Public URL: ${VALIDATOR_URL:-not configured}"
+echo ""
+echo "Background approval watcher:"
+echo "  ${JOIN_WATCHER_NAME} is checking for admin approval and will bond automatically."
+echo "  It removes itself after you are added as a validator."
+echo "  To stop it manually: ${JOIN_WATCHER_REMOVE}"
+echo ""
+echo "After bonding, add your public URL to vote_servers via a PR:"
+echo "  https://github.com/valargroup/token-holder-voting-config"
+echo "  {\"url\":\"${VALIDATOR_URL}\",\"label\":\"${MONIKER}\"}"
