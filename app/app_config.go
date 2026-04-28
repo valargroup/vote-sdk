@@ -25,10 +25,11 @@ import (
 	consensustypes "github.com/cosmos/cosmos-sdk/x/consensus/types"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
-	_ "github.com/cosmos/cosmos-sdk/x/slashing" // import for side-effects
-	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	_ "github.com/cosmos/cosmos-sdk/x/staking" // import for side-effects
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+
+	_ "github.com/valargroup/vote-sdk/x/slashing" // import for side-effects
+	slashingtypes "github.com/valargroup/vote-sdk/x/slashing/types"
 
 	// Vote module: import for depinject side-effects (registers module provider).
 	_ "github.com/valargroup/vote-sdk/x/vote"

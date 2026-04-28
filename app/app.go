@@ -28,7 +28,6 @@ import (
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
-	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 
 	"github.com/cosmos/cosmos-sdk/x/auth/ante"
@@ -37,6 +36,7 @@ import (
 	"github.com/valargroup/vote-sdk/internal/admin"
 	"github.com/valargroup/vote-sdk/internal/helper"
 	"github.com/valargroup/vote-sdk/internal/ui"
+	slashingkeeper "github.com/valargroup/vote-sdk/x/slashing/keeper"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 )
 

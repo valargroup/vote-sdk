@@ -10,11 +10,11 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
-	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/testutil"
+	slashingtypes "github.com/valargroup/vote-sdk/x/slashing/types"
 	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
 )
 
