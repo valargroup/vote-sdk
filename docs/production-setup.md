@@ -27,6 +27,15 @@ Two DigitalOcean Droplets in the same region + VPC, running native binaries unde
 
 Both nodes run the same `svoted` binary. Caddy on each host terminates TLS via Let's Encrypt.
 
+## Fee and Reward Distribution
+
+`vote-sdk` is operated as a no-fee chain: minimum gas prices default to `0usvote`,
+distribution messages are not allowed on the standard Cosmos tx path, and validator
+rewards/commission/community-pool accounting are not part of the protocol. The
+distribution module remains registered for genesis, store compatibility, and
+staking lifecycle hooks, but it intentionally does not run as a per-block
+`BeginBlocker` on validator nodes.
+
 ## Prerequisites
 
 - DigitalOcean account with API token

@@ -20,16 +20,16 @@ import (
 	_ "github.com/cosmos/cosmos-sdk/x/auth"           // import for side-effects (depinject registration)
 	_ "github.com/cosmos/cosmos-sdk/x/auth/tx/config" // import for side-effects
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
-	_ "github.com/cosmos/cosmos-sdk/x/bank"         // import for side-effects
+	_ "github.com/cosmos/cosmos-sdk/x/bank" // import for side-effects
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	_ "github.com/cosmos/cosmos-sdk/x/consensus" // import for side-effects
 	consensustypes "github.com/cosmos/cosmos-sdk/x/consensus/types"
 	_ "github.com/cosmos/cosmos-sdk/x/distribution" // import for side-effects
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
-	_ "github.com/cosmos/cosmos-sdk/x/slashing" // import for side-effects
-	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
+	_ "github.com/cosmos/cosmos-sdk/x/slashing" // import for side-effects
+	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	_ "github.com/cosmos/cosmos-sdk/x/staking" // import for side-effects
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
@@ -81,8 +81,10 @@ var (
 				PreBlockers: []string{
 					authtypes.ModuleName,
 				},
-				// Distribution runs before staking in BeginBlock so that
-				// validator fee pool is empty before staking updates.
+				// The SDK requires every registered BeginBlocker module to appear
+				// in this order during app loading. NewSvoteApp wraps distribution
+				// without its BeginBlocker before Load, because vote-sdk is a
+				// no-fee chain and does not use validator rewards or commission.
 				BeginBlockers: []string{
 					distrtypes.ModuleName,
 					slashingtypes.ModuleName,
@@ -141,12 +143,12 @@ var (
 		{
 			Name: stakingtypes.ModuleName,
 			Config: appconfig.WrapAny(&stakingmodulev1.Module{
-			Bech32PrefixValidator: "svvaloper",
-			Bech32PrefixConsensus: "svvalcons",
+				Bech32PrefixValidator: "svvaloper",
+				Bech32PrefixConsensus: "svvalcons",
 			}),
 		},
 		{
-			Name: distrtypes.ModuleName,
+			Name:   distrtypes.ModuleName,
 			Config: appconfig.WrapAny(&distrmodulev1.Module{}),
 		},
 		{
@@ -154,7 +156,7 @@ var (
 			Config: appconfig.WrapAny(&slashingmodulev1.Module{}),
 		},
 		{
-			Name: consensustypes.ModuleName,
+			Name:   consensustypes.ModuleName,
 			Config: appconfig.WrapAny(&consensusmodulev1.Module{}),
 		},
 		{

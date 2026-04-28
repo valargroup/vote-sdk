@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 
 	"github.com/mikelodder7/curvey"
 
@@ -49,6 +50,37 @@ func (s *ABCIIntegrationSuite) SetupTest() {
 // Uses NewUncachedContext because after Commit() the finalizeBlockState is nil.
 func (s *ABCIIntegrationSuite) queryCtx() sdk.Context {
 	return s.app.NewUncachedContext(false, cmtproto.Header{Height: s.app.Height})
+}
+
+func (s *ABCIIntegrationSuite) distributionStoreFingerprint() [32]byte {
+	ctx := s.queryCtx()
+	storeKey := s.app.GetKey(distrtypes.StoreKey)
+	s.Require().NotNil(storeKey)
+
+	store := ctx.KVStore(storeKey)
+	iter := store.Iterator(nil, nil)
+	defer func() {
+		s.Require().NoError(iter.Close())
+	}()
+
+	var buf bytes.Buffer
+	for ; iter.Valid(); iter.Next() {
+		buf.Write(iter.Key())
+		buf.WriteByte(0)
+		buf.Write(iter.Value())
+		buf.WriteByte(0)
+	}
+	s.Require().NoError(iter.Error())
+	return sha256.Sum256(buf.Bytes())
+}
+
+func (s *ABCIIntegrationSuite) TestEmptyBlockDoesNotMutateDistributionStore() {
+	before := s.distributionStoreFingerprint()
+
+	s.app.NextBlock()
+
+	after := s.distributionStoreFingerprint()
+	s.Require().Equal(before, after, "empty blocks should not rewrite distribution state")
 }
 
 // ---------------------------------------------------------------------------

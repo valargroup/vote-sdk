@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -8,11 +9,11 @@ import (
 
 	dbm "github.com/cosmos/cosmos-db"
 
-	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	clienthelpers "cosmossdk.io/client/v2/helpers"
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
@@ -29,6 +30,7 @@ import (
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
+	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 
@@ -133,6 +135,7 @@ func NewSvoteApp(
 	}
 
 	app.App = appBuilder.Build(db, traceStore, baseAppOptions...)
+	app.disableDistributionBeginBlocker()
 
 	// Install custom TxDecoder that handles both vote wire format
 	// ([tag || protobuf_msg]) and standard Cosmos Tx encoding.
@@ -214,6 +217,51 @@ func NewSvoteApp(
 	}
 
 	return app
+}
+
+// disableDistributionBeginBlocker keeps x/distribution registered for genesis,
+// store compatibility, and staking hooks, while preventing empty blocks from
+// rewriting fee/reward accounting on a no-fee chain.
+func (app *SvoteApp) disableDistributionBeginBlocker() {
+	mod, ok := app.ModuleManager.Modules[distrtypes.ModuleName]
+	if !ok {
+		return
+	}
+
+	appModule, ok := mod.(module.AppModule)
+	if !ok {
+		return
+	}
+
+	app.ModuleManager.Modules[distrtypes.ModuleName] = distributionNoBeginBlocker{
+		AppModule: appModule,
+		genesis:   mod.(module.HasGenesis),
+		services:  mod.(module.HasServices),
+		consensus: mod.(module.HasConsensusVersion),
+	}
+}
+
+type distributionNoBeginBlocker struct {
+	module.AppModule
+	genesis   module.HasGenesis
+	services  module.HasServices
+	consensus module.HasConsensusVersion
+}
+
+func (m distributionNoBeginBlocker) InitGenesis(ctx sdk.Context, cdc codec.JSONCodec, data json.RawMessage) {
+	m.genesis.InitGenesis(ctx, cdc, data)
+}
+
+func (m distributionNoBeginBlocker) ExportGenesis(ctx sdk.Context, cdc codec.JSONCodec) json.RawMessage {
+	return m.genesis.ExportGenesis(ctx, cdc)
+}
+
+func (m distributionNoBeginBlocker) RegisterServices(cfg module.Configurator) {
+	m.services.RegisterServices(cfg)
+}
+
+func (m distributionNoBeginBlocker) ConsensusVersion() uint64 {
+	return m.consensus.ConsensusVersion()
 }
 
 // setAnteHandler wires up the dual-mode ante handler chain.
