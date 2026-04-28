@@ -905,7 +905,9 @@ func genesisStateWithAccountOperator(
 			genAccs[0].GetAddress().String(), operAddr, sdkmath.LegacyOneDec()))
 	}
 
-	stakingGenesis := stakingtypes.NewGenesisState(stakingtypes.DefaultParams(), validators, delegations)
+	stakingParams := stakingtypes.DefaultParams()
+	stakingParams.HistoricalEntries = 0
+	stakingGenesis := stakingtypes.NewGenesisState(stakingParams, validators, delegations)
 	genesisState[stakingtypes.ModuleName] = cdc.MustMarshalJSON(stakingGenesis)
 
 	totalSupply := sdk.NewCoins()

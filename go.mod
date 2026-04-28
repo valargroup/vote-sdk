@@ -28,6 +28,8 @@ require (
 	modernc.org/sqlite v1.37.1
 )
 
+require github.com/bits-and-blooms/bitset v1.24.3 // indirect
+
 require (
 	cosmossdk.io/collections v1.3.1 // indirect
 	cosmossdk.io/schema v1.1.0 // indirect
@@ -38,7 +40,6 @@ require (
 	github.com/DataDog/zstd v1.5.7 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bgentry/speakeasy v0.2.0 // indirect
-	github.com/bits-and-blooms/bitset v1.24.3 // indirect
 	github.com/btcsuite/btcd v0.21.0-beta.0.20201114000516-e9c7a5ac6401 // indirect
 	github.com/bwesterb/go-ristretto v1.2.3 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
@@ -187,3 +188,5 @@ replace (
 	// replace broken goleveldb
 	github.com/syndtr/goleveldb => github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 )
+
+replace github.com/cosmos/cosmos-sdk => github.com/valargroup/cosmos-sdk v0.53.5-valar.1
