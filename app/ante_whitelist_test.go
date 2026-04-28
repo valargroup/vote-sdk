@@ -12,9 +12,9 @@ import (
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
+	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/testutil"
-	slashingtypes "github.com/valargroup/vote-sdk/x/slashing/types"
 	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
 )
 

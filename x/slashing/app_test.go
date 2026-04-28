@@ -19,11 +19,11 @@ import (
 	moduletestutil "github.com/cosmos/cosmos-sdk/types/module/testutil"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
+	"github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"github.com/valargroup/vote-sdk/x/slashing/keeper"
 	slashingtestutil "github.com/valargroup/vote-sdk/x/slashing/testutil"
-	"github.com/valargroup/vote-sdk/x/slashing/types"
 )
 
 var (

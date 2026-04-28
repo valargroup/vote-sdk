@@ -18,10 +18,10 @@ import (
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	banktestutil "github.com/cosmos/cosmos-sdk/x/bank/testutil"
 	distributionkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
-	slashingkeeper "github.com/valargroup/vote-sdk/x/slashing/keeper"
-	"github.com/valargroup/vote-sdk/x/slashing/testutil"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	slashingkeeper "github.com/valargroup/vote-sdk/x/slashing/keeper"
+	"github.com/valargroup/vote-sdk/x/slashing/testutil"
 )
 
 func TestSlashRedelegation(t *testing.T) {

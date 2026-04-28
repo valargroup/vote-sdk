@@ -28,8 +28,8 @@ import (
 	_ "github.com/cosmos/cosmos-sdk/x/staking" // import for side-effects
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
+	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	_ "github.com/valargroup/vote-sdk/x/slashing" // import for side-effects
-	slashingtypes "github.com/valargroup/vote-sdk/x/slashing/types"
 
 	// Vote module: import for depinject side-effects (registers module provider).
 	_ "github.com/valargroup/vote-sdk/x/vote"

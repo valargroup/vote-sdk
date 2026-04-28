@@ -6,8 +6,8 @@ import (
 	"go.uber.org/mock/gomock"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/x/slashing/types"
 	"github.com/valargroup/vote-sdk/x/slashing/testutil"
-	"github.com/valargroup/vote-sdk/x/slashing/types"
 )
 
 func (s *KeeperTestSuite) TestExportAndInitGenesis() {

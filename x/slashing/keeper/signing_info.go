@@ -8,7 +8,7 @@ import (
 	storetypes "cosmossdk.io/store/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/valargroup/vote-sdk/x/slashing/types"
+	"github.com/cosmos/cosmos-sdk/x/slashing/types"
 )
 
 // GetValidatorSigningInfo retruns the ValidatorSigningInfo for a specific validator
@@ -116,7 +116,7 @@ func (k Keeper) IsTombstoned(ctx context.Context, consAddr sdk.ConsAddress) bool
 // signed blocks do not dirty slashing state.
 func (k Keeper) HasMissedBlockAtHeight(ctx context.Context, addr sdk.ConsAddress, height int64) (bool, error) {
 	store := k.storeService.OpenKVStore(ctx)
-	bz, err := store.Get(types.ValidatorMissedBlockByValidatorKey(addr, height))
+	bz, err := store.Get(missedBlockByValidatorKey(addr, height))
 	if err != nil {
 		return false, err
 	}
@@ -129,22 +129,22 @@ func (k Keeper) HasMissedBlockAtHeight(ctx context.Context, addr sdk.ConsAddress
 func (k Keeper) SetMissedBlockAtHeight(ctx context.Context, addr sdk.ConsAddress, height int64) error {
 	store := k.storeService.OpenKVStore(ctx)
 	value := []byte{1}
-	if err := store.Set(types.ValidatorMissedBlockByValidatorKey(addr, height), value); err != nil {
+	if err := store.Set(missedBlockByValidatorKey(addr, height), value); err != nil {
 		return err
 	}
 
-	return store.Set(types.ValidatorMissedBlockByHeightKey(height, addr), value)
+	return store.Set(missedBlockByHeightKey(height, addr), value)
 }
 
 // DeleteMissedBlockAtHeight deletes a sparse missed signature marker from both
 // indexes.
 func (k Keeper) DeleteMissedBlockAtHeight(ctx context.Context, addr sdk.ConsAddress, height int64) error {
 	store := k.storeService.OpenKVStore(ctx)
-	if err := store.Delete(types.ValidatorMissedBlockByValidatorKey(addr, height)); err != nil {
+	if err := store.Delete(missedBlockByValidatorKey(addr, height)); err != nil {
 		return err
 	}
 
-	return store.Delete(types.ValidatorMissedBlockByHeightKey(height, addr))
+	return store.Delete(missedBlockByHeightKey(height, addr))
 }
 
 // CountMissedBlocksInWindow counts sparse missed signature markers for a
@@ -158,8 +158,8 @@ func (k Keeper) CountMissedBlocksInWindow(ctx context.Context, addr sdk.ConsAddr
 	}
 
 	store := k.storeService.OpenKVStore(ctx)
-	startKey := types.ValidatorMissedBlockByValidatorKey(addr, startHeight)
-	endKey := types.ValidatorMissedBlockByValidatorKey(addr, endHeight+1)
+	startKey := missedBlockByValidatorKey(addr, startHeight)
+	endKey := missedBlockByValidatorKey(addr, endHeight+1)
 	iter, err := store.Iterator(startKey, endKey)
 	if err != nil {
 		return 0, err
@@ -183,8 +183,8 @@ func (k Keeper) PruneMissedBlocksBeforeHeight(ctx context.Context, beforeHeight 
 	}
 
 	store := k.storeService.OpenKVStore(ctx)
-	startKey := types.ValidatorMissedBlockByHeightKey(0, nil)
-	endKey := types.ValidatorMissedBlockByHeightKey(beforeHeight, nil)
+	startKey := missedBlockByHeightKey(0, nil)
+	endKey := missedBlockByHeightKey(beforeHeight, nil)
 	iter, err := store.Iterator(startKey, endKey)
 	if err != nil {
 		return err
@@ -198,8 +198,8 @@ func (k Keeper) PruneMissedBlocksBeforeHeight(ctx context.Context, beforeHeight 
 	var oldMisses []missedBlock
 	for ; iter.Valid(); iter.Next() {
 		oldMisses = append(oldMisses, missedBlock{
-			addr:   types.ValidatorMissedBlockAddressFromByHeightKey(iter.Key()),
-			height: types.ValidatorMissedBlockHeightFromByHeightKey(iter.Key()),
+			addr:   missedBlockAddressFromByHeightKey(iter.Key()),
+			height: missedBlockHeightFromByHeightKey(iter.Key()),
 		})
 	}
 
@@ -232,7 +232,7 @@ func (k Keeper) SetMissedBlockBitmapValue(ctx context.Context, addr sdk.ConsAddr
 // from state. The method name is kept for SDK API compatibility.
 func (k Keeper) DeleteMissedBlockBitmap(ctx context.Context, addr sdk.ConsAddress) error {
 	store := k.storeService.OpenKVStore(ctx)
-	prefix := types.ValidatorMissedBlockByValidatorPrefixKey(addr)
+	prefix := missedBlockByValidatorPrefixKey(addr)
 	iter, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
 	if err != nil {
 		return err
@@ -241,7 +241,7 @@ func (k Keeper) DeleteMissedBlockBitmap(ctx context.Context, addr sdk.ConsAddres
 
 	var heights []int64
 	for ; iter.Valid(); iter.Next() {
-		heights = append(heights, types.ValidatorMissedBlockHeightFromByValidatorKey(iter.Key()))
+		heights = append(heights, missedBlockHeightFromByValidatorKey(iter.Key()))
 	}
 
 	for _, height := range heights {
@@ -256,7 +256,7 @@ func (k Keeper) DeleteMissedBlockBitmap(ctx context.Context, addr sdk.ConsAddres
 // The method name is kept for SDK API compatibility.
 func (k Keeper) IterateMissedBlockBitmap(ctx context.Context, addr sdk.ConsAddress, cb func(index int64, missed bool) (stop bool)) error {
 	store := k.storeService.OpenKVStore(ctx)
-	prefix := types.ValidatorMissedBlockByValidatorPrefixKey(addr)
+	prefix := missedBlockByValidatorPrefixKey(addr)
 	iter, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
 	if err != nil {
 		return err
@@ -264,7 +264,7 @@ func (k Keeper) IterateMissedBlockBitmap(ctx context.Context, addr sdk.ConsAddre
 	defer iter.Close()
 
 	for ; iter.Valid(); iter.Next() {
-		if cb(types.ValidatorMissedBlockHeightFromByValidatorKey(iter.Key()), true) {
+		if cb(missedBlockHeightFromByValidatorKey(iter.Key()), true) {
 			break
 		}
 	}

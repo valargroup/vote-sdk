@@ -15,27 +15,23 @@ import (
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	cdctypes "github.com/cosmos/cosmos-sdk/codec/types"
-	"github.com/cosmos/cosmos-sdk/testutil/simsx"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
-	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
-	"github.com/valargroup/vote-sdk/x/slashing/exported"
-	"github.com/valargroup/vote-sdk/x/slashing/keeper"
-	"github.com/valargroup/vote-sdk/x/slashing/simulation"
-	"github.com/valargroup/vote-sdk/x/slashing/types"
+	"github.com/cosmos/cosmos-sdk/x/slashing/exported"
+	"github.com/cosmos/cosmos-sdk/x/slashing/types"
 	staking "github.com/cosmos/cosmos-sdk/x/staking/types"
+	"github.com/valargroup/vote-sdk/x/slashing/keeper"
 )
 
 // ConsensusVersion defines the current x/slashing module consensus version.
 const ConsensusVersion = 4
 
 var (
-	_ module.AppModuleBasic      = AppModule{}
-	_ module.AppModuleSimulation = AppModule{}
-	_ module.HasGenesis          = AppModule{}
-	_ module.HasServices         = AppModule{}
+	_ module.AppModuleBasic = AppModule{}
+	_ module.HasGenesis     = AppModule{}
+	_ module.HasServices    = AppModule{}
 
 	_ appmodule.AppModule       = AppModule{}
 	_ appmodule.HasBeginBlocker = AppModule{}
@@ -87,8 +83,6 @@ func (AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *g
 // AppModule implements an application module for the slashing module.
 type AppModule struct {
 	AppModuleBasic
-
-	registry cdctypes.InterfaceRegistry
 
 	keeper        keeper.Keeper
 	accountKeeper types.AccountKeeper
@@ -165,43 +159,6 @@ func (AppModule) ConsensusVersion() uint64 { return ConsensusVersion }
 // BeginBlock returns the begin blocker for the slashing module.
 func (am AppModule) BeginBlock(ctx context.Context) error {
 	return BeginBlocker(ctx, am.keeper)
-}
-
-// AppModuleSimulation functions
-
-// GenerateGenesisState creates a randomized GenState of the slashing module.
-func (AppModule) GenerateGenesisState(simState *module.SimulationState) {
-	simulation.RandomizedGenState(simState)
-}
-
-// ProposalMsgs returns msgs used for governance proposals for simulations.
-// migrate to WeightedOperationsX. This method is ignored when WeightedOperationsX exists and will be removed in the future
-func (AppModule) ProposalMsgs(simState module.SimulationState) []simtypes.WeightedProposalMsg {
-	return simulation.ProposalMsgs()
-}
-
-// RegisterStoreDecoder registers a decoder for slashing module's types
-func (am AppModule) RegisterStoreDecoder(sdr simtypes.StoreDecoderRegistry) {
-	sdr[types.StoreKey] = simulation.NewDecodeStore(am.cdc)
-}
-
-// ProposalMsgsX returns msgs used for governance proposals for simulations.
-func (AppModule) ProposalMsgsX(weights simsx.WeightSource, reg simsx.Registry) {
-	reg.Add(weights.Get("msg_update_params", 100), simulation.MsgUpdateParamsFactory())
-}
-
-// WeightedOperations returns the all the slashing module operations with their respective weights.
-func (am AppModule) WeightedOperations(simState module.SimulationState) []simtypes.WeightedOperation {
-	return simulation.WeightedOperations(
-		am.registry, simState.AppParams, simState.Cdc, simState.TxConfig,
-		am.accountKeeper, am.bankKeeper, am.keeper, am.stakingKeeper,
-	)
-}
-
-// WeightedOperationsX registers weighted slashing module operations for simulation.
-func (am AppModule) WeightedOperationsX(weights simsx.WeightSource, reg simsx.Registry) {
-	// note: using old keys for backwards compatibility
-	reg.Add(weights.Get("msg_unjail", 20), simulation.MsgUnjailFactory(am.keeper, am.stakingKeeper))
 }
 
 //
