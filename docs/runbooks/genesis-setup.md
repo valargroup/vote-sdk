@@ -14,8 +14,10 @@ flowchart LR
     resetPrimary --> uploadGenesis["upload-genesis\ngenesis.json -> DO Spaces"]
     uploadGenesis --> fundSecondary["fund-secondary\nMsgAuthorizedSend"]
     fundSecondary --> resetSecondary["reset-secondary\nreset-join.sh"]
+    uploadGenesis --> resetSnapshot["reset-snapshot\nreset-snapshot.sh"]
     resetSecondary --> resetArchive["reset-archive\nreset-archive.sh"]
     resetArchive --> verify["verify\nREST health checks"]
+    resetSnapshot --> verify
 ```
 
 ### Where the primary lives
@@ -31,25 +33,26 @@ After `terraform apply`, the droplet is up and `svoted` is installed but the cha
 
 ### Bootstrap flow
 
-The single workflow [`sdk-chain-reset.yml`](../../.github/workflows/sdk-chain-reset.yml) (`workflow_dispatch`, takes a `tag` input) brings the entire fleet up from genesis. It runs five jobs in order:
+The single workflow [`sdk-chain-reset.yml`](../../.github/workflows/sdk-chain-reset.yml) (`workflow_dispatch`, takes a `tag` input) brings the entire fleet up from genesis:
 
 1. **`reset-primary`** — SSHes to `PRIMARY_HOST`, runs `install-release.sh --tag <tag>`, stops `svoted`, wipes `/opt/shielded-vote/.svoted/`, then runs [`scripts/init.sh`](../../scripts/init.sh) with `VAL_PRIVKEY=PRIMARY_VAL_PRIVKEY`, `VM_PRIVKEYS`, and `SVOTE_ADMIN_DISABLE=false`. Drops in `svoted.service.d/primary.conf`, starts `svoted`, polls `localhost:1317/shielded-vote/v1/rounds`.
 2. **`upload-genesis`** — fetches `genesis.json` from `localhost:1317/shielded-vote/v1/genesis` on the primary and uploads it to `s3://vote/genesis.json` (DO Spaces, `https://vote.fra1.digitaloceanspaces.com/genesis.json`). This is the canonical source joining nodes pull from.
 3. **`fund-secondary`** — derives the secondary's address from `SECONDARY_VAL_PRIVKEY` (in a temp keyring) and `MsgAuthorizedSend`s 100M usvote from `vote-manager-1`.
-4. **`reset-secondary`** — SSHes to `SECONDARY_HOST`, installs the same tag, runs [`scripts/reset-join.sh`](../../scripts/reset-join.sh) (downloads genesis from Spaces, discovers the primary's P2P NodeID via REST, syncs, calls `create-val-tx` to register).
-5. **`reset-archive`** — SSHes to `EXPLORER_HOST`, runs [`scripts/reset-archive.sh`](../../scripts/reset-archive.sh) to bring up a non-validator archive node (pruning=nothing) for the explorer.
+4. **`reset-snapshot`** — SSHes to `SNAPSHOT_HOST`, installs the same tag, runs [`scripts/reset-snapshot.sh`](../../scripts/reset-snapshot.sh) to bring up a pruned non-validator node, then enables `snapshot.timer`.
+5. **`reset-secondary`** — SSHes to `SECONDARY_HOST`, installs the same tag, runs [`scripts/reset-join.sh`](../../scripts/reset-join.sh) (downloads genesis from Spaces, discovers the primary's P2P NodeID via REST, syncs, calls `create-val-tx` to register).
+6. **`reset-archive`** — SSHes to `EXPLORER_HOST`, runs [`scripts/reset-archive.sh`](../../scripts/reset-archive.sh) to bring up a non-validator archive node (pruning=nothing) for the explorer.
 
 Then `verify` polls all REST endpoints. On any failure the `notify-slack` job fires.
 
 ### Required GitHub secrets
 
-`PRIMARY_HOST`, `SECONDARY_HOST`, `EXPLORER_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SENTRY_DSN`, `SLACK_WEBHOOK_URL`. Full descriptions in [deploy-setup.md § GitHub repository secrets](../deploy-setup.md#github-repository-secrets).
+`PRIMARY_HOST`, `SECONDARY_HOST`, `EXPLORER_HOST`, `SNAPSHOT_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SENTRY_DSN`, `SLACK_WEBHOOK_URL`. Full descriptions in [deploy-setup.md § GitHub repository secrets](../deploy-setup.md#github-repository-secrets).
 
 `VM_PRIVKEYS` is a comma-separated list of 64-char hex secp256k1 private keys; each derived address becomes a member of the any-of-N vote-manager set at genesis and the 1B usvote stake pool is split evenly across them. Generate one with `openssl rand -hex 32`.
 
 ### First-time bring-up
 
-1. `cd vote-infrastructure && terraform apply` — provisions all four droplets (primary, secondary, two PIR hosts), the explorer/archive host, Cloudflare DNS, and firewalls.
+1. `cd vote-infrastructure && terraform apply` — provisions the validators, PIR hosts, explorer/archive host, snapshot host, Cloudflare DNS, and firewalls.
 2. Set the GitHub secrets above (the `*_VAL_PRIVKEY` values are the deterministic identities the workflow expects to find on the corresponding droplets).
 3. Trigger the **Reset SDK Chain** workflow with the desired release tag (the tag must already be published by [`release.yml`](../../.github/workflows/release.yml) — `validate-tag` HEAD-checks DO Spaces and aborts otherwise).
 4. After the workflow goes green, sanity-check:
@@ -57,6 +60,7 @@ Then `verify` polls all REST endpoints. On any failure the `notify-slack` job fi
    - `https://svote.<domain>/` serves the admin UI
    - `https://vote-chain-secondary.<domain>/shielded-vote/v1/rounds` returns `200`
    - `https://explorer-api.<domain>/cosmos/base/tendermint/v1beta1/blocks/latest` returns `200`
+   - `https://snapshots.<domain>/` serves the snapshot page
 
 To wipe and reset the chain from genesis later (e.g. on a binary upgrade that breaks state compatibility), re-run the same workflow. For binary swaps that preserve state, use [`sdk-chain-deploy.yml`](../../.github/workflows/sdk-chain-deploy.yml) instead — it just runs `install-release.sh --tag <new-tag>` on both validators and restarts `svoted`.
 

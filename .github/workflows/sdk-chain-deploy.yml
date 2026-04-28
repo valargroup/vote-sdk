@@ -147,10 +147,56 @@ jobs:
             echo "ERROR: Explorer frontend not healthy after 2.5 minutes."
             exit 1
 
+  deploy-snapshot:
+    name: Deploy snapshot node
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to snapshot Droplet
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SNAPSHOT_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SENTRY_DSN,TAG
+          script: |
+            set -euo pipefail
+            sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
+            echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
+
+            # On first deploy (before sdk-chain-reset.yml runs reset-snapshot),
+            # .svoted/config/genesis.json does not exist yet, so svoted cannot
+            # start. Subsequent deploys restart normally to pick up the binary.
+            if [ -f /opt/shielded-vote/.svoted/config/genesis.json ]; then
+              /opt/shielded-vote/install-release.sh --tag "${TAG}"
+            else
+              /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+              echo "NOTE: snapshot node has no genesis yet. Run sdk-chain-reset.yml with this tag to initialize it."
+            fi
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+      - name: Verify snapshot frontend healthy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SNAPSHOT_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            for i in $(seq 1 15); do
+              if curl -sf -H "Host: snapshots.${{ secrets.DOMAIN }}" http://localhost/ > /dev/null 2>&1; then
+                echo "Snapshot frontend healthy."
+                exit 0
+              fi
+              echo "Waiting for snapshot frontend... ($i/15)"
+              sleep 10
+            done
+            echo "ERROR: Snapshot frontend not healthy after 2.5 minutes."
+            exit 1
+
   notify-slack:
     name: Slack Notification
     if: ${{ always() && contains(join(needs.*.result, ','), 'failure') }}
-    needs: [deploy-primary, deploy-secondary, deploy-explorer]
+    needs: [deploy-primary, deploy-secondary, deploy-explorer, deploy-snapshot]
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
@@ -175,7 +221,7 @@ jobs:
                 },
                 {
                   "type": "section",
-                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nPrimary: `${{ needs.deploy-primary.result }}` | Secondary: `${{ needs.deploy-secondary.result }}` | Explorer: `${{ needs.deploy-explorer.result }}`" }
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nPrimary: `${{ needs.deploy-primary.result }}` | Secondary: `${{ needs.deploy-secondary.result }}` | Explorer: `${{ needs.deploy-explorer.result }}` | Snapshot: `${{ needs.deploy-snapshot.result }}`" }
                 }
               ]
             }

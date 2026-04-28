@@ -191,6 +191,50 @@ jobs:
               | jq -r '.balances[] | select(.denom == "usvote") | .amount')
             echo "Secondary balance: ${BALANCE} usvote"
 
+  reset-snapshot:
+    name: Reset snapshot node
+    runs-on: ubuntu-latest
+    needs: upload-genesis
+    steps:
+      - name: Install tag and join as snapshot node
+        uses: appleboy/ssh-action@v1.0.3
+        timeout-minutes: 30
+        with:
+          host: ${{ secrets.SNAPSHOT_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: TAG
+          script: |
+            set -euo pipefail
+            export PATH="/opt/shielded-vote/current/bin:$PATH"
+
+            # Install the release (skip restart — reset-snapshot.sh starts svoted).
+            /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+
+            # Run reset-snapshot: wipe state, download genesis, configure peering
+            # with primary, start svoted as a pruned non-validator, and enable
+            # the daily snapshot timer.
+            export GENESIS_URL="${{ env.DO_SPACES_BASE }}/genesis.json"
+            export PRIMARY_REST_URL="https://vote-chain-primary.${{ secrets.DOMAIN }}"
+            export HOME_DIR=/opt/shielded-vote/.svoted
+            export CHAIN_ID=svote-1
+            export MONIKER=snapshot
+
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-snapshot.sh" -o /tmp/reset-snapshot.sh
+            bash /tmp/reset-snapshot.sh
+
+      - name: Verify snapshot services
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SNAPSHOT_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            systemctl is-active --quiet svoted
+            systemctl is-enabled --quiet snapshot.timer
+            curl -sf -H "Host: snapshots.${{ secrets.DOMAIN }}" http://localhost/ > /dev/null
+            echo "Snapshot node and frontend healthy."
+
   reset-secondary:
     name: Reset secondary (join)
     runs-on: ubuntu-latest
@@ -292,7 +336,7 @@ jobs:
   verify:
     name: Post-reset verification
     runs-on: ubuntu-latest
-    needs: reset-archive
+    needs: [reset-archive, reset-snapshot]
     steps:
       - name: Check both validators
         run: |
@@ -326,12 +370,25 @@ jobs:
             fi
             sleep 10
           done
+          SNAPSHOT_URL="https://snapshots.${{ secrets.DOMAIN }}/"
+          for i in $(seq 1 10); do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$SNAPSHOT_URL" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "[OK] snapshot frontend healthy"
+              break
+            fi
+            if [ "$i" -eq 10 ]; then
+              echo "[FAIL] snapshot frontend not healthy (HTTP ${STATUS})"
+              FAILED=1
+            fi
+            sleep 10
+          done
           exit $FAILED
 
   notify-slack:
     name: Slack Notification
     if: ${{ always() && contains(join(needs.*.result, ','), 'failure') }}
-    needs: [reset-primary, upload-genesis, fund-secondary, reset-secondary, reset-archive, verify]
+    needs: [reset-primary, upload-genesis, fund-secondary, reset-snapshot, reset-secondary, reset-archive, verify]
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
@@ -356,7 +413,7 @@ jobs:
                 },
                 {
                   "type": "section",
-                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nReset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Reset Archive: `${{ needs.reset-archive.result }}` | Verify: `${{ needs.verify.result }}`" }
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nReset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Snapshot: `${{ needs.reset-snapshot.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Reset Archive: `${{ needs.reset-archive.result }}` | Verify: `${{ needs.verify.result }}`" }
                 }
               ]
             }

@@ -20,10 +20,11 @@
                 └────P2P :26656──┘
 ```
 
-Two DigitalOcean Droplets in the same region + VPC, running native binaries under systemd (no Docker):
+Production uses dedicated DigitalOcean Droplets in the same region + VPC, running native binaries under systemd (no Docker):
 
 - **vote-primary** (`vote-chain-primary.<domain>`): 4 vCPU / 16 GB RAM / 100 GB NVMe. Bootstrap validator — creates genesis via `scripts/init.sh` with `SVOTE_ADMIN_DISABLE=false` so the admin module is enabled. Serves the admin UI at `https://vote-chain-primary.<domain>/` via `--serve-ui --ui-dist` (systemd drop-in). Secondaries keep `[admin] disable = true` from `svoted init`.
 - **vote-secondary** (`vote-chain-secondary.<domain>`): 2 vCPU / 8 GB RAM / 50 GB NVMe. Joining validator — fetches genesis, syncs, and self-registers via `scripts/reset-join.sh`.
+- **vote-snapshot** (`snapshots.<domain>`): 4 vCPU / 16 GB RAM / 100 GB volume by default. Pruned non-validator node — publishes daily `data/` snapshots and metadata to `s3://vote/snapshots/svote-1/`, while Caddy serves the public snapshot page.
 
 Both nodes run the same `svoted` binary. Caddy on each host terminates TLS via Let's Encrypt.
 
@@ -91,8 +92,8 @@ The systemd unit `ExecStart` points at `/opt/shielded-vote/current/bin/svoted`, 
 
 **`.github/workflows/sdk-chain-deploy.yml`** — manual `workflow_dispatch` with a `tag` input.
 
-1. SSHes to both hosts and runs `install-release.sh --tag <tag>`
-2. Verifies both REST APIs respond
+1. SSHes to production hosts and runs `install-release.sh --tag <tag>`
+2. Verifies chain REST APIs and public frontends respond
 
 Use this for routine upgrades. Chain state is preserved; only the binary is swapped.
 
@@ -108,10 +109,11 @@ Use this for routine upgrades. Chain state is preserved; only the binary is swap
 1. **reset-primary**: installs tag, stops svoted, wipes chain state, runs `init.sh` (imports `PRIMARY_VAL_PRIVKEY`) to create fresh genesis, starts svoted
 2. **upload-genesis**: fetches genesis from primary's REST API, uploads to DO Spaces (`s3://vote/genesis.json`)
 3. **fund-secondary**: derives the secondary address from `SECONDARY_VAL_PRIVKEY`, sends 100M usvote from a vote manager on the primary
-4. **reset-secondary**: installs tag, runs `reset-join.sh` (imports `SECONDARY_VAL_PRIVKEY`), syncs, verifies funding, registers as validator
-5. **verify**: checks both REST APIs
+4. **reset-snapshot**: installs tag, runs `reset-snapshot.sh`, starts a pruned non-validator node, and enables `snapshot.timer`
+5. **reset-secondary**: installs tag, runs `reset-join.sh` (imports `SECONDARY_VAL_PRIVKEY`), syncs, verifies funding, registers as validator
+6. **verify**: checks validators, archive, and snapshot frontend
 
-Required secrets: `PRIMARY_HOST`, `SECONDARY_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SLACK_WEBHOOK_URL`.
+Required secrets: `PRIMARY_HOST`, `SECONDARY_HOST`, `SNAPSHOT_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SLACK_WEBHOOK_URL`.
 
 ## First-Time Bootstrap
 
