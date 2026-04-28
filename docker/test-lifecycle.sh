@@ -337,7 +337,7 @@ log "  Total lifecycle:         ${TOTAL_DURATION}s"
 log ""
 log "  Block time config:"
 log "    timeout_propose:   1.8s"
-log "    timeout_commit:    400ms"
+log "    timeout_commit:    800ms"
 log ""
 
 # Count non-zero PrepareProposal timings
