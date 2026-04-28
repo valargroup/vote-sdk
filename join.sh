@@ -210,6 +210,7 @@ restore_latest_snapshot() {
   local metadata_file
   local archive_file
   local listing_file
+  local validator_state_file
   local snapshot_chain_id
   local snapshot_url
   local snapshot_checksum
@@ -224,6 +225,7 @@ restore_latest_snapshot() {
   metadata_file="${SNAPSHOT_TMP_DIR}/latest.json"
   archive_file="${SNAPSHOT_TMP_DIR}/snapshot.tar.lz4"
   listing_file="${SNAPSHOT_TMP_DIR}/snapshot.files"
+  validator_state_file="${SNAPSHOT_TMP_DIR}/priv_validator_state.json"
 
   echo "Fetching snapshot metadata from ${metadata_url}..."
   if ! curl -fsSL --connect-timeout 15 --max-time 60 -o "${metadata_file}" "${metadata_url}"; then
@@ -287,6 +289,12 @@ restore_latest_snapshot() {
     exit 1
   fi
 
+  if [ ! -f "${HOME_DIR}/data/priv_validator_state.json" ]; then
+    echo "ERROR: ${HOME_DIR}/data/priv_validator_state.json is missing before snapshot restore."
+    exit 1
+  fi
+  cp "${HOME_DIR}/data/priv_validator_state.json" "${validator_state_file}"
+
   echo "Extracting snapshot data into ${HOME_DIR}/data..."
   rm -rf "${HOME_DIR}/data"
   if ! lz4 -dc "${archive_file}" | tar -C "${HOME_DIR}" -xf -; then
@@ -299,10 +307,10 @@ restore_latest_snapshot() {
     exit 1
   fi
 
-  rm -f "${HOME_DIR}/data/priv_validator_state.json"
+  cp "${validator_state_file}" "${HOME_DIR}/data/priv_validator_state.json"
   rm -rf "${HOME_DIR}/data/cs.wal"
 
-  echo "Snapshot restored. Removed runtime-local consensus state."
+  echo "Snapshot restored. Preserved local validator state and removed restored consensus WAL."
   cleanup_snapshot_tmp
   SNAPSHOT_TMP_DIR=""
   trap - EXIT
