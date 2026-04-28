@@ -10,7 +10,7 @@ same class of overrides on their mainnet (v31, CometBFT v0.38).
 | Parameter | svoted | Osmosis mainnet | CometBFT default | Purpose |
 |---|---|---|---|---|
 | `timeout_propose` | **1.8s** | 1.4s | 3s | Max wait for a block proposal before prevoting nil |
-| `timeout_commit` | **400ms** | 400ms | 1s | Idle delay after commit before starting next height |
+| `timeout_commit` | **800ms** | 400ms | 1s | Idle delay after commit before starting next height |
 | `peer_gossip_sleep_duration` | **50ms** | 50ms | 100ms | Sleep between gossip rounds (faster vote propagation) |
 | `p2p.flush_throttle_timeout` | **80ms** | 80ms | 100ms | P2P message flush interval |
 
@@ -24,8 +24,10 @@ the actual peak is well under 120ms (see below).
 
 ## Observed block time
 
-With these parameters, a 30-validator Docker testnet produces blocks at
-**~0.91s average**, compared to ~4-6s with CometBFT defaults.
+With the current `800ms` `timeout_commit`, the target block cadence is roughly
+**1.2s**. The previous `400ms` `timeout_commit` setting produced **~0.91s
+average** blocks in a 30-validator Docker testnet, compared to ~4-6s with
+CometBFT defaults.
 
 ## Benchmarks
 
@@ -66,7 +68,7 @@ bash docker/test-lifecycle.sh
 | Metric | Value |
 |---|---|
 | Validators | 30 bonded |
-| Average block time | 0.91s |
+| Average block time (`400ms` `timeout_commit` baseline) | 0.91s |
 | DKG ceremony wall-clock | 56s (~60 blocks) |
 | DKG contribute per block | 11-17ms |
 | DKG ack per block (peak) | **116ms** (val20), median ~80ms |
@@ -86,7 +88,7 @@ The heaviest single-block operation (DKG ack at 116ms) uses **6.4%** of the
 Propose ──────────► Prevote ──────────► Precommit ──────────► Commit
   │                   │                    │                    │
   │ timeout_propose   │ timeout_prevote    │ timeout_precommit  │ timeout_commit
-  │ (1.8s)            │ (1s default)       │ (1s default)       │ (400ms)
+  │ (1.8s)            │ (1s default)       │ (1s default)       │ (800ms)
   │                   │                    │                    │
   ▼                   ▼                    ▼                    ▼
 PrepareProposal    Internal CometBFT    Internal CometBFT    BeginBlock
@@ -98,9 +100,9 @@ ProcessProposal    voting               voting               DeliverTx
 - `timeout_propose` gates how long validators wait for a proposal (which
   includes `PrepareProposal` compute + network delivery). This is the primary
   parameter that must accommodate our DKG/tally crypto work.
-- `timeout_commit` is an idle delay after the block is committed. Lowering it
-  from the 1s default to 400ms is the single biggest contributor to faster
-  block times.
+- `timeout_commit` is an idle delay after the block is committed. Setting it
+  to 800ms keeps block production faster than CometBFT defaults while targeting
+  a roughly 1.2s block cadence.
 - `timeout_prevote` and `timeout_precommit` are left at the 1s CometBFT
   default. They are not performance-critical for our workload.
 
