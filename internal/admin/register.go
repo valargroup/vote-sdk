@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -22,6 +23,16 @@ type registerPayloadWire struct {
 	URL             string `json:"url"`
 	Moniker         string `json:"moniker"`
 	Timestamp       int64  `json:"timestamp"`
+}
+
+func marshalRegisterPayloadWire(payload registerPayloadWire) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(payload); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSpace(buf.Bytes()), nil
 }
 
 // PendingValidatorPublic is returned by GET /api/pending-validators (no secrets).
@@ -59,7 +70,7 @@ func (h *apiHandler) handleRegisterValidator(w http.ResponseWriter, r *http.Requ
 		jsonError(w, "invalid JSON body", 400)
 		return
 	}
-	if body.OperatorAddress == "" || body.URL == "" || body.Moniker == "" || body.Timestamp == 0 || body.Signature == "" || body.PubKey == "" {
+	if body.OperatorAddress == "" || body.Moniker == "" || body.Timestamp == 0 || body.Signature == "" || body.PubKey == "" {
 		jsonError(w, "missing required fields", 400)
 		return
 	}
@@ -70,7 +81,7 @@ func (h *apiHandler) handleRegisterValidator(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	payloadBytes, err := json.Marshal(registerPayloadWire{
+	payloadBytes, err := marshalRegisterPayloadWire(registerPayloadWire{
 		OperatorAddress: body.OperatorAddress,
 		URL:             body.URL,
 		Moniker:         body.Moniker,

@@ -131,6 +131,7 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
               <ExternalLink size={10} />
             </a>
             .
+            Rows without a public URL can still be funded; the operator must configure HTTPS before clients use them.
           </p>
         </div>
 
@@ -251,8 +252,17 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
                     <td className="px-3 py-2 font-mono text-text-muted truncate max-w-[140px]" title={r.operator_address}>
                       {r.operator_address}
                     </td>
-                    <td className="px-3 py-2 text-text-secondary truncate max-w-[180px]" title={r.url}>
-                      {r.url}
+                    <td
+                      className="px-3 py-2 text-text-secondary truncate max-w-[180px]"
+                      title={r.url || "No public URL registered yet"}
+                    >
+                      {r.url ? (
+                        r.url
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-md border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-warning">
+                          Needs public URL
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.first_seen_at)}</td>
                     <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.last_seen_at)}</td>

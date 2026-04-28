@@ -29,7 +29,7 @@ func newSignedRegisterParts(t *testing.T, url, moniker string, timestamp int64) 
 		t.Fatal(err)
 	}
 
-	payloadBytes, err := json.Marshal(registerPayloadWire{
+	payloadBytes, err := marshalRegisterPayloadWire(registerPayloadWire{
 		OperatorAddress: operator,
 		URL:             url,
 		Moniker:         moniker,
@@ -49,6 +49,25 @@ func newSignedRegisterParts(t *testing.T, url, moniker string, timestamp int64) 
 		t.Fatal(err)
 	}
 	return operator, base64.StdEncoding.EncodeToString(sig), base64.StdEncoding.EncodeToString(pubBytes)
+}
+
+func TestMarshalRegisterPayloadWireMatchesJoinScriptJSON(t *testing.T) {
+	t.Parallel()
+
+	payload, err := marshalRegisterPayloadWire(registerPayloadWire{
+		OperatorAddress: "sv1operator",
+		URL:             "https://op.example/?a=1&b=<node>",
+		Moniker:         `evan.node "west"`,
+		Timestamp:       123,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := `{"operator_address":"sv1operator","url":"https://op.example/?a=1&b=<node>","moniker":"evan.node \"west\"","timestamp":123}`
+	if string(payload) != want {
+		t.Fatalf("payload JSON:\n got %s\nwant %s", payload, want)
+	}
 }
 
 func TestHandleRegisterValidator_Table(t *testing.T) {
@@ -152,6 +171,100 @@ func TestHandleRegisterValidator_Table(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(list) != 1 || list[0].OperatorAddress != operator {
+			t.Fatalf("pending list: %+v", list)
+		}
+	})
+
+	t.Run("dotted_moniker_upserts_pending", func(t *testing.T) {
+		t.Parallel()
+		r, st := newRouter(false)
+		defer st.Close()
+		tsDotted := time.Now().Unix()
+		opDotted, s, p := newSignedRegisterParts(t, "https://op.example", "evan.node", tsDotted)
+		body := map[string]interface{}{
+			"operator_address": opDotted,
+			"url":              "https://op.example",
+			"moniker":          "evan.node",
+			"timestamp":        tsDotted,
+			"signature":        s,
+			"pub_key":          p,
+		}
+		b, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/api/register-validator", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
+		}
+		list, err := st.ListPendingRegistrations()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 1 || list[0].Moniker != "evan.node" {
+			t.Fatalf("pending list: %+v", list)
+		}
+	})
+
+	t.Run("json_sensitive_moniker_upserts_pending", func(t *testing.T) {
+		t.Parallel()
+		r, st := newRouter(false)
+		defer st.Close()
+		moniker := `evan.node "west"`
+		tsSpecial := time.Now().Unix()
+		opSpecial, s, p := newSignedRegisterParts(t, "https://op.example", moniker, tsSpecial)
+		body := map[string]interface{}{
+			"operator_address": opSpecial,
+			"url":              "https://op.example",
+			"moniker":          moniker,
+			"timestamp":        tsSpecial,
+			"signature":        s,
+			"pub_key":          p,
+		}
+		b, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/api/register-validator", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
+		}
+		list, err := st.ListPendingRegistrations()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 1 || list[0].Moniker != moniker {
+			t.Fatalf("pending list: %+v", list)
+		}
+	})
+
+	t.Run("empty_url_still_queues_pending", func(t *testing.T) {
+		t.Parallel()
+		r, st := newRouter(false)
+		defer st.Close()
+		tsEmptyURL := time.Now().Unix()
+		opEmptyURL, s, p := newSignedRegisterParts(t, "", "needs-funding", tsEmptyURL)
+		body := map[string]interface{}{
+			"operator_address": opEmptyURL,
+			"url":              "",
+			"moniker":          "needs-funding",
+			"timestamp":        tsEmptyURL,
+			"signature":        s,
+			"pub_key":          p,
+		}
+		b, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/api/register-validator", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
+		}
+		list, err := st.ListPendingRegistrations()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 1 || list[0].OperatorAddress != opEmptyURL || list[0].URL != "" {
 			t.Fatalf("pending list: %+v", list)
 		}
 	})

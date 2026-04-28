@@ -32,6 +32,37 @@ Why these numbers:
 
 `join.sh` auto-detects the platform via `uname -s` + `uname -m`; anything outside the matrix above exits with an error.
 
+### Hostname and TLS
+
+`svoted` speaks plaintext HTTP on `:1317`; clients reach it over TLS via Caddy on the same host. Pick one before running the installer:
+
+- `--domain val.example.org` or `SVOTE_DOMAIN=val.example.org` — use a real DNS name. Recommended for production operators.
+- No domain set — `join.sh` auto-detects the public IPv4 address via `ifconfig.me` or `api.ipify.org` and uses `<ip-with-dashes>.sslip.io` (e.g. `46-101-255-48.sslip.io`). Fine for smoke-testing and short-lived deployments; not recommended for long-term production.
+- `SVOTE_SKIP_CADDY=1` — skip Caddy entirely. Use this in Docker/CI or when TLS is terminated upstream (another proxy or a managed load balancer). If skipped, `VALIDATOR_URL` is empty; the operator can still appear in the admin join queue for funding, but the helper heartbeat is disabled until a public URL is configured.
+
+If automatic `sslip.io`/Caddy setup fails, `join.sh` still registers the operator for funding with an empty URL and prints a `Public URL: missing` warning. If you explicitly pass `--domain` or `SVOTE_DOMAIN`, Caddy setup is treated as required and failures stop the installer unless `SVOTE_ALLOW_NO_PUBLIC_URL=1` is set.
+
+See [TLS / reverse proxy](#tls--reverse-proxy) for the Caddy layout `join.sh` installs.
+
+### Network requirements
+
+`join.sh` and the running validator need the following network access:
+
+| Direction | Destination | Purpose |
+|-----------|-------------|---------|
+| Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `join-loop.sh` fallback |
+| Outbound 443 | `valargroup.github.io` | [`token-holder-voting-config/voting-config.json`](https://github.com/valargroup/token-holder-voting-config) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
+| Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue) and `POST /api/server-heartbeat` (helper liveness). Override via `SVOTE_ADMIN_URL` / `DEFAULT_ADMIN_API_BASE`. |
+| Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` (P2P seed) |
+| Outbound 443 | `ifconfig.me`, `api.ipify.org` | Public IPv4 auto-detection (only when neither `--domain` nor `SVOTE_DOMAIN` is set) |
+| Outbound 443 | `dl.cloudsmith.io`, Let's Encrypt | Caddy apt-repo install + ACME certificate issuance |
+| Outbound TCP 26656 | Seed validator's P2P | CometBFT peer handshake + gossip |
+| Inbound TCP 26656 | Public | CometBFT P2P — **must be reachable**; open it in your firewall/security group. Peers cannot connect if this is blocked |
+| Inbound TCP 80 + 443 | Public | Caddy (HTTPS reverse proxy for the REST API, used by iOS clients and admin UI). 80 is required for Let's Encrypt HTTP-01 challenges |
+| Local only | `127.0.0.1:1317` (REST), `127.0.0.1:26657` (RPC), `127.0.0.1:6060` (pprof) | Do not expose directly; Caddy proxies `1317` over TLS |
+
+If the validator will answer PIR queries itself, also open inbound 443 for the `nf-server` routes — see [vote-nullifier-pir's server-setup runbook](https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/runbooks/server-setup.md).
+
 ## Quick start
 
 On Linux or macOS, run:
@@ -85,7 +116,7 @@ The loop in [scripts/join-loop.sh](../../scripts/join-loop.sh) runs until it obs
 
 On each iteration:
 
-1. **Re-register.** Build `{operator_address, url, moniker, timestamp}`, sign it with `svoted sign-arbitrary --from validator --keyring-backend test`, POST to `${SVOTE_ADMIN_URL}/api/register-validator`. Idempotent — the admin stores one row per operator, updating URL/moniker on later POSTs. If the response reports `status=bonded`, exit 0 immediately.
+1. **Re-register.** Build `{operator_address, url, moniker, timestamp}`, sign it with `svoted sign-arbitrary --from validator --keyring-backend test`, POST to `${SVOTE_ADMIN_URL}/api/register-validator`. Idempotent — the admin stores one row per operator, updating URL/moniker on later POSTs. `url` may be empty, which still lets vote managers see the operator address for funding. The admin UI marks those rows as `Needs public URL`. If the response reports `status=bonded`, exit 0 immediately.
 2. **Check bonded.** `svoted query staking validators` filtered by moniker; if `BOND_STATUS_BONDED`, exit 0 and remove the join service.
 3. **If not bonded, check balance.** `svoted query bank balances $VALIDATOR_ADDR`. If there is any `usvote` balance, run:
    ```bash
@@ -379,6 +410,7 @@ All variables are read from the environment by `join.sh`, `join-loop.sh`, or the
 | `SVOTE_HOME` | `$HOME/.svoted` | Chain data + config + keys. |
 | `SVOTE_LOCAL_BINARIES` | `0` | When `1` and both binaries are on `$PATH`, skip the download. Used by source developers with `mise run build:install`. |
 | `SVOTE_SKIP_CADDY` | `0` | `1` skips Caddy install + config. Use when TLS is handled externally. |
+| `SVOTE_ALLOW_NO_PUBLIC_URL` | `0` | When `1`, explicit-domain Caddy failures continue with an empty `VALIDATOR_URL` so the operator can still enter the funding queue. |
 | `SVOTE_SKIP_SERVICE` | `0` | `1` skips service install and the sync wait — node is initialized but not started. Useful for Docker smoke tests / CI. |
 | `VOTING_CONFIG_URL` | `https://valargroup.github.io/token-holder-voting-config/voting-config.json` | Canonical voting-config (same payload wallets fetch). Override for staging mirrors or fork testing. |
 | `SVOTE_ADMIN_URL` | `${DEFAULT_ADMIN_API_BASE}` | Admin server base URL. Used for `POST /api/register-validator` (join queue) and written into `app.toml [helper] admin_url` for the heartbeat. Not used for voting-config discovery — that comes from `VOTING_CONFIG_URL`. |
@@ -394,7 +426,7 @@ Read from `/etc/default/svoted-join` (Linux) or the launchd `EnvironmentVariable
 | `SVOTE_HOME` | Passed to `svoted` as `--home`. |
 | `VALIDATOR_ADDR` | Bech32 operator address; used in signed payload + balance/bond queries. |
 | `MONIKER` | Used to find the validator row in `svoted query staking validators`. |
-| `VALIDATOR_URL` | Public URL advertised in `register-validator`; empty disables re-registration. |
+| `VALIDATOR_URL` | Public URL advertised in `register-validator`; may be empty while waiting for funding or external TLS setup. |
 | `SVOTE_ADMIN_URL` | Base URL for `/api/register-validator`. |
 | `SVOTE_INSTALL_DIR` | Prepended to `$PATH` so `create-val-tx` resolves. |
 
@@ -429,35 +461,6 @@ Start with `journalctl -u svoted -n 200 --no-pager` / `tail -n 200 ~/.svoted/nod
 | Checksum mismatch on tarball | Corrupt download or MITM | Retry once; if it keeps happening, pull from the GitHub Release for the same tag and compare against `SHA256SUMS`. |
 | `svoted` SIGILLs immediately at startup | Binary/arch mismatch | `file ~/.local/bin/svoted` — must match `uname -m`. Re-run `join.sh` so it picks the right `PLATFORM`. |
 | `svoted-join` keeps running after you see `BOND_STATUS_BONDED` in `svoted query staking validators` | The moniker in `/etc/default/svoted-join` doesn't match the on-chain description | Confirm `MONIKER` matches `.validators[].description.moniker` exactly; edit the env file and restart `svoted-join`. |
-
-### Hostname and TLS
-
-`svoted` speaks plaintext HTTP on `:1317`; clients reach it over TLS via Caddy on the same host. Pick one before running the installer:
-
-- `--domain val.example.org` or `SVOTE_DOMAIN=val.example.org` — use a real DNS name. Recommended for production operators.
-- No domain set — `join.sh` auto-detects the public IP via `ifconfig.me` and uses `<ip-with-dashes>.sslip.io` (e.g. `46-101-255-48.sslip.io`). Fine for smoke-testing and short-lived deployments; not recommended for long-term production.
-- `SVOTE_SKIP_CADDY=1` — skip Caddy entirely. Use this in Docker/CI or when TLS is terminated upstream (another proxy or a managed load balancer). If skipped, `VALIDATOR_URL` is empty, so the admin registration step is also skipped and the helper heartbeat is disabled.
-
-See [TLS / reverse proxy](#tls--reverse-proxy) for the Caddy layout `join.sh` installs.
-
-### Network requirements
-
-`join.sh` and the running validator need the following network access:
-
-| Direction | Destination | Purpose |
-|-----------|-------------|---------|
-| Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `join-loop.sh` fallback |
-| Outbound 443 | `valargroup.github.io` | [`token-holder-voting-config/voting-config.json`](https://github.com/valargroup/token-holder-voting-config) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
-| Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue) and `POST /api/server-heartbeat` (helper liveness). Override via `SVOTE_ADMIN_URL` / `DEFAULT_ADMIN_API_BASE`. |
-| Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` (P2P seed) |
-| Outbound 443 | `ifconfig.me` | Public-IP auto-detection (only when neither `--domain` nor `SVOTE_DOMAIN` is set) |
-| Outbound 443 | `dl.cloudsmith.io`, Let's Encrypt | Caddy apt-repo install + ACME certificate issuance |
-| Outbound TCP 26656 | Seed validator's P2P | CometBFT peer handshake + gossip |
-| Inbound TCP 26656 | Public | CometBFT P2P — **must be reachable**; open it in your firewall/security group. Peers cannot connect if this is blocked |
-| Inbound TCP 80 + 443 | Public | Caddy (HTTPS reverse proxy for the REST API, used by iOS clients and admin UI). 80 is required for Let's Encrypt HTTP-01 challenges |
-| Local only | `127.0.0.1:1317` (REST), `127.0.0.1:26657` (RPC), `127.0.0.1:6060` (pprof) | Do not expose directly; Caddy proxies `1317` over TLS |
-
-If the validator will answer PIR queries itself, also open inbound 443 for the `nf-server` routes — see [vote-nullifier-pir's server-setup runbook](https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/runbooks/server-setup.md).
 
 For deeper investigation, raise `svoted` log verbosity (`--log_level debug` in the systemd ExecStart or `SVOTED_LOG_LEVEL=debug` if exported) and restart.
 
