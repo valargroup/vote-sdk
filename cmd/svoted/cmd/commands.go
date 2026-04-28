@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"cosmossdk.io/log"
+	pruningtypes "cosmossdk.io/store/pruning/types"
 
 	"github.com/valargroup/vote-sdk/app"
 
@@ -115,6 +116,9 @@ func initAppConfig() (string, interface{}) {
 	srvCfg := serverconfig.DefaultConfig()
 	// Set default min gas prices to 0 for the vote chain (no fees needed).
 	srvCfg.MinGasPrices = "0usvote"
+	// Keep validator nodes compact by default; archive nodes override this to
+	// pruning=nothing in their deployment scripts.
+	srvCfg.Pruning = pruningtypes.PruningOptionEverything
 
 	customConfig := CustomAppConfig{
 		Config: *srvCfg,
