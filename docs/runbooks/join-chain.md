@@ -106,14 +106,16 @@ flowchart LR
   poll --> funded["Funded: balance greater than 0 usvote"]
   funded --> createValTx["create-val-tx: MsgCreateValidatorWithPallasKey"]
   createValTx --> bonded["Bonded: BOND_STATUS_BONDED"]
-  bonded --> done["svoted-join exits 0; service stays enabled"]
+  bonded --> done["svoted-join exits 0; service is removed"]
   poll --> poll
 ```
 
-The loop in [scripts/join-loop.sh](../../scripts/join-loop.sh) runs forever until it observes bonded status. On each iteration:
+The loop in [scripts/join-loop.sh](../../scripts/join-loop.sh) runs until it observes bonded status, then removes the temporary join service. The temporary service exists only to monitor for funding and submit the validator creation tx; funding acts as the vote-manager approval step.
+
+On each iteration:
 
 1. **Re-register.** Build `{operator_address, url, moniker, timestamp}`, sign it with `svoted sign-arbitrary --from validator --keyring-backend test`, POST to `${SVOTE_ADMIN_URL}/api/register-validator`. Idempotent — the admin stores one row per operator, updating URL/moniker on later POSTs. If the response reports `status=bonded`, exit 0 immediately.
-2. **Check bonded.** `svoted query staking validators` filtered by moniker; if `BOND_STATUS_BONDED`, exit 0.
+2. **Check bonded.** `svoted query staking validators` filtered by moniker; if `BOND_STATUS_BONDED`, exit 0 and remove the join service.
 3. **If not bonded, check balance.** `svoted query bank balances $VALIDATOR_ADDR`. If there is any `usvote` balance, run:
    ```bash
    create-val-tx --moniker "$MONIKER" --amount 10000000usvote --home "$SVOTE_HOME" --rpc-url tcp://localhost:26657
@@ -121,11 +123,12 @@ The loop in [scripts/join-loop.sh](../../scripts/join-loop.sh) runs forever unti
    `create-val-tx` signs `MsgCreateValidatorWithPallasKey` - the **only** message type that can create a validator post-genesis.
 4. **Sleep 30 s** and loop.
 
-The loop is deliberately quiet. It only writes three kinds of lines to `join.log`:
+The loop is deliberately quiet. It only writes a few kinds of lines to `join.log`:
 
 1. `join-loop starting (moniker=...)` — once at startup.
 2. `balance=<amount> usvote — attempting create-val-tx` — once funding is detected.
-3. `register-validator returned bonded — exiting 0` — right before exit 0 when bonded.
+3. `register-validator returned bonded - exiting 0` or `validator is bonded - exiting 0` — right before exit 0 when bonded.
+4. `removing launchd join service ...` — macOS only, before the plist is removed.
 
 A healthy unfunded validator produces **only** the startup line.
 
@@ -161,12 +164,12 @@ See [Join lifecycle](#join-lifecycle) for what `join.log` should and shouldn't c
 
 ## Operating the service
 
-`join.sh` installs two services so `svoted` and the bonding loop survive SSH disconnects, reboots, and operator shell exits.
+`join.sh` installs `svoted` plus a temporary bonding loop that monitors for funding and submits the validator creation tx. The bonding loop removes its service after the validator becomes bonded.
 
 ### Linux (systemd)
 
 - **`/etc/systemd/system/svoted.service`** — `Type=simple`, `Restart=on-failure`, `RestartSec=5`, runs as the invoking user (not root), `ExecStart=${INSTALL_DIR}/svoted start --home ${HOME_DIR}`. Logs are appended to `~/.svoted/node.log`.
-- **`/etc/systemd/system/svoted-join.service`** — same lifecycle semantics (`Restart=on-failure`, `RestartSec=30`), `Requires=svoted.service`. Exits 0 once bonded; the unit stays enabled but becomes a no-op on reboot.
+- **`/etc/systemd/system/svoted-join.service`** — same lifecycle semantics (`Restart=on-failure`, `RestartSec=30`), `Requires=svoted.service`. Exits 0 once bonded; an `ExecStopPost` cleanup hook disables the unit and removes `/etc/systemd/system/svoted-join.service` plus `/etc/default/svoted-join`.
 - **`/etc/default/svoted-join`** — key/value file sourced by the unit. Contains `SVOTE_HOME`, `VALIDATOR_ADDR`, `MONIKER`, `VALIDATOR_URL`, `SVOTE_ADMIN_URL`, `SVOTE_INSTALL_DIR`. Do not indent lines — systemd's `EnvironmentFile` parser is strict about leading whitespace.
 
 To change settings, edit the appropriate file and:
@@ -179,7 +182,7 @@ sudo systemctl restart svoted-join
 
 ### macOS (launchd)
 
-Three plists under `~/Library/LaunchAgents/`: `com.shielded-vote.validator.plist` (runs `svoted`), `com.shielded-vote.caddy.plist` (runs Caddy), `com.shielded-vote.join.plist` (runs `join-loop.sh` with the env from [Linux (systemd)](#linux-systemd) baked into `EnvironmentVariables`). Control them with `launchctl`:
+Three plists under `~/Library/LaunchAgents/`: `com.shielded-vote.validator.plist` (runs `svoted`), `com.shielded-vote.caddy.plist` (runs Caddy), `com.shielded-vote.join.plist` (runs `join-loop.sh` with the env from [Linux (systemd)](#linux-systemd) baked into `EnvironmentVariables`). The join plist is temporary and is removed automatically after bonding. Control the remaining services with `launchctl`:
 
 ```bash
 launchctl print gui/$(id -u)/com.shielded-vote.validator
@@ -192,7 +195,7 @@ launchctl bootout   gui/$(id -u)/com.shielded-vote.join           # stop join lo
 | File | Source | Content |
 |------|--------|---------|
 | `~/.svoted/node.log` | `svoted start` | Block production, P2P, ABCI, REST handler output. Verbosity via `--log_level` on the systemd unit. |
-| `~/.svoted/join.log` | `svoted-join` (`join-loop.sh`) | Per-iteration loop output (see [Join lifecycle](#join-lifecycle) for the three line shapes it emits). |
+| `~/.svoted/join.log` | `svoted-join` (`join-loop.sh`) | Per-iteration loop output (see [Join lifecycle](#join-lifecycle) for the lines it emits). |
 | Caddy | `journalctl -u caddy` (Linux) / `~/.config/caddy/caddy.log` (macOS) | Access + error log. |
 
 `journalctl -u svoted -f` / `journalctl -u svoted-join -f` follow them on Linux; use `tail -f` on macOS.

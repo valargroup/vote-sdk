@@ -802,6 +802,7 @@ ExecStart=${JOIN_LOOP_BIN}
 Restart=on-failure
 RestartSec=30
 SuccessExitStatus=0
+ExecStopPost=+/bin/sh -c 'if [ "\$SERVICE_RESULT" = "success" ] && [ "\$EXIT_CODE" = "exited" ] && [ "\$EXIT_STATUS" = "0" ]; then rm -f /etc/systemd/system/multi-user.target.wants/svoted-join.service /etc/systemd/system/svoted-join.service /etc/default/svoted-join; systemctl daemon-reload >/dev/null 2>&1 || true; fi'
 StandardOutput=append:${JOIN_LOG}
 StandardError=append:${JOIN_LOG}
 
@@ -857,16 +858,12 @@ if [ "$(uname -s)" = "Darwin" ]; then
   echo "  Join loop:      com.shielded-vote.join (launchd)"
   echo "  Join logs:      tail -f ${HOME_DIR}/join.log"
   echo ""
-  echo "  svoted-join exits automatically after bonding; it stays enabled and is a"
-  echo "  no-op on reboot. To remove it:"
-  echo "    launchctl bootout gui/$(id -u)/com.shielded-vote.join"
+  echo "  svoted-join exits and removes its launchd service automatically after bonding."
 else
   echo "  Chain service:  ${SERVICE_NAME} (systemd)"
   echo "  Chain logs:     journalctl -u ${SERVICE_NAME} -f"
   echo "  Join loop:      svoted-join (systemd)"
   echo "  Join logs:      tail -f ${HOME_DIR}/join.log"
   echo ""
-  echo "  svoted-join exits automatically after bonding; it stays enabled and is a"
-  echo "  no-op on reboot. To remove it:"
-  echo "    sudo systemctl disable svoted-join"
+  echo "  svoted-join exits and removes its systemd unit automatically after bonding."
 fi
