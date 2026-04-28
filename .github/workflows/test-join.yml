@@ -4,7 +4,7 @@
 #   - Binary download + SHA-256 checksum (arch-specific tarball from DO Spaces)
 #   - voting-config CDN discovery + P2P peer resolution
 #   - svoted init + genesis fetch + genesis validation
-#   - latest chain snapshot download + SHA-256 checksum + restore
+#   - latest chain snapshot download + SHA-256 checksum + restore when published
 #   - init-validator-keys (Cosmos account + Pallas + EA keypairs)
 #   - config.toml / app.toml patching
 #
@@ -99,12 +99,16 @@ jobs:
           check_file "${D}/config/config.toml"
           check_file "${D}/config/app.toml"
           check_file "${D}/config/genesis.json"
-          check_file "${D}/data/application.db/CURRENT"
           check_file "${D}/data/priv_validator_state.json"
           check_file "${D}/pallas.sk"
           check_file "${D}/pallas.pk"
           check_file "${D}/ea.sk"
           check_file "${D}/ea.pk"
+          if [ -f "${D}/data/application.db/CURRENT" ]; then
+            echo "  OK  snapshot/app state present"
+          else
+            echo "  INFO  no restored app state found; join.sh likely used genesis fallback"
+          fi
 
           echo "=== Checking config.toml contents ==="
           # persistent_peers must have been set (not left empty).

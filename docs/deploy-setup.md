@@ -76,10 +76,11 @@ to serve the admin UI. The secondary runs the chain only.
 
 The snapshot host is provisioned by `vote-infrastructure` as a pruned
 non-validator node. `sdk-chain-reset.yml` initializes it from the current
-genesis, configures peering with primary, starts `svoted`, and enables the
-daily `snapshot.timer`. The timer publishes `data/`-only `tar.lz4` archives
-and metadata to `s3://vote/snapshots/svote-1/`, while Caddy serves the branded
-page at `https://snapshots.<domain>/`.
+genesis, clears old objects under `s3://vote/snapshots/svote-1/`, configures
+peering with primary, starts `svoted`, and enables the snapshot timer.
+The timer publishes `data/`-only `tar.lz4` archives and metadata back to
+`s3://vote/snapshots/svote-1/`, while Caddy serves the branded page at
+`https://snapshots.<domain>/`.
 
 Snapshot deploy/reset jobs are opt-in through the `include_snapshot` workflow
 input. Leave it disabled until `vote-snapshot` has been provisioned and the

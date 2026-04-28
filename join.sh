@@ -13,7 +13,7 @@
 #   2. Fetches voting-config from the GitHub Pages CDN (canonical source; same one wallets use)
 #   3. Fetches node identity from the first vote_servers[] URL (PEX seed)
 #   4. Downloads genesis.json from DO Spaces (canonical file from sdk-chain-reset)
-#   5. Restores the latest pruned chain-data snapshot
+#   5. Restores the latest pruned chain-data snapshot when one is published
 #   6. Generates cryptographic keys
 #   7. Configures the node to connect to the existing network
 #   8. Starts svoted, waits for sync, registers with the admin join queue, installs svoted-join (poll + bond)
@@ -197,6 +197,12 @@ cleanup_snapshot_tmp() {
   fi
 }
 
+finish_snapshot_tmp() {
+  cleanup_snapshot_tmp
+  SNAPSHOT_TMP_DIR=""
+  trap - EXIT
+}
+
 restore_latest_snapshot() {
   if [ "${SVOTE_SKIP_SNAPSHOT:-0}" = "1" ]; then
     echo "SVOTE_SKIP_SNAPSHOT=1: skipping snapshot restore; node will sync from genesis."
@@ -229,13 +235,17 @@ restore_latest_snapshot() {
 
   echo "Fetching snapshot metadata from ${metadata_url}..."
   if ! curl -fsSL --connect-timeout 15 --max-time 60 -o "${metadata_file}" "${metadata_url}"; then
-    echo "ERROR: Could not fetch snapshot metadata from ${metadata_url}"
-    exit 1
+    echo "WARNING: No snapshot metadata is available from ${metadata_url}."
+    echo "  Continuing without snapshot; node will sync from genesis."
+    finish_snapshot_tmp
+    return 0
   fi
 
   if ! jq empty "${metadata_file}" > /dev/null 2>&1; then
-    echo "ERROR: Snapshot metadata is not valid JSON."
-    exit 1
+    echo "WARNING: Snapshot metadata is not valid JSON."
+    echo "  Continuing without snapshot; node will sync from genesis."
+    finish_snapshot_tmp
+    return 0
   fi
 
   snapshot_chain_id=$(jq -r '.chain_id // empty' "${metadata_file}")
@@ -245,21 +255,27 @@ restore_latest_snapshot() {
   snapshot_date=$(jq -r '.date // empty' "${metadata_file}")
 
   if [ "${snapshot_chain_id}" != "${CHAIN_ID}" ]; then
-    echo "ERROR: Snapshot chain_id mismatch. Expected ${CHAIN_ID}, got ${snapshot_chain_id:-<empty>}."
-    exit 1
+    echo "WARNING: Snapshot chain_id mismatch. Expected ${CHAIN_ID}, got ${snapshot_chain_id:-<empty>}."
+    echo "  Continuing without snapshot; node will sync from genesis."
+    finish_snapshot_tmp
+    return 0
   fi
 
   case "${snapshot_url}" in
     http://*|https://*) ;;
     *)
-      echo "ERROR: Snapshot metadata does not contain a valid archive URL."
-      exit 1
+      echo "WARNING: Snapshot metadata does not contain a valid archive URL."
+      echo "  Continuing without snapshot; node will sync from genesis."
+      finish_snapshot_tmp
+      return 0
       ;;
   esac
 
   if ! printf '%s\n' "${snapshot_checksum}" | grep -Eq '^[0-9a-fA-F]{64}$'; then
-    echo "ERROR: Snapshot metadata does not contain a valid SHA-256 checksum."
-    exit 1
+    echo "WARNING: Snapshot metadata does not contain a valid SHA-256 checksum."
+    echo "  Continuing without snapshot; node will sync from genesis."
+    finish_snapshot_tmp
+    return 0
   fi
 
   echo "Latest snapshot: height ${snapshot_height:-unknown} (${snapshot_date:-unknown date})"
@@ -311,9 +327,7 @@ restore_latest_snapshot() {
   rm -rf "${HOME_DIR}/data/cs.wal"
 
   echo "Snapshot restored. Preserved local validator state and removed restored consensus WAL."
-  cleanup_snapshot_tmp
-  SNAPSHOT_TMP_DIR=""
-  trap - EXIT
+  finish_snapshot_tmp
 }
 
 # ─── Prompt for moniker ──────────────────────────────────────────────────────
