@@ -43,6 +43,7 @@ func initCometBFTConfig() *cmtcfg.Config {
 
 	cfg.Consensus.TimeoutPropose = 1800 * time.Millisecond
 	cfg.Consensus.TimeoutCommit = 800 * time.Millisecond
+	cfg.Consensus.CreateEmptyBlocksInterval = 5 * time.Second
 	cfg.Consensus.PeerGossipSleepDuration = 50 * time.Millisecond
 
 	cfg.P2P.FlushThrottleTimeout = 80 * time.Millisecond
