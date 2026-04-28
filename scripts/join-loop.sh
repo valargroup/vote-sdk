@@ -47,34 +47,37 @@ exit_bonded() {
 echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") join-loop starting (moniker=${MONIKER})"
 
 while true; do
-  if [ -n "${VALIDATOR_URL}" ]; then
-    ts=$(date +%s)
-    payload=$(printf '%s' "{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${ts}}")
-    if sig_json=$(svoted sign-arbitrary "${payload}" --from validator --keyring-backend test --home "${SVOTE_HOME}" 2>/dev/null); then
-      sig=$(echo "${sig_json}" | jq -r '.signature')
-      pub_key=$(echo "${sig_json}" | jq -r '.pub_key')
-      body=$(jq -nc \
-        --arg oa "${VALIDATOR_ADDR}" \
-        --arg u "${VALIDATOR_URL}" \
-        --arg m "${MONIKER}" \
-        --argjson ts "${ts}" \
-        --arg s "${sig}" \
-        --arg pk "${pub_key}" \
-        '{operator_address:$oa,url:$u,moniker:$m,timestamp:$ts,signature:$s,pub_key:$pk}')
-      admin_base="${SVOTE_ADMIN_URL%/}"
-      if resp=$(curl -fsSL -X POST "${admin_base}/api/register-validator" \
-        -H "Content-Type: application/json" \
-        -d "${body}" 2>/dev/null); then
-        status=$(echo "${resp}" | jq -r '.status // empty')
-        if [ "${status}" = "bonded" ]; then
-          exit_bonded "register-validator returned bonded - exiting 0"
-        fi
+  ts=$(date +%s)
+  payload=$(jq -nc \
+    --arg oa "${VALIDATOR_ADDR}" \
+    --arg u "${VALIDATOR_URL}" \
+    --arg m "${MONIKER}" \
+    --argjson ts "${ts}" \
+    '{operator_address:$oa,url:$u,moniker:$m,timestamp:$ts}')
+  if sig_json=$(svoted sign-arbitrary "${payload}" --from validator --keyring-backend test --home "${SVOTE_HOME}" 2>/dev/null); then
+    sig=$(echo "${sig_json}" | jq -r '.signature')
+    pub_key=$(echo "${sig_json}" | jq -r '.pub_key')
+    body=$(jq -nc \
+      --arg oa "${VALIDATOR_ADDR}" \
+      --arg u "${VALIDATOR_URL}" \
+      --arg m "${MONIKER}" \
+      --argjson ts "${ts}" \
+      --arg s "${sig}" \
+      --arg pk "${pub_key}" \
+      '{operator_address:$oa,url:$u,moniker:$m,timestamp:$ts,signature:$s,pub_key:$pk}')
+    admin_base="${SVOTE_ADMIN_URL%/}"
+    if resp=$(curl -fsSL -X POST "${admin_base}/api/register-validator" \
+      -H "Content-Type: application/json" \
+      -d "${body}" 2>/dev/null); then
+      status=$(echo "${resp}" | jq -r '.status // empty')
+      if [ "${status}" = "bonded" ]; then
+        exit_bonded "register-validator returned bonded - exiting 0"
       fi
     fi
   fi
 
   bond_status=$(svoted query staking validators --home "${SVOTE_HOME}" --output json 2>/dev/null \
-    | jq -r --arg moniker "${MONIKER}" '.validators[] | select(.description.moniker == $moniker) | .status' 2>/dev/null | head -1 || echo "")
+    | jq -r --arg m "${MONIKER}" '.validators[] | select(.description.moniker == $m) | .status' 2>/dev/null | head -1 || echo "")
 
   if [ "${bond_status}" = "BOND_STATUS_BONDED" ]; then
     exit_bonded "validator is bonded - exiting 0"

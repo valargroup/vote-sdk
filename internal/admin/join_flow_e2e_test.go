@@ -48,7 +48,7 @@ func TestJoinAdminFlow_PendingThenBonded(t *testing.T) {
 	}
 
 	ts := time.Now().Unix()
-	payloadBytes, err := json.Marshal(registerPayloadWire{
+	payloadBytes, err := marshalRegisterPayloadWire(registerPayloadWire{
 		OperatorAddress: operator,
 		URL:             "https://op.example",
 		Moniker:         "join-e2e",

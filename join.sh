@@ -40,10 +40,14 @@ SVOTE_ADMIN_URL="${SVOTE_ADMIN_URL:-${DEFAULT_ADMIN_API_BASE}}"
 
 # Parse --domain flag for TLS hostname override.
 SVOTE_DOMAIN="${SVOTE_DOMAIN:-}"
+DOMAIN_MODE="auto"
+if [ -n "$SVOTE_DOMAIN" ]; then
+  DOMAIN_MODE="explicit"
+fi
 while [ $# -gt 0 ]; do
   case "$1" in
-    --domain) SVOTE_DOMAIN="$2"; shift 2 ;;
-    --domain=*) SVOTE_DOMAIN="${1#--domain=}"; shift ;;
+    --domain) SVOTE_DOMAIN="$2"; DOMAIN_MODE="explicit"; shift 2 ;;
+    --domain=*) SVOTE_DOMAIN="${1#--domain=}"; DOMAIN_MODE="explicit"; shift ;;
     *) shift ;;
   esac
 done
@@ -93,6 +97,67 @@ if ! command -v jq > /dev/null 2>&1; then
   echo "ERROR: jq is still not available after install attempt."
   exit 1
 fi
+
+build_register_payload() {
+  local ts="$1"
+  jq -nc \
+    --arg oa "${VALIDATOR_ADDR}" \
+    --arg u "${VALIDATOR_URL:-}" \
+    --arg m "${MONIKER}" \
+    --argjson ts "${ts}" \
+    '{operator_address:$oa,url:$u,moniker:$m,timestamp:$ts}'
+}
+
+build_register_body() {
+  local ts="$1"
+  local sig="$2"
+  local pub_key="$3"
+  jq -nc \
+    --arg oa "${VALIDATOR_ADDR}" \
+    --arg u "${VALIDATOR_URL:-}" \
+    --arg m "${MONIKER}" \
+    --argjson ts "${ts}" \
+    --arg s "${sig}" \
+    --arg pk "${pub_key}" \
+    '{operator_address:$oa,url:$u,moniker:$m,timestamp:$ts,signature:$s,pub_key:$pk}'
+}
+
+JOIN_QUEUE_STATUS="not attempted"
+
+handle_public_url_failure() {
+  local message="$1"
+  VALIDATOR_URL=""
+
+  if [ "$DOMAIN_MODE" = "explicit" ] && [ "${SVOTE_ALLOW_NO_PUBLIC_URL:-0}" != "1" ]; then
+    echo "ERROR: ${message}"
+    echo "  You supplied a public domain, so join.sh will not continue without a working Caddy setup."
+    echo "  Fix Caddy/DNS, or set SVOTE_ALLOW_NO_PUBLIC_URL=1 to register for funding without a public URL."
+    exit 1
+  fi
+
+  echo "WARNING: ${message}"
+  echo "  Continuing with no public URL. Vote managers can still fund this operator from the join queue."
+  echo "  The validator will not be client-ready until a public HTTPS URL is configured."
+}
+
+print_join_status() {
+  echo ""
+  echo "Join queue: ${JOIN_QUEUE_STATUS}"
+  if [ -n "${VALIDATOR_URL:-}" ]; then
+    echo "Public URL: configured ${VALIDATOR_URL}"
+  else
+    echo "Public URL: missing"
+    echo "  Vote managers can still fund the operator address from the join queue."
+    echo "  Configure public HTTPS before treating this validator as client-ready."
+  fi
+}
+
+systemd_env_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
 
 # ─── Prompt for moniker ──────────────────────────────────────────────────────
 
@@ -395,7 +460,9 @@ echo ""
 echo "=== Setting up TLS reverse proxy ==="
 
 if [ "${SVOTE_SKIP_CADDY:-0}" = "1" ]; then
+  DOMAIN_MODE="skip"
   echo "SVOTE_SKIP_CADDY=1: skipping Caddy setup."
+  handle_public_url_failure "Caddy setup skipped by SVOTE_SKIP_CADDY=1."
   VALIDATOR_URL=""
 elif [ -z "$SVOTE_DOMAIN" ]; then
   # Auto-detect public IPv4 and use sslip.io for a valid TLS hostname. Avoid
@@ -404,10 +471,7 @@ elif [ -z "$SVOTE_DOMAIN" ]; then
   PUBLIC_IP=$(curl -4 -fsSL --connect-timeout 5 https://ifconfig.me 2>/dev/null || \
     curl -4 -fsSL --connect-timeout 5 https://api.ipify.org 2>/dev/null || echo "")
   if ! echo "$PUBLIC_IP" | jq -eR 'test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$")' > /dev/null 2>&1; then
-    echo "WARNING: Could not detect a public IPv4 address for sslip.io. Skipping Caddy setup."
-    echo "  Detected value: ${PUBLIC_IP:-<empty>}"
-    echo "  Re-run with --domain <hostname>, set SVOTE_DOMAIN, or set SVOTE_SKIP_CADDY=1."
-    VALIDATOR_URL=""
+    handle_public_url_failure "Could not detect a public IPv4 address for sslip.io. Detected value: ${PUBLIC_IP:-<empty>}. Re-run with --domain <hostname>, set SVOTE_DOMAIN, or set SVOTE_SKIP_CADDY=1."
   else
     SVOTE_DOMAIN="$(echo "$PUBLIC_IP" | tr '.' '-').sslip.io"
     echo "Detected public IP: ${PUBLIC_IP}"
@@ -415,14 +479,12 @@ elif [ -z "$SVOTE_DOMAIN" ]; then
   fi
 fi
 
-if [ -n "$SVOTE_DOMAIN" ] && echo "$SVOTE_DOMAIN" | jq -eR 'contains(":") or test("\\s")' > /dev/null 2>&1; then
-  echo "WARNING: Invalid TLS hostname '${SVOTE_DOMAIN}'. Skipping Caddy setup."
-  echo "  Use a DNS hostname without colons/spaces, or set SVOTE_SKIP_CADDY=1."
-  VALIDATOR_URL=""
+if [ "$DOMAIN_MODE" != "skip" ] && [ -n "$SVOTE_DOMAIN" ] && echo "$SVOTE_DOMAIN" | jq -eR 'contains(":") or test("\\s")' > /dev/null 2>&1; then
+  handle_public_url_failure "Invalid TLS hostname '${SVOTE_DOMAIN}'. Use a DNS hostname without colons/spaces, or set SVOTE_SKIP_CADDY=1."
   SVOTE_DOMAIN=""
 fi
 
-if [ -n "$SVOTE_DOMAIN" ]; then
+if [ "$DOMAIN_MODE" != "skip" ] && [ -n "$SVOTE_DOMAIN" ]; then
   VALIDATOR_URL="https://${SVOTE_DOMAIN}"
 
   # Install Caddy if not present.
@@ -439,35 +501,28 @@ if [ -n "$SVOTE_DOMAIN" ]; then
           sudo -E apt-get update &&
           sudo -E apt-get install -y caddy
         }; then
-          echo "WARNING: Caddy installation failed. Continuing without TLS reverse proxy."
-          echo "  Install Caddy manually or re-run with --domain after fixing package manager access."
-          VALIDATOR_URL=""
+          handle_public_url_failure "Caddy installation failed."
         fi
       else
-        echo "WARNING: apt not found. Install Caddy manually: https://caddyserver.com/docs/install"
-        VALIDATOR_URL=""
+        handle_public_url_failure "apt not found; automatic Caddy installation is unavailable. Install Caddy manually: https://caddyserver.com/docs/install"
       fi
     elif [ "$OS_NAME" = "Darwin" ]; then
       if command -v brew > /dev/null 2>&1; then
         echo "Installing Caddy via Homebrew..."
         if ! brew install caddy; then
-          echo "WARNING: Homebrew failed to install Caddy. Continuing without TLS reverse proxy."
-          echo "  Install Caddy manually with: brew install caddy"
-          VALIDATOR_URL=""
+          handle_public_url_failure "Caddy installation via Homebrew failed."
         fi
       else
-        echo "WARNING: Homebrew not found. Install Caddy manually:"
-        echo "  brew install caddy   (after installing Homebrew from https://brew.sh)"
-        echo "  Then re-run join.sh."
-        VALIDATOR_URL=""
+        handle_public_url_failure "Homebrew not found. Install Caddy with 'brew install caddy' after installing Homebrew from https://brew.sh."
       fi
     else
-      echo "WARNING: Automatic Caddy installation is only supported on Linux (apt) and macOS (Homebrew)."
-      echo "  Install Caddy manually: https://caddyserver.com/docs/install"
-      echo "  Then re-run join.sh."
-      VALIDATOR_URL=""
+      handle_public_url_failure "Automatic Caddy installation is only supported on Linux (apt) and macOS (Homebrew). Install Caddy manually: https://caddyserver.com/docs/install"
     fi
   fi
+fi
+
+if [ -n "$VALIDATOR_URL" ] && ! command -v caddy > /dev/null 2>&1; then
+  handle_public_url_failure "Caddy is not available after installation."
 fi
 
 if [ -n "$VALIDATOR_URL" ] && command -v caddy > /dev/null 2>&1; then
@@ -498,12 +553,32 @@ CADDYEOF
   fi
 
   if [ "$OS_NAME" = "Darwin" ]; then
+    if ! caddy validate --config "${CADDYFILE}"; then
+      handle_public_url_failure "Caddy config validation failed for ${CADDYFILE}."
+    fi
     # On macOS, Caddy is managed as part of the launchd plist (see below).
-    :
+    if [ -n "$VALIDATOR_URL" ]; then
+      echo "Caddy config validated: ${VALIDATOR_URL} → localhost:1317"
+    fi
   else
-    sudo systemctl restart caddy 2>/dev/null || sudo caddy reload --config "${CADDYFILE}" 2>/dev/null || true
+    if ! sudo caddy validate --config "${CADDYFILE}"; then
+      handle_public_url_failure "Caddy config validation failed for ${CADDYFILE}."
+    fi
+    if [ -n "$VALIDATOR_URL" ]; then
+      if command -v systemctl > /dev/null 2>&1; then
+        if ! sudo systemctl restart caddy; then
+          if ! sudo caddy reload --config "${CADDYFILE}"; then
+            handle_public_url_failure "Caddy restart/reload failed for ${CADDYFILE}."
+          fi
+        fi
+      elif ! sudo caddy reload --config "${CADDYFILE}"; then
+        handle_public_url_failure "Caddy reload failed for ${CADDYFILE}."
+      fi
+      if [ -n "$VALIDATOR_URL" ]; then
+        echo "Caddy configured: ${VALIDATOR_URL} → localhost:1317"
+      fi
+    fi
   fi
-  echo "Caddy configured: ${VALIDATOR_URL} → localhost:1317"
 else
   VALIDATOR_URL=""
 fi
@@ -518,18 +593,18 @@ fi
 # The validator exists (keys generated) but isn't bonded yet. Register with
 # the admin API so operators appear in the Join queue UI.
 
-if [ -n "$VALIDATOR_URL" ]; then
+if [ -n "$SVOTE_ADMIN_URL" ]; then
   echo ""
   echo "=== Registering with vote network ==="
 
   TIMESTAMP=$(date +%s)
-  REG_PAYLOAD="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${TIMESTAMP}}"
+  REG_PAYLOAD=$(build_register_payload "${TIMESTAMP}")
 
   if SIG_JSON=$(svoted sign-arbitrary "$REG_PAYLOAD" --from validator --keyring-backend test --home "${HOME_DIR}" 2>/dev/null); then
     SIG=$(echo "$SIG_JSON" | jq -r '.signature')
     PUB_KEY=$(echo "$SIG_JSON" | jq -r '.pub_key')
 
-    REG_BODY="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${TIMESTAMP},\"signature\":\"${SIG}\",\"pub_key\":\"${PUB_KEY}\"}"
+    REG_BODY=$(build_register_body "${TIMESTAMP}" "${SIG}" "${PUB_KEY}")
 
     REG_RESULT=$(curl -fsSL -X POST "${SVOTE_ADMIN_URL%/}/api/register-validator" \
       -H "Content-Type: application/json" \
@@ -537,16 +612,20 @@ if [ -n "$VALIDATOR_URL" ]; then
 
     if [ -n "$REG_RESULT" ]; then
       REG_STATUS=$(echo "$REG_RESULT" | jq -r '.status // empty' 2>/dev/null || echo "")
-      if [ "$REG_STATUS" = "pending" ] || [ "$REG_STATUS" = "registered" ]; then
+      if [ "$REG_STATUS" = "pending" ] || [ "$REG_STATUS" = "registered" ] || [ "$REG_STATUS" = "bonded" ]; then
+        JOIN_QUEUE_STATUS="${REG_STATUS}"
         echo "Registered (${REG_STATUS}). The admin will see your request."
       else
+        JOIN_QUEUE_STATUS="unexpected response"
         echo "WARNING: Registration response: ${REG_RESULT}"
       fi
     else
+      JOIN_QUEUE_STATUS="registration API unreachable"
       echo "WARNING: Could not reach registration API. You can register manually later:"
       echo "  svoted sign-arbitrary '<payload>' --from validator --keyring-backend test --home ${HOME_DIR}"
     fi
   else
+    JOIN_QUEUE_STATUS="signature failed"
     echo "WARNING: Could not sign registration payload. You can register manually later."
   fi
 fi
@@ -570,6 +649,7 @@ if [ "${SVOTE_SKIP_SERVICE:-0}" = "1" ]; then
   echo "  Home dir:         ${HOME_DIR}"
   echo "  Config:           ${CONFIG_TOML}"
   echo "  App config:       ${APP_TOML}"
+  print_join_status
   exit 0
 fi
 
@@ -579,16 +659,18 @@ SERVICE_NAME="svoted"
 
 # Re-register with the admin join queue (idempotent).
 register_url() {
-  if [ -z "${VALIDATOR_URL}" ] || [ -z "${SVOTE_ADMIN_URL}" ]; then
+  if [ -z "${SVOTE_ADMIN_URL}" ]; then
     return 0
   fi
   local ts=$(date +%s)
-  local payload="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${ts}}"
+  local payload
+  payload=$(build_register_payload "${ts}")
   local sig_json
   sig_json=$(svoted sign-arbitrary "$payload" --from validator --keyring-backend test --home "${HOME_DIR}" 2>/dev/null) || return 0
   local sig=$(echo "$sig_json" | jq -r '.signature')
   local pub_key=$(echo "$sig_json" | jq -r '.pub_key')
-  local body="{\"operator_address\":\"${VALIDATOR_ADDR}\",\"url\":\"${VALIDATOR_URL}\",\"moniker\":\"${MONIKER}\",\"timestamp\":${ts},\"signature\":\"${sig}\",\"pub_key\":\"${pub_key}\"}"
+  local body
+  body=$(build_register_body "${ts}" "${sig}" "${pub_key}")
   curl -fsSL -X POST "${SVOTE_ADMIN_URL%/}/api/register-validator" \
     -H "Content-Type: application/json" \
     -d "$body" > /dev/null 2>&1 || true
@@ -780,12 +862,12 @@ SVCEOF
 
   JOIN_LOG="${HOME_DIR}/join.log"
   sudo tee /etc/default/svoted-join > /dev/null <<ENVEOF
-SVOTE_HOME=${HOME_DIR}
-VALIDATOR_ADDR=${VALIDATOR_ADDR}
-MONIKER=${MONIKER}
-VALIDATOR_URL=${VALIDATOR_URL}
-SVOTE_ADMIN_URL=${SVOTE_ADMIN_URL}
-SVOTE_INSTALL_DIR=${INSTALL_DIR}
+SVOTE_HOME=$(systemd_env_quote "${HOME_DIR}")
+VALIDATOR_ADDR=$(systemd_env_quote "${VALIDATOR_ADDR}")
+MONIKER=$(systemd_env_quote "${MONIKER}")
+VALIDATOR_URL=$(systemd_env_quote "${VALIDATOR_URL}")
+SVOTE_ADMIN_URL=$(systemd_env_quote "${SVOTE_ADMIN_URL}")
+SVOTE_INSTALL_DIR=$(systemd_env_quote "${INSTALL_DIR}")
 ENVEOF
 
   sudo tee /etc/systemd/system/svoted-join.service > /dev/null <<JOINUNIT
@@ -844,11 +926,10 @@ echo "============================================="
 echo "  Congratulations, your node is synced"
 echo "============================================="
 echo ""
-echo "Environment data:"
-echo "  Validator name:    ${MONIKER}"
-echo "  Node hash:         ${VALIDATOR_ADDR}"
-echo "  Public URL:        ${VALIDATOR_URL:-not configured}"
-echo "  Chain home:        ${HOME_DIR}"
+echo "  Operator address (fund this in the admin Join queue UI):"
+echo "    ${VALIDATOR_ADDR}"
+echo ""
+print_join_status
 echo ""
 echo "How to monitor:"
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -876,6 +957,12 @@ echo "  ${JOIN_WATCHER_NAME} is checking for admin approval and will bond automa
 echo "  It removes itself after you are added as a validator."
 echo "  To stop it manually: ${JOIN_WATCHER_REMOVE}"
 echo ""
-echo "After bonding, add your public URL to vote_servers via a PR:"
-echo "  https://github.com/valargroup/token-holder-voting-config"
-echo "  {\"url\":\"${VALIDATOR_URL}\",\"label\":\"${MONIKER}\"}"
+if [ -n "${VALIDATOR_URL:-}" ]; then
+  echo "After bonding, add your public URL to vote_servers via a PR:"
+  echo "  https://github.com/valargroup/token-holder-voting-config"
+  echo "  Suggested JSON entry:"
+  echo "    $(jq -nc --arg url "${VALIDATOR_URL}" --arg label "${MONIKER}" '{url:$url,label:$label}')"
+else
+  echo "After bonding, configure a public HTTPS URL before adding this validator to vote_servers:"
+  echo "  https://github.com/valargroup/token-holder-voting-config"
+fi
