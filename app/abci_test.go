@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -49,6 +50,38 @@ func (s *ABCIIntegrationSuite) SetupTest() {
 // Uses NewUncachedContext because after Commit() the finalizeBlockState is nil.
 func (s *ABCIIntegrationSuite) queryCtx() sdk.Context {
 	return s.app.NewUncachedContext(false, cmtproto.Header{Height: s.app.Height})
+}
+
+func (s *ABCIIntegrationSuite) nextEmptyBlockAppHash() []byte {
+	s.T().Helper()
+
+	s.app.Height++
+	s.app.Time = s.app.Time.Add(5 * time.Second)
+
+	resp, err := s.app.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height:          s.app.Height,
+		Time:            s.app.Time,
+		ProposerAddress: s.app.ProposerAddress,
+	})
+	s.Require().NoError(err)
+
+	appHash := append([]byte(nil), resp.AppHash...)
+
+	_, err = s.app.Commit()
+	s.Require().NoError(err)
+
+	return appHash
+}
+
+func (s *ABCIIntegrationSuite) TestHealthyEmptyBlocksDoNotChangeAppHash() {
+	// Allow validator updates from initialization to pass the SDK's
+	// ValidatorUpdateDelay before checking steady-state empty blocks.
+	s.nextEmptyBlockAppHash()
+	s.nextEmptyBlockAppHash()
+	first := s.nextEmptyBlockAppHash()
+	second := s.nextEmptyBlockAppHash()
+
+	s.Require().Equal(first, second, "healthy empty blocks should not dirty merklized state")
 }
 
 // ---------------------------------------------------------------------------
