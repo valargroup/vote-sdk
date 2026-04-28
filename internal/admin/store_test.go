@@ -100,8 +100,67 @@ func TestStoreEvictExpiredPending(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("want 1 evicted, got %d", n)
 	}
-	list, _ := s.ListPendingRegistrations()
+	list, err := s.ListPendingRegistrations()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 0 {
 		t.Fatalf("want empty list, got %d", len(list))
+	}
+}
+
+func TestListPendingRegistrationsEvictsExpiredRows(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s, err := NewStore(filepath.Join(dir, "list-evict.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	now := time.Now().Unix()
+	expired := PendingRegistration{
+		OperatorAddress: "sv1expired",
+		URL:             "https://expired.example",
+		Moniker:         "expired",
+		Timestamp:       now - 120,
+		Signature:       "s1",
+		PubKey:          "p1",
+		FirstSeenAt:     now - 120,
+		LastSeenAt:      now - 120,
+		ExpiresAt:       now - 1,
+	}
+	live := PendingRegistration{
+		OperatorAddress: "sv1live",
+		URL:             "https://live.example",
+		Moniker:         "live",
+		Timestamp:       now,
+		Signature:       "s2",
+		PubKey:          "p2",
+		FirstSeenAt:     now,
+		LastSeenAt:      now,
+		ExpiresAt:       now + 60,
+	}
+	if err := s.UpsertPendingRegistration(expired); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertPendingRegistration(live); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := s.ListPendingRegistrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].OperatorAddress != live.OperatorAddress {
+		t.Fatalf("want only live row, got %+v", list)
+	}
+
+	n, err := s.EvictExpiredPending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("expired row should have been deleted during list, evicted %d", n)
 	}
 }

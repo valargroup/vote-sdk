@@ -59,12 +59,19 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// ListPendingRegistrations returns non-expired pending registrations.
+// ListPendingRegistrations returns non-expired pending registrations. It also
+// opportunistically deletes expired rows so GET /api/pending-validators both
+// hides and evicts stale join requests even if the background sweeper has not
+// run yet.
 func (s *Store) ListPendingRegistrations() ([]PendingRegistration, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now().Unix()
+	if _, err := s.db.Exec("DELETE FROM pending_registrations WHERE expires_at <= ?", now); err != nil {
+		return nil, err
+	}
+
 	rows, err := s.db.Query(
 		`SELECT operator_address, url, moniker, timestamp, signature, pub_key,
 			first_seen_at, last_seen_at, expires_at

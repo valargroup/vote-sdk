@@ -194,7 +194,12 @@ off).
 | `config_url` | (CDN) | URL the admin re-serves at `GET /api/voting-config`. Same URL clients hit directly — pointing it at a mirror only changes the cached copy served from this host, not what wallets/`join.sh` discover. |
 | `db_path` | `""` | SQLite path for pending registrations. Empty = `$HOME/.svoted/admin.db`. |
 
-Pending join rows expire after **7 days**; expired rows are removed by a background sweeper that runs every **hour** (both are fixed in code, not `app.toml` keys).
+Pending join rows expire **10 minutes after their most recent registration**.
+The join loop re-registers every 30 seconds while it is still waiting for
+funding, so live operators remain visible and abandoned requests fall out of the
+queue automatically. Expired rows are deleted before `GET /api/pending-validators`
+responds and by a background sweeper that runs every **minute** (both timings
+are fixed in code, not `app.toml` keys).
 
 Endpoints: `POST /api/register-validator`, `GET /api/pending-validators`, `POST /api/server-heartbeat`, plus `GET /api/voting-config` (cached CDN snapshot, not the canonical client path — see above).
 

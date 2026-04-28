@@ -9,12 +9,14 @@ package admin
 import "time"
 
 // PendingRegistrationTTL is how long an operator remains in the pending join
-// queue before the row expires (SQLite; not configurable).
-const PendingRegistrationTTL = 7 * 24 * time.Hour
+// queue after its most recent signed registration. The join loop re-registers
+// every 30 seconds, so this keeps live operators visible while automatically
+// dropping abandoned installs without an admin-only delete action.
+const PendingRegistrationTTL = 10 * time.Minute
 
 // PendingEvictionSweepInterval is how often expired pending_registrations rows
 // are deleted (not configurable).
-const PendingEvictionSweepInterval = time.Hour
+const PendingEvictionSweepInterval = time.Minute
 
 // VotingConfigRefreshInterval is how often the admin re-fetches voting-config
 // from ConfigURL so the cached GET /api/voting-config response stays warm.
