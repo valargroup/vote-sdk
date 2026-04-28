@@ -35,7 +35,7 @@ flowchart LR
 |--------|---------|-------------|
 | `PRIMARY_HOST` | deploy, reset | Hostname or IP of the primary validator. |
 | `SECONDARY_HOST` | deploy, reset | Hostname or IP of the secondary validator. |
-| `SNAPSHOT_HOST` | deploy, reset | Hostname or IP of the dedicated snapshot node. |
+| `SNAPSHOT_HOST` | deploy, reset | Hostname or IP of the dedicated snapshot node. Required only when `include_snapshot` is enabled. |
 | `DEPLOY_USER` | deploy, reset | SSH username on both hosts. |
 | `SSH_PRIVATE_KEY` | deploy, reset | SSH private key for authentication. |
 | `VM_PRIVKEYS` | reset | Comma-separated 64-char hex secp256k1 private keys for the vote-manager set (any-of-N). Each derived address becomes a vote manager at genesis; the 1B usvote stake pool is split evenly across the set. For a single-vote-manager chain, provide exactly one key. |
@@ -80,6 +80,10 @@ genesis, configures peering with primary, starts `svoted`, and enables the
 daily `snapshot.timer`. The timer publishes `data/`-only `tar.lz4` archives
 and metadata to `s3://vote/snapshots/svote-1/`, while Caddy serves the branded
 page at `https://snapshots.<domain>/`.
+
+Snapshot deploy/reset jobs are opt-in through the `include_snapshot` workflow
+input. Leave it disabled until `vote-snapshot` has been provisioned and the
+`SNAPSHOT_HOST` secret exists.
 
 See [production-setup.md](production-setup.md) for first-time bootstrap, manual
 operations, and failover runbook.

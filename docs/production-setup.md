@@ -109,11 +109,15 @@ Use this for routine upgrades. Chain state is preserved; only the binary is swap
 1. **reset-primary**: installs tag, stops svoted, wipes chain state, runs `init.sh` (imports `PRIMARY_VAL_PRIVKEY`) to create fresh genesis, starts svoted
 2. **upload-genesis**: fetches genesis from primary's REST API, uploads to DO Spaces (`s3://vote/genesis.json`)
 3. **fund-secondary**: derives the secondary address from `SECONDARY_VAL_PRIVKEY`, sends 100M usvote from a vote manager on the primary
-4. **reset-snapshot**: installs tag, runs `reset-snapshot.sh`, starts a pruned non-validator node, and enables `snapshot.timer`
+4. **reset-snapshot**: when `include_snapshot` is enabled, installs tag, runs `reset-snapshot.sh`, starts a pruned non-validator node, and enables `snapshot.timer`
 5. **reset-secondary**: installs tag, runs `reset-join.sh` (imports `SECONDARY_VAL_PRIVKEY`), syncs, verifies funding, registers as validator
 6. **verify**: checks validators, archive, and snapshot frontend
 
-Required secrets: `PRIMARY_HOST`, `SECONDARY_HOST`, `SNAPSHOT_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SLACK_WEBHOOK_URL`.
+Required secrets: `PRIMARY_HOST`, `SECONDARY_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SLACK_WEBHOOK_URL`.
+
+Leave `include_snapshot` disabled until `vote-snapshot` has been provisioned
+and `SNAPSHOT_HOST` has been added. `SNAPSHOT_HOST` is required only when
+`include_snapshot` is enabled.
 
 ## First-Time Bootstrap
 

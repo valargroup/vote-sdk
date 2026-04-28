@@ -10,12 +10,20 @@ on:
         description: "Release tag to deploy (e.g. v1.2.3). Must already exist in DO Spaces."
         type: string
         required: true
+      include_snapshot:
+        description: "Deploy the dedicated snapshot node. Enable only after vote-snapshot is provisioned and SNAPSHOT_HOST exists."
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       tag:
         description: "Release tag to deploy (e.g. v1.2.3). Must already exist in DO Spaces."
         type: string
         required: true
+      include_snapshot:
+        description: "Deploy the dedicated snapshot node. Enable only after vote-snapshot is provisioned and SNAPSHOT_HOST exists."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -149,6 +157,7 @@ jobs:
 
   deploy-snapshot:
     name: Deploy snapshot node
+    if: ${{ inputs.include_snapshot }}
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to snapshot Droplet

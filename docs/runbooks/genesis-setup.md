@@ -38,7 +38,7 @@ The single workflow [`sdk-chain-reset.yml`](../../.github/workflows/sdk-chain-re
 1. **`reset-primary`** — SSHes to `PRIMARY_HOST`, runs `install-release.sh --tag <tag>`, stops `svoted`, wipes `/opt/shielded-vote/.svoted/`, then runs [`scripts/init.sh`](../../scripts/init.sh) with `VAL_PRIVKEY=PRIMARY_VAL_PRIVKEY`, `VM_PRIVKEYS`, and `SVOTE_ADMIN_DISABLE=false`. Drops in `svoted.service.d/primary.conf`, starts `svoted`, polls `localhost:1317/shielded-vote/v1/rounds`.
 2. **`upload-genesis`** — fetches `genesis.json` from `localhost:1317/shielded-vote/v1/genesis` on the primary and uploads it to `s3://vote/genesis.json` (DO Spaces, `https://vote.fra1.digitaloceanspaces.com/genesis.json`). This is the canonical source joining nodes pull from.
 3. **`fund-secondary`** — derives the secondary's address from `SECONDARY_VAL_PRIVKEY` (in a temp keyring) and `MsgAuthorizedSend`s 100M usvote from `vote-manager-1`.
-4. **`reset-snapshot`** — SSHes to `SNAPSHOT_HOST`, installs the same tag, runs [`scripts/reset-snapshot.sh`](../../scripts/reset-snapshot.sh) to bring up a pruned non-validator node, then enables `snapshot.timer`.
+4. **`reset-snapshot`** — when `include_snapshot` is enabled, SSHes to `SNAPSHOT_HOST`, installs the same tag, runs [`scripts/reset-snapshot.sh`](../../scripts/reset-snapshot.sh) to bring up a pruned non-validator node, then enables `snapshot.timer`.
 5. **`reset-secondary`** — SSHes to `SECONDARY_HOST`, installs the same tag, runs [`scripts/reset-join.sh`](../../scripts/reset-join.sh) (downloads genesis from Spaces, discovers the primary's P2P NodeID via REST, syncs, calls `create-val-tx` to register).
 6. **`reset-archive`** — SSHes to `EXPLORER_HOST`, runs [`scripts/reset-archive.sh`](../../scripts/reset-archive.sh) to bring up a non-validator archive node (pruning=nothing) for the explorer.
 
@@ -46,9 +46,13 @@ Then `verify` polls all REST endpoints. On any failure the `notify-slack` job fi
 
 ### Required GitHub secrets
 
-`PRIMARY_HOST`, `SECONDARY_HOST`, `EXPLORER_HOST`, `SNAPSHOT_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SENTRY_DSN`, `SLACK_WEBHOOK_URL`. Full descriptions in [deploy-setup.md § GitHub repository secrets](../deploy-setup.md#github-repository-secrets).
+`PRIMARY_HOST`, `SECONDARY_HOST`, `EXPLORER_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SENTRY_DSN`, `SLACK_WEBHOOK_URL`. Full descriptions in [deploy-setup.md § GitHub repository secrets](../deploy-setup.md#github-repository-secrets).
 
 `VM_PRIVKEYS` is a comma-separated list of 64-char hex secp256k1 private keys; each derived address becomes a member of the any-of-N vote-manager set at genesis and the 1B usvote stake pool is split evenly across them. Generate one with `openssl rand -hex 32`.
+
+Leave `include_snapshot` disabled until `vote-infrastructure` has provisioned
+`vote-snapshot` and the `SNAPSHOT_HOST` secret has been added. `SNAPSHOT_HOST`
+is required only when `include_snapshot` is enabled.
 
 ### First-time bring-up
 
