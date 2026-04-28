@@ -261,18 +261,14 @@ echo "Peers: ${PERSISTENT_PEERS}"
 
 # ─── Initialize node ─────────────────────────────────────────────────────────
 
-echo ""
-echo "=== Initializing node ==="
-
 # Clean previous state if present.
 if [ -d "${HOME_DIR}" ]; then
   echo "Removing existing ${HOME_DIR}..."
   rm -rf "${HOME_DIR}"
 fi
 
-echo "Running: svoted init --home ${HOME_DIR} ..."
 # Do not silence stderr: with set -e, a failed init would otherwise exit with no explanation.
-if ! svoted init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}"; then
+if ! svoted init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}" > /dev/null; then
   echo "ERROR: svoted init failed. Typical causes: missing dynamic libraries (ldd on the svoted binary), disk full, or invalid moniker."
   exit 1
 fi
