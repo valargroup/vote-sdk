@@ -8,11 +8,11 @@ import (
 
 	dbm "github.com/cosmos/cosmos-db"
 
-	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	clienthelpers "cosmossdk.io/client/v2/helpers"
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
@@ -28,7 +28,6 @@ import (
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
-	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 
@@ -51,7 +50,7 @@ var (
 
 // SvoteApp extends an ABCI application for the Shielded-Vote chain.
 // Built from a stripped-down Cosmos SDK simapp with only the minimal
-// modules needed for block production (auth, bank, staking, distribution,
+// modules needed for block production (auth, bank, staking, slashing,
 // consensus, genutil).
 type SvoteApp struct {
 	*runtime.App
@@ -64,7 +63,6 @@ type SvoteApp struct {
 	AccountKeeper         authkeeper.AccountKeeper
 	BankKeeper            bankkeeper.BaseKeeper
 	StakingKeeper         *stakingkeeper.Keeper
-	DistrKeeper           distrkeeper.Keeper
 	SlashingKeeper        slashingkeeper.Keeper
 	ConsensusParamsKeeper consensuskeeper.Keeper
 
@@ -124,7 +122,6 @@ func NewSvoteApp(
 		&app.AccountKeeper,
 		&app.BankKeeper,
 		&app.StakingKeeper,
-		&app.DistrKeeper,
 		&app.SlashingKeeper,
 		&app.ConsensusParamsKeeper,
 		&app.VoteKeeper,

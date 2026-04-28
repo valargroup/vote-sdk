@@ -68,7 +68,8 @@ func TestWhitelist_DistributionMsgFundCommunityPoolBlocked(t *testing.T) {
 
 	resp := ta.CheckTxSync(txBytes)
 	require.NotEqual(t, uint32(0), resp.Code)
-	require.Contains(t, resp.Log, "is not allowed on this chain")
+	require.Contains(t, resp.Log, "unable to resolve type URL")
+	require.Contains(t, resp.Log, "MsgFundCommunityPool")
 }
 
 func TestWhitelist_StakingMsgDelegateBlocked(t *testing.T) {
@@ -102,7 +103,8 @@ func TestWhitelist_DistributionMsgSetWithdrawAddressBlocked(t *testing.T) {
 
 	resp := ta.CheckTxSync(txBytes)
 	require.NotEqual(t, uint32(0), resp.Code)
-	require.Contains(t, resp.Log, "is not allowed on this chain")
+	require.Contains(t, resp.Log, "unable to resolve type URL")
+	require.Contains(t, resp.Log, "MsgSetWithdrawAddress")
 }
 
 // ---------------------------------------------------------------------------
