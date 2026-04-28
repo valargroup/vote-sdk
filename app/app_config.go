@@ -6,7 +6,6 @@ import (
 	authmodulev1 "cosmossdk.io/api/cosmos/auth/module/v1"
 	bankmodulev1 "cosmossdk.io/api/cosmos/bank/module/v1"
 	consensusmodulev1 "cosmossdk.io/api/cosmos/consensus/module/v1"
-	distrmodulev1 "cosmossdk.io/api/cosmos/distribution/module/v1"
 	genutilmodulev1 "cosmossdk.io/api/cosmos/genutil/module/v1"
 	slashingmodulev1 "cosmossdk.io/api/cosmos/slashing/module/v1"
 	stakingmodulev1 "cosmossdk.io/api/cosmos/staking/module/v1"
@@ -20,16 +19,14 @@ import (
 	_ "github.com/cosmos/cosmos-sdk/x/auth"           // import for side-effects (depinject registration)
 	_ "github.com/cosmos/cosmos-sdk/x/auth/tx/config" // import for side-effects
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
-	_ "github.com/cosmos/cosmos-sdk/x/bank"         // import for side-effects
+	_ "github.com/cosmos/cosmos-sdk/x/bank" // import for side-effects
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	_ "github.com/cosmos/cosmos-sdk/x/consensus" // import for side-effects
 	consensustypes "github.com/cosmos/cosmos-sdk/x/consensus/types"
-	_ "github.com/cosmos/cosmos-sdk/x/distribution" // import for side-effects
-	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
-	_ "github.com/cosmos/cosmos-sdk/x/slashing" // import for side-effects
-	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
+	_ "github.com/cosmos/cosmos-sdk/x/slashing" // import for side-effects
+	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	_ "github.com/cosmos/cosmos-sdk/x/staking" // import for side-effects
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
@@ -57,7 +54,6 @@ var (
 	// Module account permissions for the minimal module set.
 	moduleAccPerms = []*authmodulev1.ModuleAccountPermission{
 		{Account: authtypes.FeeCollectorName},
-		{Account: distrtypes.ModuleName},
 		{Account: stakingtypes.BondedPoolName, Permissions: []string{authtypes.Burner, stakingtypes.ModuleName}},
 		{Account: stakingtypes.NotBondedPoolName, Permissions: []string{authtypes.Burner, stakingtypes.ModuleName}},
 	}
@@ -65,14 +61,13 @@ var (
 	// Blocked account addresses (cannot receive funds).
 	blockAccAddrs = []string{
 		authtypes.FeeCollectorName,
-		distrtypes.ModuleName,
 		stakingtypes.BondedPoolName,
 		stakingtypes.NotBondedPoolName,
 	}
 
 	// ModuleConfig is the module configuration for the Shielded-Vote chain.
 	// Only the minimal modules needed for block production are included:
-	// auth, bank, staking, distribution, consensus, genutil, tx.
+	// auth, bank, staking, slashing, consensus, genutil, tx.
 	ModuleConfig = []*appv1alpha1.ModuleConfig{
 		{
 			Name: runtime.ModuleName,
@@ -81,10 +76,7 @@ var (
 				PreBlockers: []string{
 					authtypes.ModuleName,
 				},
-				// Distribution runs before staking in BeginBlock so that
-				// validator fee pool is empty before staking updates.
 				BeginBlockers: []string{
-					distrtypes.ModuleName,
 					slashingtypes.ModuleName,
 					stakingtypes.ModuleName,
 				},
@@ -107,7 +99,6 @@ var (
 				InitGenesis: []string{
 					authtypes.ModuleName,
 					banktypes.ModuleName,
-					distrtypes.ModuleName,
 					stakingtypes.ModuleName,
 					slashingtypes.ModuleName,
 					genutiltypes.ModuleName,
@@ -117,7 +108,6 @@ var (
 					consensustypes.ModuleName,
 					authtypes.ModuleName,
 					banktypes.ModuleName,
-					distrtypes.ModuleName,
 					stakingtypes.ModuleName,
 					slashingtypes.ModuleName,
 					genutiltypes.ModuleName,
@@ -141,20 +131,16 @@ var (
 		{
 			Name: stakingtypes.ModuleName,
 			Config: appconfig.WrapAny(&stakingmodulev1.Module{
-			Bech32PrefixValidator: "svvaloper",
-			Bech32PrefixConsensus: "svvalcons",
+				Bech32PrefixValidator: "svvaloper",
+				Bech32PrefixConsensus: "svvalcons",
 			}),
-		},
-		{
-			Name: distrtypes.ModuleName,
-			Config: appconfig.WrapAny(&distrmodulev1.Module{}),
 		},
 		{
 			Name:   slashingtypes.ModuleName,
 			Config: appconfig.WrapAny(&slashingmodulev1.Module{}),
 		},
 		{
-			Name: consensustypes.ModuleName,
+			Name:   consensustypes.ModuleName,
 			Config: appconfig.WrapAny(&consensusmodulev1.Module{}),
 		},
 		{
