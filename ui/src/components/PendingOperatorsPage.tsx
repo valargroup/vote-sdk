@@ -71,7 +71,7 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-6 py-12">
+      <div className="max-w-5xl mx-auto px-6 py-12">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-accent/15 flex items-center justify-center">
@@ -141,29 +141,19 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
             <table className="w-full text-left text-[11px]">
               <thead className="bg-surface-2 text-text-muted uppercase tracking-wider">
                 <tr>
+                  <th className="sticky left-0 z-20 bg-surface-2 px-3 py-2 font-medium border-r border-border-subtle">Fund</th>
                   <th className="px-3 py-2 font-medium">Moniker</th>
                   <th className="px-3 py-2 font-medium">Operator</th>
                   <th className="px-3 py-2 font-medium">URL</th>
                   <th className="px-3 py-2 font-medium">First seen</th>
                   <th className="px-3 py-2 font-medium">Last seen</th>
                   <th className="px-3 py-2 font-medium">Expires</th>
-                  <th className="px-3 py-2 font-medium text-right">Fund</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.operator_address} className="border-t border-border-subtle hover:bg-surface-2/50">
-                    <td className="px-3 py-2 font-semibold text-text-primary">{r.moniker}</td>
-                    <td className="px-3 py-2 font-mono text-text-muted truncate max-w-[140px]" title={r.operator_address}>
-                      {r.operator_address}
-                    </td>
-                    <td className="px-3 py-2 text-text-secondary truncate max-w-[180px]" title={r.url}>
-                      {r.url}
-                    </td>
-                    <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.first_seen_at)}</td>
-                    <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.last_seen_at)}</td>
-                    <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.expires_at)}</td>
-                    <td className="px-3 py-2 text-right">
+                  <tr key={r.operator_address} className="group border-t border-border-subtle hover:bg-surface-2/50">
+                    <td className="sticky left-0 z-10 bg-surface-0 group-hover:bg-surface-2 px-3 py-2 border-r border-border-subtle whitespace-nowrap">
                       <button
                         type="button"
                         disabled={!wallet.signer || fundingAddr === r.operator_address}
@@ -181,6 +171,16 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
                         )}
                       </button>
                     </td>
+                    <td className="px-3 py-2 font-semibold text-text-primary">{r.moniker}</td>
+                    <td className="px-3 py-2 font-mono text-text-muted truncate max-w-[140px]" title={r.operator_address}>
+                      {r.operator_address}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary truncate max-w-[180px]" title={r.url}>
+                      {r.url}
+                    </td>
+                    <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.first_seen_at)}</td>
+                    <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.last_seen_at)}</td>
+                    <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.expires_at)}</td>
                   </tr>
                 ))}
               </tbody>
