@@ -277,19 +277,40 @@ if ! svoted init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME_DIR}"; the
   exit 1
 fi
 
-# ─── Fetch genesis from DO Spaces ────────────────────────────────────────────
+# ─── Fetch genesis ───────────────────────────────────────────────────────────
 # sdk-chain-reset.yml's upload-genesis job writes the canonical genesis to
-# s3://vote/genesis.json after every reset. That's the single source of truth
-# that reset-join.sh and reset-archive.sh already consume, so join.sh matches.
+# s3://vote/genesis.json after every reset. As a guard against a stale bucket
+# object during manual ops, also compare it with the live seed's genesis endpoint
+# and prefer the live seed copy if they differ.
 
 GENESIS_URL="${DO_BASE}/genesis.json"
+LIVE_GENESIS_URL="${SEED_URL%/}/shielded-vote/v1/genesis"
 echo "Fetching genesis.json from ${GENESIS_URL}..."
-curl -fsSL -o "${HOME_DIR}/config/genesis.json" "${GENESIS_URL}"
+GENESIS_TMP=$(mktemp)
+LIVE_GENESIS_TMP=$(mktemp)
+cleanup_genesis_tmp() {
+  rm -f "${GENESIS_TMP}" "${LIVE_GENESIS_TMP}"
+}
+trap cleanup_genesis_tmp EXIT
+
+curl -fsSL -o "${GENESIS_TMP}" "${GENESIS_URL}"
+if curl -fsSL -o "${LIVE_GENESIS_TMP}" "${LIVE_GENESIS_URL}" 2>/dev/null; then
+  if ! cmp -s "${GENESIS_TMP}" "${LIVE_GENESIS_TMP}"; then
+    echo "WARNING: ${GENESIS_URL} does not match live seed genesis."
+    echo "  Using live seed genesis from ${LIVE_GENESIS_URL}."
+    cp "${LIVE_GENESIS_TMP}" "${GENESIS_TMP}"
+  fi
+else
+  echo "WARNING: Could not fetch live seed genesis from ${LIVE_GENESIS_URL}; using ${GENESIS_URL}."
+fi
+cp "${GENESIS_TMP}" "${HOME_DIR}/config/genesis.json"
 if ! svoted genesis validate-genesis --home "${HOME_DIR}"; then
   echo "ERROR: genesis.json failed validation against this svoted build."
   exit 1
 fi
 echo "Genesis validated."
+cleanup_genesis_tmp
+trap - EXIT
 
 # ─── Generate keys ────────────────────────────────────────────────────────────
 
@@ -378,17 +399,28 @@ if [ "${SVOTE_SKIP_CADDY:-0}" = "1" ]; then
   echo "SVOTE_SKIP_CADDY=1: skipping Caddy setup."
   VALIDATOR_URL=""
 elif [ -z "$SVOTE_DOMAIN" ]; then
-  # Auto-detect public IP and use sslip.io for a valid TLS hostname.
-  PUBLIC_IP=$(curl -fsSL --connect-timeout 5 https://ifconfig.me 2>/dev/null || echo "")
-  if [ -z "$PUBLIC_IP" ]; then
-    echo "WARNING: Could not detect public IP. Skipping Caddy setup."
-    echo "  Re-run with --domain <hostname> or set SVOTE_DOMAIN to configure TLS."
+  # Auto-detect public IPv4 and use sslip.io for a valid TLS hostname. Avoid
+  # IPv6 here: a raw IPv6 address contains colons, which cannot appear in a
+  # DNS name and causes ACME certificate issuance to retry forever.
+  PUBLIC_IP=$(curl -4 -fsSL --connect-timeout 5 https://ifconfig.me 2>/dev/null || \
+    curl -4 -fsSL --connect-timeout 5 https://api.ipify.org 2>/dev/null || echo "")
+  if ! echo "$PUBLIC_IP" | jq -eR 'test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$")' > /dev/null 2>&1; then
+    echo "WARNING: Could not detect a public IPv4 address for sslip.io. Skipping Caddy setup."
+    echo "  Detected value: ${PUBLIC_IP:-<empty>}"
+    echo "  Re-run with --domain <hostname>, set SVOTE_DOMAIN, or set SVOTE_SKIP_CADDY=1."
     VALIDATOR_URL=""
   else
     SVOTE_DOMAIN="$(echo "$PUBLIC_IP" | tr '.' '-').sslip.io"
     echo "Detected public IP: ${PUBLIC_IP}"
     echo "Using sslip.io domain: ${SVOTE_DOMAIN}"
   fi
+fi
+
+if [ -n "$SVOTE_DOMAIN" ] && echo "$SVOTE_DOMAIN" | jq -eR 'contains(":") or test("\\s")' > /dev/null 2>&1; then
+  echo "WARNING: Invalid TLS hostname '${SVOTE_DOMAIN}'. Skipping Caddy setup."
+  echo "  Use a DNS hostname without colons/spaces, or set SVOTE_SKIP_CADDY=1."
+  VALIDATOR_URL=""
+  SVOTE_DOMAIN=""
 fi
 
 if [ -n "$SVOTE_DOMAIN" ]; then
@@ -401,11 +433,17 @@ if [ -n "$SVOTE_DOMAIN" ]; then
       echo "Installing Caddy..."
       if command -v apt-get > /dev/null 2>&1; then
         export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
-        sudo -E apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl > /dev/null 2>&1
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
-        sudo -E apt-get update > /dev/null 2>&1
-        sudo -E apt-get install -y caddy > /dev/null 2>&1
+        if ! {
+          sudo -E apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl &&
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg &&
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null &&
+          sudo -E apt-get update &&
+          sudo -E apt-get install -y caddy
+        }; then
+          echo "WARNING: Caddy installation failed. Continuing without TLS reverse proxy."
+          echo "  Install Caddy manually or re-run with --domain after fixing package manager access."
+          VALIDATOR_URL=""
+        fi
       else
         echo "WARNING: apt not found. Install Caddy manually: https://caddyserver.com/docs/install"
         VALIDATOR_URL=""
@@ -413,7 +451,11 @@ if [ -n "$SVOTE_DOMAIN" ]; then
     elif [ "$OS_NAME" = "Darwin" ]; then
       if command -v brew > /dev/null 2>&1; then
         echo "Installing Caddy via Homebrew..."
-        brew install caddy > /dev/null 2>&1
+        if ! brew install caddy; then
+          echo "WARNING: Homebrew failed to install Caddy. Continuing without TLS reverse proxy."
+          echo "  Install Caddy manually with: brew install caddy"
+          VALIDATOR_URL=""
+        fi
       else
         echo "WARNING: Homebrew not found. Install Caddy manually:"
         echo "  brew install caddy   (after installing Homebrew from https://brew.sh)"
