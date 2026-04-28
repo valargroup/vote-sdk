@@ -67,7 +67,7 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
         setResultMsg({
           addr: address,
           ok: true,
-          msg: `Approved (tx ${res.tx_hash.slice(0, 12)}...). Row clears when the operator bonds.`,
+          msg: `Funded (tx ${res.tx_hash.slice(0, 12)}...). Row clears when the operator bonds.`,
         });
       } else {
         setResultMsg({
@@ -209,68 +209,76 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
         )}
 
         {rows.length > 0 && (
-          <div className="overflow-x-auto rounded-xl border border-border-subtle">
-            <table className="w-full text-left text-[11px]">
-              <thead className="bg-surface-2 text-text-muted uppercase tracking-wider">
-                <tr>
-                  <th className="sticky left-0 z-20 bg-surface-2 px-3 py-2 font-medium border-r border-border-subtle">Manual Approval</th>
-                  <th className="px-3 py-2 font-medium">Moniker</th>
-                  <th className="px-3 py-2 font-medium">Operator</th>
-                  <th className="px-3 py-2 font-medium">URL</th>
-                  <th className="px-3 py-2 font-medium">First seen</th>
-                  <th className="px-3 py-2 font-medium">Last seen</th>
-                  <th className="px-3 py-2 font-medium">Expires</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.operator_address} className="group border-t border-border-subtle hover:bg-surface-2/50">
-                    <td className="sticky left-0 z-10 bg-surface-0 group-hover:bg-surface-2 px-3 py-2 border-r border-border-subtle whitespace-nowrap">
-                      {approvedLocal[r.operator_address] ? (
-                        <span className="px-2 py-1 rounded-md bg-success/15 text-success text-[10px] font-semibold">
-                          Approved
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={!wallet.signer || approvingAddr === r.operator_address}
-                          onClick={() => void handleApprove(r.operator_address)}
-                          className="px-2 py-1 rounded-md bg-accent/90 hover:bg-accent text-surface-0 text-[10px] font-semibold disabled:opacity-40 cursor-pointer"
-                          title={`Approve with ${cosmosTx.VALIDATOR_JOIN_FUND_USVOTE} usvote`}
-                        >
-                          {approvingAddr === r.operator_address ? (
-                            <span className="inline-flex items-center gap-1">
-                              <Loader2 size={10} className="animate-spin" /> Approving…
-                            </span>
-                          ) : (
-                            "Approve"
-                          )}
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 font-semibold text-text-primary">{r.moniker}</td>
-                    <td className="px-3 py-2 font-mono text-text-muted truncate max-w-[140px]" title={r.operator_address}>
-                      {r.operator_address}
-                    </td>
-                    <td
-                      className="px-3 py-2 text-text-secondary truncate max-w-[180px]"
-                      title={r.url || "No public URL registered yet"}
-                    >
+          <div className="overflow-hidden rounded-xl border border-border-subtle text-[11px]">
+            <div className="divide-y divide-border-subtle">
+              {rows.map((r) => (
+                <div
+                  key={r.operator_address}
+                  className="grid gap-0 bg-surface-0 hover:bg-surface-2/50 sm:grid-cols-[104px_minmax(0,1fr)]"
+                >
+                  <div className="flex items-center justify-center border-border-subtle px-3 py-3 sm:border-r">
+                    {approvedLocal[r.operator_address] ? (
+                      <span className="rounded-md bg-success/15 px-2 py-1 text-[10px] font-semibold text-success">
+                        Approved
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!wallet.signer || approvingAddr === r.operator_address}
+                        onClick={() => void handleApprove(r.operator_address)}
+                        className="w-full rounded-md bg-accent/90 px-2 py-1 text-[10px] font-semibold text-surface-0 hover:bg-accent disabled:opacity-40 cursor-pointer"
+                        title={`Fund with ${cosmosTx.VALIDATOR_JOIN_FUND_USVOTE} usvote`}
+                      >
+                        {approvingAddr === r.operator_address ? (
+                          <span className="inline-flex items-center justify-center gap-1">
+                            <Loader2 size={10} className="animate-spin" /> Funding...
+                          </span>
+                        ) : (
+                          "Fund"
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid min-w-0 gap-3 px-3 pb-3 pt-0 sm:py-3 lg:grid-cols-[minmax(100px,0.7fr)_minmax(140px,0.8fr)_minmax(0,1.35fr)_minmax(0,1.15fr)] lg:items-center">
+                    <div className="min-w-0">
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-text-muted">Moniker</div>
+                      <div className="font-semibold text-text-primary break-words">{r.moniker || "—"}</div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-text-muted">Seen</div>
+                      <div className="text-text-secondary break-words" title={`First seen: ${formatUnix(r.first_seen_at)}. Expires: ${formatUnix(r.expires_at)}.`}>
+                        {formatUnix(r.last_seen_at)}
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-text-muted">Operator</div>
+                      <div className="font-mono text-text-muted break-all" title={r.operator_address}>
+                        {r.operator_address}
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-text-muted">URL</div>
                       {r.url ? (
-                        r.url
+                        <div className="text-text-secondary break-all" title={r.url}>
+                          {r.url}
+                        </div>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-md border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-warning">
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-warning"
+                          title="No public URL registered yet"
+                        >
                           Needs public URL
                         </span>
                       )}
-                    </td>
-                    <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.first_seen_at)}</td>
-                    <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.last_seen_at)}</td>
-                    <td className="px-3 py-2 text-text-muted whitespace-nowrap">{formatUnix(r.expires_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
