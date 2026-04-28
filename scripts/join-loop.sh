@@ -21,6 +21,32 @@ if [ -n "${SVOTE_INSTALL_DIR:-}" ]; then
   export PATH="${SVOTE_INSTALL_DIR}:${PATH}"
 fi
 
+cleanup_launchd_join_service() {
+  if [ "$(uname -s)" != "Darwin" ]; then
+    return 0
+  fi
+
+  local join_label="com.shielded-vote.join"
+  local home_dir="${HOME:-}"
+  if [ -z "${home_dir}" ]; then
+    home_dir="$(cd ~ && pwd)"
+  fi
+  local join_plist="${home_dir}/Library/LaunchAgents/${join_label}.plist"
+
+  echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") removing launchd join service ${join_label}"
+  (
+    sleep 1
+    rm -f "${join_plist}"
+    launchctl bootout "gui/$(id -u)/${join_label}" >/dev/null 2>&1 || true
+  ) >/dev/null 2>&1 &
+}
+
+exit_bonded() {
+  echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $1"
+  cleanup_launchd_join_service
+  exit 0
+}
+
 echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") join-loop starting (moniker=${MONIKER})"
 
 while true; do
@@ -44,17 +70,18 @@ while true; do
         -d "${body}" 2>/dev/null); then
         status=$(echo "${resp}" | jq -r '.status // empty')
         if [ "${status}" = "bonded" ]; then
-          echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") register-validator returned bonded — exiting 0"
-          exit 0
+          exit_bonded "register-validator returned bonded - exiting 0"
         fi
       fi
     fi
   fi
 
   bond_status=$(svoted query staking validators --home "${SVOTE_HOME}" --output json 2>/dev/null \
-    | jq -r ".validators[] | select(.description.moniker == \"${MONIKER}\") | .status" 2>/dev/null | head -1 || echo "")
+    | jq -r --arg moniker "${MONIKER}" '.validators[] | select(.description.moniker == $moniker) | .status' 2>/dev/null | head -1 || echo "")
 
-  if [ "${bond_status}" != "BOND_STATUS_BONDED" ]; then
+  if [ "${bond_status}" = "BOND_STATUS_BONDED" ]; then
+    exit_bonded "validator is bonded - exiting 0"
+  else
     balance=$(svoted query bank balances "${VALIDATOR_ADDR}" --home "${SVOTE_HOME}" --output json 2>/dev/null \
       | jq -r '.balances[] | select(.denom == "usvote") | .amount' 2>/dev/null || echo "")
     if [ -n "${balance}" ] && [ "${balance}" != "0" ]; then
