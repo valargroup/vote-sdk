@@ -393,14 +393,46 @@ else
   RELEASE_URL="${DO_BASE}/binaries/vote-sdk/shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
   echo "Downloading release tarball..."
   echo "  ${RELEASE_URL}"
+  DOWNLOAD_SIZE=$(curl -fsSLI "${RELEASE_URL}" 2>/dev/null | awk 'BEGIN { IGNORECASE=1 } /^content-length:/ { gsub("\r", "", $2); size=$2 } END { print size }' || true)
+  if [ -n "${DOWNLOAD_SIZE}" ] && [ "${DOWNLOAD_SIZE}" -gt 0 ] 2>/dev/null; then
+    DOWNLOAD_SIZE_LABEL=$(awk -v bytes="${DOWNLOAD_SIZE}" 'BEGIN { printf "%.1f MB", bytes / 1048576 }')
+    echo "Size: ${DOWNLOAD_SIZE_LABEL}"
+  else
+    DOWNLOAD_SIZE=""
+  fi
+
   DOWNLOAD_ATTEMPT=1
   while true; do
     rm -f /tmp/shielded-vote-release.tar.gz
-    if [ -t 2 ]; then
-      if curl --fail --location --show-error --progress-bar -o /tmp/shielded-vote-release.tar.gz "${RELEASE_URL}"; then
-        break
+
+    curl -fsSL -o /tmp/shielded-vote-release.tar.gz "${RELEASE_URL}" &
+    CURL_PID=$!
+    LAST_PERCENT=0
+    LAST_MB=0
+
+    while kill -0 "${CURL_PID}" 2>/dev/null; do
+      if [ -f /tmp/shielded-vote-release.tar.gz ]; then
+        DOWNLOADED_BYTES=$(wc -c < /tmp/shielded-vote-release.tar.gz | tr -d '[:space:]')
+        if [ -n "${DOWNLOAD_SIZE}" ] && [ "${DOWNLOAD_SIZE}" -gt 0 ] 2>/dev/null; then
+          PERCENT=$((DOWNLOADED_BYTES * 100 / DOWNLOAD_SIZE))
+          PROGRESS_STEP=$((PERCENT / 10 * 10))
+          if [ "${PROGRESS_STEP}" -gt "${LAST_PERCENT}" ] && [ "${PROGRESS_STEP}" -lt 100 ]; then
+            echo "Download progress: ${PROGRESS_STEP}%"
+            LAST_PERCENT="${PROGRESS_STEP}"
+          fi
+        else
+          DOWNLOADED_MB=$((DOWNLOADED_BYTES / 1048576))
+          if [ "${DOWNLOADED_MB}" -ge $((LAST_MB + 25)) ]; then
+            echo "Download progress: ${DOWNLOADED_MB} MB"
+            LAST_MB="${DOWNLOADED_MB}"
+          fi
+        fi
       fi
-    elif curl -fsSL -o /tmp/shielded-vote-release.tar.gz "${RELEASE_URL}"; then
+      sleep 2
+    done
+
+    if wait "${CURL_PID}"; then
+      echo "Download progress: 100%"
       break
     fi
 
