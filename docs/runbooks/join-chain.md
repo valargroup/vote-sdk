@@ -34,15 +34,18 @@ Why these numbers:
 
 ### Hostname and TLS
 
-`svoted` speaks plaintext HTTP on `:1317`; clients reach it over TLS via Caddy on the same host. Pick one before running the installer:
+`svoted` speaks plaintext HTTP on `:1317`; clients reach it over TLS through a reverse proxy or load balancer. `join.sh` prompts for one of three HTTPS exposure modes unless you set `SVOTE_SKIP_CADDY` or `SVOTE_DOMAIN` ahead of time:
 
-- `--domain val.example.org` or `SVOTE_DOMAIN=val.example.org` — use a real DNS name. Recommended for production operators.
-- No domain set — `join.sh` auto-detects the public IPv4 address via `ifconfig.me` or `api.ipify.org` and uses `<ip-with-dashes>.sslip.io` (e.g. `46-101-255-48.sslip.io`). Fine for smoke-testing and short-lived deployments; not recommended for long-term production.
-- `SVOTE_SKIP_CADDY=1` — skip Caddy entirely. Use this in Docker/CI or when TLS is terminated upstream (another proxy or a managed load balancer). If skipped, `VALIDATOR_URL` is empty; the operator can still appear in the admin join queue for funding, but the helper heartbeat is disabled until a public URL is configured.
+- **Default — skip Caddy.** `join.sh` does not install or configure TLS unless you opt in. Terminate TLS upstream (load balancer, managed certificate, your own reverse proxy). The operator address still appears in the admin join queue for funding; `VALIDATOR_URL` / `[helper] helper_url` must be configured manually before the helper heartbeat starts. Equivalent to `SVOTE_SKIP_CADDY=1`.
+- `--domain val.example.org` or `SVOTE_DOMAIN=val.example.org` — install Caddy and request a Let's Encrypt cert for that hostname. The DNS record must be static and already pointed at this host; we do not rotate URLs after the operator advertises one in `vote_servers[]`. Configure DNS like:
+  ```text
+  val.example.org.  A  <your-server-public-IPv4>
+  ```
+- Auto sslip.io + Caddy — pick option 3 in the interactive menu when running `... | bash`. Suitable for trials only; if the host's public IPv4 changes, the URL breaks and you must re-run `join.sh` and PR a new entry into [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config).
 
-If automatic `sslip.io`/Caddy setup fails, `join.sh` still registers the operator for funding with an empty URL and prints a `Public URL: missing` warning. If you explicitly pass `--domain` or `SVOTE_DOMAIN`, Caddy setup is treated as required and failures stop the installer unless `SVOTE_ALLOW_NO_PUBLIC_URL=1` is set.
+If Caddy setup fails after you opt in, `join.sh` still registers the operator for funding with an empty URL and prints a `Public URL: missing` warning. If you explicitly pass `--domain` or `SVOTE_DOMAIN`, Caddy setup is treated as required and failures stop the installer unless `SVOTE_ALLOW_NO_PUBLIC_URL=1` is set.
 
-See [TLS / reverse proxy](#tls--reverse-proxy) for the Caddy layout `join.sh` installs.
+See [TLS / reverse proxy](#tls--reverse-proxy) for the Caddy layout `join.sh` installs when you opt in.
 
 ### Network requirements
 
@@ -55,12 +58,12 @@ See [TLS / reverse proxy](#tls--reverse-proxy) for the Caddy layout `join.sh` in
 | Outbound 443 | `valargroup.github.io` | [`token-holder-voting-config/voting-config.json`](https://github.com/valargroup/token-holder-voting-config) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
 | Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue) and `POST /api/server-heartbeat` (helper liveness). Override via `SVOTE_ADMIN_URL` / `DEFAULT_ADMIN_API_BASE`. |
 | Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` (P2P seed) |
-| Outbound 443 | `ifconfig.me`, `api.ipify.org` | Public IPv4 auto-detection (only when neither `--domain` nor `SVOTE_DOMAIN` is set) |
-| Outbound 443 | `dl.cloudsmith.io`, Let's Encrypt | Caddy apt-repo install + ACME certificate issuance |
+| Outbound 443 | `ifconfig.me`, `api.ipify.org` | Public IPv4 auto-detection (only when choosing auto sslip.io + Caddy) |
+| Outbound 443 | `dl.cloudsmith.io`, Let's Encrypt | Caddy apt-repo install + ACME certificate issuance (only when opting into Caddy) |
 | Outbound TCP 26656 | Seed validator's P2P | CometBFT peer handshake + gossip |
 | Inbound TCP 26656 | Public | CometBFT P2P — **must be reachable**; open it in your firewall/security group. Peers cannot connect if this is blocked |
-| Inbound TCP 80 + 443 | Public | Caddy (HTTPS reverse proxy for the REST API, used by iOS clients and admin UI). 80 is required for Let's Encrypt HTTP-01 challenges |
-| Local only | `127.0.0.1:1317` (REST), `127.0.0.1:26657` (RPC), `127.0.0.1:6060` (pprof) | Do not expose directly; Caddy proxies `1317` over TLS |
+| Inbound TCP 80 + 443 | Public | HTTPS reverse proxy for the REST API, used by iOS clients and admin UI. 80 is required for Let's Encrypt HTTP-01 challenges when using Caddy |
+| Local only | `127.0.0.1:1317` (REST), `127.0.0.1:26657` (RPC), `127.0.0.1:6060` (pprof) | Do not expose directly; proxy `1317` over TLS |
 
 If the validator will answer PIR queries itself, also open inbound 443 for the `nf-server` routes — see [vote-nullifier-pir's server-setup runbook](https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/runbooks/server-setup.md).
 
@@ -72,7 +75,15 @@ On Linux or macOS, run:
 curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
 ```
 
-If you have a real DNS name pointed at this host, skip the auto-detected `sslip.io` hostname with `--domain`:
+By default, the installer skips Caddy and leaves `VALIDATOR_URL` empty so you can terminate TLS with your own load balancer or reverse proxy. The operator address still enters the admin join queue for funding.
+
+For production hosts where you want `join.sh` to install Caddy, point a stable DNS name at this host first:
+
+```text
+val.example.org.  A  <your-server-public-IPv4>
+```
+
+Then pass that hostname with `--domain`:
 
 ```bash
 curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --domain val.example.org
@@ -80,7 +91,7 @@ curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --domai
 
 **NOTE: Most users should use this one-line command to get started and not install anything manually**
 
-The installer prompts for a validator moniker unless `SVOTE_MONIKER` is set, restores the latest Zvote snapshot when one is published, then catches up from peers. If no snapshot metadata exists yet after a chain reset, it continues from genesis. See [Join lifecycle](#join-lifecycle) for the timeline from install to bonded, [Operating the service](#operating-the-service) for what gets installed on the host, and [Reference > Manual install](#manual-install-no-joinsh) for the equivalent manual steps.
+The installer prompts for a validator moniker unless `SVOTE_MONIKER` is set, prompts for the TLS mode unless `SVOTE_SKIP_CADDY` or `SVOTE_DOMAIN` is set, restores the latest Zvote snapshot when one is published, then catches up from peers. If no snapshot metadata exists yet after a chain reset, it continues from genesis. See [Join lifecycle](#join-lifecycle) for the timeline from install to bonded, [Operating the service](#operating-the-service) for what gets installed on the host, and [Reference > Manual install](#manual-install-no-joinsh) for the equivalent manual steps.
 
 After install, operate the service with:
 
@@ -230,7 +241,7 @@ See [deploy-setup.md § Helper server configuration](../deploy-setup.md#helper-s
 
 ## TLS / reverse proxy
 
-`svoted` speaks plaintext HTTP on `:1317` and plaintext RPC on `:26657`; clients must reach the REST API over TLS. `join.sh` installs Caddy on the same host and writes a minimal config:
+`svoted` speaks plaintext HTTP on `:1317` and plaintext RPC on `:26657`; clients must reach the REST API over TLS. When you opt into Caddy, `join.sh` installs it on the same host and writes a minimal config:
 
 ```caddyfile
 val.example.org {
@@ -427,16 +438,19 @@ All variables are read from the environment by `join.sh`, `join-loop.sh`, or the
 
 #### `join.sh`
 
+Interactive runs without `SVOTE_DOMAIN` and without an explicit `SVOTE_SKIP_CADDY` value prompt for the TLS mode; pressing Enter, or waiting past `SVOTE_TLS_PROMPT_TIMEOUT` seconds, uses the default skip-Caddy path.
+
 | Variable / flag | Default | Role |
 |-----------------|---------|------|
-| `--domain <host>` or `SVOTE_DOMAIN` | auto-detected `<ip>.sslip.io` | Public hostname for Caddy + `VALIDATOR_URL`. |
+| `--domain <host>` or `SVOTE_DOMAIN` | unset | Public hostname for Caddy + `VALIDATOR_URL`. When set, the installer skips the TLS menu and treats Caddy setup for this static hostname as required. |
 | `SVOTE_MONIKER` | interactive prompt | Validator moniker; required for unattended installs. |
 | `SVOTE_INSTALL_DIR` | `$HOME/.local/bin` | Where `svoted`, `create-val-tx`, and `join-loop.sh` are installed. |
 | `SVOTE_HOME` | `$HOME/.svoted` | Chain data + config + keys. |
 | `SVOTE_SNAPSHOT_BASE_URL` | `https://snapshots.valargroup.org` | Snapshot service base URL. `join.sh` fetches `${SVOTE_SNAPSHOT_BASE_URL}/latest.json` and restores the archive it declares when metadata is available. |
 | `SVOTE_SKIP_SNAPSHOT` | `0` | When `1`, skip snapshot restore and sync from genesis. Default installs fall back to genesis when snapshot metadata is unavailable or empty; once metadata points to an archive, download, checksum, and extraction failures are fatal. |
 | `SVOTE_LOCAL_BINARIES` | `0` | When `1` and both binaries are on `$PATH`, skip the download. Used by source developers with `mise run build:install`. |
-| `SVOTE_SKIP_CADDY` | `0` | `1` skips Caddy install + config. Use when TLS is handled externally. |
+| `SVOTE_SKIP_CADDY` | `1` (default) | Skip Caddy install + config and leave `VALIDATOR_URL` empty. Set to `0` only when running interactively to expose the menu (which can re-set this to `1` if you pick option 1). |
+| `SVOTE_TLS_PROMPT_TIMEOUT` | `30` | Seconds to wait at the TLS mode prompt before defaulting to option 1 (skip Caddy). |
 | `SVOTE_ALLOW_NO_PUBLIC_URL` | `0` | When `1`, explicit-domain Caddy failures continue with an empty `VALIDATOR_URL` so the operator can still enter the funding queue. |
 | `SVOTE_SKIP_SERVICE` | `0` | `1` skips service install and the sync wait — node is initialized but not started. Useful for Docker smoke tests / CI. |
 | `VOTING_CONFIG_URL` | `https://valargroup.github.io/token-holder-voting-config/voting-config.json` | Canonical voting-config (same payload wallets fetch). Override for staging mirrors or fork testing. |

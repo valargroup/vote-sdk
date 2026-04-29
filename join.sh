@@ -731,14 +731,58 @@ HELPERCFG
 echo "Node configured."
 
 # ─── TLS reverse proxy (Caddy) ──────────────────────────────────────────────
-# Sets up Caddy as a TLS reverse proxy in front of the chain REST API (port 1317).
-# Caddy auto-provisions Let's Encrypt certificates.
+# Optionally sets up Caddy as a TLS reverse proxy in front of the chain REST API
+# (port 1317). Caddy auto-provisions Let's Encrypt certificates.
 #
-# Set SVOTE_SKIP_CADDY=1 to skip Caddy setup entirely (e.g. Docker/CI environments
-# without a public IP or systemd, or when TLS is handled externally).
+# By default, interactive runs prompt for the TLS mode and non-interactive runs
+# skip Caddy. Set SVOTE_DOMAIN or pass --domain to install Caddy for a static DNS
+# name, or choose auto sslip.io from the interactive prompt for trial installs.
 
 echo ""
 echo "=== Setting up TLS reverse proxy ==="
+
+prompt_tls_mode() {
+  if ! { : < /dev/tty; } 2>/dev/null; then
+    echo "INFO: No TTY for the TLS prompt; defaulting to skip Caddy."
+    echo "  Set SVOTE_DOMAIN=<host> for Caddy + custom domain, or run interactively to pick sslip.io."
+    DOMAIN_MODE="skip"
+    SVOTE_SKIP_CADDY=1
+    return 0
+  fi
+
+  echo ""
+  echo "How would you like to expose this validator over HTTPS?"
+  echo "  1) Skip Caddy                     (terminate TLS upstream yourself)   [default]"
+  echo "  2) Custom domain + Caddy          (production; static DNS record required)"
+  echo "  3) Auto: <ip>.sslip.io + Caddy    (trial / smoke; static IP required)"
+  printf "Choose [1-3] (default 1): "
+
+  local choice
+  read -r -t "${SVOTE_TLS_PROMPT_TIMEOUT:-30}" choice < /dev/tty || choice=""
+  case "$choice" in
+    ""|1)
+      DOMAIN_MODE="skip"
+      SVOTE_SKIP_CADDY=1
+      ;;
+    2)
+      echo "Configure DNS before continuing:"
+      echo "  val.example.org.  A  <your-server-public-IPv4>"
+      printf "Domain (e.g. val.example.org): "
+      read -r SVOTE_DOMAIN < /dev/tty
+      DOMAIN_MODE="explicit"
+      ;;
+    3) ;;
+    *)
+      echo "Unrecognized choice '${choice}'; defaulting to skip Caddy."
+      DOMAIN_MODE="skip"
+      SVOTE_SKIP_CADDY=1
+      ;;
+  esac
+}
+
+if [ "${SVOTE_SKIP_CADDY:-0}" != "1" ] && [ -z "${SVOTE_DOMAIN}" ]; then
+  prompt_tls_mode
+fi
 
 if [ "${SVOTE_SKIP_CADDY:-0}" = "1" ]; then
   DOMAIN_MODE="skip"
