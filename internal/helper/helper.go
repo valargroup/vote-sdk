@@ -62,6 +62,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 	store.logInfo = func(msg string, keyvals ...any) {
 		logger.Info(msg, keyvals...)
 	}
+	store.captureErr = CaptureErr
 
 	if cfg.MaxConcurrentProofs < 1 {
 		logger.Info(

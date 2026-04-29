@@ -28,9 +28,9 @@ type Processor struct {
 	logger    log.Logger
 	// meanInterval is the mean of the exponential distribution for the time
 	// between processing cycles. Submissions form a Poisson process.
-	meanInterval   time.Duration
-	maxConcurrent  int
-	isRoundActive  RoundStatusChecker
+	meanInterval  time.Duration
+	maxConcurrent int
+	isRoundActive RoundStatusChecker
 }
 
 // NewProcessor creates a new share processor.
@@ -73,6 +73,7 @@ func (p *Processor) Run(ctx context.Context) error {
 			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
+			p.alertExpiredUnsubmittedShares()
 			p.store.PurgeExpiredRounds()
 			p.processBatch(ctx)
 		}
@@ -99,6 +100,7 @@ func (p *Processor) randomDelay() time.Duration {
 	d, err := exponentialDelay(p.meanInterval)
 	if err != nil {
 		p.logger.Error("randomDelay: crypto/rand failed, using mean", "error", err)
+		CaptureErr(err, map[string]string{"stage": "random_delay"})
 		return p.meanInterval
 	}
 	return d
@@ -111,9 +113,42 @@ func (p *Processor) intraShareDelay() time.Duration {
 	d, err := exponentialDelay(p.meanInterval / 2)
 	if err != nil {
 		p.logger.Error("intraShareDelay: crypto/rand failed, using mean/2", "error", err)
+		CaptureErr(err, map[string]string{"stage": "intra_share_delay"})
 		return p.meanInterval / 2
 	}
 	return d
+}
+
+func (p *Processor) alertExpiredUnsubmittedShares() {
+	summaries, err := p.store.ExpiredRoundSummaries(time.Now())
+	if err != nil {
+		CaptureErr(err, map[string]string{"stage": "expired_round_summary"})
+		return
+	}
+	for _, summary := range summaries {
+		unsubmitted := summary.Unsubmitted()
+		if unsubmitted == 0 {
+			continue
+		}
+		err := fmt.Errorf("round closed with unsubmitted shares")
+		CaptureErr(err, map[string]string{
+			"round_id":           summary.RoundID,
+			"stage":              "round_closed_unsubmitted_shares",
+			"total_shares":       strconv.Itoa(summary.Total),
+			"pending_shares":     strconv.Itoa(summary.Pending),
+			"failed_shares":      strconv.Itoa(summary.Failed),
+			"submitted_shares":   strconv.Itoa(summary.Submitted),
+			"unsubmitted_shares": strconv.Itoa(unsubmitted),
+		})
+		p.logger.Error("round closed with unsubmitted shares",
+			"round_id", summary.RoundID,
+			"total", summary.Total,
+			"pending", summary.Pending,
+			"failed", summary.Failed,
+			"submitted", summary.Submitted,
+			"unsubmitted", unsubmitted,
+		)
+	}
 }
 
 // processBatch takes all ready shares and processes them.

@@ -132,6 +132,20 @@ type QueueStatus struct {
 	Failed    int `json:"failed"`
 }
 
+// ExpiredRoundSummary holds queue counts for a round whose voting window has
+// closed. Pending and Failed are both unsubmitted from the chain's perspective.
+type ExpiredRoundSummary struct {
+	RoundID   string
+	Total     int
+	Pending   int
+	Submitted int
+	Failed    int
+}
+
+func (s ExpiredRoundSummary) Unsubmitted() int {
+	return s.Pending + s.Failed
+}
+
 // ProofGenerator abstracts ZKP #3 proof generation for testing.
 type ProofGenerator interface {
 	// GenerateShareRevealProof generates a share reveal proof.

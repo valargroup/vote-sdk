@@ -377,6 +377,21 @@ Ceremony and management messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`, 
 | GET    | `/shielded-vote/v1/snapshot-data/{height}`         | Nullifier snapshot data at block height    |
 | GET    | `/shielded-vote/v1/tx/{hash}`                      | Transaction status by hash                 |
 
+### Helper Sentry Observability
+
+The helper server uses Sentry when `[helper].sentry_dsn` is set in `app.toml`
+or `SENTRY_DSN` is present in the environment. Sentry events include a `stage`
+tag that identifies the helper code path that emitted the error, such as
+`enqueue`, `process_share`, `leaf_read`, `helper_new`, or `tree_status`.
+
+When a voting round closes, the helper summarizes queued shares before purging
+expired witness data. If any shares for that round are still pending or failed,
+it emits a Sentry error with `stage=round_closed_unsubmitted_shares` and tags
+for `round_id`, `total_shares`, `pending_shares`, `failed_shares`,
+`submitted_shares`, and `unsubmitted_shares`. Configure Sentry issue alerts on
+that stage tag to page when share data was accepted by the helper but not
+submitted on-chain before the round closed.
+
 ### On-Chain State (KV Store Keys)
 
 | Key         | Type                           | Description                                |

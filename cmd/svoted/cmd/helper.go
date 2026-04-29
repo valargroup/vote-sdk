@@ -95,6 +95,7 @@ func helperPostSetup(
 		}
 		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, shareNullifierChecker, homeDir, logger)
 		if err != nil {
+			helper.CaptureErr(err, map[string]string{"stage": "helper_new"})
 			return fmt.Errorf("helper: %w", err)
 		}
 		if h == nil {
@@ -119,6 +120,7 @@ func helperPostSetup(
 			pulseCfg, err := buildPulseConfig(cfg, svrCtx, clientCtx, logger)
 			if err != nil {
 				logger.Error("heartbeat: failed to initialize, pulse disabled", "error", err)
+				helper.CaptureErr(err, map[string]string{"stage": "helper_pulse_init"})
 			} else {
 				g.Go(func() error {
 					helper.RunPulse(ctx, pulseCfg)
