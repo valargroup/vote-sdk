@@ -273,6 +273,21 @@ jobs:
           done
           echo "Only ${VALS}/3 validators bonded after 120s"
           exit 1
+      - name: Verify bonded validators have Pallas keys
+        run: |
+          set -euo pipefail
+          bonded=$(curl -sf "http://localhost:1418/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED&pagination.limit=200" \
+            | jq -r '.validators[].operator_address' | sort)
+          registered=$(curl -sf "http://localhost:1418/shielded-vote/v1/pallas-keys" \
+            | jq -r '.validators[].validator_address' | sort)
+          missing=$(comm -23 <(printf '%s\n' "$bonded") <(printf '%s\n' "$registered"))
+          if [ -n "$missing" ]; then
+            echo "Bonded validators missing Pallas keys:"
+            printf '%s\n' "$missing"
+            exit 1
+          fi
+          count=$(printf '%s\n' "$bonded" | sed '/^$/d' | wc -l | tr -d ' ')
+          echo "All ${count} bonded validators have Pallas keys"
       - name: Smoke test admin UI and API
         run: |
           echo "Checking UI is served..."

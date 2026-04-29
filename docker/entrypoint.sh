@@ -77,6 +77,7 @@ svoted init "$MONIKER" --chain-id "$CHAIN_ID" --home "$HOME_DIR" 2>/dev/null
 
 svoted keys add validator --keyring-backend test --home "$HOME_DIR" 2>/dev/null
 VAL_ADDR=$(svoted keys show validator -a --keyring-backend test --home "$HOME_DIR")
+VAL_OPER=$(svoted keys show validator --bech val -a --keyring-backend test --home "$HOME_DIR")
 
 svoted pallas-keygen --home "$HOME_DIR"
 
@@ -142,10 +143,15 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
 
     svoted genesis collect-gentxs --home "$HOME_DIR"
 
-    # Patch genesis: set vote_manager_addresses (single vote manager here), disable slashing.
+    # Patch genesis: set vote_manager_addresses (single vote manager here),
+    # register val1's Pallas key for EA ceremonies, and disable slashing.
     GENESIS="$HOME_DIR/config/genesis.json"
-    jq --arg vm "$VM_ADDR" '
+    PALLAS_PK_B64=$(base64 < "$HOME_DIR/pallas.pk" | tr -d '\n')
+    jq --arg vm "$VM_ADDR" \
+      --arg validator "$VAL_OPER" \
+      --arg pallasPk "$PALLAS_PK_B64" '
       .app_state.vote.vote_manager_addresses = [$vm]
+      | .app_state.vote.pallas_keys = [{validator_address: $validator, pallas_pk: $pallasPk}]
       | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
       | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
       "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"
