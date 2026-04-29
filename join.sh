@@ -16,10 +16,10 @@
 #   5. Restores the latest pruned chain-data snapshot when one is published
 #   6. Generates cryptographic keys
 #   7. Configures the node to connect to the existing network
-#   8. Starts svoted, waits for sync, registers with the admin join queue, installs svoted-join (poll + bond)
+#   8. Registers once with the admin join queue and installs svoted wrapper (sync + fund + bond)
 #
-# Optional: SVOTE_JOIN_LOOP_SCRIPT=/path/to/join-loop.sh when join.sh is piped from curl and
-# join-loop.sh is not beside join.sh (see vote-sdk/scripts/join-loop.sh).
+# Optional: SVOTE_WRAPPER_SCRIPT=/path/to/svoted-wrapper.sh when join.sh is piped from curl and
+# svoted-wrapper.sh is not beside join.sh (see vote-sdk/scripts/svoted-wrapper.sh).
 #
 # Requirements: curl. jq and lz4 are installed automatically when missing (apt/dnf/yum/apk/Homebrew).
 # Dependency (binary path): release.yml must have run to upload binaries to DO Spaces.
@@ -35,9 +35,9 @@ SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-https://snapshots.valargroup.org}"
 # Canonical voting-config (same payload wallets fetch). Override for staging
 # mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
 VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://valargroup.github.io/token-holder-voting-config/voting-config.json}"
-# Admin API base — POST /api/register-validator (join queue) and
-# POST /api/server-heartbeat (helper liveness). Override via SVOTE_ADMIN_URL
-# when joining a non-default deployment.
+# Admin API base — used once for POST /api/register-validator during setup and
+# by the helper heartbeat after the public URL is configured. Override via
+# SVOTE_ADMIN_URL when joining a non-default deployment.
 DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-https://vote-chain-primary.valargroup.org}"
 SVOTE_ADMIN_URL="${SVOTE_ADMIN_URL:-${DEFAULT_ADMIN_API_BASE}}"
 
@@ -369,7 +369,7 @@ fi
 # The voting-config JSON is the same one wallets fetch from
 # valargroup.github.io/token-holder-voting-config (ZIP 1244 §Vote Configuration
 # Format). We use vote_servers[0] as the seed peer for P2P; SVOTE_ADMIN_URL is
-# a separate base for the join queue and helper heartbeat.
+# a separate base for one-time join registration and helper heartbeat.
 
 echo ""
 echo "=== Discovering network ==="
@@ -665,6 +665,7 @@ echo "=== Generating cryptographic keys ==="
 svoted init-validator-keys --home "${HOME_DIR}"
 
 VALIDATOR_ADDR=$(svoted keys show validator -a --keyring-backend test --home "${HOME_DIR}")
+VALIDATOR_VALOPER=$(svoted keys show validator --bech val -a --keyring-backend test --home "${HOME_DIR}")
 
 # ─── Configure config.toml ───────────────────────────────────────────────────
 
@@ -719,8 +720,8 @@ chain_api_port = 1317
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = 2
 
-# Admin server base URL — used for POST /api/register-validator on startup
-# and POST /api/server-heartbeat every 2h. Empty disables the heartbeat.
+# Admin server base URL — used by the helper for POST /api/server-heartbeat
+# every 2h after helper_url is set. Empty disables the heartbeat.
 admin_url = "${SVOTE_ADMIN_URL}"
 
 # This server's public URL as seen by clients (set after Caddy TLS setup).
@@ -981,44 +982,22 @@ fi
 
 LOG_FILE="${HOME_DIR}/node.log"
 SVOTED_BIN=$(command -v svoted)
+WRAPPER_BIN="${INSTALL_DIR}/svoted-wrapper.sh"
 SERVICE_NAME="svoted"
+SERVICE_PATH="${INSTALL_DIR}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
-# Re-register with the admin join queue (idempotent).
-register_url() {
-  if [ -z "${SVOTE_ADMIN_URL}" ]; then
-    return 0
-  fi
-  local ts
-  local payload
-  local sig
-  local pub_key
-
-  ts=$(date +%s)
-  payload=$(build_register_payload "${ts}")
-  local sig_json
-  sig_json=$(svoted sign-arbitrary "$payload" --from validator --keyring-backend test --home "${HOME_DIR}" 2>/dev/null) || return 0
-  sig=$(echo "$sig_json" | jq -r '.signature')
-  pub_key=$(echo "$sig_json" | jq -r '.pub_key')
-  local body
-  body=$(build_register_body "${ts}" "${sig}" "${pub_key}")
-  curl -fsSL -X POST "${SVOTE_ADMIN_URL%/}/api/register-validator" \
-    -H "Content-Type: application/json" \
-    -d "$body" > /dev/null 2>&1 || true
-}
-
-# Install join-loop.sh next to svoted/create-val-tx.
-JOIN_LOOP_BIN="${INSTALL_DIR}/join-loop.sh"
-if [ -n "${SVOTE_JOIN_LOOP_SCRIPT:-}" ] && [ -f "${SVOTE_JOIN_LOOP_SCRIPT}" ]; then
-  cp "${SVOTE_JOIN_LOOP_SCRIPT}" "${JOIN_LOOP_BIN}"
-elif [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "bash" ] && [ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/join-loop.sh" ]; then
-  cp "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/join-loop.sh" "${JOIN_LOOP_BIN}"
-elif curl -fsSL "${DO_BASE}/join-loop.sh" -o "${JOIN_LOOP_BIN}" 2>/dev/null; then
+# Install svoted-wrapper.sh next to svoted/create-val-tx.
+if [ -n "${SVOTE_WRAPPER_SCRIPT:-}" ] && [ -f "${SVOTE_WRAPPER_SCRIPT}" ]; then
+  cp "${SVOTE_WRAPPER_SCRIPT}" "${WRAPPER_BIN}"
+elif [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "bash" ] && [ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/svoted-wrapper.sh" ]; then
+  cp "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/svoted-wrapper.sh" "${WRAPPER_BIN}"
+elif curl -fsSL "${DO_BASE}/svoted-wrapper.sh" -o "${WRAPPER_BIN}" 2>/dev/null; then
   :
 else
-  echo "ERROR: join-loop.sh not found. Clone vote-sdk and run ./join.sh from the repo, set SVOTE_JOIN_LOOP_SCRIPT, or publish join-loop.sh to ${DO_BASE}/join-loop.sh" >&2
+  echo "ERROR: svoted-wrapper.sh not found. Clone vote-sdk and run ./join.sh from the repo, set SVOTE_WRAPPER_SCRIPT, or publish svoted-wrapper.sh to ${DO_BASE}/svoted-wrapper.sh" >&2
   exit 1
 fi
-chmod +x "${JOIN_LOOP_BIN}"
+chmod +x "${WRAPPER_BIN}"
 
 echo ""
 OS_NAME=$(uname -s)
@@ -1034,6 +1013,8 @@ if [ "$OS_NAME" = "Darwin" ]; then
 
   # Unload existing service if present.
   launchctl bootout "gui/$(id -u)/${PLIST_LABEL}" 2>/dev/null || true
+  launchctl bootout "gui/$(id -u)/com.shielded-vote.join" 2>/dev/null || true
+  rm -f "${PLIST_DIR}/com.shielded-vote.join.plist"
 
   cat > "${PLIST_FILE}" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1044,10 +1025,7 @@ if [ "$OS_NAME" = "Darwin" ]; then
     <string>${PLIST_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${SVOTED_BIN}</string>
-        <string>start</string>
-        <string>--home</string>
-        <string>${HOME_DIR}</string>
+        <string>${WRAPPER_BIN}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -1063,7 +1041,19 @@ if [ "$OS_NAME" = "Darwin" ]; then
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>${INSTALL_DIR}:/usr/local/bin:/usr/bin:/bin</string>
+        <string>${SERVICE_PATH}</string>
+        <key>SVOTE_HOME</key>
+        <string>${HOME_DIR}</string>
+        <key>VALIDATOR_ADDR</key>
+        <string>${VALIDATOR_ADDR}</string>
+        <key>VALIDATOR_VALOPER</key>
+        <string>${VALIDATOR_VALOPER}</string>
+        <key>MONIKER</key>
+        <string>${MONIKER}</string>
+        <key>SVOTE_INSTALL_DIR</key>
+        <string>${INSTALL_DIR}</string>
+        <key>SVOTED_BIN</key>
+        <string>${SVOTED_BIN}</string>
     </dict>
 </dict>
 </plist>
@@ -1112,59 +1102,19 @@ CADDYPLISTEOF
     echo "Caddy service started: ${VALIDATOR_URL} → localhost:1317"
   fi
 
-  # Join loop: poll admin + fund + create-val-tx until bonded.
-  JOIN_LOG="${HOME_DIR}/join.log"
-  JOIN_LABEL="com.shielded-vote.join"
-  JOIN_PLIST="${PLIST_DIR}/${JOIN_LABEL}.plist"
-  launchctl bootout "gui/$(id -u)/${JOIN_LABEL}" 2>/dev/null || true
-  cat > "${JOIN_PLIST}" <<JOINPLISTEOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${JOIN_LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${JOIN_LOOP_BIN}</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>${JOIN_LOG}</string>
-    <key>StandardErrorPath</key>
-    <string>${JOIN_LOG}</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>${INSTALL_DIR}:/usr/local/bin:/usr/bin:/bin</string>
-        <key>SVOTE_HOME</key>
-        <string>${HOME_DIR}</string>
-        <key>VALIDATOR_ADDR</key>
-        <string>${VALIDATOR_ADDR}</string>
-        <key>MONIKER</key>
-        <string>${MONIKER}</string>
-        <key>VALIDATOR_URL</key>
-        <string>${VALIDATOR_URL}</string>
-        <key>SVOTE_ADMIN_URL</key>
-        <string>${SVOTE_ADMIN_URL}</string>
-        <key>SVOTE_INSTALL_DIR</key>
-        <string>${INSTALL_DIR}</string>
-    </dict>
-</dict>
-</plist>
-JOINPLISTEOF
-  launchctl bootstrap "gui/$(id -u)" "${JOIN_PLIST}"
-  echo "Background join watcher started: ${JOIN_LABEL} (logs: ${JOIN_LOG})"
+  echo "Validator wrapper will complete bonding after funding (logs: ${LOG_FILE})"
 
 else
   # ── Linux: systemd ──────────────────────────────────────────────────────────
   echo "=== Installing systemd service ==="
+
+  SYSTEMD_PATH=$(systemd_env_quote "PATH=${SERVICE_PATH}")
+  SYSTEMD_HOME=$(systemd_env_quote "SVOTE_HOME=${HOME_DIR}")
+  SYSTEMD_ADDR=$(systemd_env_quote "VALIDATOR_ADDR=${VALIDATOR_ADDR}")
+  SYSTEMD_VALOPER=$(systemd_env_quote "VALIDATOR_VALOPER=${VALIDATOR_VALOPER}")
+  SYSTEMD_MONIKER=$(systemd_env_quote "MONIKER=${MONIKER}")
+  SYSTEMD_INSTALL=$(systemd_env_quote "SVOTE_INSTALL_DIR=${INSTALL_DIR}")
+  SYSTEMD_SVOTED=$(systemd_env_quote "SVOTED_BIN=${SVOTED_BIN}")
 
   sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null <<SVCEOF
 [Unit]
@@ -1174,7 +1124,8 @@ After=network.target
 [Service]
 Type=simple
 User=$(whoami)
-ExecStart=${SVOTED_BIN} start --home ${HOME_DIR}
+Environment=${SYSTEMD_PATH} ${SYSTEMD_HOME} ${SYSTEMD_ADDR} ${SYSTEMD_VALOPER} ${SYSTEMD_MONIKER} ${SYSTEMD_INSTALL} ${SYSTEMD_SVOTED}
+ExecStart=${WRAPPER_BIN}
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${LOG_FILE}
@@ -1189,43 +1140,7 @@ SVCEOF
   sudo systemctl start ${SERVICE_NAME}
   echo "Service ${SERVICE_NAME} started (survives SSH disconnect and reboots)."
   echo "Logs: ${LOG_FILE}"
-
-  JOIN_LOG="${HOME_DIR}/join.log"
-  sudo tee /etc/default/svoted-join > /dev/null <<ENVEOF
-SVOTE_HOME=$(systemd_env_quote "${HOME_DIR}")
-VALIDATOR_ADDR=$(systemd_env_quote "${VALIDATOR_ADDR}")
-MONIKER=$(systemd_env_quote "${MONIKER}")
-VALIDATOR_URL=$(systemd_env_quote "${VALIDATOR_URL}")
-SVOTE_ADMIN_URL=$(systemd_env_quote "${SVOTE_ADMIN_URL}")
-SVOTE_INSTALL_DIR=$(systemd_env_quote "${INSTALL_DIR}")
-ENVEOF
-
-  sudo tee /etc/systemd/system/svoted-join.service > /dev/null <<JOINUNIT
-[Unit]
-Description=Shielded-Vote validator join loop (${MONIKER})
-After=network.target ${SERVICE_NAME}.service
-Requires=${SERVICE_NAME}.service
-
-[Service]
-Type=simple
-User=$(whoami)
-EnvironmentFile=/etc/default/svoted-join
-ExecStart=${JOIN_LOOP_BIN}
-Restart=on-failure
-RestartSec=30
-SuccessExitStatus=0
-ExecStopPost=+/bin/sh -c 'if [ "\$SERVICE_RESULT" = "success" ] && [ "\$EXIT_CODE" = "exited" ] && [ "\$EXIT_STATUS" = "0" ]; then rm -f /etc/systemd/system/multi-user.target.wants/svoted-join.service /etc/systemd/system/svoted-join.service /etc/default/svoted-join; systemctl daemon-reload >/dev/null 2>&1 || true; fi'
-StandardOutput=append:${JOIN_LOG}
-StandardError=append:${JOIN_LOG}
-
-[Install]
-WantedBy=multi-user.target
-JOINUNIT
-
-  sudo systemctl daemon-reload
-  sudo systemctl enable svoted-join
-  sudo systemctl start svoted-join
-  echo "Background join watcher started: svoted-join (logs: ${JOIN_LOG})"
+  echo "Validator wrapper will complete bonding after funding."
 fi
 
 # Give the node a moment to start up.
@@ -1264,14 +1179,12 @@ echo ""
 echo "How to monitor:"
 if [ "$(uname -s)" = "Darwin" ]; then
   echo "  Chain logs:     tail -f ${LOG_FILE}"
-  echo "  Join watcher:   tail -f ${HOME_DIR}/join.log"
-  JOIN_WATCHER_NAME="com.shielded-vote.join (launchd)"
-  JOIN_WATCHER_REMOVE="launchctl bootout gui/$(id -u)/com.shielded-vote.join"
+  SERVICE_WATCHER_NAME="com.shielded-vote.validator (launchd)"
+  SERVICE_WATCHER_REMOVE="launchctl bootout gui/$(id -u)/com.shielded-vote.validator"
 else
   echo "  Chain logs:     journalctl -u ${SERVICE_NAME} -f"
-  echo "  Join watcher:   tail -f ${HOME_DIR}/join.log"
-  JOIN_WATCHER_NAME="svoted-join (systemd)"
-  JOIN_WATCHER_REMOVE="sudo systemctl stop svoted-join"
+  SERVICE_WATCHER_NAME="svoted (systemd)"
+  SERVICE_WATCHER_REMOVE="sudo systemctl stop svoted"
 fi
 echo ""
 echo "Next step: message the voting admin and ask them to approve you as a validator."
@@ -1282,10 +1195,10 @@ echo "  Name: ${MONIKER}"
 echo "  Validator address: ${VALIDATOR_ADDR}"
 echo "  Public URL: ${VALIDATOR_URL:-not configured}"
 echo ""
-echo "Background approval watcher:"
-echo "  ${JOIN_WATCHER_NAME} is checking for admin approval and will bond automatically."
-echo "  It removes itself after you are added as a validator."
-echo "  To stop it manually: ${JOIN_WATCHER_REMOVE}"
+echo "Validator service:"
+echo "  ${SERVICE_WATCHER_NAME} is checking local funding and will bond automatically."
+echo "  After bonding it writes ${HOME_DIR}/join-complete and skips join logic on future restarts."
+echo "  To stop it manually: ${SERVICE_WATCHER_REMOVE}"
 echo ""
 if [ -n "${VALIDATOR_URL:-}" ]; then
   echo "After bonding, add your public URL to vote_servers via a PR:"

@@ -38,9 +38,8 @@ type Config struct {
 	// MaxConcurrentProofs limits concurrent proof generation goroutines.
 	MaxConcurrentProofs int `mapstructure:"max_concurrent_proofs"`
 
-	// AdminURL is the base URL of the admin server for registration and
-	// heartbeat (e.g. "https://admin.example.com"). When empty, heartbeat
-	// is disabled.
+	// AdminURL is the base URL of the admin server for helper heartbeat
+	// (e.g. "https://admin.example.com"). When empty, heartbeat is disabled.
 	AdminURL string `mapstructure:"admin_url"`
 
 	// HelperURL is this server's own public URL as seen by clients

@@ -66,16 +66,12 @@ type VotingConfig struct {
 	SnapshotHeight *uint64 `json:"snapshot_height,omitempty"`
 }
 
-// PendingRegistration is a row in pending_registrations and the API shape
-// for GET /api/pending-validators.
+// PendingRegistration is a row in pending_registrations and the API shape for
+// GET /api/pending-validators.
 type PendingRegistration struct {
 	OperatorAddress string `json:"operator_address"`
 	URL             string `json:"url"`
 	Moniker         string `json:"moniker"`
-	Timestamp       int64  `json:"timestamp"`
-	Signature       string `json:"signature,omitempty"`
-	PubKey          string `json:"pub_key,omitempty"`
-	FirstSeenAt     int64  `json:"first_seen_at"`
-	LastSeenAt      int64  `json:"last_seen_at"`
+	RequestedAt     int64  `json:"requested_at"`
 	ExpiresAt       int64  `json:"expires_at"`
 }

@@ -98,13 +98,8 @@ func sendSigned(ctx context.Context, client *http.Client, endpoint string, cfg P
 	return &result, nil
 }
 
-// RunPulse registers with register-validator on startup (to ensure
-// approved-servers is populated), then sends a heartbeat pulse to
-// server-heartbeat every 2 hours until ctx is cancelled.
-//
-// If the initial registration returns "pending" (e.g. the admin server
-// hasn't seen the bonding tx yet), registration is retried on each tick
-// until it succeeds, then the loop switches to heartbeat-only mode.
+// RunPulse sends a heartbeat pulse to server-heartbeat every 2 hours until ctx
+// is cancelled. Validator join registration is handled once by join.sh.
 func RunPulse(ctx context.Context, cfg PulseConfig) {
 	if cfg.AdminURL == "" || cfg.HelperURL == "" {
 		cfg.Logger.Info("heartbeat disabled: admin_url or helper_url not configured")
@@ -112,26 +107,9 @@ func RunPulse(ctx context.Context, cfg PulseConfig) {
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	registerEndpoint := cfg.AdminURL + "/api/register-validator"
 	heartbeatEndpoint := cfg.AdminURL + "/api/server-heartbeat"
 
-	// Try to register immediately, then retry a few times with short intervals
-	// to handle the common case where the chain isn't fully ready yet at startup
-	// (e.g. after a deploy restart where validators were just bonded).
-	registered := tryRegister(ctx, client, registerEndpoint, cfg)
-	if !registered {
-		for i := 0; i < 5; i++ {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(15 * time.Second):
-			}
-			registered = tryRegister(ctx, client, registerEndpoint, cfg)
-			if registered {
-				break
-			}
-		}
-	}
+	sendHeartbeat(ctx, client, heartbeatEndpoint, cfg)
 
 	ticker := time.NewTicker(pulseInterval)
 	defer ticker.Stop()
@@ -141,36 +119,8 @@ func RunPulse(ctx context.Context, cfg PulseConfig) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !registered {
-				registered = tryRegister(ctx, client, registerEndpoint, cfg)
-			}
 			sendHeartbeat(ctx, client, heartbeatEndpoint, cfg)
 		}
-	}
-}
-
-// tryRegister calls register-validator once and returns true if the server
-// was successfully registered (i.e. bonded on-chain and added to
-// approved-servers).
-func tryRegister(ctx context.Context, client *http.Client, endpoint string, cfg PulseConfig) bool {
-	result, err := sendSigned(ctx, client, endpoint, cfg)
-	if err != nil {
-		cfg.Logger.Error("register: request failed", "error", err)
-		return false
-	}
-
-	switch result.Status {
-	case "registered":
-		cfg.Logger.Info("register: registered (bonded)")
-		return true
-	case "pending":
-		cfg.Logger.Warn("register: server not yet bonded or approved, will retry",
-			"operator_address", cfg.OperatorAddress)
-		return false
-	default:
-		cfg.Logger.Error("register: unexpected response",
-			"status", result.Status, "error", result.Error)
-		return false
 	}
 }
 

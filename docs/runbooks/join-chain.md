@@ -4,7 +4,7 @@
 
 Shielded-Vote is a Cosmos SDK application chain for private on-chain voting. The chain launches with a single genesis validator. Everyone else joins post-genesis via a custom message `MsgCreateValidatorWithPallasKey`, which atomically creates the validator *and* registers its Pallas key for the EA-key ceremony. See the [protocol README](../../README.md#protocol-documentation) for the full rules.
 
-This runbook covers the operator side: standing up an `svoted` host that restores the latest Zvote snapshot when one is published, catches up with the live chain, reaches bonded status, and exposes a TLS-fronted REST API that iOS clients and peers can reach. A validator is a single `svoted` process plus a `svoted-join` bonding loop and a Caddy reverse proxy on the same host.
+This runbook covers the operator side: standing up an `svoted` host that restores the latest Zvote snapshot when one is published, catches up with the live chain, reaches bonded status, and exposes a TLS-fronted REST API that iOS clients and peers can reach. A validator is a single `svoted` service, managed by a small wrapper while joining, plus a Caddy reverse proxy on the same host.
 
 **Scope:**
 
@@ -53,7 +53,7 @@ See [TLS / reverse proxy](#tls--reverse-proxy) for the Caddy layout `join.sh` in
 
 | Direction | Destination | Purpose |
 |-----------|-------------|---------|
-| Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `join-loop.sh` fallback |
+| Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `svoted-wrapper.sh` fallback |
 | Outbound 443 | `snapshots.valargroup.org` | Latest Zvote snapshot metadata and archive URL used to bootstrap chain data before peer catch-up |
 | Outbound 443 | `valargroup.github.io` | [`token-holder-voting-config/voting-config.json`](https://github.com/valargroup/token-holder-voting-config) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
 | Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue) and `POST /api/server-heartbeat` (helper liveness). Override via `SVOTE_ADMIN_URL` / `DEFAULT_ADMIN_API_BASE`. |
@@ -97,61 +97,51 @@ After install, operate the service with:
 
 ```bash
 # Linux
-systemctl status svoted svoted-join
+systemctl status svoted
 journalctl -u svoted -f
-journalctl -u svoted-join -f
 
 # macOS
 launchctl print gui/$(id -u)/com.shielded-vote.validator
 tail -f ~/.svoted/node.log
-tail -f ~/.svoted/join.log
 ```
 
 See [Smoke test](#smoke-test) for a post-install check.
 
 ## Join lifecycle
 
-From install to bonded, the validator moves through three states: **registered** (pending), **funded** (balance > 0), **bonded** (part of the validator set).
+From install to bonded, the validator moves through three states: **registered** (pending), **funded** (balance >= 10,000,000 usvote), **bonded** (part of the validator set).
 
 ```mermaid
 flowchart LR
   installed["join.sh finishes"] --> registered["Registered: POST /api/register-validator"]
-  registered --> poll["svoted-join polls every 30s"]
-  poll --> funded["Funded: balance greater than 0 usvote"]
+  registered --> service["svoted wrapper waits for sync"]
+  service --> funded["Funded: balance >= 10,000,000 usvote"]
   funded --> createValTx["create-val-tx: MsgCreateValidatorWithPallasKey"]
   createValTx --> bonded["Bonded: BOND_STATUS_BONDED"]
-  bonded --> done["svoted-join exits 0; service is removed"]
-  poll --> poll
+  bonded --> done["join-complete marker written; service keeps running svoted"]
+  service --> service
 ```
 
-The loop in [scripts/join-loop.sh](../../scripts/join-loop.sh) runs until it observes bonded status, then removes the temporary join service. The temporary service exists only to monitor for funding and submit the validator creation tx; funding acts as the vote-manager approval step.
+The wrapper in [scripts/svoted-wrapper.sh](../../scripts/svoted-wrapper.sh) runs `svoted`, waits until the local node is synced, monitors for funding, and submits the validator creation tx. Funding acts as the vote-manager approval step.
 
-On each iteration:
+Before service install, `join.sh` builds `{operator_address, url, moniker, timestamp}`, signs it with `svoted sign-arbitrary --from validator --keyring-backend test`, and POSTs it once to `${SVOTE_ADMIN_URL}/api/register-validator`. The admin stores one pending row per operator with `requested_at`; `url` may be empty, which still lets vote managers see the operator address for funding. The admin UI marks those rows as `Needs public URL`.
 
-1. **Re-register.** Build `{operator_address, url, moniker, timestamp}`, sign it with `svoted sign-arbitrary --from validator --keyring-backend test`, POST to `${SVOTE_ADMIN_URL}/api/register-validator`. Idempotent — the admin stores one row per operator, updating URL/moniker on later POSTs. `url` may be empty, which still lets vote managers see the operator address for funding. The admin UI marks those rows as `Needs public URL`. If the response reports `status=bonded`, exit 0 immediately.
-2. **Check bonded.** `svoted query staking validators` filtered by moniker; if `BOND_STATUS_BONDED`, exit 0 and remove the join service.
-3. **If not bonded, check balance.** `svoted query bank balances $VALIDATOR_ADDR`. If there is any `usvote` balance, run:
+On each wrapper iteration:
+
+1. **Check bonded by valoper.** If `BOND_STATUS_BONDED`, write `~/.svoted/join-complete` and skip join logic for this and future service runs.
+2. **If not bonded, check balance.** `svoted query bank balances $VALIDATOR_ADDR`. Once the balance has at least the self-delegation amount, run:
    ```bash
    create-val-tx --moniker "$MONIKER" --amount 10000000usvote --home "$SVOTE_HOME" --rpc-url tcp://localhost:26657
    ```
    `create-val-tx` signs `MsgCreateValidatorWithPallasKey` - the **only** message type that can create a validator post-genesis.
-4. **Sleep 30 s** and loop.
+3. **Sleep 30 s** and loop.
 
-The loop is deliberately quiet. It only writes a few kinds of lines to `join.log`:
-
-1. `join-loop starting (moniker=...)` — once at startup.
-2. `balance=<amount> usvote — attempting create-val-tx` — once funding is detected.
-3. `register-validator returned bonded - exiting 0` or `validator is bonded - exiting 0` — right before exit 0 when bonded.
-4. `removing launchd join service ...` — macOS only, before the plist is removed.
-
-A healthy unfunded validator produces **only** the startup line.
-
-Funding happens off-loop: an existing vote manager (any member of the any-of-N vote-manager set) observes the pending registration in the [admin UI](https://svote.valargroup.org/validator-join) and authorized the validator to join.
+Funding happens outside the wrapper: an existing vote manager (any member of the any-of-N vote-manager set) observes the pending registration in the [admin UI](https://svote.valargroup.org/validator-join) and authorizes the validator to join by funding its operator account.
 
 **Operator checklist while waiting:**
 
-- Confirm the loop is alive with `systemctl is-active svoted-join` (or `pgrep -f join-loop.sh` on macOS).
-- Verify the admin UI at the admin host's public URL (`${SVOTE_ADMIN_URL}/`) shows your moniker and operator address in the **Validators → Join queue** list. `last_seen_at` should advance by ~30 s each iteration (`curl "${SVOTE_ADMIN_URL%/}/api/pending-validators" | jq`).
+- Confirm the service is alive with `systemctl is-active svoted` or `launchctl print gui/$(id -u)/com.shielded-vote.validator`.
+- Verify the admin UI at the admin host's public URL (`${SVOTE_ADMIN_URL}/`) shows your moniker and operator address in the **Validators → Join queue** list.
 - After bonding, open a PR against [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) to add your URL to `vote_servers[]` so iOS clients discover you. The suggested JSON entry is printed on the final line of `join.sh`.
 
 ## Smoke test
@@ -170,53 +160,48 @@ curl -fsS http://127.0.0.1:1317/shielded-vote/v1/rounds | jq '.rounds | length'
 # 3. Caddy is serving the REST API over TLS (skip if SVOTE_SKIP_CADDY=1).
 curl -fsS https://<your-domain>/shielded-vote/v1/genesis > /dev/null && echo "caddy OK"
 
-# 4. Join loop is alive.
-tail -n 20 ~/.svoted/join.log   # or: journalctl -u svoted-join -n 20 --no-pager
+# 4. Validator wrapper is alive.
+journalctl -u svoted -n 20 --no-pager   # or: tail -n 20 ~/.svoted/node.log
 ```
 
-See [Join lifecycle](#join-lifecycle) for what `join.log` should and shouldn't contain while you wait for funding.
+See [Join lifecycle](#join-lifecycle) for what the wrapper does while you wait for funding.
 
 ## Operating the service
 
-`join.sh` installs `svoted` plus a temporary bonding loop that monitors for funding and submits the validator creation tx. The bonding loop removes its service after the validator becomes bonded.
+`join.sh` installs one `svoted` service. The service runs `scripts/svoted-wrapper.sh`, which starts `svoted`, monitors funding while joining, submits the validator creation tx, and writes `~/.svoted/join-complete` after bonding.
 
 ### Linux (systemd)
 
-- **`/etc/systemd/system/svoted.service`** — `Type=simple`, `Restart=on-failure`, `RestartSec=5`, runs as the invoking user (not root), `ExecStart=${INSTALL_DIR}/svoted start --home ${HOME_DIR}`. Logs are appended to `~/.svoted/node.log`.
-- **`/etc/systemd/system/svoted-join.service`** — same lifecycle semantics (`Restart=on-failure`, `RestartSec=30`), `Requires=svoted.service`. Exits 0 once bonded; an `ExecStopPost` cleanup hook disables the unit and removes `/etc/systemd/system/svoted-join.service` plus `/etc/default/svoted-join`.
-- **`/etc/default/svoted-join`** — key/value file sourced by the unit. Contains `SVOTE_HOME`, `VALIDATOR_ADDR`, `MONIKER`, `VALIDATOR_URL`, `SVOTE_ADMIN_URL`, `SVOTE_INSTALL_DIR`. Do not indent lines — systemd's `EnvironmentFile` parser is strict about leading whitespace.
+- **`/etc/systemd/system/svoted.service`** — `Type=simple`, `Restart=on-failure`, `RestartSec=5`, runs as the invoking user (not root), `ExecStart=${INSTALL_DIR}/svoted-wrapper.sh`. Logs are appended to `~/.svoted/node.log`.
 
 To change settings, edit the appropriate file and:
 
 ```bash
 sudo systemctl daemon-reload   # only after editing a .service file itself
 sudo systemctl restart svoted
-sudo systemctl restart svoted-join
 ```
 
 ### macOS (launchd)
 
-Three plists under `~/Library/LaunchAgents/`: `com.shielded-vote.validator.plist` (runs `svoted`), `com.shielded-vote.caddy.plist` (runs Caddy), `com.shielded-vote.join.plist` (runs `join-loop.sh` with the env from [Linux (systemd)](#linux-systemd) baked into `EnvironmentVariables`). The join plist is temporary and is removed automatically after bonding. Control the remaining services with `launchctl`:
+Two plists under `~/Library/LaunchAgents/`: `com.shielded-vote.validator.plist` (runs `svoted-wrapper.sh`, which starts `svoted`) and `com.shielded-vote.caddy.plist` (runs Caddy when configured). Control the services with `launchctl`:
 
 ```bash
 launchctl print gui/$(id -u)/com.shielded-vote.validator
 launchctl kickstart -k gui/$(id -u)/com.shielded-vote.validator   # restart
-launchctl bootout   gui/$(id -u)/com.shielded-vote.join           # stop join loop
 ```
 
 ### Logs
 
 | File | Source | Content |
 |------|--------|---------|
-| `~/.svoted/node.log` | `svoted start` | Block production, P2P, ABCI, REST handler output. Verbosity via `--log_level` on the systemd unit. |
-| `~/.svoted/join.log` | `svoted-join` (`join-loop.sh`) | Per-iteration loop output (see [Join lifecycle](#join-lifecycle) for the lines it emits). |
+| `~/.svoted/node.log` | `svoted-wrapper.sh` + `svoted start` | Join automation, block production, P2P, ABCI, REST handler output. Verbosity via `--log_level` on the systemd unit. |
 | Caddy | `journalctl -u caddy` (Linux) / `~/.config/caddy/caddy.log` (macOS) | Access + error log. |
 
-`journalctl -u svoted -f` / `journalctl -u svoted-join -f` follow them on Linux; use `tail -f` on macOS.
+`journalctl -u svoted -f` follows it on Linux; use `tail -f ~/.svoted/node.log` on macOS.
 
 ### Helper heartbeat and admin UI
 
-Each validator POSTs a signed registration to `${admin_url}/api/register-validator` on startup, then a heartbeat to `${admin_url}/api/server-heartbeat` every 2 hours. `admin_url` defaults to `SVOTE_ADMIN_URL` (the admin host the join script discovered through). Edit `[helper] admin_url` in `app.toml` to retarget; leave empty to disable the heartbeat entirely. The pulse only runs once `helper_url` (this node's public URL) is also set.
+After `join.sh` performs the one-time signed registration, the helper sends a heartbeat to `${admin_url}/api/server-heartbeat` immediately on startup and then every 2 hours. `admin_url` defaults to `SVOTE_ADMIN_URL` (the admin host the join script discovered through). Edit `[helper] admin_url` in `app.toml` to retarget; leave empty to disable the heartbeat entirely. The pulse only runs once `helper_url` (this node's public URL) is also set.
 
 The primary validator serves the admin UI at its public HTTPS endpoint (`${SVOTE_ADMIN_URL}/`). The Validators page lists every bonded validator and every pending join request, with the operator address, moniker, last heartbeat, and bonding state. Joining operators watch this page to confirm their registration landed and to coordinate funding with the vote-manager.
 
@@ -234,7 +219,7 @@ Sentry is not shipped in `svoted` itself; add if your ops playbook requires it. 
 | `process_interval` | `5` | Seconds between share-processing ticks. |
 | `chain_api_port` | `1317` | REST port the helper submits `MsgRevealShare` to. |
 | `max_concurrent_proofs` | `2` | Parallel proof goroutines (~500 MB each). |
-| `admin_url` | `${SVOTE_ADMIN_URL}` | Admin server base for `POST /api/register-validator` and `POST /api/server-heartbeat`. Empty disables the heartbeat. Legacy key `pulse_url` is still read as a fallback. |
+| `admin_url` | `${SVOTE_ADMIN_URL}` | Admin server base for `POST /api/server-heartbeat`. Empty disables the heartbeat. Legacy key `pulse_url` is still read as a fallback. |
 | `helper_url` | `https://<SVOTE_DOMAIN>` | This host's public URL as seen by clients; empty disables the heartbeat. |
 
 See [deploy-setup.md § Helper server configuration](../deploy-setup.md#helper-server-configuration) for the production reference. `[admin]` and the admin UI are disabled by default for joining validators; only the primary runs them.
@@ -252,7 +237,7 @@ val.example.org {
 - On Linux, Caddy is installed from the Cloudsmith apt repo and managed by `systemctl`. The Caddyfile lives at `/etc/caddy/Caddyfile`.
 - On macOS, Caddy is installed via Homebrew and run as a launchd agent owned by the current user. The Caddyfile lives at `~/.config/caddy/Caddyfile`.
 
-For the hostname-vs-sslip-vs-skip choice, see [Prerequisites > Hostname and TLS](#hostname-and-tls). When `SVOTE_SKIP_CADDY=1` *and* TLS is handled externally, set `VALIDATOR_URL` manually in `/etc/default/svoted-join` and `helper_url` in `app.toml`, then restart both services.
+For the hostname-vs-sslip-vs-skip choice, see [Prerequisites > Hostname and TLS](#hostname-and-tls). When `SVOTE_SKIP_CADDY=1` *and* TLS is handled externally, set `helper_url` in `app.toml`, then restart `svoted`.
 
 ## Backup and disaster recovery
 
@@ -281,7 +266,7 @@ What happens:
 
 - The script always downloads the latest `svoted` + `create-val-tx` tarball (per `${DO_BASE}/version.txt`) and verifies the checksum.
 - Before replacing binaries it `systemctl stop svoted` (Linux) or `launchctl bootout` (macOS) to avoid `Text file busy`.
-- It reinstalls services, re-registers with the admin, and restarts everything.
+- It reinstalls services, registers once with the admin join queue, and restarts everything.
 - **It wipes `~/.svoted`** if a prior install is present — so re-running `join.sh` is *not* a safe in-place chain-data upgrade.
 
 For a chain-data-preserving binary swap, mirror the [production-setup.md](../production-setup.md) flow instead:
@@ -310,7 +295,7 @@ Plus bucket-root helpers the one-liner depends on:
 
 - `version.txt` — single line with the latest release version.
 - `join.sh` — always the latest script.
-- `join-loop.sh` — latest loop; copied onto the host so the service unit can point at it.
+- `svoted-wrapper.sh` — latest service wrapper; copied onto the host so the service unit can point at it.
 - `genesis.json` — canonical genesis, uploaded by `sdk-chain-reset.yml` after every chain reset.
 
 The GitHub Release for the tag also mirrors the tarballs, so operators who want to pin a specific version can substitute the GitHub URL in the Manual install steps below.
@@ -406,14 +391,15 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    ```bash
    svoted init-validator-keys --home "$HOME_DIR"
    VALIDATOR_ADDR=$(svoted keys show validator -a --keyring-backend test --home "$HOME_DIR")
+   VALIDATOR_VALOPER=$(svoted keys show validator --bech val -a --keyring-backend test --home "$HOME_DIR")
    ```
 
 6. **Configure and start the services** to match what `join.sh` does:
 
    - Set `persistent_peers = "${PERSISTENT_PEERS}"` in `config.toml`; enable `[api]` with `enabled-unsafe-cors = true` in `app.toml`; append the `[helper]` block — keys and defaults are in [`[helper]` and `[api]` reference](#helper-and-api-reference). Leave `helper_url` empty until the public URL is known.
    - Install Caddy (or your TLS terminator) — see [TLS / reverse proxy](#tls--reverse-proxy). Once the hostname is live, set `helper_url` in `app.toml` and restart `svoted`.
-   - Install the systemd / launchd units described in [Operating the service](#operating-the-service): `svoted.service` runs `svoted start --home "$HOME_DIR"`; `svoted-join.service` requires `svoted.service` and runs `${INSTALL_DIR}/join-loop.sh` with `EnvironmentFile=/etc/default/svoted-join` (the file holds `SVOTE_HOME`, `VALIDATOR_ADDR`, `MONIKER`, `VALIDATOR_URL`, `SVOTE_ADMIN_URL`, `SVOTE_INSTALL_DIR`).
-   - Copy [scripts/join-loop.sh](../../scripts/join-loop.sh) to `${INSTALL_DIR}/join-loop.sh`, then `systemctl enable --now svoted svoted-join`.
+   - Install the systemd / launchd unit described in [Operating the service](#operating-the-service): `svoted.service` runs `${INSTALL_DIR}/svoted-wrapper.sh` with `SVOTE_HOME`, `VALIDATOR_ADDR`, `VALIDATOR_VALOPER`, `MONIKER`, and `SVOTE_INSTALL_DIR` in the service environment.
+   - Copy [scripts/svoted-wrapper.sh](../../scripts/svoted-wrapper.sh) to `${INSTALL_DIR}/svoted-wrapper.sh`, then `systemctl enable --now svoted`.
 
 7. **Proceed to [Smoke test](#smoke-test)** and [Join lifecycle](#join-lifecycle).
 
@@ -428,13 +414,13 @@ The `SVOTE_HOME` directory (default `~/.svoted`) groups everything a joining val
 | `config/app.toml` | `svoted init` + `sed` patches + `[helper]` append | App runtime; `[api]`, `[helper]`, and on the primary `[admin]` + `[ui]`. |
 | `helper.db` | helper module | SQLite queue of shares waiting to be submitted. |
 | `node.log` | systemd / launchd | Chain stdout+stderr. |
-| `join.log` | systemd / launchd | `svoted-join` loop output. |
+| `join-complete` | `svoted-wrapper.sh` | Marker written after the wrapper observes bonded status. |
 
 When in doubt for a joining validator with no important keys yet, `rm -rf ~/.svoted && join.sh` recreates everything.
 
 ### Configuration variables
 
-All variables are read from the environment by `join.sh`, `join-loop.sh`, or the services they install. Unset = use default.
+All variables are read from the environment by `join.sh`, `svoted-wrapper.sh`, or the services they install. Unset = use default.
 
 #### `join.sh`
 
@@ -444,7 +430,7 @@ Interactive runs without `SVOTE_DOMAIN` and without an explicit `SVOTE_SKIP_CADD
 |-----------------|---------|------|
 | `--domain <host>` or `SVOTE_DOMAIN` | unset | Public hostname for Caddy + `VALIDATOR_URL`. When set, the installer skips the TLS menu and treats Caddy setup for this static hostname as required. |
 | `SVOTE_MONIKER` | interactive prompt | Validator moniker; required for unattended installs. |
-| `SVOTE_INSTALL_DIR` | `$HOME/.local/bin` | Where `svoted`, `create-val-tx`, and `join-loop.sh` are installed. |
+| `SVOTE_INSTALL_DIR` | `$HOME/.local/bin` | Where `svoted`, `create-val-tx`, and `svoted-wrapper.sh` are installed. |
 | `SVOTE_HOME` | `$HOME/.svoted` | Chain data + config + keys. |
 | `SVOTE_SNAPSHOT_BASE_URL` | `https://snapshots.valargroup.org` | Snapshot service base URL. `join.sh` fetches `${SVOTE_SNAPSHOT_BASE_URL}/latest.json` and restores the archive it declares when metadata is available. |
 | `SVOTE_SKIP_SNAPSHOT` | `0` | When `1`, skip snapshot restore and sync from genesis. Default installs fall back to genesis when snapshot metadata is unavailable or empty; once metadata points to an archive, download, checksum, and extraction failures are fatal. |
@@ -455,21 +441,21 @@ Interactive runs without `SVOTE_DOMAIN` and without an explicit `SVOTE_SKIP_CADD
 | `SVOTE_SKIP_SERVICE` | `0` | `1` skips service install and the sync wait — node is initialized but not started. Useful for Docker smoke tests / CI. |
 | `VOTING_CONFIG_URL` | `https://valargroup.github.io/token-holder-voting-config/voting-config.json` | Canonical voting-config (same payload wallets fetch). Override for staging mirrors or fork testing. |
 | `SVOTE_ADMIN_URL` | `${DEFAULT_ADMIN_API_BASE}` | Admin server base URL. Used for `POST /api/register-validator` (join queue) and written into `app.toml [helper] admin_url` for the heartbeat. Not used for voting-config discovery — that comes from `VOTING_CONFIG_URL`. |
-| `SVOTE_JOIN_LOOP_SCRIPT` | bundled path → `${DO_BASE}/join-loop.sh` fallback | Override path to `join-loop.sh`; useful when `join.sh` is piped via curl and the repo's `scripts/join-loop.sh` isn't reachable. |
+| `SVOTE_WRAPPER_SCRIPT` | bundled path → `${DO_BASE}/svoted-wrapper.sh` fallback | Override path to `svoted-wrapper.sh`; useful when `join.sh` is piped via curl and the repo's `scripts/svoted-wrapper.sh` isn't reachable. |
 | `DEFAULT_ADMIN_API_BASE` | `https://vote-chain-primary.valargroup.org` | Default value for `SVOTE_ADMIN_URL` when not explicitly set. |
 
-#### `join-loop.sh`
+#### `svoted-wrapper.sh`
 
-Read from `/etc/default/svoted-join` (Linux) or the launchd `EnvironmentVariables` block (macOS):
+Read from the systemd `Environment=` values (Linux) or the launchd `EnvironmentVariables` block (macOS):
 
 | Variable | Role |
 |----------|------|
 | `SVOTE_HOME` | Passed to `svoted` as `--home`. |
-| `VALIDATOR_ADDR` | Bech32 operator address; used in signed payload + balance/bond queries. |
-| `MONIKER` | Used to find the validator row in `svoted query staking validators`. |
-| `VALIDATOR_URL` | Public URL advertised in `register-validator`; may be empty while waiting for funding or external TLS setup. |
-| `SVOTE_ADMIN_URL` | Base URL for `/api/register-validator`. |
+| `VALIDATOR_ADDR` | Bech32 operator account address; used for local balance queries. |
+| `VALIDATOR_VALOPER` | Bech32 validator operator address; used for bonded-state queries. |
+| `MONIKER` | Passed to `create-val-tx`. |
 | `SVOTE_INSTALL_DIR` | Prepended to `$PATH` so `create-val-tx` resolves. |
+| `SVOTE_JOIN_STAKE_USVOTE` | Optional override for the self-delegation amount; default `10000000`. |
 
 ### HTTP endpoints (operator surface)
 
@@ -479,8 +465,8 @@ Read from `/etc/default/svoted-join` (Linux) or the launchd `EnvironmentVariable
 |---------------|----------|---------|
 | `GET /cosmos/base/tendermint/v1beta1/node_info` | Ops / peers | Chain ID, node ID, P2P listen addr. Used by the seed discovery step in `join.sh`. |
 | `GET /cosmos/staking/v1beta1/validators` | Ops | Validator set + bond status. |
-| `GET /cosmos/bank/v1beta1/balances/{addr}` | Ops | Account balance; `svoted-join` hits this to detect funding. |
-| `POST /api/register-validator` | `svoted-join`, helper heartbeat | Pending-join queue (admin module; primary only). |
+| `GET /cosmos/bank/v1beta1/balances/{addr}` | Ops | Account balance; `svoted-wrapper.sh` hits this to detect funding. |
+| `POST /api/register-validator` | `join.sh` | Pending-join queue (admin module; primary only). |
 | `POST /api/server-heartbeat` | helper heartbeat | Bonded-validator liveness pulse (primary only). |
 | `GET /api/pending-validators` | Admin UI / join scripts | Join-queue view (primary only). |
 | `GET /api/voting-config` | Tooling / standalone watchdog | Cached copy of the GitHub Pages voting-config (refreshed in-process every minute). **Not** the canonical client path — wallets and `join.sh` fetch the same payload directly from [valargroup.github.io/token-holder-voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json). The fleet health watchdog ([`vote-infrastructure/watchdog/`](https://github.com/valargroup/vote-infrastructure/tree/main/watchdog)) hits the CDN, not this endpoint, so it stays up if the primary `svoted` wedges. |
@@ -493,8 +479,8 @@ Start with `journalctl -u svoted -n 200 --no-pager` / `tail -n 200 ~/.svoted/nod
 |---------|--------------|--------|
 | `catching_up` stays `true` for >10 min, log shows "Dialing" / no peers connecting | Inbound 26656 blocked, or seed peer is unreachable | Verify firewall lets in 26656 (`ss -ltn | grep 26656`, then test from off-host); check `persistent_peers` in `~/.svoted/config/config.toml`; confirm the seed listed under `vote_servers[0].url` in [the voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json) is up by hitting its `/cosmos/base/tendermint/v1beta1/node_info`. |
 | `svoted` exits with "error initializing application: genesis doc mismatch" | Local `genesis.json` doesn't match the live chain | `rm -rf ~/.svoted && join.sh` (pulls canonical genesis fresh); or `curl -fsSL -o ~/.svoted/config/genesis.json https://vote.fra1.digitaloceanspaces.com/genesis.json && svoted genesis validate-genesis --home ~/.svoted`. |
-| `join.log` repeatedly shows `balance=` (empty) | Not yet funded | Wait. The vote-manager funds from the admin UI join queue. Ping the operator running the primary and confirm your address is listed. |
-| `create-val-tx` fails with `key not found: validator` | Keyring backend mismatch (os vs test) | `svoted-join` always uses `--keyring-backend test`. Confirm `svoted keys show validator -a --keyring-backend test --home ~/.svoted` returns the expected address. If you re-keyed manually, re-run `svoted init-validator-keys`. |
+| `node.log` repeatedly shows `waiting for validator funding` | Not yet funded | Wait. The vote-manager funds from the admin UI join queue. Ping the operator running the primary and confirm your address is listed. |
+| `create-val-tx` fails with `key not found: validator` | Keyring backend mismatch (os vs test) | The wrapper expects the `validator` key in the test keyring. Confirm `svoted keys show validator -a --keyring-backend test --home ~/.svoted` returns the expected address. If you re-keyed manually, re-run `svoted init-validator-keys`. |
 | `create-val-tx` fails with `account does not exist on chain` | Tx raced funding; balance hasn't settled yet | Retry — the loop re-runs every 30 s. If it persists, check `svoted query bank balances $VALIDATOR_ADDR` directly. |
 | Caddy fails to obtain a certificate (`acme: error 403` or similar) | DNS doesn't resolve to this host, or 80/443 blocked | `dig <SVOTE_DOMAIN>` against a public resolver; ensure inbound 80 AND 443 are open. For automatic sslip.io, confirm `curl -fsSL https://ifconfig.me` returns your actual public IP. |
 | `ERROR: No vote_servers[0].url in voting-config` | The published voting-config has an empty `vote_servers` list (usually during/after a chain reset) | Wait ~1 h, or set `VOTING_CONFIG_URL` to a mirror with a populated list and re-run. The fix is in [valargroup/token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) — a maintainer needs to add at least one server URL. |
@@ -503,7 +489,7 @@ Start with `journalctl -u svoted -n 200 --no-pager` / `tail -n 200 ~/.svoted/nod
 | No snapshot metadata is available | The chain was recently reset and no new snapshot has been published yet, or the snapshot service is unavailable | `join.sh` logs a warning and syncs from genesis. Confirm `curl -fsS https://snapshots.valargroup.org/latest.json | jq` once the first post-reset snapshot is expected. |
 | Snapshot download, checksum, or extraction fails | Stale metadata, corrupt download, or missing `lz4` | Confirm `curl -fsS https://snapshots.valargroup.org/latest.json | jq` works from the host. Re-run after fixing egress or the snapshot service. Use `SVOTE_SKIP_SNAPSHOT=1` only for explicit genesis-sync debugging. |
 | `svoted` SIGILLs immediately at startup | Binary/arch mismatch | `file ~/.local/bin/svoted` — must match `uname -m`. Re-run `join.sh` so it picks the right `PLATFORM`. |
-| `svoted-join` keeps running after you see `BOND_STATUS_BONDED` in `svoted query staking validators` | The moniker in `/etc/default/svoted-join` doesn't match the on-chain description | Confirm `MONIKER` matches `.validators[].description.moniker` exactly; edit the env file and restart `svoted-join`. |
+| `join-complete` is missing after bonding | Marker was deleted or the wrapper has not restarted since bonding | Restart `svoted`; once synced, the wrapper checks the valoper address, observes `BOND_STATUS_BONDED`, and rewrites the marker. |
 
 For deeper investigation, raise `svoted` log verbosity (`--log_level debug` in the systemd ExecStart or `SVOTED_LOG_LEVEL=debug` if exported) and restart.
 

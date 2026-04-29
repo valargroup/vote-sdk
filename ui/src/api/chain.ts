@@ -445,24 +445,12 @@ export interface VotingConfig {
  */
 export const PIR_SNAPSHOTS_PATH = "/snapshots";
 
-export interface PendingRegistration {
-  operator_address: string;
-  url: string;
-  moniker: string;
-  timestamp: number;
-  signature: string;
-  pub_key: string;
-  expires_at: number;
-}
-
 /** Row from GET /api/pending-validators (SQLite-backed join queue). */
 export interface PendingValidatorPublic {
   operator_address: string;
   url: string;
   moniker: string;
-  timestamp: number;
-  first_seen_at: number;
-  last_seen_at: number;
+  requested_at: number;
   expires_at: number;
 }
 
@@ -508,22 +496,6 @@ export async function getPendingValidators(): Promise<PendingValidatorPublic[]> 
   } catch {
     return [];
   }
-}
-
-/**
- * @deprecated Use {@link getPendingValidators}. Kept for older callers.
- */
-export async function getPendingRegistrations(): Promise<PendingRegistration[]> {
-  const rows = await getPendingValidators();
-  return rows.map((r) => ({
-    operator_address: r.operator_address,
-    url: r.url,
-    moniker: r.moniker,
-    timestamp: r.timestamp,
-    signature: "",
-    pub_key: "",
-    expires_at: r.expires_at,
-  }));
 }
 
 export interface ApproveRegistrationParams {

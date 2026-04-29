@@ -26,11 +26,7 @@ func TestRunPendingSweeper_DeletesExpiredRows(t *testing.T) {
 		OperatorAddress: "sv1sweep",
 		URL:             "https://s.example",
 		Moniker:         "s",
-		Timestamp:       past,
-		Signature:       "sig",
-		PubKey:          "pk",
-		FirstSeenAt:     past,
-		LastSeenAt:      past,
+		RequestedAt:     past,
 		ExpiresAt:       past + 1,
 	}); err != nil {
 		t.Fatal(err)
