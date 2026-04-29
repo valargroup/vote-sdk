@@ -278,11 +278,7 @@ func TestHandleRegisterValidator_Table(t *testing.T) {
 			OperatorAddress: operator,
 			URL:             "https://x",
 			Moniker:         "m1",
-			Timestamp:       now,
-			Signature:       "s",
-			PubKey:          "p",
-			FirstSeenAt:     now,
-			LastSeenAt:      now,
+			RequestedAt:     now,
 			ExpiresAt:       now + 3600,
 		})
 		body := map[string]interface{}{

@@ -1,9 +1,12 @@
 package admin
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestStorePendingCRUD(t *testing.T) {
@@ -20,11 +23,7 @@ func TestStorePendingCRUD(t *testing.T) {
 		OperatorAddress: "sv1abc",
 		URL:             "https://v.example.com",
 		Moniker:         "val1",
-		Timestamp:       now,
-		Signature:       "sig",
-		PubKey:          "pk",
-		FirstSeenAt:     now,
-		LastSeenAt:      now,
+		RequestedAt:     now,
 		ExpiresAt:       now + 3600,
 	}
 	if err := s.UpsertPendingRegistration(r); err != nil {
@@ -41,10 +40,11 @@ func TestStorePendingCRUD(t *testing.T) {
 		t.Fatalf("moniker: %q", list[0].Moniker)
 	}
 
-	// Upsert same operator — first_seen preserved, last_seen updated.
+	// Upsert same operator — requested_at is preserved, metadata updates.
 	r2 := r
-	r2.LastSeenAt = now + 10
+	r2.RequestedAt = now + 10
 	r2.Moniker = "val1-renamed"
+	r2.URL = "https://v2.example.com"
 	if err := s.UpsertPendingRegistration(r2); err != nil {
 		t.Fatal(err)
 	}
@@ -52,11 +52,14 @@ func TestStorePendingCRUD(t *testing.T) {
 	if len(list2) != 1 {
 		t.Fatalf("want 1 after upsert, got %d", len(list2))
 	}
-	if list2[0].FirstSeenAt != now {
-		t.Fatalf("first_seen_at should be preserved, got %d want %d", list2[0].FirstSeenAt, now)
+	if list2[0].RequestedAt != now {
+		t.Fatalf("requested_at should be preserved, got %d want %d", list2[0].RequestedAt, now)
 	}
 	if list2[0].Moniker != "val1-renamed" {
 		t.Fatalf("moniker not updated: %q", list2[0].Moniker)
+	}
+	if list2[0].URL != "https://v2.example.com" {
+		t.Fatalf("url not updated: %q", list2[0].URL)
 	}
 
 	ok, err := s.RemovePendingRegistration("sv1abc")
@@ -83,11 +86,7 @@ func TestStoreEvictExpiredPending(t *testing.T) {
 		OperatorAddress: "sv1expired",
 		URL:             "https://x.com",
 		Moniker:         "gone",
-		Timestamp:       past,
-		Signature:       "s",
-		PubKey:          "p",
-		FirstSeenAt:     past,
-		LastSeenAt:      past,
+		RequestedAt:     past,
 		ExpiresAt:       past + 1,
 	}
 	if err := s.UpsertPendingRegistration(r); err != nil {
@@ -103,5 +102,61 @@ func TestStoreEvictExpiredPending(t *testing.T) {
 	list, _ := s.ListPendingRegistrations()
 	if len(list) != 0 {
 		t.Fatalf("want empty list, got %d", len(list))
+	}
+}
+
+func TestStoreDropsLegacyPendingSchema(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "legacy.db")
+
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`
+		CREATE TABLE pending_registrations (
+			operator_address TEXT PRIMARY KEY,
+			url              TEXT NOT NULL,
+			moniker          TEXT NOT NULL,
+			timestamp        INTEGER NOT NULL,
+			signature        TEXT NOT NULL,
+			pub_key          TEXT NOT NULL,
+			first_seen_at    INTEGER NOT NULL,
+			last_seen_at     INTEGER NOT NULL,
+			expires_at       INTEGER NOT NULL
+		);
+		INSERT INTO pending_registrations (
+			operator_address, url, moniker, timestamp, signature, pub_key,
+			first_seen_at, last_seen_at, expires_at
+		) VALUES ('sv1old', 'https://old.example', 'old', 1, 'sig', 'pk', 1, 1, 9999999999);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+
+	s, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	list, err := s.ListPendingRegistrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("legacy pending rows should be dropped, got %+v", list)
+	}
+
+	now := time.Now().Unix()
+	if err := s.UpsertPendingRegistration(PendingRegistration{
+		OperatorAddress: "sv1new",
+		URL:             "",
+		Moniker:         "new",
+		RequestedAt:     now,
+		ExpiresAt:       now + 3600,
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

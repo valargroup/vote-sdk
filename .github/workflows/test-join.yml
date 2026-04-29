@@ -26,7 +26,8 @@ on:
     branches: [main]
     paths:
       - join.sh
-      - scripts/join-loop.sh
+      - scripts/svoted-wrapper.sh
+      - scripts/test_svoted_wrapper.sh
       - Dockerfile.join-test
       - scripts/test-join-docker.sh
       - .github/workflows/test-join.yml
@@ -34,7 +35,8 @@ on:
     branches: [main]
     paths:
       - join.sh
-      - scripts/join-loop.sh
+      - scripts/svoted-wrapper.sh
+      - scripts/test_svoted_wrapper.sh
       - Dockerfile.join-test
       - scripts/test-join-docker.sh
       - .github/workflows/test-join.yml
@@ -95,6 +97,9 @@ jobs:
           SVOTE_SKIP_CADDY: "1"
           SVOTE_ADMIN_URL: http://127.0.0.1:9
         run: bash join.sh
+
+      - name: Run svoted-wrapper unit smoke test
+        run: bash scripts/test_svoted_wrapper.sh
 
       - name: Verify output files and config
         shell: bash

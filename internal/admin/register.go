@@ -40,9 +40,7 @@ type PendingValidatorPublic struct {
 	OperatorAddress string `json:"operator_address"`
 	URL             string `json:"url"`
 	Moniker         string `json:"moniker"`
-	Timestamp       int64  `json:"timestamp"`
-	FirstSeenAt     int64  `json:"first_seen_at"`
-	LastSeenAt      int64  `json:"last_seen_at"`
+	RequestedAt     int64  `json:"requested_at"`
 	ExpiresAt       int64  `json:"expires_at"`
 }
 
@@ -107,11 +105,7 @@ func (h *apiHandler) handleRegisterValidator(w http.ResponseWriter, r *http.Requ
 		OperatorAddress: body.OperatorAddress,
 		URL:             body.URL,
 		Moniker:         body.Moniker,
-		Timestamp:       body.Timestamp,
-		Signature:       body.Signature,
-		PubKey:          body.PubKey,
-		FirstSeenAt:     now,
-		LastSeenAt:      now,
+		RequestedAt:     now,
 		ExpiresAt:       expiresAt,
 	}
 	if err := a.Store().UpsertPendingRegistration(reg); err != nil {
@@ -151,9 +145,7 @@ func (h *apiHandler) handleGetPendingValidators(w http.ResponseWriter, r *http.R
 			OperatorAddress: r.OperatorAddress,
 			URL:             r.URL,
 			Moniker:         r.Moniker,
-			Timestamp:       r.Timestamp,
-			FirstSeenAt:     r.FirstSeenAt,
-			LastSeenAt:      r.LastSeenAt,
+			RequestedAt:     r.RequestedAt,
 			ExpiresAt:       r.ExpiresAt,
 		})
 	}

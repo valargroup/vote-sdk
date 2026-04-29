@@ -445,24 +445,12 @@ export interface VotingConfig {
  */
 export const PIR_SNAPSHOTS_PATH = "/snapshots";
 
-export interface PendingRegistration {
-  operator_address: string;
-  url: string;
-  moniker: string;
-  timestamp: number;
-  signature: string;
-  pub_key: string;
-  expires_at: number;
-}
-
 /** Row from GET /api/pending-validators (SQLite-backed join queue). */
 export interface PendingValidatorPublic {
   operator_address: string;
   url: string;
   moniker: string;
-  timestamp: number;
-  first_seen_at: number;
-  last_seen_at: number;
+  requested_at: number;
   expires_at: number;
 }
 
@@ -510,22 +498,6 @@ export async function getPendingValidators(): Promise<PendingValidatorPublic[]> 
   }
 }
 
-/**
- * @deprecated Use {@link getPendingValidators}. Kept for older callers.
- */
-export async function getPendingRegistrations(): Promise<PendingRegistration[]> {
-  const rows = await getPendingValidators();
-  return rows.map((r) => ({
-    operator_address: r.operator_address,
-    url: r.url,
-    moniker: r.moniker,
-    timestamp: r.timestamp,
-    signature: "",
-    pub_key: "",
-    expires_at: r.expires_at,
-  }));
-}
-
 export interface ApproveRegistrationParams {
   payload: { action: "approve" | "reject"; operator_address: string };
   signature: string;
@@ -555,47 +527,6 @@ export async function rejectRegistration(params: ApproveRegistrationParams): Pro
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
   });
-}
-
-// -- Server heartbeat / approved-servers --
-
-/** Persistent list of admin-approved servers (survives pulse gaps). */
-export async function getApprovedServers(): Promise<ServiceEntry[]> {
-  try {
-    return await fetchJson<ServiceEntry[]>("/api/approved-servers");
-  } catch {
-    return [];
-  }
-}
-
-export interface RemoveApprovedServerParams {
-  payload: { action: "remove-approved"; operator_address: string };
-  signature: string;
-  pubKey: string;
-  signerAddress: string;
-}
-
-/**
- * Remove a server from approved-servers (and vote_servers + server-pulses).
- * Requires a wallet signature for vote-manager authorization.
- */
-export async function removeApprovedServer(params: RemoveApprovedServerParams): Promise<{ status: string }> {
-  return fetchJson<{ status: string }>("/api/remove-approved-server", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-}
-
-/** Pulse timestamps: { [url]: unix_timestamp }. */
-export type ServerPulses = Record<string, number>;
-
-export async function getServerPulses(): Promise<ServerPulses> {
-  try {
-    return await fetchJson<ServerPulses>("/api/server-pulses");
-  } catch {
-    return {};
-  }
 }
 
 // submitSession was removed: MsgCreateVotingSession is now a standard Cosmos

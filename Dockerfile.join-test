@@ -32,7 +32,7 @@ RUN apt-get update -q && \
     rm -rf /var/lib/apt/lists/*
 
 COPY join.sh /join.sh
-COPY scripts/join-loop.sh /scripts/join-loop.sh
+COPY scripts/svoted-wrapper.sh /scripts/svoted-wrapper.sh
 RUN chmod +x /join.sh
 
 ENV SVOTE_MONIKER=docker-test

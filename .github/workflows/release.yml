@@ -6,7 +6,7 @@
 #     ui/dist/                             (admin UI SPA)
 #     explorer/dist/                       (ping-pub block explorer SPA)
 #     systemd/svoted-val{1,2,3}.service    (Linux only)
-#     scripts/init_multi.sh, reset-archive.sh, _vote_manager_keys_lib.sh
+#     scripts/init_multi.sh, reset-archive.sh, svoted-wrapper.sh, _vote_manager_keys_lib.sh
 #     config/Caddyfile
 
 name: Release
@@ -222,8 +222,8 @@ jobs:
           cp scripts/init_multi.sh scripts/_vote_manager_keys_lib.sh "${DIR}/scripts/"
           cp scripts/reset-archive.sh "${DIR}/scripts/"
           chmod +x "${DIR}/scripts/reset-archive.sh"
-          cp scripts/join-loop.sh "${DIR}/scripts/"
-          chmod +x "${DIR}/scripts/join-loop.sh"
+          cp scripts/svoted-wrapper.sh "${DIR}/scripts/"
+          chmod +x "${DIR}/scripts/svoted-wrapper.sh"
           cp deploy/Caddyfile "${DIR}/config/"
           tar czf "${DIR}.tar.gz" "${DIR}"
           sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
@@ -289,11 +289,11 @@ jobs:
           echo "${VERSION}" > /tmp/version.txt
           s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put join.sh s3://vote/join.sh --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/join-loop.sh s3://vote/join-loop.sh --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/svoted-wrapper.sh s3://vote/svoted-wrapper.sh --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join.sh \
             "s3://vote/scripts/join/${VERSION}/join.sh"
-          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/join-loop.sh \
-            "s3://vote/scripts/join-loop/${VERSION}/join-loop.sh"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/svoted-wrapper.sh \
+            "s3://vote/scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"
 
   deploy:
     name: Deploy
