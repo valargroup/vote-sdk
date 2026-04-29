@@ -515,7 +515,7 @@ echo ""
 echo "=== Discovering network ==="
 
 echo "Fetching voting-config from ${VOTING_CONFIG_URL}..."
-if ! VOTING_CONFIG=$(curl -fsSL --connect-timeout 15 --max-time 60 "${VOTING_CONFIG_URL}"); then
+if ! VOTING_CONFIG=$(curl -fsSL --retry 5 --retry-delay 2 --retry-max-time 60 --connect-timeout 15 --max-time 60 "${VOTING_CONFIG_URL}"); then
   echo "ERROR: Could not fetch voting-config from ${VOTING_CONFIG_URL}"
   echo "  Set VOTING_CONFIG_URL to a reachable mirror, or fix network access."
   exit 1
@@ -533,7 +533,12 @@ echo "Seed node: ${SEED_URL}"
 echo "Admin / join API base: ${SVOTE_ADMIN_URL}"
 
 # Fetch the node's P2P identity.
-NODE_INFO=$(curl -fsSL "${SEED_URL}/cosmos/base/tendermint/v1beta1/node_info")
+NODE_INFO_URL="${SEED_URL%/}/cosmos/base/tendermint/v1beta1/node_info"
+if ! NODE_INFO=$(curl -fsSL --retry 5 --retry-delay 2 --retry-max-time 60 --connect-timeout 15 --max-time 30 "${NODE_INFO_URL}"); then
+  echo "ERROR: Could not fetch node_info from ${NODE_INFO_URL}"
+  echo "  The seed node may be restarting; retry join.sh in a minute."
+  exit 1
+fi
 NODE_ID=$(echo "$NODE_INFO" | jq -r '.default_node_info.default_node_id // .default_node_info.id // empty')
 LISTEN_ADDR=$(echo "$NODE_INFO" | jq -r '.default_node_info.listen_addr // empty')
 
