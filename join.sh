@@ -9,9 +9,9 @@
 #   SVOTE_LOCAL_BINARIES=1 ./join.sh   # uses local binaries, skips download
 #
 # What it does:
-#   1. Acquires svoted + create-val-tx (always downloads latest; set SVOTE_LOCAL_BINARIES=1 to use local)
-#   2. Fetches voting-config from the GitHub Pages CDN (canonical source; same one wallets use)
-#   3. Fetches node identity from the first vote_servers[] URL (PEX seed)
+#   1. Fetches voting-config from the GitHub Pages CDN (canonical source; same one wallets use)
+#   2. Fetches node identity and active app version from the first vote_servers[] URL (PEX seed)
+#   3. Acquires svoted + create-val-tx for the active chain version (set SVOTE_LOCAL_BINARIES=1 to use local)
 #   4. Downloads genesis.json from DO Spaces (canonical file from sdk-chain-reset)
 #   5. Restores the latest pruned chain-data snapshot when one is published
 #   6. Generates cryptographic keys
@@ -365,12 +365,90 @@ else
   fi
 fi
 
+# ─── Discover network via voting-config (CDN) ───────────────────────────────
+# The voting-config JSON is the same one wallets fetch from
+# valargroup.github.io/token-holder-voting-config (ZIP 1244 §Vote Configuration
+# Format). We use vote_servers[0] as the seed peer for P2P; SVOTE_ADMIN_URL is
+# a separate base for the join queue and helper heartbeat.
+
+echo ""
+echo "=== Discovering network ==="
+
+echo "Fetching voting-config from ${VOTING_CONFIG_URL}..."
+if ! VOTING_CONFIG=$(curl -fsSL --retry 5 --retry-delay 2 --retry-max-time 60 --connect-timeout 15 --max-time 60 "${VOTING_CONFIG_URL}"); then
+  echo "ERROR: Could not fetch voting-config from ${VOTING_CONFIG_URL}"
+  echo "  Set VOTING_CONFIG_URL to a reachable mirror, or fix network access."
+  exit 1
+fi
+
+SEED_URL=$(echo "$VOTING_CONFIG" | jq -r '.vote_servers[0].url // empty')
+
+if [ -z "$SEED_URL" ] || [ "$SEED_URL" = "null" ]; then
+  echo "ERROR: No vote_servers[0].url in voting-config (upstream returned an empty list)."
+  echo "  The maintainers of token-holder-voting-config need to publish at least one validator URL."
+  exit 1
+fi
+
+echo "Seed node: ${SEED_URL}"
+echo "Admin / join API base: ${SVOTE_ADMIN_URL}"
+
+# Fetch the node's P2P identity and active app version. The app version, not
+# the latest published release marker, is the binary version that can replay
+# new blocks without app-hash divergence.
+NODE_INFO_URL="${SEED_URL%/}/cosmos/base/tendermint/v1beta1/node_info"
+if ! NODE_INFO=$(curl -fsSL --retry 5 --retry-delay 2 --retry-max-time 60 --connect-timeout 15 --max-time 30 "${NODE_INFO_URL}"); then
+  echo "ERROR: Could not fetch node_info from ${NODE_INFO_URL}"
+  echo "  The seed node may be restarting; retry join.sh in a minute."
+  exit 1
+fi
+NODE_ID=$(echo "$NODE_INFO" | jq -r '.default_node_info.default_node_id // .default_node_info.id // empty')
+LISTEN_ADDR=$(echo "$NODE_INFO" | jq -r '.default_node_info.listen_addr // empty')
+CHAIN_BINARY_VERSION=$(echo "$NODE_INFO" | jq -r '.application_version.version // empty')
+
+if [ -z "$NODE_ID" ]; then
+  echo "ERROR: Could not fetch node_id from ${SEED_URL}"
+  exit 1
+fi
+
+if [ -n "${SVOTE_RELEASE_VERSION:-}" ]; then
+  echo "Using SVOTE_RELEASE_VERSION override: ${SVOTE_RELEASE_VERSION}"
+  CHAIN_BINARY_VERSION="${SVOTE_RELEASE_VERSION}"
+elif [ -z "$CHAIN_BINARY_VERSION" ] || [ "$CHAIN_BINARY_VERSION" = "null" ]; then
+  echo "WARNING: Could not read active chain app version from ${NODE_INFO_URL}."
+  echo "  Falling back to ${DO_BASE}/version.txt."
+  CHAIN_BINARY_VERSION=$(curl -fsSL "${DO_BASE}/version.txt" | tr -d '[:space:]')
+fi
+
+if [ -z "$CHAIN_BINARY_VERSION" ]; then
+  echo "ERROR: Could not resolve a release version for this chain."
+  exit 1
+fi
+
+if ! printf '%s\n' "$CHAIN_BINARY_VERSION" | grep -Eq '^v[0-9]+(\.[0-9]+)*([._-][A-Za-z0-9]+)*$'; then
+  echo "ERROR: Active chain app version is not a valid release tag: ${CHAIN_BINARY_VERSION}"
+  exit 1
+fi
+
+# Extract the host from the seed URL and the P2P port from the node's listen address.
+SEED_HOST=$(echo "$SEED_URL" | sed -E 's|^https?://||; s|:[0-9]+$||; s|/.*||')
+P2P_PORT=$(echo "$LISTEN_ADDR" | sed -E 's|.*:([0-9]+)$|\1|')
+P2P_PORT="${P2P_PORT:-26656}"
+PERSISTENT_PEERS="${NODE_ID}@${SEED_HOST}:${P2P_PORT}"
+echo "Chain binary version: ${CHAIN_BINARY_VERSION}"
+echo "Peers: ${PERSISTENT_PEERS}"
+
 # ─── Acquire binaries ────────────────────────────────────────────────────────
-# Always download the latest release binaries from DO Spaces to avoid version
-# mismatches. Source developers who built from source can skip the download by
-# setting SVOTE_LOCAL_BINARIES=1 before running the script.
+# Download the binary release that the active chain is running. Source
+# developers can skip the download by setting SVOTE_LOCAL_BINARIES=1 before
+# running the script; that local svoted must report the active chain version.
 
 if [ "${SVOTE_LOCAL_BINARIES:-0}" = "1" ] && command -v svoted > /dev/null 2>&1 && command -v create-val-tx > /dev/null 2>&1; then
+  LOCAL_SVOTED_VERSION=$(svoted version 2>/dev/null | tr -d '[:space:]' || true)
+  if [ "$LOCAL_SVOTED_VERSION" != "$CHAIN_BINARY_VERSION" ] && [ "${SVOTE_ALLOW_VERSION_MISMATCH:-0}" != "1" ]; then
+    echo "ERROR: Local svoted version ${LOCAL_SVOTED_VERSION:-<unknown>} does not match active chain ${CHAIN_BINARY_VERSION}."
+    echo "  Unset SVOTE_LOCAL_BINARIES to download the matching release, or set SVOTE_ALLOW_VERSION_MISMATCH=1 if you are intentionally testing a fork."
+    exit 1
+  fi
   echo "Using local binaries (SVOTE_LOCAL_BINARIES=1):"
   echo "  svoted:         $(command -v svoted)"
   echo "  create-val-tx:  $(command -v create-val-tx)"
@@ -402,11 +480,7 @@ else
 
   mkdir -p "${INSTALL_DIR}"
 
-  VERSION=$(curl -fsSL "${DO_BASE}/version.txt" | tr -d '[:space:]')
-  if [ -z "$VERSION" ]; then
-    echo "ERROR: Could not fetch version from ${DO_BASE}/version.txt"
-    exit 1
-  fi
+  VERSION="${CHAIN_BINARY_VERSION}"
 
   echo "Version: ${VERSION}"
   echo "Platform: ${PLATFORM}"
@@ -526,55 +600,6 @@ case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;
   *) export PATH="${INSTALL_DIR}:${PATH}" ;;
 esac
-
-# ─── Discover network via voting-config (CDN) ───────────────────────────────
-# The voting-config JSON is the same one wallets fetch from
-# valargroup.github.io/token-holder-voting-config (ZIP 1244 §Vote Configuration
-# Format). We use vote_servers[0] as the seed peer for P2P; SVOTE_ADMIN_URL is
-# a separate base for the join queue and helper heartbeat.
-
-echo ""
-echo "=== Discovering network ==="
-
-echo "Fetching voting-config from ${VOTING_CONFIG_URL}..."
-if ! VOTING_CONFIG=$(curl -fsSL --retry 5 --retry-delay 2 --retry-max-time 60 --connect-timeout 15 --max-time 60 "${VOTING_CONFIG_URL}"); then
-  echo "ERROR: Could not fetch voting-config from ${VOTING_CONFIG_URL}"
-  echo "  Set VOTING_CONFIG_URL to a reachable mirror, or fix network access."
-  exit 1
-fi
-
-SEED_URL=$(echo "$VOTING_CONFIG" | jq -r '.vote_servers[0].url // empty')
-
-if [ -z "$SEED_URL" ] || [ "$SEED_URL" = "null" ]; then
-  echo "ERROR: No vote_servers[0].url in voting-config (upstream returned an empty list)."
-  echo "  The maintainers of token-holder-voting-config need to publish at least one validator URL."
-  exit 1
-fi
-
-echo "Seed node: ${SEED_URL}"
-echo "Admin / join API base: ${SVOTE_ADMIN_URL}"
-
-# Fetch the node's P2P identity.
-NODE_INFO_URL="${SEED_URL%/}/cosmos/base/tendermint/v1beta1/node_info"
-if ! NODE_INFO=$(curl -fsSL --retry 5 --retry-delay 2 --retry-max-time 60 --connect-timeout 15 --max-time 30 "${NODE_INFO_URL}"); then
-  echo "ERROR: Could not fetch node_info from ${NODE_INFO_URL}"
-  echo "  The seed node may be restarting; retry join.sh in a minute."
-  exit 1
-fi
-NODE_ID=$(echo "$NODE_INFO" | jq -r '.default_node_info.default_node_id // .default_node_info.id // empty')
-LISTEN_ADDR=$(echo "$NODE_INFO" | jq -r '.default_node_info.listen_addr // empty')
-
-if [ -z "$NODE_ID" ]; then
-  echo "ERROR: Could not fetch node_id from ${SEED_URL}"
-  exit 1
-fi
-
-# Extract the host from the seed URL and the P2P port from the node's listen address.
-SEED_HOST=$(echo "$SEED_URL" | sed -E 's|^https?://||; s|:[0-9]+$||; s|/.*||')
-P2P_PORT=$(echo "$LISTEN_ADDR" | sed -E 's|.*:([0-9]+)$|\1|')
-P2P_PORT="${P2P_PORT:-26656}"
-PERSISTENT_PEERS="${NODE_ID}@${SEED_HOST}:${P2P_PORT}"
-echo "Peers: ${PERSISTENT_PEERS}"
 
 # ─── Initialize node ─────────────────────────────────────────────────────────
 
