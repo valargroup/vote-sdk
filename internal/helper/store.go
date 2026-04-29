@@ -32,6 +32,7 @@ type ShareStore struct {
 	fetchRoundInfo RoundInfoFetcher                 // queries the chain; may be nil in tests
 	logger         func(msg string, keyvals ...any) // optional error logger
 	logInfo        func(msg string, keyvals ...any) // optional info logger
+	captureErr     func(err error, tags map[string]string)
 }
 
 // EnqueueResult reports how an enqueue attempt was handled.
@@ -532,6 +533,42 @@ func (s *ShareStore) logError(msg string, keyvals ...any) {
 	if s.logger != nil {
 		s.logger(msg, keyvals...)
 	}
+	if s.captureErr == nil {
+		return
+	}
+	var err error
+	tags := map[string]string{
+		"component": "helper_store",
+		"stage":     msg,
+	}
+	for i := 0; i+1 < len(keyvals); i += 2 {
+		key, ok := keyvals[i].(string)
+		if !ok {
+			continue
+		}
+		value := keyvals[i+1]
+		if key == "error" {
+			if e, ok := value.(error); ok {
+				err = e
+			}
+			continue
+		}
+		switch v := value.(type) {
+		case string:
+			tags[key] = v
+		case fmt.Stringer:
+			tags[key] = v.String()
+		case int:
+			tags[key] = strconv.Itoa(v)
+		case uint32:
+			tags[key] = strconv.FormatUint(uint64(v), 10)
+		case uint64:
+			tags[key] = strconv.FormatUint(v, 10)
+		}
+	}
+	if err != nil {
+		s.captureErr(fmt.Errorf("%s: %w", msg, err), tags)
+	}
 }
 
 // Status returns per-round queue statistics.
@@ -568,6 +605,63 @@ func (s *ShareStore) Status() map[string]QueueStatus {
 	}
 
 	return result
+}
+
+// ExpiredRoundSummaries returns per-round queue counts for rounds whose voting
+// window has ended. Call this before PurgeExpiredRounds so unsubmitted share
+// alerts can be emitted without retaining witness data.
+func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(
+		`SELECT round_id, state, COUNT(*)
+		   FROM shares
+		  WHERE vote_end_time > 0 AND vote_end_time < ?
+		  GROUP BY round_id, state`,
+		now.Unix(),
+	)
+	if err != nil {
+		s.logError("ExpiredRoundSummaries: query failed", "error", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	byRound := make(map[string]*ExpiredRoundSummary)
+	var order []string
+	for rows.Next() {
+		var roundID string
+		var state, count int
+		if err := rows.Scan(&roundID, &state, &count); err != nil {
+			s.logError("ExpiredRoundSummaries: scan failed", "error", err)
+			return nil, err
+		}
+		summary := byRound[roundID]
+		if summary == nil {
+			summary = &ExpiredRoundSummary{RoundID: roundID}
+			byRound[roundID] = summary
+			order = append(order, roundID)
+		}
+		summary.Total += count
+		switch ShareState(state) {
+		case ShareStateReceived, ShareStateWitnessed:
+			summary.Pending += count
+		case ShareStateSubmitted:
+			summary.Submitted += count
+		case ShareStateFailed:
+			summary.Failed += count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		s.logError("ExpiredRoundSummaries: rows failed", "error", err)
+		return nil, err
+	}
+
+	summaries := make([]ExpiredRoundSummary, 0, len(order))
+	for _, roundID := range order {
+		summaries = append(summaries, *byRound[roundID])
+	}
+	return summaries, nil
 }
 
 // Close closes the database connection.

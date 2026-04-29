@@ -254,6 +254,9 @@ func (h *apiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		if tree := h.getTree(); tree != nil {
 			if ts, err := tree.GetTreeStatus(); err == nil {
 				resp.Tree = &ts
+			} else {
+				h.logger.Error("tree status read failed", "error", err)
+				CaptureErr(err, map[string]string{"stage": "tree_status"})
 			}
 		}
 	}
@@ -329,12 +332,24 @@ func (h *apiHandler) verifyCommitment(p *SharePayload) error {
 	computed, err := vcHash(roundID, sharesHash, p.ProposalID, p.VoteDecision)
 	if err != nil {
 		h.logger.Error("vc hash computation failed", "error", err)
+		CaptureErr(err, map[string]string{
+			"round_id":      p.VoteRoundID,
+			"proposal_id":   fmt.Sprintf("%d", p.ProposalID),
+			"tree_position": fmt.Sprintf("%d", p.TreePosition),
+			"stage":         "vc_hash",
+		})
 		return ErrInvalidCommitment
 	}
 
 	onChain, err := tree.LeafAt(p.TreePosition)
 	if err != nil {
 		h.logger.Error("leaf read failed", "tree_position", p.TreePosition, "error", err)
+		CaptureErr(err, map[string]string{
+			"round_id":      p.VoteRoundID,
+			"proposal_id":   fmt.Sprintf("%d", p.ProposalID),
+			"tree_position": fmt.Sprintf("%d", p.TreePosition),
+			"stage":         "leaf_read",
+		})
 		return fmt.Errorf("%w: tree read error", ErrInvalidCommitment)
 	}
 	if onChain == nil {

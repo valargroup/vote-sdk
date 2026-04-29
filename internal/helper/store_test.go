@@ -353,6 +353,35 @@ func TestPurgeExpiredRounds(t *testing.T) {
 	assert.Equal(t, 1, status["active_round"].Total)
 }
 
+func TestExpiredRoundSummaries(t *testing.T) {
+	fetcher := func(roundID string) (uint64, error) {
+		return uint64(time.Now().Add(-time.Hour).Unix()), nil
+	}
+
+	s, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	enqueueAndRequireInserted(t, s, testPayload("expired_round", 0))
+	enqueueAndRequireInserted(t, s, testPayload("expired_round", 1))
+
+	ready := s.TakeReady()
+	require.Len(t, ready, 2)
+	s.MarkSubmitted("expired_round", 0, 1, 0)
+	s.MarkFailed("expired_round", 1, 1, 0)
+
+	summaries, err := s.ExpiredRoundSummaries(time.Now())
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+
+	assert.Equal(t, "expired_round", summaries[0].RoundID)
+	assert.Equal(t, 2, summaries[0].Total)
+	assert.Equal(t, 1, summaries[0].Pending)
+	assert.Equal(t, 1, summaries[0].Submitted)
+	assert.Equal(t, 0, summaries[0].Failed)
+	assert.Equal(t, 1, summaries[0].Unsubmitted())
+}
+
 func TestGetRoundEndTime_Cache(t *testing.T) {
 	fetchCalls := 0
 	fetcher := func(roundID string) (uint64, error) {
