@@ -782,7 +782,8 @@ CADDYEOF
   fi
 
   if [ "$OS_NAME" = "Darwin" ]; then
-    if ! caddy validate --config "${CADDYFILE}"; then
+    if ! CADDY_VALIDATE_OUTPUT=$(caddy validate --config "${CADDYFILE}" 2>&1); then
+      printf '%s\n' "${CADDY_VALIDATE_OUTPUT}"
       handle_public_url_failure "Caddy config validation failed for ${CADDYFILE}."
     fi
     # On macOS, Caddy is managed as part of the launchd plist (see below).
@@ -790,7 +791,8 @@ CADDYEOF
       echo "Caddy config validated: ${VALIDATOR_URL} → localhost:1317"
     fi
   else
-    if ! sudo caddy validate --config "${CADDYFILE}"; then
+    if ! CADDY_VALIDATE_OUTPUT=$(sudo caddy validate --config "${CADDYFILE}" 2>&1); then
+      printf '%s\n' "${CADDY_VALIDATE_OUTPUT}"
       handle_public_url_failure "Caddy config validation failed for ${CADDYFILE}."
     fi
     if [ -n "$VALIDATOR_URL" ]; then
@@ -1182,7 +1184,7 @@ echo "Send this message:"
 echo ""
 echo "  Please approve my Shielded-Vote validator."
 echo "  Name: ${MONIKER}"
-echo "  Node hash: ${VALIDATOR_ADDR}"
+echo "  Validator address: ${VALIDATOR_ADDR}"
 echo "  Public URL: ${VALIDATOR_URL:-not configured}"
 echo ""
 echo "Background approval watcher:"
