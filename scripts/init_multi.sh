@@ -281,7 +281,9 @@ $BINARY init val1 --chain-id "$CHAIN_ID" --home "$HOME_VAL1"
 # Create validator key.
 $BINARY keys add validator --keyring-backend test --home "$HOME_VAL1"
 VAL1_ADDR=$($BINARY keys show validator -a --keyring-backend test --home "$HOME_VAL1")
+VAL1_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend test --home "$HOME_VAL1")
 echo "Val1 address: $VAL1_ADDR"
+echo "Val1 valoper: $VAL1_VALOPER"
 
 # Import the bootstrap vote-manager keys. VM_PRIVKEYS is a comma-separated list
 # of 64-char hex secp256k1 private keys; every derived address becomes a vote
@@ -362,24 +364,30 @@ $BINARY genesis gentx validator "$VAL1_SELF_DELEGATION" \
 # Collect genesis transactions and validate.
 $BINARY genesis collect-gentxs --home "$HOME_VAL1"
 
+# Generate Pallas keypair for val1 (EA key is generated per-round by auto-deal).
+# Val1 is bonded at genesis, so seed its Pallas public key into genesis state.
+$BINARY pallas-keygen --home "$HOME_VAL1"
+VAL1_PALLAS_PK_B64=$(base64 < "$HOME_VAL1/pallas.pk" | tr -d '\n')
+
 # Build the vote_manager_addresses JSON array for the genesis patch.
 VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .)
 
 # Patch genesis: set vote_manager_addresses to the imported keys' addresses,
+# register val1's Pallas key for EA ceremonies,
 # disable staking historical-info retention, and zero out slashing slash
 # fractions (no token burn).
 GENESIS="$HOME_VAL1/config/genesis.json"
-jq --argjson vms "$VOTE_MANAGER_JSON" '
+jq --argjson vms "$VOTE_MANAGER_JSON" \
+  --arg validator "$VAL1_VALOPER" \
+  --arg pallasPk "$VAL1_PALLAS_PK_B64" '
   .app_state.vote.vote_manager_addresses = $vms
+  | .app_state.vote.pallas_keys = [{validator_address: $validator, pallas_pk: $pallasPk}]
   | .app_state.staking.params.historical_entries = 0
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"
 
 $BINARY genesis validate-genesis --home "$HOME_VAL1"
-
-# Generate Pallas keypair for val1 (EA key is generated per-round by auto-deal).
-$BINARY pallas-keygen --home "$HOME_VAL1"
 
 # Configure ports.
 configure_config_toml "$HOME_VAL1" "${P2P_PORTS[0]}" "${RPC_PORTS[0]}" "${PPROF_PORTS[0]}"
