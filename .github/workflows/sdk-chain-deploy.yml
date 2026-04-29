@@ -11,7 +11,7 @@ on:
         type: string
         required: true
       include_snapshot:
-        description: "Deploy the dedicated snapshot node. Enable only after vote-snapshot is provisioned and SNAPSHOT_HOST exists."
+        description: "Deploy the dedicated snapshot node. Enable only after vote-snapshot is provisioned and snapshots DNS resolves."
         type: boolean
         default: false
   workflow_call:
@@ -21,7 +21,7 @@ on:
         type: string
         required: true
       include_snapshot:
-        description: "Deploy the dedicated snapshot node. Enable only after vote-snapshot is provisioned and SNAPSHOT_HOST exists."
+        description: "Deploy the dedicated snapshot node. Enable only after vote-snapshot is provisioned and snapshots DNS resolves."
         type: boolean
         default: false
 
@@ -163,7 +163,7 @@ jobs:
       - name: Deploy to snapshot Droplet
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SNAPSHOT_HOST }}
+          host: snapshots.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: SENTRY_DSN,TAG
@@ -187,7 +187,7 @@ jobs:
       - name: Verify snapshot frontend healthy
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SNAPSHOT_HOST }}
+          host: snapshots.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
