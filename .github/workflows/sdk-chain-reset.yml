@@ -72,10 +72,35 @@ jobs:
             systemctl reset-failed snapshot.timer snapshot.service svoted || true
             echo "Snapshot publisher quiesced."
 
+  quiesce-archive:
+    name: Quiesce archive publisher
+    runs-on: ubuntu-latest
+    needs: validate-tag
+    steps:
+      - name: Stop archive snapshot timer before chain reset
+        uses: appleboy/ssh-action@v1.0.3
+        timeout-minutes: 5
+        with:
+          host: explorer.${{ secrets.DOMAIN }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+
+            # Stop archive publishing before upload-genesis clears public
+            # snapshot artifacts, so old archive state cannot republish after
+            # the bucket prefix is wiped.
+            systemctl stop archive-snapshot.timer || true
+            systemctl disable archive-snapshot.timer || true
+            systemctl stop archive-snapshot.service || true
+            systemctl stop svoted || true
+            systemctl reset-failed archive-snapshot.timer archive-snapshot.service svoted || true
+            echo "Archive publisher quiesced."
+
   reset-primary:
     name: Reset primary (bootstrap)
     runs-on: ubuntu-latest
-    needs: quiesce-snapshot
+    needs: [quiesce-snapshot, quiesce-archive]
     steps:
       - name: Install tag and reset primary
         uses: appleboy/ssh-action@v1.0.3
@@ -251,6 +276,42 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-snapshot.sh" -o /tmp/reset-snapshot.sh
             bash /tmp/reset-snapshot.sh
 
+      - name: Publish initial pruned snapshot
+        uses: appleboy/ssh-action@v1.0.3
+        timeout-minutes: 30
+        with:
+          host: ${{ secrets.SNAPSHOT_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+
+            systemctl stop snapshot.timer || true
+            for i in $(seq 1 20); do
+              if /opt/shielded-vote/snapshot-publish.sh; then
+                systemctl enable --now snapshot.timer
+                echo "Initial pruned snapshot published."
+                break
+              fi
+              if [ "$i" = "20" ]; then
+                echo "ERROR: Initial pruned snapshot publish failed after retries."
+                systemctl enable --now snapshot.timer || true
+                exit 1
+              fi
+              echo "Snapshot node is not ready to publish yet; retrying... ($i/20)"
+              systemctl reset-failed snapshot.service || true
+              sleep 30
+            done
+
+            for path in /daily.json /latest.json /snapshots.json; do
+              curl -fsS -H "Host: snapshots.${{ secrets.DOMAIN }}" "http://localhost${path}" | jq empty
+              echo "[OK] ${path}"
+            done
+            curl -fsS -H "Host: snapshots.${{ secrets.DOMAIN }}" http://localhost/daily.json \
+              | jq -e '.roles | index("daily")' > /dev/null
+            curl -fsS -H "Host: snapshots.${{ secrets.DOMAIN }}" http://localhost/latest.json \
+              | jq -e '.roles | index("latest")' > /dev/null
+
       - name: Verify snapshot services
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -321,7 +382,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: ${{ secrets.EXPLORER_HOST }}
+          host: explorer.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: TAG
@@ -346,7 +407,7 @@ jobs:
       - name: Verify archive health
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EXPLORER_HOST }}
+          host: explorer.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -360,6 +421,39 @@ jobs:
             done
             echo "ERROR: Archive REST API not healthy."
             exit 1
+
+      - name: Publish initial archive snapshot
+        uses: appleboy/ssh-action@v1.0.3
+        timeout-minutes: 60
+        with:
+          host: explorer.${{ secrets.DOMAIN }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+
+            systemctl stop archive-snapshot.timer || true
+            for i in $(seq 1 20); do
+              if /opt/shielded-vote/archive-snapshot-publish.sh; then
+                systemctl enable --now archive-snapshot.timer
+                echo "Initial archive snapshot published."
+                break
+              fi
+              if [ "$i" = "20" ]; then
+                echo "ERROR: Initial archive snapshot publish failed after retries."
+                systemctl enable --now archive-snapshot.timer || true
+                exit 1
+              fi
+              echo "Archive node is not ready to publish yet; retrying... ($i/20)"
+              systemctl reset-failed archive-snapshot.service || true
+              sleep 30
+            done
+
+            curl -fsS "https://snapshots.${{ secrets.DOMAIN }}/archive/latest.json" \
+              | jq -e '.type == "archive" and (.roles | index("latest")) and (.roles | index("archive"))' > /dev/null
+            curl -fsS "https://snapshots.${{ secrets.DOMAIN }}/archive/snapshots.json" \
+              | jq -e 'length == 1 and .[0].type == "archive"' > /dev/null
+            echo "Archive snapshot metadata healthy."
 
   verify:
     name: Post-reset verification
@@ -412,12 +506,21 @@ jobs:
             fi
             sleep 10
           done
+          for PATH in /daily.json /latest.json /snapshots.json /archive/latest.json; do
+            URL="https://snapshots.${{ secrets.DOMAIN }}${PATH}"
+            if curl -fsS "$URL" | jq empty > /dev/null; then
+              echo "[OK] snapshot metadata ${PATH}"
+            else
+              echo "[FAIL] snapshot metadata ${PATH}"
+              FAILED=1
+            fi
+          done
           exit $FAILED
 
   notify-slack:
     name: Slack Notification
     if: ${{ always() && contains(join(needs.*.result, ','), 'failure') }}
-    needs: [quiesce-snapshot, reset-primary, upload-genesis, fund-secondary, reset-snapshot, reset-secondary, reset-archive, verify]
+    needs: [quiesce-snapshot, quiesce-archive, reset-primary, upload-genesis, fund-secondary, reset-snapshot, reset-secondary, reset-archive, verify]
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
@@ -442,7 +545,7 @@ jobs:
                 },
                 {
                   "type": "section",
-                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nQuiesce Snapshot: `${{ needs.quiesce-snapshot.result }}` | Reset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Snapshot: `${{ needs.reset-snapshot.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Reset Archive: `${{ needs.reset-archive.result }}` | Verify: `${{ needs.verify.result }}`" }
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nQuiesce Snapshot: `${{ needs.quiesce-snapshot.result }}` | Quiesce Archive: `${{ needs.quiesce-archive.result }}` | Reset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Snapshot: `${{ needs.reset-snapshot.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Reset Archive: `${{ needs.reset-archive.result }}` | Verify: `${{ needs.verify.result }}`" }
                 }
               ]
             }
