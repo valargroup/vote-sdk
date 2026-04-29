@@ -10,7 +10,7 @@ same class of overrides on their mainnet (v31, CometBFT v0.38).
 | Parameter | svoted | Osmosis mainnet | CometBFT default | Purpose |
 |---|---|---|---|---|
 | `timeout_propose` | **1.8s** | 1.4s | 3s | Max wait for a block proposal before prevoting nil |
-| `timeout_commit` | **800ms** | 400ms | 1s | Idle delay after commit before starting next height |
+| `timeout_commit` | **950ms** | 400ms | 1s | Idle delay after commit before starting next height |
 | `peer_gossip_sleep_duration` | **50ms** | 50ms | 100ms | Sleep between gossip rounds (faster vote propagation) |
 | `p2p.flush_throttle_timeout` | **80ms** | 80ms | 100ms | P2P message flush interval |
 
@@ -24,7 +24,7 @@ the actual peak is well under 120ms (see below).
 
 ## Observed block time
 
-With the current `800ms` `timeout_commit`, blocks that contain transactions can
+With the current `950ms` `timeout_commit`, blocks that contain transactions can
 still commit at roughly **1.2s** cadence. The previous `400ms` `timeout_commit`
 setting produced **~0.91s average** blocks in a 30-validator Docker testnet,
 compared to ~4-6s with CometBFT defaults.
@@ -88,7 +88,7 @@ The heaviest single-block operation (DKG ack at 116ms) uses **6.4%** of the
 Propose ──────────► Prevote ──────────► Precommit ──────────► Commit
   │                   │                    │                    │
   │ timeout_propose   │ timeout_prevote    │ timeout_precommit  │ timeout_commit
-  │ (1.8s)            │ (1s default)       │ (1s default)       │ (800ms)
+  │ (1.8s)            │ (1s default)       │ (1s default)       │ (950ms)
   │                   │                    │                    │
   ▼                   ▼                    ▼                    ▼
 PrepareProposal    Internal CometBFT    Internal CometBFT    BeginBlock
@@ -101,7 +101,7 @@ ProcessProposal    voting               voting               DeliverTx
   includes `PrepareProposal` compute + network delivery). This is the primary
   parameter that must accommodate our DKG/tally crypto work.
 - `timeout_commit` is an idle delay after the block is committed. Setting it
-  to 800ms keeps active block production faster than CometBFT defaults while
+  to 950ms keeps active block production faster than CometBFT defaults while
   targeting a roughly 1.2s cadence when there are transactions.
 - `timeout_prevote` and `timeout_precommit` are left at the 1s CometBFT
   default. They are not performance-critical for our workload.
