@@ -35,9 +35,8 @@ SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-https://snapshots.valargroup.org}"
 # Canonical voting-config (same payload wallets fetch). Override for staging
 # mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
 VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://valargroup.github.io/token-holder-voting-config/voting-config.json}"
-# Admin API base — used once for POST /api/register-validator during setup and
-# by the helper heartbeat after the public URL is configured. Override via
-# SVOTE_ADMIN_URL when joining a non-default deployment.
+# Admin API base — used once for POST /api/register-validator during setup.
+# Override via SVOTE_ADMIN_URL when joining a non-default deployment.
 DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-https://vote-chain-primary.valargroup.org}"
 SVOTE_ADMIN_URL="${SVOTE_ADMIN_URL:-${DEFAULT_ADMIN_API_BASE}}"
 
@@ -165,6 +164,17 @@ build_register_body() {
 
 JOIN_QUEUE_STATUS="not attempted"
 
+join_registration_landed() {
+  case "${JOIN_QUEUE_STATUS}" in
+    pending|registered|bonded)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 handle_public_url_failure() {
   local message="$1"
   VALIDATOR_URL=""
@@ -177,7 +187,7 @@ handle_public_url_failure() {
   fi
 
   echo "WARNING: ${message}"
-  echo "  Continuing with no public URL. Vote managers can still fund this operator from the join queue."
+  echo "  Continuing with no public URL. Registration can still add this operator to the join queue for funding."
   echo "  The validator will not be client-ready until a public HTTPS URL is configured."
 }
 
@@ -188,7 +198,11 @@ print_join_status() {
     echo "Public URL: configured ${VALIDATOR_URL}"
   else
     echo "Public URL: missing"
-    echo "  Vote managers can still fund the operator address from the join queue."
+    if join_registration_landed; then
+      echo "  Vote managers can still fund the operator address from the join queue."
+    else
+      echo "  Share the operator address with the admin for manual funding/approval."
+    fi
     echo "  Configure public HTTPS before treating this validator as client-ready."
   fi
 }
@@ -369,7 +383,7 @@ fi
 # The voting-config JSON is the same one wallets fetch from
 # valargroup.github.io/token-holder-voting-config (ZIP 1244 §Vote Configuration
 # Format). We use vote_servers[0] as the seed peer for P2P; SVOTE_ADMIN_URL is
-# a separate base for one-time join registration and helper heartbeat.
+# a separate base for one-time join registration.
 
 echo ""
 echo "=== Discovering network ==="
@@ -720,13 +734,6 @@ chain_api_port = 1317
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = 2
 
-# Admin server base URL — used by the helper for POST /api/server-heartbeat
-# every 2h after helper_url is set. Empty disables the heartbeat.
-admin_url = "${SVOTE_ADMIN_URL}"
-
-# This server's public URL as seen by clients (set after Caddy TLS setup).
-# Empty disables the heartbeat.
-helper_url = ""
 HELPERCFG
 
 echo "Node configured."
@@ -908,12 +915,6 @@ CADDYEOF
   fi
 else
   VALIDATOR_URL=""
-fi
-
-# Patch [helper] helper_url now that VALIDATOR_URL is known.
-if [ -n "$VALIDATOR_URL" ]; then
-  sed -i.bak "s|^helper_url = \"\"$|helper_url = \"${VALIDATOR_URL}\"|" "${APP_TOML}"
-  rm -f "${APP_TOML}.bak"
 fi
 
 # ─── Phase 1: Register as pending validator ─────────────────────────────────
@@ -1171,7 +1172,7 @@ echo "============================================="
 echo "  Congratulations, your node is synced"
 echo "============================================="
 echo ""
-echo "  Operator address (fund this in the admin Join queue UI):"
+echo "  Operator address:"
 echo "    ${VALIDATOR_ADDR}"
 echo ""
 print_join_status

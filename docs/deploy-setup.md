@@ -156,8 +156,6 @@ the REST API port. It is configured in `app.toml` under `[helper]` (written by
 | `process_interval` | `5` | How often to check for ready shares (seconds). |
 | `chain_api_port` | `1418` | Port of the REST API (for `MsgRevealShare` submission). In production this is `1317`. |
 | `max_concurrent_proofs` | `2` | Maximum parallel proof generation goroutines (~500 MB RAM each). |
-| `admin_url` | `""` | Admin server base URL for `POST /api/server-heartbeat` (heartbeat). `join.sh` writes the value of `SVOTE_ADMIN_URL` here. Empty disables the heartbeat. Legacy key `pulse_url` is still read as a fallback. |
-| `helper_url` | `""` | This host's public URL as seen by clients. Set after Caddy/TLS is up. Empty disables the heartbeat. |
 
 ## Admin UI
 
@@ -183,15 +181,14 @@ The admin server re-serves a cached copy of the
 at `GET /api/voting-config` for tooling that wants the same payload from a
 chain host (refreshed in-process every minute). It also stores **pending
 validator join requests** in SQLite (`POST /api/register-validator`,
-`GET /api/pending-validators`) and accepts helper liveness pulses
-(`POST /api/server-heartbeat`).
+`GET /api/pending-validators`).
 
 The CDN — not the admin — is the canonical discovery path. iOS wallets,
 `join.sh`, and the helper module all fetch
 `voting-config.json` directly from
 [valargroup/token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config)
 (see [the README there](https://github.com/valargroup/token-holder-voting-config#cdn)).
-The admin only needs to be reached for one-time join registration and heartbeat traffic.
+The admin only needs to be reached for one-time join registration.
 Publishing a validator's public URL to `vote_servers` happens via a manual PR
 on the config repo; once merged, the CDN serves the new entry within ~30 s and
 the cached `/api/voting-config` snapshot picks it up on the next refresh
@@ -212,7 +209,7 @@ off).
 
 Pending join rows expire after **7 days**; expired rows are removed by a background sweeper that runs every **hour** (both are fixed in code, not `app.toml` keys).
 
-Endpoints: `POST /api/register-validator`, `GET /api/pending-validators`, `POST /api/server-heartbeat`, plus `GET /api/voting-config` (cached CDN snapshot, not the canonical client path — see above).
+Endpoints: `POST /api/register-validator`, `GET /api/pending-validators`, plus `GET /api/voting-config` (cached CDN snapshot, not the canonical client path — see above).
 
 > Older configs may include an `[admin].watchdog_interval` key — that field
 > is ignored. Fleet health probing of `vote_servers` and `pir_endpoints`

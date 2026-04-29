@@ -529,46 +529,5 @@ export async function rejectRegistration(params: ApproveRegistrationParams): Pro
   });
 }
 
-// -- Server heartbeat / approved-servers --
-
-/** Persistent list of admin-approved servers (survives pulse gaps). */
-export async function getApprovedServers(): Promise<ServiceEntry[]> {
-  try {
-    return await fetchJson<ServiceEntry[]>("/api/approved-servers");
-  } catch {
-    return [];
-  }
-}
-
-export interface RemoveApprovedServerParams {
-  payload: { action: "remove-approved"; operator_address: string };
-  signature: string;
-  pubKey: string;
-  signerAddress: string;
-}
-
-/**
- * Remove a server from approved-servers (and vote_servers + server-pulses).
- * Requires a wallet signature for vote-manager authorization.
- */
-export async function removeApprovedServer(params: RemoveApprovedServerParams): Promise<{ status: string }> {
-  return fetchJson<{ status: string }>("/api/remove-approved-server", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-}
-
-/** Pulse timestamps: { [url]: unix_timestamp }. */
-export type ServerPulses = Record<string, number>;
-
-export async function getServerPulses(): Promise<ServerPulses> {
-  try {
-    return await fetchJson<ServerPulses>("/api/server-pulses");
-  } catch {
-    return {};
-  }
-}
-
 // submitSession was removed: MsgCreateVotingSession is now a standard Cosmos
 // SDK transaction signed client-side. See cosmosTx.ts.

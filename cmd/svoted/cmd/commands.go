@@ -87,8 +87,8 @@ const adminConfigTemplate = `
 
 [admin]
 
-# When true, disables the join-queue API (register-validator, pending-validators,
-# server-heartbeat) and the cached /api/voting-config endpoint. Default true so
+# When true, disables the join-queue API (register-validator, pending-validators)
+# and the cached /api/voting-config endpoint. Default true so
 # only the designated admin host runs the join-queue SQLite DB. Enable (false)
 # only on the node that serves the admin UI: production primary
 # (SVOTE_ADMIN_DISABLE=false in init.sh / reset workflow), or val1 from
