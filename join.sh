@@ -82,7 +82,7 @@ install_missing_tools() {
   OS_NAME=$(uname -s)
   if [ "$OS_NAME" = "Linux" ]; then
     if command -v apt-get > /dev/null 2>&1; then
-      export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+      export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
       sudo -E apt-get update -qq
       sudo -E apt-get install -y "${missing[@]}"
     elif command -v dnf > /dev/null 2>&1; then
