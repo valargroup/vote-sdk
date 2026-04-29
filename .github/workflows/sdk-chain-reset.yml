@@ -1,6 +1,7 @@
-# Reset the full SDK chain fleet from genesis: wipe state, re-init primary with
-# deterministic keys, upload genesis to DO Spaces, reset the snapshot node,
-# fund the secondary from a vote manager, then join secondary and archive.
+# Reset the full SDK chain fleet from genesis: quiesce the snapshot publisher,
+# wipe state, re-init primary with deterministic keys, upload genesis to DO
+# Spaces, reset the snapshot node, fund the secondary from a vote manager, then
+# join secondary and archive.
 # Manual-only: triggered via workflow_dispatch with a release tag.
 
 name: Reset SDK Chain
@@ -47,10 +48,34 @@ jobs:
             exit 1
           fi
 
+  quiesce-snapshot:
+    name: Quiesce snapshot publisher
+    runs-on: ubuntu-latest
+    needs: validate-tag
+    steps:
+      - name: Stop snapshot timer before chain reset
+        uses: appleboy/ssh-action@v1.0.3
+        timeout-minutes: 5
+        with:
+          host: ${{ secrets.SNAPSHOT_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+
+            # Stop publisher first so old chain state cannot republish stale
+            # metadata after upload-genesis clears public snapshot artifacts.
+            systemctl stop snapshot.timer
+            systemctl disable snapshot.timer
+            systemctl stop snapshot.service
+            systemctl stop svoted
+            systemctl reset-failed snapshot.timer snapshot.service svoted || true
+            echo "Snapshot publisher quiesced."
+
   reset-primary:
     name: Reset primary (bootstrap)
     runs-on: ubuntu-latest
-    needs: validate-tag
+    needs: quiesce-snapshot
     steps:
       - name: Install tag and reset primary
         uses: appleboy/ssh-action@v1.0.3
@@ -392,7 +417,7 @@ jobs:
   notify-slack:
     name: Slack Notification
     if: ${{ always() && contains(join(needs.*.result, ','), 'failure') }}
-    needs: [reset-primary, upload-genesis, fund-secondary, reset-snapshot, reset-secondary, reset-archive, verify]
+    needs: [quiesce-snapshot, reset-primary, upload-genesis, fund-secondary, reset-snapshot, reset-secondary, reset-archive, verify]
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
@@ -417,7 +442,7 @@ jobs:
                 },
                 {
                   "type": "section",
-                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nReset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Snapshot: `${{ needs.reset-snapshot.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Reset Archive: `${{ needs.reset-archive.result }}` | Verify: `${{ needs.verify.result }}`" }
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nQuiesce Snapshot: `${{ needs.quiesce-snapshot.result }}` | Reset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Snapshot: `${{ needs.reset-snapshot.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Reset Archive: `${{ needs.reset-archive.result }}` | Verify: `${{ needs.verify.result }}`" }
                 }
               ]
             }

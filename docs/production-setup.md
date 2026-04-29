@@ -106,12 +106,13 @@ Use this for routine upgrades. Chain state is preserved; only the binary is swap
 
 **`.github/workflows/sdk-chain-reset.yml`** — manual `workflow_dispatch` with a `tag` input.
 
-1. **reset-primary**: installs tag, stops svoted, wipes chain state, runs `init.sh` (imports `PRIMARY_VAL_PRIVKEY`) to create fresh genesis, starts svoted
-2. **upload-genesis**: fetches genesis from primary's REST API, uploads to DO Spaces (`s3://vote/genesis.json`), and clears `s3://vote/snapshots/svote-1/`
-3. **fund-secondary**: derives the secondary address from `SECONDARY_VAL_PRIVKEY`, sends 100M usvote from a vote manager on the primary
-4. **reset-snapshot**: installs tag, runs `reset-snapshot.sh`, starts a pruned non-validator node, and enables `snapshot.timer`
-5. **reset-secondary**: installs tag, runs `reset-join.sh` (imports `SECONDARY_VAL_PRIVKEY`), syncs, verifies funding, registers as validator
-6. **verify**: checks validators, archive, and snapshot frontend
+1. **quiesce-snapshot**: stops and disables `snapshot.timer`, stops any running publisher, and stops old snapshot-node `svoted` before chain state changes
+2. **reset-primary**: installs tag, stops svoted, wipes chain state, runs `init.sh` (imports `PRIMARY_VAL_PRIVKEY`) to create fresh genesis, starts svoted
+3. **upload-genesis**: fetches genesis from primary's REST API, uploads to DO Spaces (`s3://vote/genesis.json`), and clears `s3://vote/snapshots/svote-1/`
+4. **fund-secondary**: derives the secondary address from `SECONDARY_VAL_PRIVKEY`, sends 100M usvote from a vote manager on the primary
+5. **reset-snapshot**: installs tag, runs `reset-snapshot.sh`, starts a pruned non-validator node, and enables `snapshot.timer`
+6. **reset-secondary**: installs tag, runs `reset-join.sh` (imports `SECONDARY_VAL_PRIVKEY`), syncs, verifies funding, registers as validator
+7. **verify**: checks validators, archive, and snapshot frontend
 
 Required secrets: `PRIMARY_HOST`, `SECONDARY_HOST`, `EXPLORER_HOST`, `SNAPSHOT_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SLACK_WEBHOOK_URL`.
 

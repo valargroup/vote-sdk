@@ -10,7 +10,8 @@ For joining additional validators to an already-running chain, see [join-chain.m
 flowchart LR
     tag["git tag v*"] --> release["release.yml\nbuild + DO Spaces upload"]
     release --> reset["sdk-chain-reset.yml\nworkflow_dispatch"]
-    reset --> resetPrimary["reset-primary\ninstall-release.sh + scripts/init.sh"]
+    reset --> quiesceSnapshot["quiesce-snapshot\nstop old publisher"]
+    quiesceSnapshot --> resetPrimary["reset-primary\ninstall-release.sh + scripts/init.sh"]
     resetPrimary --> uploadGenesis["upload-genesis\ngenesis.json -> DO Spaces"]
     uploadGenesis --> fundSecondary["fund-secondary\nMsgAuthorizedSend"]
     fundSecondary --> resetSecondary["reset-secondary\nreset-join.sh"]
@@ -35,12 +36,13 @@ After `terraform apply`, the droplet is up and `svoted` is installed but the cha
 
 The single workflow [`sdk-chain-reset.yml`](../../.github/workflows/sdk-chain-reset.yml) (`workflow_dispatch`, takes a `tag` input) brings the entire fleet up from genesis:
 
-1. **`reset-primary`** — SSHes to `PRIMARY_HOST`, runs `install-release.sh --tag <tag>`, stops `svoted`, wipes `/opt/shielded-vote/.svoted/`, then runs [`scripts/init.sh`](../../scripts/init.sh) with `VAL_PRIVKEY=PRIMARY_VAL_PRIVKEY`, `VM_PRIVKEYS`, and `SVOTE_ADMIN_DISABLE=false`. Drops in `svoted.service.d/primary.conf`, starts `svoted`, polls `localhost:1317/shielded-vote/v1/rounds`.
-2. **`upload-genesis`** — fetches `genesis.json` from `localhost:1317/shielded-vote/v1/genesis` on the primary, uploads it to `s3://vote/genesis.json` (DO Spaces, `https://vote.fra1.digitaloceanspaces.com/genesis.json`), and clears `s3://vote/snapshots/svote-1/` so joiners cannot restore a pre-reset snapshot. This is the canonical source joining nodes pull from.
-3. **`fund-secondary`** — derives the secondary's address from `SECONDARY_VAL_PRIVKEY` (in a temp keyring) and `MsgAuthorizedSend`s 100M usvote from `vote-manager-1`.
-4. **`reset-snapshot`** — SSHes to `SNAPSHOT_HOST`, installs the same tag, runs [`scripts/reset-snapshot.sh`](../../scripts/reset-snapshot.sh) to bring up a pruned non-validator node, then enables `snapshot.timer`.
-5. **`reset-secondary`** — SSHes to `SECONDARY_HOST`, installs the same tag, runs [`scripts/reset-join.sh`](../../scripts/reset-join.sh) (downloads genesis from Spaces, discovers the primary's P2P NodeID via REST, syncs, calls `create-val-tx` to register).
-6. **`reset-archive`** — SSHes to `EXPLORER_HOST`, runs [`scripts/reset-archive.sh`](../../scripts/reset-archive.sh) to bring up a non-validator archive node (pruning=nothing) for the explorer.
+1. **`quiesce-snapshot`** — SSHes to `SNAPSHOT_HOST`, stops and disables `snapshot.timer`, stops any running `snapshot.service`, and stops old snapshot-node `svoted` before primary chain state changes.
+2. **`reset-primary`** — SSHes to `PRIMARY_HOST`, runs `install-release.sh --tag <tag>`, stops `svoted`, wipes `/opt/shielded-vote/.svoted/`, then runs [`scripts/init.sh`](../../scripts/init.sh) with `VAL_PRIVKEY=PRIMARY_VAL_PRIVKEY`, `VM_PRIVKEYS`, and `SVOTE_ADMIN_DISABLE=false`. Drops in `svoted.service.d/primary.conf`, starts `svoted`, polls `localhost:1317/shielded-vote/v1/rounds`.
+3. **`upload-genesis`** — fetches `genesis.json` from `localhost:1317/shielded-vote/v1/genesis` on the primary, uploads it to `s3://vote/genesis.json` (DO Spaces, `https://vote.fra1.digitaloceanspaces.com/genesis.json`), and clears `s3://vote/snapshots/svote-1/` so joiners cannot restore a pre-reset snapshot. This is the canonical source joining nodes pull from.
+4. **`fund-secondary`** — derives the secondary's address from `SECONDARY_VAL_PRIVKEY` (in a temp keyring) and `MsgAuthorizedSend`s 100M usvote from `vote-manager-1`.
+5. **`reset-snapshot`** — SSHes to `SNAPSHOT_HOST`, installs the same tag, runs [`scripts/reset-snapshot.sh`](../../scripts/reset-snapshot.sh) to bring up a pruned non-validator node, then enables `snapshot.timer`.
+6. **`reset-secondary`** — SSHes to `SECONDARY_HOST`, installs the same tag, runs [`scripts/reset-join.sh`](../../scripts/reset-join.sh) (downloads genesis from Spaces, discovers the primary's P2P NodeID via REST, syncs, calls `create-val-tx` to register).
+7. **`reset-archive`** — SSHes to `EXPLORER_HOST`, runs [`scripts/reset-archive.sh`](../../scripts/reset-archive.sh) to bring up a non-validator archive node (pruning=nothing) for the explorer.
 
 Then `verify` polls all REST endpoints. On any failure the `notify-slack` job fires.
 
