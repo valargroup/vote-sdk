@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +130,65 @@ func TestProbeVoteServersTimeoutIsDown(t *testing.T) {
 	}
 	if row.LastSuccessAt != 0 {
 		t.Fatalf("last_success_at should be unset, got %d", row.LastSuccessAt)
+	}
+}
+
+func TestProbeVoteServersLargeLatestBlockBodyIsUp(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"block":{"header":{"height":"456"},"data":{"txs":["`))
+		_, _ = w.Write([]byte(strings.Repeat("a", 2<<20)))
+		_, _ = w.Write([]byte(`"]}}}`))
+	}))
+	defer ts.Close()
+
+	a := newHealthTestAdmin([]ServiceEntry{{URL: ts.URL, Label: "large"}}, nil)
+	if err := a.ProbeVoteServers(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := a.GetVoteServerHealth()
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rows[0]
+	if row.State != VoteServerHealthUp {
+		t.Fatalf("state: got %q want %q; error=%q", row.State, VoteServerHealthUp, row.Error)
+	}
+	if row.Height == nil || *row.Height != 456 {
+		t.Fatalf("height: %+v", row.Height)
+	}
+}
+
+func TestProbeVoteServersHTTP200WithInvalidHeightIsUp(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(latestBlockHandler("invalid"))
+	defer ts.Close()
+
+	a := newHealthTestAdmin([]ServiceEntry{{URL: ts.URL, Label: "no-height"}}, nil)
+	if err := a.ProbeVoteServers(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := a.GetVoteServerHealth()
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rows[0]
+	if row.State != VoteServerHealthUp {
+		t.Fatalf("state: got %q want %q; error=%q", row.State, VoteServerHealthUp, row.Error)
+	}
+	if row.Height != nil {
+		t.Fatalf("height should be optional, got %d", *row.Height)
+	}
+	if row.Error != "" {
+		t.Fatalf("error should be clear on HTTP 200, got %q", row.Error)
+	}
+	if row.LastSuccessAt == 0 {
+		t.Fatalf("expected success timestamp")
 	}
 }
 

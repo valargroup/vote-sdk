@@ -16,14 +16,6 @@ import (
 
 const voteServerHealthProbePath = "/cosmos/base/tendermint/v1beta1/blocks/latest"
 
-type latestBlockResponse struct {
-	Block struct {
-		Header struct {
-			Height string `json:"height"`
-		} `json:"header"`
-	} `json:"block"`
-}
-
 // GetVoteServerHealth returns one health row for each current vote_servers
 // entry. Rows are keyed by URL because the published config does not require
 // operator_address today.
@@ -131,23 +123,154 @@ func (a *Admin) probeVoteServer(ctx context.Context, server ServiceEntry, previo
 		return row
 	}
 
-	var block latestBlockResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&block); err != nil {
-		row.Error = fmt.Sprintf("decode latest block: %v", err)
-		return row
-	}
-
-	height, err := strconv.ParseInt(block.Block.Header.Height, 10, 64)
-	if err != nil || height <= 0 {
-		row.Error = fmt.Sprintf("invalid latest height %q", block.Block.Header.Height)
-		return row
-	}
-
 	row.State = VoteServerHealthUp
 	row.LastSuccessAt = row.LastCheckedAt
 	row.Error = ""
-	row.Height = &height
+	if height, ok := latestBlockHeight(resp.Body); ok {
+		row.Height = &height
+	}
 	return row
+}
+
+func latestBlockHeight(r io.Reader) (int64, bool) {
+	dec := json.NewDecoder(r)
+	dec.UseNumber()
+
+	if !readJSONObjectStart(dec) {
+		return 0, false
+	}
+	for dec.More() {
+		key, ok := readJSONObjectKey(dec)
+		if !ok {
+			return 0, false
+		}
+		if key != "block" {
+			if err := skipJSONValue(dec); err != nil {
+				return 0, false
+			}
+			continue
+		}
+		return latestBlockHeightFromBlock(dec)
+	}
+	return 0, false
+}
+
+func latestBlockHeightFromBlock(dec *json.Decoder) (int64, bool) {
+	if !readJSONObjectStart(dec) {
+		return 0, false
+	}
+	for dec.More() {
+		key, ok := readJSONObjectKey(dec)
+		if !ok {
+			return 0, false
+		}
+		if key != "header" {
+			if err := skipJSONValue(dec); err != nil {
+				return 0, false
+			}
+			continue
+		}
+		return latestBlockHeightFromHeader(dec)
+	}
+	return 0, false
+}
+
+func latestBlockHeightFromHeader(dec *json.Decoder) (int64, bool) {
+	if !readJSONObjectStart(dec) {
+		return 0, false
+	}
+	for dec.More() {
+		key, ok := readJSONObjectKey(dec)
+		if !ok {
+			return 0, false
+		}
+		if key != "height" {
+			if err := skipJSONValue(dec); err != nil {
+				return 0, false
+			}
+			continue
+		}
+		height, ok := readPositiveInt64(dec)
+		return height, ok
+	}
+	return 0, false
+}
+
+func readJSONObjectStart(dec *json.Decoder) bool {
+	tok, err := dec.Token()
+	if err != nil {
+		return false
+	}
+	delim, ok := tok.(json.Delim)
+	return ok && delim == '{'
+}
+
+func readJSONObjectKey(dec *json.Decoder) (string, bool) {
+	tok, err := dec.Token()
+	if err != nil {
+		return "", false
+	}
+	key, ok := tok.(string)
+	return key, ok
+}
+
+func readPositiveInt64(dec *json.Decoder) (int64, bool) {
+	tok, err := dec.Token()
+	if err != nil {
+		return 0, false
+	}
+
+	var raw string
+	switch v := tok.(type) {
+	case string:
+		raw = v
+	case json.Number:
+		raw = v.String()
+	default:
+		return 0, false
+	}
+
+	height, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || height <= 0 {
+		return 0, false
+	}
+	return height, true
+}
+
+func skipJSONValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil
+	}
+
+	switch delim {
+	case '{':
+		for dec.More() {
+			if _, ok := readJSONObjectKey(dec); !ok {
+				return fmt.Errorf("invalid object key")
+			}
+			if err := skipJSONValue(dec); err != nil {
+				return err
+			}
+		}
+		_, err := dec.Token()
+		return err
+	case '[':
+		for dec.More() {
+			if err := skipJSONValue(dec); err != nil {
+				return err
+			}
+		}
+		_, err := dec.Token()
+		return err
+	default:
+		return nil
+	}
 }
 
 // RunVoteServerHealthPoller probes vote_servers immediately and then on each
