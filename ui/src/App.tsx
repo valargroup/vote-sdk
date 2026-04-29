@@ -1833,8 +1833,6 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
 
   // Edge Config network management state.
   const [votingConfig, setVotingConfig] = useState<chainApi.VotingConfig | null>(null);
-  const [urlInputFor, setUrlInputFor] = useState<string | null>(null); // moniker being edited
-  const [urlInput, setUrlInput] = useState("");
   const [networkUpdating, setNetworkUpdating] = useState(false);
   const [networkResult, setNetworkResult] = useState<{ moniker: string; ok: boolean; msg: string } | null>(null);
 
@@ -1879,39 +1877,20 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
     }
   };
 
-  // Register or remove a validator's public URL via manual PR on token-holder-voting-config.
-  const updateNetwork = async (action: "add" | "remove", moniker: string, url?: string) => {
+  const openVotingConfigEditor = (moniker: string) => {
     setNetworkUpdating(true);
     setNetworkResult(null);
     try {
-      if (action === "add" && url) {
-        window.open(
-          "https://github.com/valargroup/token-holder-voting-config/edit/main/voting-config.json",
-          "_blank",
-          "noopener,noreferrer",
-        );
-        setUrlInputFor(null);
-        setUrlInput("");
-        setNetworkResult({
-          moniker,
-          ok: true,
-          msg: `Add vote_servers entry { "url": "${url}", "label": "${moniker}" } in the config PR.`,
-        });
-        return;
-      }
-      if (action === "remove") {
-        window.open(
-          "https://github.com/valargroup/token-holder-voting-config/edit/main/voting-config.json",
-          "_blank",
-          "noopener,noreferrer",
-        );
-        setNetworkResult({
-          moniker,
-          ok: true,
-          msg: `Remove the vote_servers entry labeled "${moniker}" in the config PR.`,
-        });
-        return;
-      }
+      window.open(
+        "https://github.com/valargroup/token-holder-voting-config/edit/main/voting-config.json",
+        "_blank",
+        "noopener,noreferrer",
+      );
+      setNetworkResult({
+        moniker,
+        ok: true,
+        msg: "Opened voting-config.json.",
+      });
     } finally {
       setNetworkUpdating(false);
     }
@@ -2002,7 +1981,16 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
             </div>
             <p className="text-[10px] text-text-secondary mb-1">
               All bonded validators on-chain. A validator can be bonded and producing blocks but not listed as an approved submission server if it has been taken out of client rotation by an admin.
-              Vote server registration opens a config edit so operators can submit a PR against the published vote_servers list.
+              To become a recommended configuration for wallets, server owners should open a pull request in{" "}
+              <a
+                href="https://github.com/valargroup/token-holder-voting-config"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent hover:text-accent-glow"
+              >
+                token-holder-voting-config
+              </a>
+              {" "}that updates the published <code className="font-mono">vote_servers</code> list.
             </p>
             {pallasKeys.size > 0 && (
               <p className="text-[10px] text-text-secondary">
@@ -2135,19 +2123,25 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                   const registeredUrl = votingConfig?.vote_servers.find(
                     (s) => s.label === moniker
                   )?.url;
+                  const configActionCopy = registeredUrl
+                    ? `Edit or remove the vote_servers entry for "${moniker}" via a pull request to token-holder-voting-config GitHub repository.`
+                    : `Add a vote_servers entry for "${moniker}" via a pull request to token-holder-voting-config GitHub repository.`;
                   if (registeredUrl) {
                     return (
-                      <div className="mt-2 flex items-center gap-2">
-                        <Server size={10} className="text-success shrink-0" />
-                        <span className="text-[10px] text-text-secondary truncate">{registeredUrl}</span>
-                        <button
-                          type="button"
-                          className="text-[9px] px-1.5 py-0.5 rounded bg-danger/15 text-danger hover:bg-danger/25 transition-colors shrink-0 disabled:opacity-50"
-                          disabled={networkUpdating}
-                          onClick={() => void updateNetwork("remove", moniker)}
-                        >
-                          Remove vote URL (PR)
-                        </button>
+                      <div className="mt-2 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Server size={10} className="text-success shrink-0" />
+                          <span className="text-[10px] text-text-secondary truncate">{registeredUrl}</span>
+                          <button
+                            type="button"
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-surface-3 text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors shrink-0 disabled:opacity-50 cursor-pointer"
+                            disabled={networkUpdating}
+                            onClick={() => openVotingConfigEditor(moniker)}
+                          >
+                            Edit URL
+                          </button>
+                        </div>
+                        <p className="text-[9px] text-text-muted">{configActionCopy}</p>
                         {networkResult?.moniker === moniker && (
                           <span className={`text-[9px] ${networkResult.ok ? "text-success" : "text-danger"}`}>
                             {networkResult.msg}
@@ -2157,57 +2151,23 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                     );
                   }
 
-                  if (urlInputFor === moniker) {
-                    return (
-                      <div className="mt-2 space-y-1.5">
-                        <input
-                          type="text"
-                          value={urlInput}
-                          onChange={(e) => setUrlInput(e.target.value.trim())}
-                          placeholder="https://validator.example.com"
-                          spellCheck={false}
-                          autoComplete="off"
-                          className="w-full px-2 py-1 bg-surface-2 border border-border-subtle rounded text-[10px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
-                        />
-                        <div className="flex items-center gap-3">
-                          <p className="text-[10px] text-text-muted">
-                            Opens GitHub to add this validator to vote_servers. PIR endpoints are managed separately in the config repo.
-                          </p>
-                          <div className="flex-1" />
-                          <button
-                            className="text-[10px] text-text-muted hover:text-text-secondary cursor-pointer"
-                            onClick={() => { setUrlInputFor(null); setUrlInput(""); }}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            className="text-[10px] px-2 py-0.5 rounded bg-accent/90 text-surface-0 hover:bg-accent transition-colors disabled:opacity-50 cursor-pointer"
-                            disabled={!urlInput.startsWith("http") || networkUpdating}
-                            onClick={() => updateNetwork("add", moniker, urlInput)}
-                          >
-                            {networkUpdating ? "Saving…" : "Save"}
-                          </button>
-                        </div>
-                        {networkResult?.moniker === moniker && !networkResult.ok && (
-                          <p className="text-[9px] text-danger">{networkResult.msg}</p>
-                        )}
-                      </div>
-                    );
-                  }
-
                   return (
-                    <div className="mt-2">
+                    <div className="mt-2 space-y-1">
+                      <p className="text-[9px] text-text-muted">{configActionCopy}</p>
                       <button
                         type="button"
                         className="inline-flex items-center gap-1 text-[10px] text-text-muted hover:text-accent transition-colors cursor-pointer"
-                        onClick={() => {
-                          setUrlInputFor(moniker);
-                          setNetworkResult(null);
-                        }}
+                        disabled={networkUpdating}
+                        onClick={() => openVotingConfigEditor(moniker)}
                       >
                         <Server size={9} />
-                        Register vote server URL (PR)
+                        Register URL
                       </button>
+                      {networkResult?.moniker === moniker && (
+                        <span className={`ml-2 text-[9px] ${networkResult.ok ? "text-success" : "text-danger"}`}>
+                          {networkResult.msg}
+                        </span>
+                      )}
                     </div>
                   );
                 })()}

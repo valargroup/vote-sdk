@@ -12,7 +12,7 @@ if [ -f "$REPO_ROOT/.env" ]; then
 fi
 
 CHAIN_ID="svote-1"
-MONIKER="validator"
+MONIKER="valarg-genesis"
 HOME_DIR="${SVOTED_HOME:-$HOME/.svoted}"
 BINARY="svoted"
 DENOM="usvote"

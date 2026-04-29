@@ -21,7 +21,7 @@
 # Optional env:
 #   HOME_DIR          svoted home directory (default: /opt/shielded-vote/.svoted)
 #   CHAIN_ID          Cosmos chain ID (default: svote-1)
-#   MONIKER           Validator moniker (default: secondary)
+#   MONIKER           Validator moniker (default: valarg-secondary)
 
 set -euo pipefail
 
@@ -30,9 +30,9 @@ PRIMARY_REST_URL="${PRIMARY_REST_URL:?PRIMARY_REST_URL must be set}"
 VAL_PRIVKEY="${VAL_PRIVKEY:?VAL_PRIVKEY must be set}"
 HOME_DIR="${HOME_DIR:-/opt/shielded-vote/.svoted}"
 CHAIN_ID="${CHAIN_ID:-svote-1}"
-MONIKER="${MONIKER:-secondary}"
+MONIKER="${MONIKER:-valarg-secondary}"
 
-echo "=== Reset-join: secondary validator ==="
+echo "=== Reset-join: ${MONIKER} validator ==="
 echo "  Genesis:  ${GENESIS_URL}"
 echo "  Primary:  ${PRIMARY_REST_URL}"
 echo "  Home:     ${HOME_DIR}"
