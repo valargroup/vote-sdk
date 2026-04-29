@@ -65,6 +65,27 @@ if ! command -v curl > /dev/null 2>&1; then
   exit 1
 fi
 
+brew_install_quiet() {
+  local log_file="${SVOTE_INSTALL_LOG:-${TMPDIR:-/tmp}/shielded-vote-join-install.log}"
+  local package_list="$*"
+
+  mkdir -p "$(dirname "${log_file}")"
+  echo "Installing with Homebrew: ${package_list} (details: ${log_file})"
+  {
+    echo ""
+    echo "[$(date)] brew install ${package_list}"
+  } >> "${log_file}"
+
+  if HOMEBREW_NO_ENV_HINTS=1 brew install "$@" >> "${log_file}" 2>&1; then
+    echo "Homebrew install complete: ${package_list}"
+    return 0
+  fi
+
+  echo "ERROR: Homebrew install failed: ${package_list}"
+  echo "  See log: ${log_file}"
+  return 1
+}
+
 install_missing_tools() {
   local missing=()
   local tool
@@ -98,7 +119,7 @@ install_missing_tools() {
     fi
   elif [ "$OS_NAME" = "Darwin" ]; then
     if command -v brew > /dev/null 2>&1; then
-      brew install "${missing[@]}"
+      brew_install_quiet "${missing[@]}"
     else
       echo "ERROR: ${missing[*]} required. Install with: brew install ${missing[*]}"
       exit 1
@@ -743,8 +764,7 @@ if [ "$DOMAIN_MODE" != "skip" ] && [ -n "$SVOTE_DOMAIN" ]; then
       fi
     elif [ "$OS_NAME" = "Darwin" ]; then
       if command -v brew > /dev/null 2>&1; then
-        echo "Installing Caddy via Homebrew..."
-        if ! brew install caddy; then
+        if ! brew_install_quiet caddy; then
           handle_public_url_failure "Caddy installation via Homebrew failed."
         fi
       else
