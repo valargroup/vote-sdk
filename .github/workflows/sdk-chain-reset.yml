@@ -269,7 +269,7 @@ jobs:
             export VAL_PRIVKEY="${{ secrets.SECONDARY_VAL_PRIVKEY }}"
             export HOME_DIR=/opt/shielded-vote/.svoted
             export CHAIN_ID=svote-1
-            export MONIKER=secondary
+            export MONIKER=valarg-secondary
 
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-join.sh" -o /tmp/reset-join.sh
             bash /tmp/reset-join.sh
