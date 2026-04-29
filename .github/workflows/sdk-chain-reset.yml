@@ -286,6 +286,10 @@ jobs:
           script: |
             set -euo pipefail
 
+            set -a
+            . /etc/default/snapshot
+            set +a
+
             systemctl stop snapshot.timer || true
             for i in $(seq 1 20); do
               if /opt/shielded-vote/snapshot-publish.sh; then
@@ -304,13 +308,17 @@ jobs:
             done
 
             for path in /daily.json /latest.json /snapshots.json; do
-              curl -fsS -H "Host: snapshots.${{ secrets.DOMAIN }}" "http://localhost${path}" | jq empty
+              curl -fsS --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
+                "https://snapshots.${{ secrets.DOMAIN }}${path}" \
+                | jq -e 'type == "object" or type == "array"' > /dev/null
               echo "[OK] ${path}"
             done
-            curl -fsS -H "Host: snapshots.${{ secrets.DOMAIN }}" http://localhost/daily.json \
-              | jq -e '.roles | index("daily")' > /dev/null
-            curl -fsS -H "Host: snapshots.${{ secrets.DOMAIN }}" http://localhost/latest.json \
-              | jq -e '.roles | index("latest")' > /dev/null
+            curl -fsS --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
+              "https://snapshots.${{ secrets.DOMAIN }}/daily.json" \
+              | jq -e '.roles | index("daily") != null' > /dev/null
+            curl -fsS --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
+              "https://snapshots.${{ secrets.DOMAIN }}/latest.json" \
+              | jq -e '.roles | index("latest") != null' > /dev/null
 
       - name: Verify snapshot services
         uses: appleboy/ssh-action@v1.0.3
@@ -321,7 +329,8 @@ jobs:
           script: |
             systemctl is-active --quiet svoted
             systemctl is-enabled --quiet snapshot.timer
-            curl -sf -H "Host: snapshots.${{ secrets.DOMAIN }}" http://localhost/ > /dev/null
+            curl -sf --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
+              "https://snapshots.${{ secrets.DOMAIN }}/" > /dev/null
             echo "Snapshot node and frontend healthy."
 
   reset-secondary:
@@ -431,6 +440,10 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
+
+            set -a
+            . /etc/default/archive-snapshot
+            set +a
 
             systemctl stop archive-snapshot.timer || true
             for i in $(seq 1 20); do
