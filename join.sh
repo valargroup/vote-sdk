@@ -390,7 +390,14 @@ else
   echo "Platform: ${PLATFORM}"
   # Tarballs live under binaries/vote-sdk/ since release.yml commit b30573d8.
   # version.txt and join.sh itself stay at the bucket root.
-  curl -fsSL -o /tmp/shielded-vote-release.tar.gz "${DO_BASE}/binaries/vote-sdk/shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
+  RELEASE_URL="${DO_BASE}/binaries/vote-sdk/shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
+  echo "Downloading release tarball..."
+  echo "  ${RELEASE_URL}"
+  if [ -t 2 ]; then
+    curl --fail --location --show-error --progress-bar -o /tmp/shielded-vote-release.tar.gz "${RELEASE_URL}"
+  else
+    curl -fsSL -o /tmp/shielded-vote-release.tar.gz "${RELEASE_URL}"
+  fi
 
   # Verify tarball integrity via SHA-256 checksum.
   CHECKSUM_URL="${DO_BASE}/binaries/vote-sdk/shielded-vote-${VERSION}-${PLATFORM}.tar.gz.sha256"
