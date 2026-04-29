@@ -65,6 +65,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify truncated stream is inert
+        shell: bash
+        run: |
+          OUTPUT=$(sed -n '1,500p' join.sh | bash 2>&1) || STATUS=$?
+          STATUS=${STATUS:-0}
+
+          if [ "$STATUS" -eq 0 ]; then
+            echo "Expected truncated join.sh to fail before execution"
+            exit 1
+          fi
+
+          if printf '%s\n' "$OUTPUT" | grep -q "Shielded-Vote validator join"; then
+            echo "Truncated join.sh executed installer code:"
+            printf '%s\n' "$OUTPUT"
+            exit 1
+          fi
+
       - name: Install jq and lz4 (macOS)
         if: runner.os == 'macOS'
         run: |
