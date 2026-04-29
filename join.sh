@@ -69,20 +69,43 @@ brew_install_quiet() {
   local log_file="${SVOTE_INSTALL_LOG:-${TMPDIR:-/tmp}/shielded-vote-join-install.log}"
   local package_list="$*"
 
+  # Xcode CLT is a hard prerequisite for Homebrew on macOS. Without it brew
+  # can pop a GUI installer mid-run, which is invisible while output is
+  # redirected and looks like a hang.
+  if ! xcode-select -p > /dev/null 2>&1; then
+    echo "ERROR: Xcode Command Line Tools are required for Homebrew."
+    echo "  Install them, then re-run join.sh:"
+    echo "    xcode-select --install"
+    return 1
+  fi
+
   mkdir -p "$(dirname "${log_file}")"
-  echo "Installing with Homebrew: ${package_list} (details: ${log_file})"
+  echo "Installing with Homebrew: ${package_list} (log: ${log_file})"
   {
     echo ""
-    echo "[$(date)] brew install ${package_list}"
+    echo "[$(date)] brew install --force-bottle ${package_list}"
   } >> "${log_file}"
 
-  if HOMEBREW_NO_ENV_HINTS=1 brew install "$@" >> "${log_file}" 2>&1; then
+  # --force-bottle: refuse to compile from source. A bottle miss is almost
+  # always a stale tap or unsupported macOS, both of which we want to surface
+  # immediately rather than spend 10+ minutes on a doomed source build.
+  # HOMEBREW_NO_AUTO_UPDATE: keep installs deterministic and fast.
+  if HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 \
+       brew install --force-bottle "$@" >> "${log_file}" 2>&1; then
     echo "Homebrew install complete: ${package_list}"
     return 0
   fi
 
   echo "ERROR: Homebrew install failed: ${package_list}"
-  echo "  See log: ${log_file}"
+  echo "  --- last 30 log lines ---"
+  if [ -f "${log_file}" ]; then
+    tail -n 30 "${log_file}" 2>/dev/null | sed 's/^/  /'
+  fi
+  echo "  --- end log (full file: ${log_file}) ---"
+  echo "  Hints:"
+  echo "    - 'No available formula' or 'no bottle': run 'brew update && brew upgrade' and retry."
+  echo "    - Bottle not built for your macOS: check 'softwareupdate --list' for an OS update,"
+  echo "      or install Caddy manually: https://caddyserver.com/docs/install"
   return 1
 }
 
@@ -843,10 +866,35 @@ if [ "$DOMAIN_MODE" != "skip" ] && [ -n "$SVOTE_DOMAIN" ]; then
       handle_public_url_failure "Automatic Caddy installation is only supported on Linux (apt) and macOS (Homebrew). Install Caddy manually: https://caddyserver.com/docs/install"
     fi
   fi
+
+  # Stop any pre-existing 'brew services' caddy on macOS so it doesn't fight
+  # com.shielded-vote.caddy for :80/:443. brew's caddy caveats explicitly
+  # suggest 'brew services start caddy', so this collision is common after a
+  # second join.sh run on the same machine.
+  OS_NAME=$(uname -s)
+  if [ "$OS_NAME" = "Darwin" ] && command -v brew > /dev/null 2>&1; then
+    if brew services list 2>/dev/null | awk 'NR>1 && $1 == "caddy" && ($2 == "started" || $2 == "scheduled" || $2 == "error") { found=1 } END { exit found ? 0 : 1 }'; then
+      echo "WARNING: 'brew services' is already managing caddy on this machine."
+      echo "  Stopping it to avoid port conflicts with com.shielded-vote.caddy..."
+      brew services stop caddy > /dev/null 2>&1 || true
+    fi
+  fi
 fi
 
 if [ -n "$VALIDATOR_URL" ] && ! command -v caddy > /dev/null 2>&1; then
   handle_public_url_failure "Caddy is not available after installation."
+fi
+
+# Sanity-check the caddy binary actually runs (catches PATH lookups that
+# resolve to a broken/incompatible build, mismatched arch on Rosetta, or a
+# bottle that didn't fully extract).
+if [ -n "$VALIDATOR_URL" ] && command -v caddy > /dev/null 2>&1; then
+  if ! CADDY_VERSION_OUT=$(caddy version 2>&1); then
+    printf '%s\n' "${CADDY_VERSION_OUT}" | sed 's/^/  /'
+    handle_public_url_failure "Caddy on PATH ($(command -v caddy)) failed to run."
+  else
+    echo "Caddy ready: ${CADDY_VERSION_OUT}"
+  fi
 fi
 
 if [ -n "$VALIDATOR_URL" ] && command -v caddy > /dev/null 2>&1; then
@@ -1109,7 +1157,26 @@ PLISTEOF
 CADDYPLISTEOF
 
     launchctl bootstrap "gui/$(id -u)" "${CADDY_PLIST}"
-    echo "Caddy service started: ${VALIDATOR_URL} → localhost:1317"
+
+    # Give Caddy a moment to attempt port binding, then check the log for
+    # the most common silent failure: user-level launchd cannot bind <1024
+    # without root, so :80/:443 listeners die immediately and ACME never
+    # succeeds. Surface this clearly instead of letting it time out hours
+    # later as "the validator URL doesn't work."
+    sleep 2
+    if [ -f "${CADDY_LOG}" ] && grep -Eqi 'permission denied|address already in use|listen tcp.*: bind:' "${CADDY_LOG}"; then
+      echo "WARNING: Caddy launchd agent reported a startup error:"
+      tail -n 15 "${CADDY_LOG}" | sed 's/^/  /'
+      echo ""
+      echo "  On macOS, user-level launchd agents cannot bind privileged ports (<1024)."
+      echo "  ACME / TLS-ALPN will not succeed without root. Options:"
+      echo "    - Run the Caddy agent as a system LaunchDaemon (sudo) instead, OR"
+      echo "    - Front Caddy with a load balancer that terminates :443 elsewhere."
+      echo "  Caddy log: ${CADDY_LOG}"
+    else
+      echo "Caddy service started: ${VALIDATOR_URL} → localhost:1317"
+      echo "  Caddy log: ${CADDY_LOG}"
+    fi
   fi
 
   # Join loop: poll admin + fund + create-val-tx until bonded.
