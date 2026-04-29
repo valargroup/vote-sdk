@@ -26,6 +26,7 @@
 
 set -euo pipefail
 
+main() {
 CHAIN_ID="svote-1"
 INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
@@ -1206,3 +1207,6 @@ else
   echo "After bonding, configure a public HTTPS URL before adding this validator to vote_servers:"
   echo "  https://github.com/valargroup/token-holder-voting-config"
 fi
+}
+
+main "$@"
