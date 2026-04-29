@@ -38,15 +38,6 @@ type Config struct {
 	// MaxConcurrentProofs limits concurrent proof generation goroutines.
 	MaxConcurrentProofs int `mapstructure:"max_concurrent_proofs"`
 
-	// AdminURL is the base URL of the admin server for registration and
-	// heartbeat (e.g. "https://admin.example.com"). When empty, heartbeat
-	// is disabled.
-	AdminURL string `mapstructure:"admin_url"`
-
-	// HelperURL is this server's own public URL as seen by clients
-	// (e.g. "https://1-2-3-4.sslip.io"). When empty, heartbeat is disabled.
-	HelperURL string `mapstructure:"helper_url"`
-
 	// SentryDSN is the Sentry DSN for error tracking. When empty, Sentry is
 	// disabled. Can also be set via the SENTRY_DSN environment variable at
 	// runtime (app.toml takes precedence if set).

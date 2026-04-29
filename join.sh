@@ -35,9 +35,8 @@ SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-https://snapshots.valargroup.org}"
 # Canonical voting-config (same payload wallets fetch). Override for staging
 # mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
 VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://valargroup.github.io/token-holder-voting-config/voting-config.json}"
-# Admin API base — POST /api/register-validator (join queue) and
-# POST /api/server-heartbeat (helper liveness). Override via SVOTE_ADMIN_URL
-# when joining a non-default deployment.
+# Admin API base — POST /api/register-validator (join queue). Override via
+# SVOTE_ADMIN_URL when joining a non-default deployment.
 DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-https://vote-chain-primary.valargroup.org}"
 SVOTE_ADMIN_URL="${SVOTE_ADMIN_URL:-${DEFAULT_ADMIN_API_BASE}}"
 
@@ -510,7 +509,7 @@ esac
 # The voting-config JSON is the same one wallets fetch from
 # valargroup.github.io/token-holder-voting-config (ZIP 1244 §Vote Configuration
 # Format). We use vote_servers[0] as the seed peer for P2P; SVOTE_ADMIN_URL is
-# a separate base for the join queue and helper heartbeat.
+# a separate base for the join queue.
 
 echo ""
 echo "=== Discovering network ==="
@@ -673,13 +672,6 @@ chain_api_port = 1317
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = 2
 
-# Admin server base URL — used for POST /api/register-validator on startup
-# and POST /api/server-heartbeat every 2h. Empty disables the heartbeat.
-admin_url = "${SVOTE_ADMIN_URL}"
-
-# This server's public URL as seen by clients (set after Caddy TLS setup).
-# Empty disables the heartbeat.
-helper_url = ""
 HELPERCFG
 
 echo "Node configured."
@@ -818,12 +810,6 @@ CADDYEOF
   fi
 else
   VALIDATOR_URL=""
-fi
-
-# Patch [helper] helper_url now that VALIDATOR_URL is known.
-if [ -n "$VALIDATOR_URL" ]; then
-  sed -i.bak "s|^helper_url = \"\"$|helper_url = \"${VALIDATOR_URL}\"|" "${APP_TOML}"
-  rm -f "${APP_TOML}.bak"
 fi
 
 # ─── Phase 1: Register as pending validator ─────────────────────────────────

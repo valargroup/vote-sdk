@@ -20,13 +20,16 @@ type BondingChecker func(valoper string) bool
 // Admin fetches and caches voting-config from the CDN and stores pending
 // validator registrations in SQLite.
 type Admin struct {
-	configURL   string
-	logger      log.Logger
-	store       *Store
-	checkBonded BondingChecker
+	configURL    string
+	logger       log.Logger
+	store        *Store
+	checkBonded  BondingChecker
+	healthClient *http.Client
 
-	mu     sync.RWMutex
-	cached *VotingConfig
+	mu               sync.RWMutex
+	cached           *VotingConfig
+	healthMu         sync.RWMutex
+	voteServerHealth map[string]VoteServerHealth
 }
 
 // New creates a new Admin from the given configuration.
@@ -56,10 +59,12 @@ func New(cfg Config, homeDir string, checkBonded BondingChecker, logger log.Logg
 	}
 
 	a := &Admin{
-		configURL:   configURL,
-		logger:      logger,
-		store:       store,
-		checkBonded: checkBonded,
+		configURL:        configURL,
+		logger:           logger,
+		store:            store,
+		checkBonded:      checkBonded,
+		healthClient:     &http.Client{Timeout: VoteServerHealthProbeTimeout},
+		voteServerHealth: make(map[string]VoteServerHealth),
 	}
 
 	if err := a.refresh(); err != nil {
@@ -117,10 +122,8 @@ func (a *Admin) GetVotingConfig() (*VotingConfig, error) {
 // GET /api/voting-config response stays warm and picks up newly added or
 // removed servers without a process restart. Blocks until ctx is cancelled.
 //
-// This used to be a side effect of the in-process fleet health watchdog,
-// which now lives in vote-infrastructure/watchdog/ as a standalone Rust
-// service. The refresher remains in-process because the cached endpoint
-// only matters when the admin HTTP server is up.
+// This also feeds the in-process vote-server health poller so newly added or
+// removed vote_servers become visible without a process restart.
 func RunConfigRefresher(ctx context.Context, a *Admin, interval time.Duration, logger log.Logger) {
 	if a == nil || interval <= 0 {
 		return

@@ -82,6 +82,11 @@ func adminPostSetup(
 			return nil
 		})
 
+		g.Go(func() error {
+			admin.RunVoteServerHealthPoller(ctx, a, admin.VoteServerHealthProbeInterval, logger)
+			return nil
+		})
+
 		logger.Info("admin config proxy initialized")
 		return nil
 	}

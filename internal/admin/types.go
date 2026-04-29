@@ -21,6 +21,13 @@ const PendingEvictionSweepInterval = time.Hour
 // Not configurable — the CDN is small, this is purely a freshness window.
 const VotingConfigRefreshInterval = time.Minute
 
+// VoteServerHealthProbeInterval is how often the admin actively probes the
+// vote_servers entries from voting-config for operator-facing liveness.
+const VoteServerHealthProbeInterval = time.Minute
+
+// VoteServerHealthProbeTimeout is the per-server timeout for health probes.
+const VoteServerHealthProbeTimeout = 5 * time.Second
+
 // Config holds the admin server configuration, read from app.toml [admin].
 type Config struct {
 	// Disable turns off the admin server entirely.
@@ -30,9 +37,8 @@ type Config struct {
 	// cached GET /api/voting-config endpoint. It points at the same canonical
 	// CDN URL that wallets and join.sh fetch directly
 	// (valargroup.github.io/token-holder-voting-config/voting-config.json) —
-	// override only for staging mirrors or fork testing. Fleet health
-	// probing of these endpoints is handled by the standalone watchdog
-	// service in vote-infrastructure/watchdog/.
+	// override only for staging mirrors or fork testing. The admin process
+	// actively probes vote_servers from this config for UI health display.
 	ConfigURL string `mapstructure:"config_url"`
 
 	// DBPath is the SQLite path for pending validator registrations.
@@ -78,4 +84,27 @@ type PendingRegistration struct {
 	FirstSeenAt     int64  `json:"first_seen_at"`
 	LastSeenAt      int64  `json:"last_seen_at"`
 	ExpiresAt       int64  `json:"expires_at"`
+}
+
+// VoteServerHealthState is the admin UI liveness state for a published vote
+// server. Unknown means no probe result has been recorded since process start.
+type VoteServerHealthState string
+
+const (
+	VoteServerHealthUnknown VoteServerHealthState = "unknown"
+	VoteServerHealthUp      VoteServerHealthState = "up"
+	VoteServerHealthDown    VoteServerHealthState = "down"
+)
+
+// VoteServerHealth is returned by GET /api/vote-server-health.
+type VoteServerHealth struct {
+	URL           string                `json:"url"`
+	Label         string                `json:"label"`
+	State         VoteServerHealthState `json:"state"`
+	LastCheckedAt int64                 `json:"last_checked_at"`
+	LastSuccessAt int64                 `json:"last_success_at"`
+	LatencyMS     int64                 `json:"latency_ms"`
+	Height        *int64                `json:"height"`
+	StatusCode    *int                  `json:"status_code"`
+	Error         string                `json:"error"`
 }

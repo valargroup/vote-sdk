@@ -87,24 +87,20 @@ const adminConfigTemplate = `
 
 [admin]
 
-# When true, disables the join-queue API (register-validator, pending-validators,
-# server-heartbeat) and the cached /api/voting-config endpoint. Default true so
-# only the designated admin host runs the join-queue SQLite DB. Enable (false)
-# only on the node that serves the admin UI: production primary
+# When true, disables the join-queue API (register-validator, pending-validators),
+# vote-server health API, and the cached /api/voting-config endpoint. Default
+# true so only the designated admin host runs the join-queue SQLite DB. Enable
+# (false) only on the node that serves the admin UI: production primary
 # (SVOTE_ADMIN_DISABLE=false in init.sh / reset workflow), or val1 from
 # init_multi.sh.
 #
-# Fleet health probing of vote_servers and pir_endpoints used to live in this
-# process and was gated by an [admin].watchdog_interval setting. It now ships
-# as a standalone binary at vote-infrastructure/watchdog/, deployed as a
-# sidecar systemd unit on the vote-explorer droplet. Old watchdog_interval
-# entries in existing app.toml files are silently ignored.
+# The admin process actively probes published vote_servers every minute for
+# operator-facing health display in the admin UI.
 disable = true
 
 # Voting-config JSON re-served on GET /api/voting-config as a cached copy
-# (refreshed in-process every minute). Same canonical CDN URL that wallets,
-# join.sh, and the standalone watchdog all fetch directly — override only
-# for staging mirrors.
+# (refreshed in-process every minute). Same canonical CDN URL that wallets and
+# join.sh fetch directly — override only for staging mirrors.
 config_url = "https://valargroup.github.io/token-holder-voting-config/voting-config.json"
 
 # SQLite database path for pending validator join requests (empty = $HOME/.svoted/admin.db).

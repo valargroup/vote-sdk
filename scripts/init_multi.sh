@@ -174,8 +174,6 @@ configure_app_toml() {
 configure_helper() {
     local home="$1"
     local api_port="$2"
-    local admin_url="${3:-}"
-    local helper_url="${4:-}"
     local sentry_dsn="${SVOTE_HELPER_SENTRY_DSN:-}"
 
     local app_toml="$home/config/app.toml"
@@ -205,12 +203,6 @@ chain_api_port = ${api_port}
 
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = 2
-
-# Admin server URL for registration and heartbeat. Empty disables (local dev default).
-admin_url = "${admin_url}"
-
-# This server's public URL. Empty disables the heartbeat (local dev default).
-helper_url = "${helper_url}"
 
 # Sentry DSN for error tracking. Empty disables Sentry.
 sentry_dsn = "${sentry_dsn}"
@@ -258,14 +250,12 @@ UICFG
 }
 
 # ---------------------------------------------------------------------------
-# Detect public IP for heartbeat URLs (CI mode only)
+# Detect public admin URL (CI mode only)
 # ---------------------------------------------------------------------------
 ADMIN_SERVER_URL=""
-DASHED_IP=""
 if [ "$CI_MODE" = true ]; then
     PUBLIC_IP=$(curl -4s --connect-timeout 5 ifconfig.me || true)
     if [ -n "$PUBLIC_IP" ]; then
-        DASHED_IP=$(echo "$PUBLIC_IP" | tr '.' '-')
         ADMIN_SERVER_URL="${SVOTE_ADMIN_URL:-https://val1.$(echo "$PUBLIC_IP" | tr '.' '-').sslip.io}"
     fi
 fi
@@ -398,13 +388,8 @@ configure_admin "$HOME_VAL1" "false"
 
 # Helper server on all validators — each needs its own to accept shares when
 # the iOS app distributes encrypted shares across per-validator URLs.
-# In local mode, admin_url points to val1's API port.
 VAL1_ADMIN_URL="${ADMIN_SERVER_URL:-http://localhost:${API_PORTS[0]}}"
-if [ -n "$DASHED_IP" ]; then
-    configure_helper "$HOME_VAL1" "${API_PORTS[0]}" "$VAL1_ADMIN_URL" "https://val1.${DASHED_IP}.sslip.io"
-else
-    configure_helper "$HOME_VAL1" "${API_PORTS[0]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[0]}"
-fi
+configure_helper "$HOME_VAL1" "${API_PORTS[0]}"
 
 # ---------------------------------------------------------------------------
 # Step 2: Configure Validators 2 and 3 (copy genesis, set peers)
@@ -435,11 +420,7 @@ for i in 2 3; do
     # Admin server disabled on non-admin validators (default).
     configure_admin "$home" "true"
 
-    if [ -n "$DASHED_IP" ]; then
-        configure_helper "$home" "${API_PORTS[$idx]}" "$VAL1_ADMIN_URL" "https://val${i}.${DASHED_IP}.sslip.io"
-    else
-        configure_helper "$home" "${API_PORTS[$idx]}" "$VAL1_ADMIN_URL" "http://localhost:${API_PORTS[$idx]}"
-    fi
+    configure_helper "$home" "${API_PORTS[$idx]}"
 
     # Set persistent_peers to val1.
     set_persistent_peers "$home" "$VAL1_PEER"

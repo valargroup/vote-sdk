@@ -152,8 +152,6 @@ HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
 HELPER_MIN_DELAY="${SVOTE_HELPER_MIN_DELAY:-90}"
 HELPER_PROCESS_INTERVAL="${SVOTE_HELPER_PROCESS_INTERVAL:-5}"
 HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-2}"
-HELPER_ADMIN_URL="${SVOTE_HELPER_ADMIN_URL:-}"
-HELPER_URL="${SVOTE_HELPER_URL:-}"
 HELPER_SENTRY_DSN="${SVOTE_HELPER_SENTRY_DSN:-}"
 
 # Append [helper] section (not in the default template).
@@ -190,12 +188,6 @@ chain_api_port = 1317
 
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = $HELPER_MAX_CONCURRENT_PROOFS
-
-# Admin server URL for registration and heartbeat. Empty disables (local dev default).
-admin_url = "$HELPER_ADMIN_URL"
-
-# This server's public URL. Empty disables the heartbeat (local dev default).
-helper_url = "$HELPER_URL"
 
 # Sentry DSN for error tracking. Empty disables Sentry.
 # Can also be set at runtime via the SENTRY_DSN environment variable.

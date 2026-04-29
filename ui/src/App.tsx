@@ -9,6 +9,7 @@ import { RoundEditor } from "./components/RoundEditor";
 import { SnapshotSettingsPage } from "./components/SnapshotSettingsPage";
 import { PendingOperatorsPage } from "./components/PendingOperatorsPage";
 import { PirFleetStatus } from "./components/PirFleetStatus";
+import { VoteServerFleetStatus, VoteServerHealthBadge } from "./components/VoteServerFleetStatus";
 import { RoundsList } from "./components/RoundsList";
 import { useStore } from "./store/useStore";
 import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown } from "lucide-react";
@@ -1603,6 +1604,12 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
               )}
             </div>
           </details>
+
+          {voteServers.length > 0 && (
+            <div className="pt-4 border-t border-border-subtle/50">
+              <VoteServerFleetStatus servers={voteServers} />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1833,6 +1840,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
 
   // Edge Config network management state.
   const [votingConfig, setVotingConfig] = useState<chainApi.VotingConfig | null>(null);
+  const [voteServerHealth, setVoteServerHealth] = useState<chainApi.VoteServerHealth[]>([]);
   const [networkUpdating, setNetworkUpdating] = useState(false);
   const [networkResult, setNetworkResult] = useState<{ moniker: string; ok: boolean; msg: string } | null>(null);
 
@@ -1860,16 +1868,18 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
     if (!silent) setLoading(true);
     setError("");
     try {
-      const [valResp, ceremonyResp, pallasResp, vcResp] = await Promise.all([
+      const [valResp, ceremonyResp, pallasResp, vcResp, healthResp] = await Promise.all([
         chainApi.getValidators(),
         chainApi.getCeremonyState().catch(() => null),
         chainApi.getPallasKeys().catch(() => ({ validators: [] })),
         chainApi.getVotingConfig().catch(() => null),
+        chainApi.getVoteServerHealth().catch(() => []),
       ]);
       setValidators(valResp.validators ?? []);
       setCeremony(ceremonyResp);
       setPallasKeys(new Set(pallasResp.validators.map((v) => v.validator_address)));
       setVotingConfig(vcResp);
+      setVoteServerHealth(healthResp);
     } catch (err) {
       if (!silent) setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1917,6 +1927,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
   const totalPower = validators
     .filter((v) => v.status === "BOND_STATUS_BONDED")
     .reduce((sum, v) => sum + BigInt(v.tokens ?? "0"), BigInt(0));
+  const voteServerHealthByURL = new Map(voteServerHealth.map((row) => [row.url, row]));
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -2132,6 +2143,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                         <div className="flex flex-wrap items-center gap-2">
                           <Server size={10} className="text-success shrink-0" />
                           <span className="text-[10px] text-text-secondary truncate">{registeredUrl}</span>
+                          <VoteServerHealthBadge health={voteServerHealthByURL.get(registeredUrl)} />
                           <button
                             type="button"
                             className="text-[9px] px-1.5 py-0.5 rounded bg-surface-3 text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors shrink-0 disabled:opacity-50 cursor-pointer"

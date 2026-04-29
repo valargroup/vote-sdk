@@ -557,44 +557,27 @@ export async function rejectRegistration(params: ApproveRegistrationParams): Pro
   });
 }
 
-// -- Server heartbeat / approved-servers --
+// -- Vote server health --
 
-/** Persistent list of admin-approved servers (survives pulse gaps). */
-export async function getApprovedServers(): Promise<ServiceEntry[]> {
+export type VoteServerHealthState = "unknown" | "up" | "down";
+
+export interface VoteServerHealth {
+  url: string;
+  label: string;
+  state: VoteServerHealthState;
+  last_checked_at: number;
+  last_success_at: number;
+  latency_ms: number;
+  height: number | null;
+  status_code: number | null;
+  error: string;
+}
+
+export async function getVoteServerHealth(): Promise<VoteServerHealth[]> {
   try {
-    return await fetchJson<ServiceEntry[]>("/api/approved-servers");
+    return await fetchJson<VoteServerHealth[]>("/api/vote-server-health");
   } catch {
     return [];
-  }
-}
-
-export interface RemoveApprovedServerParams {
-  payload: { action: "remove-approved"; operator_address: string };
-  signature: string;
-  pubKey: string;
-  signerAddress: string;
-}
-
-/**
- * Remove a server from approved-servers (and vote_servers + server-pulses).
- * Requires a wallet signature for vote-manager authorization.
- */
-export async function removeApprovedServer(params: RemoveApprovedServerParams): Promise<{ status: string }> {
-  return fetchJson<{ status: string }>("/api/remove-approved-server", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-}
-
-/** Pulse timestamps: { [url]: unix_timestamp }. */
-export type ServerPulses = Record<string, number>;
-
-export async function getServerPulses(): Promise<ServerPulses> {
-  try {
-    return await fetchJson<ServerPulses>("/api/server-pulses");
-  } catch {
-    return {};
   }
 }
 
