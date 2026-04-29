@@ -1,6 +1,7 @@
 package sentry
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +13,13 @@ import (
 )
 
 var sentryEnabled atomic.Bool
+
+// TraceSpan is a small wrapper around a Sentry span that keeps callers from
+// depending on sentry-go directly. Methods are safe to call when tracing is
+// disabled.
+type TraceSpan struct {
+	span *sentrylib.Span
+}
 
 // knownNoisyErrorSignatures are non-actionable error strings observed in
 // Sentry that do not originate from vote-sdk runtime code.
@@ -117,4 +125,45 @@ func CaptureErr(err error, tags map[string]string) {
 		return
 	}
 	sentrylib.CaptureException(err)
+}
+
+// StartTransaction starts a root performance transaction when Sentry tracing is
+// enabled. It returns the transaction context so child spans attach to it.
+func StartTransaction(ctx context.Context, name string, tags map[string]string, data map[string]interface{}) (context.Context, *TraceSpan) {
+	if !sentryEnabled.Load() {
+		return ctx, &TraceSpan{}
+	}
+	span := sentrylib.StartTransaction(ctx, name)
+	setSpanAttributes(span, tags, data)
+	return span.Context(), &TraceSpan{span: span}
+}
+
+// SetData attaches diagnostic data to a span.
+func (s *TraceSpan) SetData(name string, value interface{}) {
+	if s == nil || s.span == nil {
+		return
+	}
+	s.span.SetData(name, value)
+}
+
+// Finish closes the span and marks it OK or failed based on err.
+func (s *TraceSpan) Finish(err error) {
+	if s == nil || s.span == nil {
+		return
+	}
+	if err != nil {
+		s.span.Status = sentrylib.SpanStatusInternalError
+	} else {
+		s.span.Status = sentrylib.SpanStatusOK
+	}
+	s.span.Finish()
+}
+
+func setSpanAttributes(span *sentrylib.Span, tags map[string]string, data map[string]interface{}) {
+	for k, v := range tags {
+		span.SetTag(k, v)
+	}
+	for k, v := range data {
+		span.SetData(k, v)
+	}
 }

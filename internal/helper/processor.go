@@ -345,6 +345,14 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 
 	// Generate ZKP #3 proof.
 	proofStart := time.Now()
+	_, span := StartTrace(ctx, "helper.generate_share_reveal_proof", map[string]string{
+		"round_id":    share.Payload.VoteRoundID,
+		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+	}, map[string]interface{}{
+		"share_index":   share.Payload.EncShare.ShareIndex,
+		"proposal_id":   share.Payload.ProposalID,
+		"vote_decision": share.Payload.VoteDecision,
+	})
 	proof, nullifier, _, err := p.prover.GenerateShareRevealProof(
 		merklePath,
 		shareComms,
@@ -357,6 +365,9 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		roundID,
 	)
 	proofDuration := time.Since(proofStart)
+	span.SetData("duration_ms", proofDuration.Milliseconds())
+	span.SetData("proof_bytes", len(proof))
+	span.Finish(err)
 	if err != nil {
 		return fmt.Errorf("generate proof: %w", err)
 	}
@@ -371,7 +382,6 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	copy(encShareBytes[:32], c1Bytes)
 	copy(encShareBytes[32:], c2Bytes)
 
-	// Submit to chain.
 	msg := &MsgRevealShareJSON{
 		ShareNullifier:           base64.StdEncoding.EncodeToString(nullifier[:]),
 		EncShare:                 base64.StdEncoding.EncodeToString(encShareBytes),
@@ -382,6 +392,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		VoteCommTreeAnchorHeight: anchorHeight,
 	}
 
+	// Submit to chain.
 	result, err := p.submitter.SubmitRevealShare(msg)
 	if err != nil {
 		return fmt.Errorf("submit: %w", err)
