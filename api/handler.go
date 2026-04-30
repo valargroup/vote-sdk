@@ -11,17 +11,33 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	sentrysdk "github.com/getsentry/sentry-go"
 	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/gorilla/mux"
 	protov2 "google.golang.org/protobuf/proto"
 
 	"github.com/valargroup/vote-sdk/sentry"
 	"github.com/valargroup/vote-sdk/x/vote/types"
+)
+
+const (
+	// cometBroadcastAttemptTimeout bounds each individual broadcast_tx_sync call.
+	// Slow CheckTx should not hold the helper request open indefinitely.
+	cometBroadcastAttemptTimeout = 10 * time.Second
+
+	// cometBroadcastMaxAttempts is the total number of attempts for transport-level
+	// failures where CometBFT may still have accepted the tx.
+	cometBroadcastMaxAttempts = 3
+
+	// cometStatusQueryTimeout bounds best-effort status lookups after ambiguous
+	// broadcast outcomes. The public /tx/{hash} endpoint has its own timeout.
+	cometStatusQueryTimeout = 5 * time.Second
 )
 
 // HandlerConfig configures the REST API handler.
@@ -49,9 +65,8 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	if endpoint == "" {
 		endpoint = "http://localhost:26657"
 	}
-	// broadcast_tx_sync only blocks on CheckTx (ZKP verification is ~13ms; the
-	// 30-60s figure is client-side proof generation, not validator-side verify).
-	// 30s gives ample headroom over CometBFT's default 10s timeout_broadcast_tx_commit.
+	// Individual CometBFT RPC calls use shorter per-request contexts; this
+	// client timeout is a final guardrail for any caller that forgets one.
 	client := &http.Client{Timeout: 30 * time.Second}
 	return &Handler{
 		cometRPC: endpoint,
@@ -96,7 +111,7 @@ func (h *Handler) handleDelegateVote(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(w, msg)
+	h.broadcastVoteTx(r.Context(), w, msg)
 }
 
 func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +119,7 @@ func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(w, msg)
+	h.broadcastVoteTx(r.Context(), w, msg)
 }
 
 func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +127,7 @@ func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(w, msg)
+	h.broadcastVoteTx(r.Context(), w, msg)
 }
 
 // --- Snapshot data ---
@@ -186,9 +201,11 @@ func decodeBase64IfPlain(s string) string {
 // errTxNotFound is returned by queryTxByHash when CometBFT has no record of the TX in any block.
 var errTxNotFound = errors.New("tx not found in any block")
 
-// queryTxByHash queries CometBFT's /tx JSON-RPC endpoint for a confirmed
-// transaction. Returns errTxNotFound if the TX is not yet in a block.
-func (h *Handler) queryTxByHash(txHash string) (*txStatusResult, error) {
+// queryTxByHash queries CometBFT's /tx JSON-RPC endpoint for a transaction
+// that has already been included in a block. It returns errTxNotFound when
+// CometBFT has no committed record yet, which includes txs still waiting in
+// the mempool.
+func (h *Handler) queryTxByHash(ctx context.Context, txHash string) (*txStatusResult, error) {
 	// CometBFT JSON-RPC unmarshals the hash param as []byte via Go's
 	// json.Unmarshal, which expects base64 — not hex. Convert hex → bytes → base64.
 	hashBytes, err := hex.DecodeString(txHash)
@@ -212,7 +229,7 @@ func (h *Handler) queryTxByHash(txHash string) (*txStatusResult, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", h.cometRPC, bytes.NewReader(bodyBytes))
@@ -283,7 +300,7 @@ func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.queryTxByHash(txHash)
+	result, err := h.queryTxByHash(r.Context(), txHash)
 	if errors.Is(err, errTxNotFound) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -317,9 +334,11 @@ type BroadcastResult struct {
 	Log    string `json:"log,omitempty"`
 }
 
-// broadcastVoteTx encodes a vote message to wire format and broadcasts it
-// to the local CometBFT node via broadcast_tx_sync.
-func (h *Handler) broadcastVoteTx(w http.ResponseWriter, msg types.VoteMessage) {
+// broadcastVoteTx encodes a vote message, broadcasts it to the local CometBFT
+// node, and translates the result into the REST response contract. Ambiguous
+// transport failures are reconciled by cometBroadcastTxSyncWithRetry before an
+// HTTP 502 is returned to the client.
+func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, msg types.VoteMessage) {
 	raw, err := EncodeVoteTx(msg)
 	if err != nil {
 		sentry.CaptureErr(err, map[string]string{
@@ -332,12 +351,12 @@ func (h *Handler) broadcastVoteTx(w http.ResponseWriter, msg types.VoteMessage) 
 	}
 
 	start := time.Now()
-	result, err := h.cometBroadcastTxSync(raw)
+	result, err := h.cometBroadcastTxSyncWithRetry(ctx, raw, fmt.Sprintf("%T", msg))
 	elapsed := time.Since(start)
 	log.Printf("[shielded-vote-api] broadcast_tx_sync duration_ms=%d msg_type=%T", elapsed.Milliseconds(), msg)
 	if err != nil {
-		// 502 = CometBFT rejected the broadcast (RPC error). The error string now includes
-		// CometBFT's error.data when present (e.g. "tx already in cache", "context canceled").
+		// Ambiguous transport failures are handled inside cometBroadcastTxSyncWithRetry.
+		// Anything that reaches this point is a definite CometBFT/RPC rejection.
 		log.Printf("[shielded-vote-api] broadcast_tx_sync failed: %v", err)
 		sentry.CaptureErr(err, map[string]string{
 			"handler":  "broadcastVoteTx",
@@ -356,10 +375,60 @@ func (h *Handler) broadcastVoteTx(w http.ResponseWriter, msg types.VoteMessage) 
 	writeJSON(w, http.StatusOK, result)
 }
 
+// cometBroadcastTxSyncWithRetry broadcasts txBytes with bounded retries for
+// transport errors whose outcome is unknown. EOFs and timeouts can happen after
+// CometBFT accepts the tx but before the helper receives the RPC response, so
+// each ambiguous failure is followed by a /tx lookup for the precomputed hash.
+func (h *Handler) cometBroadcastTxSyncWithRetry(ctx context.Context, txBytes []byte, msgType string) (*BroadcastResult, error) {
+	txHash := txHashHex(txBytes)
+	var lastErr error
+
+	for attempt := 1; attempt <= cometBroadcastMaxAttempts; attempt++ {
+		result, err := h.cometBroadcastTxSyncAttempt(ctx, txBytes, txHash, msgType, attempt)
+		if err == nil {
+			return result, nil
+		}
+
+		lastErr = err
+		if !isUnknownBroadcastError(err) {
+			return nil, err
+		}
+
+		log.Printf("[shielded-vote-api] broadcast_tx_sync unknown outcome attempt=%d tx_hash=%s: %v", attempt, txHash, err)
+		status, statusErr := h.queryTxByHashWithSpan(ctx, txHash, msgType, attempt)
+		if statusErr == nil {
+			return broadcastResultFromTxStatus(txHash, status), nil
+		}
+		captureStatusLookupError(statusErr, msgType, txHash)
+	}
+
+	return &BroadcastResult{
+		TxHash: txHash,
+		Code:   0,
+		Log:    fmt.Sprintf("broadcast outcome unknown after retries; poll tx status: %v", lastErr),
+	}, nil
+}
+
+// cometBroadcastTxSyncAttempt wraps one broadcast_tx_sync call with its per-RPC
+// timeout and Sentry span. Retry decisions are made by the caller.
+func (h *Handler) cometBroadcastTxSyncAttempt(ctx context.Context, txBytes []byte, txHash, msgType string, attempt int) (*BroadcastResult, error) {
+	span := h.startCometSpan(ctx, "broadcast_tx_sync", txHash, msgType, attempt)
+	attemptCtx, cancel := context.WithTimeout(span.Context(), cometBroadcastAttemptTimeout)
+
+	start := time.Now()
+	result, err := h.cometBroadcastTxSync(attemptCtx, txBytes, txHash)
+	elapsed := time.Since(start)
+	cancel()
+
+	h.finishCometSpan(span, err, elapsed)
+	log.Printf("[shielded-vote-api] broadcast_tx_sync attempt=%d duration_ms=%d tx_hash=%s msg_type=%s", attempt, elapsed.Milliseconds(), txHash, msgType)
+	return result, err
+}
+
 // cometBroadcastTxSync sends raw tx bytes to CometBFT's broadcast_tx_sync
 // JSON-RPC endpoint. The tx bytes are automatically base64-encoded by
 // encoding/json when marshaled.
-func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error) {
+func (h *Handler) cometBroadcastTxSync(ctx context.Context, txBytes []byte, txHash string) (*BroadcastResult, error) {
 	reqBody := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -374,7 +443,13 @@ func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error)
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	resp, err := h.client.Post(h.cometRPC, "application/json", bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", h.cometRPC, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create CometBFT request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP POST to CometBFT: %w", err)
 	}
@@ -419,10 +494,9 @@ func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error)
 		// mempool. This includes txs that passed CheckTx AND txs that were rejected — the
 		// cache tracks hashes, not outcomes. Query CometBFT /tx to find the real status.
 		if strings.Contains(detail, "already exists in cache") {
-			txHash := fmt.Sprintf("%X", sha256.Sum256(txBytes))
 			log.Printf("[shielded-vote-api] tx already in mempool cache, querying real status hash=%s", txHash)
 
-			status, err := h.queryTxByHash(txHash)
+			status, err := h.queryTxByHash(ctx, txHash)
 			if errors.Is(err, errTxNotFound) {
 				// TX is pending in the mempool (not yet committed). Return the hash
 				// so the client can poll /tx/{hash} for confirmation.
@@ -437,11 +511,7 @@ func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error)
 			}
 
 			// TX was committed — return the real outcome (may be code 0 or non-zero).
-			return &BroadcastResult{
-				TxHash: txHash,
-				Code:   status.Code,
-				Log:    status.Log,
-			}, nil
+			return broadcastResultFromTxStatus(txHash, status), nil
 		}
 
 		return nil, fmt.Errorf("CometBFT RPC error %d: %s", rpcResp.Error.Code, detail)
@@ -452,6 +522,125 @@ func (h *Handler) cometBroadcastTxSync(txBytes []byte) (*BroadcastResult, error)
 		Code:   rpcResp.Result.Code,
 		Log:    rpcResp.Result.Log,
 	}, nil
+}
+
+// queryTxByHashWithSpan records the status lookup used to reconcile an
+// ambiguous broadcast. A not-found result is expected while a tx is still
+// pending, so callers decide whether to surface or ignore that error.
+func (h *Handler) queryTxByHashWithSpan(ctx context.Context, txHash, msgType string, attempt int) (*txStatusResult, error) {
+	span := h.startCometSpan(ctx, "tx", txHash, msgType, attempt)
+	statusCtx, cancel := context.WithTimeout(span.Context(), cometStatusQueryTimeout)
+
+	start := time.Now()
+	status, err := h.queryTxByHash(statusCtx, txHash)
+	elapsed := time.Since(start)
+	cancel()
+
+	h.finishCometSpan(span, err, elapsed)
+	return status, err
+}
+
+// startCometSpan creates optional Sentry instrumentation for a CometBFT RPC.
+// sentry-go is safe when Sentry is not configured; in that case this remains
+// local no-op tracing and does not affect request handling.
+func (h *Handler) startCometSpan(ctx context.Context, method, txHash, msgType string, attempt int) *sentrysdk.Span {
+	span := sentrysdk.StartSpan(ctx, "rpc.client", sentrysdk.WithDescription("CometBFT "+method))
+	span.SetTag("rpc.system", "jsonrpc")
+	span.SetTag("rpc.service", "cometbft")
+	span.SetTag("rpc.method", method)
+	span.SetTag("tx_hash", txHash)
+	span.SetTag("msg_type", msgType)
+	span.SetData("attempt", attempt)
+	span.SetData("endpoint", h.cometRPC)
+	return span
+}
+
+// finishCometSpan records the outcome and coarse error kind for a CometBFT RPC
+// span before closing it.
+func (h *Handler) finishCometSpan(span *sentrysdk.Span, err error, elapsed time.Duration) {
+	span.SetData("duration_ms", elapsed.Milliseconds())
+	if err == nil {
+		span.SetTag("outcome", "ok")
+		span.Status = sentrysdk.SpanStatusOK
+		span.Finish()
+		return
+	}
+
+	span.SetTag("outcome", "error")
+	span.SetTag("error_kind", cometErrorKind(err))
+	if errors.Is(err, errTxNotFound) {
+		span.Status = sentrysdk.SpanStatusNotFound
+	} else if isUnknownBroadcastError(err) {
+		span.Status = sentrysdk.SpanStatusDeadlineExceeded
+	} else {
+		span.Status = sentrysdk.SpanStatusInternalError
+	}
+	span.Finish()
+}
+
+// isUnknownBroadcastError reports whether err means the helper lost the RPC
+// response without knowing if CometBFT accepted the tx. These are safe to retry
+// because the tx hash is deterministic and duplicate submissions are reconciled
+// through CometBFT's cache/status query behavior.
+func isUnknownBroadcastError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+
+	var netErr net.Error
+	return errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary())
+}
+
+// cometErrorKind normalizes transport/status failures into low-cardinality
+// Sentry tag values.
+func cometErrorKind(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, io.EOF):
+		return "eof"
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return "unexpected_eof"
+	case errors.Is(err, errTxNotFound):
+		return "tx_not_found"
+	default:
+		var netErr net.Error
+		if errors.As(err, &netErr) {
+			if netErr.Timeout() {
+				return "net_timeout"
+			}
+			if netErr.Temporary() {
+				return "net_temporary"
+			}
+			return "net_error"
+		}
+		return "other"
+	}
+}
+
+func txHashHex(txBytes []byte) string {
+	return fmt.Sprintf("%X", sha256.Sum256(txBytes))
+}
+
+func broadcastResultFromTxStatus(txHash string, status *txStatusResult) *BroadcastResult {
+	return &BroadcastResult{
+		TxHash: txHash,
+		Code:   status.Code,
+		Log:    status.Log,
+	}
+}
+
+func captureStatusLookupError(err error, msgType, txHash string) {
+	if errors.Is(err, errTxNotFound) {
+		return
+	}
+
+	sentry.CaptureErr(err, map[string]string{
+		"handler":  "broadcastVoteTx",
+		"stage":    "status_after_unknown_broadcast",
+		"msg_type": msgType,
+		"tx_hash":  txHash,
+	})
 }
 
 // --- Helpers ---
