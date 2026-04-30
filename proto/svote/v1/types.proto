@@ -10,7 +10,6 @@ enum SessionStatus {
   SESSION_STATUS_TALLYING    = 2;
   SESSION_STATUS_FINALIZED   = 3;
   SESSION_STATUS_PENDING     = 4; // Ceremony in progress, not yet active
-  SESSION_STATUS_ABORTED     = 5; // Ceremony could not meet the validator floor
 }
 
 // VoteOption represents a named choice within a proposal.

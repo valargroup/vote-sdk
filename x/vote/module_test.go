@@ -2,7 +2,6 @@ package vote_test
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -18,7 +17,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -36,10 +34,9 @@ var fpLE = svtest.FpLE
 
 type EndBlockerTestSuite struct {
 	suite.Suite
-	ctx     sdk.Context
-	keeper  *keeper.Keeper
-	module  vote.AppModule
-	staking *moduleMockStakingKeeper
+	ctx    sdk.Context
+	keeper *keeper.Keeper
+	module vote.AppModule
 }
 
 func TestEndBlockerTestSuite(t *testing.T) {
@@ -55,57 +52,8 @@ func (s *EndBlockerTestSuite) SetupTest() {
 		WithBlockTime(time.Unix(1_000_000, 0).UTC()).
 		WithBlockHeight(10)
 	storeService := runtime.NewKVStoreService(key)
-	s.staking = newModuleMockStakingKeeper()
-	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), s.staking, nil)
+	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	s.module = vote.NewAppModule(s.keeper, nil) // codec unused by EndBlock
-}
-
-type moduleMockStakingKeeper struct {
-	validators       map[string]stakingtypes.Validator
-	proposerOperator string
-}
-
-func newModuleMockStakingKeeper() *moduleMockStakingKeeper {
-	return &moduleMockStakingKeeper{validators: make(map[string]stakingtypes.Validator)}
-}
-
-func (mk *moduleMockStakingKeeper) setValidator(addr string, status stakingtypes.BondStatus, jailed bool) {
-	mk.validators[addr] = stakingtypes.Validator{
-		OperatorAddress: addr,
-		Status:          status,
-		Jailed:          jailed,
-	}
-}
-
-func (mk *moduleMockStakingKeeper) GetValidator(_ context.Context, addr sdk.ValAddress) (stakingtypes.Validator, error) {
-	v, ok := mk.validators[addr.String()]
-	if !ok {
-		return stakingtypes.Validator{}, fmt.Errorf("validator %s not found", addr)
-	}
-	return v, nil
-}
-
-func (mk *moduleMockStakingKeeper) GetValidatorByConsAddr(_ context.Context, _ sdk.ConsAddress) (stakingtypes.Validator, error) {
-	if mk.proposerOperator == "" {
-		return stakingtypes.Validator{}, fmt.Errorf("proposer not configured in mock")
-	}
-	return stakingtypes.Validator{OperatorAddress: mk.proposerOperator}, nil
-}
-
-func (mk *moduleMockStakingKeeper) Jail(_ context.Context, _ sdk.ConsAddress) error {
-	return nil
-}
-
-func (mk *moduleMockStakingKeeper) Unjail(_ context.Context, _ sdk.ConsAddress) error {
-	return nil
-}
-
-func moduleTestValAddr(seed byte) string {
-	return sdk.ValAddress(bytes.Repeat([]byte{seed}, 20)).String()
-}
-
-func moduleTestPallasKey(seed byte) []byte {
-	return bytes.Repeat([]byte{seed}, 32)
 }
 
 // ---------------------------------------------------------------------------
@@ -410,183 +358,6 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 	}
 }
 
-func (s *EndBlockerTestSuite) TestEndBlock_RegisteringTimeoutEvictsAndRestarts() {
-	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 3))
-
-	validators := make([]*types.ValidatorPallasKey, 0, 4)
-	for i := byte(1); i <= 4; i++ {
-		addr := moduleTestValAddr(i)
-		pk := moduleTestPallasKey(i)
-		s.staking.setValidator(addr, stakingtypes.Bonded, false)
-		s.Require().NoError(s.keeper.SetPallasKey(kv, &types.ValidatorPallasKey{
-			ValidatorAddress: addr,
-			PallasPk:         pk,
-		}))
-		validators = append(validators, &types.ValidatorPallasKey{
-			ValidatorAddress: addr,
-			PallasPk:         pk,
-			ShamirIndex:      uint32(i + 10),
-		})
-	}
-
-	roundID := bytes.Repeat([]byte{0xD1}, 32)
-	phaseStart := uint64(s.ctx.BlockTime().Unix()) - types.DefaultContributionTimeout
-	round := &types.VoteRound{
-		VoteRoundId:          roundID,
-		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
-		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-		CeremonyValidators:   validators,
-		CeremonyPhaseStart:   phaseStart,
-		CeremonyPhaseTimeout: types.DefaultContributionTimeout,
-		DkgContributions: []*types.DKGContribution{
-			{ValidatorAddress: validators[0].ValidatorAddress, FeldmanCommitments: [][]byte{{0x01}}},
-			{ValidatorAddress: validators[1].ValidatorAddress, FeldmanCommitments: [][]byte{{0x02}}},
-			{ValidatorAddress: validators[2].ValidatorAddress, FeldmanCommitments: [][]byte{{0x03}}},
-		},
-		CeremonyAcks:       []*types.AckEntry{{ValidatorAddress: validators[0].ValidatorAddress}},
-		EaPk:               bytes.Repeat([]byte{0xAA}, 32),
-		FeldmanCommitments: [][]byte{bytes.Repeat([]byte{0xBB}, 32)},
-		Threshold:          2,
-	}
-	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
-
-	s.Require().NoError(s.module.EndBlock(s.ctx))
-
-	round, err := s.keeper.GetVoteRound(kv, roundID)
-	s.Require().NoError(err)
-	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
-	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
-	s.Require().Len(round.CeremonyValidators, 3)
-	for i := range round.CeremonyValidators {
-		s.Require().Equal(validators[i].ValidatorAddress, round.CeremonyValidators[i].ValidatorAddress)
-		s.Require().Equal(uint32(i+1), round.CeremonyValidators[i].ShamirIndex)
-	}
-	s.Require().Nil(round.DkgContributions)
-	s.Require().Nil(round.CeremonyAcks)
-	s.Require().Nil(round.EaPk)
-	s.Require().Nil(round.FeldmanCommitments)
-	s.Require().Zero(round.Threshold)
-	s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), round.CeremonyPhaseStart)
-	s.Require().Equal(types.DefaultContributionTimeout, round.CeremonyPhaseTimeout)
-	s.Require().Len(round.CeremonyLog, 1)
-	s.Require().Contains(round.CeremonyLog[0], "REGISTERING timeout: evicted 1 non-contributor/ineligible validator(s), restarting with 3/4")
-}
-
-func (s *EndBlockerTestSuite) TestEndBlock_RegisteringTimeoutAbortsBelowMin() {
-	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 3))
-
-	validators := make([]*types.ValidatorPallasKey, 0, 4)
-	for i := byte(1); i <= 4; i++ {
-		addr := moduleTestValAddr(i)
-		pk := moduleTestPallasKey(i)
-		s.staking.setValidator(addr, stakingtypes.Bonded, false)
-		s.Require().NoError(s.keeper.SetPallasKey(kv, &types.ValidatorPallasKey{
-			ValidatorAddress: addr,
-			PallasPk:         pk,
-		}))
-		validators = append(validators, &types.ValidatorPallasKey{
-			ValidatorAddress: addr,
-			PallasPk:         pk,
-			ShamirIndex:      uint32(i),
-		})
-	}
-
-	roundID := bytes.Repeat([]byte{0xD2}, 32)
-	phaseStart := uint64(s.ctx.BlockTime().Unix()) - types.DefaultContributionTimeout
-	round := &types.VoteRound{
-		VoteRoundId:          roundID,
-		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
-		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-		CeremonyValidators:   validators,
-		CeremonyPhaseStart:   phaseStart,
-		CeremonyPhaseTimeout: types.DefaultContributionTimeout,
-		DkgContributions: []*types.DKGContribution{
-			{ValidatorAddress: validators[0].ValidatorAddress},
-			{ValidatorAddress: validators[1].ValidatorAddress},
-		},
-	}
-	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
-
-	s.Require().NoError(s.module.EndBlock(s.ctx))
-
-	round, err := s.keeper.GetVoteRound(kv, roundID)
-	s.Require().NoError(err)
-	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ABORTED, round.Status)
-	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
-	s.Require().Len(round.CeremonyValidators, 2)
-	s.Require().Nil(round.DkgContributions)
-	s.Require().Len(round.CeremonyLog, 1)
-	s.Require().Contains(round.CeremonyLog[0], "REGISTERING timeout: aborted, only 2/4 validators remained below min 3")
-
-	hasPending, err := s.keeper.HasPendingRound(kv)
-	s.Require().NoError(err)
-	s.Require().False(hasPending, "aborted rounds must not block a replacement voting session")
-
-	s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{
-		Addresses: []string{svtest.DefaultVoteManagerAddress},
-	}))
-	msgServer := keeper.NewMsgServerImpl(s.keeper)
-	_, err = msgServer.CreateVotingSession(s.ctx, svtest.ValidCreateVotingSessionWithEndTime(time.Unix(2_000_000, 0)))
-	s.Require().NoError(err)
-}
-
-func (s *EndBlockerTestSuite) TestEndBlock_RegisteringTimeoutDropsContributedButIneligible() {
-	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 2))
-
-	validators := make([]*types.ValidatorPallasKey, 0, 4)
-	for i := byte(1); i <= 4; i++ {
-		addr := moduleTestValAddr(i)
-		pk := moduleTestPallasKey(i)
-		jailed := i == 2
-		s.staking.setValidator(addr, stakingtypes.Bonded, jailed)
-		if i != 3 {
-			s.Require().NoError(s.keeper.SetPallasKey(kv, &types.ValidatorPallasKey{
-				ValidatorAddress: addr,
-				PallasPk:         pk,
-			}))
-		}
-		validators = append(validators, &types.ValidatorPallasKey{
-			ValidatorAddress: addr,
-			PallasPk:         pk,
-			ShamirIndex:      uint32(i),
-		})
-	}
-
-	roundID := bytes.Repeat([]byte{0xD3}, 32)
-	phaseStart := uint64(s.ctx.BlockTime().Unix()) - types.DefaultContributionTimeout
-	round := &types.VoteRound{
-		VoteRoundId:          roundID,
-		Status:               types.SessionStatus_SESSION_STATUS_PENDING,
-		CeremonyStatus:       types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-		CeremonyValidators:   validators,
-		CeremonyPhaseStart:   phaseStart,
-		CeremonyPhaseTimeout: types.DefaultContributionTimeout,
-	}
-	for _, v := range validators {
-		round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{
-			ValidatorAddress: v.ValidatorAddress,
-		})
-	}
-	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
-
-	s.Require().NoError(s.module.EndBlock(s.ctx))
-
-	round, err := s.keeper.GetVoteRound(kv, roundID)
-	s.Require().NoError(err)
-	s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
-	s.Require().Len(round.CeremonyValidators, 2)
-	s.Require().Equal(validators[0].ValidatorAddress, round.CeremonyValidators[0].ValidatorAddress)
-	s.Require().Equal(validators[3].ValidatorAddress, round.CeremonyValidators[1].ValidatorAddress)
-	s.Require().Equal(uint32(1), round.CeremonyValidators[0].ShamirIndex)
-	s.Require().Equal(uint32(2), round.CeremonyValidators[1].ShamirIndex)
-	s.Require().Nil(round.DkgContributions)
-	s.Require().Len(round.CeremonyLog, 1)
-	s.Require().Contains(round.CeremonyLog[0], "REGISTERING timeout: evicted 2 non-contributor/ineligible validator(s), restarting with 2/4")
-}
-
 // ---------------------------------------------------------------------------
 // Ceremony log tests for EndBlocker timeout paths
 // ---------------------------------------------------------------------------
@@ -699,10 +470,10 @@ func (s *EndBlockerTestSuite) TestEndBlock_TallyTimeout() {
 	roundID := bytes.Repeat([]byte{0xEE}, 32)
 
 	tests := []struct {
-		name         string
-		setup        func()
-		wantStatus   types.SessionStatus
-		wantTimedOut bool
+		name            string
+		setup           func()
+		wantStatus      types.SessionStatus
+		wantTimedOut    bool
 	}{
 		{
 			name: "TALLYING past deadline -> FINALIZED with tally_timed_out=true",
