@@ -30,6 +30,16 @@ function apiBase(): string {
   return localStorage.getItem(CHAIN_URL_KEY) || "";
 }
 
+class HTTPError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "HTTPError";
+    this.status = status;
+  }
+}
+
 /** Return the resolved API base URL for use by other modules (e.g. cosmosTx). */
 export function getApiBase(): string {
   return apiBase();
@@ -83,7 +93,7 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       if (body) msg = body;
     }
-    throw new Error(msg);
+    throw new HTTPError(resp.status, msg);
   }
   return resp.json();
 }
@@ -347,8 +357,11 @@ export async function getActiveRound(): Promise<{ round: ChainRound | null }> {
   try {
     const resp = await fetchJson<{ round?: ChainRound }>("/shielded-vote/v1/rounds/active");
     return { round: resp.round ?? null };
-  } catch {
-    return { round: null };
+  } catch (err) {
+    if (err instanceof HTTPError && err.status === 404) {
+      return { round: null };
+    }
+    throw err;
   }
 }
 
