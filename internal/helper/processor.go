@@ -183,6 +183,10 @@ func (p *Processor) processBatch(ctx context.Context) {
 		return
 	}
 
+	ctx, batchSpan := StartTrace(ctx, "helper.wakeup", "helper.process_ready_shares", nil, map[string]interface{}{
+		"ready_count":    len(ready),
+		"max_concurrent": p.maxConcurrent,
+	})
 	p.logger.Info(
 		"processing ready shares",
 		"count", len(ready),
@@ -195,9 +199,22 @@ func (p *Processor) processBatch(ctx context.Context) {
 	for _, queued := range ready {
 		share := queued
 		g.Go(func() (retErr error) {
+			shareCtx, shareSpan := StartTrace(gctx, "helper.process_share", "helper.process_share", map[string]string{
+				"round_id":    share.Payload.VoteRoundID,
+				"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+			}, map[string]interface{}{
+				"proposal_id":   share.Payload.ProposalID,
+				"tree_position": share.Payload.TreePosition,
+				"submit_at":     share.Payload.SubmitAt,
+			})
+			var spanErr error
+			defer func() {
+				shareSpan.Finish(spanErr)
+			}()
 			defer func() {
 				if r := recover(); r != nil {
 					err := fmt.Errorf("panic in processShare: %v", r)
+					spanErr = err
 					CaptureErr(err, map[string]string{
 						"round_id":    share.Payload.VoteRoundID,
 						"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
@@ -213,14 +230,18 @@ func (p *Processor) processBatch(ctx context.Context) {
 			}()
 
 			select {
-			case <-gctx.Done():
+			case <-shareCtx.Done():
+				spanErr = shareCtx.Err()
 				return nil
 			default:
 			}
 
 			if p.isRoundActive != nil {
+				_, statusSpan := StartTrace(shareCtx, "helper.round_status_check", "helper.round_status_check", nil, nil)
 				active, err := p.isRoundActive(share.Payload.VoteRoundID)
+				statusSpan.Finish(err)
 				if err != nil {
+					spanErr = err
 					p.logger.Warn("round status check failed, skipping share",
 						"round_id", share.Payload.VoteRoundID,
 						"share_index", share.Payload.EncShare.ShareIndex,
@@ -235,6 +256,7 @@ func (p *Processor) processBatch(ctx context.Context) {
 					return nil
 				}
 				if !active {
+					shareSpan.SetData("outcome", "round_inactive")
 					p.logger.Info("round no longer active, skipping share",
 						"round_id", share.Payload.VoteRoundID,
 						"share_index", share.Payload.EncShare.ShareIndex,
@@ -247,16 +269,23 @@ func (p *Processor) processBatch(ctx context.Context) {
 			// Skip jitter for immediate-mode shares (last-moment votes).
 			if share.Payload.SubmitAt != 0 {
 				delay := p.intraShareDelay()
+				_, jitterSpan := StartTrace(shareCtx, "helper.intra_share_delay", "helper.intra_share_delay", nil, map[string]interface{}{
+					"delay_ms": delay.Milliseconds(),
+				})
 				timer := time.NewTimer(delay)
 				select {
-				case <-gctx.Done():
+				case <-shareCtx.Done():
 					timer.Stop()
+					spanErr = shareCtx.Err()
+					jitterSpan.Finish(spanErr)
 					return nil
 				case <-timer.C:
 				}
+				jitterSpan.Finish(nil)
 			}
 
-			if err := p.processShare(gctx, share); err != nil {
+			if err := p.processShare(shareCtx, share); err != nil {
+				spanErr = err
 				p.logger.Warn("share processing failed",
 					"round_id", share.Payload.VoteRoundID,
 					"share_index", share.Payload.EncShare.ShareIndex,
@@ -271,6 +300,7 @@ func (p *Processor) processBatch(ctx context.Context) {
 				return nil
 			}
 
+			shareSpan.SetData("outcome", "submitted")
 			p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 			p.logger.Info("share submitted",
 				"round_id", share.Payload.VoteRoundID,
@@ -280,8 +310,11 @@ func (p *Processor) processBatch(ctx context.Context) {
 		})
 	}
 	if err := g.Wait(); err != nil {
+		batchSpan.Finish(err)
 		p.logger.Error("share processing batch had errors", "error", err)
+		return
 	}
+	batchSpan.Finish(nil)
 }
 
 // processShare handles a single share: Merkle path → proof → submit.
@@ -418,7 +451,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	}
 
 	// Submit to chain.
-	result, err := p.submitter.SubmitRevealShare(msg)
+	result, err := p.submitter.SubmitRevealShareContext(ctx, msg)
 	if err != nil {
 		return fmt.Errorf("submit: %w", err)
 	}
