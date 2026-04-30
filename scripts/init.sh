@@ -98,9 +98,10 @@ VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .
 
 # Patch genesis: set vote_manager_addresses to the imported keys' addresses,
 # register the genesis validator's Pallas key for EA ceremonies,
-# disable staking historical-info retention, and zero out slashing slash
-# fractions (no token burn). Defaults for signed_blocks_window (100),
-# min_signed_per_window (0.5), and downtime_jail_duration (600s) are acceptable.
+# disable staking historical-info retention, configure downtime jailing, and
+# zero out slashing slash fractions (no token burn). The signed block window
+# gives mature validators roughly a 1h continuous-downtime threshold and keeps
+# the initial slashing warm-up around 5h at current svoted block times.
 GENESIS="$HOME_DIR/config/genesis.json"
 jq --argjson vms "$VOTE_MANAGER_JSON" \
   --arg validator "$VALIDATOR_VALOPER" \
@@ -108,6 +109,9 @@ jq --argjson vms "$VOTE_MANAGER_JSON" \
   .app_state.vote.vote_manager_addresses = $vms
   | .app_state.vote.pallas_keys = [{validator_address: $validator, pallas_pk: $pallasPk}]
   | .app_state.staking.params.historical_entries = 0
+  | .app_state.slashing.params.signed_blocks_window = "15000"
+  | .app_state.slashing.params.min_signed_per_window = "0.800000000000000000"
+  | .app_state.slashing.params.downtime_jail_duration = "60s"
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"
