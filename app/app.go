@@ -80,6 +80,9 @@ type SvoteApp struct {
 
 	// UI dist path (set externally by PostSetup; empty = UI disabled).
 	uiDistPath string
+
+	// Crypto verifier cache readiness.
+	cryptoWarmup cryptoWarmupState
 }
 
 func init() {
@@ -319,6 +322,7 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			PIRServiceURL:    os.Getenv("SVOTE_PIR_URL"),
 			LightwalletdURLs: voteapi.ParseLightwalletdURLs(os.Getenv("SVOTE_LWD_URLS")),
 		},
+		CryptoReadiness: app.CryptoWarmupStatus,
 	})
 	voteHandler.RegisterTxRoutes(apiSvr.Router)
 	voteHandler.RegisterQueryRoutes(apiSvr.Router, apiSvr.ClientCtx)

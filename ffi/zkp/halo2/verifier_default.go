@@ -15,3 +15,10 @@ const IsMock = true
 func NewVerifier() zkp.Verifier {
 	return zkp.NewMockVerifier()
 }
+
+// WarmVerifierCaches is a no-op when built without the "halo2" tag. This keeps
+// non-production commands and unit tests buildable without the Rust static
+// library; production svoted rejects mock crypto builds at startup.
+func WarmVerifierCaches() error {
+	return nil
+}
