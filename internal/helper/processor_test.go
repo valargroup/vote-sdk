@@ -12,6 +12,7 @@ import (
 
 	"cosmossdk.io/log"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockProver returns a fixed proof and nullifier.
@@ -338,6 +339,38 @@ func TestProcessor_ProcessBatch_Sequential(t *testing.T) {
 
 	status := store.Status()
 	assert.Equal(t, 4, status[roundID].Submitted)
+}
+
+func TestProcessor_CurrentMeanInterval_AcceleratesNearRoundEnd(t *testing.T) {
+	const baseMean = 30 * time.Second
+
+	// Round 'soon' ends in 2 minutes — within urgentWindow.
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (uint64, error) {
+		if roundID == "soon" {
+			return now + 120, nil
+		}
+		return now + 12*3600, nil
+	}
+	store, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer store.Close()
+
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+	submitter := NewChainSubmitter("http://localhost:0")
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), baseMean, 1, nil)
+
+	assert.Equal(t, baseMean, proc.currentMeanInterval(),
+		"no shares queued — mean should be unchanged")
+
+	enqueueAndRequireInserted(t, store, testPayload("far", 0))
+	assert.Equal(t, baseMean, proc.currentMeanInterval(),
+		"only far-future round queued — mean should be unchanged")
+
+	enqueueAndRequireInserted(t, store, testPayload("soon", 0))
+	assert.Equal(t, baseMean/urgentSpeedup, proc.currentMeanInterval(),
+		"share in soon-closing round — mean should be divided by urgentSpeedup")
 }
 
 func TestValidatePayload(t *testing.T) {

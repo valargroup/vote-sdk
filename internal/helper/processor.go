@@ -15,6 +15,16 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// urgentWindow is how close to a round's vote_end_time the processor switches
+// to the accelerated wake-up cadence. When any scheduled share belongs to a
+// round ending within this window, randomDelay samples from an exponential
+// distribution whose mean is divided by urgentSpeedup, dramatically reducing
+// the probability of a wake-up being too long to catch a last-minute share.
+const (
+	urgentWindow  = 5 * time.Minute
+	urgentSpeedup = 5
+)
+
 // Processor is the background share processing loop. It checks the share queue
 // at Poisson-distributed intervals (exponential inter-arrival times) for shares
 // whose delay has elapsed, generates Merkle paths and ZKP #3 proofs, and submits
@@ -95,15 +105,30 @@ func exponentialDelay(mean time.Duration) (time.Duration, error) {
 	return time.Duration(delaySecs * float64(time.Second)), nil
 }
 
-// randomDelay samples from Exp(1/meanInterval) for inter-cycle timing.
+// randomDelay samples from Exp(1/meanInterval) for inter-cycle timing. When
+// any scheduled share belongs to a round ending within urgentWindow, the mean
+// is divided by urgentSpeedup so wake-ups become frequent enough that missing
+// the round close is vanishingly unlikely. The Poisson property is preserved
+// — privacy degrades only in the final minutes of a round, where preventing
+// vote loss outweighs marginal timing-correlation gains.
 func (p *Processor) randomDelay() time.Duration {
-	d, err := exponentialDelay(p.meanInterval)
+	mean := p.currentMeanInterval()
+	d, err := exponentialDelay(mean)
 	if err != nil {
 		p.logger.Error("randomDelay: crypto/rand failed, using mean", "error", err)
 		CaptureErr(err, map[string]string{"stage": "random_delay"})
-		return p.meanInterval
+		return mean
 	}
 	return d
+}
+
+// currentMeanInterval returns the inter-cycle mean delay, accelerated by
+// urgentSpeedup when a share's round is within urgentWindow of closing.
+func (p *Processor) currentMeanInterval() time.Duration {
+	if p.store != nil && p.store.HasUrgentShares(urgentWindow) {
+		return p.meanInterval / urgentSpeedup
+	}
+	return p.meanInterval
 }
 
 // intraShareDelay samples from Exp(2/meanInterval) — half the mean of the
