@@ -33,10 +33,10 @@ func TestRunPendingSweeper_DeletesExpiredRows(t *testing.T) {
 	}
 
 	a := &Admin{
-		configURL:   "http://invalid.local",
-		logger:      log.NewNopLogger(),
-		store:       st,
-		checkBonded: func(string) bool { return false },
+		configURL:            "http://invalid.local",
+		logger:               log.NewNopLogger(),
+		store:                st,
+		checkValidatorExists: func(string) bool { return false },
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

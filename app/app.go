@@ -282,19 +282,16 @@ func (app *SvoteApp) LoadHeight(height int64) error {
 	return app.LoadVersion(height)
 }
 
-// ValidatorValoperBonded returns true if the staking module reports the given
-// valoper bech32 address as bonded.
-func (app *SvoteApp) ValidatorValoperBonded(valoper string) bool {
+// ValidatorValoperExists returns true if the staking module has a validator
+// record for the given valoper bech32 address, regardless of bond status.
+func (app *SvoteApp) ValidatorValoperExists(valoper string) bool {
 	valAddr, err := sdk.ValAddressFromBech32(valoper)
 	if err != nil {
 		return false
 	}
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.LastBlockHeight()})
-	val, err := app.StakingKeeper.GetValidator(ctx, valAddr)
-	if err != nil {
-		return false
-	}
-	return val.IsBonded()
+	_, err = app.StakingKeeper.GetValidator(ctx, valAddr)
+	return err == nil
 }
 
 // SimulationManager implements the SimulationApp interface (required by runtime.AppI).

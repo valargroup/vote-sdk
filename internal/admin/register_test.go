@@ -70,23 +70,52 @@ func TestMarshalRegisterPayloadWireMatchesJoinScriptJSON(t *testing.T) {
 	}
 }
 
+func TestValidatorExistsConvertsOperatorAddressToValoper(t *testing.T) {
+	t.Parallel()
+
+	priv := secp256k1.GenPrivKey()
+	pub := priv.PubKey().(*secp256k1.PubKey)
+	operator, err := pubKeyToAddress(pub.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantValoper, err := AddressToValoper(operator)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gotValoper string
+	a := &Admin{
+		checkValidatorExists: func(valoper string) bool {
+			gotValoper = valoper
+			return true
+		},
+	}
+	if !a.ValidatorExists(operator) {
+		t.Fatal("want validator exists")
+	}
+	if gotValoper != wantValoper {
+		t.Fatalf("validator check valoper: got %q want %q", gotValoper, wantValoper)
+	}
+}
+
 func TestHandleRegisterValidator_Table(t *testing.T) {
 	t.Parallel()
 
 	ts := time.Now().Unix()
 	operator, sig, pub := newSignedRegisterParts(t, "https://op.example", "m1", ts)
 
-	newRouter := func(bonded bool) (*mux.Router, *Store) {
+	newRouter := func(validatorExists bool) (*mux.Router, *Store) {
 		dir := t.TempDir()
 		st, err := NewStore(filepath.Join(dir, "r.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		a := &Admin{
-			configURL:   "http://invalid.local",
-			logger:      log.NewNopLogger(),
-			store:       st,
-			checkBonded: func(string) bool { return bonded },
+			configURL:            "http://invalid.local",
+			logger:               log.NewNopLogger(),
+			store:                st,
+			checkValidatorExists: func(string) bool { return validatorExists },
 		}
 		r := mux.NewRouter()
 		RegisterRoutes(r, func() *Admin { return a }, log.NewNopLogger())
@@ -269,7 +298,7 @@ func TestHandleRegisterValidator_Table(t *testing.T) {
 		}
 	})
 
-	t.Run("bonded_deletes_pending", func(t *testing.T) {
+	t.Run("registered_deletes_pending", func(t *testing.T) {
 		t.Parallel()
 		r, st := newRouter(true)
 		defer st.Close()
@@ -301,8 +330,8 @@ func TestHandleRegisterValidator_Table(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 			t.Fatal(err)
 		}
-		if resp["status"] != "bonded" {
-			t.Fatalf("want bonded, got %#v", resp)
+		if resp["status"] != "registered" {
+			t.Fatalf("want registered, got %#v", resp)
 		}
 		list, _ := st.ListPendingRegistrations()
 		if len(list) != 0 {
@@ -310,7 +339,7 @@ func TestHandleRegisterValidator_Table(t *testing.T) {
 		}
 	})
 
-	t.Run("idempotent_double_bonded", func(t *testing.T) {
+	t.Run("idempotent_double_registered", func(t *testing.T) {
 		t.Parallel()
 		r, st := newRouter(true)
 		defer st.Close()
@@ -335,8 +364,8 @@ func TestHandleRegisterValidator_Table(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 				t.Fatal(err)
 			}
-			if resp["status"] != "bonded" {
-				t.Fatalf("iter %d: want bonded, got %#v", i, resp)
+			if resp["status"] != "registered" {
+				t.Fatalf("iter %d: want registered, got %#v", i, resp)
 			}
 		}
 		_ = st
