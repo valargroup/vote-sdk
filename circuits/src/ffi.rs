@@ -669,6 +669,8 @@ fn share_reveal_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine
 /// This performs the deterministic Halo2 params/keygen work normally triggered
 /// by the first proof verification. Calling it during node readiness warm-up
 /// keeps the first live vote transaction off the cold-cache path.
+/// Each circuit cache is initialized on its own thread so process readiness is
+/// bounded by the slowest verifier keygen rather than the sum of all three.
 ///
 /// # Returns
 /// * `0` on success.
@@ -676,9 +678,28 @@ fn share_reveal_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine
 #[no_mangle]
 pub extern "C" fn sv_warm_verifier_caches() -> i32 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = delegation_vk_cached();
-        let _ = vote_proof_vk_cached();
-        let _ = share_reveal_vk_cached();
+        let handles = [
+            ("delegation", std::thread::spawn(|| {
+                let _ = delegation_vk_cached();
+            })),
+            ("vote", std::thread::spawn(|| {
+                let _ = vote_proof_vk_cached();
+            })),
+            ("share_reveal", std::thread::spawn(|| {
+                let _ = share_reveal_vk_cached();
+            })),
+        ];
+
+        let mut failed_cache = None;
+        for (name, handle) in handles {
+            if handle.join().is_err() {
+                failed_cache.get_or_insert(name);
+            }
+        }
+        if let Some(name) = failed_cache {
+            set_ffi_error(format!("sv_warm_verifier_caches: {name} cache warm-up panicked"));
+            return -6;
+        }
         0
     }));
 
