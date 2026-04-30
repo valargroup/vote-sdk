@@ -8,11 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/gorilla/mux"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -122,6 +125,10 @@ func (qh *queryHandler) handleActiveRound(w http.ResponseWriter, _ *http.Request
 	resp := &types.QueryActiveRoundResponse{}
 
 	if err := qh.abciQuery("/svote.v1.Query/ActiveRound", req, resp); err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeJSON(w, http.StatusOK, map[string]*types.VoteRound{"round": nil})
+			return
+		}
 		writeQueryError(w, err)
 		return
 	}
@@ -327,7 +334,7 @@ func (qh *queryHandler) abciQuery(path string, req proto.Message, resp proto.Mes
 	}
 
 	if abciResp.Code != 0 {
-		return fmt.Errorf("query failed (code %d): %s", abciResp.Code, abciResp.Log)
+		return abciQueryError(abciResp.Code, abciResp.Log)
 	}
 
 	if err := proto.Unmarshal(abciResp.Value, resp); err != nil {
@@ -335,6 +342,17 @@ func (qh *queryHandler) abciQuery(path string, req proto.Message, resp proto.Mes
 	}
 
 	return nil
+}
+
+func abciQueryError(code uint32, log string) error {
+	switch {
+	case strings.Contains(log, "code = NotFound"):
+		return grpcstatus.Error(codes.NotFound, strings.TrimSpace(log))
+	case strings.Contains(log, "code = InvalidArgument"):
+		return grpcstatus.Error(codes.InvalidArgument, strings.TrimSpace(log))
+	default:
+		return fmt.Errorf("query failed (code %d): %s", code, log)
+	}
 }
 
 // writeProtoJSON marshals a protobuf message to JSON and writes it to the response.
@@ -353,5 +371,16 @@ func writeProtoJSON(w http.ResponseWriter, msg proto.Message) {
 
 // writeQueryError writes an appropriate HTTP error response for a query failure.
 func writeQueryError(w http.ResponseWriter, err error) {
+	if grpcErr, ok := grpcstatus.FromError(err); ok {
+		switch grpcErr.Code() {
+		case codes.NotFound:
+			writeError(w, http.StatusNotFound, grpcErr.Message())
+			return
+		case codes.InvalidArgument:
+			writeError(w, http.StatusBadRequest, grpcErr.Message())
+			return
+		}
+	}
+
 	writeError(w, http.StatusInternalServerError, err.Error())
 }
