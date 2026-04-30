@@ -748,9 +748,6 @@ api_token = ""
 # Path to the SQLite database file. Empty = default (\$HOME/.svoted/helper.db).
 db_path = ""
 
-# How often to check for shares ready to submit (seconds).
-process_interval = 5
-
 # Port of the chain's REST API (used for MsgRevealShare submission).
 chain_api_port = 1317
 

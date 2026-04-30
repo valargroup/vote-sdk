@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -85,7 +87,7 @@ type mockTreeReader struct {
 	err          error
 }
 
-func (m *mockTreeReader) SetRoundID(_ []byte) {}
+func (m *mockTreeReader) ForRound(_ []byte) TreeReader { return m }
 
 func (m *mockTreeReader) GetTreeStatus() (TreeStatus, error) {
 	if m.err != nil {
@@ -121,6 +123,74 @@ func newMockTreeReader() *mockTreeReader {
 	}
 }
 
+type roundAwareTreeState struct {
+	leafCounts  map[string]uint64
+	pathDelay   time.Duration
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
+}
+
+type roundAwareTreeReader struct {
+	state   *roundAwareTreeState
+	roundID string
+}
+
+func newRoundAwareTreeReader(leafCounts map[string]uint64, pathDelay time.Duration) *roundAwareTreeReader {
+	return &roundAwareTreeReader{
+		state: &roundAwareTreeState{
+			leafCounts: leafCounts,
+			pathDelay:  pathDelay,
+		},
+	}
+}
+
+func (r *roundAwareTreeReader) ForRound(roundID []byte) TreeReader {
+	return &roundAwareTreeReader{
+		state:   r.state,
+		roundID: hex.EncodeToString(roundID),
+	}
+}
+
+func (r *roundAwareTreeReader) GetTreeStatus() (TreeStatus, error) {
+	leafCount, ok := r.state.leafCounts[r.roundID]
+	if !ok {
+		return TreeStatus{}, fmt.Errorf("unexpected round_id %q", r.roundID)
+	}
+	return TreeStatus{LeafCount: leafCount, AnchorHeight: 1}, nil
+}
+
+func (r *roundAwareTreeReader) MerklePath(position uint64, _ uint32) ([]byte, error) {
+	current := r.state.inFlight.Add(1)
+	defer r.state.inFlight.Add(-1)
+	for {
+		seen := r.state.maxInFlight.Load()
+		if current <= seen || r.state.maxInFlight.CompareAndSwap(seen, current) {
+			break
+		}
+	}
+	time.Sleep(r.state.pathDelay)
+
+	leafCount, ok := r.state.leafCounts[r.roundID]
+	if !ok {
+		return nil, fmt.Errorf("unexpected round_id %q", r.roundID)
+	}
+	if position >= leafCount {
+		return nil, fmt.Errorf("tree_position %d out of range for round %s", position, r.roundID)
+	}
+	return make([]byte, 772), nil
+}
+
+func (r *roundAwareTreeReader) LeafAt(position uint64) ([]byte, error) {
+	leafCount, ok := r.state.leafCounts[r.roundID]
+	if !ok {
+		return nil, fmt.Errorf("unexpected round_id %q", r.roundID)
+	}
+	if position >= leafCount {
+		return nil, nil
+	}
+	return make([]byte, 32), nil
+}
+
 func TestProcessor_ProcessBatch_Success(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
@@ -134,7 +204,7 @@ func TestProcessor_ProcessBatch_Success(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
 
 	// Enqueue a share (zero delay in test store means immediately ready).
 	roundID := hex.EncodeToString(make([]byte, 32))
@@ -164,7 +234,7 @@ func TestProcessor_ProcessBatch_ProofFailure(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
 
 	// Enqueue (zero delay, immediately ready).
 	roundID := hex.EncodeToString(make([]byte, 32))
@@ -192,7 +262,7 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	p := testPayload(roundID, 0)
@@ -221,7 +291,7 @@ func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T)
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	p := testPayload(roundID, 0)
@@ -242,7 +312,7 @@ func TestProcessor_Run_CancelContext(t *testing.T) {
 	prover := &mockProver{}
 	tree := newMockTreeReader()
 	submitter := NewChainSubmitter("http://localhost:0")
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 50*time.Millisecond, 2, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -251,12 +321,54 @@ func TestProcessor_Run_CancelContext(t *testing.T) {
 		done <- proc.Run(ctx)
 	}()
 
-	// Let it run for a bit.
-	time.Sleep(100 * time.Millisecond)
+	// Let it enter the deterministic wait.
+	time.Sleep(20 * time.Millisecond)
 	cancel()
 
 	err := <-done
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestProcessor_Run_ImmediateEnqueueWakesProcessor(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	store, err := NewShareStore(filepath.Join(t.TempDir(), "helper.db"), func(roundID string) (uint64, error) {
+		return now + testVoteEndOffset, nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { store.Close() })
+
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tx_hash":"OK","code":0,"log":""}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- proc.Run(ctx)
+	}()
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	require.Eventually(t, func() bool {
+		status := store.Status()
+		return prover.callCount.Load() == 1 && status[roundID].Submitted == 1
+	}, time.Second, 10*time.Millisecond)
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestProcessor_TreePositionOutOfRange(t *testing.T) {
@@ -270,7 +382,7 @@ func TestProcessor_TreePositionOutOfRange(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 2, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	p := testPayload(roundID, 0)
@@ -295,7 +407,7 @@ func TestProcessor_MaxConcurrentFallback(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 0, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 0, nil)
 	assert.Equal(t, 1, proc.maxConcurrent)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
@@ -309,8 +421,7 @@ func TestProcessor_MaxConcurrentFallback(t *testing.T) {
 	assert.Equal(t, 1, status[roundID].Submitted)
 }
 
-// Verify that shares are processed sequentially (maxConcurrent forced to 1
-// for Poisson timing privacy).
+// Verify that maxConcurrent=1 is honored.
 func TestProcessor_ProcessBatch_Sequential(t *testing.T) {
 	store := newTestStore(t)
 	prover := &trackingProver{sleep: 60 * time.Millisecond}
@@ -323,7 +434,7 @@ func TestProcessor_ProcessBatch_Sequential(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), time.Second, 1, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 1, nil)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	for i := 0; i < 4; i++ {
@@ -341,36 +452,46 @@ func TestProcessor_ProcessBatch_Sequential(t *testing.T) {
 	assert.Equal(t, 4, status[roundID].Submitted)
 }
 
-func TestProcessor_CurrentMeanInterval_AcceleratesNearRoundEnd(t *testing.T) {
-	const baseMean = 30 * time.Second
-
-	// Round 'soon' ends in 2 minutes — within urgentWindow.
-	now := uint64(time.Now().Unix())
-	fetcher := func(roundID string) (uint64, error) {
-		if roundID == "soon" {
-			return now + 120, nil
-		}
-		return now + 12*3600, nil
-	}
-	store, err := NewShareStore(":memory:", fetcher)
-	require.NoError(t, err)
-	defer store.Close()
-
+func TestProcessor_ProcessBatch_ConcurrentRoundsUseScopedTreeReaders(t *testing.T) {
+	store := newTestStore(t)
 	prover := &mockProver{}
-	tree := newMockTreeReader()
-	submitter := NewChainSubmitter("http://localhost:0")
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), baseMean, 1, nil)
 
-	assert.Equal(t, baseMean, proc.currentMeanInterval(),
-		"no shares queued — mean should be unchanged")
+	roundABytes := make([]byte, 32)
+	roundABytes[31] = 1
+	roundA := hex.EncodeToString(roundABytes)
+	roundBBytes := make([]byte, 32)
+	roundBBytes[31] = 2
+	roundB := hex.EncodeToString(roundBBytes)
+	tree := newRoundAwareTreeReader(map[string]uint64{
+		roundA: 1,
+		roundB: 2,
+	}, 50*time.Millisecond)
 
-	enqueueAndRequireInserted(t, store, testPayload("far", 0))
-	assert.Equal(t, baseMean, proc.currentMeanInterval(),
-		"only far-future round queued — mean should be unchanged")
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tx_hash":"OK","code":0,"log":""}`))
+	}))
+	defer chainServer.Close()
 
-	enqueueAndRequireInserted(t, store, testPayload("soon", 0))
-	assert.Equal(t, baseMean/urgentSpeedup, proc.currentMeanInterval(),
-		"share in soon-closing round — mean should be divided by urgentSpeedup")
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	pA := testPayload(roundA, 0)
+	pA.TreePosition = 0
+	enqueueAndRequireInserted(t, store, pA)
+
+	pB := testPayload(roundB, 0)
+	pB.TreePosition = 1
+	enqueueAndRequireInserted(t, store, pB)
+
+	proc.processBatch(context.Background())
+
+	assert.Equal(t, int32(2), prover.callCount.Load())
+	assert.Equal(t, int32(2), tree.state.maxInFlight.Load())
+
+	status := store.Status()
+	assert.Equal(t, 1, status[roundA].Submitted)
+	assert.Equal(t, 1, status[roundB].Submitted)
 }
 
 func TestValidatePayload(t *testing.T) {

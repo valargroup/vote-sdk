@@ -1,148 +1,77 @@
-# Helper Server — Submission Delay Privacy Model
+# Helper Server - Share Scheduling Model
 
-The helper server uses three layers of random delay to make share
-submissions temporally unlinkable. Layers 2 and 3 sample from exponential
-distributions (Poisson process) via inverse CDF; Layer 1 uses a uniform
-distribution to spread shares evenly across the remaining voting window.
-All layers use `crypto/rand`, so delays are cryptographically unpredictable.
+The helper server accepts encrypted voting shares from wallets, stores them in
+SQLite, waits until each wallet-provided `submit_at` time, generates the ZKP 3
+share reveal proof, and submits `MsgRevealShare` to the chain.
 
-## Layer 1: Per-share readiness delay
+Timing privacy is owned by the wallet. The helper does not add random
+submission delays, random processor wakeups, or intra-batch jitter. If multiple
+shares become ready in the same second, the helper processes them together up to
+`helper.max_concurrent_proofs`.
 
-**Where:** `ShareStore.Enqueue()` → `uniformDelay(voteEndTime)`
+## Client-controlled `submit_at`
 
-When a wallet submits a share, it is persisted immediately but not
-processed until a random delay elapses. This decouples the time a vote
-was cast from the time the share becomes eligible for processing.
+`POST /shielded-vote/v1/shares` includes `submit_at` in the share payload.
+`ShareStore.Enqueue()` persists that value with the payload and schedules the
+share for the corresponding Unix second.
 
-- Distribution: Uniform over `[0, remaining_window)` where
-  `remaining_window = vote_end_time − now − 60s`
-- Floor: delay is raised to at least `min_delay` seconds, preventing
-  near-zero samples from making shares trivially linkable
-- Cap: delay is clamped so the share is submitted at least 60 seconds
-  before `vote_end_time` (cap takes precedence over floor when the
-  deadline is imminent)
-- On restart, shares get fresh random delays (scheduling is ephemeral)
+- `submit_at = 0` means immediate processing.
+- `submit_at > 0` means the share is eligible once that Unix timestamp arrives.
+- `submit_at` must not be greater than the round's `vote_end_time`.
 
-## Layer 2: Poisson processing cycle
+The helper accepts same-second collisions without spreading them. This preserves
+the wallet's intended schedule exactly.
 
-**Where:** `Processor.Run()` → `randomDelay()`
+## Processor wakeups
 
-The processor does not wake up at fixed intervals. Instead, the time
-between consecutive processing cycles is drawn from an exponential
-distribution, making the overall submission pattern a Poisson process.
-An observer monitoring chain submissions sees irregularly spaced events
-with no periodic structure.
+`Processor.Run()` is deterministic:
 
-- Distribution: Exp(1/`process_interval`)
-- Config: `helper.process_interval` (seconds), default **30**
-- Each cycle calls `TakeReady()` and processes any shares whose
-  Layer 1 delay has elapsed
-- **Urgent-window acceleration:** when any scheduled share belongs to
-  a round whose `vote_end_time` is within **5 minutes** of now, the
-  mean is divided by **5** (so 6 s instead of 30 s by default). This
-  drops `P(wake-up > 60 s)` from ≈13.5 % to ≈4.5×10⁻⁵, making it
-  vanishingly unlikely that a last-minute share misses round close.
-  Privacy degrades only in the final minutes of an active round —
-  preventing vote loss outweighs marginal timing-correlation gains
-  when the round is about to end.
+1. emit alerts for expired rounds with unsubmitted shares,
+2. purge expired round data,
+3. process all ready shares,
+4. wait for the earliest scheduled `submit_at`, a schedule-change notification,
+   cancellation, or a 30 second maintenance wake.
 
-## Layer 3: Intra-batch jitter
-
-**Where:** `processBatch()` → `intraShareDelay()`
-
-When multiple shares become ready in the same cycle, each share sleeps
-for an additional random duration before proof generation and submission.
-This prevents burst patterns where N shares are submitted
-near-simultaneously.
-
-- Distribution: Exp(2/`process_interval`) — half the mean of Layer 2
-- Not independently configurable; derived from `process_interval`
-- **Deadline bypass:** if less than 60 seconds remain before the share's
-  `vote_end_time`, the jitter is skipped and the share is submitted
-  immediately to avoid missing the deadline
-
-## Configuration summary
-
-| Parameter               | app.toml key                   | Default  | Controls           |
-|-------------------------|--------------------------------|----------|--------------------|
-| `MinDelay`              | `helper.min_delay`             | 90 s     | Layer 1 floor      |
-| `ProcessInterval`       | `helper.process_interval`      | 30 s     | Layer 2 & 3 mean   |
-| `MaxConcurrentProofs`   | `helper.max_concurrent_proofs` | 2        | Parallelism        |
-
-## Sampling method
-
-Layers 2 and 3 use inverse CDF exponential sampling:
-
-```
-U  = crypto/rand uniform in (0, 1]
-delay = -mean * ln(U)
-```
-
-This produces an exponentially distributed sample with the given mean.
-Exponential inter-arrivals give the Poisson process its memoryless
-property — an observer gains no information about the next event from
-past observations.
-
-Layer 1 uses uniform sampling over the remaining voting window:
-
-```
-U     = crypto/rand uniform in [0, 1)
-delay = max(min_delay, U * remaining_window)
-```
-
-Uniform spread is preferred over exponential for hold times because
-exponential clusters most samples near zero, making shares trivially
-linkable to their submission session (see `TestUniformDelayDistribution`).
-
-All layers use `crypto/rand` instead of `math/rand` so that an adversary
-who observes submission times cannot reconstruct the PRNG state and
-predict future delays.
+The maintenance wake exists only so expiry alerts and purging still run when no
+shares are scheduled. Enqueue and retry scheduling changes signal the processor
+through a buffered channel so new immediate shares do not wait for the
+maintenance wake.
 
 ## Crash Recovery
 
-The helper server is designed for crash-safe operation. Share payloads and
-processing state are persisted to SQLite (WAL mode); only scheduling delays
-are kept in memory. On startup, `NewShareStore` calls `recover()` which:
+The helper server is designed for crash-safe operation. Share payloads,
+`submit_at`, vote end times, attempt counts, and processing state are persisted
+to SQLite with WAL mode enabled. On startup, `NewShareStore` calls `recover()`
+which:
 
-1. **Resets in-flight shares** — any share in Witnessed state (taken for
-   proof generation but not yet submitted) is rolled back to Received.
-2. **Rebuilds the round cache** from the persisted `rounds` table and heals
-   shares whose `vote_end_time` was 0 (transient fetch failure at enqueue).
-3. **Assigns fresh random delays** to all pending shares. Scheduling is
-   intentionally ephemeral — on restart, shares get new uniform delays
-   so that an observer cannot predict post-restart timing from pre-crash
-   patterns.
+1. resets in-flight shares from Witnessed back to Received,
+2. rebuilds the round cache from the persisted `rounds` table,
+3. restores each pending share to its persisted `submit_at` schedule.
 
-### State-by-state behaviour
+No fresh random delay is assigned during recovery. A recovered share keeps the
+same schedule the wallet provided.
+
+### State-by-state behavior
 
 | State at crash | On recovery | Share lost? |
 |---|---|---|
-| **Received (0)** — waiting for delay | Fresh random delay, re-enters schedule | No |
-| **Witnessed (1)** — mid-processing | Reset to Received, fresh delay, re-processes | No |
-| **Submitted (2)** — on chain | Terminal, no action needed | No |
-| **Failed (3)** — permanent failure | Terminal, no action needed | N/A |
+| Received (0) - waiting for `submit_at` | Re-enters schedule at persisted `submit_at` | No |
+| Witnessed (1) - mid-processing | Reset to Received, re-enters schedule | No |
+| Submitted (2) - on chain | Terminal, no action needed | No |
+| Failed (3) - permanent failure | Terminal, no action needed | N/A |
 
-### Wallet retry safety
+## Wallet Retry Safety
 
-If the server crashes between receiving the HTTP POST and completing the
-SQLite INSERT, the wallet gets an HTTP error and can retry. `Enqueue` is
-idempotent — duplicate payloads return `"duplicate"`, conflicting payloads
-for the same `(round_id, share_index, proposal_id, tree_position)` are
-rejected with 409 Conflict.
+If the server crashes between receiving the HTTP POST and completing the SQLite
+insert, the wallet gets an HTTP error and can retry. `Enqueue` is idempotent:
+duplicate payloads return `"duplicate"`, and conflicting payloads for the same
+`(round_id, share_index, proposal_id, tree_position)` return `409 Conflict`.
 
-### Known limitations
+## Known Limitations
 
-- **Retry budget**: `MarkFailed` allows 5 attempts with exponential backoff
-  (2 s, 4 s, 8 s, 16 s, 32 s ≈ 62 s total). If the chain is unreachable
-  for longer, shares become permanently failed. Attempt counts survive
-  recovery (not reset), so a share with prior failures has fewer retries
-  remaining after restart.
-- **Almost-submitted race**: If the chain accepted a share but the server
-  crashed before `MarkSubmitted`, the share reverts to Received on recovery
-  and is re-processed. The chain rejects the duplicate (nullifier already
-  used), consuming retry attempts. The vote itself is safe — it is already
-  on chain — but the helper DB may show it as Failed.
-- **Synchronous mode**: No explicit `PRAGMA synchronous=FULL` is set.
-  SQLite WAL defaults to FULL on most builds, but a power loss (vs process
-  crash) could theoretically lose the last committed transaction depending
-  on the driver.
+- Retry budget: `MarkFailed` allows 5 attempts with exponential backoff (2 s,
+  4 s, 8 s, 16 s, 32 s). If the chain is unreachable for longer, shares become
+  permanently failed. Attempt counts survive recovery.
+- Almost-submitted race: if the chain accepted a share but the server crashed
+  before `MarkSubmitted`, recovery will retry it. The chain-side share nullifier
+  makes the duplicate reveal idempotent.

@@ -60,6 +60,15 @@ func enqueueAndRequireInserted(t *testing.T, s *ShareStore, payload SharePayload
 	require.Equal(t, EnqueueInserted, result)
 }
 
+func requireScheduleChanged(t *testing.T, s *ShareStore) {
+	t.Helper()
+	select {
+	case <-s.ScheduleChanged():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for schedule change notification")
+	}
+}
+
 func TestEnqueueAndTakeReady(t *testing.T) {
 	s := newTestStore(t)
 
@@ -486,65 +495,58 @@ func TestMigrateOldSchema(t *testing.T) {
 	assert.Equal(t, EnqueueInserted, result)
 }
 
-func TestHasUrgentShares(t *testing.T) {
+func TestNextScheduledTimeEmptyAndReadyRemoval(t *testing.T) {
+	s := newTestStore(t)
+
+	_, ok := s.NextScheduledTime()
+	assert.False(t, ok)
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	requireScheduleChanged(t, s)
+
+	next, ok := s.NextScheduledTime()
+	require.True(t, ok)
+	assert.False(t, next.After(time.Now()))
+
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+
+	_, ok = s.NextScheduledTime()
+	assert.False(t, ok)
+}
+
+func TestNextScheduledTimeReturnsEarliest(t *testing.T) {
+	s := newTestStore(t)
+
 	now := uint64(time.Now().Unix())
-	fetcher := func(roundID string) (uint64, error) {
-		switch roundID {
-		case "soon":
-			return now + 120, nil // ends in 2 min — within window
-		case "far":
-			return now + 3600, nil // ends in 1 h — outside window
-		case "edge":
-			return now + 300, nil // ends right at 5 min — within window
-		case "expired":
-			return now - 60, nil // already past
-		default:
-			return now + 12*3600, nil
-		}
-	}
-	s, err := NewShareStore(":memory:", fetcher)
-	require.NoError(t, err)
-	defer s.Close()
+	later := testPayload("later", 0)
+	later.SubmitAt = now + 180
+	enqueueAndRequireInserted(t, s, later)
+	requireScheduleChanged(t, s)
 
-	const window = 5 * time.Minute
+	earlier := testPayload("earlier", 0)
+	earlier.SubmitAt = now + 60
+	enqueueAndRequireInserted(t, s, earlier)
+	requireScheduleChanged(t, s)
 
-	t.Run("no shares scheduled", func(t *testing.T) {
-		assert.False(t, s.HasUrgentShares(window))
-	})
+	next, ok := s.NextScheduledTime()
+	require.True(t, ok)
+	assert.Equal(t, int64(earlier.SubmitAt), next.Unix())
+}
 
-	t.Run("only far-future round", func(t *testing.T) {
-		enqueueAndRequireInserted(t, s, testPayload("far", 0))
-		assert.False(t, s.HasUrgentShares(window))
-	})
+func TestScheduleChangedOnRetryScheduling(t *testing.T) {
+	s := newTestStore(t)
 
-	t.Run("share in soon-closing round triggers urgency", func(t *testing.T) {
-		enqueueAndRequireInserted(t, s, testPayload("soon", 0))
-		assert.True(t, s.HasUrgentShares(window))
-	})
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	requireScheduleChanged(t, s)
 
-	t.Run("share at the window edge counts as urgent", func(t *testing.T) {
-		enqueueAndRequireInserted(t, s, testPayload("edge", 0))
-		assert.True(t, s.HasUrgentShares(window))
-	})
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
 
-	t.Run("expired round is not urgent (already too late)", func(t *testing.T) {
-		s2, err := NewShareStore(":memory:", fetcher)
-		require.NoError(t, err)
-		defer s2.Close()
-		enqueueAndRequireInserted(t, s2, testPayload("expired", 0))
-		assert.False(t, s2.HasUrgentShares(window))
-	})
+	s.MarkFailed("round1", 0, 1, 0)
+	requireScheduleChanged(t, s)
 
-	t.Run("urgency clears once shares are taken", func(t *testing.T) {
-		s3, err := NewShareStore(":memory:", fetcher)
-		require.NoError(t, err)
-		defer s3.Close()
-		enqueueAndRequireInserted(t, s3, testPayload("soon", 0))
-		require.True(t, s3.HasUrgentShares(window))
-
-		ready := s3.TakeReady()
-		require.Len(t, ready, 1)
-		assert.False(t, s3.HasUrgentShares(window),
-			"witnessed share should not keep urgency on — it's already being processed")
-	})
+	next, ok := s.NextScheduledTime()
+	require.True(t, ok)
+	assert.True(t, next.After(time.Now()))
 }

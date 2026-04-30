@@ -133,9 +133,6 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.db_path") {
 		cfg.DBPath = v.GetString("helper.db_path")
 	}
-	if v.IsSet("helper.process_interval") {
-		cfg.ProcessInterval = v.GetInt("helper.process_interval")
-	}
 	if v.IsSet("helper.chain_api_port") {
 		cfg.ChainAPIPort = v.GetInt("helper.chain_api_port")
 	}
@@ -150,16 +147,23 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 }
 
 // keeperTreeReader implements helper.TreeReader by reading directly from the
-// vote keeper's KV store. The roundID must be set before tree methods are
-// called (e.g. from the active round or first share payload).
+// vote keeper's KV store. Round-scoped readers are immutable so concurrent
+// shares cannot overwrite each other's round context.
 type keeperTreeReader struct {
 	app     *app.SvoteApp
 	logger  log.Logger
 	roundID []byte
 }
 
-// SetRoundID sets the voting round used for tree lookups.
-func (r *keeperTreeReader) SetRoundID(id []byte) { r.roundID = id }
+// ForRound returns an isolated reader scoped to the given voting round.
+func (r *keeperTreeReader) ForRound(id []byte) helper.TreeReader {
+	roundID := append([]byte(nil), id...)
+	return &keeperTreeReader{
+		app:     r.app,
+		logger:  r.logger,
+		roundID: roundID,
+	}
+}
 
 // GetTreeStatus returns lightweight tree statistics without reading leaf data.
 func (r *keeperTreeReader) GetTreeStatus() (helper.TreeStatus, error) {

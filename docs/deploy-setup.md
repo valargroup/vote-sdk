@@ -154,7 +154,6 @@ the REST API port. It is configured in `app.toml` under `[helper]` (written by
 | `disable` | `false` | Set to `true` to disable the helper server entirely. |
 | `api_token` | `""` | Optional token for `POST /shielded-vote/v1/shares` (`X-Helper-Token` header). |
 | `db_path` | `""` | Path to SQLite database. Empty = `$HOME/helper.db`. |
-| `process_interval` | `5` | How often to check for ready shares (seconds). |
 | `chain_api_port` | `1418` | Port of the REST API (for `MsgRevealShare` submission). In production this is `1317`. |
 | `max_concurrent_proofs` | `2` | Maximum parallel proof generation goroutines (~500 MB RAM each). |
 

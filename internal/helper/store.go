@@ -18,21 +18,22 @@ import (
 // it from transient failures.
 var ErrUnknownRound = errors.New("unknown voting round")
 
-// ErrInvalidSubmitAt is returned when submit_at is in the past or after vote end time.
+// ErrInvalidSubmitAt is returned when submit_at is after vote end time.
 var ErrInvalidSubmitAt = errors.New("invalid submit_at")
 
 // ShareStore is a SQLite-backed share queue with ephemeral in-memory scheduling.
-// Payload data and processing state are persisted; submit_at timestamps from
-// the client control when each share is released for proof generation.
+// Payload data and processing state are persisted; client-provided submit_at
+// timestamps control when each share is eligible for proof generation.
 type ShareStore struct {
-	db             *sql.DB
-	mu             sync.Mutex
-	schedule       map[string]time.Time             // key: "round_id:share_index:proposal_id:tree_position"
-	roundCache     map[string]uint64                // roundID → vote_end_time (unix seconds)
-	fetchRoundInfo RoundInfoFetcher                 // queries the chain; may be nil in tests
-	logger         func(msg string, keyvals ...any) // optional error logger
-	logInfo        func(msg string, keyvals ...any) // optional info logger
-	captureErr     func(err error, tags map[string]string)
+	db              *sql.DB
+	mu              sync.Mutex
+	schedule        map[string]time.Time // key: "round_id:share_index:proposal_id:tree_position"
+	scheduleChanged chan struct{}
+	roundCache      map[string]uint64                // roundID → vote_end_time (unix seconds)
+	fetchRoundInfo  RoundInfoFetcher                 // queries the chain; may be nil in tests
+	logger          func(msg string, keyvals ...any) // optional error logger
+	logInfo         func(msg string, keyvals ...any) // optional info logger
+	captureErr      func(err error, tags map[string]string)
 }
 
 // EnqueueResult reports how an enqueue attempt was handled.
@@ -71,10 +72,11 @@ func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error)
 	}
 
 	s := &ShareStore{
-		db:             db,
-		schedule:       make(map[string]time.Time),
-		roundCache:     make(map[string]uint64),
-		fetchRoundInfo: fetcher,
+		db:              db,
+		schedule:        make(map[string]time.Time),
+		scheduleChanged: make(chan struct{}, 1),
+		roundCache:      make(map[string]uint64),
+		fetchRoundInfo:  fetcher,
 	}
 
 	// Recover non-terminal shares from SQLite.
@@ -306,8 +308,7 @@ func schedKey(roundID string, shareIndex, proposalID uint32, treePosition uint64
 	return fmt.Sprintf("%s:%d:%d:%d", roundID, shareIndex, proposalID, treePosition)
 }
 
-// Enqueue adds a share payload with a uniform random submission delay,
-// capped at the vote end time for the round.
+// Enqueue adds a share payload using the wallet-provided submit_at time.
 //
 // Returns:
 //   - EnqueueInserted when a new row was inserted and scheduled.
@@ -367,6 +368,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		}
 		key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
 		s.schedule[key] = schedTime
+		s.notifyScheduleChangedLocked()
 		if s.logInfo != nil {
 			s.logInfo("share scheduled",
 				"round_id", payload.VoteRoundID,
@@ -393,6 +395,36 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	}
 
 	return EnqueueConflict, nil
+}
+
+// ScheduleChanged returns a buffered notification channel that receives a signal
+// when enqueue or retry scheduling changes. Multiple changes may coalesce.
+func (s *ShareStore) ScheduleChanged() <-chan struct{} {
+	return s.scheduleChanged
+}
+
+func (s *ShareStore) notifyScheduleChangedLocked() {
+	select {
+	case s.scheduleChanged <- struct{}{}:
+	default:
+	}
+}
+
+// NextScheduledTime returns the earliest scheduled share time.
+func (s *ShareStore) NextScheduledTime() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var next time.Time
+	for _, scheduledAt := range s.schedule {
+		if next.IsZero() || scheduledAt.Before(next) {
+			next = scheduledAt
+		}
+	}
+	if next.IsZero() {
+		return time.Time{}, false
+	}
+	return next, true
 }
 
 // TakeReady returns all shares past their scheduled submission time that are
@@ -481,7 +513,11 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 	); err != nil {
 		s.logError("MarkSubmitted: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
 	}
-	delete(s.schedule, schedKey(roundID, shareIndex, proposalID, treePosition))
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
+	if _, ok := s.schedule[key]; ok {
+		delete(s.schedule, key)
+		s.notifyScheduleChangedLocked()
+	}
 }
 
 // MarkFailed marks a share processing attempt as failed, with retry or
@@ -515,7 +551,10 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 		); err != nil {
 			s.logError("MarkFailed: db update (permanent) failed", "error", err)
 		}
-		delete(s.schedule, key)
+		if _, ok := s.schedule[key]; ok {
+			delete(s.schedule, key)
+			s.notifyScheduleChangedLocked()
+		}
 	} else {
 		// Re-schedule with exponential backoff.
 		if _, err := s.db.Exec(
@@ -526,6 +565,7 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 		}
 		backoff := time.Duration(1<<uint(min(newAttempts, 6))) * time.Second
 		s.schedule[key] = time.Now().Add(backoff)
+		s.notifyScheduleChangedLocked()
 	}
 }
 
@@ -669,37 +709,6 @@ func (s *ShareStore) Close() error {
 	return s.db.Close()
 }
 
-// HasUrgentShares reports whether any scheduled share belongs to a voting
-// round whose vote_end_time falls within the given window from now. Used by
-// the processor to shorten its wake-up interval near round close so the
-// probability of missing a last-minute share becomes negligible.
-//
-// Shares already in Witnessed state are excluded — they have been picked up
-// by a batch and are not waiting on the next wake-up.
-func (s *ShareStore) HasUrgentShares(window time.Duration) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := time.Now().Unix()
-	deadline := uint64(now) + uint64(window.Seconds())
-
-	for key := range s.schedule {
-		idx := strings.IndexByte(key, ':')
-		if idx <= 0 {
-			continue
-		}
-		roundID := key[:idx]
-		vet, ok := s.roundCache[roundID]
-		if !ok {
-			continue
-		}
-		if vet > uint64(now) && vet <= deadline {
-			return true
-		}
-	}
-	return false
-}
-
 // PurgeExpiredRounds deletes all share data for rounds whose vote_end_time
 // has passed, and removes the corresponding entries from the in-memory
 // schedule and round cache. Returns the number of rows deleted.
@@ -731,6 +740,7 @@ func (s *ShareStore) PurgeExpiredRounds() int64 {
 			delete(s.roundCache, roundID)
 		}
 	}
+	schedulePruned := false
 	for key := range s.schedule {
 		parts := strings.SplitN(key, ":", 4)
 		if len(parts) < 1 {
@@ -739,7 +749,11 @@ func (s *ShareStore) PurgeExpiredRounds() int64 {
 		roundID := parts[0]
 		if _, ok := s.roundCache[roundID]; !ok {
 			delete(s.schedule, key)
+			schedulePruned = true
 		}
+	}
+	if schedulePruned {
+		s.notifyScheduleChangedLocked()
 	}
 
 	if deleted > 0 {
