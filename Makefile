@@ -17,7 +17,7 @@ LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
            -X $(VERSION_PKG).Commit=$(COMMIT) \
            -X "$(VERSION_PKG).BuildTags=$(BUILD_TAGS_LIST)"
 
-.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
+.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx build-manifest-signer install-manifest-signer test-manifest-signer fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
 
 ## install: Build and install the svoted binary to $GOPATH/bin
 install:
@@ -42,6 +42,18 @@ build-create-val-tx:
 ## install-create-val-tx: Install create-val-tx to $GOBIN
 install-create-val-tx:
 	go install -ldflags '$(LDFLAGS)' ./scripts/create-val-tx
+
+## build-manifest-signer: Build manifest-signer binary locally
+build-manifest-signer:
+	go build -ldflags '$(LDFLAGS)' -o manifest-signer ./cmd/manifest-signer
+
+## install-manifest-signer: Install manifest-signer to $GOBIN
+install-manifest-signer:
+	go install -ldflags '$(LDFLAGS)' ./cmd/manifest-signer
+
+## test-manifest-signer: Run manifest-signer unit + KAT tests
+test-manifest-signer:
+	go test -count=1 -race ./cmd/manifest-signer/...
 
 ## init: Initialize a single-validator chain with FFI (wipes existing data)
 init: install-ffi
@@ -102,7 +114,7 @@ test-helper:
 	go test -count=1 -race ./internal/helper/...
 
 ## test: Run all tests (Go only, no Rust dependency)
-test: test-unit test-integration test-helper
+test: test-unit test-integration test-helper test-manifest-signer
 
 ## ceremony: Register Pallas key + create round + wait for ACTIVE (per-round auto-ceremony)
 ceremony:
