@@ -2,12 +2,9 @@ package helper
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"strconv"
 	"time"
 
@@ -15,30 +12,17 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// urgentWindow is how close to a round's vote_end_time the processor switches
-// to the accelerated wake-up cadence. When any scheduled share belongs to a
-// round ending within this window, randomDelay samples from an exponential
-// distribution whose mean is divided by urgentSpeedup, dramatically reducing
-// the probability of a wake-up being too long to catch a last-minute share.
-const (
-	urgentWindow  = 5 * time.Minute
-	urgentSpeedup = 5
-)
+const maintenanceInterval = 30 * time.Second
 
 // Processor is the background share processing loop. It checks the share queue
-// at Poisson-distributed intervals (exponential inter-arrival times) for shares
-// whose delay has elapsed, generates Merkle paths and ZKP #3 proofs, and submits
-// MsgRevealShare to the chain. The random timing prevents an observer from
-// correlating submission patterns with share readiness.
+// when wallet-provided submit_at times arrive, generates Merkle paths and ZKP
+// 3 proofs, and submits MsgRevealShare to the chain.
 type Processor struct {
-	store     *ShareStore
-	tree      TreeReader
-	prover    ProofGenerator
-	submitter *ChainSubmitter
-	logger    log.Logger
-	// meanInterval is the mean of the exponential distribution for the time
-	// between processing cycles. Submissions form a Poisson process.
-	meanInterval  time.Duration
+	store         *ShareStore
+	tree          TreeReader
+	prover        ProofGenerator
+	submitter     *ChainSubmitter
+	logger        log.Logger
 	maxConcurrent int
 	isRoundActive RoundStatusChecker
 }
@@ -50,7 +34,6 @@ func NewProcessor(
 	prover ProofGenerator,
 	submitter *ChainSubmitter,
 	logger log.Logger,
-	meanInterval time.Duration,
 	maxConcurrent int,
 	isRoundActive RoundStatusChecker,
 ) *Processor {
@@ -64,84 +47,48 @@ func NewProcessor(
 		prover:        prover,
 		submitter:     submitter,
 		logger:        logger,
-		meanInterval:  meanInterval,
 		maxConcurrent: maxConcurrent,
 		isRoundActive: isRoundActive,
 	}
 }
 
 // Run starts the processing loop. Blocks until ctx is cancelled.
-// Wake-up intervals follow an exponential distribution so that share
-// submissions form a Poisson process, preventing timing correlation.
-// Each cycle also purges share data for rounds whose voting window has ended.
+// Each cycle processes ready shares and purges share data for rounds whose
+// voting window has ended.
 func (p *Processor) Run(ctx context.Context) error {
 	for {
-		delay := p.randomDelay()
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-			p.alertExpiredUnsubmittedShares()
-			p.store.PurgeExpiredRounds()
-			p.processBatch(ctx)
+		p.alertExpiredUnsubmittedShares()
+		p.store.PurgeExpiredRounds()
+		p.processBatch(ctx)
+		if err := p.waitForSchedule(ctx); err != nil {
+			return err
 		}
 	}
 }
 
-// exponentialDelay samples from Exp(1/mean) using crypto/rand for
-// unpredictable timing.
-func exponentialDelay(mean time.Duration) (time.Duration, error) {
-	if mean <= 0 {
-		return 0, nil
+func (p *Processor) waitForSchedule(ctx context.Context) error {
+	delay := maintenanceInterval
+	if next, ok := p.store.NextScheduledTime(); ok {
+		until := time.Until(next)
+		if until <= 0 {
+			return nil
+		}
+		if until < delay {
+			delay = until
+		}
 	}
-	var buf [8]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return 0, fmt.Errorf("crypto/rand: %w", err)
-	}
-	u := (float64(binary.LittleEndian.Uint64(buf[:])) + 1.0) / (float64(1<<64) + 1.0)
-	delaySecs := -mean.Seconds() * math.Log(u)
-	return time.Duration(delaySecs * float64(time.Second)), nil
-}
 
-// randomDelay samples from Exp(1/meanInterval) for inter-cycle timing. When
-// any scheduled share belongs to a round ending within urgentWindow, the mean
-// is divided by urgentSpeedup so wake-ups become frequent enough that missing
-// the round close is vanishingly unlikely. The Poisson property is preserved
-// — privacy degrades only in the final minutes of a round, where preventing
-// vote loss outweighs marginal timing-correlation gains.
-func (p *Processor) randomDelay() time.Duration {
-	mean := p.currentMeanInterval()
-	d, err := exponentialDelay(mean)
-	if err != nil {
-		p.logger.Error("randomDelay: crypto/rand failed, using mean", "error", err)
-		CaptureErr(err, map[string]string{"stage": "random_delay"})
-		return mean
-	}
-	return d
-}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
 
-// currentMeanInterval returns the inter-cycle mean delay, accelerated by
-// urgentSpeedup when a share's round is within urgentWindow of closing.
-func (p *Processor) currentMeanInterval() time.Duration {
-	if p.store != nil && p.store.HasUrgentShares(urgentWindow) {
-		return p.meanInterval / urgentSpeedup
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	case <-p.store.ScheduleChanged():
+		return nil
 	}
-	return p.meanInterval
-}
-
-// intraShareDelay samples from Exp(2/meanInterval) — half the mean of the
-// inter-cycle delay — adding jitter between individual share submissions
-// within a batch.
-func (p *Processor) intraShareDelay() time.Duration {
-	d, err := exponentialDelay(p.meanInterval / 2)
-	if err != nil {
-		p.logger.Error("intraShareDelay: crypto/rand failed, using mean/2", "error", err)
-		CaptureErr(err, map[string]string{"stage": "intra_share_delay"})
-		return p.meanInterval / 2
-	}
-	return d
 }
 
 func (p *Processor) alertExpiredUnsubmittedShares() {
@@ -264,24 +211,6 @@ func (p *Processor) processBatch(ctx context.Context) {
 					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 					return nil
 				}
-			}
-
-			// Skip jitter for immediate-mode shares (last-moment votes).
-			if share.Payload.SubmitAt != 0 {
-				delay := p.intraShareDelay()
-				_, jitterSpan := StartTrace(shareCtx, "helper.intra_share_delay", "helper.intra_share_delay", nil, map[string]interface{}{
-					"delay_ms": delay.Milliseconds(),
-				})
-				timer := time.NewTimer(delay)
-				select {
-				case <-shareCtx.Done():
-					timer.Stop()
-					spanErr = shareCtx.Err()
-					jitterSpan.Finish(spanErr)
-					return nil
-				case <-timer.C:
-				}
-				jitterSpan.Finish(nil)
 			}
 
 			if err := p.processShare(shareCtx, share); err != nil {

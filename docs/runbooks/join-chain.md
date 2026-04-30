@@ -179,7 +179,6 @@ Sentry is not shipped in `svoted` itself; add if your ops playbook requires it. 
 | `disable` | `false` | Set `true` to disable the helper server. |
 | `api_token` | `""` | Optional bearer for `POST /shielded-vote/v1/shares` (sent as `X-Helper-Token`). |
 | `db_path` | `""` (= `~/.svoted/helper.db`) | SQLite path for queued shares. |
-| `process_interval` | `5` | Seconds between share-processing ticks. |
 | `chain_api_port` | `1317` | REST port the helper submits `MsgRevealShare` to. |
 | `max_concurrent_proofs` | `2` | Parallel proof goroutines (~500 MB each). |
 

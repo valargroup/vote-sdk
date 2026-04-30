@@ -145,12 +145,10 @@ sed -i.bak "s|^ea_sk_path = .*|ea_sk_path = \"$EA_SK_PATH\"|" "$APP_TOML"
 sed -i.bak "s|^pallas_sk_path = .*|pallas_sk_path = \"$PALLAS_SK_PATH\"|" "$APP_TOML"
 rm -f "${APP_TOML}.bak"
 
-# Helper defaults are privacy/dev oriented. Benchmark scripts can override them
+# Helper defaults are dev oriented. Benchmark scripts can override them
 # via environment variables before invoking this script.
 HELPER_API_TOKEN="${SVOTE_HELPER_API_TOKEN:-}"
 HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
-HELPER_MIN_DELAY="${SVOTE_HELPER_MIN_DELAY:-90}"
-HELPER_PROCESS_INTERVAL="${SVOTE_HELPER_PROCESS_INTERVAL:-5}"
 HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-2}"
 HELPER_SENTRY_DSN="${SVOTE_HELPER_SENTRY_DSN:-}"
 
@@ -176,12 +174,6 @@ expose_queue_status = $HELPER_EXPOSE_QUEUE_STATUS
 
 # Path to the SQLite database file. Empty = default ($HOME/.svoted/helper.db).
 db_path = ""
-
-# Minimum delay floor (seconds).
-min_delay = $HELPER_MIN_DELAY
-
-# How often to check for shares ready to submit (seconds).
-process_interval = $HELPER_PROCESS_INTERVAL
 
 # Port of the chain's REST API (used for MsgRevealShare submission).
 chain_api_port = 1317

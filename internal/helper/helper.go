@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"time"
 
 	"cosmossdk.io/log"
 	"github.com/gorilla/mux"
@@ -79,7 +78,6 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		prover,
 		submitter,
 		logger,
-		time.Duration(cfg.ProcessInterval)*time.Second,
 		cfg.MaxConcurrentProofs,
 		isRoundActive,
 	)

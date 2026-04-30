@@ -133,9 +133,6 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.db_path") {
 		cfg.DBPath = v.GetString("helper.db_path")
 	}
-	if v.IsSet("helper.process_interval") {
-		cfg.ProcessInterval = v.GetInt("helper.process_interval")
-	}
 	if v.IsSet("helper.chain_api_port") {
 		cfg.ChainAPIPort = v.GetInt("helper.chain_api_port")
 	}

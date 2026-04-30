@@ -1,7 +1,6 @@
 // Package helper implements the share processing pipeline that receives
-// encrypted voting shares from wallets, applies random delays for temporal
-// unlinkability, generates ZKP #3 proofs, and submits MsgRevealShare to
-// the chain.
+// encrypted voting shares from wallets, waits until wallet-provided submit_at
+// times, generates ZKP 3 proofs, and submits MsgRevealShare to the chain.
 //
 // This package runs inside the svoted binary, reading commitment tree
 // leaves directly from the vote keeper's KV store.
@@ -22,9 +21,6 @@ type Config struct {
 
 	// DBPath is the path to the SQLite database file. Use ":memory:" for testing.
 	DBPath string `mapstructure:"db_path"`
-
-	// ProcessInterval is how often to check for shares ready to submit (seconds).
-	ProcessInterval int `mapstructure:"process_interval"`
 
 	// ChainAPIPort is the port of the chain's REST API (localhost).
 	// Used for submitting MsgRevealShare via POST. Defaults to 1317 — the
@@ -51,7 +47,6 @@ func DefaultConfig() Config {
 		APIToken:            "",
 		ExposeQueueStatus:   false,
 		DBPath:              "",
-		ProcessInterval:     30,
 		ChainAPIPort:        1317,
 		MaxConcurrentProofs: 2,
 	}
@@ -101,7 +96,7 @@ type SharePayload struct {
 type ShareState int
 
 const (
-	ShareStateReceived  ShareState = 0 // waiting for delay to elapse
+	ShareStateReceived  ShareState = 0 // waiting for submit_at
 	ShareStateWitnessed ShareState = 1 // ready for proof generation
 	ShareStateSubmitted ShareState = 2 // submitted to chain
 	ShareStateFailed    ShareState = 3 // permanently failed
