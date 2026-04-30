@@ -669,6 +669,37 @@ func (s *ShareStore) Close() error {
 	return s.db.Close()
 }
 
+// HasUrgentShares reports whether any scheduled share belongs to a voting
+// round whose vote_end_time falls within the given window from now. Used by
+// the processor to shorten its wake-up interval near round close so the
+// probability of missing a last-minute share becomes negligible.
+//
+// Shares already in Witnessed state are excluded — they have been picked up
+// by a batch and are not waiting on the next wake-up.
+func (s *ShareStore) HasUrgentShares(window time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().Unix()
+	deadline := uint64(now) + uint64(window.Seconds())
+
+	for key := range s.schedule {
+		idx := strings.IndexByte(key, ':')
+		if idx <= 0 {
+			continue
+		}
+		roundID := key[:idx]
+		vet, ok := s.roundCache[roundID]
+		if !ok {
+			continue
+		}
+		if vet > uint64(now) && vet <= deadline {
+			return true
+		}
+	}
+	return false
+}
+
 // PurgeExpiredRounds deletes all share data for rounds whose vote_end_time
 // has passed, and removes the corresponding entries from the in-memory
 // schedule and round cache. Returns the number of rows deleted.

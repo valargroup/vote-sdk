@@ -37,6 +37,14 @@ with no periodic structure.
 - Config: `helper.process_interval` (seconds), default **30**
 - Each cycle calls `TakeReady()` and processes any shares whose
   Layer 1 delay has elapsed
+- **Urgent-window acceleration:** when any scheduled share belongs to
+  a round whose `vote_end_time` is within **5 minutes** of now, the
+  mean is divided by **5** (so 6 s instead of 30 s by default). This
+  drops `P(wake-up > 60 s)` from ≈13.5 % to ≈4.5×10⁻⁵, making it
+  vanishingly unlikely that a last-minute share misses round close.
+  Privacy degrades only in the final minutes of an active round —
+  preventing vote loss outweighs marginal timing-correlation gains
+  when the round is about to end.
 
 ## Layer 3: Intra-batch jitter
 

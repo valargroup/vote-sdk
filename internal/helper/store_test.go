@@ -485,3 +485,66 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, EnqueueInserted, result)
 }
+
+func TestHasUrgentShares(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (uint64, error) {
+		switch roundID {
+		case "soon":
+			return now + 120, nil // ends in 2 min — within window
+		case "far":
+			return now + 3600, nil // ends in 1 h — outside window
+		case "edge":
+			return now + 300, nil // ends right at 5 min — within window
+		case "expired":
+			return now - 60, nil // already past
+		default:
+			return now + 12*3600, nil
+		}
+	}
+	s, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	const window = 5 * time.Minute
+
+	t.Run("no shares scheduled", func(t *testing.T) {
+		assert.False(t, s.HasUrgentShares(window))
+	})
+
+	t.Run("only far-future round", func(t *testing.T) {
+		enqueueAndRequireInserted(t, s, testPayload("far", 0))
+		assert.False(t, s.HasUrgentShares(window))
+	})
+
+	t.Run("share in soon-closing round triggers urgency", func(t *testing.T) {
+		enqueueAndRequireInserted(t, s, testPayload("soon", 0))
+		assert.True(t, s.HasUrgentShares(window))
+	})
+
+	t.Run("share at the window edge counts as urgent", func(t *testing.T) {
+		enqueueAndRequireInserted(t, s, testPayload("edge", 0))
+		assert.True(t, s.HasUrgentShares(window))
+	})
+
+	t.Run("expired round is not urgent (already too late)", func(t *testing.T) {
+		s2, err := NewShareStore(":memory:", fetcher)
+		require.NoError(t, err)
+		defer s2.Close()
+		enqueueAndRequireInserted(t, s2, testPayload("expired", 0))
+		assert.False(t, s2.HasUrgentShares(window))
+	})
+
+	t.Run("urgency clears once shares are taken", func(t *testing.T) {
+		s3, err := NewShareStore(":memory:", fetcher)
+		require.NoError(t, err)
+		defer s3.Close()
+		enqueueAndRequireInserted(t, s3, testPayload("soon", 0))
+		require.True(t, s3.HasUrgentShares(window))
+
+		ready := s3.TakeReady()
+		require.Len(t, ready, 1)
+		assert.False(t, s3.HasUrgentShares(window),
+			"witnessed share should not keep urgency on — it's already being processed")
+	})
+}
