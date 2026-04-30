@@ -15,6 +15,8 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import type { KeplrChainInfo } from "../types/keplr";
 
 const BECH32_PREFIX = "sv";
+// Match Cosmos SDK's default FullFundraiserPath: m/44'/118'/0'/0/0.
+const BIP44_COIN_TYPE = 118;
 
 const COIN = {
   coinDenom: "SVOTE",
@@ -42,7 +44,7 @@ function buildChainInfo(chainId: string, restUrl: string, rpcUrl: string): Keplr
     chainName: "Shielded-Vote",
     rpc: rpcUrl,
     rest: restUrl,
-    bip44: { coinType: 133 },
+    bip44: { coinType: BIP44_COIN_TYPE },
     bech32Config: {
       bech32PrefixAccAddr: BECH32_PREFIX,
       bech32PrefixAccPub: `${BECH32_PREFIX}pub`,
