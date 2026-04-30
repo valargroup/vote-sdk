@@ -26,7 +26,7 @@ func CaptureErr(err error, tags map[string]string) {
 // TraceSpan wraps a Sentry performance span.
 type TraceSpan = sentry.TraceSpan
 
-// StartTrace starts a Sentry performance transaction.
-func StartTrace(ctx context.Context, name string, tags map[string]string, data map[string]interface{}) (context.Context, *TraceSpan) {
-	return sentry.StartTransaction(ctx, name, tags, data)
+// StartTrace starts a Sentry performance span.
+func StartTrace(ctx context.Context, operation, description string, tags map[string]string, data map[string]interface{}) (context.Context, *TraceSpan) {
+	return sentry.StartSpan(ctx, operation, description, tags, data)
 }
