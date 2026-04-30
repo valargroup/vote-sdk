@@ -13,10 +13,14 @@ const (
 	RouterKey = ModuleName
 )
 
-// DefaultContributionTimeout is the REGISTERING phase timeout in seconds (30 minutes).
-// If not all validators have contributed by this deadline, EndBlocker clears
-// contributions and restarts REGISTERING with a fresh timeout.
-const DefaultContributionTimeout uint64 = 1800
+// DefaultContributionTimeout is the REGISTERING phase timeout in seconds (10 minutes).
+// DKG contributions are proposer-driven. With the expected maximum of 15 equal-power
+// validators and 5s blocks as the conservative slow-case assumption, every online
+// ceremony validator should normally get roughly eight proposer chances in this
+// window. Faster blocks only increase that chance count. If not all validators have
+// contributed by the deadline, EndBlocker evicts non-contributors/ineligible
+// validators and either restarts REGISTERING or aborts below the validator floor.
+const DefaultContributionTimeout uint64 = 600
 
 // DefaultDealTimeout is the ceremony deal/ack phase timeout in seconds (30 minutes).
 const DefaultDealTimeout uint64 = 1800

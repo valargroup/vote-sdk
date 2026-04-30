@@ -522,7 +522,10 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 
 	// --- 3. Per-round ceremony REGISTERING phase timeout ---
 	// If a REGISTERING round has not collected all n contributions within its
-	// timeout, clear contributions and restart the phase with a fresh deadline.
+	// timeout, evict non-contributors/ineligible validators and restart the
+	// phase from scratch as long as the retained set still meets the validator
+	// floor. If it does not, abort the round so it no longer blocks operators
+	// from creating a replacement voting session.
 	var contribTimeoutIDs [][]byte
 	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
 		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING &&
@@ -546,12 +549,37 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			continue
 		}
 
-		keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-			fmt.Sprintf("REGISTERING timeout: reset (%d/%d contributions), restarting",
-				len(round.DkgContributions), len(round.CeremonyValidators)))
+		originalCount := len(round.CeremonyValidators)
+		retained, _, err := am.keeper.RetainRegisteringTimeoutValidators(goCtx, kvStore, round)
+		if err != nil {
+			return err
+		}
+		retainedCount := len(retained)
+		evictedCount := originalCount - retainedCount
+		minVal, err := am.keeper.GetMinCeremonyValidators(kvStore)
+		if err != nil {
+			return err
+		}
 
+		round.CeremonyValidators = retained
 		round.DkgContributions = nil
+		round.CeremonyAcks = nil
+		round.EaPk = nil
+		round.FeldmanCommitments = nil
+		round.Threshold = 0
 		round.CeremonyPhaseStart = blockTime
+		round.CeremonyPhaseTimeout = types.DefaultContributionTimeout
+
+		if uint32(retainedCount) < minVal {
+			round.Status = types.SessionStatus_SESSION_STATUS_ABORTED
+			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+				fmt.Sprintf("REGISTERING timeout: aborted, only %d/%d validators remained below min %d",
+					retainedCount, originalCount, minVal))
+		} else {
+			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+				fmt.Sprintf("REGISTERING timeout: evicted %d non-contributor/ineligible validator(s), restarting with %d/%d",
+					evictedCount, retainedCount, originalCount))
+		}
 
 		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 			return err
@@ -563,6 +591,14 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			sdk.NewAttribute(types.AttributeKeyOldStatus, round.CeremonyStatus.String()),
 			sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
 		))
+		if round.Status == types.SessionStatus_SESSION_STATUS_ABORTED {
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeRoundStatusChange,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_PENDING.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_ABORTED.String()),
+			))
+		}
 	}
 
 	// --- 4. Per-round ceremony DEALT phase timeout ---

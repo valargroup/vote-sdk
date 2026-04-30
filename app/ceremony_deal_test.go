@@ -16,8 +16,8 @@ import (
 
 	"cosmossdk.io/log"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
@@ -947,6 +947,7 @@ func TestEndBlockerRegistering_TimeoutResetsContributions(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	proposerAddr := ta.ValidatorOperAddr()
+	ta.RegisterPallasKey(pallasPk)
 	_, pk2 := elgamal.KeyGen(rand.Reader)
 
 	validators := []*types.ValidatorPallasKey{
@@ -990,12 +991,27 @@ func TestEndBlockerRegistering_TimeoutResetsContributions(t *testing.T) {
 		"ceremony should remain REGISTERING after contribution timeout")
 	require.Nil(t, round.DkgContributions,
 		"DkgContributions must be cleared on contribution timeout")
-	require.Equal(t, 2, len(round.CeremonyValidators),
-		"CeremonyValidators must be preserved after contribution timeout")
+	require.Equal(t, 1, len(round.CeremonyValidators),
+		"non-contributing or ineligible validators must be evicted after contribution timeout")
+	require.Equal(t, proposerAddr, round.CeremonyValidators[0].ValidatorAddress)
+	require.Equal(t, uint32(1), round.CeremonyValidators[0].ShamirIndex)
 	require.Equal(t, uint64(timeoutTime.Unix()), round.CeremonyPhaseStart,
 		"CeremonyPhaseStart must be refreshed to the timeout block time")
 	require.Equal(t, types.DefaultContributionTimeout, round.CeremonyPhaseTimeout,
 		"CeremonyPhaseTimeout must remain set for next cycle")
+	require.NotEmpty(t, round.CeremonyLog)
+	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-1],
+		"REGISTERING timeout: evicted 1 non-contributor/ineligible validator(s), restarting with 1/2")
+
+	ta.NextBlockWithPrepareProposal()
+	round = ta.MustGetVoteRound(roundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
+		"retained validator should be able to rebuild DKG after timeout eviction")
+
+	ta.NextBlockWithPrepareProposal()
+	round = ta.MustGetVoteRound(roundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
 }
 
 func TestEndBlockerRegistering_NoTimeoutBeforeDeadline(t *testing.T) {
@@ -1326,4 +1342,3 @@ func TestAckDKGRound(t *testing.T) {
 		})
 	}
 }
-
