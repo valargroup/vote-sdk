@@ -237,7 +237,7 @@ Implementation:
 | Single party can decrypt votes | No — requires `t` partial decryptions |
 | Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor) |
 | Malicious validator sabotages tally | No — DLEQ proof required per partial decryption |
-| Offline validator | REGISTERING phase times out after `DefaultContributionTimeout` (30 min), the pending round is finalized, and a vote manager can create a new round |
+| Offline validator | REGISTERING phase times out after `DefaultContributionTimeout` (30 min), the pending round is finalized, and a later session with a different `vote_round_id` can be created |
 | Compromised Pallas key | Validator rotates via `MsgRotatePallasKey` (blocked during in-flight ceremonies). Future rounds use the new key. Past ECIES ciphertexts in completed `DkgContributions` remain encrypted to the old key. |
 | Liveness (all honest, n validators) | ~2n blocks (n contributions + n acks) |
 
@@ -251,7 +251,7 @@ Two liveness gaps were identified during DKG review.
 
 **Problem.** The DKG requires all `n` contributions before transitioning REGISTERING → DEALT (`len(round.DkgContributions) == nValidators` in `ContributeDKG`). If any validator is offline and never proposes a block, the ceremony hangs indefinitely.
 
-**Fix (implemented).** `DefaultContributionTimeout` (30 minutes) is set on `CeremonyPhaseStart` / `CeremonyPhaseTimeout` when a round enters REGISTERING. EndBlocker checks for expired REGISTERING rounds and finalizes the pending round rather than retrying with the same ceremony validator snapshot. A vote manager can then create a new round, which snapshots the currently eligible validators.
+**Fix (implemented).** `DefaultContributionTimeout` (30 minutes) is set on `CeremonyPhaseStart` / `CeremonyPhaseTimeout` when a round enters REGISTERING. EndBlocker checks for expired REGISTERING rounds and finalizes the pending round rather than retrying with the same ceremony validator snapshot. A later session with a different `vote_round_id` can snapshot the currently eligible validators.
 
 #### Issue 2: Corrupted-share DoS vector (documented, deferred)
 

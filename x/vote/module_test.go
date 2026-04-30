@@ -457,7 +457,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		s.Require().Len(round.CeremonyLog, 1)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: finalized pending round")
 		s.Require().Contains(round.CeremonyLog[0], "5/9 acks")
-		s.Require().Contains(round.CeremonyLog[0], "remaining 5 < threshold 6")
+		s.Require().Contains(round.CeremonyLog[0], "below threshold 6")
 		s.Require().Len(round.CeremonyValidators, 9)
 		s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
 	})

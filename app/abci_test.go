@@ -757,15 +757,20 @@ func TestMultiValidatorCeremony_TimeoutFinalizesPendingRound(t *testing.T) {
 // 6.2.23: Validator Recovery Requires New Round
 // ---------------------------------------------------------------------------
 
-// TestCeremonyRecovery_NewRoundAfterMiss exercises the recovery path where a
-// failed pending round is finalized and a new round is created with the
-// validators that are expected to participate.
+// TestCeremonyRecovery_NewRoundAfterMiss exercises the ceremony mechanics after
+// a failed pending round is finalized: a later round with a different ID can use
+// a smaller validator set and complete.
 //
 // Setup: 4 validators (1 real proposer + 3 phantom). With 4 validators,
 // the 1/2 threshold requires 2*2=4 >= 4, so 2 acks are needed.
 //
 // First round: timeout (only real validator acks, 1*2=2 < 4) finalizes.
-// New round: real validator + phantom1 complete the ceremony.
+// New seeded round: real validator + phantom1 complete the ceremony.
+//
+// This intentionally seeds the recovery round directly. It does not prove that
+// CreateVotingSession can retry the same vote metadata, because vote_round_id is
+// deterministic and an existing round with that ID still causes
+// ErrRoundAlreadyExists.
 func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
@@ -824,7 +829,7 @@ func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 	// New round — Recovery: phantom1 acks manually, ceremony confirms.
 	// -----------------------------------------------------------------------
 
-	// New round: phantom1 is available, so the reduced validator set can
+	// New seeded round: phantom1 is available, so the reduced validator set can
 	// complete a fresh ceremony.
 	recoveryValidators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
@@ -876,7 +881,7 @@ func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 	// 2 acks: real validator + phantom1.
 	require.Len(t, round.CeremonyAcks, 2, "should have 2 acks (real + phantom1)")
 
-	// Recovery round was created with only the two participating validators.
+	// Recovery round was seeded with only the two participating validators.
 	require.Len(t, round.CeremonyValidators, 2)
 }
 

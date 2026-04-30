@@ -608,8 +608,8 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			if nAcks < int(round.Threshold) {
 				oldRoundStatus := round.Status
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-					fmt.Sprintf("DEALT timeout: finalized pending round (%d/%d acks, %d stripped, remaining %d < threshold %d)",
-						nAcks, nVals, stripped, nAcks, round.Threshold))
+					fmt.Sprintf("DEALT timeout: finalized pending round (%d/%d acks, below threshold %d)",
+						nAcks, nVals, round.Threshold))
 				round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
 
 				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
@@ -650,8 +650,8 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				))
 			}
 		} else {
-			// < 1/2 acks: finalize this pending round; a vote manager can
-			// create a new round with the current eligible validator set.
+			// < 1/2 acks: finalize this pending round. A later round can
+			// snapshot the current eligible validator set.
 			oldRoundStatus := round.Status
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 				fmt.Sprintf("DEALT timeout: finalized pending round (%d/%d acks, below threshold)", nAcks, nVals))
