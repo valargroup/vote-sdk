@@ -40,6 +40,20 @@ func rustLastError() string {
 	return C.GoString(C.sv_last_error())
 }
 
+// WarmVerifierCaches initializes the deterministic Halo2 verifier params and
+// verifying keys without verifying a proof. Use this during process readiness
+// warm-up so the first live transaction does not pay the cold-cache cost.
+//
+// The Rust side stores these artifacts in OnceLocks, so repeated calls are
+// cheap after the first successful warm-up.
+func WarmVerifierCaches() error {
+	rc := C.sv_warm_verifier_caches()
+	if rc == 0 {
+		return nil
+	}
+	return fmt.Errorf("halo2: warm verifier caches failed with code %d: %s", rc, rustLastError())
+}
+
 // pallasFpModulus is the Pallas base field modulus in big-endian byte order:
 // p = 0x40000000000000000000000000000000224698fc094cf91b992d30ed00000001
 var pallasFpModulus = [32]byte{

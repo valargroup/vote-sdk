@@ -664,6 +664,33 @@ fn share_reveal_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine
     })
 }
 
+/// Warm all real verifier caches used by the vote chain.
+///
+/// This performs the deterministic Halo2 params/keygen work normally triggered
+/// by the first proof verification. Calling it during node readiness warm-up
+/// keeps the first live vote transaction off the cold-cache path.
+///
+/// # Returns
+/// * `0` on success.
+/// * `-6` if cache initialization panics.
+#[no_mangle]
+pub extern "C" fn sv_warm_verifier_caches() -> i32 {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = delegation_vk_cached();
+        let _ = vote_proof_vk_cached();
+        let _ = share_reveal_vk_cached();
+        0
+    }));
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_ffi_error("sv_warm_verifier_caches: internal panic");
+            -6
+        }
+    }
+}
+
 /// Verify a real share reveal circuit proof (ZKP #3).
 ///
 /// The public inputs are passed as a flat byte array of 9 × 32-byte

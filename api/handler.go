@@ -27,6 +27,23 @@ import (
 )
 
 const (
+	// CryptoReadinessStatusNotStarted means the node has not launched verifier
+	// cache warm-up yet. Submit endpoints fail closed in this state.
+	CryptoReadinessStatusNotStarted = "not_started"
+
+	// CryptoReadinessStatusWarming means the node is currently initializing the
+	// expensive Halo2 verifier params and verifying keys.
+	CryptoReadinessStatusWarming = "warming"
+
+	// CryptoReadinessStatusReady means vote submit endpoints may broadcast txs
+	// because the local process has already paid the verifier cold-cache cost.
+	CryptoReadinessStatusReady = "ready"
+
+	// CryptoReadinessStatusFailed means verifier cache warm-up failed. Submit
+	// endpoints remain unavailable until the process is restarted and warms
+	// successfully.
+	CryptoReadinessStatusFailed = "failed"
+
 	// cometBroadcastAttemptTimeout bounds each individual broadcast_tx_sync call.
 	// Slow CheckTx should not hold the helper request open indefinitely.
 	cometBroadcastAttemptTimeout = 10 * time.Second
@@ -49,14 +66,19 @@ type HandlerConfig struct {
 	// Snapshot configures external service URLs for fetching Zcash snapshot
 	// data (nc_root from lightwalletd, nullifier IMT root from IMT service).
 	Snapshot SnapshotConfig
+
+	// CryptoReadiness returns the process-local Halo2 verifier warm-up status.
+	// If nil, transaction submission is treated as ready for compatibility.
+	CryptoReadiness func() CryptoReadinessStatus
 }
 
 // Handler provides JSON REST endpoints for vote transaction submission
 // and query access.
 type Handler struct {
-	cometRPC string
-	client   *http.Client
-	snapshot SnapshotConfig
+	cometRPC        string
+	client          *http.Client
+	snapshot        SnapshotConfig
+	cryptoReadiness func() CryptoReadinessStatus
 }
 
 // NewHandler creates a new REST API handler.
@@ -69,10 +91,36 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	// client timeout is a final guardrail for any caller that forgets one.
 	client := &http.Client{Timeout: 30 * time.Second}
 	return &Handler{
-		cometRPC: endpoint,
-		client:   client,
-		snapshot: cfg.Snapshot,
+		cometRPC:        endpoint,
+		client:          client,
+		snapshot:        cfg.Snapshot,
+		cryptoReadiness: cfg.CryptoReadiness,
 	}
+}
+
+// CryptoReadinessStatus describes whether the process has initialized the
+// expensive verifier caches needed for vote CheckTx.
+type CryptoReadinessStatus struct {
+	// Status is one of CryptoReadinessStatusNotStarted, Warming, Ready, or Failed.
+	Status string `json:"status"`
+
+	// StartedAt is set once this process starts warming verifier caches.
+	StartedAt *time.Time `json:"started_at,omitempty"`
+
+	// CompletedAt is set when warm-up reaches either ready or failed.
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+
+	// DurationMS is the elapsed warm-up duration. While warming, it is measured
+	// from StartedAt to now; after completion, from StartedAt to CompletedAt.
+	DurationMS int64 `json:"duration_ms,omitempty"`
+
+	// Error contains the warm-up failure message when Status is failed.
+	Error string `json:"error,omitempty"`
+}
+
+// ready reports whether submit endpoints may proceed to CometBFT.
+func (s CryptoReadinessStatus) ready() bool {
+	return s.Status == CryptoReadinessStatusReady
 }
 
 // RegisterTxRoutes registers vote transaction submission endpoints on the router.
@@ -102,11 +150,15 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.Handle("/shielded-vote/v1/snapshot-data/{height}", trace(http.HandlerFunc(h.handleSnapshotData))).Methods("GET")
 
 	router.Handle("/shielded-vote/v1/tx/{hash}", trace(http.HandlerFunc(h.handleTxStatus))).Methods("GET")
+	router.Handle("/shielded-vote/v1/readiness", trace(http.HandlerFunc(h.handleReadiness))).Methods("GET")
 }
 
 // --- Tx submission handlers ---
 
 func (h *Handler) handleDelegateVote(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureCryptoReady(w) {
+		return
+	}
 	msg := &types.MsgDelegateVote{}
 	if !h.decodeAndValidate(w, r, msg) {
 		return
@@ -115,6 +167,9 @@ func (h *Handler) handleDelegateVote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureCryptoReady(w) {
+		return
+	}
 	msg := &types.MsgCastVote{}
 	if !h.decodeAndValidate(w, r, msg) {
 		return
@@ -123,11 +178,55 @@ func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureCryptoReady(w) {
+		return
+	}
 	msg := &types.MsgRevealShare{}
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
 	h.broadcastVoteTx(r.Context(), w, msg)
+}
+
+// handleReadiness exposes the process-local crypto warm-up state for operators
+// and load balancers. It deliberately reflects only crypto readiness, not full
+// chain health.
+func (h *Handler) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	status := h.currentCryptoReadiness()
+	if !status.ready() {
+		w.Header().Set("Retry-After", "2")
+		writeJSON(w, http.StatusServiceUnavailable, status)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+// ensureCryptoReady gates write endpoints before they submit to CometBFT. This
+// keeps the first live vote transaction from paying Halo2 verifier keygen during
+// CheckTx and surfacing as a transport timeout.
+func (h *Handler) ensureCryptoReady(w http.ResponseWriter) bool {
+	status := h.currentCryptoReadiness()
+	if status.ready() {
+		return true
+	}
+
+	w.Header().Set("Retry-After", "2")
+	writeJSON(w, http.StatusServiceUnavailable, status)
+	return false
+}
+
+// currentCryptoReadiness returns the configured readiness snapshot. A nil getter
+// preserves the historical behavior for tests or embedders that do not wire
+// process-level crypto warm-up.
+func (h *Handler) currentCryptoReadiness() CryptoReadinessStatus {
+	if h.cryptoReadiness == nil {
+		return CryptoReadinessStatus{Status: CryptoReadinessStatusReady}
+	}
+	status := h.cryptoReadiness()
+	if status.Status == "" {
+		status.Status = CryptoReadinessStatusNotStarted
+	}
+	return status
 }
 
 // --- Snapshot data ---
