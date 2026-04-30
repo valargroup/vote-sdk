@@ -1308,6 +1308,11 @@ func seedPhantomDKGContributions(
 
 	n := len(validators)
 	tVal := (n + 1) / 2
+	if n == 1 {
+		tVal = 1
+	} else if tVal < 2 {
+		tVal = 2
+	}
 
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
