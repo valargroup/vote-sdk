@@ -519,12 +519,12 @@ jobs:
             fi
             sleep 10
           done
-          for PATH in /daily.json /latest.json /snapshots.json /archive/latest.json; do
-            URL="https://snapshots.${{ secrets.DOMAIN }}${PATH}"
+          for METADATA_PATH in /daily.json /latest.json /snapshots.json /archive/latest.json; do
+            URL="https://snapshots.${{ secrets.DOMAIN }}${METADATA_PATH}"
             if curl -fsS "$URL" | jq empty > /dev/null; then
-              echo "[OK] snapshot metadata ${PATH}"
+              echo "[OK] snapshot metadata ${METADATA_PATH}"
             else
-              echo "[FAIL] snapshot metadata ${PATH}"
+              echo "[FAIL] snapshot metadata ${METADATA_PATH}"
               FAILED=1
             fi
           done
