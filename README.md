@@ -162,7 +162,9 @@ A registered key can be replaced via `MsgRotatePallasKey`. Rotation is rejected 
 
 #### Timeout (EndBlocker)
 
-Only the DEALT phase has a timeout (default: 30 minutes). On timeout:
+REGISTERING has a 10-minute timeout. DKG contributions are proposer-driven; with the expected maximum of 15 equal-power validators and 5s blocks as the conservative slow-case assumption, every online ceremony validator should normally get roughly eight proposer chances before timeout. Faster blocks only increase that chance count. On timeout, non-contributors and now-ineligible validators are evicted, stale DKG artifacts are cleared, and the round either restarts REGISTERING with the retained set or aborts if the retained set is below `min_ceremony_validators`.
+
+DEALT has a timeout (default: 30 minutes). On timeout:
 - **>= 1/2 acked:** Confirm ceremony, strip non-ackers, activate round.
 - **< 1/2 acked:** Reset to REGISTERING for re-deal by the next proposer.
 

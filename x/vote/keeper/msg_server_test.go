@@ -116,12 +116,17 @@ type mockStakingKeeper struct {
 func newMockStakingKeeper(valAddrs ...string) *mockStakingKeeper {
 	mk := &mockStakingKeeper{validators: make(map[string]stakingtypes.Validator)}
 	for _, addr := range valAddrs {
-		mk.validators[addr] = stakingtypes.Validator{
-			OperatorAddress: addr,
-			Status:          stakingtypes.Bonded,
-		}
+		mk.setValidator(addr, stakingtypes.Bonded, false)
 	}
 	return mk
+}
+
+func (mk *mockStakingKeeper) setValidator(addr string, status stakingtypes.BondStatus, jailed bool) {
+	mk.validators[addr] = stakingtypes.Validator{
+		OperatorAddress: addr,
+		Status:          status,
+		Jailed:          jailed,
+	}
 }
 
 func (mk *mockStakingKeeper) GetValidator(_ context.Context, addr sdk.ValAddress) (stakingtypes.Validator, error) {
@@ -435,6 +440,32 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
 		}
 	}
 	s.Require().True(found, "expected %s event", types.EventTypeCreateVotingSession)
+}
+
+func (s *MsgServerTestSuite) TestCreateVotingSession_ExcludesJailedBondedValidators() {
+	s.SetupTest()
+	addrs, _ := s.registerValidators(3)
+	mk := newMockStakingKeeper(addrs...)
+	mk.setValidator(addrs[1], stakingtypes.Bonded, true)
+	s.setupWithMockStakingKeeper(mk)
+	s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
+
+	msg := validSetupMsg()
+	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, resp.VoteRoundId)
+	s.Require().NoError(err)
+	s.Require().Len(round.CeremonyValidators, 2)
+	gotAddrs := []string{
+		round.CeremonyValidators[0].ValidatorAddress,
+		round.CeremonyValidators[1].ValidatorAddress,
+	}
+	s.Require().ElementsMatch([]string{addrs[0], addrs[2]}, gotAddrs)
+	s.Require().NotContains(gotAddrs, addrs[1])
+	s.Require().Equal(uint32(1), round.CeremonyValidators[0].ShamirIndex)
+	s.Require().Equal(uint32(2), round.CeremonyValidators[1].ShamirIndex)
 }
 
 // ---------------------------------------------------------------------------
