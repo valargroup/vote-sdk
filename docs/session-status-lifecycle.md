@@ -45,8 +45,13 @@ All vote-round messages (including `MsgRevealShare`) require ACTIVE status. `Msg
 
 - **Trigger (fast path)**: `MsgAckExecutiveAuthorityKey` — when ALL ceremony validators have acked
 - **Trigger (timeout path)**: `EndBlocker` — DEALT phase timeout with >= 1/2 acks; non-ackers are stripped
-- **Trigger (timeout reset)**: `EndBlocker` — DEALT phase timeout with < 1/2 acks; ceremony resets to REGISTERING for re-deal (round stays PENDING)
 - **Action**: Sets `status = SESSION_STATUS_ACTIVE`, `ceremony_status = CEREMONY_STATUS_CONFIRMED`
+
+### PENDING → FINALIZED
+
+- **Trigger (REGISTERING timeout)**: `EndBlocker` — DKG contributions remain incomplete at timeout
+- **Trigger (DEALT timeout failure)**: `EndBlocker` — fewer than 1/2 acked, or the ack set does not meet the published threshold
+- **Action**: Sets `status = SESSION_STATUS_FINALIZED` and preserves ceremony fields for audit. A vote manager must create a new round to retry with a fresh validator snapshot.
 
 ### ACTIVE → TALLYING
 

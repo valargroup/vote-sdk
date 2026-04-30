@@ -522,7 +522,8 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 
 	// --- 3. Per-round ceremony REGISTERING phase timeout ---
 	// If a REGISTERING round has not collected all n contributions within its
-	// timeout, clear contributions and restart the phase with a fresh deadline.
+	// timeout, finalize the pending round so a new round can be created with a
+	// fresh validator snapshot.
 	var contribTimeoutIDs [][]byte
 	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
 		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING &&
@@ -546,29 +547,29 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			continue
 		}
 
+		oldRoundStatus := round.Status
 		keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-			fmt.Sprintf("REGISTERING timeout: reset (%d/%d contributions), restarting",
+			fmt.Sprintf("REGISTERING timeout: finalized pending round (%d/%d contributions)",
 				len(round.DkgContributions), len(round.CeremonyValidators)))
-
-		round.DkgContributions = nil
-		round.CeremonyPhaseStart = blockTime
+		round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
 
 		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 			return err
 		}
 
 		ctx.EventManager().EmitEvent(sdk.NewEvent(
-			types.EventTypeCeremonyStatusChange,
+			types.EventTypeRoundStatusChange,
 			sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-			sdk.NewAttribute(types.AttributeKeyOldStatus, round.CeremonyStatus.String()),
-			sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+			sdk.NewAttribute(types.AttributeKeyOldStatus, oldRoundStatus.String()),
+			sdk.NewAttribute(types.AttributeKeyNewStatus, round.Status.String()),
 		))
 	}
 
 	// --- 4. Per-round ceremony DEALT phase timeout ---
 	// On DEALT timeout with >= 1/2 acks: strip non-ackers, confirm ceremony,
 	// transition round to ACTIVE.
-	// On DEALT timeout with < 1/2 acks: reset ceremony to REGISTERING for re-deal.
+	// On DEALT timeout with < 1/2 acks, or too few acks for the published
+	// threshold, finalize the pending round so a new round can be created.
 	// Collect round IDs with expired ceremony deadlines (avoid mutating store during iteration).
 	var ceremonyTimeoutIDs [][]byte
 	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
@@ -605,26 +606,21 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			// with a correctly-computed threshold. It guards against a dealer
 			// that published an unusually high threshold value.
 			if nAcks < int(round.Threshold) {
+				oldRoundStatus := round.Status
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-					fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, %d stripped, remaining %d < threshold %d)",
+					fmt.Sprintf("DEALT timeout: finalized pending round (%d/%d acks, %d stripped, remaining %d < threshold %d)",
 						nAcks, nVals, stripped, nAcks, round.Threshold))
-
-				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
-				round.CeremonyAcks = nil
-				round.DkgContributions = nil
-				round.CeremonyPhaseStart = blockTime
-				round.CeremonyPhaseTimeout = types.DefaultContributionTimeout
-				round.EaPk = nil
+				round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
 
 				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 					return err
 				}
 
 				ctx.EventManager().EmitEvent(sdk.NewEvent(
-					types.EventTypeCeremonyStatusChange,
+					types.EventTypeRoundStatusChange,
 					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-					sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
-					sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+					sdk.NewAttribute(types.AttributeKeyOldStatus, oldRoundStatus.String()),
+					sdk.NewAttribute(types.AttributeKeyNewStatus, round.Status.String()),
 				))
 			} else {
 				// >= 1/2 acked and remaining ackers meet threshold: strip
@@ -654,26 +650,22 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				))
 			}
 		} else {
-			// < 1/2 acks: reset ceremony for re-contribute by next proposer.
+			// < 1/2 acks: finalize this pending round; a vote manager can
+			// create a new round with the current eligible validator set.
+			oldRoundStatus := round.Status
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-				fmt.Sprintf("DEALT timeout: reset to REGISTERING (%d/%d acks, below threshold)", nAcks, nVals))
-
-			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_REGISTERING
-			round.CeremonyAcks = nil
-			round.DkgContributions = nil
-			round.CeremonyPhaseStart = blockTime
-			round.CeremonyPhaseTimeout = types.DefaultContributionTimeout
-			round.EaPk = nil
+				fmt.Sprintf("DEALT timeout: finalized pending round (%d/%d acks, below threshold)", nAcks, nVals))
+			round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
 
 			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 				return err
 			}
 
 			ctx.EventManager().EmitEvent(sdk.NewEvent(
-				types.EventTypeCeremonyStatusChange,
+				types.EventTypeRoundStatusChange,
 				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-				sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
-				sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, oldRoundStatus.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, round.Status.String()),
 			))
 		}
 	}

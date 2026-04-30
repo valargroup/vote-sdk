@@ -690,15 +690,15 @@ func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 6.2.22: Multi-Validator Ceremony — Timeout, Re-Deal
+// 6.2.22: Multi-Validator Ceremony — Timeout Finalizes
 // ---------------------------------------------------------------------------
 
-// TestMultiValidatorCeremony_TimeoutMissTracking uses 4 validators (1 real +
+// TestMultiValidatorCeremony_TimeoutFinalizesPendingRound uses 4 validators (1 real +
 // 3 phantom) to exercise the timeout path where acks fall below the 1/2
 // threshold. With 4 validators, 1 ack gives 1*2=2 < 4 — below threshold.
-// The EndBlocker resets the ceremony to REGISTERING for re-deal.
-// Repeats 3 cycles to verify reset behavior across rounds.
-func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
+// The EndBlocker finalizes the pending round so a vote manager can create a
+// new round with a fresh validator snapshot.
+func TestMultiValidatorCeremony_TimeoutFinalizesPendingRound(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	valAddr := app.ValidatorOperAddr()
@@ -724,66 +724,49 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 	G := elgamal.PallasGenerator()
 	phantomAddrs := []string{phantom1Addr, phantom2Addr, phantom3Addr}
 
-	for cycle := 1; cycle <= 3; cycle++ {
-		// Pre-seed 3 phantom DKG contributions so the proposer's
-		// 4th contribution via PrepareProposal triggers finalizeDKG → DEALT.
-		seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
+	// Pre-seed 3 phantom DKG contributions so the proposer's 4th contribution
+	// via PrepareProposal triggers finalizeDKG → DEALT.
+	seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
 
-		// Step 1: DKG contribution from proposer via pipeline.
-		app.NextBlockWithPrepareProposal()
+	// Step 1: DKG contribution from proposer via pipeline.
+	app.NextBlockWithPrepareProposal()
 
-		round := app.MustGetVoteRound(roundID)
-		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-			"cycle %d: ceremony should be DEALT after auto-deal", cycle)
-
-		// Step 2: PrepareProposal fires auto-ack → 1/4 < 1/2 → stays DEALT.
-		app.NextBlockWithPrepareProposal()
-
-		round = app.MustGetVoteRound(roundID)
-		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-			"cycle %d: ceremony should still be DEALT (1/4 below threshold)", cycle)
-		require.Len(t, round.CeremonyAcks, 1,
-			"cycle %d: should have 1 ack from real validator", cycle)
-
-		// Step 3: Advance 31 minutes past deal time → EndBlocker timeout.
-		// CeremonyPhaseStart was set when the deal was processed.
-		timeoutTime := time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
-		app.NextBlockAtTime(timeoutTime)
-
-		round = app.MustGetVoteRound(roundID)
-		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
-			"cycle %d: ceremony should reset to REGISTERING after timeout", cycle)
-		require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, round.Status,
-			"cycle %d: round should stay PENDING after timeout reset", cycle)
-		require.Nil(t, round.CeremonyAcks,
-			"cycle %d: acks should be cleared after timeout reset", cycle)
-
-		// Verify ceremony log entries for the timeout reset.
-		require.NotEmpty(t, round.CeremonyLog,
-			"cycle %d: ceremony log should not be empty", cycle)
-	}
-
-	// After 3 cycles, verify final state.
 	round := app.MustGetVoteRound(roundID)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+
+	// Step 2: PrepareProposal fires auto-ack → 1/4 < 1/2 → stays DEALT.
+	app.NextBlockWithPrepareProposal()
+
+	round = app.MustGetVoteRound(roundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	require.Len(t, round.CeremonyAcks, 1, "should have 1 ack from real validator")
+
+	// Step 3: Advance past deal timeout. Insufficient acks finalize the round.
+	timeoutTime := time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
+	app.NextBlockAtTime(timeoutTime)
+
+	round = app.MustGetVoteRound(roundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
+	require.Len(t, round.CeremonyAcks, 1, "acks should be preserved for audit")
+	require.NotEmpty(t, round.CeremonyLog)
+	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-1], "DEALT timeout: finalized pending round")
 }
 
 // ---------------------------------------------------------------------------
-// 6.2.23: Validator Recovery After Missed Ceremony
+// 6.2.23: Validator Recovery Requires New Round
 // ---------------------------------------------------------------------------
 
-// TestCeremonyRecovery_ValidatorRejoinsAfterMiss exercises the recovery path
-// where a validator that missed a ceremony cycle comes back online and
-// successfully acks in the next cycle, pushing the ceremony past the 1/2
-// threshold to CONFIRMED.
+// TestCeremonyRecovery_NewRoundAfterMiss exercises the recovery path where a
+// failed pending round is finalized and a new round is created with the
+// validators that are expected to participate.
 //
 // Setup: 4 validators (1 real proposer + 3 phantom). With 4 validators,
 // the 1/2 threshold requires 2*2=4 >= 4, so 2 acks are needed.
 //
-// Cycle 1: timeout (only real validator acks, 1*3=3 < 4).
-// Cycle 2: phantom1 manually acks → 2 acks total → timeout confirms + strips.
-func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
+// First round: timeout (only real validator acks, 1*2=2 < 4) finalizes.
+// New round: real validator + phantom1 complete the ceremony.
+func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	valAddr := app.ValidatorOperAddr()
@@ -810,59 +793,63 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	phantomAddrs := []string{phantom1Addr, phantom2Addr, phantom3Addr}
 
 	// -----------------------------------------------------------------------
-	// Cycle 1 — Timeout: only real validator acks, phantoms miss.
+	// First round — Timeout: only real validator acks, phantoms miss.
 	// -----------------------------------------------------------------------
 
-	// Pre-seed 3 phantom DKG contributions for cycle 1.
+	// Pre-seed 3 phantom DKG contributions for the first round.
 	seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
 
 	// Block 1: DKG contribution from proposer via pipeline → DEALT.
 	app.NextBlockWithPrepareProposal()
 
 	round := app.MustGetVoteRound(roundID)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"cycle 1: ceremony should be DEALT after deal")
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 
 	// Block 2: PrepareProposal fires auto-ack from real validator → still DEALT.
 	app.NextBlockWithPrepareProposal()
 
 	round = app.MustGetVoteRound(roundID)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"cycle 1: ceremony should still be DEALT (1/4 below threshold)")
-	require.Len(t, round.CeremonyAcks, 1, "cycle 1: should have 1 ack from real validator")
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	require.Len(t, round.CeremonyAcks, 1, "should have 1 ack from real validator")
 
-	// Block 3: Advance past timeout → EndBlocker resets to REGISTERING.
+	// Block 3: Advance past timeout → EndBlocker finalizes the pending round.
 	timeoutTime := time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
 	app.NextBlockAtTime(timeoutTime)
 
 	round = app.MustGetVoteRound(roundID)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
-		"cycle 1: ceremony should reset to REGISTERING after timeout")
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 
 	// -----------------------------------------------------------------------
-	// Cycle 2 — Recovery: phantom1 acks manually, ceremony confirms.
+	// New round — Recovery: phantom1 acks manually, ceremony confirms.
 	// -----------------------------------------------------------------------
 
-	// Pre-seed 3 phantom DKG contributions for cycle 2.
-	seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
+	// New round: phantom1 is available, so the reduced validator set can
+	// complete a fresh ceremony.
+	recoveryValidators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: phantom1Addr, PallasPk: phantomPk1.Point.ToAffineCompressed()},
+	}
+	recoveryRoundID := app.SeedRegisteringCeremony(recoveryValidators)
+
+	// Pre-seed phantom1's DKG contribution for the recovery round.
+	seedPhantomDKGContributions(t, app, recoveryRoundID, recoveryValidators, valAddr, []string{phantom1Addr}, G)
 
 	// Block 4: DKG contribution from proposer via pipeline → DEALT.
 	app.NextBlockWithPrepareProposal()
 
-	round = app.MustGetVoteRound(roundID)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"cycle 2: ceremony should be DEALT after auto-deal")
+	round = app.MustGetVoteRound(recoveryRoundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 
 	// Block 5: PrepareProposal fires auto-ack from real validator → still DEALT.
 	app.NextBlockWithPrepareProposal()
 
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, recoveryRoundID)
 	require.NoError(t, err)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"cycle 2: ceremony should still be DEALT (1/4 below threshold)")
-	require.Len(t, round.CeremonyAcks, 1, "cycle 2: should have 1 ack from real validator")
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	require.Len(t, round.CeremonyAcks, 1, "should have 1 ack from real validator")
 
 	// Block 6: Write phantom1's ack directly to state. In production,
 	// phantom1 would ack when they are the block proposer
@@ -871,31 +858,26 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
 	app.NextBlock()
 
-	// Fast path requires ALL validators to ack, so 2/4 stays DEALT.
-	// Advance past timeout → EndBlocker confirms with >= 1/2 acks and strips
-	// non-ackers (phantom2, phantom3).
+	// Fast path only runs inside MsgAckExecutiveAuthorityKey in this test, so
+	// advance past timeout and let EndBlocker confirm with both validators acked.
 	timeoutTime = time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
 	app.NextBlockAtTime(timeoutTime)
 
 	// -----------------------------------------------------------------------
-	// Assertions: ceremony confirmed via timeout, non-ackers stripped.
+	// Assertions: recovery ceremony confirmed via timeout.
 	// -----------------------------------------------------------------------
 
-	round = app.MustGetVoteRound(roundID)
+	round = app.MustGetVoteRound(recoveryRoundID)
 
 	// Round should be ACTIVE with ceremony CONFIRMED.
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
-		"round should be ACTIVE after timeout with 2/4 acks")
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus,
-		"ceremony should be CONFIRMED")
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus)
 
 	// 2 acks: real validator + phantom1.
 	require.Len(t, round.CeremonyAcks, 2, "should have 2 acks (real + phantom1)")
 
-	// Non-ackers stripped: only 2 validators remain.
-	require.Len(t, round.CeremonyValidators, 2,
-		"CeremonyValidators should have 2 entries (non-ackers stripped)")
-
+	// Recovery round was created with only the two participating validators.
+	require.Len(t, round.CeremonyValidators, 2)
 }
 
 // ---------------------------------------------------------------------------

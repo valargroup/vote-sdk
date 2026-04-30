@@ -273,21 +273,21 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
 		},
 		{
-			name: "DEALT + zero acks + timeout -> REGISTERING (reset)",
+			name: "DEALT + zero acks + timeout -> FINALIZED",
 			setup: func() {
 				seedDealtRound(0)
 			},
-			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_PENDING,
+			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_FINALIZED,
 		},
 		{
 			// n=3: 1 ack fails HalfAcked (1*2=2 < 3) — below the 1/2 ack quorum.
-			name: "DEALT + below 1/2 (1/3 acks) + timeout -> REGISTERING",
+			name: "DEALT + below 1/2 (1/3 acks) + timeout -> FINALIZED",
 			setup: func() {
 				seedDealtRound(1) // 1 of 3 acked
 			},
-			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_PENDING,
+			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_FINALIZED,
 		},
 		{
 			// n=9, threshold=5 (ceil(9/2)), 5 acks: HalfAcked (5*2=10>=9) and 5 >= threshold=5.
@@ -302,13 +302,13 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 		{
 			// n=9, threshold=6 (higher than ceil(9/2)=5), 5 acks: HalfAcked but
 			// 5 < threshold=6. Safety check catches a dealer-set threshold above
-			// the standard 1/2 formula. Reset to REGISTERING.
-			name: "DEALT + 1/2 acked + dealer threshold=6 above standard -> REGISTERING",
+			// the standard 1/2 formula and finalizes the failed pending round.
+			name: "DEALT + 1/2 acked + dealer threshold=6 above standard -> FINALIZED",
 			setup: func() {
 				seedDealtRoundWithThreshold(9, 6, 5)
 			},
-			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_PENDING,
+			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_FINALIZED,
 		},
 		{
 			name: "DEALT + no timeout yet (block_time < deadline)",
@@ -397,7 +397,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		s.Require().Contains(round.CeremonyLog[0], "1 stripped")
 	})
 
-	s.Run("timeout+reset logs entry", func() {
+	s.Run("timeout+finalize logs entry", func() {
 		s.SetupTest()
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
@@ -419,15 +419,15 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		round, err := s.keeper.GetVoteRound(kv, roundID)
 		s.Require().NoError(err)
 		s.Require().Len(round.CeremonyLog, 1)
-		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: reset to REGISTERING")
+		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: finalized pending round")
 		s.Require().Contains(round.CeremonyLog[0], "0/3 acks")
+		s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
 	})
 
 	s.Run("timeout+below-threshold logs entry and preserves validators", func() {
 		// n=9, threshold=6 (above standard ceil(9/2)=5), 5 acks: HalfAcked
-		// (5*2=10>=9) but 5 < dealer-set threshold=6. Safety check resets to
-		// REGISTERING so a fresh deal can use a correct threshold.
-		// All 9 validators are preserved (non-ackers are NOT stripped before reset).
+		// (5*2=10>=9) but 5 < dealer-set threshold=6. Safety check finalizes
+		// the failed pending round. All 9 validators are preserved for audit.
 		s.SetupTest()
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
@@ -455,10 +455,11 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		round, err := s.keeper.GetVoteRound(kv, roundID)
 		s.Require().NoError(err)
 		s.Require().Len(round.CeremonyLog, 1)
-		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: reset to REGISTERING")
+		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: finalized pending round")
 		s.Require().Contains(round.CeremonyLog[0], "5/9 acks")
 		s.Require().Contains(round.CeremonyLog[0], "remaining 5 < threshold 6")
 		s.Require().Len(round.CeremonyValidators, 9)
+		s.Require().Equal(types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
 	})
 }
 
@@ -470,10 +471,10 @@ func (s *EndBlockerTestSuite) TestEndBlock_TallyTimeout() {
 	roundID := bytes.Repeat([]byte{0xEE}, 32)
 
 	tests := []struct {
-		name            string
-		setup           func()
-		wantStatus      types.SessionStatus
-		wantTimedOut    bool
+		name         string
+		setup        func()
+		wantStatus   types.SessionStatus
+		wantTimedOut bool
 	}{
 		{
 			name: "TALLYING past deadline -> FINALIZED with tally_timed_out=true",

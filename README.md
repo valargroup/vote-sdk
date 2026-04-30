@@ -124,14 +124,14 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
 
 ```
   PENDING (REGISTERING) ──> PENDING (DEALT) ──> ACTIVE (CONFIRMED)
-                                  │                (all acked)
-                       timeout    │
-                       (< 1/2)   │ timeout (≥ 1/2)
-                          │       │
-                          v       v
-                    REGISTERING   ACTIVE (CONFIRMED)
-                    (reset for    + strip non-ackers
-                     re-deal)
+             │                    │                (all acked)
+             │ timeout            │ timeout (≥ 1/2)
+             v                    v
+        FINALIZED           ACTIVE (CONFIRMED)
+                         + strip non-ackers
+                                  │ timeout (< 1/2)
+                                  v
+                              FINALIZED
 ```
 
 | From        | To                 | Trigger                       | Condition                                       |
@@ -139,7 +139,8 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
 | REGISTERING | DEALT              | Auto-deal via PrepareProposal | Block proposer is a ceremony validator          |
 | DEALT       | CONFIRMED + ACTIVE | MsgAckExecutiveAuthorityKey   | All validators acked (fast path)                |
 | DEALT       | CONFIRMED + ACTIVE | EndBlocker timeout            | >= 1/2 acked at timeout; non-ackers stripped    |
-| DEALT       | REGISTERING        | EndBlocker timeout            | < 1/2 acked; reset for re-deal by next proposer |
+| REGISTERING | FINALIZED          | EndBlocker timeout            | DKG contributions incomplete at timeout         |
+| DEALT       | FINALIZED          | EndBlocker timeout            | < 1/2 acked or below published threshold        |
 
 Key behaviors:
 - **Fast path vs timeout** — the fast path confirms when ALL validators ack (no stripping needed). The timeout path confirms with >= 1/2 acks (integer arithmetic: `acks * 2 >= validators`) and strips non-ackers.
@@ -162,9 +163,9 @@ A registered key can be replaced via `MsgRotatePallasKey`. Rotation is rejected 
 
 #### Timeout (EndBlocker)
 
-Only the DEALT phase has a timeout (default: 30 minutes). On timeout:
+REGISTERING and DEALT phases have timeouts (default: 30 minutes). On DEALT timeout:
 - **>= 1/2 acked:** Confirm ceremony, strip non-ackers, activate round.
-- **< 1/2 acked:** Reset to REGISTERING for re-deal by the next proposer.
+- **< 1/2 acked:** Finalize the pending round; a vote manager must create a new round.
 
 #### ECIES Encryption Scheme
 

@@ -16,8 +16,8 @@ import (
 
 	"cosmossdk.io/log"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
@@ -880,14 +880,14 @@ func TestDKGContributionThroughPipeline(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// EndBlocker clears DkgContributions on ceremony timeout
+// EndBlocker finalizes failed ceremonies on timeout
 //
 // Seeds a DEALT round with DkgContributions populated, then advances past the
-// ceremony phase timeout so the EndBlocker fires. Verifies that the round
-// resets to REGISTERING with DkgContributions = nil.
+// ceremony phase timeout so the EndBlocker fires. Verifies that the pending
+// round is finalized so a new round can be created.
 // ---------------------------------------------------------------------------
 
-func TestEndBlockerClearsDKGContributionsOnTimeout(t *testing.T) {
+func TestEndBlockerFinalizesDealtRoundOnInsufficientAckTimeout(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	proposerAddr := ta.ValidatorOperAddr()
@@ -902,7 +902,7 @@ func TestEndBlockerClearsDKGContributionsOnTimeout(t *testing.T) {
 	roundID[0] = 0xEB
 
 	phaseStart := uint64(ta.Time.Unix())
-	phaseTimeout := uint64(30 * 60)
+	phaseTimeout := types.DefaultDealTimeout
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
@@ -929,21 +929,21 @@ func TestEndBlockerClearsDKGContributionsOnTimeout(t *testing.T) {
 	require.NoError(t, ta.VoteKeeper().SetVoteRound(kvStore, round))
 	ta.NextBlock()
 
-	// Advance past the ceremony phase timeout to trigger the EndBlocker reset.
+	// Advance past the ceremony phase timeout to trigger finalization.
 	timeoutTime := time.Unix(int64(phaseStart+phaseTimeout)+1, 0)
 	ta.NextBlockAtTime(timeoutTime)
 
 	round = ta.MustGetVoteRound(roundID)
 
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
-		"ceremony should reset to REGISTERING after timeout")
-	require.Nil(t, round.DkgContributions,
-		"DkgContributions must be cleared on timeout reset")
-	require.Nil(t, round.CeremonyAcks,
-		"CeremonyAcks must be cleared on timeout reset")
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
+		"round should be finalized after insufficient ack timeout")
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
+		"ceremony status should preserve the failed phase")
+	require.Len(t, round.DkgContributions, 2,
+		"DkgContributions should be preserved for audit")
 }
 
-func TestEndBlockerRegistering_TimeoutResetsContributions(t *testing.T) {
+func TestEndBlockerRegistering_TimeoutFinalizesPendingRound(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	proposerAddr := ta.ValidatorOperAddr()
@@ -986,16 +986,18 @@ func TestEndBlockerRegistering_TimeoutResetsContributions(t *testing.T) {
 
 	round = ta.MustGetVoteRound(roundID)
 
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
+		"round should be finalized after contribution timeout")
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
-		"ceremony should remain REGISTERING after contribution timeout")
-	require.Nil(t, round.DkgContributions,
-		"DkgContributions must be cleared on contribution timeout")
+		"ceremony status should preserve the failed phase")
+	require.Len(t, round.DkgContributions, 1,
+		"DkgContributions should be preserved for audit")
 	require.Equal(t, 2, len(round.CeremonyValidators),
 		"CeremonyValidators must be preserved after contribution timeout")
-	require.Equal(t, uint64(timeoutTime.Unix()), round.CeremonyPhaseStart,
-		"CeremonyPhaseStart must be refreshed to the timeout block time")
+	require.Equal(t, phaseStart, round.CeremonyPhaseStart,
+		"CeremonyPhaseStart must not be refreshed on terminal timeout")
 	require.Equal(t, types.DefaultContributionTimeout, round.CeremonyPhaseTimeout,
-		"CeremonyPhaseTimeout must remain set for next cycle")
+		"CeremonyPhaseTimeout should remain recorded for audit")
 }
 
 func TestEndBlockerRegistering_NoTimeoutBeforeDeadline(t *testing.T) {
