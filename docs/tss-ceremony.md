@@ -237,7 +237,7 @@ Implementation:
 | Single party can decrypt votes | No — requires `t` partial decryptions |
 | Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor) |
 | Malicious validator sabotages tally | No — DLEQ proof required per partial decryption |
-| Offline validator | REGISTERING phase times out after `DefaultContributionTimeout` (10 min), non-contributors/ineligible validators are evicted, stale DKG artifacts are cleared, and the phase restarts if the retained set still meets `min_ceremony_validators` |
+| Offline validator | REGISTERING phase times out after `DefaultContributionTimeout` (30 min), contributions are cleared and the phase restarts |
 | Compromised Pallas key | Validator rotates via `MsgRotatePallasKey` (blocked during in-flight ceremonies). Future rounds use the new key. Past ECIES ciphertexts in completed `DkgContributions` remain encrypted to the old key. |
 | Liveness (all honest, n validators) | ~2n blocks (n contributions + n acks) |
 
@@ -251,7 +251,7 @@ Two liveness gaps were identified during DKG review.
 
 **Problem.** The DKG requires all `n` contributions before transitioning REGISTERING → DEALT (`len(round.DkgContributions) == nValidators` in `ContributeDKG`). If any validator is offline and never proposes a block, the ceremony hangs indefinitely.
 
-**Fix (implemented).** `DefaultContributionTimeout` (10 minutes) is set on `CeremonyPhaseStart` / `CeremonyPhaseTimeout` when a round enters REGISTERING (both on initial creation and when resetting from a DEALT timeout). DKG contributions are proposer-driven. With the expected maximum of 15 equal-power validators and 5s blocks as the conservative slow-case assumption, every online ceremony validator should normally get roughly eight proposer chances in this window. Faster blocks only increase that chance count. EndBlocker checks for expired REGISTERING rounds, retains validators that contributed and are still eligible, resets their Shamir indexes to `1..n`, clears all stale DKG artifacts, and restarts REGISTERING if the retained set still meets `min_ceremony_validators`. If the retained set falls below the floor, the round is marked `SESSION_STATUS_ABORTED` so operators can create a replacement voting session.
+**Fix (implemented).** `DefaultContributionTimeout` (30 minutes) is set on `CeremonyPhaseStart` / `CeremonyPhaseTimeout` when a round enters REGISTERING (both on initial creation and when resetting from a DEALT timeout). EndBlocker checks for expired REGISTERING rounds and unconditionally clears contributions, resetting `CeremonyPhaseStart` to the current block time. The ceremony validators are preserved, giving everyone a fresh window to contribute. The same reset-only approach applies when a DEALT timeout resets back to REGISTERING.
 
 #### Issue 2: Corrupted-share DoS vector (documented, deferred)
 

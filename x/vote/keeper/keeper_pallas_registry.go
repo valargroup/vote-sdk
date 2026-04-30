@@ -166,123 +166,30 @@ func (k Keeper) RotatePallasKeyCore(kvStore store.KVStore, valAddr string, newPa
 	return existing.PallasPk, nil
 }
 
-// GetEligibleValidators returns all bonded, unjailed validators that have a registered Pallas PK.
+// GetEligibleValidators returns all bonded validators that have a registered Pallas PK.
 // Used when creating a round to snapshot the ceremony participants.
 func (k Keeper) GetEligibleValidators(ctx context.Context, kvStore store.KVStore) ([]*types.ValidatorPallasKey, error) {
 	var eligible []*types.ValidatorPallasKey
-	var eligibilityErr error
 
 	if err := k.IterateAllPallasKeys(kvStore, func(vpk *types.ValidatorPallasKey) bool {
-		if reason, err := k.validatorCeremonyIneligibilityReason(ctx, vpk.ValidatorAddress); err != nil {
-			eligibilityErr = err
-			return true
-		} else if reason == "" {
-			eligible = append(eligible, vpk)
+		// Check that the validator is bonded.
+		valAddr, err := sdk.ValAddressFromBech32(vpk.ValidatorAddress)
+		if err != nil {
+			return false // skip invalid addresses
 		}
+		val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
+		if err != nil {
+			return false // skip if not found
+		}
+		if val.GetStatus() != stakingtypes.Bonded {
+			return false // skip non-bonded
+		}
+		eligible = append(eligible, vpk)
 		return false
 	}); err != nil {
 		return nil, err
-	}
-	if eligibilityErr != nil {
-		return nil, eligibilityErr
 	}
 
 	return eligible, nil
 }
 
-// RegisteringTimeoutDrop records why a validator from the original ceremony
-// snapshot was not retained when a REGISTERING timeout fired.
-type RegisteringTimeoutDrop struct {
-	ValidatorAddress string
-	Reason           string
-}
-
-// RetainRegisteringTimeoutValidators returns the original ceremony validators
-// that contributed during the expired REGISTERING window and are still eligible
-// to participate. The retained set preserves original order but receives fresh
-// contiguous Shamir indexes because all prior DKG material is discarded.
-func (k Keeper) RetainRegisteringTimeoutValidators(
-	ctx context.Context,
-	kvStore store.KVStore,
-	round *types.VoteRound,
-) ([]*types.ValidatorPallasKey, []RegisteringTimeoutDrop, error) {
-	contributed := make(map[string]bool, len(round.DkgContributions))
-	for _, c := range round.DkgContributions {
-		contributed[c.ValidatorAddress] = true
-	}
-
-	retained := make([]*types.ValidatorPallasKey, 0, len(round.CeremonyValidators))
-	dropped := make([]RegisteringTimeoutDrop, 0, len(round.CeremonyValidators))
-	for _, v := range round.CeremonyValidators {
-		valAddr := v.ValidatorAddress
-		if !contributed[valAddr] {
-			dropped = append(dropped, RegisteringTimeoutDrop{
-				ValidatorAddress: valAddr,
-				Reason:           "no contribution",
-			})
-			continue
-		}
-
-		current, reason, err := k.currentEligiblePallasKey(ctx, kvStore, valAddr)
-		if err != nil {
-			return nil, nil, err
-		}
-		if reason != "" {
-			dropped = append(dropped, RegisteringTimeoutDrop{
-				ValidatorAddress: valAddr,
-				Reason:           reason,
-			})
-			continue
-		}
-
-		retained = append(retained, &types.ValidatorPallasKey{
-			ValidatorAddress: current.ValidatorAddress,
-			PallasPk:         append([]byte(nil), current.PallasPk...),
-			ShamirIndex:      uint32(len(retained) + 1),
-		})
-	}
-
-	return retained, dropped, nil
-}
-
-func (k Keeper) currentEligiblePallasKey(
-	ctx context.Context,
-	kvStore store.KVStore,
-	valoperAddr string,
-) (*types.ValidatorPallasKey, string, error) {
-	if reason, err := k.validatorCeremonyIneligibilityReason(ctx, valoperAddr); err != nil {
-		return nil, "", err
-	} else if reason != "" {
-		return nil, reason, nil
-	}
-
-	vpk, err := k.GetPallasKey(kvStore, valoperAddr)
-	if err != nil {
-		return nil, "", err
-	}
-	if vpk == nil {
-		return nil, "missing pallas key", nil
-	}
-	return vpk, "", nil
-}
-
-func (k Keeper) validatorCeremonyIneligibilityReason(ctx context.Context, valoperAddr string) (string, error) {
-	if k.stakingKeeper == nil {
-		return "", fmt.Errorf("staking keeper not configured")
-	}
-	valAddr, err := sdk.ValAddressFromBech32(valoperAddr)
-	if err != nil {
-		return "invalid validator address", nil
-	}
-	val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
-	if err != nil {
-		return "validator not found", nil
-	}
-	if val.GetStatus() != stakingtypes.Bonded {
-		return "not bonded", nil
-	}
-	if val.IsJailed() {
-		return "jailed", nil
-	}
-	return "", nil
-}
