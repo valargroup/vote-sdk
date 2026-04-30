@@ -166,23 +166,44 @@ func (k Keeper) RotatePallasKeyCore(kvStore store.KVStore, valAddr string, newPa
 	return existing.PallasPk, nil
 }
 
-// GetEligibleValidators returns all bonded validators that have a registered Pallas PK.
+// IsActiveCeremonyValidator reports whether valAddr is currently eligible to
+// participate in a ceremony: bonded and not jailed.
+func (k Keeper) IsActiveCeremonyValidator(ctx context.Context, valAddr string) bool {
+	val, err := k.getActiveCeremonyValidator(ctx, valAddr)
+	return err == nil && val != nil
+}
+
+// getActiveCeremonyValidator resolves a validator operator address and returns
+// the staking validator only when it is eligible for ceremony participation.
+// Ceremony eligibility intentionally follows the consensus-active set: the
+// validator must exist, be bonded, and not be jailed.
+func (k Keeper) getActiveCeremonyValidator(ctx context.Context, valoperAddr string) (*stakingtypes.Validator, error) {
+	if k.stakingKeeper == nil {
+		return nil, fmt.Errorf("staking keeper is not configured")
+	}
+
+	valAddr, err := sdk.ValAddressFromBech32(valoperAddr)
+	if err != nil {
+		return nil, err
+	}
+	val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
+	if err != nil {
+		return nil, err
+	}
+	if val.GetStatus() != stakingtypes.Bonded || val.Jailed {
+		return nil, fmt.Errorf("validator %s is not active", valoperAddr)
+	}
+	return &val, nil
+}
+
+// GetEligibleValidators returns all bonded, unjailed validators that have a registered Pallas PK.
 // Used when creating a round to snapshot the ceremony participants.
 func (k Keeper) GetEligibleValidators(ctx context.Context, kvStore store.KVStore) ([]*types.ValidatorPallasKey, error) {
 	var eligible []*types.ValidatorPallasKey
 
 	if err := k.IterateAllPallasKeys(kvStore, func(vpk *types.ValidatorPallasKey) bool {
-		// Check that the validator is bonded.
-		valAddr, err := sdk.ValAddressFromBech32(vpk.ValidatorAddress)
-		if err != nil {
-			return false // skip invalid addresses
-		}
-		val, err := k.stakingKeeper.GetValidator(ctx, valAddr)
-		if err != nil {
-			return false // skip if not found
-		}
-		if val.GetStatus() != stakingtypes.Bonded {
-			return false // skip non-bonded
+		if _, err := k.getActiveCeremonyValidator(ctx, vpk.ValidatorAddress); err != nil {
+			return false // skip invalid, missing, non-bonded, or jailed validators
 		}
 		eligible = append(eligible, vpk)
 		return false
@@ -192,4 +213,3 @@ func (k Keeper) GetEligibleValidators(ctx context.Context, kvStore store.KVStore
 
 	return eligible, nil
 }
-

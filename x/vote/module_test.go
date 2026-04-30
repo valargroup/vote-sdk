@@ -358,6 +358,43 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 	}
 }
 
+func (s *EndBlockerTestSuite) TestEndBlock_RegisteringTimeoutPreservesCeremonyValidators() {
+	roundID := bytes.Repeat([]byte{0xCE}, 32)
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	round := &types.VoteRound{
+		VoteRoundId:    roundID,
+		Status:         types.SessionStatus_SESSION_STATUS_PENDING,
+		CeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		CeremonyValidators: []*types.ValidatorPallasKey{
+			{ValidatorAddress: "val1", PallasPk: make([]byte, 32), ShamirIndex: 1},
+			{ValidatorAddress: "val2", PallasPk: make([]byte, 32), ShamirIndex: 2},
+			{ValidatorAddress: "val3", PallasPk: make([]byte, 32), ShamirIndex: 3},
+		},
+		CeremonyPhaseStart:   999_400,
+		CeremonyPhaseTimeout: 600,
+		DkgContributions: []*types.DKGContribution{
+			{ValidatorAddress: "val1", FeldmanCommitments: [][]byte{{0x01}}},
+			{ValidatorAddress: "val3", FeldmanCommitments: [][]byte{{0x03}}},
+		},
+	}
+	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+
+	s.Require().NoError(s.module.EndBlock(s.ctx))
+
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Len(round.CeremonyValidators, 3)
+	s.Require().Equal("val1", round.CeremonyValidators[0].ValidatorAddress)
+	s.Require().Equal(uint32(1), round.CeremonyValidators[0].ShamirIndex)
+	s.Require().Equal("val2", round.CeremonyValidators[1].ValidatorAddress)
+	s.Require().Equal(uint32(2), round.CeremonyValidators[1].ShamirIndex)
+	s.Require().Equal("val3", round.CeremonyValidators[2].ValidatorAddress)
+	s.Require().Equal(uint32(3), round.CeremonyValidators[2].ShamirIndex)
+	s.Require().Nil(round.DkgContributions)
+	s.Require().Contains(round.CeremonyLog[0], "REGISTERING timeout: reset (2/3 contributions)")
+}
+
 // ---------------------------------------------------------------------------
 // Ceremony log tests for EndBlocker timeout paths
 // ---------------------------------------------------------------------------
@@ -470,10 +507,10 @@ func (s *EndBlockerTestSuite) TestEndBlock_TallyTimeout() {
 	roundID := bytes.Repeat([]byte{0xEE}, 32)
 
 	tests := []struct {
-		name            string
-		setup           func()
-		wantStatus      types.SessionStatus
-		wantTimedOut    bool
+		name         string
+		setup        func()
+		wantStatus   types.SessionStatus
+		wantTimedOut bool
 	}{
 		{
 			name: "TALLYING past deadline -> FINALIZED with tally_timed_out=true",
