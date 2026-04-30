@@ -141,6 +141,12 @@ func (h *apiHandler) handleGetPendingValidators(w http.ResponseWriter, r *http.R
 
 	out := make([]PendingValidatorPublic, 0, len(regs))
 	for _, r := range regs {
+		if a.IsBonded(r.OperatorAddress) {
+			if _, err := a.Store().RemovePendingRegistration(r.OperatorAddress); err != nil {
+				h.logger.Error("remove bonded pending registration", "operator", r.OperatorAddress, "error", err)
+			}
+			continue
+		}
 		out = append(out, PendingValidatorPublic{
 			OperatorAddress: r.OperatorAddress,
 			URL:             r.URL,
