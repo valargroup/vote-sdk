@@ -175,12 +175,6 @@ func initRootCmd(
 	adminSetup := adminPostSetup(&svoteAppRef)
 	server.AddCommandsWithStartCmdOptions(rootCmd, app.DefaultNodeHome, newAppFn, appExport, server.StartCmdOptions{
 		PostSetup: func(svrCtx *server.Context, clientCtx client.Context, ctx context.Context, g *errgroup.Group) error {
-			if svoteAppRef == nil {
-				return errors.New("crypto warm-up: app not initialized")
-			}
-			g.Go(func() error {
-				return svoteAppRef.StartCryptoWarmup(ctx, svrCtx.Logger)
-			})
 			if err := helperSetup(svrCtx, clientCtx, ctx, g); err != nil {
 				return err
 			}

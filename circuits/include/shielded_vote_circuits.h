@@ -453,24 +453,6 @@ int32_t sv_generate_share_reveal(
 );
 
 /* -----------------------------------------------------------------------
- * Halo2 verifier cache warm-up
- * ----------------------------------------------------------------------- */
-
-/*
- * Warm all real verifier caches used by the vote chain.
- *
- * This initializes deterministic Halo2 params and verifying keys for the
- * delegation, vote commitment, and share reveal circuits without verifying a
- * proof. Operators can call this during readiness warm-up so the first live
- * transaction does not pay the cold-cache cost.
- *
- * Returns:
- *    0  on success.
- *   -6  if cache initialization panics.
- */
-int32_t sv_warm_verifier_caches(void);
-
-/* -----------------------------------------------------------------------
  * Orchard note commitment tree root extraction
  * ----------------------------------------------------------------------- */
 
