@@ -16,8 +16,8 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// Simulates operator join admin flow: register while unbonded (pending row),
-// then register again after bonding (row cleared, status bonded). Funding and
+// Simulates operator join admin flow: register once while unbonded, then clear
+// the pending row from the read path after the operator bonds. Funding and
 // create-val-tx happen on-chain outside this package.
 func TestJoinAdminFlow_PendingThenBonded(t *testing.T) {
 	t.Parallel()
@@ -114,6 +114,17 @@ func TestJoinAdminFlow_PendingThenBonded(t *testing.T) {
 	}
 
 	bonded.Store(true)
+	if getPending() != 0 {
+		t.Fatalf("want 0 pending rows after bond read-repair")
+	}
+	stored, err := st.ListPendingRegistrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("want pending row deleted after bond read-repair, got %+v", stored)
+	}
+
 	w2 := post()
 	if w2.Code != http.StatusOK {
 		t.Fatalf("second POST: %d %s", w2.Code, w2.Body.String())
@@ -123,21 +134,6 @@ func TestJoinAdminFlow_PendingThenBonded(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r2["status"] != "bonded" {
-		t.Fatalf("want bonded, got %#v", r2)
-	}
-	if getPending() != 0 {
-		t.Fatalf("want 0 pending rows after bond")
-	}
-
-	w3 := post()
-	if w3.Code != http.StatusOK {
-		t.Fatalf("third POST: %d %s", w3.Code, w3.Body.String())
-	}
-	var r3 map[string]string
-	if err := json.Unmarshal(w3.Body.Bytes(), &r3); err != nil {
-		t.Fatal(err)
-	}
-	if r3["status"] != "bonded" {
-		t.Fatalf("want idempotent bonded, got %#v", r3)
+		t.Fatalf("want idempotent bonded, got %#v", r2)
 	}
 }
