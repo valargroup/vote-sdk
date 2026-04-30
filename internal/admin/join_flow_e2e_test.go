@@ -16,10 +16,10 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// Simulates operator join admin flow: register once while unbonded, then clear
-// the pending row from the read path after the operator bonds. Funding and
-// create-val-tx happen on-chain outside this package.
-func TestJoinAdminFlow_PendingThenBonded(t *testing.T) {
+// Simulates operator join admin flow: register once before the validator exists,
+// then clear the pending row from the read path after create-val-tx succeeds.
+// Funding and create-val-tx happen on-chain outside this package.
+func TestJoinAdminFlow_PendingThenRegistered(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	st, err := NewStore(filepath.Join(dir, "join.db"))
@@ -28,14 +28,14 @@ func TestJoinAdminFlow_PendingThenBonded(t *testing.T) {
 	}
 	defer st.Close()
 
-	var bonded atomic.Bool
-	check := func(string) bool { return bonded.Load() }
+	var validatorExists atomic.Bool
+	check := func(string) bool { return validatorExists.Load() }
 
 	a := &Admin{
-		configURL:   "http://invalid.local",
-		logger:      log.NewNopLogger(),
-		store:       st,
-		checkBonded: check,
+		configURL:            "http://invalid.local",
+		logger:               log.NewNopLogger(),
+		store:                st,
+		checkValidatorExists: check,
 	}
 	r := mux.NewRouter()
 	RegisterRoutes(r, func() *Admin { return a }, log.NewNopLogger())
@@ -113,16 +113,16 @@ func TestJoinAdminFlow_PendingThenBonded(t *testing.T) {
 		t.Fatalf("want 1 pending row")
 	}
 
-	bonded.Store(true)
+	validatorExists.Store(true)
 	if getPending() != 0 {
-		t.Fatalf("want 0 pending rows after bond read-repair")
+		t.Fatalf("want 0 pending rows after validator-exists read-repair")
 	}
 	stored, err := st.ListPendingRegistrations()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(stored) != 0 {
-		t.Fatalf("want pending row deleted after bond read-repair, got %+v", stored)
+		t.Fatalf("want pending row deleted after validator-exists read-repair, got %+v", stored)
 	}
 
 	w2 := post()
@@ -133,7 +133,7 @@ func TestJoinAdminFlow_PendingThenBonded(t *testing.T) {
 	if err := json.Unmarshal(w2.Body.Bytes(), &r2); err != nil {
 		t.Fatal(err)
 	}
-	if r2["status"] != "bonded" {
-		t.Fatalf("want idempotent bonded, got %#v", r2)
+	if r2["status"] != "registered" {
+		t.Fatalf("want idempotent registered, got %#v", r2)
 	}
 }

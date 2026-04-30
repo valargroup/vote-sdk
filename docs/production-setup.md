@@ -3,21 +3,15 @@
 ## Architecture
 
 ```
-               ┌────────────────┐
-               │  Cloudflare    │
-               │  DNS           │
-               └───┬────────┬──┘
-                   │        │
-          ┌────────▼──┐  ┌──▼──────────┐
-          │ Droplet 1  │  │ Droplet 2    │
-          │ vote-      │  │ vote-        │
-          │ primary    │  │ secondary    │
-          │            │  │              │
-          │ • svoted   │  │ • svoted     │
-          │   start    │  │   start      │
-          │ • caddy    │  │ • caddy      │
-          └─────┬──────┘  └──────┬───────┘
-                └────P2P :26656──┘
+                  Cloudflare DNS
+      ┌──────────────┼───────────────┬───────────────┐
+      │              │               │               │
+┌─────▼─────┐  ┌─────▼──────┐  ┌─────▼──────┐  ┌─────▼──────┐
+│ primary   │  │ secondary  │  │ explorer   │  │ snapshot   │
+│ svoted    │  │ svoted     │  │ svoted     │  │ svoted     │
+│ caddy     │  │ caddy      │  │ caddy      │  │ caddy      │
+└─────┬─────┘  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘
+      └──────── P2P / REST as configured ─────────────┘
 ```
 
 Production uses dedicated DigitalOcean Droplets in the same region + VPC, running native binaries under systemd (no Docker):
@@ -26,7 +20,7 @@ Production uses dedicated DigitalOcean Droplets in the same region + VPC, runnin
 - **vote-secondary** (`vote-chain-secondary.<domain>`): 2 vCPU / 8 GB RAM / 50 GB NVMe. Joining validator — fetches genesis, syncs, and self-registers via `scripts/reset-join.sh`.
 - **vote-snapshot** (`snapshots.<domain>`): 4 vCPU / 16 GB RAM / 100 GB volume by default. Pruned non-validator node — publishes scheduled `data/` snapshots and metadata to `s3://vote/snapshots/svote-1/`, while Caddy serves the public snapshot page.
 
-Both nodes run the same `svoted` binary. Caddy on each host terminates TLS via Let's Encrypt.
+All chain-facing nodes run the same `svoted` binary. Caddy on each public host terminates TLS via Let's Encrypt.
 
 ## Fee and Reward Distribution
 
@@ -57,9 +51,9 @@ terraform apply
 
 This creates:
 - VPC in the chosen region
-- Two Droplets with block volumes attached
+- Dedicated Droplets for primary, secondary, explorer/archive, and snapshot roles
 - Firewalls (SSH from admin IPs, P2P, HTTPS)
-- Cloudflare DNS records for both hosts
+- Cloudflare DNS records for the public hosts
 
 Cloud-init on each Droplet automatically:
 1. Installs Caddy from the official apt repo
@@ -92,7 +86,7 @@ The systemd unit `ExecStart` points at `/opt/shielded-vote/current/bin/svoted`, 
 
 **`.github/workflows/sdk-chain-deploy.yml`** — manual `workflow_dispatch` with a `tag` input.
 
-1. SSHes to production hosts and runs `install-release.sh --tag <tag>`
+1. SSHes to the primary, secondary, explorer/archive, and snapshot hosts and runs `install-release.sh --tag <tag>`
 2. Verifies chain REST APIs and public frontends respond
 
 Use this for routine upgrades. Chain state is preserved; only the binary is swapped.
@@ -126,7 +120,7 @@ After `terraform apply`, run the Reset workflow to initialize the chain:
 
 1. Add GitHub secrets: `PRIMARY_VAL_PRIVKEY` and `SECONDARY_VAL_PRIVKEY` (64-char hex private keys for each validator)
 2. Trigger "Reset SDK Chain" with the desired release tag
-3. The workflow bootstraps genesis on primary, uploads it, funds the secondary from a vote manager, and joins secondary
+3. The workflow bootstraps genesis on primary, uploads it, funds the secondary from a vote manager, and joins secondary/archive/snapshot nodes
 4. Verify: `DOMAIN=<your-domain> bash scripts/healthcheck.sh`
 
 ## Manual Operations

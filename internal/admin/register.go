@@ -94,9 +94,9 @@ func (h *apiHandler) handleRegisterValidator(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if a.IsBonded(body.OperatorAddress) {
+	if a.ValidatorExists(body.OperatorAddress) {
 		_, _ = a.Store().RemovePendingRegistration(body.OperatorAddress)
-		jsonResponse(w, map[string]string{"status": "bonded"}, 200)
+		jsonResponse(w, map[string]string{"status": "registered"}, 200)
 		return
 	}
 
@@ -141,9 +141,9 @@ func (h *apiHandler) handleGetPendingValidators(w http.ResponseWriter, r *http.R
 
 	out := make([]PendingValidatorPublic, 0, len(regs))
 	for _, r := range regs {
-		if a.IsBonded(r.OperatorAddress) {
+		if a.ValidatorExists(r.OperatorAddress) {
 			if _, err := a.Store().RemovePendingRegistration(r.OperatorAddress); err != nil {
-				h.logger.Error("remove bonded pending registration", "operator", r.OperatorAddress, "error", err)
+				h.logger.Error("remove registered pending registration", "operator", r.OperatorAddress, "error", err)
 			}
 			continue
 		}

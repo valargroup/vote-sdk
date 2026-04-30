@@ -68,7 +68,7 @@ snapshot node state, so `sdk-chain-reset.yml` always reinitializes
    - `https://explorer-api.<domain>/cosmos/base/tendermint/v1beta1/blocks/latest` returns `200`
    - `https://snapshots.<domain>/` serves the snapshot page
 
-To wipe and reset the chain from genesis later (e.g. on a binary upgrade that breaks state compatibility), re-run the same workflow. For binary swaps that preserve state, use [`sdk-chain-deploy.yml`](../../.github/workflows/sdk-chain-deploy.yml) instead — it just runs `install-release.sh --tag <new-tag>` on both validators and restarts `svoted`.
+To wipe and reset the chain from genesis later (e.g. on a binary upgrade that breaks state compatibility), re-run the same workflow. For binary swaps that preserve state, use [`sdk-chain-deploy.yml`](../../.github/workflows/sdk-chain-deploy.yml) instead — it installs the new tag across the primary, secondary, explorer/archive, and snapshot hosts, restarting `svoted` where chain state is already initialized.
 
 ### What `scripts/init.sh` does
 

@@ -58,11 +58,11 @@ func adminPostSetup(
 		}
 
 		homeDir := clientCtx.HomeDir
-		checkBonded := func(valoper string) bool {
-			return (*svoteApp).ValidatorValoperBonded(valoper)
+		checkValidatorExists := func(valoper string) bool {
+			return (*svoteApp).ValidatorValoperExists(valoper)
 		}
 
-		a, err := admin.New(cfg, homeDir, checkBonded, logger)
+		a, err := admin.New(cfg, homeDir, checkValidatorExists, logger)
 		if err != nil {
 			return fmt.Errorf("admin: %w", err)
 		}

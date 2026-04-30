@@ -13,17 +13,17 @@ import (
 	"cosmossdk.io/log"
 )
 
-// BondingChecker returns whether the validator with the given valoper bech32
-// is currently bonded.
-type BondingChecker func(valoper string) bool
+// ValidatorChecker returns whether a validator with the given valoper bech32
+// exists in staking state.
+type ValidatorChecker func(valoper string) bool
 
 // Admin fetches and caches voting-config from the CDN and stores pending
 // validator registrations in SQLite.
 type Admin struct {
-	configURL   string
-	logger      log.Logger
-	store       *Store
-	checkBonded BondingChecker
+	configURL            string
+	logger               log.Logger
+	store                *Store
+	checkValidatorExists ValidatorChecker
 
 	mu     sync.RWMutex
 	cached *VotingConfig
@@ -31,8 +31,8 @@ type Admin struct {
 
 // New creates a new Admin from the given configuration.
 // homeDir is used to resolve default DBPath when cfg.DBPath is empty.
-// checkBonded may be nil; in that case bonding checks always return false.
-func New(cfg Config, homeDir string, checkBonded BondingChecker, logger log.Logger) (*Admin, error) {
+// checkValidatorExists may be nil; in that case validator checks always return false.
+func New(cfg Config, homeDir string, checkValidatorExists ValidatorChecker, logger log.Logger) (*Admin, error) {
 	logger = logger.With("module", "admin")
 
 	if cfg.Disable {
@@ -56,10 +56,10 @@ func New(cfg Config, homeDir string, checkBonded BondingChecker, logger log.Logg
 	}
 
 	a := &Admin{
-		configURL:   configURL,
-		logger:      logger,
-		store:       store,
-		checkBonded: checkBonded,
+		configURL:            configURL,
+		logger:               logger,
+		store:                store,
+		checkValidatorExists: checkValidatorExists,
 	}
 
 	if err := a.refresh(); err != nil {
@@ -82,16 +82,18 @@ func (a *Admin) Close() error {
 	return a.store.Close()
 }
 
-// IsBonded reports whether the operator account (bech32) is bonded as a validator.
-func (a *Admin) IsBonded(operatorAddress string) bool {
-	if a.checkBonded == nil {
+// ValidatorExists reports whether the operator account (bech32) has a staking
+// validator record. It converts the account address to its valoper form before
+// checking staking state.
+func (a *Admin) ValidatorExists(operatorAddress string) bool {
+	if a.checkValidatorExists == nil {
 		return false
 	}
 	valoper, err := AddressToValoper(operatorAddress)
 	if err != nil {
 		return false
 	}
-	return a.checkBonded(valoper)
+	return a.checkValidatorExists(valoper)
 }
 
 // GetVotingConfig returns the cached voting config, refreshing if stale.

@@ -21,10 +21,10 @@ func TestHandleRegisterValidatorBadJSON(t *testing.T) {
 	defer st.Close()
 
 	a := &Admin{
-		configURL:   "http://invalid.local",
-		logger:      log.NewNopLogger(),
-		store:       st,
-		checkBonded: func(string) bool { return false },
+		configURL:            "http://invalid.local",
+		logger:               log.NewNopLogger(),
+		store:                st,
+		checkValidatorExists: func(string) bool { return false },
 	}
 
 	r := mux.NewRouter()
