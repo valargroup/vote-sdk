@@ -959,9 +959,9 @@ dependencies = [
 
 [[package]]
 name = "voting-circuits"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7830eca6c294cff758bc4885ca8bd2fbdf90f9998f586c5c4cfe2d1b559555f6"
+checksum = "454ce29a0767cd4d8db05d9437cdbb7ed0970441cb5a35f371b0c53d8c52ea2f"
 dependencies = [
  "blake2b_simd",
  "ff",

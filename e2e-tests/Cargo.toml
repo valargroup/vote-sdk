@@ -9,10 +9,10 @@ description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeSc
 shielded-vote-circuits = { path = "../circuits" }
 
 orchard = { version = "=0.13.1", features = ["unstable-voting-circuits"] }
-voting-circuits = { version = "0.3.1", features = ["share-reveal"] }
+voting-circuits = { version = "0.4.0", features = ["share-reveal"] }
 vote-commitment-tree = "0.1.1"
 vote-commitment-tree-client = "0.1.1"
-zcash_voting = "0.1.1"
+zcash_voting = "0.2.0"
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }
