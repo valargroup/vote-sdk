@@ -2187,12 +2187,10 @@ const STATUS_MAP: Record<string | number, { label: string; color: string }> = {
   SESSION_STATUS_ACTIVE: { label: "Active", color: "bg-success/20 text-success" },
   SESSION_STATUS_TALLYING: { label: "Tallying", color: "bg-warning/20 text-warning" },
   SESSION_STATUS_FINALIZED: { label: "Finalized", color: "bg-blue-500/20 text-blue-400" },
-  SESSION_STATUS_ABORTED: { label: "Aborted", color: "bg-danger/20 text-danger" },
   4: { label: "Pending", color: "bg-orange-500/20 text-orange-400" },
   1: { label: "Active", color: "bg-success/20 text-success" },
   2: { label: "Tallying", color: "bg-warning/20 text-warning" },
   3: { label: "Finalized", color: "bg-blue-500/20 text-blue-400" },
-  5: { label: "Aborted", color: "bg-danger/20 text-danger" },
 };
 
 
