@@ -2,6 +2,7 @@ package helper
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,12 +15,12 @@ import (
 // MsgRevealShareJSON is the JSON payload for submitting MsgRevealShare to the
 // chain's REST API. Byte fields are base64-encoded (Go's default for []byte).
 type MsgRevealShareJSON struct {
-	ShareNullifier           string `json:"share_nullifier"`              // base64, 32 bytes
-	EncShare                 string `json:"enc_share"`                    // base64, 64 bytes (C1||C2)
+	ShareNullifier           string `json:"share_nullifier"` // base64, 32 bytes
+	EncShare                 string `json:"enc_share"`       // base64, 64 bytes (C1||C2)
 	ProposalID               uint32 `json:"proposal_id"`
 	VoteDecision             uint32 `json:"vote_decision"`
-	Proof                    string `json:"proof"`                        // base64
-	VoteRoundID              string `json:"vote_round_id"`                // base64, 32 bytes
+	Proof                    string `json:"proof"`         // base64
+	VoteRoundID              string `json:"vote_round_id"` // base64, 32 bytes
 	VoteCommTreeAnchorHeight uint64 `json:"vote_comm_tree_anchor_height"`
 }
 
@@ -81,6 +82,12 @@ func (c *ChainSubmitter) FetchVoteRound(roundID string) (uint64, error) {
 
 // SubmitRevealShare POSTs a MsgRevealShare to the chain endpoint.
 func (c *ChainSubmitter) SubmitRevealShare(msg *MsgRevealShareJSON) (*BroadcastResult, error) {
+	return c.SubmitRevealShareContext(context.Background(), msg)
+}
+
+// SubmitRevealShareContext POSTs a MsgRevealShare to the chain endpoint using
+// ctx, allowing callers to attach the outbound request to an active trace.
+func (c *ChainSubmitter) SubmitRevealShareContext(ctx context.Context, msg *MsgRevealShareJSON) (*BroadcastResult, error) {
 	url := fmt.Sprintf("%s/shielded-vote/v1/reveal-share", c.baseURL)
 
 	body, err := json.Marshal(msg)
@@ -88,14 +95,25 @@ func (c *ChainSubmitter) SubmitRevealShare(msg *MsgRevealShareJSON) (*BroadcastR
 		return nil, fmt.Errorf("marshal msg: %w", err)
 	}
 
-	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
+	ctx, span := StartTrace(ctx, "http.client", "POST /shielded-vote/v1/reveal-share", nil, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
+		span.Finish(err)
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		span.Finish(err)
 		return nil, fmt.Errorf("HTTP error: %w", err)
 	}
 	defer resp.Body.Close()
+	span.SetData("http.response.status_code", resp.StatusCode)
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
+		span.Finish(err)
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
@@ -103,14 +121,21 @@ func (c *ChainSubmitter) SubmitRevealShare(msg *MsgRevealShareJSON) (*BroadcastR
 	// body still contains a structured BroadcastResult. Parse both so the caller
 	// can inspect result.Code.
 	if resp.StatusCode != 200 && resp.StatusCode != 422 {
-		return nil, fmt.Errorf("chain returned %d: %s", resp.StatusCode, string(respBody))
+		err := fmt.Errorf("chain returned %d: %s", resp.StatusCode, string(respBody))
+		span.Finish(err)
+		return nil, err
 	}
 
 	var result BroadcastResult
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		span.Finish(err)
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-
+	span.SetData("chain.code", result.Code)
+	if result.TxHash != "" {
+		span.SetData("chain.tx_hash", result.TxHash)
+	}
+	span.Finish(nil)
 	return &result, nil
 }
 
