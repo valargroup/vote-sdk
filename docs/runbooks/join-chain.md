@@ -32,41 +32,6 @@ Why these numbers:
 
 `join.sh` auto-detects the platform via `uname -s` + `uname -m`; anything outside the matrix above exits with an error.
 
-### Hostname and TLS
-
-`svoted` speaks plaintext HTTP on `:1317`; clients reach it over TLS through a reverse proxy or load balancer. `join.sh` prompts for one of three HTTPS exposure modes unless you set `SVOTE_SKIP_CADDY` or `SVOTE_DOMAIN` ahead of time:
-
-- **Default — skip Caddy.** `join.sh` does not install or configure TLS unless you opt in. Terminate TLS upstream (load balancer, managed certificate, your own reverse proxy). The operator address still appears in the admin join queue for funding; the public URL can be supplied later when the validator is added to `vote_servers[]`. Equivalent to `SVOTE_SKIP_CADDY=1`.
-- `--domain val.example.org` or `SVOTE_DOMAIN=val.example.org` — install Caddy and request a Let's Encrypt cert for that hostname. The DNS record must be static and already pointed at this host; we do not rotate URLs after the operator advertises one in `vote_servers[]`. Configure DNS like:
-  ```text
-  val.example.org.  A  <your-server-public-IPv4>
-  ```
-- Auto sslip.io + Caddy — pick option 3 in the interactive menu when running `... | bash`. Suitable for trials only; if the host's public IPv4 changes, the URL breaks and you must re-run `join.sh` and PR a new entry into [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config).
-
-If Caddy setup fails after you opt in, `join.sh` still registers the operator for funding with an empty URL and prints a `Public URL: missing` warning. If you explicitly pass `--domain` or `SVOTE_DOMAIN`, Caddy setup is treated as required and failures stop the installer unless `SVOTE_ALLOW_NO_PUBLIC_URL=1` is set.
-
-See [TLS / reverse proxy](#tls--reverse-proxy) for the Caddy layout `join.sh` installs when you opt in.
-
-### Network requirements
-
-`join.sh` and the running validator need the following network access:
-
-| Direction | Destination | Purpose |
-|-----------|-------------|---------|
-| Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `svoted-wrapper.sh` fallback |
-| Outbound 443 | `snapshots.valargroup.org` | Latest Zvote snapshot metadata and archive URL used to bootstrap chain data before peer catch-up |
-| Outbound 443 | `valargroup.github.io` | [`token-holder-voting-config/voting-config.json`](https://github.com/valargroup/token-holder-voting-config) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
-| Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue). Override via `SVOTE_ADMIN_URL` / `DEFAULT_ADMIN_API_BASE`. |
-| Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` (P2P seed) |
-| Outbound 443 | `ifconfig.me`, `api.ipify.org` | Public IPv4 auto-detection (only when choosing auto sslip.io + Caddy) |
-| Outbound 443 | `dl.cloudsmith.io`, Let's Encrypt | Caddy apt-repo install + ACME certificate issuance (only when opting into Caddy) |
-| Outbound TCP 26656 | Seed validator's P2P | CometBFT peer handshake + gossip |
-| Inbound TCP 26656 | Public | CometBFT P2P — **must be reachable**; open it in your firewall/security group. Peers cannot connect if this is blocked |
-| Inbound TCP 80 + 443 | Public | HTTPS reverse proxy for the REST API, used by iOS clients and admin UI. 80 is required for Let's Encrypt HTTP-01 challenges when using Caddy |
-| Local only | `127.0.0.1:1317` (REST), `127.0.0.1:26657` (RPC), `127.0.0.1:6060` (pprof) | Do not expose directly; proxy `1317` over TLS |
-
-If the validator will answer PIR queries itself, also open inbound 443 for the `nf-server` routes — see [vote-nullifier-pir's server-setup runbook](https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/runbooks/server-setup.md).
-
 ## Quick start
 
 On Linux or macOS, run:
@@ -233,7 +198,7 @@ val.example.org {
 - On Linux, Caddy is installed from the Cloudsmith apt repo and managed by `systemctl`. The Caddyfile lives at `/etc/caddy/Caddyfile`.
 - On macOS, Caddy is installed via Homebrew and run as a launchd agent owned by the current user. The Caddyfile lives at `~/.config/caddy/Caddyfile`.
 
-For the hostname-vs-sslip-vs-skip choice, see [Prerequisites > Hostname and TLS](#hostname-and-tls).
+For the hostname-vs-sslip-vs-skip choice, see [Troubleshooting > Hostname and TLS](#hostname-and-tls).
 
 ## Backup and disaster recovery
 
@@ -469,6 +434,43 @@ Read from the systemd `Environment=` values (Linux) or the launchd `EnvironmentV
 ## Troubleshooting
 
 Start with `journalctl -u svoted -n 200 --no-pager` / `tail -n 200 ~/.svoted/node.log` and `svoted status --home ~/.svoted | jq .sync_info`.
+
+### Hostname and TLS
+
+`svoted` speaks plaintext HTTP on `:1317`; clients reach it over TLS through a reverse proxy or load balancer. `join.sh` prompts for one of three HTTPS exposure modes unless you set `SVOTE_SKIP_CADDY` or `SVOTE_DOMAIN` ahead of time:
+
+- **Default — skip Caddy.** `join.sh` does not install or configure TLS unless you opt in. Terminate TLS upstream (load balancer, managed certificate, your own reverse proxy). The operator address still appears in the admin join queue for funding; the public URL can be supplied later when the validator is added to `vote_servers[]`. Equivalent to `SVOTE_SKIP_CADDY=1`.
+- `--domain val.example.org` or `SVOTE_DOMAIN=val.example.org` — install Caddy and request a Let's Encrypt cert for that hostname. The DNS record must be static and already pointed at this host; we do not rotate URLs after the operator advertises one in `vote_servers[]`. Configure DNS like:
+  ```text
+  val.example.org.  A  <your-server-public-IPv4>
+  ```
+- Auto sslip.io + Caddy — pick option 3 in the interactive menu when running `... | bash`. Suitable for trials only; if the host's public IPv4 changes, the URL breaks and you must re-run `join.sh` and PR a new entry into [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config).
+
+If Caddy setup fails after you opt in, `join.sh` still registers the operator for funding with an empty URL and prints a `Public URL: missing` warning. If you explicitly pass `--domain` or `SVOTE_DOMAIN`, Caddy setup is treated as required and failures stop the installer unless `SVOTE_ALLOW_NO_PUBLIC_URL=1` is set.
+
+See [TLS / reverse proxy](#tls--reverse-proxy) for the Caddy layout `join.sh` installs when you opt in.
+
+### Network requirements
+
+`join.sh` and the running validator need the following network access:
+
+| Direction | Destination | Purpose |
+|-----------|-------------|---------|
+| Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `svoted-wrapper.sh` fallback |
+| Outbound 443 | `snapshots.valargroup.org` | Latest Zvote snapshot metadata and archive URL used to bootstrap chain data before peer catch-up |
+| Outbound 443 | `valargroup.github.io` | [`token-holder-voting-config/voting-config.json`](https://github.com/valargroup/token-holder-voting-config) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
+| Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue). Override via `SVOTE_ADMIN_URL` / `DEFAULT_ADMIN_API_BASE`. |
+| Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` (P2P seed) |
+| Outbound 443 | `ifconfig.me`, `api.ipify.org` | Public IPv4 auto-detection (only when choosing auto sslip.io + Caddy) |
+| Outbound 443 | `dl.cloudsmith.io`, Let's Encrypt | Caddy apt-repo install + ACME certificate issuance (only when opting into Caddy) |
+| Outbound TCP 26656 | Seed validator's P2P | CometBFT peer handshake + gossip |
+| Inbound TCP 26656 | Public | CometBFT P2P — **must be reachable**; open it in your firewall/security group. Peers cannot connect if this is blocked |
+| Inbound TCP 80 + 443 | Public | HTTPS reverse proxy for the REST API, used by iOS clients and admin UI. 80 is required for Let's Encrypt HTTP-01 challenges when using Caddy |
+| Local only | `127.0.0.1:1317` (REST), `127.0.0.1:26657` (RPC), `127.0.0.1:6060` (pprof) | Do not expose directly; proxy `1317` over TLS |
+
+If the validator will answer PIR queries itself, also open inbound 443 for the `nf-server` routes — see [vote-nullifier-pir's server-setup runbook](https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/runbooks/server-setup.md).
+
+### Common issues
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
