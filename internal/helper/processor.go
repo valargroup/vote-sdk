@@ -370,7 +370,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 
 	// Generate ZKP #3 proof.
 	proofStart := time.Now()
-	_, span := StartTrace(ctx, "helper.generate_share_reveal_proof", map[string]string{
+	_, span := StartTrace(ctx, "zkp.prove", "helper.generate_share_reveal_proof", map[string]string{
 		"round_id":    share.Payload.VoteRoundID,
 		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
 	}, map[string]interface{}{

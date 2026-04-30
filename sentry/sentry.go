@@ -138,6 +138,28 @@ func StartTransaction(ctx context.Context, name string, tags map[string]string, 
 	return span.Context(), &TraceSpan{span: span}
 }
 
+// StartSpan starts a performance span when Sentry tracing is enabled. If ctx
+// does not already contain a Sentry span, the span becomes the root transaction
+// so background work is still sent to Sentry.
+func StartSpan(ctx context.Context, operation, description string, tags map[string]string, data map[string]interface{}) (context.Context, *TraceSpan) {
+	if !sentryEnabled.Load() {
+		return ctx, &TraceSpan{}
+	}
+
+	options := []sentrylib.SpanOption{sentrylib.WithDescription(description)}
+	if sentrylib.SpanFromContext(ctx) == nil {
+		transactionName := description
+		if transactionName == "" {
+			transactionName = operation
+		}
+		options = append(options, sentrylib.WithTransactionName(transactionName))
+	}
+
+	span := sentrylib.StartSpan(ctx, operation, options...)
+	setSpanAttributes(span, tags, data)
+	return span.Context(), &TraceSpan{span: span}
+}
+
 // SetData attaches diagnostic data to a span.
 func (s *TraceSpan) SetData(name string, value interface{}) {
 	if s == nil || s.span == nil {
