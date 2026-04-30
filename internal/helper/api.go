@@ -250,17 +250,6 @@ func (h *apiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Status: "ok",
 	}
 
-	if h.getTree != nil {
-		if tree := h.getTree(); tree != nil {
-			if ts, err := tree.GetTreeStatus(); err == nil {
-				resp.Tree = &ts
-			} else {
-				h.logger.Error("tree status read failed", "error", err)
-				CaptureErr(err, map[string]string{"stage": "tree_status"})
-			}
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
@@ -320,7 +309,7 @@ func (h *apiHandler) verifyCommitment(p *SharePayload) error {
 	}
 	copy(roundID[:], roundBytes)
 
-	tree.SetRoundID(roundBytes)
+	tree = tree.ForRound(roundBytes)
 
 	var sharesHash [32]byte
 	shBytes, err := base64.StdEncoding.DecodeString(p.SharesHash)

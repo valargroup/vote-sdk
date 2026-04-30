@@ -409,7 +409,7 @@ type vcMockTree struct {
 	leaves map[uint64][]byte
 }
 
-func (m *vcMockTree) SetRoundID(_ []byte) {}
+func (m *vcMockTree) ForRound(_ []byte) TreeReader { return m }
 
 func (m *vcMockTree) GetTreeStatus() (TreeStatus, error) {
 	return TreeStatus{LeafCount: 1, AnchorHeight: 1}, nil
@@ -613,4 +613,3 @@ func TestSubmitShare_VCCrossCheck_BlocksPositionVariation(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w2.Code)
 	assert.Contains(t, w2.Body.String(), "no leaf at position")
 }
-

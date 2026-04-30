@@ -253,10 +253,10 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	if err != nil {
 		return fmt.Errorf("decode vote_round_id: %w", err)
 	}
-	p.tree.SetRoundID(roundBytes)
+	tree := p.tree.ForRound(roundBytes)
 
 	// Read tree status (leaf count + anchor height) without loading leaf data.
-	status, err := p.tree.GetTreeStatus()
+	status, err := tree.GetTreeStatus()
 	if err != nil {
 		return fmt.Errorf("read tree status: %w", err)
 	}
@@ -271,13 +271,12 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 
 	// Compute Merkle authentication path via the persistent KV-backed tree.
 	// O(depth) shard reads — no leaf replay.
-	merklePath, err := p.tree.MerklePath(share.Payload.TreePosition, uint32(anchorHeight))
+	merklePath, err := tree.MerklePath(share.Payload.TreePosition, uint32(anchorHeight))
 	if err != nil {
 		return fmt.Errorf("compute merkle path: %w", err)
 	}
 
-	// Build fixed-size round_id array for the proof generator (already
-	// decoded above for SetRoundID).
+	// Build fixed-size round_id array for the proof generator.
 	var roundID [32]byte
 	if len(roundBytes) != 32 {
 		return fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes))

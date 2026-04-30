@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -86,7 +87,7 @@ type mockTreeReader struct {
 	err          error
 }
 
-func (m *mockTreeReader) SetRoundID(_ []byte) {}
+func (m *mockTreeReader) ForRound(_ []byte) TreeReader { return m }
 
 func (m *mockTreeReader) GetTreeStatus() (TreeStatus, error) {
 	if m.err != nil {
@@ -120,6 +121,74 @@ func newMockTreeReader() *mockTreeReader {
 		leafCount:    1,
 		anchorHeight: 1,
 	}
+}
+
+type roundAwareTreeState struct {
+	leafCounts  map[string]uint64
+	pathDelay   time.Duration
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
+}
+
+type roundAwareTreeReader struct {
+	state   *roundAwareTreeState
+	roundID string
+}
+
+func newRoundAwareTreeReader(leafCounts map[string]uint64, pathDelay time.Duration) *roundAwareTreeReader {
+	return &roundAwareTreeReader{
+		state: &roundAwareTreeState{
+			leafCounts: leafCounts,
+			pathDelay:  pathDelay,
+		},
+	}
+}
+
+func (r *roundAwareTreeReader) ForRound(roundID []byte) TreeReader {
+	return &roundAwareTreeReader{
+		state:   r.state,
+		roundID: hex.EncodeToString(roundID),
+	}
+}
+
+func (r *roundAwareTreeReader) GetTreeStatus() (TreeStatus, error) {
+	leafCount, ok := r.state.leafCounts[r.roundID]
+	if !ok {
+		return TreeStatus{}, fmt.Errorf("unexpected round_id %q", r.roundID)
+	}
+	return TreeStatus{LeafCount: leafCount, AnchorHeight: 1}, nil
+}
+
+func (r *roundAwareTreeReader) MerklePath(position uint64, _ uint32) ([]byte, error) {
+	current := r.state.inFlight.Add(1)
+	defer r.state.inFlight.Add(-1)
+	for {
+		seen := r.state.maxInFlight.Load()
+		if current <= seen || r.state.maxInFlight.CompareAndSwap(seen, current) {
+			break
+		}
+	}
+	time.Sleep(r.state.pathDelay)
+
+	leafCount, ok := r.state.leafCounts[r.roundID]
+	if !ok {
+		return nil, fmt.Errorf("unexpected round_id %q", r.roundID)
+	}
+	if position >= leafCount {
+		return nil, fmt.Errorf("tree_position %d out of range for round %s", position, r.roundID)
+	}
+	return make([]byte, 772), nil
+}
+
+func (r *roundAwareTreeReader) LeafAt(position uint64) ([]byte, error) {
+	leafCount, ok := r.state.leafCounts[r.roundID]
+	if !ok {
+		return nil, fmt.Errorf("unexpected round_id %q", r.roundID)
+	}
+	if position >= leafCount {
+		return nil, nil
+	}
+	return make([]byte, 32), nil
 }
 
 func TestProcessor_ProcessBatch_Success(t *testing.T) {
@@ -381,6 +450,48 @@ func TestProcessor_ProcessBatch_Sequential(t *testing.T) {
 
 	status := store.Status()
 	assert.Equal(t, 4, status[roundID].Submitted)
+}
+
+func TestProcessor_ProcessBatch_ConcurrentRoundsUseScopedTreeReaders(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+
+	roundABytes := make([]byte, 32)
+	roundABytes[31] = 1
+	roundA := hex.EncodeToString(roundABytes)
+	roundBBytes := make([]byte, 32)
+	roundBBytes[31] = 2
+	roundB := hex.EncodeToString(roundBBytes)
+	tree := newRoundAwareTreeReader(map[string]uint64{
+		roundA: 1,
+		roundB: 2,
+	}, 50*time.Millisecond)
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tx_hash":"OK","code":0,"log":""}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	pA := testPayload(roundA, 0)
+	pA.TreePosition = 0
+	enqueueAndRequireInserted(t, store, pA)
+
+	pB := testPayload(roundB, 0)
+	pB.TreePosition = 1
+	enqueueAndRequireInserted(t, store, pB)
+
+	proc.processBatch(context.Background())
+
+	assert.Equal(t, int32(2), prover.callCount.Load())
+	assert.Equal(t, int32(2), tree.state.maxInFlight.Load())
+
+	status := store.Status()
+	assert.Equal(t, 1, status[roundA].Submitted)
+	assert.Equal(t, 1, status[roundB].Submitted)
 }
 
 func TestValidatePayload(t *testing.T) {

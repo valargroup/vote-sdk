@@ -159,11 +159,12 @@ type TreeStatus struct {
 }
 
 // TreeReader abstracts commitment tree access from the keeper.
-// Commitment trees are scoped per voting round; callers must call SetRoundID
-// before any tree lookup to select the correct round.
+// Commitment trees are scoped per voting round; callers must use ForRound
+// before round-specific tree lookups so concurrent shares cannot overwrite
+// shared round state.
 type TreeReader interface {
-	// SetRoundID selects the voting round for subsequent tree lookups.
-	SetRoundID(roundID []byte)
+	// ForRound returns an isolated reader for the given voting round.
+	ForRound(roundID []byte) TreeReader
 
 	// GetTreeStatus returns lightweight tree statistics (leaf count + anchor height).
 	GetTreeStatus() (TreeStatus, error)
