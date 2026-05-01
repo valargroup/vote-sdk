@@ -163,9 +163,10 @@ A registered key can be replaced via `MsgRotatePallasKey`. Rotation is rejected 
 
 #### Timeout (EndBlocker)
 
-REGISTERING and DEALT phases have timeouts (default: 10 minutes). On DEALT timeout:
-- **>= 1/2 acked:** Jail and strip non-ackers, confirm ceremony, activate round.
-- **< 1/2 acked:** Jail non-ackers and finalize the pending round; a later create transaction can retry the same vote metadata because `vote_round_id` includes the round creation height.
+REGISTERING and DEALT phases have timeouts (default: 10 minutes):
+- **REGISTERING timeout:** Jail validators that did not contribute DKG material and mark the pending round `CEREMONY_FAILED`.
+- **DEALT timeout, >= 1/2 acked:** Strip non-ackers, confirm ceremony, activate round.
+- **DEALT timeout, < 1/2 acked:** Mark the pending round `CEREMONY_FAILED` without jailing non-ackers, because missing acks are not reliable blame evidence. A later create transaction can retry the same vote metadata because `vote_round_id` includes the round creation height.
 
 #### ECIES Encryption Scheme
 
