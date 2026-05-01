@@ -839,8 +839,8 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_NextRoundExcludesJailedVali
 	s.Require().NoError(s.keeper.SetVoteRound(kv, firstRound))
 
 	nextMsg := validSetupMsg()
-	nextMsg.SnapshotHeight = firstMsg.SnapshotHeight + 1
-	nextResp, err := s.msgServer.CreateVotingSession(s.ctx, nextMsg)
+	nextCtx := s.ctx.WithBlockHeight(s.ctx.BlockHeight() + 1)
+	nextResp, err := s.msgServer.CreateVotingSession(nextCtx, nextMsg)
 	s.Require().NoError(err)
 
 	nextRound, err := s.keeper.GetVoteRound(kv, nextResp.VoteRoundId)

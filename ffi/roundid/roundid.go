@@ -1,9 +1,10 @@
 // Package roundid provides Go bindings to the Rust FFI function that derives
-// vote_round_id from session fields via Poseidon hash.
+// vote_round_id from a creation height and session fields via Poseidon hash.
 //
 // The round ID is a canonical Pallas Fp element (32 bytes LE), computed as
-// Poseidon(<8 Fp elements>) from the 6 session setup fields. This ensures the
-// round ID is always a valid field element for use in ZKP circuits.
+// Poseidon(<8 Fp elements>) from the creation height and 5 session setup
+// fields. This ensures the round ID is always a valid field element for use in
+// ZKP circuits.
 //
 // It requires the Rust static library to be built first:
 //
@@ -22,12 +23,13 @@ import (
 	"unsafe"
 )
 
-// DeriveRoundID computes vote_round_id from the 6 session setup fields
-// via Poseidon hash (matching the Rust derive_round_id_poseidon function).
+// DeriveRoundID computes vote_round_id from the creation height and setup
+// fields via Poseidon hash (matching the Rust derive_round_id_poseidon
+// function).
 //
 // Returns a 32-byte canonical Pallas Fp element.
 func DeriveRoundID(
-	snapshotHeight uint64,
+	creationHeight uint64,
 	snapshotBlockhash []byte,
 	proposalsHash []byte,
 	voteEndTime uint64,
@@ -42,7 +44,7 @@ func DeriveRoundID(
 	}
 
 	rc := C.sv_derive_round_id(
-		C.uint64_t(snapshotHeight),
+		C.uint64_t(creationHeight),
 		(*C.uint8_t)(unsafe.Pointer(&snapshotBlockhash[0])),
 		(*C.uint8_t)(unsafe.Pointer(&proposalsHash[0])),
 		C.uint64_t(voteEndTime),

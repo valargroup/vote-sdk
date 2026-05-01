@@ -385,7 +385,8 @@ func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {
 		eaPk = make([]byte, 32)
 	}
 
-	roundID := deriveRoundID(msg)
+	createdAtHeight := uint64(ctx.BlockHeight())
+	roundID := deriveRoundID(msg, createdAtHeight)
 
 	round := &types.VoteRound{
 		VoteRoundId:       roundID,
@@ -400,6 +401,7 @@ func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {
 		EaPk:              eaPk,
 		Proposals:         msg.Proposals,
 		Description:       msg.Description,
+		CreatedAtHeight:   createdAtHeight,
 	}
 
 	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
@@ -409,10 +411,11 @@ func (ta *TestApp) SeedVotingSession(msg *types.MsgCreateVotingSession) []byte {
 	return roundID
 }
 
-// deriveRoundID computes vote_round_id via Poseidon hash (FFI call to Rust).
-func deriveRoundID(msg *types.MsgCreateVotingSession) []byte {
+// deriveRoundID computes vote_round_id from creation height and setup fields
+// via Poseidon hash (FFI call to Rust).
+func deriveRoundID(msg *types.MsgCreateVotingSession, createdAtHeight uint64) []byte {
 	rid, err := roundid.DeriveRoundID(
-		msg.SnapshotHeight,
+		createdAtHeight,
 		msg.SnapshotBlockhash,
 		msg.ProposalsHash,
 		msg.VoteEndTime,

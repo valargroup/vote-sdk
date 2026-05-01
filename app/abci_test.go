@@ -7,12 +7,15 @@ import (
 	"testing"
 	"time"
 
+	sdkmath "cosmossdk.io/math"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"github.com/mikelodder7/curvey"
 
@@ -20,7 +23,9 @@ import (
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
+	"github.com/valargroup/vote-sdk/ffi/roundid"
 	"github.com/valargroup/vote-sdk/testutil"
+	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -40,6 +45,72 @@ type ABCIIntegrationSuite struct {
 
 func TestABCIIntegration(t *testing.T) {
 	suite.Run(t, new(ABCIIntegrationSuite))
+}
+
+func deriveRoundIDForCreateHeight(t *testing.T, msg *types.MsgCreateVotingSession, createHeight uint64) []byte {
+	t.Helper()
+	rid, err := roundid.DeriveRoundID(
+		createHeight,
+		msg.SnapshotBlockhash,
+		msg.ProposalsHash,
+		msg.VoteEndTime,
+		msg.NullifierImtRoot,
+		msg.NcRoot,
+	)
+	require.NoError(t, err)
+	return rid[:]
+}
+
+func deliverCreateVotingSession(t *testing.T, app *testutil.TestApp, msg *types.MsgCreateVotingSession) []byte {
+	t.Helper()
+	createHeight := uint64(app.Height + 1)
+	roundID := deriveRoundIDForCreateHeight(t, msg, createHeight)
+	result := app.DeliverVoteTx(app.MustBuildSignedCeremonyTx(msg))
+	require.Equal(t, uint32(0), result.Code, "CreateVotingSession should succeed, got: %s", result.Log)
+
+	round := app.MustGetVoteRound(roundID)
+	require.Equal(t, createHeight, round.CreatedAtHeight)
+	return roundID
+}
+
+func requireDuplicateCreateVotingSessionAtHeight(t *testing.T, app *testutil.TestApp, msg *types.MsgCreateVotingSession, height uint64) {
+	t.Helper()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: int64(height), Time: app.Time})
+	msgServer := votekeeper.NewMsgServerImpl(app.VoteKeeper())
+
+	_, err := msgServer.CreateVotingSession(ctx, msg)
+	require.ErrorIs(t, err, types.ErrRoundAlreadyExists)
+}
+
+func seedBondedValidatorWithPallasKey(t *testing.T, app *testutil.TestApp, valAddr string, pallasPk []byte) {
+	t.Helper()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+
+	tokens := sdkmath.NewInt(1_000_000)
+	validator, err := stakingtypes.NewValidator(valAddr, ed25519.GenPrivKey().PubKey(), stakingtypes.Description{Moniker: valAddr})
+	require.NoError(t, err)
+	validator.Status = stakingtypes.Bonded
+	validator.Tokens = tokens
+	validator.DelegatorShares = sdkmath.LegacyNewDecFromInt(tokens)
+	validator.MinSelfDelegation = sdkmath.OneInt()
+
+	require.NoError(t, app.StakingKeeper.SetValidator(ctx, validator))
+
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	require.NoError(t, app.VoteKeeper().RegisterPallasKeyCore(kvStore, valAddr, pallasPk))
+}
+
+func markValidatorsJailed(t *testing.T, app *testutil.TestApp, valAddrs ...string) {
+	t.Helper()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	for _, valAddr := range valAddrs {
+		addr, err := sdk.ValAddressFromBech32(valAddr)
+		require.NoError(t, err)
+		validator, err := app.StakingKeeper.GetValidator(ctx, addr)
+		require.NoError(t, err)
+		validator.Jailed = true
+		require.NoError(t, app.StakingKeeper.SetValidator(ctx, validator))
+	}
 }
 
 func (s *ABCIIntegrationSuite) SetupTest() {
@@ -690,15 +761,15 @@ func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 6.2.22: Multi-Validator Ceremony — Timeout, Re-Deal
+// 6.2.22: Multi-Validator Ceremony — Timeout Finalizes
 // ---------------------------------------------------------------------------
 
-// TestMultiValidatorCeremony_TimeoutMissTracking uses 4 validators (1 real +
+// TestMultiValidatorCeremony_TimeoutFinalizesPendingRound uses 4 validators (1 real +
 // 3 phantom) to exercise the timeout path where acks fall below the 1/2
 // threshold. With 4 validators, 1 ack gives 1*2=2 < 4 — below threshold.
-// The EndBlocker resets the ceremony to REGISTERING for re-deal.
-// Repeats 3 cycles to verify reset behavior across rounds.
-func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
+// The EndBlocker finalizes the pending round so a vote manager can create a
+// new round with a fresh validator snapshot.
+func TestMultiValidatorCeremony_TimeoutFinalizesPendingRound(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	valAddr := app.ValidatorOperAddr()
@@ -724,66 +795,53 @@ func TestMultiValidatorCeremony_TimeoutMissTracking(t *testing.T) {
 	G := elgamal.PallasGenerator()
 	phantomAddrs := []string{phantom1Addr, phantom2Addr, phantom3Addr}
 
-	for cycle := 1; cycle <= 3; cycle++ {
-		// Pre-seed 3 phantom DKG contributions so the proposer's
-		// 4th contribution via PrepareProposal triggers finalizeDKG → DEALT.
-		seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
+	// Pre-seed 3 phantom DKG contributions so the proposer's 4th contribution
+	// via PrepareProposal triggers finalizeDKG → DEALT.
+	seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
 
-		// Step 1: DKG contribution from proposer via pipeline.
-		app.NextBlockWithPrepareProposal()
+	// Step 1: DKG contribution from proposer via pipeline.
+	app.NextBlockWithPrepareProposal()
 
-		round := app.MustGetVoteRound(roundID)
-		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-			"cycle %d: ceremony should be DEALT after auto-deal", cycle)
-
-		// Step 2: PrepareProposal fires auto-ack → 1/4 < 1/2 → stays DEALT.
-		app.NextBlockWithPrepareProposal()
-
-		round = app.MustGetVoteRound(roundID)
-		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-			"cycle %d: ceremony should still be DEALT (1/4 below threshold)", cycle)
-		require.Len(t, round.CeremonyAcks, 1,
-			"cycle %d: should have 1 ack from real validator", cycle)
-
-		// Step 3: Advance 31 minutes past deal time → EndBlocker timeout.
-		// CeremonyPhaseStart was set when the deal was processed.
-		timeoutTime := time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
-		app.NextBlockAtTime(timeoutTime)
-
-		round = app.MustGetVoteRound(roundID)
-		require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
-			"cycle %d: ceremony should reset to REGISTERING after timeout", cycle)
-		require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, round.Status,
-			"cycle %d: round should stay PENDING after timeout reset", cycle)
-		require.Nil(t, round.CeremonyAcks,
-			"cycle %d: acks should be cleared after timeout reset", cycle)
-
-		// Verify ceremony log entries for the timeout reset.
-		require.NotEmpty(t, round.CeremonyLog,
-			"cycle %d: ceremony log should not be empty", cycle)
-	}
-
-	// After 3 cycles, verify final state.
 	round := app.MustGetVoteRound(roundID)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+
+	// Step 2: PrepareProposal fires auto-ack → 1/4 < 1/2 → stays DEALT.
+	app.NextBlockWithPrepareProposal()
+
+	round = app.MustGetVoteRound(roundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	require.Len(t, round.CeremonyAcks, 1, "should have 1 ack from real validator")
+
+	// Step 3: Advance past deal timeout. Insufficient acks finalize the round.
+	timeoutTime := time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
+	app.NextBlockAtTime(timeoutTime)
+
+	round = app.MustGetVoteRound(roundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
+	require.Len(t, round.CeremonyAcks, 1, "acks should be preserved for audit")
+	require.NotEmpty(t, round.CeremonyLog)
+	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-1], "DEALT timeout: ceremony failed")
 }
 
 // ---------------------------------------------------------------------------
-// 6.2.23: Validator Recovery After Missed Ceremony
+// 6.2.23: Validator Recovery Requires New Round
 // ---------------------------------------------------------------------------
 
-// TestCeremonyRecovery_ValidatorRejoinsAfterMiss exercises the recovery path
-// where a validator that missed a ceremony cycle comes back online and
-// successfully acks in the next cycle, pushing the ceremony past the 1/2
-// threshold to CONFIRMED.
+// TestCeremonyRecovery_NewRoundAfterMiss exercises the ceremony mechanics after
+// a failed pending round is finalized: a later round with a different ID can use
+// a smaller validator set and complete.
 //
 // Setup: 4 validators (1 real proposer + 3 phantom). With 4 validators,
 // the 1/2 threshold requires 2*2=4 >= 4, so 2 acks are needed.
 //
-// Cycle 1: timeout (only real validator acks, 1*3=3 < 4).
-// Cycle 2: phantom1 manually acks → 2 acks total → timeout confirms + strips.
-func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
+// First round: timeout (only real validator acks, 1*2=2 < 4) finalizes.
+// New seeded round: real validator + phantom1 complete the ceremony.
+//
+// This intentionally seeds the recovery round directly to focus on ceremony
+// mechanics. The CreateVotingSession retry path is covered below by tests that
+// reuse the same vote metadata at a later creation height.
+func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	valAddr := app.ValidatorOperAddr()
@@ -810,59 +868,63 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	phantomAddrs := []string{phantom1Addr, phantom2Addr, phantom3Addr}
 
 	// -----------------------------------------------------------------------
-	// Cycle 1 — Timeout: only real validator acks, phantoms miss.
+	// First round — Timeout: only real validator acks, phantoms miss.
 	// -----------------------------------------------------------------------
 
-	// Pre-seed 3 phantom DKG contributions for cycle 1.
+	// Pre-seed 3 phantom DKG contributions for the first round.
 	seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
 
 	// Block 1: DKG contribution from proposer via pipeline → DEALT.
 	app.NextBlockWithPrepareProposal()
 
 	round := app.MustGetVoteRound(roundID)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"cycle 1: ceremony should be DEALT after deal")
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 
 	// Block 2: PrepareProposal fires auto-ack from real validator → still DEALT.
 	app.NextBlockWithPrepareProposal()
 
 	round = app.MustGetVoteRound(roundID)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"cycle 1: ceremony should still be DEALT (1/4 below threshold)")
-	require.Len(t, round.CeremonyAcks, 1, "cycle 1: should have 1 ack from real validator")
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	require.Len(t, round.CeremonyAcks, 1, "should have 1 ack from real validator")
 
-	// Block 3: Advance past timeout → EndBlocker resets to REGISTERING.
+	// Block 3: Advance past timeout -> EndBlocker marks the ceremony failed.
 	timeoutTime := time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
 	app.NextBlockAtTime(timeoutTime)
 
 	round = app.MustGetVoteRound(roundID)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
-		"cycle 1: ceremony should reset to REGISTERING after timeout")
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 
 	// -----------------------------------------------------------------------
-	// Cycle 2 — Recovery: phantom1 acks manually, ceremony confirms.
+	// New round — Recovery: phantom1 acks manually, ceremony confirms.
 	// -----------------------------------------------------------------------
 
-	// Pre-seed 3 phantom DKG contributions for cycle 2.
-	seedPhantomDKGContributions(t, app, roundID, validators, valAddr, phantomAddrs, G)
+	// New seeded round: phantom1 is available, so the reduced validator set can
+	// complete a fresh ceremony.
+	recoveryValidators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+		{ValidatorAddress: phantom1Addr, PallasPk: phantomPk1.Point.ToAffineCompressed()},
+	}
+	recoveryRoundID := app.SeedRegisteringCeremony(recoveryValidators)
+
+	// Pre-seed phantom1's DKG contribution for the recovery round.
+	seedPhantomDKGContributions(t, app, recoveryRoundID, recoveryValidators, valAddr, []string{phantom1Addr}, G)
 
 	// Block 4: DKG contribution from proposer via pipeline → DEALT.
 	app.NextBlockWithPrepareProposal()
 
-	round = app.MustGetVoteRound(roundID)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"cycle 2: ceremony should be DEALT after auto-deal")
+	round = app.MustGetVoteRound(recoveryRoundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 
 	// Block 5: PrepareProposal fires auto-ack from real validator → still DEALT.
 	app.NextBlockWithPrepareProposal()
 
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
-	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
+	round, err := app.VoteKeeper().GetVoteRound(kvStore, recoveryRoundID)
 	require.NoError(t, err)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
-		"cycle 2: ceremony should still be DEALT (1/4 below threshold)")
-	require.Len(t, round.CeremonyAcks, 1, "cycle 2: should have 1 ack from real validator")
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
+	require.Len(t, round.CeremonyAcks, 1, "should have 1 ack from real validator")
 
 	// Block 6: Write phantom1's ack directly to state. In production,
 	// phantom1 would ack when they are the block proposer
@@ -871,31 +933,138 @@ func TestCeremonyRecovery_ValidatorRejoinsAfterMiss(t *testing.T) {
 	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, round))
 	app.NextBlock()
 
-	// Fast path requires ALL validators to ack, so 2/4 stays DEALT.
-	// Advance past timeout → EndBlocker confirms with >= 1/2 acks and strips
-	// non-ackers (phantom2, phantom3).
+	// Fast path only runs inside MsgAckExecutiveAuthorityKey in this test, so
+	// advance past timeout and let EndBlocker confirm with both validators acked.
 	timeoutTime = time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
 	app.NextBlockAtTime(timeoutTime)
 
 	// -----------------------------------------------------------------------
-	// Assertions: ceremony confirmed via timeout, non-ackers stripped.
+	// Assertions: recovery ceremony confirmed via timeout.
 	// -----------------------------------------------------------------------
 
-	round = app.MustGetVoteRound(roundID)
+	round = app.MustGetVoteRound(recoveryRoundID)
 
 	// Round should be ACTIVE with ceremony CONFIRMED.
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status,
-		"round should be ACTIVE after timeout with 2/4 acks")
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus,
-		"ceremony should be CONFIRMED")
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, round.CeremonyStatus)
 
 	// 2 acks: real validator + phantom1.
 	require.Len(t, round.CeremonyAcks, 2, "should have 2 acks (real + phantom1)")
 
-	// Non-ackers stripped: only 2 validators remain.
-	require.Len(t, round.CeremonyValidators, 2,
-		"CeremonyValidators should have 2 entries (non-ackers stripped)")
+	// Recovery round was seeded with only the two participating validators.
+	require.Len(t, round.CeremonyValidators, 2)
+}
 
+func TestCreateVotingSession_DealtTimeoutRetrySameMetadataSameHeightFailsNextSucceeds(t *testing.T) {
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	app.SeedVoteManagers(app.ValidatorAccAddr())
+	app.RegisterPallasKey(pallasPk)
+
+	valAddr := app.ValidatorOperAddr()
+	_, phantomPk1 := elgamal.KeyGen(rand.Reader)
+	_, phantomPk2 := elgamal.KeyGen(rand.Reader)
+	_, phantomPk3 := elgamal.KeyGen(rand.Reader)
+	phantom1Addr := sdk.ValAddress(bytes.Repeat([]byte{0xE1}, 20)).String()
+	phantom2Addr := sdk.ValAddress(bytes.Repeat([]byte{0xE2}, 20)).String()
+	phantom3Addr := sdk.ValAddress(bytes.Repeat([]byte{0xE3}, 20)).String()
+
+	seedBondedValidatorWithPallasKey(t, app, phantom1Addr, phantomPk1.Point.ToAffineCompressed())
+	seedBondedValidatorWithPallasKey(t, app, phantom2Addr, phantomPk2.Point.ToAffineCompressed())
+	seedBondedValidatorWithPallasKey(t, app, phantom3Addr, phantomPk3.Point.ToAffineCompressed())
+	app.NextBlock()
+
+	msg := testutil.ValidCreateVotingSessionAt(app.Time)
+	msg.Creator = app.ValidatorAccAddr()
+
+	firstRoundID := deliverCreateVotingSession(t, app, msg)
+	firstRound := app.MustGetVoteRound(firstRoundID)
+	require.Len(t, firstRound.CeremonyValidators, 4)
+
+	// First round: seed phantom DKG contributions, let the real proposer
+	// contribute and ack, then time out with only 1/4 acknowledgments.
+	G := elgamal.PallasGenerator()
+	phantomAddrs := []string{phantom1Addr, phantom2Addr, phantom3Addr}
+	seedPhantomDKGContributions(t, app, firstRoundID, firstRound.CeremonyValidators, valAddr, phantomAddrs, G)
+
+	app.NextBlockWithPrepareProposal()
+	firstRound = app.MustGetVoteRound(firstRoundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, firstRound.CeremonyStatus)
+
+	app.NextBlockWithPrepareProposal()
+	firstRound = app.MustGetVoteRound(firstRoundID)
+	require.Len(t, firstRound.CeremonyAcks, 1)
+
+	timeoutTime := time.Unix(int64(firstRound.CeremonyPhaseStart+firstRound.CeremonyPhaseTimeout)+1, 0)
+	app.NextBlockAtTime(timeoutTime)
+
+	firstRound = app.MustGetVoteRound(firstRoundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, firstRound.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, firstRound.CeremonyStatus)
+
+	// Retrying at the original creation height derives the same round_id and is
+	// rejected even though the prior ceremony is now terminal.
+	requireDuplicateCreateVotingSessionAtHeight(t, app, msg, firstRound.CreatedAtHeight)
+
+	// Retry with identical vote metadata at the next block height. The new
+	// creation height produces a different round_id, and jailed phantom
+	// validators are excluded from the new snapshot so the single live validator
+	// can complete the ceremony.
+	markValidatorsJailed(t, app, phantom1Addr, phantom2Addr, phantom3Addr)
+	retryRoundID := deliverCreateVotingSession(t, app, msg)
+	require.NotEqual(t, firstRoundID, retryRoundID)
+
+	retryRound := app.MustGetVoteRound(retryRoundID)
+	require.Len(t, retryRound.CeremonyValidators, 1)
+	require.Equal(t, valAddr, retryRound.CeremonyValidators[0].ValidatorAddress)
+
+	app.NextBlockWithPrepareProposal()
+	app.NextBlockWithPrepareProposal()
+
+	retryRound = app.MustGetVoteRound(retryRoundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, retryRound.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, retryRound.CeremonyStatus)
+}
+
+func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataSameHeightFailsNextSucceeds(t *testing.T) {
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	app.SeedVoteManagers(app.ValidatorAccAddr())
+	app.RegisterPallasKey(pallasPk)
+
+	msg := testutil.ValidCreateVotingSessionAt(app.Time)
+	msg.Creator = app.ValidatorAccAddr()
+
+	firstRoundID := deliverCreateVotingSession(t, app, msg)
+	firstRound := app.MustGetVoteRound(firstRoundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, firstRound.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, firstRound.CeremonyStatus)
+
+	// Do not run PrepareProposal. Advancing past the contribution timeout
+	// leaves the round in REGISTERING and marks it terminal.
+	timeoutTime := time.Unix(int64(firstRound.CeremonyPhaseStart+firstRound.CeremonyPhaseTimeout)+1, 0)
+	app.NextBlockAtTime(timeoutTime)
+
+	firstRound = app.MustGetVoteRound(firstRoundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, firstRound.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, firstRound.CeremonyStatus)
+
+	// Retrying at the original creation height derives the same round_id and is
+	// rejected even though the prior ceremony is now terminal.
+	requireDuplicateCreateVotingSessionAtHeight(t, app, msg, firstRound.CreatedAtHeight)
+
+	// Retry with the same metadata at the next block height. The later creation
+	// height produces a fresh round_id, proving the production create path can
+	// recover after timeout.
+	retryRoundID := deliverCreateVotingSession(t, app, msg)
+	require.NotEqual(t, firstRoundID, retryRoundID)
+
+	app.NextBlockWithPrepareProposal()
+	app.NextBlockWithPrepareProposal()
+
+	retryRound := app.MustGetVoteRound(retryRoundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, retryRound.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, retryRound.CeremonyStatus)
 }
 
 // ---------------------------------------------------------------------------
@@ -1326,6 +1495,11 @@ func seedPhantomDKGContributions(
 
 	n := len(validators)
 	tVal := (n + 1) / 2
+	if n == 1 {
+		tVal = 1
+	} else if tVal < 2 {
+		tVal = 2
+	}
 
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)

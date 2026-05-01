@@ -35,13 +35,13 @@ fn round_counter_next() -> u64 {
 /// Derive vote_round_id via Poseidon hash of 8 Fp elements.
 ///
 /// Same encoding as the chain's `derive_round_id_poseidon` in `sdk/circuits/src/ffi.rs`:
-///   snapshot_height → Fp::from(u64)
+///   creation_height → Fp::from(u64)
 ///   snapshot_blockhash → 2 Fp (lo/hi u128 limbs)
 ///   proposals_hash → 2 Fp (lo/hi u128 limbs)
 ///   vote_end_time → Fp::from(u64)
 ///   nullifier_imt_root → Fp::from_repr() (canonical)
 ///   nc_root → Fp::from_repr() (canonical)
-pub fn derive_round_id(fields: &SetupRoundFields) -> [u8; 32] {
+pub fn derive_round_id_at_height(fields: &SetupRoundFields, creation_height: u64) -> [u8; 32] {
     use ff::PrimeField;
     use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
     use pasta_curves::pallas;
@@ -60,7 +60,7 @@ pub fn derive_round_id(fields: &SetupRoundFields) -> [u8; 32] {
         pallas::Base::from_repr(fields.nc_root).expect("nc_root not canonical Fp");
 
     let inputs = [
-        pallas::Base::from(fields.snapshot_height),
+        pallas::Base::from(creation_height),
         bh_lo,
         bh_hi,
         ph_lo,
@@ -72,6 +72,13 @@ pub fn derive_round_id(fields: &SetupRoundFields) -> [u8; 32] {
 
     let hash = poseidon::Hash::<_, P128Pow5T3, ConstantLength<8>, 3, 2>::init().hash(inputs);
     hash.to_repr()
+}
+
+/// Legacy test helper for fixtures that intentionally use `snapshot_height` as
+/// the creation-height input. Live e2e tests should read the emitted round_id
+/// from the create transaction instead of precomputing it.
+pub fn derive_round_id(fields: &SetupRoundFields) -> [u8; 32] {
+    derive_round_id_at_height(fields, fields.snapshot_height)
 }
 
 fn to_base64(bytes: &[u8]) -> String {

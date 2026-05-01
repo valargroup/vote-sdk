@@ -16,7 +16,8 @@
 use e2e_tests::{
     api::{
         broadcast_cosmos_msg, default_cosmos_tx_config, get_round,
-        wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
+        wait_for_create_round_id, wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME,
+        SESSION_STATUS_ACTIVE,
     },
     payloads::create_voting_session_payload,
 };
@@ -33,9 +34,7 @@ fn round_activation() {
     eprintln!("[E2E] Vote manager address: {}", vote_manager_address);
 
     // Create a voting round — starts as PENDING, triggers per-round ceremony.
-    let (mut body, _, round_id) =
-        create_voting_session_payload(&vote_manager_address, 300, None);
-    let round_id_hex = hex::encode(round_id);
+    let (mut body, _, _) = create_voting_session_payload(&vote_manager_address, 300, None);
     body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
 
     let vm_config = e2e_tests::api::CosmosTxConfig {
@@ -53,6 +52,7 @@ fn round_activation() {
         "create session rejected: {:?}",
         json.get("log")
     );
+    let round_id_hex = wait_for_create_round_id(&json).expect("create tx should emit round_id");
 
     // Wait for auto-deal + auto-ack across all 3 validators → round becomes ACTIVE.
     // With 3 validators each needing a proposer turn for deal and ack, this can

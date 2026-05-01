@@ -183,6 +183,7 @@ pub const SESSION_STATUS_ACTIVE: i64 = 1;
 pub const SESSION_STATUS_TALLYING: i64 = 2;
 pub const SESSION_STATUS_FINALIZED: i64 = 3;
 pub const SESSION_STATUS_PENDING: i64 = 4;
+pub const SESSION_STATUS_CEREMONY_FAILED: i64 = 5;
 
 /// Returns the first validator's operator address from the staking module.
 /// Queries the standard Cosmos SDK endpoint at the same base URL.
@@ -345,6 +346,73 @@ where
         }
     }
     Ok((status, json))
+}
+
+fn event_attr(events: &[Value], event_type: &str, key: &str) -> Option<String> {
+    for event in events {
+        if event.get("type").and_then(|v| v.as_str()) != Some(event_type) {
+            continue;
+        }
+        let attrs = event.get("attributes").and_then(|v| v.as_array())?;
+        for attr in attrs {
+            let attr_key = attr.get("key").and_then(|v| v.as_str())?;
+            if attr_key == key {
+                return attr
+                    .get("value")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn create_round_id_from_tx_json(json: &Value) -> Option<String> {
+    if let Some(events) = json.get("events").and_then(|v| v.as_array()) {
+        if let Some(round_id) = event_attr(events, "create_voting_session", "vote_round_id")
+            .or_else(|| event_attr(events, "create_voting_session", "round_id"))
+        {
+            return Some(round_id);
+        }
+    }
+    if let Some(tx_response) = json.get("tx_response") {
+        if let Some(events) = tx_response.get("events").and_then(|v| v.as_array()) {
+            if let Some(round_id) = event_attr(events, "create_voting_session", "vote_round_id")
+                .or_else(|| event_attr(events, "create_voting_session", "round_id"))
+            {
+                return Some(round_id);
+            }
+        }
+    }
+    None
+}
+
+/// Returns the on-chain round_id emitted by MsgCreateVotingSession.
+pub fn wait_for_create_round_id(
+    broadcast_json: &Value,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(round_id) = create_round_id_from_tx_json(broadcast_json) {
+        return Ok(round_id);
+    }
+
+    let tx_hash = broadcast_json
+        .get("tx_hash")
+        .or_else(|| broadcast_json.get("txhash"))
+        .and_then(|v| v.as_str())
+        .ok_or("broadcast response did not include tx hash or create round event")?;
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
+        let path = format!("/cosmos/tx/v1beta1/txs/{}", tx_hash);
+        if let Ok((200, tx_json)) = get_json(&path) {
+            if let Some(round_id) = create_round_id_from_tx_json(&tx_json) {
+                return Ok(round_id);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+
+    Err(format!("timed out waiting for create_voting_session event in tx {}", tx_hash).into())
 }
 
 // ---------------------------------------------------------------------------

@@ -531,14 +531,14 @@ int32_t sv_vote_commitment_hash(
  * ----------------------------------------------------------------------- */
 
 /*
- * Derive vote_round_id from session fields via Poseidon hash.
+ * Derive vote_round_id from creation height and session fields via Poseidon hash.
  *
  * Encodes the 6 inputs into 8 Fp elements and hashes with
  * Poseidon::<ConstantLength<8>> (P128Pow5T3). The output is a canonical
  * 32-byte Pallas Fp element.
  *
  * Parameters:
- *   snapshot_height      - Block height for the snapshot.
+ *   creation_height      - Block height that created the round.
  *   snapshot_blockhash   - Pointer to 32-byte block hash.
  *   proposals_hash       - Pointer to 32-byte proposals hash.
  *   vote_end_time        - Unix timestamp when voting ends.
@@ -552,7 +552,7 @@ int32_t sv_vote_commitment_hash(
  *   -3  if nullifier_imt_root or nc_root is not a canonical Pallas Fp.
  */
 int32_t sv_derive_round_id(
-    uint64_t snapshot_height,
+    uint64_t creation_height,
     const uint8_t* snapshot_blockhash,
     const uint8_t* proposals_hash,
     uint64_t vote_end_time,
