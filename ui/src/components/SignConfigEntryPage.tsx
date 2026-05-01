@@ -104,9 +104,19 @@ export function SignConfigEntryPage() {
   const [hash, setHash] = useState("");
   const [payloadNotice, setPayloadNotice] = useState("");
   const [snippet, setSnippet] = useState("");
+  const [verifyRoundId, setVerifyRoundId] = useState("");
+  const [verifyEaPK, setVerifyEaPK] = useState("");
+  const [verifySignature, setVerifySignature] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<chainApi.VerifyConfigEntryResponse | null>(null);
+  const [verifyError, setVerifyError] = useState("");
 
   const selectedRoundKey = useMemo(() => `${roundId}|${eaPK}`, [roundId, eaPK]);
   const canSignRound = /^[0-9a-f]{64}$/.test(roundId) && validateEaPK(eaPK);
+  const canVerify =
+    /^[0-9a-f]{64}$/.test(verifyRoundId) &&
+    validateEaPK(verifyEaPK) &&
+    verifySignature.trim().length > 0;
 
   const loadRounds = async () => {
     setLoadingRounds(true);
@@ -239,6 +249,25 @@ export function SignConfigEntryPage() {
     if (!selected) return;
     setRoundId(selected.roundIdHex);
     setEaPK(selected.eaPK);
+  };
+
+  const handleVerify = async () => {
+    setVerifying(true);
+    setVerifyError("");
+    setVerifyResult(null);
+    try {
+      const resp = await chainApi.verifyConfigEntry({
+        round_id: verifyRoundId,
+        ea_pk: verifyEaPK,
+        signature: verifySignature.trim(),
+        auth_version: 1,
+      });
+      setVerifyResult(resp);
+    } catch (err) {
+      setVerifyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setVerifying(false);
+    }
   };
 
   return (
@@ -458,6 +487,100 @@ export function SignConfigEntryPage() {
             )}
           </section>
         )}
+
+        <section className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-4">
+          <div>
+            <h2 className="text-xs font-semibold text-text-primary">
+              Verify signature
+            </h2>
+            <p className="text-[10px] text-text-muted mt-1">
+              Check a signature against the admin server&apos;s trusted keys.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-text-secondary mb-1">
+              round_id
+            </label>
+            <input
+              value={verifyRoundId}
+              onChange={(e) => setVerifyRoundId(e.target.value.trim())}
+              placeholder="64 lowercase hex characters"
+              spellCheck={false}
+              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-text-secondary mb-1">
+              ea_pk
+            </label>
+            <input
+              value={verifyEaPK}
+              onChange={(e) => setVerifyEaPK(e.target.value.trim())}
+              placeholder="base64 32-byte EA public key"
+              spellCheck={false}
+              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-text-secondary mb-1">
+              signature
+            </label>
+            <input
+              value={verifySignature}
+              onChange={(e) => setVerifySignature(e.target.value)}
+              placeholder="base64 64-byte Ed25519 signature"
+              spellCheck={false}
+              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+            />
+          </div>
+
+          <button
+            onClick={handleVerify}
+            disabled={!canVerify || verifying}
+            className="px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+          >
+            {verifying ? "Verifying..." : "Verify signature"}
+          </button>
+
+          {verifyError && (
+            <div className="flex items-start gap-2 bg-danger/10 border border-danger/30 rounded-lg p-3">
+              <AlertCircle size={14} className="text-danger mt-0.5 shrink-0" />
+              <p className="text-[11px] text-danger">{verifyError}</p>
+            </div>
+          )}
+
+          {verifyResult && (
+            <div
+              className={`rounded-lg border p-3 ${
+                verifyResult.ok
+                  ? "bg-success/10 border-success/30"
+                  : "bg-danger/10 border-danger/30"
+              }`}
+            >
+              <p
+                className={`text-[11px] font-semibold ${
+                  verifyResult.ok ? "text-success" : "text-danger"
+                }`}
+              >
+                {verifyResult.ok
+                  ? `Valid signature${verifyResult.key_id ? ` from ${verifyResult.key_id}` : ""}`
+                  : "Invalid signature"}
+              </p>
+              {verifyResult.error && (
+                <p className="text-[10px] text-text-secondary mt-1">
+                  {verifyResult.error}
+                </p>
+              )}
+              <p className="text-[10px] text-text-muted mt-2">signed_payload_hash</p>
+              <p className="text-[11px] text-text-primary font-mono break-all">
+                {verifyResult.signed_payload_hash}
+              </p>
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

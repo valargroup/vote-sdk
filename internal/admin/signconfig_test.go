@@ -2,6 +2,8 @@ package admin
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 
 	"cosmossdk.io/log"
 	"github.com/gorilla/mux"
+	"github.com/valargroup/vote-sdk/internal/votingconfig"
 )
 
 func TestHandleSignConfigEntry(t *testing.T) {
@@ -107,5 +110,109 @@ func TestHandleSignConfigEntryRejectsBadInputs(t *testing.T) {
 				t.Fatalf("want 400, got %d body=%s", w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestHandleVerifyConfigEntry(t *testing.T) {
+	t.Parallel()
+
+	eaPK := make([]byte, 32)
+	for i := range eaPK {
+		eaPK[i] = byte(i)
+	}
+	var eaPKArray [32]byte
+	copy(eaPKArray[:], eaPK)
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	sig := votingconfig.SignV1(priv, eaPKArray)
+	trustedKeys := []votingconfig.TrustedKey{{
+		KeyID:  "valar-test",
+		Alg:    votingconfig.AlgEd25519,
+		Pubkey: base64.StdEncoding.EncodeToString(pub),
+	}}
+
+	body, err := json.Marshal(verifyConfigEntryRequest{
+		RoundID:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		EaPK:        base64.StdEncoding.EncodeToString(eaPK),
+		Signature:   base64.StdEncoding.EncodeToString(sig),
+		AuthVersion: votingconfig.AuthVersionV1,
+		TrustedKeys: trustedKeys,
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	r := mux.NewRouter()
+	RegisterRoutes(r, func() *Admin { return nil }, log.NewNopLogger())
+	req := httptest.NewRequest(http.MethodPost, "/api/verify-config-entry", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp verifyConfigEntryResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected ok response: %+v", resp)
+	}
+	if resp.KeyID != "valar-test" {
+		t.Fatalf("key_id mismatch: got %q", resp.KeyID)
+	}
+}
+
+func TestHandleVerifyConfigEntryRejectsInvalidSignature(t *testing.T) {
+	t.Parallel()
+
+	eaPK := make([]byte, 32)
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	badSig := make([]byte, ed25519.SignatureSize)
+	trustedKeys := []votingconfig.TrustedKey{{
+		KeyID:  "valar-test",
+		Alg:    votingconfig.AlgEd25519,
+		Pubkey: base64.StdEncoding.EncodeToString(pub),
+	}}
+
+	body, err := json.Marshal(verifyConfigEntryRequest{
+		RoundID:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		EaPK:        base64.StdEncoding.EncodeToString(eaPK),
+		Signature:   base64.StdEncoding.EncodeToString(badSig),
+		AuthVersion: votingconfig.AuthVersionV1,
+		TrustedKeys: trustedKeys,
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	r := mux.NewRouter()
+	RegisterRoutes(r, func() *Admin { return nil }, log.NewNopLogger())
+	req := httptest.NewRequest(http.MethodPost, "/api/verify-config-entry", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp verifyConfigEntryResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.OK {
+		t.Fatalf("expected invalid signature response: %+v", resp)
+	}
+	if resp.Error == "" {
+		t.Fatalf("expected error detail")
 	}
 }
