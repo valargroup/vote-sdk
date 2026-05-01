@@ -11,11 +11,13 @@ stateDiagram-v2
     ACTIVE --> TALLYING: EndBlocker (blockTime >= vote_end_time)
     TALLYING --> FINALIZED: MsgSubmitTally (auto-injected via PrepareProposal)
     TALLYING --> FINALIZED: EndBlocker tally timeout (tally_timed_out=true)
+    PENDING --> CEREMONY_FAILED: Ceremony timeout without consensus
 
     note right of PENDING: Ceremony in progress (deal + ack)
     note right of ACTIVE: DelegateVote, CastVote, RevealShare accepted
     note right of TALLYING: Only RevealShare accepted
     note right of FINALIZED: Read-only (no messages accepted)
+    note right of CEREMONY_FAILED: Ceremony failed; retry by creating a new round
 ```
 
 ## SessionStatus Enum
@@ -27,15 +29,16 @@ stateDiagram-v2
 | 2 | `SESSION_STATUS_TALLYING` | Voting closed; only `MsgRevealShare` accepted |
 | 3 | `SESSION_STATUS_FINALIZED` | Tally complete; round is read-only |
 | 4 | `SESSION_STATUS_PENDING` | Ceremony in progress; round is not yet open for voting |
+| 5 | `SESSION_STATUS_CEREMONY_FAILED` | Ceremony timed out before reaching ACTIVE; round is read-only |
 
 ## Per-Status Message Acceptance
 
-| Message Type | PENDING | ACTIVE | TALLYING | FINALIZED |
-|---|---|---|---|---|
-| `MsgDelegateVote` | **Rejected** | Accepted | **Rejected** | **Rejected** |
-| `MsgCastVote` | **Rejected** | Accepted | **Rejected** | **Rejected** |
-| `MsgRevealShare` | **Rejected** | Accepted | **Rejected** | **Rejected** |
-| `MsgCreateVotingSession` | N/A | N/A | N/A | N/A |
+| Message Type | PENDING | ACTIVE | TALLYING | FINALIZED | CEREMONY_FAILED |
+|---|---|---|---|---|---|
+| `MsgDelegateVote` | **Rejected** | Accepted | **Rejected** | **Rejected** | **Rejected** |
+| `MsgCastVote` | **Rejected** | Accepted | **Rejected** | **Rejected** | **Rejected** |
+| `MsgRevealShare` | **Rejected** | Accepted | **Rejected** | **Rejected** | **Rejected** |
+| `MsgCreateVotingSession` | N/A | N/A | N/A | N/A | N/A |
 
 All vote-round messages (including `MsgRevealShare`) require ACTIVE status. `MsgSubmitTally` requires TALLYING status and is handled separately. Shares that don't land on-chain before the vote window closes are rejected — accepting them during TALLYING would corrupt the tally accumulator after partial decryptions have been committed.
 
@@ -47,11 +50,11 @@ All vote-round messages (including `MsgRevealShare`) require ACTIVE status. `Msg
 - **Trigger (timeout path)**: `EndBlocker` — DEALT phase timeout with >= 1/2 acks; non-ackers are stripped
 - **Action**: Sets `status = SESSION_STATUS_ACTIVE`, `ceremony_status = CEREMONY_STATUS_CONFIRMED`
 
-### PENDING → FINALIZED
+### PENDING → CEREMONY_FAILED
 
 - **Trigger (REGISTERING timeout)**: `EndBlocker` — DKG contributions remain incomplete at timeout
 - **Trigger (DEALT timeout failure)**: `EndBlocker` — fewer than 1/2 acked, or the ack set does not meet the published threshold
-- **Action**: Sets `status = SESSION_STATUS_FINALIZED` and preserves ceremony fields for audit. Retrying uses a later `CreateVotingSession` transaction with the same vote metadata; the later creation height produces a fresh `vote_round_id`.
+- **Action**: Sets `status = SESSION_STATUS_CEREMONY_FAILED` and preserves ceremony fields for audit. Retrying uses a later `CreateVotingSession` transaction with the same vote metadata; the later creation height produces a fresh `vote_round_id`.
 
 ### ACTIVE → TALLYING
 

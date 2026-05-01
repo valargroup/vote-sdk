@@ -183,6 +183,7 @@ pub const SESSION_STATUS_ACTIVE: i64 = 1;
 pub const SESSION_STATUS_TALLYING: i64 = 2;
 pub const SESSION_STATUS_FINALIZED: i64 = 3;
 pub const SESSION_STATUS_PENDING: i64 = 4;
+pub const SESSION_STATUS_CEREMONY_FAILED: i64 = 5;
 
 /// Returns the first validator's operator address from the staking module.
 /// Queries the standard Cosmos SDK endpoint at the same base URL.

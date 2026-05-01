@@ -127,11 +127,11 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
              │                    │                (all acked)
              │ timeout            │ timeout (≥ 1/2)
              v                    v
-        FINALIZED           ACTIVE (CONFIRMED)
+  CEREMONY_FAILED     ACTIVE (CONFIRMED)
                          + strip non-ackers
                                   │ timeout (< 1/2)
                                   v
-                              FINALIZED
+                          CEREMONY_FAILED
 ```
 
 | From        | To                 | Trigger                       | Condition                                       |
@@ -139,8 +139,8 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
 | REGISTERING | DEALT              | Auto-deal via PrepareProposal | Block proposer is a ceremony validator          |
 | DEALT       | CONFIRMED + ACTIVE | MsgAckExecutiveAuthorityKey   | All validators acked (fast path)                |
 | DEALT       | CONFIRMED + ACTIVE | EndBlocker timeout            | >= 1/2 acked at timeout; non-ackers stripped    |
-| REGISTERING | FINALIZED          | EndBlocker timeout            | DKG contributions incomplete at timeout         |
-| DEALT       | FINALIZED          | EndBlocker timeout            | < 1/2 acked or below published threshold        |
+| REGISTERING | CEREMONY_FAILED    | EndBlocker timeout            | DKG contributions incomplete at timeout         |
+| DEALT       | CEREMONY_FAILED    | EndBlocker timeout            | < 1/2 acked or below published threshold        |
 
 Key behaviors:
 - **Fast path vs timeout** — the fast path confirms when ALL validators ack (no stripping needed). The timeout path confirms with >= 1/2 acks (integer arithmetic: `acks * 2 >= validators`) and strips non-ackers.

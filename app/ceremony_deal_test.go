@@ -935,8 +935,8 @@ func TestEndBlockerFinalizesDealtRoundOnInsufficientAckTimeout(t *testing.T) {
 
 	round = ta.MustGetVoteRound(roundID)
 
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
-		"round should be finalized after insufficient ack timeout")
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status,
+		"round should be marked ceremony failed after insufficient ack timeout")
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus,
 		"ceremony status should preserve the failed phase")
 	require.Len(t, round.DkgContributions, 2,
@@ -986,8 +986,8 @@ func TestEndBlockerRegistering_TimeoutFinalizesPendingRound(t *testing.T) {
 
 	round = ta.MustGetVoteRound(roundID)
 
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status,
-		"round should be finalized after contribution timeout")
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status,
+		"round should be marked ceremony failed after contribution timeout")
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus,
 		"ceremony status should preserve the failed phase")
 	require.Len(t, round.DkgContributions, 1,
