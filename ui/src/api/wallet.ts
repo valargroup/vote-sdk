@@ -1,11 +1,6 @@
 // Wallet connection abstraction.
 //
-// Supports two sources:
-//   1. Keplr browser extension (production path)
-//   2. Raw secp256k1 private key via DirectSecp256k1Wallet (dev/testing)
-//
-// Both return an OfflineDirectSigner with identical getAccounts()/signDirect()
-// interfaces, so the rest of the signing pipeline (cosmosTx.ts) is agnostic.
+// Supports Keplr and manually pasted raw private keys as admin wallet sources.
 
 import { DirectSecp256k1Wallet } from "@cosmjs/proto-signing";
 import type { OfflineDirectSigner } from "@cosmjs/proto-signing";
@@ -97,8 +92,7 @@ export async function connectKeplr(restUrl: string, rpcUrl: string): Promise<Wal
 }
 
 /**
- * Connect using a raw hex-encoded secp256k1 private key.
- * Intended for local development against a test chain.
+ * Connect using a raw hex-encoded secp256k1 private key entered by the operator.
  */
 export async function connectWithPrivateKey(privateKeyHex: string): Promise<WalletConnection> {
   const privkey = fromHex(privateKeyHex);
@@ -110,8 +104,7 @@ export async function connectWithPrivateKey(privateKeyHex: string): Promise<Wall
 // ── signArbitrary ────────────────────────────────────────────────
 //
 // Signs an arbitrary string payload, compatible with Keplr's signArbitrary.
-// Returns { signature, pubKey } as base64 strings for verification by the
-// edge function.
+// Returns { signature, pubKey } as base64 strings for verification by the API.
 
 export interface ArbitrarySignature {
   signature: string; // base64-encoded 64-byte compact secp256k1 sig
@@ -143,7 +136,7 @@ function makeSignArbitraryDoc(signer: string, data: string): Uint8Array {
 }
 
 /**
- * Sign arbitrary data using a raw private key (dev/testing path).
+ * Sign arbitrary data using a raw private key.
  * Produces the same format as Keplr's signArbitrary.
  */
 export function signArbitraryWithKey(
@@ -156,7 +149,7 @@ export function signArbitraryWithKey(
   const msgHash = sha256(signBytes);
 
   const sig = secp256k1.sign(msgHash, privKey, { prehash: false });
-  const pubKey = secp256k1.getPublicKey(privKey, true); // compressed
+  const pubKey = secp256k1.getPublicKey(privKey, true);
 
   return {
     signature: toBase64(sig),

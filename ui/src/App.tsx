@@ -24,7 +24,7 @@ import {
 } from "./store/rpc";
 import * as chainApi from "./api/chain";
 import * as cosmosTx from "./api/cosmosTx";
-import { useWallet, DEFAULT_DEV_KEY } from "./hooks/useWallet";
+import { useWallet } from "./hooks/useWallet";
 import type { UseWallet } from "./hooks/useWallet";
 
 // Matches the iOS voteOptionColor palette in VotingComponents.swift.
@@ -200,7 +200,7 @@ function App() {
     if (!wallet.signer) {
       setPublishStatus("error");
       setPublishError(
-        "No wallet connected. Go to Settings → Wallet to connect Keplr or enter a dev key."
+        "No wallet connected. Go to Settings → Wallet to connect Keplr or paste a private key."
       );
       return;
     }
@@ -981,9 +981,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [voteManagers, setVoteManagers] = useState<string[]>([]);
   const [activeRound, setActiveRound] = useState<chainApi.ChainRound | null>(null);
   const [chainDetailsOpen, setChainDetailsOpen] = useState(false);
-
-  // Dev private key connection (collapsible section)
-  const [devKey, setDevKey] = useState(DEFAULT_DEV_KEY);
+  const [devKey, setDevKey] = useState("");
   const [devKeyVisible, setDevKeyVisible] = useState(false);
 
   // Update vote-manager set flow. The UI accepts a comma- or newline-separated list
@@ -1315,7 +1313,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                   <Wallet size={14} className="text-success" />
                   <span className="text-xs text-text-secondary">Connected</span>
                   <span className="text-[10px] text-text-muted">
-                    ({wallet.source === "keplr" ? "Keplr" : "dev key"})
+                    ({wallet.source === "keplr" ? "Keplr" : "pasted key"})
                   </span>
                 </div>
                 <button
@@ -1355,7 +1353,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
 
               <details className="group">
                 <summary className="text-[11px] text-text-muted cursor-pointer hover:text-text-secondary">
-                  Developer: connect with private key
+                  Connect with private key
                 </summary>
                 <div className="mt-2 space-y-2">
                   <div className="relative">
@@ -1690,7 +1688,7 @@ function PublishModal({
   onConfirm: () => void;
   onClose: () => void;
 }) {
-  const [devKey, setDevKey] = useState(DEFAULT_DEV_KEY);
+  const [devKey, setDevKey] = useState("");
   const [devKeyVisible, setDevKeyVisible] = useState(false);
   const walletConnected = !!wallet.address;
 
@@ -1781,7 +1779,7 @@ function PublishModal({
 
               <details className="group">
                 <summary className="text-[11px] text-text-muted cursor-pointer hover:text-text-secondary">
-                  Paste dev private key
+                  Paste private key
                 </summary>
                 <div className="mt-2 space-y-2">
                   <div className="relative">
