@@ -83,37 +83,33 @@ in [runbooks/key-rotation.md](runbooks/key-rotation.md).
 Published by the manifest publisher at
 `https://valargroup.github.io/token-holder-voting-config/voting-config.json`
 (GitHub Pages, see [token-holder-voting-config/README.md](../../token-holder-voting-config/README.md)).
-Split into static and round-dynamic parts so a fresh round only changes the
-bottom of the file.
 
-### Static (changes ≤ once per release)
+The discovery config does not name a round. Wallets MUST discover the current
+round from chain state after choosing a vote server, using
+`/shielded-vote/v1/rounds/active` for the active round or
+`/shielded-vote/v1/rounds` when presenting the full round list. Any
+round-looking metadata in the config is informational; chain round data is
+authoritative for voting.
 
 | Field                  | Type                              | Notes |
 | ---------------------- | --------------------------------- | ----- |
 | `config_version`       | int                               | Currently `1`. |
 | `vote_servers[]`       | `[{url, label}]`                  | Chain REST + helper endpoints. |
 | `pir_endpoints[]`      | `[{url, label}]`                  | Nullifier PIR endpoints. |
+| `snapshot_height`      | uint64                            | Informational; wallets and PIR use chain round data when voting. |
+| `vote_end_time`        | uint64                            | Informational; wallets use chain round data when voting. |
 | `supported_versions`   | `{pir, vote_protocol, tally, vote_server}` | Versions the publisher claims are deployed. Wallet checks against `WalletCapabilities`. |
-
-### Round-dynamic (changes once per round)
-
-| Field             | Type             | Notes |
-| ----------------- | ---------------- | ----- |
-| `vote_round_id`   | hex (64 chars)   | Must match the chain's active `VoteRound.vote_round_id`. |
-| `snapshot_height` | uint64           | Orchard snapshot height. |
-| `vote_end_time`   | uint64           | Unix seconds. |
-| `proposals[]`     | `[Proposal]`     | Must hash byte-for-byte to `VoteRound.proposals_hash`. |
-| `round_signatures` | object \| null  | Phase 1+ — see below. |
 
 ### `round_signatures` schema
 
-Optional field on `voting-config.json`. When present, wallets MUST verify it
-(Phase 2 hard-fails if verification fails). When absent, Phase 2 wallets MUST
-hard-fail with `manifestSignaturesMissing` — there is no silent fallback.
+A signed round manifest binds a chain round to its EA key. When manifests are
+required, wallets MUST verify one for the chain-discovered round (Phase 2
+hard-fails if verification fails). When absent, Phase 2 wallets MUST hard-fail
+with `manifestSignaturesMissing` — there is no silent fallback.
 
 ```jsonc
 {
-  "round_id": "<64 lowercase hex chars>",       // MUST equal voting-config.vote_round_id
+  "round_id": "<64 lowercase hex chars>",       // MUST equal chain VoteRound.vote_round_id
   "ea_pk": "<base64-encoded 32-byte Pallas pubkey>",
   "valset_hash": "<64 lowercase hex chars>",     // CometBFT validator-set hash at round.creation_height
   "signed_payload_hash": "<64 lowercase hex chars>", // SHA-256 of the canonical payload below; debug aid only
@@ -209,15 +205,14 @@ pointer is `checkpoints/latest.json`.
 
 ```mermaid
 flowchart TD
-    start([fetchServiceConfig succeeded]) --> roundIdEq{config.vote_round_id == chain round_id?}
-    roundIdEq -- no --> hardFail([hard-fail roundIdMismatch])
-    roundIdEq -- yes --> hashEq{proposalsHash matches chain?}
-    hashEq -- no --> hardFail2([hard-fail proposalsHashMismatch])
-    hashEq -- yes --> sigsPresent{round_signatures present?}
+    start([fetchServiceConfig succeeded]) --> activeRound[fetch chain active round]
+    activeRound --> sigsPresent{round manifest present?}
     sigsPresent -- no --> hardFail3([hard-fail manifestSignaturesMissing])
-    sigsPresent -- yes --> sigsValid{≥ k_required valid signatures over canonical payload?}
+    sigsPresent -- yes --> roundIdEq{manifest round_id == chain round_id?}
+    roundIdEq -- no --> hardFail([hard-fail manifestRoundIdMismatch])
+    roundIdEq -- yes --> sigsValid{≥ k_required valid signatures over canonical payload?}
     sigsValid -- no --> hardFail4([hard-fail manifestSignatureInvalid])
-    sigsValid -- yes --> eaPkEq{config.ea_pk == server.ea_pk?}
+    sigsValid -- yes --> eaPkEq{manifest ea_pk == server ea_pk?}
     eaPkEq -- no --> hardFail5([hard-fail eaPkMismatch])
     eaPkEq -- yes --> phase3{Phase 3 enabled?}
     phase3 -- no --> proceed([proceed: encrypt to ea_pk])
@@ -235,13 +230,11 @@ let cfg = try await fetchServiceConfig()        // CDN or local override
 try cfg.validate()                              // version check
 let session = try await fetchActiveSession()    // chain REST
 
-// Existing checks (already in zodl-ios today).
-guard cfg.voteRoundId == session.voteRoundId.hex else { throw .roundIdMismatch }
-guard computeProposalsHash(cfg.proposals) == session.proposalsHash else { throw .proposalsHashMismatch }
-
-// New in Phase 2.
-guard let sigs = cfg.roundSignatures else { throw .manifestSignaturesMissing }
-guard sigs.roundId == cfg.voteRoundId else { throw .manifestRoundIdMismatch }
+// New in Phase 2. Round identity comes from chain state, not the config.
+guard let sigs = try await fetchRoundManifest(for: session.voteRoundId.hex) else {
+    throw .manifestSignaturesMissing
+}
+guard sigs.roundId == session.voteRoundId.hex else { throw .manifestRoundIdMismatch }
 let payload = canonicalRoundManifestPayload(
     chainId: WalletConstants.chainId,
     roundId: sigs.roundId,
