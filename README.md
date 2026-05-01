@@ -162,7 +162,7 @@ A registered key can be replaced via `MsgRotatePallasKey`. Rotation is rejected 
 
 #### Timeout (EndBlocker)
 
-Only the DEALT phase has a timeout (default: 30 minutes). On timeout:
+REGISTERING and DEALT phases have timeouts (default: 10 minutes). On DEALT timeout:
 - **>= 1/2 acked:** Confirm ceremony, strip non-ackers, activate round.
 - **< 1/2 acked:** Reset to REGISTERING for re-deal by the next proposer.
 

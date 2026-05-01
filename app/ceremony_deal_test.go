@@ -16,8 +16,8 @@ import (
 
 	"cosmossdk.io/log"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
@@ -902,7 +902,7 @@ func TestEndBlockerClearsDKGContributionsOnTimeout(t *testing.T) {
 	roundID[0] = 0xEB
 
 	phaseStart := uint64(ta.Time.Unix())
-	phaseTimeout := uint64(30 * 60)
+	phaseTimeout := types.DefaultDealTimeout
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
