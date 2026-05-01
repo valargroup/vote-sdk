@@ -108,6 +108,71 @@ brew_install_quiet() {
   return 1
 }
 
+apt_lock_output_indicates_busy() {
+  local output_file="$1"
+
+  grep -Eiq 'Could not get lock|Unable to acquire.*lock|is another process using it|Waiting for cache lock|Could not open lock' "${output_file}"
+}
+
+apt_get_with_lock_retry() {
+  local description="$1"
+  shift
+
+  local timeout="${SVOTE_APT_LOCK_TIMEOUT:-300}"
+  local interval="${SVOTE_APT_LOCK_RETRY_INTERVAL:-5}"
+  local waited=0
+  local sleep_for
+  local status
+  local output_file
+
+  case "${timeout}" in
+    ''|*[!0-9]*) timeout=300 ;;
+  esac
+  case "${interval}" in
+    ''|*[!0-9]*) interval=5 ;;
+  esac
+  if [ "${interval}" -lt 1 ]; then
+    interval=1
+  fi
+
+  output_file=$(mktemp)
+  while true; do
+    : > "${output_file}"
+    # shellcheck disable=SC2024
+    if sudo -E apt-get -o "DPkg::Lock::Timeout=${interval}" "$@" > "${output_file}" 2>&1; then
+      rm -f "${output_file}"
+      return 0
+    fi
+    status=$?
+
+    if ! apt_lock_output_indicates_busy "${output_file}"; then
+      cat "${output_file}" >&2
+      rm -f "${output_file}"
+      return "${status}"
+    fi
+
+    if [ "${waited}" -ge "${timeout}" ]; then
+      echo "ERROR: Timed out waiting for apt/dpkg lock while ${description}." >&2
+      echo "  Another package process is still running. Let it finish, then re-run join.sh." >&2
+      cat "${output_file}" >&2
+      rm -f "${output_file}"
+      return "${status}"
+    fi
+
+    sleep_for="${interval}"
+    if [ $((waited + sleep_for)) -gt "${timeout}" ]; then
+      sleep_for=$((timeout - waited))
+    fi
+    if [ "${sleep_for}" -lt 1 ]; then
+      sleep_for=1
+    fi
+
+    echo "apt/dpkg is busy; waiting ${sleep_for}s before retrying ${description}..."
+    sleep "${sleep_for}"
+    waited=$((waited + sleep_for))
+  done
+}
+
 install_missing_tools() {
   local missing=()
   local tool
@@ -127,8 +192,8 @@ install_missing_tools() {
   if [ "$OS_NAME" = "Linux" ]; then
     if command -v apt-get > /dev/null 2>&1; then
       export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
-      sudo -E apt-get update -qq
-      sudo -E apt-get install -y "${missing[@]}"
+      apt_get_with_lock_retry "refreshing package metadata" update -qq
+      apt_get_with_lock_retry "installing ${missing[*]}" install -y "${missing[@]}"
     elif command -v dnf > /dev/null 2>&1; then
       sudo dnf install -y "${missing[@]}"
     elif command -v yum > /dev/null 2>&1; then
@@ -846,13 +911,13 @@ if [ "$DOMAIN_MODE" != "skip" ] && [ -n "$SVOTE_DOMAIN" ]; then
     if [ "$OS_NAME" = "Linux" ]; then
       echo "Installing Caddy..."
       if command -v apt-get > /dev/null 2>&1; then
-        export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+        export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
         if ! {
-          sudo -E apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl &&
+          apt_get_with_lock_retry "installing Caddy apt dependencies" install -y debian-keyring debian-archive-keyring apt-transport-https curl &&
           curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg &&
           curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null &&
-          sudo -E apt-get update &&
-          sudo -E apt-get install -y caddy
+          apt_get_with_lock_retry "refreshing package metadata for Caddy" update &&
+          apt_get_with_lock_retry "installing Caddy" install -y caddy
         }; then
           handle_public_url_failure "Caddy installation failed."
         fi
