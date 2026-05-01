@@ -107,8 +107,9 @@ func (k *Keeper) getOrCreateRoundTree(roundID []byte) *roundTree {
 //
 // Cases:
 //   - handle == nil, Height > 0 (restart): shard/cap/checkpoint blobs
-//     exist in KV from the previous process. Create handle at nextIndex;
-//     ShardTree restores lazily from KV — O(1) cold start.
+//     exist in KV from the previous process. Create handle at the last
+//     checkpointed leaf count (NextIndexAtRoot), then fall through to append any
+//     leaves added after that checkpoint.
 //   - handle == nil, Height == 0 (first boot): no shard data in KV yet.
 //     Create handle at position 0 and fall through to the delta-append path
 //     so all leaves [0, nextIndex) are replayed via AppendFromKV. O(N) but
@@ -133,19 +134,25 @@ func (k *Keeper) ensureRoundTreeLoaded(kvStore store.KVStore, roundID []byte, ne
 		}
 
 		if state.Height > 0 {
-			h, err := votetree.NewTreeHandleWithKV(rt.proxy, nextIndex)
+			if state.NextIndexAtRoot > nextIndex {
+				return false, fmt.Errorf("ensureRoundTreeLoaded: checkpoint index %d > nextIndex %d: invariant violated", state.NextIndexAtRoot, nextIndex)
+			}
+			if state.NextIndex > 0 && state.NextIndexAtRoot == 0 {
+				return false, fmt.Errorf("ensureRoundTreeLoaded: missing checkpoint index for non-empty tree at height %d: invariant violated", state.Height)
+			}
+
+			h, err := votetree.NewTreeHandleWithKV(rt.proxy, state.NextIndexAtRoot)
 			if err != nil {
 				return false, fmt.Errorf("ensureRoundTreeLoaded: restart: %w", err)
 			}
 			rt.handle = h
-			return false, nil
+		} else {
+			h, err := votetree.NewTreeHandleWithKV(rt.proxy, 0)
+			if err != nil {
+				return false, fmt.Errorf("ensureRoundTreeLoaded: first boot: %w", err)
+			}
+			rt.handle = h
 		}
-
-		h, err := votetree.NewTreeHandleWithKV(rt.proxy, 0)
-		if err != nil {
-			return false, fmt.Errorf("ensureRoundTreeLoaded: first boot: %w", err)
-		}
-		rt.handle = h
 	}
 
 	size := rt.handle.Size()

@@ -13,8 +13,9 @@ import (
 // given block height.
 //
 // On cold start (handle == nil) the behaviour depends on state.Height:
-//   - Height > 0 (restart): shard data exists in KV. Handle is created at
-//     nextIndex and ShardTree restores lazily from KV — O(1).
+//   - Height > 0 (restart): shard data exists in KV. Handle is created at the
+//     last checkpointed leaf count and any post-checkpoint leaves are appended
+//     from KV before checkpointing.
 //   - Height == 0 (first boot): no shard data yet. Handle is created at 0
 //     and all leaves are replayed via AppendFromKV — O(N) but unavoidable.
 //
@@ -22,8 +23,8 @@ import (
 // appended — O(k) per block where k = new leaves that block.
 //
 // A checkpoint is created only when delta leaves were actually appended.
-// Cold start and no-new-leaves blocks skip the checkpoint; latest_checkpoint
-// is restored from KV on handle creation so Root() is always correct.
+// No-new-leaves restart blocks skip the checkpoint; latest_checkpoint is
+// restored from KV on handle creation so Root() is still correct.
 func (k *Keeper) ComputeTreeRoot(kvStore store.KVStore, roundID []byte, nextIndex, blockHeight uint64) ([]byte, error) {
 	if nextIndex == 0 {
 		return nil, nil
