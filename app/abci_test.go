@@ -808,10 +808,10 @@ func TestMultiValidatorCeremony_TimeoutFinalizesPendingRound(t *testing.T) {
 
 	round = app.MustGetVoteRound(roundID)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
 	require.Len(t, round.CeremonyAcks, 1, "acks should be preserved for audit")
 	require.NotEmpty(t, round.CeremonyLog)
-	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-1], "DEALT timeout: finalized pending round")
+	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-1], "DEALT timeout: ceremony failed")
 }
 
 // ---------------------------------------------------------------------------
@@ -877,12 +877,12 @@ func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 	require.Len(t, round.CeremonyAcks, 1, "should have 1 ack from real validator")
 
-	// Block 3: Advance past timeout → EndBlocker finalizes the pending round.
+	// Block 3: Advance past timeout -> EndBlocker marks the ceremony failed.
 	timeoutTime := time.Unix(int64(round.CeremonyPhaseStart+round.CeremonyPhaseTimeout)+1, 0)
 	app.NextBlockAtTime(timeoutTime)
 
 	round = app.MustGetVoteRound(roundID)
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, round.Status)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, round.CeremonyStatus)
 
 	// -----------------------------------------------------------------------
@@ -989,7 +989,7 @@ func TestCreateVotingSession_DealtTimeoutRetrySameMetadataNextSucceeds(t *testin
 	app.NextBlockAtTime(timeoutTime)
 
 	firstRound = app.MustGetVoteRound(firstRoundID)
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, firstRound.Status)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, firstRound.Status)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, firstRound.CeremonyStatus)
 
 	// Retry with identical vote metadata. The new creation height produces a
@@ -1031,7 +1031,7 @@ func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataNextSucceeds(t *
 	app.NextBlockAtTime(timeoutTime)
 
 	firstRound = app.MustGetVoteRound(firstRoundID)
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, firstRound.Status)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, firstRound.Status)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, firstRound.CeremonyStatus)
 
 	// Retry with the same metadata. The later creation height produces a fresh

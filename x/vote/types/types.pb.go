@@ -25,11 +25,12 @@ const (
 type SessionStatus int32
 
 const (
-	SessionStatus_SESSION_STATUS_UNSPECIFIED SessionStatus = 0
-	SessionStatus_SESSION_STATUS_ACTIVE      SessionStatus = 1
-	SessionStatus_SESSION_STATUS_TALLYING    SessionStatus = 2
-	SessionStatus_SESSION_STATUS_FINALIZED   SessionStatus = 3
-	SessionStatus_SESSION_STATUS_PENDING     SessionStatus = 4 // Ceremony in progress, not yet active
+	SessionStatus_SESSION_STATUS_UNSPECIFIED     SessionStatus = 0
+	SessionStatus_SESSION_STATUS_ACTIVE          SessionStatus = 1
+	SessionStatus_SESSION_STATUS_TALLYING        SessionStatus = 2
+	SessionStatus_SESSION_STATUS_FINALIZED       SessionStatus = 3
+	SessionStatus_SESSION_STATUS_PENDING         SessionStatus = 4 // Ceremony in progress, not yet active
+	SessionStatus_SESSION_STATUS_CEREMONY_FAILED SessionStatus = 5 // Ceremony timed out before reaching ACTIVE
 )
 
 // Enum value maps for SessionStatus.
@@ -40,13 +41,15 @@ var (
 		2: "SESSION_STATUS_TALLYING",
 		3: "SESSION_STATUS_FINALIZED",
 		4: "SESSION_STATUS_PENDING",
+		5: "SESSION_STATUS_CEREMONY_FAILED",
 	}
 	SessionStatus_value = map[string]int32{
-		"SESSION_STATUS_UNSPECIFIED": 0,
-		"SESSION_STATUS_ACTIVE":      1,
-		"SESSION_STATUS_TALLYING":    2,
-		"SESSION_STATUS_FINALIZED":   3,
-		"SESSION_STATUS_PENDING":     4,
+		"SESSION_STATUS_UNSPECIFIED":     0,
+		"SESSION_STATUS_ACTIVE":          1,
+		"SESSION_STATUS_TALLYING":        2,
+		"SESSION_STATUS_FINALIZED":       3,
+		"SESSION_STATUS_PENDING":         4,
+		"SESSION_STATUS_CEREMONY_FAILED": 5,
 	}
 )
 
@@ -2083,13 +2086,14 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12#\n" +
 	"\rack_signature\x18\x02 \x01(\fR\fackSignature\x12\x1d\n" +
 	"\n" +
-	"ack_height\x18\x03 \x01(\x04R\tackHeight*\xa1\x01\n" +
+	"ack_height\x18\x03 \x01(\x04R\tackHeight*\xc5\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
 	"\x17SESSION_STATUS_TALLYING\x10\x02\x12\x1c\n" +
 	"\x18SESSION_STATUS_FINALIZED\x10\x03\x12\x1a\n" +
-	"\x16SESSION_STATUS_PENDING\x10\x04*\x8c\x01\n" +
+	"\x16SESSION_STATUS_PENDING\x10\x04\x12\"\n" +
+	"\x1eSESSION_STATUS_CEREMONY_FAILED\x10\x05*\x8c\x01\n" +
 	"\x0eCeremonyStatus\x12\x1f\n" +
 	"\x1bCEREMONY_STATUS_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bCEREMONY_STATUS_REGISTERING\x10\x01\x12\x19\n" +

@@ -549,9 +549,9 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 
 		oldRoundStatus := round.Status
 		keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-			fmt.Sprintf("REGISTERING timeout: finalized pending round (%d/%d contributions)",
+			fmt.Sprintf("REGISTERING timeout: ceremony failed (%d/%d contributions)",
 				len(round.DkgContributions), len(round.CeremonyValidators)))
-		round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
+		round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
 		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 			return err
@@ -608,9 +608,9 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			if nAcks < int(round.Threshold) {
 				oldRoundStatus := round.Status
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-					fmt.Sprintf("DEALT timeout: finalized pending round (%d/%d acks, below threshold %d)",
+					fmt.Sprintf("DEALT timeout: ceremony failed (%d/%d acks, below threshold %d)",
 						nAcks, nVals, round.Threshold))
-				round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
+				round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
 				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 					return err
@@ -654,8 +654,8 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			// snapshot the current eligible validator set.
 			oldRoundStatus := round.Status
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-				fmt.Sprintf("DEALT timeout: finalized pending round (%d/%d acks, below threshold)", nAcks, nVals))
-			round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
+				fmt.Sprintf("DEALT timeout: ceremony failed (%d/%d acks, below threshold)", nAcks, nVals))
+			round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
 			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 				return err

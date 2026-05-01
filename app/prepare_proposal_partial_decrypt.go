@@ -86,7 +86,9 @@ func PartialDecryptPrepareProposalInjector(
 				continue
 			}
 			r, err := voteKeeper.GetVoteRound(kvStore, roundID)
-			if err != nil || r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
+			if err != nil ||
+				r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED ||
+				r.Status == types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED {
 				zeroScalar(share.Scalar)
 				delete(shareCache, roundHex)
 				zeroAndDeleteShareFile(ceremonyDir, roundID, logger)
@@ -271,7 +273,9 @@ func cleanOrphanedShareFiles(
 			continue
 		}
 		r, err := voteKeeper.GetVoteRound(kvStore, roundID)
-		if err != nil || r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED {
+		if err != nil ||
+			r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED ||
+			r.Status == types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED {
 			zeroAndDeleteShareFile(ceremonyDir, roundID, logger)
 		}
 	}
