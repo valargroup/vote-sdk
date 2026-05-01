@@ -153,7 +153,7 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
       --arg pallasPk "$PALLAS_PK_B64" '
       .app_state.vote.vote_manager_addresses = [$vm]
       | .app_state.vote.pallas_keys = [{validator_address: $validator, pallas_pk: $pallasPk}]
-      | .app_state.slashing.params.signed_blocks_window = "72800"
+      | .app_state.slashing.params.signed_blocks_window = "15000"
       | .app_state.slashing.params.min_signed_per_window = "0.800000000000000000"
       | .app_state.slashing.params.downtime_jail_duration = "60s"
       | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
