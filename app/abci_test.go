@@ -25,6 +25,7 @@ import (
 	"github.com/valargroup/vote-sdk/crypto/shamir"
 	"github.com/valargroup/vote-sdk/ffi/roundid"
 	"github.com/valargroup/vote-sdk/testutil"
+	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -70,6 +71,15 @@ func deliverCreateVotingSession(t *testing.T, app *testutil.TestApp, msg *types.
 	round := app.MustGetVoteRound(roundID)
 	require.Equal(t, createHeight, round.CreatedAtHeight)
 	return roundID
+}
+
+func requireDuplicateCreateVotingSessionAtHeight(t *testing.T, app *testutil.TestApp, msg *types.MsgCreateVotingSession, height uint64) {
+	t.Helper()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: int64(height), Time: app.Time})
+	msgServer := votekeeper.NewMsgServerImpl(app.VoteKeeper())
+
+	_, err := msgServer.CreateVotingSession(ctx, msg)
+	require.ErrorIs(t, err, types.ErrRoundAlreadyExists)
 }
 
 func seedBondedValidatorWithPallasKey(t *testing.T, app *testutil.TestApp, valAddr string, pallasPk []byte) {
@@ -945,7 +955,7 @@ func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 	require.Len(t, round.CeremonyValidators, 2)
 }
 
-func TestCreateVotingSession_DealtTimeoutRetrySameMetadataNextSucceeds(t *testing.T) {
+func TestCreateVotingSession_DealtTimeoutRetrySameMetadataSameHeightFailsNextSucceeds(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	app.SeedVoteManagers(app.ValidatorAccAddr())
@@ -992,9 +1002,14 @@ func TestCreateVotingSession_DealtTimeoutRetrySameMetadataNextSucceeds(t *testin
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, firstRound.Status)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, firstRound.CeremonyStatus)
 
-	// Retry with identical vote metadata. The new creation height produces a
-	// different round_id, and jailed phantom validators are excluded from the
-	// new snapshot so the single live validator can complete the ceremony.
+	// Retrying at the original creation height derives the same round_id and is
+	// rejected even though the prior ceremony is now terminal.
+	requireDuplicateCreateVotingSessionAtHeight(t, app, msg, firstRound.CreatedAtHeight)
+
+	// Retry with identical vote metadata at the next block height. The new
+	// creation height produces a different round_id, and jailed phantom
+	// validators are excluded from the new snapshot so the single live validator
+	// can complete the ceremony.
 	markValidatorsJailed(t, app, phantom1Addr, phantom2Addr, phantom3Addr)
 	retryRoundID := deliverCreateVotingSession(t, app, msg)
 	require.NotEqual(t, firstRoundID, retryRoundID)
@@ -1011,7 +1026,7 @@ func TestCreateVotingSession_DealtTimeoutRetrySameMetadataNextSucceeds(t *testin
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, retryRound.CeremonyStatus)
 }
 
-func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataNextSucceeds(t *testing.T) {
+func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataSameHeightFailsNextSucceeds(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	app.SeedVoteManagers(app.ValidatorAccAddr())
@@ -1034,8 +1049,13 @@ func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataNextSucceeds(t *
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, firstRound.Status)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, firstRound.CeremonyStatus)
 
-	// Retry with the same metadata. The later creation height produces a fresh
-	// round_id, proving the production create path can recover after timeout.
+	// Retrying at the original creation height derives the same round_id and is
+	// rejected even though the prior ceremony is now terminal.
+	requireDuplicateCreateVotingSessionAtHeight(t, app, msg, firstRound.CreatedAtHeight)
+
+	// Retry with the same metadata at the next block height. The later creation
+	// height produces a fresh round_id, proving the production create path can
+	// recover after timeout.
 	retryRoundID := deliverCreateVotingSession(t, app, msg)
 	require.NotEqual(t, firstRoundID, retryRoundID)
 
