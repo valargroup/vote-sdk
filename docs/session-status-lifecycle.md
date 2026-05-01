@@ -51,7 +51,7 @@ All vote-round messages (including `MsgRevealShare`) require ACTIVE status. `Msg
 
 - **Trigger (REGISTERING timeout)**: `EndBlocker` — DKG contributions remain incomplete at timeout
 - **Trigger (DEALT timeout failure)**: `EndBlocker` — fewer than 1/2 acked, or the ack set does not meet the published threshold
-- **Action**: Sets `status = SESSION_STATUS_FINALIZED` and preserves ceremony fields for audit. Retrying currently requires a later session with a different `vote_round_id`; reusing the same deterministic round ID remains rejected as an existing round.
+- **Action**: Sets `status = SESSION_STATUS_FINALIZED` and preserves ceremony fields for audit. Retrying uses a later `CreateVotingSession` transaction with the same vote metadata; the later creation height produces a fresh `vote_round_id`.
 
 ### ACTIVE → TALLYING
 

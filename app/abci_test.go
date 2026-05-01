@@ -7,12 +7,15 @@ import (
 	"testing"
 	"time"
 
+	sdkmath "cosmossdk.io/math"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"github.com/mikelodder7/curvey"
 
@@ -20,6 +23,7 @@ import (
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
+	"github.com/valargroup/vote-sdk/ffi/roundid"
 	"github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -40,6 +44,63 @@ type ABCIIntegrationSuite struct {
 
 func TestABCIIntegration(t *testing.T) {
 	suite.Run(t, new(ABCIIntegrationSuite))
+}
+
+func deriveRoundIDForCreateHeight(t *testing.T, msg *types.MsgCreateVotingSession, createHeight uint64) []byte {
+	t.Helper()
+	rid, err := roundid.DeriveRoundID(
+		createHeight,
+		msg.SnapshotBlockhash,
+		msg.ProposalsHash,
+		msg.VoteEndTime,
+		msg.NullifierImtRoot,
+		msg.NcRoot,
+	)
+	require.NoError(t, err)
+	return rid[:]
+}
+
+func deliverCreateVotingSession(t *testing.T, app *testutil.TestApp, msg *types.MsgCreateVotingSession) []byte {
+	t.Helper()
+	createHeight := uint64(app.Height + 1)
+	roundID := deriveRoundIDForCreateHeight(t, msg, createHeight)
+	result := app.DeliverVoteTx(app.MustBuildSignedCeremonyTx(msg))
+	require.Equal(t, uint32(0), result.Code, "CreateVotingSession should succeed, got: %s", result.Log)
+
+	round := app.MustGetVoteRound(roundID)
+	require.Equal(t, createHeight, round.CreatedAtHeight)
+	return roundID
+}
+
+func seedBondedValidatorWithPallasKey(t *testing.T, app *testutil.TestApp, valAddr string, pallasPk []byte) {
+	t.Helper()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+
+	tokens := sdkmath.NewInt(1_000_000)
+	validator, err := stakingtypes.NewValidator(valAddr, ed25519.GenPrivKey().PubKey(), stakingtypes.Description{Moniker: valAddr})
+	require.NoError(t, err)
+	validator.Status = stakingtypes.Bonded
+	validator.Tokens = tokens
+	validator.DelegatorShares = sdkmath.LegacyNewDecFromInt(tokens)
+	validator.MinSelfDelegation = sdkmath.OneInt()
+
+	require.NoError(t, app.StakingKeeper.SetValidator(ctx, validator))
+
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	require.NoError(t, app.VoteKeeper().RegisterPallasKeyCore(kvStore, valAddr, pallasPk))
+}
+
+func markValidatorsJailed(t *testing.T, app *testutil.TestApp, valAddrs ...string) {
+	t.Helper()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	for _, valAddr := range valAddrs {
+		addr, err := sdk.ValAddressFromBech32(valAddr)
+		require.NoError(t, err)
+		validator, err := app.StakingKeeper.GetValidator(ctx, addr)
+		require.NoError(t, err)
+		validator.Jailed = true
+		require.NoError(t, app.StakingKeeper.SetValidator(ctx, validator))
+	}
 }
 
 func (s *ABCIIntegrationSuite) SetupTest() {
@@ -767,10 +828,9 @@ func TestMultiValidatorCeremony_TimeoutFinalizesPendingRound(t *testing.T) {
 // First round: timeout (only real validator acks, 1*2=2 < 4) finalizes.
 // New seeded round: real validator + phantom1 complete the ceremony.
 //
-// This intentionally seeds the recovery round directly. It does not prove that
-// CreateVotingSession can retry the same vote metadata, because vote_round_id is
-// deterministic and an existing round with that ID still causes
-// ErrRoundAlreadyExists.
+// This intentionally seeds the recovery round directly to focus on ceremony
+// mechanics. The CreateVotingSession retry path is covered below by tests that
+// reuse the same vote metadata at a later creation height.
 func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
@@ -883,6 +943,108 @@ func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 
 	// Recovery round was seeded with only the two participating validators.
 	require.Len(t, round.CeremonyValidators, 2)
+}
+
+func TestCreateVotingSession_DealtTimeoutRetrySameMetadataNextSucceeds(t *testing.T) {
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	app.SeedVoteManagers(app.ValidatorAccAddr())
+	app.RegisterPallasKey(pallasPk)
+
+	valAddr := app.ValidatorOperAddr()
+	_, phantomPk1 := elgamal.KeyGen(rand.Reader)
+	_, phantomPk2 := elgamal.KeyGen(rand.Reader)
+	_, phantomPk3 := elgamal.KeyGen(rand.Reader)
+	phantom1Addr := sdk.ValAddress(bytes.Repeat([]byte{0xE1}, 20)).String()
+	phantom2Addr := sdk.ValAddress(bytes.Repeat([]byte{0xE2}, 20)).String()
+	phantom3Addr := sdk.ValAddress(bytes.Repeat([]byte{0xE3}, 20)).String()
+
+	seedBondedValidatorWithPallasKey(t, app, phantom1Addr, phantomPk1.Point.ToAffineCompressed())
+	seedBondedValidatorWithPallasKey(t, app, phantom2Addr, phantomPk2.Point.ToAffineCompressed())
+	seedBondedValidatorWithPallasKey(t, app, phantom3Addr, phantomPk3.Point.ToAffineCompressed())
+	app.NextBlock()
+
+	msg := testutil.ValidCreateVotingSessionAt(app.Time)
+	msg.Creator = app.ValidatorAccAddr()
+
+	firstRoundID := deliverCreateVotingSession(t, app, msg)
+	firstRound := app.MustGetVoteRound(firstRoundID)
+	require.Len(t, firstRound.CeremonyValidators, 4)
+
+	// First round: seed phantom DKG contributions, let the real proposer
+	// contribute and ack, then time out with only 1/4 acknowledgments.
+	G := elgamal.PallasGenerator()
+	phantomAddrs := []string{phantom1Addr, phantom2Addr, phantom3Addr}
+	seedPhantomDKGContributions(t, app, firstRoundID, firstRound.CeremonyValidators, valAddr, phantomAddrs, G)
+
+	app.NextBlockWithPrepareProposal()
+	firstRound = app.MustGetVoteRound(firstRoundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, firstRound.CeremonyStatus)
+
+	app.NextBlockWithPrepareProposal()
+	firstRound = app.MustGetVoteRound(firstRoundID)
+	require.Len(t, firstRound.CeremonyAcks, 1)
+
+	timeoutTime := time.Unix(int64(firstRound.CeremonyPhaseStart+firstRound.CeremonyPhaseTimeout)+1, 0)
+	app.NextBlockAtTime(timeoutTime)
+
+	firstRound = app.MustGetVoteRound(firstRoundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, firstRound.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, firstRound.CeremonyStatus)
+
+	// Retry with identical vote metadata. The new creation height produces a
+	// different round_id, and jailed phantom validators are excluded from the
+	// new snapshot so the single live validator can complete the ceremony.
+	markValidatorsJailed(t, app, phantom1Addr, phantom2Addr, phantom3Addr)
+	retryRoundID := deliverCreateVotingSession(t, app, msg)
+	require.NotEqual(t, firstRoundID, retryRoundID)
+
+	retryRound := app.MustGetVoteRound(retryRoundID)
+	require.Len(t, retryRound.CeremonyValidators, 1)
+	require.Equal(t, valAddr, retryRound.CeremonyValidators[0].ValidatorAddress)
+
+	app.NextBlockWithPrepareProposal()
+	app.NextBlockWithPrepareProposal()
+
+	retryRound = app.MustGetVoteRound(retryRoundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, retryRound.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, retryRound.CeremonyStatus)
+}
+
+func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataNextSucceeds(t *testing.T) {
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+
+	app.SeedVoteManagers(app.ValidatorAccAddr())
+	app.RegisterPallasKey(pallasPk)
+
+	msg := testutil.ValidCreateVotingSessionAt(app.Time)
+	msg.Creator = app.ValidatorAccAddr()
+
+	firstRoundID := deliverCreateVotingSession(t, app, msg)
+	firstRound := app.MustGetVoteRound(firstRoundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, firstRound.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, firstRound.CeremonyStatus)
+
+	// Do not run PrepareProposal. Advancing past the contribution timeout
+	// leaves the round in REGISTERING and marks it terminal.
+	timeoutTime := time.Unix(int64(firstRound.CeremonyPhaseStart+firstRound.CeremonyPhaseTimeout)+1, 0)
+	app.NextBlockAtTime(timeoutTime)
+
+	firstRound = app.MustGetVoteRound(firstRoundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_FINALIZED, firstRound.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, firstRound.CeremonyStatus)
+
+	// Retry with the same metadata. The later creation height produces a fresh
+	// round_id, proving the production create path can recover after timeout.
+	retryRoundID := deliverCreateVotingSession(t, app, msg)
+	require.NotEqual(t, firstRoundID, retryRoundID)
+
+	app.NextBlockWithPrepareProposal()
+	app.NextBlockWithPrepareProposal()
+
+	retryRound := app.MustGetVoteRound(retryRoundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, retryRound.Status)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, retryRound.CeremonyStatus)
 }
 
 // ---------------------------------------------------------------------------

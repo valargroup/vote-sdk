@@ -14,8 +14,8 @@ use base64::Engine;
 use e2e_tests::{
     api::{
         self, broadcast_cosmos_msg, commitment_tree_next_index, default_cosmos_tx_config, get_json,
-        import_first_vote_manager_key, post_json_accept_committed, wait_for_round_status,
-        CosmosTxConfig, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
+        import_first_vote_manager_key, post_json_accept_committed, wait_for_create_round_id,
+        wait_for_round_status, CosmosTxConfig, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
     },
     payloads::{create_voting_session_payload, delegate_vote_payload},
     setup::{build_multi_delegation_bundles, ensure_pallas_key_registered},
@@ -65,9 +65,8 @@ fn sync_stress_multi_delegation() {
     let config = default_cosmos_tx_config();
     let vote_manager_address = import_first_vote_manager_key(&config.home_dir);
 
-    let (mut body, _, round_id) =
+    let (mut body, _, _) =
         create_voting_session_payload(&vote_manager_address, 300, Some(round_fields));
-    let round_id_hex = hex::encode(&round_id);
 
     body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
     let vm_config = CosmosTxConfig {
@@ -89,6 +88,8 @@ fn sync_stress_multi_delegation() {
         "create session rejected: {:?}",
         json.get("log")
     );
+    let round_id_hex = wait_for_create_round_id(&json).expect("create tx should emit round_id");
+    let round_id = hex::decode(&round_id_hex).expect("round_id should be hex");
 
     eprintln!(
         "[stress] Phase 2: waiting for round {} to become ACTIVE...",

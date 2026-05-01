@@ -69,9 +69,9 @@ func (s *MsgServerTestSuite) setupRootAtHeight(roundID []byte, height uint64) {
 }
 
 // computeExpectedRoundID mirrors the deriveRoundID function for test verification.
-func computeExpectedRoundID(msg *types.MsgCreateVotingSession) []byte {
+func computeExpectedRoundID(msg *types.MsgCreateVotingSession, createdAtHeight uint64) []byte {
 	rid, err := roundid.DeriveRoundID(
-		msg.SnapshotHeight,
+		createdAtHeight,
 		msg.SnapshotBlockhash,
 		msg.ProposalsHash,
 		msg.VoteEndTime,
@@ -217,7 +217,6 @@ func (s *MsgServerTestSuite) setupWithMockBankKeeper(bk keeper.BankKeeper) {
 
 func (s *MsgServerTestSuite) TestCreateVotingSession() {
 	msg := validSetupMsg()
-	expectedID := computeExpectedRoundID(msg)
 
 	tests := []struct {
 		name        string
@@ -235,6 +234,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
+				expectedID := computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight()))
 				s.Require().Equal(expectedID, resp.VoteRoundId)
 
 				// Verify round is stored with correct fields.
@@ -293,6 +293,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				},
 			},
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
+				expectedID := computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight()))
 				s.Require().NotEqual(expectedID, resp.VoteRoundId)
 				s.Require().Len(resp.VoteRoundId, 32)
 			},
@@ -327,6 +328,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
+				expectedID := computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight()))
 				s.Require().Equal(expectedID, resp.VoteRoundId)
 
 				kv := s.keeper.OpenKVStore(s.ctx)
@@ -343,6 +345,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			},
 			msg: msg,
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
+				expectedID := computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight()))
 				s.Require().Equal(expectedID, resp.VoteRoundId)
 
 				kv := s.keeper.OpenKVStore(s.ctx)
@@ -405,10 +408,33 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
 	s.Require().NoError(err)
 
-	// Same inputs must produce same ID.
-	expected := computeExpectedRoundID(msg)
+	// Same setup inputs at the same creation height must produce same ID.
+	expected := computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight()))
 	s.Require().Equal(expected, resp1.VoteRoundId)
 	s.Require().Len(resp1.VoteRoundId, 32)
+}
+
+func (s *MsgServerTestSuite) TestCreateVotingSession_SameMetadataDifferentCreationHeights() {
+	s.SetupTest()
+	s.seedEligibleValidators(2)
+	s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
+	msg := validSetupMsg()
+
+	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, resp1.VoteRoundId)
+	s.Require().NoError(err)
+	round.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
+	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+
+	nextCtx := s.ctx.WithBlockHeight(s.ctx.BlockHeight() + 1)
+	resp2, err := s.msgServer.CreateVotingSession(nextCtx, msg)
+	s.Require().NoError(err)
+
+	s.Require().NotEqual(resp1.VoteRoundId, resp2.VoteRoundId)
+	s.Require().Equal(computeExpectedRoundID(msg, uint64(nextCtx.BlockHeight())), resp2.VoteRoundId)
 }
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
@@ -428,7 +454,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
 			// Verify round ID attribute present.
 			for _, attr := range e.Attributes {
 				if attr.Key == types.AttributeKeyRoundID {
-					expected := fmt.Sprintf("%x", computeExpectedRoundID(msg))
+					expected := fmt.Sprintf("%x", computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight())))
 					s.Require().Equal(expected, attr.Value)
 				}
 			}

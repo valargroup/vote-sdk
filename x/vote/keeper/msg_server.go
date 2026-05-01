@@ -28,7 +28,7 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 }
 
 // CreateVotingSession handles MsgCreateVotingSession.
-// Computes vote_round_id = Poseidon(snapshot_height, snapshot_blockhash_lo,
+// Computes vote_round_id = Poseidon(created_at_height, snapshot_blockhash_lo,
 // snapshot_blockhash_hi, proposals_hash_lo, proposals_hash_hi, vote_end_time,
 // nullifier_imt_root, nc_root) via FFI,
 // stores the VoteRound in PENDING status with a ceremony validator snapshot,
@@ -44,8 +44,12 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 
 	kvStore := ms.k.OpenKVStore(ctx)
 
-	// Derive vote_round_id deterministically.
-	roundID, err := deriveRoundID(msg)
+	createdAtHeight := uint64(ctx.BlockHeight())
+
+	// Derive vote_round_id deterministically from the creation height and setup
+	// fields. Using the creation height allows the same vote metadata to be
+	// retried after a failed ceremony without colliding with the expired round.
+	roundID, err := deriveRoundID(msg, createdAtHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +118,7 @@ func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCre
 		// EaPk left empty — set when ceremony confirms.
 		Proposals:       msg.Proposals,
 		Description:     msg.Description,
-		CreatedAtHeight: uint64(ctx.BlockHeight()),
+		CreatedAtHeight: createdAtHeight,
 		Title:           msg.Title,
 		DiscussionUrl:   msg.DiscussionUrl,
 		// Per-round ceremony fields.
@@ -246,12 +250,12 @@ func (ms msgServer) UpdateVoteManagers(goCtx context.Context, msg *types.MsgUpda
 	return &types.MsgUpdateVoteManagersResponse{}, nil
 }
 
-// deriveRoundID computes a deterministic vote_round_id from the setup fields
-// via Poseidon hash (FFI call to Rust). The output is a canonical 32-byte
-// Pallas Fp element.
-func deriveRoundID(msg *types.MsgCreateVotingSession) ([]byte, error) {
+// deriveRoundID computes a deterministic vote_round_id from the creation
+// height and setup fields via Poseidon hash (FFI call to Rust). The output is a
+// canonical 32-byte Pallas Fp element.
+func deriveRoundID(msg *types.MsgCreateVotingSession, createdAtHeight uint64) ([]byte, error) {
 	rid, err := roundid.DeriveRoundID(
-		msg.SnapshotHeight,
+		createdAtHeight,
 		msg.SnapshotBlockhash,
 		msg.ProposalsHash,
 		msg.VoteEndTime,

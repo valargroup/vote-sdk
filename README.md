@@ -165,7 +165,7 @@ A registered key can be replaced via `MsgRotatePallasKey`. Rotation is rejected 
 
 REGISTERING and DEALT phases have timeouts (default: 30 minutes). On DEALT timeout:
 - **>= 1/2 acked:** Confirm ceremony, strip non-ackers, activate round.
-- **< 1/2 acked:** Finalize the pending round; a later session with a different `vote_round_id` must be created to retry.
+- **< 1/2 acked:** Finalize the pending round; a later create transaction can retry the same vote metadata because `vote_round_id` includes the round creation height.
 
 #### ECIES Encryption Scheme
 
