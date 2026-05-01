@@ -160,26 +160,26 @@ func newSignCmd() *cobra.Command {
 	cmd.Flags().StringVar(&signerID, "signer-id", "", "Signer identifier matching trusted_keys.json[].key_id")
 	cmd.Flags().StringVar(&privFile, "privkey-file", "", "Read base64(seed) Ed25519 private key from this file")
 	cmd.Flags().BoolVar(&privStdin, "privkey-stdin", false, "Read base64(seed) Ed25519 private key from stdin")
-	cmd.Flags().StringVar(&mergePath, "merge", "", "Rewrite this voting-config-v2.json with the signed entry merged in")
+	cmd.Flags().StringVar(&mergePath, "merge", "", "Rewrite this dynamic-voting-config.json with the signed entry merged in")
 	return cmd
 }
 
 func newVerifyCmd() *cobra.Command {
 	var (
-		configPath string
-		keysPath   string
-		jsonOut    bool
+		configPath       string
+		staticConfigPath string
+		jsonOut          bool
 	)
 	cmd := &cobra.Command{
 		Use:   "verify",
-		Short: "Verify voting-config-v2 round signatures",
+		Short: "Verify dynamic voting config round signatures",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if configPath == "" {
 				return errors.New("--config is required")
 			}
-			if keysPath == "" {
-				return errors.New("--keys is required")
+			if staticConfigPath == "" {
+				return errors.New("--static-config is required")
 			}
 			cfg, err := readConfig(configPath)
 			if err != nil {
@@ -188,7 +188,7 @@ func newVerifyCmd() *cobra.Command {
 			if err := votingconfig.ValidateWrapper(cfg); err != nil {
 				return err
 			}
-			keys, err := readTrustedKeys(keysPath)
+			staticConfig, err := readStaticConfig(staticConfigPath)
 			if err != nil {
 				return err
 			}
@@ -196,7 +196,7 @@ func newVerifyCmd() *cobra.Command {
 				if entry.AuthVersion != votingconfig.AuthVersionV1 {
 					return fmt.Errorf("round %s: unsupported auth_version %d", roundID, entry.AuthVersion)
 				}
-				if !votingconfig.VerifyEntrySignatures(entry, keys) {
+				if !votingconfig.VerifyEntrySignatures(entry, staticConfig.TrustedKeys) {
 					return fmt.Errorf("round %s: no valid signature", roundID)
 				}
 			}
@@ -216,8 +216,8 @@ func newVerifyCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "", "Path to voting-config-v2.json")
-	cmd.Flags().StringVar(&keysPath, "keys", "", "Path to trusted_keys.json")
+	cmd.Flags().StringVar(&configPath, "config", "", "Path to dynamic-voting-config.json")
+	cmd.Flags().StringVar(&staticConfigPath, "static-config", "", "Path to static-voting-config-sample.json")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Write machine-readable verification result")
 	return cmd
 }
@@ -272,19 +272,23 @@ func readConfig(path string) (*votingconfig.SignedConfig, error) {
 	return &cfg, nil
 }
 
-func readTrustedKeys(path string) ([]votingconfig.TrustedKey, error) {
+func readStaticConfig(path string) (*votingconfig.StaticConfig, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read keys %q: %w", path, err)
+		return nil, fmt.Errorf("read static config %q: %w", path, err)
 	}
-	var trustedKeys []votingconfig.TrustedKey
-	if err := json.Unmarshal(raw, &trustedKeys); err != nil {
-		return nil, fmt.Errorf("parse keys %q: %w", path, err)
+	trimmed := strings.TrimSpace(string(raw))
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		return nil, errors.New("input is a flat array; --static-config now requires the static-config object shape (see static-voting-config-sample.json)")
 	}
-	if len(trustedKeys) == 0 {
-		return nil, errors.New("trusted keys must contain at least one entry")
+	var cfg votingconfig.StaticConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, fmt.Errorf("parse static config %q: %w", path, err)
 	}
-	return trustedKeys, nil
+	if err := votingconfig.ValidateStaticConfig(&cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
 }
 
 func parseEaPK(eaPKB64 string) ([32]byte, error) {

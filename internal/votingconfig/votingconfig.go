@@ -7,12 +7,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 const (
-	ConfigVersionV1 = 1
-	AuthVersionV1   = 1
-	AlgEd25519      = "ed25519"
+	ConfigVersionV1       = 1
+	StaticConfigVersionV1 = 1
+	AuthVersionV1         = 1
+	AlgEd25519            = "ed25519"
 )
 
 type SignedConfig struct {
@@ -52,6 +54,12 @@ type TrustedKey struct {
 	Alg    string `json:"alg"`
 	Pubkey string `json:"pubkey"`
 	Notes  string `json:"notes,omitempty"`
+}
+
+type StaticConfig struct {
+	StaticConfigVersion int          `json:"static_config_version"`
+	DynamicConfigURL    string       `json:"dynamic_config_url"`
+	TrustedKeys         []TrustedKey `json:"trusted_keys"`
 }
 
 type AuthStatus string
@@ -130,6 +138,22 @@ func ValidateWrapper(cfg *SignedConfig) error {
 		if err := ValidateRoundID(roundID); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func ValidateStaticConfig(cfg *StaticConfig) error {
+	if cfg == nil {
+		return errors.New("static config is nil")
+	}
+	if cfg.StaticConfigVersion != StaticConfigVersionV1 {
+		return fmt.Errorf("unsupported static_config_version %d", cfg.StaticConfigVersion)
+	}
+	if strings.TrimSpace(cfg.DynamicConfigURL) == "" {
+		return errors.New("dynamic_config_url is required")
+	}
+	if len(cfg.TrustedKeys) == 0 {
+		return errors.New("trusted_keys must contain at least one entry")
 	}
 	return nil
 }

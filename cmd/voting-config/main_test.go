@@ -24,8 +24,8 @@ func TestSignAndVerifyConfig(t *testing.T) {
 	}
 	roundID := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "voting-config-v2.json")
-	keysPath := filepath.Join(dir, "trusted_keys.json")
+	configPath := filepath.Join(dir, "dynamic-voting-config.json")
+	staticConfigPath := filepath.Join(dir, "static-voting-config-sample.json")
 	writeJSON(t, configPath, votingconfig.SignedConfig{
 		ConfigVersion: votingconfig.ConfigVersionV1,
 		VoteServers:   []votingconfig.Endpoint{{URL: "https://vote.example", Label: "vote"}},
@@ -38,12 +38,14 @@ func TestSignAndVerifyConfig(t *testing.T) {
 		},
 		Rounds: map[string]votingconfig.RoundEntry{},
 	})
-	writeJSON(t, keysPath, []votingconfig.TrustedKey{
-		{
+	writeJSON(t, staticConfigPath, votingconfig.StaticConfig{
+		StaticConfigVersion: votingconfig.StaticConfigVersionV1,
+		DynamicConfigURL:    "https://example.com/dynamic-voting-config.json",
+		TrustedKeys: []votingconfig.TrustedKey{{
 			KeyID:  "key-1",
 			Alg:    votingconfig.AlgEd25519,
 			Pubkey: base64.StdEncoding.EncodeToString(pub),
-		},
+		}},
 	})
 
 	t.Setenv("VOTING_CONFIG_PRIVKEY", base64.StdEncoding.EncodeToString(priv.Seed()))
@@ -62,12 +64,37 @@ func TestSignAndVerifyConfig(t *testing.T) {
 	verifyCmd := newRootCmd()
 	var out bytes.Buffer
 	verifyCmd.SetOut(&out)
-	verifyCmd.SetArgs([]string{"verify", "--config", configPath, "--keys", keysPath})
+	verifyCmd.SetArgs([]string{"verify", "--config", configPath, "--static-config", staticConfigPath})
 	if err := verifyCmd.Execute(); err != nil {
 		t.Fatalf("verify command failed: %v", err)
 	}
 	if !strings.Contains(out.String(), "OK: verified 1 round entries") {
 		t.Fatalf("unexpected verify output: %q", out.String())
+	}
+}
+
+func TestVerifyRejectsLegacyTrustedKeysArray(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "dynamic-voting-config.json")
+	staticConfigPath := filepath.Join(dir, "trusted_keys.json")
+	writeJSON(t, configPath, votingconfig.SignedConfig{
+		ConfigVersion: votingconfig.ConfigVersionV1,
+		VoteServers:   []votingconfig.Endpoint{{URL: "https://vote.example", Label: "vote"}},
+		PIREndpoints:  []votingconfig.Endpoint{{URL: "https://pir.example", Label: "pir"}},
+		Rounds:        map[string]votingconfig.RoundEntry{},
+	})
+	writeJSON(t, staticConfigPath, []votingconfig.TrustedKey{
+		{KeyID: "key-1", Alg: votingconfig.AlgEd25519, Pubkey: base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))},
+	})
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"verify", "--config", configPath, "--static-config", staticConfigPath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected legacy trusted_keys array to be rejected")
+	}
+	if !strings.Contains(err.Error(), "flat array") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

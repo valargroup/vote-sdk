@@ -1,6 +1,6 @@
 # voting-config
 
-`voting-config` signs and verifies `token-holder-voting-config` v2 round entries.
+`voting-config` signs and verifies `token-holder-voting-config` dynamic round entries.
 
 For `auth_version: 1`, signatures cover only the raw 32-byte `ea_pk` decoded from base64. Wrapper fields such as vote servers and PIR endpoints are validated by CI, but are not signed by this version of the scheme.
 
@@ -10,7 +10,7 @@ For `auth_version: 1`, signatures cover only the raw 32-byte `ea_pk` decoded fro
 voting-config keygen --signer-id valar-2026-q2 --out ./valar-2026-q2.seed
 ```
 
-The private key file is `base64(seed)` for an Ed25519 keypair. Keep it out of git. The command also prints a JSON object ready to paste into `admin-keys.json` under `trusted_keys`.
+The private key file is `base64(seed)` for an Ed25519 keypair. Keep it out of git. The command also prints a JSON object ready to paste into `static-voting-config-sample.json` under `trusted_keys`.
 
 If `--out` is omitted, the seed is printed to stdout for one-shot offline workflows.
 
@@ -32,7 +32,7 @@ voting-config sign \
   --ea-pk '<base64 32-byte ea_pk>' \
   --signer-id valar-2026-q2 \
   --privkey-file ./valar-2026-q2.seed \
-  --merge ./voting-config-v2.json
+  --merge ./dynamic-voting-config.json
 ```
 
 Private-key input can come from exactly one of:
@@ -44,11 +44,13 @@ Private-key input can come from exactly one of:
 ## Verify a config
 
 ```bash
-voting-config verify --config voting-config-v2.json --keys admin-keys.json
+voting-config verify \
+  --config dynamic-voting-config.json \
+  --static-config static-voting-config-sample.json
 ```
 
 Use `--json` for CI output.
 
 ## Key rotation
 
-Add the new public key to `admin-keys.json`, sign new or updated round entries with the new `key_id`, and keep old trusted keys until every shipped wallet release has dropped them from its bundled trust anchor.
+Add the new public key to `static-voting-config-sample.json` under `trusted_keys`, sign new or updated round entries with the new `key_id`, and keep old trusted keys until every shipped wallet release has dropped them from its bundled trust anchor.
