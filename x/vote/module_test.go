@@ -2,6 +2,7 @@ package vote_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -14,9 +15,11 @@ import (
 	"cosmossdk.io/x/tx/signing"
 
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -54,6 +57,105 @@ func (s *EndBlockerTestSuite) SetupTest() {
 	storeService := runtime.NewKVStoreService(key)
 	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	s.module = vote.NewAppModule(s.keeper, nil) // codec unused by EndBlock
+}
+
+type moduleMockStakingKeeper struct {
+	validators     map[string]stakingtypes.Validator
+	consToOperator map[string]string
+}
+
+func newModuleMockStakingKeeper(valAddrs ...string) *moduleMockStakingKeeper {
+	mk := &moduleMockStakingKeeper{
+		validators:     make(map[string]stakingtypes.Validator, len(valAddrs)),
+		consToOperator: make(map[string]string, len(valAddrs)),
+	}
+	for _, addr := range valAddrs {
+		validator, err := stakingtypes.NewValidator(addr, ed25519.GenPrivKey().PubKey(), stakingtypes.Description{Moniker: addr})
+		if err != nil {
+			panic(err)
+		}
+		validator.Status = stakingtypes.Bonded
+		mk.validators[addr] = validator
+
+		consAddr, err := validator.GetConsAddr()
+		if err != nil {
+			panic(err)
+		}
+		mk.consToOperator[sdk.ConsAddress(consAddr).String()] = addr
+	}
+	return mk
+}
+
+func (mk *moduleMockStakingKeeper) GetValidator(_ context.Context, addr sdk.ValAddress) (stakingtypes.Validator, error) {
+	validator, ok := mk.validators[addr.String()]
+	if !ok {
+		return stakingtypes.Validator{}, fmt.Errorf("validator %s not found", addr)
+	}
+	return validator, nil
+}
+
+func (mk *moduleMockStakingKeeper) GetValidatorByConsAddr(_ context.Context, consAddr sdk.ConsAddress) (stakingtypes.Validator, error) {
+	operAddr, ok := mk.consToOperator[consAddr.String()]
+	if !ok {
+		return stakingtypes.Validator{}, fmt.Errorf("validator with consensus address %s not found", consAddr)
+	}
+	return mk.validators[operAddr], nil
+}
+
+func (mk *moduleMockStakingKeeper) Jail(_ context.Context, consAddr sdk.ConsAddress) error {
+	operAddr, ok := mk.consToOperator[consAddr.String()]
+	if !ok {
+		return fmt.Errorf("validator with consensus address %s not found", consAddr)
+	}
+	validator := mk.validators[operAddr]
+	validator.Jailed = true
+	mk.validators[operAddr] = validator
+	return nil
+}
+
+func (mk *moduleMockStakingKeeper) Unjail(_ context.Context, consAddr sdk.ConsAddress) error {
+	operAddr, ok := mk.consToOperator[consAddr.String()]
+	if !ok {
+		return fmt.Errorf("validator with consensus address %s not found", consAddr)
+	}
+	validator := mk.validators[operAddr]
+	validator.Jailed = false
+	mk.validators[operAddr] = validator
+	return nil
+}
+
+type moduleMockSlashingKeeper struct {
+	jailDuration time.Duration
+	jailedUntil  map[string]time.Time
+	jailCalls    []sdk.ConsAddress
+}
+
+func newModuleMockSlashingKeeper(jailDuration time.Duration) *moduleMockSlashingKeeper {
+	return &moduleMockSlashingKeeper{
+		jailDuration: jailDuration,
+		jailedUntil:  make(map[string]time.Time),
+	}
+}
+
+func (mk *moduleMockSlashingKeeper) Jail(_ context.Context, consAddr sdk.ConsAddress) error {
+	mk.jailCalls = append(mk.jailCalls, consAddr)
+	return nil
+}
+
+func (mk *moduleMockSlashingKeeper) JailUntil(_ context.Context, consAddr sdk.ConsAddress, jailTime time.Time) error {
+	mk.jailedUntil[consAddr.String()] = jailTime
+	return nil
+}
+
+func (mk *moduleMockSlashingKeeper) DowntimeJailDuration(context.Context) (time.Duration, error) {
+	return mk.jailDuration, nil
+}
+
+func (s *EndBlockerTestSuite) setupCeremonyJailing(valAddrs ...string) *moduleMockSlashingKeeper {
+	s.keeper.SetStakingKeeper(newModuleMockStakingKeeper(valAddrs...))
+	slashing := newModuleMockSlashingKeeper(5 * time.Minute)
+	s.keeper.SetSlashingKeeper(slashing)
+	return slashing
 }
 
 // ---------------------------------------------------------------------------
@@ -193,12 +295,36 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 // Ceremony phase timeout tests
 // ---------------------------------------------------------------------------
 
+func (s *EndBlockerTestSuite) TestCeremonyNonParticipantSelection() {
+	addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
+	round := &types.VoteRound{
+		CeremonyValidators: []*types.ValidatorPallasKey{
+			{ValidatorAddress: addrs[0]},
+			{ValidatorAddress: addrs[1]},
+			{ValidatorAddress: addrs[2]},
+		},
+		DkgContributions: []*types.DKGContribution{
+			{ValidatorAddress: addrs[0]},
+			{ValidatorAddress: addrs[2]},
+		},
+		CeremonyAcks: []*types.AckEntry{
+			{ValidatorAddress: addrs[0]},
+			{ValidatorAddress: addrs[1]},
+		},
+	}
+
+	s.Require().Equal([]string{addrs[1]}, keeper.MissingCeremonyContributors(round))
+	s.Require().Equal([]string{addrs[2]}, keeper.MissingCeremonyAckers(round))
+}
+
 func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 	roundID := bytes.Repeat([]byte{0xCC}, 32)
 
 	// Helper: seed a PENDING round with DEALT ceremony and 3 validators.
 	// phase_start=999_400, phase_timeout=600 -> deadline = 1_000_000 == block_time.
 	seedDealtRound := func(ackCount int) {
+		addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
+		s.setupCeremonyJailing(addrs...)
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
 			VoteRoundId:    roundID,
@@ -206,9 +332,9 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			EaPk:           make([]byte, 32),
 			CeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 			CeremonyValidators: []*types.ValidatorPallasKey{
-				{ValidatorAddress: "val1", PallasPk: make([]byte, 32)},
-				{ValidatorAddress: "val2", PallasPk: make([]byte, 32)},
-				{ValidatorAddress: "val3", PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[0], PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[1], PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[2], PallasPk: make([]byte, 32)},
 			},
 			CeremonyPhaseStart:   999_400,
 			CeremonyPhaseTimeout: 600,
@@ -225,6 +351,11 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 	// Helper: seed a PENDING round with DEALT ceremony, n validators, a
 	// Shamir threshold, and ackCount acks. Uses the same timeout deadline.
 	seedDealtRoundWithThreshold := func(nVals int, threshold uint32, ackCount int) {
+		addrs := make([]string, nVals)
+		for i := 0; i < nVals; i++ {
+			addrs[i] = svtest.TestValAddr(byte(i + 1))
+		}
+		s.setupCeremonyJailing(addrs...)
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
 			VoteRoundId:          roundID,
@@ -236,9 +367,8 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			CeremonyPhaseTimeout: 600,
 		}
 		for i := 0; i < nVals; i++ {
-			addr := fmt.Sprintf("val%d", i+1)
 			round.CeremonyValidators = append(round.CeremonyValidators,
-				&types.ValidatorPallasKey{ValidatorAddress: addr, PallasPk: make([]byte, 32)})
+				&types.ValidatorPallasKey{ValidatorAddress: addrs[i], PallasPk: make([]byte, 32)})
 		}
 		for i := 0; i < ackCount; i++ {
 			round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
@@ -360,6 +490,8 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 
 func (s *EndBlockerTestSuite) TestEndBlock_RegisteringTimeoutMarksCeremonyFailedAndPreservesSnapshot() {
 	roundID := bytes.Repeat([]byte{0xCE}, 32)
+	addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
+	slashing := s.setupCeremonyJailing(addrs...)
 	kv := s.keeper.OpenKVStore(s.ctx)
 
 	round := &types.VoteRound{
@@ -367,15 +499,15 @@ func (s *EndBlockerTestSuite) TestEndBlock_RegisteringTimeoutMarksCeremonyFailed
 		Status:         types.SessionStatus_SESSION_STATUS_PENDING,
 		CeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
 		CeremonyValidators: []*types.ValidatorPallasKey{
-			{ValidatorAddress: "val1", PallasPk: make([]byte, 32), ShamirIndex: 1},
-			{ValidatorAddress: "val2", PallasPk: make([]byte, 32), ShamirIndex: 2},
-			{ValidatorAddress: "val3", PallasPk: make([]byte, 32), ShamirIndex: 3},
+			{ValidatorAddress: addrs[0], PallasPk: make([]byte, 32), ShamirIndex: 1},
+			{ValidatorAddress: addrs[1], PallasPk: make([]byte, 32), ShamirIndex: 2},
+			{ValidatorAddress: addrs[2], PallasPk: make([]byte, 32), ShamirIndex: 3},
 		},
 		CeremonyPhaseStart:   999_400,
 		CeremonyPhaseTimeout: 600,
 		DkgContributions: []*types.DKGContribution{
-			{ValidatorAddress: "val1", FeldmanCommitments: [][]byte{{0x01}}},
-			{ValidatorAddress: "val3", FeldmanCommitments: [][]byte{{0x03}}},
+			{ValidatorAddress: addrs[0], FeldmanCommitments: [][]byte{{0x01}}},
+			{ValidatorAddress: addrs[2], FeldmanCommitments: [][]byte{{0x03}}},
 		},
 	}
 	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
@@ -385,15 +517,18 @@ func (s *EndBlockerTestSuite) TestEndBlock_RegisteringTimeoutMarksCeremonyFailed
 	round, err := s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
 	s.Require().Len(round.CeremonyValidators, 3)
-	s.Require().Equal("val1", round.CeremonyValidators[0].ValidatorAddress)
+	s.Require().Equal(addrs[0], round.CeremonyValidators[0].ValidatorAddress)
 	s.Require().Equal(uint32(1), round.CeremonyValidators[0].ShamirIndex)
-	s.Require().Equal("val2", round.CeremonyValidators[1].ValidatorAddress)
+	s.Require().Equal(addrs[1], round.CeremonyValidators[1].ValidatorAddress)
 	s.Require().Equal(uint32(2), round.CeremonyValidators[1].ShamirIndex)
-	s.Require().Equal("val3", round.CeremonyValidators[2].ValidatorAddress)
+	s.Require().Equal(addrs[2], round.CeremonyValidators[2].ValidatorAddress)
 	s.Require().Equal(uint32(3), round.CeremonyValidators[2].ShamirIndex)
 	s.Require().Len(round.DkgContributions, 2)
 	s.Require().Equal(types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
 	s.Require().Contains(round.CeremonyLog[0], "REGISTERING timeout: ceremony failed (2/3 contributions)")
+	s.Require().Contains(round.CeremonyLog[1], "REGISTERING timeout: jailed 1 non-contributors")
+	s.Require().Len(slashing.jailCalls, 1)
+	s.Require().Equal(s.ctx.BlockTime().Add(5*time.Minute), slashing.jailedUntil[slashing.jailCalls[0].String()])
 }
 
 // ---------------------------------------------------------------------------
@@ -406,6 +541,8 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 	s.Run("timeout+confirm logs entry", func() {
 		// 2 of 3 acked: HalfAcked (2*2=4 >= 3). 1 non-acker stripped.
 		s.SetupTest()
+		addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
+		s.setupCeremonyJailing(addrs...)
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
 			VoteRoundId:    roundID,
@@ -413,15 +550,15 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 			EaPk:           make([]byte, 32),
 			CeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 			CeremonyValidators: []*types.ValidatorPallasKey{
-				{ValidatorAddress: "val1", PallasPk: make([]byte, 32)},
-				{ValidatorAddress: "val2", PallasPk: make([]byte, 32)},
-				{ValidatorAddress: "val3", PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[0], PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[1], PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[2], PallasPk: make([]byte, 32)},
 			},
 			CeremonyPhaseStart:   999_400,
 			CeremonyPhaseTimeout: 600,
 			CeremonyAcks: []*types.AckEntry{
-				{ValidatorAddress: "val1", AckHeight: 9},
-				{ValidatorAddress: "val2", AckHeight: 9},
+				{ValidatorAddress: addrs[0], AckHeight: 9},
+				{ValidatorAddress: addrs[1], AckHeight: 9},
 			},
 		}
 		s.Require().NoError(s.keeper.SetVoteRound(kv, round))
@@ -429,14 +566,17 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 
 		round, err := s.keeper.GetVoteRound(kv, roundID)
 		s.Require().NoError(err)
-		s.Require().Len(round.CeremonyLog, 1)
+		s.Require().Len(round.CeremonyLog, 2)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: confirmed")
 		s.Require().Contains(round.CeremonyLog[0], "2/3 acks")
 		s.Require().Contains(round.CeremonyLog[0], "1 stripped")
+		s.Require().Contains(round.CeremonyLog[1], "DEALT timeout: jailed 1 non-ackers")
 	})
 
 	s.Run("timeout+finalize logs entry", func() {
 		s.SetupTest()
+		addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
+		s.setupCeremonyJailing(addrs...)
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
 			VoteRoundId:    roundID,
@@ -444,9 +584,9 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 			EaPk:           make([]byte, 32),
 			CeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 			CeremonyValidators: []*types.ValidatorPallasKey{
-				{ValidatorAddress: "val1", PallasPk: make([]byte, 32)},
-				{ValidatorAddress: "val2", PallasPk: make([]byte, 32)},
-				{ValidatorAddress: "val3", PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[0], PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[1], PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[2], PallasPk: make([]byte, 32)},
 			},
 			CeremonyPhaseStart:   999_400,
 			CeremonyPhaseTimeout: 600,
@@ -456,9 +596,10 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 
 		round, err := s.keeper.GetVoteRound(kv, roundID)
 		s.Require().NoError(err)
-		s.Require().Len(round.CeremonyLog, 1)
+		s.Require().Len(round.CeremonyLog, 2)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: ceremony failed")
 		s.Require().Contains(round.CeremonyLog[0], "0/3 acks")
+		s.Require().Contains(round.CeremonyLog[1], "DEALT timeout: jailed 3 non-ackers")
 		s.Require().Equal(types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
 	})
 
@@ -467,6 +608,11 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		// (5*2=10>=9) but 5 < dealer-set threshold=6. Safety check finalizes
 		// the failed pending round. All 9 validators are preserved for audit.
 		s.SetupTest()
+		addrs := make([]string, 9)
+		for i := range addrs {
+			addrs[i] = svtest.TestValAddr(byte(i + 1))
+		}
+		s.setupCeremonyJailing(addrs...)
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
 			VoteRoundId:          roundID,
@@ -479,7 +625,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		}
 		for i := 1; i <= 9; i++ {
 			round.CeremonyValidators = append(round.CeremonyValidators,
-				&types.ValidatorPallasKey{ValidatorAddress: fmt.Sprintf("val%d", i), PallasPk: make([]byte, 32)})
+				&types.ValidatorPallasKey{ValidatorAddress: addrs[i-1], PallasPk: make([]byte, 32)})
 		}
 		for i := 0; i < 5; i++ {
 			round.CeremonyAcks = append(round.CeremonyAcks, &types.AckEntry{
@@ -492,10 +638,11 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 
 		round, err := s.keeper.GetVoteRound(kv, roundID)
 		s.Require().NoError(err)
-		s.Require().Len(round.CeremonyLog, 1)
+		s.Require().Len(round.CeremonyLog, 2)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: ceremony failed")
 		s.Require().Contains(round.CeremonyLog[0], "5/9 acks")
 		s.Require().Contains(round.CeremonyLog[0], "below threshold 6")
+		s.Require().Contains(round.CeremonyLog[1], "DEALT timeout: jailed 4 non-ackers")
 		s.Require().Len(round.CeremonyValidators, 9)
 		s.Require().Equal(types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
 	})

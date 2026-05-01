@@ -237,7 +237,7 @@ Implementation:
 | Single party can decrypt votes | No — requires `t` partial decryptions |
 | Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor) |
 | Malicious validator sabotages tally | No — DLEQ proof required per partial decryption |
-| Offline validator | REGISTERING phase times out after `DefaultContributionTimeout` (10 min), the pending round is marked `SESSION_STATUS_CEREMONY_FAILED`, and a later create transaction can retry the same vote metadata with a fresh height-derived `vote_round_id` |
+| Offline validator | REGISTERING phase times out after `DefaultContributionTimeout` (10 min), non-contributors are jailed through `x/slashing`, the pending round is marked `SESSION_STATUS_CEREMONY_FAILED`, and a later create transaction can retry the same vote metadata with a fresh height-derived `vote_round_id` |
 | Compromised Pallas key | Validator rotates via `MsgRotatePallasKey` (blocked during in-flight ceremonies). Future rounds use the new key. Past ECIES ciphertexts in completed `DkgContributions` remain encrypted to the old key. |
 | Liveness (all honest, n validators) | ~2n blocks (n contributions + n acks) |
 
@@ -251,7 +251,7 @@ Two liveness gaps were identified during DKG review.
 
 **Problem.** The DKG requires all `n` contributions before transitioning REGISTERING → DEALT (`len(round.DkgContributions) == nValidators` in `ContributeDKG`). If any validator is offline and never proposes a block, the ceremony hangs indefinitely.
 
-**Fix (implemented).** `DefaultContributionTimeout` (10 minutes) is set on `CeremonyPhaseStart` / `CeremonyPhaseTimeout` when a round enters REGISTERING. EndBlocker checks for expired REGISTERING rounds and marks the pending round `SESSION_STATUS_CEREMONY_FAILED` rather than retrying with the same ceremony validator snapshot. A later create transaction can reuse the same vote metadata, derive a fresh `vote_round_id` from its creation height, and snapshot the currently eligible validators.
+**Fix (implemented).** `DefaultContributionTimeout` (10 minutes) is set on `CeremonyPhaseStart` / `CeremonyPhaseTimeout` when a round enters REGISTERING. EndBlocker checks for expired REGISTERING rounds, jails validators that did not contribute, and marks the pending round `SESSION_STATUS_CEREMONY_FAILED` rather than retrying with the same ceremony validator snapshot. A later create transaction can reuse the same vote metadata, derive a fresh `vote_round_id` from its creation height, and snapshot the currently eligible validators.
 
 #### Issue 2: Corrupted-share DoS vector (documented, deferred)
 

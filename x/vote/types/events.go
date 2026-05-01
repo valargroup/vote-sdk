@@ -18,6 +18,7 @@ const (
 	EventTypeSubmitPartialDecryption  = "submit_partial_decryption"
 	EventTypeAuthorizedSend           = "authorized_send"
 	EventTypeTallyTimeout             = "tally_timeout"
+	EventTypeCeremonyValidatorJailed  = "ceremony_validator_jailed"
 )
 
 // Event attribute keys.
@@ -45,4 +46,6 @@ const (
 	AttributeKeyAmount           = "amount"
 	AttributeKeyOldPallasPk      = "old_pallas_pk"
 	AttributeKeyNewPallasPk      = "new_pallas_pk"
+	AttributeKeyCeremonyPhase    = "ceremony_phase"
+	AttributeKeyJailedUntil      = "jailed_until"
 )

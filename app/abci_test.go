@@ -15,6 +15,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"github.com/mikelodder7/curvey"
@@ -95,9 +96,33 @@ func seedBondedValidatorWithPallasKey(t *testing.T, app *testutil.TestApp, valAd
 	validator.MinSelfDelegation = sdkmath.OneInt()
 
 	require.NoError(t, app.StakingKeeper.SetValidator(ctx, validator))
+	require.NoError(t, app.StakingKeeper.SetValidatorByConsAddr(ctx, validator))
+
+	ensureValidatorSigningInfo(t, app, valAddr)
 
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
 	require.NoError(t, app.VoteKeeper().RegisterPallasKeyCore(kvStore, valAddr, pallasPk))
+}
+
+func ensureValidatorSigningInfo(t *testing.T, app *testutil.TestApp, valAddr string) {
+	t.Helper()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height, Time: app.Time})
+	addr, err := sdk.ValAddressFromBech32(valAddr)
+	require.NoError(t, err)
+	validator, err := app.StakingKeeper.GetValidator(ctx, addr)
+	require.NoError(t, err)
+	consAddr, err := validator.GetConsAddr()
+	require.NoError(t, err)
+	if _, err := app.SlashingKeeper.GetValidatorSigningInfo(ctx, sdk.ConsAddress(consAddr)); err == nil {
+		return
+	}
+	require.NoError(t, app.SlashingKeeper.SetValidatorSigningInfo(ctx, sdk.ConsAddress(consAddr), slashingtypes.ValidatorSigningInfo{
+		Address:             sdk.ConsAddress(consAddr).String(),
+		StartHeight:         app.Height,
+		JailedUntil:         time.Unix(0, 0).UTC(),
+		Tombstoned:          false,
+		MissedBlocksCounter: 0,
+	}))
 }
 
 func markValidatorsJailed(t *testing.T, app *testutil.TestApp, valAddrs ...string) {
@@ -111,6 +136,31 @@ func markValidatorsJailed(t *testing.T, app *testutil.TestApp, valAddrs ...strin
 		validator.Jailed = true
 		require.NoError(t, app.StakingKeeper.SetValidator(ctx, validator))
 	}
+}
+
+func setDowntimeJailDuration(t *testing.T, app *testutil.TestApp, duration time.Duration) {
+	t.Helper()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height, Time: app.Time})
+	params, err := app.SlashingKeeper.GetParams(ctx)
+	require.NoError(t, err)
+	params.DowntimeJailDuration = duration
+	require.NoError(t, app.SlashingKeeper.SetParams(ctx, params))
+}
+
+func requireValidatorJailedUntil(t *testing.T, app *testutil.TestApp, valAddr string, want time.Time) {
+	t.Helper()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height, Time: app.Time})
+	addr, err := sdk.ValAddressFromBech32(valAddr)
+	require.NoError(t, err)
+	validator, err := app.StakingKeeper.GetValidator(ctx, addr)
+	require.NoError(t, err)
+	require.True(t, validator.Jailed, "expected validator %s to be jailed", valAddr)
+
+	consAddr, err := validator.GetConsAddr()
+	require.NoError(t, err)
+	info, err := app.SlashingKeeper.GetValidatorSigningInfo(ctx, sdk.ConsAddress(consAddr))
+	require.NoError(t, err)
+	require.Equal(t, want.UTC(), info.JailedUntil.UTC())
 }
 
 func (s *ABCIIntegrationSuite) SetupTest() {
@@ -771,6 +821,7 @@ func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
 // new round with a fresh validator snapshot.
 func TestMultiValidatorCeremony_TimeoutFinalizesPendingRound(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	setDowntimeJailDuration(t, app, 5*time.Minute)
 
 	valAddr := app.ValidatorOperAddr()
 
@@ -783,6 +834,9 @@ func TestMultiValidatorCeremony_TimeoutFinalizesPendingRound(t *testing.T) {
 	phantom1Addr := sdk.ValAddress(bytes.Repeat([]byte{0xB1}, 20)).String()
 	phantom2Addr := sdk.ValAddress(bytes.Repeat([]byte{0xB2}, 20)).String()
 	phantom3Addr := sdk.ValAddress(bytes.Repeat([]byte{0xB3}, 20)).String()
+	seedBondedValidatorWithPallasKey(t, app, phantom1Addr, phantomPk1.Point.ToAffineCompressed())
+	seedBondedValidatorWithPallasKey(t, app, phantom2Addr, phantomPk2.Point.ToAffineCompressed())
+	seedBondedValidatorWithPallasKey(t, app, phantom3Addr, phantomPk3.Point.ToAffineCompressed())
 
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
@@ -821,7 +875,11 @@ func TestMultiValidatorCeremony_TimeoutFinalizesPendingRound(t *testing.T) {
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
 	require.Len(t, round.CeremonyAcks, 1, "acks should be preserved for audit")
 	require.NotEmpty(t, round.CeremonyLog)
-	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-1], "DEALT timeout: ceremony failed")
+	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-2], "DEALT timeout: ceremony failed")
+	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-1], "DEALT timeout: jailed 3 non-ackers")
+	requireValidatorJailedUntil(t, app, phantom1Addr, timeoutTime.Add(5*time.Minute))
+	requireValidatorJailedUntil(t, app, phantom2Addr, timeoutTime.Add(5*time.Minute))
+	requireValidatorJailedUntil(t, app, phantom3Addr, timeoutTime.Add(5*time.Minute))
 }
 
 // ---------------------------------------------------------------------------
@@ -855,6 +913,9 @@ func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 	phantom1Addr := sdk.ValAddress(bytes.Repeat([]byte{0xC1}, 20)).String()
 	phantom2Addr := sdk.ValAddress(bytes.Repeat([]byte{0xC2}, 20)).String()
 	phantom3Addr := sdk.ValAddress(bytes.Repeat([]byte{0xC3}, 20)).String()
+	seedBondedValidatorWithPallasKey(t, app, phantom1Addr, phantomPk1.Point.ToAffineCompressed())
+	seedBondedValidatorWithPallasKey(t, app, phantom2Addr, phantomPk2.Point.ToAffineCompressed())
+	seedBondedValidatorWithPallasKey(t, app, phantom3Addr, phantomPk3.Point.ToAffineCompressed())
 
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: valAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
@@ -957,6 +1018,7 @@ func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 
 func TestCreateVotingSession_DealtTimeoutRetrySameMetadataSameHeightFailsNextSucceeds(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	setDowntimeJailDuration(t, app, 5*time.Minute)
 
 	app.SeedVoteManagers(app.ValidatorAccAddr())
 	app.RegisterPallasKey(pallasPk)
@@ -1001,6 +1063,9 @@ func TestCreateVotingSession_DealtTimeoutRetrySameMetadataSameHeightFailsNextSuc
 	firstRound = app.MustGetVoteRound(firstRoundID)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, firstRound.Status)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, firstRound.CeremonyStatus)
+	requireValidatorJailedUntil(t, app, phantom1Addr, timeoutTime.Add(5*time.Minute))
+	requireValidatorJailedUntil(t, app, phantom2Addr, timeoutTime.Add(5*time.Minute))
+	requireValidatorJailedUntil(t, app, phantom3Addr, timeoutTime.Add(5*time.Minute))
 
 	// Retrying at the original creation height derives the same round_id and is
 	// rejected even though the prior ceremony is now terminal.
@@ -1010,7 +1075,6 @@ func TestCreateVotingSession_DealtTimeoutRetrySameMetadataSameHeightFailsNextSuc
 	// creation height produces a different round_id, and jailed phantom
 	// validators are excluded from the new snapshot so the single live validator
 	// can complete the ceremony.
-	markValidatorsJailed(t, app, phantom1Addr, phantom2Addr, phantom3Addr)
 	retryRoundID := deliverCreateVotingSession(t, app, msg)
 	require.NotEqual(t, firstRoundID, retryRoundID)
 
@@ -1028,9 +1092,22 @@ func TestCreateVotingSession_DealtTimeoutRetrySameMetadataSameHeightFailsNextSuc
 
 func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataSameHeightFailsNextSucceeds(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	setDowntimeJailDuration(t, app, 5*time.Minute)
 
 	app.SeedVoteManagers(app.ValidatorAccAddr())
 	app.RegisterPallasKey(pallasPk)
+
+	valAddr := app.ValidatorOperAddr()
+	_, phantomPk1 := elgamal.KeyGen(rand.Reader)
+	_, phantomPk2 := elgamal.KeyGen(rand.Reader)
+	_, phantomPk3 := elgamal.KeyGen(rand.Reader)
+	phantom1Addr := sdk.ValAddress(bytes.Repeat([]byte{0xF1}, 20)).String()
+	phantom2Addr := sdk.ValAddress(bytes.Repeat([]byte{0xF2}, 20)).String()
+	phantom3Addr := sdk.ValAddress(bytes.Repeat([]byte{0xF3}, 20)).String()
+	seedBondedValidatorWithPallasKey(t, app, phantom1Addr, phantomPk1.Point.ToAffineCompressed())
+	seedBondedValidatorWithPallasKey(t, app, phantom2Addr, phantomPk2.Point.ToAffineCompressed())
+	seedBondedValidatorWithPallasKey(t, app, phantom3Addr, phantomPk3.Point.ToAffineCompressed())
+	app.NextBlock()
 
 	msg := testutil.ValidCreateVotingSessionAt(app.Time)
 	msg.Creator = app.ValidatorAccAddr()
@@ -1039,15 +1116,24 @@ func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataSameHeightFailsN
 	firstRound := app.MustGetVoteRound(firstRoundID)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_PENDING, firstRound.Status)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, firstRound.CeremonyStatus)
+	require.Len(t, firstRound.CeremonyValidators, 4)
 
-	// Do not run PrepareProposal. Advancing past the contribution timeout
-	// leaves the round in REGISTERING and marks it terminal.
+	// Let the live proposer contribute, but leave the phantom validators
+	// offline so REGISTERING times out with 1/4 contributions.
+	app.NextBlockWithPrepareProposal()
+	firstRound = app.MustGetVoteRound(firstRoundID)
+	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, firstRound.CeremonyStatus)
+	require.Len(t, firstRound.DkgContributions, 1)
+
 	timeoutTime := time.Unix(int64(firstRound.CeremonyPhaseStart+firstRound.CeremonyPhaseTimeout)+1, 0)
 	app.NextBlockAtTime(timeoutTime)
 
 	firstRound = app.MustGetVoteRound(firstRoundID)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, firstRound.Status)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, firstRound.CeremonyStatus)
+	requireValidatorJailedUntil(t, app, phantom1Addr, timeoutTime.Add(5*time.Minute))
+	requireValidatorJailedUntil(t, app, phantom2Addr, timeoutTime.Add(5*time.Minute))
+	requireValidatorJailedUntil(t, app, phantom3Addr, timeoutTime.Add(5*time.Minute))
 
 	// Retrying at the original creation height derives the same round_id and is
 	// rejected even though the prior ceremony is now terminal.
@@ -1058,11 +1144,14 @@ func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataSameHeightFailsN
 	// recover after timeout.
 	retryRoundID := deliverCreateVotingSession(t, app, msg)
 	require.NotEqual(t, firstRoundID, retryRoundID)
-
-	app.NextBlockWithPrepareProposal()
-	app.NextBlockWithPrepareProposal()
-
 	retryRound := app.MustGetVoteRound(retryRoundID)
+	require.Len(t, retryRound.CeremonyValidators, 1)
+	require.Equal(t, valAddr, retryRound.CeremonyValidators[0].ValidatorAddress)
+
+	app.NextBlockWithPrepareProposal()
+	app.NextBlockWithPrepareProposal()
+
+	retryRound = app.MustGetVoteRound(retryRoundID)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, retryRound.Status)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, retryRound.CeremonyStatus)
 }

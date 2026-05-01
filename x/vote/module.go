@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
+	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
@@ -250,12 +251,13 @@ func ProvideAuthorizedSendSigner() signing.CustomGetSigner {
 type ModuleInputs struct {
 	depinject.In
 
-	StoreService  store.KVStoreService
-	Cdc           codec.Codec
-	Logger        log.Logger
-	Config        *modulev1.Module
-	StakingKeeper *stakingkeeper.Keeper
-	BankKeeper    bankkeeper.BaseKeeper
+	StoreService   store.KVStoreService
+	Cdc            codec.Codec
+	Logger         log.Logger
+	Config         *modulev1.Module
+	StakingKeeper  *stakingkeeper.Keeper
+	SlashingKeeper slashingkeeper.Keeper
+	BankKeeper     bankkeeper.BaseKeeper
 }
 
 // ModuleOutputs defines the outputs produced by the vote module.
@@ -275,6 +277,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.StakingKeeper,
 		&in.BankKeeper,
 	)
+	k.SetSlashingKeeper(in.SlashingKeeper)
 
 	m := NewAppModule(k, in.Cdc)
 
@@ -547,10 +550,23 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			continue
 		}
 
+		jailedValidators, err := am.keeper.JailCeremonyNonParticipants(
+			ctx,
+			round,
+			types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		)
+		if err != nil {
+			return err
+		}
+
 		oldRoundStatus := round.Status
 		keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 			fmt.Sprintf("REGISTERING timeout: ceremony failed (%d/%d contributions)",
 				len(round.DkgContributions), len(round.CeremonyValidators)))
+		if len(jailedValidators) > 0 {
+			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+				fmt.Sprintf("REGISTERING timeout: jailed %d non-contributors", len(jailedValidators)))
+		}
 		round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
 		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
@@ -598,6 +614,15 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		nAcks := len(round.CeremonyAcks)
 		nVals := len(round.CeremonyValidators)
 
+		jailedValidators, err := am.keeper.JailCeremonyNonParticipants(
+			ctx,
+			round,
+			types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+		)
+		if err != nil {
+			return err
+		}
+
 		if keeper.HalfAcked(round) {
 			stripped := nVals - nAcks
 
@@ -610,6 +635,10 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 					fmt.Sprintf("DEALT timeout: ceremony failed (%d/%d acks, below threshold %d)",
 						nAcks, nVals, round.Threshold))
+				if len(jailedValidators) > 0 {
+					keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+						fmt.Sprintf("DEALT timeout: jailed %d non-ackers", len(jailedValidators)))
+				}
 				round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
 				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
@@ -631,6 +660,10 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 					fmt.Sprintf("DEALT timeout: confirmed with %d/%d acks, %d stripped", nAcks, nVals, stripped))
+				if len(jailedValidators) > 0 {
+					keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+						fmt.Sprintf("DEALT timeout: jailed %d non-ackers", len(jailedValidators)))
+				}
 
 				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 					return err
@@ -655,6 +688,10 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			oldRoundStatus := round.Status
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 				fmt.Sprintf("DEALT timeout: ceremony failed (%d/%d acks, below threshold)", nAcks, nVals))
+			if len(jailedValidators) > 0 {
+				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+					fmt.Sprintf("DEALT timeout: jailed %d non-ackers", len(jailedValidators)))
+			}
 			round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
 			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {

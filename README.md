@@ -138,15 +138,15 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
 | ----------- | ------------------ | ----------------------------- | ----------------------------------------------- |
 | REGISTERING | DEALT              | Auto-deal via PrepareProposal | Block proposer is a ceremony validator          |
 | DEALT       | CONFIRMED + ACTIVE | MsgAckExecutiveAuthorityKey   | All validators acked (fast path)                |
-| DEALT       | CONFIRMED + ACTIVE | EndBlocker timeout            | >= 1/2 acked at timeout; non-ackers stripped    |
-| REGISTERING | CEREMONY_FAILED    | EndBlocker timeout            | DKG contributions incomplete at timeout         |
-| DEALT       | CEREMONY_FAILED    | EndBlocker timeout            | < 1/2 acked or below published threshold        |
+| DEALT       | CONFIRMED + ACTIVE | EndBlocker timeout            | >= 1/2 acked at timeout; non-ackers stripped and jailed |
+| REGISTERING | CEREMONY_FAILED    | EndBlocker timeout            | DKG contributions incomplete at timeout; non-contributors jailed |
+| DEALT       | CEREMONY_FAILED    | EndBlocker timeout            | < 1/2 acked or below published threshold; non-ackers jailed |
 
 Key behaviors:
 - **Fast path vs timeout** — the fast path confirms when ALL validators ack (no stripping needed). The timeout path confirms with >= 1/2 acks (integer arithmetic: `acks * 2 >= validators`) and strips non-ackers.
 - **Auto-deal** — the block proposer automatically deals when it detects a PENDING round in REGISTERING state. No manual `ceremony.sh deal` step.
 - **Auto-ack** — each block proposer auto-acks via PrepareProposal when it detects a DEALT round.
-- **Non-acker stripping** — validators who fail to ack within the timeout are stripped from the round's ceremony (removed from `ceremony_validators` and `ceremony_payloads`). No miss counters or ceremony-based jailing — liveness enforcement is handled by `x/slashing` block-miss detection.
+- **Ceremony timeout jailing** — validators who miss REGISTERING contributions or DEALT acks are jailed through `x/slashing` until the chain's downtime jail duration elapses. DEALT non-ackers are also stripped from successful timeout confirmations.
 - **Ceremony log** — each state transition appends a timestamped entry to `ceremony_log` on the round, visible in queries and the admin UI.
 
 #### Pallas Key Registration and Rotation
@@ -164,8 +164,8 @@ A registered key can be replaced via `MsgRotatePallasKey`. Rotation is rejected 
 #### Timeout (EndBlocker)
 
 REGISTERING and DEALT phases have timeouts (default: 10 minutes). On DEALT timeout:
-- **>= 1/2 acked:** Confirm ceremony, strip non-ackers, activate round.
-- **< 1/2 acked:** Finalize the pending round; a later create transaction can retry the same vote metadata because `vote_round_id` includes the round creation height.
+- **>= 1/2 acked:** Jail and strip non-ackers, confirm ceremony, activate round.
+- **< 1/2 acked:** Jail non-ackers and finalize the pending round; a later create transaction can retry the same vote metadata because `vote_round_id` includes the round creation height.
 
 #### ECIES Encryption Scheme
 
