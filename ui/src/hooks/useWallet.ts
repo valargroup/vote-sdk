@@ -1,18 +1,15 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { OfflineDirectSigner } from "@cosmjs/proto-signing";
 import {
   connectKeplr,
-  connectWithPrivateKey,
-  signArbitraryWithKey,
   signArbitraryWithKeplr,
 } from "../api/wallet";
 import type { ArbitrarySignature } from "../api/wallet";
 import * as chainApi from "../api/chain";
 
-type WalletSource = "keplr" | "privkey";
+type WalletSource = "keplr";
 
 const SOURCE_KEY = "sv-wallet-source";
-export const DEFAULT_DEV_KEY = import.meta.env.VITE_VM_PRIVKEY ?? "";
 
 // Tendermint RPC — defaults to same host as REST but on the standard RPC port.
 const DEFAULT_RPC_URL = "http://localhost:26657";
@@ -34,9 +31,8 @@ export interface UseWallet {
   connecting: boolean;
   error: string | null;
   connect: () => Promise<void>;
-  connectDev: (privateKeyHex: string) => Promise<void>;
   disconnect: () => void;
-  /** Sign arbitrary data using the connected wallet (Keplr or dev key). */
+  /** Sign arbitrary data using the connected Keplr wallet. */
   signPayload: (data: string) => Promise<ArbitrarySignature>;
 }
 
@@ -46,8 +42,6 @@ export function useWallet(): UseWallet {
   const [source, setSource] = useState<WalletSource | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Store the raw private key hex for dev-mode signArbitrary support.
-  const privKeyRef = useRef<string | null>(null);
 
   const applyConnection = useCallback(
     (conn: { signer: OfflineDirectSigner; address: string }, src: WalletSource) => {
@@ -75,30 +69,11 @@ export function useWallet(): UseWallet {
     }
   }, [applyConnection]);
 
-  // Dev private key connection
-  const connectDev = useCallback(
-    async (privateKeyHex: string) => {
-      setConnecting(true);
-      setError(null);
-      try {
-        const conn = await connectWithPrivateKey(privateKeyHex);
-        privKeyRef.current = privateKeyHex;
-        applyConnection(conn, "privkey");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setConnecting(false);
-      }
-    },
-    [applyConnection],
-  );
-
   const disconnect = useCallback(() => {
     setSigner(null);
     setAddress(null);
     setSource(null);
     setError(null);
-    privKeyRef.current = null;
     localStorage.removeItem(SOURCE_KEY);
   }, []);
 
@@ -106,23 +81,18 @@ export function useWallet(): UseWallet {
   const signPayload = useCallback(
     async (data: string): Promise<ArbitrarySignature> => {
       if (!address) throw new Error("Wallet not connected");
-      if (source === "privkey" && privKeyRef.current) {
-        return signArbitraryWithKey(privKeyRef.current, address, data);
-      }
       return signArbitraryWithKeplr(address, data);
     },
-    [address, source],
+    [address],
   );
 
-  // Auto-reconnect on page load: Keplr if previously used, otherwise default dev key.
+  // Auto-reconnect on page load when Keplr was previously used.
   useEffect(() => {
     const saved = localStorage.getItem(SOURCE_KEY);
     if (saved === "keplr" && window.keplr) {
       connect();
-    } else if (!saved && DEFAULT_DEV_KEY) {
-      connectDev(DEFAULT_DEV_KEY);
     }
-  }, [connect, connectDev]);
+  }, [connect]);
 
   // Re-derive address when user switches Keplr accounts.
   useEffect(() => {
@@ -140,7 +110,6 @@ export function useWallet(): UseWallet {
     connecting,
     error,
     connect,
-    connectDev,
     disconnect,
     signPayload,
   };
