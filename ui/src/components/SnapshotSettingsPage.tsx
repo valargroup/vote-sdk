@@ -44,18 +44,17 @@ function formatTimestamp(iso: string): string {
 // snapshot the entire fleet should converge on?".
 //
 // Two sources are combined:
-//   * snapshot_height comes from the published wallet-facing voting-config —
-//     it's what wallets/iOS will validate the chain round against.
+//   * snapshot_height comes from the active on-chain round — it's what
+//     wallets/iOS validate after discovering the current round id.
 //   * precomputed_base_url comes from THIS svoted's /api/ui-config — it's a
 //     deployment-level concern (staging svoted points at a staging bucket)
 //     rather than a wallet-facing one.
 function PublishedSnapshotCard() {
   const {
-    publishedConfig,
-    publishedConfigLoaded,
-    refreshPublishedConfig,
     precomputedBaseURL,
   } = useUIConfig();
+  const [activeRoundHeight, setActiveRoundHeight] = useState<number | null>(null);
+  const [activeRoundLoaded, setActiveRoundLoaded] = useState(false);
   const [manifest, setManifest] = useState<PublishedSnapshotManifest | null>(
     null
   );
@@ -63,14 +62,30 @@ function PublishedSnapshotCard() {
   const [loading, setLoading] = useState(false);
 
   const precomputedBase = precomputedBaseURL ?? null;
-  const height = publishedConfig?.snapshot_height ?? null;
+  const height = activeRoundHeight;
 
-  const fetchManifest = useCallback(async () => {
-    if (!precomputedBase || height == null) return;
+  const refreshActiveRound = useCallback(async (): Promise<number | null> => {
+    try {
+      const resp = await chainApi.getActiveRound();
+      const parsedHeight = Number(resp.round?.snapshot_height ?? 0);
+      const nextHeight = parsedHeight > 0 ? parsedHeight : null;
+      setActiveRoundHeight(nextHeight);
+      return nextHeight;
+    } catch {
+      setActiveRoundHeight(null);
+      return null;
+    } finally {
+      setActiveRoundLoaded(true);
+    }
+  }, []);
+
+  const fetchManifest = useCallback(async (heightOverride?: number | null) => {
+    const manifestHeight = heightOverride ?? height;
+    if (!precomputedBase || manifestHeight == null) return;
     setLoading(true);
     setError(null);
     try {
-      const m = await chainApi.getPublishedSnapshotManifest(precomputedBase, height);
+      const m = await chainApi.getPublishedSnapshotManifest(precomputedBase, manifestHeight);
       setManifest(m);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch manifest");
@@ -83,6 +98,25 @@ function PublishedSnapshotCard() {
   useEffect(() => {
     fetchManifest();
   }, [fetchManifest]);
+
+  useEffect(() => {
+    let cancelled = false;
+    chainApi.getActiveRound()
+      .then((resp) => {
+        if (cancelled) return;
+        const parsedHeight = Number(resp.round?.snapshot_height ?? 0);
+        setActiveRoundHeight(parsedHeight > 0 ? parsedHeight : null);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveRoundHeight(null);
+      })
+      .finally(() => {
+        if (!cancelled) setActiveRoundLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const totalBytes = manifest
     ? Object.values(manifest.files).reduce((sum, f) => sum + f.size, 0)
@@ -99,8 +133,8 @@ function PublishedSnapshotCard() {
         </div>
         <button
           onClick={async () => {
-            await refreshPublishedConfig();
-            await fetchManifest();
+            const refreshedHeight = await refreshActiveRound();
+            await fetchManifest(refreshedHeight);
           }}
           className="p-1 text-text-muted hover:text-text-secondary cursor-pointer"
           title="Refresh"
@@ -109,11 +143,11 @@ function PublishedSnapshotCard() {
         </button>
       </div>
 
-      {!publishedConfigLoaded && (
-        <p className="text-xs text-text-muted">Loading published config…</p>
+      {!activeRoundLoaded && (
+        <p className="text-xs text-text-muted">Loading active round…</p>
       )}
 
-      {publishedConfigLoaded && (!precomputedBase || height == null) && (
+      {activeRoundLoaded && (!precomputedBase || height == null) && (
         <div className="flex items-start gap-2 px-3 py-2.5 bg-warning/10 border border-warning/30 rounded-lg">
           <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
           <div>
@@ -123,7 +157,7 @@ function PublishedSnapshotCard() {
             <p className="text-[10px] text-text-muted mt-0.5">
               {height == null && (
                 <>
-                  The voting-config is missing{" "}
+                  No active on-chain round exposes{" "}
                   <code className="font-mono">snapshot_height</code>.{" "}
                 </>
               )}

@@ -974,6 +974,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [latestBlock, setLatestBlock] = useState<chainApi.LatestBlockInfo | null>(null);
   const [helperStatus, setHelperStatus] = useState<chainApi.HelperStatus | null>(null);
   const [voteManagers, setVoteManagers] = useState<string[]>([]);
+  const [activeRound, setActiveRound] = useState<chainApi.ChainRound | null>(null);
   const [chainDetailsOpen, setChainDetailsOpen] = useState(false);
 
   // Dev private key connection (collapsible section)
@@ -1009,14 +1010,16 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
       const block = await chainApi.getLatestBlock();
       setLatestBlock(block);
 
-      const [state, vmResp, helper] = await Promise.all([
+      const [state, vmResp, helper, activeRoundResp] = await Promise.all([
         chainApi.testConnection(),
         chainApi.getVoteManagers(),
         chainApi.getHelperStatus().catch(() => null),
+        chainApi.getActiveRound().catch(() => ({ round: null })),
       ]);
       setCeremony(state);
       setVoteManagers(vmResp.vote_manager_addresses ?? []);
       setHelperStatus(helper);
+      setActiveRound(activeRoundResp.round);
       setConnStatus("ok");
     } catch (err) {
       setConnError(err instanceof Error ? err.message : String(err));
@@ -1289,7 +1292,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
               <PirFleetStatus
                 endpoints={pirEndpoints}
                 selectedUrl={selectedNullifierUrl || undefined}
-                expectedHeight={votingConfig?.snapshot_height}
+                expectedHeight={Number(activeRound?.snapshot_height ?? 0) || undefined}
               />
             </div>
           )}
