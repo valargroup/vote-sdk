@@ -254,7 +254,9 @@ function PIRStatusCard({ devControls }: { devControls: boolean }) {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const s = await chainApi.getSnapshotStatus();
+      const s = devControls
+        ? await chainApi.getLocalSnapshotStatus()
+        : await chainApi.getSnapshotStatus();
       setStatus(s);
       setStatusError(null);
       return s;
@@ -262,7 +264,7 @@ function PIRStatusCard({ devControls }: { devControls: boolean }) {
       setStatusError(err instanceof Error ? err.message : "Failed to fetch status");
       return null;
     }
-  }, []);
+  }, [devControls]);
 
   const fetchActiveRound = useCallback(async () => {
     try {
@@ -321,7 +323,10 @@ function PIRStatusCard({ devControls }: { devControls: boolean }) {
     setRebuildError(null);
     try {
       await chainApi.prepareSnapshot(height);
-      fetchStatus();
+      const s = await fetchStatus();
+      if (!s || s.phase !== "rebuilding") {
+        setRebuilding(false);
+      }
     } catch (err) {
       setRebuildError(err instanceof Error ? err.message : "Failed to start rebuild");
       setRebuilding(false);
@@ -348,7 +353,7 @@ function PIRStatusCard({ devControls }: { devControls: boolean }) {
       <div className="bg-surface-1 border border-border rounded-xl p-5 mb-6">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-medium text-text-primary">
-            Local PIR server status
+            {devControls ? "Local PIR server status" : "PIR server status"}
           </h2>
           <button
             onClick={fetchStatus}

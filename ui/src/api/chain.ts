@@ -47,12 +47,20 @@ export function getApiBase(): string {
 
 const NULLIFIER_URL_KEY = "shielded-vote-nullifier-url";
 
-export function getNullifierUrl(): string {
+export const LOCAL_PIR_URL = "/nullifier";
+export const DEFAULT_PIR_URL = "https://pir.valargroup.org";
+
+function storedNullifierUrl(): string {
+  if (typeof window === "undefined") return "";
   return localStorage.getItem(NULLIFIER_URL_KEY) || "";
 }
 
+export function getNullifierUrl(): string {
+  return storedNullifierUrl() || DEFAULT_PIR_URL;
+}
+
 export function setNullifierUrl(url: string) {
-  if (url) {
+  if (url && url !== DEFAULT_PIR_URL) {
     localStorage.setItem(NULLIFIER_URL_KEY, url);
   } else {
     localStorage.removeItem(NULLIFIER_URL_KEY);
@@ -60,18 +68,12 @@ export function setNullifierUrl(url: string) {
 }
 
 function nullifierBase(): string {
-  if (typeof window !== "undefined") {
-    const stored = localStorage.getItem(NULLIFIER_URL_KEY);
-    if (stored) return stored;
-  }
-  return "";
+  return getNullifierUrl();
 }
 
 /** Resolved nullifier API base for direct fetch calls (always returns a usable value). */
 export function getNullifierApiBase(): string {
-  const stored = getNullifierUrl();
-  if (stored) return stored;
-  return "/nullifier";
+  return getNullifierUrl();
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -83,7 +85,15 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   } else {
     url = `${apiBase()}${path}`;
   }
+  return fetchJsonAtUrl<T>(url, init);
+}
+
+async function fetchJsonAtUrl<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, init);
+  return decodeJsonResponse<T>(resp);
+}
+
+async function decodeJsonResponse<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
     const body = await resp.text();
     let msg = `HTTP ${resp.status}`;
@@ -96,6 +106,52 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     throw new HTTPError(resp.status, msg);
   }
   return resp.json();
+}
+
+function nullifierURL(base: string, path: "/root" | "/snapshot/status"): string {
+  return `${base.replace(/\/+$/, "")}${path}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function assertPirRootResponse(value: unknown): asserts value is { height: number | null; num_ranges: number } {
+  if (!isRecord(value)) throw new Error("Invalid PIR root response");
+  if (value.height !== null && typeof value.height !== "number") {
+    throw new Error("Invalid PIR root height");
+  }
+  if (typeof value.num_ranges !== "number") {
+    throw new Error("Invalid PIR nullifier count");
+  }
+}
+
+function assertSnapshotStatus(value: unknown): asserts value is SnapshotStatus {
+  if (!isRecord(value)) throw new Error("Invalid PIR snapshot status");
+  if (!["serving", "rebuilding", "error"].includes(String(value.phase))) {
+    throw new Error("Invalid PIR snapshot phase");
+  }
+}
+
+async function fetchReadOnlyNullifierJson<T>(
+  path: "/root" | "/snapshot/status",
+  validate: (value: unknown) => asserts value is T
+): Promise<T> {
+  return fetchNullifierJsonAtBase(getNullifierApiBase(), path, validate);
+}
+
+async function fetchNullifierJsonAtBase<T>(
+  base: string,
+  path: "/root" | "/snapshot/status",
+  validate: (value: unknown) => asserts value is T
+): Promise<T> {
+  const fetchAndValidate = async (base: string): Promise<T> => {
+    const data = await fetchJsonAtUrl<unknown>(nullifierURL(base, path));
+    validate(data);
+    return data;
+  };
+
+  return fetchAndValidate(base);
 }
 
 // -- Types matching the chain REST API responses --
@@ -260,7 +316,10 @@ export interface NullifierStatus {
 export async function getNullifierStatus(): Promise<NullifierStatus> {
   // The PIR server exposes /root with {height, num_ranges, ...}.
   // Map to the NullifierStatus shape expected by the UI.
-  const pir = await fetchJson<{ height: number | null; num_ranges: number }>("/nullifier/root");
+  const pir = await fetchReadOnlyNullifierJson<{ height: number | null; num_ranges: number }>(
+    "/root",
+    assertPirRootResponse
+  );
   return {
     latest_height: pir.height,
     nullifier_count: pir.num_ranges,
@@ -342,11 +401,15 @@ export interface SnapshotStatus {
 }
 
 export async function getSnapshotStatus(): Promise<SnapshotStatus> {
-  return fetchJson<SnapshotStatus>("/nullifier/snapshot/status");
+  return fetchReadOnlyNullifierJson<SnapshotStatus>("/snapshot/status", assertSnapshotStatus);
+}
+
+export async function getLocalSnapshotStatus(): Promise<SnapshotStatus> {
+  return fetchNullifierJsonAtBase<SnapshotStatus>(LOCAL_PIR_URL, "/snapshot/status", assertSnapshotStatus);
 }
 
 export async function prepareSnapshot(height: number): Promise<{ status: string; target_height: number }> {
-  return fetchJson<{ status: string; target_height: number }>("/nullifier/snapshot/prepare", {
+  return fetchJsonAtUrl<{ status: string; target_height: number }>(`${LOCAL_PIR_URL}/snapshot/prepare`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ height }),
