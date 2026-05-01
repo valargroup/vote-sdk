@@ -655,21 +655,19 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
 
 /// Cached share reveal circuit params and verifying key.
 ///
-/// Same caching pattern as delegation_vk_cached().
-fn share_reveal_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine>) {
-    static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        let params = share_reveal::share_reveal_params();
-        let (_pk, vk) = share_reveal::share_reveal_proving_key(&params);
-        (params, vk)
-    })
+/// This reuses the share-reveal prover cache so proof generation and
+/// verification do not initialize separate key sets.
+fn share_reveal_vk_cached() -> (&'static Params<EqAffine>, &'static VerifyingKey<EqAffine>) {
+    let (params, _pk, vk) = share_reveal::share_reveal_cached_keys();
+    (params, vk)
 }
 
-/// Warm all real verifier caches used by the vote chain.
+/// Warm all real verifier/prover caches used by the vote chain.
 ///
 /// This performs the deterministic Halo2 params/keygen work normally triggered
-/// by the first proof verification. Calling it during node readiness warm-up
-/// keeps the first live vote transaction off the cold-cache path.
+/// by the first proof verification or helper proof generation. Calling it
+/// during node readiness warm-up keeps the first live vote transaction and
+/// first helper proof off the cold-cache path.
 /// Each circuit cache is initialized on its own thread so process readiness is
 /// bounded by the slowest verifier keygen rather than the sum of all three.
 ///
@@ -687,7 +685,7 @@ pub extern "C" fn sv_warm_verifier_caches() -> i32 {
                 let _ = vote_proof_vk_cached();
             })),
             ("share_reveal", std::thread::spawn(|| {
-                let _ = share_reveal_vk_cached();
+                let _ = share_reveal::share_reveal_cached_keys();
             })),
         ];
 

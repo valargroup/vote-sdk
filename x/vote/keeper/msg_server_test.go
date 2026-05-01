@@ -338,6 +338,50 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			},
 		},
 		{
+			name: "happy path: jailed validator excluded from ceremony snapshot",
+			setup: func() {
+				addrs, _ := s.registerValidators(3)
+				mk := newMockStakingKeeper(addrs...)
+				jailed := mk.validators[addrs[1]]
+				jailed.Jailed = true
+				mk.validators[addrs[1]] = jailed
+				s.setupWithMockStakingKeeper(mk)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
+			},
+			msg: msg,
+			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, err := s.keeper.GetVoteRound(kv, resp.VoteRoundId)
+				s.Require().NoError(err)
+				s.Require().Len(round.CeremonyValidators, 2)
+				got := []string{
+					round.CeremonyValidators[0].ValidatorAddress,
+					round.CeremonyValidators[1].ValidatorAddress,
+				}
+				s.Require().ElementsMatch([]string{testValAddr(1), testValAddr(3)}, got)
+			},
+		},
+		{
+			name: "happy path: unjailed validator can start without jailed validator",
+			setup: func() {
+				addrs, _ := s.registerValidators(2)
+				mk := newMockStakingKeeper(addrs...)
+				jailed := mk.validators[addrs[1]]
+				jailed.Jailed = true
+				mk.validators[addrs[1]] = jailed
+				s.setupWithMockStakingKeeper(mk)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
+			},
+			msg: msg,
+			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, err := s.keeper.GetVoteRound(kv, resp.VoteRoundId)
+				s.Require().NoError(err)
+				s.Require().Len(round.CeremonyValidators, 1)
+				s.Require().Equal(testValAddr(1), round.CeremonyValidators[0].ValidatorAddress)
+			},
+		},
+		{
 			name: "happy path: exactly 2 validators",
 			setup: func() {
 				s.seedEligibleValidators(2)

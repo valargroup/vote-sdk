@@ -39,7 +39,8 @@ pub mod vote_proof {
 pub mod share_reveal {
     pub use voting_circuits::share_reveal::{
         verify_share_reveal_proof, verify_share_reveal_proof_raw,
-        create_share_reveal_proof, share_reveal_params, share_reveal_proving_key,
+        create_share_reveal_proof, share_reveal_cached_keys, share_reveal_params,
+        share_reveal_proving_key,
         domain_tag_share_spend, share_nullifier_hash,
         Circuit, Instance, K,
     };

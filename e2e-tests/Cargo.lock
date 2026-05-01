@@ -3079,9 +3079,9 @@ dependencies = [
 
 [[package]]
 name = "voting-circuits"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7830eca6c294cff758bc4885ca8bd2fbdf90f9998f586c5c4cfe2d1b559555f6"
+checksum = "454ce29a0767cd4d8db05d9437cdbb7ed0970441cb5a35f371b0c53d8c52ea2f"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3640,9 +3640,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_voting"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "809181bbe54f6fdde1f5d94b2c2722b993e46c4669ba101ea88fa21078e4a9d7"
+checksum = "222bf8f7cd993b64de1901588924938db527f24a9bc096e1cd2552d60ce9ddfa"
 dependencies = [
  "blake2b_simd",
  "ff",
