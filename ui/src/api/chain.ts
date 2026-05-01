@@ -175,7 +175,7 @@ export interface ChainRound {
   snapshot_height?: string;
   vote_end_time?: string;
   creator?: string;
-  status?: string;
+  status?: string | number;
   description?: string;
   title?: string;
   created_at_height?: string;
@@ -186,11 +186,13 @@ export interface ChainRound {
   }>;
   proposals_hash?: string;
   ea_pk?: string;
+  threshold?: number | string;
   // Per-round ceremony fields (populated when status = PENDING).
   ceremony_status?: string | number;
   ceremony_validators?: Array<{
     validator_address: string;
     pallas_pk: string;
+    shamir_index?: number | string;
   }>;
   ceremony_dealer?: string;
   ceremony_phase_start?: string;
