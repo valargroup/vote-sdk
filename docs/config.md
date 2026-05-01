@@ -84,16 +84,20 @@ Published by the manifest publisher at
 `https://valargroup.github.io/token-holder-voting-config/voting-config.json`
 (GitHub Pages, see [token-holder-voting-config/README.md](../../token-holder-voting-config/README.md)).
 
-The discovery config is service metadata only. It does not name a round. Wallets
-MUST discover the current round from chain state after choosing a vote server,
-using `/shielded-vote/v1/rounds/active` for the active round or
-`/shielded-vote/v1/rounds` when presenting the full round list.
+The discovery config does not name a round. Wallets MUST discover the current
+round from chain state after choosing a vote server, using
+`/shielded-vote/v1/rounds/active` for the active round or
+`/shielded-vote/v1/rounds` when presenting the full round list. Any
+round-looking metadata in the config is informational; chain round data is
+authoritative for voting.
 
 | Field                  | Type                              | Notes |
 | ---------------------- | --------------------------------- | ----- |
 | `config_version`       | int                               | Currently `1`. |
 | `vote_servers[]`       | `[{url, label}]`                  | Chain REST + helper endpoints. |
 | `pir_endpoints[]`      | `[{url, label}]`                  | Nullifier PIR endpoints. |
+| `snapshot_height`      | uint64                            | Informational; wallets and PIR use chain round data when voting. |
+| `vote_end_time`        | uint64                            | Informational; wallets use chain round data when voting. |
 | `supported_versions`   | `{pir, vote_protocol, tally, vote_server}` | Versions the publisher claims are deployed. Wallet checks against `WalletCapabilities`. |
 
 ### `round_signatures` schema
