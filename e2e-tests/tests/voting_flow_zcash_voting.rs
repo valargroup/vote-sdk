@@ -14,9 +14,9 @@ use e2e_tests::{
     api::{
         self, broadcast_cosmos_msg, commitment_tree_next_index, default_cosmos_tx_config, get_json,
         get_round, helper_server_url, import_first_vote_manager_key,
-        post_helper_json, post_json_accept_committed, tally_has_proposal, wait_for_round_status,
-        FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE, SESSION_STATUS_FINALIZED,
-        SESSION_STATUS_TALLYING,
+        post_helper_json, post_json_accept_committed, tally_has_proposal, wait_for_create_round_id,
+        wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
+        SESSION_STATUS_FINALIZED, SESSION_STATUS_TALLYING,
     },
     payloads::{
         cast_vote_payload_real, create_voting_session_payload, delegate_vote_payload,
@@ -84,9 +84,8 @@ fn voting_flow_zcash_voting_path() {
 
     // Save fields we need for DB before session_fields is consumed
     let fields_for_db = session_fields.clone();
-    let (mut body, _, round_id) =
+    let (mut body, _, _) =
         create_voting_session_payload(&vote_manager_address, 120, Some(session_fields));
-    let round_id_hex = hex::encode(&round_id);
 
     // ---- Step 1: Create voting session ----
     // MsgCreateVotingSession is a standard Cosmos SDK tx signed by a vote manager.
@@ -111,6 +110,8 @@ fn voting_flow_zcash_voting_path() {
         "create session rejected: {:?}",
         json.get("log")
     );
+    let round_id_hex = wait_for_create_round_id(&json).expect("create tx should emit round_id");
+    let round_id = hex::decode(&round_id_hex).expect("round_id should be hex");
     // Wait for the round to become ACTIVE. The round starts as PENDING and
     // transitions to ACTIVE once the per-round ceremony completes (auto-deal +
     // auto-ack via PrepareProposal, typically 2-3 blocks).

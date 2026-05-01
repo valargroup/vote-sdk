@@ -23,7 +23,7 @@ const (
 )
 
 // MsgCreateVotingSession creates a new voting session.
-// vote_round_id is computed on-chain as Poseidon(snapshot_height, snapshot_blockhash_lo, snapshot_blockhash_hi, proposals_hash_lo, proposals_hash_hi, vote_end_time, nullifier_imt_root, nc_root).
+// vote_round_id is computed on-chain as Poseidon(created_at_height, snapshot_blockhash_lo, snapshot_blockhash_hi, proposals_hash_lo, proposals_hash_hi, vote_end_time, nullifier_imt_root, nc_root).
 // The output is a canonical 32-byte Pallas Fp element. Creates the round in
 // PENDING status; ea_pk is set when the per-round ceremony confirms.
 type MsgCreateVotingSession struct {

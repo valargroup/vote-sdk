@@ -75,11 +75,12 @@ pub extern "C" fn sv_clear_error() {
 
 /// Derive vote_round_id as a canonical Pallas Fp element via Poseidon hash.
 ///
-/// Encodes the 6 session fields into 8 Fp elements and hashes them with
-/// `Poseidon::<ConstantLength<8>>` (P128Pow5T3, same params as circuit hashes).
+/// Encodes the creation height plus 5 session fields into 8 Fp elements and
+/// hashes them with `Poseidon::<ConstantLength<8>>` (P128Pow5T3, same params as
+/// circuit hashes).
 ///
 /// Input encoding:
-///   snapshot_height (u64)        → Fp::from(u64)
+///   creation_height (u64)        → Fp::from(u64)
 ///   snapshot_blockhash (32 bytes)→ 2 Fp: from_u128(lo), from_u128(hi)
 ///   proposals_hash (32 bytes)    → 2 Fp: from_u128(lo), from_u128(hi)
 ///   vote_end_time (u64)          → Fp::from(u64)
@@ -88,7 +89,7 @@ pub extern "C" fn sv_clear_error() {
 ///
 /// Total: 8 Fp elements.
 fn derive_round_id_poseidon(
-    snapshot_height: u64,
+    creation_height: u64,
     snapshot_blockhash: [u8; 32],
     proposals_hash: [u8; 32],
     vote_end_time: u64,
@@ -114,7 +115,7 @@ fn derive_round_id_poseidon(
         .ok_or("nc_root is not a canonical Pallas Fp element")?;
 
     let inputs = [
-        pallas::Base::from(snapshot_height),
+        pallas::Base::from(creation_height),
         bh_lo,
         bh_hi,
         ph_lo,
@@ -1619,14 +1620,14 @@ pub unsafe extern "C" fn sv_vote_commitment_hash(
 // Round ID derivation (Poseidon)
 // ---------------------------------------------------------------------------
 
-/// Derive vote_round_id from session fields via Poseidon hash.
+/// Derive vote_round_id from creation height and session fields via Poseidon hash.
 ///
 /// Encodes the 6 inputs into 8 Fp elements and hashes with
 /// Poseidon::<ConstantLength<8>> (P128Pow5T3). The output is a canonical
 /// 32-byte Pallas Fp element written to `round_id_out`.
 ///
 /// # Arguments
-/// * `snapshot_height`      - Block height for the snapshot.
+/// * `creation_height`      - Block height that created the round.
 /// * `snapshot_blockhash`   - 32-byte block hash at snapshot_height.
 /// * `proposals_hash`       - 32-byte hash of the proposals.
 /// * `vote_end_time`        - Unix timestamp when voting ends.
@@ -1643,7 +1644,7 @@ pub unsafe extern "C" fn sv_vote_commitment_hash(
 /// All pointers must be valid and point to buffers of at least 32 bytes.
 #[no_mangle]
 pub unsafe extern "C" fn sv_derive_round_id(
-    snapshot_height: u64,
+    creation_height: u64,
     snapshot_blockhash: *const u8,
     proposals_hash: *const u8,
     vote_end_time: u64,
@@ -1671,7 +1672,7 @@ pub unsafe extern "C" fn sv_derive_round_id(
         let mut nc = [0u8; 32];
         nc.copy_from_slice(std::slice::from_raw_parts(nc_root, 32));
 
-        match derive_round_id_poseidon(snapshot_height, bh, ph, vote_end_time, nf_root, nc) {
+        match derive_round_id_poseidon(creation_height, bh, ph, vote_end_time, nf_root, nc) {
             Ok(fp) => {
                 let bytes = fp.to_repr();
                 std::ptr::copy_nonoverlapping(bytes.as_ptr(), round_id_out, 32);
@@ -1838,7 +1839,7 @@ mod tests {
         let r2 = derive_round_id_poseidon(1001, bh, ph, 2_000_000, nf_root, nc).unwrap();
         assert_ne!(
             r1, r2,
-            "different snapshot_height must produce different round_id"
+            "different creation_height must produce different round_id"
         );
 
         let r3 = derive_round_id_poseidon(1000, bh, ph, 3_000_000, nf_root, nc).unwrap();

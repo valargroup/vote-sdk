@@ -22,9 +22,9 @@
 use e2e_tests::{
     api::{
         self, broadcast_cosmos_msg, default_cosmos_tx_config, import_first_vote_manager_key,
-        wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
+        wait_for_create_round_id, wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME,
+        SESSION_STATUS_ACTIVE,
     },
-    payloads::{self, SetupRoundFields},
 };
 use incrementalmerkletree::{Hashable, Level};
 use orchard::tree::MerkleHashOrchard;
@@ -325,7 +325,7 @@ fn create_round_for_zashi() {
     // ---- Step 4: Fetch real nullifier_imt_root from IMT server ----
     let nullifier_imt_root = fetch_imt_root();
 
-    // ---- Step 5: Compute session fields and round_id ----
+    // ---- Step 5: Compute session fields ----
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -334,18 +334,6 @@ fn create_round_for_zashi() {
 
     let snapshot_blockhash = [0xAAu8; 32]; // placeholder — chain doesn't validate this
     let proposals_hash = [0xBBu8; 32]; // placeholder — chain doesn't validate this
-
-    let fields = SetupRoundFields {
-        snapshot_height: snap_height,
-        snapshot_blockhash,
-        proposals_hash,
-        vote_end_time,
-        nullifier_imt_root,
-        nc_root,
-    };
-    let round_id = payloads::derive_round_id(&fields);
-    let round_id_hex = hex::encode(round_id);
-    log(&format!("round_id: {}", round_id_hex));
 
     // ---- Step 6: Build and broadcast MsgCreateVotingSession ----
     log("creating voting session...");
@@ -380,6 +368,8 @@ fn create_round_for_zashi() {
         "create session rejected: {:?}",
         json.get("log")
     );
+    let round_id_hex = wait_for_create_round_id(&json).expect("create tx should emit round_id");
+    log(&format!("round_id: {}", round_id_hex));
     log("session TX broadcast ✓");
 
     // ---- Step 7: Wait for round to become ACTIVE ----

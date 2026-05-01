@@ -184,6 +184,9 @@ func (k Keeper) GetEligibleValidators(ctx context.Context, kvStore store.KVStore
 		if val.GetStatus() != stakingtypes.Bonded {
 			return false // skip non-bonded
 		}
+		if val.Jailed {
+			return false // skip jailed validators
+		}
 		eligible = append(eligible, vpk)
 		return false
 	}); err != nil {
