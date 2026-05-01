@@ -54,10 +54,6 @@ type TrustedKey struct {
 	Notes  string `json:"notes,omitempty"`
 }
 
-type TrustedKeysFile struct {
-	TrustedKeys []TrustedKey `json:"trusted_keys"`
-}
-
 type AuthStatus string
 
 const (

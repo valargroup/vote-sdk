@@ -25,7 +25,7 @@ func TestSignAndVerifyConfig(t *testing.T) {
 	roundID := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "voting-config-v2.json")
-	keysPath := filepath.Join(dir, "admin-keys.json")
+	keysPath := filepath.Join(dir, "trusted_keys.json")
 	writeJSON(t, configPath, votingconfig.SignedConfig{
 		ConfigVersion: votingconfig.ConfigVersionV1,
 		VoteServers:   []votingconfig.Endpoint{{URL: "https://vote.example", Label: "vote"}},
@@ -38,12 +38,12 @@ func TestSignAndVerifyConfig(t *testing.T) {
 		},
 		Rounds: map[string]votingconfig.RoundEntry{},
 	})
-	writeJSON(t, keysPath, votingconfig.TrustedKeysFile{
-		TrustedKeys: []votingconfig.TrustedKey{{
+	writeJSON(t, keysPath, []votingconfig.TrustedKey{
+		{
 			KeyID:  "key-1",
 			Alg:    votingconfig.AlgEd25519,
 			Pubkey: base64.StdEncoding.EncodeToString(pub),
-		}},
+		},
 	})
 
 	t.Setenv("VOTING_CONFIG_PRIVKEY", base64.StdEncoding.EncodeToString(priv.Seed()))
@@ -93,7 +93,7 @@ func TestKeygenWritesSeedFile(t *testing.T) {
 		t.Fatalf("seed length = %d, want %d", len(seed), ed25519.SeedSize)
 	}
 	if !strings.Contains(out.String(), `"key_id":"key-1"`) {
-		t.Fatalf("expected admin key JSON in output, got %q", out.String())
+		t.Fatalf("expected trusted key JSON in output, got %q", out.String())
 	}
 }
 
