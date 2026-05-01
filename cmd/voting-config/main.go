@@ -68,20 +68,20 @@ func newKeygenCmd() *cobra.Command {
 				}
 			}
 
-			adminKey := votingconfig.TrustedKey{
+			trustedKey := votingconfig.TrustedKey{
 				KeyID:  signerID,
 				Alg:    votingconfig.AlgEd25519,
 				Pubkey: pubB64,
 			}
-			adminKeyJSON, err := json.Marshal(adminKey)
+			trustedKeyJSON, err := json.Marshal(trustedKey)
 			if err != nil {
-				return fmt.Errorf("marshal admin key: %w", err)
+				return fmt.Errorf("marshal trusted key: %w", err)
 			}
 
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "signer_id: %s\n", signerID)
 			fmt.Fprintf(out, "public_key_b64: %s\n", pubB64)
-			fmt.Fprintf(out, "admin_keys_entry: %s\n", adminKeyJSON)
+			fmt.Fprintf(out, "trusted_keys_entry: %s\n", trustedKeyJSON)
 			if outPath != "" {
 				fmt.Fprintf(out, "private_key_file: %s\n", outPath)
 			} else {
@@ -90,7 +90,7 @@ func newKeygenCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&signerID, "signer-id", "", "Signer identifier matching admin-keys.json trusted_keys[].key_id")
+	cmd.Flags().StringVar(&signerID, "signer-id", "", "Signer identifier matching trusted_keys.json[].key_id")
 	cmd.Flags().StringVar(&outPath, "out", "", "Write base64(seed) private key to this path instead of stdout")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite --out if it already exists")
 	return cmd
@@ -157,7 +157,7 @@ func newSignCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&roundID, "round-id", "", "Round id (64 lowercase hex characters)")
 	cmd.Flags().StringVar(&eaPKB64, "ea-pk", "", "Election authority public key (base64-encoded 32 bytes)")
-	cmd.Flags().StringVar(&signerID, "signer-id", "", "Signer identifier matching admin-keys.json trusted_keys[].key_id")
+	cmd.Flags().StringVar(&signerID, "signer-id", "", "Signer identifier matching trusted_keys.json[].key_id")
 	cmd.Flags().StringVar(&privFile, "privkey-file", "", "Read base64(seed) Ed25519 private key from this file")
 	cmd.Flags().BoolVar(&privStdin, "privkey-stdin", false, "Read base64(seed) Ed25519 private key from stdin")
 	cmd.Flags().StringVar(&mergePath, "merge", "", "Rewrite this voting-config-v2.json with the signed entry merged in")
@@ -217,7 +217,7 @@ func newVerifyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to voting-config-v2.json")
-	cmd.Flags().StringVar(&keysPath, "keys", "", "Path to admin-keys.json")
+	cmd.Flags().StringVar(&keysPath, "keys", "", "Path to trusted_keys.json")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Write machine-readable verification result")
 	return cmd
 }
@@ -277,14 +277,14 @@ func readTrustedKeys(path string) ([]votingconfig.TrustedKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read keys %q: %w", path, err)
 	}
-	var keysFile votingconfig.TrustedKeysFile
-	if err := json.Unmarshal(raw, &keysFile); err != nil {
+	var trustedKeys []votingconfig.TrustedKey
+	if err := json.Unmarshal(raw, &trustedKeys); err != nil {
 		return nil, fmt.Errorf("parse keys %q: %w", path, err)
 	}
-	if len(keysFile.TrustedKeys) == 0 {
-		return nil, errors.New("trusted_keys must contain at least one entry")
+	if len(trustedKeys) == 0 {
+		return nil, errors.New("trusted keys must contain at least one entry")
 	}
-	return keysFile.TrustedKeys, nil
+	return trustedKeys, nil
 }
 
 func parseEaPK(eaPKB64 string) ([32]byte, error) {

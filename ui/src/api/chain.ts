@@ -94,8 +94,8 @@ async function fetchJsonAtUrl<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 async function decodeJsonResponse<T>(resp: Response): Promise<T> {
+  const body = await resp.text();
   if (!resp.ok) {
-    const body = await resp.text();
     let msg = `HTTP ${resp.status}`;
     try {
       const parsed = JSON.parse(body);
@@ -105,7 +105,13 @@ async function decodeJsonResponse<T>(resp: Response): Promise<T> {
     }
     throw new HTTPError(resp.status, msg);
   }
-  return resp.json();
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    throw new Error(
+      `Expected JSON response from ${resp.url || "request"}, got ${body.slice(0, 40)}`
+    );
+  }
 }
 
 function nullifierURL(base: string, path: "/root" | "/snapshot/status"): string {
@@ -330,6 +336,24 @@ export async function getNullifierStatus(): Promise<NullifierStatus> {
 
 export async function listRounds(): Promise<{ rounds: ChainRound[] | null }> {
   return fetchJson<{ rounds: ChainRound[] | null }>("/shielded-vote/v1/rounds");
+}
+
+export interface SignConfigEntryResponse {
+  canonical_payload_b64: string;
+  signed_payload_hash: string;
+  auth_version: number;
+}
+
+export async function signConfigEntry(input: {
+  round_id: string;
+  ea_pk: string;
+  auth_version: 1;
+}): Promise<SignConfigEntryResponse> {
+  return fetchJson<SignConfigEntryResponse>("/api/sign-config-entry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 
 export async function getRound(

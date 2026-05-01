@@ -10,6 +10,7 @@ import { SnapshotSettingsPage } from "./components/SnapshotSettingsPage";
 import { PendingOperatorsPage } from "./components/PendingOperatorsPage";
 import { PirFleetStatus } from "./components/PirFleetStatus";
 import { RoundsList } from "./components/RoundsList";
+import { SignConfigEntryPage } from "./components/SignConfigEntryPage";
 import { useStore } from "./store/useStore";
 import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft } from "lucide-react";
 import type { Proposal, RoundSettings, RoundStatus, VotingRound } from "./types";
@@ -55,6 +56,7 @@ type Section =
   | "vote-status"
   | "validators"
   | "validator-join"
+  | "sign-config"
   | "snapshot";
 
 const SECTION_PATHS: Record<Section, string> = {
@@ -68,6 +70,7 @@ const SECTION_PATHS: Record<Section, string> = {
   "vote-status": "/vote-status",
   validators: "/validators",
   "validator-join": "/validator-join",
+  "sign-config": "/sign-config",
   snapshot: "/snapshot",
 };
 
@@ -450,6 +453,8 @@ function App() {
         {section === "validators" && <ValidatorsView wallet={wallet} />}
 
         {section === "validator-join" && <PendingOperatorsPage wallet={wallet} />}
+
+        {section === "sign-config" && <SignConfigEntryPage />}
 
         {/* Vote status */}
         {section === "vote-status" && (
