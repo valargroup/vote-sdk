@@ -5,8 +5,7 @@ import {
   useChainInfo,
   estimateTimestamp,
 } from "../store/rpc";
-import { getSnapshotStatus } from "../api/chain";
-import { useUIConfig } from "../store/uiConfigContext";
+import { getActiveRound, getSnapshotStatus } from "../api/chain";
 
 interface RoundEditorProps {
   round: VotingRound;
@@ -119,18 +118,17 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
   const hasEndTime = endTime.length > 0;
 
   const chain = useChainInfo();
-  const { publishedConfig, publishedConfigLoaded } = useUIConfig();
-  const publishedHeight = publishedConfig?.snapshot_height ?? null;
+  const [chainSnapshotHeight, setChainSnapshotHeight] = useState<number | null>(null);
+  const [chainSnapshotLoaded, setChainSnapshotLoaded] = useState(false);
 
   // Ref to avoid stale closure — parent passes an inline arrow that changes
   // every render, but the callback logic should always use the latest version.
   const onUpdateSettingsRef = useRef(onUpdateSettings);
   useEffect(() => { onUpdateSettingsRef.current = onUpdateSettings; });
 
-  // Fetch snapshot height from PIR server. The published voting-config is the
-  // source of truth for round drafts, but we still poll PIR so we can surface
-  // a mismatch warning (and so we have a fallback for older configs that
-  // don't yet declare snapshot_height).
+  // Fetch snapshot height from PIR server. Chain state is the source of truth
+  // for active rounds, but PIR status remains useful while drafting the first
+  // round and for surfacing replica/bootstrap mismatches.
   const fetchSnapshotHeight = useCallback(async (setLoading: boolean) => {
     if (setLoading) {
       setNhLoading(true);
@@ -153,22 +151,43 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
     }
   }, []);
 
-  // Auto-populate snapshot height from the published voting-config when set,
+  useEffect(() => {
+    if (isReadonly) return;
+    let cancelled = false;
+    setChainSnapshotLoaded(false);
+    getActiveRound()
+      .then((resp) => {
+        if (cancelled) return;
+        const height = Number(resp.round?.snapshot_height ?? 0);
+        setChainSnapshotHeight(height > 0 ? height : null);
+      })
+      .catch(() => {
+        if (!cancelled) setChainSnapshotHeight(null);
+      })
+      .finally(() => {
+        if (!cancelled) setChainSnapshotLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [round.id, isReadonly]);
+
+  // Auto-populate snapshot height from the active on-chain round when set,
   // otherwise fall back to whatever the PIR server reports.
   useEffect(() => {
     if (isReadonly) return;
-    if (!publishedConfigLoaded) return;
-    if (publishedHeight != null) {
-      onUpdateSettingsRef.current({ snapshotHeight: String(publishedHeight) });
+    if (!chainSnapshotLoaded) return;
+    if (chainSnapshotHeight != null) {
+      onUpdateSettingsRef.current({ snapshotHeight: String(chainSnapshotHeight) });
     } else if (pirServedHeight != null) {
       onUpdateSettingsRef.current({ snapshotHeight: String(pirServedHeight) });
     } else if (round.settings.snapshotHeight === "") {
       // Surface "no source of truth" only once a fetch has completed.
-      if (publishedConfigLoaded && pirServedHeight === null && !pirRebuilding && !nhLoading) {
-        setNhError((e) => e ?? "No snapshot height in published config and PIR server has no checkpoint");
+      if (chainSnapshotLoaded && pirServedHeight === null && !pirRebuilding && !nhLoading) {
+        setNhError((e) => e ?? "No active on-chain round and PIR server has no checkpoint");
       }
     }
-  }, [publishedHeight, pirServedHeight, publishedConfigLoaded, pirRebuilding, nhLoading, isReadonly, round.id, round.settings.snapshotHeight]);
+  }, [chainSnapshotHeight, pirServedHeight, chainSnapshotLoaded, pirRebuilding, nhLoading, isReadonly, round.id, round.settings.snapshotHeight]);
 
   // Auto-populate snapshot height from PIR server on mount and round switch.
   useEffect(() => {
@@ -185,9 +204,9 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
 
   const snapshotHeight = parseInt(round.settings.snapshotHeight, 10);
   const isValidHeight = !isNaN(snapshotHeight) && snapshotHeight > 0;
-  // PIR is "behind" the canonical config — typically a deploy-in-progress.
+  // PIR is "behind" the active chain round — typically a deploy-in-progress.
   const pirMismatch =
-    publishedHeight != null && pirServedHeight != null && pirServedHeight !== publishedHeight;
+    chainSnapshotHeight != null && pirServedHeight != null && pirServedHeight !== chainSnapshotHeight;
 
   // Estimated timestamp for the snapshot height
   const estimatedDate =
@@ -255,16 +274,16 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
             </div>
           )}
 
-          {/* PIR vs published-config height mismatch */}
+          {/* PIR vs active round height mismatch */}
           {pirMismatch && !pirRebuilding && (
             <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-warning/10 border border-warning/40 rounded-md">
               <AlertTriangle size={12} className="text-warning shrink-0 mt-0.5" />
               <div className="min-w-0">
                 <p className="text-[10px] text-warning font-semibold leading-snug">
-                  PIR server height differs from published config
+                  PIR server height differs from active round
                 </p>
                 <p className="text-[10px] text-text-muted leading-snug mt-0.5">
-                  Config wants <span className="font-mono">{publishedHeight!.toLocaleString()}</span>,
+                  Chain wants <span className="font-mono">{chainSnapshotHeight!.toLocaleString()}</span>,
                   PIR is serving <span className="font-mono">{pirServedHeight!.toLocaleString()}</span>.
                   This is normal during a snapshot deploy; the PIR server will
                   catch up automatically. Wait before publishing.
@@ -338,9 +357,9 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
           )}
 
           <p className="text-[10px] text-text-muted mt-1">
-            Auto-populated from the published voting-config (falls back to the
-            PIR server). The block height at which balances are captured for
-            vote weighting.
+            Auto-populated from the active on-chain round (falls back to the PIR
+            server). The block height at which balances are captured for vote
+            weighting.
           </p>
         </div>
 

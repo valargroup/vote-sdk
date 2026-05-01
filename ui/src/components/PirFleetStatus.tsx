@@ -131,10 +131,10 @@ interface Props {
   /** URL of the endpoint the wallet / page is configured to use, so we
    * can highlight "this is the row driving your queries". */
   selectedUrl?: string;
-  /** snapshot_height from the published voting-config. When provided,
-   * renders a warning row if any successful replica is at a different
-   * height (which can happen legitimately for a few minutes during a
-   * bump while one replica is still bootstrapping). */
+  /** snapshot_height from the active on-chain round. When provided, renders a
+   * warning row if any successful replica is at a different height (which can
+   * happen legitimately for a few minutes during a bump while one replica is
+   * still bootstrapping). */
   expectedHeight?: number;
 }
 
@@ -233,8 +233,8 @@ export function PirFleetStatus({
         <div className="flex items-start gap-2 p-2.5 rounded-lg bg-warning/10 border border-warning/30">
           <AlertCircle size={14} className="text-warning shrink-0 mt-0.5" />
           <div className="text-[11px] text-warning">
-            One or more replicas are at a different height than the
-            published voting-config (
+            One or more replicas are at a different height than the active
+            on-chain round (
             <span className="font-mono">
               {expectedHeight?.toLocaleString()}
             </span>

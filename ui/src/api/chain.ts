@@ -512,8 +512,6 @@ export interface VotingConfig {
   version: number;
   vote_servers: ServiceEntry[];
   pir_endpoints: ServiceEntry[];
-  /** Canonical Orchard nullifier-tree snapshot height for the current round. */
-  snapshot_height?: number;
 }
 
 /**
