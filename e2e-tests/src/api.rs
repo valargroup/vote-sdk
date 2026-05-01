@@ -348,6 +348,42 @@ where
     Ok((status, json))
 }
 
+fn decode_event_attr_text(value: &str) -> String {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+
+    if let Ok(decoded) = B64.decode(value) {
+        if let Ok(text) = String::from_utf8(decoded) {
+            return text;
+        }
+    }
+    value.to_string()
+}
+
+fn normalize_round_id_attr(value: &str) -> Option<String> {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+
+    let trimmed = value.trim().trim_matches('"');
+    if trimmed.len() == 64 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Some(trimmed.to_ascii_lowercase());
+    }
+
+    if let Ok(decoded) = B64.decode(trimmed) {
+        if decoded.len() == 32 {
+            return Some(hex::encode(decoded));
+        }
+        if let Ok(text) = String::from_utf8(decoded) {
+            let text = text.trim().trim_matches('"');
+            if text.len() == 64 && text.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Some(text.to_ascii_lowercase());
+            }
+        }
+    }
+
+    None
+}
+
 fn event_attr(events: &[Value], event_type: &str, key: &str) -> Option<String> {
     for event in events {
         if event.get("type").and_then(|v| v.as_str()) != Some(event_type) {
@@ -355,12 +391,15 @@ fn event_attr(events: &[Value], event_type: &str, key: &str) -> Option<String> {
         }
         let attrs = event.get("attributes").and_then(|v| v.as_array())?;
         for attr in attrs {
-            let attr_key = attr.get("key").and_then(|v| v.as_str())?;
+            let attr_key = attr
+                .get("key")
+                .and_then(|v| v.as_str())
+                .map(decode_event_attr_text)?;
             if attr_key == key {
                 return attr
                     .get("value")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
+                    .and_then(normalize_round_id_attr);
             }
         }
     }
@@ -381,6 +420,17 @@ fn create_round_id_from_tx_json(json: &Value) -> Option<String> {
                 .or_else(|| event_attr(events, "create_voting_session", "round_id"))
             {
                 return Some(round_id);
+            }
+        }
+    }
+    if let Some(logs) = json.get("logs").and_then(|v| v.as_array()) {
+        for log in logs {
+            if let Some(events) = log.get("events").and_then(|v| v.as_array()) {
+                if let Some(round_id) = event_attr(events, "create_voting_session", "vote_round_id")
+                    .or_else(|| event_attr(events, "create_voting_session", "round_id"))
+                {
+                    return Some(round_id);
+                }
             }
         }
     }
