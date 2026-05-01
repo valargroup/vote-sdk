@@ -871,40 +871,32 @@ const CEREMONY_STATUS_NAMES: Record<number, string> = {
   3: "confirmed",
 };
 
-interface NullifierStatus {
-  latest_height: number | null;
-  nullifier_count: number;
-}
-
-function useNullifierStatus(baseUrl?: string) {
-  const [data, setData] = useState<NullifierStatus | null>(null);
+function useNullifierStatus(
+  selectedUrl: string
+) {
+  const [data, setData] = useState<chainApi.NullifierStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const base = baseUrl ?? chainApi.getNullifierApiBase();
 
   const refresh = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetch(`${base}/root`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((json: { height: number | null; num_ranges: number }) => {
-        setData({ latest_height: json.height, nullifier_count: json.num_ranges });
+    setData(null);
+    chainApi.getNullifierStatus()
+      .then((status) => {
+        setData(status);
         setLoading(false);
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : String(err));
         setLoading(false);
       });
-  }, [base]);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(refresh, 0);
     return () => window.clearTimeout(timer);
-  }, [refresh]);
+  }, [refresh, selectedUrl]);
 
   return { data, loading, error, refresh };
 }
@@ -913,7 +905,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [rpcUrl, setRpcUrl] = useState(getStoredRpc);
   const chain = useChainInfo();
   const [selectedNullifierUrl, setSelectedNullifierUrl] = useState(chainApi.getNullifierUrl);
-  const nullifier = useNullifierStatus(selectedNullifierUrl || undefined);
+  const nullifier = useNullifierStatus(selectedNullifierUrl);
   const isCustom = !LIGHTWALLETD_ENDPOINTS.some((e) => e.url === rpcUrl);
 
   // Voting config (PIR endpoints + vote servers)
@@ -921,7 +913,11 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [configLoaded, setConfigLoaded] = useState(false);
   const pirEndpoints = votingConfig?.pir_endpoints ?? [];
   const voteServers = votingConfig?.vote_servers ?? [];
-  const isCustomNullifier = configLoaded && selectedNullifierUrl !== "" && !pirEndpoints.some((e) => e.url === selectedNullifierUrl);
+  const isKnownNullifier =
+    selectedNullifierUrl === chainApi.DEFAULT_PIR_URL ||
+    selectedNullifierUrl === chainApi.LOCAL_PIR_URL ||
+    pirEndpoints.some((e) => e.url === selectedNullifierUrl);
+  const isCustomNullifier = configLoaded && !isKnownNullifier;
 
   useEffect(() => {
     chainApi.getVotingConfig().then((cfg) => {
@@ -1165,12 +1161,17 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
               }}
               className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary focus:outline-none focus:border-accent/50 cursor-pointer [color-scheme:dark]"
             >
-              <option value="">Default (same-origin)</option>
-              {pirEndpoints.map((ep) => (
+              <option value={chainApi.DEFAULT_PIR_URL}>
+                PIR primary (default) — {chainApi.DEFAULT_PIR_URL}
+              </option>
+              {pirEndpoints
+                .filter((ep) => ep.url !== chainApi.DEFAULT_PIR_URL && ep.url !== chainApi.LOCAL_PIR_URL)
+                .map((ep) => (
                 <option key={ep.url} value={ep.url}>
                   {ep.label} — {ep.url}
                 </option>
               ))}
+              <option value={chainApi.LOCAL_PIR_URL}>Local PIR — /nullifier</option>
               <option value="__custom__">Custom URL...</option>
             </select>
           </div>
