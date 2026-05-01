@@ -1,8 +1,12 @@
 // Wallet connection abstraction.
 //
-// Supports the Keplr browser extension as the admin wallet source.
+// Supports Keplr and manually pasted raw private keys as admin wallet sources.
 
+import { DirectSecp256k1Wallet } from "@cosmjs/proto-signing";
 import type { OfflineDirectSigner } from "@cosmjs/proto-signing";
+import { fromHex, toBase64 } from "@cosmjs/encoding";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import type { KeplrChainInfo } from "../types/keplr";
 
 const BECH32_PREFIX = "sv";
@@ -87,6 +91,16 @@ export async function connectKeplr(restUrl: string, rpcUrl: string): Promise<Wal
   return { signer, address: account.address };
 }
 
+/**
+ * Connect using a raw hex-encoded secp256k1 private key entered by the operator.
+ */
+export async function connectWithPrivateKey(privateKeyHex: string): Promise<WalletConnection> {
+  const privkey = fromHex(privateKeyHex);
+  const signer = await DirectSecp256k1Wallet.fromKey(privkey, BECH32_PREFIX);
+  const [account] = await signer.getAccounts();
+  return { signer, address: account.address };
+}
+
 // ── signArbitrary ────────────────────────────────────────────────
 //
 // Signs an arbitrary string payload, compatible with Keplr's signArbitrary.
@@ -95,6 +109,52 @@ export async function connectKeplr(restUrl: string, rpcUrl: string): Promise<Wal
 export interface ArbitrarySignature {
   signature: string; // base64-encoded 64-byte compact secp256k1 sig
   pubKey: string;    // base64-encoded 33-byte compressed public key
+}
+
+/**
+ * Reconstruct the amino sign doc used by Keplr's signArbitrary.
+ * Keys must be alphabetically sorted at every level for determinism.
+ */
+function makeSignArbitraryDoc(signer: string, data: string): Uint8Array {
+  const signDoc = {
+    account_number: "0",
+    chain_id: "",
+    fee: { amount: [] as never[], gas: "0" },
+    memo: "",
+    msgs: [
+      {
+        type: "sign/MsgSignData",
+        value: {
+          data: btoa(data),
+          signer: signer,
+        },
+      },
+    ],
+    sequence: "0",
+  };
+  return new TextEncoder().encode(JSON.stringify(signDoc));
+}
+
+/**
+ * Sign arbitrary data using a raw private key.
+ * Produces the same format as Keplr's signArbitrary.
+ */
+export function signArbitraryWithKey(
+  privateKeyHex: string,
+  signerAddress: string,
+  data: string,
+): ArbitrarySignature {
+  const privKey = fromHex(privateKeyHex);
+  const signBytes = makeSignArbitraryDoc(signerAddress, data);
+  const msgHash = sha256(signBytes);
+
+  const sig = secp256k1.sign(msgHash, privKey, { prehash: false });
+  const pubKey = secp256k1.getPublicKey(privKey, true);
+
+  return {
+    signature: toBase64(sig),
+    pubKey: toBase64(pubKey),
+  };
 }
 
 /**

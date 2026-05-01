@@ -12,7 +12,7 @@ import { PirFleetStatus } from "./components/PirFleetStatus";
 import { RoundsList } from "./components/RoundsList";
 import { SignConfigEntryPage } from "./components/SignConfigEntryPage";
 import { useStore } from "./store/useStore";
-import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft } from "lucide-react";
+import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft } from "lucide-react";
 import type { Proposal, RoundSettings, RoundStatus, VotingRound } from "./types";
 import { MAX_VOTE_OPTIONS, MIN_VOTE_OPTIONS } from "./constants/vote";
 import {
@@ -200,7 +200,7 @@ function App() {
     if (!wallet.signer) {
       setPublishStatus("error");
       setPublishError(
-        "No wallet connected. Go to Settings → Wallet to connect Keplr."
+        "No wallet connected. Go to Settings → Wallet to connect Keplr or paste a private key."
       );
       return;
     }
@@ -981,6 +981,8 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [voteManagers, setVoteManagers] = useState<string[]>([]);
   const [activeRound, setActiveRound] = useState<chainApi.ChainRound | null>(null);
   const [chainDetailsOpen, setChainDetailsOpen] = useState(false);
+  const [devKey, setDevKey] = useState("");
+  const [devKeyVisible, setDevKeyVisible] = useState(false);
 
   // Update vote-manager set flow. The UI accepts a comma- or newline-separated list
   // of bech32 addresses; submission atomically replaces the entire set.
@@ -1026,6 +1028,10 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
       setConnError(err instanceof Error ? err.message : String(err));
       setConnStatus("error");
     }
+  };
+
+  const handleConnectDev = async () => {
+    await wallet.connectDev(devKey);
   };
 
   const handleUpdateVoteManagers = async () => {
@@ -1307,7 +1313,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                   <Wallet size={14} className="text-success" />
                   <span className="text-xs text-text-secondary">Connected</span>
                   <span className="text-[10px] text-text-muted">
-                    (Keplr)
+                    ({wallet.source === "keplr" ? "Keplr" : "pasted key"})
                   </span>
                 </div>
                 <button
@@ -1344,6 +1350,48 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                   <span>{wallet.error}</span>
                 </div>
               )}
+
+              <details className="group">
+                <summary className="text-[11px] text-text-muted cursor-pointer hover:text-text-secondary">
+                  Connect with private key
+                </summary>
+                <div className="mt-2 space-y-2">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={devKey}
+                      onChange={(e) => setDevKey(e.target.value.trim())}
+                      placeholder="64-character hex private key"
+                      spellCheck={false}
+                      autoComplete="off"
+                      data-1p-ignore
+                      data-lpignore="true"
+                      style={devKeyVisible ? undefined : { WebkitTextSecurity: "disc" } as React.CSSProperties}
+                      className="w-full px-3 py-2 pr-9 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setDevKeyVisible((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-secondary cursor-pointer"
+                      title={devKeyVisible ? "Hide" : "Show"}
+                    >
+                      {devKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                  {devKey.length > 0 && devKey.length !== 64 && (
+                    <p className="text-[10px] text-warning">
+                      Key must be exactly 64 hex characters ({devKey.length}/64)
+                    </p>
+                  )}
+                  <button
+                    onClick={handleConnectDev}
+                    disabled={devKey.length !== 64 || wallet.connecting}
+                    className="px-3 py-1.5 bg-surface-3 hover:bg-surface-2 text-text-secondary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    Connect
+                  </button>
+                </div>
+              </details>
             </div>
           )}
         </div>
@@ -1640,7 +1688,14 @@ function PublishModal({
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const [devKey, setDevKey] = useState("");
+  const [devKeyVisible, setDevKeyVisible] = useState(false);
   const walletConnected = !!wallet.address;
+
+  const handleConnectDev = async () => {
+    await wallet.connectDev(devKey);
+    setDevKey("");
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -1721,6 +1776,48 @@ function PublishModal({
                   <span>{wallet.error}</span>
                 </div>
               )}
+
+              <details className="group">
+                <summary className="text-[11px] text-text-muted cursor-pointer hover:text-text-secondary">
+                  Paste private key
+                </summary>
+                <div className="mt-2 space-y-2">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={devKey}
+                      onChange={(e) => setDevKey(e.target.value.trim())}
+                      placeholder="64-character hex private key"
+                      spellCheck={false}
+                      autoComplete="off"
+                      data-1p-ignore
+                      data-lpignore="true"
+                      style={devKeyVisible ? undefined : { WebkitTextSecurity: "disc" } as React.CSSProperties}
+                      className="w-full px-3 py-2 pr-9 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setDevKeyVisible((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-secondary cursor-pointer"
+                      title={devKeyVisible ? "Hide" : "Show"}
+                    >
+                      {devKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                  {devKey.length > 0 && devKey.length !== 64 && (
+                    <p className="text-[10px] text-warning">
+                      Key must be exactly 64 hex characters ({devKey.length}/64)
+                    </p>
+                  )}
+                  <button
+                    onClick={handleConnectDev}
+                    disabled={devKey.length !== 64 || wallet.connecting}
+                    className="px-3 py-1.5 bg-surface-3 hover:bg-surface-2 text-text-secondary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    Connect
+                  </button>
+                </div>
+              </details>
             </div>
           )}
         </div>

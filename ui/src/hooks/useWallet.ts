@@ -1,13 +1,15 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { OfflineDirectSigner } from "@cosmjs/proto-signing";
 import {
   connectKeplr,
+  connectWithPrivateKey,
+  signArbitraryWithKey,
   signArbitraryWithKeplr,
 } from "../api/wallet";
 import type { ArbitrarySignature } from "../api/wallet";
 import * as chainApi from "../api/chain";
 
-type WalletSource = "keplr";
+type WalletSource = "keplr" | "privkey";
 
 const SOURCE_KEY = "sv-wallet-source";
 
@@ -31,8 +33,9 @@ export interface UseWallet {
   connecting: boolean;
   error: string | null;
   connect: () => Promise<void>;
+  connectDev: (privateKeyHex: string) => Promise<void>;
   disconnect: () => void;
-  /** Sign arbitrary data using the connected Keplr wallet. */
+  /** Sign arbitrary data using the connected wallet (Keplr or pasted key). */
   signPayload: (data: string) => Promise<ArbitrarySignature>;
 }
 
@@ -42,6 +45,7 @@ export function useWallet(): UseWallet {
   const [source, setSource] = useState<WalletSource | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const privKeyRef = useRef<string | null>(null);
 
   const applyConnection = useCallback(
     (conn: { signer: OfflineDirectSigner; address: string }, src: WalletSource) => {
@@ -69,11 +73,29 @@ export function useWallet(): UseWallet {
     }
   }, [applyConnection]);
 
+  const connectDev = useCallback(
+    async (privateKeyHex: string) => {
+      setConnecting(true);
+      setError(null);
+      try {
+        const conn = await connectWithPrivateKey(privateKeyHex);
+        privKeyRef.current = privateKeyHex;
+        applyConnection(conn, "privkey");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setConnecting(false);
+      }
+    },
+    [applyConnection],
+  );
+
   const disconnect = useCallback(() => {
     setSigner(null);
     setAddress(null);
     setSource(null);
     setError(null);
+    privKeyRef.current = null;
     localStorage.removeItem(SOURCE_KEY);
   }, []);
 
@@ -81,9 +103,12 @@ export function useWallet(): UseWallet {
   const signPayload = useCallback(
     async (data: string): Promise<ArbitrarySignature> => {
       if (!address) throw new Error("Wallet not connected");
+      if (source === "privkey" && privKeyRef.current) {
+        return signArbitraryWithKey(privKeyRef.current, address, data);
+      }
       return signArbitraryWithKeplr(address, data);
     },
-    [address],
+    [address, source],
   );
 
   // Auto-reconnect on page load when Keplr was previously used.
@@ -110,6 +135,7 @@ export function useWallet(): UseWallet {
     connecting,
     error,
     connect,
+    connectDev,
     disconnect,
     signPayload,
   };
