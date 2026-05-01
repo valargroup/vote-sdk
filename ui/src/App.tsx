@@ -11,7 +11,7 @@ import { PendingOperatorsPage } from "./components/PendingOperatorsPage";
 import { PirFleetStatus } from "./components/PirFleetStatus";
 import { RoundsList } from "./components/RoundsList";
 import { useStore } from "./store/useStore";
-import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown } from "lucide-react";
+import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft } from "lucide-react";
 import type { Proposal, RoundSettings, RoundStatus, VotingRound } from "./types";
 import { MAX_VOTE_OPTIONS, MIN_VOTE_OPTIONS } from "./constants/vote";
 import {
@@ -75,14 +75,37 @@ const PATH_TO_SECTION: Record<string, Section> = Object.fromEntries(
   Object.entries(SECTION_PATHS).map(([s, p]) => [p, s as Section])
 ) as Record<string, Section>;
 
-function sectionFromPath(): Section {
-  return PATH_TO_SECTION[window.location.pathname] ?? "about";
+interface AppRoute {
+  section: Section;
+  voteStatusRoundId: string | null;
+}
+
+function routeFromPath(): AppRoute {
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  if (path === SECTION_PATHS["vote-status"]) {
+    return { section: "vote-status", voteStatusRoundId: null };
+  }
+  if (path.startsWith(`${SECTION_PATHS["vote-status"]}/`)) {
+    const encodedRoundId = path.slice(SECTION_PATHS["vote-status"].length + 1);
+    let roundId = encodedRoundId;
+    try {
+      roundId = decodeURIComponent(encodedRoundId);
+    } catch {
+      // Leave malformed escape sequences for the detail view's invalid-ID state.
+    }
+    return {
+      section: "vote-status",
+      voteStatusRoundId: roundId || null,
+    };
+  }
+  return { section: PATH_TO_SECTION[path] ?? "about", voteStatusRoundId: null };
 }
 
 function App() {
   const store = useStore();
   const wallet = useWallet();
-  const [section, setSectionState] = useState<Section>(sectionFromPath);
+  const [route, setRouteState] = useState<AppRoute>(routeFromPath);
+  const section = route.section;
   const [filter, setFilter] = useState<RoundStatus | "all">("all");
   const importRef = useRef<HTMLInputElement>(null);
   const [publishModal, setPublishModal] = useState<string | null>(null); // round id
@@ -93,8 +116,16 @@ function App() {
 
   // Sync section ↔ URL path, keeping nav instant (no full reload).
   const setSection = useCallback((s: Section) => {
-    setSectionState(s);
+    setRouteState({ section: s, voteStatusRoundId: null });
     const path = SECTION_PATHS[s];
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, "", path);
+    }
+  }, []);
+
+  const setVoteStatusRound = useCallback((roundIdHex: string) => {
+    const path = `${SECTION_PATHS["vote-status"]}/${encodeURIComponent(roundIdHex)}`;
+    setRouteState({ section: "vote-status", voteStatusRoundId: roundIdHex });
     if (window.location.pathname !== path) {
       window.history.pushState(null, "", path);
     }
@@ -102,7 +133,7 @@ function App() {
 
   // Handle browser back/forward buttons.
   useEffect(() => {
-    const onPopState = () => setSectionState(sectionFromPath());
+    const onPopState = () => setRouteState(routeFromPath());
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -421,7 +452,14 @@ function App() {
         {section === "validator-join" && <PendingOperatorsPage wallet={wallet} />}
 
         {/* Vote status */}
-        {section === "vote-status" && <VoteStatusView expectRoundCount={expectedRoundCount} />}
+        {section === "vote-status" && (
+          <VoteStatusView
+            expectRoundCount={expectedRoundCount}
+            selectedRoundIdHex={route.voteStatusRoundId}
+            onSelectRound={setVoteStatusRound}
+            onBackToList={() => setSection("vote-status")}
+          />
+        )}
 
         {/* Snapshot settings */}
         {section === "snapshot" && <SnapshotSettingsPage />}
@@ -2211,13 +2249,59 @@ function base64ToHex(b64: string): string {
   ).join("");
 }
 
+function normalizeHex(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+function isRoundIdHex(s: string): boolean {
+  return /^[0-9a-f]{64}$/i.test(s.trim());
+}
+
+function truncateMiddle(value: string, head = 12, tail = 8): string {
+  if (value.length <= head + tail + 3) return value;
+  return `${value.slice(0, head)}...${value.slice(-tail)}`;
+}
+
+function statusMatches(value: string | number | undefined, code: number, name: string): boolean {
+  return Number(value) === code || value === name;
+}
+
+function humanizeEnum(value: string | number | undefined, prefix: string): string {
+  if (value == null || value === "") return "Unknown";
+  if (typeof value === "number" || /^\d+$/.test(String(value))) {
+    const numeric = Number(value);
+    if (prefix === "CEREMONY_STATUS_") {
+      return CEREMONY_STATUS_NAMES[numeric]
+        ? CEREMONY_STATUS_NAMES[numeric][0].toUpperCase() + CEREMONY_STATUS_NAMES[numeric].slice(1)
+        : String(value);
+    }
+    return STATUS_MAP[numeric]?.label ?? String(value);
+  }
+  return String(value)
+    .replace(prefix, "")
+    .toLowerCase()
+    .replace(/(^|_)([a-z])/g, (_match, sep: string, letter: string) =>
+      `${sep ? " " : ""}${letter.toUpperCase()}`
+    );
+}
+
 /* ── Copyable field helper ────────────────────────────────────── */
 
-function CopyableField({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
+function CopyableField({
+  label,
+  value,
+  copyValue = value,
+  mono = true,
+}: {
+  label: string;
+  value: string;
+  copyValue?: string;
+  mono?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(value).then(() => {
+    navigator.clipboard.writeText(copyValue).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -2233,7 +2317,7 @@ function CopyableField({ label, value, mono = true }: { label: string; value: st
         <button
           onClick={handleCopy}
           className="p-0.5 rounded hover:bg-surface-3 text-text-muted hover:text-text-secondary cursor-pointer shrink-0 transition-colors"
-          title="Copy to clipboard"
+          title={copyValue === value ? "Copy to clipboard" : `Copy ${copyValue} to clipboard`}
         >
           {copied ? <Check size={11} className="text-success" /> : <Copy size={11} />}
         </button>
@@ -2242,12 +2326,61 @@ function CopyableField({ label, value, mono = true }: { label: string; value: st
   );
 }
 
+function CopyableCode({
+  value,
+  title,
+  head = 12,
+  tail = 8,
+}: {
+  value: string;
+  title?: string;
+  head?: number;
+  tail?: number;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      title={title ?? value}
+      className="inline-flex min-w-0 items-center gap-1.5 rounded text-left font-mono text-[11px] text-text-primary hover:text-accent transition-colors cursor-pointer"
+    >
+      <span className="truncate">{truncateMiddle(value, head, tail)}</span>
+      {copied ? (
+        <Check size={11} className="text-success shrink-0" />
+      ) : (
+        <Copy size={11} className="text-text-muted shrink-0" />
+      )}
+    </button>
+  );
+}
+
 /* ── Vote status view ────────────────────────────────────────── */
 
-function VoteStatusView({ expectRoundCount }: { expectRoundCount?: number | null }) {
+interface VoteStatusViewProps {
+  expectRoundCount?: number | null;
+  selectedRoundIdHex?: string | null;
+  onSelectRound: (roundIdHex: string) => void;
+  onBackToList: () => void;
+}
+
+function VoteStatusView({
+  expectRoundCount,
+  selectedRoundIdHex,
+  onSelectRound,
+  onBackToList,
+}: VoteStatusViewProps) {
   const [rounds, setRounds] = useState<chainApi.ChainRound[]>([]);
   const [summaries, setSummaries] = useState<Record<string, chainApi.VoteSummaryResponse>>({});
   const [summaryErrors, setSummaryErrors] = useState<Record<string, string>>({});
+  const [validatorMonikers, setValidatorMonikers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const zcashChain = useChainInfo();
@@ -2327,6 +2460,52 @@ function VoteStatusView({ expectRoundCount }: { expectRoundCount?: number | null
       if (pollingRef.current) clearTimeout(pollingRef.current);
     };
   }, [expectRoundCount, fetchAll]);
+
+  useEffect(() => {
+    if (!selectedRoundIdHex) return;
+    let cancelled = false;
+
+    chainApi.getValidators()
+      .then((resp) => {
+        if (cancelled) return;
+        const monikers: Record<string, string> = {};
+        for (const val of resp.validators ?? []) {
+          const addr = val.operator_address;
+          const moniker = val.description?.moniker;
+          if (addr && moniker) monikers[addr] = moniker;
+        }
+        setValidatorMonikers(monikers);
+      })
+      .catch(() => {
+        if (!cancelled) setValidatorMonikers({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRoundIdHex]);
+
+  const normalizedSelectedRoundId = selectedRoundIdHex
+    ? normalizeHex(selectedRoundIdHex)
+    : null;
+  const selectedRound =
+    normalizedSelectedRoundId && isRoundIdHex(normalizedSelectedRoundId)
+      ? rounds.find((round) => normalizeHex(base64ToHex(round.vote_round_id ?? "")) === normalizedSelectedRoundId)
+      : null;
+
+  if (selectedRoundIdHex) {
+    return (
+      <VoteRoundEaDetail
+        round={selectedRound ?? null}
+        roundIdHex={selectedRoundIdHex}
+        loading={loading}
+        error={error}
+        validatorMonikers={validatorMonikers}
+        zcashChain={zcashChain}
+        onBack={onBackToList}
+      />
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -2462,9 +2641,21 @@ function VoteStatusView({ expectRoundCount }: { expectRoundCount?: number | null
                     <CopyableField
                       label="Vote end time"
                       value={endDate.toLocaleString()}
+                      copyValue={String(endTimeSec)}
                       mono={false}
                     />
                   )}
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => onSelectRound(roundIdHex)}
+                      disabled={!isRoundIdHex(roundIdHex)}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-surface-2 px-2.5 py-1.5 text-[11px] font-semibold text-text-secondary hover:bg-surface-3 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer transition-colors"
+                    >
+                      <Users size={12} />
+                      EA validators
+                    </button>
+                  </div>
                 </div>
 
                 {/* Ceremony log */}
@@ -2675,6 +2866,288 @@ function VoteStatusView({ expectRoundCount }: { expectRoundCount?: number | null
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function isCeremonyConfirmed(round: chainApi.ChainRound): boolean {
+  return statusMatches(round.ceremony_status, 3, "CEREMONY_STATUS_CONFIRMED") && !!round.ea_pk;
+}
+
+function isRoundPending(round: chainApi.ChainRound): boolean {
+  return statusMatches(round.status, 4, "SESSION_STATUS_PENDING");
+}
+
+function isRoundFinalized(round: chainApi.ChainRound): boolean {
+  return statusMatches(round.status, 3, "SESSION_STATUS_FINALIZED");
+}
+
+function getEaLifecycle(round: chainApi.ChainRound): {
+  label: string;
+  description: string;
+  className: string;
+} {
+  if (isCeremonyConfirmed(round)) {
+    return {
+      label: "Confirmed EA validators",
+      description: "This round established an EA key with these ceremony validators.",
+      className: "border-success/30 bg-success/10 text-success",
+    };
+  }
+
+  if (isRoundPending(round)) {
+    return {
+      label: "Ceremony validator snapshot",
+      description: "This round is still pending. The EA is not established until the ceremony confirms.",
+      className: "border-warning/30 bg-warning/10 text-warning",
+    };
+  }
+
+  if (isRoundFinalized(round)) {
+    return {
+      label: "Failed ceremony snapshot",
+      description: "No EA was established for this round.",
+      className: "border-danger/30 bg-danger/10 text-danger",
+    };
+  }
+
+  return {
+    label: "Ceremony validator snapshot",
+    description: "These validators were selected for this round's EA ceremony.",
+    className: "border-border-subtle bg-surface-2 text-text-secondary",
+  };
+}
+
+function DetailStat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-border-subtle bg-surface-2 px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wider text-text-muted">{label}</p>
+      <div className="mt-1 text-[12px] font-semibold text-text-primary">{value}</div>
+    </div>
+  );
+}
+
+function VoteRoundEaDetail({
+  round,
+  roundIdHex,
+  loading,
+  error,
+  validatorMonikers,
+  zcashChain,
+  onBack,
+}: {
+  round: chainApi.ChainRound | null;
+  roundIdHex: string;
+  loading: boolean;
+  error: string;
+  validatorMonikers: Record<string, string>;
+  zcashChain: ReturnType<typeof useChainInfo>;
+  onBack: () => void;
+}) {
+  const normalizedRoundId = normalizeHex(roundIdHex);
+  const validRoundId = isRoundIdHex(normalizedRoundId);
+
+  const statusKey = round?.status ?? "";
+  const statusInfo = STATUS_MAP[statusKey] ?? {
+    label: humanizeEnum(statusKey, "SESSION_STATUS_"),
+    color: "bg-surface-3 text-text-muted",
+  };
+  const lifecycle = round ? getEaLifecycle(round) : null;
+  const validators = round?.ceremony_validators ?? [];
+  const snapshotHeight = Number(round?.snapshot_height ?? 0);
+  const snapshotTime =
+    snapshotHeight > 0 && zcashChain.latestHeight && zcashChain.latestTimestamp
+      ? estimateTimestamp(snapshotHeight, zcashChain.latestHeight, zcashChain.latestTimestamp)
+      : null;
+  const endTimeSec = round?.vote_end_time
+    ? parseInt(String(round.vote_end_time), 10)
+    : 0;
+  const endDate = endTimeSec > 0 ? new Date(endTimeSec * 1000) : null;
+  const threshold = round?.threshold != null && Number(round.threshold) > 0
+    ? String(round.threshold)
+    : "Not set";
+  const ceremonyStatus = humanizeEnum(round?.ceremony_status, "CEREMONY_STATUS_");
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-4xl mx-auto px-6 py-12">
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <button
+              type="button"
+              onClick={onBack}
+              className="mb-4 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-text-muted hover:bg-surface-2 hover:text-text-primary cursor-pointer transition-colors"
+            >
+              <ArrowLeft size={12} />
+              Vote status
+            </button>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-accent/15 flex items-center justify-center shrink-0">
+                <Users size={22} className="text-accent" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-lg font-bold text-text-primary">
+                  EA validators for this round
+                </h1>
+                <p className="text-[11px] text-text-muted truncate">
+                  {round?.title || "On-chain voting round"}
+                </p>
+              </div>
+            </div>
+          </div>
+          {round && (
+            <span className={`mt-9 text-[9px] px-2 py-0.5 rounded-full shrink-0 ${statusInfo.color}`}>
+              {statusInfo.label}
+            </span>
+          )}
+        </div>
+
+        {error && (
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 p-3">
+            <AlertCircle size={14} className="text-danger shrink-0" />
+            <p className="text-[11px] text-danger">{error}</p>
+          </div>
+        )}
+
+        {!validRoundId && (
+          <div className="rounded-xl border border-border-subtle bg-surface-1 p-5 text-center">
+            <p className="text-xs font-semibold text-text-primary">Invalid round ID</p>
+            <p className="mt-1 text-[11px] text-text-muted">
+              Round detail URLs use the 64-character hex round ID.
+            </p>
+          </div>
+        )}
+
+        {validRoundId && loading && !round && (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 size={22} className="text-text-muted animate-spin" />
+          </div>
+        )}
+
+        {validRoundId && !loading && !round && !error && (
+          <div className="rounded-xl border border-border-subtle bg-surface-1 p-5 text-center">
+            <p className="text-xs font-semibold text-text-primary">Round not found</p>
+            <p className="mt-1 text-[11px] text-text-muted">
+              No on-chain round matched this round ID.
+            </p>
+          </div>
+        )}
+
+        {round && lifecycle && (
+          <div className="space-y-5">
+            <div className={`rounded-xl border p-4 ${lifecycle.className}`}>
+              <div className="flex items-start gap-2">
+                {isCeremonyConfirmed(round) ? (
+                  <ShieldCheck size={15} className="mt-0.5 shrink-0" />
+                ) : isRoundFinalized(round) ? (
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                ) : (
+                  <Shield size={15} className="mt-0.5 shrink-0" />
+                )}
+                <div>
+                  <p className="text-xs font-semibold">{lifecycle.label}</p>
+                  <p className="mt-1 text-[11px]">{lifecycle.description}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border-subtle bg-surface-1 p-5">
+              <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                <DetailStat label="Validators" value={validators.length.toLocaleString()} />
+                <DetailStat label="Threshold" value={threshold} />
+                <DetailStat label="Ceremony status" value={ceremonyStatus} />
+              </div>
+
+              <div className="space-y-2">
+                <CopyableField label="Round ID" value={normalizedRoundId} />
+                {snapshotHeight > 0 && (
+                  <CopyableField
+                    label="Snapshot height"
+                    value={
+                      snapshotTime
+                        ? `${snapshotHeight.toLocaleString()} (~${snapshotTime.toLocaleDateString()})`
+                        : snapshotHeight.toLocaleString()
+                    }
+                  />
+                )}
+                {endDate && (
+                  <CopyableField
+                    label="Vote end time"
+                    value={endDate.toLocaleString()}
+                    copyValue={String(endTimeSec)}
+                    mono={false}
+                  />
+                )}
+                {round.ea_pk && (
+                  <CopyableField label="EA public key" value={round.ea_pk} />
+                )}
+              </div>
+            </div>
+
+            {validators.length === 0 ? (
+              <div className="rounded-xl border border-border-subtle bg-surface-1 p-5 text-center">
+                <p className="text-xs font-semibold text-text-primary">No ceremony validators</p>
+                <p className="mt-1 text-[11px] text-text-muted">
+                  This round does not expose a ceremony validator snapshot.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface-1">
+                <div className="border-b border-border-subtle px-5 py-3">
+                  <h2 className="text-xs font-semibold text-text-primary">
+                    Validators
+                  </h2>
+                </div>
+                <div className="divide-y divide-border-subtle">
+                  {validators.map((validator, index) => {
+                    const address = validator.validator_address;
+                    const moniker = validatorMonikers[address] ?? "Unknown";
+                    const shamirIndex = validator.shamir_index != null
+                      ? String(validator.shamir_index)
+                      : "Not set";
+
+                    return (
+                      <div
+                        key={`${address}-${index}`}
+                        className="grid gap-3 px-5 py-4 lg:grid-cols-[90px_160px_minmax(0,1.2fr)_minmax(0,1fr)] lg:items-center"
+                      >
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-text-muted">Index</p>
+                          <p className="mt-1 font-mono text-xs text-text-primary">{shamirIndex}</p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] uppercase tracking-wider text-text-muted">Moniker</p>
+                          <p className="mt-1 truncate text-xs font-semibold text-text-primary">{moniker}</p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] uppercase tracking-wider text-text-muted">Operator</p>
+                          <div className="mt-1 min-w-0">
+                            {address ? (
+                              <CopyableCode value={address} head={16} tail={10} />
+                            ) : (
+                              <span className="text-[11px] text-text-muted">Not set</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] uppercase tracking-wider text-text-muted">Pallas key</p>
+                          <div className="mt-1 min-w-0">
+                            {validator.pallas_pk ? (
+                              <CopyableCode value={validator.pallas_pk} />
+                            ) : (
+                              <span className="text-[11px] text-text-muted">Not set</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
