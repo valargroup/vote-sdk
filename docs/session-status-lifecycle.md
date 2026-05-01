@@ -47,14 +47,14 @@ All vote-round messages (including `MsgRevealShare`) require ACTIVE status. `Msg
 ### PENDING → ACTIVE
 
 - **Trigger (fast path)**: `MsgAckExecutiveAuthorityKey` — when ALL ceremony validators have acked
-- **Trigger (timeout path)**: `EndBlocker` — DEALT phase timeout with >= 1/2 acks; non-ackers are jailed and stripped
+- **Trigger (timeout path)**: `EndBlocker` — DEALT phase timeout with >= 1/2 acks; non-ackers are stripped from the ceremony snapshot
 - **Action**: Sets `status = SESSION_STATUS_ACTIVE`, `ceremony_status = CEREMONY_STATUS_CONFIRMED`
 
 ### PENDING → CEREMONY_FAILED
 
 - **Trigger (REGISTERING timeout)**: `EndBlocker` — DKG contributions remain incomplete at timeout
 - **Trigger (DEALT timeout failure)**: `EndBlocker` — fewer than 1/2 acked, or the ack set does not meet the published threshold
-- **Action**: Jails missing phase participants, sets `status = SESSION_STATUS_CEREMONY_FAILED`, and preserves ceremony fields for audit. Retrying uses a later `CreateVotingSession` transaction with the same vote metadata; the later creation height produces a fresh `vote_round_id`.
+- **Action**: REGISTERING timeout jails missing DKG contributors. DEALT timeout failure does not jail non-ackers, because a missing ack can be caused by bad DKG material from another validator. Both paths set `status = SESSION_STATUS_CEREMONY_FAILED` and preserve ceremony fields for audit. Retrying uses a later `CreateVotingSession` transaction with the same vote metadata; the later creation height produces a fresh `vote_round_id`.
 
 ### ACTIVE → TALLYING
 

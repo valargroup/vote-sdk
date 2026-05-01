@@ -550,11 +550,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			continue
 		}
 
-		jailedValidators, err := am.keeper.JailCeremonyNonParticipants(
-			ctx,
-			round,
-			types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
-		)
+		jailedValidators, err := am.keeper.JailCeremonyNonContributors(ctx, round)
 		if err != nil {
 			return err
 		}
@@ -614,15 +610,6 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		nAcks := len(round.CeremonyAcks)
 		nVals := len(round.CeremonyValidators)
 
-		jailedValidators, err := am.keeper.JailCeremonyNonParticipants(
-			ctx,
-			round,
-			types.CeremonyStatus_CEREMONY_STATUS_DEALT,
-		)
-		if err != nil {
-			return err
-		}
-
 		if keeper.HalfAcked(round) {
 			stripped := nVals - nAcks
 
@@ -635,10 +622,6 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 					fmt.Sprintf("DEALT timeout: ceremony failed (%d/%d acks, below threshold %d)",
 						nAcks, nVals, round.Threshold))
-				if len(jailedValidators) > 0 {
-					keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-						fmt.Sprintf("DEALT timeout: jailed %d non-ackers", len(jailedValidators)))
-				}
 				round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
 				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
@@ -653,17 +636,13 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				))
 			} else {
 				// >= 1/2 acked and remaining ackers meet threshold: strip
-				// non-ackers (offline/non-responsive), confirm ceremony, activate round.
+				// non-ackers, confirm ceremony, activate round.
 				keeper.StripNonAckersFromRound(round)
 				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 				round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
 
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 					fmt.Sprintf("DEALT timeout: confirmed with %d/%d acks, %d stripped", nAcks, nVals, stripped))
-				if len(jailedValidators) > 0 {
-					keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-						fmt.Sprintf("DEALT timeout: jailed %d non-ackers", len(jailedValidators)))
-				}
 
 				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 					return err
@@ -688,10 +667,6 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			oldRoundStatus := round.Status
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 				fmt.Sprintf("DEALT timeout: ceremony failed (%d/%d acks, below threshold)", nAcks, nVals))
-			if len(jailedValidators) > 0 {
-				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-					fmt.Sprintf("DEALT timeout: jailed %d non-ackers", len(jailedValidators)))
-			}
 			round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
 			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {

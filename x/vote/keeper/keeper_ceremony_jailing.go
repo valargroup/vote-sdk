@@ -10,7 +10,8 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// CeremonyJailResult records a validator jailed for missing a ceremony phase.
+// CeremonyJailResult records a validator jailed for missing a REGISTERING
+// ceremony contribution.
 type CeremonyJailResult struct {
 	ValidatorAddress string
 	ConsAddress      sdk.ConsAddress
@@ -28,19 +29,6 @@ func MissingCeremonyContributors(round *types.VoteRound) []string {
 		contributed[contribution.ValidatorAddress] = struct{}{}
 	}
 	return missingCeremonyValidators(round, contributed)
-}
-
-// MissingCeremonyAckers returns validators snapshotted into the round that did
-// not ack the dealt ceremony.
-func MissingCeremonyAckers(round *types.VoteRound) []string {
-	acked := make(map[string]struct{}, len(round.GetCeremonyAcks()))
-	for _, ack := range round.GetCeremonyAcks() {
-		if ack == nil {
-			continue
-		}
-		acked[ack.ValidatorAddress] = struct{}{}
-	}
-	return missingCeremonyValidators(round, acked)
 }
 
 func missingCeremonyValidators(round *types.VoteRound, seen map[string]struct{}) []string {
@@ -63,25 +51,18 @@ func missingCeremonyValidators(round *types.VoteRound, seen map[string]struct{})
 	return missing
 }
 
-// JailCeremonyNonParticipants jails validators that missed the timed-out
-// ceremony phase. REGISTERING uses missing DKG contributions; DEALT uses
-// missing acks.
-func (k *Keeper) JailCeremonyNonParticipants(
+// JailCeremonyNonContributors jails validators that were snapshotted into a
+// timed-out REGISTERING ceremony but never submitted a DKG contribution.
+func (k *Keeper) JailCeremonyNonContributors(
 	ctx context.Context,
 	round *types.VoteRound,
-	phase types.CeremonyStatus,
 ) ([]CeremonyJailResult, error) {
-	var offenders []string
-	switch phase {
-	case types.CeremonyStatus_CEREMONY_STATUS_REGISTERING:
-		offenders = MissingCeremonyContributors(round)
-	case types.CeremonyStatus_CEREMONY_STATUS_DEALT:
-		offenders = MissingCeremonyAckers(round)
-	default:
-		return nil, fmt.Errorf("unsupported ceremony jailing phase: %s", phase)
-	}
-
-	return k.jailCeremonyValidators(ctx, round, phase, offenders)
+	return k.jailCeremonyValidators(
+		ctx,
+		round,
+		types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		MissingCeremonyContributors(round),
+	)
 }
 
 func (k *Keeper) jailCeremonyValidators(

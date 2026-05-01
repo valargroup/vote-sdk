@@ -163,6 +163,16 @@ func requireValidatorJailedUntil(t *testing.T, app *testutil.TestApp, valAddr st
 	require.Equal(t, want.UTC(), info.JailedUntil.UTC())
 }
 
+func requireValidatorNotJailed(t *testing.T, app *testutil.TestApp, valAddr string) {
+	t.Helper()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height, Time: app.Time})
+	addr, err := sdk.ValAddressFromBech32(valAddr)
+	require.NoError(t, err)
+	validator, err := app.StakingKeeper.GetValidator(ctx, addr)
+	require.NoError(t, err)
+	require.False(t, validator.Jailed, "expected validator %s not to be jailed", valAddr)
+}
+
 func (s *ABCIIntegrationSuite) SetupTest() {
 	s.app = testutil.SetupTestApp(s.T())
 }
@@ -821,7 +831,6 @@ func TestAckExecutiveAuthorityKeyMempoolBlocking(t *testing.T) {
 // new round with a fresh validator snapshot.
 func TestMultiValidatorCeremony_TimeoutFinalizesPendingRound(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-	setDowntimeJailDuration(t, app, 5*time.Minute)
 
 	valAddr := app.ValidatorOperAddr()
 
@@ -875,11 +884,10 @@ func TestMultiValidatorCeremony_TimeoutFinalizesPendingRound(t *testing.T) {
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
 	require.Len(t, round.CeremonyAcks, 1, "acks should be preserved for audit")
 	require.NotEmpty(t, round.CeremonyLog)
-	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-2], "DEALT timeout: ceremony failed")
-	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-1], "DEALT timeout: jailed 3 non-ackers")
-	requireValidatorJailedUntil(t, app, phantom1Addr, timeoutTime.Add(5*time.Minute))
-	requireValidatorJailedUntil(t, app, phantom2Addr, timeoutTime.Add(5*time.Minute))
-	requireValidatorJailedUntil(t, app, phantom3Addr, timeoutTime.Add(5*time.Minute))
+	require.Contains(t, round.CeremonyLog[len(round.CeremonyLog)-1], "DEALT timeout: ceremony failed")
+	requireValidatorNotJailed(t, app, phantom1Addr)
+	requireValidatorNotJailed(t, app, phantom2Addr)
+	requireValidatorNotJailed(t, app, phantom3Addr)
 }
 
 // ---------------------------------------------------------------------------
@@ -1016,9 +1024,8 @@ func TestCeremonyRecovery_NewRoundAfterMiss(t *testing.T) {
 	require.Len(t, round.CeremonyValidators, 2)
 }
 
-func TestCreateVotingSession_DealtTimeoutRetrySameMetadataSameHeightFailsNextSucceeds(t *testing.T) {
+func TestCreateVotingSession_DealtTimeoutRetrySameMetadataSameHeightFailsNextCreatesFreshRound(t *testing.T) {
 	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
-	setDowntimeJailDuration(t, app, 5*time.Minute)
 
 	app.SeedVoteManagers(app.ValidatorAccAddr())
 	app.RegisterPallasKey(pallasPk)
@@ -1063,31 +1070,24 @@ func TestCreateVotingSession_DealtTimeoutRetrySameMetadataSameHeightFailsNextSuc
 	firstRound = app.MustGetVoteRound(firstRoundID)
 	require.Equal(t, types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, firstRound.Status)
 	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_DEALT, firstRound.CeremonyStatus)
-	requireValidatorJailedUntil(t, app, phantom1Addr, timeoutTime.Add(5*time.Minute))
-	requireValidatorJailedUntil(t, app, phantom2Addr, timeoutTime.Add(5*time.Minute))
-	requireValidatorJailedUntil(t, app, phantom3Addr, timeoutTime.Add(5*time.Minute))
+	requireValidatorNotJailed(t, app, phantom1Addr)
+	requireValidatorNotJailed(t, app, phantom2Addr)
+	requireValidatorNotJailed(t, app, phantom3Addr)
 
 	// Retrying at the original creation height derives the same round_id and is
 	// rejected even though the prior ceremony is now terminal.
 	requireDuplicateCreateVotingSessionAtHeight(t, app, msg, firstRound.CreatedAtHeight)
 
 	// Retry with identical vote metadata at the next block height. The new
-	// creation height produces a different round_id, and jailed phantom
-	// validators are excluded from the new snapshot so the single live validator
-	// can complete the ceremony.
+	// creation height produces a different round_id. Because DEALT timeout does
+	// not jail non-ackers, the new snapshot still includes the same eligible
+	// validators.
 	retryRoundID := deliverCreateVotingSession(t, app, msg)
 	require.NotEqual(t, firstRoundID, retryRoundID)
 
 	retryRound := app.MustGetVoteRound(retryRoundID)
-	require.Len(t, retryRound.CeremonyValidators, 1)
+	require.Len(t, retryRound.CeremonyValidators, 4)
 	require.Equal(t, valAddr, retryRound.CeremonyValidators[0].ValidatorAddress)
-
-	app.NextBlockWithPrepareProposal()
-	app.NextBlockWithPrepareProposal()
-
-	retryRound = app.MustGetVoteRound(retryRoundID)
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, retryRound.Status)
-	require.Equal(t, types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, retryRound.CeremonyStatus)
 }
 
 func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataSameHeightFailsNextSucceeds(t *testing.T) {

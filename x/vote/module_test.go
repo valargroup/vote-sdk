@@ -295,7 +295,7 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 // Ceremony phase timeout tests
 // ---------------------------------------------------------------------------
 
-func (s *EndBlockerTestSuite) TestCeremonyNonParticipantSelection() {
+func (s *EndBlockerTestSuite) TestCeremonyMissingContributorSelection() {
 	addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
 	round := &types.VoteRound{
 		CeremonyValidators: []*types.ValidatorPallasKey{
@@ -307,14 +307,9 @@ func (s *EndBlockerTestSuite) TestCeremonyNonParticipantSelection() {
 			{ValidatorAddress: addrs[0]},
 			{ValidatorAddress: addrs[2]},
 		},
-		CeremonyAcks: []*types.AckEntry{
-			{ValidatorAddress: addrs[0]},
-			{ValidatorAddress: addrs[1]},
-		},
 	}
 
 	s.Require().Equal([]string{addrs[1]}, keeper.MissingCeremonyContributors(round))
-	s.Require().Equal([]string{addrs[2]}, keeper.MissingCeremonyAckers(round))
 }
 
 func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
@@ -542,7 +537,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		// 2 of 3 acked: HalfAcked (2*2=4 >= 3). 1 non-acker stripped.
 		s.SetupTest()
 		addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
-		s.setupCeremonyJailing(addrs...)
+		slashing := s.setupCeremonyJailing(addrs...)
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
 			VoteRoundId:    roundID,
@@ -566,17 +561,17 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 
 		round, err := s.keeper.GetVoteRound(kv, roundID)
 		s.Require().NoError(err)
-		s.Require().Len(round.CeremonyLog, 2)
+		s.Require().Len(round.CeremonyLog, 1)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: confirmed")
 		s.Require().Contains(round.CeremonyLog[0], "2/3 acks")
 		s.Require().Contains(round.CeremonyLog[0], "1 stripped")
-		s.Require().Contains(round.CeremonyLog[1], "DEALT timeout: jailed 1 non-ackers")
+		s.Require().Empty(slashing.jailCalls)
 	})
 
 	s.Run("timeout+finalize logs entry", func() {
 		s.SetupTest()
 		addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
-		s.setupCeremonyJailing(addrs...)
+		slashing := s.setupCeremonyJailing(addrs...)
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
 			VoteRoundId:    roundID,
@@ -596,10 +591,10 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 
 		round, err := s.keeper.GetVoteRound(kv, roundID)
 		s.Require().NoError(err)
-		s.Require().Len(round.CeremonyLog, 2)
+		s.Require().Len(round.CeremonyLog, 1)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: ceremony failed")
 		s.Require().Contains(round.CeremonyLog[0], "0/3 acks")
-		s.Require().Contains(round.CeremonyLog[1], "DEALT timeout: jailed 3 non-ackers")
+		s.Require().Empty(slashing.jailCalls)
 		s.Require().Equal(types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
 	})
 
@@ -612,7 +607,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		for i := range addrs {
 			addrs[i] = svtest.TestValAddr(byte(i + 1))
 		}
-		s.setupCeremonyJailing(addrs...)
+		slashing := s.setupCeremonyJailing(addrs...)
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
 			VoteRoundId:          roundID,
@@ -638,11 +633,11 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 
 		round, err := s.keeper.GetVoteRound(kv, roundID)
 		s.Require().NoError(err)
-		s.Require().Len(round.CeremonyLog, 2)
+		s.Require().Len(round.CeremonyLog, 1)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: ceremony failed")
 		s.Require().Contains(round.CeremonyLog[0], "5/9 acks")
 		s.Require().Contains(round.CeremonyLog[0], "below threshold 6")
-		s.Require().Contains(round.CeremonyLog[1], "DEALT timeout: jailed 4 non-ackers")
+		s.Require().Empty(slashing.jailCalls)
 		s.Require().Len(round.CeremonyValidators, 9)
 		s.Require().Equal(types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)
 	})
