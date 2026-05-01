@@ -13,8 +13,8 @@ use blake2b_simd::Params as Blake2bParams;
 use e2e_tests::{
     api::{
         self, broadcast_cosmos_msg, commitment_tree_next_index, default_cosmos_tx_config, get_json,
-        get_round, helper_server_url, import_first_vote_manager_key,
-        post_helper_json, post_json_accept_committed, tally_has_proposal, wait_for_create_round_id,
+        get_round, helper_server_url, import_first_vote_manager_key, post_helper_json,
+        post_json_accept_committed, tally_has_proposal, wait_for_create_round_id,
         wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
         SESSION_STATUS_FINALIZED, SESSION_STATUS_TALLYING,
     },
@@ -22,17 +22,17 @@ use e2e_tests::{
         cast_vote_payload_real, create_voting_session_payload, delegate_vote_payload,
         helper_share_payload,
     },
-    setup::build_delegation_bundle_for_test,
+    setup::prepare_delegation_bundle_for_test,
 };
 use ff::PrimeField;
 use group::{Curve, GroupEncoding};
-use zcash_voting::{NoopProgressReporter, VotingRoundParams, WireEncryptedShare};
 use orchard::keys::SpendAuthorizingKey;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use vote_commitment_tree::TreeClient;
 use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
+use zcash_voting::{NoopProgressReporter, VotingRoundParams, WireEncryptedShare};
 
 const BLOCK_WAIT_MS: u64 = 6000;
 
@@ -63,24 +63,28 @@ fn voting_flow_zcash_voting_path() {
     log_step("Step 0", "importing vote manager key into keyring...");
     let config = default_cosmos_tx_config();
     let vote_manager_address = import_first_vote_manager_key(&config.home_dir);
-    log_step("Step 0", &format!("vote manager address: {}", vote_manager_address));
+    log_step(
+        "Step 0",
+        &format!("vote manager address: {}", vote_manager_address),
+    );
 
     let mut rng = ChaCha20Rng::seed_from_u64(43);
 
-    // Build delegation bundle using the seed-derived SpendingKey
+    // Prepare delegation inputs using the seed-derived SpendingKey. The proof
+    // must be built after the create tx emits the height-derived round ID.
     log_step(
         "Setup",
-        "building delegation bundle with seed-derived key (K=14 proof, 30-60s)...",
+        "preparing delegation inputs with seed-derived key...",
     );
     let vote_end = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs()
         + 300;
-    let (delegation_bundle, session_fields, vote_proof_data) =
-        build_delegation_bundle_for_test(Some(sk), Some(vote_end))
-            .expect("build_delegation_bundle_for_test");
-    log_step("Setup", "delegation bundle ready");
+    let (prepared_delegation, session_fields) =
+        prepare_delegation_bundle_for_test(Some(sk), Some(vote_end))
+            .expect("prepare_delegation_bundle_for_test");
+    log_step("Setup", "delegation inputs ready");
 
     // Save fields we need for DB before session_fields is consumed
     let fields_for_db = session_fields.clone();
@@ -112,6 +116,16 @@ fn voting_flow_zcash_voting_path() {
     );
     let round_id_hex = wait_for_create_round_id(&json).expect("create tx should emit round_id");
     let round_id = hex::decode(&round_id_hex).expect("round_id should be hex");
+
+    log_step(
+        "Step 1c",
+        "building delegation bundle for emitted round ID (K=14 proof, 30-60s)...",
+    );
+    let (delegation_bundle, vote_proof_data) = prepared_delegation
+        .build_for_round_id(&round_id)
+        .expect("build delegation bundle for emitted round_id");
+    log_step("Step 1c", "delegation bundle ready");
+
     // Wait for the round to become ACTIVE. The round starts as PENDING and
     // transitions to ACTIVE once the per-round ceremony completes (auto-deal +
     // auto-ack via PrepareProposal, typically 2-3 blocks).
@@ -220,8 +234,11 @@ fn voting_flow_zcash_voting_path() {
     );
     let mut anchor_height: u32 = 0;
     for _ in 0..30 {
-        let (status, json) =
-            get_json(&format!("/shielded-vote/v1/commitment-tree/{}/latest", round_id_hex)).expect("GET tree latest");
+        let (status, json) = get_json(&format!(
+            "/shielded-vote/v1/commitment-tree/{}/latest",
+            round_id_hex
+        ))
+        .expect("GET tree latest");
         assert_eq!(status, 200);
         if let Some(tree) = json.get("tree") {
             let h = tree.get("height").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
@@ -633,7 +650,11 @@ fn voting_flow_zcash_voting_path() {
     log_step("Step 9b", "single-share vote commitment built successfully");
 
     // Basic bundle sanity checks
-    assert_eq!(single_bundle.enc_shares.len(), 16, "circuit always produces 16 encrypted shares");
+    assert_eq!(
+        single_bundle.enc_shares.len(),
+        16,
+        "circuit always produces 16 encrypted shares"
+    );
     assert_eq!(single_bundle.shares_hash.len(), 32);
 
     // Verify the proof locally — the circuit must accept [num_ballots, 0, ..., 0] shares
@@ -710,7 +731,10 @@ fn voting_flow_zcash_voting_path() {
         "single_share=true should produce exactly 1 payload, got {}",
         single_payloads.len()
     );
-    assert_eq!(single_payloads[0].enc_share.share_index, 0, "single payload must be share 0");
+    assert_eq!(
+        single_payloads[0].enc_share.share_index, 0,
+        "single payload must be share 0"
+    );
     assert_eq!(single_payloads[0].proposal_id, 1);
     assert_eq!(single_payloads[0].vote_decision, 1);
     // The all_enc_shares field should still contain all 16 shares (needed by the helper for ZKP #3)

@@ -18,12 +18,10 @@ use orchard::{
 };
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
-use voting_circuits::{
-    delegation::{
-        builder::{build_delegation_bundle, RealNoteInput},
-        imt::{ImtProvider, SpacedLeafImtProvider},
-        prove::{create_delegation_proof, verify_delegation_proof},
-    },
+use voting_circuits::delegation::{
+    builder::{build_delegation_bundle, RealNoteInput},
+    imt::{ImtProvider, SpacedLeafImtProvider},
+    prove::{create_delegation_proof, verify_delegation_proof},
 };
 
 /// Far-future vote_end_time (Jan 1 2100 UTC). Since vote_end_time is hashed
@@ -47,9 +45,143 @@ pub struct VoteProofDelegationData {
     pub cmx_new: pallas::Base,
 }
 
-/// Build delegation bundle and session fields for the E2E test.
-/// Returns payload for MsgDelegateVote, session fields for MsgCreateVotingSession,
-/// and private witness data for building ZKP #2 (vote proof).
+/// Prepared delegation witness data that can be bound to the on-chain round ID.
+pub struct PreparedDelegationBundle {
+    sk: SpendingKey,
+    fvk: FullViewingKey,
+    alpha: pallas::Scalar,
+    van_comm_rand: pallas::Base,
+    output_recipient: orchard::Address,
+    note_inputs: Vec<RealNoteInput>,
+    nc_root: pallas::Base,
+    total_note_value: u64,
+}
+
+impl PreparedDelegationBundle {
+    /// Build ZKP #1 and its payload using the round ID emitted by the create tx.
+    pub fn build_for_round_id(
+        self,
+        round_id: &[u8],
+    ) -> Result<
+        (DelegationBundlePayload, VoteProofDelegationData),
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let vote_round_id = vote_round_id_from_bytes(round_id)?;
+        build_delegation_payload(
+            self.note_inputs,
+            self.fvk,
+            self.sk,
+            self.alpha,
+            self.output_recipient,
+            vote_round_id,
+            self.nc_root,
+            self.van_comm_rand,
+            self.total_note_value,
+        )
+    }
+}
+
+fn vote_round_id_from_bytes(
+    round_id: &[u8],
+) -> Result<pallas::Base, Box<dyn std::error::Error + Send + Sync>> {
+    let bytes: [u8; 32] = round_id
+        .try_into()
+        .map_err(|_| format!("vote_round_id must be 32 bytes, got {}", round_id.len()))?;
+    Option::from(pallas::Base::from_repr(bytes))
+        .ok_or_else(|| "vote_round_id must be a canonical Pallas Fp element".into())
+}
+
+fn build_delegation_payload(
+    note_inputs: Vec<RealNoteInput>,
+    fvk: FullViewingKey,
+    sk: SpendingKey,
+    alpha: pallas::Scalar,
+    output_recipient: orchard::Address,
+    vote_round_id: pallas::Base,
+    nc_root: pallas::Base,
+    van_comm_rand: pallas::Base,
+    total_note_value: u64,
+) -> Result<
+    (DelegationBundlePayload, VoteProofDelegationData),
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    let mut rng = OsRng;
+    let imt = SpacedLeafImtProvider::new();
+
+    let bundle = build_delegation_bundle(
+        note_inputs,
+        &fvk,
+        alpha,
+        output_recipient,
+        vote_round_id,
+        nc_root,
+        van_comm_rand,
+        &imt,
+        &mut rng,
+        None,
+    )
+    .map_err(|e| format!("build_delegation_bundle: {}", e))?;
+
+    let proof = create_delegation_proof(bundle.circuit, &bundle.instance);
+    verify_delegation_proof(&proof, &bundle.instance)
+        .map_err(|e| format!("verify_delegation_proof: {}", e))?;
+
+    let ask = SpendAuthorizingKey::from(&sk);
+    let rsk = ask.randomize(&alpha);
+
+    let rk_bytes: [u8; 32] = bundle.instance.rk.clone().into();
+    let nf_signed_bytes = bundle.instance.nf_signed.to_bytes();
+    let cmx_new_bytes = bundle.instance.cmx_new.to_repr();
+    let van_cmx_bytes = bundle.instance.van_comm.to_repr();
+    let gov_null_bytes: Vec<[u8; 32]> = bundle
+        .instance
+        .gov_null
+        .iter()
+        .map(|g| g.to_repr())
+        .collect();
+    // Sighash: in production this is the ZIP-244 sighash extracted from the
+    // governance PCZT. The e2e test builds the bundle directly (no PCZT), so
+    // we use a deterministic 32-byte value. The chain only checks
+    // len(sighash)==32 and verifies the RedPallas sig over it.
+    let sighash = {
+        let h = Blake2bParams::new()
+            .hash_length(32)
+            .personal(b"e2e-test-sighash")
+            .hash(&rk_bytes);
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(h.as_bytes());
+        buf
+    };
+    let sig = rsk.sign(&mut rng, &sighash);
+
+    let sig_bytes: [u8; 64] = (&sig).into();
+
+    let payload = DelegationBundlePayload {
+        rk: rk_bytes.to_vec(),
+        spend_auth_sig: sig_bytes.to_vec(),
+        sighash: sighash.to_vec(),
+        signed_note_nullifier: nf_signed_bytes.to_vec(),
+        cmx_new: cmx_new_bytes[..].to_vec(),
+        van_cmx: van_cmx_bytes[..].to_vec(),
+        gov_nullifiers: gov_null_bytes.iter().map(|b| b.to_vec()).collect(),
+        proof,
+    };
+
+    let vote_proof_data = VoteProofDelegationData {
+        sk,
+        van_comm_rand,
+        vote_round_id,
+        total_note_value,
+        van_comm: bundle.instance.van_comm,
+        cmx_new: bundle.instance.cmx_new,
+    };
+
+    Ok((payload, vote_proof_data))
+}
+
+/// Prepare delegation inputs and session fields for the E2E test.
+/// The returned witness data must be bound to the actual round ID emitted by
+/// MsgCreateVotingSession before submitting MsgDelegateVote.
 ///
 /// `vote_end_time_override`: if None, uses FAR_FUTURE_VOTE_END_TIME (fixtures
 /// reusable indefinitely). Pass `Some(now + secs)` when the test needs the round
@@ -57,17 +189,11 @@ pub struct VoteProofDelegationData {
 ///
 /// If `sk_override` is Some, uses that SpendingKey (e.g. derived from a hotkey seed
 /// via ZIP-32, for testing the zcash_voting path). Otherwise generates a random key.
-pub fn build_delegation_bundle_for_test(
+pub fn prepare_delegation_bundle_for_test(
     sk_override: Option<SpendingKey>,
     vote_end_time_override: Option<u64>,
-) -> Result<
-    (
-        DelegationBundlePayload,
-        SetupRoundFields,
-        VoteProofDelegationData,
-    ),
-    Box<dyn std::error::Error + Send + Sync>,
-> {
+) -> Result<(PreparedDelegationBundle, SetupRoundFields), Box<dyn std::error::Error + Send + Sync>>
+{
     let mut rng = OsRng;
 
     let sk = sk_override.unwrap_or_else(|| SpendingKey::random(&mut rng));
@@ -180,78 +306,38 @@ pub fn build_delegation_bundle_for_test(
         nullifier_imt_root: nf_imt_root_repr,
         nc_root: nc_root_repr,
     };
-    let round_id_bytes = crate::payloads::derive_round_id(&round_id_fields);
-    let vote_round_id: pallas::Base =
-        pallas::Base::from_repr(round_id_bytes).expect("Poseidon output must be canonical Fp");
-
-    let bundle = build_delegation_bundle(
-        note_inputs,
-        &fvk,
-        alpha,
-        output_recipient,
-        vote_round_id,
-        nc_root,
-        van_comm_rand,
-        &imt,
-        &mut rng,
-        None,
-    )
-    .map_err(|e| format!("build_delegation_bundle: {}", e))?;
-
-    let proof = create_delegation_proof(bundle.circuit, &bundle.instance);
-    verify_delegation_proof(&proof, &bundle.instance)
-        .map_err(|e| format!("verify_delegation_proof: {}", e))?;
-
-    let ask = SpendAuthorizingKey::from(&sk);
-    let rsk = ask.randomize(&alpha);
-
-    let rk_bytes: [u8; 32] = bundle.instance.rk.clone().into();
-    let nf_signed_bytes = bundle.instance.nf_signed.to_bytes();
-    let cmx_new_bytes = bundle.instance.cmx_new.to_repr();
-    let van_cmx_bytes = bundle.instance.van_comm.to_repr();
-    let gov_null_bytes: Vec<[u8; 32]> = bundle
-        .instance
-        .gov_null
-        .iter()
-        .map(|g| g.to_repr())
-        .collect();
-    // Sighash: in production this is the ZIP-244 sighash extracted from the
-    // governance PCZT. The e2e test builds the bundle directly (no PCZT), so
-    // we use a deterministic 32-byte value. The chain only checks
-    // len(sighash)==32 and verifies the RedPallas sig over it.
-    let sighash = {
-        let h = Blake2bParams::new()
-            .hash_length(32)
-            .personal(b"e2e-test-sighash")
-            .hash(&rk_bytes);
-        let mut buf = [0u8; 32];
-        buf.copy_from_slice(h.as_bytes());
-        buf
-    };
-    let sig = rsk.sign(&mut rng, &sighash);
-
-    let sig_bytes: [u8; 64] = (&sig).into();
-
-    let payload = DelegationBundlePayload {
-        rk: rk_bytes.to_vec(),
-        spend_auth_sig: sig_bytes.to_vec(),
-        sighash: sighash.to_vec(),
-        signed_note_nullifier: nf_signed_bytes.to_vec(),
-        cmx_new: cmx_new_bytes[..].to_vec(),
-        van_cmx: van_cmx_bytes[..].to_vec(),
-        gov_nullifiers: gov_null_bytes.iter().map(|b| b.to_vec()).collect(),
-        proof,
-    };
-
-    let vote_proof_data = VoteProofDelegationData {
+    let prepared = PreparedDelegationBundle {
         sk,
+        fvk,
+        alpha,
         van_comm_rand,
-        vote_round_id,
+        output_recipient,
+        note_inputs,
+        nc_root,
         total_note_value,
-        van_comm: bundle.instance.van_comm,
-        cmx_new: bundle.instance.cmx_new,
     };
 
+    Ok((prepared, round_id_fields))
+}
+
+/// Build delegation bundle and session fields using the legacy precomputed ID.
+/// Live-chain tests should prefer `prepare_delegation_bundle_for_test` so the
+/// proof binds to the emitted on-chain round ID.
+pub fn build_delegation_bundle_for_test(
+    sk_override: Option<SpendingKey>,
+    vote_end_time_override: Option<u64>,
+) -> Result<
+    (
+        DelegationBundlePayload,
+        SetupRoundFields,
+        VoteProofDelegationData,
+    ),
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    let (prepared, round_id_fields) =
+        prepare_delegation_bundle_for_test(sk_override, vote_end_time_override)?;
+    let round_id = crate::payloads::derive_round_id(&round_id_fields);
+    let (payload, vote_proof_data) = prepared.build_for_round_id(&round_id)?;
     Ok((payload, round_id_fields, vote_proof_data))
 }
 
@@ -331,21 +417,53 @@ fn build_nc_auth_path(
     auth_path
 }
 
-/// Build N delegation bundles sharing a common note commitment tree and round fields.
+struct DelegationInput {
+    sk: SpendingKey,
+    fvk: FullViewingKey,
+    note_ext: Note,
+    note_int: Note,
+    ext_pos: u32,
+    int_pos: u32,
+    auth_path_ext: [MerkleHashOrchard; NOTE_COMMITMENT_TREE_DEPTH],
+    auth_path_int: [MerkleHashOrchard; NOTE_COMMITMENT_TREE_DEPTH],
+    imt_proof_ext: voting_circuits::delegation::imt::ImtProofData,
+    imt_proof_int: voting_circuits::delegation::imt::ImtProofData,
+}
+
+/// Prepared multi-delegation witness data sharing a common note commitment root.
+pub struct PreparedMultiDelegationBundles {
+    inputs: Vec<DelegationInput>,
+    nc_root: pallas::Base,
+    total_note_value: u64,
+}
+
+impl PreparedMultiDelegationBundles {
+    /// Build all delegation proofs using the round ID emitted by the create tx.
+    pub fn build_for_round_id(
+        self,
+        round_id: &[u8],
+    ) -> Result<
+        Vec<(DelegationBundlePayload, VoteProofDelegationData)>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let vote_round_id = vote_round_id_from_bytes(round_id)?;
+        build_multi_delegation_payloads(
+            self.inputs,
+            self.nc_root,
+            self.total_note_value,
+            vote_round_id,
+        )
+    }
+}
+
+/// Prepare N delegation witnesses sharing a common note commitment tree.
 ///
-/// All N delegations prove against the same `nc_root` (shared 2N-leaf tree,
-/// 2 notes per delegation: external + internal) and the same `vote_round_id`.
-/// Proof generation is parallelized across threads (~30-60s wall time per proof,
-/// but N proofs run concurrently).
-///
-/// Returns `(bundles, round_fields)` where `bundles[i] = (payload, vote_proof_data)`.
-pub fn build_multi_delegation_bundles(
+/// The returned witnesses must be bound to the actual round ID emitted by
+/// MsgCreateVotingSession before submitting MsgDelegateVote.
+pub fn prepare_multi_delegation_bundles(
     count: usize,
 ) -> Result<
-    (
-        Vec<(DelegationBundlePayload, VoteProofDelegationData)>,
-        SetupRoundFields,
-    ),
+    (PreparedMultiDelegationBundles, SetupRoundFields),
     Box<dyn std::error::Error + Send + Sync>,
 > {
     assert!(count > 0, "need at least one delegation");
@@ -411,24 +529,7 @@ pub fn build_multi_delegation_bundles(
         nullifier_imt_root: nf_imt_root.to_repr(),
         nc_root: nc_root.to_repr(),
     };
-    let round_id_bytes = crate::payloads::derive_round_id(&round_fields);
-    let vote_round_id: pallas::Base =
-        pallas::Base::from_repr(round_id_bytes).expect("Poseidon output must be canonical Fp");
-
     // ---- Prepare per-delegation inputs (auth paths + IMT proofs for real notes) ----
-    struct DelegationInput {
-        sk: SpendingKey,
-        fvk: FullViewingKey,
-        note_ext: Note,
-        note_int: Note,
-        ext_pos: u32,
-        int_pos: u32,
-        auth_path_ext: [MerkleHashOrchard; NOTE_COMMITMENT_TREE_DEPTH],
-        auth_path_int: [MerkleHashOrchard; NOTE_COMMITMENT_TREE_DEPTH],
-        imt_proof_ext: voting_circuits::delegation::imt::ImtProofData,
-        imt_proof_int: voting_circuits::delegation::imt::ImtProofData,
-    }
-
     let mut inputs: Vec<DelegationInput> = Vec::with_capacity(count);
     for (i, (sk, note_ext, note_int, fvk)) in per_delegation_data.into_iter().enumerate() {
         let ext_pos = (2 * i) as u32;
@@ -459,11 +560,35 @@ pub fn build_multi_delegation_bundles(
         });
     }
 
+    Ok((
+        PreparedMultiDelegationBundles {
+            inputs,
+            nc_root,
+            total_note_value,
+        },
+        round_fields,
+    ))
+}
+
+fn build_multi_delegation_payloads(
+    inputs: Vec<DelegationInput>,
+    nc_root: pallas::Base,
+    total_note_value: u64,
+    vote_round_id: pallas::Base,
+) -> Result<
+    Vec<(DelegationBundlePayload, VoteProofDelegationData)>,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    let count = inputs.len();
     // ---- Parallel proof generation (bounded parallelism) ----
     let max_parallel: usize = std::env::var("FIXTURE_GEN_THREADS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8));
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(8)
+        });
     eprintln!(
         "[multi-deleg] generating {} proofs with parallelism={}...",
         count, max_parallel
@@ -474,12 +599,12 @@ pub fn build_multi_delegation_bundles(
         inputs.into_iter().enumerate().collect();
 
     while !indexed_inputs.is_empty() {
-    let chunk_size = max_parallel.min(indexed_inputs.len());
-    let chunk: Vec<(usize, DelegationInput)> = indexed_inputs.drain(..chunk_size).collect();
-    let handles: Vec<_> = chunk
-        .into_iter()
-        .map(|(i, input)| {
-            std::thread::spawn(move || -> Result<
+        let chunk_size = max_parallel.min(indexed_inputs.len());
+        let chunk: Vec<(usize, DelegationInput)> = indexed_inputs.drain(..chunk_size).collect();
+        let handles: Vec<_> = chunk
+            .into_iter()
+            .map(|(i, input)| {
+                std::thread::spawn(move || -> Result<
                 (DelegationBundlePayload, VoteProofDelegationData),
                 Box<dyn std::error::Error + Send + Sync>,
             > {
@@ -570,19 +695,37 @@ pub fn build_multi_delegation_bundles(
 
                 Ok((payload, vote_proof_data))
             })
-        })
-        .collect();
+            })
+            .collect();
 
-    for handle in handles {
-        let result = handle
-            .join()
-            .map_err(|_| "delegation thread panicked".to_string())?;
-        results.push(result?);
-    }
+        for handle in handles {
+            let result = handle
+                .join()
+                .map_err(|_| "delegation thread panicked".to_string())?;
+            results.push(result?);
+        }
     } // end chunk loop
 
     eprintln!("[multi-deleg] all {} bundles built and verified", count);
-    Ok((results, round_fields))
+    Ok(results)
+}
+
+/// Build N delegation bundles using the legacy precomputed ID.
+/// Live-chain tests should prefer `prepare_multi_delegation_bundles` so proofs
+/// bind to the emitted on-chain round ID.
+pub fn build_multi_delegation_bundles(
+    count: usize,
+) -> Result<
+    (
+        Vec<(DelegationBundlePayload, VoteProofDelegationData)>,
+        SetupRoundFields,
+    ),
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    let (prepared, round_fields) = prepare_multi_delegation_bundles(count)?;
+    let round_id = crate::payloads::derive_round_id(&round_fields);
+    let bundles = prepared.build_for_round_id(&round_id)?;
+    Ok((bundles, round_fields))
 }
 
 // ---------------------------------------------------------------------------

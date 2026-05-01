@@ -18,7 +18,7 @@ use e2e_tests::{
         wait_for_round_status, CosmosTxConfig, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
     },
     payloads::{create_voting_session_payload, delegate_vote_payload},
-    setup::{build_multi_delegation_bundles, ensure_pallas_key_registered},
+    setup::{ensure_pallas_key_registered, prepare_multi_delegation_bundles},
 };
 use ff::PrimeField;
 use pasta_curves::pallas;
@@ -51,14 +51,11 @@ fn sync_stress_multi_delegation() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(5);
 
-    // ---- Phase 1: Pre-generate N delegation bundles (parallel ZKP #1 proofs) ----
-    eprintln!(
-        "[stress] Phase 1: pre-generating {} delegation bundles...",
-        n
-    );
-    let (bundles, round_fields) =
-        build_multi_delegation_bundles(n).expect("build_multi_delegation_bundles");
-    eprintln!("[stress] Phase 1 complete: {} bundles ready", bundles.len());
+    // ---- Phase 1: Prepare N delegation witnesses before the round exists ----
+    eprintln!("[stress] Phase 1: preparing {} delegation witnesses...", n);
+    let (prepared_bundles, round_fields) =
+        prepare_multi_delegation_bundles(n).expect("prepare_multi_delegation_bundles");
+    eprintln!("[stress] Phase 1 complete: {} witnesses ready", n);
 
     // ---- Phase 2: Create round + wait for ACTIVE ----
     ensure_pallas_key_registered();
@@ -90,6 +87,18 @@ fn sync_stress_multi_delegation() {
     );
     let round_id_hex = wait_for_create_round_id(&json).expect("create tx should emit round_id");
     let round_id = hex::decode(&round_id_hex).expect("round_id should be hex");
+
+    eprintln!(
+        "[stress] Phase 2b: building {} delegation proofs for emitted round ID...",
+        n
+    );
+    let bundles = prepared_bundles
+        .build_for_round_id(&round_id)
+        .expect("build delegation bundles for emitted round_id");
+    eprintln!(
+        "[stress] Phase 2b complete: {} bundles ready",
+        bundles.len()
+    );
 
     eprintln!(
         "[stress] Phase 2: waiting for round {} to become ACTIVE...",
@@ -299,8 +308,11 @@ fn sync_stress_multi_delegation() {
 
     // 4c: final_root matches on-chain root at final_height.
     let final_height = first.final_height.expect("must have final height");
-    let (status, json) = get_json(&format!("/shielded-vote/v1/commitment-tree/{}/{}", round_id_hex, final_height))
-        .expect("GET tree at final height");
+    let (status, json) = get_json(&format!(
+        "/shielded-vote/v1/commitment-tree/{}/{}",
+        round_id_hex, final_height
+    ))
+    .expect("GET tree at final height");
     assert_eq!(status, 200);
     let on_chain_root_b64 = json
         .get("tree")
