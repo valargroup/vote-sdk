@@ -1087,7 +1087,11 @@ func TestCreateVotingSession_DealtTimeoutRetrySameMetadataSameHeightFailsNextCre
 
 	retryRound := app.MustGetVoteRound(retryRoundID)
 	require.Len(t, retryRound.CeremonyValidators, 4)
-	require.Equal(t, valAddr, retryRound.CeremonyValidators[0].ValidatorAddress)
+	retryAddrs := make([]string, 0, len(retryRound.CeremonyValidators))
+	for _, validator := range retryRound.CeremonyValidators {
+		retryAddrs = append(retryAddrs, validator.ValidatorAddress)
+	}
+	require.ElementsMatch(t, []string{valAddr, phantom1Addr, phantom2Addr, phantom3Addr}, retryAddrs)
 }
 
 func TestCreateVotingSession_RegisteringTimeoutRetrySameMetadataSameHeightFailsNextSucceeds(t *testing.T) {
