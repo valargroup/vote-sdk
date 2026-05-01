@@ -522,7 +522,8 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 
 	// --- 3. Per-round ceremony REGISTERING phase timeout ---
 	// If a REGISTERING round has not collected all n contributions within its
-	// timeout, clear contributions and restart the phase with a fresh deadline.
+	// timeout, clear contributions and restart with a fresh deadline. The
+	// ceremony validator snapshot is kept unchanged for this round.
 	var contribTimeoutIDs [][]byte
 	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
 		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING &&

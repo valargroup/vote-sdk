@@ -810,6 +810,81 @@ func (s *MsgServerTestSuite) TestCreateValidatorWithPallasKey_ProtoReflectFullNa
 	)
 }
 
+func (s *MsgServerTestSuite) TestCreateVotingSession_NextRoundExcludesJailedValidatorsAndCeremonySucceeds() {
+	s.SetupTest()
+
+	addrs, _ := s.registerValidators(5)
+	staking := newMockStakingKeeper(addrs...)
+	s.setupWithMockStakingKeeper(staking)
+	s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
+
+	firstMsg := validSetupMsg()
+	firstResp, err := s.msgServer.CreateVotingSession(s.ctx, firstMsg)
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	firstRound, err := s.keeper.GetVoteRound(kv, firstResp.VoteRoundId)
+	s.Require().NoError(err)
+	s.Require().Len(firstRound.CeremonyValidators, 5)
+
+	for _, jailedAddr := range addrs[3:] {
+		jailed := staking.validators[jailedAddr]
+		jailed.Jailed = true
+		staking.validators[jailedAddr] = jailed
+	}
+
+	// The in-flight round keeps its creation-time ceremony snapshot. Once that
+	// round is no longer pending, the next round snapshots only active validators.
+	firstRound.Status = types.SessionStatus_SESSION_STATUS_FINALIZED
+	s.Require().NoError(s.keeper.SetVoteRound(kv, firstRound))
+
+	nextMsg := validSetupMsg()
+	nextMsg.SnapshotHeight = firstMsg.SnapshotHeight + 1
+	nextResp, err := s.msgServer.CreateVotingSession(s.ctx, nextMsg)
+	s.Require().NoError(err)
+
+	nextRound, err := s.keeper.GetVoteRound(kv, nextResp.VoteRoundId)
+	s.Require().NoError(err)
+	s.Require().Len(nextRound.CeremonyValidators, 3)
+	activeAddrs := addrs[:3]
+	gotAddrs := make([]string, 0, len(nextRound.CeremonyValidators))
+	for _, v := range nextRound.CeremonyValidators {
+		gotAddrs = append(gotAddrs, v.ValidatorAddress)
+	}
+	s.Require().ElementsMatch(activeAddrs, gotAddrs)
+
+	for _, addr := range activeAddrs {
+		s.setBlockProposer(addr)
+		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+			Creator:            addr,
+			VoteRoundId:        nextResp.VoteRoundId,
+			FeldmanCommitments: makeDKGCommitments(2),
+			Payloads:           makeDKGPayloads(activeAddrs, addr),
+		})
+		s.Require().NoError(err)
+	}
+
+	nextRound, err = s.keeper.GetVoteRound(kv, nextResp.VoteRoundId)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_DEALT, nextRound.CeremonyStatus)
+
+	for _, addr := range activeAddrs {
+		s.setBlockProposer(addr)
+		_, err := s.msgServer.AckExecutiveAuthorityKey(s.ctx, &types.MsgAckExecutiveAuthorityKey{
+			Creator:      addr,
+			VoteRoundId:  nextResp.VoteRoundId,
+			AckSignature: s.ackSignature(nextResp.VoteRoundId, addr),
+		})
+		s.Require().NoError(err)
+	}
+
+	nextRound, err = s.keeper.GetVoteRound(kv, nextResp.VoteRoundId)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED, nextRound.CeremonyStatus)
+	s.Require().Equal(types.SessionStatus_SESSION_STATUS_ACTIVE, nextRound.Status)
+	s.Require().Len(nextRound.CeremonyValidators, 3)
+}
+
 // ===========================================================================
 // MsgContributeDKG handler tests
 // ===========================================================================
