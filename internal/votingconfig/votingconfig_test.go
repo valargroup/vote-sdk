@@ -153,6 +153,38 @@ func TestValidateWrapper(t *testing.T) {
 	}
 }
 
+func TestValidateStaticConfig(t *testing.T) {
+	cfg := &StaticConfig{
+		StaticConfigVersion: StaticConfigVersionV1,
+		DynamicConfigURL:    "https://example.com/dynamic-voting-config.json",
+		TrustedKeys: []TrustedKey{{
+			KeyID:  "key-1",
+			Alg:    AlgEd25519,
+			Pubkey: base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize)),
+		}},
+	}
+	if err := ValidateStaticConfig(cfg); err != nil {
+		t.Fatalf("ValidateStaticConfig() unexpected error: %v", err)
+	}
+
+	cfg.StaticConfigVersion = 99
+	if err := ValidateStaticConfig(cfg); err == nil {
+		t.Fatalf("expected unsupported static_config_version error")
+	}
+	cfg.StaticConfigVersion = StaticConfigVersionV1
+
+	cfg.DynamicConfigURL = " "
+	if err := ValidateStaticConfig(cfg); err == nil {
+		t.Fatalf("expected dynamic_config_url error")
+	}
+	cfg.DynamicConfigURL = "https://example.com/dynamic-voting-config.json"
+
+	cfg.TrustedKeys = nil
+	if err := ValidateStaticConfig(cfg); err == nil {
+		t.Fatalf("expected trusted_keys error")
+	}
+}
+
 func baseConfig(roundID string, eaPK [32]byte, sig []byte) *SignedConfig {
 	return &SignedConfig{
 		ConfigVersion: ConfigVersionV1,
