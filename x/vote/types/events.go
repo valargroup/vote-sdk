@@ -19,6 +19,8 @@ const (
 	EventTypeAuthorizedSend           = "authorized_send"
 	EventTypeTallyTimeout             = "tally_timeout"
 	EventTypeCeremonyValidatorJailed  = "ceremony_validator_jailed"
+	EventTypeScheduleUpgrade          = "schedule_upgrade"
+	EventTypeCancelUpgrade            = "cancel_upgrade"
 )
 
 // Event attribute keys.
@@ -48,4 +50,7 @@ const (
 	AttributeKeyNewPallasPk      = "new_pallas_pk"
 	AttributeKeyCeremonyPhase    = "ceremony_phase"
 	AttributeKeyJailedUntil      = "jailed_until"
+	AttributeKeyUpgradeName      = "upgrade_name"
+	AttributeKeyUpgradeInfo      = "upgrade_info"
+	AttributeKeyReplaceExisting  = "replace_existing"
 )

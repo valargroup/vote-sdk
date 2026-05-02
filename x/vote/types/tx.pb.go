@@ -1652,6 +1652,204 @@ func (*MsgAuthorizedSendResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{27}
 }
 
+// MsgScheduleUpgrade schedules a software upgrade through x/upgrade.
+// Callable by any current vote manager. The message intentionally keeps the
+// wire shape primitive instead of embedding cosmos.upgrade.v1beta1.Plan so the
+// vote module owns the public upgrade-control surface.
+type MsgScheduleUpgrade struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Creator         string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                         // Sender address (must be in the current vote manager set)
+	Name            string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                               // Upgrade plan name; must match the future binary's registered handler
+	Height          int64                  `protobuf:"varint,3,opt,name=height,proto3" json:"height,omitempty"`                                          // Upgrade height; x/upgrade rejects past heights
+	Info            string                 `protobuf:"bytes,4,opt,name=info,proto3" json:"info,omitempty"`                                               // Operator-readable upgrade metadata
+	ReplaceExisting bool                   `protobuf:"varint,5,opt,name=replace_existing,json=replaceExisting,proto3" json:"replace_existing,omitempty"` // Required to overwrite an existing scheduled plan
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *MsgScheduleUpgrade) Reset() {
+	*x = MsgScheduleUpgrade{}
+	mi := &file_svote_v1_tx_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgScheduleUpgrade) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgScheduleUpgrade) ProtoMessage() {}
+
+func (x *MsgScheduleUpgrade) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgScheduleUpgrade.ProtoReflect.Descriptor instead.
+func (*MsgScheduleUpgrade) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *MsgScheduleUpgrade) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+func (x *MsgScheduleUpgrade) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *MsgScheduleUpgrade) GetHeight() int64 {
+	if x != nil {
+		return x.Height
+	}
+	return 0
+}
+
+func (x *MsgScheduleUpgrade) GetInfo() string {
+	if x != nil {
+		return x.Info
+	}
+	return ""
+}
+
+func (x *MsgScheduleUpgrade) GetReplaceExisting() bool {
+	if x != nil {
+		return x.ReplaceExisting
+	}
+	return false
+}
+
+type MsgScheduleUpgradeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgScheduleUpgradeResponse) Reset() {
+	*x = MsgScheduleUpgradeResponse{}
+	mi := &file_svote_v1_tx_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgScheduleUpgradeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgScheduleUpgradeResponse) ProtoMessage() {}
+
+func (x *MsgScheduleUpgradeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgScheduleUpgradeResponse.ProtoReflect.Descriptor instead.
+func (*MsgScheduleUpgradeResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{29}
+}
+
+// MsgCancelUpgrade clears the currently scheduled x/upgrade plan.
+// Callable by any current vote manager.
+type MsgCancelUpgrade struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"` // Sender address (must be in the current vote manager set)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgCancelUpgrade) Reset() {
+	*x = MsgCancelUpgrade{}
+	mi := &file_svote_v1_tx_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgCancelUpgrade) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgCancelUpgrade) ProtoMessage() {}
+
+func (x *MsgCancelUpgrade) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgCancelUpgrade.ProtoReflect.Descriptor instead.
+func (*MsgCancelUpgrade) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *MsgCancelUpgrade) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+type MsgCancelUpgradeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgCancelUpgradeResponse) Reset() {
+	*x = MsgCancelUpgradeResponse{}
+	mi := &file_svote_v1_tx_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgCancelUpgradeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgCancelUpgradeResponse) ProtoMessage() {}
+
+func (x *MsgCancelUpgradeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgCancelUpgradeResponse.ProtoReflect.Descriptor instead.
+func (*MsgCancelUpgradeResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{31}
+}
+
 var File_svote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_svote_v1_tx_proto_rawDesc = "" +
@@ -1768,7 +1966,18 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"to_address\x18\x02 \x01(\tR\ttoAddress\x12\x16\n" +
 	"\x06amount\x18\x03 \x01(\tR\x06amount\x12\x14\n" +
 	"\x05denom\x18\x04 \x01(\tR\x05denom\"\x1b\n" +
-	"\x19MsgAuthorizedSendResponse2\xad\t\n" +
+	"\x19MsgAuthorizedSendResponse\"\x99\x01\n" +
+	"\x12MsgScheduleUpgrade\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
+	"\x06height\x18\x03 \x01(\x03R\x06height\x12\x12\n" +
+	"\x04info\x18\x04 \x01(\tR\x04info\x12)\n" +
+	"\x10replace_existing\x18\x05 \x01(\bR\x0freplaceExisting\"\x1c\n" +
+	"\x1aMsgScheduleUpgradeResponse\",\n" +
+	"\x10MsgCancelUpgrade\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\"\x1a\n" +
+	"\x18MsgCancelUpgradeResponse2\xd5\n" +
+	"\n" +
 	"\x03Msg\x12a\n" +
 	"\x13CreateVotingSession\x12 .svote.v1.MsgCreateVotingSession\x1a(.svote.v1.MsgCreateVotingSessionResponse\x12L\n" +
 	"\fDelegateVote\x12\x19.svote.v1.MsgDelegateVote\x1a!.svote.v1.MsgDelegateVoteResponse\x12@\n" +
@@ -1782,7 +1991,9 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x18AckExecutiveAuthorityKey\x12%.svote.v1.MsgAckExecutiveAuthorityKey\x1a-.svote.v1.MsgAckExecutiveAuthorityKeyResponse\x12|\n" +
 	"\x1cCreateValidatorWithPallasKey\x12).svote.v1.MsgCreateValidatorWithPallasKey\x1a1.svote.v1.MsgCreateValidatorWithPallasKeyResponse\x12^\n" +
 	"\x12UpdateVoteManagers\x12\x1f.svote.v1.MsgUpdateVoteManagers\x1a'.svote.v1.MsgUpdateVoteManagersResponse\x12R\n" +
-	"\x0eAuthorizedSend\x12\x1b.svote.v1.MsgAuthorizedSend\x1a#.svote.v1.MsgAuthorizedSendResponse\x1a\x05\x80\xe7\xb0*\x01B-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
+	"\x0eAuthorizedSend\x12\x1b.svote.v1.MsgAuthorizedSend\x1a#.svote.v1.MsgAuthorizedSendResponse\x12U\n" +
+	"\x0fScheduleUpgrade\x12\x1c.svote.v1.MsgScheduleUpgrade\x1a$.svote.v1.MsgScheduleUpgradeResponse\x12O\n" +
+	"\rCancelUpgrade\x12\x1a.svote.v1.MsgCancelUpgrade\x1a\".svote.v1.MsgCancelUpgradeResponse\x1a\x05\x80\xe7\xb0*\x01B-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
 
 var (
 	file_svote_v1_tx_proto_rawDescOnce sync.Once
@@ -1796,7 +2007,7 @@ func file_svote_v1_tx_proto_rawDescGZIP() []byte {
 	return file_svote_v1_tx_proto_rawDescData
 }
 
-var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgCreateVotingSession)(nil),                  // 0: svote.v1.MsgCreateVotingSession
 	(*MsgCreateVotingSessionResponse)(nil),          // 1: svote.v1.MsgCreateVotingSessionResponse
@@ -1826,13 +2037,17 @@ var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgUpdateVoteManagersResponse)(nil),           // 25: svote.v1.MsgUpdateVoteManagersResponse
 	(*MsgAuthorizedSend)(nil),                       // 26: svote.v1.MsgAuthorizedSend
 	(*MsgAuthorizedSendResponse)(nil),               // 27: svote.v1.MsgAuthorizedSendResponse
-	(*Proposal)(nil),                                // 28: svote.v1.Proposal
-	(*DealerPayload)(nil),                           // 29: svote.v1.DealerPayload
+	(*MsgScheduleUpgrade)(nil),                      // 28: svote.v1.MsgScheduleUpgrade
+	(*MsgScheduleUpgradeResponse)(nil),              // 29: svote.v1.MsgScheduleUpgradeResponse
+	(*MsgCancelUpgrade)(nil),                        // 30: svote.v1.MsgCancelUpgrade
+	(*MsgCancelUpgradeResponse)(nil),                // 31: svote.v1.MsgCancelUpgradeResponse
+	(*Proposal)(nil),                                // 32: svote.v1.Proposal
+	(*DealerPayload)(nil),                           // 33: svote.v1.DealerPayload
 }
 var file_svote_v1_tx_proto_depIdxs = []int32{
-	28, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
+	32, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
 	9,  // 1: svote.v1.MsgSubmitTally.entries:type_name -> svote.v1.TallyEntry
-	29, // 2: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
+	33, // 2: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
 	22, // 3: svote.v1.MsgSubmitPartialDecryption.entries:type_name -> svote.v1.PartialDecryptionEntry
 	0,  // 4: svote.v1.Msg.CreateVotingSession:input_type -> svote.v1.MsgCreateVotingSession
 	2,  // 5: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
@@ -1847,21 +2062,25 @@ var file_svote_v1_tx_proto_depIdxs = []int32{
 	19, // 14: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
 	24, // 15: svote.v1.Msg.UpdateVoteManagers:input_type -> svote.v1.MsgUpdateVoteManagers
 	26, // 16: svote.v1.Msg.AuthorizedSend:input_type -> svote.v1.MsgAuthorizedSend
-	1,  // 17: svote.v1.Msg.CreateVotingSession:output_type -> svote.v1.MsgCreateVotingSessionResponse
-	3,  // 18: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
-	5,  // 19: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
-	7,  // 20: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
-	10, // 21: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
-	23, // 22: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
-	12, // 23: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
-	14, // 24: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
-	16, // 25: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
-	18, // 26: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
-	20, // 27: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
-	25, // 28: svote.v1.Msg.UpdateVoteManagers:output_type -> svote.v1.MsgUpdateVoteManagersResponse
-	27, // 29: svote.v1.Msg.AuthorizedSend:output_type -> svote.v1.MsgAuthorizedSendResponse
-	17, // [17:30] is the sub-list for method output_type
-	4,  // [4:17] is the sub-list for method input_type
+	28, // 17: svote.v1.Msg.ScheduleUpgrade:input_type -> svote.v1.MsgScheduleUpgrade
+	30, // 18: svote.v1.Msg.CancelUpgrade:input_type -> svote.v1.MsgCancelUpgrade
+	1,  // 19: svote.v1.Msg.CreateVotingSession:output_type -> svote.v1.MsgCreateVotingSessionResponse
+	3,  // 20: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
+	5,  // 21: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
+	7,  // 22: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
+	10, // 23: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
+	23, // 24: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
+	12, // 25: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
+	14, // 26: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
+	16, // 27: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
+	18, // 28: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
+	20, // 29: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
+	25, // 30: svote.v1.Msg.UpdateVoteManagers:output_type -> svote.v1.MsgUpdateVoteManagersResponse
+	27, // 31: svote.v1.Msg.AuthorizedSend:output_type -> svote.v1.MsgAuthorizedSendResponse
+	29, // 32: svote.v1.Msg.ScheduleUpgrade:output_type -> svote.v1.MsgScheduleUpgradeResponse
+	31, // 33: svote.v1.Msg.CancelUpgrade:output_type -> svote.v1.MsgCancelUpgradeResponse
+	19, // [19:34] is the sub-list for method output_type
+	4,  // [4:19] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -1879,7 +2098,7 @@ func file_svote_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_tx_proto_rawDesc), len(file_svote_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   28,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

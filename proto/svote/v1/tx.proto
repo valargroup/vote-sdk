@@ -25,6 +25,8 @@ service Msg {
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
   rpc UpdateVoteManagers(MsgUpdateVoteManagers) returns (MsgUpdateVoteManagersResponse);
   rpc AuthorizedSend(MsgAuthorizedSend) returns (MsgAuthorizedSendResponse);
+  rpc ScheduleUpgrade(MsgScheduleUpgrade) returns (MsgScheduleUpgradeResponse);
+  rpc CancelUpgrade(MsgCancelUpgrade) returns (MsgCancelUpgradeResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -218,3 +220,24 @@ message MsgAuthorizedSend {
 
 message MsgAuthorizedSendResponse {}
 
+// MsgScheduleUpgrade schedules a software upgrade through x/upgrade.
+// Callable by any current vote manager. The message intentionally keeps the
+// wire shape primitive instead of embedding cosmos.upgrade.v1beta1.Plan so the
+// vote module owns the public upgrade-control surface.
+message MsgScheduleUpgrade {
+  string creator          = 1; // Sender address (must be in the current vote manager set)
+  string name             = 2; // Upgrade plan name; must match the future binary's registered handler
+  int64  height           = 3; // Upgrade height; x/upgrade rejects past heights
+  string info             = 4; // Operator-readable upgrade metadata
+  bool   replace_existing = 5; // Required to overwrite an existing scheduled plan
+}
+
+message MsgScheduleUpgradeResponse {}
+
+// MsgCancelUpgrade clears the currently scheduled x/upgrade plan.
+// Callable by any current vote manager.
+message MsgCancelUpgrade {
+  string creator = 1; // Sender address (must be in the current vote manager set)
+}
+
+message MsgCancelUpgradeResponse {}

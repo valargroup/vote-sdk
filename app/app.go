@@ -12,6 +12,7 @@ import (
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
+	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
@@ -67,7 +68,8 @@ type SvoteApp struct {
 	ConsensusParamsKeeper consensuskeeper.Keeper
 
 	// Vote module keeper.
-	VoteKeeper *votekeeper.Keeper
+	VoteKeeper    *votekeeper.Keeper
+	UpgradeKeeper *upgradekeeper.Keeper
 
 	// CometBFT RPC endpoint for the vote API handler (read from app.toml vote.comet_rpc).
 	cometRPC string
@@ -128,6 +130,7 @@ func NewSvoteApp(
 		&app.SlashingKeeper,
 		&app.ConsensusParamsKeeper,
 		&app.VoteKeeper,
+		&app.UpgradeKeeper,
 	); err != nil {
 		panic(err)
 	}
@@ -208,6 +211,8 @@ func NewSvoteApp(
 		app.VoteKeeper,
 		logger,
 	))
+
+	app.RegisterUpgradeHandlers()
 
 	if err := app.Load(loadLatest); err != nil {
 		panic(err)

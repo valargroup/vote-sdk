@@ -96,6 +96,19 @@ func SetupTestApp(t *testing.T) *TestApp {
 	return ta
 }
 
+// SetupTestAppWithAppOptions is SetupTestApp with caller-provided app options.
+// It preserves the same post-genesis fixture state as SetupTestApp.
+func SetupTestAppWithAppOptions(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
+	t.Helper()
+	ta := setupTestApp(t, appOpts)
+
+	_, pk := elgamal.KeyGen(rand.Reader)
+	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
+	ta.SeedVoteManagers(DefaultVoteManagerAddress)
+
+	return ta
+}
+
 // SetupTestAppWithEAKey creates a TestApp with a real ElGamal keypair for the
 // EA (Election Authority). The secret key is written to a temp file and passed
 // via the "vote.ea_sk_path" app option so that PrepareProposal can decrypt

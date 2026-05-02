@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -35,12 +36,92 @@ func GetTxCmd() *cobra.Command {
 		CmdCreateValidatorWithPallasKey(),
 		// Vote-manager commands — signed by any current vote manager (any-of-N).
 		CmdUpdateVoteManagers(),
+		CmdScheduleUpgrade(),
+		CmdCancelUpgrade(),
 		CmdCreateVotingSession(),
 		CmdSubmitTally(),
 		// Token transfer — uses whitelisted MsgAuthorizedSend.
 		CmdAuthorizedSend(),
 	)
 
+	return cmd
+}
+
+// CmdScheduleUpgrade broadcasts MsgScheduleUpgrade.
+// Callable by any current vote manager.
+func CmdScheduleUpgrade() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "schedule-upgrade [name] [height] --info <info> [--replace-existing]",
+		Short: "Schedule a software upgrade halt height",
+		Long: `Broadcast a MsgScheduleUpgrade transaction.
+
+The --from signer must be a current vote manager. The name must match the
+upgrade handler registered in the future binary. If another plan is already
+scheduled, pass --replace-existing to overwrite it.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+
+			height, err := strconv.ParseInt(args[1], 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid height %q: %w", args[1], err)
+			}
+			info, err := cmd.Flags().GetString("info")
+			if err != nil {
+				return err
+			}
+			replaceExisting, err := cmd.Flags().GetBool("replace-existing")
+			if err != nil {
+				return err
+			}
+
+			msg := &types.MsgScheduleUpgrade{
+				Creator:         clientCtx.GetFromAddress().String(),
+				Name:            args[0],
+				Height:          height,
+				Info:            info,
+				ReplaceExisting: replaceExisting,
+			}
+
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	cmd.Flags().String("info", "", "Operator-readable upgrade metadata")
+	cmd.Flags().Bool("replace-existing", false, "Overwrite an existing scheduled upgrade plan")
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
+// CmdCancelUpgrade broadcasts MsgCancelUpgrade.
+// Callable by any current vote manager.
+func CmdCancelUpgrade() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cancel-upgrade",
+		Short: "Cancel the scheduled software upgrade",
+		Long: `Broadcast a MsgCancelUpgrade transaction.
+
+The --from signer must be a current vote manager. Cancelling with no scheduled
+upgrade is accepted as a no-op by x/upgrade.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+
+			msg := &types.MsgCancelUpgrade{
+				Creator: clientCtx.GetFromAddress().String(),
+			}
+
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	flags.AddTxFlagsToCmd(cmd)
 	return cmd
 }
 

@@ -45,4 +45,8 @@ var (
 
 	// Authorized send errors.
 	ErrUnauthorizedSend = errors.Register(ModuleName, 32, "sender not authorized to send to recipient")
+
+	// Upgrade scheduling errors.
+	ErrUpgradeUnavailable = errors.Register(ModuleName, 40, "upgrade scheduler unavailable")
+	ErrUpgradePlanExists  = errors.Register(ModuleName, 41, "upgrade plan already scheduled")
 )

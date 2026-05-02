@@ -7,9 +7,11 @@ import (
 	"github.com/spf13/cobra"
 
 	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
+	upgradev1beta1 "cosmossdk.io/api/cosmos/upgrade/v1beta1"
 	"cosmossdk.io/client/v2/autocli"
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
 
 	"github.com/valargroup/vote-sdk/app"
 
@@ -86,12 +88,54 @@ func NewRootCmd() *cobra.Command {
 	nodeCmds := nodeservice.NewNodeCommands()
 	autoCliOpts.ModuleOptions = make(map[string]*autocliv1.ModuleOptions)
 	autoCliOpts.ModuleOptions[nodeCmds.Name()] = nodeCmds.AutoCLIOptions()
+	autoCliOpts.ModuleOptions[upgradetypes.ModuleName] = upgradeQueryOnlyAutoCLIOptions()
 
 	if err := autoCliOpts.EnhanceRootCommand(rootCmd); err != nil {
 		panic(err)
 	}
 
 	return rootCmd
+}
+
+func upgradeQueryOnlyAutoCLIOptions() *autocliv1.ModuleOptions {
+	return &autocliv1.ModuleOptions{
+		Query: &autocliv1.ServiceCommandDescriptor{
+			Service: upgradev1beta1.Query_ServiceDesc.ServiceName,
+			Short:   "Querying commands for the upgrade module",
+			RpcCommandOptions: []*autocliv1.RpcCommandOptions{
+				{
+					RpcMethod: "CurrentPlan",
+					Use:       "plan",
+					Short:     "Query the scheduled upgrade plan",
+				},
+				{
+					RpcMethod: "AppliedPlan",
+					Use:       "applied [upgrade-name]",
+					Short:     "Query the height at which an upgrade was applied",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "name"},
+					},
+				},
+				{
+					RpcMethod: "ModuleVersions",
+					Use:       "module-versions [optional module_name]",
+					Short:     "Query module consensus versions",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "module_name", Optional: true},
+					},
+				},
+				{
+					RpcMethod: "Authority",
+					Use:       "authority",
+					Short:     "Query the upgrade authority address",
+				},
+				{
+					RpcMethod: "UpgradedConsensusState",
+					Skip:      true,
+				},
+			},
+		},
+	}
 }
 
 // ProvideClientContext provides the client context for depinject.

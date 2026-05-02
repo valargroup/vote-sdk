@@ -1053,6 +1053,8 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		vote.ProvideRotatePallasKeySigner(),
 		vote.ProvideContributeDKGSigner(),
 		vote.ProvideAckExecutiveAuthorityKeySigner(),
+		vote.ProvideScheduleUpgradeSigner(),
+		vote.ProvideCancelUpgradeSigner(),
 	}
 
 	wantMsgTypes := []protoreflect.FullName{
@@ -1065,6 +1067,8 @@ func TestAllSignerProviders_Completeness(t *testing.T) {
 		"svote.v1.MsgRotatePallasKey",
 		"svote.v1.MsgContributeDKG",
 		"svote.v1.MsgAckExecutiveAuthorityKey",
+		"svote.v1.MsgScheduleUpgrade",
+		"svote.v1.MsgCancelUpgrade",
 	}
 
 	signerMap := make(map[protoreflect.FullName]bool, len(allSigners))

@@ -3,7 +3,10 @@ package types
 import (
 	"bytes"
 	"fmt"
+	"strings"
 )
+
+const MaxUpgradeInfoBytes = 4096
 
 // zeroPoint32 is the compressed encoding of the Pallas identity (point at
 // infinity). Used by ValidateBasic as a cheap stateless guard against the
@@ -211,6 +214,31 @@ func (msg *MsgSubmitTally) ValidateBasic() error {
 				ErrInvalidField, i, e.ProposalId, e.VoteDecision)
 		}
 		seen[key] = true
+	}
+	return nil
+}
+
+// ValidateBasic performs stateless validation for MsgScheduleUpgrade.
+func (msg *MsgScheduleUpgrade) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if strings.TrimSpace(msg.Name) == "" {
+		return fmt.Errorf("%w: name cannot be empty", ErrInvalidField)
+	}
+	if msg.Height <= 0 {
+		return fmt.Errorf("%w: height must be greater than 0", ErrInvalidField)
+	}
+	if len(msg.Info) > MaxUpgradeInfoBytes {
+		return fmt.Errorf("%w: info cannot exceed %d bytes, got %d", ErrInvalidField, MaxUpgradeInfoBytes, len(msg.Info))
+	}
+	return nil
+}
+
+// ValidateBasic performs stateless validation for MsgCancelUpgrade.
+func (msg *MsgCancelUpgrade) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
 	}
 	return nil
 }
