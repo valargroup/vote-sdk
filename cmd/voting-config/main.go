@@ -217,7 +217,7 @@ func newVerifyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to dynamic-voting-config.json")
-	cmd.Flags().StringVar(&staticConfigPath, "static-config", "", "Path to static-voting-config-sample.json")
+	cmd.Flags().StringVar(&staticConfigPath, "static-config", "", "Path to static-voting-config.json")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Write machine-readable verification result")
 	return cmd
 }
