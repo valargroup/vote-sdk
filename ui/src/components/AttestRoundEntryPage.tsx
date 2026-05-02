@@ -175,6 +175,14 @@ export function AttestRoundEntryPage() {
   const selectedRoundIsLatest =
     !!selectedRound && latestRound?.roundIdHex === selectedRound.roundIdHex;
   const canSignRound = /^[0-9a-f]{64}$/.test(roundId) && validateEaPK(eaPK);
+  const eaPKHex = useMemo(() => {
+    if (!eaPK || !validateEaPK(eaPK)) return "";
+    try {
+      return bytesToHex(base64ToBytes(eaPK.trim()));
+    } catch {
+      return "";
+    }
+  }, [eaPK]);
 
   const loadRounds = async () => {
     setLoadingRounds(true);
@@ -642,6 +650,14 @@ export function AttestRoundEntryPage() {
               spellCheck={false}
               className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
             />
+            {eaPKHex && (
+              <div className="mt-1.5 flex items-start gap-2">
+                <span className="text-[10px] text-text-muted shrink-0 mt-0.5">hex</span>
+                <p className="text-[10px] text-text-secondary font-mono break-all">
+                  {eaPKHex}
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -660,7 +676,7 @@ export function AttestRoundEntryPage() {
               }
               className="px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
             >
-              {signing ? "Signing..." : "Sign with derived key"}
+              {signing ? "Signing..." : "Create Attestation"}
             </button>
           </div>
         </section>
@@ -699,7 +715,7 @@ export function AttestRoundEntryPage() {
                     }
                     className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-md text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    {configPrStatus === "creating" ? "Opening Pull Request..." : "Update via Pull Request"}
+                    {configPrStatus === "creating" ? "Opening Pull Request..." : "Add Attestation via Pull Request"}
                   </button>
                   <a
                     href="https://github.com/valargroup/token-holder-voting-config/pull/36"
@@ -707,7 +723,7 @@ export function AttestRoundEntryPage() {
                     rel="noreferrer"
                     className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-surface-2 hover:bg-surface-3 text-text-secondary rounded-md text-[11px] font-semibold transition-colors ml-2"
                   >
-                    <span>Sample Pull Request</span>
+                    <span>See Sample Pull Request</span>
                     <ExternalLink size={12} />
                   </a>
                 </div>
