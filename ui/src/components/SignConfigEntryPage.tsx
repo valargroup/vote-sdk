@@ -16,6 +16,9 @@ interface RoundOption {
   eaPK: string;
   title: string;
   status: string;
+  createdAtHeight: number | null;
+  voteEndTime: number | null;
+  isActive: boolean;
 }
 
 interface DerivedPublicKeyInfo {
@@ -77,6 +80,42 @@ function validateEaPK(value: string): boolean {
   }
 }
 
+function optionalNumber(value: string | number | undefined): number | null {
+  if (value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isActiveStatus(status: string): boolean {
+  const normalized = status.trim().toLowerCase();
+  return normalized === "1" || normalized === "active" || normalized === "session_status_active";
+}
+
+function getLatestRound(rounds: RoundOption[]): RoundOption | null {
+  return rounds.reduce<RoundOption | null>((latest, round) => {
+    if (!latest) return round;
+
+    const roundHeight = round.createdAtHeight ?? Number.NEGATIVE_INFINITY;
+    const latestHeight = latest.createdAtHeight ?? Number.NEGATIVE_INFINITY;
+    if (roundHeight !== latestHeight) return roundHeight > latestHeight ? round : latest;
+
+    const roundEndTime = round.voteEndTime ?? Number.NEGATIVE_INFINITY;
+    const latestEndTime = latest.voteEndTime ?? Number.NEGATIVE_INFINITY;
+    return roundEndTime > latestEndTime ? round : latest;
+  }, null);
+}
+
+function getDefaultRound(
+  rounds: RoundOption[],
+  activeRoundIdHex: string | null
+): RoundOption | null {
+  if (activeRoundIdHex) {
+    const activeRound = rounds.find((round) => round.roundIdHex === activeRoundIdHex);
+    if (activeRound) return activeRound;
+  }
+  return rounds.find((round) => round.isActive) ?? getLatestRound(rounds);
+}
+
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -121,6 +160,14 @@ export function SignConfigEntryPage() {
   const [verifyError, setVerifyError] = useState("");
 
   const selectedRoundKey = useMemo(() => `${roundId}|${eaPK}`, [roundId, eaPK]);
+  const latestRound = useMemo(() => getLatestRound(rounds), [rounds]);
+  const selectedRound = useMemo(
+    () => rounds.find((round) => round.roundIdHex === roundId) ?? null,
+    [roundId, rounds]
+  );
+  const selectedRoundIsActive = selectedRound?.isActive ?? false;
+  const selectedRoundIsLatest =
+    !!selectedRound && latestRound?.roundIdHex === selectedRound.roundIdHex;
   const canSignRound = /^[0-9a-f]{64}$/.test(roundId) && validateEaPK(eaPK);
   const canVerify =
     /^[0-9a-f]{64}$/.test(verifyRoundId) &&
@@ -131,7 +178,11 @@ export function SignConfigEntryPage() {
     setLoadingRounds(true);
     setRoundError("");
     try {
-      const resp = await chainApi.listRounds();
+      const [resp, activeResp] = await Promise.all([
+        chainApi.listRounds(),
+        chainApi.getActiveRound().catch(() => ({ round: null })),
+      ]);
+      const activeRoundIdHex = normalizeRoundId(activeResp.round?.vote_round_id);
       const options = (resp.rounds ?? [])
         .map((round): RoundOption | null => {
           const roundIdHex = normalizeRoundId(round.vote_round_id);
@@ -141,13 +192,20 @@ export function SignConfigEntryPage() {
             eaPK: round.ea_pk,
             title: round.title || round.description || roundIdHex,
             status: String(round.status ?? "unknown"),
+            createdAtHeight: optionalNumber(round.created_at_height),
+            voteEndTime: optionalNumber(round.vote_end_time),
+            isActive: roundIdHex === activeRoundIdHex || isActiveStatus(String(round.status ?? "")),
           };
         })
         .filter((round): round is RoundOption => round !== null);
       setRounds(options);
-      if (options.length > 0 && !roundId) {
-        setRoundId(options[0].roundIdHex);
-        setEaPK(options[0].eaPK);
+      const currentSelectionStillExists = options.some((round) => round.roundIdHex === roundId);
+      if (options.length > 0 && (!roundId || !currentSelectionStillExists)) {
+        const defaultRound = getDefaultRound(options, activeRoundIdHex);
+        if (defaultRound) {
+          setRoundId(defaultRound.roundIdHex);
+          setEaPK(defaultRound.eaPK);
+        }
       }
     } catch (err) {
       setRoundError(err instanceof Error ? err.message : String(err));
@@ -467,10 +525,29 @@ export function SignConfigEntryPage() {
               )}
               {rounds.map((round) => (
                 <option key={round.roundIdHex} value={round.roundIdHex}>
-                  {round.title} ({round.status}) — {round.roundIdHex.slice(0, 12)}...
+                  {round.isActive ? "[ACTIVE] " : ""}
+                  {latestRound?.roundIdHex === round.roundIdHex ? "[LATEST] " : ""}
+                  {round.title} ({round.status}) - {round.roundIdHex.slice(0, 12)}...
                 </option>
               ))}
             </select>
+            {selectedRound && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {selectedRoundIsActive && (
+                  <span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success">
+                    Active round
+                  </span>
+                )}
+                {!selectedRoundIsActive && selectedRoundIsLatest && (
+                  <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                    Latest round
+                  </span>
+                )}
+                <span className="text-[10px] text-text-muted">
+                  {selectedRound.title}
+                </span>
+              </div>
+            )}
           </div>
 
           <div>
