@@ -31,6 +31,9 @@ func MissingCeremonyContributors(round *types.VoteRound) []string {
 	return missingCeremonyValidators(round, contributed)
 }
 
+// missingCeremonyValidators returns snapshotted validators absent from seen.
+// The result preserves ceremony snapshot order and de-dupes duplicate snapshot
+// entries so each validator can only be jailed once.
 func missingCeremonyValidators(round *types.VoteRound, seen map[string]struct{}) []string {
 	missing := make([]string, 0)
 	added := make(map[string]struct{}, len(round.GetCeremonyValidators()))
@@ -65,6 +68,11 @@ func (k *Keeper) JailCeremonyNonContributors(
 	)
 }
 
+// jailCeremonyValidators converts each valoper address to its consensus address
+// and applies slashing downtime jailing for the supplied ceremony phase. It
+// skips validators that are already jailed, records JailUntil as block time plus
+// the configured downtime jail duration, and emits one event per newly jailed
+// validator.
 func (k *Keeper) jailCeremonyValidators(
 	ctx context.Context,
 	round *types.VoteRound,
@@ -90,6 +98,8 @@ func (k *Keeper) jailCeremonyValidators(
 
 	results := make([]CeremonyJailResult, 0, len(valoperAddrs))
 	for _, valoperAddr := range valoperAddrs {
+		// Slashing jail APIs operate on consensus addresses, while ceremony
+		// snapshots store staking validator operator addresses.
 		valAddr, err := sdk.ValAddressFromBech32(valoperAddr)
 		if err != nil {
 			return nil, fmt.Errorf("parse ceremony validator address %q: %w", valoperAddr, err)

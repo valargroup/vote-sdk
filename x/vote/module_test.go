@@ -297,19 +297,193 @@ func (s *EndBlockerTestSuite) TestEndBlock() {
 
 func (s *EndBlockerTestSuite) TestCeremonyMissingContributorSelection() {
 	addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
-	round := &types.VoteRound{
-		CeremonyValidators: []*types.ValidatorPallasKey{
-			{ValidatorAddress: addrs[0]},
-			{ValidatorAddress: addrs[1]},
-			{ValidatorAddress: addrs[2]},
+
+	tests := []struct {
+		name          string
+		validators    []*types.ValidatorPallasKey
+		contributions []*types.DKGContribution
+		want          []string
+	}{
+		{
+			name: "no missing contributors",
+			validators: []*types.ValidatorPallasKey{
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[1]},
+			},
+			contributions: []*types.DKGContribution{
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[1]},
+			},
+			want: []string{},
 		},
-		DkgContributions: []*types.DKGContribution{
-			{ValidatorAddress: addrs[0]},
-			{ValidatorAddress: addrs[2]},
+		{
+			name: "one missing contributor",
+			validators: []*types.ValidatorPallasKey{
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[1]},
+				{ValidatorAddress: addrs[2]},
+			},
+			contributions: []*types.DKGContribution{
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[2]},
+			},
+			want: []string{addrs[1]},
+		},
+		{
+			name: "all contributors missing",
+			validators: []*types.ValidatorPallasKey{
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[1]},
+				{ValidatorAddress: addrs[2]},
+			},
+			want: []string{addrs[0], addrs[1], addrs[2]},
+		},
+		{
+			name: "duplicate contributions still count once",
+			validators: []*types.ValidatorPallasKey{
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[1]},
+				{ValidatorAddress: addrs[2]},
+			},
+			contributions: []*types.DKGContribution{
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[2]},
+			},
+			want: []string{addrs[1]},
+		},
+		{
+			name: "nil contributions are ignored",
+			validators: []*types.ValidatorPallasKey{
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[1]},
+			},
+			contributions: []*types.DKGContribution{
+				nil,
+				{ValidatorAddress: addrs[0]},
+			},
+			want: []string{addrs[1]},
+		},
+		{
+			name: "duplicate validators are returned once",
+			validators: []*types.ValidatorPallasKey{
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[1]},
+				{ValidatorAddress: addrs[1]},
+				{ValidatorAddress: addrs[2]},
+			},
+			contributions: []*types.DKGContribution{
+				{ValidatorAddress: addrs[0]},
+			},
+			want: []string{addrs[1], addrs[2]},
+		},
+		{
+			name: "missing contributors preserve snapshot order",
+			validators: []*types.ValidatorPallasKey{
+				{ValidatorAddress: addrs[2]},
+				{ValidatorAddress: addrs[0]},
+				{ValidatorAddress: addrs[1]},
+			},
+			contributions: []*types.DKGContribution{
+				{ValidatorAddress: addrs[0]},
+			},
+			want: []string{addrs[2], addrs[1]},
 		},
 	}
 
-	s.Require().Equal([]string{addrs[1]}, keeper.MissingCeremonyContributors(round))
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			round := &types.VoteRound{
+				CeremonyValidators: tc.validators,
+				DkgContributions:   tc.contributions,
+			}
+			s.Require().Equal(tc.want, keeper.MissingCeremonyContributors(round))
+		})
+	}
+}
+
+func (s *EndBlockerTestSuite) TestJailCeremonyNonContributors() {
+	addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
+
+	tests := []struct {
+		name          string
+		snapshot      []string
+		contributed   []string
+		alreadyJailed []string
+		wantJailed    []string
+	}{
+		{
+			name:        "no missing contributors",
+			snapshot:    []string{addrs[0], addrs[1], addrs[2]},
+			contributed: []string{addrs[0], addrs[1], addrs[2]},
+			wantJailed:  []string{},
+		},
+		{
+			name:        "jails only missing contributor",
+			snapshot:    []string{addrs[0], addrs[1], addrs[2]},
+			contributed: []string{addrs[0], addrs[2]},
+			wantJailed:  []string{addrs[1]},
+		},
+		{
+			name:        "skips already jailed missing contributor",
+			snapshot:    []string{addrs[0], addrs[1], addrs[2]},
+			contributed: []string{addrs[0], addrs[2]},
+			alreadyJailed: []string{
+				addrs[1],
+			},
+			wantJailed: []string{},
+		},
+		{
+			name:        "duplicate snapshot entries are jailed once",
+			snapshot:    []string{addrs[0], addrs[1], addrs[1], addrs[2]},
+			contributed: []string{addrs[0]},
+			wantJailed:  []string{addrs[1], addrs[2]},
+		},
+		{
+			name:       "all missing contributors",
+			snapshot:   []string{addrs[2], addrs[0], addrs[1]},
+			wantJailed: []string{addrs[2], addrs[0], addrs[1]},
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			staking := newModuleMockStakingKeeper(addrs...)
+			for _, addr := range tc.alreadyJailed {
+				validator := staking.validators[addr]
+				validator.Jailed = true
+				staking.validators[addr] = validator
+			}
+			slashing := newModuleMockSlashingKeeper(5 * time.Minute)
+			s.keeper.SetStakingKeeper(staking)
+			s.keeper.SetSlashingKeeper(slashing)
+
+			round := &types.VoteRound{
+				VoteRoundId: bytes.Repeat([]byte{0xCB}, 32),
+			}
+			for _, addr := range tc.snapshot {
+				round.CeremonyValidators = append(round.CeremonyValidators,
+					&types.ValidatorPallasKey{ValidatorAddress: addr})
+			}
+			for _, addr := range tc.contributed {
+				round.DkgContributions = append(round.DkgContributions,
+					&types.DKGContribution{ValidatorAddress: addr})
+			}
+
+			results, err := s.keeper.JailCeremonyNonContributors(s.ctx, round)
+			s.Require().NoError(err)
+
+			gotJailed := make([]string, 0, len(results))
+			for _, result := range results {
+				gotJailed = append(gotJailed, result.ValidatorAddress)
+				s.Require().Equal(s.ctx.BlockTime().Add(5*time.Minute), result.JailedUntil)
+				s.Require().Equal(result.JailedUntil, slashing.jailedUntil[result.ConsAddress.String()])
+			}
+			s.Require().Equal(tc.wantJailed, gotJailed)
+			s.Require().Len(slashing.jailCalls, len(tc.wantJailed))
+		})
+	}
 }
 
 func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
