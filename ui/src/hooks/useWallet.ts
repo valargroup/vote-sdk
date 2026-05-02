@@ -3,6 +3,7 @@ import type { OfflineDirectSigner } from "@cosmjs/proto-signing";
 import {
   connectKeplr,
   connectWithPrivateKey,
+  getKeplrChainId,
   signArbitraryWithKey,
   signArbitraryWithKeplr,
 } from "../api/wallet";
@@ -30,6 +31,7 @@ export interface UseWallet {
   address: string | null;
   signer: OfflineDirectSigner | null;
   source: WalletSource | null;
+  chainId: string | null;
   connecting: boolean;
   error: string | null;
   connect: () => Promise<void>;
@@ -37,12 +39,15 @@ export interface UseWallet {
   disconnect: () => void;
   /** Sign arbitrary data using the connected wallet (Keplr or pasted key). */
   signPayload: (data: string) => Promise<ArbitrarySignature>;
+  /** Sign arbitrary data using Keplr specifically, for deterministic key derivation. */
+  signKeplrPayload: (data: string) => Promise<ArbitrarySignature>;
 }
 
 export function useWallet(): UseWallet {
   const [address, setAddress] = useState<string | null>(null);
   const [signer, setSigner] = useState<OfflineDirectSigner | null>(null);
   const [source, setSource] = useState<WalletSource | null>(null);
+  const [chainId, setChainId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const privKeyRef = useRef<string | null>(null);
@@ -52,6 +57,7 @@ export function useWallet(): UseWallet {
       setSigner(conn.signer);
       setAddress(conn.address);
       setSource(src);
+      setChainId(src === "keplr" ? getKeplrChainId() : null);
       setError(null);
       localStorage.setItem(SOURCE_KEY, src);
     },
@@ -94,6 +100,7 @@ export function useWallet(): UseWallet {
     setSigner(null);
     setAddress(null);
     setSource(null);
+    setChainId(null);
     setError(null);
     privKeyRef.current = null;
     localStorage.removeItem(SOURCE_KEY);
@@ -105,6 +112,16 @@ export function useWallet(): UseWallet {
       if (!address) throw new Error("Wallet not connected");
       if (source === "privkey" && privKeyRef.current) {
         return signArbitraryWithKey(privKeyRef.current, address, data);
+      }
+      return signArbitraryWithKeplr(address, data);
+    },
+    [address, source],
+  );
+
+  const signKeplrPayload = useCallback(
+    async (data: string): Promise<ArbitrarySignature> => {
+      if (!address || source !== "keplr") {
+        throw new Error("Connect Keplr before deriving the signing key");
       }
       return signArbitraryWithKeplr(address, data);
     },
@@ -132,11 +149,13 @@ export function useWallet(): UseWallet {
     address,
     signer,
     source,
+    chainId,
     connecting,
     error,
     connect,
     connectDev,
     disconnect,
     signPayload,
+    signKeplrPayload,
   };
 }

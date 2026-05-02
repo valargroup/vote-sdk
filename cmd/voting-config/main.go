@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/valargroup/vote-sdk/internal/keplrderive"
 	"github.com/valargroup/vote-sdk/internal/votingconfig"
 )
 
@@ -31,7 +32,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newKeygenCmd(), newSignCmd(), newVerifyCmd())
+	root.AddCommand(newKeygenCmd(), newConfigAttestationKeygenCmd(), newSignCmd(), newVerifyCmd())
 	return root
 }
 
@@ -92,6 +93,97 @@ func newKeygenCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&signerID, "signer-id", "", "Signer identifier matching trusted_keys.json[].key_id")
 	cmd.Flags().StringVar(&outPath, "out", "", "Write base64(seed) private key to this path instead of stdout")
+	cmd.Flags().BoolVar(&force, "force", false, "Overwrite --out if it already exists")
+	return cmd
+}
+
+func newConfigAttestationKeygenCmd() *cobra.Command {
+	var (
+		chainID       string
+		bip44Path     string
+		bech32Prefix  string
+		purpose       string
+		signerID      string
+		mnemonicFile  string
+		mnemonicStdin bool
+		passphrase    string
+		outPath       string
+		force         bool
+	)
+	cmd := &cobra.Command{
+		Use:   "config-attestation-keygen",
+		Short: "Derive the voting Ed25519 key from a Keplr/Cosmos mnemonic",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(chainID) == "" {
+				return errors.New("--chain-id is required")
+			}
+			if outPath != "" {
+				if err := refuseOverwrite(outPath, force); err != nil {
+					return err
+				}
+			}
+
+			mnemonic, err := loadMnemonic(mnemonicFile, mnemonicStdin, os.Stdin)
+			if err != nil {
+				return err
+			}
+			derived, err := keplrderive.DeriveSigner(keplrderive.DerivationParams{
+				Mnemonic:        mnemonic,
+				BIP39Passphrase: passphrase,
+				BIP44Path:       bip44Path,
+				Bech32Prefix:    bech32Prefix,
+				ChainID:         chainID,
+				Purpose:         purpose,
+			})
+			if err != nil {
+				return err
+			}
+			if signerID == "" {
+				signerID = "keplr:" + derived.Address
+			}
+
+			seedB64 := base64.StdEncoding.EncodeToString(derived.Ed25519Seed)
+			pubB64 := base64.StdEncoding.EncodeToString(derived.Ed25519Pub)
+			if outPath != "" {
+				if err := writeFile(outPath, []byte(seedB64+"\n"), 0o600); err != nil {
+					return err
+				}
+			}
+
+			trustedKey := votingconfig.TrustedKey{
+				KeyID:  signerID,
+				Alg:    votingconfig.AlgEd25519,
+				Pubkey: pubB64,
+			}
+			trustedKeyJSON, err := json.Marshal(trustedKey)
+			if err != nil {
+				return fmt.Errorf("marshal trusted key: %w", err)
+			}
+
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "chain_id: %s\n", strings.TrimSpace(chainID))
+			fmt.Fprintf(out, "derived_address: %s\n", derived.Address)
+			fmt.Fprintf(out, "signer_id: %s\n", signerID)
+			fmt.Fprintf(out, "public_key_b64: %s\n", pubB64)
+			fmt.Fprintf(out, "trusted_keys_entry: %s\n", trustedKeyJSON)
+			if outPath != "" {
+				fmt.Fprintf(out, "private_key_file: %s\n", outPath)
+			} else {
+				fmt.Fprintf(out, "private_key_seed_b64: %s\n", seedB64)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&chainID, "chain-id", "", "Chain ID used in the Ed25519 derivation info")
+	cmd.Flags().StringVar(&bip44Path, "bip44-path", keplrderive.DefaultBIP44Path, "Cosmos HD path used by Keplr")
+	cmd.Flags().StringVar(&bech32Prefix, "bech32-prefix", keplrderive.DefaultBech32Prefix, "Account bech32 prefix")
+	cmd.Flags().StringVar(&purpose, "purpose", keplrderive.DefaultPurpose, "Keplr signArbitrary purpose string")
+	cmd.Flags().StringVar(&signerID, "signer-id", "", "Signer identifier for trusted_keys (default: keplr:<derived_address>)")
+	cmd.Flags().StringVar(&mnemonicFile, "mnemonic-file", "", "Read BIP-39 mnemonic from this file")
+	cmd.Flags().BoolVar(&mnemonicStdin, "mnemonic-stdin", false, "Read BIP-39 mnemonic from stdin")
+	cmd.Flags().StringVar(&passphrase, "bip39-passphrase", "", "Optional BIP-39 passphrase")
+	cmd.Flags().StringVar(&outPath, "out", "", "Write derived base64 Ed25519 seed to this path instead of stdout")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite --out if it already exists")
 	return cmd
 }
@@ -346,6 +438,50 @@ func loadPrivateKey(file string, stdin bool, stdinReader io.Reader) (ed25519.Pri
 		return nil, fmt.Errorf("decoded privkey is %d bytes, expected %d", len(seed), ed25519.SeedSize)
 	}
 	return ed25519.NewKeyFromSeed(seed), nil
+}
+
+func loadMnemonic(file string, stdin bool, stdinReader io.Reader) (string, error) {
+	envMnemonic := os.Getenv("VOTING_CONFIG_MNEMONIC")
+	sources := 0
+	if file != "" {
+		sources++
+	}
+	if envMnemonic != "" {
+		sources++
+	}
+	if stdin {
+		sources++
+	}
+	if sources == 0 {
+		return "", errors.New("no mnemonic provided: use --mnemonic-file, VOTING_CONFIG_MNEMONIC, or --mnemonic-stdin")
+	}
+	if sources > 1 {
+		return "", errors.New("multiple mnemonics provided: pick exactly one of --mnemonic-file, VOTING_CONFIG_MNEMONIC, --mnemonic-stdin")
+	}
+
+	var mnemonic string
+	switch {
+	case file != "":
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("read mnemonic-file %q: %w", file, err)
+		}
+		mnemonic = string(raw)
+	case envMnemonic != "":
+		mnemonic = envMnemonic
+	case stdin:
+		raw, err := io.ReadAll(stdinReader)
+		if err != nil {
+			return "", fmt.Errorf("read mnemonic from stdin: %w", err)
+		}
+		mnemonic = string(raw)
+	}
+
+	mnemonic = strings.Join(strings.Fields(mnemonic), " ")
+	if mnemonic == "" {
+		return "", errors.New("mnemonic is empty")
+	}
+	return mnemonic, nil
 }
 
 func refuseOverwrite(path string, force bool) error {
