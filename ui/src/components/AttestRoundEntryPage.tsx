@@ -426,7 +426,7 @@ export function AttestRoundEntryPage() {
               </h1>
             </div>
             <p className="text-[11px] text-text-muted max-w-2xl">
-              Create a signed <code>rounds</code> entry for{" "}
+              Attest the Election Authority public key for the selected round by publishing a signed <code>rounds</code> entry to{" "}
               <a
                 href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
                 target="_blank"
@@ -436,7 +436,7 @@ export function AttestRoundEntryPage() {
                 <code>dynamic-voting-config.json</code>
                 <ExternalLink size={10} />
               </a>
-              . This page generates a signed <code>rounds</code> entry for the selected round.
+              .
             </p>
           </div>
           <button
@@ -464,7 +464,17 @@ export function AttestRoundEntryPage() {
             <p className="text-[10px] text-text-secondary mt-1">
               Derives the Ed25519 key in memory. The seed is not stored or shared with the server.
               The derived key is used to sign the round entry Election Authority public key.
-              Upon successful signing, an option to open a pull request against the [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) repository is provided.
+              Upon successful signing, an option to open a pull request against the{" "}
+              <a
+                href="https://github.com/valargroup/token-holder-voting-config"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+              >
+                <code>token-holder-voting-config</code>
+                <ExternalLink size={10} />
+              </a>{" "}
+              repository is provided.
             </p>
           </div>
 
