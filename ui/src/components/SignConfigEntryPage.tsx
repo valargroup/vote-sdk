@@ -3,18 +3,27 @@ import {
   AlertCircle,
   Check,
   Copy,
-  KeyRound,
   RefreshCw,
   ShieldCheck,
+  Wallet,
 } from "lucide-react";
 import * as chainApi from "../api/chain";
 import * as votingKey from "../api/votingKey";
+import { useWallet } from "../hooks/useWallet";
 
 interface RoundOption {
   roundIdHex: string;
   eaPK: string;
   title: string;
   status: string;
+}
+
+interface DerivedPublicKeyInfo {
+  signerId: string;
+  publicKeyB64: string;
+  createdAt: string;
+  sourceAddress: string;
+  chainId: string;
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -90,10 +99,10 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 }
 
 export function SignConfigEntryPage() {
-  const [keyInfo, setKeyInfo] = useState<votingKey.VotingKeyInfo | null>(null);
-  const [signerId, setSignerId] = useState("");
-  const [keyMaterialB64, setKeyMaterialB64] = useState("");
-  const [importNotice, setImportNotice] = useState("");
+  const wallet = useWallet();
+  const [keyInfo, setKeyInfo] = useState<DerivedPublicKeyInfo | null>(null);
+  const [derivingKey, setDerivingKey] = useState(false);
+  const [deriveNotice, setDeriveNotice] = useState("");
   const [rounds, setRounds] = useState<RoundOption[]>([]);
   const [loadingRounds, setLoadingRounds] = useState(true);
   const [roundError, setRoundError] = useState("");
@@ -153,11 +162,41 @@ export function SignConfigEntryPage() {
   }, []);
 
   useEffect(() => {
+    const clearDerivedPublicKey = () => {
+      setKeyInfo(null);
+      setDeriveNotice("");
+    };
+    window.addEventListener("keplr_keystorechange", clearDerivedPublicKey);
+    return () => window.removeEventListener("keplr_keystorechange", clearDerivedPublicKey);
+  }, []);
+
+  useEffect(() => {
     setHash("");
     setPayloadNotice("");
     setSnippet("");
     setError("");
   }, [selectedRoundKey]);
+
+  const deriveEphemeralKey = async (): Promise<votingKey.KeplrDerivedVotingKeyInfo> => {
+    if (!wallet.address || wallet.source !== "keplr" || !wallet.chainId) {
+      throw new Error("Connect Keplr before deriving the signing key.");
+    }
+    return votingKey.deriveEd25519FromKeplr(
+      wallet.address,
+      wallet.chainId,
+      wallet.signKeplrPayload
+    );
+  };
+
+  const rememberPublicKey = (key: votingKey.KeplrDerivedVotingKeyInfo) => {
+    setKeyInfo({
+      signerId: key.signerId,
+      publicKeyB64: key.publicKeyB64,
+      createdAt: key.createdAt,
+      sourceAddress: key.sourceAddress,
+      chainId: key.chainId,
+    });
+  };
 
   const createSignedJSON = async (key: votingKey.VotingKeyInfo) => {
     if (!canSignRound) {
@@ -210,38 +249,44 @@ export function SignConfigEntryPage() {
     }
   };
 
-  const handleGenerate = async () => {
+  const handleDeriveFromKeplr = async () => {
     setError("");
-    setImportNotice("");
+    setDeriveNotice("");
+    if (!wallet.address || wallet.source !== "keplr" || !wallet.chainId) {
+      setError("Connect Keplr before deriving the signing key.");
+      return;
+    }
+    setDerivingKey(true);
     try {
-      const generated = votingKey.generateKeypair(signerId);
-      setKeyInfo(generated);
-      try {
-        await navigator.clipboard.writeText(generated.seedB64);
-        setImportNotice("Generated a new key and copied its seed once. It will not be shown again. Write it down.");
-      } catch {
-        setImportNotice("Generated a new key, but clipboard copy failed. Generate again to retry copying the seed.");
-      }
-      await createSignedJSON(generated);
+      const derived = await deriveEphemeralKey();
+      rememberPublicKey(derived);
+      setDeriveNotice("Derived the Ed25519 public key from Keplr. Secret material was discarded.");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDerivingKey(false);
     }
   };
 
-  const handleImport = async () => {
+  const handleSignWithKeplr = async () => {
     setError("");
+    setDeriveNotice("");
+    setSigning(true);
     try {
-      const imported = votingKey.importKeyMaterial(keyMaterialB64, signerId);
-      setKeyInfo(imported);
-      setImportNotice(
-        imported.importedAs === "seed"
-          ? "Imported 32-byte seed."
-          : "Imported 64-byte Ed25519 private key."
-      );
-      await createSignedJSON(imported);
+      const derived = await deriveEphemeralKey();
+      rememberPublicKey(derived);
+      await createSignedJSON(derived);
+      setDeriveNotice("Signed with a freshly derived key. Secret material was discarded after signing.");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setSigning(false);
     }
+  };
+
+  const handleDisconnect = () => {
+    setKeyInfo(null);
+    setDeriveNotice("");
+    wallet.disconnect();
   };
 
   const handleSelectRound = (value: string) => {
@@ -283,8 +328,8 @@ export function SignConfigEntryPage() {
             </div>
             <p className="text-[11px] text-text-muted max-w-2xl">
               Create a signed `rounds` entry for `voting-config-v2.json`.
-              This page uses a browser-resident Ed25519 key and does not use
-              Keplr.
+              This page derives the Ed25519 signer from the connected Keplr account
+              only while displaying the public key or signing a round.
             </p>
           </div>
           <button
@@ -299,80 +344,97 @@ export function SignConfigEntryPage() {
 
         <section className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-4">
           <div className="flex items-center gap-2">
-            <KeyRound size={14} className="text-text-muted" />
+            <Wallet size={14} className="text-text-muted" />
             <h2 className="text-xs font-semibold text-text-primary">
-              Browser signing key
+              Keplr signing key
             </h2>
           </div>
 
-          <div className="rounded-lg border border-warning/30 bg-warning/10 p-3">
-            <p className="text-[11px] text-warning font-semibold">
-              Temporary operator tooling
+          <div className="rounded-lg border border-accent/30 bg-accent/10 p-3">
+            <p className="text-[11px] text-accent font-semibold">
+              Deterministic vote-manager signer
             </p>
             <p className="text-[10px] text-text-secondary mt-1">
-              Key material is not stored. It is kept only in page memory while
-              creating the snippet. When generating in-browser, the seed is
-              copied to the clipboard once and is not shown again.
+              Keplr signs a fixed purpose string each time. This page derives
+              the Ed25519 key in memory, uses it for the requested action, and
+              does not store the seed or Keplr signature.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-[1fr_auto] gap-3 items-end">
-            <div>
-              <label className="block text-[11px] text-text-secondary mb-1">
-                signer_id / key_id
-              </label>
-              <input
-                value={signerId}
-                onChange={(e) => setSignerId(e.target.value)}
-                placeholder="valar-2026-q2"
-                className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
-              />
+          <div className="flex flex-col gap-3 rounded-lg bg-surface-2 px-3 py-3">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div className="min-w-0">
+                <p className="text-[10px] text-text-muted">Connected wallet</p>
+                <p className="text-[11px] text-text-primary font-mono break-all">
+                  {wallet.address
+                    ? `${wallet.address}${wallet.chainId ? ` (${wallet.chainId})` : ""}`
+                    : "No Keplr wallet connected"}
+                </p>
+                {wallet.error && (
+                  <p className="mt-1 text-[10px] text-danger">{wallet.error}</p>
+                )}
+              </div>
+              <div className="flex gap-2 shrink-0">
+                {wallet.address ? (
+                  <button
+                    onClick={handleDisconnect}
+                    className="px-3 py-2 bg-surface-3 hover:bg-surface-1 text-text-secondary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer"
+                  >
+                    Disconnect
+                  </button>
+                ) : (
+                  <button
+                    onClick={wallet.connect}
+                    disabled={wallet.connecting}
+                    className="px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {wallet.connecting ? "Connecting..." : "Connect Keplr"}
+                  </button>
+                )}
+                <button
+                  onClick={handleDeriveFromKeplr}
+                  disabled={
+                    !wallet.address ||
+                    wallet.source !== "keplr" ||
+                    !wallet.chainId ||
+                    derivingKey
+                  }
+                  className="px-3 py-2 bg-surface-3 hover:bg-surface-1 text-text-secondary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {derivingKey ? "Deriving..." : "Show public key"}
+                </button>
+              </div>
             </div>
-            <button
-              onClick={handleGenerate}
-              disabled={!signerId.trim() || !canSignRound || signing}
-              className="px-3 py-2 bg-surface-3 hover:bg-surface-2 text-text-secondary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {signing ? "Signing..." : "Generate and sign"}
-            </button>
           </div>
 
-          <div className="grid md:grid-cols-[1fr_auto] gap-3 items-end">
-            <div>
-              <label className="block text-[11px] text-text-secondary mb-1">
-                Import seed or private key
-              </label>
-              <input
-                value={keyMaterialB64}
-                onChange={(e) => setKeyMaterialB64(e.target.value)}
-                placeholder="base64 32-byte seed or 64-byte Ed25519 private key"
-                spellCheck={false}
-                autoComplete="off"
-                data-1p-ignore
-                data-lpignore="true"
-                className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
-              />
-            </div>
-            <button
-              onClick={handleImport}
-              disabled={!signerId.trim() || !keyMaterialB64.trim() || !canSignRound || signing}
-              className="px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {signing ? "Signing..." : "Import and sign"}
-            </button>
-          </div>
-
-          {importNotice && (
-            <p className="text-[10px] text-success">{importNotice}</p>
+          {deriveNotice && (
+            <p className="text-[10px] text-success">{deriveNotice}</p>
           )}
 
           {keyInfo && (
             <div className="bg-surface-2 rounded-lg px-3 py-2 space-y-1">
-              <p className="text-[10px] text-text-muted">Current public key (memory only)</p>
+              <p className="text-[10px] text-text-muted">
+                Derived Ed25519 public key
+              </p>
               <p className="text-[11px] text-text-primary font-mono break-all">
                 {keyInfo.publicKeyB64}
               </p>
-              <CopyButton value={keyInfo.publicKeyB64} label="Copy public key" />
+              <div className="flex flex-wrap items-center gap-2">
+                <CopyButton value={keyInfo.publicKeyB64} label="Copy public key" />
+                <CopyButton
+                  value={JSON.stringify({
+                    key_id: keyInfo.signerId,
+                    alg: "ed25519",
+                    pubkey: keyInfo.publicKeyB64,
+                  })}
+                  label="Copy trusted key"
+                />
+              </div>
+              <p className="text-[10px] text-warning mt-2">
+                Add this public key to static-voting-config-sample.json
+                trusted_keys and ship that trust anchor before signatures from
+                this key are accepted by wallets.
+              </p>
             </div>
           )}
         </section>
@@ -437,9 +499,25 @@ export function SignConfigEntryPage() {
             />
           </div>
 
-          <p className="text-[10px] text-text-muted">
-            Import or generate a key above to create the signed JSON for this round.
-          </p>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <p className="text-[10px] text-text-muted">
+              Signing asks Keplr again, derives the Ed25519 key in flight, and
+              discards secret material after creating the JSON snippet.
+            </p>
+            <button
+              onClick={handleSignWithKeplr}
+              disabled={
+                !wallet.address ||
+                wallet.source !== "keplr" ||
+                !wallet.chainId ||
+                !canSignRound ||
+                signing
+              }
+              className="px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {signing ? "Signing..." : "Sign with derived key"}
+            </button>
+          </div>
         </section>
 
         {error && (

@@ -124,6 +124,40 @@ func TestKeygenWritesSeedFile(t *testing.T) {
 	}
 }
 
+func TestConfigAttestationKeygenMatchesParityVector(t *testing.T) {
+	const mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
+
+	t.Setenv("VOTING_CONFIG_MNEMONIC", mnemonic)
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"config-attestation-keygen", "--chain-id", "shielded-vote-1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("config-attestation-keygen failed: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		"derived_address: sv1r5v5srda7xfth3hn2s26txvrcrntldju3n5lv5",
+		"signer_id: keplr:sv1r5v5srda7xfth3hn2s26txvrcrntldju3n5lv5",
+		"public_key_b64: L9mWw81NjPpERmbT7qOhg7PrioccEQgghUntIsEEZV0=",
+		`"key_id":"keplr:sv1r5v5srda7xfth3hn2s26txvrcrntldju3n5lv5"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("config-attestation-keygen output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestConfigAttestationKeygenRequiresChainID(t *testing.T) {
+	t.Setenv("VOTING_CONFIG_MNEMONIC", "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art")
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"config-attestation-keygen"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--chain-id is required") {
+		t.Fatalf("expected missing chain-id error, got %v", err)
+	}
+}
+
 func writeJSON(t *testing.T, path string, v any) {
 	t.Helper()
 	data, err := json.MarshalIndent(v, "", "  ")

@@ -22,6 +22,7 @@ const COIN = {
 export interface WalletConnection {
   signer: OfflineDirectSigner;
   address: string;
+  chainId: string;
 }
 
 async function fetchChainId(restUrl: string): Promise<string> {
@@ -88,7 +89,7 @@ export async function connectKeplr(restUrl: string, rpcUrl: string): Promise<Wal
   const signer = window.keplr.getOfflineSigner(chainId);
   const [account] = await signer.getAccounts();
 
-  return { signer, address: account.address };
+  return { signer, address: account.address, chainId };
 }
 
 /**
@@ -98,7 +99,7 @@ export async function connectWithPrivateKey(privateKeyHex: string): Promise<Wall
   const privkey = fromHex(privateKeyHex);
   const signer = await DirectSecp256k1Wallet.fromKey(privkey, BECH32_PREFIX);
   const [account] = await signer.getAccounts();
-  return { signer, address: account.address };
+  return { signer, address: account.address, chainId: "" };
 }
 
 // ── signArbitrary ────────────────────────────────────────────────
@@ -174,4 +175,8 @@ export async function signArbitraryWithKeplr(
     signature: result.signature,
     pubKey: result.pub_key.value,
   };
+}
+
+export function getKeplrChainId(): string {
+  return keplrChainId;
 }

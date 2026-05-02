@@ -1,4 +1,11 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { hkdf } from "@noble/hashes/hkdf.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+
+export const KEPLR_DERIVATION_PURPOSE = "shielded-vote/ea-pk-signer/v1";
+const ED25519_SEED_SALT = sha256(
+  new TextEncoder().encode("shielded-vote/ed25519-seed/v1")
+);
 
 const ED25519_PKCS8_PREFIX = new Uint8Array([
   0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70,
@@ -18,13 +25,18 @@ export interface ImportedVotingKeyInfo extends VotingKeyInfo {
   importedAs: "seed" | "private_key";
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
+export interface KeplrDerivedVotingKeyInfo extends VotingKeyInfo {
+  sourceAddress: string;
+  chainId: string;
+}
+
+export function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
 
-function base64ToBytes(value: string): Uint8Array {
+export function base64ToBytes(value: string): Uint8Array {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {
@@ -35,6 +47,46 @@ function base64ToBytes(value: string): Uint8Array {
 
 function publicKeyFromSeed(seed: Uint8Array): string {
   return bytesToBase64(ed25519.getPublicKey(seed));
+}
+
+export function deriveEd25519FromKeplrSignature(params: {
+  address: string;
+  chainId: string;
+  signatureB64: string;
+}): KeplrDerivedVotingKeyInfo {
+  const address = params.address.trim();
+  const chainId = params.chainId.trim();
+  if (!address) throw new Error("Keplr address is required");
+  if (!chainId) throw new Error("Keplr chain ID is required");
+
+  const signatureBytes = base64ToBytes(params.signatureB64.trim());
+  if (signatureBytes.length !== 64) {
+    throw new Error("Keplr signArbitrary signature must decode to 64 bytes");
+  }
+
+  const info = new TextEncoder().encode(`${chainId}|${address}`);
+  const seed = hkdf(sha256, signatureBytes, ED25519_SEED_SALT, info, 32);
+  return {
+    signerId: `keplr:${address}`,
+    seedB64: bytesToBase64(seed),
+    publicKeyB64: publicKeyFromSeed(seed),
+    createdAt: new Date().toISOString(),
+    sourceAddress: address,
+    chainId,
+  };
+}
+
+export async function deriveEd25519FromKeplr(
+  address: string,
+  chainId: string,
+  signArbitrary: (data: string) => Promise<{ signature: string }>
+): Promise<KeplrDerivedVotingKeyInfo> {
+  const { signature } = await signArbitrary(KEPLR_DERIVATION_PURPOSE);
+  return deriveEd25519FromKeplrSignature({
+    address,
+    chainId,
+    signatureB64: signature,
+  });
 }
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
