@@ -17,13 +17,3 @@ func (k *Keeper) TreeSizeForTest(roundID []byte) uint64 {
 func (k *Keeper) StoreServiceForTest() store.KVStoreService {
 	return k.storeService
 }
-
-// SetStakingKeeper replaces the staking keeper. Used in tests.
-func (k *Keeper) SetStakingKeeper(sk StakingKeeper) {
-	k.stakingKeeper = sk
-}
-
-// SetBankKeeper replaces the bank keeper. Used in tests.
-func (k *Keeper) SetBankKeeper(bk BankKeeper) {
-	k.bankKeeper = bk
-}

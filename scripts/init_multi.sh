@@ -375,7 +375,7 @@ jq --argjson vms "$VOTE_MANAGER_JSON" \
   | .app_state.staking.params.historical_entries = 0
   | .app_state.slashing.params.signed_blocks_window = "72800"
   | .app_state.slashing.params.min_signed_per_window = "0.800000000000000000"
-  | .app_state.slashing.params.downtime_jail_duration = "60s"
+  | .app_state.slashing.params.downtime_jail_duration = "300s"
   | .app_state.slashing.params.slash_fraction_double_sign = "0.000000000000000000"
   | .app_state.slashing.params.slash_fraction_downtime = "0.000000000000000000"' \
   "$GENESIS" > "${GENESIS}.tmp" && mv "${GENESIS}.tmp" "$GENESIS"

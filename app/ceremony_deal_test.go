@@ -891,11 +891,14 @@ func TestEndBlockerFinalizesDealtRoundOnInsufficientAckTimeout(t *testing.T) {
 	ta, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
 
 	proposerAddr := ta.ValidatorOperAddr()
+	ensureValidatorSigningInfo(t, ta, proposerAddr)
 	_, pk2 := elgamal.KeyGen(rand.Reader)
+	validator2Addr := testutil.TestValAddr(2)
+	seedBondedValidatorWithPallasKey(t, ta, validator2Addr, pk2.Point.ToAffineCompressed())
 
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
-		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed()},
+		{ValidatorAddress: validator2Addr, PallasPk: pk2.Point.ToAffineCompressed()},
 	}
 
 	roundID := make([]byte, 32)
@@ -919,7 +922,7 @@ func TestEndBlockerFinalizesDealtRoundOnInsufficientAckTimeout(t *testing.T) {
 		FeldmanCommitments:   [][]byte{make([]byte, 32)},
 		DkgContributions: []*types.DKGContribution{
 			{ValidatorAddress: proposerAddr, FeldmanCommitments: [][]byte{{0x01}}},
-			{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", FeldmanCommitments: [][]byte{{0x02}}},
+			{ValidatorAddress: validator2Addr, FeldmanCommitments: [][]byte{{0x02}}},
 		},
 		VoteEndTime:      uint64(ta.Time.Add(24 * time.Hour).Unix()),
 		Proposals:        testutil.SampleProposals(),
@@ -948,10 +951,12 @@ func TestEndBlockerRegistering_TimeoutFinalizesPendingRound(t *testing.T) {
 
 	proposerAddr := ta.ValidatorOperAddr()
 	_, pk2 := elgamal.KeyGen(rand.Reader)
+	validator2Addr := testutil.TestValAddr(2)
+	seedBondedValidatorWithPallasKey(t, ta, validator2Addr, pk2.Point.ToAffineCompressed())
 
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed(), ShamirIndex: 1},
-		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed(), ShamirIndex: 2},
+		{ValidatorAddress: validator2Addr, PallasPk: pk2.Point.ToAffineCompressed(), ShamirIndex: 2},
 	}
 
 	roundID := make([]byte, 32)
@@ -1005,10 +1010,11 @@ func TestEndBlockerRegistering_NoTimeoutBeforeDeadline(t *testing.T) {
 
 	proposerAddr := ta.ValidatorOperAddr()
 	_, pk2 := elgamal.KeyGen(rand.Reader)
+	validator2Addr := testutil.TestValAddr(2)
 
 	validators := []*types.ValidatorPallasKey{
 		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed(), ShamirIndex: 1},
-		{ValidatorAddress: "sv1validator2xxxxxxxxxxxxxxxxxxxxxxxxxx", PallasPk: pk2.Point.ToAffineCompressed(), ShamirIndex: 2},
+		{ValidatorAddress: validator2Addr, PallasPk: pk2.Point.ToAffineCompressed(), ShamirIndex: 2},
 	}
 
 	roundID := make([]byte, 32)

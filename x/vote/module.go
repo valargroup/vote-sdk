@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
+	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
@@ -250,12 +251,13 @@ func ProvideAuthorizedSendSigner() signing.CustomGetSigner {
 type ModuleInputs struct {
 	depinject.In
 
-	StoreService  store.KVStoreService
-	Cdc           codec.Codec
-	Logger        log.Logger
-	Config        *modulev1.Module
-	StakingKeeper *stakingkeeper.Keeper
-	BankKeeper    bankkeeper.BaseKeeper
+	StoreService   store.KVStoreService
+	Cdc            codec.Codec
+	Logger         log.Logger
+	Config         *modulev1.Module
+	StakingKeeper  *stakingkeeper.Keeper
+	SlashingKeeper slashingkeeper.Keeper
+	BankKeeper     bankkeeper.BaseKeeper
 }
 
 // ModuleOutputs defines the outputs produced by the vote module.
@@ -275,6 +277,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.StakingKeeper,
 		&in.BankKeeper,
 	)
+	k.SetSlashingKeeper(in.SlashingKeeper)
 
 	m := NewAppModule(k, in.Cdc)
 
@@ -547,10 +550,19 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			continue
 		}
 
+		jailedValidators, err := am.keeper.JailCeremonyNonContributors(ctx, round)
+		if err != nil {
+			return err
+		}
+
 		oldRoundStatus := round.Status
 		keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 			fmt.Sprintf("REGISTERING timeout: ceremony failed (%d/%d contributions)",
 				len(round.DkgContributions), len(round.CeremonyValidators)))
+		if len(jailedValidators) > 0 {
+			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+				fmt.Sprintf("REGISTERING timeout: jailed %d non-contributors", len(jailedValidators)))
+		}
 		round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
 		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
@@ -624,7 +636,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				))
 			} else {
 				// >= 1/2 acked and remaining ackers meet threshold: strip
-				// non-ackers (offline/non-responsive), confirm ceremony, activate round.
+				// non-ackers, confirm ceremony, activate round.
 				keeper.StripNonAckersFromRound(round)
 				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 				round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
