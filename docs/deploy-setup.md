@@ -209,7 +209,7 @@ off).
 
 Pending join rows expire after **7 days**; expired rows are removed by a background sweeper that runs every **hour** (both are fixed in code, not `app.toml` keys).
 
-Endpoints: `POST /api/register-validator`, `GET /api/pending-validators`, plus `GET /api/voting-config` (cached CDN snapshot, not the canonical client path — see above).
+Endpoints: `POST /api/register-validator`, `GET /api/pending-validators`, plus `GET /api/voting-config` (cached CDN snapshot, not the canonical client path — see above). When `SVOTE_CONFIG_PR_GITHUB_TOKEN` is set in the service environment, `POST /api/config-prs` creates a branch, commits `dynamic-voting-config.json`, and opens a PR against `valargroup/token-holder-voting-config:main`. The request must include a valid ADR-036 wallet signature from an address that is currently in the chain vote-manager set. The GitHub token only needs Contents write and Pull requests write permissions on that repo.
 
 > Older configs may include an `[admin].watchdog_interval` key — that field
 > is ignored. Fleet health probing of `vote_servers` and `pir_endpoints`

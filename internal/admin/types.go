@@ -1,9 +1,6 @@
 // Package admin serves the voting-config endpoint by proxying the
 // GitHub Pages CDN (valargroup/token-holder-voting-config) and exposes
 // HTTP endpoints for validator join registration (pending queue in SQLite).
-//
-// Published vote_servers URLs are updated via manual PRs on the config repo;
-// this package does not write to GitHub.
 package admin
 
 import "time"
@@ -38,6 +35,11 @@ type Config struct {
 	// DBPath is the SQLite path for pending validator registrations.
 	// Default: $HOME/.svoted/admin.db (resolved in New).
 	DBPath string `mapstructure:"db_path"`
+
+	// ConfigPRGitHubToken enables backend-assisted PR creation for
+	// dynamic-voting-config.json. It is populated from
+	// SVOTE_CONFIG_PR_GITHUB_TOKEN so the token is not written to app.toml.
+	ConfigPRGitHubToken string
 }
 
 // DefaultConfig returns the default admin configuration.

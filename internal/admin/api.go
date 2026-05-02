@@ -18,6 +18,7 @@ func RegisterRoutes(
 	router.HandleFunc("/api/voting-config", h.handleGetVotingConfig).Methods("GET", "OPTIONS")
 	router.HandleFunc("/api/sign-config-entry", h.handleSignConfigEntry).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/verify-config-entry", h.handleVerifyConfigEntry).Methods("POST", "OPTIONS")
+	router.HandleFunc("/api/config-prs", h.handleCreateConfigPR).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/register-validator", h.handleRegisterValidator).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/pending-validators", h.handleGetPendingValidators).Methods("GET", "OPTIONS")
 }

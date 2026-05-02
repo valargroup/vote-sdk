@@ -3,6 +3,7 @@ import {
   AlertCircle,
   Check,
   Copy,
+  ExternalLink,
   RefreshCw,
   ShieldCheck,
   Wallet,
@@ -27,6 +28,14 @@ interface DerivedPublicKeyInfo {
   createdAt: string;
   sourceAddress: string;
   chainId: string;
+}
+
+interface ConfigPRIntentPayload {
+  action: "create_config_pr";
+  round_id: string;
+  signed_payload_hash: string;
+  entry_sha256: string;
+  timestamp: number;
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -152,6 +161,9 @@ export function SignConfigEntryPage() {
   const [hash, setHash] = useState("");
   const [payloadNotice, setPayloadNotice] = useState("");
   const [snippet, setSnippet] = useState("");
+  const [configPrStatus, setConfigPrStatus] = useState<"idle" | "creating" | "ok" | "error">("idle");
+  const [configPrUrl, setConfigPrUrl] = useState("");
+  const [configPrError, setConfigPrError] = useState("");
   const [verifyRoundId, setVerifyRoundId] = useState("");
   const [verifyEaPK, setVerifyEaPK] = useState("");
   const [verifySignature, setVerifySignature] = useState("");
@@ -233,6 +245,9 @@ export function SignConfigEntryPage() {
     setPayloadNotice("");
     setSnippet("");
     setError("");
+    setConfigPrStatus("idle");
+    setConfigPrUrl("");
+    setConfigPrError("");
   }, [selectedRoundKey]);
 
   const deriveEphemeralKey = async (): Promise<votingKey.KeplrDerivedVotingKeyInfo> => {
@@ -300,6 +315,9 @@ export function SignConfigEntryPage() {
       };
       setHash(response.signed_payload_hash);
       setSnippet(JSON.stringify({ [roundId]: entry }, null, 2));
+      setConfigPrStatus("idle");
+      setConfigPrUrl("");
+      setConfigPrError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -370,6 +388,58 @@ export function SignConfigEntryPage() {
       setVerifyError(err instanceof Error ? err.message : String(err));
     } finally {
       setVerifying(false);
+    }
+  };
+
+  const handleCreateConfigPr = async () => {
+    setConfigPrStatus("creating");
+    setConfigPrError("");
+    setConfigPrUrl("");
+    try {
+      if (!wallet.address) {
+        throw new Error("Connect a vote-manager wallet before opening a config PR.");
+      }
+      const managers = await chainApi.getVoteManagers();
+      const isVoteManager = (managers.vote_manager_addresses ?? []).some(
+        (address) => address.toLowerCase() === wallet.address?.toLowerCase()
+      );
+      if (!isVoteManager) {
+        throw new Error("Connected wallet is not in the current vote-manager set.");
+      }
+
+      const parsed = JSON.parse(snippet) as Record<string, chainApi.ConfigRoundEntry>;
+      const entry = parsed[roundId];
+      if (!entry) {
+        throw new Error("Generated JSON snippet does not contain the selected round.");
+      }
+      const entryHash = await sha256Hex(new TextEncoder().encode(JSON.stringify(entry)));
+      const intent: ConfigPRIntentPayload = {
+        action: "create_config_pr",
+        round_id: roundId,
+        signed_payload_hash: hash,
+        entry_sha256: entryHash,
+        timestamp: Math.floor(Date.now() / 1000),
+      };
+      const payload = JSON.stringify(intent);
+      const signature = await wallet.signPayload(payload);
+      const selectedRound = rounds.find((round) => round.roundIdHex === roundId);
+      const resp = await chainApi.createConfigPr({
+        round_id: roundId,
+        entry,
+        signed_payload_hash: hash,
+        title: selectedRound?.title,
+        auth: {
+          signer_address: wallet.address,
+          payload,
+          signature: signature.signature,
+          pub_key: signature.pubKey,
+        },
+      });
+      setConfigPrUrl(resp.html_url);
+      setConfigPrStatus("ok");
+    } catch (err) {
+      setConfigPrError(err instanceof Error ? err.message : String(err));
+      setConfigPrStatus("error");
     }
   };
 
@@ -633,11 +703,43 @@ export function SignConfigEntryPage() {
                   <h2 className="text-xs font-semibold text-text-primary">
                     JSON snippet
                   </h2>
-                  <CopyButton value={snippet} label="Copy JSON" />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CopyButton value={snippet} label="Copy JSON" />
+                    <button
+                      onClick={handleCreateConfigPr}
+                      disabled={
+                        configPrStatus === "creating" ||
+                        !wallet.address ||
+                        !hash ||
+                        !snippet ||
+                        !canSignRound
+                      }
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-md text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {configPrStatus === "creating" ? "Opening PR..." : "Open config PR"}
+                    </button>
+                  </div>
                 </div>
                 <pre className="text-[11px] text-text-primary font-mono whitespace-pre-wrap break-all bg-surface-2 rounded-lg px-3 py-2 overflow-x-auto">
                   {snippet}
                 </pre>
+                {configPrError && (
+                  <div className="flex items-start gap-2 bg-danger/10 border border-danger/30 rounded-lg p-3 mt-3">
+                    <AlertCircle size={14} className="text-danger mt-0.5 shrink-0" />
+                    <p className="text-[11px] text-danger">{configPrError}</p>
+                  </div>
+                )}
+                {configPrUrl && (
+                  <a
+                    href={configPrUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 mt-3 text-[11px] font-semibold text-accent hover:text-accent/80"
+                  >
+                    Opened config PR
+                    <ExternalLink size={12} />
+                  </a>
+                )}
               </div>
             )}
           </section>

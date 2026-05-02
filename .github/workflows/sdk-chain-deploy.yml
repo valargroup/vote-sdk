@@ -35,13 +35,18 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN
+          envs: SENTRY_DSN,SVOTE_CONFIG_PR_GITHUB_TOKEN
           script: |
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
+            sed -i '/^SVOTE_CONFIG_PR_GITHUB_TOKEN=/d' /etc/default/svoted
+            if [ -n "${SVOTE_CONFIG_PR_GITHUB_TOKEN:-}" ]; then
+              echo "SVOTE_CONFIG_PR_GITHUB_TOKEN=$SVOTE_CONFIG_PR_GITHUB_TOKEN" >> /etc/default/svoted
+            fi
             /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}" --base "${{ env.RELEASE_BASE_URL }}"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SVOTE_CONFIG_PR_GITHUB_TOKEN: ${{ secrets.CONFIG_PR_GITHUB_TOKEN }}
 
       - name: Verify primary health
         uses: appleboy/ssh-action@v1.0.3
