@@ -246,7 +246,7 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		return nil, err
 	}
 
-	mergedContent, mergedExisting, err := mergeConfigPREntry(dynamicContent, staticContent, body.RoundID, body.Entry)
+	mergedContent, mergedExisting, resolvedKeyIDs, err := mergeConfigPREntry(dynamicContent, staticContent, body.RoundID, body.Entry)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +270,7 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		}
 	}
 
-	prBody := configPRBody(body, mergedExisting)
+	prBody := configPRBody(body, mergedExisting, resolvedKeyIDs)
 	pr, err := client.createPullRequest(ctx, branch, a.configPR.BaseBranch, configPRTitle(body), prBody)
 	if err != nil {
 		if ghErr, ok := err.(*githubAPIError); ok && ghErr.Status == http.StatusUnprocessableEntity {
@@ -288,26 +288,30 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 	}, nil
 }
 
-func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, entry votingconfig.RoundEntry) ([]byte, bool, error) {
+func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, entry votingconfig.RoundEntry) ([]byte, bool, []string, error) {
 	var cfg votingconfig.SignedConfig
 	if err := json.Unmarshal(dynamicContent, &cfg); err != nil {
-		return nil, false, fmt.Errorf("parse dynamic-voting-config.json: %w", err)
+		return nil, false, nil, fmt.Errorf("parse dynamic-voting-config.json: %w", err)
 	}
 	if err := votingconfig.ValidateWrapper(&cfg); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 
 	var staticCfg votingconfig.StaticConfig
 	if err := json.Unmarshal(staticContent, &staticCfg); err != nil {
-		return nil, false, fmt.Errorf("parse static-voting-config.json: %w", err)
+		return nil, false, nil, fmt.Errorf("parse static-voting-config.json: %w", err)
 	}
 	if err := votingconfig.ValidateStaticConfig(&staticCfg); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 
 	entry, err := resolveConfigPREntrySignatureKeyIDs(entry, staticCfg.TrustedKeys)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
+	}
+	resolvedKeyIDs := make([]string, 0, len(entry.Signatures))
+	for _, sig := range entry.Signatures {
+		resolvedKeyIDs = append(resolvedKeyIDs, sig.KeyID)
 	}
 
 	mergedExisting := false
@@ -316,10 +320,10 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 	}
 	if existing, ok := cfg.Rounds[roundID]; ok {
 		if existing.AuthVersion != votingconfig.AuthVersionV1 {
-			return nil, false, fmt.Errorf("round %s: cannot merge into auth_version %d", roundID, existing.AuthVersion)
+			return nil, false, nil, fmt.Errorf("round %s: cannot merge into auth_version %d", roundID, existing.AuthVersion)
 		}
 		if existing.EaPK != entry.EaPK {
-			return nil, false, fmt.Errorf("round %s: ea_pk mismatch in merge target", roundID)
+			return nil, false, nil, fmt.Errorf("round %s: ea_pk mismatch in merge target", roundID)
 		}
 		entry.Signatures = mergeConfigPRSignatures(existing.Signatures, entry.Signatures)
 		mergedExisting = true
@@ -328,15 +332,15 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 
 	for roundID, entry := range cfg.Rounds {
 		if !votingconfig.VerifyEntrySignatures(entry, staticCfg.TrustedKeys) {
-			return nil, false, fmt.Errorf("round %s: no valid signature", roundID)
+			return nil, false, nil, fmt.Errorf("round %s: no valid signature", roundID)
 		}
 	}
 
 	data, err := json.MarshalIndent(&cfg, "", "  ")
 	if err != nil {
-		return nil, false, fmt.Errorf("marshal dynamic-voting-config.json: %w", err)
+		return nil, false, nil, fmt.Errorf("marshal dynamic-voting-config.json: %w", err)
 	}
-	return append(data, '\n'), mergedExisting, nil
+	return append(data, '\n'), mergedExisting, resolvedKeyIDs, nil
 }
 
 func resolveConfigPREntrySignatureKeyIDs(entry votingconfig.RoundEntry, trusted []votingconfig.TrustedKey) (votingconfig.RoundEntry, error) {
@@ -414,10 +418,10 @@ func configPRTitle(body createConfigPRRequest) string {
 	return fmt.Sprintf("Add signed config entry for round %s", body.RoundID[:12])
 }
 
-func configPRBody(body createConfigPRRequest, mergedExisting bool) string {
-	keyIDs := make([]string, 0, len(body.Entry.Signatures))
-	for _, sig := range body.Entry.Signatures {
-		keyIDs = append(keyIDs, sig.KeyID)
+func configPRBody(body createConfigPRRequest, mergedExisting bool, trustedKeyIDs []string) string {
+	keyIDsLine := strings.Join(trustedKeyIDs, ", ")
+	if keyIDsLine == "" {
+		keyIDsLine = "(unresolved)"
 	}
 	mergeNote := "new round entry"
 	if mergedExisting {
@@ -425,14 +429,14 @@ func configPRBody(body createConfigPRRequest, mergedExisting bool) string {
 	}
 	return fmt.Sprintf(`## Summary
 - Add signed dynamic config entry for round %s.
-- Config signer key ID(s): %s.
+- Trusted key IDs (from static-voting-config.json) attesting this entry: %s.
 - Authenticated vote manager: %s.
 - Merge mode: %s.
 
 ## Reviewer check
 - signed_payload_hash: %s
 - CI will verify dynamic-voting-config.json against static-voting-config.json.
-`, body.RoundID, strings.Join(keyIDs, ", "), body.Auth.SignerAddress, mergeNote, body.SignedPayloadHash)
+`, body.RoundID, keyIDsLine, body.Auth.SignerAddress, mergeNote, body.SignedPayloadHash)
 }
 
 type githubConfigClient struct {

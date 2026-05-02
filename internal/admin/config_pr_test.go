@@ -161,7 +161,7 @@ func TestMergeConfigPREntryRejectsEaPKMismatch(t *testing.T) {
 		body.RoundID: existing,
 	})
 
-	_, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
+	_, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
 	if err == nil || !strings.Contains(err.Error(), "ea_pk mismatch") {
 		t.Fatalf("want ea_pk mismatch, got %v", err)
 	}
@@ -179,7 +179,7 @@ func TestMergeConfigPREntryPreservesOtherSignatures(t *testing.T) {
 		body.RoundID: existing,
 	})
 
-	merged, mergedExisting, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
+	merged, mergedExisting, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestMergeConfigPREntryResolvesTrustedKeyID(t *testing.T) {
 	body.Entry.Signatures[0].KeyID = "keplr:sv1example"
 	dynamicConfig, staticConfig := configDocuments(t, nil)
 
-	merged, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
+	merged, _, resolvedKeyIDs, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,6 +213,24 @@ func TestMergeConfigPREntryResolvesTrustedKeyID(t *testing.T) {
 	got := cfg.Rounds[body.RoundID].Signatures[0].KeyID
 	if got != "valar-test" {
 		t.Fatalf("want trusted key id, got %q", got)
+	}
+	if len(resolvedKeyIDs) != 1 || resolvedKeyIDs[0] != "valar-test" {
+		t.Fatalf("want resolved key ids [valar-test], got %v", resolvedKeyIDs)
+	}
+}
+
+func TestConfigPRBodyUsesResolvedKeyIDs(t *testing.T) {
+	t.Parallel()
+
+	body := validCreateConfigPRRequest(t)
+	body.Entry.Signatures[0].KeyID = "keplr:sv1example"
+
+	got := configPRBody(body, false, []string{"valar-test"})
+	if !strings.Contains(got, "Trusted key IDs (from static-voting-config.json) attesting this entry: valar-test.") {
+		t.Fatalf("PR body missing resolved trusted key ID line:\n%s", got)
+	}
+	if strings.Contains(got, "keplr:sv1example") {
+		t.Fatalf("PR body should not surface raw keplr placeholder key ID:\n%s", got)
 	}
 }
 
