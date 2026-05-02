@@ -28,7 +28,7 @@ flowchart LR
 |----------|---------|-------------|
 | [`release.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/release.yml) | `v*` tag push | Builds `svoted` + admin UI for linux/darwin x amd64/arm64. Creates a GitHub Release with tarballs, uploads to DO Spaces (`s3://vote/`). |
 | [`sdk-chain-deploy.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-deploy.yml) | Manual `workflow_dispatch` | SSHes to production hosts, runs `install-release.sh --tag <tag>` (download from Spaces, verify checksum, swap symlink, restart `svoted` where initialized), and checks public surfaces. Notifies Slack on failure. |
-| [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Full chain reset from genesis. Quiesces the snapshot publisher, wipes state on primary, runs `init.sh`, uploads genesis to DO Spaces, funds secondary, joins secondary/archive/snapshot nodes, enables the snapshot timer, and verifies public surfaces. |
+| [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Full chain reset from genesis. Takes `tag` plus optional `network_config_json` for side-networks. Quiesces the snapshot publisher, wipes state on primary, runs `init.sh`, uploads genesis to DO Spaces, funds secondary, joins secondary/archive/snapshot nodes, enables the snapshot timer, and verifies public surfaces. |
 
 ### GitHub repository secrets
 

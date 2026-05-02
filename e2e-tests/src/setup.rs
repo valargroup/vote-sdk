@@ -30,6 +30,7 @@ use voting_circuits::delegation::{
 const FAR_FUTURE_VOTE_END_TIME: u64 = 4102444800;
 
 /// Data from delegation that the vote proof builder needs.
+#[derive(Clone)]
 pub struct VoteProofDelegationData {
     /// The spending key used during delegation.
     pub sk: SpendingKey,
@@ -430,6 +431,44 @@ struct DelegationInput {
     imt_proof_int: voting_circuits::delegation::imt::ImtProofData,
 }
 
+struct LaunchNoteInput {
+    note: Note,
+    position: u32,
+    scope: Scope,
+    auth_path: [MerkleHashOrchard; NOTE_COMMITMENT_TREE_DEPTH],
+    imt_proof: voting_circuits::delegation::imt::ImtProofData,
+}
+
+struct LaunchDelegationInput {
+    sk: SpendingKey,
+    fvk: FullViewingKey,
+    notes: Vec<LaunchNoteInput>,
+    total_note_value: u64,
+}
+
+/// Prepared launch-validation delegation witnesses sharing one NC root.
+///
+/// Each input corresponds to one protocol bundle of 1-5 notes. The caller still
+/// has to build proofs after the live chain returns the actual round ID.
+pub struct PreparedLaunchDelegationBundles {
+    inputs: Vec<LaunchDelegationInput>,
+    nc_root: pallas::Base,
+}
+
+impl PreparedLaunchDelegationBundles {
+    /// Build all launch-validation delegation proofs against the emitted round ID.
+    pub fn build_for_round_id(
+        self,
+        round_id: &[u8],
+    ) -> Result<
+        Vec<(DelegationBundlePayload, VoteProofDelegationData)>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let vote_round_id = vote_round_id_from_bytes(round_id)?;
+        build_launch_delegation_payloads(self.inputs, self.nc_root, vote_round_id)
+    }
+}
+
 /// Prepared multi-delegation witness data sharing a common note commitment root.
 pub struct PreparedMultiDelegationBundles {
     inputs: Vec<DelegationInput>,
@@ -454,6 +493,122 @@ impl PreparedMultiDelegationBundles {
             vote_round_id,
         )
     }
+}
+
+/// Prepare launch-validation delegation witnesses from explicit bundle note values.
+///
+/// This is the note creation path for the synthetic launch gate. It does not
+/// fund wallets on-chain. Instead, it constructs Orchard notes locally, builds a
+/// shared note-commitment tree over exactly those notes, and returns round
+/// fields whose `nc_root` admits those notes. Each entry in
+/// `note_values_by_bundle` is one vote bundle and must contain 1-5 notes with a
+/// sum of at least 0.125 ZEC.
+pub fn prepare_launch_delegation_bundles(
+    note_values_by_bundle: &[Vec<u64>],
+    vote_end_time_override: Option<u64>,
+    snapshot_height: u64,
+) -> Result<
+    (PreparedLaunchDelegationBundles, SetupRoundFields),
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    const LAUNCH_BALLOT_DIVISOR: u64 = 12_500_000;
+
+    if note_values_by_bundle.is_empty() {
+        return Err("need at least one launch delegation bundle".into());
+    }
+
+    let mut rng = OsRng;
+    let mut bundle_notes: Vec<(SpendingKey, FullViewingKey, Vec<(Note, Scope, u32)>, u64)> =
+        Vec::with_capacity(note_values_by_bundle.len());
+    let total_note_count: usize = note_values_by_bundle.iter().map(Vec::len).sum();
+    let mut all_cmxs: Vec<MerkleHashOrchard> = Vec::with_capacity(total_note_count);
+    let mut next_position = 0u32;
+
+    for (bundle_idx, values) in note_values_by_bundle.iter().enumerate() {
+        if values.is_empty() || values.len() > 5 {
+            return Err(format!(
+                "bundle {bundle_idx} must contain 1-5 notes, got {}",
+                values.len()
+            )
+            .into());
+        }
+        let total_note_value = values.iter().sum::<u64>();
+        if total_note_value < LAUNCH_BALLOT_DIVISOR {
+            return Err(
+                format!("bundle {bundle_idx} total {total_note_value} is below 0.125 ZEC").into(),
+            );
+        }
+
+        let sk = SpendingKey::random(&mut rng);
+        let fvk: FullViewingKey = (&sk).into();
+        let mut notes = Vec::with_capacity(values.len());
+
+        for (note_idx, value) in values.iter().enumerate() {
+            let scope = if note_idx % 2 == 0 {
+                Scope::External
+            } else {
+                Scope::Internal
+            };
+            let recipient = fvk.address_at(0u32, scope);
+            let (_, _, dummy_parent) = Note::dummy(&mut rng, None);
+            let note = Note::new(
+                recipient,
+                NoteValue::from_raw(*value),
+                Rho::from_nf_old(dummy_parent.nullifier(&fvk)),
+                &mut rng,
+            );
+            all_cmxs.push(MerkleHashOrchard::from_cmx(&ExtractedNoteCommitment::from(
+                note.commitment(),
+            )));
+            notes.push((note, scope, next_position));
+            next_position += 1;
+        }
+
+        bundle_notes.push((sk, fvk, notes, total_note_value));
+    }
+
+    let (nc_root, levels) = build_shared_nc_tree(&all_cmxs);
+    let subtree_levels = all_cmxs.len().next_power_of_two().trailing_zeros() as usize;
+    let imt = SpacedLeafImtProvider::new();
+    let nf_imt_root = imt.root();
+
+    let mut inputs = Vec::with_capacity(bundle_notes.len());
+    for (sk, fvk, notes, total_note_value) in bundle_notes {
+        let mut prepared_notes = Vec::with_capacity(notes.len());
+        for (note, scope, position) in notes {
+            let auth_path = build_nc_auth_path(position, &levels, subtree_levels);
+            let nf_fp: pallas::Base = pallas::Base::from_repr(note.nullifier(&fvk).to_bytes())
+                .expect("note nullifier must be canonical Fp");
+            let imt_proof = imt.non_membership_proof(nf_fp)?;
+            prepared_notes.push(LaunchNoteInput {
+                note,
+                position,
+                scope,
+                auth_path,
+                imt_proof,
+            });
+        }
+        inputs.push(LaunchDelegationInput {
+            sk,
+            fvk,
+            notes: prepared_notes,
+            total_note_value,
+        });
+    }
+
+    let round_fields = SetupRoundFields {
+        snapshot_height,
+        snapshot_blockhash: [0xAAu8; 32],
+        proposals_hash: [0xBBu8; 32],
+        vote_end_time: vote_end_time_override.unwrap_or(FAR_FUTURE_VOTE_END_TIME),
+        nullifier_imt_root: nf_imt_root.to_repr(),
+        nc_root: nc_root.to_repr(),
+    };
+
+    Ok((
+        PreparedLaunchDelegationBundles { inputs, nc_root },
+        round_fields,
+    ))
 }
 
 /// Prepare N delegation witnesses sharing a common note commitment tree.
@@ -707,6 +862,150 @@ fn build_multi_delegation_payloads(
     } // end chunk loop
 
     eprintln!("[multi-deleg] all {} bundles built and verified", count);
+    Ok(results)
+}
+
+fn build_launch_delegation_payloads(
+    inputs: Vec<LaunchDelegationInput>,
+    nc_root: pallas::Base,
+    vote_round_id: pallas::Base,
+) -> Result<
+    Vec<(DelegationBundlePayload, VoteProofDelegationData)>,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    let count = inputs.len();
+    let max_parallel: usize = std::env::var("LAUNCH_FIXTURE_GEN_THREADS")
+        .or_else(|_| std::env::var("FIXTURE_GEN_THREADS"))
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(8)
+        });
+    eprintln!(
+        "[launch-deleg] generating {} proofs with parallelism={}...",
+        count, max_parallel
+    );
+
+    let mut results = Vec::with_capacity(count);
+    let mut indexed_inputs: Vec<(usize, LaunchDelegationInput)> =
+        inputs.into_iter().enumerate().collect();
+
+    while !indexed_inputs.is_empty() {
+        let chunk_size = max_parallel.min(indexed_inputs.len());
+        let chunk: Vec<(usize, LaunchDelegationInput)> =
+            indexed_inputs.drain(..chunk_size).collect();
+        let handles: Vec<_> = chunk
+            .into_iter()
+            .map(|(i, input)| {
+                std::thread::spawn(move || -> Result<
+                    (DelegationBundlePayload, VoteProofDelegationData),
+                    Box<dyn std::error::Error + Send + Sync>,
+                > {
+                    let mut rng = OsRng;
+                    let imt = SpacedLeafImtProvider::new();
+                    let alpha = pallas::Scalar::random(&mut rng);
+                    let van_comm_rand = pallas::Base::random(&mut rng);
+                    let output_recipient = input.fvk.address_at(1u32, Scope::External);
+
+                    let note_inputs = input
+                        .notes
+                        .into_iter()
+                        .map(|note_input| RealNoteInput {
+                            note: note_input.note,
+                            fvk: input.fvk.clone(),
+                            merkle_path: MerklePath::from_parts(
+                                note_input.position,
+                                note_input.auth_path,
+                            ),
+                            imt_proof: note_input.imt_proof,
+                            scope: note_input.scope,
+                        })
+                        .collect::<Vec<_>>();
+
+                    eprintln!(
+                        "[launch-deleg] bundle {} building {}-note proof...",
+                        i,
+                        note_inputs.len()
+                    );
+                    let bundle = build_delegation_bundle(
+                        note_inputs,
+                        &input.fvk,
+                        alpha,
+                        output_recipient,
+                        vote_round_id,
+                        nc_root,
+                        van_comm_rand,
+                        &imt,
+                        &mut rng,
+                        None,
+                    )
+                    .map_err(|e| {
+                        format!("launch bundle {}: build_delegation_bundle: {}", i, e)
+                    })?;
+
+                    let proof = create_delegation_proof(bundle.circuit, &bundle.instance);
+                    verify_delegation_proof(&proof, &bundle.instance).map_err(|e| {
+                        format!("launch bundle {}: verify_delegation_proof: {}", i, e)
+                    })?;
+                    eprintln!("[launch-deleg] bundle {} proof verified", i);
+
+                    let ask = SpendAuthorizingKey::from(&input.sk);
+                    let rsk = ask.randomize(&alpha);
+                    let rk_bytes: [u8; 32] = bundle.instance.rk.clone().into();
+                    let sighash = {
+                        let h = Blake2bParams::new()
+                            .hash_length(32)
+                            .personal(b"e2e-test-sighash")
+                            .hash(&rk_bytes);
+                        let mut buf = [0u8; 32];
+                        buf.copy_from_slice(h.as_bytes());
+                        buf
+                    };
+                    let sig = rsk.sign(&mut rng, &sighash);
+                    let sig_bytes: [u8; 64] = (&sig).into();
+
+                    let nf_signed_bytes = bundle.instance.nf_signed.to_bytes();
+                    let cmx_new_bytes = bundle.instance.cmx_new.to_repr();
+                    let van_cmx_bytes = bundle.instance.van_comm.to_repr();
+                    let gov_null_bytes: Vec<[u8; 32]> =
+                        bundle.instance.gov_null.iter().map(|g| g.to_repr()).collect();
+
+                    let payload = DelegationBundlePayload {
+                        rk: rk_bytes.to_vec(),
+                        spend_auth_sig: sig_bytes.to_vec(),
+                        sighash: sighash.to_vec(),
+                        signed_note_nullifier: nf_signed_bytes.to_vec(),
+                        cmx_new: cmx_new_bytes[..].to_vec(),
+                        van_cmx: van_cmx_bytes[..].to_vec(),
+                        gov_nullifiers: gov_null_bytes.iter().map(|b| b.to_vec()).collect(),
+                        proof,
+                    };
+
+                    let vote_proof_data = VoteProofDelegationData {
+                        sk: input.sk,
+                        van_comm_rand,
+                        vote_round_id,
+                        total_note_value: input.total_note_value,
+                        van_comm: bundle.instance.van_comm,
+                        cmx_new: bundle.instance.cmx_new,
+                    };
+
+                    Ok((payload, vote_proof_data))
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            let result = handle
+                .join()
+                .map_err(|_| "launch delegation thread panicked".to_string())?;
+            results.push(result?);
+        }
+    }
+
+    eprintln!("[launch-deleg] all {} bundles built and verified", count);
     Ok(results)
 }
 

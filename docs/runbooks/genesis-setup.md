@@ -34,7 +34,7 @@ After `terraform apply`, the droplet is up and `svoted` is installed but the cha
 
 ### Bootstrap flow
 
-The single workflow [`sdk-chain-reset.yml`](../../.github/workflows/sdk-chain-reset.yml) (`workflow_dispatch`, takes a `tag` input) brings the entire fleet up from genesis:
+The single workflow [`sdk-chain-reset.yml`](../../.github/workflows/sdk-chain-reset.yml) (`workflow_dispatch`, takes `tag` plus optional `network_config_json` for side-networks) brings the entire fleet up from genesis:
 
 1. **`quiesce-snapshot`** — SSHes to `SNAPSHOT_HOST`, stops and disables `snapshot.timer`, stops any running `snapshot.service`, and stops old snapshot-node `svoted` before primary chain state changes.
 2. **`reset-primary`** — SSHes to `PRIMARY_HOST`, runs `install-release.sh --tag <tag>`, stops `svoted`, wipes `/opt/shielded-vote/.svoted/`, then runs [`scripts/init.sh`](../../scripts/init.sh) with `VAL_PRIVKEY=PRIMARY_VAL_PRIVKEY`, `VM_PRIVKEYS`, and `SVOTE_ADMIN_DISABLE=false`. Drops in `svoted.service.d/primary.conf`, starts `svoted`, polls `localhost:1317/shielded-vote/v1/rounds`.

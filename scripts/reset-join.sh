@@ -105,6 +105,28 @@ sed -i '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = t
 sed -i "s|address = \"tcp://localhost:1317\"|address = \"tcp://0.0.0.0:1317\"|" "${APP_TOML}"
 sed -i "s|\\\$HOME/.svoted|${HOME_DIR}|g" "${APP_TOML}"
 
+HELPER_API_TOKEN="${SVOTE_HELPER_API_TOKEN:-}"
+HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
+HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-2}"
+HELPER_SENTRY_DSN="${SVOTE_HELPER_SENTRY_DSN:-}"
+
+cat >> "${APP_TOML}" <<HELPERCFG
+
+###############################################################################
+###                         Helper Server                                   ###
+###############################################################################
+
+[helper]
+
+disable = false
+api_token = "${HELPER_API_TOKEN}"
+expose_queue_status = ${HELPER_EXPOSE_QUEUE_STATUS}
+db_path = ""
+chain_api_port = 1317
+max_concurrent_proofs = ${HELPER_MAX_CONCURRENT_PROOFS}
+sentry_dsn = "${HELPER_SENTRY_DSN}"
+HELPERCFG
+
 # ─── Start svoted ─────────────────────────────────────────────────────────────
 
 echo "Starting svoted..."
@@ -152,7 +174,7 @@ for i in $(seq 1 60); do
 done
 
 echo "Registering as validator..."
-if ! create-val-tx --moniker "${MONIKER}" --amount 10000000usvote --home "${HOME_DIR}" --rpc-url tcp://localhost:26657; then
+if ! create-val-tx --moniker "${MONIKER}" --amount 10000000usvote --home "${HOME_DIR}" --rpc-url tcp://localhost:26657 --chain-id "${CHAIN_ID}"; then
   echo "ERROR: create-val-tx failed." >&2
   exit 1
 fi

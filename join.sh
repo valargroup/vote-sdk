@@ -794,6 +794,11 @@ sed -i.bak "s|\\\$HOME/.svoted|${HOME_DIR}|g" "${APP_TOML}"
 
 rm -f "${APP_TOML}.bak"
 
+HELPER_API_TOKEN="${SVOTE_HELPER_API_TOKEN:-}"
+HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
+HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-2}"
+HELPER_SENTRY_DSN="${SVOTE_HELPER_SENTRY_DSN:-}"
+
 # Append [helper] section (not in the default template).
 cat >> "${APP_TOML}" <<HELPERCFG
 
@@ -808,7 +813,11 @@ disable = false
 
 # Optional auth token for POST /shielded-vote/v1/shares (sent via X-Helper-Token header).
 # Empty disables token auth.
-api_token = ""
+api_token = "${HELPER_API_TOKEN}"
+
+# Benchmark-only queue metrics endpoint. Keep disabled by default to avoid
+# exposing per-round share activity to unauthenticated observers.
+expose_queue_status = ${HELPER_EXPOSE_QUEUE_STATUS}
 
 # Path to the SQLite database file. Empty = default (\$HOME/.svoted/helper.db).
 db_path = ""
@@ -817,7 +826,10 @@ db_path = ""
 chain_api_port = 1317
 
 # Maximum concurrent proof generation goroutines.
-max_concurrent_proofs = 2
+max_concurrent_proofs = ${HELPER_MAX_CONCURRENT_PROOFS}
+
+# Sentry DSN for error tracking. Empty disables Sentry.
+sentry_dsn = "${HELPER_SENTRY_DSN}"
 
 HELPERCFG
 

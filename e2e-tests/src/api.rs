@@ -488,10 +488,15 @@ pub fn default_cosmos_tx_config() -> CosmosTxConfig {
         .unwrap_or_else(|_| format!("{}/.svoted", home));
     let node_url = std::env::var("SVOTE_NODE_URL")
         .unwrap_or_else(|_| "tcp://localhost:26657".to_string());
+    let chain_id = std::env::var("SVOTE_CHAIN_ID")
+        .or_else(|_| std::env::var("CHAIN_ID"))
+        .unwrap_or_else(|_| "svote-1".to_string());
+    let key_name =
+        std::env::var("SVOTE_TX_KEY_NAME").unwrap_or_else(|_| "validator".to_string());
     CosmosTxConfig {
-        key_name: "validator".to_string(),
+        key_name,
         home_dir,
-        chain_id: "svote-1".to_string(),
+        chain_id,
         node_url,
     }
 }
@@ -598,7 +603,6 @@ fn broadcast_cosmos_msg_ssh(
     ssh_host: &str,
 ) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
     use std::io::Write;
-    use std::process::Command;
 
     let remote_svoted = std::env::var("SVOTE_REMOTE_SVOTED")
         .unwrap_or_else(|_| "svoted".to_string());
@@ -614,8 +618,9 @@ fn broadcast_cosmos_msg_ssh(
     let remote_signed = format!("/tmp/sv_signed_{}.json", ts);
 
     // Pipe unsigned tx to remote temp file.
-    let mut upload = Command::new("ssh")
-        .args([ssh_host, &format!("cat > {}", remote_unsigned)])
+    let mut upload_cmd = ssh_command(ssh_host);
+    let mut upload = upload_cmd
+        .arg(format!("cat > {}", remote_unsigned))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -631,10 +636,8 @@ fn broadcast_cosmos_msg_ssh(
     }
 
     // Sign on remote.
-    let sign_output = Command::new("ssh")
-        .args([
-            ssh_host,
-            &format!(
+    let sign_output = ssh_command(ssh_host)
+        .arg(format!(
                 "{svoted} tx sign {unsigned} \
                  --from {from} \
                  --keyring-backend test \
@@ -650,41 +653,37 @@ fn broadcast_cosmos_msg_ssh(
                 home = config.home_dir,
                 node = config.node_url,
                 signed = remote_signed,
-            ),
-        ])
+            ))
         .output()?;
 
     // Clean up remote unsigned file regardless of sign outcome.
-    let _ = Command::new("ssh")
-        .args([ssh_host, &format!("rm -f {}", remote_unsigned)])
+    let _ = ssh_command(ssh_host)
+        .arg(format!("rm -f {}", remote_unsigned))
         .output();
 
     if !sign_output.status.success() {
-        let _ = Command::new("ssh")
-            .args([ssh_host, &format!("rm -f {}", remote_signed)])
+        let _ = ssh_command(ssh_host)
+            .arg(format!("rm -f {}", remote_signed))
             .output();
         let stderr = String::from_utf8_lossy(&sign_output.stderr);
         return Err(format!("svoted tx sign (remote) failed: {}", stderr).into());
     }
 
     // Broadcast on remote.
-    let broadcast_output = Command::new("ssh")
-        .args([
-            ssh_host,
-            &format!(
+    let broadcast_output = ssh_command(ssh_host)
+        .arg(format!(
                 "{svoted} tx broadcast {signed} \
                  --node {node} \
                  --output json",
                 svoted = remote_svoted,
                 signed = remote_signed,
                 node = config.node_url,
-            ),
-        ])
+            ))
         .output()?;
 
     // Clean up remote signed file.
-    let _ = Command::new("ssh")
-        .args([ssh_host, &format!("rm -f {}", remote_signed)])
+    let _ = ssh_command(ssh_host)
+        .arg(format!("rm -f {}", remote_signed))
         .output();
 
     if !broadcast_output.status.success() {
@@ -693,6 +692,24 @@ fn broadcast_cosmos_msg_ssh(
     }
 
     parse_broadcast_stdout(&broadcast_output.stdout)
+}
+
+fn ssh_command(host: &str) -> std::process::Command {
+    let mut command = std::process::Command::new("ssh");
+    command.args([
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "ServerAliveInterval=10",
+        "-o",
+        "ServerAliveCountMax=6",
+        host,
+    ]);
+    command
 }
 
 /// Build the unsigned tx JSON envelope around a message.
@@ -752,16 +769,13 @@ pub fn key_account_address(key_name: &str, home_dir: &str) -> Option<String> {
     let output = if let Some(ref host) = ssh_host {
         let remote_svoted = std::env::var("SVOTE_REMOTE_SVOTED")
             .unwrap_or_else(|_| "svoted".to_string());
-        Command::new("ssh")
-            .args([
-                host.as_str(),
-                &format!(
+        ssh_command(host)
+            .arg(format!(
                     "{svoted} keys show {key} -a --keyring-backend test --home {home}",
                     svoted = remote_svoted,
                     key = key_name,
                     home = home_dir,
-                ),
-            ])
+                ))
             .output()
             .ok()?
     } else {
@@ -796,17 +810,14 @@ pub fn import_hex_key(name: &str, hex_privkey: &str, home_dir: &str) {
     let output = if let Some(ref host) = ssh_host {
         let remote_svoted = std::env::var("SVOTE_REMOTE_SVOTED")
             .unwrap_or_else(|_| "svoted".to_string());
-        Command::new("ssh")
-            .args([
-                host.as_str(),
-                &format!(
+        ssh_command(host)
+            .arg(format!(
                     "{svoted} keys import-hex {name} {hex} --keyring-backend test --home {home}",
                     svoted = remote_svoted,
                     name = name,
                     hex = hex_privkey,
                     home = home_dir,
-                ),
-            ])
+                ))
             .output()
             .expect("failed to run svoted keys import-hex via SSH")
     } else {

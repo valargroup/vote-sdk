@@ -13,14 +13,37 @@ on:
         description: "Release tag to deploy (e.g. v1.2.3). Must already exist in DO Spaces."
         type: string
         required: true
+      network_config_json:
+        description: "Optional JSON overrides for domain, chain_id, hosts, URLs, bucket, and extra validators."
+        type: string
+        required: false
+        default: "{}"
 
 permissions:
   contents: read
 
 env:
   TAG: ${{ inputs.tag }}
-  DO_SPACES_BASE: https://vote.fra1.digitaloceanspaces.com
+  DOMAIN: ${{ fromJSON(inputs.network_config_json || '{}').domain || secrets.DOMAIN }}
+  CHAIN_ID: ${{ fromJSON(inputs.network_config_json || '{}').chain_id || 'svote-1' }}
+  SPACES_BUCKET: ${{ fromJSON(inputs.network_config_json || '{}').spaces_bucket || 'vote' }}
+  SPACES_REGION: ${{ fromJSON(inputs.network_config_json || '{}').spaces_region || 'fra1' }}
+  GENESIS_OBJECT_KEY: ${{ fromJSON(inputs.network_config_json || '{}').genesis_object_key || 'genesis.json' }}
+  CLEAR_SNAPSHOT_ARTIFACTS: ${{ fromJSON(inputs.network_config_json || '{}').clear_snapshot_artifacts == false && 'false' || 'true' }}
+  FULL_STACK: ${{ fromJSON(inputs.network_config_json || '{}').full_stack == false && 'false' || 'true' }}
+  DO_SPACES_BASE: https://${{ fromJSON(inputs.network_config_json || '{}').spaces_bucket || 'vote' }}.${{ fromJSON(inputs.network_config_json || '{}').spaces_region || 'fra1' }}.digitaloceanspaces.com
+  GENESIS_URL: https://${{ fromJSON(inputs.network_config_json || '{}').spaces_bucket || 'vote' }}.${{ fromJSON(inputs.network_config_json || '{}').spaces_region || 'fra1' }}.digitaloceanspaces.com/${{ fromJSON(inputs.network_config_json || '{}').genesis_object_key || 'genesis.json' }}
   RELEASE_BASE_URL: https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk
+  PRIMARY_HOST: ${{ fromJSON(inputs.network_config_json || '{}').primary_host || secrets.PRIMARY_HOST }}
+  SECONDARY_HOST: ${{ fromJSON(inputs.network_config_json || '{}').secondary_host || secrets.SECONDARY_HOST }}
+  SNAPSHOT_HOST: ${{ fromJSON(inputs.network_config_json || '{}').snapshot_host || format('snapshots.{0}', fromJSON(inputs.network_config_json || '{}').domain || secrets.DOMAIN) }}
+  EXPLORER_HOST: ${{ fromJSON(inputs.network_config_json || '{}').explorer_host || format('explorer.{0}', fromJSON(inputs.network_config_json || '{}').domain || secrets.DOMAIN) }}
+  PRIMARY_API_URL: ${{ fromJSON(inputs.network_config_json || '{}').primary_api_url || format('https://vote-chain-primary.{0}', fromJSON(inputs.network_config_json || '{}').domain || secrets.DOMAIN) }}
+  SECONDARY_API_URL: ${{ fromJSON(inputs.network_config_json || '{}').secondary_api_url || format('https://vote-chain-secondary.{0}', fromJSON(inputs.network_config_json || '{}').domain || secrets.DOMAIN) }}
+  SNAPSHOT_URL: ${{ fromJSON(inputs.network_config_json || '{}').snapshot_url || format('https://snapshots.{0}', fromJSON(inputs.network_config_json || '{}').domain || secrets.DOMAIN) }}
+  EXPLORER_API_URL: ${{ fromJSON(inputs.network_config_json || '{}').explorer_api_url || format('https://explorer-api.{0}', fromJSON(inputs.network_config_json || '{}').domain || secrets.DOMAIN) }}
+  EXTRA_VALIDATOR_HOSTS: ${{ fromJSON(inputs.network_config_json || '{}').extra_validator_hosts || '' }}
+  EXTRA_VALIDATOR_API_URLS: ${{ fromJSON(inputs.network_config_json || '{}').extra_validator_api_urls || '' }}
 
 jobs:
   validate-tag:
@@ -53,13 +76,19 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate-tag
     steps:
+      - name: Skip snapshot quiesce for lean reset
+        if: ${{ env.FULL_STACK != 'true' }}
+        run: echo "full_stack=false; no snapshot node to quiesce."
+
       - name: Stop snapshot timer before chain reset
+        if: ${{ env.FULL_STACK == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 5
         with:
-          host: snapshots.${{ secrets.DOMAIN }}
+          host: ${{ env.SNAPSHOT_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SNAPSHOT_HOST,SNAPSHOT_URL
           script: |
             set -euo pipefail
 
@@ -77,11 +106,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate-tag
     steps:
+      - name: Skip archive quiesce for lean reset
+        if: ${{ env.FULL_STACK != 'true' }}
+        run: echo "full_stack=false; no archive node to quiesce."
+
       - name: Stop archive snapshot timer before chain reset
+        if: ${{ env.FULL_STACK == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 5
         with:
-          host: explorer.${{ secrets.DOMAIN }}
+          host: ${{ env.EXPLORER_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -106,7 +140,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 15
         with:
-          host: ${{ secrets.PRIMARY_HOST }}
+          host: ${{ env.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: TAG,SENTRY_DSN
@@ -129,9 +163,19 @@ jobs:
 
             # Run init.sh with deterministic validator key and vote-manager set.
             export SVOTED_HOME=/opt/shielded-vote/.svoted
-            export VM_PRIVKEYS="${{ secrets.VM_PRIVKEYS }}"
+            export CHAIN_ID="${{ env.CHAIN_ID }}"
+            export VM_PRIVKEYS="${{ fromJSON(inputs.network_config_json || '{}').spaces_bucket == 'vote-loadtest' && secrets.LOADTEST_VM_PRIVKEYS || secrets.VM_PRIVKEYS }}"
             export VAL_PRIVKEY="${{ secrets.PRIMARY_VAL_PRIVKEY }}"
             export SVOTE_ADMIN_DISABLE=false
+            if [ -f /etc/default/svoted ]; then
+              set -a
+              . /etc/default/svoted
+              set +a
+              export CHAIN_ID="${{ env.CHAIN_ID }}"
+              export VM_PRIVKEYS="${{ fromJSON(inputs.network_config_json || '{}').spaces_bucket == 'vote-loadtest' && secrets.LOADTEST_VM_PRIVKEYS || secrets.VM_PRIVKEYS }}"
+              export VAL_PRIVKEY="${{ secrets.PRIMARY_VAL_PRIVKEY }}"
+              export SVOTE_ADMIN_DISABLE=false
+            fi
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/init.sh" -o /tmp/init.sh
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/_vote_manager_keys_lib.sh" -o /tmp/_vote_manager_keys_lib.sh
             bash /tmp/init.sh
@@ -168,10 +212,10 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 5
         with:
-          host: ${{ secrets.PRIMARY_HOST }}
+          host: ${{ env.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: DO_ACCESS_KEY,DO_SECRET_KEY
+          envs: DO_ACCESS_KEY,DO_SECRET_KEY,SPACES_BUCKET,SPACES_REGION,GENESIS_OBJECT_KEY,CHAIN_ID,CLEAR_SNAPSHOT_ARTIFACTS
           script: |
             set -euo pipefail
 
@@ -187,20 +231,21 @@ jobs:
             [default]
             access_key = ${DO_ACCESS_KEY}
             secret_key = ${DO_SECRET_KEY}
-            host_base = fra1.digitaloceanspaces.com
-            host_bucket = %(bucket)s.fra1.digitaloceanspaces.com
-            bucket_location = fra1
+            host_base = ${SPACES_REGION}.digitaloceanspaces.com
+            host_bucket = %(bucket)s.${SPACES_REGION}.digitaloceanspaces.com
+            bucket_location = ${SPACES_REGION}
             use_https = True
             EOCFG
-            s3cmd -c /tmp/do-spaces.s3cfg put /tmp/genesis.json s3://vote/genesis.json --acl-public --force
-            echo "Clearing old snapshot artifacts from s3://vote/snapshots/svote-1/..."
-            s3cmd -c /tmp/do-spaces.s3cfg del --recursive s3://vote/snapshots/svote-1/
+            s3cmd -c /tmp/do-spaces.s3cfg put /tmp/genesis.json "s3://${SPACES_BUCKET}/${GENESIS_OBJECT_KEY}" --acl-public --force
+            if [ "${CLEAR_SNAPSHOT_ARTIFACTS}" = "true" ]; then
+              echo "Clearing old snapshot artifacts from s3://${SPACES_BUCKET}/snapshots/${CHAIN_ID}/..."
+              s3cmd -c /tmp/do-spaces.s3cfg del --recursive "s3://${SPACES_BUCKET}/snapshots/${CHAIN_ID}/"
+            fi
             rm -f /tmp/do-spaces.s3cfg
-            echo "Genesis uploaded to s3://vote/genesis.json"
-            echo "Old snapshots cleared from s3://vote/snapshots/svote-1/"
+            echo "Genesis uploaded to s3://${SPACES_BUCKET}/${GENESIS_OBJECT_KEY}"
         env:
-          DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
-          DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
+          DO_ACCESS_KEY: ${{ fromJSON(inputs.network_config_json || '{}').spaces_bucket == 'vote-loadtest' && secrets.LOADTEST_DO_ACCESS_KEY || secrets.DO_ACCESS_KEY }}
+          DO_SECRET_KEY: ${{ fromJSON(inputs.network_config_json || '{}').spaces_bucket == 'vote-loadtest' && secrets.LOADTEST_DO_SECRET_KEY || secrets.DO_SECRET_KEY }}
 
   fund-secondary:
     name: Fund secondary validator
@@ -211,9 +256,10 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 5
         with:
-          host: ${{ secrets.PRIMARY_HOST }}
+          host: ${{ env.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: CHAIN_ID
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -234,7 +280,7 @@ jobs:
               --from vote-manager-1 \
               --keyring-backend test \
               --home "$HOME_DIR" \
-              --chain-id svote-1 \
+              --chain-id "${CHAIN_ID}" \
               --yes
 
             echo "Waiting for tx to be included..."
@@ -244,19 +290,110 @@ jobs:
               | jq -r '.balances[] | select(.denom == "usvote") | .amount')
             echo "Secondary balance: ${BALANCE} usvote"
 
+  reset-extra-validators:
+    name: Fund and reset extra validators
+    runs-on: ubuntu-latest
+    needs: fund-secondary
+    env:
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      EXTRA_VAL_PRIVKEYS: ${{ secrets.EXTRA_VAL_PRIVKEYS }}
+    steps:
+      - name: Join val3+ validators
+        run: |
+          set -euo pipefail
+          if [ -z "${EXTRA_VALIDATOR_HOSTS}" ]; then
+            echo "No extra validators requested."
+            exit 0
+          fi
+          if [ -z "${EXTRA_VAL_PRIVKEYS}" ]; then
+            echo "ERROR: extra_validator_hosts was set, but EXTRA_VAL_PRIVKEYS secret is empty."
+            exit 1
+          fi
+
+          IFS=',' read -r -a HOSTS <<< "${EXTRA_VALIDATOR_HOSTS}"
+          IFS=',' read -r -a KEYS <<< "${EXTRA_VAL_PRIVKEYS}"
+          if [ "${#HOSTS[@]}" -ne "${#KEYS[@]}" ]; then
+            echo "ERROR: extra_validator_hosts count (${#HOSTS[@]}) != EXTRA_VAL_PRIVKEYS count (${#KEYS[@]})."
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          SSH=(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=10 -o ServerAliveCountMax=6)
+
+          for idx in "${!HOSTS[@]}"; do
+            host="$(echo "${HOSTS[$idx]}" | xargs)"
+            key="$(echo "${KEYS[$idx]}" | xargs)"
+            moniker="valarg-val$((idx + 3))"
+            if [ -z "${host}" ] || [ -z "${key}" ]; then
+              echo "ERROR: empty host or key at extra validator index ${idx}."
+              exit 1
+            fi
+
+            echo "Funding ${moniker} account from primary..."
+            "${SSH[@]}" "${DEPLOY_USER}@${PRIMARY_HOST}" \
+              "CHAIN_ID='${CHAIN_ID}' VAL_PRIVKEY='${key}' bash -se" <<'REMOTE_FUND'
+              set -euo pipefail
+              export PATH="/opt/shielded-vote/current/bin:$PATH"
+              HOME_DIR=/opt/shielded-vote/.svoted
+              TMPKR=$(mktemp -d)
+              trap 'rm -rf "$TMPKR"' EXIT
+              svoted keys import-hex extra-validator-tmp "${VAL_PRIVKEY}" \
+                --keyring-backend test --home "$TMPKR" >/dev/null
+              ADDR=$(svoted keys show extra-validator-tmp -a --keyring-backend test --home "$TMPKR")
+              svoted tx vote authorized-send "${ADDR}" 100000000 usvote \
+                --from vote-manager-1 \
+                --keyring-backend test \
+                --home "$HOME_DIR" \
+                --chain-id "${CHAIN_ID}" \
+                --yes
+              echo "Funded ${ADDR}."
+          REMOTE_FUND
+
+            echo "Resetting ${moniker} on ${host}..."
+            "${SSH[@]}" "${DEPLOY_USER}@${host}" \
+              "TAG='${TAG}' GENESIS_URL='${GENESIS_URL}' PRIMARY_REST_URL='${PRIMARY_API_URL}' CHAIN_ID='${CHAIN_ID}' VAL_PRIVKEY='${key}' MONIKER='${moniker}' GITHUB_REPOSITORY='${{ github.repository }}' GITHUB_SHA='${{ github.sha }}' bash -se" <<'REMOTE_RESET'
+              set -euo pipefail
+              export PATH="/opt/shielded-vote/current/bin:$PATH"
+              /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+              export HOME_DIR=/opt/shielded-vote/.svoted
+              if [ -f /etc/default/svoted ]; then
+                set -a
+                . /etc/default/svoted
+                set +a
+                export GENESIS_URL="${GENESIS_URL}"
+                export PRIMARY_REST_URL="${SVOTE_PRIMARY_REST_URL:-${PRIMARY_REST_URL}}"
+                export CHAIN_ID="${CHAIN_ID}"
+                export VAL_PRIVKEY="${VAL_PRIVKEY}"
+                export HOME_DIR=/opt/shielded-vote/.svoted
+                export MONIKER="${MONIKER}"
+              fi
+              curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/scripts/reset-join.sh" -o /tmp/reset-join.sh
+              bash /tmp/reset-join.sh
+          REMOTE_RESET
+          done
+
   reset-snapshot:
     name: Reset snapshot node
     runs-on: ubuntu-latest
     needs: upload-genesis
     steps:
+      - name: Skip snapshot reset for lean reset
+        if: ${{ env.FULL_STACK != 'true' }}
+        run: echo "full_stack=false; no snapshot node to reset."
+
       - name: Install tag and join as snapshot node
+        if: ${{ env.FULL_STACK == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: snapshots.${{ secrets.DOMAIN }}
+          host: ${{ env.SNAPSHOT_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG
+          envs: TAG,GENESIS_URL,PRIMARY_API_URL,CHAIN_ID
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -267,28 +404,34 @@ jobs:
             # Run reset-snapshot: wipe state, download genesis, configure peering
             # with primary, start svoted as a pruned non-validator, and enable
             # the snapshot timer.
-            export GENESIS_URL="${{ env.DO_SPACES_BASE }}/genesis.json"
-            export PRIMARY_REST_URL="https://vote-chain-primary.${{ secrets.DOMAIN }}"
+            export GENESIS_URL="${GENESIS_URL}"
+            export PRIMARY_REST_URL="${SVOTE_PRIMARY_REST_URL:-${PRIMARY_API_URL}}"
             export HOME_DIR=/opt/shielded-vote/.svoted
-            export CHAIN_ID=svote-1
+            export CHAIN_ID="${CHAIN_ID}"
             export MONIKER=snapshot
 
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-snapshot.sh" -o /tmp/reset-snapshot.sh
             bash /tmp/reset-snapshot.sh
 
       - name: Publish initial pruned snapshot
+        if: ${{ env.FULL_STACK == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: snapshots.${{ secrets.DOMAIN }}
+          host: ${{ env.SNAPSHOT_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SNAPSHOT_HOST,SNAPSHOT_URL
           script: |
             set -euo pipefail
 
+            PUBLIC_SNAPSHOT_HOST="${SNAPSHOT_HOST}"
+            PUBLIC_SNAPSHOT_URL="${SNAPSHOT_URL}"
             set -a
             . /etc/default/snapshot
             set +a
+            export SNAPSHOT_HOST="${PUBLIC_SNAPSHOT_HOST}"
+            export SNAPSHOT_URL="${PUBLIC_SNAPSHOT_URL}"
 
             systemctl stop snapshot.timer || true
             for i in $(seq 1 20); do
@@ -307,30 +450,33 @@ jobs:
               sleep 30
             done
 
+            SNAPSHOT_HOSTNAME="${SNAPSHOT_HOST}"
             for path in /daily.json /latest.json /snapshots.json; do
-              curl -fsS --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
-                "https://snapshots.${{ secrets.DOMAIN }}${path}" \
+              curl -fsS --resolve "${SNAPSHOT_HOSTNAME}:443:127.0.0.1" \
+                "${SNAPSHOT_URL}${path}" \
                 | jq -e 'type == "object" or type == "array"' > /dev/null
               echo "[OK] ${path}"
             done
-            curl -fsS --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
-              "https://snapshots.${{ secrets.DOMAIN }}/daily.json" \
+            curl -fsS --resolve "${SNAPSHOT_HOSTNAME}:443:127.0.0.1" \
+              "${SNAPSHOT_URL}/daily.json" \
               | jq -e '.roles | index("daily") != null' > /dev/null
-            curl -fsS --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
-              "https://snapshots.${{ secrets.DOMAIN }}/latest.json" \
+            curl -fsS --resolve "${SNAPSHOT_HOSTNAME}:443:127.0.0.1" \
+              "${SNAPSHOT_URL}/latest.json" \
               | jq -e '.roles | index("latest") != null' > /dev/null
 
       - name: Verify snapshot services
+        if: ${{ env.FULL_STACK == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: snapshots.${{ secrets.DOMAIN }}
+          host: ${{ env.SNAPSHOT_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SNAPSHOT_HOST,SNAPSHOT_URL
           script: |
             systemctl is-active --quiet svoted
             systemctl is-enabled --quiet snapshot.timer
-            curl -sf --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
-              "https://snapshots.${{ secrets.DOMAIN }}/" > /dev/null
+            curl -sf --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
+              "${SNAPSHOT_URL}/" > /dev/null
             echo "Snapshot node and frontend healthy."
 
   reset-secondary:
@@ -342,10 +488,10 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: ${{ secrets.SECONDARY_HOST }}
+          host: ${{ env.SECONDARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG
+          envs: TAG,GENESIS_URL,PRIMARY_API_URL,CHAIN_ID
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -354,12 +500,23 @@ jobs:
             /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
 
             # Run reset-join with deterministic validator key
-            export GENESIS_URL="${{ env.DO_SPACES_BASE }}/genesis.json"
-            export PRIMARY_REST_URL="https://vote-chain-primary.${{ secrets.DOMAIN }}"
+            export GENESIS_URL="${GENESIS_URL}"
+            export PRIMARY_REST_URL="${SVOTE_PRIMARY_REST_URL:-${PRIMARY_API_URL}}"
             export VAL_PRIVKEY="${{ secrets.SECONDARY_VAL_PRIVKEY }}"
             export HOME_DIR=/opt/shielded-vote/.svoted
-            export CHAIN_ID=svote-1
+            export CHAIN_ID="${CHAIN_ID}"
             export MONIKER=valarg-secondary
+            if [ -f /etc/default/svoted ]; then
+              set -a
+              . /etc/default/svoted
+              set +a
+              export GENESIS_URL="${GENESIS_URL}"
+              export PRIMARY_REST_URL="${SVOTE_PRIMARY_REST_URL:-${PRIMARY_API_URL}}"
+              export VAL_PRIVKEY="${{ secrets.SECONDARY_VAL_PRIVKEY }}"
+              export HOME_DIR=/opt/shielded-vote/.svoted
+              export CHAIN_ID="${CHAIN_ID}"
+              export MONIKER=valarg-secondary
+            fi
 
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-join.sh" -o /tmp/reset-join.sh
             bash /tmp/reset-join.sh
@@ -367,7 +524,7 @@ jobs:
       - name: Verify secondary health
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SECONDARY_HOST }}
+          host: ${{ env.SECONDARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -385,16 +542,21 @@ jobs:
   reset-archive:
     name: Reset archive (join)
     runs-on: ubuntu-latest
-    needs: reset-secondary
+    needs: [reset-secondary, reset-extra-validators]
     steps:
+      - name: Skip archive reset for lean reset
+        if: ${{ env.FULL_STACK != 'true' }}
+        run: echo "full_stack=false; no archive node to reset."
+
       - name: Install tag and join as archive
+        if: ${{ env.FULL_STACK == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: explorer.${{ secrets.DOMAIN }}
+          host: ${{ env.EXPLORER_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG
+          envs: TAG,GENESIS_URL,PRIMARY_API_URL,CHAIN_ID
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -404,19 +566,20 @@ jobs:
 
             # Run reset-archive: wipe state, download genesis, configure peering
             # with primary, start svoted in archive mode (pruning=nothing).
-            export GENESIS_URL="${{ env.DO_SPACES_BASE }}/genesis.json"
-            export PRIMARY_REST_URL="https://vote-chain-primary.${{ secrets.DOMAIN }}"
+            export GENESIS_URL="${GENESIS_URL}"
+            export PRIMARY_REST_URL="${SVOTE_PRIMARY_REST_URL:-${PRIMARY_API_URL}}"
             export HOME_DIR=/opt/shielded-vote/.svoted
-            export CHAIN_ID=svote-1
+            export CHAIN_ID="${CHAIN_ID}"
             export MONIKER=archive
 
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-archive.sh" -o /tmp/reset-archive.sh
             bash /tmp/reset-archive.sh
 
       - name: Verify archive health
+        if: ${{ env.FULL_STACK == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: explorer.${{ secrets.DOMAIN }}
+          host: ${{ env.EXPLORER_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -432,18 +595,22 @@ jobs:
             exit 1
 
       - name: Publish initial archive snapshot
+        if: ${{ env.FULL_STACK == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 60
         with:
-          host: explorer.${{ secrets.DOMAIN }}
+          host: ${{ env.EXPLORER_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SNAPSHOT_URL
           script: |
             set -euo pipefail
 
+            PUBLIC_SNAPSHOT_URL="${SNAPSHOT_URL}"
             set -a
             . /etc/default/archive-snapshot
             set +a
+            export SNAPSHOT_URL="${PUBLIC_SNAPSHOT_URL}"
 
             systemctl stop archive-snapshot.timer || true
             for i in $(seq 1 20); do
@@ -462,9 +629,9 @@ jobs:
               sleep 30
             done
 
-            curl -fsS "https://snapshots.${{ secrets.DOMAIN }}/archive/latest.json" \
+            curl -fsS "${SNAPSHOT_URL}/archive/latest.json" \
               | jq -e '.type == "archive" and (.roles | index("latest")) and (.roles | index("archive"))' > /dev/null
-            curl -fsS "https://snapshots.${{ secrets.DOMAIN }}/archive/snapshots.json" \
+            curl -fsS "${SNAPSHOT_URL}/archive/snapshots.json" \
               | jq -e 'length == 1 and .[0].type == "archive"' > /dev/null
             echo "Archive snapshot metadata healthy."
 
@@ -477,63 +644,89 @@ jobs:
       - name: Check both validators
         run: |
           FAILED=0
-          for HOST in "vote-chain-primary" "vote-chain-secondary"; do
-            URL="https://${HOST}.${{ secrets.DOMAIN }}/shielded-vote/v1/rounds"
+
+          VALIDATOR_CHECKS=("primary ${PRIMARY_API_URL}" "secondary ${SECONDARY_API_URL}")
+          if [ -n "${EXTRA_VALIDATOR_API_URLS}" ]; then
+            IFS=',' read -r -a EXTRA_URLS <<< "${EXTRA_VALIDATOR_API_URLS}"
+            for idx in "${!EXTRA_URLS[@]}"; do
+              URL="$(echo "${EXTRA_URLS[$idx]}" | xargs)"
+              if [ -n "${URL}" ]; then
+                VALIDATOR_CHECKS+=("val$((idx + 3)) ${URL}")
+              fi
+            done
+          elif [ -n "${EXTRA_VALIDATOR_HOSTS}" ]; then
+            IFS=',' read -r -a EXTRA_HOSTS <<< "${EXTRA_VALIDATOR_HOSTS}"
+            for idx in "${!EXTRA_HOSTS[@]}"; do
+              HOST="$(echo "${EXTRA_HOSTS[$idx]}" | xargs)"
+              if [ -n "${HOST}" ]; then
+                VALIDATOR_CHECKS+=("val$((idx + 3)) https://${HOST}")
+              fi
+            done
+          fi
+
+          for NAME_URL in "${VALIDATOR_CHECKS[@]}"; do
+            NAME="${NAME_URL%% *}"
+            BASE_URL="${NAME_URL#* }"
+            URL="${BASE_URL}/shielded-vote/v1/rounds"
             for i in $(seq 1 10); do
               STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$URL" || echo "000")
               if [ "$STATUS" = "200" ]; then
-                echo "[OK] ${HOST} healthy"
+                echo "[OK] ${NAME} healthy"
                 break
               fi
               if [ "$i" -eq 10 ]; then
-                echo "[FAIL] ${HOST} not healthy (HTTP ${STATUS})"
+                echo "[FAIL] ${NAME} not healthy (HTTP ${STATUS})"
                 FAILED=1
               fi
               sleep 10
             done
           done
-          # Explorer archive exposes the Cosmos LCD at explorer-api.<domain>.
-          ARCHIVE_URL="https://explorer-api.${{ secrets.DOMAIN }}/cosmos/base/tendermint/v1beta1/blocks/latest"
-          for i in $(seq 1 10); do
-            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$ARCHIVE_URL" || echo "000")
-            if [ "$STATUS" = "200" ]; then
-              echo "[OK] explorer archive healthy"
-              break
-            fi
-            if [ "$i" -eq 10 ]; then
-              echo "[FAIL] explorer archive not healthy (HTTP ${STATUS})"
-              FAILED=1
-            fi
-            sleep 10
-          done
-          SNAPSHOT_URL="https://snapshots.${{ secrets.DOMAIN }}/"
-          for i in $(seq 1 10); do
-            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$SNAPSHOT_URL" || echo "000")
-            if [ "$STATUS" = "200" ]; then
-              echo "[OK] snapshot frontend healthy"
-              break
-            fi
-            if [ "$i" -eq 10 ]; then
-              echo "[FAIL] snapshot frontend not healthy (HTTP ${STATUS})"
-              FAILED=1
-            fi
-            sleep 10
-          done
-          for METADATA_PATH in /daily.json /latest.json /snapshots.json /archive/latest.json; do
-            URL="https://snapshots.${{ secrets.DOMAIN }}${METADATA_PATH}"
-            if curl -fsS "$URL" | jq empty > /dev/null; then
-              echo "[OK] snapshot metadata ${METADATA_PATH}"
-            else
-              echo "[FAIL] snapshot metadata ${METADATA_PATH}"
-              FAILED=1
-            fi
-          done
+          if [ "${FULL_STACK}" = "true" ]; then
+            # Explorer archive exposes the Cosmos LCD at explorer-api.<domain>.
+            ARCHIVE_URL="${EXPLORER_API_URL}/cosmos/base/tendermint/v1beta1/blocks/latest"
+            for i in $(seq 1 10); do
+              STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$ARCHIVE_URL" || echo "000")
+              if [ "$STATUS" = "200" ]; then
+                echo "[OK] explorer archive healthy"
+                break
+              fi
+              if [ "$i" -eq 10 ]; then
+                echo "[FAIL] explorer archive not healthy (HTTP ${STATUS})"
+                FAILED=1
+              fi
+              sleep 10
+            done
+            for i in $(seq 1 10); do
+              STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "${SNAPSHOT_URL}/" || echo "000")
+              if [ "$STATUS" = "200" ]; then
+                echo "[OK] snapshot frontend healthy"
+                break
+              fi
+              if [ "$i" -eq 10 ]; then
+                echo "[FAIL] snapshot frontend not healthy (HTTP ${STATUS})"
+                FAILED=1
+              fi
+              sleep 10
+            done
+            for METADATA_PATH in /daily.json /latest.json /snapshots.json /archive/latest.json; do
+              URL="${SNAPSHOT_URL}${METADATA_PATH}"
+              if curl -fsS "$URL" | jq empty > /dev/null; then
+                echo "[OK] snapshot metadata ${METADATA_PATH}"
+              else
+                echo "[FAIL] snapshot metadata ${METADATA_PATH}"
+                FAILED=1
+              fi
+            done
+          else
+            echo "[SKIP] explorer archive checks (full_stack=false)"
+            echo "[SKIP] snapshot frontend and metadata checks (full_stack=false)"
+          fi
           exit $FAILED
 
   notify-slack:
     name: Slack Notification
     if: ${{ always() && contains(join(needs.*.result, ','), 'failure') }}
-    needs: [quiesce-snapshot, quiesce-archive, reset-primary, upload-genesis, fund-secondary, reset-snapshot, reset-secondary, reset-archive, verify]
+    needs: [quiesce-snapshot, quiesce-archive, reset-primary, upload-genesis, fund-secondary, reset-extra-validators, reset-snapshot, reset-secondary, reset-archive, verify]
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack on failure
@@ -558,7 +751,7 @@ jobs:
                 },
                 {
                   "type": "section",
-                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nQuiesce Snapshot: `${{ needs.quiesce-snapshot.result }}` | Quiesce Archive: `${{ needs.quiesce-archive.result }}` | Reset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Snapshot: `${{ needs.reset-snapshot.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Reset Archive: `${{ needs.reset-archive.result }}` | Verify: `${{ needs.verify.result }}`" }
+                  "text": { "type": "mrkdwn", "text": "*Job Results:*\nQuiesce Snapshot: `${{ needs.quiesce-snapshot.result }}` | Quiesce Archive: `${{ needs.quiesce-archive.result }}` | Reset Primary: `${{ needs.reset-primary.result }}` | Upload Genesis: `${{ needs.upload-genesis.result }}` | Fund Secondary: `${{ needs.fund-secondary.result }}` | Reset Extra Validators: `${{ needs.reset-extra-validators.result }}` | Reset Snapshot: `${{ needs.reset-snapshot.result }}` | Reset Secondary: `${{ needs.reset-secondary.result }}` | Reset Archive: `${{ needs.reset-archive.result }}` | Verify: `${{ needs.verify.result }}`" }
                 }
               ]
             }

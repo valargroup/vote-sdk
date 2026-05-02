@@ -8,6 +8,8 @@ pub mod api;
 pub mod ecies;
 pub mod elgamal;
 pub mod fixtures;
+pub mod launch;
+pub mod launch_execute;
 pub mod metrics;
 pub mod payloads;
 pub mod setup;

@@ -98,7 +98,8 @@ Use this for routine upgrades. Chain state is preserved; only the binary is swap
 
 ### Reset (from genesis)
 
-**`.github/workflows/sdk-chain-reset.yml`** — manual `workflow_dispatch` with a `tag` input.
+**`.github/workflows/sdk-chain-reset.yml`** — manual `workflow_dispatch` with a
+`tag` input and an optional `network_config_json` override for side-networks.
 
 1. **quiesce-snapshot**: stops and disables `snapshot.timer`, stops any running publisher, and stops old snapshot-node `svoted` before chain state changes
 2. **reset-primary**: installs tag, stops svoted, wipes chain state, runs `init.sh` (imports `PRIMARY_VAL_PRIVKEY`) to create fresh genesis, starts svoted

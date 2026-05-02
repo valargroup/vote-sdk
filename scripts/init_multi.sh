@@ -41,7 +41,7 @@ if [ "$CI_MODE" = false ]; then
     export GOTOOLCHAIN=auto
 fi
 
-CHAIN_ID="svote-1"
+CHAIN_ID="${CHAIN_ID:-${SVOTE_CHAIN_ID:-svote-1}}"
 BINARY="svoted"
 DENOM="usvote"
 NUM_VALIDATORS=3
@@ -174,6 +174,9 @@ configure_app_toml() {
 configure_helper() {
     local home="$1"
     local api_port="$2"
+    local helper_api_token="${SVOTE_HELPER_API_TOKEN:-}"
+    local expose_queue_status="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
+    local max_concurrent_proofs="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-2}"
     local sentry_dsn="${SVOTE_HELPER_SENTRY_DSN:-}"
 
     local app_toml="$home/config/app.toml"
@@ -190,7 +193,11 @@ disable = false
 
 # Optional auth token for POST /shielded-vote/v1/shares (sent via X-Helper-Token header).
 # Empty disables token auth.
-api_token = ""
+api_token = "${helper_api_token}"
+
+# Benchmark-only queue metrics endpoint. Keep disabled by default to avoid
+# exposing per-round share activity to unauthenticated observers.
+expose_queue_status = ${expose_queue_status}
 
 # Path to the SQLite database file. Empty = default (\$home/helper.db).
 db_path = ""
@@ -199,7 +206,7 @@ db_path = ""
 chain_api_port = ${api_port}
 
 # Maximum concurrent proof generation goroutines.
-max_concurrent_proofs = 2
+max_concurrent_proofs = ${max_concurrent_proofs}
 
 # Sentry DSN for error tracking. Empty disables Sentry.
 sentry_dsn = "${sentry_dsn}"

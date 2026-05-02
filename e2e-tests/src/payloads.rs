@@ -54,8 +54,8 @@ pub fn derive_round_id_at_height(fields: &SetupRoundFields, creation_height: u64
 
     let (bh_lo, bh_hi) = split(&fields.snapshot_blockhash);
     let (ph_lo, ph_hi) = split(&fields.proposals_hash);
-    let nf_root: pallas::Base =
-        pallas::Base::from_repr(fields.nullifier_imt_root).expect("nullifier_imt_root not canonical Fp");
+    let nf_root: pallas::Base = pallas::Base::from_repr(fields.nullifier_imt_root)
+        .expect("nullifier_imt_root not canonical Fp");
     let nc: pallas::Base =
         pallas::Base::from_repr(fields.nc_root).expect("nc_root not canonical Fp");
 
@@ -120,7 +120,7 @@ pub fn create_voting_session_payload(
             { "id": 1, "title": "Proposal A", "description": "First proposal",
               "options": [{"index": 0, "label": "Support"}, {"index": 1, "label": "Oppose"}] },
             { "id": 2, "title": "Proposal B", "description": "Second proposal",
-              "options": [{"index": 0, "label": "Support"}, {"index": 1, "label": "Oppose"}] },
+              "options": [{"index": 0, "label": "Option A"}, {"index": 1, "label": "Option B"}, {"index": 2, "label": "Abstain"}] },
         ],
     });
     (body, fields, round_id)
@@ -280,6 +280,41 @@ pub fn helper_share_payload(
     share_comms: &[Vec<u8>],                // 16 x 32-byte Poseidon commitments
     primary_blind: &[u8],                   // 32-byte blind for this share
 ) -> Value {
+    helper_share_payload_with_submit_at(
+        round_id,
+        shares_hash,
+        proposal_id,
+        vote_decision,
+        enc_share_c1,
+        enc_share_c2,
+        share_index,
+        tree_position,
+        all_enc_shares,
+        share_comms,
+        primary_blind,
+        0,
+    )
+}
+
+/// Build a share payload with an explicit wallet-provided `submit_at`.
+///
+/// `submit_at = 0` means immediate helper processing. Launch-validation runs use
+/// delayed `submit_at` values for normal voters and immediate single-share
+/// payloads for the last-moment cohort.
+pub fn helper_share_payload_with_submit_at(
+    round_id: &[u8],
+    shares_hash: &[u8],
+    proposal_id: u32,
+    vote_decision: u32,
+    enc_share_c1: &[u8],
+    enc_share_c2: &[u8],
+    share_index: u32,
+    tree_position: u64,
+    all_enc_shares: &[(&[u8], &[u8], u32)],
+    share_comms: &[Vec<u8>],
+    primary_blind: &[u8],
+    submit_at: u64,
+) -> Value {
     let all_shares_json: Vec<Value> = all_enc_shares
         .iter()
         .map(|(c1, c2, idx)| {
@@ -310,5 +345,6 @@ pub fn helper_share_payload(
         "all_enc_shares": all_shares_json,
         "share_comms": comms_json,
         "primary_blind": to_base64(primary_blind),
+        "submit_at": submit_at,
     })
 }

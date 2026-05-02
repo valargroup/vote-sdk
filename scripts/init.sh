@@ -11,7 +11,7 @@ if [ -f "$REPO_ROOT/.env" ]; then
     set +a
 fi
 
-CHAIN_ID="svote-1"
+CHAIN_ID="${CHAIN_ID:-${SVOTE_CHAIN_ID:-svote-1}}"
 MONIKER="valarg-genesis"
 HOME_DIR="${SVOTED_HOME:-$HOME/.svoted}"
 BINARY="svoted"

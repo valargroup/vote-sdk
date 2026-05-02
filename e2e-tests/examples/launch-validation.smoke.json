@@ -1,0 +1,61 @@
+{
+  "run_name": "shielded-vote-loadtest-smoke-75-20m",
+  "seed": 1776,
+  "primary_api_url": "https://vote-chain-loadtest-primary.valargroup.org",
+  "output_dir": "artifacts/launch-validation-smoke",
+  "snapshot_height": 3317500,
+  "voter_count": 75,
+  "round_duration_secs": 1200,
+  "validator_count": 5,
+  "helper_target_count": 3,
+  "proposals": [
+    {
+      "id": 1,
+      "title": "Launch Validation Smoke Binary Proposal",
+      "options": ["Support", "Oppose"],
+      "decision_weights": [60, 40]
+    },
+    {
+      "id": 2,
+      "title": "Launch Validation Smoke Multi-Option Proposal",
+      "options": ["Option A", "Option B", "Abstain"],
+      "decision_weights": [50, 30, 20]
+    }
+  ],
+  "wallet_mix": {
+    "dust_only_pct": 5,
+    "exact_threshold_pct": 15,
+    "five_note_pct": 45,
+    "multi_bundle_pct": 25,
+    "whale_pct": 10
+  },
+  "timing": {
+    "early_burst_pct": 45,
+    "mid_burst_pct": 35,
+    "last_moment_pct": 20
+  },
+  "vote_servers": [
+    { "label": "loadtest-primary", "url": "https://vote-chain-loadtest-primary.valargroup.org", "ssh_host": "root@vote-chain-loadtest-primary.valargroup.org" },
+    { "label": "loadtest-secondary", "url": "https://vote-chain-loadtest-secondary.valargroup.org", "ssh_host": "root@vote-chain-loadtest-secondary.valargroup.org" },
+    { "label": "loadtest-val3", "url": "https://vote-chain-loadtest-val3.valargroup.org", "ssh_host": "root@vote-chain-loadtest-val3.valargroup.org" },
+    { "label": "loadtest-val4", "url": "https://vote-chain-loadtest-val4.valargroup.org", "ssh_host": "root@vote-chain-loadtest-val4.valargroup.org" },
+    { "label": "loadtest-val5", "url": "https://vote-chain-loadtest-val5.valargroup.org", "ssh_host": "root@vote-chain-loadtest-val5.valargroup.org" }
+  ],
+  "chaos": [
+    {
+      "id": "validator-down-2m",
+      "at_offset_secs": 240,
+      "target": "loadtest-val3",
+      "action": "stop",
+      "duration_secs": 120,
+      "description": "Stop one non-primary validator/helper for two minutes, then restart it."
+    },
+    {
+      "id": "helper-down-through-close-smoke",
+      "at_offset_secs": 600,
+      "target": "loadtest-val4",
+      "action": "stop_until_vote_end",
+      "description": "Stop a different validator/helper after queued shares have been accepted and keep it down through vote end."
+    }
+  ]
+}
