@@ -146,7 +146,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   );
 }
 
-export function SignConfigEntryPage() {
+export function AttestRoundEntryPage() {
   const wallet = useWallet();
   const [keyInfo, setKeyInfo] = useState<DerivedPublicKeyInfo | null>(null);
   const [derivingKey, setDerivingKey] = useState(false);
@@ -270,9 +270,9 @@ export function SignConfigEntryPage() {
     setError("");
     setPayloadNotice("");
     try {
-      let response: chainApi.SignConfigEntryResponse;
+      let response: chainApi.AttestRoundEntryResponse;
       try {
-        response = await chainApi.signConfigEntry({
+        response = await chainApi.attestRoundEntry({
           round_id: roundId,
           ea_pk: eaPK,
           auth_version: 1,
@@ -669,77 +669,60 @@ export function SignConfigEntryPage() {
           </div>
         )}
 
-        {(snippet || hash) && (
+        {snippet && (
           <section className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-4">
-            {hash && (
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <h2 className="text-xs font-semibold text-text-primary">
-                    signed_payload_hash
-                  </h2>
-                  <CopyButton value={hash} label="Copy hash" />
-                </div>
-                <p className="text-[11px] text-text-primary font-mono break-all bg-surface-2 rounded-lg px-3 py-2">
-                  {hash}
-                </p>
-              </div>
-            )}
-
-            {snippet && (
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <h2 className="text-xs font-semibold text-text-primary">
-                    JSON snippet
-                  </h2>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <CopyButton value={snippet} label="Copy JSON" />
-                    <button
-                      onClick={handleCreateConfigPr}
-                      disabled={
-                        configPrStatus === "creating" ||
-                        !wallet.address ||
-                        !hash ||
-                        !snippet ||
-                        !canSignRound
-                      }
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-md text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {configPrStatus === "creating" ? "Opening Pull Request..." : "Update via Pull Request"}
-                    </button>
-                    <a
-                      href="https://github.com/valargroup/token-holder-voting-config/pull/36"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-surface-2 hover:bg-surface-3 text-text-secondary rounded-md text-[11px] font-semibold transition-colors ml-2"
-                    >
-                      <span>Sample Pull Request</span>
-                      <ExternalLink size={12} />
-                    </a>
-               
-                  </div>
-                </div>
-                <pre className="text-[11px] text-text-primary font-mono whitespace-pre-wrap break-all bg-surface-2 rounded-lg px-3 py-2 overflow-x-auto">
-                  {snippet}
-                </pre>
-                {configPrError && (
-                  <div className="flex items-start gap-2 bg-danger/10 border border-danger/30 rounded-lg p-3 mt-3">
-                    <AlertCircle size={14} className="text-danger mt-0.5 shrink-0" />
-                    <p className="text-[11px] text-danger">{configPrError}</p>
-                  </div>
-                )}
-                {configPrUrl && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <h2 className="text-xs font-semibold text-text-primary">
+                  JSON snippet
+                </h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <CopyButton value={snippet} label="Copy JSON" />
+                  <button
+                    onClick={handleCreateConfigPr}
+                    disabled={
+                      configPrStatus === "creating" ||
+                      !wallet.address ||
+                      !hash ||
+                      !snippet ||
+                      !canSignRound
+                    }
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-md text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {configPrStatus === "creating" ? "Opening Pull Request..." : "Update via Pull Request"}
+                  </button>
                   <a
-                    href={configPrUrl}
+                    href="https://github.com/valargroup/token-holder-voting-config/pull/36"
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 mt-3 text-[11px] font-semibold text-accent hover:text-accent/80"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-surface-2 hover:bg-surface-3 text-text-secondary rounded-md text-[11px] font-semibold transition-colors ml-2"
                   >
-                    Opened config PR
+                    <span>Sample Pull Request</span>
                     <ExternalLink size={12} />
                   </a>
-                )}
+                </div>
               </div>
-            )}
+              <pre className="text-[11px] text-text-primary font-mono whitespace-pre-wrap break-all bg-surface-2 rounded-lg px-3 py-2 overflow-x-auto">
+                {snippet}
+              </pre>
+              {configPrError && (
+                <div className="flex items-start gap-2 bg-danger/10 border border-danger/30 rounded-lg p-3 mt-3">
+                  <AlertCircle size={14} className="text-danger mt-0.5 shrink-0" />
+                  <p className="text-[11px] text-danger">{configPrError}</p>
+                </div>
+              )}
+              {configPrUrl && (
+                <a
+                  href={configPrUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 mt-3 text-[11px] font-semibold text-accent hover:text-accent/80"
+                >
+                  Opened config PR
+                  <ExternalLink size={12} />
+                </a>
+              )}
+            </div>
           </section>
         )}
 

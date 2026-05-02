@@ -338,18 +338,18 @@ export async function listRounds(): Promise<{ rounds: ChainRound[] | null }> {
   return fetchJson<{ rounds: ChainRound[] | null }>("/shielded-vote/v1/rounds");
 }
 
-export interface SignConfigEntryResponse {
+export interface AttestRoundEntryResponse {
   canonical_payload_b64: string;
   signed_payload_hash: string;
   auth_version: number;
 }
 
-export async function signConfigEntry(input: {
+export async function attestRoundEntry(input: {
   round_id: string;
   ea_pk: string;
   auth_version: 1;
-}): Promise<SignConfigEntryResponse> {
-  return fetchJson<SignConfigEntryResponse>("/api/sign-config-entry", {
+}): Promise<AttestRoundEntryResponse> {
+  return fetchJson<AttestRoundEntryResponse>("/api/sign-config-entry", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
