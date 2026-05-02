@@ -18,6 +18,14 @@ interface RoundOption {
   status: string;
 }
 
+interface DerivedPublicKeyInfo {
+  signerId: string;
+  publicKeyB64: string;
+  createdAt: string;
+  sourceAddress: string;
+  chainId: string;
+}
+
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -92,7 +100,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 
 export function SignConfigEntryPage() {
   const wallet = useWallet();
-  const [keyInfo, setKeyInfo] = useState<votingKey.VotingKeyInfo | null>(null);
+  const [keyInfo, setKeyInfo] = useState<DerivedPublicKeyInfo | null>(null);
   const [derivingKey, setDerivingKey] = useState(false);
   const [deriveNotice, setDeriveNotice] = useState("");
   const [rounds, setRounds] = useState<RoundOption[]>([]);
@@ -118,10 +126,6 @@ export function SignConfigEntryPage() {
     /^[0-9a-f]{64}$/.test(verifyRoundId) &&
     validateEaPK(verifyEaPK) &&
     verifySignature.trim().length > 0;
-  const derivedKeyStorageKey =
-    wallet.source === "keplr" && wallet.address && wallet.chainId
-      ? `sv-keplr-derived-voting-key:${wallet.chainId}:${wallet.address}`
-      : null;
 
   const loadRounds = async () => {
     setLoadingRounds(true);
@@ -158,41 +162,12 @@ export function SignConfigEntryPage() {
   }, []);
 
   useEffect(() => {
-    setKeyInfo(null);
-    setDeriveNotice("");
-    if (!derivedKeyStorageKey) return;
-
-    const cached = sessionStorage.getItem(derivedKeyStorageKey);
-    if (!cached) return;
-    try {
-      const parsed = JSON.parse(cached) as votingKey.KeplrDerivedVotingKeyInfo;
-      if (
-        parsed.sourceAddress === wallet.address &&
-        parsed.chainId === wallet.chainId &&
-        parsed.seedB64 &&
-        parsed.publicKeyB64
-      ) {
-        setKeyInfo(parsed);
-        setDeriveNotice("Loaded the Keplr-derived signing key from this tab session.");
-      }
-    } catch {
-      sessionStorage.removeItem(derivedKeyStorageKey);
-    }
-  }, [derivedKeyStorageKey, wallet.address, wallet.chainId]);
-
-  useEffect(() => {
-    const clearDerivedKeys = () => {
-      for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
-        const key = sessionStorage.key(i);
-        if (key?.startsWith("sv-keplr-derived-voting-key:")) {
-          sessionStorage.removeItem(key);
-        }
-      }
+    const clearDerivedPublicKey = () => {
       setKeyInfo(null);
       setDeriveNotice("");
     };
-    window.addEventListener("keplr_keystorechange", clearDerivedKeys);
-    return () => window.removeEventListener("keplr_keystorechange", clearDerivedKeys);
+    window.addEventListener("keplr_keystorechange", clearDerivedPublicKey);
+    return () => window.removeEventListener("keplr_keystorechange", clearDerivedPublicKey);
   }, []);
 
   useEffect(() => {
@@ -201,6 +176,27 @@ export function SignConfigEntryPage() {
     setSnippet("");
     setError("");
   }, [selectedRoundKey]);
+
+  const deriveEphemeralKey = async (): Promise<votingKey.KeplrDerivedVotingKeyInfo> => {
+    if (!wallet.address || wallet.source !== "keplr" || !wallet.chainId) {
+      throw new Error("Connect Keplr before deriving the signing key.");
+    }
+    return votingKey.deriveEd25519FromKeplr(
+      wallet.address,
+      wallet.chainId,
+      wallet.signKeplrPayload
+    );
+  };
+
+  const rememberPublicKey = (key: votingKey.KeplrDerivedVotingKeyInfo) => {
+    setKeyInfo({
+      signerId: key.signerId,
+      publicKeyB64: key.publicKeyB64,
+      createdAt: key.createdAt,
+      sourceAddress: key.sourceAddress,
+      chainId: key.chainId,
+    });
+  };
 
   const createSignedJSON = async (key: votingKey.VotingKeyInfo) => {
     if (!canSignRound) {
@@ -256,20 +252,15 @@ export function SignConfigEntryPage() {
   const handleDeriveFromKeplr = async () => {
     setError("");
     setDeriveNotice("");
-    if (!wallet.address || wallet.source !== "keplr" || !wallet.chainId || !derivedKeyStorageKey) {
+    if (!wallet.address || wallet.source !== "keplr" || !wallet.chainId) {
       setError("Connect Keplr before deriving the signing key.");
       return;
     }
     setDerivingKey(true);
     try {
-      const derived = await votingKey.deriveEd25519FromKeplr(
-        wallet.address,
-        wallet.chainId,
-        wallet.signKeplrPayload
-      );
-      setKeyInfo(derived);
-      sessionStorage.setItem(derivedKeyStorageKey, JSON.stringify(derived));
-      setDeriveNotice("Derived the Ed25519 signing key from Keplr for this tab session.");
+      const derived = await deriveEphemeralKey();
+      rememberPublicKey(derived);
+      setDeriveNotice("Derived the Ed25519 public key from Keplr. Secret material was discarded.");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -277,8 +268,22 @@ export function SignConfigEntryPage() {
     }
   };
 
+  const handleSignWithKeplr = async () => {
+    setError("");
+    setDeriveNotice("");
+    setSigning(true);
+    try {
+      const derived = await deriveEphemeralKey();
+      rememberPublicKey(derived);
+      await createSignedJSON(derived);
+      setDeriveNotice("Signed with a freshly derived key. Secret material was discarded after signing.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSigning(false);
+    }
+  };
+
   const handleDisconnect = () => {
-    if (derivedKeyStorageKey) sessionStorage.removeItem(derivedKeyStorageKey);
     setKeyInfo(null);
     setDeriveNotice("");
     wallet.disconnect();
@@ -323,8 +328,8 @@ export function SignConfigEntryPage() {
             </div>
             <p className="text-[11px] text-text-muted max-w-2xl">
               Create a signed `rounds` entry for `voting-config-v2.json`.
-              This page derives the Ed25519 signer from the connected Keplr
-              account for the current tab session.
+              This page derives the Ed25519 signer from the connected Keplr account
+              only while displaying the public key or signing a round.
             </p>
           </div>
           <button
@@ -350,9 +355,9 @@ export function SignConfigEntryPage() {
               Deterministic vote-manager signer
             </p>
             <p className="text-[10px] text-text-secondary mt-1">
-              Keplr signs a fixed purpose string once. This page derives an
-              Ed25519 key from that signature and keeps the seed only in this
-              tab&apos;s session storage.
+              Keplr signs a fixed purpose string each time. This page derives
+              the Ed25519 key in memory, uses it for the requested action, and
+              does not store the seed or Keplr signature.
             </p>
           </div>
 
@@ -396,7 +401,7 @@ export function SignConfigEntryPage() {
                   }
                   className="px-3 py-2 bg-surface-3 hover:bg-surface-1 text-text-secondary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  {derivingKey ? "Deriving..." : "Derive signing key"}
+                  {derivingKey ? "Deriving..." : "Show public key"}
                 </button>
               </div>
             </div>
@@ -496,12 +501,18 @@ export function SignConfigEntryPage() {
 
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <p className="text-[10px] text-text-muted">
-              Derive the Keplr signing key above, then sign this round&apos;s
-              `ea_pk` to create the JSON snippet.
+              Signing asks Keplr again, derives the Ed25519 key in flight, and
+              discards secret material after creating the JSON snippet.
             </p>
             <button
-              onClick={() => keyInfo && createSignedJSON(keyInfo)}
-              disabled={!keyInfo || !canSignRound || signing}
+              onClick={handleSignWithKeplr}
+              disabled={
+                !wallet.address ||
+                wallet.source !== "keplr" ||
+                !wallet.chainId ||
+                !canSignRound ||
+                signing
+              }
               className="px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
             >
               {signing ? "Signing..." : "Sign with derived key"}
