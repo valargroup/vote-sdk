@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -296,6 +297,19 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 		return nil, false, err
 	}
 
+	var staticCfg votingconfig.StaticConfig
+	if err := json.Unmarshal(staticContent, &staticCfg); err != nil {
+		return nil, false, fmt.Errorf("parse static-voting-config.json: %w", err)
+	}
+	if err := votingconfig.ValidateStaticConfig(&staticCfg); err != nil {
+		return nil, false, err
+	}
+
+	entry, err := resolveConfigPREntrySignatureKeyIDs(entry, staticCfg.TrustedKeys)
+	if err != nil {
+		return nil, false, err
+	}
+
 	mergedExisting := false
 	if cfg.Rounds == nil {
 		cfg.Rounds = map[string]votingconfig.RoundEntry{}
@@ -312,13 +326,6 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 	}
 	cfg.Rounds[roundID] = entry
 
-	var staticCfg votingconfig.StaticConfig
-	if err := json.Unmarshal(staticContent, &staticCfg); err != nil {
-		return nil, false, fmt.Errorf("parse static-voting-config.json: %w", err)
-	}
-	if err := votingconfig.ValidateStaticConfig(&staticCfg); err != nil {
-		return nil, false, err
-	}
 	for roundID, entry := range cfg.Rounds {
 		if !votingconfig.VerifyEntrySignatures(entry, staticCfg.TrustedKeys) {
 			return nil, false, fmt.Errorf("round %s: no valid signature", roundID)
@@ -330,6 +337,56 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 		return nil, false, fmt.Errorf("marshal dynamic-voting-config.json: %w", err)
 	}
 	return append(data, '\n'), mergedExisting, nil
+}
+
+func resolveConfigPREntrySignatureKeyIDs(entry votingconfig.RoundEntry, trusted []votingconfig.TrustedKey) (votingconfig.RoundEntry, error) {
+	entryEaPK, err := votingconfig.DecodeBase64Fixed(entry.EaPK, 32, "entry.ea_pk")
+	if err != nil {
+		return entry, fmt.Errorf("entry.ea_pk must be base64-encoded 32 bytes")
+	}
+	var eaPK [32]byte
+	copy(eaPK[:], entryEaPK)
+
+	resolved := entry
+	resolved.Signatures = append([]votingconfig.Signature(nil), entry.Signatures...)
+	for i, sig := range resolved.Signatures {
+		if sig.Alg != votingconfig.AlgEd25519 {
+			continue
+		}
+		if keyID, ok := resolveConfigPRSignatureKeyID(sig, trusted, eaPK); ok {
+			resolved.Signatures[i].KeyID = keyID
+		}
+	}
+	return resolved, nil
+}
+
+func resolveConfigPRSignatureKeyID(sig votingconfig.Signature, trusted []votingconfig.TrustedKey, eaPK [32]byte) (string, bool) {
+	for _, key := range trusted {
+		if key.KeyID == sig.KeyID && configPRSignatureMatchesTrustedKey(sig, key, eaPK) {
+			return key.KeyID, true
+		}
+	}
+	for _, key := range trusted {
+		if configPRSignatureMatchesTrustedKey(sig, key, eaPK) {
+			return key.KeyID, true
+		}
+	}
+	return "", false
+}
+
+func configPRSignatureMatchesTrustedKey(sig votingconfig.Signature, key votingconfig.TrustedKey, eaPK [32]byte) bool {
+	if sig.Alg != votingconfig.AlgEd25519 || key.Alg != votingconfig.AlgEd25519 {
+		return false
+	}
+	pub, err := votingconfig.DecodeBase64Fixed(key.Pubkey, ed25519.PublicKeySize, "trusted_keys.pubkey")
+	if err != nil {
+		return false
+	}
+	sigBytes, err := votingconfig.DecodeBase64Fixed(sig.Sig, ed25519.SignatureSize, "signatures.sig")
+	if err != nil {
+		return false
+	}
+	return votingconfig.VerifyV1(ed25519.PublicKey(pub), eaPK, sigBytes)
 }
 
 func mergeConfigPRSignatures(existing, incoming []votingconfig.Signature) []votingconfig.Signature {
