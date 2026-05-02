@@ -377,6 +377,46 @@ export async function verifyConfigEntry(input: {
   });
 }
 
+export interface ConfigRoundSignature {
+  key_id: string;
+  alg: "ed25519";
+  sig: string;
+}
+
+export interface ConfigRoundEntry {
+  auth_version: 1;
+  ea_pk: string;
+  signatures: ConfigRoundSignature[];
+}
+
+export interface ConfigPRAuth {
+  signer_address: string;
+  payload: string;
+  signature: string;
+  pub_key: string;
+}
+
+export interface CreateConfigPRResponse {
+  html_url: string;
+  branch: string;
+  commit_sha?: string;
+  merged_existing_signature: boolean;
+}
+
+export async function createConfigPr(input: {
+  round_id: string;
+  entry: ConfigRoundEntry;
+  signed_payload_hash: string;
+  title?: string;
+  auth: ConfigPRAuth;
+}): Promise<CreateConfigPRResponse> {
+  return fetchJson<CreateConfigPRResponse>("/api/config-prs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
 export async function getRound(
   roundIdHex: string
 ): Promise<{ round: ChainRound }> {

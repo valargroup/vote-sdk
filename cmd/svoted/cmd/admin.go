@@ -61,8 +61,11 @@ func adminPostSetup(
 		checkValidatorExists := func(valoper string) bool {
 			return (*svoteApp).ValidatorValoperExists(valoper)
 		}
+		checkVoteManager := func(address string) bool {
+			return (*svoteApp).IsVoteManager(address)
+		}
 
-		a, err := admin.New(cfg, homeDir, checkValidatorExists, logger)
+		a, err := admin.New(cfg, homeDir, checkValidatorExists, checkVoteManager, logger)
 		if err != nil {
 			return fmt.Errorf("admin: %w", err)
 		}
@@ -100,6 +103,5 @@ func readAdminConfig(v *viper.Viper) admin.Config {
 	if v.IsSet("admin.db_path") {
 		cfg.DBPath = v.GetString("admin.db_path")
 	}
-
 	return cfg
 }

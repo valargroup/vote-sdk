@@ -52,6 +52,10 @@ Both the `sdk-chain-deploy` and `sdk-chain-reset` workflows read
 loads this file via `EnvironmentFile=`, and the Go binary picks up
 `SENTRY_DSN` at runtime as a fallback when `app.toml` has no `sentry_dsn`.
 
+The same workflows also write optional primary-only operational secrets, such
+as `CONFIG_PR_GITHUB_TOKEN`, to the primary's `/etc/default/svoted` under the
+runtime environment variable name expected by `svoted`.
+
 Add the secret at:
 
 ```

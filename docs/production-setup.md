@@ -112,6 +112,12 @@ in [software-upgrades.md](runbooks/software-upgrades.md).
 
 Required secrets: `PRIMARY_HOST`, `SECONDARY_HOST`, `EXPLORER_HOST`, `SNAPSHOT_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SLACK_WEBHOOK_URL`.
 
+Optional primary-only secret: `CONFIG_PR_GITHUB_TOKEN`. When present, the deploy
+and reset workflows write it to the primary node as
+`SVOTE_CONFIG_PR_GITHUB_TOKEN`, enabling vote-manager-authenticated config PR
+creation from the admin UI. The token needs Contents write and Pull requests
+write on `valargroup/token-holder-voting-config`.
+
 `SNAPSHOT_HOST` is required for every reset. A chain reset also invalidates old
 snapshot node state, so the reset workflow always reinitializes the snapshot
 node after uploading the new genesis.

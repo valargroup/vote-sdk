@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -18,13 +19,19 @@ import (
 // exists in staking state.
 type ValidatorChecker func(valoper string) bool
 
+// VoteManagerChecker returns whether the given account address is a current
+// vote manager on the chain.
+type VoteManagerChecker func(address string) bool
+
 // Admin fetches and caches voting-config from the CDN and stores pending
 // validator registrations in SQLite.
 type Admin struct {
 	configURL            string
+	configPR             configPRAutomation
 	logger               log.Logger
 	store                *Store
 	checkValidatorExists ValidatorChecker
+	checkVoteManager     VoteManagerChecker
 
 	mu     sync.RWMutex
 	cached *VotingConfig
@@ -32,8 +39,9 @@ type Admin struct {
 
 // New creates a new Admin from the given configuration.
 // homeDir is used to resolve default DBPath when cfg.DBPath is empty.
-// checkValidatorExists may be nil; in that case validator checks always return false.
-func New(cfg Config, homeDir string, checkValidatorExists ValidatorChecker, logger log.Logger) (*Admin, error) {
+// checkValidatorExists and checkVoteManager may be nil; in that case those
+// authorization checks always return false.
+func New(cfg Config, homeDir string, checkValidatorExists ValidatorChecker, checkVoteManager VoteManagerChecker, logger log.Logger) (*Admin, error) {
 	logger = logger.With("module", "admin")
 
 	if cfg.Disable {
@@ -45,6 +53,7 @@ func New(cfg Config, homeDir string, checkValidatorExists ValidatorChecker, logg
 	if configURL == "" {
 		configURL = DefaultConfig().ConfigURL
 	}
+	cfg = applyConfigPREnvDefaults(cfg)
 
 	dbPath := cfg.DBPath
 	if dbPath == "" {
@@ -58,9 +67,11 @@ func New(cfg Config, homeDir string, checkValidatorExists ValidatorChecker, logg
 
 	a := &Admin{
 		configURL:            configURL,
+		configPR:             newConfigPRAutomation(cfg),
 		logger:               logger,
 		store:                store,
 		checkValidatorExists: checkValidatorExists,
+		checkVoteManager:     checkVoteManager,
 	}
 
 	if err := a.refresh(); err != nil {
@@ -68,6 +79,13 @@ func New(cfg Config, homeDir string, checkValidatorExists ValidatorChecker, logg
 	}
 
 	return a, nil
+}
+
+func applyConfigPREnvDefaults(cfg Config) Config {
+	if cfg.ConfigPRGitHubToken == "" {
+		cfg.ConfigPRGitHubToken = os.Getenv("SVOTE_CONFIG_PR_GITHUB_TOKEN")
+	}
+	return cfg
 }
 
 // Store returns the SQLite store (never nil when Admin is non-nil).
@@ -95,6 +113,14 @@ func (a *Admin) ValidatorExists(operatorAddress string) bool {
 		return false
 	}
 	return a.checkValidatorExists(valoper)
+}
+
+// IsVoteManager reports whether address is in the current chain vote-manager set.
+func (a *Admin) IsVoteManager(address string) bool {
+	if a.checkVoteManager == nil {
+		return false
+	}
+	return a.checkVoteManager(address)
 }
 
 // GetVotingConfig returns the cached voting config, refreshing if stale.

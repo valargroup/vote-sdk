@@ -302,6 +302,14 @@ func (app *SvoteApp) ValidatorValoperExists(valoper string) bool {
 	return err == nil
 }
 
+// IsVoteManager returns true if the given account address is currently in the
+// vote-manager set.
+func (app *SvoteApp) IsVoteManager(address string) bool {
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.LastBlockHeight()})
+	ok, err := app.VoteKeeper.IsVoteManager(ctx, address)
+	return err == nil && ok
+}
+
 // SimulationManager implements the SimulationApp interface (required by runtime.AppI).
 // We don't use simulation, so this returns nil.
 func (app *SvoteApp) SimulationManager() *module.SimulationManager {
