@@ -21,7 +21,6 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-
 // ---------------------------------------------------------------------------
 // Query server test suite
 // ---------------------------------------------------------------------------
@@ -119,6 +118,7 @@ func (s *QueryServerTestSuite) TestLatestCommitmentTree_WithCommitments() {
 	s.Require().NoError(err)
 	state.Root = root
 	state.Height = 10
+	state.NextIndexAtRoot = state.NextIndex
 	s.Require().NoError(s.keeper.SetCommitmentTreeState(kvStore, roundID, state))
 
 	resp, err := s.queryServer.LatestCommitmentTree(s.ctx, &types.QueryLatestTreeRequest{VoteRoundId: roundID})

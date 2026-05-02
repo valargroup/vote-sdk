@@ -637,10 +637,13 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_Incremental() {
 	s.Require().NotEqual(root2, root3)
 
 	// Simulate what EndBlocker does: persist state.Height so a freshKeeper
-	// takes the O(1) restart path instead of the O(N) first-boot replay.
+	// takes the restart path from the last checkpointed leaf count instead
+	// of the O(N) first-boot replay.
 	treeState, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 	s.Require().NoError(err)
+	treeState.Root = root3
 	treeState.Height = 3
+	treeState.NextIndexAtRoot = 3
 	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, roundID, treeState))
 
 	// root3 must match what a cold-start restart produces.
@@ -689,10 +692,8 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeltaAppend() {
 	s.Require().Equal(uint64(8), s.keeper.TreeSizeForTest(roundID))
 }
 
-// TestComputeTreeRoot_ColdStartNoNewLeaves verifies that a cold-start keeper
-// returns the correct root for a block that adds no new leaves. With the
-// O(N) replay path, the fresh keeper replays all existing leaves via
-// AppendFromKV and checkpoints them, producing the same root as the original.
+// TestComputeTreeRoot_ColdStartNoNewLeaves verifies that a restarted keeper
+// returns the correct root for a block that adds no new leaves.
 func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	s.SetupTest()
@@ -707,18 +708,18 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 	s.Require().NoError(err)
 	s.Require().Len(root1, 32)
 
-	// Simulate what EndBlocker does: persist state.Height so a freshKeeper
-	// takes the O(1) restart path (lazy-loads shard data from KV) rather than
-	// the O(N) first-boot replay, which would conflict with existing shard data.
+	// Simulate what EndBlocker does: persist the last checkpoint metadata so
+	// a freshKeeper takes the restart path rather than the first-boot replay.
 	treeState, err := s.keeper.GetCommitmentTreeState(kv, roundID)
 	s.Require().NoError(err)
+	treeState.Root = root1
 	treeState.Height = 10
+	treeState.NextIndexAtRoot = 4
 	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, roundID, treeState))
 
 	// Simulate a node restart: new keeper with the same KV store but a nil
-	// tree handle. The fresh keeper takes the O(1) restart path: it creates a
-	// handle at nextIndex=4, reads max_checkpoint=10 from KV, and returns the
-	// root at checkpoint 10 without replaying any leaves.
+	// tree handle. Since no new leaves were added, the fresh keeper returns
+	// the root at checkpoint 10 without replaying any leaves.
 	freshKeeper := keeper.NewKeeper(
 		s.keeper.StoreServiceForTest(),
 		svtest.TestAuthority,
@@ -733,6 +734,49 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartNoNewLeaves() {
 	root2, err := freshKeeper.ComputeTreeRoot(kv, roundID, 4, 20)
 	s.Require().NoError(err)
 	s.Require().Equal(root1, root2, "restart root must match original root when no new leaves added")
+}
+
+// TestComputeTreeRoot_ColdStartWithNewLeavesAfterRestart verifies that a
+// restarted keeper catches up with leaves appended after the latest checkpoint.
+func (s *KeeperTestSuite) TestComputeTreeRoot_ColdStartWithNewLeavesAfterRestart() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	for i := uint64(1); i <= 2; i++ {
+		_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(i))
+		s.Require().NoError(err)
+	}
+	root2, err := s.keeper.ComputeTreeRoot(kv, roundID, 2, 10)
+	s.Require().NoError(err)
+
+	treeState, err := s.keeper.GetCommitmentTreeState(kv, roundID)
+	s.Require().NoError(err)
+	treeState.Root = root2
+	treeState.Height = 10
+	treeState.NextIndexAtRoot = 2
+	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, roundID, treeState))
+
+	freshKeeper := keeper.NewKeeper(
+		s.keeper.StoreServiceForTest(),
+		svtest.TestAuthority,
+		log.NewNopLogger(),
+		nil,
+		nil,
+	)
+
+	for i := uint64(3); i <= 4; i++ {
+		_, err := freshKeeper.AppendCommitment(kv, roundID, fpLE(i))
+		s.Require().NoError(err)
+	}
+
+	coldRoot, err := freshKeeper.ComputeTreeRoot(kv, roundID, 4, 11)
+	s.Require().NoError(err)
+	warmRoot, err := s.keeper.ComputeTreeRoot(kv, roundID, 4, 11)
+	s.Require().NoError(err)
+
+	s.Require().Equal(warmRoot, coldRoot, "cold restart must append leaves added after restart")
+	s.Require().Equal(uint64(4), freshKeeper.TreeSizeForTest(roundID))
 }
 
 // TestComputeTreeRoot_IdempotentSameBlock verifies that calling ComputeTreeRoot
