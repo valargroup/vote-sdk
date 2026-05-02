@@ -38,14 +38,19 @@ function formatTimestamp(iso: string): string {
   }
 }
 
+function parsePositiveHeight(value: unknown): number | null {
+  const height = Number(value ?? 0);
+  return Number.isFinite(height) && height > 0 ? height : null;
+}
+
 // Card showing the published snapshot manifest from the configured CDN base.
 // Always rendered (prod + dev). Independent of whether the local PIR server
 // is up — this is the operator's view of "what's the canonical published
 // snapshot the entire fleet should converge on?".
 //
 // Two sources are combined:
-//   * snapshot_height comes from the active on-chain round — it's what
-//     wallets/iOS validate after discovering the current round id.
+//   * snapshot_height comes from the active on-chain round when a round is live.
+//     Otherwise, PIR /snapshot/status reports the currently served height.
 //   * precomputed_base_url comes from THIS svoted's /api/ui-config — it's a
 //     deployment-level concern (staging svoted points at a staging bucket)
 //     rather than a wallet-facing one.
@@ -53,8 +58,8 @@ function PublishedSnapshotCard() {
   const {
     precomputedBaseURL,
   } = useUIConfig();
-  const [activeRoundHeight, setActiveRoundHeight] = useState<number | null>(null);
-  const [activeRoundLoaded, setActiveRoundLoaded] = useState(false);
+  const [snapshotHeight, setSnapshotHeight] = useState<number | null>(null);
+  const [heightLoaded, setHeightLoaded] = useState(false);
   const [manifest, setManifest] = useState<PublishedSnapshotManifest | null>(
     null
   );
@@ -62,26 +67,38 @@ function PublishedSnapshotCard() {
   const [loading, setLoading] = useState(false);
 
   const precomputedBase = precomputedBaseURL ?? null;
-  const height = activeRoundHeight;
+  const height = snapshotHeight;
 
-  const refreshActiveRound = useCallback(async (): Promise<number | null> => {
+  const refreshSnapshotHeight = useCallback(async () => {
+    let nextHeight: number | null = null;
+
     try {
       const resp = await chainApi.getActiveRound();
-      const parsedHeight = Number(resp.round?.snapshot_height ?? 0);
-      const nextHeight = parsedHeight > 0 ? parsedHeight : null;
-      setActiveRoundHeight(nextHeight);
-      return nextHeight;
+      nextHeight = parsePositiveHeight(resp.round?.snapshot_height);
     } catch {
-      setActiveRoundHeight(null);
-      return null;
-    } finally {
-      setActiveRoundLoaded(true);
+      // Fall back to the PIR endpoint below.
     }
+
+    if (nextHeight == null) {
+      try {
+        const status = await chainApi.getSnapshotStatus();
+        nextHeight = status.phase === "serving" ? parsePositiveHeight(status.height) : null;
+      } catch {
+        nextHeight = null;
+      }
+    }
+
+    setSnapshotHeight(nextHeight);
+    setHeightLoaded(true);
+    return nextHeight;
   }, []);
 
   const fetchManifest = useCallback(async (heightOverride?: number | null) => {
-    const manifestHeight = heightOverride ?? height;
-    if (!precomputedBase || manifestHeight == null) return;
+    const manifestHeight = heightOverride === undefined ? height : heightOverride;
+    if (!precomputedBase || manifestHeight == null) {
+      setManifest(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -100,23 +117,8 @@ function PublishedSnapshotCard() {
   }, [fetchManifest]);
 
   useEffect(() => {
-    let cancelled = false;
-    chainApi.getActiveRound()
-      .then((resp) => {
-        if (cancelled) return;
-        const parsedHeight = Number(resp.round?.snapshot_height ?? 0);
-        setActiveRoundHeight(parsedHeight > 0 ? parsedHeight : null);
-      })
-      .catch(() => {
-        if (!cancelled) setActiveRoundHeight(null);
-      })
-      .finally(() => {
-        if (!cancelled) setActiveRoundLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    refreshSnapshotHeight();
+  }, [refreshSnapshotHeight]);
 
   const totalBytes = manifest
     ? Object.values(manifest.files).reduce((sum, f) => sum + f.size, 0)
@@ -133,7 +135,7 @@ function PublishedSnapshotCard() {
         </div>
         <button
           onClick={async () => {
-            const refreshedHeight = await refreshActiveRound();
+            const refreshedHeight = await refreshSnapshotHeight();
             await fetchManifest(refreshedHeight);
           }}
           className="p-1 text-text-muted hover:text-text-secondary cursor-pointer"
@@ -143,11 +145,11 @@ function PublishedSnapshotCard() {
         </button>
       </div>
 
-      {!activeRoundLoaded && (
-        <p className="text-xs text-text-muted">Loading active round…</p>
+      {!heightLoaded && (
+        <p className="text-xs text-text-muted">Loading snapshot height…</p>
       )}
 
-      {activeRoundLoaded && (!precomputedBase || height == null) && (
+      {heightLoaded && (!precomputedBase || height == null) && (
         <div className="flex items-start gap-2 px-3 py-2.5 bg-warning/10 border border-warning/30 rounded-lg">
           <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
           <div>
@@ -157,8 +159,9 @@ function PublishedSnapshotCard() {
             <p className="text-[10px] text-text-muted mt-0.5">
               {height == null && (
                 <>
-                  No active on-chain round exposes{" "}
-                  <code className="font-mono">snapshot_height</code>.{" "}
+                  No active round exposes{" "}
+                  <code className="font-mono">snapshot_height</code> and the
+                  PIR status endpoint did not report a serving height.{" "}
                 </>
               )}
               {!precomputedBase && (
@@ -168,7 +171,8 @@ function PublishedSnapshotCard() {
                   resolved.{" "}
                 </>
               )}
-              PIR servers cannot bootstrap from CDN until both are set.
+              PIR servers cannot bootstrap from CDN until a snapshot height and
+              bucket are available.
             </p>
           </div>
         </div>
