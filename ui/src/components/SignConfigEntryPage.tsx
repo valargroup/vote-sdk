@@ -422,13 +422,21 @@ export function SignConfigEntryPage() {
             <div className="flex items-center gap-2 mb-2">
               <ShieldCheck size={18} className="text-accent" />
               <h1 className="text-lg font-bold text-text-primary">
-                Sign config entry
+                Attest Round Entry
               </h1>
             </div>
             <p className="text-[11px] text-text-muted max-w-2xl">
-              Create a signed `rounds` entry for `voting-config-v2.json`.
-              This page derives the Ed25519 signer from the connected Keplr account
-              only while displaying the public key or signing a round.
+              Create a signed <code>rounds</code> entry for{" "}
+              <a
+                href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+              >
+                <code>dynamic-voting-config.json</code>
+                <ExternalLink size={10} />
+              </a>
+              . This page generates a signed <code>rounds</code> entry for the selected round.
             </p>
           </div>
           <button
@@ -445,18 +453,18 @@ export function SignConfigEntryPage() {
           <div className="flex items-center gap-2">
             <Wallet size={14} className="text-text-muted" />
             <h2 className="text-xs font-semibold text-text-primary">
-              Keplr signing key
+              Connect Keplr wallet
             </h2>
           </div>
 
           <div className="rounded-lg border border-accent/30 bg-accent/10 p-3">
             <p className="text-[11px] text-accent font-semibold">
-              Deterministic vote-manager signer
+              Connect Keplr to approve the round entry Election Authority public key by signing over it.
             </p>
             <p className="text-[10px] text-text-secondary mt-1">
-              Keplr signs a fixed purpose string each time. This page derives
-              the Ed25519 key in memory, uses it for the requested action, and
-              does not store the seed or Keplr signature.
+              Derives the Ed25519 key in memory. The seed is not stored or shared with the server.
+              The derived key is used to sign the round entry Election Authority public key.
+              Upon successful signing, an option to open a pull request against the [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) repository is provided.
             </p>
           </div>
 
@@ -530,9 +538,18 @@ export function SignConfigEntryPage() {
                 />
               </div>
               <p className="text-[10px] text-warning mt-2">
-                Add this public key to static-voting-config-sample.json
-                trusted_keys and ship that trust anchor before signatures from
-                this key are accepted by wallets.
+                Add this public key to{" "}
+                <a
+                  href="https://github.com/valargroup/token-holder-voting-config/blob/main/static-voting-config.json"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-warning underline-offset-2 hover:underline"
+                >
+                  <code>static-voting-config.json</code>
+                  <ExternalLink size={10} />
+                </a>{" "}
+                <code>trusted_keys</code> and ship that trust anchor before
+                signatures from this key are accepted by wallets.
               </p>
             </div>
           )}
@@ -687,8 +704,18 @@ export function SignConfigEntryPage() {
                       }
                       className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-md text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
                     >
-                      {configPrStatus === "creating" ? "Opening PR..." : "Open config PR"}
+                      {configPrStatus === "creating" ? "Opening Pull Request..." : "Update via Pull Request"}
                     </button>
+                    <a
+                      href="https://github.com/valargroup/token-holder-voting-config/pull/36"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-surface-2 hover:bg-surface-3 text-text-secondary rounded-md text-[11px] font-semibold transition-colors ml-2"
+                    >
+                      <span>Sample Pull Request</span>
+                      <ExternalLink size={12} />
+                    </a>
+               
                   </div>
                 </div>
                 <pre className="text-[11px] text-text-primary font-mono whitespace-pre-wrap break-all bg-surface-2 rounded-lg px-3 py-2 overflow-x-auto">
