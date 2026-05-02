@@ -90,6 +90,8 @@ The systemd unit `ExecStart` points at `/opt/shielded-vote/current/bin/svoted`, 
 2. Verifies chain REST APIs and public frontends respond
 
 Use this for routine upgrades. Chain state is preserved; only the binary is swapped.
+For state-breaking upgrades, use the vote-manager scheduled `x/upgrade` flow
+in [software-upgrades.md](runbooks/software-upgrades.md).
 
 ```bash
 # Or manually on each host:

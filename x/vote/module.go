@@ -13,6 +13,7 @@ import (
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 	"cosmossdk.io/x/tx/signing"
+	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -62,6 +63,8 @@ func init() {
 			ProvideCreateValidatorWithPallasKeySigner,
 			ProvideUpdateVoteManagersSigner,
 			ProvideAuthorizedSendSigner,
+			ProvideScheduleUpgradeSigner,
+			ProvideCancelUpgradeSigner,
 		),
 	)
 }
@@ -247,6 +250,20 @@ func ProvideAuthorizedSendSigner() signing.CustomGetSigner {
 	}
 }
 
+func ProvideScheduleUpgradeSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgScheduleUpgrade"),
+		Fn:      ceremonyCreatorSignerFn,
+	}
+}
+
+func ProvideCancelUpgradeSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgCancelUpgrade"),
+		Fn:      ceremonyCreatorSignerFn,
+	}
+}
+
 // ModuleInputs defines the inputs needed to create the vote module.
 type ModuleInputs struct {
 	depinject.In
@@ -258,6 +275,7 @@ type ModuleInputs struct {
 	StakingKeeper  *stakingkeeper.Keeper
 	SlashingKeeper slashingkeeper.Keeper
 	BankKeeper     bankkeeper.BaseKeeper
+	UpgradeKeeper  *upgradekeeper.Keeper
 }
 
 // ModuleOutputs defines the outputs produced by the vote module.
@@ -278,6 +296,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		&in.BankKeeper,
 	)
 	k.SetSlashingKeeper(in.SlashingKeeper)
+	k.SetUpgradeScheduler(in.UpgradeKeeper)
 
 	m := NewAppModule(k, in.Cdc)
 

@@ -10,8 +10,11 @@ import (
 	slashingmodulev1 "cosmossdk.io/api/cosmos/slashing/module/v1"
 	stakingmodulev1 "cosmossdk.io/api/cosmos/staking/module/v1"
 	txconfigv1 "cosmossdk.io/api/cosmos/tx/config/v1"
+	upgrademodulev1 "cosmossdk.io/api/cosmos/upgrade/module/v1"
 	"cosmossdk.io/core/appconfig"
 	"cosmossdk.io/depinject"
+	_ "cosmossdk.io/x/upgrade" // import for side-effects (depinject registration)
+	upgradetypes "cosmossdk.io/x/upgrade/types"
 
 	"github.com/cosmos/cosmos-sdk/runtime"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -67,13 +70,14 @@ var (
 
 	// ModuleConfig is the module configuration for the Shielded-Vote chain.
 	// Only the minimal modules needed for block production are included:
-	// auth, bank, staking, slashing, consensus, genutil, tx.
+	// auth, bank, staking, slashing, consensus, genutil, upgrade, tx.
 	ModuleConfig = []*appv1alpha1.ModuleConfig{
 		{
 			Name: runtime.ModuleName,
 			Config: appconfig.WrapAny(&runtimev1alpha1.Module{
 				AppName: "Shielded-Vote",
 				PreBlockers: []string{
+					upgradetypes.ModuleName,
 					authtypes.ModuleName,
 				},
 				BeginBlockers: []string{
@@ -102,6 +106,7 @@ var (
 					stakingtypes.ModuleName,
 					slashingtypes.ModuleName,
 					genutiltypes.ModuleName,
+					upgradetypes.ModuleName,
 					votetypes.ModuleName,
 				},
 				ExportGenesis: []string{
@@ -111,6 +116,7 @@ var (
 					stakingtypes.ModuleName,
 					slashingtypes.ModuleName,
 					genutiltypes.ModuleName,
+					upgradetypes.ModuleName,
 					votetypes.ModuleName,
 				},
 			}),
@@ -146,6 +152,13 @@ var (
 		{
 			Name:   genutiltypes.ModuleName,
 			Config: appconfig.WrapAny(&genutilmodulev1.Module{}),
+		},
+		{
+			Name: upgradetypes.ModuleName,
+			Config: appconfig.WrapAny(&upgrademodulev1.Module{
+				// x/upgrade translates module names to module-account addresses.
+				Authority: votetypes.ModuleName,
+			}),
 		},
 		{
 			Name:   votetypes.ModuleName,

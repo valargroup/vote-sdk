@@ -8,6 +8,7 @@ import (
 
 	"cosmossdk.io/core/store"
 	"cosmossdk.io/log"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"google.golang.org/protobuf/proto"
@@ -40,6 +41,14 @@ type BankKeeper interface {
 	SendCoins(ctx context.Context, fromAddr, toAddr sdk.AccAddress, amt sdk.Coins) error
 }
 
+// UpgradeScheduler defines the x/upgrade keeper methods needed by vote-manager
+// upgrade-control messages.
+type UpgradeScheduler interface {
+	ScheduleUpgrade(ctx context.Context, plan upgradetypes.Plan) error
+	ClearUpgradePlan(ctx context.Context) error
+	GetUpgradePlan(ctx context.Context) (upgradetypes.Plan, error)
+}
+
 // roundTree holds the in-memory ShardTree state for a single voting round.
 // Each active round gets its own proxy (with a round-scoped Prefix) and a
 // lazily-initialized tree handle.
@@ -68,6 +77,7 @@ type Keeper struct {
 	stakingKeeper  StakingKeeper
 	slashingKeeper SlashingKeeper
 	bankKeeper     BankKeeper
+	upgradeKeeper  UpgradeScheduler
 
 	// roundTrees holds per-round in-memory ShardTree state, keyed by the
 	// hex-encoded round ID. Each entry has its own KvStoreProxy (with a
@@ -217,6 +227,13 @@ func unmarshal(bz []byte, m proto.Message) error {
 // GetAuthority returns the module's authority address.
 func (k *Keeper) GetAuthority() string {
 	return k.authority
+}
+
+// SetUpgradeScheduler installs the x/upgrade scheduling dependency. It is
+// separated from NewKeeper so narrow keeper tests can construct the vote keeper
+// without a full app.
+func (k *Keeper) SetUpgradeScheduler(scheduler UpgradeScheduler) {
+	k.upgradeKeeper = scheduler
 }
 
 // Logger returns a module-specific logger.

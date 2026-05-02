@@ -13,6 +13,7 @@ import (
 	"cosmossdk.io/log"
 	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
 
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
@@ -208,6 +209,58 @@ func (mk *mockBankKeeper) SendCoins(_ context.Context, from, to sdk.AccAddress, 
 // setupWithMockBankKeeper replaces the keeper's bank keeper with the given mock.
 func (s *MsgServerTestSuite) setupWithMockBankKeeper(bk keeper.BankKeeper) {
 	s.keeper.SetBankKeeper(bk)
+	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
+}
+
+// ---------------------------------------------------------------------------
+// Mock upgrade scheduler
+// ---------------------------------------------------------------------------
+
+// mockUpgradeScheduler implements keeper.UpgradeScheduler for tests.
+type mockUpgradeScheduler struct {
+	plan          upgradetypes.Plan
+	hasPlan       bool
+	scheduleCalls int
+	clearCalls    int
+	getErr        error
+	scheduleErr   error
+	clearErr      error
+}
+
+func (mk *mockUpgradeScheduler) ScheduleUpgrade(_ context.Context, plan upgradetypes.Plan) error {
+	mk.scheduleCalls++
+	if mk.scheduleErr != nil {
+		return mk.scheduleErr
+	}
+	mk.plan = plan
+	mk.hasPlan = true
+	return nil
+}
+
+func (mk *mockUpgradeScheduler) ClearUpgradePlan(_ context.Context) error {
+	mk.clearCalls++
+	if mk.clearErr != nil {
+		return mk.clearErr
+	}
+	mk.plan = upgradetypes.Plan{}
+	mk.hasPlan = false
+	return nil
+}
+
+func (mk *mockUpgradeScheduler) GetUpgradePlan(_ context.Context) (upgradetypes.Plan, error) {
+	if mk.getErr != nil {
+		return upgradetypes.Plan{}, mk.getErr
+	}
+	if !mk.hasPlan {
+		return upgradetypes.Plan{}, upgradetypes.ErrNoUpgradePlanFound
+	}
+	return mk.plan, nil
+}
+
+// setupWithMockUpgradeScheduler replaces the keeper's upgrade scheduler with
+// the given mock.
+func (s *MsgServerTestSuite) setupWithMockUpgradeScheduler(us keeper.UpgradeScheduler) {
+	s.keeper.SetUpgradeScheduler(us)
 	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }
 
@@ -898,6 +951,188 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmitsEvent() {
 		}
 	}
 	s.Require().True(found, "expected %s event", types.EventTypeUpdateVoteManagers)
+}
+
+// ---------------------------------------------------------------------------
+// Software upgrade scheduling (vote-manager gated x/upgrade access)
+// ---------------------------------------------------------------------------
+
+func (s *MsgServerTestSuite) TestScheduleUpgrade_VoteManagerCanSchedule() {
+	s.SetupTest()
+	vm := testAccAddr(70)
+	s.seedVoteManagers(vm)
+	upgrades := &mockUpgradeScheduler{}
+	s.setupWithMockUpgradeScheduler(upgrades)
+
+	_, err := s.msgServer.ScheduleUpgrade(s.ctx, &types.MsgScheduleUpgrade{
+		Creator:         vm,
+		Name:            "  v2-state-break  ",
+		Height:          123,
+		Info:            `{"binary":"v2.0.0"}`,
+		ReplaceExisting: false,
+	})
+	s.Require().NoError(err)
+
+	s.Require().Equal(1, upgrades.scheduleCalls)
+	s.Require().Equal(upgradetypes.Plan{
+		Name:   "v2-state-break",
+		Height: 123,
+		Info:   `{"binary":"v2.0.0"}`,
+	}, upgrades.plan)
+
+	var found bool
+	for _, e := range s.ctx.EventManager().Events() {
+		if e.Type == types.EventTypeScheduleUpgrade {
+			found = true
+		}
+	}
+	s.Require().True(found, "expected %s event", types.EventTypeScheduleUpgrade)
+}
+
+func (s *MsgServerTestSuite) TestScheduleUpgrade_NonVoteManagerRejected() {
+	s.SetupTest()
+	vm := testAccAddr(71)
+	s.seedVoteManagers(vm)
+	upgrades := &mockUpgradeScheduler{}
+	s.setupWithMockUpgradeScheduler(upgrades)
+
+	_, err := s.msgServer.ScheduleUpgrade(s.ctx, &types.MsgScheduleUpgrade{
+		Creator: testAccAddr(72),
+		Name:    "v2-state-break",
+		Height:  123,
+	})
+	s.Require().ErrorIs(err, types.ErrNotAuthorized)
+	s.Require().Zero(upgrades.scheduleCalls)
+}
+
+func (s *MsgServerTestSuite) TestScheduleUpgrade_MalformedCreatorRejected() {
+	s.SetupTest()
+	s.seedVoteManagers(testAccAddr(73))
+	upgrades := &mockUpgradeScheduler{}
+	s.setupWithMockUpgradeScheduler(upgrades)
+
+	_, err := s.msgServer.ScheduleUpgrade(s.ctx, &types.MsgScheduleUpgrade{
+		Creator: "not_a_bech32",
+		Name:    "v2-state-break",
+		Height:  123,
+	})
+	s.Require().ErrorIs(err, types.ErrNotAuthorized)
+	s.Require().Contains(err.Error(), "not a valid bech32 address")
+	s.Require().Zero(upgrades.scheduleCalls)
+}
+
+func (s *MsgServerTestSuite) TestScheduleUpgrade_InvalidFieldsRejected() {
+	vm := testAccAddr(74)
+	tests := []struct {
+		name string
+		msg  *types.MsgScheduleUpgrade
+	}{
+		{
+			name: "empty name",
+			msg: &types.MsgScheduleUpgrade{
+				Creator: vm,
+				Name:    "   ",
+				Height:  123,
+			},
+		},
+		{
+			name: "non-positive height",
+			msg: &types.MsgScheduleUpgrade{
+				Creator: vm,
+				Name:    "v2-state-break",
+				Height:  0,
+			},
+		},
+		{
+			name: "oversized info",
+			msg: &types.MsgScheduleUpgrade{
+				Creator: vm,
+				Name:    "v2-state-break",
+				Height:  123,
+				Info:    strings.Repeat("x", types.MaxUpgradeInfoBytes+1),
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			s.seedVoteManagers(vm)
+			upgrades := &mockUpgradeScheduler{}
+			s.setupWithMockUpgradeScheduler(upgrades)
+
+			_, err := s.msgServer.ScheduleUpgrade(s.ctx, tc.msg)
+			s.Require().ErrorIs(err, types.ErrInvalidField)
+			s.Require().Zero(upgrades.scheduleCalls)
+		})
+	}
+}
+
+func (s *MsgServerTestSuite) TestScheduleUpgrade_ExistingPlanRequiresReplaceExisting() {
+	s.SetupTest()
+	vm := testAccAddr(75)
+	s.seedVoteManagers(vm)
+	upgrades := &mockUpgradeScheduler{
+		hasPlan: true,
+		plan: upgradetypes.Plan{
+			Name:   "already-scheduled",
+			Height: 100,
+		},
+	}
+	s.setupWithMockUpgradeScheduler(upgrades)
+
+	_, err := s.msgServer.ScheduleUpgrade(s.ctx, &types.MsgScheduleUpgrade{
+		Creator: vm,
+		Name:    "replacement",
+		Height:  200,
+	})
+	s.Require().ErrorIs(err, types.ErrUpgradePlanExists)
+	s.Require().Zero(upgrades.scheduleCalls)
+
+	_, err = s.msgServer.ScheduleUpgrade(s.ctx, &types.MsgScheduleUpgrade{
+		Creator:         vm,
+		Name:            "replacement",
+		Height:          200,
+		ReplaceExisting: true,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(1, upgrades.scheduleCalls)
+	s.Require().Equal("replacement", upgrades.plan.Name)
+	s.Require().Equal(int64(200), upgrades.plan.Height)
+}
+
+func (s *MsgServerTestSuite) TestCancelUpgrade_VoteManagerGated() {
+	s.Run("vote manager can cancel", func() {
+		s.SetupTest()
+		vm := testAccAddr(76)
+		s.seedVoteManagers(vm)
+		upgrades := &mockUpgradeScheduler{hasPlan: true}
+		s.setupWithMockUpgradeScheduler(upgrades)
+
+		_, err := s.msgServer.CancelUpgrade(s.ctx, &types.MsgCancelUpgrade{Creator: vm})
+		s.Require().NoError(err)
+		s.Require().Equal(1, upgrades.clearCalls)
+
+		var found bool
+		for _, e := range s.ctx.EventManager().Events() {
+			if e.Type == types.EventTypeCancelUpgrade {
+				found = true
+			}
+		}
+		s.Require().True(found, "expected %s event", types.EventTypeCancelUpgrade)
+	})
+
+	s.Run("non-manager cannot cancel", func() {
+		s.SetupTest()
+		vm := testAccAddr(77)
+		s.seedVoteManagers(vm)
+		upgrades := &mockUpgradeScheduler{hasPlan: true}
+		s.setupWithMockUpgradeScheduler(upgrades)
+
+		_, err := s.msgServer.CancelUpgrade(s.ctx, &types.MsgCancelUpgrade{Creator: testAccAddr(78)})
+		s.Require().ErrorIs(err, types.ErrNotAuthorized)
+		s.Require().Zero(upgrades.clearCalls)
+	})
 }
 
 // ---------------------------------------------------------------------------

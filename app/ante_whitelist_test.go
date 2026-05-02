@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	sdkmath "cosmossdk.io/math"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
@@ -148,6 +149,20 @@ func TestWhitelist_AllowedMessagesPassThrough(t *testing.T) {
 				ValidatorAddr: sdk.ValAddress(signerAddr).String(),
 			},
 		},
+		{
+			name: "MsgScheduleUpgrade",
+			msg: &votetypes.MsgScheduleUpgrade{
+				Creator: signerAddr.String(),
+				Name:    "test-upgrade",
+				Height:  100,
+			},
+		},
+		{
+			name: "MsgCancelUpgrade",
+			msg: &votetypes.MsgCancelUpgrade{
+				Creator: signerAddr.String(),
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -157,6 +172,42 @@ func TestWhitelist_AllowedMessagesPassThrough(t *testing.T) {
 			t.Logf("CheckTx code=%d log=%q", resp.Code, resp.Log)
 			require.NotContains(t, resp.Log, "is not allowed on this chain",
 				"%s should pass the whitelist", tc.name)
+		})
+	}
+}
+
+func TestWhitelist_RawUpgradeMsgsBlocked(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+
+	tests := []struct {
+		name string
+		msg  sdk.Msg
+	}{
+		{
+			name: "MsgSoftwareUpgrade",
+			msg: &upgradetypes.MsgSoftwareUpgrade{
+				Authority: "sv1rawupgradeauthority",
+				Plan: upgradetypes.Plan{
+					Name:   "raw-upgrade",
+					Height: 100,
+				},
+			},
+		},
+		{
+			name: "MsgCancelUpgrade",
+			msg: &upgradetypes.MsgCancelUpgrade{
+				Authority: "sv1rawupgradeauthority",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			txBytes := buildUnsignedTx(t, ta, tc.msg)
+			resp := ta.CheckTxSync(txBytes)
+			require.NotEqual(t, uint32(0), resp.Code)
+			require.Contains(t, resp.Log, "is not allowed on this chain")
+			require.Contains(t, resp.Log, tc.name)
 		})
 	}
 }
@@ -179,6 +230,8 @@ func TestDefaultAllowedMessages_ContainsExpectedTypes(t *testing.T) {
 	require.True(t, allowed["/svote.v1.MsgRotatePallasKey"])
 	require.True(t, allowed["/svote.v1.MsgCreateValidatorWithPallasKey"])
 	require.True(t, allowed["/svote.v1.MsgUpdateVoteManagers"])
+	require.True(t, allowed["/svote.v1.MsgScheduleUpgrade"])
+	require.True(t, allowed["/svote.v1.MsgCancelUpgrade"])
 	require.True(t, allowed["/cosmos.staking.v1beta1.MsgCreateValidator"])
 	require.True(t, allowed["/cosmos.staking.v1beta1.MsgEditValidator"])
 	require.True(t, allowed["/cosmos.slashing.v1beta1.MsgUnjail"])
@@ -194,6 +247,8 @@ func TestDefaultAllowedMessages_ContainsExpectedTypes(t *testing.T) {
 	require.False(t, allowed["/svote.v1.MsgDelegateVote"])
 	require.False(t, allowed["/svote.v1.MsgCastVote"])
 	require.False(t, allowed["/svote.v1.MsgRevealShare"])
+	require.False(t, allowed["/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade"])
+	require.False(t, allowed["/cosmos.upgrade.v1beta1.MsgCancelUpgrade"])
 }
 
 // ---------------------------------------------------------------------------
