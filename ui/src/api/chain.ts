@@ -356,27 +356,6 @@ export async function signConfigEntry(input: {
   });
 }
 
-export interface VerifyConfigEntryResponse {
-  ok: boolean;
-  key_id?: string;
-  signed_payload_hash: string;
-  auth_version: number;
-  error?: string;
-}
-
-export async function verifyConfigEntry(input: {
-  round_id: string;
-  ea_pk: string;
-  signature: string;
-  auth_version: 1;
-}): Promise<VerifyConfigEntryResponse> {
-  return fetchJson<VerifyConfigEntryResponse>("/api/verify-config-entry", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-}
-
 export interface ConfigRoundSignature {
   key_id: string;
   alg: "ed25519";

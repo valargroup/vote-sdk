@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"cosmossdk.io/log"
-	"github.com/valargroup/vote-sdk/internal/votingconfig"
 )
 
 // ValidatorChecker returns whether a validator with the given valoper bech32
@@ -142,36 +141,6 @@ func (a *Admin) GetVotingConfig() (*VotingConfig, error) {
 	return a.cached, nil
 }
 
-// GetTrustedKeys fetches trusted_keys.json from the same published config
-// directory as ConfigURL. The document is tiny and used only by operator
-// tooling, so it is fetched on demand instead of cached.
-func (a *Admin) GetTrustedKeys() ([]votingconfig.TrustedKey, error) {
-	if a == nil {
-		return nil, fmt.Errorf("admin server not initialized")
-	}
-	url := siblingConfigURL(a.configURL, "trusted_keys.json")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("fetch trusted keys: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("fetch trusted keys: HTTP %d – %s", resp.StatusCode, string(body))
-	}
-
-	var keys []votingconfig.TrustedKey
-	if err := json.NewDecoder(resp.Body).Decode(&keys); err != nil {
-		return nil, fmt.Errorf("decode trusted keys: %w", err)
-	}
-	if len(keys) == 0 {
-		return nil, fmt.Errorf("trusted keys document is empty")
-	}
-	return keys, nil
-}
-
 // RunConfigRefresher periodically re-fetches voting-config so the cached
 // GET /api/voting-config response stays warm and picks up newly added or
 // removed servers without a process restart. Blocks until ctx is cancelled.
@@ -226,13 +195,4 @@ func (a *Admin) refresh() error {
 
 	a.logger.Info("voting config loaded", "vote_servers", len(cfg.VoteServers), "pir_endpoints", len(cfg.PIRServers))
 	return nil
-}
-
-func siblingConfigURL(configURL, filename string) string {
-	for i := len(configURL) - 1; i >= 0; i-- {
-		if configURL[i] == '/' {
-			return configURL[:i+1] + filename
-		}
-	}
-	return filename
 }
