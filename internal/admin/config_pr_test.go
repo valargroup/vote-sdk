@@ -195,6 +195,27 @@ func TestMergeConfigPREntryPreservesOtherSignatures(t *testing.T) {
 	}
 }
 
+func TestMergeConfigPREntryResolvesTrustedKeyID(t *testing.T) {
+	t.Parallel()
+
+	body := validCreateConfigPRRequest(t)
+	body.Entry.Signatures[0].KeyID = "keplr:sv1example"
+	dynamicConfig, staticConfig := configDocuments(t, nil)
+
+	merged, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg votingconfig.SignedConfig
+	if err := json.Unmarshal(merged, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Rounds[body.RoundID].Signatures[0].KeyID
+	if got != "valar-test" {
+		t.Fatalf("want trusted key id, got %q", got)
+	}
+}
+
 func validCreateConfigPRRequest(t *testing.T) createConfigPRRequest {
 	t.Helper()
 	roundID := strings.Repeat("a", 64)
