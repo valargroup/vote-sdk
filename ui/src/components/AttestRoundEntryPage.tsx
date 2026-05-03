@@ -636,10 +636,10 @@ export function AttestRoundEntryPage() {
             </label>
             <input
               value={roundId}
-              onChange={(e) => setRoundId(e.target.value.trim())}
+              readOnly
               placeholder="64 lowercase hex characters"
               spellCheck={false}
-              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none font-mono cursor-default"
             />
           </div>
 
@@ -649,10 +649,10 @@ export function AttestRoundEntryPage() {
             </label>
             <input
               value={eaPK}
-              onChange={(e) => setEaPK(e.target.value.trim())}
+              readOnly
               placeholder="base64 32-byte EA public key"
               spellCheck={false}
-              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none font-mono cursor-default"
             />
             {eaPKHex && (
               <div className="mt-1.5 flex items-start gap-2">
