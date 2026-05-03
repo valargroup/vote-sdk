@@ -4,6 +4,7 @@ import {
   Check,
   Copy,
   ExternalLink,
+  KeyRound,
   RefreshCw,
   ShieldCheck,
   Wallet,
@@ -436,18 +437,54 @@ export function AttestRoundEntryPage() {
               </h1>
             </div>
             <p className="text-[11px] text-text-muted max-w-2xl">
-              Attest the Election Authority public key for the selected round by publishing a signed <code>rounds</code> entry to{" "}
-              <a
-                href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
-              >
-                <code>dynamic-voting-config.json</code>
-                <ExternalLink size={10} />
-              </a>
-              .
+              Vote managers authenticate each round by signing its Election
+              Authority public key with an Ed25519 admin key. There are two
+              distinct flows here — complete Step 1 once per signer, then use
+              Step 2 for every round.
             </p>
+            <ol className="mt-2 space-y-1 text-[11px] text-text-secondary list-decimal list-inside max-w-2xl">
+              <li>
+                <strong className="text-text-primary">One-time per signer.</strong>{" "}
+                Derive the Ed25519 public key from your Keplr account and
+                publish it as a trust anchor in{" "}
+                <a
+                  href="https://github.com/valargroup/token-holder-voting-config/blob/main/static-voting-config.json"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+                >
+                  <code>static-voting-config.json</code>
+                  <ExternalLink size={10} />
+                </a>
+                . After the PR merges, update the SHA-256 pin in{" "}
+                <a
+                  href="https://github.com/valargroup/zodl-ios/blob/main/secant/Sources/Dependencies/VotingModels/StaticVotingConfig.swift"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+                >
+                  <code>zodl-ios</code> <code>StaticVotingConfig.swift</code>
+                  <ExternalLink size={10} />
+                </a>{" "}
+                and ship a wallet release before signatures from this key are
+                accepted.
+              </li>
+              <li>
+                <strong className="text-text-primary">Per-round.</strong>{" "}
+                Once the key is trusted by a shipped wallet release, sign each
+                round&apos;s <code>ea_pk</code> and PR it into{" "}
+                <a
+                  href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+                >
+                  <code>dynamic-voting-config.json</code>
+                  <ExternalLink size={10} />
+                </a>
+                .
+              </li>
+            </ol>
           </div>
           <button
             onClick={loadRounds}
@@ -461,33 +498,44 @@ export function AttestRoundEntryPage() {
 
         <section className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-4">
           <div className="flex items-center gap-2">
-            <Wallet size={14} className="text-text-muted" />
+            <KeyRound size={14} className="text-accent" />
             <h2 className="text-xs font-semibold text-text-primary">
-              {keplrConnected ? "Keplr wallet connected" : "Connect Keplr wallet"}
+              Step 1 · Register signing key{" "}
+              <span className="text-text-muted font-normal">
+                (one-time per Keplr account)
+              </span>
             </h2>
           </div>
 
           <div className="rounded-lg border border-accent/30 bg-accent/10 p-3">
             <p className="text-[11px] text-accent font-semibold">
               {keplrConnected
-                ? "Sign to approve the round entry Election Authority public key with your connected Keplr account."
-                : "Connect Keplr to approve the round entry Election Authority public key by signing over it."}
+                ? "Reveal the Ed25519 public key derived from your connected Keplr account."
+                : "Connect Keplr to derive the Ed25519 admin key your wallet account will sign with."}
             </p>
             <p className="text-[10px] text-text-secondary mt-1">
-              Derives the Ed25519 key in memory. The seed is not stored or shared with the server.
-              The derived key is used to sign the round entry Election Authority public key.
-              Upon successful signing, an option to open a pull request against the{" "}
+              The Ed25519 seed is derived in memory from a Keplr-signed
+              challenge bound to your wallet address and chain id, and discarded
+              after use; it is never stored or sent to any server. The same
+              public key will reappear every time you derive from this account.
+              If your key is already in the deployed{" "}
               <a
-                href="https://github.com/valargroup/token-holder-voting-config"
+                href="https://voting.valargroup.org/static-voting-config.json"
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
               >
-                <code>token-holder-voting-config</code>
+                <code>static-voting-config.json</code>
                 <ExternalLink size={10} />
               </a>{" "}
-              repository is provided.
+              and that pin matches a shipped wallet release, you can skip
+              straight to Step 2.
             </p>
+          </div>
+
+          <div className="flex items-center gap-2 text-[10px] text-text-muted">
+            <Wallet size={12} className="text-text-muted" />
+            {keplrConnected ? "Keplr wallet connected" : "No Keplr wallet connected"}
           </div>
 
           <div className="flex flex-col gap-3 rounded-lg bg-surface-2 px-3 py-3">
@@ -541,46 +589,142 @@ export function AttestRoundEntryPage() {
           )}
 
           {keyInfo && (
-            <div className="bg-surface-2 rounded-lg px-3 py-2 space-y-1">
-              <p className="text-[10px] text-text-muted">
-                Derived Ed25519 public key
-              </p>
-              <p className="text-[11px] text-text-primary font-mono break-all">
-                {keyInfo.publicKeyB64}
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <CopyButton value={keyInfo.publicKeyB64} label="Copy public key" />
-                <CopyButton
-                  value={JSON.stringify({
-                    key_id: keyInfo.signerId,
-                    alg: "ed25519",
-                    pubkey: keyInfo.publicKeyB64,
-                  })}
-                  label="Copy trusted key"
-                />
+            <div className="rounded-lg border border-warning/40 bg-warning/5 p-4 space-y-4">
+              <div className="space-y-1">
+                <p className="text-[10px] uppercase tracking-wider text-text-muted">
+                  Derived Ed25519 public key
+                </p>
+                <p className="text-[11px] text-text-primary font-mono break-all">
+                  {keyInfo.publicKeyB64}
+                </p>
+                <p className="text-[10px] text-text-muted font-mono">
+                  key_id: {keyInfo.signerId}
+                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <CopyButton value={keyInfo.publicKeyB64} label="Copy public key" />
+                  <CopyButton
+                    value={JSON.stringify(
+                      {
+                        key_id: keyInfo.signerId,
+                        alg: "ed25519",
+                        pubkey: keyInfo.publicKeyB64,
+                        notes: `Vote-manager Keplr-derived key for ${keyInfo.sourceAddress}`,
+                      },
+                      null,
+                      2
+                    )}
+                    label="Copy trusted_keys entry"
+                  />
+                </div>
               </div>
-              <p className="text-[10px] text-warning mt-2">
-                Add this public key to{" "}
-                <a
-                  href="https://github.com/valargroup/token-holder-voting-config/blob/main/static-voting-config.json"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-warning underline-offset-2 hover:underline"
-                >
-                  <code>static-voting-config.json</code>
-                  <ExternalLink size={10} />
-                </a>{" "}
-                <code>trusted_keys</code> and ship that trust anchor before
-                signatures from this key are accepted by wallets.
-              </p>
+
+              <div className="border-t border-warning/30 pt-3 space-y-3">
+                <p className="text-[11px] font-semibold text-warning">
+                  Wallets will reject signatures from this key until it is
+                  shipped as a trust anchor. Three steps, in order:
+                </p>
+
+                <ol className="space-y-2.5 text-[11px] text-text-secondary">
+                  <li className="flex gap-2">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-warning/20 text-warning text-[10px] font-bold flex items-center justify-center">
+                      1
+                    </span>
+                    <div className="space-y-1.5 min-w-0">
+                      <p>
+                        Open a PR adding the <em>trusted_keys entry</em> above
+                        to{" "}
+                        <a
+                          href="https://github.com/valargroup/token-holder-voting-config/edit/main/static-voting-config.json"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+                        >
+                          <code>static-voting-config.json</code>
+                          <ExternalLink size={10} />
+                        </a>{" "}
+                        under <code>trusted_keys[]</code>. The CI workflow on
+                        the repo verifies every dynamic-config signature
+                        against the new set before it can merge.
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-warning/20 text-warning text-[10px] font-bold flex items-center justify-center">
+                      2
+                    </span>
+                    <div className="space-y-1.5 min-w-0">
+                      <p>
+                        After the PR merges and{" "}
+                        <a
+                          href="https://voting.valargroup.org/static-voting-config.json"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+                        >
+                          <code>voting.valargroup.org/static-voting-config.json</code>
+                          <ExternalLink size={10} />
+                        </a>{" "}
+                        republishes, recompute its SHA-256 (the deploy
+                        workflow prints it in the Actions step summary and
+                        publishes <code>static-voting-config.json.sha256</code>{" "}
+                        beside it) and update <code>bundledPinnedSource</code>{" "}
+                        in{" "}
+                        <a
+                          href="https://github.com/valargroup/zodl-ios/blob/main/secant/Sources/Dependencies/VotingModels/StaticVotingConfig.swift"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+                        >
+                          <code>zodl-ios StaticVotingConfig.swift</code>
+                          <ExternalLink size={10} />
+                        </a>
+                        .
+                      </p>
+                      <p className="text-[10px] text-text-muted font-mono break-all">
+                        sha256sum static-voting-config.json
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-warning/20 text-warning text-[10px] font-bold flex items-center justify-center">
+                      3
+                    </span>
+                    <p className="min-w-0">
+                      Cut a wallet release that pins the new SHA-256. Until a
+                      shipped wallet binary embeds the new pin, signatures
+                      from this key will not be trusted by clients in the
+                      field — Step 2 will succeed in the UI but produce
+                      entries no live wallet can verify.
+                    </p>
+                  </li>
+                </ol>
+              </div>
             </div>
           )}
         </section>
 
         <section className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-4">
-          <h2 className="text-xs font-semibold text-text-primary">
-            Round entry
-          </h2>
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={14} className="text-accent" />
+            <h2 className="text-xs font-semibold text-text-primary">
+              Step 2 · Attest round entry{" "}
+              <span className="text-text-muted font-normal">(per-round)</span>
+            </h2>
+          </div>
+          <p className="text-[10px] text-text-muted">
+            Picks a round, signs its <code>ea_pk</code> with your derived
+            Ed25519 key, and offers to open a PR that adds the entry to{" "}
+            <a
+              href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+            >
+              <code>dynamic-voting-config.json#/rounds</code>
+              <ExternalLink size={10} />
+            </a>
+            .
+          </p>
 
           {roundError && (
             <div className="flex items-start gap-2 bg-danger/10 border border-danger/30 rounded-lg p-3">
