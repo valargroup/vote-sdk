@@ -175,6 +175,8 @@ export function AttestRoundEntryPage() {
   const selectedRoundIsLatest =
     !!selectedRound && latestRound?.roundIdHex === selectedRound.roundIdHex;
   const canSignRound = /^[0-9a-f]{64}$/.test(roundId) && validateEaPK(eaPK);
+  const keplrConnected =
+    !!wallet.address && wallet.source === "keplr" && !!wallet.chainId;
   const eaPKHex = useMemo(() => {
     if (!eaPK || !validateEaPK(eaPK)) return "";
     try {
@@ -461,13 +463,15 @@ export function AttestRoundEntryPage() {
           <div className="flex items-center gap-2">
             <Wallet size={14} className="text-text-muted" />
             <h2 className="text-xs font-semibold text-text-primary">
-              Connect Keplr wallet
+              {keplrConnected ? "Keplr wallet connected" : "Connect Keplr wallet"}
             </h2>
           </div>
 
           <div className="rounded-lg border border-accent/30 bg-accent/10 p-3">
             <p className="text-[11px] text-accent font-semibold">
-              Connect Keplr to approve the round entry Election Authority public key by signing over it.
+              {keplrConnected
+                ? "Sign to approve the round entry Election Authority public key with your connected Keplr account."
+                : "Connect Keplr to approve the round entry Election Authority public key by signing over it."}
             </p>
             <p className="text-[10px] text-text-secondary mt-1">
               Derives the Ed25519 key in memory. The seed is not stored or shared with the server.
