@@ -25,6 +25,23 @@ type Processor struct {
 	logger        log.Logger
 	maxConcurrent int
 	isRoundActive RoundStatusChecker
+	vcHash        VCHashFunc
+	shareNFHash   ShareNullifierHashFunc
+	shareNF       ShareNullifierChecker
+}
+
+type ProcessorOption func(*Processor)
+
+func WithPreProofShareDeduper(
+	vcHash VCHashFunc,
+	shareNFHash ShareNullifierHashFunc,
+	shareNF ShareNullifierChecker,
+) ProcessorOption {
+	return func(p *Processor) {
+		p.vcHash = vcHash
+		p.shareNFHash = shareNFHash
+		p.shareNF = shareNF
+	}
 }
 
 // NewProcessor creates a new share processor.
@@ -36,12 +53,13 @@ func NewProcessor(
 	logger log.Logger,
 	maxConcurrent int,
 	isRoundActive RoundStatusChecker,
+	options ...ProcessorOption,
 ) *Processor {
 	if maxConcurrent < 1 {
 		maxConcurrent = 1
 	}
 
-	return &Processor{
+	p := &Processor{
 		store:         store,
 		tree:          tree,
 		prover:        prover,
@@ -50,6 +68,10 @@ func NewProcessor(
 		maxConcurrent: maxConcurrent,
 		isRoundActive: isRoundActive,
 	}
+	for _, option := range options {
+		option(p)
+	}
+	return p
 }
 
 // Run starts the processing loop. Blocks until ctx is cancelled.
@@ -253,6 +275,29 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	if err != nil {
 		return fmt.Errorf("decode vote_round_id: %w", err)
 	}
+	var roundID [32]byte
+	if len(roundBytes) != 32 {
+		return fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes))
+	}
+	copy(roundID[:], roundBytes)
+
+	if p.vcHash != nil && p.shareNFHash != nil && p.shareNF != nil {
+		alreadyRevealed, err := p.shareAlreadyRevealed(ctx, share, roundID)
+		if err != nil {
+			p.logger.Warn("pre-proof share nullifier check failed, continuing with proof",
+				"round_id", share.Payload.VoteRoundID,
+				"share_index", share.Payload.EncShare.ShareIndex,
+				"error", err,
+			)
+		} else if alreadyRevealed {
+			p.logger.Info("share already revealed before proof generation",
+				"round_id", share.Payload.VoteRoundID,
+				"share_index", share.Payload.EncShare.ShareIndex,
+			)
+			return nil
+		}
+	}
+
 	tree := p.tree.ForRound(roundBytes)
 
 	// Read tree status (leaf count + anchor height) without loading leaf data.
@@ -275,13 +320,6 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	if err != nil {
 		return fmt.Errorf("compute merkle path: %w", err)
 	}
-
-	// Build fixed-size round_id array for the proof generator.
-	var roundID [32]byte
-	if len(roundBytes) != 32 {
-		return fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes))
-	}
-	copy(roundID[:], roundBytes)
 
 	// Decode share_comms.
 	var shareComms [16][32]byte
@@ -396,4 +434,65 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 
 	p.logger.Debug("MsgRevealShare broadcast ok", "tx_hash", result.TxHash)
 	return nil
+}
+
+func (p *Processor) shareAlreadyRevealed(ctx context.Context, share QueuedShare, roundID [32]byte) (bool, error) {
+	if p.vcHash == nil || p.shareNFHash == nil || p.shareNF == nil {
+		return false, nil
+	}
+
+	_, span := StartTrace(ctx, "helper.dedupe", "helper.preproof_share_nullifier_check", map[string]string{
+		"round_id":    share.Payload.VoteRoundID,
+		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+	}, map[string]interface{}{
+		"proposal_id":   share.Payload.ProposalID,
+		"vote_decision": share.Payload.VoteDecision,
+	})
+
+	var spanErr error
+	var already bool
+	defer func() {
+		span.SetData("already_revealed", already)
+		span.Finish(spanErr)
+	}()
+
+	sharesHash, err := decodeBase64Array32(share.Payload.SharesHash, "shares_hash")
+	if err != nil {
+		spanErr = err
+		return false, err
+	}
+	primaryBlind, err := decodeBase64Array32(share.Payload.PrimaryBlind, "primary_blind")
+	if err != nil {
+		spanErr = err
+		return false, err
+	}
+	voteCommitment, err := p.vcHash(roundID, sharesHash, share.Payload.ProposalID, share.Payload.VoteDecision)
+	if err != nil {
+		spanErr = err
+		return false, fmt.Errorf("compute vote commitment: %w", err)
+	}
+	nullifier, err := p.shareNFHash(voteCommitment, share.Payload.EncShare.ShareIndex, primaryBlind)
+	if err != nil {
+		spanErr = err
+		return false, fmt.Errorf("compute share nullifier: %w", err)
+	}
+	already, err = p.shareNF(share.Payload.VoteRoundID, nullifier[:])
+	if err != nil {
+		spanErr = err
+		return false, fmt.Errorf("check share nullifier: %w", err)
+	}
+	return already, nil
+}
+
+func decodeBase64Array32(value string, field string) ([32]byte, error) {
+	var out [32]byte
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return out, fmt.Errorf("decode %s: %w", field, err)
+	}
+	if len(decoded) != 32 {
+		return out, fmt.Errorf("%s must be 32 bytes, got %d", field, len(decoded))
+	}
+	copy(out[:], decoded)
+	return out, nil
 }

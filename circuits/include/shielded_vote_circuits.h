@@ -527,6 +527,33 @@ int32_t sv_vote_commitment_hash(
 );
 
 /* -----------------------------------------------------------------------
+ * Share nullifier hash (Poseidon)
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Compute a share reveal nullifier via Poseidon.
+ *
+ * share_nullifier = Poseidon(domain_tag_share_spend, vote_commitment, share_index, primary_blind)
+ *
+ * Parameters:
+ *   vote_commitment_ptr - Pointer to 32-byte canonical Pallas Fp vote commitment.
+ *   share_index         - Revealed share index (converted to Fp internally).
+ *   primary_blind_ptr   - Pointer to 32-byte canonical Pallas Fp primary blind.
+ *   nullifier_out       - Pointer to 32-byte output buffer.
+ *
+ * Returns:
+ *    0  on success.
+ *   -1  if any pointer is null.
+ *   -3  if vote_commitment or primary_blind is not a canonical Pallas Fp.
+ */
+int32_t sv_share_nullifier_hash(
+    const uint8_t* vote_commitment_ptr,
+    uint32_t share_index,
+    const uint8_t* primary_blind_ptr,
+    uint8_t* nullifier_out
+);
+
+/* -----------------------------------------------------------------------
  * Round ID derivation (Poseidon)
  * ----------------------------------------------------------------------- */
 

@@ -307,6 +307,61 @@ func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T)
 	assert.Equal(t, 0, status[roundID].Pending)
 }
 
+func TestProcessor_PreProofDuplicateNullifierSkipsProof(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := &mockTreeReader{err: assert.AnError}
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("should not submit when pre-proof nullifier check finds existing reveal")
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	expectedCommitment := [32]byte{0x44}
+	expectedNullifier := [32]byte{0x55}
+	var checkerCalls atomic.Int32
+	proc := NewProcessor(
+		store,
+		tree,
+		prover,
+		submitter,
+		log.NewNopLogger(),
+		2,
+		nil,
+		WithPreProofShareDeduper(
+			func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
+				require.Equal(t, uint32(1), proposalID)
+				require.Equal(t, uint32(0), voteDecision)
+				return expectedCommitment, nil
+			},
+			func(voteCommitment [32]byte, shareIndex uint32, primaryBlind [32]byte) ([32]byte, error) {
+				require.Equal(t, expectedCommitment, voteCommitment)
+				require.Equal(t, uint32(0), shareIndex)
+				return expectedNullifier, nil
+			},
+			func(roundIDHex string, shareNullifier []byte) (bool, error) {
+				checkerCalls.Add(1)
+				require.Equal(t, expectedNullifier[:], shareNullifier)
+				return true, nil
+			},
+		),
+	)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 100
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(context.Background())
+
+	assert.Equal(t, int32(1), checkerCalls.Load())
+	assert.Equal(t, int32(0), prover.callCount.Load())
+	status := store.Status()
+	assert.Equal(t, 1, status[roundID].Submitted)
+	assert.Equal(t, 0, status[roundID].Pending)
+}
+
 func TestProcessor_Run_CancelContext(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}

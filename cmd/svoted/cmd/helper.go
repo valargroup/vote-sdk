@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/valargroup/vote-sdk/app"
+	"github.com/valargroup/vote-sdk/ffi/sharetracking"
 	"github.com/valargroup/vote-sdk/ffi/votecommitment"
 	"github.com/valargroup/vote-sdk/ffi/votetree"
 	"github.com/valargroup/vote-sdk/internal/helper"
@@ -90,7 +91,7 @@ func helperPostSetup(
 			kvStore := (*svoteApp).VoteKeeper.OpenKVStore(ctx)
 			return (*svoteApp).VoteKeeper.HasNullifier(kvStore, votetypes.NullifierTypeShare, roundBytes, shareNullifier)
 		}
-		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, shareNullifierChecker, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
 		if err != nil {
 			helper.CaptureErr(err, map[string]string{"stage": "helper_new"})
 			return fmt.Errorf("helper: %w", err)

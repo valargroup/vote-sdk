@@ -28,10 +28,11 @@ type Helper struct {
 //   - prover: generates ZKP #3 proofs (real FFI or mock)
 //   - roundFetcher: queries the chain for round metadata (direct keeper access)
 //   - isRoundActive: checks if a round is still ACTIVE (nil = skip check)
-//   - vcHash: computes vote commitment Poseidon hash for ingress validation
+//   - vcHash: computes vote commitment Poseidon hash
+//   - shareNFHash: computes share nullifier Poseidon hash before proof generation
 //   - homeDir: the chain's home directory (for default DB path)
 //   - logger: module logger
-func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, vcHash VCHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
+func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, vcHash VCHashFunc, shareNFHash ShareNullifierHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
 	logger = logger.With("module", "helper")
 
 	if cfg.Disable {
@@ -80,6 +81,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		logger,
 		cfg.MaxConcurrentProofs,
 		isRoundActive,
+		WithPreProofShareDeduper(vcHash, shareNFHash, shareNF),
 	)
 
 	return &Helper{
