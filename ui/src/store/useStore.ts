@@ -1,80 +1,14 @@
 import { useState, useCallback, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import type { VotingRound, Proposal, ProposalType, RoundStatus } from "../types";
+import {
+  createSampleRoundFromTemplate,
+  createSampleRounds,
+  type SampleRoundTemplateId,
+} from "./sampleRounds";
 
 const STORAGE_KEY = "shielded-vote-rounds";
 const SEEDED_KEY = "shielded-vote-seeded";
-
-function makeBinaryProposal(title: string, description: string): Proposal {
-  return {
-    id: uuidv4(),
-    title,
-    description,
-    type: "binary",
-    options: [
-      { id: uuidv4(), label: "Support" },
-      { id: uuidv4(), label: "Oppose" },
-    ],
-    allowAbstain: false,
-    zipNumber: "",
-    forumURL: "",
-    metadata: [],
-  };
-}
-
-function makeMultiChoiceProposal(title: string, description: string, labels: string[]): Proposal {
-  return {
-    id: uuidv4(),
-    title,
-    description,
-    type: "multi-choice",
-    options: labels.map((label) => ({ id: uuidv4(), label })),
-    allowAbstain: false,
-    zipNumber: "",
-    forumURL: "",
-    metadata: [],
-  };
-}
-
-function createSampleProposals(): Proposal[] {
-  return [
-    makeBinaryProposal(
-      "Network Sustainability Mechanism (NSM)",
-      "What is your general sentiment toward adding protocol support for the Network Sustainability Mechanism (NSM), including smoothing the issuance curve, which allows ZEC to be removed from circulation and later reissued as future block rewards to help sustain network security while preserving the 21 million ZEC supply cap?"
-    ),
-    makeBinaryProposal(
-      "Fee Burning via NSM",
-      "What is your general sentiment toward burning 60% of transaction fees via the Network Sustainability Mechanism (NSM)? The goals are to demonstrate Zcash's commitment to long-term sustainability, to burn ZEC so that it can be re-issued in the future without exceeding the 21M supply cap, and in the context of dynamic fees, to prevent miners from manipulating fees.\n\nReference: ZIP-235"
-    ),
-    makeMultiChoiceProposal(
-      "Project Tachyon",
-      "What is your general sentiment toward deploying a new shielded protocol or pool to address scalability challenges as part of Project Tachyon?",
-      ["Hell yeah", "Yes", "No"]
-    ),
-  ];
-}
-
-function createSeedRound(): VotingRound {
-  const now = new Date().toISOString();
-  return {
-    id: uuidv4(),
-    name: "(SAMPLE) NU7 Sentiment Polling",
-    status: "draft",
-    proposals: createSampleProposals(),
-    settings: {
-      description:
-        "Sentiment polling for Zcash Network Upgrade 7 (NU7) feature candidates.",
-      snapshotHeight: "",
-      endTime: "",
-      openUntilClosed: true,
-      defaultProposalType: "binary",
-      defaultLabels: ["Support", "Oppose"],
-      discussionURL: "",
-    },
-    createdAt: now,
-    updatedAt: now,
-  };
-}
 
 function loadRounds(): VotingRound[] {
   try {
@@ -82,7 +16,7 @@ function loadRounds(): VotingRound[] {
     if (raw) return JSON.parse(raw);
     // First-time user: seed with sample round
     if (!localStorage.getItem(SEEDED_KEY)) {
-      const seed = [createSeedRound()];
+      const seed = createSampleRounds();
       localStorage.setItem(SEEDED_KEY, "true");
       localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
       return seed;
@@ -182,8 +116,8 @@ export function useStore() {
     return round;
   }, []);
 
-  const createSampleRound = useCallback(() => {
-    const round = createSeedRound();
+  const createSampleRound = useCallback((templateId?: SampleRoundTemplateId) => {
+    const round = createSampleRoundFromTemplate(templateId);
     setRounds((prev) => [round, ...prev]);
     setActiveRoundId(round.id);
     setActiveProposalId(round.proposals[0]?.id ?? null);
