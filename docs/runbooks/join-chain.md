@@ -33,15 +33,7 @@ On Linux or macOS:
 curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
 ```
 
-The default install expects you to terminate TLS at your own load balancer or reverse proxy. The operator address still enters the admin join queue for funding.
-
-To have `join.sh` install Caddy for TLS, point a stable DNS name at the host first:
-
-```text
-val.example.org.  A  <your-server-public-IPv4>
-```
-
-Then pass that hostname:
+The default install expects you to terminate TLS at your own load balancer or reverse proxy. The operator address still enters the admin join queue for funding. To have `join.sh` install Caddy with a Let's Encrypt cert, point a DNS A-record at the host and pass `--domain` (see [TLS / reverse proxy](#tls--reverse-proxy) for prerequisites and the other modes):
 
 ```bash
 curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --domain val.example.org
@@ -112,7 +104,7 @@ journalctl -u svoted -n 20 --no-pager   # or: tail -n 20 ~/.svoted/node.log
 
 ## Operating the service
 
-`join.sh` installs a single `svoted` service that runs `scripts/svoted-wrapper.sh`. The wrapper starts `svoted`, watches for funding while joining, submits the validator creation tx, and writes `~/.svoted/join-complete` after bonding.
+`join.sh` installs a single `svoted` service that runs [`scripts/svoted-wrapper.sh`](../../scripts/svoted-wrapper.sh); the wrapper's join-time behavior is in [Join lifecycle](#join-lifecycle).
 
 ### Linux (systemd)
 
@@ -214,7 +206,7 @@ Back these up encrypted off-host. Keep `priv_validator_key.json` exclusive to a 
 curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
 ```
 
-The script downloads the latest `svoted` + `create-val-tx` tarball (per `${DO_BASE}/version.txt`) and verifies its checksum. Before replacing binaries it stops the service (`systemctl stop svoted` on Linux, `launchctl bootout` on macOS) to avoid `Text file busy`, reinstalls the service files, re-registers with the admin join queue, and restarts everything.
+The script downloads the latest `svoted` + `create-val-tx` tarball (per `${DO_BASE}/version.txt`) and verifies its checksum. Before replacing binaries it stops the service to avoid `Text file busy` (`systemctl stop svoted` on Linux, `launchctl bootout` on macOS). It then reinstalls the service files, re-registers with the admin join queue, and restarts.
 
 If a prior install is present, `join.sh` wipes `~/.svoted`. It is not a safe in-place chain-data upgrade.
 
@@ -251,7 +243,7 @@ The GitHub Release for each tag also mirrors the tarballs, so operators pinning 
 
 ### Manual install (no `join.sh`)
 
-The manual install exists for custom layouts, non-Linux platforms, debugging the installer, and as a reference for what `join.sh` does under the hood. Most operators should use the one-liner instead.
+Use this for custom layouts or to debug the installer. Most operators should use the one-liner instead.
 
 Prerequisites: `curl`, `jq`, `lz4`, and `sudo`. On minimal Ubuntu/Debian images:
 
@@ -259,7 +251,7 @@ Prerequisites: `curl`, `jq`, `lz4`, and `sudo`. On minimal Ubuntu/Debian images:
 sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
 ```
 
-1. Download and install the binaries. `join.sh` always pulls the latest; pin a specific `TAG` here for a reproducible install. The tarball is downloaded under its published name so `sha256sum -c` can validate it against the companion `.sha256` file, which lists the original filename.
+1. Download and install the binaries. `join.sh` always pulls the latest; pin a specific `TAG` here for a reproducible install.
 
    ```bash
    PLATFORM=linux-amd64        # or linux-arm64, darwin-arm64, darwin-amd64
@@ -351,7 +343,7 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
 
 ### Files under `~/.svoted`
 
-`SVOTE_HOME` (default `~/.svoted`) groups everything a joining validator cares about. Identity files — keys, consensus signer, block store — are catalogued under [Backup and disaster recovery](#backup-and-disaster-recovery). The other runtime files:
+Identity files (keys, consensus signer, block store) live under `SVOTE_HOME` (default `~/.svoted`) and are catalogued under [Backup and disaster recovery](#backup-and-disaster-recovery). The other runtime files:
 
 | Path | Owner / writer | Purpose |
 |------|----------------|---------|
@@ -379,7 +371,7 @@ Interactive runs without `SVOTE_DOMAIN` and without an explicit `SVOTE_SKIP_CADD
 | `SVOTE_INSTALL_DIR` | `$HOME/.local/bin` | Where `svoted`, `create-val-tx`, and `svoted-wrapper.sh` are installed. |
 | `SVOTE_HOME` | `$HOME/.svoted` | Chain data + config + keys. |
 | `SVOTE_SNAPSHOT_BASE_URL` | `https://snapshots.valargroup.org` | Snapshot service base URL. `join.sh` fetches `${SVOTE_SNAPSHOT_BASE_URL}/latest.json` and restores the archive it declares when metadata is available. |
-| `SVOTE_SKIP_SNAPSHOT` | `0` | When `1`, skip snapshot restore and sync from genesis. Default installs fall back to genesis when snapshot metadata is unavailable or empty; once metadata points to an archive, download, checksum, and extraction failures are fatal. |
+| `SVOTE_SKIP_SNAPSHOT` | `0` | When `1`, skip snapshot restore and sync from genesis. With `0` (default), missing metadata falls back to genesis but a broken archive is fatal. |
 | `SVOTE_LOCAL_BINARIES` | `0` | When `1` and both binaries are on `$PATH`, skip the download. Used by source developers with `mise run build:install`. |
 | `SVOTE_APT_LOCK_TIMEOUT` | `300` | Linux/apt only: seconds to wait for another apt/dpkg process before failing while auto-installing packages. |
 | `SVOTE_SKIP_CADDY` | `1` (default) | Skip Caddy install + config and leave `VALIDATOR_URL` empty. Set to `0` only to surface the interactive TLS menu. |
@@ -387,9 +379,8 @@ Interactive runs without `SVOTE_DOMAIN` and without an explicit `SVOTE_SKIP_CADD
 | `SVOTE_ALLOW_NO_PUBLIC_URL` | `0` | When `1`, explicit-domain Caddy failures continue with an empty `VALIDATOR_URL` so the operator can still enter the funding queue. |
 | `SVOTE_SKIP_SERVICE` | `0` | When `1`, skip service install and the sync wait. The node is initialized but not started. Useful for Docker smoke tests and CI. |
 | `VOTING_CONFIG_URL` | `https://valargroup.github.io/token-holder-voting-config/voting-config.json` | Canonical voting-config (same payload wallets fetch). Override for staging mirrors or fork testing. |
-| `SVOTE_ADMIN_URL` | `${DEFAULT_ADMIN_API_BASE}` | Admin server base URL. Used for `POST /api/register-validator` (join queue). Voting-config discovery uses `VOTING_CONFIG_URL` instead. |
+| `SVOTE_ADMIN_URL` | `https://vote-chain-primary.valargroup.org` | Admin server base URL. Used for `POST /api/register-validator` (join queue). Voting-config discovery uses `VOTING_CONFIG_URL` instead. |
 | `SVOTE_WRAPPER_SCRIPT` | bundled path → `${DO_BASE}/svoted-wrapper.sh` fallback | Override path to `svoted-wrapper.sh`. Useful when `join.sh` is piped via curl and the repo's `scripts/svoted-wrapper.sh` isn't reachable. |
-| `DEFAULT_ADMIN_API_BASE` | `https://vote-chain-primary.valargroup.org` | Default value for `SVOTE_ADMIN_URL` when not explicitly set. |
 
 #### `svoted-wrapper.sh`
 
@@ -440,7 +431,7 @@ The three TLS modes and the Caddy layout are described in [TLS / reverse proxy](
 | Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `svoted-wrapper.sh` fallback |
 | Outbound 443 | `snapshots.valargroup.org` | Latest Zvote snapshot metadata and archive URL used to bootstrap chain data before peer catch-up |
 | Outbound 443 | `valargroup.github.io` | [`token-holder-voting-config/voting-config.json`](https://github.com/valargroup/token-holder-voting-config) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
-| Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue). Override via `SVOTE_ADMIN_URL` / `DEFAULT_ADMIN_API_BASE`. |
+| Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue). Override via `SVOTE_ADMIN_URL`. |
 | Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` (P2P seed) |
 | Outbound 443 | `ifconfig.me`, `api.ipify.org` | Public IPv4 auto-detection (only when choosing auto sslip.io + Caddy) |
 | Outbound 443 | `dl.cloudsmith.io`, Let's Encrypt | Caddy apt-repo install + ACME certificate issuance (only when opting into Caddy) |
