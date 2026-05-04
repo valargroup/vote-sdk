@@ -6,11 +6,7 @@ Shielded-Vote is a Cosmos SDK application chain for private on-chain voting. The
 
 This runbook is the operator side of joining: standing up an `svoted` host, restoring the latest Zvote snapshot if one is published, catching up with the chain, reaching bonded status, and exposing the REST API over TLS so iOS clients and peers can reach it. A validator is one `svoted` service (managed by a small wrapper while joining) plus a Caddy reverse proxy on the same host.
 
-This document covers joining the live `svote-1` chain. For other flows:
-
-- Bootstrapping the first (genesis) validator and building `genesis.json` from scratch: [genesis-setup.md](genesis-setup.md).
-- Local development from a source checkout: [CONTRIBUTING.md](../../CONTRIBUTING.md).
-- Custom layouts, non-Linux platforms, or auditing what `join.sh` does: [Reference > Manual install](#manual-install-no-joinsh).
+This document covers joining the live `svote-1` chain.
 
 ## Prerequisites
 
@@ -37,9 +33,9 @@ On Linux or macOS:
 curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
 ```
 
-The default install skips Caddy and leaves `VALIDATOR_URL` empty, so you can terminate TLS at your own load balancer or reverse proxy. The operator address still enters the admin join queue for funding.
+The default install requires you terminating TLS at your own load balancer or reverse proxy. The operator address still enters the admin join queue for funding.
 
-To have `join.sh` install Caddy, point a stable DNS name at the host first:
+To have `join.sh` install Caddy for TLS, point a stable DNS name at the host first:
 
 ```text
 val.example.org.  A  <your-server-public-IPv4>
@@ -51,7 +47,7 @@ Then pass that hostname:
 curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --domain val.example.org
 ```
 
-The installer prompts for a moniker (unless `SVOTE_MONIKER` is set) and for the TLS mode (unless `SVOTE_SKIP_CADDY` or `SVOTE_DOMAIN` is set), restores the latest Zvote snapshot if one is published, and catches up from peers. With no snapshot metadata available — the usual case right after a chain reset — it syncs from genesis instead.
+The installer prompts for a moniker and for the TLS mode, restores the latest vote chain snapshot if one is published, and catches up from peers. With no snapshot metadata available — the usual case right after a chain reset — it syncs from genesis instead.
 
 For what comes next, see [Join lifecycle](#join-lifecycle), [Operating the service](#operating-the-service), and [Smoke test](#smoke-test).
 
@@ -99,7 +95,7 @@ Funding itself happens outside the wrapper: any member of the vote-manager set o
 While waiting, an operator should:
 
 - Confirm the service is alive (`systemctl is-active svoted` on Linux, `launchctl print gui/$(id -u)/com.shielded-vote.validator` on macOS).
-- Confirm the admin UI at `${SVOTE_ADMIN_URL}/` lists their moniker and operator address under **Validators → Join queue**.
+- Confirm the [admin UI](https://svote.valargroup.org/validator-join) lists their moniker and operator address under **Validators → Join queue**.
 - After bonding, open a PR against [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) adding their URL to `vote_servers[]` so iOS clients can discover them. `join.sh` prints the suggested JSON entry on its final line.
 
 ## Smoke test
@@ -128,7 +124,7 @@ journalctl -u svoted -n 20 --no-pager   # or: tail -n 20 ~/.svoted/node.log
 
 ### Linux (systemd)
 
-`/etc/systemd/system/svoted.service` is a `Type=simple` unit with `Restart=on-failure`, `RestartSec=5`, running as the invoking user (not root). `ExecStart` is `${INSTALL_DIR}/svoted-wrapper.sh`, and stdout/stderr go to `~/.svoted/node.log`.
+`/etc/systemd/system/svoted.service`, running as the invoking user (not root). `ExecStart` is `${INSTALL_DIR}/svoted-wrapper.sh`, and stdout/stderr go to `~/.svoted/node.log`.
 
 After editing the unit, reload and restart:
 
@@ -162,7 +158,7 @@ Follow with `journalctl -u svoted -f` on Linux or `tail -f ~/.svoted/node.log` o
 
 ### Admin UI
 
-The primary validator serves the admin UI at `${SVOTE_ADMIN_URL}/`. Its Validators page lists every bonded validator and every pending join request with operator address, moniker, requested time, and bonding state. Joining operators watch this page to confirm their registration landed and to coordinate funding with a vote-manager.
+The primary validator serves the admin UI [here](https://svote.valargroup.org/vote-status). Its Validators page lists every bonded validator and every pending join request with operator address, moniker, requested time, and bonding state. Joining operators watch this page to confirm their registration landed and to coordinate funding with a vote-manager.
 
 `svoted` does not ship Sentry; add it if your ops playbook requires it. For structural observability, see [observability.md](../observability.md).
 
@@ -232,7 +228,7 @@ mv -Tf /opt/shielded-vote/current.new /opt/shielded-vote/current
 systemctl restart svoted
 ```
 
-Subscribe to the GitHub Releases feed of [valargroup/vote-sdk](https://github.com/valargroup/vote-sdk). Upgrade promptly on `v*` tags that ship security or consensus fixes; cosmetic mid-round patches can wait for the next quiet window.
+Subscribe to the GitHub Releases feed of [valargroup/vote-sdk](https://github.com/valargroup/vote-sdk). Upgrade promptly on `v*` tags that ship security or consensus fixes; cosmetic mid-round patches can wait for the next coordinated window.
 
 ## Reference
 
@@ -311,7 +307,7 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    svoted genesis validate-genesis --home "$HOME_DIR"
    ```
 
-4. Restore the latest Zvote snapshot before generating validator keys, if metadata is published. Skip this block if `latest.json` is not available yet after a reset and let the node sync from genesis.
+4. Restore the latest vote chain snapshot before generating validator keys, if metadata is published. Skip this block if `latest.json` is not available yet after a reset and let the node sync from genesis.
 
    ```bash
    SNAPSHOT_META=$(mktemp)
