@@ -73,9 +73,9 @@ flowchart LR
   funded -->|wrapper submits MsgCreateValidatorWithPallasKey| bonded["Bonded<br/>(BOND_STATUS_BONDED)"]
 ```
 
-Before installing the service, `join.sh` builds `{operator_address, url, moniker, timestamp}`, signs it with `svoted sign-arbitrary --from validator --keyring-backend test`, and POSTs it once to `${SVOTE_ADMIN_URL}/api/register-validator`. The admin stores a single pending row per operator, allowing the UI to prompt for approval.
+Before installing the service, `join.sh` builds validator-identifying payload, signs it, and POSTs it once to the admin server. The admin server stores a single pending row per operator, allowing [the UI to prompt for approval](https://svote.valargroup.org/validator-join).
 
-The wrapper in [scripts/svoted-wrapper.sh](../../scripts/svoted-wrapper.sh) then runs `svoted`, waits for sync, watches for funding, and submits the validator creation tx. Funding is the vote-manager approval step. Each iteration:
+It then runs the `svoted` binary, waits for sync, watches for funding (i.e. approval by the vote manager), and submits the validator creation tx. Funding is the vote-manager approval step. Each iteration:
 
 1. Query the valoper's bond status. If `BOND_STATUS_BONDED`, write `~/.svoted/join-complete` and stop running the join logic on this and future service runs.
 2. Otherwise, check the balance with `svoted query bank balances $VALIDATOR_ADDR`. Once it covers the self-delegation amount, run:
@@ -85,7 +85,7 @@ The wrapper in [scripts/svoted-wrapper.sh](../../scripts/svoted-wrapper.sh) then
    `create-val-tx` signs `MsgCreateValidatorWithPallasKey`, the only message type that can create a validator post-genesis.
 3. Sleep 30s and repeat.
 
-Funding itself happens outside the wrapper: any member of the vote-manager set observes the pending row in the [admin UI](https://svote.valargroup.org/validator-join) and authorises the join by funding the operator account.
+Funding itself happens outside the script: any member of the vote-manager set observes the pending row in the [admin UI](https://svote.valargroup.org/validator-join) and authorises the join by funding the operator account.
 
 While waiting, an operator should:
 
