@@ -4,13 +4,13 @@
 
 Shielded-Vote is a Cosmos SDK application chain for private on-chain voting. The chain launches with a single genesis validator. Everyone else joins post-genesis via the custom `MsgCreateValidatorWithPallasKey` message, which atomically creates the validator and registers its Pallas key for the EA-key ceremony. The full rules live in the [protocol README](../../README.md#protocol-documentation).
 
-This runbook is the operator side of joining: standing up an `svoted` host, restoring the latest Zvote snapshot if one is published, catching up with the chain, reaching bonded status, and exposing the REST API over TLS so iOS clients and peers can reach it. A validator is one `svoted` service (managed by a small wrapper while joining) plus a Caddy reverse proxy on the same host.
+This runbook covers the operator side of joining `svote-1`: standing up an `svoted` host, restoring the latest vote chain snapshot if one is published, catching up with the chain, reaching bonded status, and exposing the REST API over TLS for iOS clients and peers.
 
-This document covers joining the live `svote-1` chain.
+A validator is one `svoted` service (managed by a small wrapper while joining) plus a Caddy reverse proxy on the same host.
 
 ## Prerequisites
 
-Production target: `linux-amd64`, 2 vCPU, 8 GB RAM, 50 GB SSD. 2 vCPU is enough to verify incoming ZKPs and participate in ceremony/tally proposer injection without starving the CometBFT consensus thread.
+Production target: `linux-amd64`, 2 vCPU, 8 GB RAM, 50 GB SSD. 2 vCPU is enough to keep ZKP verification and ceremony/tally injection from contending with the CometBFT consensus thread.
 
 ### Platform support
 
@@ -33,7 +33,7 @@ On Linux or macOS:
 curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
 ```
 
-The default install requires you terminating TLS at your own load balancer or reverse proxy. The operator address still enters the admin join queue for funding.
+The default install expects you to terminate TLS at your own load balancer or reverse proxy. The operator address still enters the admin join queue for funding.
 
 To have `join.sh` install Caddy for TLS, point a stable DNS name at the host first:
 
@@ -48,8 +48,6 @@ curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --domai
 ```
 
 The installer prompts for a moniker and for the TLS mode, restores the latest vote chain snapshot if one is published, and catches up from peers. With no snapshot metadata available — the usual case right after a chain reset — it syncs from genesis instead.
-
-For what comes next, see [Join lifecycle](#join-lifecycle), [Operating the service](#operating-the-service), and [Smoke test](#smoke-test).
 
 Service controls after install:
 
@@ -73,25 +71,24 @@ flowchart LR
   funded -->|wrapper submits MsgCreateValidatorWithPallasKey| bonded["Bonded<br/>(BOND_STATUS_BONDED)"]
 ```
 
-Before installing the service, `join.sh` builds validator-identifying payload, signs it, and POSTs it once to the admin server. The admin server stores a single pending row per operator, allowing [the UI to prompt for approval](https://svote.valargroup.org/validator-join).
+Before installing the service, `join.sh` builds a validator-identifying payload, signs it, and POSTs it once to the admin server. The admin server stores a single pending row per operator, which surfaces in [the admin UI](https://svote.valargroup.org/validator-join) for a vote-manager to approve by funding the operator account.
 
-It then runs the `svoted` binary, waits for sync, watches for funding (i.e. approval by the vote manager), and submits the validator creation tx. Funding is the vote-manager approval step. Each iteration:
+The service then runs `svoted`, waits for sync, watches for funding, and submits the validator creation tx. Each iteration:
 
 1. Query the valoper's bond status. If `BOND_STATUS_BONDED`, write `~/.svoted/join-complete` and stop running the join logic on this and future service runs.
-2. Otherwise, check the balance with `svoted query bank balances $VALIDATOR_ADDR`. Once it covers the self-delegation amount, run:
+2. Otherwise, check the balance with `svoted query bank balances <VALIDATOR_ADDR>`. Once it covers the self-delegation amount, run:
    ```bash
    create-val-tx --moniker "$MONIKER" --amount 10000000usvote --home "$SVOTE_HOME" --rpc-url tcp://localhost:26657
    ```
    `create-val-tx` signs `MsgCreateValidatorWithPallasKey`, the only message type that can create a validator post-genesis.
 3. Sleep 30s and repeat.
 
-Funding itself happens outside the script: any member of the vote-manager set observes the pending row in the [admin UI](https://svote.valargroup.org/validator-join) and authorises the join by funding the operator account.
-
 While waiting, an operator should:
 
 - Confirm the service is alive (`systemctl is-active svoted` on Linux, `launchctl print gui/$(id -u)/com.shielded-vote.validator` on macOS).
-- Confirm the [admin UI](https://svote.valargroup.org/validator-join) lists their moniker and operator address under **Validators → Join queue**.
-- After bonding, open a PR against [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) adding their URL to `vote_servers[]` so iOS clients can discover them. `join.sh` prints the suggested JSON entry on its final line.
+- Confirm the admin UI lists their moniker and operator address under **Validators → Join queue**.
+
+After bonding, open a PR against [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) adding the validator's URL to `vote_servers[]` so iOS clients can discover it. `join.sh` prints the suggested JSON entry on its final line.
 
 ## Smoke test
 
@@ -153,7 +150,7 @@ Follow with `journalctl -u svoted -f` on Linux or `tail -f ~/.svoted/node.log` o
 
 ### Admin UI
 
-The primary validator serves the admin UI [here](https://svote.valargroup.org/vote-status). Its Validators page lists every bonded validator and every pending join request with operator address, moniker, requested time, and bonding state. Joining operators watch this page to confirm their registration landed and to coordinate funding with a vote-manager.
+The primary validator serves the admin UI [here](https://svote.valargroup.org/vote-status). Its Validators page lists every bonded validator and every pending join request with operator address, moniker, requested time, and bonding state.
 
 `svoted` does not ship Sentry; add it if your ops playbook requires it. For structural observability, see [observability.md](../observability.md).
 
@@ -173,7 +170,16 @@ The production reference is [deploy-setup.md § Helper server configuration](../
 
 ## TLS / reverse proxy
 
-`svoted` speaks plaintext HTTP on `:1317` and plaintext RPC on `:26657`. Clients must reach the REST API over TLS, so something has to terminate it. When you opt into Caddy, `join.sh` installs it on the same host and writes:
+`svoted` speaks plaintext HTTP on `:1317` and plaintext RPC on `:26657`. Clients must reach the REST API over TLS, so something has to terminate it. Unless you set `SVOTE_SKIP_CADDY` or `SVOTE_DOMAIN` ahead of time, `join.sh` prompts for one of three modes:
+
+1. **Skip Caddy** (the default; equivalent to `SVOTE_SKIP_CADDY=1`). `join.sh` does not install or configure TLS. Terminate it upstream — load balancer, managed certificate, or your own reverse proxy. The operator address still enters the admin join queue, and the public URL can be supplied later when the validator is added to `vote_servers[]`.
+2. **`--domain val.example.org`** (or `SVOTE_DOMAIN=val.example.org`). `join.sh` installs Caddy and requests a Let's Encrypt cert for that hostname. The DNS record must already point at this host; URLs aren't rotated after they're advertised in `vote_servers[]`.
+   ```text
+   val.example.org.  A  <your-server-public-IPv4>
+   ```
+3. **Auto sslip.io + Caddy.** Pick option 3 from the interactive menu (only available when running through `... | bash`). Useful for trials; if the host's public IPv4 changes, the URL breaks.
+
+When you opt into Caddy, `join.sh` writes:
 
 ```caddyfile
 val.example.org {
@@ -183,7 +189,7 @@ val.example.org {
 
 On Linux, Caddy is installed from the Cloudsmith apt repo and managed by `systemctl`; its config lives at `/etc/caddy/Caddyfile`. On macOS, Caddy is installed via Homebrew and runs as a per-user launchd agent with config at `~/.config/caddy/Caddyfile`.
 
-For the trade-offs between a real hostname, sslip.io, or skipping Caddy entirely, see [Troubleshooting > Hostname and TLS](#hostname-and-tls).
+For TLS-setup failure modes, see [Troubleshooting > Hostname and TLS](#hostname-and-tls).
 
 ## Backup and disaster recovery
 
@@ -376,7 +382,7 @@ Interactive runs without `SVOTE_DOMAIN` and without an explicit `SVOTE_SKIP_CADD
 | `SVOTE_SKIP_SNAPSHOT` | `0` | When `1`, skip snapshot restore and sync from genesis. Default installs fall back to genesis when snapshot metadata is unavailable or empty; once metadata points to an archive, download, checksum, and extraction failures are fatal. |
 | `SVOTE_LOCAL_BINARIES` | `0` | When `1` and both binaries are on `$PATH`, skip the download. Used by source developers with `mise run build:install`. |
 | `SVOTE_APT_LOCK_TIMEOUT` | `300` | Linux/apt only: seconds to wait for another apt/dpkg process before failing while auto-installing packages. |
-| `SVOTE_SKIP_CADDY` | `1` (default) | Skip Caddy install + config and leave `VALIDATOR_URL` empty. Set to `0` only when running interactively to expose the menu (which can re-set this to `1` if you pick option 1). |
+| `SVOTE_SKIP_CADDY` | `1` (default) | Skip Caddy install + config and leave `VALIDATOR_URL` empty. Set to `0` only to surface the interactive TLS menu. |
 | `SVOTE_TLS_PROMPT_TIMEOUT` | `30` | Seconds to wait at the TLS mode prompt before defaulting to option 1 (skip Caddy). |
 | `SVOTE_ALLOW_NO_PUBLIC_URL` | `0` | When `1`, explicit-domain Caddy failures continue with an empty `VALIDATOR_URL` so the operator can still enter the funding queue. |
 | `SVOTE_SKIP_SERVICE` | `0` | When `1`, skip service install and the sync wait. The node is initialized but not started. Useful for Docker smoke tests and CI. |
@@ -409,7 +415,9 @@ The routes below are the ones ops hit during install, bonding, and debugging. Th
 | `GET /cosmos/bank/v1beta1/balances/{addr}` | Ops | Account balance; `svoted-wrapper.sh` hits this to detect funding. |
 | `POST /api/register-validator` | `join.sh` | Pending-join queue (admin module; primary only). |
 | `GET /api/pending-validators` | Admin UI / join scripts | Join-queue view (primary only). |
-| `GET /api/voting-config` | Tooling / standalone watchdog | Cached copy of the GitHub Pages voting-config, refreshed in-process every minute. This is not the canonical client path — wallets and `join.sh` fetch the same payload directly from [valargroup.github.io/token-holder-voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json). The fleet health watchdog ([`vote-infrastructure/watchdog/`](https://github.com/valargroup/vote-infrastructure/tree/main/watchdog)) hits the CDN, not this endpoint, so it stays up if the primary `svoted` wedges. |
+| `GET /api/voting-config` | Tooling | Cached copy of the canonical voting-config, refreshed in-process every minute. |
+
+The `/api/voting-config` cache is a fallback — wallets, `join.sh`, and the fleet health watchdog ([`vote-infrastructure/watchdog/`](https://github.com/valargroup/vote-infrastructure/tree/main/watchdog)) read the [voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json) directly from GitHub Pages so it stays available if the primary `svoted` wedges.
 
 ## Troubleshooting
 
@@ -417,18 +425,11 @@ Start with `journalctl -u svoted -n 200 --no-pager` (or `tail -n 200 ~/.svoted/n
 
 ### Hostname and TLS
 
-`svoted` speaks plaintext HTTP on `:1317`; clients reach it over TLS through a reverse proxy or load balancer. Unless you set `SVOTE_SKIP_CADDY` or `SVOTE_DOMAIN` ahead of time, `join.sh` prompts for one of three modes:
+The three TLS modes and the Caddy layout are described in [TLS / reverse proxy](#tls--reverse-proxy). Failure modes:
 
-1. Skip Caddy (the default). `join.sh` does not install or configure TLS. Terminate it upstream — load balancer, managed certificate, or your own reverse proxy. The operator address still enters the admin join queue, and the public URL can be supplied later when the validator is added to `vote_servers[]`. Equivalent to `SVOTE_SKIP_CADDY=1`.
-2. `--domain val.example.org` or `SVOTE_DOMAIN=val.example.org`. `join.sh` installs Caddy and requests a Let's Encrypt cert for that hostname. The DNS record must be static and already point at this host; URLs aren't rotated after they're advertised in `vote_servers[]`. Example DNS:
-   ```text
-   val.example.org.  A  <your-server-public-IPv4>
-   ```
-3. Auto sslip.io + Caddy. Pick option 3 from the interactive menu (only available when running through `... | bash`). Useful for trials. If the host's public IPv4 changes, the URL breaks and you have to re-run `join.sh` and PR a new entry into [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config).
-
-If Caddy setup fails after you opt in, `join.sh` still registers the operator for funding with an empty URL and prints `Public URL: missing`. With an explicit `--domain` / `SVOTE_DOMAIN`, Caddy setup is required and failures stop the installer unless `SVOTE_ALLOW_NO_PUBLIC_URL=1` is set.
-
-The Caddy layout `join.sh` installs when you opt in is documented under [TLS / reverse proxy](#tls--reverse-proxy).
+- **Caddy fails after you opt in.** `join.sh` still registers the operator with an empty URL and prints `Public URL: missing`. With explicit `--domain` / `SVOTE_DOMAIN`, Caddy is required; failures stop the installer unless `SVOTE_ALLOW_NO_PUBLIC_URL=1`.
+- **sslip URL stops resolving.** The host's public IPv4 changed. Re-run `join.sh` and PR a new entry into [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config).
+- **ACME cert issuance fails.** See the Caddy row under [Common issues](#common-issues).
 
 ### Network requirements
 
