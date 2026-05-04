@@ -69,16 +69,11 @@ A joining validator moves through three states: registered (pending), funded (ba
 
 ```mermaid
 flowchart LR
-  installed["join.sh finishes"] --> registered["Registered: POST /api/register-validator"]
-  registered --> service["svoted wrapper waits for sync"]
-  service --> funded["Funded: balance >= 10,000,000 usvote"]
-  funded --> createValTx["create-val-tx: MsgCreateValidatorWithPallasKey"]
-  createValTx --> bonded["Bonded: BOND_STATUS_BONDED"]
-  bonded --> done["join-complete marker written; service keeps running svoted"]
-  service --> service
+  registered["Registered<br/>(pending)"] -->|vote manager funds operator| funded["Funded<br/>(≥ 10,000,000 usvote)"]
+  funded -->|wrapper submits MsgCreateValidatorWithPallasKey| bonded["Bonded<br/>(BOND_STATUS_BONDED)"]
 ```
 
-Before installing the service, `join.sh` builds `{operator_address, url, moniker, timestamp}`, signs it with `svoted sign-arbitrary --from validator --keyring-backend test`, and POSTs it once to `${SVOTE_ADMIN_URL}/api/register-validator`. The admin stores a single pending row per operator with `requested_at`. An empty `url` is fine — vote managers can still see the operator address for funding, and the admin UI marks the row as `Needs public URL`.
+Before installing the service, `join.sh` builds `{operator_address, url, moniker, timestamp}`, signs it with `svoted sign-arbitrary --from validator --keyring-backend test`, and POSTs it once to `${SVOTE_ADMIN_URL}/api/register-validator`. The admin stores a single pending row per operator, allowing the UI to prompt for approval.
 
 The wrapper in [scripts/svoted-wrapper.sh](../../scripts/svoted-wrapper.sh) then runs `svoted`, waits for sync, watches for funding, and submits the validator creation tx. Funding is the vote-manager approval step. Each iteration:
 
