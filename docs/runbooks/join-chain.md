@@ -2,11 +2,11 @@
 
 ## Overview
 
-Shielded-Vote is a Cosmos SDK application chain for private on-chain voting. The chain launches with a single genesis validator. Everyone else joins post-genesis via the custom `MsgCreateValidatorWithPallasKey` message, which atomically creates the validator and registers its Pallas key for the EA-key ceremony. The full rules live in the [protocol README](../../README.md#protocol-documentation).
+Shielded-Vote is a Cosmos SDK application chain for private on-chain voting. The chain launches with a single genesis validator. Everyone else joins post-genesis via a custom validator-creating message, which atomically creates the validator and registers its Pallas key for the EA-key ceremony. The full rules live in the [protocol README](../../README.md#protocol-documentation).
 
-This runbook covers the operator side of joining `svote-1`: standing up an `svoted` host, restoring the latest vote chain snapshot if one is published, catching up with the chain, reaching bonded status, and exposing the REST API over TLS for iOS clients and peers.
+This runbook covers the operator side of joining `svote-1`: standing up a host, restoring the latest vote chain snapshot, catching up with the chain, reaching bonded status, and exposing the REST API over TLS for iOS clients and peers.
 
-A validator is one `svoted` service (managed by a small wrapper while joining) plus a Caddy reverse proxy on the same host.
+A validator is one service plus an optional Caddy reverse proxy on the same host.
 
 ## Prerequisites
 
