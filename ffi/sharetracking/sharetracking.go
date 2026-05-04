@@ -39,6 +39,9 @@ func ShareNullifierHash(voteCommitment [32]byte, shareIndex uint32, primaryBlind
 	case -3:
 		errMsg := C.GoString(C.sv_last_error())
 		return nullifier, fmt.Errorf("sharetracking: %s", errMsg)
+	case -6:
+		errMsg := C.GoString(C.sv_last_error())
+		return nullifier, fmt.Errorf("sharetracking: %s", errMsg)
 	default:
 		return nullifier, fmt.Errorf("sharetracking: unexpected error code %d", rc)
 	}

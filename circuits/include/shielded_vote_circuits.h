@@ -545,6 +545,7 @@ int32_t sv_vote_commitment_hash(
  *    0  on success.
  *   -1  if any pointer is null.
  *   -3  if vote_commitment or primary_blind is not a canonical Pallas Fp.
+ *   -6  if an internal panic occurred.
  */
 int32_t sv_share_nullifier_hash(
     const uint8_t* vote_commitment_ptr,
