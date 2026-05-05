@@ -158,7 +158,7 @@ The primary validator serves the admin UI [here](https://svote.valargroup.org/vo
 | `api_token` | `""` | Optional bearer for `POST /shielded-vote/v1/shares` (sent as `X-Helper-Token`). |
 | `db_path` | `""` (= `~/.svoted/helper.db`) | SQLite path for queued shares. |
 | `chain_api_port` | `1317` | REST port the helper submits `MsgRevealShare` to. |
-| `max_concurrent_proofs` | `2` | Parallel proof goroutines (~500 MB each). |
+| `max_concurrent_proofs` | `8` | Parallel proof goroutines (~500 MB each). |
 
 The production reference is [deploy-setup.md § Helper server configuration](../deploy-setup.md#helper-server-configuration). `[admin]` and the admin UI are disabled for joining validators; only the primary runs them.
 

@@ -199,7 +199,7 @@ db_path = ""
 chain_api_port = ${api_port}
 
 # Maximum concurrent proof generation goroutines.
-max_concurrent_proofs = 2
+max_concurrent_proofs = 8
 
 # Sentry DSN for error tracking. Empty disables Sentry.
 sentry_dsn = "${sentry_dsn}"
