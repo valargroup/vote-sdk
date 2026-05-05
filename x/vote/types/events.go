@@ -23,6 +23,7 @@ const (
 	EventTypeCancelUpgrade            = "cancel_upgrade"
 	EventTypeSetEndorser              = "set_endorser"
 	EventTypeEndorseRound             = "endorse_round"
+	EventTypeClearRoundEndorsement    = "clear_round_endorsement"
 )
 
 // Event attribute keys.

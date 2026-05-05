@@ -72,13 +72,22 @@ func (k *Keeper) IterateEndorsers(kvStore store.KVStore, fn func(endorser *types
 	return nil
 }
 
-// AddEndorsedRound records an append-only endorsement. Re-adding the same pair is idempotent.
+// AddEndorsedRound records an endorsement. Re-adding the same pair is idempotent.
 func (k *Keeper) AddEndorsedRound(kvStore store.KVStore, endorserID string, roundID []byte) error {
 	key, err := types.EndorsedRoundKey(endorserID, roundID)
 	if err != nil {
 		return err
 	}
 	return kvStore.Set(key, []byte{1})
+}
+
+// DeleteEndorsedRound clears an endorsement. Deleting a missing pair is idempotent.
+func (k *Keeper) DeleteEndorsedRound(kvStore store.KVStore, endorserID string, roundID []byte) error {
+	key, err := types.EndorsedRoundKey(endorserID, roundID)
+	if err != nil {
+		return err
+	}
+	return kvStore.Delete(key)
 }
 
 // IsRoundEndorsed reports whether endorserID endorsed roundID.

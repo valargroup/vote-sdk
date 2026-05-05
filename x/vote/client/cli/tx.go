@@ -42,6 +42,7 @@ func GetTxCmd() *cobra.Command {
 		CmdSubmitTally(),
 		CmdSetEndorser(),
 		CmdEndorseRound(),
+		CmdClearRoundEndorsement(),
 		// Token transfer — uses whitelisted MsgAuthorizedSend.
 		CmdAuthorizedSend(),
 	)
@@ -381,6 +382,36 @@ func CmdEndorseRound() *cobra.Command {
 			}
 
 			msg := &types.MsgEndorseRound{
+				Creator:     clientCtx.GetFromAddress().String(),
+				EndorserId:  args[0],
+				VoteRoundId: roundID,
+			}
+
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
+// CmdClearRoundEndorsement broadcasts MsgClearRoundEndorsement. Callable by the mapped endorser address.
+func CmdClearRoundEndorsement() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "clear-round-endorsement [endorser-id] [round-id-hex]",
+		Short: "Clear an endorsement for a voting round",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+			roundID, err := hex.DecodeString(args[1])
+			if err != nil {
+				return fmt.Errorf("round-id-hex: invalid hex: %w", err)
+			}
+
+			msg := &types.MsgClearRoundEndorsement{
 				Creator:     clientCtx.GetFromAddress().String(),
 				EndorserId:  args[0],
 				VoteRoundId: roundID,

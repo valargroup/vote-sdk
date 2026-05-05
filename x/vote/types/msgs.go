@@ -281,6 +281,23 @@ func (msg *MsgEndorseRound) ValidateBasic() error {
 	return nil
 }
 
+// ValidateBasic performs stateless validation for MsgClearRoundEndorsement.
+func (msg *MsgClearRoundEndorsement) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if _, err := sdk.AccAddressFromBech32(msg.Creator); err != nil {
+		return fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", ErrInvalidField, msg.Creator, err)
+	}
+	if err := ValidateEndorserID(msg.EndorserId); err != nil {
+		return err
+	}
+	if len(msg.VoteRoundId) != RoundIDLen {
+		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
+	}
+	return nil
+}
+
 // --- VoteMessage interface implementations ---
 
 // GetNullifiers returns the nullifiers from a MsgDelegateVote.

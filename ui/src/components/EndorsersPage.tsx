@@ -107,6 +107,24 @@ export function EndorsersPage({ wallet }: EndorsersPageProps) {
     [refreshEndorsedRounds, wallet.signer],
   );
 
+  const submitClearRoundEndorsement = useCallback(
+    async (endorserID: string, roundIDHex: string) => {
+      if (!wallet.signer) throw new Error("Connect a wallet first");
+      setBusy(`clear:${roundIDHex}`);
+      setError(null);
+      setMessage(null);
+      try {
+        const result = await cosmosTx.clearRoundEndorsement(chainApi.getApiBase(), wallet.signer, endorserID, roundIDHex);
+        if (result.code !== 0) throw new Error(result.log || `Transaction failed with code ${result.code}`);
+        setMessage(`Cleared endorsement for ${shortHex(roundIDHex)} as ${endorserID}`);
+        await refreshEndorsedRounds(endorserID);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [refreshEndorsedRounds, wallet.signer],
+  );
+
   const selectedEndorser = endorsers.find((e) => e.endorser_id === selectedEndorserID);
   const canEndorse = Boolean(wallet.address && selectedEndorser?.address === wallet.address && wallet.signer);
 
@@ -267,10 +285,27 @@ export function EndorsersPage({ wallet }: EndorsersPageProps) {
                       <div className="text-xs text-text-muted font-mono">{shortHex(roundIDHex)}</div>
                     </div>
                     {endorsed ? (
-                      <span className="flex items-center gap-1.5 text-xs text-success">
-                        <CheckCircle2 size={14} />
-                        Endorsed
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-1.5 text-xs text-success">
+                          <CheckCircle2 size={14} />
+                          Endorsed
+                        </span>
+                        {canEndorse && (
+                          <button
+                            disabled={busy !== null}
+                            onClick={() =>
+                              submitClearRoundEndorsement(selectedEndorserID, roundIDHex).catch((err) =>
+                                setError(err instanceof Error ? err.message : String(err)),
+                              )
+                            }
+                            className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-text-muted hover:bg-surface-2 hover:text-danger disabled:opacity-50 cursor-pointer"
+                            title="Clear this endorsement"
+                          >
+                            <Trash2 size={11} />
+                            {busy === `clear:${roundIDHex}` ? "Clearing..." : "Clear"}
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <button
                         disabled={!canEndorse || !roundIDHex || busy !== null}

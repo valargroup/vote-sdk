@@ -36,6 +36,7 @@ const (
 	Msg_CancelUpgrade_FullMethodName                = "/svote.v1.Msg/CancelUpgrade"
 	Msg_SetEndorser_FullMethodName                  = "/svote.v1.Msg/SetEndorser"
 	Msg_EndorseRound_FullMethodName                 = "/svote.v1.Msg/EndorseRound"
+	Msg_ClearRoundEndorsement_FullMethodName        = "/svote.v1.Msg/ClearRoundEndorsement"
 )
 
 // MsgClient is the client API for Msg service.
@@ -64,6 +65,7 @@ type MsgClient interface {
 	CancelUpgrade(ctx context.Context, in *MsgCancelUpgrade, opts ...grpc.CallOption) (*MsgCancelUpgradeResponse, error)
 	SetEndorser(ctx context.Context, in *MsgSetEndorser, opts ...grpc.CallOption) (*MsgSetEndorserResponse, error)
 	EndorseRound(ctx context.Context, in *MsgEndorseRound, opts ...grpc.CallOption) (*MsgEndorseRoundResponse, error)
+	ClearRoundEndorsement(ctx context.Context, in *MsgClearRoundEndorsement, opts ...grpc.CallOption) (*MsgClearRoundEndorsementResponse, error)
 }
 
 type msgClient struct {
@@ -244,6 +246,16 @@ func (c *msgClient) EndorseRound(ctx context.Context, in *MsgEndorseRound, opts 
 	return out, nil
 }
 
+func (c *msgClient) ClearRoundEndorsement(ctx context.Context, in *MsgClearRoundEndorsement, opts ...grpc.CallOption) (*MsgClearRoundEndorsementResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgClearRoundEndorsementResponse)
+	err := c.cc.Invoke(ctx, Msg_ClearRoundEndorsement_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MsgServer is the server API for Msg service.
 // All implementations must embed UnimplementedMsgServer
 // for forward compatibility.
@@ -270,6 +282,7 @@ type MsgServer interface {
 	CancelUpgrade(context.Context, *MsgCancelUpgrade) (*MsgCancelUpgradeResponse, error)
 	SetEndorser(context.Context, *MsgSetEndorser) (*MsgSetEndorserResponse, error)
 	EndorseRound(context.Context, *MsgEndorseRound) (*MsgEndorseRoundResponse, error)
+	ClearRoundEndorsement(context.Context, *MsgClearRoundEndorsement) (*MsgClearRoundEndorsementResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
 
@@ -330,6 +343,9 @@ func (UnimplementedMsgServer) SetEndorser(context.Context, *MsgSetEndorser) (*Ms
 }
 func (UnimplementedMsgServer) EndorseRound(context.Context, *MsgEndorseRound) (*MsgEndorseRoundResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EndorseRound not implemented")
+}
+func (UnimplementedMsgServer) ClearRoundEndorsement(context.Context, *MsgClearRoundEndorsement) (*MsgClearRoundEndorsementResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClearRoundEndorsement not implemented")
 }
 func (UnimplementedMsgServer) mustEmbedUnimplementedMsgServer() {}
 func (UnimplementedMsgServer) testEmbeddedByValue()             {}
@@ -658,6 +674,24 @@ func _Msg_EndorseRound_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_ClearRoundEndorsement_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgClearRoundEndorsement)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).ClearRoundEndorsement(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_ClearRoundEndorsement_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).ClearRoundEndorsement(ctx, req.(*MsgClearRoundEndorsement))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Msg_ServiceDesc is the grpc.ServiceDesc for Msg service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -732,6 +766,10 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EndorseRound",
 			Handler:    _Msg_EndorseRound_Handler,
+		},
+		{
+			MethodName: "ClearRoundEndorsement",
+			Handler:    _Msg_ClearRoundEndorsement_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

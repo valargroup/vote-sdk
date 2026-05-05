@@ -187,6 +187,33 @@ const MsgEndorseRoundProto = {
   },
 };
 
+// ── Protobuf type: MsgClearRoundEndorsement ─────────────────────
+//
+// message MsgClearRoundEndorsement { string creator = 1; string endorser_id = 2; bytes vote_round_id = 3; }
+const MsgClearRoundEndorsementProto = {
+  encode(
+    message: { creator: string; endorserId: string; voteRoundId: Uint8Array },
+    writer: ProtoWriter = ProtoWriter.create(),
+  ): ProtoWriter {
+    if (message.creator !== "") writer.uint32(10).string(message.creator);
+    if (message.endorserId !== "") writer.uint32(18).string(message.endorserId);
+    if (message.voteRoundId.length) writer.uint32(26).bytes(message.voteRoundId);
+    return writer;
+  },
+  decode(): { creator: string; endorserId: string; voteRoundId: Uint8Array } {
+    throw new Error("decode not implemented");
+  },
+  fromPartial(
+    object: Partial<{ creator: string; endorserId: string; voteRoundId: Uint8Array }>,
+  ): { creator: string; endorserId: string; voteRoundId: Uint8Array } {
+    return {
+      creator: object.creator ?? "",
+      endorserId: object.endorserId ?? "",
+      voteRoundId: object.voteRoundId ?? new Uint8Array(),
+    };
+  },
+};
+
 // ── Protobuf type: MsgCreateVotingSession ───────────────────────
 
 // message VoteOption { uint32 index = 1; string label = 2; }
@@ -351,6 +378,8 @@ function createRegistry(): Registry {
   registry.register("/svote.v1.MsgSetEndorser", MsgSetEndorserProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/svote.v1.MsgEndorseRound", MsgEndorseRoundProto as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registry.register("/svote.v1.MsgClearRoundEndorsement", MsgClearRoundEndorsementProto as any);
   return registry;
 }
 
@@ -630,6 +659,30 @@ export async function endorseRound(
     messages: [
       {
         typeUrl: "/svote.v1.MsgEndorseRound",
+        value: {
+          creator: account.address,
+          endorserId,
+          voteRoundId: hexToBytes(roundIdHex),
+        },
+      },
+    ],
+  });
+}
+
+/** Sign and broadcast a MsgClearRoundEndorsement transaction. */
+export async function clearRoundEndorsement(
+  apiBase: string,
+  signer: OfflineDirectSigner,
+  endorserId: string,
+  roundIdHex: string,
+): Promise<BroadcastResult> {
+  const [account] = await signer.getAccounts();
+  return signAndBroadcast({
+    apiBase,
+    signer,
+    messages: [
+      {
+        typeUrl: "/svote.v1.MsgClearRoundEndorsement",
         value: {
           creator: account.address,
           endorserId,
