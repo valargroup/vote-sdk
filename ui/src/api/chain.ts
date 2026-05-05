@@ -296,15 +296,55 @@ export const testConnection = getCeremonyState;
 export interface LatestBlockInfo {
   chainId: string;
   height: number;
+  time: string;
+  timeMs: number;
+}
+
+function parseBlockInfo(data: {
+  block?: { header?: { chain_id?: string; height?: string; time?: string } };
+}): LatestBlockInfo {
+  const time = data.block?.header?.time ?? "";
+  const timeMs = time ? Date.parse(time) : 0;
+  return {
+    chainId: data.block?.header?.chain_id ?? "",
+    height: parseInt(data.block?.header?.height ?? "0", 10),
+    time,
+    timeMs: Number.isFinite(timeMs) ? timeMs : 0,
+  };
 }
 
 export async function getLatestBlock(): Promise<LatestBlockInfo> {
   const data = await fetchJson<{
-    block?: { header?: { chain_id?: string; height?: string } };
+    block?: { header?: { chain_id?: string; height?: string; time?: string } };
   }>("/cosmos/base/tendermint/v1beta1/blocks/latest");
+  return parseBlockInfo(data);
+}
+
+export async function getBlock(height: number): Promise<LatestBlockInfo> {
+  const data = await fetchJson<{
+    block?: { header?: { chain_id?: string; height?: string; time?: string } };
+  }>(`/cosmos/base/tendermint/v1beta1/blocks/${height}`);
+  return parseBlockInfo(data);
+}
+
+export interface UpgradePlan {
+  name: string;
+  height: number;
+  info: string;
+}
+
+export async function getCurrentUpgradePlan(): Promise<{ plan: UpgradePlan | null }> {
+  const resp = await fetchJson<{
+    plan?: { name?: string; height?: string | number; info?: string } | null;
+  }>("/cosmos/upgrade/v1beta1/current_plan");
+  const plan = resp.plan;
+  if (!plan) return { plan: null };
   return {
-    chainId: data.block?.header?.chain_id ?? "",
-    height: parseInt(data.block?.header?.height ?? "0", 10),
+    plan: {
+      name: plan.name ?? "",
+      height: typeof plan.height === "number" ? plan.height : parseInt(plan.height ?? "0", 10),
+      info: plan.info ?? "",
+    },
   };
 }
 

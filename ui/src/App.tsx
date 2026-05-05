@@ -12,6 +12,7 @@ import { PirFleetStatus } from "./components/PirFleetStatus";
 import { RoundsList } from "./components/RoundsList";
 import { AttestRoundEntryPage } from "./components/AttestRoundEntryPage";
 import { EndorsersPage } from "./components/EndorsersPage";
+import { UpgradesPage } from "./components/UpgradesPage";
 import { useStore } from "./store/useStore";
 import { SAMPLE_ROUND_TEMPLATES, type SampleRoundTemplateId } from "./store/sampleRounds";
 import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft } from "lucide-react";
@@ -60,6 +61,7 @@ type Section =
   | "validator-join"
   | "attest-round"
   | "endorsers"
+  | "upgrades"
   | "snapshot";
 
 const SECTION_PATHS: Record<Section, string> = {
@@ -75,6 +77,7 @@ const SECTION_PATHS: Record<Section, string> = {
   "validator-join": "/validator-join",
   "attest-round": "/attest-round",
   endorsers: "/endorsements",
+  upgrades: "/upgrades",
   snapshot: "/snapshot",
 };
 
@@ -462,6 +465,8 @@ function App() {
         {section === "attest-round" && <AttestRoundEntryPage />}
 
         {section === "endorsers" && <EndorsersPage wallet={wallet} />}
+
+        {section === "upgrades" && <UpgradesPage wallet={wallet} />}
 
         {/* Vote status */}
         {section === "vote-status" && (
