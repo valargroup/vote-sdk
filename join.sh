@@ -30,6 +30,8 @@ main() {
 CHAIN_ID="svote-1"
 INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
+ORIGINAL_PATH="${PATH}"
+PATH_REFRESH_COMMAND=""
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
 SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-https://snapshots.valargroup.org}"
 # Canonical voting-config (same payload wallets fetch). Override for staging
@@ -315,6 +317,95 @@ sha256_file() {
   fi
 }
 
+path_has_dir() {
+  local search_path="$1"
+  local dir="$2"
+
+  case ":${search_path}:" in
+    *":${dir}:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+shell_single_quote() {
+  local value="$1"
+
+  case "${value}" in
+    *"'"*) return 1 ;;
+    *) printf "'%s'" "${value}" ;;
+  esac
+}
+
+append_path_snippet_if_missing() {
+  local profile_file="$1"
+  local install_dir_literal="$2"
+  local marker="# Shielded-Vote CLI path"
+
+  if [ -f "${profile_file}" ] &&
+     grep -Fq "${marker}" "${profile_file}" &&
+     grep -Fq "shielded_vote_bin=${install_dir_literal}" "${profile_file}"; then
+    return 2
+  fi
+
+  mkdir -p "$(dirname "${profile_file}")"
+  if {
+    echo ""
+    echo "${marker}"
+    echo "shielded_vote_bin=${install_dir_literal}"
+    echo 'case ":${PATH}:" in'
+    echo '  *":${shielded_vote_bin}:"*) ;;'
+    echo '  *) export PATH="${shielded_vote_bin}:${PATH}" ;;'
+    echo 'esac'
+    echo 'unset shielded_vote_bin'
+  } >> "${profile_file}"; then
+    echo "Added ${INSTALL_DIR} to future shell PATH via ${profile_file}."
+    return 0
+  fi
+
+  echo "WARNING: Could not update ${profile_file}; add ${INSTALL_DIR} to PATH manually."
+  return 1
+}
+
+ensure_install_dir_on_user_path() {
+  local install_dir_literal
+  local profile_file_literal
+  local shell_name
+  local profile_file
+  local refresh_prefix
+  local append_status
+
+  if path_has_dir "${ORIGINAL_PATH}" "${INSTALL_DIR}"; then
+    return 0
+  fi
+
+  if ! install_dir_literal=$(shell_single_quote "${INSTALL_DIR}"); then
+    echo "NOTE: ${INSTALL_DIR} is not on your shell PATH."
+    echo "  Add it manually to run 'svoted' without a full path."
+    echo "  For this terminal: export PATH=\"${INSTALL_DIR}:\$PATH\""
+    return 0
+  fi
+
+  shell_name="$(basename "${SHELL:-}")"
+  case "${shell_name}" in
+    zsh) profile_file="${HOME}/.zshrc"; refresh_prefix="source" ;;
+    bash) profile_file="${HOME}/.bashrc"; refresh_prefix="source" ;;
+    *) profile_file="${HOME}/.profile"; refresh_prefix="." ;;
+  esac
+
+  append_status=0
+  append_path_snippet_if_missing "${profile_file}" "${install_dir_literal}" || append_status=$?
+  if [ "${append_status}" = "0" ] || [ "${append_status}" = "2" ]; then
+    if profile_file_literal=$(shell_single_quote "${profile_file}"); then
+      PATH_REFRESH_COMMAND="${refresh_prefix} ${profile_file_literal}"
+      echo "For this terminal, run: ${PATH_REFRESH_COMMAND}"
+      return 0
+    fi
+  fi
+
+  PATH_REFRESH_COMMAND="export PATH=\"${INSTALL_DIR}:\$PATH\""
+  echo "For this terminal, run: ${PATH_REFRESH_COMMAND}"
+}
+
 cleanup_snapshot_tmp() {
   if [ -n "${SNAPSHOT_TMP_DIR:-}" ]; then
     rm -rf "${SNAPSHOT_TMP_DIR}"
@@ -544,6 +635,7 @@ echo "Peers: ${PERSISTENT_PEERS}"
 # developers can skip the download by setting SVOTE_LOCAL_BINARIES=1 before
 # running the script; that local svoted must report the active chain version.
 
+DOWNLOADED_RELEASE_BINARIES=0
 if [ "${SVOTE_LOCAL_BINARIES:-0}" = "1" ] && command -v svoted > /dev/null 2>&1 && command -v create-val-tx > /dev/null 2>&1; then
   LOCAL_SVOTED_VERSION=$(svoted version 2>/dev/null | tr -d '[:space:]' || true)
   if [ "$LOCAL_SVOTED_VERSION" != "$CHAIN_BINARY_VERSION" ] && [ "${SVOTE_ALLOW_VERSION_MISMATCH:-0}" != "1" ]; then
@@ -695,6 +787,7 @@ else
 
   hash -r
   echo "Installed: ${INSTALL_DIR}/svoted, ${INSTALL_DIR}/create-val-tx"
+  DOWNLOADED_RELEASE_BINARIES=1
 fi
 
 # Ensure install dir is on PATH for this session.
@@ -702,6 +795,9 @@ case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;
   *) export PATH="${INSTALL_DIR}:${PATH}" ;;
 esac
+if [ "${DOWNLOADED_RELEASE_BINARIES}" = "1" ]; then
+  ensure_install_dir_on_user_path
+fi
 
 # ─── Initialize node ─────────────────────────────────────────────────────────
 
@@ -1315,6 +1411,10 @@ else
   echo "  Chain logs:     journalctl -u ${SERVICE_NAME} -f"
   SERVICE_WATCHER_NAME="svoted (systemd)"
   SERVICE_WATCHER_REMOVE="sudo systemctl stop svoted"
+fi
+echo "  Chain status:   svoted status --home ${HOME_DIR}"
+if [ -n "${PATH_REFRESH_COMMAND}" ]; then
+  echo "  Shell PATH:     ${PATH_REFRESH_COMMAND}"
 fi
 echo ""
 echo "Next step: message the voting admin and ask them to approve you as a validator."

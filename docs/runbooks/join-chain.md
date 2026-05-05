@@ -41,6 +41,8 @@ curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --domai
 
 The installer prompts for a moniker and for the TLS mode, restores the latest vote chain snapshot if one is published, and catches up from peers. With no snapshot metadata available — the usual case right after a chain reset — it syncs from genesis instead.
 
+`join.sh` installs `svoted` and `create-val-tx` into `~/.local/bin` by default. If that directory is not already on your shell `PATH`, the installer adds it to your shell profile for future terminals and prints the `source ~/.zshrc` / `source ~/.bashrc` refresh command, or the one-line `export PATH="$HOME/.local/bin:$PATH"` fallback, for the current terminal.
+
 Service controls after install:
 
 ```bash
@@ -368,7 +370,7 @@ Interactive runs without `SVOTE_DOMAIN` and without an explicit `SVOTE_SKIP_CADD
 |-----------------|---------|------|
 | `--domain <host>` or `SVOTE_DOMAIN` | unset | Public hostname for Caddy + `VALIDATOR_URL`. When set, the installer skips the TLS menu and treats Caddy setup for this static hostname as required. |
 | `SVOTE_MONIKER` | interactive prompt | Validator moniker; required for unattended installs. |
-| `SVOTE_INSTALL_DIR` | `$HOME/.local/bin` | Where `svoted`, `create-val-tx`, and `svoted-wrapper.sh` are installed. |
+| `SVOTE_INSTALL_DIR` | `$HOME/.local/bin` | Where `svoted`, `create-val-tx`, and `svoted-wrapper.sh` are installed. For downloaded release binaries, `join.sh` adds this directory to the user's future shell `PATH` if it was missing. |
 | `SVOTE_HOME` | `$HOME/.svoted` | Chain data + config + keys. |
 | `SVOTE_SNAPSHOT_BASE_URL` | `https://snapshots.valargroup.org` | Snapshot service base URL. `join.sh` fetches `${SVOTE_SNAPSHOT_BASE_URL}/latest.json` and restores the archive it declares when metadata is available. |
 | `SVOTE_SKIP_SNAPSHOT` | `0` | When `1`, skip snapshot restore and sync from genesis. With `0` (default), missing metadata falls back to genesis but a broken archive is fatal. |
