@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 const MaxUpgradeInfoBytes = 4096
@@ -235,10 +237,46 @@ func (msg *MsgScheduleUpgrade) ValidateBasic() error {
 	return nil
 }
 
+// ValidateBasic performs stateless validation for MsgSetEndorser.
+func (msg *MsgSetEndorser) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if _, err := sdk.AccAddressFromBech32(msg.Creator); err != nil {
+		return fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", ErrInvalidField, msg.Creator, err)
+	}
+	if err := ValidateEndorserID(msg.EndorserId); err != nil {
+		return err
+	}
+	if msg.Address != "" {
+		if _, err := sdk.AccAddressFromBech32(msg.Address); err != nil {
+			return fmt.Errorf("%w: address %q is not a valid bech32 address: %v", ErrInvalidField, msg.Address, err)
+		}
+	}
+	return nil
+}
+
 // ValidateBasic performs stateless validation for MsgCancelUpgrade.
 func (msg *MsgCancelUpgrade) ValidateBasic() error {
 	if msg.Creator == "" {
 		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	return nil
+}
+
+// ValidateBasic performs stateless validation for MsgEndorseRound.
+func (msg *MsgEndorseRound) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if _, err := sdk.AccAddressFromBech32(msg.Creator); err != nil {
+		return fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", ErrInvalidField, msg.Creator, err)
+	}
+	if err := ValidateEndorserID(msg.EndorserId); err != nil {
+		return err
+	}
+	if len(msg.VoteRoundId) != RoundIDLen {
+		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
 	}
 	return nil
 }

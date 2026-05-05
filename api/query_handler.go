@@ -35,6 +35,8 @@ import (
 //	GET /shielded-vote/v1/ceremony
 //	GET /shielded-vote/v1/pallas-keys
 //	GET /shielded-vote/v1/vote-managers
+//	GET /shielded-vote/v1/endorsers
+//	GET /shielded-vote/v1/endorsed-rounds/{id}
 //	GET /shielded-vote/v1/genesis
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
 	qh := &queryHandler{clientCtx: clientCtx}
@@ -54,6 +56,8 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.Handle("/shielded-vote/v1/ceremony", trace(http.HandlerFunc(qh.handleCeremonyState))).Methods("GET")
 	router.Handle("/shielded-vote/v1/pallas-keys", trace(http.HandlerFunc(qh.handlePallasKeys))).Methods("GET")
 	router.Handle("/shielded-vote/v1/vote-managers", trace(http.HandlerFunc(qh.handleVoteManagers))).Methods("GET")
+	router.Handle("/shielded-vote/v1/endorsers", trace(http.HandlerFunc(qh.handleEndorsers))).Methods("GET")
+	router.Handle("/shielded-vote/v1/endorsed-rounds/{id}", trace(http.HandlerFunc(qh.handleEndorsedRounds))).Methods("GET")
 	router.Handle("/shielded-vote/v1/genesis", trace(http.HandlerFunc(qh.handleGenesis))).Methods("GET")
 }
 
@@ -309,6 +313,36 @@ func (qh *queryHandler) handleVoteManagers(w http.ResponseWriter, _ *http.Reques
 	resp := &types.QueryVoteManagersResponse{}
 
 	if err := qh.abciQuery("/svote.v1.Query/VoteManagers", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handleEndorsers(w http.ResponseWriter, _ *http.Request) {
+	req := &types.QueryEndorsersRequest{}
+	resp := &types.QueryEndorsersResponse{}
+
+	if err := qh.abciQuery("/svote.v1.Query/Endorsers", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handleEndorsedRounds(w http.ResponseWriter, r *http.Request) {
+	endorserID := mux.Vars(r)["id"]
+	if err := types.ValidateEndorserID(endorserID); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid endorser_id: %v", err))
+		return
+	}
+
+	req := &types.QueryEndorsedRoundsRequest{EndorserId: endorserID}
+	resp := &types.QueryEndorsedRoundsResponse{}
+
+	if err := qh.abciQuery("/svote.v1.Query/EndorsedRounds", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}

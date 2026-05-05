@@ -312,6 +312,25 @@ export async function getVoteManagers(): Promise<{ vote_manager_addresses: strin
   return fetchJson<{ vote_manager_addresses: string[] }>("/shielded-vote/v1/vote-managers");
 }
 
+export interface EndorserEntry {
+  endorser_id: string;
+  address: string;
+}
+
+export async function getEndorsers(): Promise<{ endorsers: EndorserEntry[] }> {
+  const resp = await fetchJson<{ endorsers?: EndorserEntry[] }>("/shielded-vote/v1/endorsers");
+  return { endorsers: resp.endorsers ?? [] };
+}
+
+export async function getEndorsedRounds(
+  endorserId: string
+): Promise<{ vote_round_ids: string[] }> {
+  const resp = await fetchJson<{ vote_round_ids?: string[] }>(
+    `/shielded-vote/v1/endorsed-rounds/${encodeURIComponent(endorserId)}`
+  );
+  return { vote_round_ids: resp.vote_round_ids ?? [] };
+}
+
 export async function getHelperStatus(): Promise<HelperStatus> {
   return fetchJson<HelperStatus>("/shielded-vote/v1/status");
 }

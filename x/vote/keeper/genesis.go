@@ -63,6 +63,18 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 		}
 	}
 
+	// Restore endorser mappings and append-only endorsements.
+	for _, endorser := range genesis.Endorsers {
+		if err := k.SetEndorser(kvStore, endorser.EndorserId, endorser.Address); err != nil {
+			return err
+		}
+	}
+	for _, endorsed := range genesis.EndorsedRounds {
+		if err := k.AddEndorsedRound(kvStore, endorsed.EndorserId, endorsed.VoteRoundId); err != nil {
+			return err
+		}
+	}
+
 	// Restore min ceremony validators (default 1 if unset).
 	minVal := genesis.MinCeremonyValidators
 	if minVal == 0 {
@@ -148,6 +160,19 @@ func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, erro
 	if vms != nil {
 		gs.VoteManagerAddresses = vms.Addresses
 	}
+
+	// Endorser mappings and append-only endorsements.
+	if err := k.IterateEndorsers(kvStore, func(endorser *types.Endorser) bool {
+		gs.Endorsers = append(gs.Endorsers, endorser)
+		return false
+	}); err != nil {
+		return nil, fmt.Errorf("export endorsers: %w", err)
+	}
+	endorsedRounds, err := exportEndorsedRounds(kvStore)
+	if err != nil {
+		return nil, fmt.Errorf("export endorsed rounds: %w", err)
+	}
+	gs.EndorsedRounds = endorsedRounds
 
 	// Min ceremony validators (singleton).
 	minVal, err := k.GetMinCeremonyValidators(kvStore)
@@ -345,6 +370,46 @@ func exportNullifiers(kvStore store.KVStore) ([]*types.NullifierEntry, error) {
 			NullifierType: uint32(nfType),
 			RoundId:       roundID,
 			Nullifier:     nf,
+		})
+	}
+	return entries, nil
+}
+
+// exportEndorsedRounds iterates the 0x17 prefix and returns all stored endorsements.
+// Key format: 0x17 || endorser_id_bytes || 0x00 || round_id (32 bytes) -> []byte{1}
+func exportEndorsedRounds(kvStore store.KVStore) ([]*types.EndorsedRound, error) {
+	prefix := types.EndorsedRoundPrefix
+	end := types.PrefixEndBytes(prefix)
+
+	iter, err := kvStore.Iterator(prefix, end)
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	var entries []*types.EndorsedRound
+	prefixLen := len(prefix)
+	for ; iter.Valid(); iter.Next() {
+		key := iter.Key()
+		if len(key) < prefixLen+1+types.RoundIDLen {
+			continue
+		}
+		rest := key[prefixLen:]
+		separator := -1
+		for i, b := range rest {
+			if b == 0 {
+				separator = i
+				break
+			}
+		}
+		if separator <= 0 || len(rest[separator+1:]) != types.RoundIDLen {
+			continue
+		}
+		roundID := make([]byte, types.RoundIDLen)
+		copy(roundID, rest[separator+1:])
+		entries = append(entries, &types.EndorsedRound{
+			EndorserId:  string(rest[:separator]),
+			VoteRoundId: roundID,
 		})
 	}
 	return entries, nil

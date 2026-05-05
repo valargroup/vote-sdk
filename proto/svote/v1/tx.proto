@@ -27,6 +27,8 @@ service Msg {
   rpc AuthorizedSend(MsgAuthorizedSend) returns (MsgAuthorizedSendResponse);
   rpc ScheduleUpgrade(MsgScheduleUpgrade) returns (MsgScheduleUpgradeResponse);
   rpc CancelUpgrade(MsgCancelUpgrade) returns (MsgCancelUpgradeResponse);
+  rpc SetEndorser(MsgSetEndorser) returns (MsgSetEndorserResponse);
+  rpc EndorseRound(MsgEndorseRound) returns (MsgEndorseRoundResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -241,3 +243,28 @@ message MsgCancelUpgrade {
 }
 
 message MsgCancelUpgradeResponse {}
+
+// MsgSetEndorser creates, rotates, or clears an endorser_id -> bech32 address
+// mapping. Only vote managers may execute this message. An empty address clears
+// the mapping; existing endorsements remain queryable.
+message MsgSetEndorser {
+  option (cosmos.msg.v1.signer) = "creator";
+
+  string creator     = 1; // Sender address (must be a current vote manager)
+  string endorser_id = 2; // Stable identifier, e.g. "zodl"
+  string address     = 3; // Canonicalized on-chain; empty clears the mapping
+}
+
+message MsgSetEndorserResponse {}
+
+// MsgEndorseRound records that endorser_id endorses vote_round_id. Only the
+// current address mapped to endorser_id may execute this message.
+message MsgEndorseRound {
+  option (cosmos.msg.v1.signer) = "creator";
+
+  string creator       = 1;
+  string endorser_id   = 2;
+  bytes  vote_round_id = 3;
+}
+
+message MsgEndorseRoundResponse {}

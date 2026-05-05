@@ -34,6 +34,8 @@ const (
 	Msg_AuthorizedSend_FullMethodName               = "/svote.v1.Msg/AuthorizedSend"
 	Msg_ScheduleUpgrade_FullMethodName              = "/svote.v1.Msg/ScheduleUpgrade"
 	Msg_CancelUpgrade_FullMethodName                = "/svote.v1.Msg/CancelUpgrade"
+	Msg_SetEndorser_FullMethodName                  = "/svote.v1.Msg/SetEndorser"
+	Msg_EndorseRound_FullMethodName                 = "/svote.v1.Msg/EndorseRound"
 )
 
 // MsgClient is the client API for Msg service.
@@ -60,6 +62,8 @@ type MsgClient interface {
 	AuthorizedSend(ctx context.Context, in *MsgAuthorizedSend, opts ...grpc.CallOption) (*MsgAuthorizedSendResponse, error)
 	ScheduleUpgrade(ctx context.Context, in *MsgScheduleUpgrade, opts ...grpc.CallOption) (*MsgScheduleUpgradeResponse, error)
 	CancelUpgrade(ctx context.Context, in *MsgCancelUpgrade, opts ...grpc.CallOption) (*MsgCancelUpgradeResponse, error)
+	SetEndorser(ctx context.Context, in *MsgSetEndorser, opts ...grpc.CallOption) (*MsgSetEndorserResponse, error)
+	EndorseRound(ctx context.Context, in *MsgEndorseRound, opts ...grpc.CallOption) (*MsgEndorseRoundResponse, error)
 }
 
 type msgClient struct {
@@ -220,6 +224,26 @@ func (c *msgClient) CancelUpgrade(ctx context.Context, in *MsgCancelUpgrade, opt
 	return out, nil
 }
 
+func (c *msgClient) SetEndorser(ctx context.Context, in *MsgSetEndorser, opts ...grpc.CallOption) (*MsgSetEndorserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgSetEndorserResponse)
+	err := c.cc.Invoke(ctx, Msg_SetEndorser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) EndorseRound(ctx context.Context, in *MsgEndorseRound, opts ...grpc.CallOption) (*MsgEndorseRoundResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgEndorseRoundResponse)
+	err := c.cc.Invoke(ctx, Msg_EndorseRound_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MsgServer is the server API for Msg service.
 // All implementations must embed UnimplementedMsgServer
 // for forward compatibility.
@@ -244,6 +268,8 @@ type MsgServer interface {
 	AuthorizedSend(context.Context, *MsgAuthorizedSend) (*MsgAuthorizedSendResponse, error)
 	ScheduleUpgrade(context.Context, *MsgScheduleUpgrade) (*MsgScheduleUpgradeResponse, error)
 	CancelUpgrade(context.Context, *MsgCancelUpgrade) (*MsgCancelUpgradeResponse, error)
+	SetEndorser(context.Context, *MsgSetEndorser) (*MsgSetEndorserResponse, error)
+	EndorseRound(context.Context, *MsgEndorseRound) (*MsgEndorseRoundResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
 
@@ -298,6 +324,12 @@ func (UnimplementedMsgServer) ScheduleUpgrade(context.Context, *MsgScheduleUpgra
 }
 func (UnimplementedMsgServer) CancelUpgrade(context.Context, *MsgCancelUpgrade) (*MsgCancelUpgradeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CancelUpgrade not implemented")
+}
+func (UnimplementedMsgServer) SetEndorser(context.Context, *MsgSetEndorser) (*MsgSetEndorserResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetEndorser not implemented")
+}
+func (UnimplementedMsgServer) EndorseRound(context.Context, *MsgEndorseRound) (*MsgEndorseRoundResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EndorseRound not implemented")
 }
 func (UnimplementedMsgServer) mustEmbedUnimplementedMsgServer() {}
 func (UnimplementedMsgServer) testEmbeddedByValue()             {}
@@ -590,6 +622,42 @@ func _Msg_CancelUpgrade_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_SetEndorser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgSetEndorser)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).SetEndorser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_SetEndorser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).SetEndorser(ctx, req.(*MsgSetEndorser))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_EndorseRound_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgEndorseRound)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).EndorseRound(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_EndorseRound_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).EndorseRound(ctx, req.(*MsgEndorseRound))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Msg_ServiceDesc is the grpc.ServiceDesc for Msg service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -656,6 +724,14 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CancelUpgrade",
 			Handler:    _Msg_CancelUpgrade_Handler,
+		},
+		{
+			MethodName: "SetEndorser",
+			Handler:    _Msg_SetEndorser_Handler,
+		},
+		{
+			MethodName: "EndorseRound",
+			Handler:    _Msg_EndorseRound_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

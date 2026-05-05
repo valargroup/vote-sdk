@@ -21,6 +21,8 @@ const (
 	EventTypeCeremonyValidatorJailed  = "ceremony_validator_jailed"
 	EventTypeScheduleUpgrade          = "schedule_upgrade"
 	EventTypeCancelUpgrade            = "cancel_upgrade"
+	EventTypeSetEndorser              = "set_endorser"
+	EventTypeEndorseRound             = "endorse_round"
 )
 
 // Event attribute keys.
@@ -53,4 +55,6 @@ const (
 	AttributeKeyUpgradeName      = "upgrade_name"
 	AttributeKeyUpgradeInfo      = "upgrade_info"
 	AttributeKeyReplaceExisting  = "replace_existing"
+	AttributeKeyEndorserID       = "endorser_id"
+	AttributeKeyEndorserAddress  = "endorser_address"
 )
