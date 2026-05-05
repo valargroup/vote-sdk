@@ -41,16 +41,45 @@ VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://valargroup.github.io/token-holde
 DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-https://vote-chain-primary.valargroup.org}"
 SVOTE_ADMIN_URL="${SVOTE_ADMIN_URL:-${DEFAULT_ADMIN_API_BASE}}"
 
-# Parse --domain flag for TLS hostname override.
+# Parse TLS selection flags. Interactive installs must choose a mode; unattended
+# installs can pass --tls-mode/SVOTE_TLS_MODE or the legacy SVOTE_SKIP_CADDY=1.
 SVOTE_DOMAIN="${SVOTE_DOMAIN:-}"
-DOMAIN_MODE="auto"
-if [ -n "$SVOTE_DOMAIN" ]; then
-  DOMAIN_MODE="explicit"
-fi
+SVOTE_TLS_MODE="${SVOTE_TLS_MODE:-}"
+DOMAIN_MODE=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --domain) SVOTE_DOMAIN="$2"; DOMAIN_MODE="explicit"; shift 2 ;;
-    --domain=*) SVOTE_DOMAIN="${1#--domain=}"; DOMAIN_MODE="explicit"; shift ;;
+    --domain)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --domain requires a hostname."
+        exit 1
+      fi
+      SVOTE_DOMAIN="$2"
+      shift 2
+      ;;
+    --domain=*)
+      SVOTE_DOMAIN="${1#--domain=}"
+      if [ -z "${SVOTE_DOMAIN}" ]; then
+        echo "ERROR: --domain requires a hostname."
+        exit 1
+      fi
+      shift
+      ;;
+    --tls-mode)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --tls-mode requires one of: skip, custom, auto."
+        exit 1
+      fi
+      SVOTE_TLS_MODE="$2"
+      shift 2
+      ;;
+    --tls-mode=*)
+      SVOTE_TLS_MODE="${1#--tls-mode=}"
+      if [ -z "${SVOTE_TLS_MODE}" ]; then
+        echo "ERROR: --tls-mode requires one of: skip, custom, auto."
+        exit 1
+      fi
+      shift
+      ;;
     *) shift ;;
   esac
 done
@@ -909,54 +938,154 @@ echo "Node configured."
 # Optionally sets up Caddy as a TLS reverse proxy in front of the chain REST API
 # (port 1317). Caddy auto-provisions Let's Encrypt certificates.
 #
-# By default, interactive runs prompt for the TLS mode and non-interactive runs
-# skip Caddy. Set SVOTE_DOMAIN or pass --domain to install Caddy for a static DNS
-# name, or choose auto sslip.io from the interactive prompt for trial installs.
+# Interactive runs prompt for the TLS mode and wait for an explicit selection.
+# Unattended runs must set SVOTE_TLS_MODE/--tls-mode, SVOTE_DOMAIN/--domain, or
+# the legacy SVOTE_SKIP_CADDY=1. Custom-domain Caddy requires SVOTE_DOMAIN or
+# --domain; auto mode uses sslip.io for trial installs.
 
 echo ""
 echo "=== Setting up TLS reverse proxy ==="
 
-prompt_tls_mode() {
-  if ! { : < /dev/tty; } 2>/dev/null; then
-    echo "INFO: No TTY for the TLS prompt; defaulting to skip Caddy."
-    echo "  Set SVOTE_DOMAIN=<host> for Caddy + custom domain, or run interactively to pick sslip.io."
-    DOMAIN_MODE="skip"
-    SVOTE_SKIP_CADDY=1
-    return 0
-  fi
-
-  echo ""
-  echo "How would you like to expose this validator over HTTPS?"
-  echo "  1) Skip Caddy                     (terminate TLS upstream yourself)   [default]"
-  echo "  2) Custom domain + Caddy          (production; static DNS record required)"
-  echo "  3) Auto: <ip>.sslip.io + Caddy    (trial / smoke; static IP required)"
-  printf "Choose [1-3] (default 1): "
-
-  local choice
-  read -r -t "${SVOTE_TLS_PROMPT_TIMEOUT:-30}" choice < /dev/tty || choice=""
-  case "$choice" in
-    ""|1)
-      DOMAIN_MODE="skip"
-      SVOTE_SKIP_CADDY=1
-      ;;
-    2)
-      echo "Configure DNS before continuing:"
-      echo "  val.example.org.  A  <your-server-public-IPv4>"
-      printf "Domain (e.g. val.example.org): "
-      read -r SVOTE_DOMAIN < /dev/tty
-      DOMAIN_MODE="explicit"
-      ;;
-    3) ;;
+normalize_tls_mode() {
+  local mode
+  mode="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$mode" in
+    skip|none|off|1) echo "skip" ;;
+    custom|domain|explicit|2) echo "custom" ;;
+    auto|sslip|sslip.io|3) echo "auto" ;;
     *)
-      echo "Unrecognized choice '${choice}'; defaulting to skip Caddy."
-      DOMAIN_MODE="skip"
-      SVOTE_SKIP_CADDY=1
+      echo "ERROR: invalid TLS mode '${1}'. Use one of: skip, custom, auto." >&2
+      return 1
       ;;
   esac
 }
 
-if [ "${SVOTE_SKIP_CADDY:-0}" != "1" ] && [ -z "${SVOTE_DOMAIN}" ]; then
+print_tls_config_hint() {
+  echo "  Use one of:"
+  echo "    curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --tls-mode skip"
+  echo "    curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --tls-mode custom --domain val.example.org"
+  echo "    curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --tls-mode auto"
+  echo "  Environment variables also work, for example:"
+  echo "    curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | SVOTE_TLS_MODE=auto bash"
+}
+
+prompt_tls_domain() {
+  if [ -n "${SVOTE_DOMAIN}" ]; then
+    return 0
+  fi
+  if ! { : < /dev/tty; } 2>/dev/null; then
+    echo "ERROR: custom TLS mode requires --domain <host> or SVOTE_DOMAIN=<host> for unattended installs."
+    print_tls_config_hint
+    exit 1
+  fi
+
+  echo "Configure DNS before continuing:"
+  echo "  val.example.org.  A  <your-server-public-IPv4>"
+  while [ -z "${SVOTE_DOMAIN}" ]; do
+    printf "Domain (e.g. val.example.org): "
+    if ! read -r SVOTE_DOMAIN < /dev/tty; then
+      echo "ERROR: failed to read TLS domain from /dev/tty."
+      exit 1
+    fi
+    if [ -z "${SVOTE_DOMAIN}" ]; then
+      echo "Domain is required for custom-domain Caddy mode."
+    fi
+  done
+}
+
+prompt_tls_mode() {
+  if ! { : < /dev/tty; } 2>/dev/null; then
+    echo "ERROR: TLS mode is required for unattended join.sh installs."
+    print_tls_config_hint
+    exit 1
+  fi
+
+  echo ""
+  echo "How would you like to expose this validator over HTTPS?"
+  echo "  1) Skip Caddy                     (terminate TLS upstream yourself)"
+  echo "  2) Custom domain + Caddy          (production; static DNS record required)"
+  echo "  3) Auto: <ip>.sslip.io + Caddy    (trial / smoke; static IP required)"
+
+  local choice
+  while true; do
+    printf "Choose [1-3]: "
+    if ! read -r choice < /dev/tty; then
+      echo "ERROR: failed to read TLS mode from /dev/tty."
+      exit 1
+    fi
+    case "$choice" in
+      1)
+        DOMAIN_MODE="skip"
+        SVOTE_SKIP_CADDY=1
+        return 0
+        ;;
+      2)
+        DOMAIN_MODE="explicit"
+        SVOTE_SKIP_CADDY=0
+        prompt_tls_domain
+        return 0
+        ;;
+      3)
+        DOMAIN_MODE="auto"
+        SVOTE_SKIP_CADDY=0
+        return 0
+        ;;
+      "")
+        echo "A TLS mode selection is required."
+        ;;
+      *)
+        echo "Unrecognized choice '${choice}'. Choose 1, 2, or 3."
+        ;;
+    esac
+  done
+}
+
+if [ -n "${SVOTE_TLS_MODE}" ]; then
+  if ! SVOTE_TLS_MODE="$(normalize_tls_mode "${SVOTE_TLS_MODE}")"; then
+    exit 1
+  fi
+fi
+
+if [ -n "${SVOTE_SKIP_CADDY:-}" ] && [ "${SVOTE_SKIP_CADDY}" != "0" ] && [ "${SVOTE_SKIP_CADDY}" != "1" ]; then
+  echo "ERROR: SVOTE_SKIP_CADDY must be 0 or 1."
+  exit 1
+fi
+
+if [ -n "${SVOTE_TLS_MODE}" ]; then
+  case "${SVOTE_TLS_MODE}" in
+    skip)
+      if [ -n "${SVOTE_DOMAIN}" ]; then
+        echo "ERROR: --tls-mode skip cannot be combined with --domain/SVOTE_DOMAIN."
+        exit 1
+      fi
+      DOMAIN_MODE="skip"
+      SVOTE_SKIP_CADDY=1
+      ;;
+    custom)
+      DOMAIN_MODE="explicit"
+      SVOTE_SKIP_CADDY=0
+      ;;
+    auto)
+      if [ -n "${SVOTE_DOMAIN}" ]; then
+        echo "ERROR: --tls-mode auto cannot be combined with --domain/SVOTE_DOMAIN."
+        exit 1
+      fi
+      DOMAIN_MODE="auto"
+      SVOTE_SKIP_CADDY=0
+      ;;
+  esac
+elif [ -n "${SVOTE_DOMAIN}" ]; then
+  DOMAIN_MODE="explicit"
+  SVOTE_SKIP_CADDY=0
+elif [ "${SVOTE_SKIP_CADDY:-}" = "1" ]; then
+  DOMAIN_MODE="skip"
+fi
+
+if [ -z "${DOMAIN_MODE}" ]; then
   prompt_tls_mode
+fi
+if [ "${DOMAIN_MODE}" = "explicit" ] && [ -z "${SVOTE_DOMAIN}" ]; then
+  prompt_tls_domain
 fi
 
 if [ "${SVOTE_SKIP_CADDY:-0}" = "1" ]; then
@@ -971,7 +1100,7 @@ elif [ -z "$SVOTE_DOMAIN" ]; then
   PUBLIC_IP=$(curl -4 -fsSL --connect-timeout 5 https://ifconfig.me 2>/dev/null || \
     curl -4 -fsSL --connect-timeout 5 https://api.ipify.org 2>/dev/null || echo "")
   if ! echo "$PUBLIC_IP" | jq -eR 'test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$")' > /dev/null 2>&1; then
-    handle_public_url_failure "Could not detect a public IPv4 address for sslip.io. Detected value: ${PUBLIC_IP:-<empty>}. Re-run with --domain <hostname>, set SVOTE_DOMAIN, or set SVOTE_SKIP_CADDY=1."
+    handle_public_url_failure "Could not detect a public IPv4 address for sslip.io. Detected value: ${PUBLIC_IP:-<empty>}. Re-run with --tls-mode custom --domain <hostname>, set SVOTE_DOMAIN, or use --tls-mode skip."
   else
     SVOTE_DOMAIN="$(echo "$PUBLIC_IP" | tr '.' '-').sslip.io"
     echo "Detected public IP: ${PUBLIC_IP}"
@@ -980,7 +1109,7 @@ elif [ -z "$SVOTE_DOMAIN" ]; then
 fi
 
 if [ "$DOMAIN_MODE" != "skip" ] && [ -n "$SVOTE_DOMAIN" ] && echo "$SVOTE_DOMAIN" | jq -eR 'contains(":") or test("\\s")' > /dev/null 2>&1; then
-  handle_public_url_failure "Invalid TLS hostname '${SVOTE_DOMAIN}'. Use a DNS hostname without colons/spaces, or set SVOTE_SKIP_CADDY=1."
+  handle_public_url_failure "Invalid TLS hostname '${SVOTE_DOMAIN}'. Use a DNS hostname without colons/spaces, or use --tls-mode skip."
   SVOTE_DOMAIN=""
 fi
 
