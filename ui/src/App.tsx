@@ -13,6 +13,7 @@ import { RoundsList } from "./components/RoundsList";
 import { AttestRoundEntryPage } from "./components/AttestRoundEntryPage";
 import { EndorsersPage } from "./components/EndorsersPage";
 import { useStore } from "./store/useStore";
+import { SAMPLE_ROUND_TEMPLATES, type SampleRoundTemplateId } from "./store/sampleRounds";
 import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft } from "lucide-react";
 import type { Proposal, RoundSettings, RoundStatus, VotingRound } from "./types";
 import { MAX_VOTE_OPTIONS, MIN_VOTE_OPTIONS } from "./constants/vote";
@@ -311,8 +312,8 @@ function App() {
     [setSection]
   );
 
-  const handleCreateSampleRound = useCallback(() => {
-    store.createSampleRound();
+  const handleCreateSampleRound = useCallback((templateId: SampleRoundTemplateId) => {
+    store.createSampleRound(templateId);
     setSection("builder");
   }, [store, setSection]);
 
@@ -792,7 +793,7 @@ function AboutPage({
   onOpenSample,
 }: {
   onCreateRound: () => void;
-  onOpenSample: () => void;
+  onOpenSample: (templateId: SampleRoundTemplateId) => void;
 }) {
   return (
     <div className="flex-1 overflow-y-auto">
@@ -827,23 +828,25 @@ function AboutPage({
           Getting started
         </h2>
         <div className="space-y-3 mb-8">
-          <button
-            onClick={onOpenSample}
-            className="w-full flex items-start gap-3 bg-surface-1 border border-border-subtle hover:border-accent/30 rounded-xl p-4 text-left transition-colors cursor-pointer group"
-          >
-            <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0 mt-0.5">
-              <FileText size={16} className="text-accent" />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-text-primary group-hover:text-accent-glow transition-colors">
-                Start from a sample round
-              </p>
-              <p className="text-[11px] text-text-muted mt-0.5">
-                Create a new draft pre-loaded with 3 sample NU7 proposals
-                to see how the builder works.
-              </p>
-            </div>
-          </button>
+          {SAMPLE_ROUND_TEMPLATES.map((template) => (
+            <button
+              key={template.id}
+              onClick={() => onOpenSample(template.id)}
+              className="w-full flex items-start gap-3 bg-surface-1 border border-border-subtle hover:border-accent/30 rounded-xl p-4 text-left transition-colors cursor-pointer group"
+            >
+              <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0 mt-0.5">
+                <FileText size={16} className="text-accent" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-text-primary group-hover:text-accent-glow transition-colors">
+                  Start from {template.name.replace(/^\(SAMPLE\)\s*/, "")}
+                </p>
+                <p className="text-[11px] text-text-muted mt-0.5">
+                  {template.summary}
+                </p>
+              </div>
+            </button>
+          ))}
 
           <button
             onClick={onCreateRound}
