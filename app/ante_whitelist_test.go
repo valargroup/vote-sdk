@@ -179,6 +179,14 @@ func TestWhitelist_AllowedMessagesPassThrough(t *testing.T) {
 				VoteRoundId: make([]byte, votetypes.RoundIDLen),
 			},
 		},
+		{
+			name: "MsgClearRoundEndorsement",
+			msg: &votetypes.MsgClearRoundEndorsement{
+				Creator:     signerAddr.String(),
+				EndorserId:  "zodl",
+				VoteRoundId: make([]byte, votetypes.RoundIDLen),
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -250,6 +258,7 @@ func TestDefaultAllowedMessages_ContainsExpectedTypes(t *testing.T) {
 	require.True(t, allowed["/svote.v1.MsgCancelUpgrade"])
 	require.True(t, allowed["/svote.v1.MsgSetEndorser"])
 	require.True(t, allowed["/svote.v1.MsgEndorseRound"])
+	require.True(t, allowed["/svote.v1.MsgClearRoundEndorsement"])
 	require.True(t, allowed["/cosmos.staking.v1beta1.MsgCreateValidator"])
 	require.True(t, allowed["/cosmos.staking.v1beta1.MsgEditValidator"])
 	require.True(t, allowed["/cosmos.slashing.v1beta1.MsgUnjail"])

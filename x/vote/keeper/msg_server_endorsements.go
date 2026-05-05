@@ -58,7 +58,7 @@ func (ms msgServer) SetEndorser(goCtx context.Context, msg *types.MsgSetEndorser
 	return &types.MsgSetEndorserResponse{}, nil
 }
 
-// EndorseRound appends one endorser_id/round endorsement. Endorser address only.
+// EndorseRound records one endorser_id/round endorsement. Endorser address only.
 func (ms msgServer) EndorseRound(goCtx context.Context, msg *types.MsgEndorseRound) (*types.MsgEndorseRoundResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	if err := types.ValidateEndorserID(msg.EndorserId); err != nil {
@@ -97,4 +97,45 @@ func (ms msgServer) EndorseRound(goCtx context.Context, msg *types.MsgEndorseRou
 	))
 
 	return &types.MsgEndorseRoundResponse{}, nil
+}
+
+// ClearRoundEndorsement clears one endorser_id/round endorsement. Endorser address only.
+func (ms msgServer) ClearRoundEndorsement(goCtx context.Context, msg *types.MsgClearRoundEndorsement) (*types.MsgClearRoundEndorsementResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	if err := types.ValidateEndorserID(msg.EndorserId); err != nil {
+		return nil, err
+	}
+
+	kvStore := ms.k.OpenKVStore(ctx)
+	authorizedAddress, found, err := ms.k.GetEndorser(kvStore, msg.EndorserId)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("%w: %s", types.ErrEndorserNotFound, msg.EndorserId)
+	}
+
+	creator, err := normalizeBech32Addr(msg.Creator)
+	if err != nil {
+		return nil, fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", types.ErrNotAuthorized, msg.Creator, err)
+	}
+	if creator != authorizedAddress {
+		return nil, fmt.Errorf("%w: sender %s is not mapped to endorser %s", types.ErrNotAuthorized, creator, msg.EndorserId)
+	}
+
+	if _, err := ms.k.GetVoteRound(kvStore, msg.VoteRoundId); err != nil {
+		return nil, err
+	}
+	if err := ms.k.DeleteEndorsedRound(kvStore, msg.EndorserId, msg.VoteRoundId); err != nil {
+		return nil, err
+	}
+
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeClearRoundEndorsement,
+		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
+		sdk.NewAttribute(types.AttributeKeyEndorserID, msg.EndorserId),
+		sdk.NewAttribute(types.AttributeKeyRoundID, hex.EncodeToString(msg.VoteRoundId)),
+	))
+
+	return &types.MsgClearRoundEndorsementResponse{}, nil
 }

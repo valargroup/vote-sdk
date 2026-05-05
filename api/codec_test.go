@@ -159,6 +159,18 @@ func TestStandardEndorserMessagesProtoRoundTrip(t *testing.T) {
 	require.NoError(t, protov2.Unmarshal(endorseBytes, &decodedEndorse))
 	require.Equal(t, endorseMsg.EndorserId, decodedEndorse.EndorserId)
 	require.Equal(t, endorseMsg.VoteRoundId, decodedEndorse.VoteRoundId)
+
+	clearMsg := &types.MsgClearRoundEndorsement{
+		Creator:     "sv1endorser",
+		EndorserId:  "zodl",
+		VoteRoundId: bytes.Repeat([]byte{0xB5}, types.RoundIDLen),
+	}
+	clearBytes, err := protov2.Marshal(clearMsg)
+	require.NoError(t, err)
+	var decodedClear types.MsgClearRoundEndorsement
+	require.NoError(t, protov2.Unmarshal(clearBytes, &decodedClear))
+	require.Equal(t, clearMsg.EndorserId, decodedClear.EndorserId)
+	require.Equal(t, clearMsg.VoteRoundId, decodedClear.VoteRoundId)
 }
 
 func TestIsCeremonyTag(t *testing.T) {

@@ -48,5 +48,6 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgCancelUpgrade{},
 		&MsgSetEndorser{},
 		&MsgEndorseRound{},
+		&MsgClearRoundEndorsement{},
 	)
 }

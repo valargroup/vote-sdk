@@ -29,6 +29,7 @@ service Msg {
   rpc CancelUpgrade(MsgCancelUpgrade) returns (MsgCancelUpgradeResponse);
   rpc SetEndorser(MsgSetEndorser) returns (MsgSetEndorserResponse);
   rpc EndorseRound(MsgEndorseRound) returns (MsgEndorseRoundResponse);
+  rpc ClearRoundEndorsement(MsgClearRoundEndorsement) returns (MsgClearRoundEndorsementResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -268,3 +269,16 @@ message MsgEndorseRound {
 }
 
 message MsgEndorseRoundResponse {}
+
+// MsgClearRoundEndorsement clears an existing endorser_id/vote_round_id
+// endorsement. Only the current address mapped to endorser_id may execute this
+// message. Clearing a missing endorsement is accepted as an idempotent no-op.
+message MsgClearRoundEndorsement {
+  option (cosmos.msg.v1.signer) = "creator";
+
+  string creator       = 1;
+  string endorser_id   = 2;
+  bytes  vote_round_id = 3;
+}
+
+message MsgClearRoundEndorsementResponse {}

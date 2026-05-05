@@ -342,6 +342,81 @@ func (s *KeeperTestSuite) TestEndorsers_KeeperEndorsementMethods_TableDriven() {
 	}
 }
 
+func (s *KeeperTestSuite) TestEndorsers_KeeperDeleteEndorsementMethods_TableDriven() {
+	validRoundID := bytes.Repeat([]byte{0xC1}, types.RoundIDLen)
+	otherRoundID := bytes.Repeat([]byte{0xC2}, types.RoundIDLen)
+
+	tests := []struct {
+		name             string
+		preEndorserID    string
+		preRoundID       []byte
+		deleteEndorserID string
+		deleteRoundID    []byte
+		wantDeleteErr    error
+		wantEndorsed     bool
+	}{
+		{
+			name:             "delete existing endorsement",
+			preEndorserID:    "zodl",
+			preRoundID:       validRoundID,
+			deleteEndorserID: "zodl",
+			deleteRoundID:    validRoundID,
+			wantEndorsed:     false,
+		},
+		{
+			name:             "delete missing endorsement is idempotent",
+			deleteEndorserID: "zodl",
+			deleteRoundID:    validRoundID,
+			wantEndorsed:     false,
+		},
+		{
+			name:             "delete one endorsement leaves others intact",
+			preEndorserID:    "zodl",
+			preRoundID:       otherRoundID,
+			deleteEndorserID: "zodl",
+			deleteRoundID:    validRoundID,
+			wantEndorsed:     true,
+		},
+		{
+			name:             "invalid id rejected",
+			deleteEndorserID: "ZODL",
+			deleteRoundID:    validRoundID,
+			wantDeleteErr:    types.ErrInvalidEndorserID,
+		},
+		{
+			name:             "invalid round rejected",
+			deleteEndorserID: "zodl",
+			deleteRoundID:    []byte{0x01},
+			wantDeleteErr:    types.ErrInvalidRoundIDLen,
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			kv := s.keeper.OpenKVStore(s.ctx)
+			if tc.preEndorserID != "" {
+				s.Require().NoError(s.keeper.AddEndorsedRound(kv, tc.preEndorserID, tc.preRoundID))
+			}
+
+			err := s.keeper.DeleteEndorsedRound(kv, tc.deleteEndorserID, tc.deleteRoundID)
+			if tc.wantDeleteErr != nil {
+				s.Require().ErrorIs(err, tc.wantDeleteErr)
+				return
+			}
+			s.Require().NoError(err)
+
+			checkRoundID := tc.preRoundID
+			if checkRoundID == nil {
+				checkRoundID = tc.deleteRoundID
+			}
+			endorsed, err := s.keeper.IsRoundEndorsed(kv, "zodl", checkRoundID)
+			s.Require().NoError(err)
+			s.Require().Equal(tc.wantEndorsed, endorsed)
+		})
+	}
+}
+
 func (s *KeeperTestSuite) TestEndorsers_KeeperIterators_TableDriven() {
 	tests := []struct {
 		name             string
@@ -510,6 +585,111 @@ func (s *KeeperTestSuite) TestEndorsers_MsgServerAuthAndIdempotency() {
 	_, found, err := s.keeper.GetEndorser(kv, "zodl")
 	s.Require().NoError(err)
 	s.Require().False(found)
+}
+
+func (s *KeeperTestSuite) TestEndorsers_MsgClearRoundEndorsement_TableDriven() {
+	manager := testAddr(0x01)
+	endorser := testAddr(0x02)
+	stranger := testAddr(0x03)
+	roundID := bytes.Repeat([]byte{0xC3}, types.RoundIDLen)
+	otherRoundID := bytes.Repeat([]byte{0xC4}, types.RoundIDLen)
+	missingRoundID := bytes.Repeat([]byte{0xFF}, types.RoundIDLen)
+
+	tests := []struct {
+		name           string
+		creator        string
+		endorserID     string
+		voteRoundID    []byte
+		preMapping     bool
+		preEndorsement bool
+		wantErr        error
+		wantEndorsed   bool
+	}{
+		{
+			name:           "authorized clear removes endorsement",
+			creator:        endorser,
+			endorserID:     "zodl",
+			voteRoundID:    roundID,
+			preMapping:     true,
+			preEndorsement: true,
+			wantEndorsed:   false,
+		},
+		{
+			name:         "repeated clear is idempotent",
+			creator:      endorser,
+			endorserID:   "zodl",
+			voteRoundID:  roundID,
+			preMapping:   true,
+			wantEndorsed: false,
+		},
+		{
+			name:           "unauthorized clear rejected",
+			creator:        stranger,
+			endorserID:     "zodl",
+			voteRoundID:    roundID,
+			preMapping:     true,
+			preEndorsement: true,
+			wantErr:        types.ErrNotAuthorized,
+			wantEndorsed:   true,
+		},
+		{
+			name:         "missing endorser mapping rejected",
+			creator:      endorser,
+			endorserID:   "zodl",
+			voteRoundID:  roundID,
+			wantErr:      types.ErrEndorserNotFound,
+			wantEndorsed: false,
+		},
+		{
+			name:         "missing round rejected",
+			creator:      endorser,
+			endorserID:   "zodl",
+			voteRoundID:  missingRoundID,
+			preMapping:   true,
+			wantErr:      types.ErrRoundNotFound,
+			wantEndorsed: false,
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			kv := s.keeper.OpenKVStore(s.ctx)
+			s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{Addresses: []string{manager}}))
+			s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+				VoteRoundId: roundID,
+				VoteEndTime: activeEndTime,
+				Creator:     manager,
+			}))
+			s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+				VoteRoundId: otherRoundID,
+				VoteEndTime: activeEndTime,
+				Creator:     manager,
+			}))
+			if tc.preMapping {
+				s.Require().NoError(s.keeper.SetEndorser(kv, tc.endorserID, endorser))
+			}
+			if tc.preEndorsement {
+				s.Require().NoError(s.keeper.AddEndorsedRound(kv, tc.endorserID, tc.voteRoundID))
+			}
+
+			msgServer := keeper.NewMsgServerImpl(s.keeper)
+			_, err := msgServer.ClearRoundEndorsement(s.ctx, &types.MsgClearRoundEndorsement{
+				Creator:     tc.creator,
+				EndorserId:  tc.endorserID,
+				VoteRoundId: tc.voteRoundID,
+			})
+			if tc.wantErr != nil {
+				s.Require().ErrorIs(err, tc.wantErr)
+			} else {
+				s.Require().NoError(err)
+			}
+
+			endorsed, err := s.keeper.IsRoundEndorsed(kv, tc.endorserID, tc.voteRoundID)
+			s.Require().NoError(err)
+			s.Require().Equal(tc.wantEndorsed, endorsed)
+		})
+	}
 }
 
 func (s *KeeperTestSuite) TestEndorsers_MsgSetEndorserAccountCreation_TableDriven() {
