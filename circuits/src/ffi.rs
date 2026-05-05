@@ -1615,6 +1615,77 @@ pub unsafe extern "C" fn sv_vote_commitment_hash(
 }
 
 // ---------------------------------------------------------------------------
+// Share nullifier hash (Poseidon)
+// ---------------------------------------------------------------------------
+
+/// Compute a share reveal nullifier via Poseidon.
+///
+/// `share_nullifier = Poseidon(domain_tag_share_spend, vote_commitment, share_index, primary_blind)`
+///
+/// # Arguments
+/// * `vote_commitment_ptr` - 32-byte canonical Pallas Fp vote commitment.
+/// * `share_index`         - Share index converted to Fp internally.
+/// * `primary_blind_ptr`   - 32-byte canonical Pallas Fp primary blind.
+/// * `nullifier_out`       - 32-byte output buffer.
+///
+/// # Returns
+/// * `0`  on success.
+/// * `-1` if any pointer is null.
+/// * `-3` if vote_commitment or primary_blind is not a canonical Pallas Fp.
+/// * `-6` if an internal panic occurred.
+///
+/// # Safety
+/// All pointers must be valid and point to buffers of at least 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn sv_share_nullifier_hash(
+    vote_commitment_ptr: *const u8,
+    share_index: u32,
+    primary_blind_ptr: *const u8,
+    nullifier_out: *mut u8,
+) -> i32 {
+    if vote_commitment_ptr.is_null() || primary_blind_ptr.is_null() || nullifier_out.is_null() {
+        set_ffi_error("share_nullifier_hash: null pointer argument");
+        return -1;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut vc = [0u8; 32];
+        vc.copy_from_slice(std::slice::from_raw_parts(vote_commitment_ptr, 32));
+        let mut blind = [0u8; 32];
+        blind.copy_from_slice(std::slice::from_raw_parts(primary_blind_ptr, 32));
+
+        let vote_commitment: Fp = match Option::from(Fp::from_repr(vc)) {
+            Some(fp) => fp,
+            None => {
+                set_ffi_error("share_nullifier_hash: vote_commitment is not a canonical Pallas Fp");
+                return -3;
+            }
+        };
+        let primary_blind: Fp = match Option::from(Fp::from_repr(blind)) {
+            Some(fp) => fp,
+            None => {
+                set_ffi_error("share_nullifier_hash: primary_blind is not a canonical Pallas Fp");
+                return -3;
+            }
+        };
+        let share_index_fp = Fp::from(u64::from(share_index));
+
+        let nullifier =
+            share_reveal::share_nullifier_hash(vote_commitment, share_index_fp, primary_blind);
+        let bytes = nullifier.to_repr();
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), nullifier_out, 32);
+        0
+    }));
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_ffi_error("sv_share_nullifier_hash: internal panic");
+            -6
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Round ID derivation (Poseidon)
 // ---------------------------------------------------------------------------
 
@@ -1694,6 +1765,33 @@ pub unsafe extern "C" fn sv_derive_round_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_share_nullifier_hash_ffi_matches_rust() {
+        let vote_commitment = Fp::from(7).to_repr();
+        let primary_blind = Fp::from(11).to_repr();
+        let share_index = 3;
+        let mut out = [0u8; 32];
+
+        let rc = unsafe {
+            sv_share_nullifier_hash(
+                vote_commitment.as_ptr(),
+                share_index,
+                primary_blind.as_ptr(),
+                out.as_mut_ptr(),
+            )
+        };
+
+        assert_eq!(rc, 0);
+        let expected = share_reveal::share_nullifier_hash(
+            Fp::from(7),
+            Fp::from(u64::from(share_index)),
+            Fp::from(11),
+        )
+        .to_repr();
+        assert_eq!(out, expected);
+    }
+
     /// Full round-trip test: generate a share reveal proof and verify it via FFI.
     ///
     /// This test runs real Halo2 proving (~5-15s in release mode).

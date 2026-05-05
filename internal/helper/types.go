@@ -72,6 +72,10 @@ type ShareNullifierChecker func(roundIDHex string, shareNullifier []byte) (bool,
 // helper package doesn't depend on the Rust FFI library directly.
 type VCHashFunc func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error)
 
+// ShareNullifierHashFunc computes the share nullifier from the vote commitment,
+// share index, and per-share primary blind before generating ZKP 3.
+type ShareNullifierHashFunc func(voteCommitment [32]byte, shareIndex uint32, primaryBlind [32]byte) ([32]byte, error)
+
 // EncryptedShareWire is the wire format for an encrypted ElGamal share component.
 type EncryptedShareWire struct {
 	C1         string `json:"c1"`          // base64, 32 bytes
