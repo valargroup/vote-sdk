@@ -31,6 +31,7 @@ CHAIN_ID="svote-1"
 INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
 ORIGINAL_PATH="${PATH}"
+PATH_REFRESH_COMMAND=""
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
 SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-https://snapshots.valargroup.org}"
 # Canonical voting-config (same payload wallets fetch). Override for staging
@@ -372,7 +373,7 @@ append_path_snippet_if_missing() {
   if [ -f "${profile_file}" ] &&
      grep -Fq "${marker}" "${profile_file}" &&
      grep -Fq "shielded_vote_bin=${install_dir_literal}" "${profile_file}"; then
-    return 1
+    return 2
   fi
 
   mkdir -p "$(dirname "${profile_file}")"
@@ -396,8 +397,11 @@ append_path_snippet_if_missing() {
 
 ensure_install_dir_on_user_path() {
   local install_dir_literal
+  local profile_file_literal
   local shell_name
   local profile_file
+  local refresh_prefix
+  local append_status
 
   if path_has_dir "${ORIGINAL_PATH}" "${INSTALL_DIR}"; then
     return 0
@@ -412,13 +416,23 @@ ensure_install_dir_on_user_path() {
 
   shell_name="$(basename "${SHELL:-}")"
   case "${shell_name}" in
-    zsh) profile_file="${HOME}/.zshrc" ;;
-    bash) profile_file="${HOME}/.bashrc" ;;
-    *) profile_file="${HOME}/.profile" ;;
+    zsh) profile_file="${HOME}/.zshrc"; refresh_prefix="source" ;;
+    bash) profile_file="${HOME}/.bashrc"; refresh_prefix="source" ;;
+    *) profile_file="${HOME}/.profile"; refresh_prefix="." ;;
   esac
 
-  append_path_snippet_if_missing "${profile_file}" "${install_dir_literal}" || true
-  echo "For this terminal, run: export PATH=\"${INSTALL_DIR}:\$PATH\""
+  append_status=0
+  append_path_snippet_if_missing "${profile_file}" "${install_dir_literal}" || append_status=$?
+  if [ "${append_status}" = "0" ] || [ "${append_status}" = "2" ]; then
+    if profile_file_literal=$(shell_single_quote "${profile_file}"); then
+      PATH_REFRESH_COMMAND="${refresh_prefix} ${profile_file_literal}"
+      echo "For this terminal, run: ${PATH_REFRESH_COMMAND}"
+      return 0
+    fi
+  fi
+
+  PATH_REFRESH_COMMAND="export PATH=\"${INSTALL_DIR}:\$PATH\""
+  echo "For this terminal, run: ${PATH_REFRESH_COMMAND}"
 }
 
 cleanup_snapshot_tmp() {
@@ -1303,6 +1317,7 @@ if [ "${SVOTE_SKIP_SERVICE:-0}" = "1" ]; then
 fi
 
 LOG_FILE="${HOME_DIR}/node.log"
+LOG_FOLLOW_COMMAND=""
 SVOTED_BIN=$(command -v svoted)
 WRAPPER_BIN="${INSTALL_DIR}/svoted-wrapper.sh"
 SERVICE_NAME="svoted"
@@ -1327,6 +1342,7 @@ OS_NAME=$(uname -s)
 if [ "$OS_NAME" = "Darwin" ]; then
   # ── macOS: launchd ──────────────────────────────────────────────────────────
   echo "=== Installing launchd service ==="
+  LOG_FOLLOW_COMMAND="tail -f ${LOG_FILE}"
 
   PLIST_LABEL="com.shielded-vote.validator"
   PLIST_DIR="${HOME}/Library/LaunchAgents"
@@ -1469,8 +1485,8 @@ Environment=${SYSTEMD_PATH} ${SYSTEMD_HOME} ${SYSTEMD_ADDR} ${SYSTEMD_VALOPER} $
 ExecStart=${WRAPPER_BIN}
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:${LOG_FILE}
-StandardError=append:${LOG_FILE}
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -1479,8 +1495,9 @@ SVCEOF
   sudo systemctl daemon-reload
   sudo systemctl enable ${SERVICE_NAME}
   sudo systemctl start ${SERVICE_NAME}
+  LOG_FOLLOW_COMMAND="journalctl -u ${SERVICE_NAME} -f"
   echo "Service ${SERVICE_NAME} started (survives SSH disconnect and reboots)."
-  echo "Logs: ${LOG_FILE}"
+  echo "Logs: ${LOG_FOLLOW_COMMAND}"
   echo "Validator wrapper will complete bonding after funding."
 fi
 
@@ -1488,7 +1505,7 @@ fi
 sleep 5
 
 echo "Waiting for node to sync..."
-echo "  (follow logs with: tail -f ${LOG_FILE})"
+echo "  (follow logs with: ${LOG_FOLLOW_COMMAND})"
 while true; do
   STATUS=$(svoted status --home "${HOME_DIR}" 2>/dev/null || echo "")
   if [ -z "$STATUS" ]; then
@@ -1519,15 +1536,18 @@ print_join_status
 echo ""
 echo "How to monitor:"
 if [ "$(uname -s)" = "Darwin" ]; then
-  echo "  Chain logs:     tail -f ${LOG_FILE}"
+  echo "  Chain logs:     ${LOG_FOLLOW_COMMAND}"
   SERVICE_WATCHER_NAME="com.shielded-vote.validator (launchd)"
   SERVICE_WATCHER_REMOVE="launchctl bootout gui/$(id -u)/com.shielded-vote.validator"
 else
-  echo "  Chain logs:     journalctl -u ${SERVICE_NAME} -f"
+  echo "  Chain logs:     ${LOG_FOLLOW_COMMAND}"
   SERVICE_WATCHER_NAME="svoted (systemd)"
   SERVICE_WATCHER_REMOVE="sudo systemctl stop svoted"
 fi
 echo "  Chain status:   svoted status --home ${HOME_DIR}"
+if [ -n "${PATH_REFRESH_COMMAND}" ]; then
+  echo "  Shell PATH:     ${PATH_REFRESH_COMMAND}"
+fi
 echo ""
 echo "Next step: message the voting admin and ask them to approve you as a validator."
 echo "Send this message:"
