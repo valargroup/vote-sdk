@@ -60,6 +60,13 @@ export const SAMPLE_ROUND_TEMPLATES: SampleRoundTemplate[] = [
         ],
         allowAbstain: true,
       },
+      {
+        title: "What's the Coolest Zebra Name?",
+        description: "Which name has the strongest stripes?",
+        type: "multi-choice",
+        labels: ["Ziggy", "Zephyr", "Moxie"],
+        allowAbstain: true,
+      },
     ],
   },
   {
@@ -89,7 +96,7 @@ The 6 questions below cover the remaining open items.`,
 
 Which approach do you support?
 
-Refs: ZIP 233, ZIP 234`,
+Refs: ZIP 233 (https://zips.z.cash/zip-0233), ZIP 234 (https://zips.z.cash/zip-0234)`,
         type: "multi-choice",
         labels: [
           "Preserve halvings. Keep the existing halving schedule for new ZEC. Only fees and donated funds are smoothed and reissued.",
@@ -127,7 +134,7 @@ When should v4 transactions be disabled?`,
       },
       {
         title: "Memo bundles",
-        description: `ZIP 231 has been updated with additional rationale since the prior poll, where results diverged (76.8% ZCAP support, 99.3% coinholder opposition on 62 ballots).
+        description: `ZIP 231 (https://github.com/zcash/zips/blob/main/zips/zip-0231.md) has been updated with additional rationale since the prior poll, where results diverged (76.8% ZCAP support, 99.3% coinholder opposition on 62 ballots).
 
 Do you support activating memo bundles for Orchard in NU7?`,
         type: "binary",
@@ -143,13 +150,15 @@ Daily ZEC issuance unchanged.
 
 Benefits:
 - Faster confirmations
-- Orchard TPS roughly 2x
+- Orchard TPS roughly 2×
 
 Costs:
-- Consensus bandwidth roughly 3x
+- Consensus bandwidth roughly 3×
 - Sapling TPS down roughly 60% (reduces DOS surface)
 
-Ref: ZIP XXX`,
+Choose:
+
+Ref: ZIP XXX (https://github.com/zcash/zips/pull/1215)`,
         type: "binary",
         labels: ["Yes", "No"],
         allowAbstain: true,
@@ -159,11 +168,7 @@ Ref: ZIP XXX`,
         title: "NU7 schedule",
         description: `Do you support scheduling NU7 as soon as feasible, with these contents?
 
-Always included:
-- Orchard Quantum Recoverability
-- Explicit fees
-- NSM fee burning
-- Extensible transaction format
+Always included: Orchard Quantum Recoverability, explicit fees, NSM fee burning, extensible tx format.
 
 Conditional on this poll:
 - NSM issuance smoothing if Q1 is option 1 or 2
@@ -171,7 +176,7 @@ Conditional on this poll:
 - Memo bundles if Q4 is Yes
 - Faster block times and per-pool limits if Q5 is Yes
 
-Readiness clause: A feature is "ready" when spec, audit, and testing are complete, as certified jointly by ZODL, the Zcash Foundation, and ZIP Editors. If a feature is not ready by July 15, 2026, it defers to the next upgrade rather than delaying NU7. Dependent features defer with their dependencies.`,
+Readiness clause: A feature is "ready" when spec, audit, and testing are complete, as certified jointly by ZODLECC, the Zcash Foundation, and ZIP Editors. If a feature is not ready by July 15, 2026, it defers to the next upgrade rather than delaying NU7. Dependent features defer with their dependencies.`,
         type: "binary",
         labels: ["Yes, proceed", "No"],
         allowAbstain: true,
