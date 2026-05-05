@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
@@ -272,6 +273,7 @@ type ModuleInputs struct {
 	Cdc            codec.Codec
 	Logger         log.Logger
 	Config         *modulev1.Module
+	AccountKeeper  authkeeper.AccountKeeper
 	StakingKeeper  *stakingkeeper.Keeper
 	SlashingKeeper slashingkeeper.Keeper
 	BankKeeper     bankkeeper.BaseKeeper
@@ -295,6 +297,7 @@ func ProvideModule(in ModuleInputs) ModuleOutputs {
 		in.StakingKeeper,
 		&in.BankKeeper,
 	)
+	k.SetAccountKeeper(in.AccountKeeper)
 	k.SetSlashingKeeper(in.SlashingKeeper)
 	k.SetUpgradeScheduler(in.UpgradeKeeper)
 
