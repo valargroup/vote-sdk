@@ -18,29 +18,50 @@ const maintenanceInterval = 30 * time.Second
 // when wallet-provided submit_at times arrive, generates Merkle paths and ZKP
 // 3 proofs, and submits MsgRevealShare to the chain.
 type Processor struct {
-	store         *ShareStore
-	tree          TreeReader
-	prover        ProofGenerator
-	submitter     *ChainSubmitter
-	logger        log.Logger
-	maxConcurrent int
-	isRoundActive RoundStatusChecker
-	vcHash        VCHashFunc
-	shareNFHash   ShareNullifierHashFunc
-	shareNF       ShareNullifierChecker
+	store          *ShareStore
+	tree           TreeReader
+	prover         ProofGenerator
+	submitter      *ChainSubmitter
+	logger         log.Logger
+	maxConcurrent  int
+	isRoundActive  RoundStatusChecker
+	preProofDedupe *preProofShareDeduper
 }
 
 type ProcessorOption func(*Processor)
 
+type preProofShareDeduper struct {
+	vcHash      VCHashFunc
+	shareNFHash ShareNullifierHashFunc
+	shareNF     ShareNullifierChecker
+}
+
+// WithPreProofShareDeduper enables an optional cheap share-nullifier lookup
+// before proof generation. When the pre-proof check reports an existing reveal,
+// the processor skips proof generation; when the check fails, processing falls
+// through to the normal proof and submit path.
 func WithPreProofShareDeduper(
 	vcHash VCHashFunc,
 	shareNFHash ShareNullifierHashFunc,
 	shareNF ShareNullifierChecker,
 ) ProcessorOption {
 	return func(p *Processor) {
-		p.vcHash = vcHash
-		p.shareNFHash = shareNFHash
-		p.shareNF = shareNF
+		p.preProofDedupe = newPreProofShareDeduper(vcHash, shareNFHash, shareNF)
+	}
+}
+
+func newPreProofShareDeduper(
+	vcHash VCHashFunc,
+	shareNFHash ShareNullifierHashFunc,
+	shareNF ShareNullifierChecker,
+) *preProofShareDeduper {
+	if vcHash == nil || shareNFHash == nil || shareNF == nil {
+		return nil
+	}
+	return &preProofShareDeduper{
+		vcHash:      vcHash,
+		shareNFHash: shareNFHash,
+		shareNF:     shareNF,
 	}
 }
 
@@ -281,8 +302,8 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	}
 	copy(roundID[:], roundBytes)
 
-	if p.vcHash != nil && p.shareNFHash != nil && p.shareNF != nil {
-		alreadyRevealed, err := p.shareAlreadyRevealed(ctx, share, roundID)
+	if p.preProofDedupe != nil {
+		alreadyRevealed, err := p.preProofDedupe.shareAlreadyRevealed(ctx, share, roundID)
 		if err != nil {
 			p.logger.Warn("pre-proof share nullifier check failed, continuing with proof",
 				"round_id", share.Payload.VoteRoundID,
@@ -436,11 +457,9 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	return nil
 }
 
-func (p *Processor) shareAlreadyRevealed(ctx context.Context, share QueuedShare, roundID [32]byte) (bool, error) {
-	if p.vcHash == nil || p.shareNFHash == nil || p.shareNF == nil {
-		return false, nil
-	}
-
+// shareAlreadyRevealed computes the queued share's nullifier and checks whether
+// the chain has already recorded it for the share's voting round.
+func (d *preProofShareDeduper) shareAlreadyRevealed(ctx context.Context, share QueuedShare, roundID [32]byte) (bool, error) {
 	_, span := StartTrace(ctx, "helper.dedupe", "helper.preproof_share_nullifier_check", map[string]string{
 		"round_id":    share.Payload.VoteRoundID,
 		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
@@ -466,17 +485,17 @@ func (p *Processor) shareAlreadyRevealed(ctx context.Context, share QueuedShare,
 		spanErr = err
 		return false, err
 	}
-	voteCommitment, err := p.vcHash(roundID, sharesHash, share.Payload.ProposalID, share.Payload.VoteDecision)
+	voteCommitment, err := d.vcHash(roundID, sharesHash, share.Payload.ProposalID, share.Payload.VoteDecision)
 	if err != nil {
 		spanErr = err
 		return false, fmt.Errorf("compute vote commitment: %w", err)
 	}
-	nullifier, err := p.shareNFHash(voteCommitment, share.Payload.EncShare.ShareIndex, primaryBlind)
+	nullifier, err := d.shareNFHash(voteCommitment, share.Payload.EncShare.ShareIndex, primaryBlind)
 	if err != nil {
 		spanErr = err
 		return false, fmt.Errorf("compute share nullifier: %w", err)
 	}
-	already, err = p.shareNF(share.Payload.VoteRoundID, nullifier[:])
+	already, err = d.shareNF(share.Payload.VoteRoundID, nullifier[:])
 	if err != nil {
 		spanErr = err
 		return false, fmt.Errorf("check share nullifier: %w", err)
