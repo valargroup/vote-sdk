@@ -27,7 +27,9 @@ on:
     paths:
       - join.sh
       - scripts/svoted-wrapper.sh
+      - scripts/reset-validator-snapshot.sh
       - scripts/test_svoted_wrapper.sh
+      - scripts/test_reset_validator_snapshot.sh
       - Dockerfile.join-test
       - scripts/test-join-docker.sh
       - .github/workflows/test-join.yml
@@ -36,7 +38,9 @@ on:
     paths:
       - join.sh
       - scripts/svoted-wrapper.sh
+      - scripts/reset-validator-snapshot.sh
       - scripts/test_svoted_wrapper.sh
+      - scripts/test_reset_validator_snapshot.sh
       - Dockerfile.join-test
       - scripts/test-join-docker.sh
       - .github/workflows/test-join.yml
@@ -66,6 +70,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check reset-validator-snapshot syntax
+        run: bash -n scripts/reset-validator-snapshot.sh scripts/test_reset_validator_snapshot.sh
 
       - name: Verify truncated stream is inert
         shell: bash
@@ -100,6 +107,9 @@ jobs:
 
       - name: Run svoted-wrapper unit smoke test
         run: bash scripts/test_svoted_wrapper.sh
+
+      - name: Run reset-validator-snapshot unit smoke test
+        run: bash scripts/test_reset_validator_snapshot.sh
 
       - name: Verify output files and config
         shell: bash
@@ -157,4 +167,9 @@ jobs:
             fail=1
           fi
 
-          [ "$fail" -eq 0 ] && echo "=== All checks passed ===" || { echo "=== CHECKS FAILED ==="; exit 1; }
+          if [ "$fail" -eq 0 ]; then
+            echo "=== All checks passed ==="
+          else
+            echo "=== CHECKS FAILED ==="
+            exit 1
+          fi
