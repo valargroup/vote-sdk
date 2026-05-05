@@ -48,7 +48,7 @@ curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --tls-m
 
 The installer prompts for a moniker and, unless TLS mode is already configured by flags or environment, for the TLS mode. It restores the latest vote chain snapshot if one is published and catches up from peers. With no snapshot metadata available — the usual case right after a chain reset — it syncs from genesis instead.
 
-`join.sh` installs `svoted` and `create-val-tx` into `~/.local/bin` by default. If that directory is not already on your shell `PATH`, the installer adds it to your shell profile for future terminals and prints the one-line `export PATH="$HOME/.local/bin:$PATH"` command for the current terminal.
+`join.sh` installs `svoted` and `create-val-tx` into `~/.local/bin` by default. If that directory is not already on your shell `PATH`, the installer adds it to your shell profile for future terminals and prints the `source ~/.zshrc` / `source ~/.bashrc` refresh command, or the one-line `export PATH="$HOME/.local/bin:$PATH"` fallback, for the current terminal.
 
 Service controls after install:
 
@@ -108,7 +108,8 @@ curl -fsS http://127.0.0.1:1317/shielded-vote/v1/rounds | jq '.rounds | length'
 curl -fsS https://<your-domain>/shielded-vote/v1/genesis > /dev/null && echo "caddy OK"
 
 # Wrapper is alive.
-journalctl -u svoted -n 20 --no-pager   # or: tail -n 20 ~/.svoted/node.log
+journalctl -u svoted -n 20 --no-pager   # Linux
+tail -n 20 ~/.svoted/node.log           # macOS
 ```
 
 ## Operating the service
@@ -117,7 +118,7 @@ journalctl -u svoted -n 20 --no-pager   # or: tail -n 20 ~/.svoted/node.log
 
 ### Linux (systemd)
 
-`/etc/systemd/system/svoted.service`, running as the invoking user (not root). `ExecStart` is `${INSTALL_DIR}/svoted-wrapper.sh`, and stdout/stderr go to `~/.svoted/node.log`.
+`/etc/systemd/system/svoted.service`, running as the invoking user (not root). `ExecStart` is `${INSTALL_DIR}/svoted-wrapper.sh`, and stdout/stderr go to journald so `journalctl -u svoted -f` shows wrapper and chain output.
 
 After editing the unit, reload and restart:
 
@@ -142,9 +143,10 @@ launchctl kickstart -k gui/$(id -u)/com.shielded-vote.validator   # restart
 
 ### Logs
 
-| File | Source | Content |
-|------|--------|---------|
-| `~/.svoted/node.log` | `svoted-wrapper.sh` + `svoted start` | Join automation, block production, P2P, ABCI, REST handler output. Verbosity via `--log_level` on the systemd unit. |
+| Log | Source | Content |
+|-----|--------|---------|
+| `journalctl -u svoted` | Linux systemd service | Join automation, block production, P2P, ABCI, REST handler output. Verbosity via `--log_level` on the systemd unit. |
+| `~/.svoted/node.log` | macOS launchd service | Join automation, block production, P2P, ABCI, REST handler output. |
 | Caddy | `journalctl -u caddy` (Linux) / `~/.config/caddy/caddy.log` (macOS) | Access + error log. |
 
 Follow with `journalctl -u svoted -f` on Linux or `tail -f ~/.svoted/node.log` on macOS.
@@ -393,7 +395,7 @@ Identity files (keys, consensus signer, block store) live under `SVOTE_HOME` (de
 | `config/config.toml` | `svoted init` + `sed` patches | CometBFT runtime. `persistent_peers` is what `join.sh` tweaks. |
 | `config/app.toml` | `svoted init` + `sed` patches + `[helper]` append | App runtime: `[api]`, `[helper]`, and on the primary `[admin]` + `[ui]`. |
 | `helper.db` | helper module | SQLite queue of shares waiting to be submitted. |
-| `node.log` | systemd / launchd | Chain stdout+stderr. |
+| `node.log` | launchd on macOS | Chain stdout+stderr. Linux writes service logs to journald. |
 | `join-complete` | `svoted-wrapper.sh` | Marker written after the wrapper observes bonded status. |
 
 For a joining validator with nothing valuable yet, `rm -rf ~/.svoted && join.sh` recreates everything.
@@ -490,7 +492,7 @@ If the validator will answer PIR queries itself, also open inbound 443 for the `
 |---------|--------------|--------|
 | `catching_up` stays `true` for >10 min, log shows "Dialing" / no peers connecting | Inbound 26656 blocked, or seed peer is unreachable | Verify firewall lets in 26656 (`ss -ltn | grep 26656`, then test from off-host); check `persistent_peers` in `~/.svoted/config/config.toml`; confirm the seed listed under `vote_servers[0].url` in [the voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json) is up by hitting its `/cosmos/base/tendermint/v1beta1/node_info`. |
 | `svoted` exits with "error initializing application: genesis doc mismatch" | Local `genesis.json` doesn't match the live chain | `rm -rf ~/.svoted && join.sh` (pulls canonical genesis fresh); or `curl -fsSL -o ~/.svoted/config/genesis.json https://vote.fra1.digitaloceanspaces.com/genesis.json && svoted genesis validate-genesis --home ~/.svoted`. |
-| `node.log` repeatedly shows `waiting for validator funding` | Not yet funded | Wait. The vote-manager funds from the admin UI join queue. Ping the operator running the primary and confirm your address is listed. |
+| Service logs repeatedly show `waiting for validator funding` | Not yet funded | Wait. The vote-manager funds from the admin UI join queue. Ping the operator running the primary and confirm your address is listed. |
 | `create-val-tx` fails with `key not found: validator` | Keyring backend mismatch (os vs test) | The wrapper expects the `validator` key in the test keyring. Confirm `svoted keys show validator -a --keyring-backend test --home ~/.svoted` returns the expected address. If you re-keyed manually, re-run `svoted init-validator-keys`. |
 | `create-val-tx` fails with `account does not exist on chain` | Tx raced funding; balance hasn't settled yet | Retry; the loop re-runs every 30 s. If it persists, check `svoted query bank balances $VALIDATOR_ADDR` directly. |
 | Caddy fails to obtain a certificate (`acme: error 403` or similar) | DNS doesn't resolve to this host, or 80/443 blocked | `dig <SVOTE_DOMAIN>` against a public resolver; ensure inbound 80 AND 443 are open. For automatic sslip.io, confirm `curl -fsSL https://ifconfig.me` returns your actual public IP. |
