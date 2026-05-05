@@ -46,5 +46,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgAuthorizedSend{},
 		&MsgScheduleUpgrade{},
 		&MsgCancelUpgrade{},
+		&MsgSetEndorser{},
+		&MsgEndorseRound{},
 	)
 }

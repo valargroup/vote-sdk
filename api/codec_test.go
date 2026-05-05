@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	protov2 "google.golang.org/protobuf/proto"
 
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -132,6 +133,32 @@ func TestEncodeDecodeSubmitTally(t *testing.T) {
 	require.Equal(t, uint32(1), decodedMsg.Entries[1].ProposalId)
 	require.Equal(t, uint32(0), decodedMsg.Entries[1].VoteDecision)
 	require.Equal(t, uint64(200), decodedMsg.Entries[1].TotalValue)
+}
+
+func TestStandardEndorserMessagesProtoRoundTrip(t *testing.T) {
+	setMsg := &types.MsgSetEndorser{
+		Creator:    "sv1manager",
+		EndorserId: "zodl",
+		Address:    "sv1endorser",
+	}
+	setBytes, err := protov2.Marshal(setMsg)
+	require.NoError(t, err)
+	var decodedSet types.MsgSetEndorser
+	require.NoError(t, protov2.Unmarshal(setBytes, &decodedSet))
+	require.Equal(t, setMsg.EndorserId, decodedSet.EndorserId)
+	require.Equal(t, setMsg.Address, decodedSet.Address)
+
+	endorseMsg := &types.MsgEndorseRound{
+		Creator:     "sv1endorser",
+		EndorserId:  "zodl",
+		VoteRoundId: bytes.Repeat([]byte{0xA5}, types.RoundIDLen),
+	}
+	endorseBytes, err := protov2.Marshal(endorseMsg)
+	require.NoError(t, err)
+	var decodedEndorse types.MsgEndorseRound
+	require.NoError(t, protov2.Unmarshal(endorseBytes, &decodedEndorse))
+	require.Equal(t, endorseMsg.EndorserId, decodedEndorse.EndorserId)
+	require.Equal(t, endorseMsg.VoteRoundId, decodedEndorse.VoteRoundId)
 }
 
 func TestIsCeremonyTag(t *testing.T) {

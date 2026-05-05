@@ -55,6 +55,8 @@ func DefaultAllowedMessages() []string {
 		"/svote.v1.MsgAuthorizedSend",
 		"/svote.v1.MsgScheduleUpgrade",
 		"/svote.v1.MsgCancelUpgrade",
+		"/svote.v1.MsgSetEndorser",
+		"/svote.v1.MsgEndorseRound",
 
 		// Staking — only validator creation and metadata edits are allowed.
 		// MsgDelegate/MsgUndelegate/MsgBeginRedelegate are excluded so

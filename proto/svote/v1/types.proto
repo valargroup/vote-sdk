@@ -100,6 +100,20 @@ message GenesisState {
   uint32                           min_ceremony_validators   = 11;
   repeated GenesisRoundTree        round_trees               = 12;
   repeated GenesisPartialDecryption partial_decryptions      = 13;
+  repeated Endorser                endorsers                 = 14;
+  repeated EndorsedRound           endorsed_rounds           = 15;
+}
+
+// Endorser records a stable identifier's currently authorized bech32 address.
+message Endorser {
+  string endorser_id = 1;
+  string address     = 2;
+}
+
+// EndorsedRound records one append-only round endorsement by endorser_id.
+message EndorsedRound {
+  string endorser_id   = 1;
+  bytes  vote_round_id = 2;
 }
 
 // GenesisRoundTree holds per-round commitment tree state for genesis export/import.

@@ -299,6 +299,49 @@ func (qs queryServer) PallasKeys(goCtx context.Context, req *types.QueryPallasKe
 	return &types.QueryPallasKeysResponse{Validators: keys}, nil
 }
 
+// Endorsers returns all configured endorser mappings.
+func (qs queryServer) Endorsers(goCtx context.Context, req *types.QueryEndorsersRequest) (*types.QueryEndorsersResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	var endorsers []*types.Endorser
+	if err := qs.k.IterateEndorsers(kvStore, func(endorser *types.Endorser) bool {
+		endorsers = append(endorsers, endorser)
+		return false
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to iterate endorsers: %v", err)
+	}
+
+	return &types.QueryEndorsersResponse{Endorsers: endorsers}, nil
+}
+
+// EndorsedRounds returns all round IDs endorsed by a given endorser_id.
+func (qs queryServer) EndorsedRounds(goCtx context.Context, req *types.QueryEndorsedRoundsRequest) (*types.QueryEndorsedRoundsResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+	if err := types.ValidateEndorserID(req.EndorserId); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid endorser_id: %v", err)
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	var roundIDs [][]byte
+	if err := qs.k.IterateEndorsedRounds(kvStore, req.EndorserId, func(roundID []byte) bool {
+		roundIDs = append(roundIDs, roundID)
+		return false
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to iterate endorsed rounds: %v", err)
+	}
+
+	return &types.QueryEndorsedRoundsResponse{VoteRoundIds: roundIDs}, nil
+}
+
 // ActiveRound returns the first active voting round, if any.
 // Iterates all stored rounds and returns the first with SESSION_STATUS_ACTIVE.
 func (qs queryServer) ActiveRound(goCtx context.Context, req *types.QueryActiveRoundRequest) (*types.QueryActiveRoundResponse, error) {

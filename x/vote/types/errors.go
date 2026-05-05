@@ -49,4 +49,8 @@ var (
 	// Upgrade scheduling errors.
 	ErrUpgradeUnavailable = errors.Register(ModuleName, 40, "upgrade scheduler unavailable")
 	ErrUpgradePlanExists  = errors.Register(ModuleName, 41, "upgrade plan already scheduled")
+
+	// Endorser registry errors.
+	ErrInvalidEndorserID = errors.Register(ModuleName, 42, "invalid endorser id")
+	ErrEndorserNotFound  = errors.Register(ModuleName, 43, "endorser not found")
 )
