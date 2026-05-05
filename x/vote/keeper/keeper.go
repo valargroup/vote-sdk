@@ -41,6 +41,13 @@ type BankKeeper interface {
 	SendCoins(ctx context.Context, fromAddr, toAddr sdk.AccAddress, amt sdk.Coins) error
 }
 
+// AccountKeeper defines the auth module interface needed by the vote module.
+type AccountKeeper interface {
+	GetAccount(ctx context.Context, addr sdk.AccAddress) sdk.AccountI
+	NewAccountWithAddress(ctx context.Context, addr sdk.AccAddress) sdk.AccountI
+	SetAccount(ctx context.Context, account sdk.AccountI)
+}
+
 // UpgradeScheduler defines the x/upgrade keeper methods needed by vote-manager
 // upgrade-control messages.
 type UpgradeScheduler interface {
@@ -77,6 +84,7 @@ type Keeper struct {
 	stakingKeeper  StakingKeeper
 	slashingKeeper SlashingKeeper
 	bankKeeper     BankKeeper
+	accountKeeper  AccountKeeper
 	upgradeKeeper  UpgradeScheduler
 
 	// roundTrees holds per-round in-memory ShardTree state, keyed by the
@@ -103,6 +111,12 @@ func (k *Keeper) SetSlashingKeeper(sk SlashingKeeper) {
 // the vote keeper directly.
 func (k *Keeper) SetBankKeeper(bk BankKeeper) {
 	k.bankKeeper = bk
+}
+
+// SetAccountKeeper replaces the account keeper. Used by depinject wiring and
+// focused tests that construct the vote keeper directly.
+func (k *Keeper) SetAccountKeeper(ak AccountKeeper) {
+	k.accountKeeper = ak
 }
 
 // NewKeeper creates a new vote module keeper.

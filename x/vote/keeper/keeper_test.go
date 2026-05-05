@@ -73,6 +73,7 @@ func (s *KeeperTestSuite) SetupTest() {
 	s.ctx = testCtx.Ctx.WithBlockTime(testBlockTime)
 	storeService := runtime.NewKVStoreService(key)
 	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
+	s.keeper.SetAccountKeeper(newFakeAccountKeeper())
 }
 
 func uint64Ptr(v uint64) *uint64 { return &v }

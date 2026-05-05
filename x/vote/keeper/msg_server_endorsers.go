@@ -33,6 +33,16 @@ func (ms msgServer) SetEndorser(goCtx context.Context, msg *types.MsgSetEndorser
 			return nil, fmt.Errorf("%w: address %q is not a valid bech32 address: %v", types.ErrInvalidField, msg.Address, err)
 		}
 		normalized = addr
+		accAddr, err := sdk.AccAddressFromBech32(normalized)
+		if err != nil {
+			return nil, fmt.Errorf("%w: address %q is not a valid bech32 address: %v", types.ErrInvalidField, normalized, err)
+		}
+		if ms.k.accountKeeper == nil {
+			return nil, fmt.Errorf("%w: account keeper is not configured", types.ErrInvalidField)
+		}
+		if ms.k.accountKeeper.GetAccount(goCtx, accAddr) == nil {
+			ms.k.accountKeeper.SetAccount(goCtx, ms.k.accountKeeper.NewAccountWithAddress(goCtx, accAddr))
+		}
 		if err := ms.k.SetEndorser(kvStore, msg.EndorserId, normalized); err != nil {
 			return nil, err
 		}

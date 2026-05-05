@@ -2,15 +2,47 @@ package keeper_test
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 
 	"github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
+
+type fakeAccountKeeper struct {
+	accounts map[string]sdk.AccountI
+	created  []string
+}
+
+func newFakeAccountKeeper() *fakeAccountKeeper {
+	return &fakeAccountKeeper{accounts: make(map[string]sdk.AccountI)}
+}
+
+func (f *fakeAccountKeeper) GetAccount(_ context.Context, addr sdk.AccAddress) sdk.AccountI {
+	return f.accounts[addr.String()]
+}
+
+func (f *fakeAccountKeeper) NewAccountWithAddress(_ context.Context, addr sdk.AccAddress) sdk.AccountI {
+	f.created = append(f.created, addr.String())
+	return authtypes.NewBaseAccountWithAddress(addr)
+}
+
+func (f *fakeAccountKeeper) SetAccount(_ context.Context, account sdk.AccountI) {
+	f.accounts[account.GetAddress().String()] = account
+}
+
+func (f *fakeAccountKeeper) seedAccount(addr string) {
+	accAddr, err := sdk.AccAddressFromBech32(addr)
+	if err != nil {
+		panic(err)
+	}
+	f.accounts[accAddr.String()] = authtypes.NewBaseAccountWithAddress(accAddr)
+}
 
 func testAddr(seed byte) string {
 	return sdk.AccAddress(bytes.Repeat([]byte{seed}, 20)).String()
@@ -478,6 +510,128 @@ func (s *KeeperTestSuite) TestEndorsers_MsgServerAuthAndIdempotency() {
 	_, found, err := s.keeper.GetEndorser(kv, "zodl")
 	s.Require().NoError(err)
 	s.Require().False(found)
+}
+
+func (s *KeeperTestSuite) TestEndorsers_MsgSetEndorserAccountCreation_TableDriven() {
+	manager := testAddr(0x01)
+	stranger := testAddr(0x02)
+	oldEndorser := testAddr(0x03)
+	newEndorser := testAddr(0x04)
+
+	tests := []struct {
+		name           string
+		creator        string
+		preMapping     string
+		preAccounts    []string
+		address        string
+		wantErr        error
+		wantMapping    bool
+		wantAddress    string
+		wantCreated    []string
+		wantAccounts   []string
+		wantNoAccounts []string
+	}{
+		{
+			name:         "missing target account",
+			creator:      manager,
+			address:      newEndorser,
+			wantMapping:  true,
+			wantAddress:  newEndorser,
+			wantCreated:  []string{newEndorser},
+			wantAccounts: []string{newEndorser},
+		},
+		{
+			name:         "existing target account",
+			creator:      manager,
+			preAccounts:  []string{newEndorser},
+			address:      newEndorser,
+			wantMapping:  true,
+			wantAddress:  newEndorser,
+			wantAccounts: []string{newEndorser},
+		},
+		{
+			name:         "rotate to missing target",
+			creator:      manager,
+			preMapping:   oldEndorser,
+			address:      newEndorser,
+			wantMapping:  true,
+			wantAddress:  newEndorser,
+			wantCreated:  []string{newEndorser},
+			wantAccounts: []string{newEndorser},
+		},
+		{
+			name:         "clear mapping",
+			creator:      manager,
+			preMapping:   oldEndorser,
+			preAccounts:  []string{oldEndorser},
+			address:      "",
+			wantMapping:  false,
+			wantAccounts: []string{oldEndorser},
+		},
+		{
+			name:           "non-vote-manager rejected",
+			creator:        stranger,
+			address:        newEndorser,
+			wantErr:        types.ErrNotAuthorized,
+			wantMapping:    false,
+			wantNoAccounts: []string{newEndorser},
+		},
+		{
+			name:           "invalid endorser address rejected",
+			creator:        manager,
+			address:        "not-a-bech32",
+			wantErr:        types.ErrInvalidField,
+			wantMapping:    false,
+			wantNoAccounts: []string{newEndorser},
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			kv := s.keeper.OpenKVStore(s.ctx)
+			accounts := newFakeAccountKeeper()
+			s.keeper.SetAccountKeeper(accounts)
+			s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{Addresses: []string{manager}}))
+
+			for _, addr := range tc.preAccounts {
+				accounts.seedAccount(addr)
+			}
+			if tc.preMapping != "" {
+				s.Require().NoError(s.keeper.SetEndorser(kv, "zodl", tc.preMapping))
+			}
+
+			msgServer := keeper.NewMsgServerImpl(s.keeper)
+			_, err := msgServer.SetEndorser(s.ctx, &types.MsgSetEndorser{
+				Creator:    tc.creator,
+				EndorserId: "zodl",
+				Address:    tc.address,
+			})
+			if tc.wantErr != nil {
+				s.Require().ErrorIs(err, tc.wantErr)
+			} else {
+				s.Require().NoError(err)
+			}
+
+			got, found, err := s.keeper.GetEndorser(kv, "zodl")
+			s.Require().NoError(err)
+			s.Require().Equal(tc.wantMapping, found)
+			if tc.wantMapping {
+				s.Require().Equal(tc.wantAddress, got)
+			}
+			s.Require().Equal(tc.wantCreated, accounts.created)
+			for _, addr := range tc.wantAccounts {
+				accAddr, err := sdk.AccAddressFromBech32(addr)
+				s.Require().NoError(err)
+				s.Require().NotNil(accounts.GetAccount(s.ctx, accAddr))
+			}
+			for _, addr := range tc.wantNoAccounts {
+				accAddr, err := sdk.AccAddressFromBech32(addr)
+				s.Require().NoError(err)
+				s.Require().Nil(accounts.GetAccount(s.ctx, accAddr))
+			}
+		})
+	}
 }
 
 func (s *KeeperTestSuite) TestEndorsers_QueryServer() {
