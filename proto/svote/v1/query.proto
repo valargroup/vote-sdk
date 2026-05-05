@@ -46,6 +46,12 @@ service Query {
 
   // PallasKeys returns all registered Pallas public keys from the global registry.
   rpc PallasKeys(QueryPallasKeysRequest) returns (QueryPallasKeysResponse);
+
+  // Endorsers returns all configured endorser_id -> bech32 address mappings.
+  rpc Endorsers(QueryEndorsersRequest) returns (QueryEndorsersResponse);
+
+  // EndorsedRounds returns all vote round IDs endorsed by a given endorser_id.
+  rpc EndorsedRounds(QueryEndorsedRoundsRequest) returns (QueryEndorsedRoundsResponse);
 }
 
 message QueryCommitmentTreeRequest {
@@ -141,4 +147,18 @@ message QueryPallasKeysRequest {}
 
 message QueryPallasKeysResponse {
   repeated ValidatorPallasKey validators = 1;
+}
+
+message QueryEndorsersRequest {}
+
+message QueryEndorsersResponse {
+  repeated Endorser endorsers = 1;
+}
+
+message QueryEndorsedRoundsRequest {
+  string endorser_id = 1;
+}
+
+message QueryEndorsedRoundsResponse {
+  repeated bytes vote_round_ids = 1;
 }

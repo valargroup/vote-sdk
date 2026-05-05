@@ -37,6 +37,8 @@ func GetTxCmd() *cobra.Command {
 		CmdUpdateVoteManagers(),
 		CmdCreateVotingSession(),
 		CmdSubmitTally(),
+		CmdSetEndorser(),
+		CmdEndorseRound(),
 		// Token transfer — uses whitelisted MsgAuthorizedSend.
 		CmdAuthorizedSend(),
 	)
@@ -228,6 +230,85 @@ holds their own funds.`,
 	}
 
 	cmd.Flags().StringArray("vote-manager", nil, "Vote-manager bech32 address (repeatable; all specified addresses form the new set)")
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
+// CmdSetEndorser broadcasts MsgSetEndorser. Callable by any current vote manager.
+func CmdSetEndorser() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "set-endorser [endorser-id] [address]",
+		Short: "Create, rotate, or clear an endorser mapping",
+		Long: `Broadcast an MsgSetEndorser transaction.
+
+Arguments:
+  endorser-id  Stable identifier, e.g. zodl
+  address      Bech32 account address authorized to endorse rounds
+
+Pass --clear with only endorser-id to delete the mapping. Stored endorsements
+remain queryable.`,
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+			clearMapping, err := cmd.Flags().GetBool("clear")
+			if err != nil {
+				return err
+			}
+			if clearMapping && len(args) != 1 {
+				return fmt.Errorf("--clear accepts only endorser-id")
+			}
+			if !clearMapping && len(args) != 2 {
+				return fmt.Errorf("address is required unless --clear is set")
+			}
+
+			address := ""
+			if !clearMapping {
+				address = args[1]
+			}
+			msg := &types.MsgSetEndorser{
+				Creator:    clientCtx.GetFromAddress().String(),
+				EndorserId: args[0],
+				Address:    address,
+			}
+
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	cmd.Flags().Bool("clear", false, "Clear the endorser mapping instead of setting an address")
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
+// CmdEndorseRound broadcasts MsgEndorseRound. Callable by the mapped endorser address.
+func CmdEndorseRound() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "endorse-round [endorser-id] [round-id-hex]",
+		Short: "Endorse a voting round",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+			roundID, err := hex.DecodeString(args[1])
+			if err != nil {
+				return fmt.Errorf("round-id-hex: invalid hex: %w", err)
+			}
+
+			msg := &types.MsgEndorseRound{
+				Creator:     clientCtx.GetFromAddress().String(),
+				EndorserId:  args[0],
+				VoteRoundId: roundID,
+			}
+
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
 	flags.AddTxFlagsToCmd(cmd)
 	return cmd
 }

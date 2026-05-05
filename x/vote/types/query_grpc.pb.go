@@ -31,6 +31,8 @@ const (
 	Query_VoteSummary_FullMethodName            = "/svote.v1.Query/VoteSummary"
 	Query_ListRounds_FullMethodName             = "/svote.v1.Query/ListRounds"
 	Query_PallasKeys_FullMethodName             = "/svote.v1.Query/PallasKeys"
+	Query_Endorsers_FullMethodName              = "/svote.v1.Query/Endorsers"
+	Query_EndorsedRounds_FullMethodName         = "/svote.v1.Query/EndorsedRounds"
 )
 
 // QueryClient is the client API for Query service.
@@ -67,6 +69,10 @@ type QueryClient interface {
 	ListRounds(ctx context.Context, in *QueryListRoundsRequest, opts ...grpc.CallOption) (*QueryListRoundsResponse, error)
 	// PallasKeys returns all registered Pallas public keys from the global registry.
 	PallasKeys(ctx context.Context, in *QueryPallasKeysRequest, opts ...grpc.CallOption) (*QueryPallasKeysResponse, error)
+	// Endorsers returns all configured endorser_id -> bech32 address mappings.
+	Endorsers(ctx context.Context, in *QueryEndorsersRequest, opts ...grpc.CallOption) (*QueryEndorsersResponse, error)
+	// EndorsedRounds returns all vote round IDs endorsed by a given endorser_id.
+	EndorsedRounds(ctx context.Context, in *QueryEndorsedRoundsRequest, opts ...grpc.CallOption) (*QueryEndorsedRoundsResponse, error)
 }
 
 type queryClient struct {
@@ -197,6 +203,26 @@ func (c *queryClient) PallasKeys(ctx context.Context, in *QueryPallasKeysRequest
 	return out, nil
 }
 
+func (c *queryClient) Endorsers(ctx context.Context, in *QueryEndorsersRequest, opts ...grpc.CallOption) (*QueryEndorsersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryEndorsersResponse)
+	err := c.cc.Invoke(ctx, Query_Endorsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) EndorsedRounds(ctx context.Context, in *QueryEndorsedRoundsRequest, opts ...grpc.CallOption) (*QueryEndorsedRoundsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryEndorsedRoundsResponse)
+	err := c.cc.Invoke(ctx, Query_EndorsedRounds_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
@@ -231,6 +257,10 @@ type QueryServer interface {
 	ListRounds(context.Context, *QueryListRoundsRequest) (*QueryListRoundsResponse, error)
 	// PallasKeys returns all registered Pallas public keys from the global registry.
 	PallasKeys(context.Context, *QueryPallasKeysRequest) (*QueryPallasKeysResponse, error)
+	// Endorsers returns all configured endorser_id -> bech32 address mappings.
+	Endorsers(context.Context, *QueryEndorsersRequest) (*QueryEndorsersResponse, error)
+	// EndorsedRounds returns all vote round IDs endorsed by a given endorser_id.
+	EndorsedRounds(context.Context, *QueryEndorsedRoundsRequest) (*QueryEndorsedRoundsResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -276,6 +306,12 @@ func (UnimplementedQueryServer) ListRounds(context.Context, *QueryListRoundsRequ
 }
 func (UnimplementedQueryServer) PallasKeys(context.Context, *QueryPallasKeysRequest) (*QueryPallasKeysResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PallasKeys not implemented")
+}
+func (UnimplementedQueryServer) Endorsers(context.Context, *QueryEndorsersRequest) (*QueryEndorsersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Endorsers not implemented")
+}
+func (UnimplementedQueryServer) EndorsedRounds(context.Context, *QueryEndorsedRoundsRequest) (*QueryEndorsedRoundsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EndorsedRounds not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -514,6 +550,42 @@ func _Query_PallasKeys_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_Endorsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryEndorsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).Endorsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_Endorsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).Endorsers(ctx, req.(*QueryEndorsersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_EndorsedRounds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryEndorsedRoundsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).EndorsedRounds(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_EndorsedRounds_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).EndorsedRounds(ctx, req.(*QueryEndorsedRoundsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -568,6 +640,14 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PallasKeys",
 			Handler:    _Query_PallasKeys_Handler,
+		},
+		{
+			MethodName: "Endorsers",
+			Handler:    _Query_Endorsers_Handler,
+		},
+		{
+			MethodName: "EndorsedRounds",
+			Handler:    _Query_EndorsedRounds_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

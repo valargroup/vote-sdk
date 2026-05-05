@@ -44,5 +44,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgCreateValidatorWithPallasKey{},
 		&MsgUpdateVoteManagers{},
 		&MsgAuthorizedSend{},
+		&MsgSetEndorser{},
+		&MsgEndorseRound{},
 	)
 }

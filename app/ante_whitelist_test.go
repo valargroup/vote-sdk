@@ -146,6 +146,22 @@ func TestWhitelist_AllowedMessagesPassThrough(t *testing.T) {
 				ValidatorAddr: sdk.ValAddress(signerAddr).String(),
 			},
 		},
+		{
+			name: "MsgSetEndorser",
+			msg: &votetypes.MsgSetEndorser{
+				Creator:    signerAddr.String(),
+				EndorserId: "zodl",
+				Address:    signerAddr.String(),
+			},
+		},
+		{
+			name: "MsgEndorseRound",
+			msg: &votetypes.MsgEndorseRound{
+				Creator:     signerAddr.String(),
+				EndorserId:  "zodl",
+				VoteRoundId: make([]byte, votetypes.RoundIDLen),
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -177,6 +193,8 @@ func TestDefaultAllowedMessages_ContainsExpectedTypes(t *testing.T) {
 	require.True(t, allowed["/svote.v1.MsgRotatePallasKey"])
 	require.True(t, allowed["/svote.v1.MsgCreateValidatorWithPallasKey"])
 	require.True(t, allowed["/svote.v1.MsgUpdateVoteManagers"])
+	require.True(t, allowed["/svote.v1.MsgSetEndorser"])
+	require.True(t, allowed["/svote.v1.MsgEndorseRound"])
 	require.True(t, allowed["/cosmos.staking.v1beta1.MsgCreateValidator"])
 	require.True(t, allowed["/cosmos.staking.v1beta1.MsgEditValidator"])
 	require.True(t, allowed["/cosmos.slashing.v1beta1.MsgUnjail"])

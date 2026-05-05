@@ -45,4 +45,8 @@ var (
 
 	// Authorized send errors.
 	ErrUnauthorizedSend = errors.Register(ModuleName, 32, "sender not authorized to send to recipient")
+
+	// Endorser registry errors.
+	ErrInvalidEndorserID = errors.Register(ModuleName, 40, "invalid endorser id")
+	ErrEndorserNotFound  = errors.Register(ModuleName, 41, "endorser not found")
 )

@@ -15,10 +15,10 @@ import (
 // ZKP/RedPallas authentication. Tags 0x08, 0x0D, and 0x0E are ceremony/tally
 // tags auto-injected by PrepareProposal that also use the custom wire format.
 //
-// Tags 0x01, 0x06, 0x09, 0x0C are reserved for messages that use the standard
+// Tags 0x01, 0x06, 0x09, 0x0C, 0x0F, and 0x10 are reserved for messages that use the standard
 // Cosmos SDK Tx envelope (MsgCreateVotingSession, MsgRegisterPallasKey,
-// MsgCreateValidatorWithPallasKey, MsgUpdateVoteManagers). They are not used by
-// any encoder or decoder here — see sdk/README.md for the full byte map.
+// MsgCreateValidatorWithPallasKey, MsgUpdateVoteManagers, MsgSetEndorser,
+// and MsgEndorseRound). They are not used by any encoder or decoder here.
 // Tag 0x0A is deliberately absent: it collides with the standard Cosmos Tx
 // protobuf encoding (field 1, wire type 2).
 const (

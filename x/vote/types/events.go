@@ -18,6 +18,8 @@ const (
 	EventTypeSubmitPartialDecryption  = "submit_partial_decryption"
 	EventTypeAuthorizedSend           = "authorized_send"
 	EventTypeTallyTimeout             = "tally_timeout"
+	EventTypeSetEndorser              = "set_endorser"
+	EventTypeEndorseRound             = "endorse_round"
 )
 
 // Event attribute keys.
@@ -45,4 +47,6 @@ const (
 	AttributeKeyAmount           = "amount"
 	AttributeKeyOldPallasPk      = "old_pallas_pk"
 	AttributeKeyNewPallasPk      = "new_pallas_pk"
+	AttributeKeyEndorserID       = "endorser_id"
+	AttributeKeyEndorserAddress  = "endorser_address"
 )

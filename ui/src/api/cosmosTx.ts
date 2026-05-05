@@ -125,6 +125,60 @@ const MsgUpdateVoteManagersProto = {
   },
 };
 
+// ── Protobuf type: MsgSetEndorser ───────────────────────────────
+//
+// message MsgSetEndorser { string creator = 1; string endorser_id = 2; string address = 3; }
+const MsgSetEndorserProto = {
+  encode(
+    message: { creator: string; endorserId: string; address: string },
+    writer: ProtoWriter = ProtoWriter.create(),
+  ): ProtoWriter {
+    if (message.creator !== "") writer.uint32(10).string(message.creator);
+    if (message.endorserId !== "") writer.uint32(18).string(message.endorserId);
+    if (message.address !== "") writer.uint32(26).string(message.address);
+    return writer;
+  },
+  decode(): { creator: string; endorserId: string; address: string } {
+    throw new Error("decode not implemented");
+  },
+  fromPartial(
+    object: Partial<{ creator: string; endorserId: string; address: string }>,
+  ): { creator: string; endorserId: string; address: string } {
+    return {
+      creator: object.creator ?? "",
+      endorserId: object.endorserId ?? "",
+      address: object.address ?? "",
+    };
+  },
+};
+
+// ── Protobuf type: MsgEndorseRound ──────────────────────────────
+//
+// message MsgEndorseRound { string creator = 1; string endorser_id = 2; bytes vote_round_id = 3; }
+const MsgEndorseRoundProto = {
+  encode(
+    message: { creator: string; endorserId: string; voteRoundId: Uint8Array },
+    writer: ProtoWriter = ProtoWriter.create(),
+  ): ProtoWriter {
+    if (message.creator !== "") writer.uint32(10).string(message.creator);
+    if (message.endorserId !== "") writer.uint32(18).string(message.endorserId);
+    if (message.voteRoundId.length) writer.uint32(26).bytes(message.voteRoundId);
+    return writer;
+  },
+  decode(): { creator: string; endorserId: string; voteRoundId: Uint8Array } {
+    throw new Error("decode not implemented");
+  },
+  fromPartial(
+    object: Partial<{ creator: string; endorserId: string; voteRoundId: Uint8Array }>,
+  ): { creator: string; endorserId: string; voteRoundId: Uint8Array } {
+    return {
+      creator: object.creator ?? "",
+      endorserId: object.endorserId ?? "",
+      voteRoundId: object.voteRoundId ?? new Uint8Array(),
+    };
+  },
+};
+
 // ── Protobuf type: MsgCreateVotingSession ───────────────────────
 
 // message VoteOption { uint32 index = 1; string label = 2; }
@@ -285,6 +339,10 @@ function createRegistry(): Registry {
   registry.register("/cosmos.slashing.v1beta1.MsgUnjail", MsgUnjailProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/svote.v1.MsgAuthorizedSend", MsgAuthorizedSendProto as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registry.register("/svote.v1.MsgSetEndorser", MsgSetEndorserProto as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registry.register("/svote.v1.MsgEndorseRound", MsgEndorseRoundProto as any);
   return registry;
 }
 
@@ -525,6 +583,50 @@ export async function updateVoteManagers(
       {
         typeUrl: "/svote.v1.MsgUpdateVoteManagers",
         value: { creator: account.address, newVoteManagers },
+      },
+    ],
+  });
+}
+
+/** Sign and broadcast a MsgSetEndorser transaction. Empty address clears the mapping. */
+export async function setEndorser(
+  apiBase: string,
+  signer: OfflineDirectSigner,
+  endorserId: string,
+  address: string,
+): Promise<BroadcastResult> {
+  const [account] = await signer.getAccounts();
+  return signAndBroadcast({
+    apiBase,
+    signer,
+    messages: [
+      {
+        typeUrl: "/svote.v1.MsgSetEndorser",
+        value: { creator: account.address, endorserId, address },
+      },
+    ],
+  });
+}
+
+/** Sign and broadcast a MsgEndorseRound transaction. */
+export async function endorseRound(
+  apiBase: string,
+  signer: OfflineDirectSigner,
+  endorserId: string,
+  roundIdHex: string,
+): Promise<BroadcastResult> {
+  const [account] = await signer.getAccounts();
+  return signAndBroadcast({
+    apiBase,
+    signer,
+    messages: [
+      {
+        typeUrl: "/svote.v1.MsgEndorseRound",
+        value: {
+          creator: account.address,
+          endorserId,
+          voteRoundId: hexToBytes(roundIdHex),
+        },
       },
     ],
   });

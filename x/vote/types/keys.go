@@ -64,6 +64,9 @@ const MaxTreePosition = (1 << 32) - 1
 // the CommitmentLeaves gRPC query to prevent unbounded memory allocation.
 const MaxCommitmentLeafRange uint64 = 1000
 
+// MaxEndorserIDLen bounds human-readable endorser identifiers stored in KV keys.
+const MaxEndorserIDLen = 64
+
 // Session creation field names — used in the HTTP API response, CLI input
 // parsing, and structured logging. Single source of truth for the JSON keys
 // of hex-encoded fields in MsgCreateVotingSession.
@@ -169,6 +172,14 @@ var (
 	// 0x06, 0x08). Shard/cap/checkpoint keys (0x0F, 0x10, 0x11) are scoped
 	// transparently by the KvStoreProxy prefix on the Rust side.
 	RoundTreePrefix = []byte{0x14}
+
+	// EndorserAddressPrefix stores the current endorser mapping:
+	//   0x16 || endorser_id_bytes -> canonical bech32 address bytes
+	EndorserAddressPrefix = []byte{0x16}
+
+	// EndorsedRoundPrefix stores append-only round endorsements:
+	//   0x17 || endorser_id_bytes || 0x00 || round_id (32 bytes) -> []byte{1}
+	EndorsedRoundPrefix = []byte{0x17}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -361,6 +372,63 @@ func ValidateRoundID(id []byte) error {
 		return ErrInvalidRoundIDLen
 	}
 	return nil
+}
+
+// ValidateEndorserID accepts stable, URL/path-friendly identifiers such as "zodl".
+func ValidateEndorserID(id string) error {
+	if len(id) == 0 {
+		return fmt.Errorf("%w: endorser_id cannot be empty", ErrInvalidEndorserID)
+	}
+	if len(id) > MaxEndorserIDLen {
+		return fmt.Errorf("%w: endorser_id length %d exceeds max %d", ErrInvalidEndorserID, len(id), MaxEndorserIDLen)
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
+			continue
+		}
+		return fmt.Errorf("%w: endorser_id may contain only lowercase letters, digits, and hyphen", ErrInvalidEndorserID)
+	}
+	return nil
+}
+
+// EndorserAddressKey returns the store key for an endorser_id -> address mapping.
+func EndorserAddressKey(endorserID string) ([]byte, error) {
+	if err := ValidateEndorserID(endorserID); err != nil {
+		return nil, err
+	}
+	key := make([]byte, 0, len(EndorserAddressPrefix)+len(endorserID))
+	key = append(key, EndorserAddressPrefix...)
+	key = append(key, []byte(endorserID)...)
+	return key, nil
+}
+
+// EndorsedRoundKey returns the store key for one endorser_id/round endorsement.
+func EndorsedRoundKey(endorserID string, roundID []byte) ([]byte, error) {
+	if err := ValidateEndorserID(endorserID); err != nil {
+		return nil, err
+	}
+	if err := ValidateRoundID(roundID); err != nil {
+		return nil, err
+	}
+	key := make([]byte, 0, len(EndorsedRoundPrefix)+len(endorserID)+1+RoundIDLen)
+	key = append(key, EndorsedRoundPrefix...)
+	key = append(key, []byte(endorserID)...)
+	key = append(key, 0x00)
+	key = append(key, roundID...)
+	return key, nil
+}
+
+// EndorsedRoundPrefixForID returns the prefix for all rounds endorsed by an endorser_id.
+func EndorsedRoundPrefixForID(endorserID string) ([]byte, error) {
+	if err := ValidateEndorserID(endorserID); err != nil {
+		return nil, err
+	}
+	key := make([]byte, 0, len(EndorsedRoundPrefix)+len(endorserID)+1)
+	key = append(key, EndorsedRoundPrefix...)
+	key = append(key, []byte(endorserID)...)
+	key = append(key, 0x00)
+	return key, nil
 }
 
 // BlockLeafIndexKey returns the store key for a block-to-leaf-index mapping scoped to a round.

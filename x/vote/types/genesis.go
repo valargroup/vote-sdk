@@ -126,5 +126,36 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
+	// Validate endorser mappings.
+	seenEndorsers := make(map[string]struct{}, len(gs.Endorsers))
+	for i, endorser := range gs.Endorsers {
+		if err := ValidateEndorserID(endorser.EndorserId); err != nil {
+			return fmt.Errorf("endorsers[%d].endorser_id: %w", i, err)
+		}
+		if _, dup := seenEndorsers[endorser.EndorserId]; dup {
+			return fmt.Errorf("endorsers[%d]: duplicate endorser_id %q", i, endorser.EndorserId)
+		}
+		seenEndorsers[endorser.EndorserId] = struct{}{}
+		if _, err := sdk.AccAddressFromBech32(endorser.Address); err != nil {
+			return fmt.Errorf("endorsers[%d].address %q is not a valid bech32 address: %w", i, endorser.Address, err)
+		}
+	}
+
+	// Validate append-only endorsements.
+	seenEndorsedRounds := make(map[string]struct{}, len(gs.EndorsedRounds))
+	for i, endorsed := range gs.EndorsedRounds {
+		if err := ValidateEndorserID(endorsed.EndorserId); err != nil {
+			return fmt.Errorf("endorsed_rounds[%d].endorser_id: %w", i, err)
+		}
+		if len(endorsed.VoteRoundId) != RoundIDLen {
+			return fmt.Errorf("endorsed_rounds[%d].vote_round_id is %d bytes, expected %d", i, len(endorsed.VoteRoundId), RoundIDLen)
+		}
+		key := endorsed.EndorserId + "\x00" + string(endorsed.VoteRoundId)
+		if _, dup := seenEndorsedRounds[key]; dup {
+			return fmt.Errorf("endorsed_rounds[%d]: duplicate endorsement for %q/%x", i, endorsed.EndorserId, endorsed.VoteRoundId)
+		}
+		seenEndorsedRounds[key] = struct{}{}
+	}
+
 	return nil
 }

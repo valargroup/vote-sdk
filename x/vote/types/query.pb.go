@@ -1102,6 +1102,174 @@ func (x *QueryPallasKeysResponse) GetValidators() []*ValidatorPallasKey {
 	return nil
 }
 
+type QueryEndorsersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryEndorsersRequest) Reset() {
+	*x = QueryEndorsersRequest{}
+	mi := &file_svote_v1_query_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryEndorsersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryEndorsersRequest) ProtoMessage() {}
+
+func (x *QueryEndorsersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryEndorsersRequest.ProtoReflect.Descriptor instead.
+func (*QueryEndorsersRequest) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{24}
+}
+
+type QueryEndorsersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Endorsers     []*Endorser            `protobuf:"bytes,1,rep,name=endorsers,proto3" json:"endorsers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryEndorsersResponse) Reset() {
+	*x = QueryEndorsersResponse{}
+	mi := &file_svote_v1_query_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryEndorsersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryEndorsersResponse) ProtoMessage() {}
+
+func (x *QueryEndorsersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryEndorsersResponse.ProtoReflect.Descriptor instead.
+func (*QueryEndorsersResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *QueryEndorsersResponse) GetEndorsers() []*Endorser {
+	if x != nil {
+		return x.Endorsers
+	}
+	return nil
+}
+
+type QueryEndorsedRoundsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EndorserId    string                 `protobuf:"bytes,1,opt,name=endorser_id,json=endorserId,proto3" json:"endorser_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryEndorsedRoundsRequest) Reset() {
+	*x = QueryEndorsedRoundsRequest{}
+	mi := &file_svote_v1_query_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryEndorsedRoundsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryEndorsedRoundsRequest) ProtoMessage() {}
+
+func (x *QueryEndorsedRoundsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryEndorsedRoundsRequest.ProtoReflect.Descriptor instead.
+func (*QueryEndorsedRoundsRequest) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *QueryEndorsedRoundsRequest) GetEndorserId() string {
+	if x != nil {
+		return x.EndorserId
+	}
+	return ""
+}
+
+type QueryEndorsedRoundsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VoteRoundIds  [][]byte               `protobuf:"bytes,1,rep,name=vote_round_ids,json=voteRoundIds,proto3" json:"vote_round_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryEndorsedRoundsResponse) Reset() {
+	*x = QueryEndorsedRoundsResponse{}
+	mi := &file_svote_v1_query_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryEndorsedRoundsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryEndorsedRoundsResponse) ProtoMessage() {}
+
+func (x *QueryEndorsedRoundsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryEndorsedRoundsResponse.ProtoReflect.Descriptor instead.
+func (*QueryEndorsedRoundsResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *QueryEndorsedRoundsResponse) GetVoteRoundIds() [][]byte {
+	if x != nil {
+		return x.VoteRoundIds
+	}
+	return nil
+}
+
 var File_svote_v1_query_proto protoreflect.FileDescriptor
 
 const file_svote_v1_query_proto_rawDesc = "" +
@@ -1165,7 +1333,15 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\x17QueryPallasKeysResponse\x12<\n" +
 	"\n" +
 	"validators\x18\x01 \x03(\v2\x1c.svote.v1.ValidatorPallasKeyR\n" +
-	"validators2\xbc\b\n" +
+	"validators\"\x17\n" +
+	"\x15QueryEndorsersRequest\"J\n" +
+	"\x16QueryEndorsersResponse\x120\n" +
+	"\tendorsers\x18\x01 \x03(\v2\x12.svote.v1.EndorserR\tendorsers\"=\n" +
+	"\x1aQueryEndorsedRoundsRequest\x12\x1f\n" +
+	"\vendorser_id\x18\x01 \x01(\tR\n" +
+	"endorserId\"C\n" +
+	"\x1bQueryEndorsedRoundsResponse\x12$\n" +
+	"\x0evote_round_ids\x18\x01 \x03(\fR\fvoteRoundIds2\xeb\t\n" +
 	"\x05Query\x12e\n" +
 	"\x16CommitmentTreeAtHeight\x12$.svote.v1.QueryCommitmentTreeRequest\x1a%.svote.v1.QueryCommitmentTreeResponse\x12[\n" +
 	"\x14LatestCommitmentTree\x12 .svote.v1.QueryLatestTreeRequest\x1a!.svote.v1.QueryLatestTreeResponse\x12N\n" +
@@ -1180,7 +1356,9 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\n" +
 	"ListRounds\x12 .svote.v1.QueryListRoundsRequest\x1a!.svote.v1.QueryListRoundsResponse\x12Q\n" +
 	"\n" +
-	"PallasKeys\x12 .svote.v1.QueryPallasKeysRequest\x1a!.svote.v1.QueryPallasKeysResponseB-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
+	"PallasKeys\x12 .svote.v1.QueryPallasKeysRequest\x1a!.svote.v1.QueryPallasKeysResponse\x12N\n" +
+	"\tEndorsers\x12\x1f.svote.v1.QueryEndorsersRequest\x1a .svote.v1.QueryEndorsersResponse\x12]\n" +
+	"\x0eEndorsedRounds\x12$.svote.v1.QueryEndorsedRoundsRequest\x1a%.svote.v1.QueryEndorsedRoundsResponseB-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
 
 var (
 	file_svote_v1_query_proto_rawDescOnce sync.Once
@@ -1194,7 +1372,7 @@ func file_svote_v1_query_proto_rawDescGZIP() []byte {
 	return file_svote_v1_query_proto_rawDescData
 }
 
-var file_svote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_svote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_svote_v1_query_proto_goTypes = []any{
 	(*QueryCommitmentTreeRequest)(nil),    // 0: svote.v1.QueryCommitmentTreeRequest
 	(*QueryCommitmentTreeResponse)(nil),   // 1: svote.v1.QueryCommitmentTreeResponse
@@ -1220,58 +1398,68 @@ var file_svote_v1_query_proto_goTypes = []any{
 	(*QueryListRoundsResponse)(nil),       // 21: svote.v1.QueryListRoundsResponse
 	(*QueryPallasKeysRequest)(nil),        // 22: svote.v1.QueryPallasKeysRequest
 	(*QueryPallasKeysResponse)(nil),       // 23: svote.v1.QueryPallasKeysResponse
-	nil,                                   // 24: svote.v1.QueryProposalTallyResponse.TallyEntry
-	(*CommitmentTreeState)(nil),           // 25: svote.v1.CommitmentTreeState
-	(*VoteRound)(nil),                     // 26: svote.v1.VoteRound
-	(*TallyResult)(nil),                   // 27: svote.v1.TallyResult
-	(*BlockCommitments)(nil),              // 28: svote.v1.BlockCommitments
-	(*CeremonyState)(nil),                 // 29: svote.v1.CeremonyState
-	(SessionStatus)(0),                    // 30: svote.v1.SessionStatus
-	(*ProposalSummary)(nil),               // 31: svote.v1.ProposalSummary
-	(*ValidatorPallasKey)(nil),            // 32: svote.v1.ValidatorPallasKey
+	(*QueryEndorsersRequest)(nil),         // 24: svote.v1.QueryEndorsersRequest
+	(*QueryEndorsersResponse)(nil),        // 25: svote.v1.QueryEndorsersResponse
+	(*QueryEndorsedRoundsRequest)(nil),    // 26: svote.v1.QueryEndorsedRoundsRequest
+	(*QueryEndorsedRoundsResponse)(nil),   // 27: svote.v1.QueryEndorsedRoundsResponse
+	nil,                                   // 28: svote.v1.QueryProposalTallyResponse.TallyEntry
+	(*CommitmentTreeState)(nil),           // 29: svote.v1.CommitmentTreeState
+	(*VoteRound)(nil),                     // 30: svote.v1.VoteRound
+	(*TallyResult)(nil),                   // 31: svote.v1.TallyResult
+	(*BlockCommitments)(nil),              // 32: svote.v1.BlockCommitments
+	(*CeremonyState)(nil),                 // 33: svote.v1.CeremonyState
+	(SessionStatus)(0),                    // 34: svote.v1.SessionStatus
+	(*ProposalSummary)(nil),               // 35: svote.v1.ProposalSummary
+	(*ValidatorPallasKey)(nil),            // 36: svote.v1.ValidatorPallasKey
+	(*Endorser)(nil),                      // 37: svote.v1.Endorser
 }
 var file_svote_v1_query_proto_depIdxs = []int32{
-	25, // 0: svote.v1.QueryCommitmentTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
-	25, // 1: svote.v1.QueryLatestTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
-	26, // 2: svote.v1.QueryVoteRoundResponse.round:type_name -> svote.v1.VoteRound
-	24, // 3: svote.v1.QueryProposalTallyResponse.tally:type_name -> svote.v1.QueryProposalTallyResponse.TallyEntry
-	27, // 4: svote.v1.QueryTallyResultsResponse.results:type_name -> svote.v1.TallyResult
-	28, // 5: svote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> svote.v1.BlockCommitments
-	26, // 6: svote.v1.QueryActiveRoundResponse.round:type_name -> svote.v1.VoteRound
-	29, // 7: svote.v1.QueryCeremonyStateResponse.ceremony:type_name -> svote.v1.CeremonyState
-	30, // 8: svote.v1.QueryVoteSummaryResponse.status:type_name -> svote.v1.SessionStatus
-	31, // 9: svote.v1.QueryVoteSummaryResponse.proposals:type_name -> svote.v1.ProposalSummary
-	26, // 10: svote.v1.QueryListRoundsResponse.rounds:type_name -> svote.v1.VoteRound
-	32, // 11: svote.v1.QueryPallasKeysResponse.validators:type_name -> svote.v1.ValidatorPallasKey
-	0,  // 12: svote.v1.Query.CommitmentTreeAtHeight:input_type -> svote.v1.QueryCommitmentTreeRequest
-	2,  // 13: svote.v1.Query.LatestCommitmentTree:input_type -> svote.v1.QueryLatestTreeRequest
-	4,  // 14: svote.v1.Query.VoteRound:input_type -> svote.v1.QueryVoteRoundRequest
-	6,  // 15: svote.v1.Query.ProposalTally:input_type -> svote.v1.QueryProposalTallyRequest
-	8,  // 16: svote.v1.Query.TallyResults:input_type -> svote.v1.QueryTallyResultsRequest
-	10, // 17: svote.v1.Query.CommitmentLeaves:input_type -> svote.v1.QueryCommitmentLeavesRequest
-	12, // 18: svote.v1.Query.ActiveRound:input_type -> svote.v1.QueryActiveRoundRequest
-	14, // 19: svote.v1.Query.CeremonyState:input_type -> svote.v1.QueryCeremonyStateRequest
-	16, // 20: svote.v1.Query.VoteManagers:input_type -> svote.v1.QueryVoteManagersRequest
-	18, // 21: svote.v1.Query.VoteSummary:input_type -> svote.v1.QueryVoteSummaryRequest
-	20, // 22: svote.v1.Query.ListRounds:input_type -> svote.v1.QueryListRoundsRequest
-	22, // 23: svote.v1.Query.PallasKeys:input_type -> svote.v1.QueryPallasKeysRequest
-	1,  // 24: svote.v1.Query.CommitmentTreeAtHeight:output_type -> svote.v1.QueryCommitmentTreeResponse
-	3,  // 25: svote.v1.Query.LatestCommitmentTree:output_type -> svote.v1.QueryLatestTreeResponse
-	5,  // 26: svote.v1.Query.VoteRound:output_type -> svote.v1.QueryVoteRoundResponse
-	7,  // 27: svote.v1.Query.ProposalTally:output_type -> svote.v1.QueryProposalTallyResponse
-	9,  // 28: svote.v1.Query.TallyResults:output_type -> svote.v1.QueryTallyResultsResponse
-	11, // 29: svote.v1.Query.CommitmentLeaves:output_type -> svote.v1.QueryCommitmentLeavesResponse
-	13, // 30: svote.v1.Query.ActiveRound:output_type -> svote.v1.QueryActiveRoundResponse
-	15, // 31: svote.v1.Query.CeremonyState:output_type -> svote.v1.QueryCeremonyStateResponse
-	17, // 32: svote.v1.Query.VoteManagers:output_type -> svote.v1.QueryVoteManagersResponse
-	19, // 33: svote.v1.Query.VoteSummary:output_type -> svote.v1.QueryVoteSummaryResponse
-	21, // 34: svote.v1.Query.ListRounds:output_type -> svote.v1.QueryListRoundsResponse
-	23, // 35: svote.v1.Query.PallasKeys:output_type -> svote.v1.QueryPallasKeysResponse
-	24, // [24:36] is the sub-list for method output_type
-	12, // [12:24] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	29, // 0: svote.v1.QueryCommitmentTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
+	29, // 1: svote.v1.QueryLatestTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
+	30, // 2: svote.v1.QueryVoteRoundResponse.round:type_name -> svote.v1.VoteRound
+	28, // 3: svote.v1.QueryProposalTallyResponse.tally:type_name -> svote.v1.QueryProposalTallyResponse.TallyEntry
+	31, // 4: svote.v1.QueryTallyResultsResponse.results:type_name -> svote.v1.TallyResult
+	32, // 5: svote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> svote.v1.BlockCommitments
+	30, // 6: svote.v1.QueryActiveRoundResponse.round:type_name -> svote.v1.VoteRound
+	33, // 7: svote.v1.QueryCeremonyStateResponse.ceremony:type_name -> svote.v1.CeremonyState
+	34, // 8: svote.v1.QueryVoteSummaryResponse.status:type_name -> svote.v1.SessionStatus
+	35, // 9: svote.v1.QueryVoteSummaryResponse.proposals:type_name -> svote.v1.ProposalSummary
+	30, // 10: svote.v1.QueryListRoundsResponse.rounds:type_name -> svote.v1.VoteRound
+	36, // 11: svote.v1.QueryPallasKeysResponse.validators:type_name -> svote.v1.ValidatorPallasKey
+	37, // 12: svote.v1.QueryEndorsersResponse.endorsers:type_name -> svote.v1.Endorser
+	0,  // 13: svote.v1.Query.CommitmentTreeAtHeight:input_type -> svote.v1.QueryCommitmentTreeRequest
+	2,  // 14: svote.v1.Query.LatestCommitmentTree:input_type -> svote.v1.QueryLatestTreeRequest
+	4,  // 15: svote.v1.Query.VoteRound:input_type -> svote.v1.QueryVoteRoundRequest
+	6,  // 16: svote.v1.Query.ProposalTally:input_type -> svote.v1.QueryProposalTallyRequest
+	8,  // 17: svote.v1.Query.TallyResults:input_type -> svote.v1.QueryTallyResultsRequest
+	10, // 18: svote.v1.Query.CommitmentLeaves:input_type -> svote.v1.QueryCommitmentLeavesRequest
+	12, // 19: svote.v1.Query.ActiveRound:input_type -> svote.v1.QueryActiveRoundRequest
+	14, // 20: svote.v1.Query.CeremonyState:input_type -> svote.v1.QueryCeremonyStateRequest
+	16, // 21: svote.v1.Query.VoteManagers:input_type -> svote.v1.QueryVoteManagersRequest
+	18, // 22: svote.v1.Query.VoteSummary:input_type -> svote.v1.QueryVoteSummaryRequest
+	20, // 23: svote.v1.Query.ListRounds:input_type -> svote.v1.QueryListRoundsRequest
+	22, // 24: svote.v1.Query.PallasKeys:input_type -> svote.v1.QueryPallasKeysRequest
+	24, // 25: svote.v1.Query.Endorsers:input_type -> svote.v1.QueryEndorsersRequest
+	26, // 26: svote.v1.Query.EndorsedRounds:input_type -> svote.v1.QueryEndorsedRoundsRequest
+	1,  // 27: svote.v1.Query.CommitmentTreeAtHeight:output_type -> svote.v1.QueryCommitmentTreeResponse
+	3,  // 28: svote.v1.Query.LatestCommitmentTree:output_type -> svote.v1.QueryLatestTreeResponse
+	5,  // 29: svote.v1.Query.VoteRound:output_type -> svote.v1.QueryVoteRoundResponse
+	7,  // 30: svote.v1.Query.ProposalTally:output_type -> svote.v1.QueryProposalTallyResponse
+	9,  // 31: svote.v1.Query.TallyResults:output_type -> svote.v1.QueryTallyResultsResponse
+	11, // 32: svote.v1.Query.CommitmentLeaves:output_type -> svote.v1.QueryCommitmentLeavesResponse
+	13, // 33: svote.v1.Query.ActiveRound:output_type -> svote.v1.QueryActiveRoundResponse
+	15, // 34: svote.v1.Query.CeremonyState:output_type -> svote.v1.QueryCeremonyStateResponse
+	17, // 35: svote.v1.Query.VoteManagers:output_type -> svote.v1.QueryVoteManagersResponse
+	19, // 36: svote.v1.Query.VoteSummary:output_type -> svote.v1.QueryVoteSummaryResponse
+	21, // 37: svote.v1.Query.ListRounds:output_type -> svote.v1.QueryListRoundsResponse
+	23, // 38: svote.v1.Query.PallasKeys:output_type -> svote.v1.QueryPallasKeysResponse
+	25, // 39: svote.v1.Query.Endorsers:output_type -> svote.v1.QueryEndorsersResponse
+	27, // 40: svote.v1.Query.EndorsedRounds:output_type -> svote.v1.QueryEndorsedRoundsResponse
+	27, // [27:41] is the sub-list for method output_type
+	13, // [13:27] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_svote_v1_query_proto_init() }
@@ -1286,7 +1474,7 @@ func file_svote_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_query_proto_rawDesc), len(file_svote_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
