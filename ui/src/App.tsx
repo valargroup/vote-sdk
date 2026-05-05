@@ -73,13 +73,14 @@ const SECTION_PATHS: Record<Section, string> = {
   validators: "/validators",
   "validator-join": "/validator-join",
   "attest-round": "/attest-round",
-  endorsers: "/endorsers",
+  endorsers: "/endorsements",
   snapshot: "/snapshot",
 };
 
 const PATH_TO_SECTION: Record<string, Section> = Object.fromEntries(
   Object.entries(SECTION_PATHS).map(([s, p]) => [p, s as Section])
 ) as Record<string, Section>;
+PATH_TO_SECTION["/endorsers"] = "endorsers";
 
 interface AppRoute {
   section: Section;
@@ -2391,6 +2392,8 @@ function VoteStatusView({
   const [rounds, setRounds] = useState<chainApi.ChainRound[]>([]);
   const [summaries, setSummaries] = useState<Record<string, chainApi.VoteSummaryResponse>>({});
   const [summaryErrors, setSummaryErrors] = useState<Record<string, string>>({});
+  const [endorsedByRound, setEndorsedByRound] = useState<Record<string, string[]>>({});
+  const [endorsementError, setEndorsementError] = useState("");
   const [validatorMonikers, setValidatorMonikers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -2401,6 +2404,7 @@ function VoteStatusView({
     setLoading(true);
     setError("");
     setSummaryErrors({});
+    setEndorsementError("");
     try {
       const resp = await chainApi.listRounds();
       const allRounds = (resp.rounds ?? []).sort((a, b) => {
@@ -2409,6 +2413,46 @@ function VoteStatusView({
         return ha - hb;
       });
       setRounds(allRounds);
+
+      try {
+        const endorsersResp = await chainApi.getEndorsers();
+        const endorsementEntries = await Promise.all(
+          endorsersResp.endorsers.map(async (endorser) => {
+            try {
+              const endorsed = await chainApi.getEndorsedRounds(endorser.endorser_id);
+              return {
+                endorserID: endorser.endorser_id,
+                roundIDs: endorsed.vote_round_ids.map(base64ToHex),
+                error: "",
+              };
+            } catch (err) {
+              return {
+                endorserID: endorser.endorser_id,
+                roundIDs: [],
+                error: err instanceof Error ? err.message : String(err),
+              };
+            }
+          })
+        );
+        const byRound: Record<string, string[]> = {};
+        const failedEndorsers: string[] = [];
+        for (const entry of endorsementEntries) {
+          if (entry.error) {
+            failedEndorsers.push(entry.endorserID);
+            continue;
+          }
+          for (const roundID of entry.roundIDs) {
+            byRound[roundID] = [...(byRound[roundID] ?? []), entry.endorserID];
+          }
+        }
+        setEndorsedByRound(byRound);
+        if (failedEndorsers.length > 0) {
+          setEndorsementError(`Endorsements unavailable for ${failedEndorsers.join(", ")}.`);
+        }
+      } catch (err) {
+        setEndorsedByRound({});
+        setEndorsementError(`Endorsements unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
       // Fetch vote summary for each round in parallel.
       const entries = await Promise.all(
@@ -2551,6 +2595,13 @@ function VoteStatusView({
           </div>
         )}
 
+        {endorsementError && (
+          <div className="flex items-center gap-2 bg-warning/10 border border-warning/30 rounded-lg p-3 mb-4">
+            <AlertTriangle size={14} className="text-warning shrink-0" />
+            <p className="text-[11px] text-warning">{endorsementError}</p>
+          </div>
+        )}
+
         {!loading && !error && rounds.length === 0 && (
           <div className="text-center py-12">
             <p className="text-xs text-text-muted">
@@ -2585,6 +2636,7 @@ function VoteStatusView({
             const isExpired = endDate ? endDate.getTime() < Date.now() : false;
 
             const roundIdHex = base64ToHex(roundId);
+            const endorsingIDs = endorsedByRound[roundIdHex] ?? [];
             const snapshotHeight = Number(round.snapshot_height ?? 0);
             const snapshotTime =
               snapshotHeight > 0 && zcashChain.latestHeight && zcashChain.latestTimestamp
@@ -2656,6 +2708,23 @@ function VoteStatusView({
                       mono={false}
                     />
                   )}
+                  <div className="rounded-lg border border-border-subtle bg-surface-2 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-text-muted">Endorsed By</p>
+                    {endorsingIDs.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {endorsingIDs.map((endorserID) => (
+                          <span
+                            key={endorserID}
+                            className="rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success"
+                          >
+                            {endorserID}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-[11px] text-text-muted">No Endorsements.</p>
+                    )}
+                  </div>
                   <div className="pt-1">
                     <button
                       type="button"

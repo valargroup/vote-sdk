@@ -169,7 +169,7 @@ export function Sidebar({
           }`}
         >
           <ShieldCheck size={15} />
-          Endorsers
+          Endorsements
         </button>
 
         <button
