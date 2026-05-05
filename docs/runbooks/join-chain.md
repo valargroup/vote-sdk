@@ -10,7 +10,7 @@ A validator is one service plus an optional Caddy reverse proxy on the same host
 
 ## Prerequisites
 
-Production target: `linux-amd64`, 4 vCPU, 8 GB RAM, 120 GB NVMe SSD. 4 vCPU gives enough headroom for ZKP verification and ceremony/tally injection without contending with the CometBFT consensus thread.
+Production target: `linux-amd64`, 4 vCPU, 8 GB RAM, 100 GB NVMe SSD. 4 vCPU gives enough headroom for ZKP verification and ceremony/tally injection without contending with the CometBFT consensus thread.
 
 ### Platform support
 
