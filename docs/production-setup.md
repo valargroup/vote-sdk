@@ -16,7 +16,7 @@
 
 Production uses dedicated DigitalOcean Droplets in the same region + VPC, running native binaries under systemd (no Docker):
 
-- **vote-primary** (`vote-chain-primary.<domain>`): 4 vCPU / 16 GB RAM / 200 GB NVMe SSD. Bootstrap validator — creates genesis via `scripts/init.sh` with `SVOTE_ADMIN_DISABLE=false` so the admin module is enabled. Serves the admin UI at `https://vote-chain-primary.<domain>/` via `--serve-ui --ui-dist` (systemd drop-in). Secondaries keep `[admin] disable = true` from `svoted init`.
+- **vote-primary** (`vote-chain-primary.<domain>`): 4 vCPU / 16 GB RAM / 200 GB NVMe. Bootstrap validator — creates genesis via `scripts/init.sh` with `SVOTE_ADMIN_DISABLE=false` so the admin module is enabled. Serves the admin UI at `https://vote-chain-primary.<domain>/` via `--serve-ui --ui-dist` (systemd drop-in). Secondaries keep `[admin] disable = true` from `svoted init`.
 - **vote-secondary** (`vote-chain-secondary.<domain>`): 2 vCPU / 8 GB RAM / 100 GB NVMe. Joining validator — fetches genesis, syncs, and self-registers via `scripts/reset-join.sh`.
 - **vote-snapshot** (`snapshots.<domain>`): 4 vCPU / 16 GB RAM / 100 GB volume by default. Pruned non-validator node — publishes scheduled `data/` snapshots and metadata to `s3://vote/snapshots/svote-1/`, while Caddy serves the public snapshot page.
 
