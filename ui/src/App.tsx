@@ -43,6 +43,11 @@ const VOTE_OPTION_COLORS = [
   "#6366f1", // indigo
 ];
 
+const TOKEN_HOLDER_VOTING_CONFIG_REPO_URL =
+  "https://github.com/valargroup/token-holder-voting-config";
+const DYNAMIC_VOTING_CONFIG_FILE_URL = `${TOKEN_HOLDER_VOTING_CONFIG_REPO_URL}/blob/main/dynamic-voting-config.json`;
+const DYNAMIC_VOTING_CONFIG_EDIT_URL = `${TOKEN_HOLDER_VOTING_CONFIG_REPO_URL}/edit/main/dynamic-voting-config.json`;
+
 function optionColor(index: number, total: number): string {
   if (total === 2) return index === 0 ? VOTE_OPTION_COLORS[0] : VOTE_OPTION_COLORS[1];
   return VOTE_OPTION_COLORS[index % VOTE_OPTION_COLORS.length];
@@ -1890,7 +1895,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
   const [unjailing, setUnjailing] = useState<string | null>(null); // operator_address being unjailed
   const [unjailResult, setUnjailResult] = useState<{ addr: string; ok: boolean; msg: string } | null>(null);
 
-  // Edge Config network management state.
+  // Dynamic voting config network management state.
   const [votingConfig, setVotingConfig] = useState<chainApi.VotingConfig | null>(null);
   const [networkUpdating, setNetworkUpdating] = useState(false);
   const [networkResult, setNetworkResult] = useState<{ moniker: string; ok: boolean; msg: string } | null>(null);
@@ -1941,14 +1946,14 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
     setNetworkResult(null);
     try {
       window.open(
-        "https://github.com/valargroup/token-holder-voting-config/edit/main/voting-config.json",
+        DYNAMIC_VOTING_CONFIG_EDIT_URL,
         "_blank",
         "noopener,noreferrer",
       );
       setNetworkResult({
         moniker,
         ok: true,
-        msg: "Opened voting-config.json.",
+        msg: "Opened dynamic-voting-config.json.",
       });
     } finally {
       setNetworkUpdating(false);
@@ -2042,12 +2047,12 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
               All bonded validators on-chain. A validator can be bonded and producing blocks but not listed as an approved submission server if it has been taken out of client rotation by an admin.
               To become a recommended configuration for wallets, server owners should open a pull request in{" "}
               <a
-                href="https://github.com/valargroup/token-holder-voting-config"
+                href={DYNAMIC_VOTING_CONFIG_FILE_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-accent hover:text-accent-glow"
               >
-                token-holder-voting-config
+                dynamic-voting-config.json
               </a>
               {" "}that updates the published <code className="font-mono">vote_servers</code> list.
             </p>
@@ -2177,14 +2182,14 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                   </div>
                 )}
 
-                {/* Network URL (Edge Config) */}
+                {/* Network URL (dynamic voting config) */}
                 {(() => {
                   const registeredUrl = votingConfig?.vote_servers.find(
                     (s) => s.label === moniker
                   )?.url;
                   const configActionCopy = registeredUrl
-                    ? `Edit or remove the vote_servers entry for "${moniker}" via a pull request to token-holder-voting-config GitHub repository.`
-                    : `Add a vote_servers entry for "${moniker}" via a pull request to token-holder-voting-config GitHub repository.`;
+                    ? `Edit or remove the vote_servers entry for "${moniker}" via a pull request to dynamic-voting-config.json.`
+                    : `Add a vote_servers entry for "${moniker}" via a pull request to dynamic-voting-config.json.`;
                   if (registeredUrl) {
                     return (
                       <div className="mt-2 space-y-1">

@@ -123,11 +123,11 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
             <code className="text-[10px] text-text-primary">vote_servers</code> via a manual PR on{" "}
             <a
               className="text-accent inline-flex items-center gap-0.5 hover:underline"
-              href="https://github.com/valargroup/token-holder-voting-config"
+              href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
               target="_blank"
               rel="noreferrer"
             >
-              token-holder-voting-config
+              dynamic-voting-config.json
               <ExternalLink size={10} />
             </a>
             .
