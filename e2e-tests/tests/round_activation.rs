@@ -19,7 +19,7 @@ use e2e_tests::{
         wait_for_create_round_id, wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME,
         SESSION_STATUS_ACTIVE,
     },
-    payloads::create_voting_session_payload,
+    payloads::{coordinator_action_proposal_payload, create_voting_session_payload},
 };
 
 #[test]
@@ -33,9 +33,14 @@ fn round_activation() {
     let vote_manager_address = e2e_tests::api::import_first_vote_manager_key(&config.home_dir);
     eprintln!("[E2E] Vote manager address: {}", vote_manager_address);
 
-    // Create a voting round — starts as PENDING, triggers per-round ceremony.
+    // Create a voting round through coordinator approval — starts as PENDING,
+    // triggers per-round ceremony.
     let (mut body, _, _) = create_voting_session_payload(&vote_manager_address, 300, None);
-    body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
+    body = coordinator_action_proposal_payload(
+        &vote_manager_address,
+        body,
+        "/svote.v1.MsgCreateVotingSession",
+    );
 
     let vm_config = e2e_tests::api::CosmosTxConfig {
         key_name: FIRST_VOTE_MANAGER_KEY_NAME.to_string(),

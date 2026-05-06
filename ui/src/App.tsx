@@ -987,6 +987,25 @@ function coordinatorActionTime(value: number | string | undefined): string {
   return new Date(seconds * 1000).toLocaleString();
 }
 
+function sameCoordinatorAddress(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function currentCoordinatorApprovalCount(
+  action: chainApi.CoordinatorAction,
+  voteManagers: string[],
+): number {
+  const currentManagers = new Set(voteManagers.map((addr) => addr.trim().toLowerCase()));
+  const seen = new Set<string>();
+  for (const approval of action.approvals ?? []) {
+    const canonical = approval.trim().toLowerCase();
+    if (currentManagers.has(canonical)) {
+      seen.add(canonical);
+    }
+  }
+  return seen.size;
+}
+
 function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [rpcUrl, setRpcUrl] = useState(getStoredRpc);
   const chain = useChainInfo();
@@ -1663,8 +1682,9 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                       <div className="space-y-2">
                         {pendingCoordinatorActions.map((action) => {
                           const actionID = coordinatorActionID(action);
-                          const approvalCount = action.approvals?.length ?? 0;
-                          const alreadyApproved = !!wallet.address && (action.approvals ?? []).includes(wallet.address);
+                          const approvalCount = currentCoordinatorApprovalCount(action, voteManagers);
+                          const alreadyApproved = !!wallet.address && (action.approvals ?? []).some((addr) => sameCoordinatorAddress(addr, wallet.address ?? ""));
+                          const canRecheckExecution = alreadyApproved && approvalCount >= voteManagerThreshold;
                           const payloadDetails = describeCoordinatorActionPayload(action);
                           return (
                             <div key={actionID} className="border border-border-subtle rounded-lg p-2.5 bg-surface-2 space-y-2">
@@ -1674,18 +1694,18 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                                     #{actionID} {coordinatorActionLabel(action)}
                                   </p>
                                   <p className="text-[10px] text-text-muted">
-                                    {approvalCount}/{voteManagerThreshold} approvals · expires {coordinatorActionTime(action.expires_at)}
+                                    {approvalCount}/{voteManagerThreshold} current approvals · expires {coordinatorActionTime(action.expires_at)}
                                   </p>
                                 </div>
                                 {wallet.signer && (
                                   <button
                                     type="button"
                                     onClick={() => void handleApproveCoordinatorAction(action)}
-                                    disabled={!actionID || alreadyApproved || approvingActionID === actionID || !payloadDetails.canApprove}
+                                    disabled={!actionID || (alreadyApproved && !canRecheckExecution) || approvingActionID === actionID || !payloadDetails.canApprove}
                                     className="px-2 py-1 bg-accent/90 hover:bg-accent text-surface-0 rounded text-[10px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                                    title={payloadDetails.error || "Approve coordinator action"}
+                                    title={payloadDetails.error || (canRecheckExecution ? "Recheck coordinator action execution" : "Approve coordinator action")}
                                   >
-                                    {approvingActionID === actionID ? "Approving..." : alreadyApproved ? "Approved" : "Approve"}
+                                    {approvingActionID === actionID ? "Approving..." : alreadyApproved ? (canRecheckExecution ? "Recheck" : "Approved") : "Approve"}
                                   </button>
                                 )}
                               </div>
