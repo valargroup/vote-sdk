@@ -202,7 +202,7 @@ The validator identity lives under `~/.svoted/`. Losing these files without a ba
 |------|------------|------------------|
 | `config/node_key.json` | CometBFT P2P identity (NodeID). | Regenerate; peers reconnect via the new ID. Cosmetic only. |
 | `config/priv_validator_key.json` | CometBFT consensus signing key. Same key on two nodes = double-sign = slashing. | Never restore onto a second host without first confirming the other copy is offline. Without backup, join as a fresh validator. |
-| `keyring-test/` | BIP39-derived secp256k1 account key (`validator`) used to sign Cosmos txs including `MsgCreateValidatorWithPallasKey`. | Restore from the mnemonic printed by `svoted init-validator-keys`. |
+| `keyring-test/` | BIP39-derived secp256k1 account key (`validator`) used to sign Cosmos txs including `MsgCreateValidatorWithPallasKey`. | Restore from an encrypted backup of `keyring-test/`; `join.sh` suppresses mnemonic output. |
 | `pallas.sk` / `pallas.pk` | EA-ceremony Pallas keypair, required for ceremony auto-ack. | Rotate via `MsgRotatePallasKey` outside an active ceremony. See [Pallas Key Registration and Rotation](../../README.md#pallas-key-registration-and-rotation). |
 | `ea.sk` / `ea.pk` | Auto-deal EA keypair placeholder; overwritten per-round by the ceremony. | Regenerated next round. |
 | `data/` | Block store + app state. | Restore the latest Zvote snapshot, then catch up from peers. Authoritative state lives on-chain. |
