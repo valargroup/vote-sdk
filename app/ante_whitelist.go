@@ -52,7 +52,6 @@ func DefaultAllowedMessages() []string {
 		"/svote.v1.MsgRegisterPallasKey",
 		"/svote.v1.MsgRotatePallasKey",
 		"/svote.v1.MsgCreateValidatorWithPallasKey",
-		"/svote.v1.MsgAuthorizedSend",
 		"/svote.v1.MsgEndorseRound",
 		"/svote.v1.MsgClearRoundEndorsement",
 

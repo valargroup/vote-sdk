@@ -15,11 +15,11 @@ import (
 // ZKP/RedPallas authentication. Tags 0x08, 0x0D, and 0x0E are ceremony/tally
 // tags auto-injected by PrepareProposal that also use the custom wire format.
 //
-// Coordinator proposals/approvals, validator setup, endorser actions, and
-// validator-originated authorized sends use the standard Cosmos SDK Tx
-// envelope. Coordinator-owned payloads such as MsgCreateVotingSession and
-// MsgUpdateVoteManagers are embedded in MsgProposeCoordinatorAction rather than
-// encoded with custom wire-format tags.
+// Coordinator proposals/approvals, validator setup, and endorser actions use
+// the standard Cosmos SDK Tx envelope. Coordinator-owned payloads such as
+// MsgCreateVotingSession, MsgUpdateVoteManagers, and MsgAuthorizedSend are
+// embedded in MsgProposeCoordinatorAction rather than encoded with custom
+// wire-format tags.
 // Tag 0x0A is deliberately absent: it collides with the standard Cosmos Tx
 // protobuf encoding (field 1, wire type 2).
 const (

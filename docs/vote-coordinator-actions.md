@@ -79,9 +79,9 @@ For example, if an action sends funds from `sv1alice...`, then `sv1alice...`
 must approve that action. It is not enough for other coordinators to approve a
 send from Alice's account.
 
-Validator-originated sends are different. Bonded validators can still use
-`MsgAuthorizedSend` directly when sending to a current coordinator or another
-bonded validator. That validator-owned path is outside coordinator multisig.
+Direct top-level sends are rejected, including sends from bonded validators.
+Funding is intended to flow from a coordinator account to the prospective
+validator account that will bond it.
 
 ## Actions Outside Coordinator Multisig
 
@@ -93,7 +93,6 @@ These remain outside the coordinator action flow:
 - ceremony participation,
 - staking metadata edits,
 - validator unjail,
-- validator-originated allowed sends,
 - mapped endorser actions for endorsing or clearing a round endorsement.
 
 EA/DKG key attestations also remain outside this coordinator multisig. A trusted

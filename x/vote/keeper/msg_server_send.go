@@ -10,16 +10,16 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// AuthorizedSend handles MsgAuthorizedSend — the only coin-transfer path on
-// this chain. Bank MsgSend/MsgMultiSend are blocked at the ante handler because
+// AuthorizedSend handles MsgAuthorizedSend. Top-level external sends are not
+// an authority path; the message is only executable as a coordinator action
+// payload. Bank MsgSend/MsgMultiSend are blocked at the ante handler because
 // unrestricted transfers would allow anyone to accumulate stake and create a
 // validator, undermining the controlled validator set.
 //
 // Authorization rules:
-//   - Vote-manager sends must go through coordinator actions.
-//   - Bonded validators can send to any vote manager or to other bonded validators
-//     (allows operational redistribution within the trusted set).
-//   - All other senders are rejected.
+//   - Direct top-level MsgAuthorizedSend is rejected.
+//   - Coordinator-action sends must originate from a current coordinator.
+//   - The source funding account must be one of the approving coordinators.
 func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend) (*types.MsgAuthorizedSendResponse, error) {
 	return ms.executeAuthorizedSend(goCtx, msg, false, nil)
 }
@@ -46,36 +46,19 @@ func (ms msgServer) executeAuthorizedSend(goCtx context.Context, msg *types.MsgA
 
 	coins := sdk.NewCoins(sdk.NewCoin(msg.Denom, amt))
 
+	if !allowCoordinatorSender {
+		return nil, fmt.Errorf("%w: sends require coordinator action approval", types.ErrCoordinatorActionRequired)
+	}
+
 	senderIsVoteManager, err := ms.k.IsVoteManager(ctx, msg.FromAddress)
 	if err != nil {
 		return nil, err
 	}
-	if senderIsVoteManager {
-		if !allowCoordinatorSender {
-			return nil, fmt.Errorf("%w: vote-manager sends require coordinator action approval", types.ErrCoordinatorActionRequired)
-		}
-		if !addressInList(fromAddr.String(), approvals) {
-			return nil, fmt.Errorf("%w: source funding account %s must approve the coordinator action", types.ErrNotAuthorized, fromAddr.String())
-		}
-	} else {
-		if allowCoordinatorSender {
-			return nil, fmt.Errorf("%w: coordinator-funded sends must originate from a vote manager", types.ErrUnauthorizedSend)
-		}
-		senderValAddr := sdk.ValAddress(fromAddr).String()
-		if !ms.k.IsValidator(ctx, senderValAddr) {
-			return nil, fmt.Errorf("%w: %s is neither a vote manager nor a bonded validator",
-				types.ErrUnauthorizedSend, msg.FromAddress)
-		}
-
-		recipientIsVoteManager, err := ms.k.IsVoteManager(ctx, msg.ToAddress)
-		if err != nil {
-			return nil, err
-		}
-		recipientValAddr := sdk.ValAddress(toAddr).String()
-		if !recipientIsVoteManager && !ms.k.IsValidator(ctx, recipientValAddr) {
-			return nil, fmt.Errorf("%w: validator %s can only send to a vote manager or another bonded validator",
-				types.ErrUnauthorizedSend, msg.FromAddress)
-		}
+	if !senderIsVoteManager {
+		return nil, fmt.Errorf("%w: coordinator-funded sends must originate from a vote manager", types.ErrUnauthorizedSend)
+	}
+	if !addressInList(fromAddr.String(), approvals) {
+		return nil, fmt.Errorf("%w: source funding account %s must approve the coordinator action", types.ErrNotAuthorized, fromAddr.String())
 	}
 
 	if err := ms.k.bankKeeper.SendCoins(ctx, fromAddr, toAddr, coins); err != nil {

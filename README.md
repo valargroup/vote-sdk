@@ -188,7 +188,7 @@ Coordinator approval gates voting session creation, coordinator membership and
 threshold changes, software upgrades, endorser mapping changes, and
 coordinator-funded sends. Validator-owned actions such as Pallas key
 registration, validator creation, ceremony participation, staking edits, unjail,
-and validator-originated allowed sends remain outside this multisig.
+and mapped endorser actions remain outside this multisig.
 
 For the plain-English operator workflow, see
 [docs/vote-coordinator-actions.md](docs/vote-coordinator-actions.md).
@@ -262,17 +262,16 @@ These flow through the standard ante chain: signature verification (`SigVerifica
 | `MsgCreateValidatorWithPallasKey` | Anyone (becomes a validator) | secp256k1 sig; exempt from `CeremonyValidatorDecorator`                | Delegates to `x/staking` `CreateValidator`; registers Pallas key; rejects duplicates                                     |
 | `MsgProposeCoordinatorAction`     | Current coordinator          | secp256k1 sig; exempt from `CeremonyValidatorDecorator`                | Stores the payload and proposer approval; executes automatically if current approvals meet threshold                      |
 | `MsgApproveCoordinatorAction`     | Current coordinator          | secp256k1 sig; exempt from `CeremonyValidatorDecorator`                | Adds one distinct approval; rejects duplicates, non-members, and expired actions; executes automatically at threshold     |
-| `MsgAuthorizedSend`               | Bonded validator direct path | secp256k1 sig (standard Cosmos Tx)                                     | Validators can send to a current coordinator or another bonded validator; coordinator-funded sends must use coordinator actions |
 | `MsgEndorseRound`                 | Mapped endorser address      | secp256k1 sig                                                          | Records the endorser's approval for one round                                                                            |
 | `MsgClearRoundEndorsement`        | Mapped endorser address      | secp256k1 sig                                                          | Clears that endorser's approval for one round                                                                            |
 | `MsgCreateValidator`              | **Blocked** post-genesis     | Ante handler rejects at `BlockHeight > 0`                              | N/A — never reaches MsgServer                                                                                            |
 | `MsgSend` / `MsgMultiSend`       | **Blocked**                  | Not in message whitelist                                               | N/A — never reaches MsgServer                                                                                            |
 
 `MsgCreateVotingSession`, `MsgUpdateVoteManagers`, `MsgScheduleUpgrade`,
-`MsgCancelUpgrade`, `MsgSetEndorser`, and coordinator-funded
-`MsgAuthorizedSend` still exist as payload types, but direct external
-submission is not the authority model. They are embedded in
-`MsgProposeCoordinatorAction` and executed only after coordinator approval.
+`MsgCancelUpgrade`, `MsgSetEndorser`, and `MsgAuthorizedSend` still exist as
+payload types, but direct external submission is not the authority model. They
+are embedded in `MsgProposeCoordinatorAction` and executed only after
+coordinator approval.
 
 #### Vote-round messages (custom wire format, ZKP/RedPallas auth)
 
@@ -318,7 +317,7 @@ A positive-security allowlist: only messages whose proto type URL appears in `De
 
 | Module   | Allowed messages |
 | -------- | ---------------- |
-| Vote     | `MsgProposeCoordinatorAction`, `MsgApproveCoordinatorAction`, `MsgRegisterPallasKey`, `MsgRotatePallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgAuthorizedSend`, `MsgEndorseRound`, `MsgClearRoundEndorsement` |
+| Vote     | `MsgProposeCoordinatorAction`, `MsgApproveCoordinatorAction`, `MsgRegisterPallasKey`, `MsgRotatePallasKey`, `MsgCreateValidatorWithPallasKey`, `MsgEndorseRound`, `MsgClearRoundEndorsement` |
 | Staking  | `MsgCreateValidator` (genesis only — blocked post-genesis by Layer 1), `MsgEditValidator` |
 | Slashing | `MsgUnjail` |
 
@@ -326,20 +325,22 @@ A positive-security allowlist: only messages whose proto type URL appears in `De
 
 | Excluded messages | Reason |
 | ----------------- | ------ |
-| `MsgSend`, `MsgMultiSend` | Replaced by `MsgAuthorizedSend` with role-based restrictions. Unrestricted transfers would let anyone accumulate stake and create a validator, bypassing the controlled validator set. |
+| `MsgSend`, `MsgMultiSend` | Replaced by coordinator-approved `MsgAuthorizedSend` payloads. Unrestricted transfers would let anyone accumulate stake and create a validator, bypassing the controlled validator set. |
 | `MsgDelegate`, `MsgUndelegate`, `MsgBeginRedelegate` | Prevents validators from reorganizing stake without a vote manager. Initial self-delegation is handled atomically by `MsgCreateValidatorWithPallasKey`. |
 | `MsgWithdrawDelegatorReward`, `MsgWithdrawValidatorCommission` | Prevents extracting staking rewards as liquid tokens that could be transferred outside of vote-manager control. |
 | `MsgFundCommunityPool`, `MsgSetWithdrawAddress`, `MsgUpdateParams` | No governance module; these have no legitimate use on this chain. |
-| Direct coordinator-owned vote messages | `MsgCreateVotingSession`, `MsgUpdateVoteManagers`, `MsgScheduleUpgrade`, `MsgCancelUpgrade`, and `MsgSetEndorser` must be executed through `MsgProposeCoordinatorAction`. |
+| Direct coordinator-owned vote messages | `MsgCreateVotingSession`, `MsgUpdateVoteManagers`, `MsgScheduleUpgrade`, `MsgCancelUpgrade`, `MsgSetEndorser`, and `MsgAuthorizedSend` must be executed through `MsgProposeCoordinatorAction`. |
 | All vote/ceremony ZKP messages | Must use the custom `VoteTxWrapper` wire format with ZKP/RedPallas authentication. Blocked by both Layer 1 and Layer 2. |
 
 #### `MsgAuthorizedSend` authorization rules
 
-`MsgAuthorizedSend` is the **only** coin-transfer path on this chain. Authorization is enforced in the MsgServer handler (`x/vote/keeper/msg_server_send.go`):
+`MsgAuthorizedSend` is the **only** coin-transfer payload on this chain, and it
+is only executable through coordinator action approval. Authorization is
+enforced in the MsgServer handler (`x/vote/keeper/msg_server_send.go`):
 
 - **Coordinator-funded sends** must go through coordinator action approval. The source funding account must be one of the approving coordinators.
-- **Bonded validators** can send to any vote manager or other bonded validators (operational redistribution within the trusted set).
-- **All other senders** are rejected. Note that a former vote manager who has been removed from the set is neither a vote manager nor a validator, so their remaining balance becomes one-way frozen — drain before removal.
+- **Direct top-level `MsgAuthorizedSend` is rejected**, including sends from bonded validators.
+- **All non-coordinator source accounts** are rejected.
 
 #### Design assumptions
 

@@ -47,7 +47,7 @@ func GetTxCmd() *cobra.Command {
 		CmdSetEndorser(),
 		CmdEndorseRound(),
 		CmdClearRoundEndorsement(),
-		// Token transfer — uses whitelisted MsgAuthorizedSend.
+		// Token transfer — proposed as a coordinator action.
 		CmdAuthorizedSend(),
 	)
 
@@ -473,22 +473,22 @@ func CmdClearRoundEndorsement() *cobra.Command {
 	return cmd
 }
 
-// CmdAuthorizedSend broadcasts MsgAuthorizedSend.
-// Transfers tokens using the whitelisted MsgAuthorizedSend instead of the
-// blocked bank MsgSend.
+// CmdAuthorizedSend proposes a MsgAuthorizedSend coordinator action.
+// Bank MsgSend is blocked; coordinator-approved MsgAuthorizedSend is the
+// privileged funding path.
 func CmdAuthorizedSend() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "authorized-send [to-address] [amount] [denom]",
-		Short: "Send tokens via MsgAuthorizedSend (whitelisted transfer)",
-		Long: `Broadcast an MsgAuthorizedSend transaction.
+		Short: "Propose a coordinator-approved token send",
+		Long: `Propose a MsgAuthorizedSend coordinator action.
 
 Arguments:
   to-address  Recipient bech32 account address (sv1...)
   amount      Integer amount to send (e.g. 200000)
   denom       Token denomination (e.g. usvote)
 
-The --from flag specifies the sender. Unlike 'bank send', this message
-is whitelisted by the chain's MessageWhitelistDecorator.
+The --from flag specifies the coordinator funding account. That account must be
+a current coordinator and must approve the action.
 
 Example:
   svoted tx vote authorized-send sv1abc... 200000 usvote --from mykey`,
@@ -506,7 +506,7 @@ Example:
 				Denom:       args[2],
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 

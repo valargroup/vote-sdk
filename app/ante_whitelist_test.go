@@ -57,6 +57,25 @@ func TestWhitelist_BankMsgMultiSendBlocked(t *testing.T) {
 	require.Contains(t, resp.Log, "MsgMultiSend")
 }
 
+func TestWhitelist_VoteMsgAuthorizedSendBlocked(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+
+	signerAddr := sdk.AccAddress(ta.ValPrivKey.PubKey().Address())
+	msg := &votetypes.MsgAuthorizedSend{
+		FromAddress: signerAddr.String(),
+		ToAddress:   signerAddr.String(),
+		Amount:      "100",
+		Denom:       "usvote",
+	}
+
+	txBytes := buildSignedTxWithKey(t, ta, ta.ValPrivKey, 0, 0, msg)
+
+	resp := ta.CheckTxSync(txBytes)
+	require.NotEqual(t, uint32(0), resp.Code)
+	require.Contains(t, resp.Log, "is not allowed on this chain")
+	require.Contains(t, resp.Log, "MsgAuthorizedSend")
+}
+
 func TestWhitelist_DistributionMsgFundCommunityPoolBlocked(t *testing.T) {
 	ta := testutil.SetupTestApp(t)
 
@@ -121,15 +140,6 @@ func TestWhitelist_AllowedMessagesPassThrough(t *testing.T) {
 		name string
 		msg  sdk.Msg
 	}{
-		{
-			name: "MsgAuthorizedSend",
-			msg: &votetypes.MsgAuthorizedSend{
-				FromAddress: signerAddr.String(),
-				ToAddress:   signerAddr.String(),
-				Amount:      "100",
-				Denom:       "usvote",
-			},
-		},
 		{
 			name: "MsgRegisterPallasKey",
 			msg: &votetypes.MsgRegisterPallasKey{
@@ -241,7 +251,6 @@ func TestDefaultAllowedMessages_ContainsExpectedTypes(t *testing.T) {
 	}
 
 	// Should be present
-	require.True(t, allowed["/svote.v1.MsgAuthorizedSend"])
 	require.True(t, allowed["/svote.v1.MsgProposeCoordinatorAction"])
 	require.True(t, allowed["/svote.v1.MsgApproveCoordinatorAction"])
 	require.True(t, allowed["/svote.v1.MsgRegisterPallasKey"])
@@ -266,6 +275,7 @@ func TestDefaultAllowedMessages_ContainsExpectedTypes(t *testing.T) {
 	require.False(t, allowed["/svote.v1.MsgRevealShare"])
 	require.False(t, allowed["/svote.v1.MsgCreateVotingSession"])
 	require.False(t, allowed["/svote.v1.MsgUpdateVoteManagers"])
+	require.False(t, allowed["/svote.v1.MsgAuthorizedSend"])
 	require.False(t, allowed["/svote.v1.MsgScheduleUpgrade"])
 	require.False(t, allowed["/svote.v1.MsgCancelUpgrade"])
 	require.False(t, allowed["/svote.v1.MsgSetEndorser"])

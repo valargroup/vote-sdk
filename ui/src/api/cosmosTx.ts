@@ -467,8 +467,8 @@ const MsgUnjailProto = {
 };
 
 // ── Protobuf type: MsgAuthorizedSend (svote.v1) ─────────────────
-// Bank MsgSend is disabled at the ante-handler level; all transfers
-// must use MsgAuthorizedSend with role-based authorization.
+// Bank MsgSend is disabled at the ante-handler level; privileged transfers use
+// MsgAuthorizedSend only as coordinator action payloads.
 //
 // message MsgAuthorizedSend {
 //   string from_address = 1; string to_address = 2;

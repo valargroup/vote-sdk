@@ -1548,15 +1548,15 @@ func (*MsgUpdateVoteManagersResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{25}
 }
 
-// MsgAuthorizedSend is the only way to transfer coins on this chain.
+// MsgAuthorizedSend is the only privileged coin-transfer payload on this chain.
 // Standard bank MsgSend and MsgMultiSend are disabled at the ante-handler
 // level because unrestricted transfers would let anyone accumulate enough
 // stake to create a validator, bypassing the controlled validator set.
 //
 // Authorization rules:
 //   - Coordinator-funded sends must be approved as coordinator actions.
-//   - Bonded validators can send to any coordinator or to other bonded validators.
-//   - All other senders are rejected.
+//   - Direct top-level MsgAuthorizedSend is rejected.
+//   - The source account must be a current coordinator that approved the action.
 type MsgAuthorizedSend struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	FromAddress   string                 `protobuf:"bytes,1,opt,name=from_address,json=fromAddress,proto3" json:"from_address,omitempty"`
