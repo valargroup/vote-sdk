@@ -26,6 +26,7 @@ func (k *Keeper) GetVoteManagers(kvStore store.KVStore) (*types.VoteManagerSet, 
 	if err := unmarshal(bz, &set); err != nil {
 		return nil, err
 	}
+	set.Threshold = types.NormalizeVoteManagerThreshold(set.Threshold)
 	return &set, nil
 }
 
@@ -33,11 +34,14 @@ func (k *Keeper) GetVoteManagers(kvStore store.KVStore) (*types.VoteManagerSet, 
 // normalized and deduplicated before persist so every read returns canonical
 // bech32, even if callers passed mixed-case or uncanonical forms.
 func (k *Keeper) SetVoteManagers(kvStore store.KVStore, set *types.VoteManagerSet) error {
-	normalized, err := types.ValidateAndNormalizeVoteManagerSet(set.Addresses)
+	if set == nil {
+		return fmt.Errorf("%w", types.ErrEmptyVoteManagerSet)
+	}
+	normalized, threshold, err := types.ValidateAndNormalizeVoteManagerPolicy(set.Addresses, set.Threshold)
 	if err != nil {
 		return err
 	}
-	bz, err := marshal(&types.VoteManagerSet{Addresses: normalized})
+	bz, err := marshal(&types.VoteManagerSet{Addresses: normalized, Threshold: threshold})
 	if err != nil {
 		return err
 	}
@@ -83,28 +87,35 @@ func (k *Keeper) IsVoteManager(ctx context.Context, addr string) (bool, error) {
 // ValidateVoteManagerOnly returns nil iff creator is in the current vote manager set.
 // Distinguishes ErrNoVoteManagers (empty set) from ErrNotAuthorized (non-member).
 func (k *Keeper) ValidateVoteManagerOnly(ctx context.Context, creator string) error {
+	_, err := k.ValidateVoteManagerApprover(ctx, creator)
+	return err
+}
+
+// ValidateVoteManagerApprover returns the canonical account address iff creator
+// is in the current coordinator policy.
+func (k *Keeper) ValidateVoteManagerApprover(ctx context.Context, creator string) (string, error) {
 	kvStore := k.OpenKVStore(ctx)
 	set, err := k.GetVoteManagers(kvStore)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if set == nil || len(set.Addresses) == 0 {
-		return fmt.Errorf("%w", types.ErrNoVoteManagers)
+		return "", fmt.Errorf("%w", types.ErrNoVoteManagers)
 	}
 
 	normalized, err := normalizeBech32Addr(creator)
 	if err != nil {
-		return fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", types.ErrNotAuthorized, creator, err)
+		return "", fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", types.ErrNotAuthorized, creator, err)
 	}
 
 	for _, a := range set.Addresses {
 		if a == normalized {
-			return nil
+			return normalized, nil
 		}
 	}
 
-	return fmt.Errorf("%w: sender %s is not in the vote-manager set", types.ErrNotAuthorized, normalized)
+	return "", fmt.Errorf("%w: sender %s is not in the vote-manager set", types.ErrNotAuthorized, normalized)
 }
 
 // normalizeBech32Addr parses the address and returns its canonical bech32 form.

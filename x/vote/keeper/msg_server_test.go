@@ -465,6 +465,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 					VoteEndTime:       2_000_000,
 					NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 					NcRoot:            bytes.Repeat([]byte{0x04}, 32),
+					Proposals:         msg.Proposals,
 				})
 				s.Require().NoError(err)
 			},

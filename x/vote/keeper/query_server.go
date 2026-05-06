@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"errors"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"google.golang.org/grpc/codes"
@@ -234,8 +235,48 @@ func (qs queryServer) VoteManagers(goCtx context.Context, req *types.QueryVoteMa
 	resp := &types.QueryVoteManagersResponse{}
 	if set != nil {
 		resp.VoteManagerAddresses = set.Addresses
+		resp.Threshold = set.Threshold
 	}
 	return resp, nil
+}
+
+// CoordinatorAction returns one threshold-gated coordinator action.
+func (qs queryServer) CoordinatorAction(goCtx context.Context, req *types.QueryCoordinatorActionRequest) (*types.QueryCoordinatorActionResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+	if req.ActionId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "action_id cannot be zero")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+	action, err := qs.k.GetCoordinatorAction(kvStore, req.ActionId)
+	if err != nil {
+		if errors.Is(err, types.ErrCoordinatorActionNotFound) {
+			return nil, status.Errorf(codes.NotFound, "coordinator action not found: %v", err)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to get coordinator action: %v", err)
+	}
+	return &types.QueryCoordinatorActionResponse{Action: action}, nil
+}
+
+// PendingCoordinatorActions returns all pending threshold-gated actions.
+func (qs queryServer) PendingCoordinatorActions(goCtx context.Context, req *types.QueryPendingCoordinatorActionsRequest) (*types.QueryPendingCoordinatorActionsResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+	var actions []*types.CoordinatorAction
+	if err := qs.k.IteratePendingCoordinatorActions(kvStore, func(action *types.CoordinatorAction) bool {
+		actions = append(actions, action)
+		return false
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to iterate coordinator actions: %v", err)
+	}
+	return &types.QueryPendingCoordinatorActionsResponse{Actions: actions}, nil
 }
 
 // ListRounds returns all stored vote rounds.

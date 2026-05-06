@@ -9,6 +9,9 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
@@ -36,6 +39,7 @@ func GetTxCmd() *cobra.Command {
 		CmdCreateValidatorWithPallasKey(),
 		// Vote-manager commands — signed by any current vote manager (any-of-N).
 		CmdUpdateVoteManagers(),
+		CmdApproveCoordinatorAction(),
 		CmdScheduleUpgrade(),
 		CmdCancelUpgrade(),
 		CmdCreateVotingSession(),
@@ -47,6 +51,46 @@ func GetTxCmd() *cobra.Command {
 		CmdAuthorizedSend(),
 	)
 
+	return cmd
+}
+
+func broadcastCoordinatorProposal(clientCtx client.Context, flagSet *pflag.FlagSet, payload proto.Message) error {
+	bz, err := proto.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal coordinator action payload: %w", err)
+	}
+	msg := &types.MsgProposeCoordinatorAction{
+		Creator: clientCtx.GetFromAddress().String(),
+		Payload: &anypb.Any{
+			TypeUrl: "/" + string(payload.ProtoReflect().Descriptor().FullName()),
+			Value:   bz,
+		},
+	}
+	return tx.GenerateOrBroadcastTxCLI(clientCtx, flagSet, msg)
+}
+
+func CmdApproveCoordinatorAction() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "approve-coordinator-action [action-id]",
+		Short: "Approve a pending coordinator action",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+			actionID, err := strconv.ParseUint(args[0], 10, 64)
+			if err != nil || actionID == 0 {
+				return fmt.Errorf("action-id must be a positive integer")
+			}
+			msg := &types.MsgApproveCoordinatorAction{
+				Creator:  clientCtx.GetFromAddress().String(),
+				ActionId: actionID,
+			}
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+	flags.AddTxFlagsToCmd(cmd)
 	return cmd
 }
 
@@ -89,7 +133,7 @@ scheduled, pass --replace-existing to overwrite it.`,
 				ReplaceExisting: replaceExisting,
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
@@ -120,7 +164,7 @@ upgrade is accepted as a no-op by x/upgrade.`,
 				Creator: clientCtx.GetFromAddress().String(),
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
@@ -301,17 +345,23 @@ holds their own funds.`,
 			if len(newVoteManagers) == 0 {
 				return fmt.Errorf("at least one --vote-manager flag is required")
 			}
+			threshold, err := cmd.Flags().GetUint32("threshold")
+			if err != nil {
+				return err
+			}
 
 			msg := &types.MsgUpdateVoteManagers{
 				Creator:         clientCtx.GetFromAddress().String(),
 				NewVoteManagers: newVoteManagers,
+				NewThreshold:    threshold,
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
 	cmd.Flags().StringArray("vote-manager", nil, "Vote-manager bech32 address (repeatable; all specified addresses form the new set)")
+	cmd.Flags().Uint32("threshold", 1, "Coordinator approval threshold for the new vote-manager set")
 	flags.AddTxFlagsToCmd(cmd)
 	return cmd
 }
@@ -356,7 +406,7 @@ remain queryable.`,
 				Address:    address,
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
@@ -595,7 +645,7 @@ Example:
 				Title:             input.Title,
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 

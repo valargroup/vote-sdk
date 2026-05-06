@@ -754,6 +754,7 @@ var DefaultVoteManagerAddresses = []string{
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {
 	gs := &types.GenesisState{
 		VoteManagerAddresses:  append([]string(nil), DefaultVoteManagerAddresses...),
+		VoteManagerThreshold:  1,
 		MinCeremonyValidators: 1,
 	}
 	bz, err := json.Marshal(gs)

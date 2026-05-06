@@ -17,12 +17,20 @@ import (
 // any current vote manager may schedule, but raw x/upgrade Msgs remain blocked
 // by the app-level whitelist.
 func (ms msgServer) ScheduleUpgrade(goCtx context.Context, msg *types.MsgScheduleUpgrade) (*types.MsgScheduleUpgradeResponse, error) {
-	ctx := sdk.UnwrapSDKContext(goCtx)
-
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
+		return nil, err
+	}
+
+	return ms.executeScheduleUpgrade(goCtx, msg)
+}
+
+func (ms msgServer) executeScheduleUpgrade(goCtx context.Context, msg *types.MsgScheduleUpgrade) (*types.MsgScheduleUpgradeResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+
+	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 	if ms.k.upgradeKeeper == nil {
@@ -63,12 +71,20 @@ func (ms msgServer) ScheduleUpgrade(goCtx context.Context, msg *types.MsgSchedul
 // CancelUpgrade clears the currently scheduled x/upgrade plan. x/upgrade treats
 // cancelling with no plan as a no-op, and this handler preserves that behavior.
 func (ms msgServer) CancelUpgrade(goCtx context.Context, msg *types.MsgCancelUpgrade) (*types.MsgCancelUpgradeResponse, error) {
-	ctx := sdk.UnwrapSDKContext(goCtx)
-
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
+		return nil, err
+	}
+
+	return ms.executeCancelUpgrade(goCtx, msg)
+}
+
+func (ms msgServer) executeCancelUpgrade(goCtx context.Context, msg *types.MsgCancelUpgrade) (*types.MsgCancelUpgradeResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+
+	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 	if ms.k.upgradeKeeper == nil {

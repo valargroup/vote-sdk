@@ -47,15 +47,12 @@ func DefaultAllowedMessages() []string {
 	return []string{
 		// Vote module — standard Cosmos tx path only (ceremony/ZKP messages
 		// use the custom VoteTxWrapper path and are never seen here).
-		"/svote.v1.MsgCreateVotingSession",
+		"/svote.v1.MsgProposeCoordinatorAction",
+		"/svote.v1.MsgApproveCoordinatorAction",
 		"/svote.v1.MsgRegisterPallasKey",
 		"/svote.v1.MsgRotatePallasKey",
 		"/svote.v1.MsgCreateValidatorWithPallasKey",
-		"/svote.v1.MsgUpdateVoteManagers",
 		"/svote.v1.MsgAuthorizedSend",
-		"/svote.v1.MsgScheduleUpgrade",
-		"/svote.v1.MsgCancelUpgrade",
-		"/svote.v1.MsgSetEndorser",
 		"/svote.v1.MsgEndorseRound",
 		"/svote.v1.MsgClearRoundEndorsement",
 

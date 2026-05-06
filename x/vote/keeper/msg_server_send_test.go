@@ -1,7 +1,6 @@
 package keeper_test
 
 import (
-	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -19,7 +18,7 @@ func accToValoper(accBech32 string) string {
 // AuthorizedSend — vote-manager sender tests
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToAnyone() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerDirectSendRequiresCoordinatorAction() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -34,20 +33,11 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToAnyone() {
 		Amount:      "1000000",
 		Denom:       "usvote",
 	})
-	s.Require().NoError(err)
-	s.Require().Len(bk.sendCalls, 1)
-
-	from, _ := sdk.AccAddressFromBech32(vm)
-	to, _ := sdk.AccAddressFromBech32(recipient)
-	s.Require().Equal(from, bk.sendCalls[0].From)
-	s.Require().Equal(to, bk.sendCalls[0].To)
-	s.Require().Equal(
-		sdk.NewCoins(sdk.NewCoin("usvote", sdkmath.NewInt(1_000_000))),
-		bk.sendCalls[0].Amt,
-	)
+	s.Require().ErrorIs(err, types.ErrCoordinatorActionRequired)
+	s.Require().Empty(bk.sendCalls)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToValidator() {
+func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendVoteManagerCanFundValidator() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -57,17 +47,22 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToValidator() 
 	s.seedVoteManagers(vm)
 	s.setupWithMockStaking(accToValoper(valAcc))
 
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
 		FromAddress: vm,
 		ToAddress:   valAcc,
 		Amount:      "500",
 		Denom:       "usvote",
 	})
+	resp, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+		Creator: vm,
+		Payload: payload,
+	})
 	s.Require().NoError(err)
+	s.Require().True(resp.Executed)
 	s.Require().Len(bk.sendCalls, 1)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToOtherVoteManager() {
+func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendVoteManagerCanSendToOtherVoteManager() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -76,13 +71,18 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToOtherVoteMan
 	vmB := testAccAddr(2)
 	s.seedVoteManagers(vmA, vmB)
 
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
 		FromAddress: vmA,
 		ToAddress:   vmB,
 		Amount:      "100",
 		Denom:       "usvote",
 	})
+	resp, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+		Creator: vmA,
+		Payload: payload,
+	})
 	s.Require().NoError(err)
+	s.Require().True(resp.Executed)
 	s.Require().Len(bk.sendCalls, 1)
 }
 
@@ -316,12 +316,13 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 	s.setupWithMockBankKeeper(bk)
 
 	vm := testAccAddr(1)
-	recipient := testAccAddr(2)
+	valAcc := testAccAddr(10)
 	s.seedVoteManagers(vm)
+	s.setupWithMockStaking(accToValoper(valAcc))
 
 	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: vm,
-		ToAddress:   recipient,
+		FromAddress: valAcc,
+		ToAddress:   vm,
 		Amount:      "42",
 		Denom:       "usvote",
 	})
@@ -334,9 +335,9 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmitsEvent() {
 			for _, attr := range e.Attributes {
 				switch attr.Key {
 				case types.AttributeKeySender:
-					s.Require().Equal(vm, attr.Value)
+					s.Require().Equal(valAcc, attr.Value)
 				case types.AttributeKeyRecipient:
-					s.Require().Equal(recipient, attr.Value)
+					s.Require().Equal(vm, attr.Value)
 				}
 			}
 		}
@@ -373,7 +374,7 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_RevokedVoteManagerCannotSend() {
 	s.Require().Empty(bk.sendCalls)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToRevokedVoteManager() {
+func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendVoteManagerCanSendToRevokedVoteManager() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -382,14 +383,18 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_VoteManagerCanSendToRevokedVoteM
 	revoked := testAccAddr(2)
 	s.seedVoteManagers(vmA)
 
-	// Vote-managers-send-to-anyone takes the early-return path; no validator check.
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
 		FromAddress: vmA,
 		ToAddress:   revoked,
 		Amount:      "1",
 		Denom:       "usvote",
 	})
+	resp, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+		Creator: vmA,
+		Payload: payload,
+	})
 	s.Require().NoError(err)
+	s.Require().True(resp.Executed)
 	s.Require().Len(bk.sendCalls, 1)
 }
 

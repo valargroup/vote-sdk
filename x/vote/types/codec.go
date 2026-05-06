@@ -49,5 +49,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgSetEndorser{},
 		&MsgEndorseRound{},
 		&MsgClearRoundEndorsement{},
+		&MsgProposeCoordinatorAction{},
+		&MsgApproveCoordinatorAction{},
 	)
 }

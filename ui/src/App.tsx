@@ -279,6 +279,13 @@ function App() {
     setPublishError("");
     try {
       const base = chainApi.getApiBase();
+      let roundCountBefore: number | null = null;
+      try {
+        const before = await chainApi.listRounds();
+        roundCountBefore = (before.rounds ?? []).length;
+      } catch {
+        roundCountBefore = null;
+      }
       const result = await cosmosTx.createVotingSession(base, wallet.signer, {
         snapshotHeight,
         voteEndTime,
@@ -293,11 +300,15 @@ function App() {
       } else {
         setPublishResult(result.tx_hash);
         setPublishStatus("ok");
-        store.setRoundStatus(publishModal, "published");
-        // Tell VoteStatusView to poll until a new round appears.
         try {
           const resp = await chainApi.listRounds();
-          setExpectedRoundCount((resp.rounds ?? []).length + 1);
+          const nextCount = (resp.rounds ?? []).length;
+          if (roundCountBefore != null && nextCount > roundCountBefore) {
+            store.setRoundStatus(publishModal, "published");
+            setExpectedRoundCount(nextCount);
+          } else {
+            setExpectedRoundCount(null);
+          }
         } catch {
           setExpectedRoundCount(null);
         }
@@ -958,6 +969,23 @@ function useNullifierStatus(
   return { data, loading, error, refresh };
 }
 
+function coordinatorActionID(action: chainApi.CoordinatorAction): number {
+  const raw = action.action_id ?? 0;
+  return typeof raw === "number" ? raw : parseInt(raw, 10) || 0;
+}
+
+function coordinatorActionLabel(action: chainApi.CoordinatorAction): string {
+  const typeURL = action.payload?.type_url ?? "";
+  const short = typeURL.split(".").pop() || typeURL;
+  return short.replace(/^Msg/, "") || "Coordinator action";
+}
+
+function coordinatorActionTime(value: number | string | undefined): string {
+  const seconds = typeof value === "number" ? value : parseInt(value ?? "0", 10);
+  if (!seconds) return "—";
+  return new Date(seconds * 1000).toLocaleString();
+}
+
 function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [rpcUrl, setRpcUrl] = useState(getStoredRpc);
   const chain = useChainInfo();
@@ -993,6 +1021,10 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [latestBlock, setLatestBlock] = useState<chainApi.LatestBlockInfo | null>(null);
   const [helperStatus, setHelperStatus] = useState<chainApi.HelperStatus | null>(null);
   const [voteManagers, setVoteManagers] = useState<string[]>([]);
+  const [voteManagerThreshold, setVoteManagerThreshold] = useState(1);
+  const [pendingCoordinatorActions, setPendingCoordinatorActions] = useState<chainApi.CoordinatorAction[]>([]);
+  const [pendingActionsError, setPendingActionsError] = useState("");
+  const [approvingActionID, setApprovingActionID] = useState<number | null>(null);
   const [activeRound, setActiveRound] = useState<chainApi.ChainRound | null>(null);
   const [chainDetailsOpen, setChainDetailsOpen] = useState(false);
   const [devKey, setDevKey] = useState("");
@@ -1001,6 +1033,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   // Update vote-manager set flow. The UI accepts a comma- or newline-separated list
   // of bech32 addresses; submission atomically replaces the entire set.
   const [vmNewAddrs, setVmNewAddrs] = useState("");
+  const [vmNewThreshold, setVmNewThreshold] = useState("1");
   const [vmTxStatus, setVmTxStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
   const [vmTxError, setVmTxError] = useState("");
   const [vmTxHash, setVmTxHash] = useState("");
@@ -1033,8 +1066,15 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
         chainApi.getHelperStatus().catch(() => null),
         chainApi.getActiveRound().catch(() => ({ round: null })),
       ]);
+      const pending = await chainApi.getPendingCoordinatorActions().catch((err) => {
+        setPendingActionsError(err instanceof Error ? err.message : String(err));
+        return { actions: [] };
+      });
       setCeremony(state);
       setVoteManagers(vmResp.vote_manager_addresses ?? []);
+      setVoteManagerThreshold(vmResp.threshold ?? 1);
+      setVmNewThreshold(String(vmResp.threshold ?? 1));
+      setPendingCoordinatorActions(pending.actions);
       setHelperStatus(helper);
       setActiveRound(activeRoundResp.round);
       setConnStatus("ok");
@@ -1063,8 +1103,14 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
         setVmTxStatus("error");
         return;
       }
+      const nextThreshold = parseInt(vmNewThreshold, 10);
+      if (!Number.isFinite(nextThreshold) || nextThreshold < 1 || nextThreshold > newVoteManagers.length) {
+        setVmTxError(`Threshold must be between 1 and ${newVoteManagers.length}`);
+        setVmTxStatus("error");
+        return;
+      }
       const base = chainApi.getApiBase();
-      const result = await cosmosTx.updateVoteManagers(base, wallet.signer, newVoteManagers);
+      const result = await cosmosTx.updateVoteManagers(base, wallet.signer, newVoteManagers, nextThreshold);
       if (result.code !== 0) {
         setVmTxError(result.log || `tx failed with code ${result.code}`);
         setVmTxStatus("error");
@@ -1077,15 +1123,48 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
         try {
           const vmResp = await chainApi.getVoteManagers();
           setVoteManagers(vmResp.vote_manager_addresses ?? []);
+          setVoteManagerThreshold(vmResp.threshold ?? 1);
         } catch {
           // Keep the user-typed list on failure; the next connection test
           // will sync to canonical form.
           setVoteManagers(newVoteManagers);
+          setVoteManagerThreshold(nextThreshold);
         }
+        const pending = await chainApi.getPendingCoordinatorActions().catch(() => ({ actions: [] }));
+        setPendingCoordinatorActions(pending.actions);
       }
     } catch (err) {
       setVmTxError(err instanceof Error ? err.message : String(err));
       setVmTxStatus("error");
+    }
+  };
+
+  const handleApproveCoordinatorAction = async (action: chainApi.CoordinatorAction) => {
+    if (!wallet.signer) return;
+    const actionID = coordinatorActionID(action);
+    if (!actionID) return;
+    setApprovingActionID(actionID);
+    setPendingActionsError("");
+    try {
+      const result = await cosmosTx.approveCoordinatorAction(chainApi.getApiBase(), wallet.signer, actionID);
+      if (result.code !== 0) {
+        setPendingActionsError(result.log || `tx failed with code ${result.code}`);
+        return;
+      }
+      const [pending, vmResp] = await Promise.all([
+        chainApi.getPendingCoordinatorActions(),
+        chainApi.getVoteManagers().catch(() => null),
+      ]);
+      setPendingCoordinatorActions(pending.actions);
+      if (vmResp) {
+        setVoteManagers(vmResp.vote_manager_addresses ?? []);
+        setVoteManagerThreshold(vmResp.threshold ?? 1);
+        setVmNewThreshold(String(vmResp.threshold ?? 1));
+      }
+    } catch (err) {
+      setPendingActionsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApprovingActionID(null);
     }
   };
 
@@ -1540,11 +1619,15 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                 </div>
               )}
 
-              {/* Vote-manager set (any-of-N) */}
+              {/* Coordinator policy */}
               {connStatus === "ok" && (
                 <div className="border-t border-border-subtle pt-3 space-y-3">
                   <div>
-                    <div className="text-xs text-text-secondary mb-1.5">Vote Managers (any-of-N)</div>
+                    <div className="text-xs text-text-secondary mb-1.5">Vote coordinator policy</div>
+                    <SettingsStubRow
+                      label="Threshold"
+                      value={`${voteManagerThreshold} of ${voteManagers.length}`}
+                    />
                     {voteManagers.length === 0 ? (
                       <span className="text-[11px] text-text-muted italic">none set</span>
                     ) : (
@@ -1561,10 +1644,67 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                     )}
                   </div>
 
+                  <div className="border-t border-border-subtle pt-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs text-text-secondary">Pending coordinator actions</div>
+                      <button
+                        type="button"
+                        onClick={handleTestConnection}
+                        className="p-1 hover:bg-surface-3 rounded text-text-muted hover:text-text-secondary cursor-pointer"
+                        title="Refresh pending actions"
+                      >
+                        <RefreshCw size={12} />
+                      </button>
+                    </div>
+                    {pendingCoordinatorActions.length === 0 ? (
+                      <p className="text-[11px] text-text-muted italic">none pending</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {pendingCoordinatorActions.map((action) => {
+                          const actionID = coordinatorActionID(action);
+                          const approvalCount = action.approvals?.length ?? 0;
+                          const alreadyApproved = !!wallet.address && (action.approvals ?? []).includes(wallet.address);
+                          return (
+                            <div key={actionID} className="border border-border-subtle rounded-lg p-2.5 bg-surface-2 space-y-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-[11px] font-semibold text-text-primary">
+                                    #{actionID} {coordinatorActionLabel(action)}
+                                  </p>
+                                  <p className="text-[10px] text-text-muted">
+                                    {approvalCount}/{voteManagerThreshold} approvals · expires {coordinatorActionTime(action.expires_at)}
+                                  </p>
+                                </div>
+                                {wallet.signer && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleApproveCoordinatorAction(action)}
+                                    disabled={!actionID || alreadyApproved || approvingActionID === actionID}
+                                    className="px-2 py-1 bg-accent/90 hover:bg-accent text-surface-0 rounded text-[10px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                                  >
+                                    {approvingActionID === actionID ? "Approving..." : alreadyApproved ? "Approved" : "Approve"}
+                                  </button>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-text-secondary font-mono break-all">
+                                proposer: {action.proposer || "unknown"}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {pendingActionsError && (
+                      <p className="text-[11px] text-danger bg-danger/10 border border-danger/30 rounded-lg p-2">
+                        {pendingActionsError}
+                      </p>
+                    )}
+                  </div>
+
                   {wallet.signer && (
                     <details className="group">
                       <summary className="text-[11px] text-accent cursor-pointer hover:text-accent-glow">
-                        Replace vote-manager set
+                        Propose coordinator policy change
                       </summary>
                       <div className="mt-3 space-y-3">
                         <div className="bg-surface-2 rounded-lg px-3 py-2">
@@ -1585,8 +1725,20 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                             className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
                           />
                           <p className="text-[10px] text-text-muted mt-1">
-                            Replaces the entire vote-manager set atomically. Balances are not moved.
+                            Replaces the entire vote-manager set when enough current coordinators approve.
                           </p>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-text-secondary mb-1">
+                            New threshold
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={vmNewThreshold}
+                            onChange={(e) => setVmNewThreshold(e.target.value)}
+                            className="w-24 px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                          />
                         </div>
                         <button
                           onClick={handleUpdateVoteManagers}
@@ -1598,13 +1750,13 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                               <Loader2 size={12} className="animate-spin" /> Signing & broadcasting...
                             </span>
                           ) : (
-                            "Sign & broadcast on-chain"
+                            "Propose action"
                           )}
                         </button>
                         {vmTxStatus === "ok" && (
                           <div className="bg-success/10 border border-success/30 rounded-lg p-2.5">
                             <p className="text-[11px] text-success font-semibold">
-                              Vote-manager set updated
+                              Coordinator action submitted
                             </p>
                             {vmTxHash && (
                               <p className="text-[10px] text-text-secondary font-mono mt-0.5 break-all">
@@ -1623,7 +1775,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                   )}
                   {!wallet.signer && connStatus === "ok" && (
                     <p className="text-[10px] text-text-muted">
-                      Connect a wallet above to sign vote-manager-set updates.
+                      Connect a wallet above to propose or approve coordinator actions.
                     </p>
                   )}
                 </div>
@@ -1756,7 +1908,7 @@ function PublishModal({
               {status === "ok" && (
                 <div className="bg-success/10 border border-success/30 rounded-lg p-3">
                   <p className="text-[11px] text-success font-semibold mb-1">
-                    Published successfully
+                    Coordinator action submitted
                   </p>
                   <p className="text-[10px] text-text-secondary font-mono break-all">
                     TX: {result}
@@ -1851,10 +2003,10 @@ function PublishModal({
             >
               {status === "publishing" ? (
                 <>
-                  <Loader2 size={12} className="animate-spin" /> Publishing...
+                  <Loader2 size={12} className="animate-spin" /> Proposing...
                 </>
               ) : (
-                "Publish to chain"
+                "Propose on chain"
               )}
             </button>
           )}

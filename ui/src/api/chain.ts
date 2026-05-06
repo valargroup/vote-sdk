@@ -206,6 +206,20 @@ export interface ChainRound {
   ceremony_log?: string[];
 }
 
+export interface CoordinatorAction {
+  action_id?: number | string;
+  payload?: {
+    type_url?: string;
+    value?: string;
+  };
+  proposer?: string;
+  approvals?: string[];
+  status?: string | number;
+  created_at?: number | string;
+  expires_at?: number | string;
+  executed_at?: number | string;
+}
+
 export interface TallyResult {
   vote_round_id?: string;
   proposal_id?: number;
@@ -348,8 +362,25 @@ export async function getCurrentUpgradePlan(): Promise<{ plan: UpgradePlan | nul
   };
 }
 
-export async function getVoteManagers(): Promise<{ vote_manager_addresses: string[] }> {
-  return fetchJson<{ vote_manager_addresses: string[] }>("/shielded-vote/v1/vote-managers");
+export async function getVoteManagers(): Promise<{ vote_manager_addresses: string[]; threshold: number }> {
+  const resp = await fetchJson<{ vote_manager_addresses?: string[]; threshold?: number | string }>(
+    "/shielded-vote/v1/vote-managers"
+  );
+  return {
+    vote_manager_addresses: resp.vote_manager_addresses ?? [],
+    threshold: typeof resp.threshold === "number" ? resp.threshold : parseInt(resp.threshold ?? "1", 10) || 1,
+  };
+}
+
+export async function getPendingCoordinatorActions(): Promise<{ actions: CoordinatorAction[] }> {
+  const resp = await fetchJson<{ actions?: CoordinatorAction[] }>("/shielded-vote/v1/coordinator-actions");
+  return { actions: resp.actions ?? [] };
+}
+
+export async function getCoordinatorAction(actionID: number): Promise<{ action?: CoordinatorAction }> {
+  return fetchJson<{ action?: CoordinatorAction }>(
+    `/shielded-vote/v1/coordinator-actions/${encodeURIComponent(String(actionID))}`
+  );
 }
 
 export interface EndorserEntry {

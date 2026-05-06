@@ -184,6 +184,14 @@ var (
 	// EndorsedRoundPrefix stores append-only round endorsements:
 	//   0x17 || endorser_id_bytes || 0x00 || round_id (32 bytes) -> []byte{1}
 	EndorsedRoundPrefix = []byte{0x17}
+
+	// CoordinatorActionPrefix stores threshold-gated coordinator actions:
+	//   0x18 || big-endian uint64 action_id -> CoordinatorAction (protobuf)
+	CoordinatorActionPrefix = []byte{0x18}
+
+	// NextCoordinatorActionIDKey stores the next allocated coordinator action ID:
+	//   single key -> big-endian uint64. IDs start at 1.
+	NextCoordinatorActionIDKey = []byte{0x19}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -220,6 +228,14 @@ func RoundTreeKey(roundID []byte) []byte {
 	key := make([]byte, len(RoundTreePrefix)+len(roundID))
 	copy(key, RoundTreePrefix)
 	copy(key[len(RoundTreePrefix):], roundID)
+	return key
+}
+
+// CoordinatorActionKey returns the store key for a coordinator action.
+func CoordinatorActionKey(actionID uint64) []byte {
+	key := make([]byte, len(CoordinatorActionPrefix)+8)
+	copy(key, CoordinatorActionPrefix)
+	putUint64BE(key[len(CoordinatorActionPrefix):], actionID)
 	return key
 }
 

@@ -66,7 +66,7 @@ func deliverCreateVotingSession(t *testing.T, app *testutil.TestApp, msg *types.
 	t.Helper()
 	createHeight := uint64(app.Height + 1)
 	roundID := deriveRoundIDForCreateHeight(t, msg, createHeight)
-	result := app.DeliverVoteTx(app.MustBuildSignedCeremonyTx(msg))
+	result := app.DeliverVoteTx(app.MustBuildSignedCoordinatorActionTx(msg.Creator, msg))
 	require.Equal(t, uint32(0), result.Code, "CreateVotingSession should succeed, got: %s", result.Log)
 
 	round := app.MustGetVoteRound(roundID)

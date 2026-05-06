@@ -243,7 +243,7 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
         setActionError(result.log || `tx failed with code ${result.code}`);
         return;
       }
-      setResultMsg(`${reviewAction.kind === "schedule" ? "Upgrade scheduled" : "Upgrade canceled"} (${compactHash(result.tx_hash)})`);
+      setResultMsg(`Coordinator action proposed to ${reviewAction.kind === "schedule" ? "schedule" : "cancel"} upgrade (${compactHash(result.tx_hash)})`);
       setReviewAction(null);
       await refresh(true);
     } catch (err) {

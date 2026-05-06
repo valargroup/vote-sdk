@@ -2,6 +2,7 @@ syntax = "proto3";
 package svote.v1;
 
 import "cosmos/msg/v1/msg.proto";
+import "google/protobuf/any.proto";
 import "svote/v1/types.proto";
 
 option go_package = "github.com/valargroup/vote-sdk/x/vote/types";
@@ -30,6 +31,8 @@ service Msg {
   rpc SetEndorser(MsgSetEndorser) returns (MsgSetEndorserResponse);
   rpc EndorseRound(MsgEndorseRound) returns (MsgEndorseRoundResponse);
   rpc ClearRoundEndorsement(MsgClearRoundEndorsement) returns (MsgClearRoundEndorsementResponse);
+  rpc ProposeCoordinatorAction(MsgProposeCoordinatorAction) returns (MsgProposeCoordinatorActionResponse);
+  rpc ApproveCoordinatorAction(MsgApproveCoordinatorAction) returns (MsgApproveCoordinatorActionResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -201,6 +204,7 @@ message MsgSubmitPartialDecryptionResponse {}
 message MsgUpdateVoteManagers {
   string          creator    = 1; // Sender address (must be in the current vote manager set)
   repeated string new_vote_managers = 2; // Full replacement set
+  uint32          new_threshold = 3; // Defaults to 1 when omitted; must be <= len(new_vote_managers)
 }
 
 message MsgUpdateVoteManagersResponse {}
@@ -282,3 +286,31 @@ message MsgClearRoundEndorsement {
 }
 
 message MsgClearRoundEndorsementResponse {}
+
+// MsgProposeCoordinatorAction creates a threshold-gated coordinator action.
+// The proposer counts as the first approval. If the current threshold is 1, the
+// action executes in the same transaction.
+message MsgProposeCoordinatorAction {
+  option (cosmos.msg.v1.signer) = "creator";
+
+  string creator = 1; // Sender address (must be a current vote coordinator)
+  google.protobuf.Any payload = 2; // One supported vote-manager payload message
+}
+
+message MsgProposeCoordinatorActionResponse {
+  uint64 action_id = 1;
+  bool executed = 2;
+}
+
+// MsgApproveCoordinatorAction adds one coordinator approval to a pending action.
+message MsgApproveCoordinatorAction {
+  option (cosmos.msg.v1.signer) = "creator";
+
+  string creator = 1; // Sender address (must be a current vote coordinator)
+  uint64 action_id = 2;
+}
+
+message MsgApproveCoordinatorActionResponse {
+  uint64 action_id = 1;
+  bool executed = 2;
+}

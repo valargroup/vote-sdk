@@ -15,12 +15,16 @@ import (
 // unrestricted transfers would allow anyone to accumulate stake and create a
 // validator, undermining the controlled validator set.
 //
-// Authorization rules (vote-manager membership = any-of-N):
-//   - Any vote manager can send to anyone (used to distribute stake to new validators).
+// Authorization rules:
+//   - Vote-manager sends must go through coordinator actions.
 //   - Bonded validators can send to any vote manager or to other bonded validators
 //     (allows operational redistribution within the trusted set).
 //   - All other senders are rejected.
 func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend) (*types.MsgAuthorizedSendResponse, error) {
+	return ms.executeAuthorizedSend(goCtx, msg, false, nil)
+}
+
+func (ms msgServer) executeAuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend, allowCoordinatorSender bool, approvals []string) (*types.MsgAuthorizedSendResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
 	fromAddr, err := sdk.AccAddressFromBech32(msg.FromAddress)
@@ -46,7 +50,17 @@ func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthoriz
 	if err != nil {
 		return nil, err
 	}
-	if !senderIsVoteManager {
+	if senderIsVoteManager {
+		if !allowCoordinatorSender {
+			return nil, fmt.Errorf("%w: vote-manager sends require coordinator action approval", types.ErrCoordinatorActionRequired)
+		}
+		if !addressInList(fromAddr.String(), approvals) {
+			return nil, fmt.Errorf("%w: source funding account %s must approve the coordinator action", types.ErrNotAuthorized, fromAddr.String())
+		}
+	} else {
+		if allowCoordinatorSender {
+			return nil, fmt.Errorf("%w: coordinator-funded sends must originate from a vote manager", types.ErrUnauthorizedSend)
+		}
 		senderValAddr := sdk.ValAddress(fromAddr).String()
 		if !ms.k.IsValidator(ctx, senderValAddr) {
 			return nil, fmt.Errorf("%w: %s is neither a vote manager nor a bonded validator",
@@ -76,4 +90,13 @@ func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthoriz
 	))
 
 	return &types.MsgAuthorizedSendResponse{}, nil
+}
+
+func addressInList(addr string, addrs []string) bool {
+	for _, candidate := range addrs {
+		if candidate == addr {
+			return true
+		}
+	}
+	return false
 }

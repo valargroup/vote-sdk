@@ -19,20 +19,22 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Query_CommitmentTreeAtHeight_FullMethodName = "/svote.v1.Query/CommitmentTreeAtHeight"
-	Query_LatestCommitmentTree_FullMethodName   = "/svote.v1.Query/LatestCommitmentTree"
-	Query_VoteRound_FullMethodName              = "/svote.v1.Query/VoteRound"
-	Query_ProposalTally_FullMethodName          = "/svote.v1.Query/ProposalTally"
-	Query_TallyResults_FullMethodName           = "/svote.v1.Query/TallyResults"
-	Query_CommitmentLeaves_FullMethodName       = "/svote.v1.Query/CommitmentLeaves"
-	Query_ActiveRound_FullMethodName            = "/svote.v1.Query/ActiveRound"
-	Query_CeremonyState_FullMethodName          = "/svote.v1.Query/CeremonyState"
-	Query_VoteManagers_FullMethodName           = "/svote.v1.Query/VoteManagers"
-	Query_VoteSummary_FullMethodName            = "/svote.v1.Query/VoteSummary"
-	Query_ListRounds_FullMethodName             = "/svote.v1.Query/ListRounds"
-	Query_PallasKeys_FullMethodName             = "/svote.v1.Query/PallasKeys"
-	Query_Endorsers_FullMethodName              = "/svote.v1.Query/Endorsers"
-	Query_EndorsedRounds_FullMethodName         = "/svote.v1.Query/EndorsedRounds"
+	Query_CommitmentTreeAtHeight_FullMethodName    = "/svote.v1.Query/CommitmentTreeAtHeight"
+	Query_LatestCommitmentTree_FullMethodName      = "/svote.v1.Query/LatestCommitmentTree"
+	Query_VoteRound_FullMethodName                 = "/svote.v1.Query/VoteRound"
+	Query_ProposalTally_FullMethodName             = "/svote.v1.Query/ProposalTally"
+	Query_TallyResults_FullMethodName              = "/svote.v1.Query/TallyResults"
+	Query_CommitmentLeaves_FullMethodName          = "/svote.v1.Query/CommitmentLeaves"
+	Query_ActiveRound_FullMethodName               = "/svote.v1.Query/ActiveRound"
+	Query_CeremonyState_FullMethodName             = "/svote.v1.Query/CeremonyState"
+	Query_VoteManagers_FullMethodName              = "/svote.v1.Query/VoteManagers"
+	Query_VoteSummary_FullMethodName               = "/svote.v1.Query/VoteSummary"
+	Query_ListRounds_FullMethodName                = "/svote.v1.Query/ListRounds"
+	Query_PallasKeys_FullMethodName                = "/svote.v1.Query/PallasKeys"
+	Query_Endorsers_FullMethodName                 = "/svote.v1.Query/Endorsers"
+	Query_EndorsedRounds_FullMethodName            = "/svote.v1.Query/EndorsedRounds"
+	Query_CoordinatorAction_FullMethodName         = "/svote.v1.Query/CoordinatorAction"
+	Query_PendingCoordinatorActions_FullMethodName = "/svote.v1.Query/PendingCoordinatorActions"
 )
 
 // QueryClient is the client API for Query service.
@@ -73,6 +75,10 @@ type QueryClient interface {
 	Endorsers(ctx context.Context, in *QueryEndorsersRequest, opts ...grpc.CallOption) (*QueryEndorsersResponse, error)
 	// EndorsedRounds returns all vote round IDs endorsed by a given endorser_id.
 	EndorsedRounds(ctx context.Context, in *QueryEndorsedRoundsRequest, opts ...grpc.CallOption) (*QueryEndorsedRoundsResponse, error)
+	// CoordinatorAction returns a stored threshold-gated action by id.
+	CoordinatorAction(ctx context.Context, in *QueryCoordinatorActionRequest, opts ...grpc.CallOption) (*QueryCoordinatorActionResponse, error)
+	// PendingCoordinatorActions returns all pending threshold-gated actions.
+	PendingCoordinatorActions(ctx context.Context, in *QueryPendingCoordinatorActionsRequest, opts ...grpc.CallOption) (*QueryPendingCoordinatorActionsResponse, error)
 }
 
 type queryClient struct {
@@ -223,6 +229,26 @@ func (c *queryClient) EndorsedRounds(ctx context.Context, in *QueryEndorsedRound
 	return out, nil
 }
 
+func (c *queryClient) CoordinatorAction(ctx context.Context, in *QueryCoordinatorActionRequest, opts ...grpc.CallOption) (*QueryCoordinatorActionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryCoordinatorActionResponse)
+	err := c.cc.Invoke(ctx, Query_CoordinatorAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) PendingCoordinatorActions(ctx context.Context, in *QueryPendingCoordinatorActionsRequest, opts ...grpc.CallOption) (*QueryPendingCoordinatorActionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryPendingCoordinatorActionsResponse)
+	err := c.cc.Invoke(ctx, Query_PendingCoordinatorActions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
@@ -261,6 +287,10 @@ type QueryServer interface {
 	Endorsers(context.Context, *QueryEndorsersRequest) (*QueryEndorsersResponse, error)
 	// EndorsedRounds returns all vote round IDs endorsed by a given endorser_id.
 	EndorsedRounds(context.Context, *QueryEndorsedRoundsRequest) (*QueryEndorsedRoundsResponse, error)
+	// CoordinatorAction returns a stored threshold-gated action by id.
+	CoordinatorAction(context.Context, *QueryCoordinatorActionRequest) (*QueryCoordinatorActionResponse, error)
+	// PendingCoordinatorActions returns all pending threshold-gated actions.
+	PendingCoordinatorActions(context.Context, *QueryPendingCoordinatorActionsRequest) (*QueryPendingCoordinatorActionsResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -312,6 +342,12 @@ func (UnimplementedQueryServer) Endorsers(context.Context, *QueryEndorsersReques
 }
 func (UnimplementedQueryServer) EndorsedRounds(context.Context, *QueryEndorsedRoundsRequest) (*QueryEndorsedRoundsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EndorsedRounds not implemented")
+}
+func (UnimplementedQueryServer) CoordinatorAction(context.Context, *QueryCoordinatorActionRequest) (*QueryCoordinatorActionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CoordinatorAction not implemented")
+}
+func (UnimplementedQueryServer) PendingCoordinatorActions(context.Context, *QueryPendingCoordinatorActionsRequest) (*QueryPendingCoordinatorActionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PendingCoordinatorActions not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -586,6 +622,42 @@ func _Query_EndorsedRounds_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_CoordinatorAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryCoordinatorActionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).CoordinatorAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_CoordinatorAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).CoordinatorAction(ctx, req.(*QueryCoordinatorActionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_PendingCoordinatorActions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryPendingCoordinatorActionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).PendingCoordinatorActions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_PendingCoordinatorActions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).PendingCoordinatorActions(ctx, req.(*QueryPendingCoordinatorActionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -648,6 +720,14 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EndorsedRounds",
 			Handler:    _Query_EndorsedRounds_Handler,
+		},
+		{
+			MethodName: "CoordinatorAction",
+			Handler:    _Query_CoordinatorAction_Handler,
+		},
+		{
+			MethodName: "PendingCoordinatorActions",
+			Handler:    _Query_PendingCoordinatorActions_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

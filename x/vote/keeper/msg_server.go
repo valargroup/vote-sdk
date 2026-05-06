@@ -35,13 +35,21 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 // and emits an event. The round transitions to ACTIVE when its per-round
 // ceremony confirms (auto-deal + auto-ack via PrepareProposal).
 func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
-	ctx := sdk.UnwrapSDKContext(goCtx)
+	if err := msg.ValidateBasic(); err != nil {
+		return nil, err
+	}
 
-	// Only a vote manager can create voting sessions (any-of-N).
+	// Direct transactions are blocked by the app whitelist; this guard keeps
+	// direct handler calls consistent with the coordinator membership policy.
 	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
 		return nil, err
 	}
 
+	return ms.executeCreateVotingSession(goCtx, msg)
+}
+
+func (ms msgServer) executeCreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
 
 	createdAtHeight := uint64(ctx.BlockHeight())
@@ -225,25 +233,30 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 // Allows the caller to remove themselves from the new set — the non-empty
 // check is the only liveness guarantee.
 func (ms msgServer) UpdateVoteManagers(goCtx context.Context, msg *types.MsgUpdateVoteManagers) (*types.MsgUpdateVoteManagersResponse, error) {
-	ctx := sdk.UnwrapSDKContext(goCtx)
-
 	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
 		return nil, err
 	}
 
-	normalized, err := types.ValidateAndNormalizeVoteManagerSet(msg.NewVoteManagers)
+	return ms.executeUpdateVoteManagers(goCtx, msg)
+}
+
+func (ms msgServer) executeUpdateVoteManagers(goCtx context.Context, msg *types.MsgUpdateVoteManagers) (*types.MsgUpdateVoteManagersResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+
+	normalized, threshold, err := types.ValidateAndNormalizeVoteManagerPolicy(msg.NewVoteManagers, msg.NewThreshold)
 	if err != nil {
-		return nil, fmt.Errorf("new_vote_managers: %w", err)
+		return nil, fmt.Errorf("new_vote_manager_policy: %w", err)
 	}
 
 	kvStore := ms.k.OpenKVStore(ctx)
-	if err := ms.k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: normalized}); err != nil {
+	if err := ms.k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: normalized, Threshold: threshold}); err != nil {
 		return nil, err
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeUpdateVoteManagers,
 		sdk.NewAttribute(types.AttributeKeyVoteManagers, strings.Join(normalized, ",")),
+		sdk.NewAttribute(types.AttributeKeyThreshold, fmt.Sprintf("%d", threshold)),
 		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
 	))
 

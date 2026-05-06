@@ -37,6 +37,8 @@ const (
 	Msg_SetEndorser_FullMethodName                  = "/svote.v1.Msg/SetEndorser"
 	Msg_EndorseRound_FullMethodName                 = "/svote.v1.Msg/EndorseRound"
 	Msg_ClearRoundEndorsement_FullMethodName        = "/svote.v1.Msg/ClearRoundEndorsement"
+	Msg_ProposeCoordinatorAction_FullMethodName     = "/svote.v1.Msg/ProposeCoordinatorAction"
+	Msg_ApproveCoordinatorAction_FullMethodName     = "/svote.v1.Msg/ApproveCoordinatorAction"
 )
 
 // MsgClient is the client API for Msg service.
@@ -66,6 +68,8 @@ type MsgClient interface {
 	SetEndorser(ctx context.Context, in *MsgSetEndorser, opts ...grpc.CallOption) (*MsgSetEndorserResponse, error)
 	EndorseRound(ctx context.Context, in *MsgEndorseRound, opts ...grpc.CallOption) (*MsgEndorseRoundResponse, error)
 	ClearRoundEndorsement(ctx context.Context, in *MsgClearRoundEndorsement, opts ...grpc.CallOption) (*MsgClearRoundEndorsementResponse, error)
+	ProposeCoordinatorAction(ctx context.Context, in *MsgProposeCoordinatorAction, opts ...grpc.CallOption) (*MsgProposeCoordinatorActionResponse, error)
+	ApproveCoordinatorAction(ctx context.Context, in *MsgApproveCoordinatorAction, opts ...grpc.CallOption) (*MsgApproveCoordinatorActionResponse, error)
 }
 
 type msgClient struct {
@@ -256,6 +260,26 @@ func (c *msgClient) ClearRoundEndorsement(ctx context.Context, in *MsgClearRound
 	return out, nil
 }
 
+func (c *msgClient) ProposeCoordinatorAction(ctx context.Context, in *MsgProposeCoordinatorAction, opts ...grpc.CallOption) (*MsgProposeCoordinatorActionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgProposeCoordinatorActionResponse)
+	err := c.cc.Invoke(ctx, Msg_ProposeCoordinatorAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) ApproveCoordinatorAction(ctx context.Context, in *MsgApproveCoordinatorAction, opts ...grpc.CallOption) (*MsgApproveCoordinatorActionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgApproveCoordinatorActionResponse)
+	err := c.cc.Invoke(ctx, Msg_ApproveCoordinatorAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MsgServer is the server API for Msg service.
 // All implementations must embed UnimplementedMsgServer
 // for forward compatibility.
@@ -283,6 +307,8 @@ type MsgServer interface {
 	SetEndorser(context.Context, *MsgSetEndorser) (*MsgSetEndorserResponse, error)
 	EndorseRound(context.Context, *MsgEndorseRound) (*MsgEndorseRoundResponse, error)
 	ClearRoundEndorsement(context.Context, *MsgClearRoundEndorsement) (*MsgClearRoundEndorsementResponse, error)
+	ProposeCoordinatorAction(context.Context, *MsgProposeCoordinatorAction) (*MsgProposeCoordinatorActionResponse, error)
+	ApproveCoordinatorAction(context.Context, *MsgApproveCoordinatorAction) (*MsgApproveCoordinatorActionResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
 
@@ -346,6 +372,12 @@ func (UnimplementedMsgServer) EndorseRound(context.Context, *MsgEndorseRound) (*
 }
 func (UnimplementedMsgServer) ClearRoundEndorsement(context.Context, *MsgClearRoundEndorsement) (*MsgClearRoundEndorsementResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClearRoundEndorsement not implemented")
+}
+func (UnimplementedMsgServer) ProposeCoordinatorAction(context.Context, *MsgProposeCoordinatorAction) (*MsgProposeCoordinatorActionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProposeCoordinatorAction not implemented")
+}
+func (UnimplementedMsgServer) ApproveCoordinatorAction(context.Context, *MsgApproveCoordinatorAction) (*MsgApproveCoordinatorActionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ApproveCoordinatorAction not implemented")
 }
 func (UnimplementedMsgServer) mustEmbedUnimplementedMsgServer() {}
 func (UnimplementedMsgServer) testEmbeddedByValue()             {}
@@ -692,6 +724,42 @@ func _Msg_ClearRoundEndorsement_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_ProposeCoordinatorAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgProposeCoordinatorAction)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).ProposeCoordinatorAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_ProposeCoordinatorAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).ProposeCoordinatorAction(ctx, req.(*MsgProposeCoordinatorAction))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_ApproveCoordinatorAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgApproveCoordinatorAction)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).ApproveCoordinatorAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_ApproveCoordinatorAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).ApproveCoordinatorAction(ctx, req.(*MsgApproveCoordinatorAction))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Msg_ServiceDesc is the grpc.ServiceDesc for Msg service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -770,6 +838,14 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ClearRoundEndorsement",
 			Handler:    _Msg_ClearRoundEndorsement_Handler,
+		},
+		{
+			MethodName: "ProposeCoordinatorAction",
+			Handler:    _Msg_ProposeCoordinatorAction_Handler,
+		},
+		{
+			MethodName: "ApproveCoordinatorAction",
+			Handler:    _Msg_ApproveCoordinatorAction_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

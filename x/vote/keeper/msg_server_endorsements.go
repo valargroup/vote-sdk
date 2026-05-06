@@ -12,9 +12,20 @@ import (
 
 // SetEndorser creates, rotates, or clears an endorser mapping. Vote managers only.
 func (ms msgServer) SetEndorser(goCtx context.Context, msg *types.MsgSetEndorser) (*types.MsgSetEndorserResponse, error) {
+	if err := msg.ValidateBasic(); err != nil {
+		return nil, err
+	}
+	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
+		return nil, err
+	}
+
+	return ms.executeSetEndorser(goCtx, msg)
+}
+
+func (ms msgServer) executeSetEndorser(goCtx context.Context, msg *types.MsgSetEndorser) (*types.MsgSetEndorserResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
+	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 	if err := types.ValidateEndorserID(msg.EndorserId); err != nil {

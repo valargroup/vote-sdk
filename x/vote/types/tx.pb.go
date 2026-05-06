@@ -10,6 +10,7 @@ import (
 	_ "github.com/cosmos/cosmos-sdk/types/msgservice"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -1455,6 +1456,7 @@ type MsgUpdateVoteManagers struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Creator         string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                          // Sender address (must be in the current vote manager set)
 	NewVoteManagers []string               `protobuf:"bytes,2,rep,name=new_vote_managers,json=newVoteManagers,proto3" json:"new_vote_managers,omitempty"` // Full replacement set
+	NewThreshold    uint32                 `protobuf:"varint,3,opt,name=new_threshold,json=newThreshold,proto3" json:"new_threshold,omitempty"`           // Defaults to 1 when omitted; must be <= len(new_vote_managers)
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1501,6 +1503,13 @@ func (x *MsgUpdateVoteManagers) GetNewVoteManagers() []string {
 		return x.NewVoteManagers
 	}
 	return nil
+}
+
+func (x *MsgUpdateVoteManagers) GetNewThreshold() uint32 {
+	if x != nil {
+		return x.NewThreshold
+	}
+	return 0
 }
 
 type MsgUpdateVoteManagersResponse struct {
@@ -2146,11 +2155,223 @@ func (*MsgClearRoundEndorsementResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{37}
 }
 
+// MsgProposeCoordinatorAction creates a threshold-gated coordinator action.
+// The proposer counts as the first approval. If the current threshold is 1, the
+// action executes in the same transaction.
+type MsgProposeCoordinatorAction struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"` // Sender address (must be a current vote coordinator)
+	Payload       *anypb.Any             `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"` // One supported vote-manager payload message
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgProposeCoordinatorAction) Reset() {
+	*x = MsgProposeCoordinatorAction{}
+	mi := &file_svote_v1_tx_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgProposeCoordinatorAction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgProposeCoordinatorAction) ProtoMessage() {}
+
+func (x *MsgProposeCoordinatorAction) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgProposeCoordinatorAction.ProtoReflect.Descriptor instead.
+func (*MsgProposeCoordinatorAction) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *MsgProposeCoordinatorAction) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+func (x *MsgProposeCoordinatorAction) GetPayload() *anypb.Any {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+type MsgProposeCoordinatorActionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ActionId      uint64                 `protobuf:"varint,1,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"`
+	Executed      bool                   `protobuf:"varint,2,opt,name=executed,proto3" json:"executed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgProposeCoordinatorActionResponse) Reset() {
+	*x = MsgProposeCoordinatorActionResponse{}
+	mi := &file_svote_v1_tx_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgProposeCoordinatorActionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgProposeCoordinatorActionResponse) ProtoMessage() {}
+
+func (x *MsgProposeCoordinatorActionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgProposeCoordinatorActionResponse.ProtoReflect.Descriptor instead.
+func (*MsgProposeCoordinatorActionResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *MsgProposeCoordinatorActionResponse) GetActionId() uint64 {
+	if x != nil {
+		return x.ActionId
+	}
+	return 0
+}
+
+func (x *MsgProposeCoordinatorActionResponse) GetExecuted() bool {
+	if x != nil {
+		return x.Executed
+	}
+	return false
+}
+
+// MsgApproveCoordinatorAction adds one coordinator approval to a pending action.
+type MsgApproveCoordinatorAction struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"` // Sender address (must be a current vote coordinator)
+	ActionId      uint64                 `protobuf:"varint,2,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgApproveCoordinatorAction) Reset() {
+	*x = MsgApproveCoordinatorAction{}
+	mi := &file_svote_v1_tx_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgApproveCoordinatorAction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgApproveCoordinatorAction) ProtoMessage() {}
+
+func (x *MsgApproveCoordinatorAction) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgApproveCoordinatorAction.ProtoReflect.Descriptor instead.
+func (*MsgApproveCoordinatorAction) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *MsgApproveCoordinatorAction) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+func (x *MsgApproveCoordinatorAction) GetActionId() uint64 {
+	if x != nil {
+		return x.ActionId
+	}
+	return 0
+}
+
+type MsgApproveCoordinatorActionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ActionId      uint64                 `protobuf:"varint,1,opt,name=action_id,json=actionId,proto3" json:"action_id,omitempty"`
+	Executed      bool                   `protobuf:"varint,2,opt,name=executed,proto3" json:"executed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgApproveCoordinatorActionResponse) Reset() {
+	*x = MsgApproveCoordinatorActionResponse{}
+	mi := &file_svote_v1_tx_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgApproveCoordinatorActionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgApproveCoordinatorActionResponse) ProtoMessage() {}
+
+func (x *MsgApproveCoordinatorActionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgApproveCoordinatorActionResponse.ProtoReflect.Descriptor instead.
+func (*MsgApproveCoordinatorActionResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *MsgApproveCoordinatorActionResponse) GetActionId() uint64 {
+	if x != nil {
+		return x.ActionId
+	}
+	return 0
+}
+
+func (x *MsgApproveCoordinatorActionResponse) GetExecuted() bool {
+	if x != nil {
+		return x.Executed
+	}
+	return false
+}
+
 var File_svote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_svote_v1_tx_proto_rawDesc = "" +
 	"\n" +
-	"\x11svote/v1/tx.proto\x12\bsvote.v1\x1a\x17cosmos/msg/v1/msg.proto\x1a\x14svote/v1/types.proto\"\xad\x03\n" +
+	"\x11svote/v1/tx.proto\x12\bsvote.v1\x1a\x17cosmos/msg/v1/msg.proto\x1a\x19google/protobuf/any.proto\x1a\x14svote/v1/types.proto\"\xad\x03\n" +
 	"\x16MsgCreateVotingSession\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -2251,10 +2472,11 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x0fpartial_decrypt\x18\x03 \x01(\fR\x0epartialDecrypt\x12\x1d\n" +
 	"\n" +
 	"dleq_proof\x18\x04 \x01(\fR\tdleqProof\"$\n" +
-	"\"MsgSubmitPartialDecryptionResponse\"]\n" +
+	"\"MsgSubmitPartialDecryptionResponse\"\x82\x01\n" +
 	"\x15MsgUpdateVoteManagers\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12*\n" +
-	"\x11new_vote_managers\x18\x02 \x03(\tR\x0fnewVoteManagers\"\x1f\n" +
+	"\x11new_vote_managers\x18\x02 \x03(\tR\x0fnewVoteManagers\x12#\n" +
+	"\rnew_threshold\x18\x03 \x01(\rR\fnewThreshold\"\x1f\n" +
 	"\x1dMsgUpdateVoteManagersResponse\"\x83\x01\n" +
 	"\x11MsgAuthorizedSend\x12!\n" +
 	"\ffrom_address\x18\x01 \x01(\tR\vfromAddress\x12\x1d\n" +
@@ -2290,7 +2512,19 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\vendorser_id\x18\x02 \x01(\tR\n" +
 	"endorserId\x12\"\n" +
 	"\rvote_round_id\x18\x03 \x01(\fR\vvoteRoundId:\f\x82\xe7\xb0*\acreator\"\"\n" +
-	" MsgClearRoundEndorsementResponse2\xd7\f\n" +
+	" MsgClearRoundEndorsementResponse\"u\n" +
+	"\x1bMsgProposeCoordinatorAction\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\x12.\n" +
+	"\apayload\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\apayload:\f\x82\xe7\xb0*\acreator\"^\n" +
+	"#MsgProposeCoordinatorActionResponse\x12\x1b\n" +
+	"\taction_id\x18\x01 \x01(\x04R\bactionId\x12\x1a\n" +
+	"\bexecuted\x18\x02 \x01(\bR\bexecuted\"b\n" +
+	"\x1bMsgApproveCoordinatorAction\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\x12\x1b\n" +
+	"\taction_id\x18\x02 \x01(\x04R\bactionId:\f\x82\xe7\xb0*\acreator\"^\n" +
+	"#MsgApproveCoordinatorActionResponse\x12\x1b\n" +
+	"\taction_id\x18\x01 \x01(\x04R\bactionId\x12\x1a\n" +
+	"\bexecuted\x18\x02 \x01(\bR\bexecuted2\xbb\x0e\n" +
 	"\x03Msg\x12a\n" +
 	"\x13CreateVotingSession\x12 .svote.v1.MsgCreateVotingSession\x1a(.svote.v1.MsgCreateVotingSessionResponse\x12L\n" +
 	"\fDelegateVote\x12\x19.svote.v1.MsgDelegateVote\x1a!.svote.v1.MsgDelegateVoteResponse\x12@\n" +
@@ -2309,7 +2543,9 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\rCancelUpgrade\x12\x1a.svote.v1.MsgCancelUpgrade\x1a\".svote.v1.MsgCancelUpgradeResponse\x12I\n" +
 	"\vSetEndorser\x12\x18.svote.v1.MsgSetEndorser\x1a .svote.v1.MsgSetEndorserResponse\x12L\n" +
 	"\fEndorseRound\x12\x19.svote.v1.MsgEndorseRound\x1a!.svote.v1.MsgEndorseRoundResponse\x12g\n" +
-	"\x15ClearRoundEndorsement\x12\".svote.v1.MsgClearRoundEndorsement\x1a*.svote.v1.MsgClearRoundEndorsementResponse\x1a\x05\x80\xe7\xb0*\x01B-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
+	"\x15ClearRoundEndorsement\x12\".svote.v1.MsgClearRoundEndorsement\x1a*.svote.v1.MsgClearRoundEndorsementResponse\x12p\n" +
+	"\x18ProposeCoordinatorAction\x12%.svote.v1.MsgProposeCoordinatorAction\x1a-.svote.v1.MsgProposeCoordinatorActionResponse\x12p\n" +
+	"\x18ApproveCoordinatorAction\x12%.svote.v1.MsgApproveCoordinatorAction\x1a-.svote.v1.MsgApproveCoordinatorActionResponse\x1a\x05\x80\xe7\xb0*\x01B-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
 
 var (
 	file_svote_v1_tx_proto_rawDescOnce sync.Once
@@ -2323,7 +2559,7 @@ func file_svote_v1_tx_proto_rawDescGZIP() []byte {
 	return file_svote_v1_tx_proto_rawDescData
 }
 
-var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgCreateVotingSession)(nil),                  // 0: svote.v1.MsgCreateVotingSession
 	(*MsgCreateVotingSessionResponse)(nil),          // 1: svote.v1.MsgCreateVotingSessionResponse
@@ -2363,55 +2599,65 @@ var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgEndorseRoundResponse)(nil),                 // 35: svote.v1.MsgEndorseRoundResponse
 	(*MsgClearRoundEndorsement)(nil),                // 36: svote.v1.MsgClearRoundEndorsement
 	(*MsgClearRoundEndorsementResponse)(nil),        // 37: svote.v1.MsgClearRoundEndorsementResponse
-	(*Proposal)(nil),                                // 38: svote.v1.Proposal
-	(*DealerPayload)(nil),                           // 39: svote.v1.DealerPayload
+	(*MsgProposeCoordinatorAction)(nil),             // 38: svote.v1.MsgProposeCoordinatorAction
+	(*MsgProposeCoordinatorActionResponse)(nil),     // 39: svote.v1.MsgProposeCoordinatorActionResponse
+	(*MsgApproveCoordinatorAction)(nil),             // 40: svote.v1.MsgApproveCoordinatorAction
+	(*MsgApproveCoordinatorActionResponse)(nil),     // 41: svote.v1.MsgApproveCoordinatorActionResponse
+	(*Proposal)(nil),                                // 42: svote.v1.Proposal
+	(*DealerPayload)(nil),                           // 43: svote.v1.DealerPayload
+	(*anypb.Any)(nil),                               // 44: google.protobuf.Any
 }
 var file_svote_v1_tx_proto_depIdxs = []int32{
-	38, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
+	42, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
 	9,  // 1: svote.v1.MsgSubmitTally.entries:type_name -> svote.v1.TallyEntry
-	39, // 2: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
+	43, // 2: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
 	22, // 3: svote.v1.MsgSubmitPartialDecryption.entries:type_name -> svote.v1.PartialDecryptionEntry
-	0,  // 4: svote.v1.Msg.CreateVotingSession:input_type -> svote.v1.MsgCreateVotingSession
-	2,  // 5: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
-	4,  // 6: svote.v1.Msg.CastVote:input_type -> svote.v1.MsgCastVote
-	6,  // 7: svote.v1.Msg.RevealShare:input_type -> svote.v1.MsgRevealShare
-	8,  // 8: svote.v1.Msg.SubmitTally:input_type -> svote.v1.MsgSubmitTally
-	21, // 9: svote.v1.Msg.SubmitPartialDecryption:input_type -> svote.v1.MsgSubmitPartialDecryption
-	11, // 10: svote.v1.Msg.RegisterPallasKey:input_type -> svote.v1.MsgRegisterPallasKey
-	13, // 11: svote.v1.Msg.RotatePallasKey:input_type -> svote.v1.MsgRotatePallasKey
-	15, // 12: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
-	17, // 13: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
-	19, // 14: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
-	24, // 15: svote.v1.Msg.UpdateVoteManagers:input_type -> svote.v1.MsgUpdateVoteManagers
-	26, // 16: svote.v1.Msg.AuthorizedSend:input_type -> svote.v1.MsgAuthorizedSend
-	28, // 17: svote.v1.Msg.ScheduleUpgrade:input_type -> svote.v1.MsgScheduleUpgrade
-	30, // 18: svote.v1.Msg.CancelUpgrade:input_type -> svote.v1.MsgCancelUpgrade
-	32, // 19: svote.v1.Msg.SetEndorser:input_type -> svote.v1.MsgSetEndorser
-	34, // 20: svote.v1.Msg.EndorseRound:input_type -> svote.v1.MsgEndorseRound
-	36, // 21: svote.v1.Msg.ClearRoundEndorsement:input_type -> svote.v1.MsgClearRoundEndorsement
-	1,  // 22: svote.v1.Msg.CreateVotingSession:output_type -> svote.v1.MsgCreateVotingSessionResponse
-	3,  // 23: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
-	5,  // 24: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
-	7,  // 25: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
-	10, // 26: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
-	23, // 27: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
-	12, // 28: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
-	14, // 29: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
-	16, // 30: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
-	18, // 31: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
-	20, // 32: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
-	25, // 33: svote.v1.Msg.UpdateVoteManagers:output_type -> svote.v1.MsgUpdateVoteManagersResponse
-	27, // 34: svote.v1.Msg.AuthorizedSend:output_type -> svote.v1.MsgAuthorizedSendResponse
-	29, // 35: svote.v1.Msg.ScheduleUpgrade:output_type -> svote.v1.MsgScheduleUpgradeResponse
-	31, // 36: svote.v1.Msg.CancelUpgrade:output_type -> svote.v1.MsgCancelUpgradeResponse
-	33, // 37: svote.v1.Msg.SetEndorser:output_type -> svote.v1.MsgSetEndorserResponse
-	35, // 38: svote.v1.Msg.EndorseRound:output_type -> svote.v1.MsgEndorseRoundResponse
-	37, // 39: svote.v1.Msg.ClearRoundEndorsement:output_type -> svote.v1.MsgClearRoundEndorsementResponse
-	22, // [22:40] is the sub-list for method output_type
-	4,  // [4:22] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	44, // 4: svote.v1.MsgProposeCoordinatorAction.payload:type_name -> google.protobuf.Any
+	0,  // 5: svote.v1.Msg.CreateVotingSession:input_type -> svote.v1.MsgCreateVotingSession
+	2,  // 6: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
+	4,  // 7: svote.v1.Msg.CastVote:input_type -> svote.v1.MsgCastVote
+	6,  // 8: svote.v1.Msg.RevealShare:input_type -> svote.v1.MsgRevealShare
+	8,  // 9: svote.v1.Msg.SubmitTally:input_type -> svote.v1.MsgSubmitTally
+	21, // 10: svote.v1.Msg.SubmitPartialDecryption:input_type -> svote.v1.MsgSubmitPartialDecryption
+	11, // 11: svote.v1.Msg.RegisterPallasKey:input_type -> svote.v1.MsgRegisterPallasKey
+	13, // 12: svote.v1.Msg.RotatePallasKey:input_type -> svote.v1.MsgRotatePallasKey
+	15, // 13: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
+	17, // 14: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
+	19, // 15: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
+	24, // 16: svote.v1.Msg.UpdateVoteManagers:input_type -> svote.v1.MsgUpdateVoteManagers
+	26, // 17: svote.v1.Msg.AuthorizedSend:input_type -> svote.v1.MsgAuthorizedSend
+	28, // 18: svote.v1.Msg.ScheduleUpgrade:input_type -> svote.v1.MsgScheduleUpgrade
+	30, // 19: svote.v1.Msg.CancelUpgrade:input_type -> svote.v1.MsgCancelUpgrade
+	32, // 20: svote.v1.Msg.SetEndorser:input_type -> svote.v1.MsgSetEndorser
+	34, // 21: svote.v1.Msg.EndorseRound:input_type -> svote.v1.MsgEndorseRound
+	36, // 22: svote.v1.Msg.ClearRoundEndorsement:input_type -> svote.v1.MsgClearRoundEndorsement
+	38, // 23: svote.v1.Msg.ProposeCoordinatorAction:input_type -> svote.v1.MsgProposeCoordinatorAction
+	40, // 24: svote.v1.Msg.ApproveCoordinatorAction:input_type -> svote.v1.MsgApproveCoordinatorAction
+	1,  // 25: svote.v1.Msg.CreateVotingSession:output_type -> svote.v1.MsgCreateVotingSessionResponse
+	3,  // 26: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
+	5,  // 27: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
+	7,  // 28: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
+	10, // 29: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
+	23, // 30: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
+	12, // 31: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
+	14, // 32: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
+	16, // 33: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
+	18, // 34: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
+	20, // 35: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
+	25, // 36: svote.v1.Msg.UpdateVoteManagers:output_type -> svote.v1.MsgUpdateVoteManagersResponse
+	27, // 37: svote.v1.Msg.AuthorizedSend:output_type -> svote.v1.MsgAuthorizedSendResponse
+	29, // 38: svote.v1.Msg.ScheduleUpgrade:output_type -> svote.v1.MsgScheduleUpgradeResponse
+	31, // 39: svote.v1.Msg.CancelUpgrade:output_type -> svote.v1.MsgCancelUpgradeResponse
+	33, // 40: svote.v1.Msg.SetEndorser:output_type -> svote.v1.MsgSetEndorserResponse
+	35, // 41: svote.v1.Msg.EndorseRound:output_type -> svote.v1.MsgEndorseRoundResponse
+	37, // 42: svote.v1.Msg.ClearRoundEndorsement:output_type -> svote.v1.MsgClearRoundEndorsementResponse
+	39, // 43: svote.v1.Msg.ProposeCoordinatorAction:output_type -> svote.v1.MsgProposeCoordinatorActionResponse
+	41, // 44: svote.v1.Msg.ApproveCoordinatorAction:output_type -> svote.v1.MsgApproveCoordinatorActionResponse
+	25, // [25:45] is the sub-list for method output_type
+	5,  // [5:25] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_svote_v1_tx_proto_init() }
@@ -2426,7 +2672,7 @@ func file_svote_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_tx_proto_rawDesc), len(file_svote_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   38,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

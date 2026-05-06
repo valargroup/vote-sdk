@@ -14,24 +14,49 @@ import (
 // Shared by ValidateGenesisState and the MsgUpdateVoteManagers handler so both
 // paths apply the same admissibility rules.
 func ValidateAndNormalizeVoteManagerSet(addrs []string) ([]string, error) {
+	normalized, _, err := ValidateAndNormalizeVoteManagerPolicy(addrs, 1)
+	return normalized, err
+}
+
+// NormalizeVoteManagerThreshold applies the genesis/config default. A zero
+// threshold means "use default 1"; any non-zero value is preserved for
+// validation against the manager set.
+func NormalizeVoteManagerThreshold(threshold uint32) uint32 {
+	if threshold == 0 {
+		return 1
+	}
+	return threshold
+}
+
+// ValidateAndNormalizeVoteManagerPolicy parses each manager address through
+// bech32, rejects duplicates, applies the default threshold, and enforces
+// 1 <= threshold <= len(addrs). The input list is not mutated.
+func ValidateAndNormalizeVoteManagerPolicy(addrs []string, threshold uint32) ([]string, uint32, error) {
 	if len(addrs) == 0 {
-		return nil, fmt.Errorf("%w", ErrEmptyVoteManagerSet)
+		return nil, 0, fmt.Errorf("%w", ErrEmptyVoteManagerSet)
 	}
 	seen := make(map[string]struct{}, len(addrs))
 	normalized := make([]string, 0, len(addrs))
 	for i, addr := range addrs {
 		acc, err := sdk.AccAddressFromBech32(addr)
 		if err != nil {
-			return nil, fmt.Errorf("[%d] %q is not a valid bech32 address: %w", i, addr, err)
+			return nil, 0, fmt.Errorf("[%d] %q is not a valid bech32 address: %w", i, addr, err)
 		}
 		canonical := acc.String()
 		if _, dup := seen[canonical]; dup {
-			return nil, fmt.Errorf("%w: %s", ErrDuplicateVoteManager, canonical)
+			return nil, 0, fmt.Errorf("%w: %s", ErrDuplicateVoteManager, canonical)
 		}
 		seen[canonical] = struct{}{}
 		normalized = append(normalized, canonical)
 	}
-	return normalized, nil
+	effectiveThreshold := NormalizeVoteManagerThreshold(threshold)
+	if effectiveThreshold < 1 {
+		return nil, 0, fmt.Errorf("%w: vote-manager threshold must be at least 1", ErrInvalidThreshold)
+	}
+	if effectiveThreshold > uint32(len(normalized)) {
+		return nil, 0, fmt.Errorf("%w: vote-manager threshold %d exceeds manager count %d", ErrInvalidThreshold, effectiveThreshold, len(normalized))
+	}
+	return normalized, effectiveThreshold, nil
 }
 
 // ValidateGenesisState performs structural validation of the vote module genesis state.
@@ -70,7 +95,7 @@ func ValidateGenesisState(gs *GenesisState) error {
 	}
 
 	// Vote-manager set is required in genesis — there is no bootstrap path.
-	if _, err := ValidateAndNormalizeVoteManagerSet(gs.VoteManagerAddresses); err != nil {
+	if _, _, err := ValidateAndNormalizeVoteManagerPolicy(gs.VoteManagerAddresses, gs.VoteManagerThreshold); err != nil {
 		return fmt.Errorf("vote_manager_addresses: %w", err)
 	}
 
@@ -155,6 +180,52 @@ func ValidateGenesisState(gs *GenesisState) error {
 			return fmt.Errorf("endorsed_rounds[%d]: duplicate endorsement for %q/%x", i, endorsed.EndorserId, endorsed.VoteRoundId)
 		}
 		seenEndorsedRounds[key] = struct{}{}
+	}
+
+	seenCoordinatorActions := make(map[uint64]struct{}, len(gs.CoordinatorActions))
+	for i, action := range gs.CoordinatorActions {
+		if action == nil {
+			return fmt.Errorf("coordinator_actions[%d] cannot be nil", i)
+		}
+		if action.ActionId == 0 {
+			return fmt.Errorf("coordinator_actions[%d].action_id cannot be zero", i)
+		}
+		if _, dup := seenCoordinatorActions[action.ActionId]; dup {
+			return fmt.Errorf("coordinator_actions[%d]: duplicate action_id %d", i, action.ActionId)
+		}
+		seenCoordinatorActions[action.ActionId] = struct{}{}
+		if action.Payload == nil || action.Payload.TypeUrl == "" || len(action.Payload.Value) == 0 {
+			return fmt.Errorf("coordinator_actions[%d].payload cannot be empty", i)
+		}
+		if _, err := sdk.AccAddressFromBech32(action.Proposer); err != nil {
+			return fmt.Errorf("coordinator_actions[%d].proposer %q is not a valid bech32 address: %w", i, action.Proposer, err)
+		}
+		switch action.Status {
+		case CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_PENDING,
+			CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_EXECUTED,
+			CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_EXPIRED:
+		default:
+			return fmt.Errorf("coordinator_actions[%d].status is invalid: %s", i, action.Status.String())
+		}
+		seenApprovals := make(map[string]struct{}, len(action.Approvals))
+		for j, approval := range action.Approvals {
+			acc, err := sdk.AccAddressFromBech32(approval)
+			if err != nil {
+				return fmt.Errorf("coordinator_actions[%d].approvals[%d] %q is not a valid bech32 address: %w", i, j, approval, err)
+			}
+			canonical := acc.String()
+			if _, dup := seenApprovals[canonical]; dup {
+				return fmt.Errorf("coordinator_actions[%d].approvals[%d]: duplicate approval %s", i, j, canonical)
+			}
+			seenApprovals[canonical] = struct{}{}
+		}
+	}
+	if gs.NextCoordinatorActionId != 0 {
+		for actionID := range seenCoordinatorActions {
+			if actionID >= gs.NextCoordinatorActionId {
+				return fmt.Errorf("next_coordinator_action_id %d must be greater than imported action_id %d", gs.NextCoordinatorActionId, actionID)
+			}
+		}
 	}
 
 	return nil

@@ -1,6 +1,8 @@
 syntax = "proto3";
 package svote.v1;
 
+import "google/protobuf/any.proto";
+
 option go_package = "github.com/valargroup/vote-sdk/x/vote/types";
 
 // SessionStatus represents the lifecycle state of a voting session.
@@ -74,10 +76,30 @@ message VoteRound {
   string discussion_url = 29; // Overall forum discussion link for the vote round
 }
 
-// VoteManagerSet stores the vote-manager addresses. Any-of-N: any member may authorize
-// vote-manager-gated operations. See README for the full rationale.
+// CoordinatorActionStatus is the lifecycle of a proposed coordinator action.
+enum CoordinatorActionStatus {
+  COORDINATOR_ACTION_STATUS_UNSPECIFIED = 0;
+  COORDINATOR_ACTION_STATUS_PENDING     = 1;
+  COORDINATOR_ACTION_STATUS_EXECUTED    = 2;
+  COORDINATOR_ACTION_STATUS_EXPIRED     = 3;
+}
+
+// VoteManagerSet stores the vote coordinator policy.
 message VoteManagerSet {
   repeated string addresses = 1;
+  uint32 threshold = 2; // Defaults to 1 when omitted; must be <= len(addresses)
+}
+
+// CoordinatorAction stores one pending or executed threshold-gated action.
+message CoordinatorAction {
+  uint64 action_id = 1;
+  google.protobuf.Any payload = 2;
+  string proposer = 3;
+  repeated string approvals = 4;
+  CoordinatorActionStatus status = 5;
+  uint64 created_at = 6;
+  uint64 expires_at = 7;
+  uint64 executed_at = 8;
 }
 
 // CommitmentTreeState holds the current state of the append-only commitment tree.
@@ -102,6 +124,9 @@ message GenesisState {
   repeated GenesisPartialDecryption partial_decryptions      = 13;
   repeated Endorser                endorsers                 = 14;
   repeated EndorsedRound           endorsed_rounds           = 15;
+  uint32                           vote_manager_threshold    = 16;
+  repeated CoordinatorAction       coordinator_actions       = 17;
+  uint64                           next_coordinator_action_id = 18;
 }
 
 // Endorser records a stable identifier's currently authorized bech32 address.
