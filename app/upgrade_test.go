@@ -121,3 +121,37 @@ func TestScheduledUpgradeWithHandlerAppliesAtDueHeight(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, dueHeight, doneHeight)
 }
+
+func TestPreprodUpgradeTestHandlerAppliesAtDueHeight(t *testing.T) {
+	ta := testutil.SetupTestAppWithAppOptions(t, sims.AppOptionsMap{
+		flags.FlagHome: t.TempDir(),
+	})
+	voteManager := ta.ValidatorAccAddr()
+	ta.SeedVoteManagers(voteManager)
+
+	dueHeight := ta.Height + 2
+	txBytes := ta.MustBuildSignedCeremonyTx(&votetypes.MsgScheduleUpgrade{
+		Creator: voteManager,
+		Name:    "preprod-upgrade-test-v0.5.70",
+		Height:  dueHeight,
+		Info:    `{"tag":"v0.5.70","notes":"pre-prod no-op upgrade test"}`,
+	})
+	result := ta.DeliverVoteTx(txBytes)
+	require.Equal(t, uint32(0), result.Code, result.Log)
+
+	ta.Height++
+	ta.Time = ta.Time.Add(5 * time.Second)
+	_, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height:          ta.Height,
+		Time:            ta.Time,
+		ProposerAddress: ta.ProposerAddress,
+	})
+	require.NoError(t, err)
+	_, err = ta.Commit()
+	require.NoError(t, err)
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	doneHeight, err := ta.SvoteApp.UpgradeKeeper.GetDoneHeight(ctx, "preprod-upgrade-test-v0.5.70")
+	require.NoError(t, err)
+	require.Equal(t, dueHeight, doneHeight)
+}
