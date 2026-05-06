@@ -34,9 +34,9 @@ ORIGINAL_PATH="${PATH}"
 PATH_REFRESH_COMMAND=""
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
 SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-https://snapshots.valargroup.org}"
-# Canonical voting-config (same payload wallets fetch). Override for staging
-# mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
-VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://valargroup.github.io/token-holder-voting-config/voting-config.json}"
+# Canonical dynamic voting-config (same payload wallets fetch). Override for
+# staging mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
+VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://voting.valargroup.org/dynamic-voting-config.json}"
 # Admin API base — used once for POST /api/register-validator during setup.
 # Override via SVOTE_ADMIN_URL when joining a non-default deployment.
 DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-https://vote-chain-primary.valargroup.org}"
@@ -684,10 +684,10 @@ fi
 confirm_existing_install_reset
 
 # ─── Discover network via voting-config (CDN) ───────────────────────────────
-# The voting-config JSON is the same one wallets fetch from
-# valargroup.github.io/token-holder-voting-config (ZIP 1244 §Vote Configuration
-# Format). We use vote_servers[0] as the seed peer for P2P; SVOTE_ADMIN_URL is
-# a separate base for one-time join registration.
+# The dynamic voting-config JSON is the same one wallets fetch from
+# voting.valargroup.org (ZIP 1244 §Vote Configuration Format). We use
+# vote_servers[0] as the seed peer for P2P; SVOTE_ADMIN_URL is a separate base
+# for one-time join registration.
 
 echo ""
 echo "=== Discovering network ==="
