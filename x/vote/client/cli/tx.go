@@ -37,7 +37,7 @@ func GetTxCmd() *cobra.Command {
 		CmdRegisterPallasKey(),
 		CmdRotatePallasKey(),
 		CmdCreateValidatorWithPallasKey(),
-		// Vote-manager commands — signed by any current vote manager (any-of-N).
+		// Coordinator commands — proposal/approval flow for gated actions.
 		CmdUpdateVoteManagers(),
 		CmdApproveCoordinatorAction(),
 		CmdScheduleUpgrade(),
@@ -94,15 +94,14 @@ func CmdApproveCoordinatorAction() *cobra.Command {
 	return cmd
 }
 
-// CmdScheduleUpgrade broadcasts MsgScheduleUpgrade.
-// Callable by any current vote manager.
+// CmdScheduleUpgrade proposes a MsgScheduleUpgrade coordinator action.
 func CmdScheduleUpgrade() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "schedule-upgrade [name] [height] --info <info> [--replace-existing]",
 		Short: "Schedule a software upgrade halt height",
-		Long: `Broadcast a MsgScheduleUpgrade transaction.
+		Long: `Propose a MsgScheduleUpgrade coordinator action.
 
-The --from signer must be a current vote manager. The name must match the
+The --from signer must be a current coordinator. The name must match the
 upgrade handler registered in the future binary. If another plan is already
 scheduled, pass --replace-existing to overwrite it.`,
 		Args: cobra.ExactArgs(2),
@@ -143,15 +142,14 @@ scheduled, pass --replace-existing to overwrite it.`,
 	return cmd
 }
 
-// CmdCancelUpgrade broadcasts MsgCancelUpgrade.
-// Callable by any current vote manager.
+// CmdCancelUpgrade proposes a MsgCancelUpgrade coordinator action.
 func CmdCancelUpgrade() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cancel-upgrade",
 		Short: "Cancel the scheduled software upgrade",
-		Long: `Broadcast a MsgCancelUpgrade transaction.
+		Long: `Propose a MsgCancelUpgrade coordinator action.
 
-The --from signer must be a current vote manager. Cancelling with no scheduled
+The --from signer must be a current coordinator. Cancelling with no scheduled
 upgrade is accepted as a no-op by x/upgrade.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -315,22 +313,22 @@ the Pallas key.`,
 	return cmd
 }
 
-// CmdUpdateVoteManagers broadcasts MsgUpdateVoteManagers.
-// Atomically replaces the vote-manager set with the given addresses. Callable by any
-// current vote manager (any-of-N).
+// CmdUpdateVoteManagers proposes a MsgUpdateVoteManagers coordinator action.
+// The action atomically replaces the coordinator set and threshold after
+// enough current coordinators approve it.
 func CmdUpdateVoteManagers() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update-vote-managers --vote-manager <addr> [--vote-manager <addr> ...]",
 		Short: "Atomically replace the vote-manager set",
-		Long: `Broadcast an MsgUpdateVoteManagers transaction.
+		Long: `Propose a MsgUpdateVoteManagers coordinator action.
 
 Flags:
   --vote-manager  Repeatable. Bech32 account address (sv1...) of a vote manager
            in the new set. Pass the flag once per vote manager. The full
            list replaces the existing set atomically.
 
-The --from signer must be a current vote manager. Balances are not moved — each vote manager
-holds their own funds.`,
+The --from signer must be a current coordinator. Balances are not moved — each
+coordinator holds their own funds.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientTxContext(cmd)
@@ -366,12 +364,12 @@ holds their own funds.`,
 	return cmd
 }
 
-// CmdSetEndorser broadcasts MsgSetEndorser. Callable by any current vote manager.
+// CmdSetEndorser proposes a MsgSetEndorser coordinator action.
 func CmdSetEndorser() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set-endorser [endorser-id] [address]",
 		Short: "Create, rotate, or clear an endorser mapping",
-		Long: `Broadcast an MsgSetEndorser transaction.
+		Long: `Propose a MsgSetEndorser coordinator action.
 
 Arguments:
   endorser-id  Stable identifier, e.g. zodl
@@ -516,14 +514,14 @@ Example:
 	return cmd
 }
 
-// CmdCreateVotingSession broadcasts MsgCreateVotingSession.
-// Callable by any current vote manager. Accepts a JSON file because the message
-// carries a structured proposal list and large binary blobs.
+// CmdCreateVotingSession proposes a MsgCreateVotingSession coordinator action.
+// Accepts a JSON file because the message carries a structured proposal list
+// and large binary blobs.
 func CmdCreateVotingSession() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create-voting-session [msg-json-file]",
-		Short: "Create a new voting session (vote-manager only)",
-		Long: `Broadcast an MsgCreateVotingSession from a JSON description file.
+		Short: "Create a new voting session through coordinator approval",
+		Long: `Propose a MsgCreateVotingSession coordinator action from a JSON description file.
 
 All byte fields are hex-encoded in the JSON.  Required fields:
 

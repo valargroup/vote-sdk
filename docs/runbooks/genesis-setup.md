@@ -39,7 +39,7 @@ The single workflow [`sdk-chain-reset.yml`](../../.github/workflows/sdk-chain-re
 1. **`quiesce-snapshot`** — SSHes to `SNAPSHOT_HOST`, stops and disables `snapshot.timer`, stops any running `snapshot.service`, and stops old snapshot-node `svoted` before primary chain state changes.
 2. **`reset-primary`** — SSHes to `PRIMARY_HOST`, runs `install-release.sh --tag <tag>`, stops `svoted`, wipes `/opt/shielded-vote/.svoted/`, then runs [`scripts/init.sh`](../../scripts/init.sh) with `VAL_PRIVKEY=PRIMARY_VAL_PRIVKEY`, `VM_PRIVKEYS`, and `SVOTE_ADMIN_DISABLE=false`. Drops in `svoted.service.d/primary.conf`, starts `svoted`, polls `localhost:1317/shielded-vote/v1/rounds`.
 3. **`upload-genesis`** — fetches `genesis.json` from `localhost:1317/shielded-vote/v1/genesis` on the primary, uploads it to `s3://vote/genesis.json` (DO Spaces, `https://vote.fra1.digitaloceanspaces.com/genesis.json`), and clears `s3://vote/snapshots/svote-1/` so joiners cannot restore a pre-reset snapshot. This is the canonical source joining nodes pull from.
-4. **`fund-secondary`** — derives the secondary's address from `SECONDARY_VAL_PRIVKEY` (in a temp keyring) and `MsgAuthorizedSend`s 100M usvote from `vote-manager-1`.
+4. **`fund-secondary`** — derives the secondary's address from `SECONDARY_VAL_PRIVKEY` (in a temp keyring) and funds it with a coordinator-approved `MsgAuthorizedSend` from `vote-manager-1`.
 5. **`reset-snapshot`** — SSHes to `SNAPSHOT_HOST`, installs the same tag, runs [`scripts/reset-snapshot.sh`](../../scripts/reset-snapshot.sh) to bring up a pruned non-validator node, then enables `snapshot.timer`.
 6. **`reset-secondary`** — SSHes to `SECONDARY_HOST`, installs the same tag, runs [`scripts/reset-join.sh`](../../scripts/reset-join.sh) (downloads genesis from Spaces, discovers the primary's P2P NodeID via REST, syncs, calls `create-val-tx` to register).
 7. **`reset-archive`** — SSHes to `EXPLORER_HOST`, runs [`scripts/reset-archive.sh`](../../scripts/reset-archive.sh) to bring up a non-validator archive node (pruning=nothing) for the explorer.
@@ -50,7 +50,7 @@ Then `verify` polls all REST endpoints. On any failure the `notify-slack` job fi
 
 `PRIMARY_HOST`, `SECONDARY_HOST`, `EXPLORER_HOST`, `SNAPSHOT_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SENTRY_DSN`, `SLACK_WEBHOOK_URL`. Full descriptions in [deploy-setup.md § GitHub repository secrets](../deploy-setup.md#github-repository-secrets).
 
-`VM_PRIVKEYS` is a comma-separated list of 64-char hex secp256k1 private keys; each derived address becomes a member of the any-of-N vote-manager set at genesis and the 1B usvote stake pool is split evenly across them. Generate one with `openssl rand -hex 32`.
+`VM_PRIVKEYS` is a comma-separated list of 64-char hex secp256k1 private keys; each derived address becomes a coordinator at genesis and the 1B usvote stake pool is split evenly across them. The coordinator threshold defaults to 1 unless configured otherwise. Generate one with `openssl rand -hex 32`.
 
 `SNAPSHOT_HOST` is required for every reset. A chain reset invalidates old
 snapshot node state, so `sdk-chain-reset.yml` always reinitializes
@@ -72,7 +72,7 @@ To wipe and reset the chain from genesis later, re-run the same workflow. The fi
 
 ### What `scripts/init.sh` does
 
-The same script runs in CI and locally. It wipes `$SVOTED_HOME` (preserving `nullifiers/`), runs `svoted init`, imports `validator` from `VAL_PRIVKEY` (or generates it if unset), imports each `vote-manager-N` from `VM_PRIVKEYS`, allocates 10M usvote to the validator and splits 1B usvote evenly across the vote managers, runs `gentx` for the validator's self-delegation, patches `app_state.vote.vote_manager_addresses`, sets the downtime slashing window to 72,800 blocks with 80% minimum signing and a 300s jail duration, and zeros out the slashing fractions in genesis. It then patches `app.toml` to enable the REST API on `:1317` with CORS, the gRPC ports off the Cosmos defaults (Cursor Remote-SSH conflicts with `9090`/`9091`), and writes `[helper]` / `[ui]` sections. It also generates the host's Pallas keypair (`pallas.sk`/`pallas.pk`); the per-round EA key is generated automatically by the auto-deal path during ceremony.
+The same script runs in CI and locally. It wipes `$SVOTED_HOME` (preserving `nullifiers/`), runs `svoted init`, imports `validator` from `VAL_PRIVKEY` (or generates it if unset), imports each `vote-manager-N` from `VM_PRIVKEYS`, allocates 10M usvote to the validator and splits 1B usvote evenly across the vote managers, runs `gentx` for the validator's self-delegation, patches `app_state.vote.vote_manager_addresses` and the coordinator threshold, sets the downtime slashing window to 72,800 blocks with 80% minimum signing and a 300s jail duration, and zeros out the slashing fractions in genesis. It then patches `app.toml` to enable the REST API on `:1317` with CORS, the gRPC ports off the Cosmos defaults (Cursor Remote-SSH conflicts with `9090`/`9091`), and writes `[helper]` / `[ui]` sections. It also generates the host's Pallas keypair (`pallas.sk`/`pallas.pk`); the per-round EA key is generated automatically by the auto-deal path during ceremony.
 
 ## EA key ceremony
 

@@ -108,9 +108,9 @@ class ProtoWriter {
 //   string creator          = 1;
 //   repeated string new_vote_managers = 2;
 // }
-// Atomically replaces the vote-manager set. Any current vote manager may call it; the new
-// set must be non-empty and contain only valid bech32 addresses with no
-// duplicates. Balances are not touched.
+// Atomically replaces the vote-manager set and threshold when executed through
+// coordinator action approval. The new set must be non-empty and contain only
+// valid bech32 addresses with no duplicates. Balances are not touched.
 const MsgUpdateVoteManagersProto = {
   encode(
     message: { creator: string; newVoteManagers: string[]; newThreshold: number },
@@ -789,8 +789,9 @@ export async function approveCoordinatorAction(
 /**
  * Propose a MsgUpdateVoteManagers coordinator action.
  *
- * Atomically replaces the vote-manager set with `newVoteManagers`. The `creator` field is
- * derived from the signer (must be a current vote manager). Balances are not moved.
+ * Atomically replaces the vote-manager set with `newVoteManagers`. The
+ * `creator` field is derived from the signer and the payload executes after
+ * coordinator threshold approval. Balances are not moved.
  */
 export async function updateVoteManagers(
   apiBase: string,
@@ -976,9 +977,8 @@ export async function createVotingSession(
 /**
  * Propose an svote.v1.MsgAuthorizedSend coordinator action.
  *
- * Used to transfer stake tokens from a vote manager to a validator address.
- * Any vote manager can send to anyone; bonded validators
- * can send to other vote managers or bonded validators; all other senders rejected.
+ * Used to transfer stake tokens from a coordinator account to a validator
+ * address. The source account must be one of the approving coordinators.
  *
  * @param amountUsvote - amount in micro-tokens (usvote), e.g. "1000000" for 1 SVOTE
  */

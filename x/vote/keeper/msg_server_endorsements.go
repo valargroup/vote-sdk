@@ -10,7 +10,9 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// SetEndorser creates, rotates, or clears an endorser mapping. Vote managers only.
+// SetEndorser creates, rotates, or clears an endorser mapping. Direct external
+// submission is blocked by the app-level whitelist; operators use coordinator
+// actions, which call executeSetEndorser after threshold approval.
 func (ms msgServer) SetEndorser(goCtx context.Context, msg *types.MsgSetEndorser) (*types.MsgSetEndorserResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err

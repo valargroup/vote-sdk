@@ -768,15 +768,16 @@ func (s *MsgServerTestSuite) TestCastVote() {
 }
 
 // ---------------------------------------------------------------------------
-// UpdateVoteManagers (any-of-N atomic replace; no balance transfer)
+// UpdateVoteManagers policy validation and atomic replace; no balance transfer.
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestUpdateVoteManagers_AnyVoteManagerCanUpdate() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_CurrentCoordinatorCanUpdate() {
 	vmA := testAccAddr(20)
 	vmB := testAccAddr(21)
 	replacement := testAccAddr(22)
 
-	// Run once per member of the initial {A, B} set to prove any-of-N.
+	// Run once per member of the initial {A, B} set to prove each current
+	// coordinator can execute a policy replacement.
 	for _, caller := range []string{vmA, vmB} {
 		s.Run("caller="+caller, func() {
 			s.SetupTest()

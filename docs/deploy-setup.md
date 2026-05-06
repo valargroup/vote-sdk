@@ -39,7 +39,7 @@ flowchart LR
 | `SNAPSHOT_HOST` | reset | Hostname or IP of the dedicated snapshot node. Required for reset quiescing before chain state is wiped. |
 | `DEPLOY_USER` | deploy, reset | SSH username on the production hosts. |
 | `SSH_PRIVATE_KEY` | deploy, reset | SSH private key for authentication. |
-| `VM_PRIVKEYS` | reset | Comma-separated 64-char hex secp256k1 private keys for the vote-manager set (any-of-N). Each derived address becomes a vote manager at genesis; the 1B usvote stake pool is split evenly across the set. For a single-vote-manager chain, provide exactly one key. |
+| `VM_PRIVKEYS` | reset | Comma-separated 64-char hex secp256k1 private keys for the coordinator set. Each derived address becomes a coordinator at genesis; the 1B usvote stake pool is split evenly across the set. The coordinator threshold defaults to 1 unless configured otherwise. For a single-coordinator chain, provide exactly one key. |
 | `PRIMARY_VAL_PRIVKEY` | reset | 64-char hex private key for the primary validator. |
 | `SECONDARY_VAL_PRIVKEY` | reset | 64-char hex private key for the secondary validator. |
 | `DOMAIN` | deploy, reset | Base domain (e.g. `valargroup.org`). Deploy uses this for explorer and snapshot hostnames; reset also uses it for public verification URLs. |

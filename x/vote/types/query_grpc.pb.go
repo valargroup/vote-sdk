@@ -61,8 +61,7 @@ type QueryClient interface {
 	ActiveRound(ctx context.Context, in *QueryActiveRoundRequest, opts ...grpc.CallOption) (*QueryActiveRoundResponse, error)
 	// CeremonyState returns the current EA key ceremony lifecycle state.
 	CeremonyState(ctx context.Context, in *QueryCeremonyStateRequest, opts ...grpc.CallOption) (*QueryCeremonyStateResponse, error)
-	// VoteManagers returns the current vote-manager set (any member can
-	// authorize vote-manager-gated operations — any-of-N semantics).
+	// VoteManagers returns the current coordinator policy.
 	VoteManagers(ctx context.Context, in *QueryVoteManagersRequest, opts ...grpc.CallOption) (*QueryVoteManagersResponse, error)
 	// VoteSummary returns a denormalized view of a vote round with proposals,
 	// ballot counts, and (if finalized) decrypted totals. Single query for frontend display.
@@ -273,8 +272,7 @@ type QueryServer interface {
 	ActiveRound(context.Context, *QueryActiveRoundRequest) (*QueryActiveRoundResponse, error)
 	// CeremonyState returns the current EA key ceremony lifecycle state.
 	CeremonyState(context.Context, *QueryCeremonyStateRequest) (*QueryCeremonyStateResponse, error)
-	// VoteManagers returns the current vote-manager set (any member can
-	// authorize vote-manager-gated operations — any-of-N semantics).
+	// VoteManagers returns the current coordinator policy.
 	VoteManagers(context.Context, *QueryVoteManagersRequest) (*QueryVoteManagersResponse, error)
 	// VoteSummary returns a denormalized view of a vote round with proposals,
 	// ballot counts, and (if finalized) decrypted totals. Single query for frontend display.

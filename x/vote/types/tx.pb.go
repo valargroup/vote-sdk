@@ -1447,14 +1447,14 @@ func (*MsgSubmitPartialDecryptionResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{23}
 }
 
-// MsgUpdateVoteManagers atomically replaces the vote-manager set with new_vote_managers.
-// Callable by any current vote manager. Does NOT move balances — each vote manager holds
-// their own funds (the bank-module per-account balance). Validation:
+// MsgUpdateVoteManagers atomically replaces the coordinator set and threshold.
+// It is executed through coordinator action approval. It does NOT move balances
+// — each coordinator holds their own funds. Validation:
 // new_vote_managers must be non-empty, each entry a valid bech32 address, and no
 // duplicates (addresses normalized before compare).
 type MsgUpdateVoteManagers struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	Creator         string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                          // Sender address (must be in the current vote manager set)
+	Creator         string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                          // Sender address (must be in the current coordinator set)
 	NewVoteManagers []string               `protobuf:"bytes,2,rep,name=new_vote_managers,json=newVoteManagers,proto3" json:"new_vote_managers,omitempty"` // Full replacement set
 	NewThreshold    uint32                 `protobuf:"varint,3,opt,name=new_threshold,json=newThreshold,proto3" json:"new_threshold,omitempty"`           // Defaults to 1 when omitted; must be <= len(new_vote_managers)
 	unknownFields   protoimpl.UnknownFields
@@ -1554,8 +1554,8 @@ func (*MsgUpdateVoteManagersResponse) Descriptor() ([]byte, []int) {
 // stake to create a validator, bypassing the controlled validator set.
 //
 // Authorization rules:
-//   - Any vote manager can send to anyone (distributes stake to new validators).
-//   - Bonded validators can send to any vote manager or to other bonded validators.
+//   - Coordinator-funded sends must be approved as coordinator actions.
+//   - Bonded validators can send to any coordinator or to other bonded validators.
 //   - All other senders are rejected.
 type MsgAuthorizedSend struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1661,13 +1661,13 @@ func (*MsgAuthorizedSendResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{27}
 }
 
-// MsgScheduleUpgrade schedules a software upgrade through x/upgrade.
-// Callable by any current vote manager. The message intentionally keeps the
-// wire shape primitive instead of embedding cosmos.upgrade.v1beta1.Plan so the
-// vote module owns the public upgrade-control surface.
+// MsgScheduleUpgrade schedules a software upgrade through x/upgrade. It is
+// executed through coordinator action approval. The message intentionally keeps
+// the wire shape primitive instead of embedding cosmos.upgrade.v1beta1.Plan so
+// the vote module owns the public upgrade-control surface.
 type MsgScheduleUpgrade struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	Creator         string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                         // Sender address (must be in the current vote manager set)
+	Creator         string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                         // Sender address (must be in the current coordinator set)
 	Name            string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                               // Upgrade plan name; must match the future binary's registered handler
 	Height          int64                  `protobuf:"varint,3,opt,name=height,proto3" json:"height,omitempty"`                                          // Upgrade height; x/upgrade rejects past heights
 	Info            string                 `protobuf:"bytes,4,opt,name=info,proto3" json:"info,omitempty"`                                               // Operator-readable upgrade metadata
@@ -1777,11 +1777,11 @@ func (*MsgScheduleUpgradeResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{29}
 }
 
-// MsgCancelUpgrade clears the currently scheduled x/upgrade plan.
-// Callable by any current vote manager.
+// MsgCancelUpgrade clears the currently scheduled x/upgrade plan. It is
+// executed through coordinator action approval.
 type MsgCancelUpgrade struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"` // Sender address (must be in the current vote manager set)
+	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"` // Sender address (must be in the current coordinator set)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1860,11 +1860,11 @@ func (*MsgCancelUpgradeResponse) Descriptor() ([]byte, []int) {
 }
 
 // MsgSetEndorser creates, rotates, or clears an endorser_id -> bech32 address
-// mapping. Only vote managers may execute this message. An empty address clears
-// the mapping; existing endorsements remain queryable.
+// mapping. It is executed through coordinator action approval. An empty address
+// clears the mapping; existing endorsements remain queryable.
 type MsgSetEndorser struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                         // Sender address (must be a current vote manager)
+	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                         // Sender address (must be a current coordinator)
 	EndorserId    string                 `protobuf:"bytes,2,opt,name=endorser_id,json=endorserId,proto3" json:"endorser_id,omitempty"` // Stable identifier, e.g. "zodl"
 	Address       string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`                         // Canonicalized on-chain; empty clears the mapping
 	unknownFields protoimpl.UnknownFields

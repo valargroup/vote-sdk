@@ -78,7 +78,7 @@ func init() {
 // either a cosmos.msg.v1.signer protobuf option or a custom GetSigners
 // function.
 //
-// Vote-round messages (0x01–0x05) bypass the Cosmos SDK Tx envelope and use
+// Vote-round messages that bypass the Cosmos SDK Tx envelope use
 // ZKP/RedPallas authentication, so they use no-op signers.
 //
 // Ceremony messages (except MsgAckExecutiveAuthorityKey) are standard Cosmos
@@ -92,10 +92,9 @@ func noopSignerFn(proto.Message) ([][]byte, error) { return nil, nil }
 
 // ceremonyCreatorSignerFn extracts the signer from a message's "creator"
 // field (a valoper or account bech32 address) and returns the corresponding
-// account address bytes. Used by ceremony messages with a creator field
-// (RegisterPallasKey, RotatePallasKey, CreateVotingSession) and by the
-// management message MsgUpdateVoteManagers, all of which go through standard
-// Cosmos SDK signature verification.
+// account address bytes. Used by standard signed vote-module messages with a
+// creator field, including coordinator action proposal/approval, validator
+// setup, and mapped endorser messages.
 func ceremonyCreatorSignerFn(msg proto.Message) ([][]byte, error) {
 	fd := msg.ProtoReflect().Descriptor().Fields().ByName("creator")
 	if fd == nil {
@@ -419,7 +418,7 @@ func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				{
 					RpcMethod: "VoteManagers",
 					Use:       "vote-managers",
-					Short:     "Query the current vote-manager set (any-of-N — any member may act)",
+					Short:     "Query the current coordinator policy",
 				},
 				{
 					RpcMethod: "ListRounds",

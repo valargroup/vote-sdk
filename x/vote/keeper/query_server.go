@@ -217,8 +217,7 @@ func (qs queryServer) CeremonyState(goCtx context.Context, req *types.QueryCerem
 	return &types.QueryCeremonyStateResponse{Ceremony: state}, nil
 }
 
-// VoteManagers returns the current vote-manager set. Any member can
-// authorize vote-manager-gated operations (any-of-N).
+// VoteManagers returns the current coordinator policy.
 func (qs queryServer) VoteManagers(goCtx context.Context, req *types.QueryVoteManagersRequest) (*types.QueryVoteManagersResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
