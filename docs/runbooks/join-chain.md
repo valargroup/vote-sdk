@@ -318,10 +318,10 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    export PATH="$INSTALL_DIR:$PATH"
    ```
 
-2. Discover the network and capture the seed peer. The voting-config payload lives in [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) on GitHub Pages — the same source wallets use. Override `VOTING_CONFIG_URL` for staging mirrors.
+2. Discover the network and capture the seed peer. The dynamic voting-config payload lives in [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json) and is published at `voting.valargroup.org` — the same source wallets use. Override `VOTING_CONFIG_URL` for staging mirrors.
 
    ```bash
-   VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://valargroup.github.io/token-holder-voting-config/voting-config.json}"
+   VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://voting.valargroup.org/dynamic-voting-config.json}"
    VOTING_CONFIG=$(curl -fsSL "$VOTING_CONFIG_URL")
    SEED_URL=$(echo "$VOTING_CONFIG" | jq -r '.vote_servers[0].url')
 
@@ -423,7 +423,7 @@ Interactive runs without an explicit TLS mode prompt until the operator chooses 
 | `SVOTE_ALLOW_NO_PUBLIC_URL` | `0` | When `1`, explicit-domain Caddy failures continue with an empty `VALIDATOR_URL` so the operator can still enter the funding queue. |
 | `SVOTE_SKIP_SERVICE` | `0` | When `1`, skip service install and the sync wait. The node is initialized but not started. Useful for Docker smoke tests and CI. |
 | `SVOTE_FORCE_RESET` | `0` | When `1`, allow `join.sh` to reset an existing install non-interactively. This stops the existing validator service, deletes `SVOTE_HOME`, generates a new validator identity, and rewrites/restarts the service. Use only when the old validator identity and any funded address are disposable or backed up. |
-| `VOTING_CONFIG_URL` | `https://valargroup.github.io/token-holder-voting-config/voting-config.json` | Canonical voting-config (same payload wallets fetch). Override for staging mirrors or fork testing. |
+| `VOTING_CONFIG_URL` | `https://voting.valargroup.org/dynamic-voting-config.json` | Canonical dynamic voting-config (same payload wallets fetch). Override for staging mirrors or fork testing. |
 | `SVOTE_ADMIN_URL` | `https://vote-chain-primary.valargroup.org` | Admin server base URL. Used for `POST /api/register-validator` (join queue). Voting-config discovery uses `VOTING_CONFIG_URL` instead. |
 | `SVOTE_WRAPPER_SCRIPT` | bundled path → `${DO_BASE}/svoted-wrapper.sh` fallback | Override path to `svoted-wrapper.sh`. Useful when `join.sh` is piped via curl and the repo's `scripts/svoted-wrapper.sh` isn't reachable. |
 
@@ -453,7 +453,7 @@ The routes below are the ones ops hit during install, bonding, and debugging. Th
 | `GET /api/pending-validators` | Admin UI / join scripts | Join-queue view (primary only). |
 | `GET /api/voting-config` | Tooling | Cached copy of the canonical voting-config, refreshed in-process every minute. |
 
-The `/api/voting-config` cache is a fallback — wallets, `join.sh`, and the fleet health watchdog ([`vote-infrastructure/watchdog/`](https://github.com/valargroup/vote-infrastructure/tree/main/watchdog)) read the [voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json) directly from GitHub Pages so it stays available if the primary `svoted` wedges.
+The `/api/voting-config` cache is a fallback — wallets, `join.sh`, and the fleet health watchdog ([`vote-infrastructure/watchdog/`](https://github.com/valargroup/vote-infrastructure/tree/main/watchdog)) read the [dynamic voting-config](https://voting.valargroup.org/dynamic-voting-config.json) directly from the CDN so it stays available if the primary `svoted` wedges.
 
 ## Troubleshooting
 
@@ -475,7 +475,7 @@ The three TLS modes and the Caddy layout are described in [TLS / reverse proxy](
 |-----------|-------------|---------|
 | Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `svoted-wrapper.sh` fallback |
 | Outbound 443 | `snapshots.valargroup.org` | Latest Zvote snapshot metadata and archive URL used to bootstrap chain data before peer catch-up |
-| Outbound 443 | `valargroup.github.io` | [`token-holder-voting-config/voting-config.json`](https://github.com/valargroup/token-holder-voting-config) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
+| Outbound 443 | `voting.valargroup.org` | [`dynamic-voting-config.json`](https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
 | Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue). Override via `SVOTE_ADMIN_URL`. |
 | Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` (P2P seed) |
 | Outbound 443 | `ifconfig.me`, `api.ipify.org` | Public IPv4 auto-detection (only when choosing auto sslip.io + Caddy) |
@@ -491,7 +491,7 @@ If the validator will answer PIR queries itself, also open inbound 443 for the `
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| `catching_up` stays `true` for >10 min, log shows "Dialing" / no peers connecting | Inbound 26656 blocked, or seed peer is unreachable | Verify firewall lets in 26656 (`ss -ltn | grep 26656`, then test from off-host); check `persistent_peers` in `~/.svoted/config/config.toml`; confirm the seed listed under `vote_servers[0].url` in [the voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json) is up by hitting its `/cosmos/base/tendermint/v1beta1/node_info`. |
+| `catching_up` stays `true` for >10 min, log shows "Dialing" / no peers connecting | Inbound 26656 blocked, or seed peer is unreachable | Verify firewall lets in 26656 (`ss -ltn | grep 26656`, then test from off-host); check `persistent_peers` in `~/.svoted/config/config.toml`; confirm the seed listed under `vote_servers[0].url` in [the dynamic voting-config](https://voting.valargroup.org/dynamic-voting-config.json) is up by hitting its `/cosmos/base/tendermint/v1beta1/node_info`. |
 | `svoted` exits with "error initializing application: genesis doc mismatch" | Local `genesis.json` doesn't match the live chain | Re-run `join.sh` and confirm the existing-install reset prompt if this is a disposable joining validator. It stops the service, deletes `~/.svoted`, and pulls canonical genesis fresh. For non-interactive reset runs, set `SVOTE_FORCE_RESET=1`. To repair only genesis manually: `curl -fsSL -o ~/.svoted/config/genesis.json https://vote.fra1.digitaloceanspaces.com/genesis.json && svoted genesis validate-genesis --home ~/.svoted`. |
 | Service logs repeatedly show `waiting for validator funding` | Not yet funded | Wait. The vote-manager funds from the admin UI join queue. Ping the operator running the primary and confirm your address is listed. |
 | Service logs show an old moniker or keep polling `balance=0` after a re-run | A stale wrapper process survived a previous install and is using the old service environment | Current `join.sh` restarts the rewritten service. On an affected host, run `systemctl show svoted -p Environment --no-pager`, compare `MONIKER`/`VALIDATOR_ADDR` with `journalctl -u svoted -o cat`, then `sudo systemctl restart svoted`. |

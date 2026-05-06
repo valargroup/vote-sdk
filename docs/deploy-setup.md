@@ -177,7 +177,7 @@ make start-admin   # builds UI then starts svoted with --serve-ui
 ## Admin server configuration
 
 The admin server re-serves a cached copy of the
-[voting-config JSON](https://valargroup.github.io/token-holder-voting-config/voting-config.json)
+[dynamic voting-config JSON](https://voting.valargroup.org/dynamic-voting-config.json)
 at `GET /api/voting-config` for tooling that wants the same payload from a
 chain host (refreshed in-process every minute). It also stores **pending
 validator join requests** in SQLite (`POST /api/register-validator`,
@@ -185,7 +185,7 @@ validator join requests** in SQLite (`POST /api/register-validator`,
 
 The CDN — not the admin — is the canonical discovery path. iOS wallets,
 `join.sh`, and the helper module all fetch
-`voting-config.json` directly from
+`dynamic-voting-config.json` directly from
 [valargroup/token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config)
 (see [the README there](https://github.com/valargroup/token-holder-voting-config#cdn)).
 The admin only needs to be reached for one-time join registration.

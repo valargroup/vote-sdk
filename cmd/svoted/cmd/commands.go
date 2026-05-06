@@ -101,11 +101,11 @@ const adminConfigTemplate = `
 # entries in existing app.toml files are silently ignored.
 disable = true
 
-# Voting-config JSON re-served on GET /api/voting-config as a cached copy
+# Dynamic voting-config JSON re-served on GET /api/voting-config as a cached copy
 # (refreshed in-process every minute). Same canonical CDN URL that wallets,
 # join.sh, and the standalone watchdog all fetch directly — override only
 # for staging mirrors.
-config_url = "https://valargroup.github.io/token-holder-voting-config/voting-config.json"
+config_url = "https://voting.valargroup.org/dynamic-voting-config.json"
 
 # SQLite database path for pending validator join requests (empty = $HOME/.svoted/admin.db).
 # db_path = ""
