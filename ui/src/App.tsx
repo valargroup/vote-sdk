@@ -27,6 +27,7 @@ import {
 } from "./store/rpc";
 import * as chainApi from "./api/chain";
 import * as cosmosTx from "./api/cosmosTx";
+import { describeCoordinatorActionPayload } from "./api/coordinatorActions";
 import { useWallet } from "./hooks/useWallet";
 import type { UseWallet } from "./hooks/useWallet";
 
@@ -1664,6 +1665,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                           const actionID = coordinatorActionID(action);
                           const approvalCount = action.approvals?.length ?? 0;
                           const alreadyApproved = !!wallet.address && (action.approvals ?? []).includes(wallet.address);
+                          const payloadDetails = describeCoordinatorActionPayload(action);
                           return (
                             <div key={actionID} className="border border-border-subtle rounded-lg p-2.5 bg-surface-2 space-y-2">
                               <div className="flex items-start justify-between gap-3">
@@ -1679,8 +1681,9 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                                   <button
                                     type="button"
                                     onClick={() => void handleApproveCoordinatorAction(action)}
-                                    disabled={!actionID || alreadyApproved || approvingActionID === actionID}
+                                    disabled={!actionID || alreadyApproved || approvingActionID === actionID || !payloadDetails.canApprove}
                                     className="px-2 py-1 bg-accent/90 hover:bg-accent text-surface-0 rounded text-[10px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                                    title={payloadDetails.error || "Approve coordinator action"}
                                   >
                                     {approvingActionID === actionID ? "Approving..." : alreadyApproved ? "Approved" : "Approve"}
                                   </button>
@@ -1689,6 +1692,21 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                               <p className="text-[10px] text-text-secondary font-mono break-all">
                                 proposer: {action.proposer || "unknown"}
                               </p>
+                              <div className="rounded-md bg-surface-1 border border-border-subtle p-2 space-y-1">
+                                {payloadDetails.rows.map((row) => (
+                                  <div key={row.label} className="grid gap-1 sm:grid-cols-[96px_minmax(0,1fr)]">
+                                    <span className="text-[10px] text-text-muted">{row.label}</span>
+                                    <span className={`text-[10px] text-text-primary whitespace-pre-wrap break-all ${row.mono ? "font-mono" : ""}`}>
+                                      {row.value}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                              {payloadDetails.error && (
+                                <p className="text-[10px] text-danger bg-danger/10 border border-danger/30 rounded-md p-2">
+                                  {payloadDetails.error}
+                                </p>
+                              )}
                             </div>
                           );
                         })}

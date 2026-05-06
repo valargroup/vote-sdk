@@ -257,6 +257,9 @@ func (qs queryServer) CoordinatorAction(goCtx context.Context, req *types.QueryC
 		}
 		return nil, status.Errorf(codes.Internal, "failed to get coordinator action: %v", err)
 	}
+	if action.Status == types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_PENDING && coordinatorActionExpired(ctx, action) {
+		action.Status = types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_EXPIRED
+	}
 	return &types.QueryCoordinatorActionResponse{Action: action}, nil
 }
 
@@ -270,6 +273,9 @@ func (qs queryServer) PendingCoordinatorActions(goCtx context.Context, req *type
 	kvStore := qs.k.OpenKVStore(ctx)
 	var actions []*types.CoordinatorAction
 	if err := qs.k.IteratePendingCoordinatorActions(kvStore, func(action *types.CoordinatorAction) bool {
+		if coordinatorActionExpired(ctx, action) {
+			return false
+		}
 		actions = append(actions, action)
 		return false
 	}); err != nil {
