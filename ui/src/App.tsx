@@ -15,7 +15,7 @@ import { EndorsersPage } from "./components/EndorsersPage";
 import { UpgradesPage } from "./components/UpgradesPage";
 import { useStore } from "./store/useStore";
 import { SAMPLE_ROUND_TEMPLATES, type SampleRoundTemplateId } from "./store/sampleRounds";
-import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft } from "lucide-react";
+import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft, ClipboardCheck } from "lucide-react";
 import type { Proposal, RoundSettings, RoundStatus, VotingRound } from "./types";
 import { MAX_VOTE_OPTIONS, MIN_VOTE_OPTIONS } from "./constants/vote";
 import {
@@ -60,6 +60,7 @@ type Section =
   | "vote-status"
   | "validators"
   | "validator-join"
+  | "coordinator-actions"
   | "attest-round"
   | "endorsers"
   | "upgrades"
@@ -76,6 +77,7 @@ const SECTION_PATHS: Record<Section, string> = {
   "vote-status": "/vote-status",
   validators: "/validators",
   "validator-join": "/validator-join",
+  "coordinator-actions": "/approvals",
   "attest-round": "/attest-round",
   endorsers: "/endorsements",
   upgrades: "/upgrades",
@@ -86,6 +88,7 @@ const PATH_TO_SECTION: Record<string, Section> = Object.fromEntries(
   Object.entries(SECTION_PATHS).map(([s, p]) => [p, s as Section])
 ) as Record<string, Section>;
 PATH_TO_SECTION["/endorsers"] = "endorsers";
+PATH_TO_SECTION["/coordinator-actions"] = "coordinator-actions";
 
 interface AppRoute {
   section: Section;
@@ -473,6 +476,8 @@ function App() {
         {section === "validators" && <ValidatorsView wallet={wallet} />}
 
         {section === "validator-join" && <PendingOperatorsPage wallet={wallet} />}
+
+        {section === "coordinator-actions" && <CoordinatorActionsPage wallet={wallet} />}
 
         {section === "attest-round" && <AttestRoundEntryPage />}
 
@@ -991,19 +996,582 @@ function sameCoordinatorAddress(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
-function currentCoordinatorApprovalCount(
+function normalizeCoordinatorAddress(addr: string): string {
+  return addr.trim().toLowerCase();
+}
+
+function currentCoordinatorApprovalSet(
   action: chainApi.CoordinatorAction,
   voteManagers: string[],
-): number {
-  const currentManagers = new Set(voteManagers.map((addr) => addr.trim().toLowerCase()));
+): Set<string> {
+  const currentManagers = new Set(voteManagers.map(normalizeCoordinatorAddress));
   const seen = new Set<string>();
   for (const approval of action.approvals ?? []) {
-    const canonical = approval.trim().toLowerCase();
+    const canonical = normalizeCoordinatorAddress(approval);
     if (currentManagers.has(canonical)) {
       seen.add(canonical);
     }
   }
-  return seen.size;
+  return seen;
+}
+
+function staleCoordinatorApprovals(
+  action: chainApi.CoordinatorAction,
+  voteManagers: string[],
+): string[] {
+  const currentManagers = new Set(voteManagers.map(normalizeCoordinatorAddress));
+  const seen = new Set<string>();
+  const stale: string[] = [];
+  for (const approval of action.approvals ?? []) {
+    const canonical = normalizeCoordinatorAddress(approval);
+    if (!canonical || seen.has(canonical)) continue;
+    seen.add(canonical);
+    if (!currentManagers.has(canonical)) {
+      stale.push(approval);
+    }
+  }
+  return stale;
+}
+
+function shortCoordinatorAddress(addr: string): string {
+  if (addr.length <= 24) return addr;
+  return `${addr.slice(0, 12)}...${addr.slice(-8)}`;
+}
+
+function coordinatorSignatureStatus(approvalCount: number, threshold: number): string {
+  const remaining = Math.max(threshold - approvalCount, 0);
+  if (remaining === 0) return "Ready to execute";
+  return `Needs ${remaining} more signature${remaining === 1 ? "" : "s"}`;
+}
+
+function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [latestBlock, setLatestBlock] = useState<chainApi.LatestBlockInfo | null>(null);
+  const [voteManagers, setVoteManagers] = useState<string[]>([]);
+  const [voteManagerThreshold, setVoteManagerThreshold] = useState(1);
+  const [pendingCoordinatorActions, setPendingCoordinatorActions] = useState<chainApi.CoordinatorAction[]>([]);
+  const [approvingActionID, setApprovingActionID] = useState<number | null>(null);
+  const [approvalTxHash, setApprovalTxHash] = useState("");
+  const [approvalError, setApprovalError] = useState("");
+  const [devKey, setDevKey] = useState("");
+  const [devKeyVisible, setDevKeyVisible] = useState(false);
+  const [vmNewAddrs, setVmNewAddrs] = useState("");
+  const [vmNewThreshold, setVmNewThreshold] = useState("1");
+  const [vmDraftInitialized, setVmDraftInitialized] = useState(false);
+  const [vmTxStatus, setVmTxStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
+  const [vmTxError, setVmTxError] = useState("");
+  const [vmTxHash, setVmTxHash] = useState("");
+
+  const refreshCoordinatorState = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const [block, vmResp, pendingResp] = await Promise.all([
+        chainApi.getLatestBlock(),
+        chainApi.getVoteManagers(),
+        chainApi.getPendingCoordinatorActions(),
+      ]);
+      setLatestBlock(block);
+      setVoteManagers(vmResp.vote_manager_addresses ?? []);
+      setVoteManagerThreshold(vmResp.threshold ?? 1);
+      setPendingCoordinatorActions(pendingResp.actions ?? []);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshCoordinatorState();
+  }, [refreshCoordinatorState]);
+
+  useEffect(() => {
+    if (vmDraftInitialized || voteManagers.length === 0) return;
+    setVmNewAddrs(voteManagers.join("\n"));
+    setVmNewThreshold(String(voteManagerThreshold || 1));
+    setVmDraftInitialized(true);
+  }, [vmDraftInitialized, voteManagers, voteManagerThreshold]);
+
+  const handleConnectDev = async () => {
+    await wallet.connectDev(devKey);
+    setDevKey("");
+  };
+
+  const handleApproveCoordinatorAction = async (action: chainApi.CoordinatorAction) => {
+    if (!wallet.signer) {
+      setApprovalError("Connect a coordinator wallet before approving.");
+      return;
+    }
+    const actionID = coordinatorActionID(action);
+    if (!actionID) {
+      setApprovalError("Coordinator action is missing an action ID.");
+      return;
+    }
+
+    setApprovingActionID(actionID);
+    setApprovalError("");
+    setApprovalTxHash("");
+    try {
+      const result = await cosmosTx.approveCoordinatorAction(chainApi.getApiBase(), wallet.signer, actionID);
+      if (result.code !== 0) {
+        setApprovalError(result.log || `Transaction failed with code ${result.code}`);
+        return;
+      }
+      setApprovalTxHash(result.tx_hash);
+      await refreshCoordinatorState();
+    } catch (err) {
+      setApprovalError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApprovingActionID(null);
+    }
+  };
+
+  const handleUpdateVoteManagers = async () => {
+    if (!wallet.signer) {
+      setVmTxStatus("error");
+      setVmTxError("Connect a coordinator wallet before proposing a policy change.");
+      return;
+    }
+    const newManagers = vmNewAddrs
+      .split(/[\s,]+/)
+      .map((addr) => addr.trim())
+      .filter(Boolean);
+    const newThreshold = parseInt(vmNewThreshold, 10);
+    const uniqueManagers = new Set(newManagers.map(normalizeCoordinatorAddress));
+    if (newManagers.length === 0) {
+      setVmTxStatus("error");
+      setVmTxError("Enter at least one vote-manager address.");
+      return;
+    }
+    if (uniqueManagers.size !== newManagers.length) {
+      setVmTxStatus("error");
+      setVmTxError("Vote-manager addresses must be unique.");
+      return;
+    }
+    if (!Number.isFinite(newThreshold) || newThreshold < 1 || newThreshold > newManagers.length) {
+      setVmTxStatus("error");
+      setVmTxError("Threshold must be at least 1 and no greater than the number of vote managers.");
+      return;
+    }
+
+    setVmTxStatus("sending");
+    setVmTxError("");
+    setVmTxHash("");
+    try {
+      const result = await cosmosTx.updateVoteManagers(
+        chainApi.getApiBase(),
+        wallet.signer,
+        newManagers,
+        newThreshold,
+      );
+      if (result.code !== 0) {
+        setVmTxStatus("error");
+        setVmTxError(result.log || `Transaction failed with code ${result.code}`);
+        return;
+      }
+      setVmTxHash(result.tx_hash);
+      setVmTxStatus("ok");
+      await refreshCoordinatorState();
+    } catch (err) {
+      setVmTxStatus("error");
+      setVmTxError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const walletIsCoordinator = !!wallet.address && voteManagers.some((addr) => sameCoordinatorAddress(addr, wallet.address ?? ""));
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-5xl mx-auto px-6 py-10">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-surface-3 flex items-center justify-center">
+              <ClipboardCheck size={22} className="text-text-secondary" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-text-primary">Approvals</h1>
+              <p className="text-[11px] text-text-muted">
+                Review coordinator actions, signatures, and threshold status
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refreshCoordinatorState()}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-2 bg-surface-2 hover:bg-surface-3 text-text-secondary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
+
+        {loadError && (
+          <div className="mb-5 flex items-start gap-2 text-[11px] text-danger bg-danger/10 border border-danger/30 rounded-lg p-3">
+            <AlertCircle size={13} className="mt-0.5 shrink-0" />
+            <span>{loadError}</span>
+          </div>
+        )}
+
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-5">
+            <section className="bg-surface-1 border border-border-subtle rounded-xl p-5">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-xs font-semibold text-text-primary">Pending actions</h2>
+                  <p className="text-[11px] text-text-muted mt-0.5">
+                    Every approval signs the exact payload shown below.
+                  </p>
+                </div>
+                <span className="text-[11px] text-text-muted">
+                  {pendingCoordinatorActions.length} pending
+                </span>
+              </div>
+
+              {!wallet.signer && (
+                <div className="mb-4 flex items-start gap-2 text-[11px] text-text-secondary bg-surface-2 border border-border-subtle rounded-lg p-3">
+                  <Wallet size={13} className="mt-0.5 shrink-0" />
+                  <span>Connect a coordinator wallet to approve or recheck actions.</span>
+                </div>
+              )}
+              {wallet.signer && !walletIsCoordinator && (
+                <div className="mb-4 flex items-start gap-2 text-[11px] text-warning bg-warning/10 border border-warning/30 rounded-lg p-3">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  <span>The connected wallet is not in the current coordinator set.</span>
+                </div>
+              )}
+
+              {approvalTxHash && (
+                <div className="mb-4 bg-success/10 border border-success/30 rounded-lg p-3">
+                  <p className="text-[11px] text-success font-semibold">Approval transaction accepted</p>
+                  <p className="text-[10px] text-text-secondary font-mono mt-0.5 break-all">TX: {approvalTxHash}</p>
+                </div>
+              )}
+              {approvalError && (
+                <div className="mb-4 bg-danger/10 border border-danger/30 rounded-lg p-3">
+                  <p className="text-[11px] text-danger">{approvalError}</p>
+                </div>
+              )}
+
+              {pendingCoordinatorActions.length === 0 ? (
+                <p className="text-[11px] text-text-muted italic">No pending coordinator actions.</p>
+              ) : (
+                <div className="space-y-3">
+                  {pendingCoordinatorActions.map((action) => {
+                    const actionID = coordinatorActionID(action);
+                    const approvalSet = currentCoordinatorApprovalSet(action, voteManagers);
+                    const approvalCount = approvalSet.size;
+                    const alreadyApproved = !!wallet.address && approvalSet.has(normalizeCoordinatorAddress(wallet.address));
+                    const canRecheckExecution = alreadyApproved && approvalCount >= voteManagerThreshold;
+                    const payloadDetails = describeCoordinatorActionPayload(action);
+                    const staleApprovals = staleCoordinatorApprovals(action, voteManagers);
+                    const canSubmitApproval = !!wallet.signer && walletIsCoordinator;
+                    const disabled =
+                      !actionID ||
+                      !canSubmitApproval ||
+                      (alreadyApproved && !canRecheckExecution) ||
+                      approvingActionID === actionID ||
+                      !payloadDetails.canApprove;
+
+                    return (
+                      <article key={actionID} className="border border-border-subtle rounded-lg bg-surface-2 p-4 space-y-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[11px] font-mono text-text-muted">#{actionID}</span>
+                              <h3 className="text-sm font-semibold text-text-primary">{coordinatorActionLabel(action)}</h3>
+                            </div>
+                            <p className="text-[11px] text-text-secondary">
+                              {approvalCount}/{voteManagerThreshold} current approvals · {coordinatorSignatureStatus(approvalCount, voteManagerThreshold)}
+                            </p>
+                            <p className="text-[10px] text-text-muted mt-1">
+                              Proposed by <span className="font-mono">{shortCoordinatorAddress(action.proposer || "unknown")}</span> · expires {coordinatorActionTime(action.expires_at)}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleApproveCoordinatorAction(action)}
+                            disabled={disabled}
+                            className="shrink-0 px-3 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                            title={
+                              payloadDetails.error ||
+                              (!wallet.signer
+                                ? "Connect a coordinator wallet"
+                                : !walletIsCoordinator
+                                  ? "Connected wallet is not a current coordinator"
+                                  : canRecheckExecution
+                                    ? "Recheck coordinator action execution"
+                                    : "Approve coordinator action")
+                            }
+                          >
+                            {approvingActionID === actionID
+                              ? "Approving..."
+                              : alreadyApproved
+                                ? (canRecheckExecution ? "Recheck" : "Approved")
+                                : "Approve"}
+                          </button>
+                        </div>
+
+                        <div className="rounded-md bg-surface-1 border border-border-subtle p-3 space-y-1.5">
+                          {payloadDetails.rows.map((row) => (
+                            <div key={row.label} className="grid gap-1 sm:grid-cols-[132px_minmax(0,1fr)]">
+                              <span className="text-[10px] text-text-muted">{row.label}</span>
+                              <span className={`text-[10px] text-text-primary whitespace-pre-wrap break-all ${row.mono ? "font-mono" : ""}`}>
+                                {row.value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        {payloadDetails.error && (
+                          <p className="text-[10px] text-danger bg-danger/10 border border-danger/30 rounded-md p-2">
+                            {payloadDetails.error}
+                          </p>
+                        )}
+
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[11px] font-semibold text-text-primary">Coordinator signatures</p>
+                            <span className="text-[10px] text-text-muted">
+                              {coordinatorSignatureStatus(approvalCount, voteManagerThreshold)}
+                            </span>
+                          </div>
+                          <div className="grid gap-2 md:grid-cols-2">
+                            {voteManagers.map((addr) => {
+                              const signed = approvalSet.has(normalizeCoordinatorAddress(addr));
+                              return (
+                                <div key={addr} className="flex items-center justify-between gap-2 rounded-md bg-surface-1 border border-border-subtle px-2.5 py-2">
+                                  <span className="text-[10px] text-text-primary font-mono break-all" title={addr}>
+                                    {shortCoordinatorAddress(addr)}
+                                  </span>
+                                  <span className={`shrink-0 text-[10px] ${signed ? "text-success" : "text-text-muted"}`}>
+                                    {signed ? "Signed" : "Waiting"}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {staleApprovals.length > 0 && (
+                            <div className="mt-2 rounded-md bg-warning/10 border border-warning/30 p-2">
+                              <p className="text-[10px] text-warning font-semibold mb-1">Ignored under current policy</p>
+                              <div className="space-y-0.5">
+                                {staleApprovals.map((addr) => (
+                                  <p key={addr} className="text-[10px] text-text-secondary font-mono break-all">{addr}</p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="bg-surface-1 border border-border-subtle rounded-xl p-5">
+              <h2 className="text-xs font-semibold text-text-primary mb-3">
+                Propose coordinator policy change
+              </h2>
+              <div className="space-y-3">
+                {wallet.signer ? (
+                  <div className="bg-surface-2 rounded-lg px-3 py-2">
+                    <p className="text-[10px] text-text-muted mb-0.5">Signing as</p>
+                    <p className="text-[11px] text-text-primary font-mono break-all">{wallet.address}</p>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-text-muted">
+                    Connect a coordinator wallet before proposing policy changes.
+                  </p>
+                )}
+                <div>
+                  <label className="block text-[11px] text-text-secondary mb-1">
+                    New vote-manager addresses
+                  </label>
+                  <textarea
+                    value={vmNewAddrs}
+                    onChange={(e) => {
+                      setVmDraftInitialized(true);
+                      setVmNewAddrs(e.target.value);
+                    }}
+                    placeholder="sv1..., sv1..., sv1..."
+                    rows={4}
+                    className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+                  />
+                  <p className="text-[10px] text-text-muted mt-1">
+                    Comma- or newline-separated. This replaces the entire coordinator set after approval.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-[11px] text-text-secondary mb-1">
+                    New threshold
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={vmNewThreshold}
+                    onChange={(e) => {
+                      setVmDraftInitialized(true);
+                      setVmNewThreshold(e.target.value);
+                    }}
+                    className="w-28 px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleUpdateVoteManagers}
+                  disabled={!wallet.signer || !vmNewAddrs.trim() || vmTxStatus === "sending"}
+                  className="px-3 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {vmTxStatus === "sending" ? (
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 size={12} className="animate-spin" /> Signing & broadcasting...
+                    </span>
+                  ) : (
+                    "Propose action"
+                  )}
+                </button>
+                {vmTxStatus === "ok" && (
+                  <div className="bg-success/10 border border-success/30 rounded-lg p-2.5">
+                    <p className="text-[11px] text-success font-semibold">Coordinator action submitted</p>
+                    {vmTxHash && (
+                      <p className="text-[10px] text-text-secondary font-mono mt-0.5 break-all">TX: {vmTxHash}</p>
+                    )}
+                  </div>
+                )}
+                {vmTxStatus === "error" && (
+                  <div className="bg-danger/10 border border-danger/30 rounded-lg p-2.5">
+                    <p className="text-[11px] text-danger">{vmTxError}</p>
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+
+          <aside className="space-y-5">
+            <section className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-3">
+              <h2 className="text-xs font-semibold text-text-primary">Current policy</h2>
+              <SettingsStubRow label="Threshold" value={`${voteManagerThreshold} of ${voteManagers.length}`} />
+              {latestBlock && (
+                <>
+                  <SettingsStubRow label="Chain ID" value={latestBlock.chainId} />
+                  <SettingsStubRow label="Latest height" value={latestBlock.height.toLocaleString()} />
+                </>
+              )}
+              <div className="pt-2 border-t border-border-subtle">
+                <p className="text-[10px] text-text-muted mb-2">Current coordinators</p>
+                {voteManagers.length === 0 ? (
+                  <p className="text-[11px] text-text-muted italic">none set</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {voteManagers.map((addr) => (
+                      <p key={addr} className="text-[10px] text-text-primary font-mono break-all">{addr}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-4">
+              <h2 className="text-xs font-semibold text-text-primary">Signing wallet</h2>
+              {wallet.address ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Wallet size={14} className={walletIsCoordinator ? "text-success" : "text-warning"} />
+                      <span className="text-xs text-text-secondary">
+                        {walletIsCoordinator ? "Coordinator connected" : "Wallet connected"}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={wallet.disconnect}
+                      className="flex items-center gap-1 px-2 py-1 text-[10px] text-text-muted hover:text-danger hover:bg-danger/10 rounded transition-colors cursor-pointer"
+                    >
+                      <Unplug size={10} /> Disconnect
+                    </button>
+                  </div>
+                  <div className="bg-surface-2 rounded-lg px-3 py-2">
+                    <p className="text-[10px] text-text-muted mb-0.5">Address</p>
+                    <p className="text-[11px] text-text-primary font-mono break-all">{wallet.address}</p>
+                  </div>
+                  <p className="text-[10px] text-text-muted">
+                    Source: {wallet.source === "keplr" ? "Keplr" : "pasted key"}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={wallet.connect}
+                    disabled={wallet.connecting}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {wallet.connecting ? (
+                      <><Loader2 size={14} className="animate-spin" /> Connecting...</>
+                    ) : (
+                      <><Wallet size={14} /> Connect Keplr</>
+                    )}
+                  </button>
+
+                  {wallet.error && (
+                    <div className="flex items-start gap-1.5 text-[11px] text-danger">
+                      <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                      <span>{wallet.error}</span>
+                    </div>
+                  )}
+
+                  <details className="group">
+                    <summary className="text-[11px] text-text-muted cursor-pointer hover:text-text-secondary">
+                      Connect with private key
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={devKey}
+                          onChange={(e) => setDevKey(e.target.value.trim())}
+                          placeholder="64-character hex private key"
+                          spellCheck={false}
+                          autoComplete="off"
+                          data-1p-ignore
+                          data-lpignore="true"
+                          style={devKeyVisible ? undefined : { WebkitTextSecurity: "disc" } as React.CSSProperties}
+                          className="w-full px-3 py-2 pr-9 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setDevKeyVisible((v) => !v)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-secondary cursor-pointer"
+                          title={devKeyVisible ? "Hide" : "Show"}
+                        >
+                          {devKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                      {devKey.length > 0 && devKey.length !== 64 && (
+                        <p className="text-[10px] text-warning">
+                          Key must be exactly 64 hex characters ({devKey.length}/64)
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleConnectDev}
+                        disabled={devKey.length !== 64 || wallet.connecting}
+                        className="px-3 py-1.5 bg-surface-3 hover:bg-surface-2 text-text-secondary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Connect
+                      </button>
+                    </div>
+                  </details>
+                </div>
+              )}
+            </section>
+          </aside>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SettingsPage({ wallet }: { wallet: UseWallet }) {
@@ -1042,21 +1610,10 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [helperStatus, setHelperStatus] = useState<chainApi.HelperStatus | null>(null);
   const [voteManagers, setVoteManagers] = useState<string[]>([]);
   const [voteManagerThreshold, setVoteManagerThreshold] = useState(1);
-  const [pendingCoordinatorActions, setPendingCoordinatorActions] = useState<chainApi.CoordinatorAction[]>([]);
-  const [pendingActionsError, setPendingActionsError] = useState("");
-  const [approvingActionID, setApprovingActionID] = useState<number | null>(null);
   const [activeRound, setActiveRound] = useState<chainApi.ChainRound | null>(null);
   const [chainDetailsOpen, setChainDetailsOpen] = useState(false);
   const [devKey, setDevKey] = useState("");
   const [devKeyVisible, setDevKeyVisible] = useState(false);
-
-  // Update vote-manager set flow. The UI accepts a comma- or newline-separated list
-  // of bech32 addresses; submission atomically replaces the entire set.
-  const [vmNewAddrs, setVmNewAddrs] = useState("");
-  const [vmNewThreshold, setVmNewThreshold] = useState("1");
-  const [vmTxStatus, setVmTxStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
-  const [vmTxError, setVmTxError] = useState("");
-  const [vmTxHash, setVmTxHash] = useState("");
 
   const handleRpcChange = (url: string) => {
     setRpcUrl(url);
@@ -1086,15 +1643,9 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
         chainApi.getHelperStatus().catch(() => null),
         chainApi.getActiveRound().catch(() => ({ round: null })),
       ]);
-      const pending = await chainApi.getPendingCoordinatorActions().catch((err) => {
-        setPendingActionsError(err instanceof Error ? err.message : String(err));
-        return { actions: [] };
-      });
       setCeremony(state);
       setVoteManagers(vmResp.vote_manager_addresses ?? []);
       setVoteManagerThreshold(vmResp.threshold ?? 1);
-      setVmNewThreshold(String(vmResp.threshold ?? 1));
-      setPendingCoordinatorActions(pending.actions);
       setHelperStatus(helper);
       setActiveRound(activeRoundResp.round);
       setConnStatus("ok");
@@ -1106,86 +1657,6 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
 
   const handleConnectDev = async () => {
     await wallet.connectDev(devKey);
-  };
-
-  const handleUpdateVoteManagers = async () => {
-    if (!wallet.signer) return;
-    setVmTxStatus("sending");
-    setVmTxError("");
-    setVmTxHash("");
-    try {
-      const newVoteManagers = vmNewAddrs
-        .split(/[\s,]+/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      if (newVoteManagers.length === 0) {
-        setVmTxError("Enter at least one vote-manager address");
-        setVmTxStatus("error");
-        return;
-      }
-      const nextThreshold = parseInt(vmNewThreshold, 10);
-      if (!Number.isFinite(nextThreshold) || nextThreshold < 1 || nextThreshold > newVoteManagers.length) {
-        setVmTxError(`Threshold must be between 1 and ${newVoteManagers.length}`);
-        setVmTxStatus("error");
-        return;
-      }
-      const base = chainApi.getApiBase();
-      const result = await cosmosTx.updateVoteManagers(base, wallet.signer, newVoteManagers, nextThreshold);
-      if (result.code !== 0) {
-        setVmTxError(result.log || `tx failed with code ${result.code}`);
-        setVmTxStatus("error");
-      } else {
-        setVmTxHash(result.tx_hash);
-        setVmTxStatus("ok");
-        // Re-fetch to get the canonical (lowercase) form the chain stored,
-        // not the user-typed form which may be mixed-case. A refetch failure
-        // here must not downgrade the tx's "ok" status — the tx succeeded.
-        try {
-          const vmResp = await chainApi.getVoteManagers();
-          setVoteManagers(vmResp.vote_manager_addresses ?? []);
-          setVoteManagerThreshold(vmResp.threshold ?? 1);
-        } catch {
-          // Keep the user-typed list on failure; the next connection test
-          // will sync to canonical form.
-          setVoteManagers(newVoteManagers);
-          setVoteManagerThreshold(nextThreshold);
-        }
-        const pending = await chainApi.getPendingCoordinatorActions().catch(() => ({ actions: [] }));
-        setPendingCoordinatorActions(pending.actions);
-      }
-    } catch (err) {
-      setVmTxError(err instanceof Error ? err.message : String(err));
-      setVmTxStatus("error");
-    }
-  };
-
-  const handleApproveCoordinatorAction = async (action: chainApi.CoordinatorAction) => {
-    if (!wallet.signer) return;
-    const actionID = coordinatorActionID(action);
-    if (!actionID) return;
-    setApprovingActionID(actionID);
-    setPendingActionsError("");
-    try {
-      const result = await cosmosTx.approveCoordinatorAction(chainApi.getApiBase(), wallet.signer, actionID);
-      if (result.code !== 0) {
-        setPendingActionsError(result.log || `tx failed with code ${result.code}`);
-        return;
-      }
-      const [pending, vmResp] = await Promise.all([
-        chainApi.getPendingCoordinatorActions(),
-        chainApi.getVoteManagers().catch(() => null),
-      ]);
-      setPendingCoordinatorActions(pending.actions);
-      if (vmResp) {
-        setVoteManagers(vmResp.vote_manager_addresses ?? []);
-        setVoteManagerThreshold(vmResp.threshold ?? 1);
-        setVmNewThreshold(String(vmResp.threshold ?? 1));
-      }
-    } catch (err) {
-      setPendingActionsError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setApprovingActionID(null);
-    }
   };
 
   // Auto-test voting chain connection on mount.
@@ -1663,159 +2134,6 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
                       </ul>
                     )}
                   </div>
-
-                  <div className="border-t border-border-subtle pt-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs text-text-secondary">Pending coordinator actions</div>
-                      <button
-                        type="button"
-                        onClick={handleTestConnection}
-                        className="p-1 hover:bg-surface-3 rounded text-text-muted hover:text-text-secondary cursor-pointer"
-                        title="Refresh pending actions"
-                      >
-                        <RefreshCw size={12} />
-                      </button>
-                    </div>
-                    {pendingCoordinatorActions.length === 0 ? (
-                      <p className="text-[11px] text-text-muted italic">none pending</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {pendingCoordinatorActions.map((action) => {
-                          const actionID = coordinatorActionID(action);
-                          const approvalCount = currentCoordinatorApprovalCount(action, voteManagers);
-                          const alreadyApproved = !!wallet.address && (action.approvals ?? []).some((addr) => sameCoordinatorAddress(addr, wallet.address ?? ""));
-                          const canRecheckExecution = alreadyApproved && approvalCount >= voteManagerThreshold;
-                          const payloadDetails = describeCoordinatorActionPayload(action);
-                          return (
-                            <div key={actionID} className="border border-border-subtle rounded-lg p-2.5 bg-surface-2 space-y-2">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="text-[11px] font-semibold text-text-primary">
-                                    #{actionID} {coordinatorActionLabel(action)}
-                                  </p>
-                                  <p className="text-[10px] text-text-muted">
-                                    {approvalCount}/{voteManagerThreshold} current approvals · expires {coordinatorActionTime(action.expires_at)}
-                                  </p>
-                                </div>
-                                {wallet.signer && (
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleApproveCoordinatorAction(action)}
-                                    disabled={!actionID || (alreadyApproved && !canRecheckExecution) || approvingActionID === actionID || !payloadDetails.canApprove}
-                                    className="px-2 py-1 bg-accent/90 hover:bg-accent text-surface-0 rounded text-[10px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                                    title={payloadDetails.error || (canRecheckExecution ? "Recheck coordinator action execution" : "Approve coordinator action")}
-                                  >
-                                    {approvingActionID === actionID ? "Approving..." : alreadyApproved ? (canRecheckExecution ? "Recheck" : "Approved") : "Approve"}
-                                  </button>
-                                )}
-                              </div>
-                              <p className="text-[10px] text-text-secondary font-mono break-all">
-                                proposer: {action.proposer || "unknown"}
-                              </p>
-                              <div className="rounded-md bg-surface-1 border border-border-subtle p-2 space-y-1">
-                                {payloadDetails.rows.map((row) => (
-                                  <div key={row.label} className="grid gap-1 sm:grid-cols-[96px_minmax(0,1fr)]">
-                                    <span className="text-[10px] text-text-muted">{row.label}</span>
-                                    <span className={`text-[10px] text-text-primary whitespace-pre-wrap break-all ${row.mono ? "font-mono" : ""}`}>
-                                      {row.value}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                              {payloadDetails.error && (
-                                <p className="text-[10px] text-danger bg-danger/10 border border-danger/30 rounded-md p-2">
-                                  {payloadDetails.error}
-                                </p>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {pendingActionsError && (
-                      <p className="text-[11px] text-danger bg-danger/10 border border-danger/30 rounded-lg p-2">
-                        {pendingActionsError}
-                      </p>
-                    )}
-                  </div>
-
-                  {wallet.signer && (
-                    <details className="group">
-                      <summary className="text-[11px] text-accent cursor-pointer hover:text-accent-glow">
-                        Propose coordinator policy change
-                      </summary>
-                      <div className="mt-3 space-y-3">
-                        <div className="bg-surface-2 rounded-lg px-3 py-2">
-                          <p className="text-[10px] text-text-muted mb-0.5">Signing as</p>
-                          <p className="text-[11px] text-text-primary font-mono break-all">
-                            {wallet.address}
-                          </p>
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-text-secondary mb-1">
-                            New vote-manager addresses (comma- or newline-separated)
-                          </label>
-                          <textarea
-                            value={vmNewAddrs}
-                            onChange={(e) => setVmNewAddrs(e.target.value)}
-                            placeholder="sv1..., sv1..., sv1..."
-                            rows={3}
-                            className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
-                          />
-                          <p className="text-[10px] text-text-muted mt-1">
-                            Replaces the entire vote-manager set when enough current coordinators approve.
-                          </p>
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-text-secondary mb-1">
-                            New threshold
-                          </label>
-                          <input
-                            type="number"
-                            min={1}
-                            value={vmNewThreshold}
-                            onChange={(e) => setVmNewThreshold(e.target.value)}
-                            className="w-24 px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary focus:outline-none focus:border-accent/50"
-                          />
-                        </div>
-                        <button
-                          onClick={handleUpdateVoteManagers}
-                          disabled={!vmNewAddrs.trim() || vmTxStatus === "sending"}
-                          className="px-3 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                        >
-                          {vmTxStatus === "sending" ? (
-                            <span className="flex items-center gap-1.5">
-                              <Loader2 size={12} className="animate-spin" /> Signing & broadcasting...
-                            </span>
-                          ) : (
-                            "Propose action"
-                          )}
-                        </button>
-                        {vmTxStatus === "ok" && (
-                          <div className="bg-success/10 border border-success/30 rounded-lg p-2.5">
-                            <p className="text-[11px] text-success font-semibold">
-                              Coordinator action submitted
-                            </p>
-                            {vmTxHash && (
-                              <p className="text-[10px] text-text-secondary font-mono mt-0.5 break-all">
-                                TX: {vmTxHash}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                        {vmTxStatus === "error" && (
-                          <div className="bg-danger/10 border border-danger/30 rounded-lg p-2.5">
-                            <p className="text-[11px] text-danger">{vmTxError}</p>
-                          </div>
-                        )}
-                      </div>
-                    </details>
-                  )}
-                  {!wallet.signer && connStatus === "ok" && (
-                    <p className="text-[10px] text-text-muted">
-                      Connect a wallet above to propose or approve coordinator actions.
-                    </p>
-                  )}
                 </div>
               )}
 
