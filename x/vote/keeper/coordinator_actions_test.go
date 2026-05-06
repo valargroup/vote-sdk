@@ -99,6 +99,66 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_UpdateManagersThresholdFlow()
 	s.Require().Equal(uint32(1), policy.Threshold)
 }
 
+func (s *MsgServerTestSuite) TestCoordinatorAction_DuplicateApprovalRechecksCurrentPolicy() {
+	manager1 := svtest.TestAccAddr(0x34)
+	manager2 := svtest.TestAccAddr(0x35)
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{
+		Addresses: []string{manager1, manager2},
+		Threshold: 2,
+	}))
+
+	restoreResp, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+		Creator: manager1,
+		Payload: coordinatorPayload(s.T(), "/svote.v1.MsgUpdateVoteManagers", &types.MsgUpdateVoteManagers{
+			Creator:         manager1,
+			NewVoteManagers: []string{manager1, manager2},
+			NewThreshold:    2,
+		}),
+	})
+	s.Require().NoError(err)
+	s.Require().False(restoreResp.Executed)
+
+	shrinkResp, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+		Creator: manager1,
+		Payload: coordinatorPayload(s.T(), "/svote.v1.MsgUpdateVoteManagers", &types.MsgUpdateVoteManagers{
+			Creator:         manager1,
+			NewVoteManagers: []string{manager1},
+			NewThreshold:    1,
+		}),
+	})
+	s.Require().NoError(err)
+	s.Require().False(shrinkResp.Executed)
+
+	approveResp, err := s.msgServer.ApproveCoordinatorAction(s.ctx, &types.MsgApproveCoordinatorAction{
+		Creator:  manager2,
+		ActionId: shrinkResp.ActionId,
+	})
+	s.Require().NoError(err)
+	s.Require().True(approveResp.Executed)
+
+	policy, err := s.keeper.GetVoteManagers(kv)
+	s.Require().NoError(err)
+	s.Require().Equal([]string{manager1}, policy.Addresses)
+	s.Require().Equal(uint32(1), policy.Threshold)
+
+	approveResp, err = s.msgServer.ApproveCoordinatorAction(s.ctx, &types.MsgApproveCoordinatorAction{
+		Creator:  manager1,
+		ActionId: restoreResp.ActionId,
+	})
+	s.Require().NoError(err)
+	s.Require().True(approveResp.Executed)
+
+	action, err := s.keeper.GetCoordinatorAction(kv, restoreResp.ActionId)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_EXECUTED, action.Status)
+
+	policy, err = s.keeper.GetVoteManagers(kv)
+	s.Require().NoError(err)
+	s.Require().Equal([]string{manager1, manager2}, policy.Addresses)
+	s.Require().Equal(uint32(2), policy.Threshold)
+}
+
 func (s *MsgServerTestSuite) TestCoordinatorAction_ThresholdOneExecutesImmediately() {
 	manager1 := svtest.TestAccAddr(0x41)
 	manager2 := svtest.TestAccAddr(0x42)

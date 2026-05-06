@@ -99,6 +99,17 @@ func (ms msgServer) ApproveCoordinatorAction(goCtx context.Context, msg *types.M
 		return nil, fmt.Errorf("%w: action %d expired at %d", types.ErrCoordinatorActionExpired, msg.ActionId, action.ExpiresAt)
 	}
 	if addressInList(approver, action.Approvals) {
+		executed, err := ms.maybeExecuteCoordinatorAction(goCtx, action)
+		if err != nil {
+			return nil, err
+		}
+		if executed {
+			if err := ms.k.SetCoordinatorAction(kvStore, action); err != nil {
+				return nil, err
+			}
+			ms.emitCoordinatorExecutionEvent(goCtx, ctx, action)
+			return &types.MsgApproveCoordinatorActionResponse{ActionId: msg.ActionId, Executed: true}, nil
+		}
 		return nil, fmt.Errorf("%w: %s", types.ErrCoordinatorAlreadyApproved, approver)
 	}
 
