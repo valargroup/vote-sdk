@@ -81,9 +81,14 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendRejectsNonCoord
 	s.setupWithMockBankKeeper(bk)
 
 	vm := testAccAddr(1)
+	vm2 := testAccAddr(3)
 	nonCoordinator := testAccAddr(2)
 	recipient := testAccAddr(10)
-	s.seedVoteManagers(vm)
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{
+		Addresses: []string{vm, vm2},
+		Threshold: 2,
+	}))
 
 	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
 		FromAddress: nonCoordinator,
@@ -97,6 +102,12 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendRejectsNonCoord
 	})
 	s.Require().ErrorIs(err, types.ErrUnauthorizedSend)
 	s.Require().Empty(bk.sendCalls)
+	var pending []*types.CoordinatorAction
+	s.Require().NoError(s.keeper.IteratePendingCoordinatorActions(kv, func(action *types.CoordinatorAction) bool {
+		pending = append(pending, action)
+		return false
+	}))
+	s.Require().Empty(pending)
 }
 
 func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidFromAddress() {
@@ -178,6 +189,23 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmptyDenom() {
 	s.Require().Contains(err.Error(), "denom cannot be empty")
 }
 
+func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidDenom() {
+	s.SetupTest()
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
+	s.seedVoteManagers(testAccAddr(1))
+
+	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+		FromAddress: testAccAddr(1),
+		ToAddress:   testAccAddr(2),
+		Amount:      "100",
+		Denom:       "!!!",
+	})
+	s.Require().ErrorIs(err, types.ErrInvalidField)
+	s.Require().Contains(err.Error(), "invalid denom")
+	s.Require().Empty(bk.sendCalls)
+}
+
 func (s *MsgServerTestSuite) TestAuthorizedSend_NonNumericAmount() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
@@ -252,5 +280,33 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendRevokedVoteMana
 		Payload: payload,
 	})
 	s.Require().ErrorIs(err, types.ErrUnauthorizedSend)
+	s.Require().Empty(bk.sendCalls)
+}
+
+func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendInvalidDenomRejectedAtProposal() {
+	s.SetupTest()
+	bk := newMockBankKeeper()
+	s.setupWithMockBankKeeper(bk)
+
+	vm1 := testAccAddr(1)
+	vm2 := testAccAddr(2)
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{
+		Addresses: []string{vm1, vm2},
+		Threshold: 2,
+	}))
+
+	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
+		FromAddress: vm1,
+		ToAddress:   testAccAddr(10),
+		Amount:      "1",
+		Denom:       "!!!",
+	})
+	_, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+		Creator: vm1,
+		Payload: payload,
+	})
+	s.Require().ErrorIs(err, types.ErrInvalidField)
+	s.Require().Contains(err.Error(), "invalid denom")
 	s.Require().Empty(bk.sendCalls)
 }

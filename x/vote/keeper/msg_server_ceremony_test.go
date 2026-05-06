@@ -819,7 +819,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_NextRoundExcludesJailedVali
 	s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 
 	firstMsg := validSetupMsg()
-	firstResp, err := s.msgServer.CreateVotingSession(s.ctx, firstMsg)
+	firstResp, err := s.createVotingSessionViaCoordinator(s.ctx, firstMsg)
 	s.Require().NoError(err)
 
 	kv := s.keeper.OpenKVStore(s.ctx)
@@ -840,7 +840,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_NextRoundExcludesJailedVali
 
 	nextMsg := validSetupMsg()
 	nextCtx := s.ctx.WithBlockHeight(s.ctx.BlockHeight() + 1)
-	nextResp, err := s.msgServer.CreateVotingSession(nextCtx, nextMsg)
+	nextResp, err := s.createVotingSessionViaCoordinator(nextCtx, nextMsg)
 	s.Require().NoError(err)
 
 	nextRound, err := s.keeper.GetVoteRound(kv, nextResp.VoteRoundId)

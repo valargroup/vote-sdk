@@ -10,20 +10,17 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// SetEndorser creates, rotates, or clears an endorser mapping. Direct external
-// submission is blocked by the app-level whitelist; operators use coordinator
-// actions, which call executeSetEndorser after threshold approval.
+// SetEndorser is only executable through coordinator action approval. Direct
+// calls are rejected here even though standard tx submission is also blocked by
+// the app whitelist.
 func (ms msgServer) SetEndorser(goCtx context.Context, msg *types.MsgSetEndorser) (*types.MsgSetEndorserResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
-		return nil, err
-	}
-
-	return ms.executeSetEndorser(goCtx, msg)
+	return nil, coordinatorActionRequired("set endorser")
 }
 
+// executeSetEndorser creates, rotates, or clears an endorser mapping.
 func (ms msgServer) executeSetEndorser(goCtx context.Context, msg *types.MsgSetEndorser) (*types.MsgSetEndorserResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 

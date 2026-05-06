@@ -1,8 +1,10 @@
 package keeper_test
 
 import (
+	"context"
 	"testing"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -16,6 +18,28 @@ func coordinatorPayload(t *testing.T, typeURL string, msg proto.Message) *anypb.
 	bz, err := proto.Marshal(msg)
 	require.NoError(t, err)
 	return &anypb.Any{TypeUrl: typeURL, Value: bz}
+}
+
+func coordinatorPayloadForMessage(t *testing.T, msg proto.Message) *anypb.Any {
+	t.Helper()
+	typeURL := "/" + string(msg.ProtoReflect().Descriptor().FullName())
+	return coordinatorPayload(t, typeURL, msg)
+}
+
+func (s *MsgServerTestSuite) proposeCoordinatorAction(ctx context.Context, creator string, msg proto.Message) (*types.MsgProposeCoordinatorActionResponse, error) {
+	return s.msgServer.ProposeCoordinatorAction(ctx, &types.MsgProposeCoordinatorAction{
+		Creator: creator,
+		Payload: coordinatorPayloadForMessage(s.T(), msg),
+	})
+}
+
+func (s *MsgServerTestSuite) createVotingSessionViaCoordinator(ctx sdk.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
+	if _, err := s.proposeCoordinatorAction(ctx, msg.Creator, msg); err != nil {
+		return nil, err
+	}
+	return &types.MsgCreateVotingSessionResponse{
+		VoteRoundId: computeExpectedRoundID(msg, uint64(ctx.BlockHeight())),
+	}, nil
 }
 
 func (s *MsgServerTestSuite) TestCoordinatorAction_UpdateManagersThresholdFlow() {

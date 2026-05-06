@@ -26,7 +26,7 @@ func (ms msgServer) ProposeCoordinatorAction(goCtx context.Context, msg *types.M
 	if err != nil {
 		return nil, err
 	}
-	if err := ms.validateCoordinatorPayload(msg.Payload, proposer); err != nil {
+	if err := ms.validateCoordinatorPayload(goCtx, msg.Payload, proposer); err != nil {
 		return nil, err
 	}
 
@@ -182,7 +182,7 @@ func (ms msgServer) currentCoordinatorApprovalCount(goCtx context.Context, appro
 	return uint32(len(currentApprovals)), set.Threshold, currentApprovals, nil
 }
 
-func (ms msgServer) validateCoordinatorPayload(payload *anypb.Any, proposer string) error {
+func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *anypb.Any, proposer string) error {
 	switch coordinatorPayloadType(payload) {
 	case "svote.v1.MsgCreateVotingSession":
 		msg := &types.MsgCreateVotingSession{}
@@ -234,14 +234,16 @@ func (ms msgServer) validateCoordinatorPayload(payload *anypb.Any, proposer stri
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
 		}
-		if _, err := sdk.AccAddressFromBech32(msg.FromAddress); err != nil {
-			return fmt.Errorf("%w: invalid from_address: %v", types.ErrInvalidField, err)
+		fromAddr, _, _, err := validateAuthorizedSendFields(msg)
+		if err != nil {
+			return err
 		}
-		if _, err := sdk.AccAddressFromBech32(msg.ToAddress); err != nil {
-			return fmt.Errorf("%w: invalid to_address: %v", types.ErrInvalidField, err)
+		senderIsVoteManager, err := ms.k.IsVoteManager(goCtx, fromAddr.String())
+		if err != nil {
+			return err
 		}
-		if msg.Amount == "" || msg.Denom == "" {
-			return fmt.Errorf("%w: amount and denom are required", types.ErrInvalidField)
+		if !senderIsVoteManager {
+			return fmt.Errorf("%w: coordinator-funded sends must originate from a vote manager", types.ErrUnauthorizedSend)
 		}
 		return nil
 	default:

@@ -27,27 +27,22 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 	return &msgServer{k: keeper}
 }
 
-// CreateVotingSession handles MsgCreateVotingSession.
-// Computes vote_round_id = Poseidon(created_at_height, snapshot_blockhash_lo,
-// snapshot_blockhash_hi, proposals_hash_lo, proposals_hash_hi, vote_end_time,
-// nullifier_imt_root, nc_root) via FFI,
-// stores the VoteRound in PENDING status with a ceremony validator snapshot,
-// and emits an event. The round transitions to ACTIVE when its per-round
-// ceremony confirms (auto-deal + auto-ack via PrepareProposal).
+// CreateVotingSession is only executable through coordinator action approval.
+// Direct calls are rejected here even though standard tx submission is also
+// blocked by the app whitelist.
 func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
-
-	// Direct transactions are blocked by the app whitelist; this guard keeps
-	// direct handler calls consistent with the coordinator membership policy.
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
-		return nil, err
-	}
-
-	return ms.executeCreateVotingSession(goCtx, msg)
+	return nil, coordinatorActionRequired("create voting session")
 }
 
+// executeCreateVotingSession computes vote_round_id = Poseidon(created_at_height,
+// snapshot_blockhash_lo, snapshot_blockhash_hi, proposals_hash_lo,
+// proposals_hash_hi, vote_end_time, nullifier_imt_root, nc_root) via FFI, stores
+// the VoteRound in PENDING status with a ceremony validator snapshot, and emits
+// an event. The round transitions to ACTIVE when its per-round ceremony
+// confirms.
 func (ms msgServer) executeCreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
@@ -229,17 +224,19 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 	return &types.MsgCastVoteResponse{}, nil
 }
 
-// UpdateVoteManagers atomically replaces the vote-manager set. See proto for semantics.
-// Allows the caller to remove themselves from the new set — the non-empty
-// check is the only liveness guarantee.
+// UpdateVoteManagers is only executable through coordinator action approval.
+// Direct calls are rejected here even though standard tx submission is also
+// blocked by the app whitelist.
 func (ms msgServer) UpdateVoteManagers(goCtx context.Context, msg *types.MsgUpdateVoteManagers) (*types.MsgUpdateVoteManagersResponse, error) {
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
+	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
-
-	return ms.executeUpdateVoteManagers(goCtx, msg)
+	return nil, coordinatorActionRequired("update vote managers")
 }
 
+// executeUpdateVoteManagers atomically replaces the vote-manager set. See proto
+// for semantics. Allows the caller to remove themselves from the new set — the
+// non-empty check is the only liveness guarantee.
 func (ms msgServer) executeUpdateVoteManagers(goCtx context.Context, msg *types.MsgUpdateVoteManagers) (*types.MsgUpdateVoteManagersResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 

@@ -24,30 +24,41 @@ func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthoriz
 	return ms.executeAuthorizedSend(goCtx, msg, false, nil)
 }
 
-func (ms msgServer) executeAuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend, allowCoordinatorSender bool, approvals []string) (*types.MsgAuthorizedSendResponse, error) {
-	ctx := sdk.UnwrapSDKContext(goCtx)
-
+func validateAuthorizedSendFields(msg *types.MsgAuthorizedSend) (sdk.AccAddress, sdk.AccAddress, sdkmath.Int, error) {
 	fromAddr, err := sdk.AccAddressFromBech32(msg.FromAddress)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid from_address: %v", types.ErrInvalidField, err)
+		return nil, nil, sdkmath.Int{}, fmt.Errorf("%w: invalid from_address: %v", types.ErrInvalidField, err)
 	}
 	toAddr, err := sdk.AccAddressFromBech32(msg.ToAddress)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid to_address: %v", types.ErrInvalidField, err)
+		return nil, nil, sdkmath.Int{}, fmt.Errorf("%w: invalid to_address: %v", types.ErrInvalidField, err)
 	}
 
 	amt, ok := sdkmath.NewIntFromString(msg.Amount)
 	if !ok || !amt.IsPositive() {
-		return nil, fmt.Errorf("%w: amount must be a positive integer string", types.ErrInvalidField)
+		return nil, nil, sdkmath.Int{}, fmt.Errorf("%w: amount must be a positive integer string", types.ErrInvalidField)
 	}
 	if msg.Denom == "" {
-		return nil, fmt.Errorf("%w: denom cannot be empty", types.ErrInvalidField)
+		return nil, nil, sdkmath.Int{}, fmt.Errorf("%w: denom cannot be empty", types.ErrInvalidField)
+	}
+	if err := sdk.ValidateDenom(msg.Denom); err != nil {
+		return nil, nil, sdkmath.Int{}, fmt.Errorf("%w: invalid denom: %v", types.ErrInvalidField, err)
+	}
+	return fromAddr, toAddr, amt, nil
+}
+
+func (ms msgServer) executeAuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend, allowCoordinatorSender bool, approvals []string) (*types.MsgAuthorizedSendResponse, error) {
+	ctx := sdk.UnwrapSDKContext(goCtx)
+
+	fromAddr, toAddr, amt, err := validateAuthorizedSendFields(msg)
+	if err != nil {
+		return nil, err
 	}
 
 	coins := sdk.NewCoins(sdk.NewCoin(msg.Denom, amt))
 
 	if !allowCoordinatorSender {
-		return nil, fmt.Errorf("%w: sends require coordinator action approval", types.ErrCoordinatorActionRequired)
+		return nil, coordinatorActionRequired("send funds")
 	}
 
 	senderIsVoteManager, err := ms.k.IsVoteManager(ctx, msg.FromAddress)

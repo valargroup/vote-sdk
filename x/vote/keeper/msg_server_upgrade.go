@@ -13,18 +13,14 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// ScheduleUpgrade schedules an x/upgrade plan. Direct external submission is
-// blocked by the app-level whitelist; operators use coordinator actions, which
-// call executeScheduleUpgrade after threshold approval.
+// ScheduleUpgrade is only executable through coordinator action approval.
+// Direct calls are rejected here even though standard tx submission is also
+// blocked by the app whitelist.
 func (ms msgServer) ScheduleUpgrade(goCtx context.Context, msg *types.MsgScheduleUpgrade) (*types.MsgScheduleUpgradeResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
-		return nil, err
-	}
-
-	return ms.executeScheduleUpgrade(goCtx, msg)
+	return nil, coordinatorActionRequired("schedule upgrade")
 }
 
 func (ms msgServer) executeScheduleUpgrade(goCtx context.Context, msg *types.MsgScheduleUpgrade) (*types.MsgScheduleUpgradeResponse, error) {
@@ -68,22 +64,19 @@ func (ms msgServer) executeScheduleUpgrade(goCtx context.Context, msg *types.Msg
 	return &types.MsgScheduleUpgradeResponse{}, nil
 }
 
-// CancelUpgrade clears the currently scheduled x/upgrade plan. Direct external
-// submission is blocked by the app-level whitelist; operators use coordinator
-// actions, which call executeCancelUpgrade after threshold approval. x/upgrade
-// treats cancelling with no plan as a no-op, and this handler preserves that
-// behavior.
+// CancelUpgrade is only executable through coordinator action approval.
+// Direct calls are rejected here even though standard tx submission is also
+// blocked by the app whitelist.
 func (ms msgServer) CancelUpgrade(goCtx context.Context, msg *types.MsgCancelUpgrade) (*types.MsgCancelUpgradeResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
-		return nil, err
-	}
-
-	return ms.executeCancelUpgrade(goCtx, msg)
+	return nil, coordinatorActionRequired("cancel upgrade")
 }
 
+// executeCancelUpgrade clears the currently scheduled x/upgrade plan.
+// x/upgrade treats cancelling with no plan as a no-op, and this handler
+// preserves that behavior.
 func (ms msgServer) executeCancelUpgrade(goCtx context.Context, msg *types.MsgCancelUpgrade) (*types.MsgCancelUpgradeResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
