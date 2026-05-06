@@ -398,7 +398,7 @@ Identity files (keys, consensus signer, block store) live under `SVOTE_HOME` (de
 | `node.log` | launchd on macOS | Chain stdout+stderr. Linux writes service logs to journald. |
 | `join-complete` | `svoted-wrapper.sh` | Marker written after the wrapper observes bonded status. |
 
-For a joining validator with nothing valuable yet, `rm -rf ~/.svoted && join.sh` recreates everything.
+For a joining validator with nothing valuable yet, re-running `join.sh` detects the existing install, warns that it will delete `SVOTE_HOME`, and requires confirmation before recreating everything. In unattended reset runs, set `SVOTE_FORCE_RESET=1`.
 
 ### Configuration variables
 
@@ -422,6 +422,7 @@ Interactive runs without an explicit TLS mode prompt until the operator chooses 
 | `SVOTE_SKIP_CADDY` | unset | Legacy shortcut equivalent to `--tls-mode skip` when set to `1`. Set to `0` only to force the interactive TLS menu when no other TLS mode is configured. |
 | `SVOTE_ALLOW_NO_PUBLIC_URL` | `0` | When `1`, explicit-domain Caddy failures continue with an empty `VALIDATOR_URL` so the operator can still enter the funding queue. |
 | `SVOTE_SKIP_SERVICE` | `0` | When `1`, skip service install and the sync wait. The node is initialized but not started. Useful for Docker smoke tests and CI. |
+| `SVOTE_FORCE_RESET` | `0` | When `1`, allow `join.sh` to reset an existing install non-interactively. This stops the existing validator service, deletes `SVOTE_HOME`, generates a new validator identity, and rewrites/restarts the service. Use only when the old validator identity and any funded address are disposable or backed up. |
 | `VOTING_CONFIG_URL` | `https://valargroup.github.io/token-holder-voting-config/voting-config.json` | Canonical voting-config (same payload wallets fetch). Override for staging mirrors or fork testing. |
 | `SVOTE_ADMIN_URL` | `https://vote-chain-primary.valargroup.org` | Admin server base URL. Used for `POST /api/register-validator` (join queue). Voting-config discovery uses `VOTING_CONFIG_URL` instead. |
 | `SVOTE_WRAPPER_SCRIPT` | bundled path → `${DO_BASE}/svoted-wrapper.sh` fallback | Override path to `svoted-wrapper.sh`. Useful when `join.sh` is piped via curl and the repo's `scripts/svoted-wrapper.sh` isn't reachable. |
@@ -491,8 +492,9 @@ If the validator will answer PIR queries itself, also open inbound 443 for the `
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
 | `catching_up` stays `true` for >10 min, log shows "Dialing" / no peers connecting | Inbound 26656 blocked, or seed peer is unreachable | Verify firewall lets in 26656 (`ss -ltn | grep 26656`, then test from off-host); check `persistent_peers` in `~/.svoted/config/config.toml`; confirm the seed listed under `vote_servers[0].url` in [the voting-config](https://valargroup.github.io/token-holder-voting-config/voting-config.json) is up by hitting its `/cosmos/base/tendermint/v1beta1/node_info`. |
-| `svoted` exits with "error initializing application: genesis doc mismatch" | Local `genesis.json` doesn't match the live chain | `rm -rf ~/.svoted && join.sh` (pulls canonical genesis fresh); or `curl -fsSL -o ~/.svoted/config/genesis.json https://vote.fra1.digitaloceanspaces.com/genesis.json && svoted genesis validate-genesis --home ~/.svoted`. |
+| `svoted` exits with "error initializing application: genesis doc mismatch" | Local `genesis.json` doesn't match the live chain | Re-run `join.sh` and confirm the existing-install reset prompt if this is a disposable joining validator. It stops the service, deletes `~/.svoted`, and pulls canonical genesis fresh. For non-interactive reset runs, set `SVOTE_FORCE_RESET=1`. To repair only genesis manually: `curl -fsSL -o ~/.svoted/config/genesis.json https://vote.fra1.digitaloceanspaces.com/genesis.json && svoted genesis validate-genesis --home ~/.svoted`. |
 | Service logs repeatedly show `waiting for validator funding` | Not yet funded | Wait. The vote-manager funds from the admin UI join queue. Ping the operator running the primary and confirm your address is listed. |
+| Service logs show an old moniker or keep polling `balance=0` after a re-run | A stale wrapper process survived a previous install and is using the old service environment | Current `join.sh` restarts the rewritten service. On an affected host, run `systemctl show svoted -p Environment --no-pager`, compare `MONIKER`/`VALIDATOR_ADDR` with `journalctl -u svoted -o cat`, then `sudo systemctl restart svoted`. |
 | `create-val-tx` fails with `key not found: validator` | Keyring backend mismatch (os vs test) | The wrapper expects the `validator` key in the test keyring. Confirm `svoted keys show validator -a --keyring-backend test --home ~/.svoted` returns the expected address. If you re-keyed manually, re-run `svoted init-validator-keys`. |
 | `create-val-tx` fails with `account does not exist on chain` | Tx raced funding; balance hasn't settled yet | Retry; the loop re-runs every 30 s. If it persists, check `svoted query bank balances $VALIDATOR_ADDR` directly. |
 | Caddy fails to obtain a certificate (`acme: error 403` or similar) | DNS doesn't resolve to this host, or 80/443 blocked | `dig <SVOTE_DOMAIN>` against a public resolver; ensure inbound 80 AND 443 are open. For automatic sslip.io, confirm `curl -fsSL https://ifconfig.me` returns your actual public IP. |
