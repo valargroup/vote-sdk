@@ -133,6 +133,81 @@ const MsgUpdateVoteManagersProto = {
   },
 };
 
+// ── Protobuf type: MsgScheduleUpgrade ───────────────────────────
+//
+// message MsgScheduleUpgrade {
+//   string creator = 1; string name = 2; int64 height = 3;
+//   string info = 4; bool replace_existing = 5;
+// }
+const MsgScheduleUpgradeProto = {
+  encode(
+    message: {
+      creator: string;
+      name: string;
+      height: number;
+      info: string;
+      replaceExisting: boolean;
+    },
+    writer: ProtoWriter = ProtoWriter.create(),
+  ): ProtoWriter {
+    if (message.creator !== "") writer.uint32(10).string(message.creator);
+    if (message.name !== "") writer.uint32(18).string(message.name);
+    if (message.height !== 0) writer.uint32(24).uint64(message.height);
+    if (message.info !== "") writer.uint32(34).string(message.info);
+    if (message.replaceExisting) writer.uint32(40).uint32(1);
+    return writer;
+  },
+  decode(): {
+    creator: string;
+    name: string;
+    height: number;
+    info: string;
+    replaceExisting: boolean;
+  } {
+    throw new Error("decode not implemented");
+  },
+  fromPartial(
+    object: Partial<{
+      creator: string;
+      name: string;
+      height: number;
+      info: string;
+      replaceExisting: boolean;
+    }>,
+  ): {
+    creator: string;
+    name: string;
+    height: number;
+    info: string;
+    replaceExisting: boolean;
+  } {
+    return {
+      creator: object.creator ?? "",
+      name: object.name ?? "",
+      height: object.height ?? 0,
+      info: object.info ?? "",
+      replaceExisting: object.replaceExisting ?? false,
+    };
+  },
+};
+
+// message MsgCancelUpgrade { string creator = 1; }
+const MsgCancelUpgradeProto = {
+  encode(
+    message: { creator: string },
+    writer: ProtoWriter = ProtoWriter.create(),
+  ): ProtoWriter {
+    if (message.creator !== "") writer.uint32(10).string(message.creator);
+    return writer;
+  },
+  decode(): { creator: string } {
+    throw new Error("decode not implemented");
+  },
+  fromPartial(object: Partial<{ creator: string }>): { creator: string } {
+    return { creator: object.creator ?? "" };
+  },
+};
+
 // ── Protobuf type: MsgSetEndorser ───────────────────────────────
 //
 // message MsgSetEndorser { string creator = 1; string endorser_id = 2; string address = 3; }
@@ -368,6 +443,10 @@ function createRegistry(): Registry {
   const registry = new Registry();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/svote.v1.MsgUpdateVoteManagers", MsgUpdateVoteManagersProto as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registry.register("/svote.v1.MsgScheduleUpgrade", MsgScheduleUpgradeProto as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registry.register("/svote.v1.MsgCancelUpgrade", MsgCancelUpgradeProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/svote.v1.MsgCreateVotingSession", MsgCreateVotingSessionProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -620,6 +699,54 @@ export async function updateVoteManagers(
       {
         typeUrl: "/svote.v1.MsgUpdateVoteManagers",
         value: { creator: account.address, newVoteManagers },
+      },
+    ],
+  });
+}
+
+/** Sign and broadcast a MsgScheduleUpgrade transaction. */
+export async function scheduleUpgrade(
+  apiBase: string,
+  signer: OfflineDirectSigner,
+  params: {
+    name: string;
+    height: number;
+    info: string;
+    replaceExisting: boolean;
+  },
+): Promise<BroadcastResult> {
+  const [account] = await signer.getAccounts();
+  return signAndBroadcast({
+    apiBase,
+    signer,
+    messages: [
+      {
+        typeUrl: "/svote.v1.MsgScheduleUpgrade",
+        value: {
+          creator: account.address,
+          name: params.name,
+          height: params.height,
+          info: params.info,
+          replaceExisting: params.replaceExisting,
+        },
+      },
+    ],
+  });
+}
+
+/** Sign and broadcast a MsgCancelUpgrade transaction. */
+export async function cancelUpgrade(
+  apiBase: string,
+  signer: OfflineDirectSigner,
+): Promise<BroadcastResult> {
+  const [account] = await signer.getAccounts();
+  return signAndBroadcast({
+    apiBase,
+    signer,
+    messages: [
+      {
+        typeUrl: "/svote.v1.MsgCancelUpgrade",
+        value: { creator: account.address },
       },
     ],
   });
