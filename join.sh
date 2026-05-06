@@ -326,6 +326,100 @@ print_join_status() {
   fi
 }
 
+detect_existing_install() {
+  EXISTING_INSTALL_REASONS=()
+
+  if [ -d "${HOME_DIR}" ]; then
+    EXISTING_INSTALL_REASONS+=("validator home exists: ${HOME_DIR}")
+  fi
+
+  case "$(uname -s)" in
+    Linux)
+      if command -v systemctl > /dev/null 2>&1; then
+        if systemctl is-active --quiet svoted 2>/dev/null; then
+          EXISTING_INSTALL_REASONS+=("systemd service is active: svoted")
+        elif systemctl cat svoted > /dev/null 2>&1; then
+          EXISTING_INSTALL_REASONS+=("systemd service exists: svoted")
+        elif [ -f /etc/systemd/system/svoted.service ]; then
+          EXISTING_INSTALL_REASONS+=("systemd unit file exists: /etc/systemd/system/svoted.service")
+        fi
+      elif [ -f /etc/systemd/system/svoted.service ]; then
+        EXISTING_INSTALL_REASONS+=("systemd unit file exists: /etc/systemd/system/svoted.service")
+      fi
+      ;;
+    Darwin)
+      local plist_label="com.shielded-vote.validator"
+      local plist_file="${HOME}/Library/LaunchAgents/${plist_label}.plist"
+      if launchctl print "gui/$(id -u)/${plist_label}" > /dev/null 2>&1; then
+        EXISTING_INSTALL_REASONS+=("launchd service is active: ${plist_label}")
+      elif [ -f "${plist_file}" ]; then
+        EXISTING_INSTALL_REASONS+=("launchd service file exists: ${plist_file}")
+      fi
+      ;;
+  esac
+
+  [ "${#EXISTING_INSTALL_REASONS[@]}" -gt 0 ]
+}
+
+confirm_existing_install_reset() {
+  local response
+
+  if ! detect_existing_install; then
+    return 0
+  fi
+
+  echo ""
+  echo "WARNING: Existing Shielded-Vote validator install detected:"
+  printf '  - %s\n' "${EXISTING_INSTALL_REASONS[@]}"
+  echo ""
+  echo "Continuing will reset this validator from scratch:"
+  echo "  - stop the existing svoted service if it is running"
+  echo "  - delete ${HOME_DIR}"
+  echo "  - generate a new validator key, address, Pallas key, and EA key"
+  echo "  - rewrite and restart the validator service"
+  echo ""
+  echo "Previously printed join requests, operator addresses, and unfunded approvals become obsolete."
+  echo "Do not continue if the existing validator/address has funds you need to keep and its mnemonic is not backed up."
+  echo "For an already-bonded validator snapshot repair, use reset-validator-snapshot.sh instead."
+  echo ""
+
+  if [ "${SVOTE_FORCE_RESET:-0}" = "1" ]; then
+    echo "SVOTE_FORCE_RESET=1 set; continuing with destructive reset."
+    return 0
+  fi
+
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    echo "ERROR: Existing install detected in a non-interactive run."
+    echo "  Re-run with SVOTE_FORCE_RESET=1 only if you intend to delete ${HOME_DIR} and create a new validator identity."
+    exit 1
+  fi
+
+  printf "Type RESET to delete the existing install and continue: " > /dev/tty
+  read -r response < /dev/tty
+  if [ "${response}" != "RESET" ]; then
+    echo "Aborted. Existing install was left unchanged."
+    exit 1
+  fi
+}
+
+stop_existing_validator_service() {
+  case "$(uname -s)" in
+    Linux)
+      if command -v systemctl > /dev/null 2>&1 && systemctl is-active --quiet svoted 2>/dev/null; then
+        echo "Stopping running svoted service..."
+        sudo systemctl stop svoted
+      fi
+      ;;
+    Darwin)
+      local plist_label="com.shielded-vote.validator"
+      if launchctl print "gui/$(id -u)/${plist_label}" > /dev/null 2>&1; then
+        echo "Stopping running ${plist_label} service..."
+        launchctl bootout "gui/$(id -u)/${plist_label}" 2>/dev/null || true
+      fi
+      ;;
+  esac
+}
+
 systemd_env_quote() {
   local value="$1"
   value="${value//\\/\\\\}"
@@ -587,6 +681,8 @@ else
   fi
 fi
 
+confirm_existing_install_reset
+
 # ─── Discover network via voting-config (CDN) ───────────────────────────────
 # The voting-config JSON is the same one wallets fetch from
 # valargroup.github.io/token-holder-voting-config (ZIP 1244 §Vote Configuration
@@ -795,19 +891,7 @@ else
   tar xzf /tmp/shielded-vote-release.tar.gz -C /tmp "${TARBALL_DIR}/bin/svoted" "${TARBALL_DIR}/bin/create-val-tx"
 
   # Stop running service before overwriting (avoids "Text file busy").
-  OS_NAME=$(uname -s)
-  if [ "$OS_NAME" = "Darwin" ]; then
-    PLIST_LABEL="com.shielded-vote.validator"
-    if launchctl print "gui/$(id -u)/${PLIST_LABEL}" >/dev/null 2>&1; then
-      echo "Stopping running ${PLIST_LABEL} service before upgrading..."
-      launchctl bootout "gui/$(id -u)/${PLIST_LABEL}" 2>/dev/null || true
-    fi
-  else
-    if systemctl is-active --quiet svoted 2>/dev/null; then
-      echo "Stopping running svoted service before upgrading..."
-      systemctl stop svoted
-    fi
-  fi
+  stop_existing_validator_service
 
   cp "/tmp/${TARBALL_DIR}/bin/svoted" "${INSTALL_DIR}/svoted"
   cp "/tmp/${TARBALL_DIR}/bin/create-val-tx" "${INSTALL_DIR}/create-val-tx"
@@ -829,6 +913,8 @@ if [ "${DOWNLOADED_RELEASE_BINARIES}" = "1" ]; then
 fi
 
 # ─── Initialize node ─────────────────────────────────────────────────────────
+
+stop_existing_validator_service
 
 # Clean previous state if present.
 if [ -d "${HOME_DIR}" ]; then
@@ -1494,7 +1580,7 @@ SVCEOF
 
   sudo systemctl daemon-reload
   sudo systemctl enable ${SERVICE_NAME}
-  sudo systemctl start ${SERVICE_NAME}
+  sudo systemctl restart ${SERVICE_NAME}
   LOG_FOLLOW_COMMAND="journalctl -u ${SERVICE_NAME} -f"
   echo "Service ${SERVICE_NAME} started (survives SSH disconnect and reboots)."
   echo "Logs: ${LOG_FOLLOW_COMMAND}"
