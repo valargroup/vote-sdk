@@ -103,7 +103,14 @@ jobs:
           SVOTE_SKIP_SERVICE: "1"
           SVOTE_SKIP_CADDY: "1"
           SVOTE_ADMIN_URL: http://127.0.0.1:9
-        run: bash join.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash join.sh 2>&1 | tee join-output.log
+          if grep -Eq 'Mnemonic:|Write down the mnemonic' join-output.log; then
+            echo "join.sh printed validator mnemonic material"
+            exit 1
+          fi
 
       - name: Run svoted-wrapper unit smoke test
         run: bash scripts/test_svoted_wrapper.sh

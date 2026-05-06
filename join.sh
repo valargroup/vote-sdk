@@ -975,7 +975,11 @@ restore_latest_snapshot
 echo ""
 echo "=== Generating cryptographic keys ==="
 
-svoted init-validator-keys --home "${HOME_DIR}"
+if ! svoted init-validator-keys --home "${HOME_DIR}" > /dev/null; then
+  echo "ERROR: failed to generate cryptographic keys." >&2
+  exit 1
+fi
+echo "Cryptographic keys generated."
 
 VALIDATOR_ADDR=$(svoted keys show validator -a --keyring-backend test --home "${HOME_DIR}")
 VALIDATOR_VALOPER=$(svoted keys show validator --bech val -a --keyring-backend test --home "${HOME_DIR}")
