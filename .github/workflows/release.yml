@@ -225,6 +225,8 @@ jobs:
           chmod +x "${DIR}/scripts/reset-archive.sh"
           cp scripts/reset-validator-snapshot.sh "${DIR}/scripts/"
           chmod +x "${DIR}/scripts/reset-validator-snapshot.sh"
+          cp scripts/remove-validator.sh scripts/remove-pir.sh "${DIR}/scripts/"
+          chmod +x "${DIR}/scripts/remove-validator.sh" "${DIR}/scripts/remove-pir.sh"
           cp scripts/svoted-wrapper.sh "${DIR}/scripts/"
           chmod +x "${DIR}/scripts/svoted-wrapper.sh"
           cp deploy/Caddyfile "${DIR}/config/"
@@ -293,11 +295,17 @@ jobs:
           s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put join.sh s3://vote/join.sh --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/reset-validator-snapshot.sh s3://vote/reset-validator-snapshot.sh --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-validator.sh s3://vote/remove-validator.sh --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-pir.sh s3://vote/remove-pir.sh --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/svoted-wrapper.sh s3://vote/svoted-wrapper.sh --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join.sh \
             "s3://vote/scripts/join/${VERSION}/join.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/reset-validator-snapshot.sh \
             "s3://vote/scripts/reset-validator-snapshot/${VERSION}/reset-validator-snapshot.sh"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/remove-validator.sh \
+            "s3://vote/scripts/remove-validator/${VERSION}/remove-validator.sh"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/remove-pir.sh \
+            "s3://vote/scripts/remove-pir/${VERSION}/remove-pir.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/svoted-wrapper.sh \
             "s3://vote/scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"
 
