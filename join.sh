@@ -1656,7 +1656,7 @@ if [ -n "${VALIDATOR_URL:-}" ]; then
   echo "After bonding, add your public URL to vote_servers via a PR:"
   echo "  https://github.com/valargroup/token-holder-voting-config"
   echo "  Suggested JSON entry:"
-  echo "    $(jq -nc --arg url "${VALIDATOR_URL}" --arg label "${MONIKER}" '{url:$url,label:$label}')"
+  echo "    $(jq -nc --arg url "${VALIDATOR_URL}" --arg validator_label "${MONIKER}" '{url:$url,label:$validator_label}')"
 else
   echo "After bonding, configure a public HTTPS URL before adding this validator to vote_servers:"
   echo "  https://github.com/valargroup/token-holder-voting-config"
