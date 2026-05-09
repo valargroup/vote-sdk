@@ -8,7 +8,7 @@ Helper server.
 
 Sentry project: **svote-helper** (slug: `svote-helper-vm`) in the
 `valar-group` org. Dashboard:
-https://valar-group.sentry.io/projects/svote-helper-vm/
+https://valar-group.sentry.io/dashboard/3836839/
 
 The Helper server supports optional [Sentry](https://sentry.io) integration
 for capturing infrastructure errors. When disabled (the default), the Sentry
@@ -108,6 +108,31 @@ invalid votes.
 | API handler (`/shielded-vote/v1/share-status`) | Nullifier check failures (500s) |
 | HTTP panic recovery | Any panic in a helper HTTP handler |
 | Processor panic recovery | Any panic during share processing |
+
+### Share pipeline observability
+
+The helper share pipeline has distinct stages. Dashboard widgets should not
+treat HTTP request counts as durable queue counts.
+
+| Metric | Sentry signal | Meaning |
+|--------|---------------|---------|
+| Shares Received | HTTP server span for `POST /shielded-vote/v1/shares` | Every request that reaches the share endpoint. Includes invalid requests, unauthorized requests, conflicts, idempotent duplicates, and newly queued shares. |
+| Shares Enqueued | `helper.enqueue` span with description `helper.share_enqueued` | A new unique share payload was inserted into the SQLite queue (`EnqueueInserted`) in `ShareStateReceived`. Duplicates and conflicts are excluded. |
+| Shares Processed | `helper.process_share` span | A ready queued share was taken by the background processor after its `submit_at` time and processing began. |
+| Share Reveals Submitted | HTTP client span for `POST /shielded-vote/v1/reveal-share` | The helper submitted a `MsgRevealShare` to the chain REST API. |
+| Shares Confirmed | Share nullifier observed on-chain | Final confirmation that the reveal was accepted on-chain. The `/share-status/{roundId}/{nullifier}` endpoint reports this as `confirmed`. |
+
+For an individual share, the intended lifecycle is:
+
+```
+Received request -> Enqueued -> Processed -> Submitted -> Confirmed
+```
+
+`Shares Received` can be greater than `Shares Enqueued` because endpoint hits
+include duplicate, conflicting, unauthorized, and invalid submissions. Within a
+fixed dashboard time window, `Enqueued`, `Processed`, and `Submitted` may also
+cross window boundaries: a share can be enqueued before the window and processed
+inside it, or enqueued inside the window with a future `submit_at`.
 
 ### Tags
 

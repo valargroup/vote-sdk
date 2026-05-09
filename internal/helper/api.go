@@ -162,6 +162,17 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "conflicting share payload for round_id/share_index", http.StatusConflict)
 		return
 	}
+	if result == EnqueueInserted {
+		_, span := StartTrace(r.Context(), "helper.enqueue", "helper.share_enqueued", map[string]string{
+			"round_id": payload.VoteRoundID,
+		}, map[string]interface{}{
+			"share_index":   payload.EncShare.ShareIndex,
+			"proposal_id":   payload.ProposalID,
+			"tree_position": payload.TreePosition,
+			"submit_at":     payload.SubmitAt,
+		})
+		span.Finish(nil)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	status := "queued"
