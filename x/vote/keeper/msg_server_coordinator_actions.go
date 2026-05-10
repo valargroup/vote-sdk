@@ -15,6 +15,22 @@ import (
 
 const coordinatorActionTTLSeconds uint64 = 7 * 24 * 60 * 60
 
+var coordinatorActionPayloadTypes = struct {
+	createVotingSession string
+	updateVoteManagers  string
+	scheduleUpgrade     string
+	cancelUpgrade       string
+	setEndorser         string
+	authorizedSend      string
+}{
+	createVotingSession: payloadMessageTypeName(&types.MsgCreateVotingSession{}),
+	updateVoteManagers:  payloadMessageTypeName(&types.MsgUpdateVoteManagers{}),
+	scheduleUpgrade:     payloadMessageTypeName(&types.MsgScheduleUpgrade{}),
+	cancelUpgrade:       payloadMessageTypeName(&types.MsgCancelUpgrade{}),
+	setEndorser:         payloadMessageTypeName(&types.MsgSetEndorser{}),
+	authorizedSend:      payloadMessageTypeName(&types.MsgAuthorizedSend{}),
+}
+
 // ProposeCoordinatorAction validates and stores a coordinator action. The
 // proposer is recorded as the first approval, so threshold 1 actions execute in
 // this transaction. The response Executed field is true only when execution
@@ -211,7 +227,7 @@ func (ms msgServer) currentCoordinatorApprovalCount(goCtx context.Context, appro
 // proposer. For sends, the source account must be a current coordinator.
 func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *anypb.Any, proposer string) error {
 	switch coordinatorPayloadType(payload) {
-	case "svote.v1.MsgCreateVotingSession":
+	case coordinatorActionPayloadTypes.createVotingSession:
 		msg := &types.MsgCreateVotingSession{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
@@ -220,7 +236,7 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 			return err
 		}
 		return validatePayloadCreator(msg.Creator, proposer)
-	case "svote.v1.MsgUpdateVoteManagers":
+	case coordinatorActionPayloadTypes.updateVoteManagers:
 		msg := &types.MsgUpdateVoteManagers{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
@@ -229,7 +245,7 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 			return err
 		}
 		return validatePayloadCreator(msg.Creator, proposer)
-	case "svote.v1.MsgScheduleUpgrade":
+	case coordinatorActionPayloadTypes.scheduleUpgrade:
 		msg := &types.MsgScheduleUpgrade{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
@@ -238,7 +254,7 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 			return err
 		}
 		return validatePayloadCreator(msg.Creator, proposer)
-	case "svote.v1.MsgCancelUpgrade":
+	case coordinatorActionPayloadTypes.cancelUpgrade:
 		msg := &types.MsgCancelUpgrade{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
@@ -247,7 +263,7 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 			return err
 		}
 		return validatePayloadCreator(msg.Creator, proposer)
-	case "svote.v1.MsgSetEndorser":
+	case coordinatorActionPayloadTypes.setEndorser:
 		msg := &types.MsgSetEndorser{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
@@ -256,7 +272,7 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 			return err
 		}
 		return validatePayloadCreator(msg.Creator, proposer)
-	case "svote.v1.MsgAuthorizedSend":
+	case coordinatorActionPayloadTypes.authorizedSend:
 		msg := &types.MsgAuthorizedSend{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
@@ -284,42 +300,42 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 // toward execution; sends use it to require source account approval.
 func (ms msgServer) executeCoordinatorPayload(goCtx context.Context, payload *anypb.Any, approvals []string) error {
 	switch coordinatorPayloadType(payload) {
-	case "svote.v1.MsgCreateVotingSession":
+	case coordinatorActionPayloadTypes.createVotingSession:
 		msg := &types.MsgCreateVotingSession{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
 		}
 		_, err := ms.executeCreateVotingSession(goCtx, msg)
 		return err
-	case "svote.v1.MsgUpdateVoteManagers":
+	case coordinatorActionPayloadTypes.updateVoteManagers:
 		msg := &types.MsgUpdateVoteManagers{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
 		}
 		_, err := ms.executeUpdateVoteManagers(goCtx, msg)
 		return err
-	case "svote.v1.MsgScheduleUpgrade":
+	case coordinatorActionPayloadTypes.scheduleUpgrade:
 		msg := &types.MsgScheduleUpgrade{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
 		}
 		_, err := ms.executeScheduleUpgrade(goCtx, msg)
 		return err
-	case "svote.v1.MsgCancelUpgrade":
+	case coordinatorActionPayloadTypes.cancelUpgrade:
 		msg := &types.MsgCancelUpgrade{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
 		}
 		_, err := ms.executeCancelUpgrade(goCtx, msg)
 		return err
-	case "svote.v1.MsgSetEndorser":
+	case coordinatorActionPayloadTypes.setEndorser:
 		msg := &types.MsgSetEndorser{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
 		}
 		_, err := ms.executeSetEndorser(goCtx, msg)
 		return err
-	case "svote.v1.MsgAuthorizedSend":
+	case coordinatorActionPayloadTypes.authorizedSend:
 		msg := &types.MsgAuthorizedSend{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
@@ -354,6 +370,10 @@ func unmarshalAnyPayload(any *anypb.Any, msg proto.Message) error {
 		return fmt.Errorf("%w: failed to decode %s: %v", types.ErrInvalidCoordinatorAction, any.TypeUrl, err)
 	}
 	return nil
+}
+
+func payloadMessageTypeName(msg proto.Message) string {
+	return string(msg.ProtoReflect().Descriptor().FullName())
 }
 
 // coordinatorPayloadType normalizes Any TypeUrl values for switch dispatch. It
