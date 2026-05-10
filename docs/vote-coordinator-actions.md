@@ -119,6 +119,14 @@ To approve a pending action from the CLI:
 svoted tx vote approve-coordinator-action <action-id> --from <coordinator-key>
 ```
 
+To inspect the coordinator policy and actions from the CLI:
+
+```bash
+svoted query vote vote-managers
+svoted query vote pending-coordinator-actions
+svoted query vote coordinator-action <action-id>
+```
+
 To inspect the policy and pending actions through the REST API:
 
 ```bash

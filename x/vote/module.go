@@ -421,6 +421,19 @@ func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 					Short:     "Query the current coordinator policy",
 				},
 				{
+					RpcMethod: "CoordinatorAction",
+					Use:       "coordinator-action [action-id]",
+					Short:     "Query a coordinator action by ID",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "action_id"},
+					},
+				},
+				{
+					RpcMethod: "PendingCoordinatorActions",
+					Use:       "pending-coordinator-actions",
+					Short:     "Query pending coordinator actions",
+				},
+				{
 					RpcMethod: "ListRounds",
 					Use:       "list-rounds",
 					Short:     "List all stored vote rounds",
