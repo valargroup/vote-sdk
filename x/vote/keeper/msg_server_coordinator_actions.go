@@ -15,8 +15,10 @@ import (
 
 const coordinatorActionTTLSeconds uint64 = 7 * 24 * 60 * 60
 
-// ProposeCoordinatorAction creates a threshold-gated coordinator action. The
-// proposer is recorded as the first approval; threshold=1 executes immediately.
+// ProposeCoordinatorAction validates and stores a coordinator action. The
+// proposer is recorded as the first approval, so threshold 1 actions execute in
+// this transaction. The response Executed field is true only when execution
+// happened before this method returned.
 func (ms msgServer) ProposeCoordinatorAction(goCtx context.Context, msg *types.MsgProposeCoordinatorAction) (*types.MsgProposeCoordinatorActionResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
@@ -70,8 +72,10 @@ func (ms msgServer) ProposeCoordinatorAction(goCtx context.Context, msg *types.M
 	return &types.MsgProposeCoordinatorActionResponse{ActionId: actionID, Executed: executed}, nil
 }
 
-// ApproveCoordinatorAction adds one distinct current coordinator approval to a
-// pending action and executes it once the current policy threshold is met.
+// ApproveCoordinatorAction adds one coordinator approval and executes the action
+// once the current policy threshold is met. If the approver already approved,
+// this rechecks execution so actions can become live after a policy change; it
+// still rejects the duplicate when the action is not ready to execute.
 func (ms msgServer) ApproveCoordinatorAction(goCtx context.Context, msg *types.MsgApproveCoordinatorAction) (*types.MsgApproveCoordinatorActionResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
@@ -136,6 +140,10 @@ func (ms msgServer) ApproveCoordinatorAction(goCtx context.Context, msg *types.M
 	return &types.MsgApproveCoordinatorActionResponse{ActionId: msg.ActionId, Executed: executed}, nil
 }
 
+// maybeExecuteCoordinatorAction executes action.Payload when the action has
+// enough current coordinator approvals. It mutates action in place. The return
+// value is true only when this call executed the payload and marked the action
+// executed.
 func (ms msgServer) maybeExecuteCoordinatorAction(goCtx context.Context, action *types.CoordinatorAction) (bool, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	if coordinatorActionExpired(ctx, action) {
@@ -159,6 +167,10 @@ func (ms msgServer) maybeExecuteCoordinatorAction(goCtx context.Context, action 
 	return true, nil
 }
 
+// currentCoordinatorApprovalCount recounts stored approvals against the current
+// coordinator policy. It returns the count, current threshold, and the normalized
+// approvals that still belong to current coordinators. Removed coordinators,
+// duplicate approvals, and malformed addresses do not count.
 func (ms msgServer) currentCoordinatorApprovalCount(goCtx context.Context, approvals []string) (uint32, uint32, []string, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
@@ -193,6 +205,10 @@ func (ms msgServer) currentCoordinatorApprovalCount(goCtx context.Context, appro
 	return uint32(len(currentApprovals)), set.Threshold, currentApprovals, nil
 }
 
+// validateCoordinatorPayload checks that the proposed payload is one of the
+// coordinator controlled actions and that it is valid before an action ID is
+// allocated. For creator based messages, the embedded creator must match the
+// proposer. For sends, the source account must be a current coordinator.
 func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *anypb.Any, proposer string) error {
 	switch coordinatorPayloadType(payload) {
 	case "svote.v1.MsgCreateVotingSession":
@@ -262,6 +278,10 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 	}
 }
 
+// executeCoordinatorPayload runs the already approved payload. Callers must
+// perform proposer, expiry, and threshold checks before reaching this helper.
+// The approvals argument is the current coordinator approvals that counted
+// toward execution; sends use it to require source account approval.
 func (ms msgServer) executeCoordinatorPayload(goCtx context.Context, payload *anypb.Any, approvals []string) error {
 	switch coordinatorPayloadType(payload) {
 	case "svote.v1.MsgCreateVotingSession":
@@ -311,6 +331,8 @@ func (ms msgServer) executeCoordinatorPayload(goCtx context.Context, payload *an
 	}
 }
 
+// validatePayloadCreator binds a coordinator proposal to the signer that
+// created the embedded action payload.
 func validatePayloadCreator(rawCreator string, proposer string) error {
 	creator, err := normalizeBech32Addr(rawCreator)
 	if err != nil {
@@ -322,6 +344,8 @@ func validatePayloadCreator(rawCreator string, proposer string) error {
 	return nil
 }
 
+// unmarshalAnyPayload decodes the Any value into the concrete message chosen by
+// the caller. The TypeUrl is used for dispatch before this helper is called.
 func unmarshalAnyPayload(any *anypb.Any, msg proto.Message) error {
 	if any == nil {
 		return fmt.Errorf("%w: payload cannot be nil", types.ErrInvalidCoordinatorAction)
@@ -332,6 +356,8 @@ func unmarshalAnyPayload(any *anypb.Any, msg proto.Message) error {
 	return nil
 }
 
+// coordinatorPayloadType normalizes Any TypeUrl values for switch dispatch. It
+// accepts both "/svote.v1.MsgX" and fully qualified URL style type URLs.
 func coordinatorPayloadType(any *anypb.Any) string {
 	if any == nil {
 		return ""
@@ -343,10 +369,15 @@ func coordinatorPayloadType(any *anypb.Any) string {
 	return typeURL
 }
 
+// coordinatorActionExpired treats zero ExpiresAt as unset and otherwise expires
+// only after the stored Unix time has passed.
 func coordinatorActionExpired(ctx sdk.Context, action *types.CoordinatorAction) bool {
 	return action.ExpiresAt != 0 && uint64(ctx.BlockTime().Unix()) > action.ExpiresAt
 }
 
+// emitCoordinatorExecutionEvent emits the best current view of approval count
+// and threshold. If the recount fails, it falls back to the stored approval
+// count so execution itself is not hidden by event formatting.
 func (ms msgServer) emitCoordinatorExecutionEvent(goCtx context.Context, ctx sdk.Context, action *types.CoordinatorAction) {
 	approvalCount := strconv.Itoa(len(action.Approvals))
 	threshold := approvalCount
