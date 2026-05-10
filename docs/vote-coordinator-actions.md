@@ -64,8 +64,8 @@ These actions must go through the coordinator action flow:
 - set, rotate, or clear an endorser mapping,
 - send funds from a coordinator account, including funding validator setup.
 
-Direct external transactions for these coordinator-owned actions are blocked.
-The external transaction path is `propose coordinator action` and `approve
+These coordinator-owned actions are payloads, not public `Msg` RPCs. The
+external transaction path is `propose coordinator action` and `approve
 coordinator action`.
 
 ## Coordinator-Funded Sends
@@ -79,9 +79,9 @@ For example, if an action sends funds from `sv1alice...`, then `sv1alice...`
 must approve that action. It is not enough for other coordinators to approve a
 send from Alice's account.
 
-Direct top-level sends are rejected, including sends from bonded validators.
-Funding is intended to flow from a coordinator account to the prospective
-validator account that will bond it.
+`MsgAuthorizedSend` is only a coordinator action payload. Funding is intended
+to flow from a coordinator account to the prospective validator account that
+will bond it.
 
 ## Actions Outside Coordinator Multisig
 

@@ -759,5 +759,5 @@ export async function rejectRegistration(params: ApproveRegistrationParams): Pro
   });
 }
 
-// submitSession was removed: MsgCreateVotingSession is now a standard Cosmos
-// SDK transaction signed client-side. See cosmosTx.ts.
+// submitSession was removed: MsgCreateVotingSession is now proposed as a
+// coordinator action signed client-side. See cosmosTx.ts.

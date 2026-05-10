@@ -55,7 +55,6 @@ var (
 	ErrEndorserNotFound  = errors.Register(ModuleName, 43, "endorser not found")
 
 	// Coordinator action errors.
-	ErrCoordinatorActionRequired    = errors.Register(ModuleName, 44, "coordinator action required")
 	ErrCoordinatorActionNotFound    = errors.Register(ModuleName, 45, "coordinator action not found")
 	ErrCoordinatorActionExpired     = errors.Register(ModuleName, 46, "coordinator action expired")
 	ErrCoordinatorAlreadyApproved   = errors.Register(ModuleName, 47, "coordinator action already approved")

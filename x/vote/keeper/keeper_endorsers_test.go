@@ -596,25 +596,6 @@ func (s *KeeperTestSuite) TestEndorsers_MsgServerAuthAndIdempotency() {
 	s.Require().False(found)
 }
 
-func (s *KeeperTestSuite) TestEndorsers_SetEndorserDirectRequiresCoordinatorAction() {
-	kv := s.keeper.OpenKVStore(s.ctx)
-	manager := testAddr(0x01)
-	endorser := testAddr(0x02)
-	s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{Addresses: []string{manager}}))
-
-	msgServer := keeper.NewMsgServerImpl(s.keeper)
-	_, err := msgServer.SetEndorser(s.ctx, &types.MsgSetEndorser{
-		Creator:    manager,
-		EndorserId: "zodl",
-		Address:    endorser,
-	})
-	s.Require().ErrorIs(err, types.ErrCoordinatorActionRequired)
-
-	_, found, err := s.keeper.GetEndorser(kv, "zodl")
-	s.Require().NoError(err)
-	s.Require().False(found)
-}
-
 func (s *KeeperTestSuite) TestEndorsers_MsgClearRoundEndorsement_TableDriven() {
 	manager := testAddr(0x01)
 	endorser := testAddr(0x02)

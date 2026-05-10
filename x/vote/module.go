@@ -51,7 +51,6 @@ func init() {
 		&modulev1.Module{},
 		appmodule.Provide(
 			ProvideModule,
-			ProvideCreateVotingSessionSigner,
 			ProvideDelegateVoteSigner,
 			ProvideCastVoteSigner,
 			ProvideRevealShareSigner,
@@ -62,10 +61,6 @@ func init() {
 			ProvideContributeDKGSigner,
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
-			ProvideUpdateVoteManagersSigner,
-			ProvideAuthorizedSendSigner,
-			ProvideScheduleUpgradeSigner,
-			ProvideCancelUpgradeSigner,
 		),
 	)
 }
@@ -136,13 +131,6 @@ func createValidatorWithPallasKeySignerFn(msg proto.Message) ([][]byte, error) {
 		return nil, fmt.Errorf("invalid validator address in staking_msg: %w", err)
 	}
 	return [][]byte{sdk.AccAddress(valAddr)}, nil
-}
-
-func ProvideCreateVotingSessionSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgCreateVotingSession"),
-		Fn:      ceremonyCreatorSignerFn,
-	}
 }
 
 func ProvideDelegateVoteSigner() signing.CustomGetSigner {
@@ -221,49 +209,6 @@ func ProvideCreateValidatorWithPallasKeySigner() signing.CustomGetSigner {
 	}
 }
 
-func ProvideUpdateVoteManagersSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgUpdateVoteManagers"),
-		Fn:      ceremonyCreatorSignerFn,
-	}
-}
-
-// authorizedSendSignerFn extracts the signer from MsgAuthorizedSend's
-// from_address field (an account bech32 address).
-func authorizedSendSignerFn(msg proto.Message) ([][]byte, error) {
-	fd := msg.ProtoReflect().Descriptor().Fields().ByName("from_address")
-	if fd == nil {
-		return nil, fmt.Errorf("MsgAuthorizedSend has no from_address field")
-	}
-	addr := msg.ProtoReflect().Get(fd).String()
-	accAddr, err := sdk.AccAddressFromBech32(addr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid from_address %q: %w", addr, err)
-	}
-	return [][]byte{accAddr}, nil
-}
-
-func ProvideAuthorizedSendSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgAuthorizedSend"),
-		Fn:      authorizedSendSignerFn,
-	}
-}
-
-func ProvideScheduleUpgradeSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgScheduleUpgrade"),
-		Fn:      ceremonyCreatorSignerFn,
-	}
-}
-
-func ProvideCancelUpgradeSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgCancelUpgrade"),
-		Fn:      ceremonyCreatorSignerFn,
-	}
-}
-
 // ModuleInputs defines the inputs needed to create the vote module.
 type ModuleInputs struct {
 	depinject.In
@@ -334,8 +279,8 @@ func (AppModule) Name() string {
 	return types.ModuleName
 }
 
-// RegisterInterfaces registers the vote module's message types with the
-// InterfaceRegistry, required for MsgServiceRouter to accept vote messages.
+// RegisterInterfaces registers public vote transaction messages and coordinator
+// action payload messages with the InterfaceRegistry.
 func (AppModule) RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	types.RegisterInterfaces(registry)
 }
@@ -344,9 +289,8 @@ func (AppModule) RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 //
 // Both QueryServer and MsgServer are registered. Vote-round messages bypass
 // the Cosmos SDK Tx envelope (using a raw [tag || protobuf] wire format) with
-// ZKP/RedPallas authentication. Ceremony messages (except MsgAck) use
-// standard Cosmos SDK transactions with signature verification and validator
-// gating. All messages are routed to the keeper via BaseApp's MsgServiceRouter.
+// ZKP/RedPallas authentication. Public Msg service messages are routed to the
+// keeper via BaseApp's MsgServiceRouter.
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServerImpl(am.keeper))
 	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))

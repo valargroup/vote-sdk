@@ -1038,37 +1038,58 @@ func TestRegisterInterfaces_IncludesCeremonyMsgs(t *testing.T) {
 	}
 }
 
-// TestAllSignerProviders_Completeness verifies that every Msg type registered
-// in RegisterInterfaces has a corresponding signer provider in init(). This
-// catches the case where a new message is added to codec.go but forgotten in
-// module.go.
-func TestAllSignerProviders_Completeness(t *testing.T) {
+func TestMsgServiceSurface_RemovesCoordinatorPayloadRPCs(t *testing.T) {
+	msgService := types.File_svote_v1_tx_proto.Services().ByName("Msg")
+	require.NotNil(t, msgService)
+
+	removedMethods := []protoreflect.Name{
+		"CreateVotingSession",
+		"UpdateVoteManagers",
+		"AuthorizedSend",
+		"ScheduleUpgrade",
+		"CancelUpgrade",
+		"SetEndorser",
+	}
+	for _, method := range removedMethods {
+		require.Nil(t, msgService.Methods().ByName(method), "coordinator payload %s must not be a public Msg RPC", method)
+	}
+
+	requiredMethods := []protoreflect.Name{
+		"ProposeCoordinatorAction",
+		"ApproveCoordinatorAction",
+	}
+	for _, method := range requiredMethods {
+		require.NotNil(t, msgService.Methods().ByName(method), "coordinator action RPC %s must remain public", method)
+	}
+}
+
+// TestCustomSignerProviders_Registered verifies the custom signer providers
+// still target the public Msg service messages that need custom signing.
+func TestCustomSignerProviders_Registered(t *testing.T) {
 	allSigners := []signing.CustomGetSigner{
-		vote.ProvideCreateVotingSessionSigner(),
 		vote.ProvideDelegateVoteSigner(),
 		vote.ProvideCastVoteSigner(),
 		vote.ProvideRevealShareSigner(),
 		vote.ProvideSubmitTallySigner(),
+		vote.ProvideSubmitPartialDecryptionSigner(),
 		vote.ProvideRegisterPallasKeySigner(),
 		vote.ProvideRotatePallasKeySigner(),
 		vote.ProvideContributeDKGSigner(),
 		vote.ProvideAckExecutiveAuthorityKeySigner(),
-		vote.ProvideScheduleUpgradeSigner(),
-		vote.ProvideCancelUpgradeSigner(),
+		vote.ProvideCreateValidatorWithPallasKeySigner(),
 	}
 
 	wantMsgTypes := []protoreflect.FullName{
-		"svote.v1.MsgCreateVotingSession",
 		"svote.v1.MsgDelegateVote",
 		"svote.v1.MsgCastVote",
 		"svote.v1.MsgRevealShare",
 		"svote.v1.MsgSubmitTally",
+		"svote.v1.MsgSubmitPartialDecryption",
 		"svote.v1.MsgRegisterPallasKey",
 		"svote.v1.MsgRotatePallasKey",
 		"svote.v1.MsgContributeDKG",
 		"svote.v1.MsgAckExecutiveAuthorityKey",
-		"svote.v1.MsgScheduleUpgrade",
-		"svote.v1.MsgCancelUpgrade",
+		"svote.v1.MsgCreateValidatorWithPallasKey",
 	}
 
 	signerMap := make(map[protoreflect.FullName]bool, len(allSigners))

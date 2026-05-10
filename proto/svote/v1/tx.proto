@@ -13,7 +13,6 @@ option go_package = "github.com/valargroup/vote-sdk/x/vote/types";
 // envelope entirely; the Msg service is defined here for gRPC registration only.
 service Msg {
   option (cosmos.msg.v1.service) = true;
-  rpc CreateVotingSession(MsgCreateVotingSession) returns (MsgCreateVotingSessionResponse);
   rpc DelegateVote(MsgDelegateVote) returns (MsgDelegateVoteResponse);
   rpc CastVote(MsgCastVote) returns (MsgCastVoteResponse);
   rpc RevealShare(MsgRevealShare) returns (MsgRevealShareResponse);
@@ -24,11 +23,6 @@ service Msg {
   rpc ContributeDKG(MsgContributeDKG) returns (MsgContributeDKGResponse);
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
-  rpc UpdateVoteManagers(MsgUpdateVoteManagers) returns (MsgUpdateVoteManagersResponse);
-  rpc AuthorizedSend(MsgAuthorizedSend) returns (MsgAuthorizedSendResponse);
-  rpc ScheduleUpgrade(MsgScheduleUpgrade) returns (MsgScheduleUpgradeResponse);
-  rpc CancelUpgrade(MsgCancelUpgrade) returns (MsgCancelUpgradeResponse);
-  rpc SetEndorser(MsgSetEndorser) returns (MsgSetEndorserResponse);
   rpc EndorseRound(MsgEndorseRound) returns (MsgEndorseRoundResponse);
   rpc ClearRoundEndorsement(MsgClearRoundEndorsement) returns (MsgClearRoundEndorsementResponse);
   rpc ProposeCoordinatorAction(MsgProposeCoordinatorAction) returns (MsgProposeCoordinatorActionResponse);
@@ -216,7 +210,7 @@ message MsgUpdateVoteManagersResponse {}
 //
 // Authorization rules:
 //   - Coordinator-funded sends must be approved as coordinator actions.
-//   - Direct top-level MsgAuthorizedSend is rejected.
+//   - MsgAuthorizedSend is a coordinator action payload, not a public Msg RPC.
 //   - The source account must be a current coordinator that approved the action.
 message MsgAuthorizedSend {
   string from_address = 1;

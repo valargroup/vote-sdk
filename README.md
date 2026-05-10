@@ -329,7 +329,7 @@ A positive-security allowlist: only messages whose proto type URL appears in `De
 | `MsgDelegate`, `MsgUndelegate`, `MsgBeginRedelegate` | Prevents validators from reorganizing stake without a vote manager. Initial self-delegation is handled atomically by `MsgCreateValidatorWithPallasKey`. |
 | `MsgWithdrawDelegatorReward`, `MsgWithdrawValidatorCommission` | Prevents extracting staking rewards as liquid tokens that could be transferred outside of vote-manager control. |
 | `MsgFundCommunityPool`, `MsgSetWithdrawAddress`, `MsgUpdateParams` | No governance module; these have no legitimate use on this chain. |
-| Direct coordinator-owned vote messages | `MsgCreateVotingSession`, `MsgUpdateVoteManagers`, `MsgScheduleUpgrade`, `MsgCancelUpgrade`, `MsgSetEndorser`, and `MsgAuthorizedSend` must be executed through `MsgProposeCoordinatorAction`. |
+| Coordinator-owned vote payloads | `MsgCreateVotingSession`, `MsgUpdateVoteManagers`, `MsgScheduleUpgrade`, `MsgCancelUpgrade`, `MsgSetEndorser`, and `MsgAuthorizedSend` are not public `Msg` RPCs and must be executed through `MsgProposeCoordinatorAction`. |
 | All vote/ceremony ZKP messages | Must use the custom `VoteTxWrapper` wire format with ZKP/RedPallas authentication. Blocked by both Layer 1 and Layer 2. |
 
 #### `MsgAuthorizedSend` authorization rules
@@ -339,7 +339,7 @@ is only executable through coordinator action approval. Authorization is
 enforced in the MsgServer handler (`x/vote/keeper/msg_server_send.go`):
 
 - **Coordinator-funded sends** must go through coordinator action approval. The source funding account must be one of the approving coordinators.
-- **Direct top-level `MsgAuthorizedSend` is rejected**, including sends from bonded validators.
+- **`MsgAuthorizedSend` is a coordinator action payload, not a public `Msg` RPC.**
 - **All non-coordinator source accounts** are rejected.
 
 #### Design assumptions

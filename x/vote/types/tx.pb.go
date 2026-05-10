@@ -1555,7 +1555,7 @@ func (*MsgUpdateVoteManagersResponse) Descriptor() ([]byte, []int) {
 //
 // Authorization rules:
 //   - Coordinator-funded sends must be approved as coordinator actions.
-//   - Direct top-level MsgAuthorizedSend is rejected.
+//   - MsgAuthorizedSend is a coordinator action payload, not a public Msg RPC.
 //   - The source account must be a current coordinator that approved the action.
 type MsgAuthorizedSend struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2524,9 +2524,9 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\taction_id\x18\x02 \x01(\x04R\bactionId:\f\x82\xe7\xb0*\acreator\"^\n" +
 	"#MsgApproveCoordinatorActionResponse\x12\x1b\n" +
 	"\taction_id\x18\x01 \x01(\x04R\bactionId\x12\x1a\n" +
-	"\bexecuted\x18\x02 \x01(\bR\bexecuted2\xbb\x0e\n" +
-	"\x03Msg\x12a\n" +
-	"\x13CreateVotingSession\x12 .svote.v1.MsgCreateVotingSession\x1a(.svote.v1.MsgCreateVotingSessionResponse\x12L\n" +
+	"\bexecuted\x18\x02 \x01(\bR\bexecuted2\xb1\n" +
+	"\n" +
+	"\x03Msg\x12L\n" +
 	"\fDelegateVote\x12\x19.svote.v1.MsgDelegateVote\x1a!.svote.v1.MsgDelegateVoteResponse\x12@\n" +
 	"\bCastVote\x12\x15.svote.v1.MsgCastVote\x1a\x1d.svote.v1.MsgCastVoteResponse\x12I\n" +
 	"\vRevealShare\x12\x18.svote.v1.MsgRevealShare\x1a .svote.v1.MsgRevealShareResponse\x12I\n" +
@@ -2536,12 +2536,7 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x0fRotatePallasKey\x12\x1c.svote.v1.MsgRotatePallasKey\x1a$.svote.v1.MsgRotatePallasKeyResponse\x12O\n" +
 	"\rContributeDKG\x12\x1a.svote.v1.MsgContributeDKG\x1a\".svote.v1.MsgContributeDKGResponse\x12p\n" +
 	"\x18AckExecutiveAuthorityKey\x12%.svote.v1.MsgAckExecutiveAuthorityKey\x1a-.svote.v1.MsgAckExecutiveAuthorityKeyResponse\x12|\n" +
-	"\x1cCreateValidatorWithPallasKey\x12).svote.v1.MsgCreateValidatorWithPallasKey\x1a1.svote.v1.MsgCreateValidatorWithPallasKeyResponse\x12^\n" +
-	"\x12UpdateVoteManagers\x12\x1f.svote.v1.MsgUpdateVoteManagers\x1a'.svote.v1.MsgUpdateVoteManagersResponse\x12R\n" +
-	"\x0eAuthorizedSend\x12\x1b.svote.v1.MsgAuthorizedSend\x1a#.svote.v1.MsgAuthorizedSendResponse\x12U\n" +
-	"\x0fScheduleUpgrade\x12\x1c.svote.v1.MsgScheduleUpgrade\x1a$.svote.v1.MsgScheduleUpgradeResponse\x12O\n" +
-	"\rCancelUpgrade\x12\x1a.svote.v1.MsgCancelUpgrade\x1a\".svote.v1.MsgCancelUpgradeResponse\x12I\n" +
-	"\vSetEndorser\x12\x18.svote.v1.MsgSetEndorser\x1a .svote.v1.MsgSetEndorserResponse\x12L\n" +
+	"\x1cCreateValidatorWithPallasKey\x12).svote.v1.MsgCreateValidatorWithPallasKey\x1a1.svote.v1.MsgCreateValidatorWithPallasKeyResponse\x12L\n" +
 	"\fEndorseRound\x12\x19.svote.v1.MsgEndorseRound\x1a!.svote.v1.MsgEndorseRoundResponse\x12g\n" +
 	"\x15ClearRoundEndorsement\x12\".svote.v1.MsgClearRoundEndorsement\x1a*.svote.v1.MsgClearRoundEndorsementResponse\x12p\n" +
 	"\x18ProposeCoordinatorAction\x12%.svote.v1.MsgProposeCoordinatorAction\x1a-.svote.v1.MsgProposeCoordinatorActionResponse\x12p\n" +
@@ -2613,48 +2608,36 @@ var file_svote_v1_tx_proto_depIdxs = []int32{
 	43, // 2: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
 	22, // 3: svote.v1.MsgSubmitPartialDecryption.entries:type_name -> svote.v1.PartialDecryptionEntry
 	44, // 4: svote.v1.MsgProposeCoordinatorAction.payload:type_name -> google.protobuf.Any
-	0,  // 5: svote.v1.Msg.CreateVotingSession:input_type -> svote.v1.MsgCreateVotingSession
-	2,  // 6: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
-	4,  // 7: svote.v1.Msg.CastVote:input_type -> svote.v1.MsgCastVote
-	6,  // 8: svote.v1.Msg.RevealShare:input_type -> svote.v1.MsgRevealShare
-	8,  // 9: svote.v1.Msg.SubmitTally:input_type -> svote.v1.MsgSubmitTally
-	21, // 10: svote.v1.Msg.SubmitPartialDecryption:input_type -> svote.v1.MsgSubmitPartialDecryption
-	11, // 11: svote.v1.Msg.RegisterPallasKey:input_type -> svote.v1.MsgRegisterPallasKey
-	13, // 12: svote.v1.Msg.RotatePallasKey:input_type -> svote.v1.MsgRotatePallasKey
-	15, // 13: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
-	17, // 14: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
-	19, // 15: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
-	24, // 16: svote.v1.Msg.UpdateVoteManagers:input_type -> svote.v1.MsgUpdateVoteManagers
-	26, // 17: svote.v1.Msg.AuthorizedSend:input_type -> svote.v1.MsgAuthorizedSend
-	28, // 18: svote.v1.Msg.ScheduleUpgrade:input_type -> svote.v1.MsgScheduleUpgrade
-	30, // 19: svote.v1.Msg.CancelUpgrade:input_type -> svote.v1.MsgCancelUpgrade
-	32, // 20: svote.v1.Msg.SetEndorser:input_type -> svote.v1.MsgSetEndorser
-	34, // 21: svote.v1.Msg.EndorseRound:input_type -> svote.v1.MsgEndorseRound
-	36, // 22: svote.v1.Msg.ClearRoundEndorsement:input_type -> svote.v1.MsgClearRoundEndorsement
-	38, // 23: svote.v1.Msg.ProposeCoordinatorAction:input_type -> svote.v1.MsgProposeCoordinatorAction
-	40, // 24: svote.v1.Msg.ApproveCoordinatorAction:input_type -> svote.v1.MsgApproveCoordinatorAction
-	1,  // 25: svote.v1.Msg.CreateVotingSession:output_type -> svote.v1.MsgCreateVotingSessionResponse
-	3,  // 26: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
-	5,  // 27: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
-	7,  // 28: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
-	10, // 29: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
-	23, // 30: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
-	12, // 31: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
-	14, // 32: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
-	16, // 33: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
-	18, // 34: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
-	20, // 35: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
-	25, // 36: svote.v1.Msg.UpdateVoteManagers:output_type -> svote.v1.MsgUpdateVoteManagersResponse
-	27, // 37: svote.v1.Msg.AuthorizedSend:output_type -> svote.v1.MsgAuthorizedSendResponse
-	29, // 38: svote.v1.Msg.ScheduleUpgrade:output_type -> svote.v1.MsgScheduleUpgradeResponse
-	31, // 39: svote.v1.Msg.CancelUpgrade:output_type -> svote.v1.MsgCancelUpgradeResponse
-	33, // 40: svote.v1.Msg.SetEndorser:output_type -> svote.v1.MsgSetEndorserResponse
-	35, // 41: svote.v1.Msg.EndorseRound:output_type -> svote.v1.MsgEndorseRoundResponse
-	37, // 42: svote.v1.Msg.ClearRoundEndorsement:output_type -> svote.v1.MsgClearRoundEndorsementResponse
-	39, // 43: svote.v1.Msg.ProposeCoordinatorAction:output_type -> svote.v1.MsgProposeCoordinatorActionResponse
-	41, // 44: svote.v1.Msg.ApproveCoordinatorAction:output_type -> svote.v1.MsgApproveCoordinatorActionResponse
-	25, // [25:45] is the sub-list for method output_type
-	5,  // [5:25] is the sub-list for method input_type
+	2,  // 5: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
+	4,  // 6: svote.v1.Msg.CastVote:input_type -> svote.v1.MsgCastVote
+	6,  // 7: svote.v1.Msg.RevealShare:input_type -> svote.v1.MsgRevealShare
+	8,  // 8: svote.v1.Msg.SubmitTally:input_type -> svote.v1.MsgSubmitTally
+	21, // 9: svote.v1.Msg.SubmitPartialDecryption:input_type -> svote.v1.MsgSubmitPartialDecryption
+	11, // 10: svote.v1.Msg.RegisterPallasKey:input_type -> svote.v1.MsgRegisterPallasKey
+	13, // 11: svote.v1.Msg.RotatePallasKey:input_type -> svote.v1.MsgRotatePallasKey
+	15, // 12: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
+	17, // 13: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
+	19, // 14: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
+	34, // 15: svote.v1.Msg.EndorseRound:input_type -> svote.v1.MsgEndorseRound
+	36, // 16: svote.v1.Msg.ClearRoundEndorsement:input_type -> svote.v1.MsgClearRoundEndorsement
+	38, // 17: svote.v1.Msg.ProposeCoordinatorAction:input_type -> svote.v1.MsgProposeCoordinatorAction
+	40, // 18: svote.v1.Msg.ApproveCoordinatorAction:input_type -> svote.v1.MsgApproveCoordinatorAction
+	3,  // 19: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
+	5,  // 20: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
+	7,  // 21: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
+	10, // 22: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
+	23, // 23: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
+	12, // 24: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
+	14, // 25: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
+	16, // 26: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
+	18, // 27: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
+	20, // 28: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
+	35, // 29: svote.v1.Msg.EndorseRound:output_type -> svote.v1.MsgEndorseRoundResponse
+	37, // 30: svote.v1.Msg.ClearRoundEndorsement:output_type -> svote.v1.MsgClearRoundEndorsementResponse
+	39, // 31: svote.v1.Msg.ProposeCoordinatorAction:output_type -> svote.v1.MsgProposeCoordinatorActionResponse
+	41, // 32: svote.v1.Msg.ApproveCoordinatorAction:output_type -> svote.v1.MsgApproveCoordinatorActionResponse
+	19, // [19:33] is the sub-list for method output_type
+	5,  // [5:19] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name

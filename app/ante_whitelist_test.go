@@ -72,7 +72,7 @@ func TestWhitelist_VoteMsgAuthorizedSendBlocked(t *testing.T) {
 
 	resp := ta.CheckTxSync(txBytes)
 	require.NotEqual(t, uint32(0), resp.Code)
-	require.Contains(t, resp.Log, "is not allowed on this chain")
+	require.Contains(t, resp.Log, "no message handler found")
 	require.Contains(t, resp.Log, "MsgAuthorizedSend")
 }
 

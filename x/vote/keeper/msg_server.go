@@ -27,16 +27,6 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 	return &msgServer{k: keeper}
 }
 
-// CreateVotingSession is only executable through coordinator action approval.
-// Direct calls are rejected here even though standard tx submission is also
-// blocked by the app whitelist.
-func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
-	if err := msg.ValidateBasic(); err != nil {
-		return nil, err
-	}
-	return nil, coordinatorActionRequired("create voting session")
-}
-
 // executeCreateVotingSession computes vote_round_id = Poseidon(created_at_height,
 // snapshot_blockhash_lo, snapshot_blockhash_hi, proposals_hash_lo,
 // proposals_hash_hi, vote_end_time, nullifier_imt_root, nc_root) via FFI, stores
@@ -222,16 +212,6 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 	))
 
 	return &types.MsgCastVoteResponse{}, nil
-}
-
-// UpdateVoteManagers is only executable through coordinator action approval.
-// Direct calls are rejected here even though standard tx submission is also
-// blocked by the app whitelist.
-func (ms msgServer) UpdateVoteManagers(goCtx context.Context, msg *types.MsgUpdateVoteManagers) (*types.MsgUpdateVoteManagersResponse, error) {
-	if err := msg.ValidateBasic(); err != nil {
-		return nil, err
-	}
-	return nil, coordinatorActionRequired("update vote managers")
 }
 
 // executeUpdateVoteManagers atomically replaces the vote-manager set. See proto

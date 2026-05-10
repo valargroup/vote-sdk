@@ -10,23 +10,8 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// AuthorizedSend handles MsgAuthorizedSend. Top-level external sends are not
-// an authority path; the message is only executable as a coordinator action
-// payload. Bank MsgSend/MsgMultiSend are blocked at the ante handler because
-// unrestricted transfers would allow anyone to accumulate stake and create a
-// validator, undermining the controlled validator set.
-//
-// Authorization rules:
-//   - Direct top-level MsgAuthorizedSend is rejected.
-//   - Coordinator-action sends must originate from a current coordinator.
-//   - The source funding account must be one of the approving coordinators.
-func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend) (*types.MsgAuthorizedSendResponse, error) {
-	if _, _, _, err := validateAuthorizedSendFields(msg); err != nil {
-		return nil, err
-	}
-	return nil, coordinatorActionRequired("send funds")
-}
-
+// validateAuthorizedSendFields checks the MsgAuthorizedSend payload fields
+// before proposal storage and again before execution.
 func validateAuthorizedSendFields(msg *types.MsgAuthorizedSend) (sdk.AccAddress, sdk.AccAddress, sdkmath.Int, error) {
 	fromAddr, err := sdk.AccAddressFromBech32(msg.FromAddress)
 	if err != nil {

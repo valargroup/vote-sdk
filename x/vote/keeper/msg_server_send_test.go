@@ -1,55 +1,8 @@
 package keeper_test
 
 import (
-	sdk "github.com/cosmos/cosmos-sdk/types"
-
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
-
-// accToValoper converts an account address to its valoper equivalent.
-func accToValoper(accBech32 string) string {
-	acc, _ := sdk.AccAddressFromBech32(accBech32)
-	return sdk.ValAddress(acc).String()
-}
-
-func (s *MsgServerTestSuite) TestAuthorizedSend_DirectVoteManagerSendRequiresCoordinatorAction() {
-	s.SetupTest()
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
-
-	vm := testAccAddr(1)
-	recipient := testAccAddr(2)
-	s.seedVoteManagers(vm)
-
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: vm,
-		ToAddress:   recipient,
-		Amount:      "1000000",
-		Denom:       "usvote",
-	})
-	s.Require().ErrorIs(err, types.ErrCoordinatorActionRequired)
-	s.Require().Empty(bk.sendCalls)
-}
-
-func (s *MsgServerTestSuite) TestAuthorizedSend_DirectBondedValidatorSendRequiresCoordinatorAction() {
-	s.SetupTest()
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
-
-	vm := testAccAddr(1)
-	valAcc := testAccAddr(10)
-	s.seedVoteManagers(vm)
-	s.setupWithMockStaking(accToValoper(valAcc))
-
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
-		FromAddress: valAcc,
-		ToAddress:   vm,
-		Amount:      "100",
-		Denom:       "usvote",
-	})
-	s.Require().ErrorIs(err, types.ErrCoordinatorActionRequired)
-	s.Require().Empty(bk.sendCalls)
-}
 
 func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendVoteManagerCanFundProspectiveValidator() {
 	s.SetupTest()
@@ -114,15 +67,18 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidFromAddress() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
+	vm := testAccAddr(1)
+	s.seedVoteManagers(vm)
 
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
 		FromAddress: "not_valid",
-		ToAddress:   testAccAddr(1),
+		ToAddress:   testAccAddr(2),
 		Amount:      "100",
 		Denom:       "usvote",
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "invalid from_address")
+	s.Require().Empty(bk.sendCalls)
 }
 
 func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidToAddress() {
@@ -131,7 +87,8 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidToAddress() {
 	s.setupWithMockBankKeeper(bk)
 	s.seedVoteManagers(testAccAddr(1))
 
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+	vm := testAccAddr(1)
+	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
 		ToAddress:   "bad_addr",
 		Amount:      "100",
@@ -147,7 +104,8 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ZeroAmount() {
 	s.setupWithMockBankKeeper(bk)
 	s.seedVoteManagers(testAccAddr(1))
 
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+	vm := testAccAddr(1)
+	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
 		ToAddress:   testAccAddr(2),
 		Amount:      "0",
@@ -163,7 +121,8 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NegativeAmount() {
 	s.setupWithMockBankKeeper(bk)
 	s.seedVoteManagers(testAccAddr(1))
 
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+	vm := testAccAddr(1)
+	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
 		ToAddress:   testAccAddr(2),
 		Amount:      "-500",
@@ -179,7 +138,8 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_EmptyDenom() {
 	s.setupWithMockBankKeeper(bk)
 	s.seedVoteManagers(testAccAddr(1))
 
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+	vm := testAccAddr(1)
+	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
 		ToAddress:   testAccAddr(2),
 		Amount:      "100",
@@ -195,7 +155,8 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidDenom() {
 	s.setupWithMockBankKeeper(bk)
 	s.seedVoteManagers(testAccAddr(1))
 
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+	vm := testAccAddr(1)
+	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
 		ToAddress:   testAccAddr(2),
 		Amount:      "100",
@@ -212,7 +173,8 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonNumericAmount() {
 	s.setupWithMockBankKeeper(bk)
 	s.seedVoteManagers(testAccAddr(1))
 
-	_, err := s.msgServer.AuthorizedSend(s.ctx, &types.MsgAuthorizedSend{
+	vm := testAccAddr(1)
+	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
 		FromAddress: testAccAddr(1),
 		ToAddress:   testAccAddr(2),
 		Amount:      "abc",

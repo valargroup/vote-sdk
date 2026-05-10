@@ -13,16 +13,6 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// ScheduleUpgrade is only executable through coordinator action approval.
-// Direct calls are rejected here even though standard tx submission is also
-// blocked by the app whitelist.
-func (ms msgServer) ScheduleUpgrade(goCtx context.Context, msg *types.MsgScheduleUpgrade) (*types.MsgScheduleUpgradeResponse, error) {
-	if err := msg.ValidateBasic(); err != nil {
-		return nil, err
-	}
-	return nil, coordinatorActionRequired("schedule upgrade")
-}
-
 func (ms msgServer) executeScheduleUpgrade(goCtx context.Context, msg *types.MsgScheduleUpgrade) (*types.MsgScheduleUpgradeResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
@@ -62,16 +52,6 @@ func (ms msgServer) executeScheduleUpgrade(goCtx context.Context, msg *types.Msg
 	))
 
 	return &types.MsgScheduleUpgradeResponse{}, nil
-}
-
-// CancelUpgrade is only executable through coordinator action approval.
-// Direct calls are rejected here even though standard tx submission is also
-// blocked by the app whitelist.
-func (ms msgServer) CancelUpgrade(goCtx context.Context, msg *types.MsgCancelUpgrade) (*types.MsgCancelUpgradeResponse, error) {
-	if err := msg.ValidateBasic(); err != nil {
-		return nil, err
-	}
-	return nil, coordinatorActionRequired("cancel upgrade")
 }
 
 // executeCancelUpgrade clears the currently scheduled x/upgrade plan.
