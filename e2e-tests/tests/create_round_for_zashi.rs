@@ -25,6 +25,7 @@ use e2e_tests::{
         wait_for_create_round_id, wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME,
         SESSION_STATUS_ACTIVE,
     },
+    payloads::coordinator_action_proposal_payload,
 };
 use incrementalmerkletree::{Hashable, Level};
 use orchard::tree::MerkleHashOrchard;
@@ -335,10 +336,9 @@ fn create_round_for_zashi() {
     let snapshot_blockhash = [0xAAu8; 32]; // placeholder — chain doesn't validate this
     let proposals_hash = [0xBBu8; 32]; // placeholder — chain doesn't validate this
 
-    // ---- Step 6: Build and broadcast MsgCreateVotingSession ----
+    // ---- Step 6: Build and broadcast coordinator action proposal ----
     log("creating voting session...");
-    let body = json!({
-        "@type": "/svote.v1.MsgCreateVotingSession",
+    let create_body = json!({
         "creator": vote_manager_address,
         "snapshot_height": snap_height,
         "snapshot_blockhash": to_base64(&snapshot_blockhash),
@@ -348,6 +348,11 @@ fn create_round_for_zashi() {
         "nc_root": to_base64(&nc_root),
         "proposals": proposals(),
     });
+    let body = coordinator_action_proposal_payload(
+        &vote_manager_address,
+        create_body,
+        "/svote.v1.MsgCreateVotingSession",
+    );
 
     let vm_config = api::CosmosTxConfig {
         key_name: FIRST_VOTE_MANAGER_KEY_NAME.to_string(),

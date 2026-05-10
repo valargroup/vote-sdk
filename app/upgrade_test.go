@@ -38,7 +38,7 @@ func TestVoteManagerScheduleUpgradeStoresPlan(t *testing.T) {
 	ta.SeedVoteManagers(voteManager)
 
 	planHeight := ta.Height + 10
-	txBytes := ta.MustBuildSignedCeremonyTx(&votetypes.MsgScheduleUpgrade{
+	txBytes := ta.MustBuildSignedCoordinatorActionTx(voteManager, &votetypes.MsgScheduleUpgrade{
 		Creator: voteManager,
 		Name:    "stored-plan-test",
 		Height:  planHeight,
@@ -63,7 +63,7 @@ func TestScheduledUpgradeWithoutHandlerHaltsAtDueHeight(t *testing.T) {
 	ta.SeedVoteManagers(voteManager)
 
 	dueHeight := ta.Height + 2
-	txBytes := ta.MustBuildSignedCeremonyTx(&votetypes.MsgScheduleUpgrade{
+	txBytes := ta.MustBuildSignedCoordinatorActionTx(voteManager, &votetypes.MsgScheduleUpgrade{
 		Creator: voteManager,
 		Name:    "halt-test",
 		Height:  dueHeight,
@@ -96,7 +96,7 @@ func TestScheduledUpgradeWithHandlerAppliesAtDueHeight(t *testing.T) {
 	})
 
 	dueHeight := ta.Height + 2
-	txBytes := ta.MustBuildSignedCeremonyTx(&votetypes.MsgScheduleUpgrade{
+	txBytes := ta.MustBuildSignedCoordinatorActionTx(voteManager, &votetypes.MsgScheduleUpgrade{
 		Creator: voteManager,
 		Name:    "handled-test",
 		Height:  dueHeight,

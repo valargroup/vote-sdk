@@ -2,6 +2,7 @@ syntax = "proto3";
 package svote.v1;
 
 import "cosmos/msg/v1/msg.proto";
+import "google/protobuf/any.proto";
 import "svote/v1/types.proto";
 
 option go_package = "github.com/valargroup/vote-sdk/x/vote/types";
@@ -12,7 +13,6 @@ option go_package = "github.com/valargroup/vote-sdk/x/vote/types";
 // envelope entirely; the Msg service is defined here for gRPC registration only.
 service Msg {
   option (cosmos.msg.v1.service) = true;
-  rpc CreateVotingSession(MsgCreateVotingSession) returns (MsgCreateVotingSessionResponse);
   rpc DelegateVote(MsgDelegateVote) returns (MsgDelegateVoteResponse);
   rpc CastVote(MsgCastVote) returns (MsgCastVoteResponse);
   rpc RevealShare(MsgRevealShare) returns (MsgRevealShareResponse);
@@ -23,13 +23,10 @@ service Msg {
   rpc ContributeDKG(MsgContributeDKG) returns (MsgContributeDKGResponse);
   rpc AckExecutiveAuthorityKey(MsgAckExecutiveAuthorityKey) returns (MsgAckExecutiveAuthorityKeyResponse);
   rpc CreateValidatorWithPallasKey(MsgCreateValidatorWithPallasKey) returns (MsgCreateValidatorWithPallasKeyResponse);
-  rpc UpdateVoteManagers(MsgUpdateVoteManagers) returns (MsgUpdateVoteManagersResponse);
-  rpc AuthorizedSend(MsgAuthorizedSend) returns (MsgAuthorizedSendResponse);
-  rpc ScheduleUpgrade(MsgScheduleUpgrade) returns (MsgScheduleUpgradeResponse);
-  rpc CancelUpgrade(MsgCancelUpgrade) returns (MsgCancelUpgradeResponse);
-  rpc SetEndorser(MsgSetEndorser) returns (MsgSetEndorserResponse);
   rpc EndorseRound(MsgEndorseRound) returns (MsgEndorseRoundResponse);
   rpc ClearRoundEndorsement(MsgClearRoundEndorsement) returns (MsgClearRoundEndorsementResponse);
+  rpc ProposeCoordinatorAction(MsgProposeCoordinatorAction) returns (MsgProposeCoordinatorActionResponse);
+  rpc ApproveCoordinatorAction(MsgApproveCoordinatorAction) returns (MsgApproveCoordinatorActionResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -193,27 +190,28 @@ message PartialDecryptionEntry {
 
 message MsgSubmitPartialDecryptionResponse {}
 
-// MsgUpdateVoteManagers atomically replaces the vote-manager set with new_vote_managers.
-// Callable by any current vote manager. Does NOT move balances — each vote manager holds
-// their own funds (the bank-module per-account balance). Validation:
+// MsgUpdateVoteManagers atomically replaces the coordinator set and threshold.
+// It is executed through coordinator action approval. It does NOT move balances
+// — each coordinator holds their own funds. Validation:
 // new_vote_managers must be non-empty, each entry a valid bech32 address, and no
 // duplicates (addresses normalized before compare).
 message MsgUpdateVoteManagers {
-  string          creator    = 1; // Sender address (must be in the current vote manager set)
+  string          creator    = 1; // Sender address (must be in the current coordinator set)
   repeated string new_vote_managers = 2; // Full replacement set
+  uint32          new_threshold = 3; // Defaults to 1 when omitted; must be <= len(new_vote_managers)
 }
 
 message MsgUpdateVoteManagersResponse {}
 
-// MsgAuthorizedSend is the only way to transfer coins on this chain.
+// MsgAuthorizedSend is the only privileged coin-transfer payload on this chain.
 // Standard bank MsgSend and MsgMultiSend are disabled at the ante-handler
 // level because unrestricted transfers would let anyone accumulate enough
 // stake to create a validator, bypassing the controlled validator set.
 //
 // Authorization rules:
-//   - Any vote manager can send to anyone (distributes stake to new validators).
-//   - Bonded validators can send to any vote manager or to other bonded validators.
-//   - All other senders are rejected.
+//   - Coordinator-funded sends must be approved as coordinator actions.
+//   - MsgAuthorizedSend is a coordinator action payload, not a public Msg RPC.
+//   - The source account must be a current coordinator that approved the action.
 message MsgAuthorizedSend {
   string from_address = 1;
   string to_address   = 2;
@@ -223,12 +221,12 @@ message MsgAuthorizedSend {
 
 message MsgAuthorizedSendResponse {}
 
-// MsgScheduleUpgrade schedules a software upgrade through x/upgrade.
-// Callable by any current vote manager. The message intentionally keeps the
-// wire shape primitive instead of embedding cosmos.upgrade.v1beta1.Plan so the
-// vote module owns the public upgrade-control surface.
+// MsgScheduleUpgrade schedules a software upgrade through x/upgrade. It is
+// executed through coordinator action approval. The message intentionally keeps
+// the wire shape primitive instead of embedding cosmos.upgrade.v1beta1.Plan so
+// the vote module owns the public upgrade-control surface.
 message MsgScheduleUpgrade {
-  string creator          = 1; // Sender address (must be in the current vote manager set)
+  string creator          = 1; // Sender address (must be in the current coordinator set)
   string name             = 2; // Upgrade plan name; must match the future binary's registered handler
   int64  height           = 3; // Upgrade height; x/upgrade rejects past heights
   string info             = 4; // Operator-readable upgrade metadata
@@ -237,21 +235,21 @@ message MsgScheduleUpgrade {
 
 message MsgScheduleUpgradeResponse {}
 
-// MsgCancelUpgrade clears the currently scheduled x/upgrade plan.
-// Callable by any current vote manager.
+// MsgCancelUpgrade clears the currently scheduled x/upgrade plan. It is
+// executed through coordinator action approval.
 message MsgCancelUpgrade {
-  string creator = 1; // Sender address (must be in the current vote manager set)
+  string creator = 1; // Sender address (must be in the current coordinator set)
 }
 
 message MsgCancelUpgradeResponse {}
 
 // MsgSetEndorser creates, rotates, or clears an endorser_id -> bech32 address
-// mapping. Only vote managers may execute this message. An empty address clears
-// the mapping; existing endorsements remain queryable.
+// mapping. It is executed through coordinator action approval. An empty address
+// clears the mapping; existing endorsements remain queryable.
 message MsgSetEndorser {
   option (cosmos.msg.v1.signer) = "creator";
 
-  string creator     = 1; // Sender address (must be a current vote manager)
+  string creator     = 1; // Sender address (must be a current coordinator)
   string endorser_id = 2; // Stable identifier, e.g. "zodl"
   string address     = 3; // Canonicalized on-chain; empty clears the mapping
 }
@@ -282,3 +280,31 @@ message MsgClearRoundEndorsement {
 }
 
 message MsgClearRoundEndorsementResponse {}
+
+// MsgProposeCoordinatorAction creates a threshold-gated coordinator action.
+// The proposer counts as the first approval. If the current threshold is 1, the
+// action executes in the same transaction.
+message MsgProposeCoordinatorAction {
+  option (cosmos.msg.v1.signer) = "creator";
+
+  string creator = 1; // Sender address (must be a current vote coordinator)
+  google.protobuf.Any payload = 2; // One supported vote-manager payload message
+}
+
+message MsgProposeCoordinatorActionResponse {
+  uint64 action_id = 1;
+  bool executed = 2;
+}
+
+// MsgApproveCoordinatorAction adds one coordinator approval to a pending action.
+message MsgApproveCoordinatorAction {
+  option (cosmos.msg.v1.signer) = "creator";
+
+  string creator = 1; // Sender address (must be a current vote coordinator)
+  uint64 action_id = 2;
+}
+
+message MsgApproveCoordinatorActionResponse {
+  uint64 action_id = 1;
+  bool executed = 2;
+}

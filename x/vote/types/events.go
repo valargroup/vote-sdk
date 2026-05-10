@@ -24,6 +24,9 @@ const (
 	EventTypeSetEndorser              = "set_endorser"
 	EventTypeEndorseRound             = "endorse_round"
 	EventTypeClearRoundEndorsement    = "clear_round_endorsement"
+	EventTypeProposeCoordinatorAction = "propose_coordinator_action"
+	EventTypeApproveCoordinatorAction = "approve_coordinator_action"
+	EventTypeExecuteCoordinatorAction = "execute_coordinator_action"
 )
 
 // Event attribute keys.
@@ -58,4 +61,8 @@ const (
 	AttributeKeyReplaceExisting  = "replace_existing"
 	AttributeKeyEndorserID       = "endorser_id"
 	AttributeKeyEndorserAddress  = "endorser_address"
+	AttributeKeyActionID         = "action_id"
+	AttributeKeyActionType       = "action_type"
+	AttributeKeyApprovalCount    = "approval_count"
+	AttributeKeyThreshold        = "threshold"
 )

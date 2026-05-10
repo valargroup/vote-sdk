@@ -35,6 +35,8 @@ import (
 //	GET /shielded-vote/v1/ceremony
 //	GET /shielded-vote/v1/pallas-keys
 //	GET /shielded-vote/v1/vote-managers
+//	GET /shielded-vote/v1/coordinator-actions
+//	GET /shielded-vote/v1/coordinator-actions/{id}
 //	GET /shielded-vote/v1/endorsers
 //	GET /shielded-vote/v1/endorsed-rounds/{id}
 //	GET /shielded-vote/v1/genesis
@@ -56,6 +58,8 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.Handle("/shielded-vote/v1/ceremony", trace(http.HandlerFunc(qh.handleCeremonyState))).Methods("GET")
 	router.Handle("/shielded-vote/v1/pallas-keys", trace(http.HandlerFunc(qh.handlePallasKeys))).Methods("GET")
 	router.Handle("/shielded-vote/v1/vote-managers", trace(http.HandlerFunc(qh.handleVoteManagers))).Methods("GET")
+	router.Handle("/shielded-vote/v1/coordinator-actions", trace(http.HandlerFunc(qh.handlePendingCoordinatorActions))).Methods("GET")
+	router.Handle("/shielded-vote/v1/coordinator-actions/{id}", trace(http.HandlerFunc(qh.handleCoordinatorAction))).Methods("GET")
 	router.Handle("/shielded-vote/v1/endorsers", trace(http.HandlerFunc(qh.handleEndorsers))).Methods("GET")
 	router.Handle("/shielded-vote/v1/endorsed-rounds/{id}", trace(http.HandlerFunc(qh.handleEndorsedRounds))).Methods("GET")
 	router.Handle("/shielded-vote/v1/genesis", trace(http.HandlerFunc(qh.handleGenesis))).Methods("GET")
@@ -313,6 +317,37 @@ func (qh *queryHandler) handleVoteManagers(w http.ResponseWriter, _ *http.Reques
 	resp := &types.QueryVoteManagersResponse{}
 
 	if err := qh.abciQuery("/svote.v1.Query/VoteManagers", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handlePendingCoordinatorActions(w http.ResponseWriter, _ *http.Request) {
+	req := &types.QueryPendingCoordinatorActionsRequest{}
+	resp := &types.QueryPendingCoordinatorActionsResponse{}
+
+	if err := qh.abciQuery("/svote.v1.Query/PendingCoordinatorActions", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handleCoordinatorAction(w http.ResponseWriter, r *http.Request) {
+	idRaw := mux.Vars(r)["id"]
+	actionID, err := strconv.ParseUint(idRaw, 10, 64)
+	if err != nil || actionID == 0 {
+		writeError(w, http.StatusBadRequest, "action id must be a positive integer")
+		return
+	}
+
+	req := &types.QueryCoordinatorActionRequest{ActionId: actionID}
+	resp := &types.QueryCoordinatorActionResponse{}
+
+	if err := qh.abciQuery("/svote.v1.Query/CoordinatorAction", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}

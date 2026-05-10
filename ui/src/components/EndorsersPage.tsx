@@ -80,7 +80,7 @@ export function EndorsersPage({ wallet }: EndorsersPageProps) {
       try {
         const result = await cosmosTx.setEndorser(chainApi.getApiBase(), wallet.signer, endorserID, address);
         if (result.code !== 0) throw new Error(result.log || `Transaction failed with code ${result.code}`);
-        setMessage(address ? `Updated endorser ${endorserID}` : `Cleared endorser ${endorserID}`);
+        setMessage(address ? `Coordinator action proposed to update ${endorserID}` : `Coordinator action proposed to clear ${endorserID}`);
         await refresh();
       } finally {
         setBusy(null);
@@ -329,4 +329,3 @@ export function EndorsersPage({ wallet }: EndorsersPageProps) {
     </div>
   );
 }
-

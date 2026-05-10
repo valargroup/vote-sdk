@@ -417,3 +417,60 @@ func (s *QueryServerTestSuite) TestBlockLeafIndex_NotFound() {
 	s.Require().NoError(err)
 	s.Require().False(found)
 }
+
+// ---------------------------------------------------------------------------
+// CoordinatorAction queries
+// ---------------------------------------------------------------------------
+
+func (s *QueryServerTestSuite) TestCoordinatorAction_ExpiredPendingReportedExpired() {
+	manager := svtest.TestAccAddr(0x91)
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+	payload := coordinatorPayload(s.T(), "/svote.v1.MsgCancelUpgrade", &types.MsgCancelUpgrade{Creator: manager})
+	s.Require().NoError(s.keeper.SetCoordinatorAction(kvStore, &types.CoordinatorAction{
+		ActionId:  1,
+		Payload:   payload,
+		Proposer:  manager,
+		Approvals: []string{manager},
+		Status:    types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_PENDING,
+		CreatedAt: uint64(s.ctx.BlockTime().Unix()) - 100,
+		ExpiresAt: uint64(s.ctx.BlockTime().Unix()) - 1,
+	}))
+
+	resp, err := s.queryServer.CoordinatorAction(s.ctx, &types.QueryCoordinatorActionRequest{ActionId: 1})
+	s.Require().NoError(err)
+	s.Require().Equal(types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_EXPIRED, resp.Action.Status)
+
+	stored, err := s.keeper.GetCoordinatorAction(kvStore, 1)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_PENDING, stored.Status)
+}
+
+func (s *QueryServerTestSuite) TestPendingCoordinatorActions_ExcludesExpiredPendingActions() {
+	manager := svtest.TestAccAddr(0x92)
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+	payload := coordinatorPayload(s.T(), "/svote.v1.MsgCancelUpgrade", &types.MsgCancelUpgrade{Creator: manager})
+	now := uint64(s.ctx.BlockTime().Unix())
+	s.Require().NoError(s.keeper.SetCoordinatorAction(kvStore, &types.CoordinatorAction{
+		ActionId:  1,
+		Payload:   payload,
+		Proposer:  manager,
+		Approvals: []string{manager},
+		Status:    types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_PENDING,
+		CreatedAt: now - 100,
+		ExpiresAt: now - 1,
+	}))
+	s.Require().NoError(s.keeper.SetCoordinatorAction(kvStore, &types.CoordinatorAction{
+		ActionId:  2,
+		Payload:   payload,
+		Proposer:  manager,
+		Approvals: []string{manager},
+		Status:    types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_PENDING,
+		CreatedAt: now,
+		ExpiresAt: now + 100,
+	}))
+
+	resp, err := s.queryServer.PendingCoordinatorActions(s.ctx, &types.QueryPendingCoordinatorActionsRequest{})
+	s.Require().NoError(err)
+	s.Require().Len(resp.Actions, 1)
+	s.Require().Equal(uint64(2), resp.Actions[0].ActionId)
+}

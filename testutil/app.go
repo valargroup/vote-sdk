@@ -40,6 +40,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
@@ -867,6 +868,22 @@ func (ta *TestApp) MustBuildSignedCeremonyTx(msg sdk.Msg) []byte {
 	require.NoError(ta.t, err, "self-decode check failed for signed ceremony tx")
 
 	return txBytes
+}
+
+// MustBuildSignedCoordinatorActionTx wraps a gated vote-manager message in
+// MsgProposeCoordinatorAction and signs it with the genesis validator key.
+// Test chains normally use threshold=1, so the proposal executes immediately.
+func (ta *TestApp) MustBuildSignedCoordinatorActionTx(creator string, msg proto.Message) []byte {
+	ta.t.Helper()
+	bz, err := proto.Marshal(msg)
+	require.NoError(ta.t, err)
+	return ta.MustBuildSignedCeremonyTx(&types.MsgProposeCoordinatorAction{
+		Creator: creator,
+		Payload: &anypb.Any{
+			TypeUrl: "/" + string(msg.ProtoReflect().Descriptor().FullName()),
+			Value:   bz,
+		},
+	})
 }
 
 // genesisStateWithAccountOperator is a variant of simtestutil.GenesisStateWithValSet

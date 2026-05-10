@@ -10,11 +10,12 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// SetEndorser creates, rotates, or clears an endorser mapping. Vote managers only.
-func (ms msgServer) SetEndorser(goCtx context.Context, msg *types.MsgSetEndorser) (*types.MsgSetEndorserResponse, error) {
+// executeSetEndorser creates, rotates, or clears an endorser mapping after
+// coordinator approval.
+func (ms msgServer) executeSetEndorser(goCtx context.Context, msg *types.MsgSetEndorser) (*types.MsgSetEndorserResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
+	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
 	}
 	if err := types.ValidateEndorserID(msg.EndorserId); err != nil {

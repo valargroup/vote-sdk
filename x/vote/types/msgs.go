@@ -256,10 +256,52 @@ func (msg *MsgSetEndorser) ValidateBasic() error {
 	return nil
 }
 
+// ValidateBasic performs stateless validation for MsgUpdateVoteManagers.
+func (msg *MsgUpdateVoteManagers) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if _, err := sdk.AccAddressFromBech32(msg.Creator); err != nil {
+		return fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", ErrInvalidField, msg.Creator, err)
+	}
+	if _, _, err := ValidateAndNormalizeVoteManagerPolicy(msg.NewVoteManagers, msg.NewThreshold); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ValidateBasic performs stateless validation for MsgCancelUpgrade.
 func (msg *MsgCancelUpgrade) ValidateBasic() error {
 	if msg.Creator == "" {
 		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	return nil
+}
+
+// ValidateBasic performs stateless validation for MsgProposeCoordinatorAction.
+func (msg *MsgProposeCoordinatorAction) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if _, err := sdk.AccAddressFromBech32(msg.Creator); err != nil {
+		return fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", ErrInvalidField, msg.Creator, err)
+	}
+	if msg.Payload == nil || msg.Payload.TypeUrl == "" || len(msg.Payload.Value) == 0 {
+		return fmt.Errorf("%w: payload cannot be empty", ErrInvalidCoordinatorAction)
+	}
+	return nil
+}
+
+// ValidateBasic performs stateless validation for MsgApproveCoordinatorAction.
+func (msg *MsgApproveCoordinatorAction) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if _, err := sdk.AccAddressFromBech32(msg.Creator); err != nil {
+		return fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", ErrInvalidField, msg.Creator, err)
+	}
+	if msg.ActionId == 0 {
+		return fmt.Errorf("%w: action_id cannot be zero", ErrInvalidCoordinatorAction)
 	}
 	return nil
 }

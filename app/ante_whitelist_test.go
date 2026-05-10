@@ -13,6 +13,7 @@ import (
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/testutil"
@@ -54,6 +55,25 @@ func TestWhitelist_BankMsgMultiSendBlocked(t *testing.T) {
 	require.NotEqual(t, uint32(0), resp.Code)
 	require.Contains(t, resp.Log, "is not allowed on this chain")
 	require.Contains(t, resp.Log, "MsgMultiSend")
+}
+
+func TestWhitelist_VoteMsgAuthorizedSendBlocked(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+
+	signerAddr := sdk.AccAddress(ta.ValPrivKey.PubKey().Address())
+	msg := &votetypes.MsgAuthorizedSend{
+		FromAddress: signerAddr.String(),
+		ToAddress:   signerAddr.String(),
+		Amount:      "100",
+		Denom:       "usvote",
+	}
+
+	txBytes := buildSignedTxWithKey(t, ta, ta.ValPrivKey, 0, 0, msg)
+
+	resp := ta.CheckTxSync(txBytes)
+	require.NotEqual(t, uint32(0), resp.Code)
+	require.Contains(t, resp.Log, "no message handler found")
+	require.Contains(t, resp.Log, "MsgAuthorizedSend")
 }
 
 func TestWhitelist_DistributionMsgFundCommunityPoolBlocked(t *testing.T) {
@@ -121,15 +141,6 @@ func TestWhitelist_AllowedMessagesPassThrough(t *testing.T) {
 		msg  sdk.Msg
 	}{
 		{
-			name: "MsgAuthorizedSend",
-			msg: &votetypes.MsgAuthorizedSend{
-				FromAddress: signerAddr.String(),
-				ToAddress:   signerAddr.String(),
-				Amount:      "100",
-				Denom:       "usvote",
-			},
-		},
-		{
 			name: "MsgRegisterPallasKey",
 			msg: &votetypes.MsgRegisterPallasKey{
 				Creator:  signerAddr.String(),
@@ -150,25 +161,17 @@ func TestWhitelist_AllowedMessagesPassThrough(t *testing.T) {
 			},
 		},
 		{
-			name: "MsgScheduleUpgrade",
-			msg: &votetypes.MsgScheduleUpgrade{
+			name: "MsgProposeCoordinatorAction",
+			msg: &votetypes.MsgProposeCoordinatorAction{
 				Creator: signerAddr.String(),
-				Name:    "test-upgrade",
-				Height:  100,
+				Payload: &anypb.Any{TypeUrl: "/svote.v1.MsgCancelUpgrade", Value: []byte{0x01}},
 			},
 		},
 		{
-			name: "MsgCancelUpgrade",
-			msg: &votetypes.MsgCancelUpgrade{
-				Creator: signerAddr.String(),
-			},
-		},
-		{
-			name: "MsgSetEndorser",
-			msg: &votetypes.MsgSetEndorser{
-				Creator:    signerAddr.String(),
-				EndorserId: "zodl",
-				Address:    signerAddr.String(),
+			name: "MsgApproveCoordinatorAction",
+			msg: &votetypes.MsgApproveCoordinatorAction{
+				Creator:  signerAddr.String(),
+				ActionId: 1,
 			},
 		},
 		{
@@ -248,15 +251,11 @@ func TestDefaultAllowedMessages_ContainsExpectedTypes(t *testing.T) {
 	}
 
 	// Should be present
-	require.True(t, allowed["/svote.v1.MsgAuthorizedSend"])
-	require.True(t, allowed["/svote.v1.MsgCreateVotingSession"])
+	require.True(t, allowed["/svote.v1.MsgProposeCoordinatorAction"])
+	require.True(t, allowed["/svote.v1.MsgApproveCoordinatorAction"])
 	require.True(t, allowed["/svote.v1.MsgRegisterPallasKey"])
 	require.True(t, allowed["/svote.v1.MsgRotatePallasKey"])
 	require.True(t, allowed["/svote.v1.MsgCreateValidatorWithPallasKey"])
-	require.True(t, allowed["/svote.v1.MsgUpdateVoteManagers"])
-	require.True(t, allowed["/svote.v1.MsgScheduleUpgrade"])
-	require.True(t, allowed["/svote.v1.MsgCancelUpgrade"])
-	require.True(t, allowed["/svote.v1.MsgSetEndorser"])
 	require.True(t, allowed["/svote.v1.MsgEndorseRound"])
 	require.True(t, allowed["/svote.v1.MsgClearRoundEndorsement"])
 	require.True(t, allowed["/cosmos.staking.v1beta1.MsgCreateValidator"])
@@ -274,6 +273,12 @@ func TestDefaultAllowedMessages_ContainsExpectedTypes(t *testing.T) {
 	require.False(t, allowed["/svote.v1.MsgDelegateVote"])
 	require.False(t, allowed["/svote.v1.MsgCastVote"])
 	require.False(t, allowed["/svote.v1.MsgRevealShare"])
+	require.False(t, allowed["/svote.v1.MsgCreateVotingSession"])
+	require.False(t, allowed["/svote.v1.MsgUpdateVoteManagers"])
+	require.False(t, allowed["/svote.v1.MsgAuthorizedSend"])
+	require.False(t, allowed["/svote.v1.MsgScheduleUpgrade"])
+	require.False(t, allowed["/svote.v1.MsgCancelUpgrade"])
+	require.False(t, allowed["/svote.v1.MsgSetEndorser"])
 	require.False(t, allowed["/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade"])
 	require.False(t, allowed["/cosmos.upgrade.v1beta1.MsgCancelUpgrade"])
 }

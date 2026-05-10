@@ -22,9 +22,8 @@ func init() {
 	gogoproto.RegisterType((*PartialDecryptionEntry)(nil), "svote.v1.PartialDecryptionEntry")
 }
 
-// RegisterInterfaces registers the vote module's message types with the
-// InterfaceRegistry. This is required for the MsgServiceRouter to accept
-// vote messages during RegisterService.
+// RegisterInterfaces registers public vote transaction messages and coordinator
+// action payload messages with the InterfaceRegistry.
 //
 // We only call RegisterImplementations (not msgservice.RegisterMsgServiceDesc)
 // because our protobuf types are generated with protoc-gen-go v2, which uses a
@@ -49,5 +48,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgSetEndorser{},
 		&MsgEndorseRound{},
 		&MsgClearRoundEndorsement{},
+		&MsgProposeCoordinatorAction{},
+		&MsgApproveCoordinatorAction{},
 	)
 }

@@ -319,7 +319,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			setup: func() {
 				s.seedEligibleValidators(2)
 				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
-				_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+				_, err := s.createVotingSessionViaCoordinator(s.ctx, msg)
 				s.Require().NoError(err)
 			},
 			msg:         msg,
@@ -457,7 +457,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				s.seedEligibleValidators(2)
 				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 				// Create a different round first to put it in PENDING.
-				_, err := s.msgServer.CreateVotingSession(s.ctx, &types.MsgCreateVotingSession{
+				_, err := s.createVotingSessionViaCoordinator(s.ctx, &types.MsgCreateVotingSession{
 					Creator:           svtest.DefaultVoteManagerAddress,
 					SnapshotHeight:    999,
 					SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
@@ -465,6 +465,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 					VoteEndTime:       2_000_000,
 					NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 					NcRoot:            bytes.Repeat([]byte{0x04}, 32),
+					Proposals:         msg.Proposals,
 				})
 				s.Require().NoError(err)
 			},
@@ -480,7 +481,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			if tc.setup != nil {
 				tc.setup()
 			}
-			resp, err := s.msgServer.CreateVotingSession(s.ctx, tc.msg)
+			resp, err := s.createVotingSessionViaCoordinator(s.ctx, tc.msg)
 			if tc.expectErr {
 				s.Require().Error(err)
 				if tc.errContains != "" {
@@ -502,7 +503,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DeterministicID() {
 	s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 	msg := validSetupMsg()
 
-	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	resp1, err := s.createVotingSessionViaCoordinator(s.ctx, msg)
 	s.Require().NoError(err)
 
 	// Same setup inputs at the same creation height must produce same ID.
@@ -517,7 +518,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_SameMetadataDifferentCreati
 	s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 	msg := validSetupMsg()
 
-	resp1, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	resp1, err := s.createVotingSessionViaCoordinator(s.ctx, msg)
 	s.Require().NoError(err)
 
 	kv := s.keeper.OpenKVStore(s.ctx)
@@ -527,7 +528,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_SameMetadataDifferentCreati
 	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
 
 	nextCtx := s.ctx.WithBlockHeight(s.ctx.BlockHeight() + 1)
-	resp2, err := s.msgServer.CreateVotingSession(nextCtx, msg)
+	resp2, err := s.createVotingSessionViaCoordinator(nextCtx, msg)
 	s.Require().NoError(err)
 
 	s.Require().NotEqual(resp1.VoteRoundId, resp2.VoteRoundId)
@@ -540,7 +541,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_EmitsEvent() {
 	s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 	msg := validSetupMsg()
 
-	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	_, err := s.createVotingSessionViaCoordinator(s.ctx, msg)
 	s.Require().NoError(err)
 
 	events := s.ctx.EventManager().Events()
@@ -767,21 +768,22 @@ func (s *MsgServerTestSuite) TestCastVote() {
 }
 
 // ---------------------------------------------------------------------------
-// UpdateVoteManagers (any-of-N atomic replace; no balance transfer)
+// UpdateVoteManagers policy validation and atomic replace; no balance transfer.
 // ---------------------------------------------------------------------------
 
-func (s *MsgServerTestSuite) TestUpdateVoteManagers_AnyVoteManagerCanUpdate() {
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_CurrentCoordinatorCanUpdate() {
 	vmA := testAccAddr(20)
 	vmB := testAccAddr(21)
 	replacement := testAccAddr(22)
 
-	// Run once per member of the initial {A, B} set to prove any-of-N.
+	// Run once per member of the initial {A, B} set to prove each current
+	// coordinator can execute a policy replacement.
 	for _, caller := range []string{vmA, vmB} {
 		s.Run("caller="+caller, func() {
 			s.SetupTest()
 			s.seedVoteManagers(vmA, vmB)
 
-			_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+			_, err := s.proposeCoordinatorAction(s.ctx, caller, &types.MsgUpdateVoteManagers{
 				Creator:         caller,
 				NewVoteManagers: []string{caller, replacement},
 			})
@@ -799,7 +801,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_NonVoteManagerRejected() {
 	s.SetupTest()
 	s.seedVoteManagers(testAccAddr(40))
 
-	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	_, err := s.proposeCoordinatorAction(s.ctx, testAccAddr(99), &types.MsgUpdateVoteManagers{
 		Creator:         testAccAddr(99), // not in the set
 		NewVoteManagers: []string{testAccAddr(41)},
 	})
@@ -810,22 +812,19 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_MalformedCreatorRejected() {
 	s.SetupTest()
 	s.seedVoteManagers(testAccAddr(40))
 
-	// Creator that fails bech32 parse at the canonicalization step must
-	// surface as ErrNotAuthorized with the "not a valid bech32 address"
-	// message, so the branch distinct from the membership-fail branch is
-	// exercised.
-	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	// A malformed proposal creator is rejected before payload authorization.
+	_, err := s.proposeCoordinatorAction(s.ctx, "not_a_bech32", &types.MsgUpdateVoteManagers{
 		Creator:         "not_a_bech32",
 		NewVoteManagers: []string{testAccAddr(41)},
 	})
-	s.Require().ErrorIs(err, types.ErrNotAuthorized)
+	s.Require().ErrorIs(err, types.ErrInvalidField)
 	s.Require().Contains(err.Error(), "not a valid bech32 address")
 }
 
 func (s *MsgServerTestSuite) TestUpdateVoteManagers_NoVoteManagersRejected() {
 	s.SetupTest()
 
-	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	_, err := s.proposeCoordinatorAction(s.ctx, testAccAddr(1), &types.MsgUpdateVoteManagers{
 		Creator:         testAccAddr(1),
 		NewVoteManagers: []string{testAccAddr(2)},
 	})
@@ -837,7 +836,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmptySetRejected() {
 	vmA := testAccAddr(10)
 	s.seedVoteManagers(vmA)
 
-	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
 		Creator:         vmA,
 		NewVoteManagers: nil,
 	})
@@ -849,7 +848,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_DuplicatesRejected() {
 	vmA := testAccAddr(10)
 	s.seedVoteManagers(vmA)
 
-	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
 		Creator:         vmA,
 		NewVoteManagers: []string{vmA, vmA},
 	})
@@ -862,7 +861,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_InvalidBech32Rejected() {
 	s.seedVoteManagers(vmA)
 
 	// Non-bech32 string.
-	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
 		Creator:         vmA,
 		NewVoteManagers: []string{"not_a_valid_address"},
 	})
@@ -870,7 +869,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_InvalidBech32Rejected() {
 	s.Require().Contains(err.Error(), "not a valid bech32 address")
 
 	// Validator operator address (valoper HRP ≠ account HRP).
-	_, err = s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	_, err = s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
 		Creator:         vmA,
 		NewVoteManagers: []string{testValAddr(2)},
 	})
@@ -890,7 +889,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_DoesNotTouchBalances() {
 	// Replace {A} with {B}; under the per-vote-manager balance model UpdateVoteManagers
 	// must never move coins. The single load-bearing check is that no
 	// SendCoins call was made.
-	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
 		Creator:         vmA,
 		NewVoteManagers: []string{vmB},
 	})
@@ -906,7 +905,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_CreatorRemovingSelfAllowed()
 
 	// vmA calls UpdateVoteManagers and removes themselves — allowed as long as
 	// the new set is non-empty.
-	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
 		Creator:         vmA,
 		NewVoteManagers: []string{vmB},
 	})
@@ -918,7 +917,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_CreatorRemovingSelfAllowed()
 	s.Require().Equal([]string{vmB}, set.Addresses)
 
 	// A subsequent call by vmA must now fail (they're no longer in the set).
-	_, err = s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	_, err = s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
 		Creator:         vmA,
 		NewVoteManagers: []string{vmA},
 	})
@@ -932,7 +931,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmitsEvent() {
 	vmB := testAccAddr(61)
 	s.seedVoteManagers(vmA)
 
-	_, err := s.msgServer.UpdateVoteManagers(s.ctx, &types.MsgUpdateVoteManagers{
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
 		Creator:         vmA,
 		NewVoteManagers: []string{vmA, vmB},
 	})
@@ -954,7 +953,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmitsEvent() {
 }
 
 // ---------------------------------------------------------------------------
-// Software upgrade scheduling (vote-manager gated x/upgrade access)
+// Software upgrade scheduling (coordinator-action gated x/upgrade access)
 // ---------------------------------------------------------------------------
 
 func (s *MsgServerTestSuite) TestScheduleUpgrade_VoteManagerCanSchedule() {
@@ -964,7 +963,7 @@ func (s *MsgServerTestSuite) TestScheduleUpgrade_VoteManagerCanSchedule() {
 	upgrades := &mockUpgradeScheduler{}
 	s.setupWithMockUpgradeScheduler(upgrades)
 
-	_, err := s.msgServer.ScheduleUpgrade(s.ctx, &types.MsgScheduleUpgrade{
+	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgScheduleUpgrade{
 		Creator:         vm,
 		Name:            "  v2-state-break  ",
 		Height:          123,
@@ -996,7 +995,7 @@ func (s *MsgServerTestSuite) TestScheduleUpgrade_NonVoteManagerRejected() {
 	upgrades := &mockUpgradeScheduler{}
 	s.setupWithMockUpgradeScheduler(upgrades)
 
-	_, err := s.msgServer.ScheduleUpgrade(s.ctx, &types.MsgScheduleUpgrade{
+	_, err := s.proposeCoordinatorAction(s.ctx, testAccAddr(72), &types.MsgScheduleUpgrade{
 		Creator: testAccAddr(72),
 		Name:    "v2-state-break",
 		Height:  123,
@@ -1011,12 +1010,12 @@ func (s *MsgServerTestSuite) TestScheduleUpgrade_MalformedCreatorRejected() {
 	upgrades := &mockUpgradeScheduler{}
 	s.setupWithMockUpgradeScheduler(upgrades)
 
-	_, err := s.msgServer.ScheduleUpgrade(s.ctx, &types.MsgScheduleUpgrade{
+	_, err := s.proposeCoordinatorAction(s.ctx, "not_a_bech32", &types.MsgScheduleUpgrade{
 		Creator: "not_a_bech32",
 		Name:    "v2-state-break",
 		Height:  123,
 	})
-	s.Require().ErrorIs(err, types.ErrNotAuthorized)
+	s.Require().ErrorIs(err, types.ErrInvalidField)
 	s.Require().Contains(err.Error(), "not a valid bech32 address")
 	s.Require().Zero(upgrades.scheduleCalls)
 }
@@ -1061,7 +1060,7 @@ func (s *MsgServerTestSuite) TestScheduleUpgrade_InvalidFieldsRejected() {
 			upgrades := &mockUpgradeScheduler{}
 			s.setupWithMockUpgradeScheduler(upgrades)
 
-			_, err := s.msgServer.ScheduleUpgrade(s.ctx, tc.msg)
+			_, err := s.proposeCoordinatorAction(s.ctx, vm, tc.msg)
 			s.Require().ErrorIs(err, types.ErrInvalidField)
 			s.Require().Zero(upgrades.scheduleCalls)
 		})
@@ -1081,7 +1080,7 @@ func (s *MsgServerTestSuite) TestScheduleUpgrade_ExistingPlanRequiresReplaceExis
 	}
 	s.setupWithMockUpgradeScheduler(upgrades)
 
-	_, err := s.msgServer.ScheduleUpgrade(s.ctx, &types.MsgScheduleUpgrade{
+	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgScheduleUpgrade{
 		Creator: vm,
 		Name:    "replacement",
 		Height:  200,
@@ -1089,7 +1088,7 @@ func (s *MsgServerTestSuite) TestScheduleUpgrade_ExistingPlanRequiresReplaceExis
 	s.Require().ErrorIs(err, types.ErrUpgradePlanExists)
 	s.Require().Zero(upgrades.scheduleCalls)
 
-	_, err = s.msgServer.ScheduleUpgrade(s.ctx, &types.MsgScheduleUpgrade{
+	_, err = s.proposeCoordinatorAction(s.ctx, vm, &types.MsgScheduleUpgrade{
 		Creator:         vm,
 		Name:            "replacement",
 		Height:          200,
@@ -1109,7 +1108,7 @@ func (s *MsgServerTestSuite) TestCancelUpgrade_VoteManagerGated() {
 		upgrades := &mockUpgradeScheduler{hasPlan: true}
 		s.setupWithMockUpgradeScheduler(upgrades)
 
-		_, err := s.msgServer.CancelUpgrade(s.ctx, &types.MsgCancelUpgrade{Creator: vm})
+		_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgCancelUpgrade{Creator: vm})
 		s.Require().NoError(err)
 		s.Require().Equal(1, upgrades.clearCalls)
 
@@ -1129,14 +1128,14 @@ func (s *MsgServerTestSuite) TestCancelUpgrade_VoteManagerGated() {
 		upgrades := &mockUpgradeScheduler{hasPlan: true}
 		s.setupWithMockUpgradeScheduler(upgrades)
 
-		_, err := s.msgServer.CancelUpgrade(s.ctx, &types.MsgCancelUpgrade{Creator: testAccAddr(78)})
+		_, err := s.proposeCoordinatorAction(s.ctx, testAccAddr(78), &types.MsgCancelUpgrade{Creator: testAccAddr(78)})
 		s.Require().ErrorIs(err, types.ErrNotAuthorized)
 		s.Require().Zero(upgrades.clearCalls)
 	})
 }
 
 // ---------------------------------------------------------------------------
-// CreateVotingSession: vote-manager gating tests
+// CreateVotingSession: coordinator-action gating tests
 // ---------------------------------------------------------------------------
 
 func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWithNoVoteManagers() {
@@ -1144,7 +1143,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWithNoVoteManagers(
 	s.seedEligibleValidators(1)
 
 	msg := validSetupMsg()
-	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	_, err := s.proposeCoordinatorAction(s.ctx, msg.Creator, msg)
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "no vote-manager set configured")
 }
@@ -1156,7 +1155,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_RejectedWhenCreatorNotVoteM
 
 	msg := validSetupMsg()
 	msg.Creator = testAccAddr(81) // not in the vote-manager set
-	_, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	_, err := s.proposeCoordinatorAction(s.ctx, msg.Creator, msg)
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "not authorized")
 }
@@ -1174,7 +1173,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_SucceedsForEachVoteManager(
 
 			msg := validSetupMsg()
 			msg.Creator = vm
-			resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+			resp, err := s.createVotingSessionViaCoordinator(s.ctx, msg)
 			s.Require().NoError(err)
 			s.Require().NotEmpty(resp.VoteRoundId)
 		})
@@ -1190,7 +1189,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	msg := validSetupMsg()
 	msg.Creator = vm
 	msg.Description = "Test round description"
-	resp, err := s.msgServer.CreateVotingSession(s.ctx, msg)
+	resp, err := s.createVotingSessionViaCoordinator(s.ctx, msg)
 	s.Require().NoError(err)
 
 	kv := s.keeper.OpenKVStore(s.ctx)

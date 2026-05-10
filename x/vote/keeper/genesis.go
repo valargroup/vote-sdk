@@ -55,10 +55,28 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 		}
 	}
 
-	// Restore vote-manager set (any-of-N). ValidateGenesisState has already
-	// checked that the list is non-empty, bech32, and deduped; persist as-is.
+	// Restore vote-manager policy. ValidateGenesisState has already checked
+	// that the list is non-empty, bech32, deduped, and that threshold is valid.
 	if len(genesis.VoteManagerAddresses) > 0 {
-		if err := k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: genesis.VoteManagerAddresses}); err != nil {
+		if err := k.SetVoteManagers(kvStore, &types.VoteManagerSet{
+			Addresses: genesis.VoteManagerAddresses,
+			Threshold: genesis.VoteManagerThreshold,
+		}); err != nil {
+			return err
+		}
+	}
+
+	nextCoordinatorActionID := genesis.NextCoordinatorActionId
+	for _, action := range genesis.CoordinatorActions {
+		if err := k.SetCoordinatorAction(kvStore, action); err != nil {
+			return err
+		}
+		if nextCoordinatorActionID == 0 || action.ActionId >= nextCoordinatorActionID {
+			nextCoordinatorActionID = action.ActionId + 1
+		}
+	}
+	if nextCoordinatorActionID != 0 {
+		if err := k.SetNextCoordinatorActionID(kvStore, nextCoordinatorActionID); err != nil {
 			return err
 		}
 	}
@@ -159,6 +177,25 @@ func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, erro
 	}
 	if vms != nil {
 		gs.VoteManagerAddresses = vms.Addresses
+		gs.VoteManagerThreshold = vms.Threshold
+	}
+
+	if err := k.IterateCoordinatorActions(kvStore, func(action *types.CoordinatorAction) bool {
+		gs.CoordinatorActions = append(gs.CoordinatorActions, action)
+		return false
+	}); err != nil {
+		return nil, fmt.Errorf("export coordinator actions: %w", err)
+	}
+	hasNextCoordinatorActionID, err := kvStore.Has(types.NextCoordinatorActionIDKey)
+	if err != nil {
+		return nil, fmt.Errorf("export next coordinator action id: %w", err)
+	}
+	if hasNextCoordinatorActionID || len(gs.CoordinatorActions) > 0 {
+		nextCoordinatorActionID, err := k.GetNextCoordinatorActionID(kvStore)
+		if err != nil {
+			return nil, fmt.Errorf("export next coordinator action id: %w", err)
+		}
+		gs.NextCoordinatorActionId = nextCoordinatorActionID
 	}
 
 	// Endorser mappings and append-only endorsements.

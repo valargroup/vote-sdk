@@ -17,6 +17,8 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/mikelodder7/curvey"
 
@@ -66,7 +68,7 @@ func deliverCreateVotingSession(t *testing.T, app *testutil.TestApp, msg *types.
 	t.Helper()
 	createHeight := uint64(app.Height + 1)
 	roundID := deriveRoundIDForCreateHeight(t, msg, createHeight)
-	result := app.DeliverVoteTx(app.MustBuildSignedCeremonyTx(msg))
+	result := app.DeliverVoteTx(app.MustBuildSignedCoordinatorActionTx(msg.Creator, msg))
 	require.Equal(t, uint32(0), result.Code, "CreateVotingSession should succeed, got: %s", result.Log)
 
 	round := app.MustGetVoteRound(roundID)
@@ -78,8 +80,13 @@ func requireDuplicateCreateVotingSessionAtHeight(t *testing.T, app *testutil.Tes
 	t.Helper()
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: int64(height), Time: app.Time})
 	msgServer := votekeeper.NewMsgServerImpl(app.VoteKeeper())
+	bz, err := proto.Marshal(msg)
+	require.NoError(t, err)
 
-	_, err := msgServer.CreateVotingSession(ctx, msg)
+	_, err = msgServer.ProposeCoordinatorAction(ctx, &types.MsgProposeCoordinatorAction{
+		Creator: msg.Creator,
+		Payload: &anypb.Any{TypeUrl: "/svote.v1.MsgCreateVotingSession", Value: bz},
+	})
 	require.ErrorIs(t, err, types.ErrRoundAlreadyExists)
 }
 

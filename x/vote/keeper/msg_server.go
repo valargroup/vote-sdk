@@ -27,21 +27,14 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 	return &msgServer{k: keeper}
 }
 
-// CreateVotingSession handles MsgCreateVotingSession.
-// Computes vote_round_id = Poseidon(created_at_height, snapshot_blockhash_lo,
-// snapshot_blockhash_hi, proposals_hash_lo, proposals_hash_hi, vote_end_time,
-// nullifier_imt_root, nc_root) via FFI,
-// stores the VoteRound in PENDING status with a ceremony validator snapshot,
-// and emits an event. The round transitions to ACTIVE when its per-round
-// ceremony confirms (auto-deal + auto-ack via PrepareProposal).
-func (ms msgServer) CreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
+// executeCreateVotingSession computes vote_round_id = Poseidon(created_at_height,
+// snapshot_blockhash_lo, snapshot_blockhash_hi, proposals_hash_lo,
+// proposals_hash_hi, vote_end_time, nullifier_imt_root, nc_root) via FFI, stores
+// the VoteRound in PENDING status with a ceremony validator snapshot, and emits
+// an event. The round transitions to ACTIVE when its per-round ceremony
+// confirms.
+func (ms msgServer) executeCreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
-
-	// Only a vote manager can create voting sessions (any-of-N).
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
-		return nil, err
-	}
-
 	kvStore := ms.k.OpenKVStore(ctx)
 
 	createdAtHeight := uint64(ctx.BlockHeight())
@@ -221,29 +214,26 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 	return &types.MsgCastVoteResponse{}, nil
 }
 
-// UpdateVoteManagers atomically replaces the vote-manager set. See proto for semantics.
-// Allows the caller to remove themselves from the new set — the non-empty
-// check is the only liveness guarantee.
-func (ms msgServer) UpdateVoteManagers(goCtx context.Context, msg *types.MsgUpdateVoteManagers) (*types.MsgUpdateVoteManagersResponse, error) {
+// executeUpdateVoteManagers atomically replaces the vote-manager set. See proto
+// for semantics. Allows the caller to remove themselves from the new set — the
+// non-empty check is the only liveness guarantee.
+func (ms msgServer) executeUpdateVoteManagers(goCtx context.Context, msg *types.MsgUpdateVoteManagers) (*types.MsgUpdateVoteManagersResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
-	if err := ms.k.ValidateVoteManagerOnly(goCtx, msg.Creator); err != nil {
-		return nil, err
-	}
-
-	normalized, err := types.ValidateAndNormalizeVoteManagerSet(msg.NewVoteManagers)
+	normalized, threshold, err := types.ValidateAndNormalizeVoteManagerPolicy(msg.NewVoteManagers, msg.NewThreshold)
 	if err != nil {
-		return nil, fmt.Errorf("new_vote_managers: %w", err)
+		return nil, fmt.Errorf("new_vote_manager_policy: %w", err)
 	}
 
 	kvStore := ms.k.OpenKVStore(ctx)
-	if err := ms.k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: normalized}); err != nil {
+	if err := ms.k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: normalized, Threshold: threshold}); err != nil {
 		return nil, err
 	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeUpdateVoteManagers,
 		sdk.NewAttribute(types.AttributeKeyVoteManagers, strings.Join(normalized, ",")),
+		sdk.NewAttribute(types.AttributeKeyThreshold, fmt.Sprintf("%d", threshold)),
 		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
 	))
 

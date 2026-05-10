@@ -132,12 +132,12 @@ func (s CryptoReadinessStatus) ready() bool {
 // MsgSubmitTally is proposer-only (auto-injected via PrepareProposal) and
 // has no REST endpoint.
 //
-// MsgCreateVotingSession is a standard Cosmos SDK transaction (signed by
-// any vote manager) and should be submitted via svoted tx sign/broadcast
-// or /cosmos/tx/v1beta1/txs.
+// Coordinator-owned actions such as MsgCreateVotingSession and
+// MsgUpdateVoteManagers should be submitted inside MsgProposeCoordinatorAction
+// via svoted tx sign/broadcast or /cosmos/tx/v1beta1/txs.
 //
-// Ceremony messages (MsgRegisterPallasKey, MsgCreateValidatorWithPallasKey,
-// MsgUpdateVoteManagers) are also standard Cosmos SDK transactions.
+// Validator-owned messages such as MsgRegisterPallasKey and
+// MsgCreateValidatorWithPallasKey are also standard Cosmos SDK transactions.
 //
 // MsgAckExecutiveAuthorityKey and MsgSubmitPartialDecryption have no REST
 // endpoints — they are injected in-protocol via PrepareProposal.

@@ -19,7 +19,6 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Msg_CreateVotingSession_FullMethodName          = "/svote.v1.Msg/CreateVotingSession"
 	Msg_DelegateVote_FullMethodName                 = "/svote.v1.Msg/DelegateVote"
 	Msg_CastVote_FullMethodName                     = "/svote.v1.Msg/CastVote"
 	Msg_RevealShare_FullMethodName                  = "/svote.v1.Msg/RevealShare"
@@ -30,13 +29,10 @@ const (
 	Msg_ContributeDKG_FullMethodName                = "/svote.v1.Msg/ContributeDKG"
 	Msg_AckExecutiveAuthorityKey_FullMethodName     = "/svote.v1.Msg/AckExecutiveAuthorityKey"
 	Msg_CreateValidatorWithPallasKey_FullMethodName = "/svote.v1.Msg/CreateValidatorWithPallasKey"
-	Msg_UpdateVoteManagers_FullMethodName           = "/svote.v1.Msg/UpdateVoteManagers"
-	Msg_AuthorizedSend_FullMethodName               = "/svote.v1.Msg/AuthorizedSend"
-	Msg_ScheduleUpgrade_FullMethodName              = "/svote.v1.Msg/ScheduleUpgrade"
-	Msg_CancelUpgrade_FullMethodName                = "/svote.v1.Msg/CancelUpgrade"
-	Msg_SetEndorser_FullMethodName                  = "/svote.v1.Msg/SetEndorser"
 	Msg_EndorseRound_FullMethodName                 = "/svote.v1.Msg/EndorseRound"
 	Msg_ClearRoundEndorsement_FullMethodName        = "/svote.v1.Msg/ClearRoundEndorsement"
+	Msg_ProposeCoordinatorAction_FullMethodName     = "/svote.v1.Msg/ProposeCoordinatorAction"
+	Msg_ApproveCoordinatorAction_FullMethodName     = "/svote.v1.Msg/ApproveCoordinatorAction"
 )
 
 // MsgClient is the client API for Msg service.
@@ -48,7 +44,6 @@ const (
 // Cosmos signatures. In Phase 5, transaction submission bypasses the Cosmos Tx
 // envelope entirely; the Msg service is defined here for gRPC registration only.
 type MsgClient interface {
-	CreateVotingSession(ctx context.Context, in *MsgCreateVotingSession, opts ...grpc.CallOption) (*MsgCreateVotingSessionResponse, error)
 	DelegateVote(ctx context.Context, in *MsgDelegateVote, opts ...grpc.CallOption) (*MsgDelegateVoteResponse, error)
 	CastVote(ctx context.Context, in *MsgCastVote, opts ...grpc.CallOption) (*MsgCastVoteResponse, error)
 	RevealShare(ctx context.Context, in *MsgRevealShare, opts ...grpc.CallOption) (*MsgRevealShareResponse, error)
@@ -59,13 +54,10 @@ type MsgClient interface {
 	ContributeDKG(ctx context.Context, in *MsgContributeDKG, opts ...grpc.CallOption) (*MsgContributeDKGResponse, error)
 	AckExecutiveAuthorityKey(ctx context.Context, in *MsgAckExecutiveAuthorityKey, opts ...grpc.CallOption) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(ctx context.Context, in *MsgCreateValidatorWithPallasKey, opts ...grpc.CallOption) (*MsgCreateValidatorWithPallasKeyResponse, error)
-	UpdateVoteManagers(ctx context.Context, in *MsgUpdateVoteManagers, opts ...grpc.CallOption) (*MsgUpdateVoteManagersResponse, error)
-	AuthorizedSend(ctx context.Context, in *MsgAuthorizedSend, opts ...grpc.CallOption) (*MsgAuthorizedSendResponse, error)
-	ScheduleUpgrade(ctx context.Context, in *MsgScheduleUpgrade, opts ...grpc.CallOption) (*MsgScheduleUpgradeResponse, error)
-	CancelUpgrade(ctx context.Context, in *MsgCancelUpgrade, opts ...grpc.CallOption) (*MsgCancelUpgradeResponse, error)
-	SetEndorser(ctx context.Context, in *MsgSetEndorser, opts ...grpc.CallOption) (*MsgSetEndorserResponse, error)
 	EndorseRound(ctx context.Context, in *MsgEndorseRound, opts ...grpc.CallOption) (*MsgEndorseRoundResponse, error)
 	ClearRoundEndorsement(ctx context.Context, in *MsgClearRoundEndorsement, opts ...grpc.CallOption) (*MsgClearRoundEndorsementResponse, error)
+	ProposeCoordinatorAction(ctx context.Context, in *MsgProposeCoordinatorAction, opts ...grpc.CallOption) (*MsgProposeCoordinatorActionResponse, error)
+	ApproveCoordinatorAction(ctx context.Context, in *MsgApproveCoordinatorAction, opts ...grpc.CallOption) (*MsgApproveCoordinatorActionResponse, error)
 }
 
 type msgClient struct {
@@ -74,16 +66,6 @@ type msgClient struct {
 
 func NewMsgClient(cc grpc.ClientConnInterface) MsgClient {
 	return &msgClient{cc}
-}
-
-func (c *msgClient) CreateVotingSession(ctx context.Context, in *MsgCreateVotingSession, opts ...grpc.CallOption) (*MsgCreateVotingSessionResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgCreateVotingSessionResponse)
-	err := c.cc.Invoke(ctx, Msg_CreateVotingSession_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *msgClient) DelegateVote(ctx context.Context, in *MsgDelegateVote, opts ...grpc.CallOption) (*MsgDelegateVoteResponse, error) {
@@ -186,56 +168,6 @@ func (c *msgClient) CreateValidatorWithPallasKey(ctx context.Context, in *MsgCre
 	return out, nil
 }
 
-func (c *msgClient) UpdateVoteManagers(ctx context.Context, in *MsgUpdateVoteManagers, opts ...grpc.CallOption) (*MsgUpdateVoteManagersResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgUpdateVoteManagersResponse)
-	err := c.cc.Invoke(ctx, Msg_UpdateVoteManagers_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *msgClient) AuthorizedSend(ctx context.Context, in *MsgAuthorizedSend, opts ...grpc.CallOption) (*MsgAuthorizedSendResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgAuthorizedSendResponse)
-	err := c.cc.Invoke(ctx, Msg_AuthorizedSend_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *msgClient) ScheduleUpgrade(ctx context.Context, in *MsgScheduleUpgrade, opts ...grpc.CallOption) (*MsgScheduleUpgradeResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgScheduleUpgradeResponse)
-	err := c.cc.Invoke(ctx, Msg_ScheduleUpgrade_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *msgClient) CancelUpgrade(ctx context.Context, in *MsgCancelUpgrade, opts ...grpc.CallOption) (*MsgCancelUpgradeResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgCancelUpgradeResponse)
-	err := c.cc.Invoke(ctx, Msg_CancelUpgrade_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *msgClient) SetEndorser(ctx context.Context, in *MsgSetEndorser, opts ...grpc.CallOption) (*MsgSetEndorserResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MsgSetEndorserResponse)
-	err := c.cc.Invoke(ctx, Msg_SetEndorser_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *msgClient) EndorseRound(ctx context.Context, in *MsgEndorseRound, opts ...grpc.CallOption) (*MsgEndorseRoundResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MsgEndorseRoundResponse)
@@ -256,6 +188,26 @@ func (c *msgClient) ClearRoundEndorsement(ctx context.Context, in *MsgClearRound
 	return out, nil
 }
 
+func (c *msgClient) ProposeCoordinatorAction(ctx context.Context, in *MsgProposeCoordinatorAction, opts ...grpc.CallOption) (*MsgProposeCoordinatorActionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgProposeCoordinatorActionResponse)
+	err := c.cc.Invoke(ctx, Msg_ProposeCoordinatorAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) ApproveCoordinatorAction(ctx context.Context, in *MsgApproveCoordinatorAction, opts ...grpc.CallOption) (*MsgApproveCoordinatorActionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgApproveCoordinatorActionResponse)
+	err := c.cc.Invoke(ctx, Msg_ApproveCoordinatorAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MsgServer is the server API for Msg service.
 // All implementations must embed UnimplementedMsgServer
 // for forward compatibility.
@@ -265,7 +217,6 @@ func (c *msgClient) ClearRoundEndorsement(ctx context.Context, in *MsgClearRound
 // Cosmos signatures. In Phase 5, transaction submission bypasses the Cosmos Tx
 // envelope entirely; the Msg service is defined here for gRPC registration only.
 type MsgServer interface {
-	CreateVotingSession(context.Context, *MsgCreateVotingSession) (*MsgCreateVotingSessionResponse, error)
 	DelegateVote(context.Context, *MsgDelegateVote) (*MsgDelegateVoteResponse, error)
 	CastVote(context.Context, *MsgCastVote) (*MsgCastVoteResponse, error)
 	RevealShare(context.Context, *MsgRevealShare) (*MsgRevealShareResponse, error)
@@ -276,13 +227,10 @@ type MsgServer interface {
 	ContributeDKG(context.Context, *MsgContributeDKG) (*MsgContributeDKGResponse, error)
 	AckExecutiveAuthorityKey(context.Context, *MsgAckExecutiveAuthorityKey) (*MsgAckExecutiveAuthorityKeyResponse, error)
 	CreateValidatorWithPallasKey(context.Context, *MsgCreateValidatorWithPallasKey) (*MsgCreateValidatorWithPallasKeyResponse, error)
-	UpdateVoteManagers(context.Context, *MsgUpdateVoteManagers) (*MsgUpdateVoteManagersResponse, error)
-	AuthorizedSend(context.Context, *MsgAuthorizedSend) (*MsgAuthorizedSendResponse, error)
-	ScheduleUpgrade(context.Context, *MsgScheduleUpgrade) (*MsgScheduleUpgradeResponse, error)
-	CancelUpgrade(context.Context, *MsgCancelUpgrade) (*MsgCancelUpgradeResponse, error)
-	SetEndorser(context.Context, *MsgSetEndorser) (*MsgSetEndorserResponse, error)
 	EndorseRound(context.Context, *MsgEndorseRound) (*MsgEndorseRoundResponse, error)
 	ClearRoundEndorsement(context.Context, *MsgClearRoundEndorsement) (*MsgClearRoundEndorsementResponse, error)
+	ProposeCoordinatorAction(context.Context, *MsgProposeCoordinatorAction) (*MsgProposeCoordinatorActionResponse, error)
+	ApproveCoordinatorAction(context.Context, *MsgApproveCoordinatorAction) (*MsgApproveCoordinatorActionResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
 
@@ -293,9 +241,6 @@ type MsgServer interface {
 // pointer dereference when methods are called.
 type UnimplementedMsgServer struct{}
 
-func (UnimplementedMsgServer) CreateVotingSession(context.Context, *MsgCreateVotingSession) (*MsgCreateVotingSessionResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method CreateVotingSession not implemented")
-}
 func (UnimplementedMsgServer) DelegateVote(context.Context, *MsgDelegateVote) (*MsgDelegateVoteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DelegateVote not implemented")
 }
@@ -326,26 +271,17 @@ func (UnimplementedMsgServer) AckExecutiveAuthorityKey(context.Context, *MsgAckE
 func (UnimplementedMsgServer) CreateValidatorWithPallasKey(context.Context, *MsgCreateValidatorWithPallasKey) (*MsgCreateValidatorWithPallasKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateValidatorWithPallasKey not implemented")
 }
-func (UnimplementedMsgServer) UpdateVoteManagers(context.Context, *MsgUpdateVoteManagers) (*MsgUpdateVoteManagersResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpdateVoteManagers not implemented")
-}
-func (UnimplementedMsgServer) AuthorizedSend(context.Context, *MsgAuthorizedSend) (*MsgAuthorizedSendResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method AuthorizedSend not implemented")
-}
-func (UnimplementedMsgServer) ScheduleUpgrade(context.Context, *MsgScheduleUpgrade) (*MsgScheduleUpgradeResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ScheduleUpgrade not implemented")
-}
-func (UnimplementedMsgServer) CancelUpgrade(context.Context, *MsgCancelUpgrade) (*MsgCancelUpgradeResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method CancelUpgrade not implemented")
-}
-func (UnimplementedMsgServer) SetEndorser(context.Context, *MsgSetEndorser) (*MsgSetEndorserResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetEndorser not implemented")
-}
 func (UnimplementedMsgServer) EndorseRound(context.Context, *MsgEndorseRound) (*MsgEndorseRoundResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EndorseRound not implemented")
 }
 func (UnimplementedMsgServer) ClearRoundEndorsement(context.Context, *MsgClearRoundEndorsement) (*MsgClearRoundEndorsementResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClearRoundEndorsement not implemented")
+}
+func (UnimplementedMsgServer) ProposeCoordinatorAction(context.Context, *MsgProposeCoordinatorAction) (*MsgProposeCoordinatorActionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProposeCoordinatorAction not implemented")
+}
+func (UnimplementedMsgServer) ApproveCoordinatorAction(context.Context, *MsgApproveCoordinatorAction) (*MsgApproveCoordinatorActionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ApproveCoordinatorAction not implemented")
 }
 func (UnimplementedMsgServer) mustEmbedUnimplementedMsgServer() {}
 func (UnimplementedMsgServer) testEmbeddedByValue()             {}
@@ -366,24 +302,6 @@ func RegisterMsgServer(s grpc.ServiceRegistrar, srv MsgServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Msg_ServiceDesc, srv)
-}
-
-func _Msg_CreateVotingSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgCreateVotingSession)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).CreateVotingSession(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Msg_CreateVotingSession_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).CreateVotingSession(ctx, req.(*MsgCreateVotingSession))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _Msg_DelegateVote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -566,96 +484,6 @@ func _Msg_CreateValidatorWithPallasKey_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_UpdateVoteManagers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgUpdateVoteManagers)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).UpdateVoteManagers(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Msg_UpdateVoteManagers_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).UpdateVoteManagers(ctx, req.(*MsgUpdateVoteManagers))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Msg_AuthorizedSend_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgAuthorizedSend)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).AuthorizedSend(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Msg_AuthorizedSend_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).AuthorizedSend(ctx, req.(*MsgAuthorizedSend))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Msg_ScheduleUpgrade_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgScheduleUpgrade)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).ScheduleUpgrade(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Msg_ScheduleUpgrade_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).ScheduleUpgrade(ctx, req.(*MsgScheduleUpgrade))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Msg_CancelUpgrade_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgCancelUpgrade)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).CancelUpgrade(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Msg_CancelUpgrade_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).CancelUpgrade(ctx, req.(*MsgCancelUpgrade))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Msg_SetEndorser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgSetEndorser)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).SetEndorser(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Msg_SetEndorser_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).SetEndorser(ctx, req.(*MsgSetEndorser))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Msg_EndorseRound_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MsgEndorseRound)
 	if err := dec(in); err != nil {
@@ -692,6 +520,42 @@ func _Msg_ClearRoundEndorsement_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_ProposeCoordinatorAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgProposeCoordinatorAction)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).ProposeCoordinatorAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_ProposeCoordinatorAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).ProposeCoordinatorAction(ctx, req.(*MsgProposeCoordinatorAction))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_ApproveCoordinatorAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgApproveCoordinatorAction)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).ApproveCoordinatorAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_ApproveCoordinatorAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).ApproveCoordinatorAction(ctx, req.(*MsgApproveCoordinatorAction))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Msg_ServiceDesc is the grpc.ServiceDesc for Msg service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -699,10 +563,6 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "svote.v1.Msg",
 	HandlerType: (*MsgServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "CreateVotingSession",
-			Handler:    _Msg_CreateVotingSession_Handler,
-		},
 		{
 			MethodName: "DelegateVote",
 			Handler:    _Msg_DelegateVote_Handler,
@@ -744,32 +604,20 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Msg_CreateValidatorWithPallasKey_Handler,
 		},
 		{
-			MethodName: "UpdateVoteManagers",
-			Handler:    _Msg_UpdateVoteManagers_Handler,
-		},
-		{
-			MethodName: "AuthorizedSend",
-			Handler:    _Msg_AuthorizedSend_Handler,
-		},
-		{
-			MethodName: "ScheduleUpgrade",
-			Handler:    _Msg_ScheduleUpgrade_Handler,
-		},
-		{
-			MethodName: "CancelUpgrade",
-			Handler:    _Msg_CancelUpgrade_Handler,
-		},
-		{
-			MethodName: "SetEndorser",
-			Handler:    _Msg_SetEndorser_Handler,
-		},
-		{
 			MethodName: "EndorseRound",
 			Handler:    _Msg_EndorseRound_Handler,
 		},
 		{
 			MethodName: "ClearRoundEndorsement",
 			Handler:    _Msg_ClearRoundEndorsement_Handler,
+		},
+		{
+			MethodName: "ProposeCoordinatorAction",
+			Handler:    _Msg_ProposeCoordinatorAction_Handler,
+		},
+		{
+			MethodName: "ApproveCoordinatorAction",
+			Handler:    _Msg_ApproveCoordinatorAction_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

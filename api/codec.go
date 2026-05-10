@@ -15,11 +15,11 @@ import (
 // ZKP/RedPallas authentication. Tags 0x08, 0x0D, and 0x0E are ceremony/tally
 // tags auto-injected by PrepareProposal that also use the custom wire format.
 //
-// Tags 0x01, 0x06, 0x09, 0x0C, 0x0F, and 0x10 are reserved for messages that
-// use the standard Cosmos SDK Tx envelope (MsgCreateVotingSession,
-// MsgRegisterPallasKey, MsgCreateValidatorWithPallasKey, MsgUpdateVoteManagers,
-// MsgSetEndorser, MsgEndorseRound, and MsgClearRoundEndorsement). They are not
-// used by any encoder or decoder here.
+// Coordinator proposals/approvals, validator setup, and endorser actions use
+// the standard Cosmos SDK Tx envelope. Coordinator-owned payloads such as
+// MsgCreateVotingSession, MsgUpdateVoteManagers, and MsgAuthorizedSend are
+// embedded in MsgProposeCoordinatorAction rather than encoded with custom
+// wire-format tags.
 // Tag 0x0A is deliberately absent: it collides with the standard Cosmos Tx
 // protobuf encoding (field 1, wire type 2).
 const (
@@ -49,7 +49,7 @@ func IsCustomTag(b byte) bool {
 }
 
 // IsVoteTag returns true if b is a vote-round transaction type tag (0x02–0x05).
-// MsgCreateVotingSession (0x01) now uses standard Cosmos SDK transactions.
+// MsgCreateVotingSession is submitted through coordinator action approval.
 func IsVoteTag(b byte) bool {
 	return b >= TagDelegateVote && b <= TagSubmitTally
 }

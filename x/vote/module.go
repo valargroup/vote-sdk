@@ -51,7 +51,6 @@ func init() {
 		&modulev1.Module{},
 		appmodule.Provide(
 			ProvideModule,
-			ProvideCreateVotingSessionSigner,
 			ProvideDelegateVoteSigner,
 			ProvideCastVoteSigner,
 			ProvideRevealShareSigner,
@@ -62,10 +61,6 @@ func init() {
 			ProvideContributeDKGSigner,
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
-			ProvideUpdateVoteManagersSigner,
-			ProvideAuthorizedSendSigner,
-			ProvideScheduleUpgradeSigner,
-			ProvideCancelUpgradeSigner,
 		),
 	)
 }
@@ -78,7 +73,7 @@ func init() {
 // either a cosmos.msg.v1.signer protobuf option or a custom GetSigners
 // function.
 //
-// Vote-round messages (0x01–0x05) bypass the Cosmos SDK Tx envelope and use
+// Vote-round messages that bypass the Cosmos SDK Tx envelope use
 // ZKP/RedPallas authentication, so they use no-op signers.
 //
 // Ceremony messages (except MsgAckExecutiveAuthorityKey) are standard Cosmos
@@ -92,10 +87,9 @@ func noopSignerFn(proto.Message) ([][]byte, error) { return nil, nil }
 
 // ceremonyCreatorSignerFn extracts the signer from a message's "creator"
 // field (a valoper or account bech32 address) and returns the corresponding
-// account address bytes. Used by ceremony messages with a creator field
-// (RegisterPallasKey, RotatePallasKey, CreateVotingSession) and by the
-// management message MsgUpdateVoteManagers, all of which go through standard
-// Cosmos SDK signature verification.
+// account address bytes. Used by standard signed vote-module messages with a
+// creator field, including coordinator action proposal/approval, validator
+// setup, and mapped endorser messages.
 func ceremonyCreatorSignerFn(msg proto.Message) ([][]byte, error) {
 	fd := msg.ProtoReflect().Descriptor().Fields().ByName("creator")
 	if fd == nil {
@@ -137,13 +131,6 @@ func createValidatorWithPallasKeySignerFn(msg proto.Message) ([][]byte, error) {
 		return nil, fmt.Errorf("invalid validator address in staking_msg: %w", err)
 	}
 	return [][]byte{sdk.AccAddress(valAddr)}, nil
-}
-
-func ProvideCreateVotingSessionSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgCreateVotingSession"),
-		Fn:      ceremonyCreatorSignerFn,
-	}
 }
 
 func ProvideDelegateVoteSigner() signing.CustomGetSigner {
@@ -222,49 +209,6 @@ func ProvideCreateValidatorWithPallasKeySigner() signing.CustomGetSigner {
 	}
 }
 
-func ProvideUpdateVoteManagersSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgUpdateVoteManagers"),
-		Fn:      ceremonyCreatorSignerFn,
-	}
-}
-
-// authorizedSendSignerFn extracts the signer from MsgAuthorizedSend's
-// from_address field (an account bech32 address).
-func authorizedSendSignerFn(msg proto.Message) ([][]byte, error) {
-	fd := msg.ProtoReflect().Descriptor().Fields().ByName("from_address")
-	if fd == nil {
-		return nil, fmt.Errorf("MsgAuthorizedSend has no from_address field")
-	}
-	addr := msg.ProtoReflect().Get(fd).String()
-	accAddr, err := sdk.AccAddressFromBech32(addr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid from_address %q: %w", addr, err)
-	}
-	return [][]byte{accAddr}, nil
-}
-
-func ProvideAuthorizedSendSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgAuthorizedSend"),
-		Fn:      authorizedSendSignerFn,
-	}
-}
-
-func ProvideScheduleUpgradeSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgScheduleUpgrade"),
-		Fn:      ceremonyCreatorSignerFn,
-	}
-}
-
-func ProvideCancelUpgradeSigner() signing.CustomGetSigner {
-	return signing.CustomGetSigner{
-		MsgType: protoreflect.FullName("svote.v1.MsgCancelUpgrade"),
-		Fn:      ceremonyCreatorSignerFn,
-	}
-}
-
 // ModuleInputs defines the inputs needed to create the vote module.
 type ModuleInputs struct {
 	depinject.In
@@ -335,8 +279,8 @@ func (AppModule) Name() string {
 	return types.ModuleName
 }
 
-// RegisterInterfaces registers the vote module's message types with the
-// InterfaceRegistry, required for MsgServiceRouter to accept vote messages.
+// RegisterInterfaces registers public vote transaction messages and coordinator
+// action payload messages with the InterfaceRegistry.
 func (AppModule) RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	types.RegisterInterfaces(registry)
 }
@@ -345,9 +289,8 @@ func (AppModule) RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 //
 // Both QueryServer and MsgServer are registered. Vote-round messages bypass
 // the Cosmos SDK Tx envelope (using a raw [tag || protobuf] wire format) with
-// ZKP/RedPallas authentication. Ceremony messages (except MsgAck) use
-// standard Cosmos SDK transactions with signature verification and validator
-// gating. All messages are routed to the keeper via BaseApp's MsgServiceRouter.
+// ZKP/RedPallas authentication. Public Msg service messages are routed to the
+// keeper via BaseApp's MsgServiceRouter.
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServerImpl(am.keeper))
 	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
@@ -419,7 +362,20 @@ func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 				{
 					RpcMethod: "VoteManagers",
 					Use:       "vote-managers",
-					Short:     "Query the current vote-manager set (any-of-N — any member may act)",
+					Short:     "Query the current coordinator policy",
+				},
+				{
+					RpcMethod: "CoordinatorAction",
+					Use:       "coordinator-action [action-id]",
+					Short:     "Query a coordinator action by ID",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{
+						{ProtoField: "action_id"},
+					},
+				},
+				{
+					RpcMethod: "PendingCoordinatorActions",
+					Use:       "pending-coordinator-actions",
+					Short:     "Query pending coordinator actions",
 				},
 				{
 					RpcMethod: "ListRounds",
@@ -754,6 +710,7 @@ var DefaultVoteManagerAddresses = []string{
 func (am AppModule) DefaultGenesis(_ codec.JSONCodec) json.RawMessage {
 	gs := &types.GenesisState{
 		VoteManagerAddresses:  append([]string(nil), DefaultVoteManagerAddresses...),
+		VoteManagerThreshold:  1,
 		MinCeremonyValidators: 1,
 	}
 	bz, err := json.Marshal(gs)

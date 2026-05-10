@@ -521,17 +521,23 @@ func (s *KeeperTestSuite) TestEndorsers_MsgServerAuthAndIdempotency() {
 	}))
 
 	msgServer := keeper.NewMsgServerImpl(s.keeper)
-	_, err := msgServer.SetEndorser(s.ctx, &types.MsgSetEndorser{
-		Creator:    stranger,
-		EndorserId: "zodl",
-		Address:    endorser,
+	_, err := msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+		Creator: stranger,
+		Payload: coordinatorPayloadForMessage(s.T(), &types.MsgSetEndorser{
+			Creator:    stranger,
+			EndorserId: "zodl",
+			Address:    endorser,
+		}),
 	})
 	s.Require().ErrorIs(err, types.ErrNotAuthorized)
 
-	_, err = msgServer.SetEndorser(s.ctx, &types.MsgSetEndorser{
-		Creator:    manager,
-		EndorserId: "zodl",
-		Address:    endorser,
+	_, err = msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+		Creator: manager,
+		Payload: coordinatorPayloadForMessage(s.T(), &types.MsgSetEndorser{
+			Creator:    manager,
+			EndorserId: "zodl",
+			Address:    endorser,
+		}),
 	})
 	s.Require().NoError(err)
 
@@ -576,10 +582,13 @@ func (s *KeeperTestSuite) TestEndorsers_MsgServerAuthAndIdempotency() {
 	}))
 	s.Require().Len(endorsed, 1)
 
-	_, err = msgServer.SetEndorser(s.ctx, &types.MsgSetEndorser{
-		Creator:    manager,
-		EndorserId: "zodl",
-		Address:    "",
+	_, err = msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+		Creator: manager,
+		Payload: coordinatorPayloadForMessage(s.T(), &types.MsgSetEndorser{
+			Creator:    manager,
+			EndorserId: "zodl",
+			Address:    "",
+		}),
 	})
 	s.Require().NoError(err)
 	_, found, err := s.keeper.GetEndorser(kv, "zodl")
@@ -782,10 +791,13 @@ func (s *KeeperTestSuite) TestEndorsers_MsgSetEndorserAccountCreation_TableDrive
 			}
 
 			msgServer := keeper.NewMsgServerImpl(s.keeper)
-			_, err := msgServer.SetEndorser(s.ctx, &types.MsgSetEndorser{
-				Creator:    tc.creator,
-				EndorserId: "zodl",
-				Address:    tc.address,
+			_, err := msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+				Creator: tc.creator,
+				Payload: coordinatorPayloadForMessage(s.T(), &types.MsgSetEndorser{
+					Creator:    tc.creator,
+					EndorserId: "zodl",
+					Address:    tc.address,
+				}),
 			})
 			if tc.wantErr != nil {
 				s.Require().ErrorIs(err, tc.wantErr)

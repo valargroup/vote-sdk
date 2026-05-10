@@ -114,6 +114,22 @@ func TestValidateGenesisState_VoteManagersDuplicate(t *testing.T) {
 	require.ErrorIs(t, err, types.ErrDuplicateVoteManager)
 }
 
+func TestValidateAndNormalizeVoteManagerPolicy_DefaultThreshold(t *testing.T) {
+	addr := "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"
+	normalized, threshold, err := types.ValidateAndNormalizeVoteManagerPolicy([]string{addr}, 0)
+	require.NoError(t, err)
+	require.Equal(t, []string{addr}, normalized)
+	require.Equal(t, uint32(1), threshold)
+}
+
+func TestValidateGenesisState_VoteManagerThresholdTooHigh(t *testing.T) {
+	gs := validGenesis()
+	gs.VoteManagerThreshold = 2
+	err := types.ValidateGenesisState(gs)
+	require.ErrorIs(t, err, types.ErrInvalidThreshold)
+	require.Contains(t, err.Error(), "exceeds manager count")
+}
+
 func TestValidateGenesisState_TallyResultBadRoundID(t *testing.T) {
 	gs := validGenesis()
 	gs.TallyResults[0].VoteRoundId = []byte{0x01}

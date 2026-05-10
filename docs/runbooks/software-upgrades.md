@@ -2,8 +2,8 @@
 
 The chain uses `x/upgrade` for coordinated state-breaking upgrades. The module
 is not exposed directly to operators: raw `cosmos.upgrade` tx messages are not
-allowlisted, and upgrade tx CLI generation is disabled. Vote managers schedule
-or cancel plans through `x/vote` wrapper messages.
+allowlisted, and upgrade tx CLI generation is disabled. Coordinators schedule
+or cancel plans through `x/vote` coordinator actions.
 
 Routine binary swaps that preserve state still use `sdk-chain-deploy.yml`.
 
@@ -15,7 +15,9 @@ change, and existing live state does not contain that store.
 
 ## Scheduling a state-breaking upgrade
 
-Any current vote manager can schedule the halt height:
+To schedule the halt height, a current coordinator proposes a coordinator
+action. It executes immediately when the threshold is 1, or after enough
+current coordinators approve it:
 
 ```bash
 svoted tx vote schedule-upgrade <name> <height> \
@@ -46,7 +48,7 @@ Inspect the scheduled plan through the query path:
 svoted query upgrade plan
 ```
 
-Cancel the current plan with:
+Cancel the current plan through the same coordinator action flow:
 
 ```bash
 svoted tx vote cancel-upgrade \

@@ -33,8 +33,7 @@ service Query {
   // CeremonyState returns the current EA key ceremony lifecycle state.
   rpc CeremonyState(QueryCeremonyStateRequest) returns (QueryCeremonyStateResponse);
 
-  // VoteManagers returns the current vote-manager set (any member can
-  // authorize vote-manager-gated operations — any-of-N semantics).
+  // VoteManagers returns the current coordinator policy.
   rpc VoteManagers(QueryVoteManagersRequest) returns (QueryVoteManagersResponse);
 
   // VoteSummary returns a denormalized view of a vote round with proposals,
@@ -52,6 +51,12 @@ service Query {
 
   // EndorsedRounds returns all vote round IDs endorsed by a given endorser_id.
   rpc EndorsedRounds(QueryEndorsedRoundsRequest) returns (QueryEndorsedRoundsResponse);
+
+  // CoordinatorAction returns a stored threshold-gated action by id.
+  rpc CoordinatorAction(QueryCoordinatorActionRequest) returns (QueryCoordinatorActionResponse);
+
+  // PendingCoordinatorActions returns all pending threshold-gated actions.
+  rpc PendingCoordinatorActions(QueryPendingCoordinatorActionsRequest) returns (QueryPendingCoordinatorActionsResponse);
 }
 
 message QueryCommitmentTreeRequest {
@@ -123,6 +128,7 @@ message QueryVoteManagersRequest {}
 
 message QueryVoteManagersResponse {
   repeated string vote_manager_addresses = 1;
+  uint32 threshold = 2;
 }
 
 message QueryVoteSummaryRequest {
@@ -161,4 +167,18 @@ message QueryEndorsedRoundsRequest {
 
 message QueryEndorsedRoundsResponse {
   repeated bytes vote_round_ids = 1;
+}
+
+message QueryCoordinatorActionRequest {
+  uint64 action_id = 1;
+}
+
+message QueryCoordinatorActionResponse {
+  CoordinatorAction action = 1;
+}
+
+message QueryPendingCoordinatorActionsRequest {}
+
+message QueryPendingCoordinatorActionsResponse {
+  repeated CoordinatorAction actions = 1;
 }

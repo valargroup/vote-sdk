@@ -44,7 +44,9 @@ use e2e_tests::api::{
 };
 use e2e_tests::fixtures::{ensure_voter_fixture_files, resolve_voter_fixture_dir};
 use e2e_tests::metrics::{self, MetricsCollector, Sample};
-use e2e_tests::payloads::{self, create_voting_session_payload};
+use e2e_tests::payloads::{
+    self, coordinator_action_proposal_payload, create_voting_session_payload,
+};
 use e2e_tests::setup::ensure_pallas_key_registered;
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
@@ -574,7 +576,11 @@ fn voter_throughput_stress() {
 
     let (mut body, _, _derived_round_id) =
         create_voting_session_payload(&vote_manager_address, 600, Some(setup_round_fields));
-    body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
+    body = coordinator_action_proposal_payload(
+        &vote_manager_address,
+        body,
+        "/svote.v1.MsgCreateVotingSession",
+    );
 
     let vm_config = CosmosTxConfig {
         key_name: FIRST_VOTE_MANAGER_KEY_NAME.to_string(),

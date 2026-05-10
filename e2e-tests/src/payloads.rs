@@ -126,6 +126,23 @@ pub fn create_voting_session_payload(
     (body, fields, round_id)
 }
 
+/// Wrap a coordinator-owned message body in MsgProposeCoordinatorAction.
+///
+/// Local e2e chains use coordinator threshold=1, so the proposal executes in
+/// the same transaction while still exercising the production authority path.
+pub fn coordinator_action_proposal_payload(
+    creator: &str,
+    mut payload: Value,
+    payload_type_url: &str,
+) -> Value {
+    payload["@type"] = json!(payload_type_url);
+    json!({
+        "@type": "/svote.v1.MsgProposeCoordinatorAction",
+        "creator": creator,
+        "payload": payload,
+    })
+}
+
 /// Delegation bundle fields (from build_delegation_bundle + create_delegation_proof).
 pub struct DelegationBundlePayload {
     pub rk: Vec<u8>,

@@ -9,6 +9,9 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
@@ -34,8 +37,9 @@ func GetTxCmd() *cobra.Command {
 		CmdRegisterPallasKey(),
 		CmdRotatePallasKey(),
 		CmdCreateValidatorWithPallasKey(),
-		// Vote-manager commands — signed by any current vote manager (any-of-N).
+		// Coordinator commands — proposal/approval flow for gated actions.
 		CmdUpdateVoteManagers(),
+		CmdApproveCoordinatorAction(),
 		CmdScheduleUpgrade(),
 		CmdCancelUpgrade(),
 		CmdCreateVotingSession(),
@@ -43,22 +47,61 @@ func GetTxCmd() *cobra.Command {
 		CmdSetEndorser(),
 		CmdEndorseRound(),
 		CmdClearRoundEndorsement(),
-		// Token transfer — uses whitelisted MsgAuthorizedSend.
+		// Token transfer — proposed as a coordinator action.
 		CmdAuthorizedSend(),
 	)
 
 	return cmd
 }
 
-// CmdScheduleUpgrade broadcasts MsgScheduleUpgrade.
-// Callable by any current vote manager.
+func broadcastCoordinatorProposal(clientCtx client.Context, flagSet *pflag.FlagSet, payload proto.Message) error {
+	bz, err := proto.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal coordinator action payload: %w", err)
+	}
+	msg := &types.MsgProposeCoordinatorAction{
+		Creator: clientCtx.GetFromAddress().String(),
+		Payload: &anypb.Any{
+			TypeUrl: "/" + string(payload.ProtoReflect().Descriptor().FullName()),
+			Value:   bz,
+		},
+	}
+	return tx.GenerateOrBroadcastTxCLI(clientCtx, flagSet, msg)
+}
+
+func CmdApproveCoordinatorAction() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "approve-coordinator-action [action-id]",
+		Short: "Approve a pending coordinator action",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+			actionID, err := strconv.ParseUint(args[0], 10, 64)
+			if err != nil || actionID == 0 {
+				return fmt.Errorf("action-id must be a positive integer")
+			}
+			msg := &types.MsgApproveCoordinatorAction{
+				Creator:  clientCtx.GetFromAddress().String(),
+				ActionId: actionID,
+			}
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
+// CmdScheduleUpgrade proposes a MsgScheduleUpgrade coordinator action.
 func CmdScheduleUpgrade() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "schedule-upgrade [name] [height] --info <info> [--replace-existing]",
 		Short: "Schedule a software upgrade halt height",
-		Long: `Broadcast a MsgScheduleUpgrade transaction.
+		Long: `Propose a MsgScheduleUpgrade coordinator action.
 
-The --from signer must be a current vote manager. The name must match the
+The --from signer must be a current coordinator. The name must match the
 upgrade handler registered in the future binary. If another plan is already
 scheduled, pass --replace-existing to overwrite it.`,
 		Args: cobra.ExactArgs(2),
@@ -89,7 +132,7 @@ scheduled, pass --replace-existing to overwrite it.`,
 				ReplaceExisting: replaceExisting,
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
@@ -99,15 +142,14 @@ scheduled, pass --replace-existing to overwrite it.`,
 	return cmd
 }
 
-// CmdCancelUpgrade broadcasts MsgCancelUpgrade.
-// Callable by any current vote manager.
+// CmdCancelUpgrade proposes a MsgCancelUpgrade coordinator action.
 func CmdCancelUpgrade() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cancel-upgrade",
 		Short: "Cancel the scheduled software upgrade",
-		Long: `Broadcast a MsgCancelUpgrade transaction.
+		Long: `Propose a MsgCancelUpgrade coordinator action.
 
-The --from signer must be a current vote manager. Cancelling with no scheduled
+The --from signer must be a current coordinator. Cancelling with no scheduled
 upgrade is accepted as a no-op by x/upgrade.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -120,7 +162,7 @@ upgrade is accepted as a no-op by x/upgrade.`,
 				Creator: clientCtx.GetFromAddress().String(),
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
@@ -271,22 +313,22 @@ the Pallas key.`,
 	return cmd
 }
 
-// CmdUpdateVoteManagers broadcasts MsgUpdateVoteManagers.
-// Atomically replaces the vote-manager set with the given addresses. Callable by any
-// current vote manager (any-of-N).
+// CmdUpdateVoteManagers proposes a MsgUpdateVoteManagers coordinator action.
+// The action atomically replaces the coordinator set and threshold after
+// enough current coordinators approve it.
 func CmdUpdateVoteManagers() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update-vote-managers --vote-manager <addr> [--vote-manager <addr> ...]",
 		Short: "Atomically replace the vote-manager set",
-		Long: `Broadcast an MsgUpdateVoteManagers transaction.
+		Long: `Propose a MsgUpdateVoteManagers coordinator action.
 
 Flags:
   --vote-manager  Repeatable. Bech32 account address (sv1...) of a vote manager
            in the new set. Pass the flag once per vote manager. The full
            list replaces the existing set atomically.
 
-The --from signer must be a current vote manager. Balances are not moved — each vote manager
-holds their own funds.`,
+The --from signer must be a current coordinator. Balances are not moved — each
+coordinator holds their own funds.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientTxContext(cmd)
@@ -301,27 +343,33 @@ holds their own funds.`,
 			if len(newVoteManagers) == 0 {
 				return fmt.Errorf("at least one --vote-manager flag is required")
 			}
+			threshold, err := cmd.Flags().GetUint32("threshold")
+			if err != nil {
+				return err
+			}
 
 			msg := &types.MsgUpdateVoteManagers{
 				Creator:         clientCtx.GetFromAddress().String(),
 				NewVoteManagers: newVoteManagers,
+				NewThreshold:    threshold,
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
 	cmd.Flags().StringArray("vote-manager", nil, "Vote-manager bech32 address (repeatable; all specified addresses form the new set)")
+	cmd.Flags().Uint32("threshold", 1, "Coordinator approval threshold for the new vote-manager set")
 	flags.AddTxFlagsToCmd(cmd)
 	return cmd
 }
 
-// CmdSetEndorser broadcasts MsgSetEndorser. Callable by any current vote manager.
+// CmdSetEndorser proposes a MsgSetEndorser coordinator action.
 func CmdSetEndorser() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set-endorser [endorser-id] [address]",
 		Short: "Create, rotate, or clear an endorser mapping",
-		Long: `Broadcast an MsgSetEndorser transaction.
+		Long: `Propose a MsgSetEndorser coordinator action.
 
 Arguments:
   endorser-id  Stable identifier, e.g. zodl
@@ -356,7 +404,7 @@ remain queryable.`,
 				Address:    address,
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
@@ -425,22 +473,22 @@ func CmdClearRoundEndorsement() *cobra.Command {
 	return cmd
 }
 
-// CmdAuthorizedSend broadcasts MsgAuthorizedSend.
-// Transfers tokens using the whitelisted MsgAuthorizedSend instead of the
-// blocked bank MsgSend.
+// CmdAuthorizedSend proposes a MsgAuthorizedSend coordinator action.
+// Bank MsgSend is blocked; coordinator-approved MsgAuthorizedSend is the
+// privileged funding path.
 func CmdAuthorizedSend() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "authorized-send [to-address] [amount] [denom]",
-		Short: "Send tokens via MsgAuthorizedSend (whitelisted transfer)",
-		Long: `Broadcast an MsgAuthorizedSend transaction.
+		Short: "Propose a coordinator-approved token send",
+		Long: `Propose a MsgAuthorizedSend coordinator action.
 
 Arguments:
   to-address  Recipient bech32 account address (sv1...)
   amount      Integer amount to send (e.g. 200000)
   denom       Token denomination (e.g. usvote)
 
-The --from flag specifies the sender. Unlike 'bank send', this message
-is whitelisted by the chain's MessageWhitelistDecorator.
+The --from flag specifies the coordinator funding account. That account must be
+a current coordinator and must approve the action.
 
 Example:
   svoted tx vote authorized-send sv1abc... 200000 usvote --from mykey`,
@@ -458,7 +506,7 @@ Example:
 				Denom:       args[2],
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
@@ -466,14 +514,14 @@ Example:
 	return cmd
 }
 
-// CmdCreateVotingSession broadcasts MsgCreateVotingSession.
-// Callable by any current vote manager. Accepts a JSON file because the message
-// carries a structured proposal list and large binary blobs.
+// CmdCreateVotingSession proposes a MsgCreateVotingSession coordinator action.
+// Accepts a JSON file because the message carries a structured proposal list
+// and large binary blobs.
 func CmdCreateVotingSession() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create-voting-session [msg-json-file]",
-		Short: "Create a new voting session (vote-manager only)",
-		Long: `Broadcast an MsgCreateVotingSession from a JSON description file.
+		Short: "Create a new voting session through coordinator approval",
+		Long: `Propose a MsgCreateVotingSession coordinator action from a JSON description file.
 
 All byte fields are hex-encoded in the JSON.  Required fields:
 
@@ -595,7 +643,7 @@ Example:
 				Title:             input.Title,
 			}
 
-			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 

@@ -17,7 +17,9 @@ use e2e_tests::{
         import_first_vote_manager_key, post_json_accept_committed, wait_for_create_round_id,
         wait_for_round_status, CosmosTxConfig, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
     },
-    payloads::{create_voting_session_payload, delegate_vote_payload},
+    payloads::{
+        coordinator_action_proposal_payload, create_voting_session_payload, delegate_vote_payload,
+    },
     setup::{ensure_pallas_key_registered, prepare_multi_delegation_bundles},
 };
 use ff::PrimeField;
@@ -65,7 +67,11 @@ fn sync_stress_multi_delegation() {
     let (mut body, _, _) =
         create_voting_session_payload(&vote_manager_address, 300, Some(round_fields));
 
-    body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
+    body = coordinator_action_proposal_payload(
+        &vote_manager_address,
+        body,
+        "/svote.v1.MsgCreateVotingSession",
+    );
     let vm_config = CosmosTxConfig {
         key_name: FIRST_VOTE_MANAGER_KEY_NAME.to_string(),
         home_dir: config.home_dir.clone(),

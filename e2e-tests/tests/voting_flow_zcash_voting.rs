@@ -19,8 +19,8 @@ use e2e_tests::{
         SESSION_STATUS_FINALIZED, SESSION_STATUS_TALLYING,
     },
     payloads::{
-        cast_vote_payload_real, create_voting_session_payload, delegate_vote_payload,
-        helper_share_payload,
+        cast_vote_payload_real, coordinator_action_proposal_payload,
+        create_voting_session_payload, delegate_vote_payload, helper_share_payload,
     },
     setup::prepare_delegation_bundle_for_test,
 };
@@ -92,9 +92,12 @@ fn voting_flow_zcash_voting_path() {
         create_voting_session_payload(&vote_manager_address, 120, Some(session_fields));
 
     // ---- Step 1: Create voting session ----
-    // MsgCreateVotingSession is a standard Cosmos SDK tx signed by a vote manager.
-    log_step("Step 1", "create voting session (Cosmos SDK tx)");
-    body["@type"] = serde_json::json!("/svote.v1.MsgCreateVotingSession");
+    log_step("Step 1", "propose create voting session coordinator action");
+    body = coordinator_action_proposal_payload(
+        &vote_manager_address,
+        body,
+        "/svote.v1.MsgCreateVotingSession",
+    );
     let vm_config = e2e_tests::api::CosmosTxConfig {
         key_name: FIRST_VOTE_MANAGER_KEY_NAME.to_string(),
         home_dir: config.home_dir.clone(),

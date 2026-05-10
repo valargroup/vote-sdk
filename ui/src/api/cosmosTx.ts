@@ -1,9 +1,8 @@
 // Client-side Cosmos SDK transaction signing and REST broadcasting.
 //
-// MsgUpdateVoteManagers, MsgCreateVotingSession, and MsgAuthorizedSend are
-// standard Cosmos SDK transactions. Instead of relying on a server-side
-// handler, we sign them directly in the browser using cosmjs and broadcast
-// via the chain's REST API (/cosmos/tx/v1beta1/txs).
+// Coordinator-owned actions are submitted through MsgProposeCoordinatorAction.
+// The embedded payload is the original action message encoded into
+// google.protobuf.Any, so threshold=1 still uses the same authority path.
 
 import type { OfflineDirectSigner } from "@cosmjs/proto-signing";
 import {
@@ -109,27 +108,91 @@ class ProtoWriter {
 //   string creator          = 1;
 //   repeated string new_vote_managers = 2;
 // }
-// Atomically replaces the vote-manager set. Any current vote manager may call it; the new
-// set must be non-empty and contain only valid bech32 addresses with no
-// duplicates. Balances are not touched.
+// Atomically replaces the vote-manager set and threshold when executed through
+// coordinator action approval. The new set must be non-empty and contain only
+// valid bech32 addresses with no duplicates. Balances are not touched.
 const MsgUpdateVoteManagersProto = {
   encode(
-    message: { creator: string; newVoteManagers: string[] },
+    message: { creator: string; newVoteManagers: string[]; newThreshold: number },
     writer: ProtoWriter = ProtoWriter.create(),
   ): ProtoWriter {
     if (message.creator !== "") writer.uint32(10).string(message.creator);
     for (const vm of message.newVoteManagers) {
       writer.uint32(18).string(vm);
     }
+    if (message.newThreshold !== 0) writer.uint32(24).uint32(message.newThreshold);
     return writer;
   },
-  decode(): { creator: string; newVoteManagers: string[] } {
+  decode(): { creator: string; newVoteManagers: string[]; newThreshold: number } {
     throw new Error("decode not implemented");
   },
   fromPartial(
-    object: Partial<{ creator: string; newVoteManagers: string[] }>,
-  ): { creator: string; newVoteManagers: string[] } {
-    return { creator: object.creator ?? "", newVoteManagers: object.newVoteManagers ?? [] };
+    object: Partial<{ creator: string; newVoteManagers: string[]; newThreshold: number }>,
+  ): { creator: string; newVoteManagers: string[]; newThreshold: number } {
+    return {
+      creator: object.creator ?? "",
+      newVoteManagers: object.newVoteManagers ?? [],
+      newThreshold: object.newThreshold ?? 0,
+    };
+  },
+};
+
+// google.protobuf.Any { string type_url = 1; bytes value = 2; }
+const AnyProto = {
+  encode(
+    message: { typeUrl: string; value: Uint8Array },
+    writer: ProtoWriter = ProtoWriter.create(),
+  ): ProtoWriter {
+    if (message.typeUrl !== "") writer.uint32(10).string(message.typeUrl);
+    if (message.value.length) writer.uint32(18).bytes(message.value);
+    return writer;
+  },
+  decode(): { typeUrl: string; value: Uint8Array } {
+    throw new Error("decode not implemented");
+  },
+  fromPartial(
+    object: Partial<{ typeUrl: string; value: Uint8Array }>,
+  ): { typeUrl: string; value: Uint8Array } {
+    return { typeUrl: object.typeUrl ?? "", value: object.value ?? new Uint8Array() };
+  },
+};
+
+const MsgProposeCoordinatorActionProto = {
+  encode(
+    message: { creator: string; payload: { typeUrl: string; value: Uint8Array } },
+    writer: ProtoWriter = ProtoWriter.create(),
+  ): ProtoWriter {
+    if (message.creator !== "") writer.uint32(10).string(message.creator);
+    writer.sub(2, AnyProto.encode(message.payload));
+    return writer;
+  },
+  decode(): { creator: string; payload: { typeUrl: string; value: Uint8Array } } {
+    throw new Error("decode not implemented");
+  },
+  fromPartial(
+    object: Partial<{ creator: string; payload: { typeUrl: string; value: Uint8Array } }>,
+  ): { creator: string; payload: { typeUrl: string; value: Uint8Array } } {
+    return {
+      creator: object.creator ?? "",
+      payload: object.payload ?? { typeUrl: "", value: new Uint8Array() },
+    };
+  },
+};
+
+const MsgApproveCoordinatorActionProto = {
+  encode(
+    message: { creator: string; actionId: number },
+    writer: ProtoWriter = ProtoWriter.create(),
+  ): ProtoWriter {
+    if (message.creator !== "") writer.uint32(10).string(message.creator);
+    if (message.actionId !== 0) writer.uint32(16).uint64(message.actionId);
+    return writer;
+  },
+  decode(): { creator: string; actionId: number } {
+    throw new Error("decode not implemented");
+  },
+  fromPartial(object: Partial<{ creator: string; actionId: number }>): { creator: string; actionId: number } {
+    return { creator: object.creator ?? "", actionId: object.actionId ?? 0 };
   },
 };
 
@@ -404,8 +467,8 @@ const MsgUnjailProto = {
 };
 
 // ── Protobuf type: MsgAuthorizedSend (svote.v1) ─────────────────
-// Bank MsgSend is disabled at the ante-handler level; all transfers
-// must use MsgAuthorizedSend with role-based authorization.
+// Bank MsgSend is disabled at the ante-handler level; privileged transfers use
+// MsgAuthorizedSend only as coordinator action payloads.
 //
 // message MsgAuthorizedSend {
 //   string from_address = 1; string to_address = 2;
@@ -442,19 +505,13 @@ const MsgAuthorizedSendProto = {
 function createRegistry(): Registry {
   const registry = new Registry();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registry.register("/svote.v1.MsgUpdateVoteManagers", MsgUpdateVoteManagersProto as any);
+  registry.register("/svote.v1.MsgProposeCoordinatorAction", MsgProposeCoordinatorActionProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registry.register("/svote.v1.MsgScheduleUpgrade", MsgScheduleUpgradeProto as any);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registry.register("/svote.v1.MsgCancelUpgrade", MsgCancelUpgradeProto as any);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registry.register("/svote.v1.MsgCreateVotingSession", MsgCreateVotingSessionProto as any);
+  registry.register("/svote.v1.MsgApproveCoordinatorAction", MsgApproveCoordinatorActionProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/cosmos.slashing.v1beta1.MsgUnjail", MsgUnjailProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/svote.v1.MsgAuthorizedSend", MsgAuthorizedSendProto as any);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registry.register("/svote.v1.MsgSetEndorser", MsgSetEndorserProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registry.register("/svote.v1.MsgEndorseRound", MsgEndorseRoundProto as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -678,18 +735,19 @@ async function fetchSnapshotData(
   };
 }
 
-// ── Public API ──────────────────────────────────────────────────
+interface MiniProto<T> {
+  encode(message: T, writer?: ProtoWriter): ProtoWriter;
+}
 
-/**
- * Sign and broadcast a MsgUpdateVoteManagers transaction.
- *
- * Atomically replaces the vote-manager set with `newVoteManagers`. The `creator` field is
- * derived from the signer (must be a current vote manager). Balances are not moved.
- */
-export async function updateVoteManagers(
+function encodePayload<T>(codec: MiniProto<T>, value: T): Uint8Array {
+  return codec.encode(value).finish();
+}
+
+async function proposeCoordinatorPayload(
   apiBase: string,
   signer: OfflineDirectSigner,
-  newVoteManagers: string[],
+  payloadTypeUrl: string,
+  payloadValue: Uint8Array,
 ): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
   return signAndBroadcast({
@@ -697,14 +755,64 @@ export async function updateVoteManagers(
     signer,
     messages: [
       {
-        typeUrl: "/svote.v1.MsgUpdateVoteManagers",
-        value: { creator: account.address, newVoteManagers },
+        typeUrl: "/svote.v1.MsgProposeCoordinatorAction",
+        value: {
+          creator: account.address,
+          payload: { typeUrl: payloadTypeUrl, value: payloadValue },
+        },
       },
     ],
   });
 }
 
-/** Sign and broadcast a MsgScheduleUpgrade transaction. */
+// ── Public API ──────────────────────────────────────────────────
+
+/** Sign and broadcast a MsgApproveCoordinatorAction transaction. */
+export async function approveCoordinatorAction(
+  apiBase: string,
+  signer: OfflineDirectSigner,
+  actionId: number,
+): Promise<BroadcastResult> {
+  const [account] = await signer.getAccounts();
+  return signAndBroadcast({
+    apiBase,
+    signer,
+    messages: [
+      {
+        typeUrl: "/svote.v1.MsgApproveCoordinatorAction",
+        value: { creator: account.address, actionId },
+      },
+    ],
+  });
+}
+
+/**
+ * Propose a MsgUpdateVoteManagers coordinator action.
+ *
+ * Atomically replaces the vote-manager set with `newVoteManagers`. The
+ * `creator` field is derived from the signer and the payload executes after
+ * coordinator threshold approval. Balances are not moved.
+ */
+export async function updateVoteManagers(
+  apiBase: string,
+  signer: OfflineDirectSigner,
+  newVoteManagers: string[],
+  newThreshold = 1,
+): Promise<BroadcastResult> {
+  const [account] = await signer.getAccounts();
+  return proposeCoordinatorPayload(
+    apiBase,
+    signer,
+    "/svote.v1.MsgUpdateVoteManagers",
+    encodePayload(MsgUpdateVoteManagersProto, {
+      creator: account.address,
+      newVoteManagers,
+      newThreshold,
+    }),
+  );
+}
+
+/** Propose a MsgScheduleUpgrade coordinator action. */
 export async function scheduleUpgrade(
   apiBase: string,
   signer: OfflineDirectSigner,
@@ -716,43 +824,35 @@ export async function scheduleUpgrade(
   },
 ): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
-  return signAndBroadcast({
+  return proposeCoordinatorPayload(
     apiBase,
     signer,
-    messages: [
-      {
-        typeUrl: "/svote.v1.MsgScheduleUpgrade",
-        value: {
-          creator: account.address,
-          name: params.name,
-          height: params.height,
-          info: params.info,
-          replaceExisting: params.replaceExisting,
-        },
-      },
-    ],
-  });
+    "/svote.v1.MsgScheduleUpgrade",
+    encodePayload(MsgScheduleUpgradeProto, {
+      creator: account.address,
+      name: params.name,
+      height: params.height,
+      info: params.info,
+      replaceExisting: params.replaceExisting,
+    }),
+  );
 }
 
-/** Sign and broadcast a MsgCancelUpgrade transaction. */
+/** Propose a MsgCancelUpgrade coordinator action. */
 export async function cancelUpgrade(
   apiBase: string,
   signer: OfflineDirectSigner,
 ): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
-  return signAndBroadcast({
+  return proposeCoordinatorPayload(
     apiBase,
     signer,
-    messages: [
-      {
-        typeUrl: "/svote.v1.MsgCancelUpgrade",
-        value: { creator: account.address },
-      },
-    ],
-  });
+    "/svote.v1.MsgCancelUpgrade",
+    encodePayload(MsgCancelUpgradeProto, { creator: account.address }),
+  );
 }
 
-/** Sign and broadcast a MsgSetEndorser transaction. Empty address clears the mapping. */
+/** Propose a MsgSetEndorser coordinator action. Empty address clears the mapping. */
 export async function setEndorser(
   apiBase: string,
   signer: OfflineDirectSigner,
@@ -760,16 +860,12 @@ export async function setEndorser(
   address: string,
 ): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
-  return signAndBroadcast({
+  return proposeCoordinatorPayload(
     apiBase,
     signer,
-    messages: [
-      {
-        typeUrl: "/svote.v1.MsgSetEndorser",
-        value: { creator: account.address, endorserId, address },
-      },
-    ],
-  });
+    "/svote.v1.MsgSetEndorser",
+    encodePayload(MsgSetEndorserProto, { creator: account.address, endorserId, address }),
+  );
 }
 
 /** Sign and broadcast a MsgEndorseRound transaction. */
@@ -821,7 +917,7 @@ export async function clearRoundEndorsement(
 }
 
 /**
- * Sign and broadcast a MsgCreateVotingSession transaction.
+ * Propose a MsgCreateVotingSession coordinator action.
  *
  * Fetches real nc_root and nullifier_imt_root from the chain's snapshot-data
  * endpoint (which calls lightwalletd and the PIR server). Throws if snapshot
@@ -858,36 +954,31 @@ export async function createVotingSession(
   ]);
   const proposalsHash = computeProposalsHash(params.proposals);
 
-  return signAndBroadcast({
+  return proposeCoordinatorPayload(
     apiBase,
     signer,
-    messages: [
-      {
-        typeUrl: "/svote.v1.MsgCreateVotingSession",
-        value: {
-          creator: account.address,
-          snapshotHeight: params.snapshotHeight,
-          snapshotBlockhash: snapshot.snapshotBlockhash,
-          proposalsHash,
-          voteEndTime: params.voteEndTime,
-          nullifierImtRoot: snapshot.nullifierImtRoot,
-          ncRoot: snapshot.ncRoot,
-          proposals: params.proposals,
-          description: params.description,
-          title: params.title,
-          discussionURL: params.discussionURL,
-        } satisfies CreateVotingSessionValue,
-      },
-    ],
-  });
+    "/svote.v1.MsgCreateVotingSession",
+    encodePayload(MsgCreateVotingSessionProto, {
+      creator: account.address,
+      snapshotHeight: params.snapshotHeight,
+      snapshotBlockhash: snapshot.snapshotBlockhash,
+      proposalsHash,
+      voteEndTime: params.voteEndTime,
+      nullifierImtRoot: snapshot.nullifierImtRoot,
+      ncRoot: snapshot.ncRoot,
+      proposals: params.proposals,
+      description: params.description,
+      title: params.title,
+      discussionURL: params.discussionURL,
+    } satisfies CreateVotingSessionValue),
+  );
 }
 
 /**
- * Sign and broadcast an svote.v1.MsgAuthorizedSend transaction.
+ * Propose an svote.v1.MsgAuthorizedSend coordinator action.
  *
- * Used to transfer stake tokens from a vote manager to a validator address.
- * Any vote manager can send to anyone; bonded validators
- * can send to other vote managers or bonded validators; all other senders rejected.
+ * Used to transfer stake tokens from a coordinator account to a validator
+ * address. The source account must be one of the approving coordinators.
  *
  * @param amountUsvote - amount in micro-tokens (usvote), e.g. "1000000" for 1 SVOTE
  */
@@ -898,21 +989,17 @@ export async function fundValidator(
   amountUsvote: string,
 ): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
-  return signAndBroadcast({
+  return proposeCoordinatorPayload(
     apiBase,
     signer,
-    messages: [
-      {
-        typeUrl: "/svote.v1.MsgAuthorizedSend",
-        value: {
-          fromAddress: account.address,
-          toAddress,
-          amount: amountUsvote,
-          denom: "usvote",
-        },
-      },
-    ],
-  });
+    "/svote.v1.MsgAuthorizedSend",
+    encodePayload(MsgAuthorizedSendProto, {
+      fromAddress: account.address,
+      toAddress,
+      amount: amountUsvote,
+      denom: "usvote",
+    }),
+  );
 }
 
 /** Default manual approval amount for validator self-delegation (10 USVOTE) plus headroom. */

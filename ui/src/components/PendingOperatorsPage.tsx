@@ -67,7 +67,7 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
         setResultMsg({
           addr: address,
           ok: true,
-          msg: `Funded (tx ${res.tx_hash.slice(0, 12)}...). Row clears when the operator bonds.`,
+          msg: `Coordinator funding action proposed (tx ${res.tx_hash.slice(0, 12)}...). Row clears after the action executes and the operator bonds.`,
         });
       } else {
         setResultMsg({
