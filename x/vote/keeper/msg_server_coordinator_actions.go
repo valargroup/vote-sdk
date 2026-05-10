@@ -304,7 +304,7 @@ func (ms msgServer) executeCoordinatorPayload(goCtx context.Context, payload *an
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
 		}
-		_, err := ms.executeAuthorizedSend(goCtx, msg, true, approvals)
+		_, err := ms.executeAuthorizedSend(goCtx, msg, approvals)
 		return err
 	default:
 		return fmt.Errorf("%w: %s", types.ErrUnsupportedCoordinatorAction, payload.GetTypeUrl())

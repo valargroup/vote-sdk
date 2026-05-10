@@ -21,7 +21,10 @@ import (
 //   - Coordinator-action sends must originate from a current coordinator.
 //   - The source funding account must be one of the approving coordinators.
 func (ms msgServer) AuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend) (*types.MsgAuthorizedSendResponse, error) {
-	return ms.executeAuthorizedSend(goCtx, msg, false, nil)
+	if _, _, _, err := validateAuthorizedSendFields(msg); err != nil {
+		return nil, err
+	}
+	return nil, coordinatorActionRequired("send funds")
 }
 
 func validateAuthorizedSendFields(msg *types.MsgAuthorizedSend) (sdk.AccAddress, sdk.AccAddress, sdkmath.Int, error) {
@@ -47,7 +50,7 @@ func validateAuthorizedSendFields(msg *types.MsgAuthorizedSend) (sdk.AccAddress,
 	return fromAddr, toAddr, amt, nil
 }
 
-func (ms msgServer) executeAuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend, allowCoordinatorSender bool, approvals []string) (*types.MsgAuthorizedSendResponse, error) {
+func (ms msgServer) executeAuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend, approvals []string) (*types.MsgAuthorizedSendResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
 	fromAddr, toAddr, amt, err := validateAuthorizedSendFields(msg)
@@ -56,10 +59,6 @@ func (ms msgServer) executeAuthorizedSend(goCtx context.Context, msg *types.MsgA
 	}
 
 	coins := sdk.NewCoins(sdk.NewCoin(msg.Denom, amt))
-
-	if !allowCoordinatorSender {
-		return nil, coordinatorActionRequired("send funds")
-	}
 
 	senderIsVoteManager, err := ms.k.IsVoteManager(ctx, msg.FromAddress)
 	if err != nil {
