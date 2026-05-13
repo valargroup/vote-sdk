@@ -149,6 +149,9 @@ func (k *Keeper) GetBlockLeafIndex(kvStore store.KVStore, roundID []byte, height
 func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, roundID []byte, fromHeight, toHeight uint64) ([]*types.BlockCommitments, uint64, error) {
 	startKey := types.BlockLeafIndexKey(roundID, fromHeight)
 	endKey := types.BlockLeafIndexKey(roundID, toHeight+1)
+	if toHeight == ^uint64(0) {
+		endKey = types.PrefixEndBytes(types.BlockLeafIndexPrefixForRound(roundID))
+	}
 
 	iter, err := kvStore.Iterator(startKey, endKey)
 	if err != nil {
@@ -180,6 +183,9 @@ func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, roundID []byte, from
 			leaf, err := kvStore.Get(types.CommitmentLeafKey(roundID, startIndex+i))
 			if err != nil {
 				return nil, 0, err
+			}
+			if len(leaf) != 32 {
+				return nil, 0, fmt.Errorf("invalid commitment leaf at index %d for block %d: expected 32 bytes, got %d", startIndex+i, height, len(leaf))
 			}
 			leaves[i] = leaf
 		}

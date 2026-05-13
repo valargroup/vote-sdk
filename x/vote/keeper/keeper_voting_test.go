@@ -1069,3 +1069,35 @@ func (s *KeeperTestSuite) TestGetCommitmentLeaves_MissingRootErrors() {
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "missing commitment root")
 }
+
+func (s *KeeperTestSuite) TestGetCommitmentLeaves_InvalidLeafErrors() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, roundID, 5, 0, 1))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, 5, commitmentRoot(0x05)))
+
+	_, _, err := s.keeper.GetCommitmentLeaves(kv, roundID, 0, 10)
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "invalid commitment leaf")
+}
+
+func (s *KeeperTestSuite) TestGetCommitmentLeaves_MaxUint64ToHeightIncludesMaxHeightBlock() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+	maxHeight := ^uint64(0)
+
+	_, err := s.keeper.AppendCommitment(kv, roundID, fpLeaf(0x01))
+	s.Require().NoError(err)
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, roundID, maxHeight, 0, 1))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, maxHeight, commitmentRoot(0xFF)))
+
+	got, nextFromHeight, err := s.keeper.GetCommitmentLeaves(kv, roundID, maxHeight, maxHeight)
+	s.Require().NoError(err)
+	s.Require().Len(got, 1)
+	s.Require().Equal(maxHeight, got[0].Height)
+	s.Require().Equal(fpLeaf(0x01), got[0].Leaves[0])
+	s.Require().Zero(nextFromHeight)
+}

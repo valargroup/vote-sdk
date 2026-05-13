@@ -410,7 +410,7 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_MultipleBlocks() {
 	s.Require().Zero(resp.NextFromHeight)
 }
 
-func (s *QueryServerTestSuite) TestCommitmentLeaves_NextFromHeightClampedToRange() {
+func (s *QueryServerTestSuite) TestCommitmentLeaves_OutOfRangeBlocksNotReturned() {
 	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
