@@ -87,6 +87,20 @@ func parseRoundID(w http.ResponseWriter, r *http.Request) []byte {
 	return roundID
 }
 
+func parseOptionalUint64QueryParam(w http.ResponseWriter, r *http.Request, name string) (uint64, bool) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return 0, true
+	}
+
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid %s: %v", name, err))
+		return 0, false
+	}
+	return value, true
+}
+
 func (qh *queryHandler) handleCommitmentTreeAtHeight(w http.ResponseWriter, r *http.Request) {
 	roundID := parseRoundID(w, r)
 	if roundID == nil {
@@ -194,27 +208,13 @@ func (qh *queryHandler) handleCommitmentLeaves(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	fromStr := r.URL.Query().Get("from_height")
-	toStr := r.URL.Query().Get("to_height")
-
-	var fromHeight uint64
-	if fromStr != "" {
-		var err error
-		fromHeight, err = strconv.ParseUint(fromStr, 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid from_height: %v", err))
-			return
-		}
+	fromHeight, ok := parseOptionalUint64QueryParam(w, r, "from_height")
+	if !ok {
+		return
 	}
-
-	var toHeight uint64
-	if toStr != "" {
-		var err error
-		toHeight, err = strconv.ParseUint(toStr, 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid to_height: %v", err))
-			return
-		}
+	toHeight, ok := parseOptionalUint64QueryParam(w, r, "to_height")
+	if !ok {
+		return
 	}
 	if toHeight != 0 && toHeight < fromHeight {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("to_height (%d) must be >= from_height (%d)", toHeight, fromHeight))
