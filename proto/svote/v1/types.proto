@@ -221,6 +221,7 @@ message BlockCommitments {
   uint64         height      = 1; // Block height
   uint64         start_index = 2; // Index of the first leaf in this block
   repeated bytes leaves      = 3; // Commitment leaves (each 32 bytes, Pallas Fp LE)
+  bytes          root        = 4; // 32-byte tree root after this block's leaves
 }
 
 // ProposalSummary is a denormalized view of a proposal for the VoteSummary query.

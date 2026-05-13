@@ -539,10 +539,11 @@ func (x *QueryCommitmentLeavesRequest) GetVoteRoundId() []byte {
 }
 
 type QueryCommitmentLeavesResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Blocks        []*BlockCommitments    `protobuf:"bytes,1,rep,name=blocks,proto3" json:"blocks,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Blocks         []*BlockCommitments    `protobuf:"bytes,1,rep,name=blocks,proto3" json:"blocks,omitempty"`
+	NextFromHeight uint64                 `protobuf:"varint,2,opt,name=next_from_height,json=nextFromHeight,proto3" json:"next_from_height,omitempty"` // 0 when no more indexed leaf blocks remain in the requested range
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *QueryCommitmentLeavesResponse) Reset() {
@@ -580,6 +581,13 @@ func (x *QueryCommitmentLeavesResponse) GetBlocks() []*BlockCommitments {
 		return x.Blocks
 	}
 	return nil
+}
+
+func (x *QueryCommitmentLeavesResponse) GetNextFromHeight() uint64 {
+	if x != nil {
+		return x.NextFromHeight
+	}
+	return 0
 }
 
 type QueryActiveRoundRequest struct {
@@ -1482,9 +1490,10 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\vfrom_height\x18\x01 \x01(\x04R\n" +
 	"fromHeight\x12\x1b\n" +
 	"\tto_height\x18\x02 \x01(\x04R\btoHeight\x12\"\n" +
-	"\rvote_round_id\x18\x03 \x01(\fR\vvoteRoundId\"S\n" +
+	"\rvote_round_id\x18\x03 \x01(\fR\vvoteRoundId\"}\n" +
 	"\x1dQueryCommitmentLeavesResponse\x122\n" +
-	"\x06blocks\x18\x01 \x03(\v2\x1a.svote.v1.BlockCommitmentsR\x06blocks\"\x19\n" +
+	"\x06blocks\x18\x01 \x03(\v2\x1a.svote.v1.BlockCommitmentsR\x06blocks\x12(\n" +
+	"\x10next_from_height\x18\x02 \x01(\x04R\x0enextFromHeight\"\x19\n" +
 	"\x17QueryActiveRoundRequest\"E\n" +
 	"\x18QueryActiveRoundResponse\x12)\n" +
 	"\x05round\x18\x01 \x01(\v2\x13.svote.v1.VoteRoundR\x05round\"\x1b\n" +

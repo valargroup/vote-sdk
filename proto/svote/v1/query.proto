@@ -110,6 +110,7 @@ message QueryCommitmentLeavesRequest {
 
 message QueryCommitmentLeavesResponse {
   repeated BlockCommitments blocks = 1;
+  uint64 next_from_height = 2; // 0 when no more indexed leaf blocks remain in the requested range
 }
 
 message QueryActiveRoundRequest {}

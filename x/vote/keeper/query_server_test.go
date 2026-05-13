@@ -257,6 +257,10 @@ func fpLeaf(v byte) []byte {
 	return leaf
 }
 
+func commitmentRoot(v byte) []byte {
+	return bytes.Repeat([]byte{v}, 32)
+}
+
 func (s *QueryServerTestSuite) TestCommitmentLeaves_NilRequest() {
 	_, err := s.queryServer.CommitmentLeaves(s.ctx, nil)
 	s.Require().Error(err)
@@ -274,25 +278,29 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_InvalidRange() {
 	s.Require().Equal(codes.InvalidArgument, status.Code(err))
 }
 
-func (s *QueryServerTestSuite) TestCommitmentLeaves_RangeTooLarge() {
+func (s *QueryServerTestSuite) TestCommitmentLeaves_ZeroToHeightUsesCurrentHeight() {
 	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	kvStore := s.keeper.OpenKVStore(s.ctx)
 
-	_, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
-		FromHeight:  0,
-		ToHeight:    types.MaxCommitmentLeafRange + 1,
-		VoteRoundId: roundID,
-	})
-	s.Require().Error(err)
-	s.Require().Equal(codes.InvalidArgument, status.Code(err))
-	s.Require().Contains(err.Error(), "exceeds maximum")
+	_, err := s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x01))
+	s.Require().NoError(err)
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 8, 0, 1))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, roundID, 8, commitmentRoot(0x08)))
 
-	// Exactly at the cap should be accepted (no error from range check).
-	_, err = s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
+	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x02))
+	s.Require().NoError(err)
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 12, 1, 1))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, roundID, 12, commitmentRoot(0x12)))
+
+	resp, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
 		FromHeight:  0,
-		ToHeight:    types.MaxCommitmentLeafRange,
+		ToHeight:    0,
 		VoteRoundId: roundID,
 	})
 	s.Require().NoError(err)
+	s.Require().Len(resp.Blocks, 1)
+	s.Require().Equal(uint64(8), resp.Blocks[0].Height)
+	s.Require().Zero(resp.NextFromHeight)
 }
 
 func (s *QueryServerTestSuite) TestCommitmentLeaves_EmptyRange() {
@@ -305,6 +313,7 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_EmptyRange() {
 	})
 	s.Require().NoError(err)
 	s.Require().Empty(resp.Blocks)
+	s.Require().Zero(resp.NextFromHeight)
 }
 
 func (s *QueryServerTestSuite) TestCommitmentLeaves_SingleBlock() {
@@ -320,6 +329,8 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_SingleBlock() {
 	s.Require().NoError(err)
 
 	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 5, 0, 2))
+	root := commitmentRoot(0x05)
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, roundID, 5, root))
 
 	resp, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
 		FromHeight:  1,
@@ -333,6 +344,8 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_SingleBlock() {
 	s.Require().Len(resp.Blocks[0].Leaves, 2)
 	s.Require().Equal(leaf0, resp.Blocks[0].Leaves[0])
 	s.Require().Equal(leaf1, resp.Blocks[0].Leaves[1])
+	s.Require().Equal(root, resp.Blocks[0].Root)
+	s.Require().Zero(resp.NextFromHeight)
 }
 
 func (s *QueryServerTestSuite) TestCommitmentLeaves_MultipleBlocks() {
@@ -345,11 +358,13 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_MultipleBlocks() {
 	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x02))
 	s.Require().NoError(err)
 	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 5, 0, 2))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, roundID, 5, commitmentRoot(0x05)))
 
 	// Block 8: 1 leaf (index 2)
 	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x03))
 	s.Require().NoError(err)
 	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 8, 2, 1))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, roundID, 8, commitmentRoot(0x08)))
 
 	// Block 12: 3 leaves (index 3, 4, 5)
 	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x04))
@@ -359,6 +374,7 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_MultipleBlocks() {
 	_, err = s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0x06))
 	s.Require().NoError(err)
 	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 12, 3, 3))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, roundID, 12, commitmentRoot(0x12)))
 
 	// Query all blocks.
 	resp, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
@@ -380,6 +396,7 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_MultipleBlocks() {
 	s.Require().Equal(uint64(12), resp.Blocks[2].Height)
 	s.Require().Equal(uint64(3), resp.Blocks[2].StartIndex)
 	s.Require().Len(resp.Blocks[2].Leaves, 3)
+	s.Require().Zero(resp.NextFromHeight)
 
 	// Query subset: only block 8.
 	resp, err = s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
@@ -390,6 +407,34 @@ func (s *QueryServerTestSuite) TestCommitmentLeaves_MultipleBlocks() {
 	s.Require().NoError(err)
 	s.Require().Len(resp.Blocks, 1)
 	s.Require().Equal(uint64(8), resp.Blocks[0].Height)
+	s.Require().Zero(resp.NextFromHeight)
+}
+
+func (s *QueryServerTestSuite) TestCommitmentLeaves_OutOfRangeBlocksNotReturned() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+
+	for i := uint64(0); i < types.MaxCommitmentLeavesPerResponse; i++ {
+		_, err := s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(byte(i)))
+		s.Require().NoError(err)
+	}
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 5, 0, types.MaxCommitmentLeavesPerResponse))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, roundID, 5, commitmentRoot(0x05)))
+
+	_, err := s.keeper.AppendCommitment(kvStore, roundID, fpLeaf(0xEE))
+	s.Require().NoError(err)
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kvStore, roundID, 12, types.MaxCommitmentLeavesPerResponse, 1))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kvStore, roundID, 12, commitmentRoot(0x12)))
+
+	resp, err := s.queryServer.CommitmentLeaves(s.ctx, &types.QueryCommitmentLeavesRequest{
+		FromHeight:  0,
+		ToHeight:    10,
+		VoteRoundId: roundID,
+	})
+	s.Require().NoError(err)
+	s.Require().Len(resp.Blocks, 1)
+	s.Require().Equal(uint64(5), resp.Blocks[0].Height)
+	s.Require().Zero(resp.NextFromHeight)
 }
 
 // ---------------------------------------------------------------------------

@@ -144,15 +144,19 @@ func (k *Keeper) GetBlockLeafIndex(kvStore store.KVStore, roundID []byte, height
 	return startIndex, count, true, nil
 }
 
-// GetCommitmentLeaves returns the commitment leaves that were appended during
-// blocks from fromHeight to toHeight (inclusive) for a round.
-func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, roundID []byte, fromHeight, toHeight uint64) ([]*types.BlockCommitments, error) {
+// GetCommitmentLeaves returns a paginated set of commitment leaves appended
+// during blocks from fromHeight to toHeight (inclusive) for a round.
+// The second return value is the next from height to query for the next page.
+func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, roundID []byte, fromHeight, toHeight uint64) ([]*types.BlockCommitments, uint64, error) {
 	startKey := types.BlockLeafIndexKey(roundID, fromHeight)
 	endKey := types.BlockLeafIndexKey(roundID, toHeight+1)
+	if toHeight == ^uint64(0) {
+		endKey = types.PrefixEndBytes(types.BlockLeafIndexPrefixForRound(roundID))
+	}
 
 	iter, err := kvStore.Iterator(startKey, endKey)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer iter.Close()
 
@@ -160,34 +164,70 @@ func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, roundID []byte, from
 	innerOffset := len(types.RoundTreeKey(roundID)) + len(types.BlockLeafIndexPrefix)
 
 	var blocks []*types.BlockCommitments
+	var leafCount uint64
 	for ; iter.Valid(); iter.Next() {
 		val := iter.Value()
 		if len(val) < 16 {
-			return nil, fmt.Errorf("corrupt BlockLeafIndex entry: expected 16 bytes, got %d", len(val))
+			return nil, 0, fmt.Errorf("corrupt BlockLeafIndex entry: expected 16 bytes, got %d", len(val))
 		}
 		startIndex := getUint64BE(val[0:8])
 		count := getUint64BE(val[8:16])
+		key := iter.Key()
+		height := getUint64BE(key[innerOffset:])
+
+		// If the count of leaves is greater than the max commitment leaves per response,
+		// we need to return the current block and the next height to query for the next page.
+		if len(blocks) > 0 && leafCount+count > types.MaxCommitmentLeavesPerResponse {
+			return blocks, height, nil
+		}
+
+		// If there are no blocks yet (i.e this is the first block), we need to add the current block
+		// even though it may be over the max commitment leaves per response.
 
 		leaves := make([][]byte, count)
 		for i := uint64(0); i < count; i++ {
 			leaf, err := kvStore.Get(types.CommitmentLeafKey(roundID, startIndex+i))
 			if err != nil {
-				return nil, err
+				return nil, 0, err
+			}
+			if len(leaf) != 32 {
+				return nil, 0, fmt.Errorf("invalid commitment leaf at index %d for block %d: expected 32 bytes, got %d", startIndex+i, height, len(leaf))
 			}
 			leaves[i] = leaf
 		}
 
-		key := iter.Key()
-		height := getUint64BE(key[innerOffset:])
+		root, err := k.GetCommitmentRootAtHeight(kvStore, roundID, height)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(root) != 32 {
+			return nil, 0, fmt.Errorf("missing commitment root for block %d", height)
+		}
 
 		blocks = append(blocks, &types.BlockCommitments{
 			Height:     height,
 			StartIndex: startIndex,
 			Leaves:     leaves,
+			Root:       root,
 		})
+		leafCount += count
+
+		// If the count of leaves is greater than the max commitment leaves per response,
+		// we need to iterate to the next height to get the next block.
+		if count > types.MaxCommitmentLeavesPerResponse {
+			// Iterate to the next height to get the next block.
+			iter.Next()
+			if iter.Valid() {
+				nextHeight := getUint64BE(iter.Key()[innerOffset:])
+				if nextHeight <= toHeight {
+					return blocks, nextHeight, nil
+				}
+			}
+			return blocks, 0, nil
+		}
 	}
 
-	return blocks, nil
+	return blocks, 0, nil
 }
 
 // ---------------------------------------------------------------------------
