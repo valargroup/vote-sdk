@@ -146,6 +146,7 @@ func (k *Keeper) GetBlockLeafIndex(kvStore store.KVStore, roundID []byte, height
 
 // GetCommitmentLeaves returns a paginated set of commitment leaves appended
 // during blocks from fromHeight to toHeight (inclusive) for a round.
+// The second return value is the next from height to query for the next page.
 func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, roundID []byte, fromHeight, toHeight uint64) ([]*types.BlockCommitments, uint64, error) {
 	startKey := types.BlockLeafIndexKey(roundID, fromHeight)
 	endKey := types.BlockLeafIndexKey(roundID, toHeight+1)
@@ -174,9 +175,14 @@ func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, roundID []byte, from
 		key := iter.Key()
 		height := getUint64BE(key[innerOffset:])
 
+		// If the count of leaves is greater than the max commitment leaves per response,
+		// we need to return the current block and the next height to query for the next page.
 		if len(blocks) > 0 && leafCount+count > types.MaxCommitmentLeavesPerResponse {
 			return blocks, height, nil
 		}
+
+		// If there are no blocks yet (i.e this is the first block), we need to add the current block
+		// even though it may be over the max commitment leaves per response.
 
 		leaves := make([][]byte, count)
 		for i := uint64(0); i < count; i++ {
@@ -206,7 +212,10 @@ func (k *Keeper) GetCommitmentLeaves(kvStore store.KVStore, roundID []byte, from
 		})
 		leafCount += count
 
+		// If the count of leaves is greater than the max commitment leaves per response,
+		// we need to iterate to the next height to get the next block.
 		if count > types.MaxCommitmentLeavesPerResponse {
+			// Iterate to the next height to get the next block.
 			iter.Next()
 			if iter.Valid() {
 				nextHeight := getUint64BE(iter.Key()[innerOffset:])
