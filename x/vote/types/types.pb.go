@@ -1680,6 +1680,7 @@ type BlockCommitments struct {
 	Height        uint64                 `protobuf:"varint,1,opt,name=height,proto3" json:"height,omitempty"`                           // Block height
 	StartIndex    uint64                 `protobuf:"varint,2,opt,name=start_index,json=startIndex,proto3" json:"start_index,omitempty"` // Index of the first leaf in this block
 	Leaves        [][]byte               `protobuf:"bytes,3,rep,name=leaves,proto3" json:"leaves,omitempty"`                            // Commitment leaves (each 32 bytes, Pallas Fp LE)
+	Root          []byte                 `protobuf:"bytes,4,opt,name=root,proto3" json:"root,omitempty"`                                // 32-byte tree root after this block's leaves
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1731,6 +1732,13 @@ func (x *BlockCommitments) GetStartIndex() uint64 {
 func (x *BlockCommitments) GetLeaves() [][]byte {
 	if x != nil {
 		return x.Leaves
+	}
+	return nil
+}
+
+func (x *BlockCommitments) GetRoot() []byte {
+	if x != nil {
+		return x.Root
 	}
 	return nil
 }
@@ -2372,12 +2380,13 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"proposalId\x12#\n" +
 	"\rvote_decision\x18\x03 \x01(\rR\fvoteDecision\x12\x1f\n" +
 	"\vtotal_value\x18\x04 \x01(\x04R\n" +
-	"totalValue\"c\n" +
+	"totalValue\"w\n" +
 	"\x10BlockCommitments\x12\x16\n" +
 	"\x06height\x18\x01 \x01(\x04R\x06height\x12\x1f\n" +
 	"\vstart_index\x18\x02 \x01(\x04R\n" +
 	"startIndex\x12\x16\n" +
-	"\x06leaves\x18\x03 \x03(\fR\x06leaves\"\x8c\x01\n" +
+	"\x06leaves\x18\x03 \x03(\fR\x06leaves\x12\x12\n" +
+	"\x04root\x18\x04 \x01(\fR\x04root\"\x8c\x01\n" +
 	"\x0fProposalSummary\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +

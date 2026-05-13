@@ -197,19 +197,27 @@ func (qh *queryHandler) handleCommitmentLeaves(w http.ResponseWriter, r *http.Re
 	fromStr := r.URL.Query().Get("from_height")
 	toStr := r.URL.Query().Get("to_height")
 
-	if fromStr == "" || toStr == "" {
-		writeError(w, http.StatusBadRequest, "from_height and to_height query params are required")
-		return
+	var fromHeight uint64
+	if fromStr != "" {
+		var err error
+		fromHeight, err = strconv.ParseUint(fromStr, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid from_height: %v", err))
+			return
+		}
 	}
 
-	fromHeight, err := strconv.ParseUint(fromStr, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid from_height: %v", err))
-		return
+	var toHeight uint64
+	if toStr != "" {
+		var err error
+		toHeight, err = strconv.ParseUint(toStr, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid to_height: %v", err))
+			return
+		}
 	}
-	toHeight, err := strconv.ParseUint(toStr, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid to_height: %v", err))
+	if toHeight != 0 && toHeight < fromHeight {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("to_height (%d) must be >= from_height (%d)", toHeight, fromHeight))
 		return
 	}
 

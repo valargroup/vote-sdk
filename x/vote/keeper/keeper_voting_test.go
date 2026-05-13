@@ -985,15 +985,18 @@ func (s *KeeperTestSuite) TestGetCommitmentLeaves() {
 					s.Require().NoError(err)
 				}
 				s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, roundID, b.height, b.start, uint64(len(b.leafVals))))
+				s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, b.height, commitmentRoot(byte(b.height))))
 			}
 
-			got, err := s.keeper.GetCommitmentLeaves(kv, roundID, tc.fromHeight, tc.toHeight)
+			got, nextFromHeight, err := s.keeper.GetCommitmentLeaves(kv, roundID, tc.fromHeight, tc.toHeight)
 			s.Require().NoError(err)
 			s.Require().Len(got, len(tc.want))
+			s.Require().Zero(nextFromHeight)
 
 			for i, w := range tc.want {
 				s.Require().Equal(w.height, got[i].Height, "block %d height", i)
 				s.Require().Equal(w.start, got[i].StartIndex, "block %d start_index", i)
+				s.Require().Equal(commitmentRoot(byte(w.height)), got[i].Root, "block %d root", i)
 				s.Require().Len(got[i].Leaves, len(w.leafVals), "block %d leaf count", i)
 				for j, v := range w.leafVals {
 					s.Require().Equal(fpLeaf(v), got[i].Leaves[j], "block %d leaf %d", i, j)
@@ -1001,4 +1004,68 @@ func (s *KeeperTestSuite) TestGetCommitmentLeaves() {
 			}
 		})
 	}
+}
+
+func (s *KeeperTestSuite) TestGetCommitmentLeaves_PaginatesBeforeFetchingNextBlockLeaves() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	for i := uint64(0); i < types.MaxCommitmentLeavesPerResponse; i++ {
+		_, err := s.keeper.AppendCommitment(kv, roundID, fpLeaf(byte(i)))
+		s.Require().NoError(err)
+	}
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, roundID, 5, 0, types.MaxCommitmentLeavesPerResponse))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, 5, commitmentRoot(0x05)))
+
+	// The second block index exists, but its leaf/root data intentionally does
+	// not. The page should stop before fetching that block.
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, roundID, 8, types.MaxCommitmentLeavesPerResponse, 1))
+
+	got, nextFromHeight, err := s.keeper.GetCommitmentLeaves(kv, roundID, 0, 10)
+	s.Require().NoError(err)
+	s.Require().Len(got, 1)
+	s.Require().Equal(uint64(5), got[0].Height)
+	s.Require().Len(got[0].Leaves, int(types.MaxCommitmentLeavesPerResponse))
+	s.Require().Equal(uint64(8), nextFromHeight)
+}
+
+func (s *KeeperTestSuite) TestGetCommitmentLeaves_OversizedSingleBlockIsAtomic() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	oversizedCount := types.MaxCommitmentLeavesPerResponse + 1
+	for i := uint64(0); i < oversizedCount; i++ {
+		_, err := s.keeper.AppendCommitment(kv, roundID, fpLeaf(byte(i)))
+		s.Require().NoError(err)
+	}
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, roundID, 5, 0, oversizedCount))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, 5, commitmentRoot(0x05)))
+
+	_, err := s.keeper.AppendCommitment(kv, roundID, fpLeaf(0xFF))
+	s.Require().NoError(err)
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, roundID, 8, oversizedCount, 1))
+	s.Require().NoError(s.keeper.SetCommitmentRootAtHeight(kv, roundID, 8, commitmentRoot(0x08)))
+
+	got, nextFromHeight, err := s.keeper.GetCommitmentLeaves(kv, roundID, 0, 10)
+	s.Require().NoError(err)
+	s.Require().Len(got, 1)
+	s.Require().Equal(uint64(5), got[0].Height)
+	s.Require().Len(got[0].Leaves, int(oversizedCount))
+	s.Require().Equal(uint64(8), nextFromHeight)
+}
+
+func (s *KeeperTestSuite) TestGetCommitmentLeaves_MissingRootErrors() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	_, err := s.keeper.AppendCommitment(kv, roundID, fpLeaf(0x01))
+	s.Require().NoError(err)
+	s.Require().NoError(s.keeper.SetBlockLeafIndex(kv, roundID, 5, 0, 1))
+
+	_, _, err = s.keeper.GetCommitmentLeaves(kv, roundID, 0, 10)
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "missing commitment root")
 }

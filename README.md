@@ -385,7 +385,7 @@ and coordinator-funded sends are submitted inside coordinator action proposals.
 | GET    | `/shielded-vote/v1/tally-results/{round_id}`       | All tally results for a round              |
 | GET    | `/shielded-vote/v1/commitment-tree/{round_id}/{height}` | Vote commitment tree at block height  |
 | GET    | `/shielded-vote/v1/commitment-tree/{round_id}/latest`   | Latest vote commitment tree           |
-| GET    | `/shielded-vote/v1/commitment-tree/{round_id}/leaves`   | Tree leaves (`?from_height=X&to_height=Y`) |
+| GET    | `/shielded-vote/v1/commitment-tree/{round_id}/leaves`   | Paginated tree leaves (`?from_height=X&to_height=Y`) |
 | GET    | `/shielded-vote/v1/pallas-keys`                    | All registered Pallas keys                 |
 | GET    | `/shielded-vote/v1/vote-managers`                         | Current coordinator policy                         |
 | GET    | `/shielded-vote/v1/coordinator-actions`                   | Pending coordinator actions                        |
@@ -393,6 +393,14 @@ and coordinator-funded sends are submitted inside coordinator action proposals.
 | GET    | `/shielded-vote/v1/genesis`                        | Chain genesis JSON                         |
 | GET    | `/shielded-vote/v1/snapshot-data/{height}`         | Nullifier snapshot data at block height    |
 | GET    | `/shielded-vote/v1/tx/{hash}`                      | Transaction status by hash                 |
+
+`from_height` and `to_height` are optional on the commitment-tree leaves
+endpoint. A zero or omitted `from_height` starts at the first indexed leaf block
+for the round. A zero or omitted `to_height` resolves to the current query
+height. Responses include `blocks[]`, where each block contains the appended
+leaves and the 32-byte tree `root` after that block, plus `next_from_height`.
+Clients continue requesting with `from_height=next_from_height` and the same
+pinned `to_height` until `next_from_height` is zero.
 
 ### Helper Sentry Observability
 

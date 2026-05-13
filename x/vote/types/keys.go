@@ -64,9 +64,9 @@ const MaxProofSize = 8192
 // so valid positions are 0..2^32-1.
 const MaxTreePosition = (1 << 32) - 1
 
-// MaxCommitmentLeafRange caps the [fromHeight, toHeight] span accepted by
-// the CommitmentLeaves gRPC query to prevent unbounded memory allocation.
-const MaxCommitmentLeafRange uint64 = 1000
+// MaxCommitmentLeavesPerResponse caps paginated CommitmentLeaves responses.
+// A single block with more leaves than this cap is still returned atomically.
+const MaxCommitmentLeavesPerResponse uint64 = 5000
 
 // MaxEndorserIDLen bounds human-readable endorser identifiers stored in KV keys.
 const MaxEndorserIDLen = 64

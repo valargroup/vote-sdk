@@ -150,22 +150,34 @@ func (qs queryServer) CommitmentLeaves(goCtx context.Context, req *types.QueryCo
 	if len(req.VoteRoundId) != types.RoundIDLen {
 		return nil, status.Errorf(codes.InvalidArgument, "vote_round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(req.VoteRoundId))
 	}
-	if req.ToHeight < req.FromHeight {
+	if req.ToHeight != 0 && req.ToHeight < req.FromHeight {
 		return nil, status.Errorf(codes.InvalidArgument, "to_height (%d) must be >= from_height (%d)", req.ToHeight, req.FromHeight)
-	}
-	if req.ToHeight-req.FromHeight > types.MaxCommitmentLeafRange {
-		return nil, status.Errorf(codes.InvalidArgument, "block range %d exceeds maximum %d", req.ToHeight-req.FromHeight, types.MaxCommitmentLeafRange)
 	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)
 
-	blocks, err := qs.k.GetCommitmentLeaves(kvStore, req.VoteRoundId, req.FromHeight, req.ToHeight)
+	toHeight := req.ToHeight
+	if toHeight == 0 {
+		if ctx.BlockHeight() <= 0 {
+			toHeight = 0
+		} else {
+			toHeight = uint64(ctx.BlockHeight())
+		}
+	}
+	if toHeight < req.FromHeight {
+		return &types.QueryCommitmentLeavesResponse{}, nil
+	}
+
+	blocks, nextFromHeight, err := qs.k.GetCommitmentLeaves(kvStore, req.VoteRoundId, req.FromHeight, toHeight)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get commitment leaves: %v", err)
 	}
 
-	return &types.QueryCommitmentLeavesResponse{Blocks: blocks}, nil
+	return &types.QueryCommitmentLeavesResponse{
+		Blocks:         blocks,
+		NextFromHeight: nextFromHeight,
+	}, nil
 }
 
 // CeremonyState returns the current EA key ceremony lifecycle state.
