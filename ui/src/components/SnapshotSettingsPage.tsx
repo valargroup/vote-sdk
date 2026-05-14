@@ -44,13 +44,14 @@ function parsePositiveHeight(value: unknown): number | null {
 }
 
 // Card showing the published snapshot manifest from the configured CDN base.
-// Always rendered (prod + dev). Independent of whether the local PIR server
-// is up — this is the operator's view of "what's the canonical published
-// snapshot the entire fleet should converge on?".
+// Always rendered (prod + dev). This is the operator's view of the snapshot the
+// PIR fleet is actually serving, with the active round height shown separately
+// when chain state disagrees.
 //
 // Two sources are combined:
-//   * snapshot_height comes from the active on-chain round when a round is live.
-//     Otherwise, PIR /snapshot/status reports the currently served height.
+//   * PIR /snapshot/status reports the currently served height.
+//   * snapshot_height from the active on-chain round is the canonical height
+//     wallets expect for the current round, but forced operations can differ.
 //   * precomputed_base_url comes from THIS svoted's /api/ui-config — it's a
 //     deployment-level concern (staging svoted points at a staging bucket)
 //     rather than a wallet-facing one.
@@ -58,7 +59,8 @@ function PublishedSnapshotCard() {
   const {
     precomputedBaseURL,
   } = useUIConfig();
-  const [snapshotHeight, setSnapshotHeight] = useState<number | null>(null);
+  const [servedHeight, setServedHeight] = useState<number | null>(null);
+  const [activeRoundHeight, setActiveRoundHeight] = useState<number | null>(null);
   const [heightLoaded, setHeightLoaded] = useState(false);
   const [manifest, setManifest] = useState<PublishedSnapshotManifest | null>(
     null
@@ -67,30 +69,37 @@ function PublishedSnapshotCard() {
   const [loading, setLoading] = useState(false);
 
   const precomputedBase = precomputedBaseURL ?? null;
-  const height = snapshotHeight;
+  const height = servedHeight ?? activeRoundHeight;
+  const heightSource = servedHeight != null ? "PIR served" : "Active round";
+  const heightMismatch =
+    servedHeight != null &&
+    activeRoundHeight != null &&
+    servedHeight !== activeRoundHeight
+      ? { servedHeight, activeRoundHeight }
+      : null;
 
   const refreshSnapshotHeight = useCallback(async () => {
-    let nextHeight: number | null = null;
+    let nextServedHeight: number | null = null;
+    let nextActiveRoundHeight: number | null = null;
 
     try {
       const resp = await chainApi.getActiveRound();
-      nextHeight = parsePositiveHeight(resp.round?.snapshot_height);
+      nextActiveRoundHeight = parsePositiveHeight(resp.round?.snapshot_height);
     } catch {
-      // Fall back to the PIR endpoint below.
+      nextActiveRoundHeight = null;
     }
 
-    if (nextHeight == null) {
-      try {
-        const status = await chainApi.getSnapshotStatus();
-        nextHeight = status.phase === "serving" ? parsePositiveHeight(status.height) : null;
-      } catch {
-        nextHeight = null;
-      }
+    try {
+      const status = await chainApi.getSnapshotStatus();
+      nextServedHeight = status.phase === "serving" ? parsePositiveHeight(status.height) : null;
+    } catch {
+      nextServedHeight = null;
     }
 
-    setSnapshotHeight(nextHeight);
+    setServedHeight(nextServedHeight);
+    setActiveRoundHeight(nextActiveRoundHeight);
     setHeightLoaded(true);
-    return nextHeight;
+    return nextServedHeight ?? nextActiveRoundHeight;
   }, []);
 
   const fetchManifest = useCallback(async (heightOverride?: number | null) => {
@@ -182,11 +191,19 @@ function PublishedSnapshotCard() {
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             <div>
-              <p className="text-[10px] text-text-muted">Height</p>
+              <p className="text-[10px] text-text-muted">{heightSource}</p>
               <p className="text-xs text-text-primary font-mono">
                 {height.toLocaleString()}
               </p>
             </div>
+            {activeRoundHeight != null && servedHeight != null && (
+              <div>
+                <p className="text-[10px] text-text-muted">Active round</p>
+                <p className="text-xs text-text-primary font-mono">
+                  {activeRoundHeight.toLocaleString()}
+                </p>
+              </div>
+            )}
             <div>
               <p className="text-[10px] text-text-muted">CDN base</p>
               <p
@@ -227,6 +244,24 @@ function PublishedSnapshotCard() {
             )}
           </div>
 
+          {heightMismatch && (
+            <div className="flex items-start gap-2 px-3 py-2 bg-warning/10 border border-warning/30 rounded-lg">
+              <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs text-warning font-semibold">
+                  PIR height differs from active round
+                </p>
+                <p className="text-[10px] text-text-muted mt-0.5">
+                  PIR is serving {heightMismatch.servedHeight.toLocaleString()}{" "}
+                  while the active round expects{" "}
+                  {heightMismatch.activeRoundHeight.toLocaleString()}.
+                  Current-round proofs may fail; new rounds should use the served
+                  height only if this was intentional.
+                </p>
+              </div>
+            </div>
+          )}
+
           {manifest && (
             <details className="group">
               <summary className="text-[10px] text-text-muted cursor-pointer hover:text-text-secondary select-none">
@@ -255,8 +290,7 @@ function PublishedSnapshotCard() {
             <div className="flex items-center gap-2 px-3 py-2 bg-success/10 border border-success/30 rounded-lg">
               <CheckCircle2 size={14} className="text-success shrink-0" />
               <p className="text-xs text-success">
-                Manifest reachable. PIR servers will bootstrap from this on next
-                start.
+                Manifest reachable for this snapshot height.
               </p>
             </div>
           )}
