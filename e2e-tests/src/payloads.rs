@@ -54,8 +54,8 @@ pub fn derive_round_id_at_height(fields: &SetupRoundFields, creation_height: u64
 
     let (bh_lo, bh_hi) = split(&fields.snapshot_blockhash);
     let (ph_lo, ph_hi) = split(&fields.proposals_hash);
-    let nf_root: pallas::Base =
-        pallas::Base::from_repr(fields.nullifier_imt_root).expect("nullifier_imt_root not canonical Fp");
+    let nf_root: pallas::Base = pallas::Base::from_repr(fields.nullifier_imt_root)
+        .expect("nullifier_imt_root not canonical Fp");
     let nc: pallas::Base =
         pallas::Base::from_repr(fields.nc_root).expect("nc_root not canonical Fp");
 
@@ -83,6 +83,147 @@ pub fn derive_round_id(fields: &SetupRoundFields) -> [u8; 32] {
 
 fn to_base64(bytes: &[u8]) -> String {
     base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
+}
+
+fn from_base64(field: &str, value: &str) -> Vec<u8> {
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, value)
+        .unwrap_or_else(|err| panic!("{} must be base64 encoded: {}", field, err))
+}
+
+fn push_varint(out: &mut Vec<u8>, mut value: u64) {
+    while value >= 0x80 {
+        out.push((value as u8) | 0x80);
+        value >>= 7;
+    }
+    out.push(value as u8);
+}
+
+fn push_key(out: &mut Vec<u8>, field_number: u32, wire_type: u8) {
+    push_varint(out, ((field_number as u64) << 3) | wire_type as u64);
+}
+
+fn push_uint64(out: &mut Vec<u8>, field_number: u32, value: u64) {
+    if value == 0 {
+        return;
+    }
+    push_key(out, field_number, 0);
+    push_varint(out, value);
+}
+
+fn push_bytes(out: &mut Vec<u8>, field_number: u32, value: &[u8]) {
+    if value.is_empty() {
+        return;
+    }
+    push_key(out, field_number, 2);
+    push_varint(out, value.len() as u64);
+    out.extend_from_slice(value);
+}
+
+fn push_string(out: &mut Vec<u8>, field_number: u32, value: &str) {
+    push_bytes(out, field_number, value.as_bytes());
+}
+
+fn required_str<'a>(value: &'a Value, field: &str) -> &'a str {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("{} must be a string", field))
+}
+
+fn required_u64(value: &Value, field: &str) -> u64 {
+    value
+        .get(field)
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| panic!("{} must be a non-negative integer", field))
+}
+
+fn encode_vote_option(value: &Value) -> Vec<u8> {
+    let mut out = Vec::new();
+    push_uint64(&mut out, 1, required_u64(value, "index"));
+    push_string(&mut out, 2, required_str(value, "label"));
+    out
+}
+
+fn encode_proposal(value: &Value) -> Vec<u8> {
+    let mut out = Vec::new();
+    push_uint64(&mut out, 1, required_u64(value, "id"));
+    push_string(&mut out, 2, required_str(value, "title"));
+    if let Some(description) = value.get("description").and_then(Value::as_str) {
+        push_string(&mut out, 3, description);
+    }
+    let options = value
+        .get("options")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("options must be an array"));
+    for option in options {
+        push_bytes(&mut out, 4, &encode_vote_option(option));
+    }
+    if let Some(zip_number) = value.get("zip_number").and_then(Value::as_str) {
+        push_string(&mut out, 5, zip_number);
+    }
+    if let Some(forum_url) = value.get("forum_url").and_then(Value::as_str) {
+        push_string(&mut out, 6, forum_url);
+    }
+    out
+}
+
+fn encode_create_voting_session(value: &Value) -> Vec<u8> {
+    let mut out = Vec::new();
+    push_string(&mut out, 1, required_str(value, "creator"));
+    push_uint64(&mut out, 2, required_u64(value, "snapshot_height"));
+    push_bytes(
+        &mut out,
+        3,
+        &from_base64(
+            "snapshot_blockhash",
+            required_str(value, "snapshot_blockhash"),
+        ),
+    );
+    push_bytes(
+        &mut out,
+        4,
+        &from_base64("proposals_hash", required_str(value, "proposals_hash")),
+    );
+    push_uint64(&mut out, 5, required_u64(value, "vote_end_time"));
+    push_bytes(
+        &mut out,
+        6,
+        &from_base64(
+            "nullifier_imt_root",
+            required_str(value, "nullifier_imt_root"),
+        ),
+    );
+    push_bytes(
+        &mut out,
+        7,
+        &from_base64("nc_root", required_str(value, "nc_root")),
+    );
+
+    let proposals = value
+        .get("proposals")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("proposals must be an array"));
+    for proposal in proposals {
+        push_bytes(&mut out, 8, &encode_proposal(proposal));
+    }
+
+    if let Some(description) = value.get("description").and_then(Value::as_str) {
+        push_string(&mut out, 9, description);
+    }
+    if let Some(title) = value.get("title").and_then(Value::as_str) {
+        push_string(&mut out, 10, title);
+    }
+    if let Some(discussion_url) = value.get("discussion_url").and_then(Value::as_str) {
+        push_string(&mut out, 11, discussion_url);
+    }
+    out
+}
+
+fn encode_coordinator_payload(payload: &Value, payload_type_url: &str) -> Vec<u8> {
+    match payload_type_url {
+        "/svote.v1.MsgCreateVotingSession" => encode_create_voting_session(payload),
+        other => panic!("unsupported coordinator action payload type: {}", other),
+    }
 }
 
 /// Build MsgCreateVotingSession body and derive round_id.
@@ -132,15 +273,62 @@ pub fn create_voting_session_payload(
 /// the same transaction while still exercising the production authority path.
 pub fn coordinator_action_proposal_payload(
     creator: &str,
-    mut payload: Value,
+    payload: Value,
     payload_type_url: &str,
 ) -> Value {
-    payload["@type"] = json!(payload_type_url);
+    let payload_value = encode_coordinator_payload(&payload, payload_type_url);
     json!({
         "@type": "/svote.v1.MsgProposeCoordinatorAction",
         "creator": creator,
-        "payload": payload,
+        "payload": {
+            "type_url": payload_type_url,
+            "value": to_base64(&payload_value),
+        },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn coordinator_payload_uses_binary_any_value() {
+        let payload = json!({
+            "creator": "sv1creator",
+            "snapshot_height": 1000,
+            "snapshot_blockhash": to_base64(&[0xaa; 32]),
+            "proposals_hash": to_base64(&[0xbb; 32]),
+            "vote_end_time": 2000,
+            "nullifier_imt_root": to_base64(&[0x01; 32]),
+            "nc_root": to_base64(&[0x02; 32]),
+            "proposals": [{
+                "id": 1,
+                "title": "Proposal A",
+                "description": "First proposal",
+                "options": [
+                    {"index": 0, "label": "Support"},
+                    {"index": 1, "label": "Oppose"},
+                ],
+            }],
+        });
+
+        let wrapped = coordinator_action_proposal_payload(
+            "sv1creator",
+            payload,
+            "/svote.v1.MsgCreateVotingSession",
+        );
+        let any_payload = wrapped.get("payload").expect("payload");
+
+        assert_eq!(
+            any_payload.get("type_url").and_then(Value::as_str),
+            Some("/svote.v1.MsgCreateVotingSession")
+        );
+        assert!(any_payload.get("@type").is_none());
+        assert_eq!(
+            any_payload.get("value").and_then(Value::as_str),
+            Some("CgpzdjFjcmVhdG9yEOgHGiCqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqiIgu7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7so0A8yIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBOiACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAkI1CAESClByb3Bvc2FsIEEaDkZpcnN0IHByb3Bvc2FsIgkSB1N1cHBvcnQiCggBEgZPcHBvc2U=")
+        );
+    }
 }
 
 /// Delegation bundle fields (from build_delegation_bundle + create_delegation_proof).
