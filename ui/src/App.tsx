@@ -13,6 +13,7 @@ import { RoundsList } from "./components/RoundsList";
 import { AttestRoundEntryPage } from "./components/AttestRoundEntryPage";
 import { EndorsersPage } from "./components/EndorsersPage";
 import { UpgradesPage } from "./components/UpgradesPage";
+import { QueueMonitorPage } from "./components/QueueMonitorPage";
 import { useStore } from "./store/useStore";
 import { SAMPLE_ROUND_TEMPLATES, type SampleRoundTemplateId } from "./store/sampleRounds";
 import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft, ClipboardCheck } from "lucide-react";
@@ -64,6 +65,7 @@ type Section =
   | "preview"
   | "settings"
   | "vote-status"
+  | "queue-monitor"
   | "validators"
   | "validator-join"
   | "coordinator-actions"
@@ -81,6 +83,7 @@ const SECTION_PATHS: Record<Section, string> = {
   preview: "/preview",
   settings: "/settings",
   "vote-status": "/vote-status",
+  "queue-monitor": "/queue-monitor",
   validators: "/validators",
   "validator-join": "/validator-join",
   "coordinator-actions": "/approvals",
@@ -517,6 +520,8 @@ function App() {
             onBackToList={() => setSection("vote-status")}
           />
         )}
+
+        {section === "queue-monitor" && <QueueMonitorPage />}
 
         {/* Snapshot settings */}
         {section === "snapshot" && <SnapshotSettingsPage />}

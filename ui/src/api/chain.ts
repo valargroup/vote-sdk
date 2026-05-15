@@ -249,6 +249,27 @@ export interface VoteSummaryResponse {
   proposals?: VoteSummaryProposalResponse[];
 }
 
+export interface QueueSummaryBucket {
+  start: number;
+  end: number;
+  submitted: number;
+  pending_future: number;
+  overdue_pending: number;
+  processing: number;
+  failed: number;
+  total: number;
+}
+
+export interface QueueSummaryResponse {
+  round_id: string;
+  bucket_seconds: number;
+  created_at_time: number;
+  vote_end_time: number;
+  generated_at: number;
+  last_minute_start: number;
+  buckets: QueueSummaryBucket[];
+}
+
 export interface BroadcastResult {
   tx_hash: string;
   code: number;
@@ -546,6 +567,16 @@ export async function getVoteSummary(
 ): Promise<VoteSummaryResponse> {
   return fetchJson<VoteSummaryResponse>(
     `/shielded-vote/v1/vote-summary/${roundIdHex}`
+  );
+}
+
+export async function getQueueSummaryFromServer(
+  serverUrl: string,
+  roundIdHex: string
+): Promise<QueueSummaryResponse> {
+  const base = serverUrl.replace(/\/+$/, "");
+  return fetchJsonAtUrl<QueueSummaryResponse>(
+    `${base}/shielded-vote/v1/queue-summary/${encodeURIComponent(roundIdHex)}`
   );
 }
 

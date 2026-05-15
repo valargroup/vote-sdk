@@ -6,6 +6,7 @@ import {
   Shield,
   Settings,
   BarChart3,
+  Activity,
   Trash2,
   Users,
   UserPlus,
@@ -124,6 +125,18 @@ export function Sidebar({
         >
           <BarChart3 size={15} />
           Vote status
+        </button>
+
+        <button
+          onClick={() => onNavigate("queue-monitor")}
+          className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs transition-colors cursor-pointer ${
+            currentSection === "queue-monitor"
+              ? "bg-surface-3 text-text-primary"
+              : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
+          }`}
+        >
+          <Activity size={15} />
+          Share queues
         </button>
 
         <button
