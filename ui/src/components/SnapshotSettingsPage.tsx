@@ -49,7 +49,7 @@ function PublishedSnapshotCard() {
     precomputedBaseURL,
   } = useUIConfig();
   const [servedHeight, setServedHeight] = useState<number | null>(null);
-  const [activeRoundHeight, setActiveRoundHeight] = useState<number | null>(null);
+  const [activeRoundHeights, setActiveRoundHeights] = useState<number[]>([]);
   const [heightLoaded, setHeightLoaded] = useState(false);
   const [heightInput, setHeightInput] = useState("");
   const [heightEdited, setHeightEdited] = useState(false);
@@ -59,22 +59,25 @@ function PublishedSnapshotCard() {
 
   const precomputedBase = precomputedBaseURL ?? null;
   const parsedHeight = parsePositiveHeight(heightInput);
+  const primaryActiveRoundHeight = activeRoundHeights[0] ?? null;
   const heightMismatch =
     servedHeight != null &&
-    activeRoundHeight != null &&
-    servedHeight !== activeRoundHeight
-      ? { servedHeight, activeRoundHeight }
+    activeRoundHeights.length > 0 &&
+    !activeRoundHeights.includes(servedHeight)
+      ? { servedHeight, activeRoundHeights }
       : null;
 
   const refreshSnapshotHeight = useCallback(async () => {
     let nextServedHeight: number | null = null;
-    let nextActiveRoundHeight: number | null = null;
+    let nextActiveRoundHeights: number[] = [];
 
     try {
-      const resp = await chainApi.getActiveRound();
-      nextActiveRoundHeight = parsePositiveHeight(resp.round?.snapshot_height);
+      const resp = await chainApi.getActiveRounds();
+      nextActiveRoundHeights = resp.rounds
+        .map((round) => parsePositiveHeight(round.snapshot_height))
+        .filter((height): height is number => height != null);
     } catch {
-      nextActiveRoundHeight = null;
+      nextActiveRoundHeights = [];
     }
 
     try {
@@ -85,8 +88,8 @@ function PublishedSnapshotCard() {
     }
 
     setServedHeight(nextServedHeight);
-    setActiveRoundHeight(nextActiveRoundHeight);
-    const defaultHeight = nextServedHeight ?? nextActiveRoundHeight;
+    setActiveRoundHeights(nextActiveRoundHeights);
+    const defaultHeight = nextServedHeight ?? nextActiveRoundHeights[0] ?? null;
     setHeightLoaded(true);
     if (!heightEdited && defaultHeight != null) {
       setHeightInput(String(defaultHeight));
@@ -192,8 +195,8 @@ function PublishedSnapshotCard() {
                 placeholder={
                   servedHeight != null
                     ? String(servedHeight)
-                    : activeRoundHeight != null
-                      ? String(activeRoundHeight)
+                    : primaryActiveRoundHeight != null
+                      ? String(primaryActiveRoundHeight)
                       : "Enter height"
                 }
                 className="flex-1 px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
@@ -226,11 +229,13 @@ function PublishedSnapshotCard() {
                 </p>
               </div>
             )}
-            {activeRoundHeight != null && (
-              <div>
-                <p className="text-[10px] text-text-muted">Active round</p>
+            {activeRoundHeights.length > 0 && (
+              <div className="col-span-2">
+                <p className="text-[10px] text-text-muted">
+                  Active round{activeRoundHeights.length === 1 ? "" : "s"}
+                </p>
                 <p className="text-xs text-text-primary font-mono">
-                  {activeRoundHeight.toLocaleString()}
+                  {activeRoundHeights.map((height) => height.toLocaleString()).join(", ")}
                 </p>
               </div>
             )}
@@ -283,8 +288,8 @@ function PublishedSnapshotCard() {
                 </p>
                 <p className="text-[10px] text-text-muted mt-0.5">
                   PIR is serving {heightMismatch.servedHeight.toLocaleString()}{" "}
-                  while the active round expects{" "}
-                  {heightMismatch.activeRoundHeight.toLocaleString()}.
+                  while active round snapshots are{" "}
+                  {heightMismatch.activeRoundHeights.map((height) => height.toLocaleString()).join(", ")}.
                   Current-round proofs may fail; new rounds should use the served
                   height only if this was intentional.
                 </p>
@@ -381,7 +386,7 @@ function PIRStatusCard({ devControls }: { devControls: boolean }) {
   const [status, setStatus] = useState<SnapshotStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [targetHeight, setTargetHeight] = useState("");
-  const [activeRound, setActiveRound] = useState<boolean>(false);
+  const [hasActiveRound, setHasActiveRound] = useState<boolean>(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildError, setRebuildError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -402,10 +407,10 @@ function PIRStatusCard({ devControls }: { devControls: boolean }) {
 
   const fetchActiveRound = useCallback(async () => {
     try {
-      const resp = await chainApi.getActiveRound();
-      setActiveRound(resp.round != null);
+      const resp = await chainApi.getActiveRounds();
+      setHasActiveRound(resp.rounds.length > 0);
     } catch {
-      setActiveRound(false);
+      setHasActiveRound(false);
     }
   }, []);
 
@@ -594,7 +599,7 @@ function PIRStatusCard({ devControls }: { devControls: boolean }) {
             <code className="font-mono">SVOTE_UI_MODE</code> ≠ <code>dev</code>.
           </p>
 
-          {activeRound && (
+          {hasActiveRound && (
             <div className="flex items-start gap-2 mb-4 px-3 py-2.5 bg-danger/10 border border-danger/30 rounded-lg">
               <AlertTriangle size={14} className="text-danger shrink-0 mt-0.5" />
               <div>

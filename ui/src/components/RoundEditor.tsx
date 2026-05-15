@@ -6,7 +6,7 @@ import {
   estimateTimestamp,
 } from "../store/rpc";
 import {
-  getActiveRound,
+  getPrimaryActiveRound,
   getSnapshotStatus,
   validatePublishedSnapshotManifest,
 } from "../api/chain";
@@ -173,7 +173,7 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
     if (isReadonly) return;
     let cancelled = false;
     setChainSnapshotLoaded(false);
-    getActiveRound()
+    getPrimaryActiveRound()
       .then((resp) => {
         if (cancelled) return;
         const height = Number(resp.round?.snapshot_height ?? 0);
@@ -193,12 +193,12 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
   // Auto-populate the first draft value, then leave manual operator edits alone.
   useEffect(() => {
     if (isReadonly) return;
-    if (!chainSnapshotLoaded) return;
+    if (pirServedHeight == null && !chainSnapshotLoaded) return;
     const nextAutoHeight =
-      chainSnapshotHeight != null
-        ? String(chainSnapshotHeight)
-        : pirServedHeight != null
-          ? String(pirServedHeight)
+      pirServedHeight != null
+        ? String(pirServedHeight)
+        : chainSnapshotHeight != null
+          ? String(chainSnapshotHeight)
           : "";
     if (nextAutoHeight) {
       const current = round.settings.snapshotHeight;
@@ -275,6 +275,15 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
     isValidHeight && chain.latestHeight && chain.latestTimestamp
       ? estimateTimestamp(snapshotHeight, chain.latestHeight, chain.latestTimestamp)
       : null;
+  const hasSnapshotValidationWarning =
+    snapshotValidation != null && snapshotValidation.status !== "valid";
+  const snapshotWarningCount = [
+    hasSnapshotValidationWarning,
+    pirMismatch && !pirRebuilding,
+    pirRebuilding,
+    nhError && !pirRebuilding,
+    chain.error,
+  ].filter(Boolean).length;
 
   return (
     <div className="space-y-4">
@@ -304,6 +313,127 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
             )}
             {snapshotValidationLoading && (
               <Loader2 size={10} className="text-accent animate-spin" />
+            )}
+            {snapshotWarningCount > 0 && (
+              <div className="relative group">
+                <button
+                  type="button"
+                  className="text-warning hover:text-warning/80 cursor-default"
+                  title={`${snapshotWarningCount} snapshot warning${snapshotWarningCount === 1 ? "" : "s"}`}
+                >
+                  <AlertTriangle size={12} />
+                </button>
+                <div className="absolute left-0 z-20 mt-2 hidden w-80 max-w-[calc(100vw-4rem)] space-y-2 rounded-lg border border-warning/30 bg-surface-1 p-3 shadow-xl group-hover:block">
+                  {snapshotValidation?.status === "missing" && (
+                    <div>
+                      <p className="text-[10px] text-warning font-semibold leading-snug">
+                        No published PIR snapshot for this height
+                      </p>
+                      <p className="text-[10px] text-text-muted leading-snug mt-0.5">
+                        Publishing will require force confirmation unless a
+                        manifest appears at this height first.
+                      </p>
+                    </div>
+                  )}
+
+                  {snapshotValidation?.status === "invalid" && (
+                    <div>
+                      <p className="text-[10px] text-danger font-semibold leading-snug">
+                        Published PIR snapshot manifest is invalid
+                      </p>
+                      <p className="text-[10px] text-danger/80 leading-snug mt-0.5 break-words">
+                        {(snapshotValidation.issues ?? []).join("; ")}
+                      </p>
+                    </div>
+                  )}
+
+                  {snapshotValidation?.status === "error" && (
+                    <div>
+                      <p className="text-[10px] text-danger font-semibold leading-snug">
+                        Could not validate published PIR snapshot
+                      </p>
+                      <p className="text-[10px] text-danger/80 leading-snug mt-0.5 break-all">
+                        {snapshotValidation.message}
+                      </p>
+                    </div>
+                  )}
+
+                  {pirMismatch && !pirRebuilding && (
+                    <div>
+                      <p className="text-[10px] text-warning font-semibold leading-snug">
+                        PIR server height differs from active round
+                      </p>
+                      <p className="text-[10px] text-text-muted leading-snug mt-0.5">
+                        Chain wants <span className="font-mono">{chainSnapshotHeight!.toLocaleString()}</span>,
+                        PIR is serving <span className="font-mono">{pirServedHeight!.toLocaleString()}</span>.
+                        You can still publish a different height, but confirm
+                        the published PIR snapshot exists before proposing.
+                      </p>
+                      {onNavigate && (
+                        <button
+                          onClick={() => onNavigate("snapshot")}
+                          className="text-[10px] text-accent hover:text-accent-glow mt-1 flex items-center gap-0.5 cursor-pointer"
+                        >
+                          <ExternalLink size={10} />
+                          Open Snapshot Settings
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {pirRebuilding && (
+                    <div>
+                      <p className="text-[10px] text-accent font-semibold leading-snug">
+                        PIR server is rebuilding
+                      </p>
+                      <p className="text-[10px] text-text-muted leading-snug mt-0.5">
+                        The snapshot is being regenerated. Wait for it to
+                        complete before publishing.
+                      </p>
+                      {onNavigate && (
+                        <button
+                          onClick={() => onNavigate("snapshot")}
+                          className="text-[10px] text-accent hover:text-accent-glow mt-1 flex items-center gap-0.5 cursor-pointer"
+                        >
+                          <ExternalLink size={10} />
+                          Go to Snapshot Settings
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {nhError && !pirRebuilding && (
+                    <div>
+                      <p className="text-[10px] text-danger font-semibold leading-snug">
+                        PIR server unavailable
+                      </p>
+                      <p className="text-[10px] text-danger/80 leading-snug mt-0.5 break-words">
+                        {nhError}
+                      </p>
+                      {onNavigate && (
+                        <button
+                          onClick={() => onNavigate("snapshot")}
+                          className="text-[10px] text-accent hover:text-accent-glow mt-1 flex items-center gap-0.5 cursor-pointer"
+                        >
+                          <ExternalLink size={10} />
+                          Go to Snapshot Settings
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {chain.error && (
+                    <div>
+                      <p className="text-[10px] text-danger font-semibold leading-snug">
+                        RPC error
+                      </p>
+                      <p className="text-[10px] text-danger/80 leading-snug mt-0.5 break-words">
+                        {chain.error}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
           <div className="relative">
@@ -346,149 +476,9 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
             </div>
           )}
 
-          {snapshotValidation?.status === "valid" && (
-            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-success/10 border border-success/30 rounded-md">
-              <div className="w-3 h-3 mt-0.5 rounded-full bg-success shrink-0" />
-              <div className="min-w-0">
-                <p className="text-[10px] text-success font-semibold leading-snug">
-                  Published PIR snapshot exists
-                </p>
-                <p className="text-[10px] text-text-muted leading-snug mt-0.5 truncate" title={snapshotValidation.manifestUrl}>
-                  {snapshotValidation.manifestUrl}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {snapshotValidation?.status === "missing" && (
-            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-warning/10 border border-warning/40 rounded-md">
-              <AlertTriangle size={12} className="text-warning shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <p className="text-[10px] text-warning font-semibold leading-snug">
-                  No published PIR snapshot for this height
-                </p>
-                <p className="text-[10px] text-text-muted leading-snug mt-0.5">
-                  Publishing will require force confirmation unless a manifest
-                  appears at this height first.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {snapshotValidation?.status === "invalid" && (
-            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-danger/10 border border-danger/40 rounded-md">
-              <AlertTriangle size={12} className="text-danger shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <p className="text-[10px] text-danger font-semibold leading-snug">
-                  Published PIR snapshot manifest is invalid
-                </p>
-                <p className="text-[10px] text-danger/80 leading-snug mt-0.5">
-                  {(snapshotValidation.issues ?? []).join("; ")}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {snapshotValidation?.status === "error" && (
-            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-danger/10 border border-danger/40 rounded-md">
-              <AlertTriangle size={12} className="text-danger shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <p className="text-[10px] text-danger font-semibold leading-snug">
-                  Could not validate published PIR snapshot
-                </p>
-                <p className="text-[10px] text-danger/80 leading-snug mt-0.5">
-                  {snapshotValidation.message}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* PIR vs active round height mismatch */}
-          {pirMismatch && !pirRebuilding && (
-            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-warning/10 border border-warning/40 rounded-md">
-              <AlertTriangle size={12} className="text-warning shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <p className="text-[10px] text-warning font-semibold leading-snug">
-                  PIR server height differs from active round
-                </p>
-                <p className="text-[10px] text-text-muted leading-snug mt-0.5">
-                  Chain wants <span className="font-mono">{chainSnapshotHeight!.toLocaleString()}</span>,
-                  PIR is serving <span className="font-mono">{pirServedHeight!.toLocaleString()}</span>.
-                  You can still publish a different height, but confirm the
-                  published PIR snapshot exists before proposing.
-                </p>
-                {onNavigate && (
-                  <button
-                    onClick={() => onNavigate("snapshot")}
-                    className="text-[10px] text-accent hover:text-accent-glow mt-1 flex items-center gap-0.5 cursor-pointer"
-                  >
-                    <ExternalLink size={10} />
-                    Open Snapshot Settings
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* PIR server rebuilding */}
-          {pirRebuilding && (
-            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-accent/10 border border-accent/40 rounded-md">
-              <Loader2 size={12} className="text-accent shrink-0 mt-0.5 animate-spin" />
-              <div className="min-w-0">
-                <p className="text-[10px] text-accent font-semibold leading-snug">
-                  PIR server is rebuilding
-                </p>
-                <p className="text-[10px] text-text-muted leading-snug mt-0.5">
-                  The snapshot is being regenerated. Wait for it to complete before publishing.
-                </p>
-                {onNavigate && (
-                  <button
-                    onClick={() => onNavigate("snapshot")}
-                    className="text-[10px] text-accent hover:text-accent-glow mt-1 flex items-center gap-0.5 cursor-pointer"
-                  >
-                    <ExternalLink size={10} />
-                    Go to Snapshot Settings
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* PIR server error */}
-          {nhError && !pirRebuilding && (
-            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-danger/10 border border-danger/40 rounded-md">
-              <AlertTriangle size={12} className="text-danger shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <p className="text-[10px] text-danger font-semibold leading-snug">
-                  PIR server unavailable
-                </p>
-                <p className="text-[10px] text-danger/80 leading-snug mt-0.5">
-                  {nhError}
-                </p>
-                {onNavigate && (
-                  <button
-                    onClick={() => onNavigate("snapshot")}
-                    className="text-[10px] text-accent hover:text-accent-glow mt-1 flex items-center gap-0.5 cursor-pointer"
-                  >
-                    <ExternalLink size={10} />
-                    Go to Snapshot Settings
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Chain error */}
-          {chain.error && (
-            <p className="text-[10px] text-danger mt-1">
-              RPC error: {chain.error}
-            </p>
-          )}
-
           <p className="text-[10px] text-text-muted mt-1">
-            Defaults from the active on-chain round, falling back to the PIR
-            server. Edit this when you intentionally want a different balance
-            snapshot height.
+            Ensure that PIR server with the matching height is properly
+            configured. You should see a warning if it is not.
           </p>
         </div>
 
