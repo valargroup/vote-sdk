@@ -9,14 +9,16 @@ For joining additional validators to an already-running chain, see [join-chain.m
 ```mermaid
 flowchart LR
     tag["git tag v*"] --> release["release.yml\nbuild + DO Spaces upload"]
-    release --> reset["sdk-chain-reset.yml\nworkflow_dispatch"]
+    release --> artifacts["shared artifacts"]
+    manual["workflow_dispatch\ntarget_environment"] --> reset["sdk-chain-reset.yml"]
     reset --> quiesceSnapshot["quiesce-snapshot\nstop old publisher"]
     quiesceSnapshot --> resetPrimary["reset-primary\ninstall-release.sh + scripts/init.sh"]
-    resetPrimary --> uploadGenesis["upload-genesis\ngenesis.json -> DO Spaces"]
-    uploadGenesis --> fundSecondary["fund-secondary\nMsgAuthorizedSend"]
-    fundSecondary --> resetSecondary["reset-secondary\nreset-join.sh"]
+    resetPrimary --> uploadGenesis["upload-genesis\ngenesis per chain -> DO Spaces"]
+    uploadGenesis --> fundSecondary["fund-secondary\nstaging only"]
+    fundSecondary --> resetSecondary["reset-secondary\nstaging only"]
     uploadGenesis --> resetSnapshot["reset-snapshot\nreset-snapshot.sh"]
-    resetSecondary --> resetArchive["reset-archive\nreset-archive.sh"]
+    uploadGenesis --> resetArchive["reset-archive\nproduction path"]
+    resetSecondary --> resetArchive
     resetArchive --> verify["verify\nREST health checks"]
     resetSnapshot --> verify
 ```
@@ -34,39 +36,43 @@ After `terraform apply`, the droplet is up and `svoted` is installed but the cha
 
 ### Bootstrap flow
 
-The single workflow [`sdk-chain-reset.yml`](../../.github/workflows/sdk-chain-reset.yml) (`workflow_dispatch`, takes a `tag` input) brings the entire fleet up from genesis:
+The single workflow [`sdk-chain-reset.yml`](../../.github/workflows/sdk-chain-reset.yml) (`workflow_dispatch`, takes `tag` and `target_environment`) brings the selected fleet up from genesis:
 
-1. **`quiesce-snapshot`** — SSHes to `SNAPSHOT_HOST`, stops and disables `snapshot.timer`, stops any running `snapshot.service`, and stops old snapshot-node `svoted` before primary chain state changes.
-2. **`reset-primary`** — SSHes to `PRIMARY_HOST`, runs `install-release.sh --tag <tag>`, stops `svoted`, wipes `/opt/shielded-vote/.svoted/`, then runs [`scripts/init.sh`](../../scripts/init.sh) with `VAL_PRIVKEY=PRIMARY_VAL_PRIVKEY`, `VM_PRIVKEYS`, and `SVOTE_ADMIN_DISABLE=false`. Drops in `svoted.service.d/primary.conf`, starts `svoted`, polls `localhost:1317/shielded-vote/v1/rounds`.
-3. **`upload-genesis`** — fetches `genesis.json` from `localhost:1317/shielded-vote/v1/genesis` on the primary, uploads it to `s3://vote/genesis.json` (DO Spaces, `https://vote.fra1.digitaloceanspaces.com/genesis.json`), and clears `s3://vote/snapshots/svote-1/` so joiners cannot restore a pre-reset snapshot. This is the canonical source joining nodes pull from.
-4. **`fund-secondary`** — derives the secondary's address from `SECONDARY_VAL_PRIVKEY` (in a temp keyring) and funds it with a coordinator-approved `MsgAuthorizedSend` from `vote-manager-1`.
-5. **`reset-snapshot`** — SSHes to `SNAPSHOT_HOST`, installs the same tag, runs [`scripts/reset-snapshot.sh`](../../scripts/reset-snapshot.sh) to bring up a pruned non-validator node, then enables `snapshot.timer`.
-6. **`reset-secondary`** — SSHes to `SECONDARY_HOST`, installs the same tag, runs [`scripts/reset-join.sh`](../../scripts/reset-join.sh) (downloads genesis from Spaces, discovers the primary's P2P NodeID via REST, syncs, calls `create-val-tx` to register).
-7. **`reset-archive`** — SSHes to `EXPLORER_HOST`, runs [`scripts/reset-archive.sh`](../../scripts/reset-archive.sh) to bring up a non-validator archive node (pruning=nothing) for the explorer.
+1. **`resolve-environment`** — reads GitHub Environment variables such as `CHAIN_ID`, `DNS_PREFIX`, `HAS_SECONDARY`, `GENESIS_KEY`, and `SNAPSHOTS_PREFIX`.
+2. **`quiesce-snapshot`** — SSHes to `<dns-prefix>snapshots.<domain>`, stops and disables `snapshot.timer`, stops any running `snapshot.service`, and stops old snapshot-node `svoted` before primary chain state changes.
+3. **`reset-primary`** — SSHes to `PRIMARY_HOST`, runs `install-release.sh --tag <tag>`, stops `svoted`, wipes `/opt/shielded-vote/.svoted/`, then runs [`scripts/init.sh`](../../scripts/init.sh) with `CHAIN_ID`, `VAL_PRIVKEY=PRIMARY_VAL_PRIVKEY`, `VM_PRIVKEYS`, and `SVOTE_ADMIN_DISABLE=false`. Drops in `svoted.service.d/primary.conf`, starts `svoted`, polls `localhost:1317/shielded-vote/v1/rounds`.
+4. **`upload-genesis`** — fetches `genesis.json` from `localhost:1317/shielded-vote/v1/genesis` on the primary, uploads it to `s3://vote/<genesis-key>` (for example `genesis/svote-1/genesis.json` or `genesis/zvote-1/genesis.json`), and clears `s3://vote/<snapshots-prefix>/` so joiners cannot restore a pre-reset snapshot from the same environment. This is the canonical source joining nodes pull from.
+5. **`fund-secondary`** — staging only. Derives the secondary's address from `SECONDARY_VAL_PRIVKEY` (in a temp keyring) and funds it with a coordinator-approved `MsgAuthorizedSend` from `vote-manager-1`.
+6. **`reset-snapshot`** — SSHes to `<dns-prefix>snapshots.<domain>`, installs the same tag, runs [`scripts/reset-snapshot.sh`](../../scripts/reset-snapshot.sh) to bring up a pruned non-validator node, then enables `snapshot.timer`.
+7. **`reset-secondary`** — staging only. SSHes to `SECONDARY_HOST`, installs the same tag, runs [`scripts/reset-join.sh`](../../scripts/reset-join.sh) (downloads environment-specific genesis from Spaces, discovers the primary's P2P NodeID via REST, syncs, calls `create-val-tx` to register).
+8. **`reset-archive`** — SSHes to `<dns-prefix>explorer.<domain>`, renders the explorer config for the selected chain, then runs [`scripts/reset-archive.sh`](../../scripts/reset-archive.sh) to bring up a non-validator archive node (pruning=nothing) for the explorer.
 
 Then `verify` polls all REST endpoints. On any failure the `notify-slack` job fires.
 
 ### Required GitHub secrets
 
-`PRIMARY_HOST`, `SECONDARY_HOST`, `EXPLORER_HOST`, `SNAPSHOT_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SENTRY_DSN`, `SLACK_WEBHOOK_URL`. Full descriptions in [deploy-setup.md § GitHub repository secrets](../deploy-setup.md#github-repository-secrets).
+Configure the `staging` and `production` GitHub Environments before reset.
+Required variables and secrets are listed in [environments.md](environments.md).
+Staging uses `CHAIN_ID=svote-1` with a secondary validator; production uses
+`CHAIN_ID=zvote-1` with `HAS_SECONDARY=false`.
 
 `VM_PRIVKEYS` is a comma-separated list of 64-char hex secp256k1 private keys; each derived address becomes a coordinator at genesis and the 1B usvote stake pool is split evenly across them. The coordinator threshold defaults to 1 unless configured otherwise. Generate one with `openssl rand -hex 32`.
 
-`SNAPSHOT_HOST` is required for every reset. A chain reset invalidates old
-snapshot node state, so `sdk-chain-reset.yml` always reinitializes
-`vote-snapshot` from the newly uploaded genesis.
+The environment-prefixed snapshot hostname is required for every reset. A chain
+reset invalidates old snapshot node state, so `sdk-chain-reset.yml` always
+reinitializes `vote-snapshot` from the newly uploaded genesis.
 
 ### First-time bring-up
 
 1. `cd vote-infrastructure && terraform apply` — provisions the validators, PIR hosts, explorer/archive host, snapshot host, Cloudflare DNS, and firewalls.
-2. Set the GitHub secrets above (the `*_VAL_PRIVKEY` values are the deterministic identities the workflow expects to find on the corresponding droplets).
-3. Trigger the **Reset SDK Chain** workflow with the desired release tag (the tag must already be published by [`release.yml`](../../.github/workflows/release.yml) — `validate-tag` HEAD-checks DO Spaces and aborts otherwise).
+2. Set the GitHub Environment variables and secrets above (the `*_VAL_PRIVKEY` values are the deterministic identities the workflow expects to find on the corresponding droplets).
+3. Trigger the **Reset SDK Chain** workflow with the desired release tag and target environment (the tag must already be published by [`release.yml`](../../.github/workflows/release.yml) — `validate-tag` HEAD-checks DO Spaces and aborts otherwise).
 4. After the workflow goes green, sanity-check:
-   - `https://vote-chain-primary.<domain>/shielded-vote/v1/rounds` returns `200`
-   - `https://svote.<domain>/` serves the admin UI
-   - `https://vote-chain-secondary.<domain>/shielded-vote/v1/rounds` returns `200`
-   - `https://explorer-api.<domain>/cosmos/base/tendermint/v1beta1/blocks/latest` returns `200`
-   - `https://snapshots.<domain>/` serves the snapshot page
+   - `https://<dns-prefix>vote-chain-primary.<domain>/shielded-vote/v1/rounds` returns `200`
+   - `https://<dns-prefix>svote.<domain>/` serves the admin UI
+   - `https://<dns-prefix>vote-chain-secondary.<domain>/shielded-vote/v1/rounds` returns `200` when `HAS_SECONDARY=true`
+   - `https://<dns-prefix>explorer-api.<domain>/cosmos/base/tendermint/v1beta1/blocks/latest` returns `200`
+   - `https://<dns-prefix>snapshots.<domain>/` serves the snapshot page
 
 To wipe and reset the chain from genesis later, re-run the same workflow. The first release that adds a new store such as `x/upgrade` must use this reset path because existing live state does not contain that store. For binary swaps that preserve state, use [`sdk-chain-deploy.yml`](../../.github/workflows/sdk-chain-deploy.yml) instead — it installs the new tag across the primary, secondary, explorer/archive, and snapshot hosts, restarting `svoted` where chain state is already initialized. Future coordinated state-breaking upgrades should follow [software-upgrades.md](software-upgrades.md).
 

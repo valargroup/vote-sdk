@@ -13,19 +13,81 @@ on:
         description: "Release tag to deploy (e.g. v1.2.3). Must already exist in DO Spaces."
         type: string
         required: true
+      target_environment:
+        description: "GitHub Environment to read reset secrets and variables from."
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+        required: true
 
 permissions:
   contents: read
 
 env:
   TAG: ${{ inputs.tag }}
-  DO_SPACES_BASE: https://vote.fra1.digitaloceanspaces.com
-  RELEASE_BASE_URL: https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk
 
 jobs:
+  resolve-environment:
+    name: Resolve environment settings
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target_environment }}
+    outputs:
+      chain_id: ${{ steps.resolve.outputs.chain_id }}
+      dns_prefix: ${{ steps.resolve.outputs.dns_prefix }}
+      has_secondary: ${{ steps.resolve.outputs.has_secondary }}
+      do_spaces_base: ${{ steps.resolve.outputs.do_spaces_base }}
+      release_base_url: ${{ steps.resolve.outputs.release_base_url }}
+      genesis_key: ${{ steps.resolve.outputs.genesis_key }}
+      snapshots_prefix: ${{ steps.resolve.outputs.snapshots_prefix }}
+    steps:
+      - name: Resolve GitHub Environment variables
+        id: resolve
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          CHAIN_ID: ${{ vars.CHAIN_ID }}
+          DNS_PREFIX: ${{ vars.DNS_PREFIX }}
+          HAS_SECONDARY: ${{ vars.HAS_SECONDARY }}
+          DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
+          RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
+          GENESIS_KEY: ${{ vars.GENESIS_KEY }}
+          SNAPSHOTS_PREFIX: ${{ vars.SNAPSHOTS_PREFIX }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_ENVIRONMENT" = "production" ]; then
+            default_chain_id="zvote-1"
+            default_dns_prefix="prod."
+            default_has_secondary="false"
+          else
+            default_chain_id="svote-1"
+            default_dns_prefix="stage."
+            default_has_secondary="true"
+          fi
+          chain_id="${CHAIN_ID:-$default_chain_id}"
+          dns_prefix="${DNS_PREFIX:-$default_dns_prefix}"
+          has_secondary="${HAS_SECONDARY:-$default_has_secondary}"
+          do_spaces_base="${DO_SPACES_BASE:-https://vote.fra1.digitaloceanspaces.com}"
+          release_base_url="${RELEASE_BASE_URL:-${do_spaces_base}/binaries/vote-sdk}"
+          genesis_key="${GENESIS_KEY:-genesis/${chain_id}/genesis.json}"
+          snapshots_prefix="${SNAPSHOTS_PREFIX:-snapshots/${chain_id}}"
+          {
+            echo "chain_id=${chain_id}"
+            echo "dns_prefix=${dns_prefix}"
+            echo "has_secondary=${has_secondary}"
+            echo "do_spaces_base=${do_spaces_base}"
+            echo "release_base_url=${release_base_url}"
+            echo "genesis_key=${genesis_key}"
+            echo "snapshots_prefix=${snapshots_prefix}"
+          } >> "$GITHUB_OUTPUT"
+
   validate-tag:
     name: Validate release tag exists in DO Spaces
     runs-on: ubuntu-latest
+    needs: resolve-environment
+    environment: ${{ inputs.target_environment }}
+    env:
+      RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
     steps:
       - name: HEAD-check published tarballs
         run: |
@@ -51,13 +113,14 @@ jobs:
   quiesce-snapshot:
     name: Quiesce snapshot publisher
     runs-on: ubuntu-latest
-    needs: validate-tag
+    needs: [resolve-environment, validate-tag]
+    environment: ${{ inputs.target_environment }}
     steps:
       - name: Stop snapshot timer before chain reset
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 5
         with:
-          host: snapshots.${{ secrets.DOMAIN }}
+          host: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -75,13 +138,14 @@ jobs:
   quiesce-archive:
     name: Quiesce archive publisher
     runs-on: ubuntu-latest
-    needs: validate-tag
+    needs: [resolve-environment, validate-tag]
+    environment: ${{ inputs.target_environment }}
     steps:
       - name: Stop archive snapshot timer before chain reset
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 5
         with:
-          host: explorer.${{ secrets.DOMAIN }}
+          host: ${{ needs.resolve-environment.outputs.dns_prefix }}explorer.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -100,7 +164,10 @@ jobs:
   reset-primary:
     name: Reset primary (bootstrap)
     runs-on: ubuntu-latest
-    needs: [quiesce-snapshot, quiesce-archive]
+    needs: [resolve-environment, quiesce-snapshot, quiesce-archive]
+    environment: ${{ inputs.target_environment }}
+    env:
+      CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
     steps:
       - name: Install tag and reset primary
         uses: appleboy/ssh-action@v1.0.3
@@ -109,7 +176,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,SENTRY_DSN,SVOTE_CONFIG_PR_GITHUB_TOKEN
+          envs: TAG,SENTRY_DSN,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -167,7 +234,11 @@ jobs:
   upload-genesis:
     name: Upload genesis to DO Spaces
     runs-on: ubuntu-latest
-    needs: reset-primary
+    needs: [resolve-environment, reset-primary]
+    environment: ${{ inputs.target_environment }}
+    env:
+      GENESIS_KEY: ${{ needs.resolve-environment.outputs.genesis_key }}
+      SNAPSHOTS_PREFIX: ${{ needs.resolve-environment.outputs.snapshots_prefix }}
     steps:
       - name: Fetch genesis and upload to DO Spaces
         uses: appleboy/ssh-action@v1.0.3
@@ -176,7 +247,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: DO_ACCESS_KEY,DO_SECRET_KEY
+          envs: DO_ACCESS_KEY,DO_SECRET_KEY,GENESIS_KEY,SNAPSHOTS_PREFIX
           script: |
             set -euo pipefail
 
@@ -197,12 +268,12 @@ jobs:
             bucket_location = fra1
             use_https = True
             EOCFG
-            s3cmd -c /tmp/do-spaces.s3cfg put /tmp/genesis.json s3://vote/genesis.json --acl-public --force
-            echo "Clearing old snapshot artifacts from s3://vote/snapshots/svote-1/..."
-            s3cmd -c /tmp/do-spaces.s3cfg del --recursive s3://vote/snapshots/svote-1/
+            s3cmd -c /tmp/do-spaces.s3cfg put /tmp/genesis.json "s3://vote/${GENESIS_KEY}" --acl-public --force
+            echo "Clearing old snapshot artifacts from s3://vote/${SNAPSHOTS_PREFIX}/..."
+            s3cmd -c /tmp/do-spaces.s3cfg del --recursive "s3://vote/${SNAPSHOTS_PREFIX}/"
             rm -f /tmp/do-spaces.s3cfg
-            echo "Genesis uploaded to s3://vote/genesis.json"
-            echo "Old snapshots cleared from s3://vote/snapshots/svote-1/"
+            echo "Genesis uploaded to s3://vote/${GENESIS_KEY}"
+            echo "Old snapshots cleared from s3://vote/${SNAPSHOTS_PREFIX}/"
         env:
           DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
           DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
@@ -210,7 +281,11 @@ jobs:
   fund-secondary:
     name: Fund secondary validator
     runs-on: ubuntu-latest
-    needs: upload-genesis
+    needs: [resolve-environment, upload-genesis]
+    if: ${{ needs.resolve-environment.outputs.has_secondary != 'false' }}
+    environment: ${{ inputs.target_environment }}
+    env:
+      CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
     steps:
       - name: Send tokens from vote-manager to secondary address
         uses: appleboy/ssh-action@v1.0.3
@@ -219,6 +294,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: CHAIN_ID
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -239,7 +315,7 @@ jobs:
               --from vote-manager-1 \
               --keyring-backend test \
               --home "$HOME_DIR" \
-              --chain-id svote-1 \
+              --chain-id "${CHAIN_ID}" \
               --yes
 
             echo "Waiting for tx to be included..."
@@ -252,16 +328,24 @@ jobs:
   reset-snapshot:
     name: Reset snapshot node
     runs-on: ubuntu-latest
-    needs: upload-genesis
+    needs: [resolve-environment, upload-genesis]
+    environment: ${{ inputs.target_environment }}
+    env:
+      CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
+      DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
+      DO_SPACES_BASE: ${{ needs.resolve-environment.outputs.do_spaces_base }}
+      GENESIS_KEY: ${{ needs.resolve-environment.outputs.genesis_key }}
+      DOMAIN: ${{ secrets.DOMAIN }}
+      SNAPSHOT_HOST: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
     steps:
       - name: Install tag and join as snapshot node
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: snapshots.${{ secrets.DOMAIN }}
+          host: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG
+          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -272,10 +356,9 @@ jobs:
             # Run reset-snapshot: wipe state, download genesis, configure peering
             # with primary, start svoted as a pruned non-validator, and enable
             # the snapshot timer.
-            export GENESIS_URL="${{ env.DO_SPACES_BASE }}/genesis.json"
-            export PRIMARY_REST_URL="https://vote-chain-primary.${{ secrets.DOMAIN }}"
+            export GENESIS_URL="${DO_SPACES_BASE}/${GENESIS_KEY}"
+            export PRIMARY_REST_URL="https://${DNS_PREFIX}vote-chain-primary.${DOMAIN}"
             export HOME_DIR=/opt/shielded-vote/.svoted
-            export CHAIN_ID=svote-1
             export MONIKER=snapshot
 
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-snapshot.sh" -o /tmp/reset-snapshot.sh
@@ -285,9 +368,10 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: snapshots.${{ secrets.DOMAIN }}
+          host: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SNAPSHOT_HOST
           script: |
             set -euo pipefail
 
@@ -313,35 +397,44 @@ jobs:
             done
 
             for path in /daily.json /latest.json /snapshots.json; do
-              curl -fsS --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
-                "https://snapshots.${{ secrets.DOMAIN }}${path}" \
+              curl -fsS --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
+                "https://${SNAPSHOT_HOST}${path}" \
                 | jq -e 'type == "object" or type == "array"' > /dev/null
               echo "[OK] ${path}"
             done
-            curl -fsS --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
-              "https://snapshots.${{ secrets.DOMAIN }}/daily.json" \
+            curl -fsS --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
+              "https://${SNAPSHOT_HOST}/daily.json" \
               | jq -e '.roles | index("daily") != null' > /dev/null
-            curl -fsS --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
-              "https://snapshots.${{ secrets.DOMAIN }}/latest.json" \
+            curl -fsS --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
+              "https://${SNAPSHOT_HOST}/latest.json" \
               | jq -e '.roles | index("latest") != null' > /dev/null
 
       - name: Verify snapshot services
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: snapshots.${{ secrets.DOMAIN }}
+          host: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SNAPSHOT_HOST
           script: |
             systemctl is-active --quiet svoted
             systemctl is-enabled --quiet snapshot.timer
-            curl -sf --resolve "snapshots.${{ secrets.DOMAIN }}:443:127.0.0.1" \
-              "https://snapshots.${{ secrets.DOMAIN }}/" > /dev/null
+            curl -sf --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
+              "https://${SNAPSHOT_HOST}/" > /dev/null
             echo "Snapshot node and frontend healthy."
 
   reset-secondary:
     name: Reset secondary (join)
     runs-on: ubuntu-latest
-    needs: fund-secondary
+    needs: [resolve-environment, fund-secondary]
+    if: ${{ needs.resolve-environment.outputs.has_secondary != 'false' }}
+    environment: ${{ inputs.target_environment }}
+    env:
+      CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
+      DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
+      DO_SPACES_BASE: ${{ needs.resolve-environment.outputs.do_spaces_base }}
+      GENESIS_KEY: ${{ needs.resolve-environment.outputs.genesis_key }}
+      DOMAIN: ${{ secrets.DOMAIN }}
     steps:
       - name: Install tag and join
         uses: appleboy/ssh-action@v1.0.3
@@ -350,7 +443,7 @@ jobs:
           host: ${{ secrets.SECONDARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG
+          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -359,11 +452,10 @@ jobs:
             /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
 
             # Run reset-join with deterministic validator key
-            export GENESIS_URL="${{ env.DO_SPACES_BASE }}/genesis.json"
-            export PRIMARY_REST_URL="https://vote-chain-primary.${{ secrets.DOMAIN }}"
+            export GENESIS_URL="${DO_SPACES_BASE}/${GENESIS_KEY}"
+            export PRIMARY_REST_URL="https://${DNS_PREFIX}vote-chain-primary.${DOMAIN}"
             export VAL_PRIVKEY="${{ secrets.SECONDARY_VAL_PRIVKEY }}"
             export HOME_DIR=/opt/shielded-vote/.svoted
-            export CHAIN_ID=svote-1
             export MONIKER=valarg-secondary
 
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-join.sh" -o /tmp/reset-join.sh
@@ -390,16 +482,25 @@ jobs:
   reset-archive:
     name: Reset archive (join)
     runs-on: ubuntu-latest
-    needs: reset-secondary
+    needs: [resolve-environment, upload-genesis, reset-secondary]
+    if: ${{ always() && needs.upload-genesis.result == 'success' && (needs.reset-secondary.result == 'success' || needs.reset-secondary.result == 'skipped') }}
+    environment: ${{ inputs.target_environment }}
+    env:
+      CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
+      DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
+      DO_SPACES_BASE: ${{ needs.resolve-environment.outputs.do_spaces_base }}
+      GENESIS_KEY: ${{ needs.resolve-environment.outputs.genesis_key }}
+      DOMAIN: ${{ secrets.DOMAIN }}
+      SNAPSHOT_HOST: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
     steps:
       - name: Install tag and join as archive
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: explorer.${{ secrets.DOMAIN }}
+          host: ${{ needs.resolve-environment.outputs.dns_prefix }}explorer.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG
+          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -407,12 +508,39 @@ jobs:
             # Install the release (skip restart — reset-archive.sh starts svoted).
             /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
 
+            mkdir -p /opt/shielded-vote/current/explorer/dist/chains/mainnet
+            cat > /opt/shielded-vote/current/explorer/dist/chains/mainnet/svote.json <<EOF
+            {
+              "chain_name": "svote",
+              "registry_name": "svote",
+              "api": ["https://${DNS_PREFIX}explorer-api.${DOMAIN}"],
+              "rpc": ["https://${DNS_PREFIX}explorer-rpc.${DOMAIN}"],
+              "sdk_version": "0.50.0",
+              "coin_type": "118",
+              "min_tx_fee": "0",
+              "addr_prefix": "sv",
+              "logo": "https://${DNS_PREFIX}explorer.${DOMAIN}/logos/zcash.svg",
+              "theme_color": "#F4B728",
+              "assets": [
+                {
+                  "base": "usvote",
+                  "symbol": "SVOTE",
+                  "exponent": "6",
+                  "coingecko_id": "",
+                  "logo": "https://${DNS_PREFIX}explorer.${DOMAIN}/logos/zcash.svg"
+                }
+              ],
+              "chain_id": "${CHAIN_ID}",
+              "pretty_name": "Zcash Vote",
+              "features": ["blocks", "tx", "staking", "governance", "supply", "parameters", "consensus"]
+            }
+            EOF
+
             # Run reset-archive: wipe state, download genesis, configure peering
             # with primary, start svoted in archive mode (pruning=nothing).
-            export GENESIS_URL="${{ env.DO_SPACES_BASE }}/genesis.json"
-            export PRIMARY_REST_URL="https://vote-chain-primary.${{ secrets.DOMAIN }}"
+            export GENESIS_URL="${DO_SPACES_BASE}/${GENESIS_KEY}"
+            export PRIMARY_REST_URL="https://${DNS_PREFIX}vote-chain-primary.${DOMAIN}"
             export HOME_DIR=/opt/shielded-vote/.svoted
-            export CHAIN_ID=svote-1
             export MONIKER=archive
 
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/reset-archive.sh" -o /tmp/reset-archive.sh
@@ -421,7 +549,7 @@ jobs:
       - name: Verify archive health
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: explorer.${{ secrets.DOMAIN }}
+          host: ${{ needs.resolve-environment.outputs.dns_prefix }}explorer.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -440,9 +568,10 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 60
         with:
-          host: explorer.${{ secrets.DOMAIN }}
+          host: ${{ needs.resolve-environment.outputs.dns_prefix }}explorer.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SNAPSHOT_HOST
           script: |
             set -euo pipefail
 
@@ -467,9 +596,9 @@ jobs:
               sleep 30
             done
 
-            curl -fsS "https://snapshots.${{ secrets.DOMAIN }}/archive/latest.json" \
+            curl -fsS "https://${SNAPSHOT_HOST}/archive/latest.json" \
               | jq -e '.type == "archive" and (.roles | index("latest")) and (.roles | index("archive"))' > /dev/null
-            curl -fsS "https://snapshots.${{ secrets.DOMAIN }}/archive/snapshots.json" \
+            curl -fsS "https://${SNAPSHOT_HOST}/archive/snapshots.json" \
               | jq -e 'length == 1 and .[0].type == "archive"' > /dev/null
             echo "Archive snapshot metadata healthy."
 
@@ -477,13 +606,22 @@ jobs:
     name: Post-reset verification
     if: ${{ always() && needs.reset-archive.result == 'success' && needs.reset-snapshot.result == 'success' }}
     runs-on: ubuntu-latest
-    needs: [reset-archive, reset-snapshot]
+    needs: [resolve-environment, reset-archive, reset-snapshot]
+    environment: ${{ inputs.target_environment }}
+    env:
+      DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
+      HAS_SECONDARY: ${{ needs.resolve-environment.outputs.has_secondary }}
+      DOMAIN: ${{ secrets.DOMAIN }}
     steps:
-      - name: Check both validators
+      - name: Check fleet endpoints
         run: |
           FAILED=0
-          for HOST in "vote-chain-primary" "vote-chain-secondary"; do
-            URL="https://${HOST}.${{ secrets.DOMAIN }}/shielded-vote/v1/rounds"
+          VALIDATOR_HOSTS=("${DNS_PREFIX}vote-chain-primary")
+          if [ "${HAS_SECONDARY}" != "false" ]; then
+            VALIDATOR_HOSTS+=("${DNS_PREFIX}vote-chain-secondary")
+          fi
+          for HOST in "${VALIDATOR_HOSTS[@]}"; do
+            URL="https://${HOST}.${DOMAIN}/shielded-vote/v1/rounds"
             for i in $(seq 1 10); do
               STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$URL" || echo "000")
               if [ "$STATUS" = "200" ]; then
@@ -498,7 +636,7 @@ jobs:
             done
           done
           # Explorer archive exposes the Cosmos LCD at explorer-api.<domain>.
-          ARCHIVE_URL="https://explorer-api.${{ secrets.DOMAIN }}/cosmos/base/tendermint/v1beta1/blocks/latest"
+          ARCHIVE_URL="https://${DNS_PREFIX}explorer-api.${DOMAIN}/cosmos/base/tendermint/v1beta1/blocks/latest"
           for i in $(seq 1 10); do
             STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$ARCHIVE_URL" || echo "000")
             if [ "$STATUS" = "200" ]; then
@@ -511,7 +649,7 @@ jobs:
             fi
             sleep 10
           done
-          SNAPSHOT_URL="https://snapshots.${{ secrets.DOMAIN }}/"
+          SNAPSHOT_URL="https://${DNS_PREFIX}snapshots.${DOMAIN}/"
           for i in $(seq 1 10); do
             STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$SNAPSHOT_URL" || echo "000")
             if [ "$STATUS" = "200" ]; then
@@ -525,7 +663,7 @@ jobs:
             sleep 10
           done
           for METADATA_PATH in /daily.json /latest.json /snapshots.json /archive/latest.json; do
-            URL="https://snapshots.${{ secrets.DOMAIN }}${METADATA_PATH}"
+            URL="https://${DNS_PREFIX}snapshots.${DOMAIN}${METADATA_PATH}"
             if curl -fsS "$URL" | jq empty > /dev/null; then
               echo "[OK] snapshot metadata ${METADATA_PATH}"
             else
@@ -540,6 +678,7 @@ jobs:
     if: ${{ always() && contains(join(needs.*.result, ','), 'failure') }}
     needs: [quiesce-snapshot, quiesce-archive, reset-primary, upload-genesis, fund-secondary, reset-snapshot, reset-secondary, reset-archive, verify]
     runs-on: ubuntu-latest
+    environment: ${{ inputs.target_environment }}
     steps:
       - name: Notify Slack on failure
         uses: slackapi/slack-github-action@v2.1.0

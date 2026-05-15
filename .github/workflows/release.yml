@@ -121,8 +121,6 @@ jobs:
           path: ~/.cache/yarn
           key: yarn-pingpub-ee1ca5ee54d7bd2dc4c5b4df8f3b93595440e9c8
       - name: Clone ping-pub and build static bundle
-        env:
-          DOMAIN: ${{ secrets.DOMAIN }}
         run: |
           set -euo pipefail
           git clone https://github.com/ping-pub/explorer.git /tmp/ping-pub
@@ -132,13 +130,12 @@ jobs:
           # Drop all upstream chain configs so the UI shows only our chain.
           rm -f chains/mainnet/*.json chains/testnet/*.json
 
-          # Substitute {{DOMAIN}} in the chain config and drop it in.
+          # Keep the chain config as a deploy-time template. The deploy/reset
+          # workflows render environment-specific DNS and chain ID values.
           # ping-pub defaults to "mainnet" when the hostname doesn't contain
           # "testnet"; our svote config lives under chains/mainnet/ so it's
-          # discoverable on explorer.<domain>.
-          sed "s|{{DOMAIN}}|${DOMAIN}|g" \
-            "$GITHUB_WORKSPACE/deploy/explorer/svote.json" \
-            > chains/mainnet/svote.json
+          # discoverable on the explorer host.
+          cp "$GITHUB_WORKSPACE/deploy/explorer/svote.json" chains/mainnet/svote.json
 
           # Bundle the Zcash logo so the chain icon resolves to our asset.
           # ping-pub's repo doesn't ship a public/logos/ directory -- create it.
@@ -308,11 +305,3 @@ jobs:
             "s3://vote/scripts/remove-pir/${VERSION}/remove-pir.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/svoted-wrapper.sh \
             "s3://vote/scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"
-
-  deploy:
-    name: Deploy
-    needs: distribute
-    uses: ./.github/workflows/sdk-chain-deploy.yml
-    with:
-      tag: ${{ github.ref_name }}
-    secrets: inherit
