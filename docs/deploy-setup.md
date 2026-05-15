@@ -17,35 +17,32 @@ three-validator setup.
 ```mermaid
 flowchart LR
     tag["git tag v*"] --> release["release.yml\nbuild + GitHub Release\n+ DO Spaces"]
-    release --> deploy["sdk-chain-deploy.yml\nSSH install-release.sh\non validators, explorer, snapshot"]
+    release --> artifacts["shared release artifacts"]
+    manual["workflow_dispatch\nwith target_environment"] -.-> deploy["sdk-chain-deploy.yml\nSSH install-release.sh\non validators, explorer, snapshot"]
     deploy --> health["health check\nlocalhost:1317"]
-    manual["workflow_dispatch"] -.-> deploy
-    reset["sdk-chain-reset.yml\nwipe + re-init genesis"] -.-> primary["primary"]
+    manual -.-> reset["sdk-chain-reset.yml\nwipe + re-init genesis"]
+    reset -.-> primary["primary"]
     reset -.-> secondary["secondary"]
 ```
 
 | Workflow | Trigger | What it does |
 |----------|---------|-------------|
-| [`release.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/release.yml) | `v*` tag push | Builds `svoted` + admin UI for linux/darwin x amd64/arm64. Creates a GitHub Release with tarballs, uploads to DO Spaces (`s3://vote/`). |
-| [`sdk-chain-deploy.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-deploy.yml) | Manual `workflow_dispatch` | SSHes to production hosts, runs `install-release.sh --tag <tag>` (download from Spaces, verify checksum, swap symlink, restart `svoted` where initialized), and checks public surfaces. Notifies Slack on failure. |
-| [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Full chain reset from genesis. Quiesces the snapshot publisher, wipes state on primary, runs `init.sh`, uploads genesis to DO Spaces, funds secondary, joins secondary/archive/snapshot nodes, enables the snapshot timer, and verifies public surfaces. |
+| [`release.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/release.yml) | `v*` tag push | Builds `svoted` + admin UI for linux/darwin x amd64/arm64. Creates a GitHub Release with tarballs and uploads shared artifacts to DO Spaces (`s3://vote/`). It does not deploy to any fleet. |
+| [`sdk-chain-deploy.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-deploy.yml) | Manual `workflow_dispatch` | Takes `target_environment`, reads GitHub Environment secrets/vars, SSHes to that fleet, runs `install-release.sh --tag <tag>` (download from Spaces, verify checksum, swap symlink, restart `svoted` where initialized), renders explorer config, and checks public surfaces. Notifies Slack on failure. |
+| [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Takes `target_environment`. Full chain reset from genesis: quiesces publishers, wipes state on primary, runs `init.sh` with the environment `CHAIN_ID`, uploads namespaced genesis to DO Spaces, optionally funds/joins secondary, joins archive/snapshot nodes, enables the snapshot timer, and verifies public surfaces. |
 
-### GitHub repository secrets
+### GitHub Environments
 
-| Secret | Used by | Description |
-|--------|---------|-------------|
-| `PRIMARY_HOST` | deploy, reset | Hostname or IP of the primary validator. |
-| `SECONDARY_HOST` | deploy, reset | Hostname or IP of the secondary validator. |
-| `SNAPSHOT_HOST` | reset | Hostname or IP of the dedicated snapshot node. Required for reset quiescing before chain state is wiped. |
-| `DEPLOY_USER` | deploy, reset | SSH username on the production hosts. |
-| `SSH_PRIVATE_KEY` | deploy, reset | SSH private key for authentication. |
-| `VM_PRIVKEYS` | reset | Comma-separated 64-char hex secp256k1 private keys for the coordinator set. Each derived address becomes a coordinator at genesis; the 1B usvote stake pool is split evenly across the set. The coordinator threshold defaults to 1 unless configured otherwise. For a single-coordinator chain, provide exactly one key. |
-| `PRIMARY_VAL_PRIVKEY` | reset | 64-char hex private key for the primary validator. |
-| `SECONDARY_VAL_PRIVKEY` | reset | 64-char hex private key for the secondary validator. |
-| `DOMAIN` | deploy, reset | Base domain (e.g. `valargroup.org`). Deploy uses this for explorer and snapshot hostnames; reset also uses it for public verification URLs. |
-| `DO_ACCESS_KEY` | release, reset | DigitalOcean Spaces access key. |
-| `DO_SECRET_KEY` | release, reset | DigitalOcean Spaces secret key. |
-| `SLACK_WEBHOOK_URL` | deploy, reset | Slack incoming webhook for failure notifications. |
+Create `staging` and `production` GitHub Environments before using deploy or
+reset. Environment variables include `CHAIN_ID` (`svote-1` staging, `zvote-1`
+production), `HAS_SECONDARY`, `DNS_PREFIX` (`stage.` / `prod.`),
+`RELEASE_BASE_URL`, `GENESIS_KEY`, and `SNAPSHOTS_PREFIX`. Environment secrets
+include `PRIMARY_HOST`, staging-only `SECONDARY_HOST`, `DOMAIN`, `DEPLOY_USER`,
+`SSH_PRIVATE_KEY`, `SENTRY_DSN`, `CONFIG_PR_GITHUB_TOKEN`, reset keys, Spaces
+credentials, and `SLACK_WEBHOOK_URL`.
+
+See [runbooks/environments.md](runbooks/environments.md) for the complete
+operator checklist.
 
 ---
 
@@ -68,26 +65,26 @@ for TLS termination. Infrastructure is provisioned by Terraform in
 
 | Host | Systemd unit | REST API | Caddy hostnames |
 |------|-------------|----------|-----------------|
-| vote-primary | `svoted.service` + `primary.conf` override | `:1317` | `vote-chain-primary.<domain>`, `svote.<domain>`, `vote-rpc-primary.<domain>` |
-| vote-secondary | `svoted.service` | `:1317` | `vote-chain-secondary.<domain>` |
-| vote-snapshot | `svoted.service`, `snapshot.timer` | local only | `snapshots.<domain>` |
+| vote-primary | `svoted.service` + `primary.conf` override | `:1317` | `<dns-prefix>vote-chain-primary.<domain>`, `<dns-prefix>svote.<domain>`, `<dns-prefix>vote-rpc-primary.<domain>` |
+| vote-secondary | `svoted.service` | `:1317` | `<dns-prefix>vote-chain-secondary.<domain>` |
+| vote-snapshot | `svoted.service`, `snapshot.timer` | local only | `<dns-prefix>snapshots.<domain>` |
 
 The primary override adds `--serve-ui --ui-dist /opt/shielded-vote/current/ui/dist`
 to serve the admin UI. The secondary runs the chain only.
 
 The snapshot host is provisioned by `vote-infrastructure` as a pruned
 non-validator node. `sdk-chain-reset.yml` stops the snapshot publisher before
-resetting the chain, clears old objects under `s3://vote/snapshots/svote-1/`,
+resetting the chain, clears old objects under `s3://vote/snapshots/<chain-id>/`,
 initializes it from the current genesis, configures peering with primary,
 starts `svoted`, and enables the snapshot timer.
 The timer publishes `data/`-only `tar.lz4` archives and metadata back to
-`s3://vote/snapshots/svote-1/`, while Caddy serves the branded page at
-`https://snapshots.<domain>/`.
+`s3://vote/snapshots/<chain-id>/`, while Caddy serves the branded page at
+`https://<dns-prefix>snapshots.<domain>/`.
 
 Deploy and reset jobs always include `vote-snapshot` so routine releases keep the
 snapshot node on the same binary as the rest of the production fleet. Provision
-`vote-snapshot`, make sure `snapshots.<domain>` resolves, and add
-`SNAPSHOT_HOST` before using the reset workflow.
+`vote-snapshot` and make sure the environment-prefixed snapshot hostname
+resolves before using the reset workflow.
 
 See [production-setup.md](production-setup.md) for first-time bootstrap, manual
 operations, and failover runbook.
