@@ -228,7 +228,7 @@ function App() {
     if (invalidProposalIndex !== -1) {
       setPublishStatus("error");
       setPublishError(
-        `Proposal ${invalidProposalIndex + 1} must have ${MIN_VOTE_OPTIONS}-${MAX_VOTE_OPTIONS} non-empty options, including abstain when enabled.`
+        `Proposal ${invalidProposalIndex + 1} must have ${MIN_VOTE_OPTIONS}-${MAX_VOTE_OPTIONS} non-empty options.`
       );
       return;
     }
@@ -548,21 +548,16 @@ function App() {
 /* ── Unified builder view (single scrollable column) ─────────── */
 
 function isProposalValid(p: Proposal): boolean {
-  const options = buildChainOptions(p);
   return (
     p.title.trim().length > 0 &&
-    options.length >= MIN_VOTE_OPTIONS &&
-    options.length <= MAX_VOTE_OPTIONS &&
-    options.every((option) => option.label.trim().length > 0)
+    p.options.length >= MIN_VOTE_OPTIONS &&
+    p.options.length <= MAX_VOTE_OPTIONS &&
+    p.options.every((option) => option.label.trim().length > 0)
   );
 }
 
 function buildChainOptions(p: Proposal): Array<{ index: number; label: string }> {
-  const options = p.options.map((opt, j) => ({ index: j, label: opt.label }));
-  if (p.allowAbstain) {
-    options.push({ index: options.length, label: "Abstain" });
-  }
-  return options;
+  return p.options.map((opt, j) => ({ index: j, label: opt.label }));
 }
 
 function BuilderView({
@@ -3891,14 +3886,6 @@ function PreviewView({ round, onBack }: { round: VotingRound; onBack: () => void
                       </span>
                     </div>
                   ))}
-                  {p.allowAbstain && (
-                    <div className="flex items-center gap-2 px-3 py-2 bg-surface-2 rounded-lg border border-border-subtle hover:border-accent/30 transition-colors cursor-pointer">
-                      <div className="w-3 h-3 rounded-full border-2 border-text-muted" />
-                      <span className="text-xs text-text-muted italic">
-                        Abstain
-                      </span>
-                    </div>
-                  )}
                 </div>
               </div>
             ))}

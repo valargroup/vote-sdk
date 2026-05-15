@@ -31,9 +31,7 @@ interface ProposalEditorProps {
 export function ProposalEditor({ proposal, onUpdate, readonly = false }: ProposalEditorProps) {
   const [descTab, setDescTab] = useState<"write" | "preview">("write");
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const effectiveOptionCount = proposal.options.length + (proposal.allowAbstain ? 1 : 0);
-  const canAddOption = effectiveOptionCount < MAX_VOTE_OPTIONS;
-  const canEnableAbstain = proposal.allowAbstain || proposal.options.length < MAX_VOTE_OPTIONS;
+  const canAddOption = proposal.options.length < MAX_VOTE_OPTIONS;
 
   const handleTypeChange = (type: ProposalType) => {
     const options =
@@ -296,22 +294,6 @@ export function ProposalEditor({ proposal, onUpdate, readonly = false }: Proposa
                     <Copy size={12} />
                   </button>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={proposal.allowAbstain}
-                  onChange={(e) => {
-                    if (e.target.checked && !canEnableAbstain) return;
-                    onUpdate({ allowAbstain: e.target.checked });
-                  }}
-                  disabled={readonly || !canEnableAbstain}
-                  title={!canEnableAbstain ? `Maximum ${MAX_VOTE_OPTIONS} choices` : undefined}
-                  className={`accent-accent ${readonly || !canEnableAbstain ? "opacity-60 cursor-default" : ""}`}
-                />
-                <label className="text-[11px] text-text-secondary">
-                  Allow abstain
-                </label>
               </div>
             </div>
           )}

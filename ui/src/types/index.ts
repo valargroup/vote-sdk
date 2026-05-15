@@ -18,7 +18,6 @@ export interface Proposal {
   description: string;
   type: ProposalType;
   options: ProposalOption[];
-  allowAbstain: boolean;
   zipNumber: string;
   forumURL: string;
   metadata: ProposalMetadata[];
