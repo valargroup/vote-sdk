@@ -11,15 +11,14 @@ import (
 
 // Helper manages the share processing pipeline lifecycle.
 type Helper struct {
-	Store                        *ShareStore
-	Processor                    *Processor
-	APIToken                     string
-	ExposeQueueStatus            bool
-	ExposeQueueSummary           bool
-	QueueSummaryMinBucketSeconds uint64
-	VCHash                       VCHashFunc
-	ShareNullifierChecker        ShareNullifierChecker
-	Logger                       log.Logger
+	Store                 *ShareStore
+	Processor             *Processor
+	APIToken              string
+	ExposeQueueStatus     bool
+	ExposeQueueSummary    bool
+	VCHash                VCHashFunc
+	ShareNullifierChecker ShareNullifierChecker
+	Logger                log.Logger
 }
 
 // New creates a new Helper from the given configuration.
@@ -87,15 +86,14 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 	)
 
 	return &Helper{
-		Store:                        store,
-		Processor:                    processor,
-		APIToken:                     cfg.APIToken,
-		ExposeQueueStatus:            cfg.ExposeQueueStatus,
-		ExposeQueueSummary:           cfg.ExposeQueueSummary,
-		QueueSummaryMinBucketSeconds: cfg.QueueSummaryMinBucketSeconds,
-		VCHash:                       vcHash,
-		ShareNullifierChecker:        shareNF,
-		Logger:                       logger,
+		Store:                 store,
+		Processor:             processor,
+		APIToken:              cfg.APIToken,
+		ExposeQueueStatus:     cfg.ExposeQueueStatus,
+		ExposeQueueSummary:    cfg.ExposeQueueSummary,
+		VCHash:                vcHash,
+		ShareNullifierChecker: shareNF,
+		Logger:                logger,
 	}, nil
 }
 
@@ -107,7 +105,6 @@ func (h *Helper) RegisterRoutes(router *mux.Router) {
 		func() string { return h.APIToken },
 		func() bool { return h.ExposeQueueStatus },
 		func() bool { return h.ExposeQueueSummary },
-		func() uint64 { return h.QueueSummaryMinBucketSeconds },
 		func() TreeReader { return h.Processor.tree },
 		func() VCHashFunc { return h.VCHash },
 		func() ShareNullifierChecker { return h.ShareNullifierChecker },

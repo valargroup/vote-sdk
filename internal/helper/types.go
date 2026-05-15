@@ -23,10 +23,6 @@ type Config struct {
 	// /shielded-vote/v1/queue-summary/{round_id} endpoint.
 	ExposeQueueSummary bool `mapstructure:"expose_queue_summary"`
 
-	// QueueSummaryMinBucketSeconds is the minimum bucket size used by the public
-	// queue summary endpoint. The helper may choose larger buckets for long votes.
-	QueueSummaryMinBucketSeconds uint64 `mapstructure:"queue_summary_min_bucket_seconds"`
-
 	// DBPath is the path to the SQLite database file. Use ":memory:" for testing.
 	DBPath string `mapstructure:"db_path"`
 
@@ -48,19 +44,16 @@ type Config struct {
 	SentryDSN string `mapstructure:"sentry_dsn"`
 }
 
-const DefaultQueueSummaryMinBucketSeconds uint64 = 6 * 60 * 60
-
 // DefaultConfig returns the default helper configuration.
 func DefaultConfig() Config {
 	return Config{
-		Disable:                      false,
-		APIToken:                     "",
-		ExposeQueueStatus:            false,
-		ExposeQueueSummary:           true,
-		QueueSummaryMinBucketSeconds: DefaultQueueSummaryMinBucketSeconds,
-		DBPath:                       "",
-		ChainAPIPort:                 1317,
-		MaxConcurrentProofs:          2,
+		Disable:             false,
+		APIToken:            "",
+		ExposeQueueStatus:   false,
+		ExposeQueueSummary:  true,
+		DBPath:              "",
+		ChainAPIPort:        1317,
+		MaxConcurrentProofs: 2,
 	}
 }
 

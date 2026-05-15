@@ -151,7 +151,6 @@ the REST API port. It is configured in `app.toml` under `[helper]` (written by
 | `disable` | `false` | Set to `true` to disable the helper server entirely. |
 | `api_token` | `""` | Optional token for `POST /shielded-vote/v1/shares` (`X-Helper-Token` header). |
 | `expose_queue_summary` | `true` | Enables public coarse round-level queue summaries at `/shielded-vote/v1/queue-summary/{round_id}`. |
-| `queue_summary_min_bucket_seconds` | `21600` | Minimum public summary bucket size. The helper may use larger buckets for long rounds. |
 | `db_path` | `""` | Path to SQLite database. Empty = `$HOME/helper.db`. |
 | `chain_api_port` | `1418` | Port of the REST API (for `MsgRevealShare` submission). In production this is `1317`. |
 | `max_concurrent_proofs` | `8` | Maximum parallel proof generation goroutines (~500 MB RAM each). |

@@ -367,12 +367,6 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			return false
 		}
 		return h.ExposeQueueSummary
-	}, func() uint64 {
-		h := app.GetHelper()
-		if h == nil {
-			return helper.DefaultQueueSummaryMinBucketSeconds
-		}
-		return h.QueueSummaryMinBucketSeconds
 	}, func() helper.TreeReader {
 		h := app.GetHelper()
 		if h == nil {

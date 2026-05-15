@@ -134,9 +134,6 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.expose_queue_summary") {
 		cfg.ExposeQueueSummary = v.GetBool("helper.expose_queue_summary")
 	}
-	if v.IsSet("helper.queue_summary_min_bucket_seconds") {
-		cfg.QueueSummaryMinBucketSeconds = v.GetUint64("helper.queue_summary_min_bucket_seconds")
-	}
 	if v.IsSet("helper.db_path") {
 		cfg.DBPath = v.GetString("helper.db_path")
 	}

@@ -43,7 +43,7 @@ func newQueueStatusRouter(t *testing.T, token string) (*mux.Router, *ShareStore)
 	return router, store
 }
 
-func newQueueSummaryRouter(t *testing.T, store *ShareStore, token string, expose bool, minBucketSeconds uint64) *mux.Router {
+func newQueueSummaryRouter(t *testing.T, store *ShareStore, token string, expose bool) *mux.Router {
 	t.Helper()
 	router := mux.NewRouter()
 	RegisterRoutesWithQueueSummaryGetters(
@@ -52,7 +52,6 @@ func newQueueSummaryRouter(t *testing.T, store *ShareStore, token string, expose
 		func() string { return token },
 		func() bool { return false },
 		func() bool { return expose },
-		func() uint64 { return minBucketSeconds },
 		nil,
 		nil,
 		nil,
@@ -290,7 +289,7 @@ func TestQueueSummary_PublicNoToken(t *testing.T) {
 	p.SubmitAt = start + 60
 	enqueueInserted(t, store, p)
 
-	router := newQueueSummaryRouter(t, store, "secret-token", true, 60)
+	router := newQueueSummaryRouter(t, store, "secret-token", true)
 	req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-summary/"+roundID, nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -305,7 +304,7 @@ func TestQueueSummary_PublicNoToken(t *testing.T) {
 
 func TestQueueSummary_Disabled(t *testing.T) {
 	store := newTestStore(t)
-	router := newQueueSummaryRouter(t, store, "", false, 60)
+	router := newQueueSummaryRouter(t, store, "", false)
 	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
 
 	req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-summary/"+roundID, nil)
@@ -321,7 +320,7 @@ func TestQueueSummary_InvalidAndUnknownRound(t *testing.T) {
 	store, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
 	defer store.Close()
-	router := newQueueSummaryRouter(t, store, "", true, 60)
+	router := newQueueSummaryRouter(t, store, "", true)
 
 	t.Run("invalid round id", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-summary/not-hex", nil)

@@ -88,7 +88,6 @@ cat >> "$APP_TOML" <<HELPERCFG
 disable = false
 api_token = ""
 expose_queue_summary = true
-queue_summary_min_bucket_seconds = 21600
 db_path = ""
 chain_api_port = 1419
 max_concurrent_proofs = 2

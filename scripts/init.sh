@@ -190,7 +190,6 @@ rm -f "${APP_TOML}.bak"
 HELPER_API_TOKEN="${SVOTE_HELPER_API_TOKEN:-}"
 HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
 HELPER_EXPOSE_QUEUE_SUMMARY="${SVOTE_HELPER_EXPOSE_QUEUE_SUMMARY:-true}"
-HELPER_QUEUE_SUMMARY_MIN_BUCKET_SECONDS="${SVOTE_HELPER_QUEUE_SUMMARY_MIN_BUCKET_SECONDS:-21600}"
 HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-8}"
 HELPER_SENTRY_DSN="${SVOTE_HELPER_SENTRY_DSN:-}"
 
@@ -217,7 +216,6 @@ expose_queue_status = $HELPER_EXPOSE_QUEUE_STATUS
 # Public coarse round-level queue histogram endpoint. The helper controls the
 # bucket size; callers cannot request more granular data.
 expose_queue_summary = $HELPER_EXPOSE_QUEUE_SUMMARY
-queue_summary_min_bucket_seconds = $HELPER_QUEUE_SUMMARY_MIN_BUCKET_SECONDS
 
 # Path to the SQLite database file. Empty = default ($HOME/.svoted/helper.db).
 db_path = ""

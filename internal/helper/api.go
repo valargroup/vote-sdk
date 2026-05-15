@@ -62,7 +62,6 @@ func RegisterRoutesWithGetters(
 		getAPIToken,
 		getExposeQueueStatus,
 		func() bool { return true },
-		func() uint64 { return DefaultQueueSummaryMinBucketSeconds },
 		getTree,
 		getVCHash,
 		getShareNullifier,
@@ -78,22 +77,20 @@ func RegisterRoutesWithQueueSummaryGetters(
 	getAPIToken func() string,
 	getExposeQueueStatus func() bool,
 	getExposeQueueSummary func() bool,
-	getQueueSummaryMinBucketSeconds func() uint64,
 	getTree func() TreeReader,
 	getVCHash func() VCHashFunc,
 	getShareNullifier ShareNullifierCheckerGetter,
 	logger log.Logger,
 ) {
 	h := &apiHandler{
-		getStore:                        getStore,
-		getAPIToken:                     getAPIToken,
-		getExposeQueueStatus:            getExposeQueueStatus,
-		getExposeQueueSummary:           getExposeQueueSummary,
-		getQueueSummaryMinBucketSeconds: getQueueSummaryMinBucketSeconds,
-		getTree:                         getTree,
-		getVCHash:                       getVCHash,
-		getShareNullifier:               getShareNullifier,
-		logger:                          logger,
+		getStore:              getStore,
+		getAPIToken:           getAPIToken,
+		getExposeQueueStatus:  getExposeQueueStatus,
+		getExposeQueueSummary: getExposeQueueSummary,
+		getTree:               getTree,
+		getVCHash:             getVCHash,
+		getShareNullifier:     getShareNullifier,
+		logger:                logger,
 	}
 	recover := sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle
 	router.Handle("/shielded-vote/v1/shares", recover(http.HandlerFunc(h.handleSubmitShare))).Methods("POST")
@@ -107,15 +104,14 @@ func RegisterRoutesWithQueueSummaryGetters(
 type ShareNullifierCheckerGetter func() ShareNullifierChecker
 
 type apiHandler struct {
-	getStore                        func() *ShareStore
-	getAPIToken                     func() string
-	getExposeQueueStatus            func() bool
-	getExposeQueueSummary           func() bool
-	getQueueSummaryMinBucketSeconds func() uint64
-	getTree                         func() TreeReader
-	getVCHash                       func() VCHashFunc
-	getShareNullifier               ShareNullifierCheckerGetter
-	logger                          log.Logger
+	getStore              func() *ShareStore
+	getAPIToken           func() string
+	getExposeQueueStatus  func() bool
+	getExposeQueueSummary func() bool
+	getTree               func() TreeReader
+	getVCHash             func() VCHashFunc
+	getShareNullifier     ShareNullifierCheckerGetter
+	logger                log.Logger
 }
 
 type submitResponse struct {
@@ -340,11 +336,7 @@ func (h *apiHandler) handleQueueSummary(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	minBucketSeconds := DefaultQueueSummaryMinBucketSeconds
-	if h.getQueueSummaryMinBucketSeconds != nil {
-		minBucketSeconds = h.getQueueSummaryMinBucketSeconds()
-	}
-	summary, err := store.QueueSummary(roundID, time.Now(), minBucketSeconds)
+	summary, err := store.QueueSummary(roundID, time.Now())
 	if err != nil {
 		if errors.Is(err, ErrUnknownRound) {
 			jsonError(w, "round not found", http.StatusNotFound)

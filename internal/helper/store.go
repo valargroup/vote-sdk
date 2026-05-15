@@ -695,14 +695,6 @@ func queueSummaryPolicyBucketSeconds(durationSeconds uint64) uint64 {
 	}
 }
 
-func queueSummaryBucketSeconds(durationSeconds, minBucketSeconds uint64) uint64 {
-	bucket := queueSummaryPolicyBucketSeconds(durationSeconds)
-	if minBucketSeconds > bucket {
-		return minBucketSeconds
-	}
-	return bucket
-}
-
 func queueSummaryLastMinuteStart(createdAtTime, voteEndTime uint64) uint64 {
 	if voteEndTime <= createdAtTime {
 		return createdAtTime
@@ -737,7 +729,7 @@ func queueSummaryBucketIndex(ts, createdAtTime, voteEndTime, bucketSeconds uint6
 
 // QueueSummary returns a public, coarse histogram for one round across all
 // proposals handled by this helper.
-func (s *ShareStore) QueueSummary(roundID string, now time.Time, minBucketSeconds uint64) (QueueSummary, error) {
+func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, error) {
 	info, err := s.getRoundInfo(roundID)
 	if err != nil {
 		return QueueSummary{}, err
@@ -751,7 +743,7 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time, minBucketSecond
 
 	generatedAt := uint64(now.Unix())
 	duration := info.VoteEndTime - info.CreatedAtTime
-	bucketSeconds := queueSummaryBucketSeconds(duration, minBucketSeconds)
+	bucketSeconds := queueSummaryPolicyBucketSeconds(duration)
 	bucketCount := int((duration + bucketSeconds - 1) / bucketSeconds)
 	if bucketCount < 1 {
 		bucketCount = 1

@@ -164,18 +164,17 @@ func TestStatus(t *testing.T) {
 }
 
 func TestQueueSummaryBucketPolicy(t *testing.T) {
-	assert.Equal(t, uint64(6*3600), queueSummaryBucketSeconds(28*24*3600, 0))
-	assert.Equal(t, uint64(3*3600), queueSummaryBucketSeconds(14*24*3600, 0))
-	assert.Equal(t, uint64(3600), queueSummaryBucketSeconds(2*24*3600, 0))
-	assert.Equal(t, uint64(15*60), queueSummaryBucketSeconds(2*3600, 0))
-	assert.Equal(t, uint64(60), queueSummaryBucketSeconds(10*60, 0))
-	assert.Equal(t, uint64(6*3600), queueSummaryBucketSeconds(10*60, DefaultQueueSummaryMinBucketSeconds))
+	assert.Equal(t, uint64(6*3600), queueSummaryPolicyBucketSeconds(28*24*3600))
+	assert.Equal(t, uint64(3*3600), queueSummaryPolicyBucketSeconds(14*24*3600))
+	assert.Equal(t, uint64(3600), queueSummaryPolicyBucketSeconds(2*24*3600))
+	assert.Equal(t, uint64(15*60), queueSummaryPolicyBucketSeconds(2*3600))
+	assert.Equal(t, uint64(60), queueSummaryPolicyBucketSeconds(10*60))
 }
 
 func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 	const roundID = "1111111111111111111111111111111111111111111111111111111111111111"
 	start := uint64(1700000000)
-	end := start + 6*3600
+	end := start + 2*24*3600
 	now := time.Unix(int64(start+2*3600+30*60), 0)
 
 	fetcher := func(roundID string) (RoundInfo, error) {
@@ -215,9 +214,9 @@ func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 	_, err = s.db.Exec("UPDATE shares SET state = 2, received_at = ? WHERE share_index = 4", start+2*3600)
 	require.NoError(t, err)
 
-	summary, err := s.QueueSummary(roundID, now, 3600)
+	summary, err := s.QueueSummary(roundID, now)
 	require.NoError(t, err)
-	require.Len(t, summary.Buckets, 6)
+	require.Len(t, summary.Buckets, 48)
 	assert.Equal(t, uint64(3600), summary.BucketSeconds)
 	assert.Equal(t, start, summary.CreatedAtTime)
 	assert.Equal(t, end, summary.VoteEndTime)
