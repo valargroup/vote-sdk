@@ -2,6 +2,7 @@ package helper
 
 import (
 	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -696,6 +697,10 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, hasReceivedAt)
 
+	hasOriginalSubmitAt, err := tableHasColumn(s.db, "shares", "original_submit_at")
+	require.NoError(t, err)
+	assert.True(t, hasOriginalSubmitAt)
+
 	hasRoundCreatedAtTime, err := tableHasColumn(s.db, "rounds", "created_at_time")
 	require.NoError(t, err)
 	assert.True(t, hasRoundCreatedAtTime)
@@ -781,4 +786,147 @@ func TestScheduleChangedOnRetryScheduling(t *testing.T) {
 	next, ok := s.NextScheduledTime()
 	require.True(t, ok)
 	assert.True(t, next.After(time.Now()))
+}
+
+func TestShareStoreExclusiveLock(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "helper.db")
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
+	}
+
+	s1, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	defer s1.Close()
+
+	_, err = NewShareStore(dbPath, fetcher)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already in use")
+}
+
+func TestExportQueueIncludesTerminalRows(t *testing.T) {
+	s := newTestStore(t)
+
+	pending := testPayload("round1", 0)
+	pending.SubmitAt = uint64(time.Now().Add(time.Hour).Unix())
+	enqueueAndRequireInserted(t, s, pending)
+
+	submitted := testPayload("round1", 1)
+	submitted.TreePosition = 11
+	enqueueAndRequireInserted(t, s, submitted)
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+	s.MarkSubmitted("round1", 1, 1, 11)
+
+	export, err := s.ExportQueue("round1", time.Unix(1234, 0))
+	require.NoError(t, err)
+	require.Len(t, export.Rows, 2)
+	assert.Equal(t, QueueExportVersion, export.Version)
+	assert.Equal(t, uint64(1234), export.ExportedAt)
+
+	var sawPending, sawSubmitted bool
+	for _, row := range export.Rows {
+		switch row.ShareIndex {
+		case 0:
+			sawPending = true
+			assert.True(t, row.Processable)
+			assert.Equal(t, ShareStateReceived, row.State)
+			assert.NotEmpty(t, row.EncShare.C1)
+			assert.Equal(t, pending.SubmitAt, row.OriginalSubmitAt)
+		case 1:
+			sawSubmitted = true
+			assert.False(t, row.Processable)
+			assert.Equal(t, ShareStateSubmitted, row.State)
+			assert.Empty(t, row.EncShare.C1)
+			assert.Empty(t, row.PrimaryBlind)
+			assert.Empty(t, row.ShareComms)
+		}
+	}
+	assert.True(t, sawPending)
+	assert.True(t, sawSubmitted)
+}
+
+func TestImportQueueSkipsTerminalAndRoundTripsProcessableRows(t *testing.T) {
+	source := newTestStore(t)
+	received := testPayload("round1", 0)
+	enqueueAndRequireInserted(t, source, received)
+	submitted := testPayload("round1", 1)
+	submitted.TreePosition = 11
+	enqueueAndRequireInserted(t, source, submitted)
+	ready := source.TakeReady()
+	require.Len(t, ready, 2)
+	source.MarkSubmitted("round1", 1, 1, 11)
+	source.MarkFailed("round1", 0, 1, 0)
+
+	export, err := source.ExportQueue("round1", time.Now())
+	require.NoError(t, err)
+
+	dest := newTestStore(t)
+	result, err := dest.ImportQueue(export, QueueImportOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Inserted)
+	assert.Equal(t, 1, result.SkippedTerminal)
+
+	status := dest.Status()
+	assert.Equal(t, 1, status["round1"].Total)
+	assert.Equal(t, 1, status["round1"].Pending)
+	assert.Equal(t, 0, status["round1"].Submitted)
+
+	ready = dest.TakeReady()
+	require.Len(t, ready, 1)
+	assert.Equal(t, uint32(0), ready[0].Payload.EncShare.ShareIndex)
+	assert.Equal(t, received.PrimaryBlind, ready[0].Payload.PrimaryBlind)
+
+	result, err = dest.ImportQueue(export, QueueImportOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.Inserted)
+	assert.Equal(t, 1, result.Duplicates)
+	assert.Equal(t, 1, result.SkippedTerminal)
+}
+
+func TestImportQueueForceReadyPreservesOriginalSubmitAt(t *testing.T) {
+	futureSubmitAt := uint64(time.Now().Add(time.Hour).Unix())
+	export := QueueExport{
+		Version: QueueExportVersion,
+		RoundID: "round1",
+		Round: QueueExportRound{
+			CreatedAtTime: futureSubmitAt - oneHourSecs,
+			VoteEndTime:   futureSubmitAt + oneHourSecs,
+		},
+		Rows: []QueueExportRow{
+			{
+				ShareIndex:       0,
+				SharesHash:       testPayload("round1", 0).SharesHash,
+				ProposalID:       1,
+				VoteDecision:     0,
+				EncShare:         testPayload("round1", 0).EncShare,
+				TreePosition:     0,
+				ShareComms:       testPayload("round1", 0).ShareComms,
+				PrimaryBlind:     testPayload("round1", 0).PrimaryBlind,
+				State:            ShareStateReceived,
+				VoteEndTime:      futureSubmitAt + oneHourSecs,
+				SubmitAt:         futureSubmitAt,
+				OriginalSubmitAt: futureSubmitAt,
+				Processable:      true,
+			},
+		},
+	}
+
+	dest := newTestStore(t)
+	result, err := dest.ImportQueue(export, QueueImportOptions{ForceReady: true})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Inserted)
+
+	var submitAt, originalSubmitAt uint64
+	err = dest.db.QueryRow(
+		"SELECT submit_at, original_submit_at FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		"round1", 0, 1, 0,
+	).Scan(&submitAt, &originalSubmitAt)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(0), submitAt)
+	assert.Equal(t, futureSubmitAt, originalSubmitAt)
+
+	ready := dest.TakeReady()
+	require.Len(t, ready, 1)
+	assert.Equal(t, uint64(0), ready[0].Payload.SubmitAt)
 }

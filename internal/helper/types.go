@@ -175,6 +175,55 @@ func (s ExpiredRoundSummary) Unsubmitted() int {
 	return s.Pending + s.Failed
 }
 
+const QueueExportVersion = 1
+
+// QueueExport is the local rescue artifact for one round's helper queue.
+// It is intentionally not exposed over HTTP. Treat files of this shape as
+// sensitive because processable rows contain witness material.
+type QueueExport struct {
+	Version    int              `json:"version"`
+	RoundID    string           `json:"round_id"`
+	ExportedAt uint64           `json:"exported_at"`
+	Round      QueueExportRound `json:"round"`
+	Rows       []QueueExportRow `json:"rows"`
+}
+
+type QueueExportRound struct {
+	CreatedAtTime uint64 `json:"created_at_time"`
+	VoteEndTime   uint64 `json:"vote_end_time"`
+}
+
+// QueueExportRow is one persisted share queue row. Terminal rows are exported
+// for debugging, but import skips them so they cannot be processed again.
+type QueueExportRow struct {
+	ShareIndex       uint32             `json:"share_index"`
+	SharesHash       string             `json:"shares_hash,omitempty"`
+	ProposalID       uint32             `json:"proposal_id"`
+	VoteDecision     uint32             `json:"vote_decision"`
+	EncShare         EncryptedShareWire `json:"enc_share,omitempty"`
+	TreePosition     uint64             `json:"tree_position"`
+	ShareComms       []string           `json:"share_comms,omitempty"`
+	PrimaryBlind     string             `json:"primary_blind,omitempty"`
+	State            ShareState         `json:"state"`
+	Attempts         int                `json:"attempts"`
+	VoteEndTime      uint64             `json:"vote_end_time"`
+	SubmitAt         uint64             `json:"submit_at"`
+	OriginalSubmitAt uint64             `json:"original_submit_at,omitempty"`
+	ReceivedAt       uint64             `json:"received_at"`
+	Processable      bool               `json:"processable"`
+}
+
+type QueueImportOptions struct {
+	ForceReady bool
+}
+
+type QueueImportResult struct {
+	Inserted        int `json:"inserted"`
+	Duplicates      int `json:"duplicates"`
+	Conflicts       int `json:"conflicts"`
+	SkippedTerminal int `json:"skipped_terminal"`
+}
+
 // ProofGenerator abstracts ZKP #3 proof generation for testing.
 type ProofGenerator interface {
 	// GenerateShareRevealProof generates a share reveal proof.
