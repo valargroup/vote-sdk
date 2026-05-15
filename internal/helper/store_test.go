@@ -21,8 +21,8 @@ func newTestStore(t *testing.T) *ShareStore {
 	// Provide a permissive round fetcher so tests don't fail on unknown rounds.
 	// Return voteEndTime 12h from now.
 	now := uint64(time.Now().Unix())
-	fetcher := func(roundID string) (uint64, error) {
-		return now + testVoteEndOffset, nil
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
 	}
 	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
@@ -163,6 +163,80 @@ func TestStatus(t *testing.T) {
 	assert.Equal(t, 2, status["round1"].Pending)
 }
 
+func TestQueueSummaryBucketPolicy(t *testing.T) {
+	assert.Equal(t, uint64(6*3600), queueSummaryBucketSeconds(28*24*3600, 0))
+	assert.Equal(t, uint64(3*3600), queueSummaryBucketSeconds(14*24*3600, 0))
+	assert.Equal(t, uint64(3600), queueSummaryBucketSeconds(2*24*3600, 0))
+	assert.Equal(t, uint64(15*60), queueSummaryBucketSeconds(2*3600, 0))
+	assert.Equal(t, uint64(60), queueSummaryBucketSeconds(10*60, 0))
+	assert.Equal(t, uint64(6*3600), queueSummaryBucketSeconds(10*60, DefaultQueueSummaryMinBucketSeconds))
+}
+
+func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
+	const roundID = "1111111111111111111111111111111111111111111111111111111111111111"
+	start := uint64(1700000000)
+	end := start + 6*3600
+	now := time.Unix(int64(start+2*3600+30*60), 0)
+
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: start, VoteEndTime: end}, nil
+	}
+	s, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	insert := func(shareIndex uint32, treePosition, submitAt uint64) {
+		p := testPayload(roundID, shareIndex)
+		p.TreePosition = treePosition
+		p.SubmitAt = submitAt
+		enqueueAndRequireInserted(t, s, p)
+	}
+	insert(0, 0, start+30*60)
+	insert(1, 1, start+90*60)
+	insert(2, 2, start+4*3600)
+	insert(3, 3, start+5*3600)
+	insert(4, 4, 0)
+	insert(5, 5, start+3600)
+
+	_, err = s.db.Exec(
+		`UPDATE shares
+		    SET state = 2, enc_share_c1 = '', enc_share_c2 = '', share_comms = '[]', primary_blind = ''
+		  WHERE share_index = 0`,
+	)
+	require.NoError(t, err)
+	_, err = s.db.Exec("UPDATE shares SET state = 1 WHERE share_index = 1")
+	require.NoError(t, err)
+	_, err = s.db.Exec(
+		`UPDATE shares
+		    SET state = 3, enc_share_c1 = '', enc_share_c2 = '', share_comms = '[]', primary_blind = ''
+		  WHERE share_index = 3`,
+	)
+	require.NoError(t, err)
+	_, err = s.db.Exec("UPDATE shares SET state = 2, received_at = ? WHERE share_index = 4", start+2*3600)
+	require.NoError(t, err)
+
+	summary, err := s.QueueSummary(roundID, now, 3600)
+	require.NoError(t, err)
+	require.Len(t, summary.Buckets, 6)
+	assert.Equal(t, uint64(3600), summary.BucketSeconds)
+	assert.Equal(t, start, summary.CreatedAtTime)
+	assert.Equal(t, end, summary.VoteEndTime)
+	assert.Equal(t, uint64(now.Unix()), summary.GeneratedAt)
+
+	assert.Equal(t, 1, summary.Buckets[0].Submitted)
+	assert.Equal(t, 1, summary.Buckets[1].Processing)
+	assert.Equal(t, 1, summary.Buckets[1].OverduePending)
+	assert.Equal(t, 1, summary.Buckets[2].Submitted)
+	assert.Equal(t, 1, summary.Buckets[4].PendingFuture)
+	assert.Equal(t, 1, summary.Buckets[5].Failed)
+
+	total := 0
+	for _, bucket := range summary.Buckets {
+		total += bucket.Total
+	}
+	assert.Equal(t, 6, total)
+}
+
 func TestDuplicateEnqueue(t *testing.T) {
 	s := newTestStore(t)
 
@@ -254,7 +328,9 @@ func TestRecovery(t *testing.T) {
 	// Use a file-based DB so we can reopen it.
 	dbPath := t.TempDir() + "/helper_test.db"
 	now := uint64(time.Now().Unix())
-	fetcher := func(roundID string) (uint64, error) { return now + 12*3600, nil }
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + 12*3600}, nil
+	}
 
 	s1, err := NewShareStore(dbPath, fetcher)
 	require.NoError(t, err)
@@ -281,7 +357,9 @@ func TestRecovery_FutureSubmitAt(t *testing.T) {
 	// Shares with future submit_at should not be immediately ready after recovery.
 	dbPath := t.TempDir() + "/helper_test.db"
 	futureTime := uint64(time.Now().Add(time.Hour).Unix())
-	fetcher := func(roundID string) (uint64, error) { return futureTime + oneHourSecs, nil }
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: futureTime - oneHourSecs, VoteEndTime: futureTime + oneHourSecs}, nil
+	}
 
 	s1, err := NewShareStore(dbPath, fetcher)
 	require.NoError(t, err)
@@ -304,7 +382,9 @@ func TestRecovery_FutureSubmitAt(t *testing.T) {
 func TestEnqueue_SubmitAtValidation(t *testing.T) {
 	now := uint64(time.Now().Unix())
 	voteEndTime := now + oneHourSecs
-	fetcher := func(roundID string) (uint64, error) { return voteEndTime, nil }
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: voteEndTime}, nil
+	}
 
 	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
@@ -335,11 +415,13 @@ func TestEnqueue_SubmitAtValidation(t *testing.T) {
 }
 
 func TestPurgeExpiredRounds(t *testing.T) {
-	fetcher := func(roundID string) (uint64, error) {
+	fetcher := func(roundID string) (RoundInfo, error) {
 		if roundID == "expired_round" {
-			return uint64(time.Now().Add(-time.Hour).Unix()), nil
+			end := uint64(time.Now().Add(-time.Hour).Unix())
+			return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
 		}
-		return uint64(time.Now().Add(time.Hour).Unix()), nil
+		now := uint64(time.Now().Unix())
+		return RoundInfo{CreatedAtTime: now - oneHourSecs, VoteEndTime: now + oneHourSecs}, nil
 	}
 
 	s, err := NewShareStore(":memory:", fetcher)
@@ -363,8 +445,9 @@ func TestPurgeExpiredRounds(t *testing.T) {
 }
 
 func TestExpiredRoundSummaries(t *testing.T) {
-	fetcher := func(roundID string) (uint64, error) {
-		return uint64(time.Now().Add(-time.Hour).Unix()), nil
+	fetcher := func(roundID string) (RoundInfo, error) {
+		end := uint64(time.Now().Add(-time.Hour).Unix())
+		return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
 	}
 
 	s, err := NewShareStore(":memory:", fetcher)
@@ -393,9 +476,9 @@ func TestExpiredRoundSummaries(t *testing.T) {
 
 func TestGetRoundEndTime_Cache(t *testing.T) {
 	fetchCalls := 0
-	fetcher := func(roundID string) (uint64, error) {
+	fetcher := func(roundID string) (RoundInfo, error) {
 		fetchCalls++
-		return 1000000, nil
+		return RoundInfo{CreatedAtTime: 990000, VoteEndTime: 1000000}, nil
 	}
 
 	s, err := NewShareStore(":memory:", fetcher)
@@ -451,9 +534,11 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, oldDB.Close())
 
-	// Opening with current code should migrate PK and add vote_end_time + submit_at.
+	// Opening with current code should migrate PK and add queue metadata columns.
 	now := uint64(time.Now().Unix())
-	fetcher := func(roundID string) (uint64, error) { return now + 12*3600, nil }
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + 12*3600}, nil
+	}
 	s, err := NewShareStore(dbPath, fetcher)
 	require.NoError(t, err)
 	defer s.Close()
@@ -467,6 +552,14 @@ func TestMigrateOldSchema(t *testing.T) {
 	hasSubmitAt, err := tableHasColumn(s.db, "shares", "submit_at")
 	require.NoError(t, err)
 	assert.True(t, hasSubmitAt)
+
+	hasReceivedAt, err := tableHasColumn(s.db, "shares", "received_at")
+	require.NoError(t, err)
+	assert.True(t, hasReceivedAt)
+
+	hasRoundCreatedAtTime, err := tableHasColumn(s.db, "rounds", "created_at_time")
+	require.NoError(t, err)
+	assert.True(t, hasRoundCreatedAtTime)
 
 	// tree_position should now be part of the primary key.
 	notInPK, err := columnNotInPK(s.db, "shares", "tree_position")

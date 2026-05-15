@@ -43,6 +43,24 @@ func newQueueStatusRouter(t *testing.T, token string) (*mux.Router, *ShareStore)
 	return router, store
 }
 
+func newQueueSummaryRouter(t *testing.T, store *ShareStore, token string, expose bool, minBucketSeconds uint64) *mux.Router {
+	t.Helper()
+	router := mux.NewRouter()
+	RegisterRoutesWithQueueSummaryGetters(
+		router,
+		func() *ShareStore { return store },
+		func() string { return token },
+		func() bool { return false },
+		func() bool { return expose },
+		func() uint64 { return minBucketSeconds },
+		nil,
+		nil,
+		nil,
+		log.NewNopLogger(),
+	)
+	return router
+}
+
 func enqueueInserted(t *testing.T, s *ShareStore, p SharePayload) {
 	t.Helper()
 	result, err := s.Enqueue(p)
@@ -257,6 +275,70 @@ func TestQueueStatus_RequiresTokenWhenEnabled(t *testing.T) {
 	})
 }
 
+func TestQueueSummary_PublicNoToken(t *testing.T) {
+	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	start := uint64(time.Now().Add(-10 * time.Minute).Unix())
+	end := start + 10*60
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: start, VoteEndTime: end}, nil
+	}
+	store, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer store.Close()
+
+	p := testPayload(roundID, 0)
+	p.SubmitAt = start + 60
+	enqueueInserted(t, store, p)
+
+	router := newQueueSummaryRouter(t, store, "secret-token", true, 60)
+	req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-summary/"+roundID, nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp QueueSummary
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, roundID, resp.RoundID)
+	assert.Equal(t, uint64(60), resp.BucketSeconds)
+	assert.Equal(t, 1, resp.Buckets[1].OverduePending)
+}
+
+func TestQueueSummary_Disabled(t *testing.T) {
+	store := newTestStore(t)
+	router := newQueueSummaryRouter(t, store, "", false, 60)
+	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+
+	req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-summary/"+roundID, nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestQueueSummary_InvalidAndUnknownRound(t *testing.T) {
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{}, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
+	}
+	store, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer store.Close()
+	router := newQueueSummaryRouter(t, store, "", true, 60)
+
+	t.Run("invalid round id", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-summary/not-hex", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("unknown round", func(t *testing.T) {
+		roundID := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-summary/"+roundID, nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
 func TestRoutes_HelperUnavailable(t *testing.T) {
 	router := mux.NewRouter()
 	RegisterRoutesWithStoreGetter(router, func() *ShareStore { return nil }, log.NewNopLogger())
@@ -374,8 +456,9 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 // returns that same commitment at position 0 so the check passes.
 func vcTestRouter(t *testing.T) (*mux.Router, *ShareStore, *vcMockTree) {
 	t.Helper()
-	fetcher := func(roundID string) (uint64, error) {
-		return uint64(time.Now().Add(time.Hour).Unix()), nil
+	fetcher := func(roundID string) (RoundInfo, error) {
+		now := uint64(time.Now().Unix())
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + uint64(time.Hour/time.Second)}, nil
 	}
 	store, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
@@ -475,8 +558,8 @@ func TestSubmitShare_VCCrossCheck_NoLeaf(t *testing.T) {
 
 func TestSubmitShare_UnknownRound(t *testing.T) {
 	// Build a store whose round fetcher rejects unknown rounds.
-	fetcher := func(roundID string) (uint64, error) {
-		return 0, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{}, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
 	}
 	store, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
@@ -520,8 +603,8 @@ func TestSubmitShare_VCCrossCheck_GracefulDegradation(t *testing.T) {
 }
 
 func TestEnqueue_UnknownRoundRejected(t *testing.T) {
-	fetcher := func(roundID string) (uint64, error) {
-		return 0, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{}, fmt.Errorf("%w: %s", ErrUnknownRound, roundID)
 	}
 	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)

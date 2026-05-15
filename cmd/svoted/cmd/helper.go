@@ -91,7 +91,7 @@ func helperPostSetup(
 			kvStore := (*svoteApp).VoteKeeper.OpenKVStore(ctx)
 			return (*svoteApp).VoteKeeper.HasNullifier(kvStore, votetypes.NullifierTypeShare, roundBytes, shareNullifier)
 		}
-		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundVoteEndTime, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundInfo, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
 		if err != nil {
 			helper.CaptureErr(err, map[string]string{"stage": "helper_new"})
 			return fmt.Errorf("helper: %w", err)
@@ -130,6 +130,12 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	}
 	if v.IsSet("helper.expose_queue_status") {
 		cfg.ExposeQueueStatus = v.GetBool("helper.expose_queue_status")
+	}
+	if v.IsSet("helper.expose_queue_summary") {
+		cfg.ExposeQueueSummary = v.GetBool("helper.expose_queue_summary")
+	}
+	if v.IsSet("helper.queue_summary_min_bucket_seconds") {
+		cfg.QueueSummaryMinBucketSeconds = v.GetUint64("helper.queue_summary_min_bucket_seconds")
 	}
 	if v.IsSet("helper.db_path") {
 		cfg.DBPath = v.GetString("helper.db_path")
@@ -236,25 +242,28 @@ func (r *keeperTreeReader) LeafAt(position uint64) ([]byte, error) {
 	return kvStore.Get(votetypes.CommitmentLeafKey(r.roundID, position))
 }
 
-// GetRoundVoteEndTime reads a vote round directly from the keeper's KV store
-// and returns its vote_end_time. Returns ErrUnknownRound when the round doesn't
+// GetRoundInfo reads a vote round directly from the keeper's KV store and
+// returns the helper metadata. Returns ErrUnknownRound when the round doesn't
 // exist; other errors (KV failures) are returned unwrapped so the caller can
 // distinguish client errors from infrastructure failures.
-func (r *keeperTreeReader) GetRoundVoteEndTime(roundID string) (uint64, error) {
+func (r *keeperTreeReader) GetRoundInfo(roundID string) (helper.RoundInfo, error) {
 	roundBytes, err := hex.DecodeString(roundID)
 	if err != nil {
-		return 0, fmt.Errorf("%w: invalid round_id hex: %v", helper.ErrUnknownRound, err)
+		return helper.RoundInfo{}, fmt.Errorf("%w: invalid round_id hex: %v", helper.ErrUnknownRound, err)
 	}
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
 	round, err := r.app.VoteKeeper.GetVoteRound(kvStore, roundBytes)
 	if err != nil {
 		if errors.Is(err, votetypes.ErrRoundNotFound) {
-			return 0, fmt.Errorf("%w: %s", helper.ErrUnknownRound, roundID)
+			return helper.RoundInfo{}, fmt.Errorf("%w: %s", helper.ErrUnknownRound, roundID)
 		}
-		return 0, fmt.Errorf("read round %s: %w", roundID, err)
+		return helper.RoundInfo{}, fmt.Errorf("read round %s: %w", roundID, err)
 	}
-	return round.VoteEndTime, nil
+	return helper.RoundInfo{
+		CreatedAtTime: round.CreatedAtTime,
+		VoteEndTime:   round.VoteEndTime,
+	}, nil
 }
 
 // GetRoundIsActive returns true if the round exists and has ACTIVE status.

@@ -165,6 +165,8 @@ The primary validator serves the admin UI [here](https://svote.valargroup.org/vo
 |-----|---------|-------------|
 | `disable` | `false` | Set `true` to disable the helper server. |
 | `api_token` | `""` | Optional bearer for `POST /shielded-vote/v1/shares` (sent as `X-Helper-Token`). |
+| `expose_queue_summary` | `true` | Enables public coarse round-level queue summaries at `/shielded-vote/v1/queue-summary/{round_id}`. |
+| `queue_summary_min_bucket_seconds` | `21600` | Minimum public summary bucket size. The helper may use larger buckets for long rounds. |
 | `db_path` | `""` (= `~/.svoted/helper.db`) | SQLite path for queued shares. |
 | `chain_api_port` | `1317` | REST port the helper submits `MsgRevealShare` to. |
 | `max_concurrent_proofs` | `8` | Parallel proof goroutines (~500 MB each). |

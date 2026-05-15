@@ -498,8 +498,8 @@ func TestProcessor_Run_CancelContext(t *testing.T) {
 
 func TestProcessor_Run_ImmediateEnqueueWakesProcessor(t *testing.T) {
 	now := uint64(time.Now().Unix())
-	store, err := NewShareStore(filepath.Join(t.TempDir(), "helper.db"), func(roundID string) (uint64, error) {
-		return now + testVoteEndOffset, nil
+	store, err := NewShareStore(filepath.Join(t.TempDir(), "helper.db"), func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { store.Close() })

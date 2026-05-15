@@ -192,6 +192,10 @@ disable = false
 # Empty disables token auth.
 api_token = ""
 
+# Public coarse round-level queue histogram endpoint.
+expose_queue_summary = true
+queue_summary_min_bucket_seconds = 21600
+
 # Path to the SQLite database file. Empty = default (\$home/helper.db).
 db_path = ""
 

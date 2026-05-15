@@ -13,14 +13,15 @@ func TestFetchVoteRound_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/shielded-vote/v1/round/aabbccdd", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"round":{"vote_end_time":1700000000}}`))
+		w.Write([]byte(`{"round":{"created_at_time":1699900000,"vote_end_time":1700000000}}`))
 	}))
 	defer server.Close()
 
 	submitter := NewChainSubmitter(server.URL)
-	vet, err := submitter.FetchVoteRound("aabbccdd")
+	info, err := submitter.FetchVoteRound("aabbccdd")
 	require.NoError(t, err)
-	assert.Equal(t, uint64(1700000000), vet)
+	assert.Equal(t, uint64(1699900000), info.CreatedAtTime)
+	assert.Equal(t, uint64(1700000000), info.VoteEndTime)
 }
 
 func TestFetchVoteRound_NotFound(t *testing.T) {

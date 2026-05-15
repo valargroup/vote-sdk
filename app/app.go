@@ -343,7 +343,7 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 	// Register helper routes unconditionally; handler resolves the backing store
 	// at request time, so routes are mounted even before PostSetup initializes
 	// the helper runtime.
-	helper.RegisterRoutesWithGetters(apiSvr.Router, func() *helper.ShareStore {
+	helper.RegisterRoutesWithQueueSummaryGetters(apiSvr.Router, func() *helper.ShareStore {
 		h := app.GetHelper()
 		if h == nil {
 			return nil
@@ -361,6 +361,18 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			return false
 		}
 		return h.ExposeQueueStatus
+	}, func() bool {
+		h := app.GetHelper()
+		if h == nil {
+			return false
+		}
+		return h.ExposeQueueSummary
+	}, func() uint64 {
+		h := app.GetHelper()
+		if h == nil {
+			return helper.DefaultQueueSummaryMinBucketSeconds
+		}
+		return h.QueueSummaryMinBucketSeconds
 	}, func() helper.TreeReader {
 		h := app.GetHelper()
 		if h == nil {
