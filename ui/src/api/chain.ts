@@ -631,6 +631,94 @@ export interface PublishedSnapshotManifest {
   files: Record<string, PublishedSnapshotFile>;
 }
 
+export const REQUIRED_PUBLISHED_SNAPSHOT_FILES = [
+  "tier0.bin",
+  "tier1.bin",
+  "tier2.bin",
+  "pir_root.json",
+] as const;
+
+export type PublishedSnapshotValidationStatus =
+  | "valid"
+  | "missing"
+  | "invalid"
+  | "error";
+
+export interface PublishedSnapshotValidationResult {
+  status: PublishedSnapshotValidationStatus;
+  height: number;
+  manifestUrl: string;
+  manifest?: PublishedSnapshotManifest;
+  issues?: string[];
+  message?: string;
+}
+
+function canonicalPublishedSnapshotBase(precomputedBase: string): string {
+  const base = precomputedBase.replace(/\/+$/, "");
+  try {
+    const url = new URL(base);
+    if (url.hostname === "vote.fra1.digitaloceanspaces.com") {
+      url.hostname = "vote.fra1.cdn.digitaloceanspaces.com";
+      return url.toString().replace(/\/+$/, "");
+    }
+  } catch {
+    // Leave non-URL bases unchanged; fetch will surface a useful error.
+  }
+  return base;
+}
+
+export function getPublishedSnapshotManifestUrl(
+  precomputedBase: string,
+  height: number
+): string {
+  const base = canonicalPublishedSnapshotBase(precomputedBase);
+  return `${base}${PIR_SNAPSHOTS_PATH}/${height}/manifest.json`;
+}
+
+function getPublishedSnapshotFetchUrl(
+  precomputedBase: string,
+  height: number
+): string {
+  if (import.meta.env.DEV) {
+    return `${PIR_SNAPSHOTS_PATH.replace(/^\/snapshots/, "/precomputed-snapshots/snapshots")}/${height}/manifest.json`;
+  }
+  return getPublishedSnapshotManifestUrl(precomputedBase, height);
+}
+
+export function validatePublishedSnapshotManifestShape(
+  manifest: unknown,
+  expectedHeight: number
+): string[] {
+  const issues: string[] = [];
+  if (!isRecord(manifest)) {
+    return ["manifest must be an object"];
+  }
+  if (manifest.schema_version !== 1) {
+    issues.push(`schema_version must be 1, got ${String(manifest.schema_version)}`);
+  }
+  if (manifest.height !== expectedHeight) {
+    issues.push(`manifest height ${manifest.height} does not match requested height ${expectedHeight}`);
+  }
+  if (!manifest.files || typeof manifest.files !== "object") {
+    issues.push("manifest files must be an object");
+    return issues;
+  }
+  for (const name of REQUIRED_PUBLISHED_SNAPSHOT_FILES) {
+    const file = (manifest.files as Record<string, unknown>)[name];
+    if (!isRecord(file)) {
+      issues.push(`missing required file ${name}`);
+      continue;
+    }
+    if (typeof file.size !== "number" || !Number.isFinite(file.size) || file.size <= 0) {
+      issues.push(`${name} has invalid size`);
+    }
+    if (typeof file.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(file.sha256)) {
+      issues.push(`${name} has invalid sha256`);
+    }
+  }
+  return issues;
+}
+
 /**
  * Fetch the manifest.json for a pre-computed PIR snapshot at the given height.
  * The manifest is uploaded last by the publisher CI, so its presence implies
@@ -645,13 +733,57 @@ export async function getPublishedSnapshotManifest(
   precomputedBase: string,
   height: number
 ): Promise<PublishedSnapshotManifest> {
-  const base = precomputedBase.replace(/\/+$/, "");
-  const url = `${base}${PIR_SNAPSHOTS_PATH}/${height}/manifest.json`;
+  const url = getPublishedSnapshotFetchUrl(precomputedBase, height);
   const resp = await fetch(url, { cache: "no-cache" });
   if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status} fetching ${url}`);
+    throw new Error(`HTTP ${resp.status} fetching ${getPublishedSnapshotManifestUrl(precomputedBase, height)}`);
   }
   return resp.json();
+}
+
+export async function validatePublishedSnapshotManifest(
+  precomputedBase: string,
+  height: number
+): Promise<PublishedSnapshotValidationResult> {
+  const manifestUrl = getPublishedSnapshotManifestUrl(precomputedBase, height);
+  const fetchUrl = getPublishedSnapshotFetchUrl(precomputedBase, height);
+  try {
+    const resp = await fetch(fetchUrl, { cache: "no-cache" });
+    if (resp.status === 404) {
+      return {
+        status: "missing",
+        height,
+        manifestUrl,
+        message: "No manifest.json exists for this snapshot height.",
+      };
+    }
+    if (!resp.ok) {
+      return {
+        status: "error",
+        height,
+        manifestUrl,
+        message: `HTTP ${resp.status} fetching ${manifestUrl}`,
+      };
+    }
+    const manifest = await resp.json() as unknown;
+    const issues = validatePublishedSnapshotManifestShape(manifest, height);
+    if (issues.length > 0) {
+      return { status: "invalid", height, manifestUrl, issues };
+    }
+    return {
+      status: "valid",
+      height,
+      manifestUrl,
+      manifest: manifest as PublishedSnapshotManifest,
+    };
+  } catch (err) {
+    return {
+      status: "error",
+      height,
+      manifestUrl,
+      message: err instanceof Error ? err.message : "Failed to validate manifest",
+    };
+  }
 }
 
 // -- Edge Config management --

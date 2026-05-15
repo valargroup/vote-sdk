@@ -5,7 +5,13 @@ import {
   useChainInfo,
   estimateTimestamp,
 } from "../store/rpc";
-import { getActiveRound, getSnapshotStatus } from "../api/chain";
+import {
+  getActiveRound,
+  getSnapshotStatus,
+  validatePublishedSnapshotManifest,
+} from "../api/chain";
+import type { PublishedSnapshotValidationResult } from "../api/chain";
+import { useUIConfig } from "../store/uiConfigContext";
 
 interface RoundEditorProps {
   round: VotingRound;
@@ -111,6 +117,10 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
   const [nhLoading, setNhLoading] = useState(false);
   const [nhError, setNhError] = useState<string | null>(null);
   const [pirRebuilding, setPirRebuilding] = useState(false);
+  const [snapshotHeightEdited, setSnapshotHeightEdited] = useState(false);
+  const [snapshotValidation, setSnapshotValidation] =
+    useState<PublishedSnapshotValidationResult | null>(null);
+  const [snapshotValidationLoading, setSnapshotValidationLoading] = useState(false);
   // PIR server's actually-served height; only used to warn when it disagrees
   // with the canonical published height.
   const [pirServedHeight, setPirServedHeight] = useState<number | null>(null);
@@ -118,6 +128,7 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
   const hasEndTime = endTime.length > 0;
 
   const chain = useChainInfo();
+  const { precomputedBaseURL } = useUIConfig();
   const [chainSnapshotHeight, setChainSnapshotHeight] = useState<number | null>(null);
   const [chainSnapshotLoaded, setChainSnapshotLoaded] = useState(false);
 
@@ -125,6 +136,13 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
   // every render, but the callback logic should always use the latest version.
   const onUpdateSettingsRef = useRef(onUpdateSettings);
   useEffect(() => { onUpdateSettingsRef.current = onUpdateSettings; });
+  const lastAutoSnapshotHeightRef = useRef<string>("");
+
+  useEffect(() => {
+    setSnapshotHeightEdited(false);
+    setSnapshotValidation(null);
+    lastAutoSnapshotHeightRef.current = "";
+  }, [round.id]);
 
   // Fetch snapshot height from PIR server. Chain state is the source of truth
   // for active rounds, but PIR status remains useful while drafting the first
@@ -172,22 +190,32 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
     };
   }, [round.id, isReadonly]);
 
-  // Auto-populate snapshot height from the active on-chain round when set,
-  // otherwise fall back to whatever the PIR server reports.
+  // Auto-populate the first draft value, then leave manual operator edits alone.
   useEffect(() => {
     if (isReadonly) return;
     if (!chainSnapshotLoaded) return;
-    if (chainSnapshotHeight != null) {
-      onUpdateSettingsRef.current({ snapshotHeight: String(chainSnapshotHeight) });
-    } else if (pirServedHeight != null) {
-      onUpdateSettingsRef.current({ snapshotHeight: String(pirServedHeight) });
+    const nextAutoHeight =
+      chainSnapshotHeight != null
+        ? String(chainSnapshotHeight)
+        : pirServedHeight != null
+          ? String(pirServedHeight)
+          : "";
+    if (nextAutoHeight) {
+      const current = round.settings.snapshotHeight;
+      const canAutoFill =
+        !snapshotHeightEdited &&
+        (current === "" || current === lastAutoSnapshotHeightRef.current);
+      if (canAutoFill) {
+        lastAutoSnapshotHeightRef.current = nextAutoHeight;
+        onUpdateSettingsRef.current({ snapshotHeight: nextAutoHeight });
+      }
     } else if (round.settings.snapshotHeight === "") {
       // Surface "no source of truth" only once a fetch has completed.
       if (chainSnapshotLoaded && pirServedHeight === null && !pirRebuilding && !nhLoading) {
         setNhError((e) => e ?? "No active on-chain round and PIR server has no checkpoint");
       }
     }
-  }, [chainSnapshotHeight, pirServedHeight, chainSnapshotLoaded, pirRebuilding, nhLoading, isReadonly, round.id, round.settings.snapshotHeight]);
+  }, [chainSnapshotHeight, pirServedHeight, chainSnapshotLoaded, pirRebuilding, nhLoading, isReadonly, round.settings.snapshotHeight, snapshotHeightEdited]);
 
   // Auto-populate snapshot height from PIR server on mount and round switch.
   useEffect(() => {
@@ -204,6 +232,40 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
 
   const snapshotHeight = parseInt(round.settings.snapshotHeight, 10);
   const isValidHeight = !isNaN(snapshotHeight) && snapshotHeight > 0;
+  useEffect(() => {
+    if (isReadonly || !isValidHeight || !precomputedBaseURL) {
+      setSnapshotValidation(null);
+      setSnapshotValidationLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSnapshotValidationLoading(true);
+    const timer = setTimeout(() => {
+      validatePublishedSnapshotManifest(precomputedBaseURL, snapshotHeight)
+        .then((result) => {
+          if (!cancelled) setSnapshotValidation(result);
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setSnapshotValidation({
+              status: "error",
+              height: snapshotHeight,
+              manifestUrl: "",
+              message: err instanceof Error ? err.message : "Snapshot validation failed",
+            });
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setSnapshotValidationLoading(false);
+        });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isReadonly, isValidHeight, precomputedBaseURL, snapshotHeight]);
+
   // PIR is "behind" the active chain round — typically a deploy-in-progress.
   const pirMismatch =
     chainSnapshotHeight != null && pirServedHeight != null && pirServedHeight !== chainSnapshotHeight;
@@ -231,7 +293,7 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
           />
         </div>
 
-        {/* Snapshot height — read-only, auto-populated from PIR server */}
+        {/* Snapshot height — defaults from chain/PIR, but operators can override. */}
         <div>
           <div className="flex items-center gap-2 mb-1">
             <label className="text-[11px] text-text-secondary">
@@ -240,14 +302,24 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
             {nhLoading && (
               <Loader2 size={10} className="text-accent animate-spin" />
             )}
+            {snapshotValidationLoading && (
+              <Loader2 size={10} className="text-accent animate-spin" />
+            )}
           </div>
           <div className="relative">
             <input
               type="text"
               inputMode="numeric"
               value={round.settings.snapshotHeight}
-              readOnly
-              className="w-full px-3 py-2 pr-24 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none font-mono opacity-60 cursor-default"
+              onChange={(e) => {
+                setSnapshotHeightEdited(true);
+                setNhError(null);
+                setSnapshotValidation(null);
+                onUpdateSettings({ snapshotHeight: e.target.value.replace(/[^0-9]/g, "") });
+              }}
+              readOnly={isReadonly}
+              placeholder={lastAutoSnapshotHeightRef.current || "Enter snapshot height"}
+              className={`w-full px-3 py-2 pr-24 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono ${isReadonly ? "opacity-60 cursor-default" : ""}`}
             />
             {onNavigate && (
               <button
@@ -274,6 +346,63 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
             </div>
           )}
 
+          {snapshotValidation?.status === "valid" && (
+            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-success/10 border border-success/30 rounded-md">
+              <div className="w-3 h-3 mt-0.5 rounded-full bg-success shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-success font-semibold leading-snug">
+                  Published PIR snapshot exists
+                </p>
+                <p className="text-[10px] text-text-muted leading-snug mt-0.5 truncate" title={snapshotValidation.manifestUrl}>
+                  {snapshotValidation.manifestUrl}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {snapshotValidation?.status === "missing" && (
+            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-warning/10 border border-warning/40 rounded-md">
+              <AlertTriangle size={12} className="text-warning shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-warning font-semibold leading-snug">
+                  No published PIR snapshot for this height
+                </p>
+                <p className="text-[10px] text-text-muted leading-snug mt-0.5">
+                  Publishing will require force confirmation unless a manifest
+                  appears at this height first.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {snapshotValidation?.status === "invalid" && (
+            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-danger/10 border border-danger/40 rounded-md">
+              <AlertTriangle size={12} className="text-danger shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-danger font-semibold leading-snug">
+                  Published PIR snapshot manifest is invalid
+                </p>
+                <p className="text-[10px] text-danger/80 leading-snug mt-0.5">
+                  {(snapshotValidation.issues ?? []).join("; ")}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {snapshotValidation?.status === "error" && (
+            <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-danger/10 border border-danger/40 rounded-md">
+              <AlertTriangle size={12} className="text-danger shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-[10px] text-danger font-semibold leading-snug">
+                  Could not validate published PIR snapshot
+                </p>
+                <p className="text-[10px] text-danger/80 leading-snug mt-0.5">
+                  {snapshotValidation.message}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* PIR vs active round height mismatch */}
           {pirMismatch && !pirRebuilding && (
             <div className="flex items-start gap-2 mt-2 px-2.5 py-2 bg-warning/10 border border-warning/40 rounded-md">
@@ -285,8 +414,8 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
                 <p className="text-[10px] text-text-muted leading-snug mt-0.5">
                   Chain wants <span className="font-mono">{chainSnapshotHeight!.toLocaleString()}</span>,
                   PIR is serving <span className="font-mono">{pirServedHeight!.toLocaleString()}</span>.
-                  This is normal during a snapshot deploy; the PIR server will
-                  catch up automatically. Wait before publishing.
+                  You can still publish a different height, but confirm the
+                  published PIR snapshot exists before proposing.
                 </p>
                 {onNavigate && (
                   <button
@@ -357,9 +486,9 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
           )}
 
           <p className="text-[10px] text-text-muted mt-1">
-            Auto-populated from the active on-chain round (falls back to the PIR
-            server). The block height at which balances are captured for vote
-            weighting.
+            Defaults from the active on-chain round, falling back to the PIR
+            server. Edit this when you intentionally want a different balance
+            snapshot height.
           </p>
         </div>
 

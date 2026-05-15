@@ -9,7 +9,7 @@ import {
   Wrench,
 } from "lucide-react";
 import * as chainApi from "../api/chain";
-import type { SnapshotStatus, PublishedSnapshotManifest } from "../api/chain";
+import type { SnapshotStatus, PublishedSnapshotValidationResult } from "../api/chain";
 import { useUIConfig } from "../store/uiConfigContext";
 
 const NU5_ACTIVATION = 1_687_104;
@@ -43,18 +43,7 @@ function parsePositiveHeight(value: unknown): number | null {
   return Number.isFinite(height) && height > 0 ? height : null;
 }
 
-// Card showing the published snapshot manifest from the configured CDN base.
-// Always rendered (prod + dev). This is the operator's view of the snapshot the
-// PIR fleet is actually serving, with the active round height shown separately
-// when chain state disagrees.
-//
-// Two sources are combined:
-//   * PIR /snapshot/status reports the currently served height.
-//   * snapshot_height from the active on-chain round is the canonical height
-//     wallets expect for the current round, but forced operations can differ.
-//   * precomputed_base_url comes from THIS svoted's /api/ui-config — it's a
-//     deployment-level concern (staging svoted points at a staging bucket)
-//     rather than a wallet-facing one.
+// Manual validator for any published snapshot height in the configured bucket.
 function PublishedSnapshotCard() {
   const {
     precomputedBaseURL,
@@ -62,15 +51,14 @@ function PublishedSnapshotCard() {
   const [servedHeight, setServedHeight] = useState<number | null>(null);
   const [activeRoundHeight, setActiveRoundHeight] = useState<number | null>(null);
   const [heightLoaded, setHeightLoaded] = useState(false);
-  const [manifest, setManifest] = useState<PublishedSnapshotManifest | null>(
-    null
-  );
-  const [error, setError] = useState<string | null>(null);
+  const [heightInput, setHeightInput] = useState("");
+  const [heightEdited, setHeightEdited] = useState(false);
+  const [validation, setValidation] =
+    useState<PublishedSnapshotValidationResult | null>(null);
   const [loading, setLoading] = useState(false);
 
   const precomputedBase = precomputedBaseURL ?? null;
-  const height = servedHeight ?? activeRoundHeight;
-  const heightSource = servedHeight != null ? "PIR served" : "Active round";
+  const parsedHeight = parsePositiveHeight(heightInput);
   const heightMismatch =
     servedHeight != null &&
     activeRoundHeight != null &&
@@ -98,40 +86,49 @@ function PublishedSnapshotCard() {
 
     setServedHeight(nextServedHeight);
     setActiveRoundHeight(nextActiveRoundHeight);
+    const defaultHeight = nextServedHeight ?? nextActiveRoundHeight;
     setHeightLoaded(true);
-    return nextServedHeight ?? nextActiveRoundHeight;
-  }, []);
+    if (!heightEdited && defaultHeight != null) {
+      setHeightInput(String(defaultHeight));
+    }
+    return defaultHeight;
+  }, [heightEdited]);
 
-  const fetchManifest = useCallback(async (heightOverride?: number | null) => {
-    const manifestHeight = heightOverride === undefined ? height : heightOverride;
+  const validateManifest = useCallback(async (heightOverride?: number | null) => {
+    const manifestHeight = heightOverride === undefined ? parsedHeight : heightOverride;
     if (!precomputedBase || manifestHeight == null) {
-      setManifest(null);
+      setValidation(null);
       return;
     }
     setLoading(true);
-    setError(null);
     try {
-      const m = await chainApi.getPublishedSnapshotManifest(precomputedBase, manifestHeight);
-      setManifest(m);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch manifest");
-      setManifest(null);
+      const result = await chainApi.validatePublishedSnapshotManifest(
+        precomputedBase,
+        manifestHeight
+      );
+      setValidation(result);
     } finally {
       setLoading(false);
     }
-  }, [precomputedBase, height]);
+  }, [precomputedBase, parsedHeight]);
 
   useEffect(() => {
-    fetchManifest();
-  }, [fetchManifest]);
+    if (precomputedBase && parsedHeight != null) {
+      validateManifest(parsedHeight);
+    }
+  }, [precomputedBase, parsedHeight, validateManifest]);
 
   useEffect(() => {
     refreshSnapshotHeight();
   }, [refreshSnapshotHeight]);
 
+  const manifest = validation?.manifest ?? null;
   const totalBytes = manifest
-    ? Object.values(manifest.files).reduce((sum, f) => sum + f.size, 0)
+    ? Object.values(manifest.files ?? {}).reduce((sum, f) => sum + f.size, 0)
     : 0;
+  const manifestUrl = precomputedBase && parsedHeight != null
+    ? chainApi.getPublishedSnapshotManifestUrl(precomputedBase, parsedHeight)
+    : null;
 
   return (
     <div className="bg-surface-1 border border-border rounded-xl p-5 mb-6">
@@ -145,7 +142,7 @@ function PublishedSnapshotCard() {
         <button
           onClick={async () => {
             const refreshedHeight = await refreshSnapshotHeight();
-            await fetchManifest(refreshedHeight);
+            await validateManifest(refreshedHeight);
           }}
           className="p-1 text-text-muted hover:text-text-secondary cursor-pointer"
           title="Refresh"
@@ -158,7 +155,7 @@ function PublishedSnapshotCard() {
         <p className="text-xs text-text-muted">Loading snapshot height…</p>
       )}
 
-      {heightLoaded && (!precomputedBase || height == null) && (
+      {heightLoaded && !precomputedBase && (
         <div className="flex items-start gap-2 px-3 py-2.5 bg-warning/10 border border-warning/30 rounded-lg">
           <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
           <div>
@@ -166,20 +163,9 @@ function PublishedSnapshotCard() {
               No published snapshot declared
             </p>
             <p className="text-[10px] text-text-muted mt-0.5">
-              {height == null && (
-                <>
-                  No active round exposes{" "}
-                  <code className="font-mono">snapshot_height</code> and the
-                  PIR status endpoint did not report a serving height.{" "}
-                </>
-              )}
-              {!precomputedBase && (
-                <>
-                  This svoted has no{" "}
-                  <code className="font-mono">SVOTE_PRECOMPUTED_BASE_URL</code>{" "}
-                  resolved.{" "}
-                </>
-              )}
+              This svoted has no{" "}
+              <code className="font-mono">SVOTE_PRECOMPUTED_BASE_URL</code>{" "}
+              resolved.{" "}
               PIR servers cannot bootstrap from CDN until a snapshot height and
               bucket are available.
             </p>
@@ -187,16 +173,60 @@ function PublishedSnapshotCard() {
         </div>
       )}
 
-      {precomputedBase && height != null && (
+      {precomputedBase && (
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-            <div>
-              <p className="text-[10px] text-text-muted">{heightSource}</p>
-              <p className="text-xs text-text-primary font-mono">
-                {height.toLocaleString()}
-              </p>
+          <div>
+            <label className="text-[11px] text-text-secondary">
+              Snapshot height to validate
+            </label>
+            <div className="flex gap-2 mt-1">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={heightInput}
+                onChange={(e) => {
+                  setHeightEdited(true);
+                  setHeightInput(e.target.value.replace(/[^0-9]/g, ""));
+                  setValidation(null);
+                }}
+                placeholder={
+                  servedHeight != null
+                    ? String(servedHeight)
+                    : activeRoundHeight != null
+                      ? String(activeRoundHeight)
+                      : "Enter height"
+                }
+                className="flex-1 px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono"
+              />
+              <button
+                onClick={() => validateManifest()}
+                disabled={loading || parsedHeight == null}
+                className="px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default flex items-center gap-1.5"
+              >
+                {loading && <Loader2 size={12} className="animate-spin" />}
+                Check
+              </button>
             </div>
-            {activeRoundHeight != null && servedHeight != null && (
+            {manifestUrl && (
+              <p
+                className="text-[10px] text-text-muted mt-1 font-mono truncate"
+                title={manifestUrl}
+              >
+                {manifestUrl}
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            {servedHeight != null && (
+              <div>
+                <p className="text-[10px] text-text-muted">PIR served</p>
+                <p className="text-xs text-text-primary font-mono">
+                  {servedHeight.toLocaleString()}
+                </p>
+              </div>
+            )}
+            {activeRoundHeight != null && (
               <div>
                 <p className="text-[10px] text-text-muted">Active round</p>
                 <p className="text-xs text-text-primary font-mono">
@@ -262,7 +292,7 @@ function PublishedSnapshotCard() {
             </div>
           )}
 
-          {manifest && (
+          {validation?.status === "valid" && manifest && (
             <details className="group">
               <summary className="text-[10px] text-text-muted cursor-pointer hover:text-text-secondary select-none">
                 Files (sha256)
@@ -286,23 +316,55 @@ function PublishedSnapshotCard() {
             </details>
           )}
 
-          {manifest && (
+          {validation?.status === "valid" && (
             <div className="flex items-center gap-2 px-3 py-2 bg-success/10 border border-success/30 rounded-lg">
               <CheckCircle2 size={14} className="text-success shrink-0" />
               <p className="text-xs text-success">
-                Manifest reachable for this snapshot height.
+                Published PIR snapshot manifest is valid for this height.
               </p>
             </div>
           )}
 
-          {error && (
+          {validation?.status === "missing" && (
+            <div className="flex items-start gap-2 px-3 py-2 bg-warning/10 border border-warning/30 rounded-lg">
+              <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs text-warning font-semibold">
+                  No PIR snapshot published
+                </p>
+                <p className="text-[10px] text-text-muted mt-0.5">
+                  No manifest exists at this height. You may still force a
+                  coordinator proposal, but PIR servers and wallets will not be
+                  able to use this round until a matching snapshot is published.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {validation?.status === "invalid" && (
+            <div className="flex items-start gap-2 px-3 py-2 bg-danger/10 border border-danger/30 rounded-lg">
+              <AlertTriangle size={14} className="text-danger shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs text-danger font-semibold">
+                  Manifest is invalid
+                </p>
+                <p className="text-[10px] text-danger/80 mt-0.5">
+                  {(validation.issues ?? []).join("; ")}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {validation?.status === "error" && (
             <div className="flex items-start gap-2 px-3 py-2 bg-danger/10 border border-danger/30 rounded-lg">
               <AlertTriangle size={14} className="text-danger shrink-0 mt-0.5" />
               <div>
                 <p className="text-xs text-danger font-semibold">
                   Manifest unreachable
                 </p>
-                <p className="text-[10px] text-danger/80 mt-0.5">{error}</p>
+                <p className="text-[10px] text-danger/80 mt-0.5">
+                  {validation.message}
+                </p>
               </div>
             </div>
           )}
