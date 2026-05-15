@@ -30,6 +30,7 @@ import * as cosmosTx from "./api/cosmosTx";
 import { describeCoordinatorActionPayload } from "./api/coordinatorActions";
 import { useWallet } from "./hooks/useWallet";
 import type { UseWallet } from "./hooks/useWallet";
+import { useUIConfig } from "./store/uiConfigContext";
 
 // Matches the iOS voteOptionColor palette in VotingComponents.swift.
 // For 2-option proposals: green, red. For 3+: cycles through 8 colors.
@@ -124,6 +125,7 @@ function routeFromPath(): AppRoute {
 function App() {
   const store = useStore();
   const wallet = useWallet();
+  const { precomputedBaseURL } = useUIConfig();
   const [route, setRouteState] = useState<AppRoute>(routeFromPath);
   const section = route.section;
   const [filter, setFilter] = useState<RoundStatus | "all">("all");
@@ -132,6 +134,8 @@ function App() {
   const [publishStatus, setPublishStatus] = useState<"idle" | "publishing" | "ok" | "error">("idle");
   const [publishResult, setPublishResult] = useState<string>("");
   const [publishError, setPublishError] = useState("");
+  const [forceWithoutSnapshot, setForceWithoutSnapshot] = useState(false);
+  const [forceWithoutSnapshotAllowed, setForceWithoutSnapshotAllowed] = useState(false);
   const [expectedRoundCount, setExpectedRoundCount] = useState<number | null>(null);
 
   // Sync section ↔ URL path, keeping nav instant (no full reload).
@@ -205,6 +209,8 @@ function App() {
       setPublishStatus("idle");
       setPublishResult("");
       setPublishError("");
+      setForceWithoutSnapshot(false);
+      setForceWithoutSnapshotAllowed(false);
     },
     []
   );
@@ -216,6 +222,7 @@ function App() {
 
     if (!wallet.signer) {
       setPublishStatus("error");
+      setForceWithoutSnapshotAllowed(false);
       setPublishError(
         "No wallet connected. Go to Settings → Wallet to connect Keplr or paste a private key."
       );
@@ -225,50 +232,54 @@ function App() {
     const invalidProposalIndex = round.proposals.findIndex((p) => !isProposalValid(p));
     if (invalidProposalIndex !== -1) {
       setPublishStatus("error");
+      setForceWithoutSnapshotAllowed(false);
       setPublishError(
         `Proposal ${invalidProposalIndex + 1} must have ${MIN_VOTE_OPTIONS}-${MAX_VOTE_OPTIONS} non-empty options, including abstain when enabled.`
       );
       return;
     }
 
-    // Snapshot height is auto-populated from the PIR server (read-only in the editor).
-    // Verify it's still current before publishing.
-    let snapshotHeight = parseInt(round.settings.snapshotHeight, 10) || 0;
-    try {
-      const nhStatus = await chainApi.getNullifierStatus();
-      const nhHeight = nhStatus.latest_height;
-      if (nhHeight != null) {
-        snapshotHeight = nhHeight;
-        if (String(nhHeight) !== round.settings.snapshotHeight) {
-          store.updateRound(round.id, {
-            settings: { ...round.settings, snapshotHeight: String(nhHeight) },
-          });
-        }
-      }
-    } catch {
-      // PIR server may be rebuilding — check snapshot status
-      try {
-        const snapStatus = await chainApi.getSnapshotStatus();
-        if (snapStatus.phase === "rebuilding") {
-          setPublishStatus("error");
-          setPublishError(
-            "PIR server is currently rebuilding. Wait for it to complete, then try again. Go to Snapshot Settings to check progress."
-          );
-          return;
-        }
-      } catch {
-        // ignore
-      }
-    }
+    const snapshotHeight = parseInt(round.settings.snapshotHeight, 10) || 0;
 
     if (snapshotHeight === 0) {
       setPublishStatus("error");
-      setPublishError("Snapshot height is not available. Check the PIR server status in Snapshot Settings.");
+      setForceWithoutSnapshotAllowed(false);
+      setPublishError("Snapshot height is not available. Enter a height in Round Settings.");
       return;
+    }
+
+    if (!(forceWithoutSnapshotAllowed && forceWithoutSnapshot)) {
+      if (!precomputedBaseURL) {
+        setPublishStatus("error");
+        setForceWithoutSnapshotAllowed(true);
+        setPublishError(
+          "Cannot validate the published PIR snapshot because this svoted did not expose SVOTE_PRECOMPUTED_BASE_URL. Check the force box to propose anyway."
+        );
+        return;
+      }
+      const validation = await chainApi.validatePublishedSnapshotManifest(
+        precomputedBaseURL,
+        snapshotHeight
+      );
+      if (validation.status !== "valid") {
+        const detail =
+          validation.status === "missing"
+            ? "No manifest.json exists for this height."
+            : validation.status === "invalid"
+              ? `Manifest is invalid: ${(validation.issues ?? []).join("; ")}`
+              : validation.message ?? "Manifest validation failed.";
+        setPublishStatus("error");
+        setForceWithoutSnapshotAllowed(true);
+        setPublishError(
+          `${detail} Check the force box to propose without a published PIR snapshot.`
+        );
+        return;
+      }
     }
 
     if (!round.settings.endTime) {
       setPublishStatus("error");
+      setForceWithoutSnapshotAllowed(false);
       setPublishError("Voting end time must be set in Round Settings.");
       return;
     }
@@ -288,6 +299,7 @@ function App() {
     setPublishError("");
     try {
       const base = chainApi.getApiBase();
+      setForceWithoutSnapshotAllowed(false);
       let roundCountBefore: number | null = null;
       try {
         const before = await chainApi.listRounds();
@@ -326,7 +338,7 @@ function App() {
       setPublishError(err instanceof Error ? err.message : String(err));
       setPublishStatus("error");
     }
-  }, [publishModal, store, wallet.signer]);
+  }, [forceWithoutSnapshot, forceWithoutSnapshotAllowed, precomputedBaseURL, publishModal, store, wallet.signer]);
 
   const handleNavigate = useCallback(
     (s: string) => {
@@ -514,10 +526,15 @@ function App() {
             status={publishStatus}
             result={publishResult}
             error={publishError}
+            forceWithoutSnapshot={forceWithoutSnapshot}
+            forceWithoutSnapshotAllowed={forceWithoutSnapshotAllowed}
+            onForceWithoutSnapshotChange={setForceWithoutSnapshot}
             onConfirm={handlePublishConfirm}
             onClose={() => {
               const wasSuccess = publishStatus === "ok";
               setPublishModal(null);
+              setForceWithoutSnapshot(false);
+              setForceWithoutSnapshotAllowed(false);
               if (wasSuccess) setSection("vote-status");
             }}
           />
@@ -2204,6 +2221,9 @@ function PublishModal({
   status,
   result,
   error,
+  forceWithoutSnapshot,
+  forceWithoutSnapshotAllowed,
+  onForceWithoutSnapshotChange,
   onConfirm,
   onClose,
 }: {
@@ -2212,6 +2232,9 @@ function PublishModal({
   status: "idle" | "publishing" | "ok" | "error";
   result: string;
   error: string;
+  forceWithoutSnapshot: boolean;
+  forceWithoutSnapshotAllowed: boolean;
+  onForceWithoutSnapshotChange: (value: boolean) => void;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -2281,6 +2304,28 @@ function PublishModal({
                 <div className="bg-danger/10 border border-danger/30 rounded-lg p-3">
                   <p className="text-[11px] text-danger">{error}</p>
                 </div>
+              )}
+
+              {status !== "ok" && forceWithoutSnapshotAllowed && (
+                <label className="flex items-start gap-2 bg-warning/10 border border-warning/30 rounded-lg p-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={forceWithoutSnapshot}
+                    onChange={(e) => onForceWithoutSnapshotChange(e.target.checked)}
+                    disabled={status === "publishing"}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block text-[11px] text-warning font-semibold">
+                      Force propose without published PIR snapshot
+                    </span>
+                    <span className="block text-[10px] text-text-muted mt-0.5">
+                      Use only when you know a matching snapshot will be
+                      published separately. The transaction still must fetch
+                      chain snapshot data for this height.
+                    </span>
+                  </span>
+                </label>
               )}
             </>
           ) : (
@@ -2367,7 +2412,7 @@ function PublishModal({
                   <Loader2 size={12} className="animate-spin" /> Proposing...
                 </>
               ) : (
-                "Propose on chain"
+                forceWithoutSnapshot ? "Force propose on chain" : "Propose on chain"
               )}
             </button>
           )}
