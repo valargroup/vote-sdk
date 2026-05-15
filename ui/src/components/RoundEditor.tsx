@@ -6,7 +6,7 @@ import {
   estimateTimestamp,
 } from "../store/rpc";
 import {
-  getActiveRound,
+  getPrimaryActiveRound,
   getSnapshotStatus,
   validatePublishedSnapshotManifest,
 } from "../api/chain";
@@ -173,7 +173,7 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
     if (isReadonly) return;
     let cancelled = false;
     setChainSnapshotLoaded(false);
-    getActiveRound()
+    getPrimaryActiveRound()
       .then((resp) => {
         if (cancelled) return;
         const height = Number(resp.round?.snapshot_height ?? 0);

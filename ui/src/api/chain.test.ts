@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  getActiveRoundsFromList,
+  getPrimaryActiveRoundFromList,
   getPublishedSnapshotManifestUrl,
+  isActiveRoundStatus,
+  type ChainRound,
   type PublishedSnapshotManifest,
   validatePublishedSnapshotManifestShape,
 } from "./chain";
@@ -71,5 +75,43 @@ describe("published snapshot validation", () => {
       "missing required file tier2.bin",
       "missing required file pir_root.json",
     ]);
+  });
+});
+
+describe("active round helpers", () => {
+  it("recognizes numeric and enum active statuses", () => {
+    expect(isActiveRoundStatus(1)).toBe(true);
+    expect(isActiveRoundStatus("1")).toBe(true);
+    expect(isActiveRoundStatus("SESSION_STATUS_ACTIVE")).toBe(true);
+    expect(isActiveRoundStatus("active")).toBe(true);
+    expect(isActiveRoundStatus(3)).toBe(false);
+    expect(isActiveRoundStatus("SESSION_STATUS_FINALIZED")).toBe(false);
+  });
+
+  it("returns all active rounds newest first and picks the newest primary", () => {
+    const oldActive: ChainRound = {
+      vote_round_id: "old",
+      status: "SESSION_STATUS_ACTIVE",
+      created_at_height: "10",
+      vote_end_time: "100",
+    };
+    const newActive: ChainRound = {
+      vote_round_id: "new",
+      status: 1,
+      created_at_height: "20",
+      vote_end_time: "50",
+    };
+    const finalized: ChainRound = {
+      vote_round_id: "done",
+      status: "SESSION_STATUS_FINALIZED",
+      created_at_height: "30",
+      vote_end_time: "500",
+    };
+
+    expect(getActiveRoundsFromList([oldActive, finalized, newActive])).toEqual([
+      newActive,
+      oldActive,
+    ]);
+    expect(getPrimaryActiveRoundFromList([oldActive, finalized, newActive])).toBe(newActive);
   });
 });

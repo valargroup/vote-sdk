@@ -1632,7 +1632,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [helperStatus, setHelperStatus] = useState<chainApi.HelperStatus | null>(null);
   const [voteManagers, setVoteManagers] = useState<string[]>([]);
   const [voteManagerThreshold, setVoteManagerThreshold] = useState(1);
-  const [activeRound, setActiveRound] = useState<chainApi.ChainRound | null>(null);
+  const [activeRounds, setActiveRounds] = useState<chainApi.ChainRound[]>([]);
   const [chainDetailsOpen, setChainDetailsOpen] = useState(false);
   const [devKey, setDevKey] = useState("");
   const [devKeyVisible, setDevKeyVisible] = useState(false);
@@ -1659,17 +1659,17 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
       const block = await chainApi.getLatestBlock();
       setLatestBlock(block);
 
-      const [state, vmResp, helper, activeRoundResp] = await Promise.all([
+      const [state, vmResp, helper, activeRoundsResp] = await Promise.all([
         chainApi.testConnection(),
         chainApi.getVoteManagers(),
         chainApi.getHelperStatus().catch(() => null),
-        chainApi.getActiveRound().catch(() => ({ round: null })),
+        chainApi.getActiveRounds().catch(() => ({ rounds: [] })),
       ]);
       setCeremony(state);
       setVoteManagers(vmResp.vote_manager_addresses ?? []);
       setVoteManagerThreshold(vmResp.threshold ?? 1);
       setHelperStatus(helper);
-      setActiveRound(activeRoundResp.round);
+      setActiveRounds(activeRoundsResp.rounds);
       setConnStatus("ok");
     } catch (err) {
       setConnError(err instanceof Error ? err.message : String(err));
@@ -1901,7 +1901,9 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
               <PirFleetStatus
                 endpoints={pirEndpoints}
                 selectedUrl={selectedNullifierUrl || undefined}
-                expectedHeight={Number(activeRound?.snapshot_height ?? 0) || undefined}
+                expectedHeights={activeRounds
+                  .map((round) => Number(round.snapshot_height ?? 0))
+                  .filter((height) => Number.isFinite(height) && height > 0)}
               />
             </div>
           )}

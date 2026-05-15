@@ -428,6 +428,47 @@ export async function listRounds(): Promise<{ rounds: ChainRound[] | null }> {
   return fetchJson<{ rounds: ChainRound[] | null }>("/shielded-vote/v1/rounds");
 }
 
+export function isActiveRoundStatus(status: unknown): boolean {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "active" || normalized === "session_status_active";
+}
+
+function optionalRoundNumber(value: string | number | undefined): number | null {
+  if (value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function compareRoundsNewestFirst(a: ChainRound, b: ChainRound): number {
+  const aHeight = optionalRoundNumber(a.created_at_height) ?? Number.NEGATIVE_INFINITY;
+  const bHeight = optionalRoundNumber(b.created_at_height) ?? Number.NEGATIVE_INFINITY;
+  if (aHeight !== bHeight) return bHeight - aHeight;
+
+  const aEnd = optionalRoundNumber(a.vote_end_time) ?? Number.NEGATIVE_INFINITY;
+  const bEnd = optionalRoundNumber(b.vote_end_time) ?? Number.NEGATIVE_INFINITY;
+  return bEnd - aEnd;
+}
+
+export function getActiveRoundsFromList(rounds: ChainRound[] | null | undefined): ChainRound[] {
+  return [...(rounds ?? [])]
+    .filter((round) => isActiveRoundStatus(round.status))
+    .sort(compareRoundsNewestFirst);
+}
+
+export function getPrimaryActiveRoundFromList(rounds: ChainRound[] | null | undefined): ChainRound | null {
+  return getActiveRoundsFromList(rounds)[0] ?? null;
+}
+
+export async function getActiveRounds(): Promise<{ rounds: ChainRound[] }> {
+  const resp = await listRounds();
+  return { rounds: getActiveRoundsFromList(resp.rounds) };
+}
+
+export async function getPrimaryActiveRound(): Promise<{ round: ChainRound | null }> {
+  const resp = await listRounds();
+  return { round: getPrimaryActiveRoundFromList(resp.rounds) };
+}
+
 export interface AttestRoundEntryResponse {
   canonical_payload_b64: string;
   signed_payload_hash: string;
@@ -570,18 +611,6 @@ export async function prepareSnapshot(height: number): Promise<{ status: string;
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ height }),
   });
-}
-
-export async function getActiveRound(): Promise<{ round: ChainRound | null }> {
-  try {
-    const resp = await fetchJson<{ round?: ChainRound }>("/shielded-vote/v1/rounds/active");
-    return { round: resp.round ?? null };
-  } catch (err) {
-    if (err instanceof HTTPError && err.status === 404) {
-      return { round: null };
-    }
-    throw err;
-  }
 }
 
 // -- UI runtime config --
