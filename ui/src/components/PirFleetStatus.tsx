@@ -131,16 +131,19 @@ interface Props {
   /** URL of the endpoint the wallet / page is configured to use, so we
    * can highlight "this is the row driving your queries". */
   selectedUrl?: string;
-  /** snapshot_height from the active on-chain round. When provided, renders a
-   * warning row if any successful replica is at a different height (which can
-   * happen legitimately for a few minutes during a bump while one replica is
-   * still bootstrapping). */
+  /** snapshot_height values from active on-chain rounds. When provided, renders
+   * a warning row if any successful replica is not serving one of those heights
+   * (which can happen legitimately during a bump while one replica is still
+   * bootstrapping). */
+  expectedHeights?: number[];
+  /** Back-compat for callers that still have a single active-round height. */
   expectedHeight?: number;
 }
 
 export function PirFleetStatus({
   endpoints,
   selectedUrl,
+  expectedHeights,
   expectedHeight,
 }: Props) {
   const { statuses, refreshing, refresh } = usePirFleetStatus(endpoints);
@@ -176,10 +179,14 @@ export function PirFleetStatus({
   const root29Diverges = okRows.length > 1 && root29s.size > 1;
   const anyDivergence = heightDiverges || root25Diverges || root29Diverges;
 
+  const expectedHeightValues = expectedHeights?.length
+    ? expectedHeights
+    : expectedHeight !== undefined && expectedHeight > 0
+      ? [expectedHeight]
+      : [];
   const heightMismatchesExpected =
-    expectedHeight !== undefined &&
-    expectedHeight > 0 &&
-    okRows.some((r) => r.status.data.height !== expectedHeight);
+    expectedHeightValues.length > 0 &&
+    okRows.some((r) => !expectedHeightValues.includes(r.status.data.height ?? -1));
 
   const divergingFields = [
     heightDiverges && "height",
@@ -234,9 +241,9 @@ export function PirFleetStatus({
           <AlertCircle size={14} className="text-warning shrink-0 mt-0.5" />
           <div className="text-[11px] text-warning">
             One or more replicas are at a different height than the active
-            on-chain round (
+            on-chain round{expectedHeightValues.length === 1 ? "" : "s"} (
             <span className="font-mono">
-              {expectedHeight?.toLocaleString()}
+              {expectedHeightValues.map((height) => height.toLocaleString()).join(", ")}
             </span>
             ) — bootstrap may still be in progress.
           </div>

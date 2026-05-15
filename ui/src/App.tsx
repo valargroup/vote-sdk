@@ -134,8 +134,6 @@ function App() {
   const [publishStatus, setPublishStatus] = useState<"idle" | "publishing" | "ok" | "error">("idle");
   const [publishResult, setPublishResult] = useState<string>("");
   const [publishError, setPublishError] = useState("");
-  const [forceWithoutSnapshot, setForceWithoutSnapshot] = useState(false);
-  const [forceWithoutSnapshotAllowed, setForceWithoutSnapshotAllowed] = useState(false);
   const [expectedRoundCount, setExpectedRoundCount] = useState<number | null>(null);
 
   // Sync section ↔ URL path, keeping nav instant (no full reload).
@@ -209,8 +207,6 @@ function App() {
       setPublishStatus("idle");
       setPublishResult("");
       setPublishError("");
-      setForceWithoutSnapshot(false);
-      setForceWithoutSnapshotAllowed(false);
     },
     []
   );
@@ -222,7 +218,6 @@ function App() {
 
     if (!wallet.signer) {
       setPublishStatus("error");
-      setForceWithoutSnapshotAllowed(false);
       setPublishError(
         "No wallet connected. Go to Settings → Wallet to connect Keplr or paste a private key."
       );
@@ -232,7 +227,6 @@ function App() {
     const invalidProposalIndex = round.proposals.findIndex((p) => !isProposalValid(p));
     if (invalidProposalIndex !== -1) {
       setPublishStatus("error");
-      setForceWithoutSnapshotAllowed(false);
       setPublishError(
         `Proposal ${invalidProposalIndex + 1} must have ${MIN_VOTE_OPTIONS}-${MAX_VOTE_OPTIONS} non-empty options, including abstain when enabled.`
       );
@@ -243,43 +237,56 @@ function App() {
 
     if (snapshotHeight === 0) {
       setPublishStatus("error");
-      setForceWithoutSnapshotAllowed(false);
       setPublishError("Snapshot height is not available. Enter a height in Round Settings.");
       return;
     }
 
-    if (!(forceWithoutSnapshotAllowed && forceWithoutSnapshot)) {
-      if (!precomputedBaseURL) {
-        setPublishStatus("error");
-        setForceWithoutSnapshotAllowed(true);
-        setPublishError(
-          "Cannot validate the published PIR snapshot because this svoted did not expose SVOTE_PRECOMPUTED_BASE_URL. Check the force box to propose anyway."
-        );
-        return;
-      }
-      const validation = await chainApi.validatePublishedSnapshotManifest(
-        precomputedBaseURL,
-        snapshotHeight
+    if (!precomputedBaseURL) {
+      setPublishStatus("error");
+      setPublishError(
+        "Cannot validate the published PIR snapshot because this svoted did not expose SVOTE_PRECOMPUTED_BASE_URL."
       );
-      if (validation.status !== "valid") {
-        const detail =
-          validation.status === "missing"
-            ? "No manifest.json exists for this height."
-            : validation.status === "invalid"
-              ? `Manifest is invalid: ${(validation.issues ?? []).join("; ")}`
-              : validation.message ?? "Manifest validation failed.";
+      return;
+    }
+    const validation = await chainApi.validatePublishedSnapshotManifest(
+      precomputedBaseURL,
+      snapshotHeight
+    );
+    if (validation.status !== "valid") {
+      const detail =
+        validation.status === "missing"
+          ? "No manifest.json exists for this height."
+          : validation.status === "invalid"
+            ? `Manifest is invalid: ${(validation.issues ?? []).join("; ")}`
+            : validation.message ?? "Manifest validation failed.";
+      setPublishStatus("error");
+      setPublishError(detail);
+      return;
+    }
+
+    try {
+      const pirStatus = await chainApi.getSnapshotStatus();
+      if (pirStatus.phase === "rebuilding") {
         setPublishStatus("error");
-        setForceWithoutSnapshotAllowed(true);
         setPublishError(
-          `${detail} Check the force box to propose without a published PIR snapshot.`
+          "PIR server is currently rebuilding. Wait for it to complete, then try again."
         );
         return;
       }
+      if (pirStatus.phase === "serving" && pirStatus.height != null && pirStatus.height !== snapshotHeight) {
+        setPublishStatus("error");
+        setPublishError(
+          `Cannot publish height ${snapshotHeight.toLocaleString()} because the PIR server is serving ${pirStatus.height.toLocaleString()}. Use ${pirStatus.height.toLocaleString()} as the snapshot height, or update the PIR server first. The chain needs PIR root data at the exact round height to build the transaction.`
+        );
+        return;
+      }
+    } catch {
+      // Keep createVotingSession as the final source of truth when the PIR
+      // status preflight is unavailable.
     }
 
     if (!round.settings.endTime) {
       setPublishStatus("error");
-      setForceWithoutSnapshotAllowed(false);
       setPublishError("Voting end time must be set in Round Settings.");
       return;
     }
@@ -299,7 +306,6 @@ function App() {
     setPublishError("");
     try {
       const base = chainApi.getApiBase();
-      setForceWithoutSnapshotAllowed(false);
       let roundCountBefore: number | null = null;
       try {
         const before = await chainApi.listRounds();
@@ -338,7 +344,7 @@ function App() {
       setPublishError(err instanceof Error ? err.message : String(err));
       setPublishStatus("error");
     }
-  }, [forceWithoutSnapshot, forceWithoutSnapshotAllowed, precomputedBaseURL, publishModal, store, wallet.signer]);
+  }, [precomputedBaseURL, publishModal, store, wallet.signer]);
 
   const handleNavigate = useCallback(
     (s: string) => {
@@ -526,15 +532,10 @@ function App() {
             status={publishStatus}
             result={publishResult}
             error={publishError}
-            forceWithoutSnapshot={forceWithoutSnapshot}
-            forceWithoutSnapshotAllowed={forceWithoutSnapshotAllowed}
-            onForceWithoutSnapshotChange={setForceWithoutSnapshot}
             onConfirm={handlePublishConfirm}
             onClose={() => {
               const wasSuccess = publishStatus === "ok";
               setPublishModal(null);
-              setForceWithoutSnapshot(false);
-              setForceWithoutSnapshotAllowed(false);
               if (wasSuccess) setSection("vote-status");
             }}
           />
@@ -1632,7 +1633,7 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [helperStatus, setHelperStatus] = useState<chainApi.HelperStatus | null>(null);
   const [voteManagers, setVoteManagers] = useState<string[]>([]);
   const [voteManagerThreshold, setVoteManagerThreshold] = useState(1);
-  const [activeRound, setActiveRound] = useState<chainApi.ChainRound | null>(null);
+  const [activeRounds, setActiveRounds] = useState<chainApi.ChainRound[]>([]);
   const [chainDetailsOpen, setChainDetailsOpen] = useState(false);
   const [devKey, setDevKey] = useState("");
   const [devKeyVisible, setDevKeyVisible] = useState(false);
@@ -1659,17 +1660,17 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
       const block = await chainApi.getLatestBlock();
       setLatestBlock(block);
 
-      const [state, vmResp, helper, activeRoundResp] = await Promise.all([
+      const [state, vmResp, helper, activeRoundsResp] = await Promise.all([
         chainApi.testConnection(),
         chainApi.getVoteManagers(),
         chainApi.getHelperStatus().catch(() => null),
-        chainApi.getActiveRound().catch(() => ({ round: null })),
+        chainApi.getActiveRounds().catch(() => ({ rounds: [] })),
       ]);
       setCeremony(state);
       setVoteManagers(vmResp.vote_manager_addresses ?? []);
       setVoteManagerThreshold(vmResp.threshold ?? 1);
       setHelperStatus(helper);
-      setActiveRound(activeRoundResp.round);
+      setActiveRounds(activeRoundsResp.rounds);
       setConnStatus("ok");
     } catch (err) {
       setConnError(err instanceof Error ? err.message : String(err));
@@ -1901,7 +1902,9 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
               <PirFleetStatus
                 endpoints={pirEndpoints}
                 selectedUrl={selectedNullifierUrl || undefined}
-                expectedHeight={Number(activeRound?.snapshot_height ?? 0) || undefined}
+                expectedHeights={activeRounds
+                  .map((round) => Number(round.snapshot_height ?? 0))
+                  .filter((height) => Number.isFinite(height) && height > 0)}
               />
             </div>
           )}
@@ -2221,9 +2224,6 @@ function PublishModal({
   status,
   result,
   error,
-  forceWithoutSnapshot,
-  forceWithoutSnapshotAllowed,
-  onForceWithoutSnapshotChange,
   onConfirm,
   onClose,
 }: {
@@ -2232,9 +2232,6 @@ function PublishModal({
   status: "idle" | "publishing" | "ok" | "error";
   result: string;
   error: string;
-  forceWithoutSnapshot: boolean;
-  forceWithoutSnapshotAllowed: boolean;
-  onForceWithoutSnapshotChange: (value: boolean) => void;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -2302,30 +2299,8 @@ function PublishModal({
 
               {status === "error" && (
                 <div className="bg-danger/10 border border-danger/30 rounded-lg p-3">
-                  <p className="text-[11px] text-danger">{error}</p>
+                  <p className="text-[11px] text-danger break-words">{error}</p>
                 </div>
-              )}
-
-              {status !== "ok" && forceWithoutSnapshotAllowed && (
-                <label className="flex items-start gap-2 bg-warning/10 border border-warning/30 rounded-lg p-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={forceWithoutSnapshot}
-                    onChange={(e) => onForceWithoutSnapshotChange(e.target.checked)}
-                    disabled={status === "publishing"}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="block text-[11px] text-warning font-semibold">
-                      Force propose without published PIR snapshot
-                    </span>
-                    <span className="block text-[10px] text-text-muted mt-0.5">
-                      Use only when you know a matching snapshot will be
-                      published separately. The transaction still must fetch
-                      chain snapshot data for this height.
-                    </span>
-                  </span>
-                </label>
               )}
             </>
           ) : (
@@ -2412,7 +2387,7 @@ function PublishModal({
                   <Loader2 size={12} className="animate-spin" /> Proposing...
                 </>
               ) : (
-                forceWithoutSnapshot ? "Force propose on chain" : "Propose on chain"
+                "Propose on chain"
               )}
             </button>
           )}
@@ -2955,9 +2930,11 @@ function VoteStatusView({
   onSelectRound,
   onBackToList,
 }: VoteStatusViewProps) {
+  const { precomputedBaseURL } = useUIConfig();
   const [rounds, setRounds] = useState<chainApi.ChainRound[]>([]);
   const [summaries, setSummaries] = useState<Record<string, chainApi.VoteSummaryResponse>>({});
   const [summaryErrors, setSummaryErrors] = useState<Record<string, string>>({});
+  const [snapshotWarnings, setSnapshotWarnings] = useState<Record<string, string>>({});
   const [endorsedByRound, setEndorsedByRound] = useState<Record<string, string[]>>({});
   const [endorsementError, setEndorsementError] = useState("");
   const [validatorMonikers, setValidatorMonikers] = useState<Record<string, string>>({});
@@ -2970,6 +2947,7 @@ function VoteStatusView({
     setLoading(true);
     setError("");
     setSummaryErrors({});
+    setSnapshotWarnings({});
     setEndorsementError("");
     try {
       const resp = await chainApi.listRounds();
@@ -2979,6 +2957,41 @@ function VoteStatusView({
         return ha - hb;
       });
       setRounds(allRounds);
+
+      const activeSnapshotEntries = chainApi.getActiveRoundsFromList(allRounds)
+        .map((round) => ({
+          roundId: round.vote_round_id ?? "",
+          height: Number(round.snapshot_height ?? 0),
+        }))
+        .filter((entry) => entry.roundId && Number.isFinite(entry.height) && entry.height > 0);
+      if (activeSnapshotEntries.length > 0) {
+        if (!precomputedBaseURL) {
+          setSnapshotWarnings(Object.fromEntries(
+            activeSnapshotEntries.map((entry) => [
+              entry.roundId,
+              "Cannot validate the published PIR snapshot because this svoted did not expose SVOTE_PRECOMPUTED_BASE_URL.",
+            ])
+          ));
+        } else {
+          const validations = await Promise.all(
+            activeSnapshotEntries.map(async (entry) => {
+              const validation = await chainApi.validatePublishedSnapshotManifest(
+                precomputedBaseURL,
+                entry.height
+              );
+              if (validation.status === "valid") return null;
+              const message =
+                validation.status === "missing"
+                  ? `No published PIR snapshot exists for height ${entry.height.toLocaleString()}.`
+                  : validation.status === "invalid"
+                    ? `Published PIR snapshot manifest is invalid: ${(validation.issues ?? []).join("; ")}`
+                    : validation.message ?? "Could not validate published PIR snapshot.";
+              return [entry.roundId, message] as const;
+            })
+          );
+          setSnapshotWarnings(Object.fromEntries(validations.filter((entry) => entry !== null)));
+        }
+      }
 
       try {
         const endorsersResp = await chainApi.getEndorsers();
@@ -3052,7 +3065,7 @@ function VoteStatusView({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [precomputedBaseURL]);
 
   // Poll until the expected round count is reached after a publish.
   useEffect(() => {
@@ -3203,6 +3216,7 @@ function VoteStatusView({
 
             const roundIdHex = base64ToHex(roundId);
             const endorsingIDs = endorsedByRound[roundIdHex] ?? [];
+            const snapshotWarning = isActive ? snapshotWarnings[roundId] : undefined;
             const snapshotHeight = Number(round.snapshot_height ?? 0);
             const snapshotTime =
               snapshotHeight > 0 && zcashChain.latestHeight && zcashChain.latestTimestamp
@@ -3226,6 +3240,25 @@ function VoteStatusView({
                       >
                         {statusInfo.label}
                       </span>
+                      {snapshotWarning && (
+                        <div className="relative group shrink-0 text-warning">
+                          <button
+                            type="button"
+                            className="text-warning hover:text-warning/80 cursor-default"
+                            title="Snapshot warning"
+                          >
+                            <AlertTriangle size={12} />
+                          </button>
+                          <div className="absolute left-0 z-20 mt-2 hidden w-80 max-w-[calc(100vw-4rem)] rounded-lg border border-warning/30 bg-surface-1 p-3 shadow-xl group-hover:block">
+                            <p className="text-[10px] text-warning font-semibold leading-snug">
+                              Published PIR snapshot warning
+                            </p>
+                            <p className="text-[10px] text-text-muted leading-snug mt-0.5 break-words">
+                              {snapshotWarning}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     {isActive && !isExpired && (
                       <span className="relative flex h-2.5 w-2.5 shrink-0 ml-3">

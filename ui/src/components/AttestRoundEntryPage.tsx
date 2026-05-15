@@ -96,11 +96,6 @@ function optionalNumber(value: string | number | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function isActiveStatus(status: string): boolean {
-  const normalized = status.trim().toLowerCase();
-  return normalized === "1" || normalized === "active" || normalized === "session_status_active";
-}
-
 function getLatestRound(rounds: RoundOption[]): RoundOption | null {
   return rounds.reduce<RoundOption | null>((latest, round) => {
     if (!latest) return round;
@@ -115,14 +110,7 @@ function getLatestRound(rounds: RoundOption[]): RoundOption | null {
   }, null);
 }
 
-function getDefaultRound(
-  rounds: RoundOption[],
-  activeRoundIdHex: string | null
-): RoundOption | null {
-  if (activeRoundIdHex) {
-    const activeRound = rounds.find((round) => round.roundIdHex === activeRoundIdHex);
-    if (activeRound) return activeRound;
-  }
+function getDefaultRound(rounds: RoundOption[]): RoundOption | null {
   return rounds.find((round) => round.isActive) ?? getLatestRound(rounds);
 }
 
@@ -191,11 +179,7 @@ export function AttestRoundEntryPage() {
     setLoadingRounds(true);
     setRoundError("");
     try {
-      const [resp, activeResp] = await Promise.all([
-        chainApi.listRounds(),
-        chainApi.getActiveRound().catch(() => ({ round: null })),
-      ]);
-      const activeRoundIdHex = normalizeRoundId(activeResp.round?.vote_round_id);
+      const resp = await chainApi.listRounds();
       const options = (resp.rounds ?? [])
         .map((round): RoundOption | null => {
           const roundIdHex = normalizeRoundId(round.vote_round_id);
@@ -207,14 +191,14 @@ export function AttestRoundEntryPage() {
             status: String(round.status ?? "unknown"),
             createdAtHeight: optionalNumber(round.created_at_height),
             voteEndTime: optionalNumber(round.vote_end_time),
-            isActive: roundIdHex === activeRoundIdHex || isActiveStatus(String(round.status ?? "")),
+            isActive: chainApi.isActiveRoundStatus(round.status),
           };
         })
         .filter((round): round is RoundOption => round !== null);
       setRounds(options);
       const currentSelectionStillExists = options.some((round) => round.roundIdHex === roundId);
       if (options.length > 0 && (!roundId || !currentSelectionStillExists)) {
-        const defaultRound = getDefaultRound(options, activeRoundIdHex);
+        const defaultRound = getDefaultRound(options);
         if (defaultRound) {
           setRoundId(defaultRound.roundIdHex);
           setEaPK(defaultRound.eaPK);
