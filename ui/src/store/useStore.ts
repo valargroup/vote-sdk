@@ -41,7 +41,6 @@ function createDefaultProposal(): Proposal {
       { id: uuidv4(), label: "Support" },
       { id: uuidv4(), label: "Oppose" },
     ],
-    allowAbstain: false,
     zipNumber: "",
     forumURL: "",
     metadata: [],

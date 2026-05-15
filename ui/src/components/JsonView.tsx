@@ -23,7 +23,6 @@ function generateExportJson(round: VotingRound) {
         description: p.description,
         type: p.type,
         options: p.options.map((o) => ({ id: o.id, label: o.label })),
-        allowAbstain: p.allowAbstain,
         zipNumber: p.zipNumber,
         forumURL: p.forumURL,
         metadata: p.metadata,
@@ -38,10 +37,9 @@ function validateRound(round: VotingRound): string[] {
   if (!round.name.trim()) issues.push("Round name is empty");
   if (round.proposals.length === 0) issues.push("No proposals added");
   round.proposals.forEach((p, i) => {
-    const optionCount = p.options.length + (p.allowAbstain ? 1 : 0);
     if (!p.title.trim()) issues.push(`round.proposals[${i}].title is empty`);
-    if (optionCount < MIN_VOTE_OPTIONS) issues.push(`round.proposals[${i}].options has fewer than ${MIN_VOTE_OPTIONS} choices`);
-    if (optionCount > MAX_VOTE_OPTIONS) issues.push(`round.proposals[${i}].options has more than ${MAX_VOTE_OPTIONS} choices`);
+    if (p.options.length < MIN_VOTE_OPTIONS) issues.push(`round.proposals[${i}].options has fewer than ${MIN_VOTE_OPTIONS} choices`);
+    if (p.options.length > MAX_VOTE_OPTIONS) issues.push(`round.proposals[${i}].options has more than ${MAX_VOTE_OPTIONS} choices`);
     p.options.forEach((o, j) => {
       if (!o.label.trim()) issues.push(`round.proposals[${i}].options[${j}].label is empty`);
     });

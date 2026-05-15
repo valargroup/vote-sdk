@@ -8,7 +8,6 @@ interface SampleProposalTemplate {
   description: string;
   type: ProposalType;
   labels: string[];
-  allowAbstain?: boolean;
   zipNumber?: string;
   forumURL?: string;
 }
@@ -37,7 +36,6 @@ export const SAMPLE_ROUND_TEMPLATES: SampleRoundTemplate[] = [
           "Which snack should be recognized as the official snack of the next team sync?",
         type: "multi-choice",
         labels: ["Pizza", "Tacos", "Dumplings", "Waffles"],
-        allowAbstain: true,
       },
       {
         title: "Tiny Hat Fridays",
@@ -45,7 +43,6 @@ export const SAMPLE_ROUND_TEMPLATES: SampleRoundTemplate[] = [
           "Should all decorative desk statues be required to wear tiny hats on Fridays?",
         type: "binary",
         labels: ["Yes", "No"],
-        allowAbstain: true,
       },
       {
         title: "Espresso Machine Codename",
@@ -58,14 +55,12 @@ export const SAMPLE_ROUND_TEMPLATES: SampleRoundTemplate[] = [
           "Professor Buzz",
           "Steam Team",
         ],
-        allowAbstain: true,
       },
       {
         title: "What's the Coolest Zebra Name?",
         description: "Which name has the strongest stripes?",
         type: "multi-choice",
         labels: ["Ziggy", "Zephyr", "Moxie"],
-        allowAbstain: true,
       },
     ],
   },
@@ -103,7 +98,6 @@ Refs: ZIP 233 (https://zips.z.cash/zip-0233), ZIP 234 (https://zips.z.cash/zip-0
           "Smooth issuance curve. Replace halvings with a gradual issuance curve. NSM-recycled funds reissue along the same curve.",
           "Do not include issuance smoothing in NU7. (Fee burning still proceeds.)",
         ],
-        allowAbstain: true,
         zipNumber: "ZIP 233, ZIP 234",
       },
       {
@@ -116,7 +110,6 @@ When should NSM reissuance of transaction fees begin?`,
           "Immediately upon NSM activation",
           "After the fourth halving (around 2032)",
         ],
-        allowAbstain: true,
       },
       {
         title: "Sprout deprecation timing",
@@ -130,7 +123,6 @@ When should v4 transactions be disabled?`,
           "Immediately at NU7 activation",
           "One year after this poll concludes",
         ],
-        allowAbstain: true,
       },
       {
         title: "Memo bundles",
@@ -139,7 +131,6 @@ When should v4 transactions be disabled?`,
 Do you support activating memo bundles for Orchard in NU7?`,
         type: "binary",
         labels: ["Yes", "No"],
-        allowAbstain: true,
         zipNumber: "ZIP 231",
       },
       {
@@ -161,7 +152,6 @@ Choose:
 Ref: ZIP XXX (https://github.com/zcash/zips/pull/1215)`,
         type: "binary",
         labels: ["Yes", "No"],
-        allowAbstain: true,
         zipNumber: "ZIP XXX",
       },
       {
@@ -179,7 +169,6 @@ Conditional on this poll:
 Readiness clause: A feature is "ready" when spec, audit, and testing are complete, as certified jointly by ZODLECC, the Zcash Foundation, and ZIP Editors. If a feature is not ready by July 15, 2026, it defers to the next upgrade rather than delaying NU7. Dependent features defer with their dependencies.`,
         type: "binary",
         labels: ["Yes, proceed", "No"],
-        allowAbstain: true,
       },
     ],
   },
@@ -194,7 +183,6 @@ function makeProposal(template: SampleProposalTemplate): Proposal {
     description: template.description,
     type: template.type,
     options: template.labels.map((label) => ({ id: uuidv4(), label })),
-    allowAbstain: template.allowAbstain ?? false,
     zipNumber: template.zipNumber ?? "",
     forumURL: template.forumURL ?? "",
     metadata: [],

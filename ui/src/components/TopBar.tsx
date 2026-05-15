@@ -53,11 +53,10 @@ export function TopBar({
   const hasProposals = round.proposals.length > 0;
   const proposalsValid = round.proposals.every(
     (p) => {
-      const optionCount = p.options.length + (p.allowAbstain ? 1 : 0);
       return (
         p.title.trim().length > 0 &&
-        optionCount >= MIN_VOTE_OPTIONS &&
-        optionCount <= MAX_VOTE_OPTIONS &&
+        p.options.length >= MIN_VOTE_OPTIONS &&
+        p.options.length <= MAX_VOTE_OPTIONS &&
         p.options.every((option) => option.label.trim().length > 0)
       );
     }
