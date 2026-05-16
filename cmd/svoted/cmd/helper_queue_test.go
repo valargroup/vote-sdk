@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cosmos/cosmos-sdk/client/flags"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -59,6 +61,7 @@ func TestHelperQueueCmdExportImport(t *testing.T) {
 func TestHelperQueueCmdUsesHomeDefaultDBPath(t *testing.T) {
 	roundID := strings.Repeat("cd", 32)
 	homeDir := t.TempDir()
+	setViperHome(t, t.TempDir())
 	dbPath := filepath.Join(homeDir, "helper.db")
 	outPath := filepath.Join(t.TempDir(), "queue.json")
 	now := uint64(time.Now().Unix())
@@ -75,6 +78,32 @@ func TestHelperQueueCmdUsesHomeDefaultDBPath(t *testing.T) {
 
 	output := executeHelperQueueCmd(t,
 		"--home", homeDir,
+		"export-queue",
+		"--round-id", roundID,
+		"--out", outPath,
+	)
+	assert.Contains(t, output, "exported 1 queue rows")
+}
+
+func TestHelperQueueCmdUsesConfiguredHomeDefaultDBPath(t *testing.T) {
+	roundID := strings.Repeat("34", 32)
+	homeDir := t.TempDir()
+	setViperHome(t, homeDir)
+	dbPath := filepath.Join(homeDir, "helper.db")
+	outPath := filepath.Join(t.TempDir(), "queue.json")
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (helper.RoundInfo, error) {
+		return helper.RoundInfo{CreatedAtTime: now, VoteEndTime: now + 3600}, nil
+	}
+
+	store, err := helper.NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	result, err := store.Enqueue(queueCmdTestPayload(roundID, 0))
+	require.NoError(t, err)
+	require.Equal(t, helper.EnqueueInserted, result)
+	require.NoError(t, store.Close())
+
+	output := executeHelperQueueCmd(t,
 		"export-queue",
 		"--round-id", roundID,
 		"--out", outPath,
@@ -185,6 +214,15 @@ func executeHelperQueueCmdErr(t *testing.T, args ...string) (string, error) {
 	cmd.SetArgs(args)
 	err := cmd.Execute()
 	return out.String(), err
+}
+
+func setViperHome(t *testing.T, homeDir string) {
+	t.Helper()
+	previousHome := viper.GetString(flags.FlagHome)
+	viper.Set(flags.FlagHome, homeDir)
+	t.Cleanup(func() {
+		viper.Set(flags.FlagHome, previousHome)
+	})
 }
 
 func queueCmdTestPayload(roundID string, shareIndex uint32) helper.SharePayload {

@@ -19,8 +19,10 @@ are intentionally not exposed over HTTP.
 On the overloaded helper:
 
 ```bash
+export SVOTE_HOME=/opt/shielded-vote/.svoted # use the same home path as the svoted service
 systemctl stop svoted
 svoted helper export-queue \
+  --home "$SVOTE_HOME" \
   --round-id <64-char-round-id-hex> \
   --out /tmp/helper-queue-<round>.json
 systemctl start svoted
@@ -38,8 +40,11 @@ included for debugging but should have witness material cleared already.
 On a rescue helper:
 
 ```bash
+export SVOTE_HOME=/opt/shielded-vote/.svoted # use the same home path as the svoted service
 systemctl stop svoted
-svoted helper import-queue --in /tmp/helper-queue-<round>.json
+svoted helper import-queue \
+  --home "$SVOTE_HOME" \
+  --in /tmp/helper-queue-<round>.json
 systemctl start svoted
 ```
 
@@ -56,8 +61,10 @@ As a last resort, import processable rows and ignore their original `submit_at`
 times:
 
 ```bash
+export SVOTE_HOME=/opt/shielded-vote/.svoted # use the same home path as the svoted service
 systemctl stop svoted
 svoted helper import-queue \
+  --home "$SVOTE_HOME" \
   --in /tmp/helper-queue-<round>.json \
   --force-ready
 systemctl start svoted

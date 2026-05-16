@@ -12,6 +12,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/internal/helper"
@@ -166,8 +167,22 @@ func resolveHelperDBPath(cmd *cobra.Command, dbPath string) string {
 	if strings.TrimSpace(dbPath) != "" {
 		return dbPath
 	}
-	homeDir, err := cmd.Flags().GetString(flags.FlagHome)
-	if err != nil || homeDir == "" {
+
+	homeDir := ""
+	if homeFlag := cmd.Flags().Lookup(flags.FlagHome); homeFlag != nil && homeFlag.Changed {
+		homeDir = homeFlag.Value.String()
+	}
+	if strings.TrimSpace(homeDir) == "" {
+		homeDir = viper.GetString(flags.FlagHome)
+	}
+	if strings.TrimSpace(homeDir) == "" {
+		var err error
+		homeDir, err = cmd.Flags().GetString(flags.FlagHome)
+		if err != nil {
+			homeDir = ""
+		}
+	}
+	if strings.TrimSpace(homeDir) == "" {
 		homeDir = app.DefaultNodeHome
 	}
 	return filepath.Join(homeDir, "helper.db")
