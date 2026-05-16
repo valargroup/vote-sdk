@@ -147,10 +147,11 @@ describe("queue summary helpers", () => {
     expect(queueSummaryMaxBucketTotal([s])).toBe(7);
   });
 
-  it("uses the short-round single-share window policy", () => {
+  it("uses the capped single-share window policy", () => {
     expect(queueSingleShareWindowStart(1000, 1600)).toBe(1360);
     expect(queueSingleShareWindowStart(1000, 4600)).toBe(3160);
-    expect(queueSingleShareWindowStart(1000, 8200)).toBe(8128);
+    expect(queueSingleShareWindowStart(1000, 8200)).toBe(5320);
+    expect(queueSingleShareWindowStart(1000, 1000 + 7 * 24 * 3600)).toBe(1000 + 7 * 24 * 3600 - 6 * 3600);
     expect(queueSingleShareWindowStart(1000, 1000)).toBeNull();
   });
 
