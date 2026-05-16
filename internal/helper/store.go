@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -30,6 +33,7 @@ var ErrInvalidRoundInfo = errors.New("invalid voting round metadata")
 // timestamps control when each share is eligible for proof generation.
 type ShareStore struct {
 	db              *sql.DB
+	lockFile        *os.File
 	mu              sync.Mutex
 	schedule        map[string]time.Time // key: "round_id:share_index:proposal_id:tree_position"
 	scheduleChanged chan struct{}
@@ -51,14 +55,21 @@ const (
 
 // NewShareStore opens (or creates) a SQLite database and runs migrations.
 func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error) {
+	lockFile, err := acquireShareStoreLock(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
+		releaseShareStoreLock(lockFile)
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
 	// Enable WAL mode for concurrent reads.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()
+		releaseShareStoreLock(lockFile)
 		return nil, fmt.Errorf("set WAL mode: %w", err)
 	}
 
@@ -66,17 +77,20 @@ func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error)
 	// retrieve witness data (blinds, commitments, encrypted shares).
 	if _, err := db.Exec("PRAGMA secure_delete=ON"); err != nil {
 		db.Close()
+		releaseShareStoreLock(lockFile)
 		return nil, fmt.Errorf("set secure_delete: %w", err)
 	}
 
 	// Run migrations.
 	if err := migrate(db); err != nil {
 		db.Close()
+		releaseShareStoreLock(lockFile)
 		return nil, fmt.Errorf("migration: %w", err)
 	}
 
 	s := &ShareStore{
 		db:              db,
+		lockFile:        lockFile,
 		schedule:        make(map[string]time.Time),
 		scheduleChanged: make(chan struct{}, 1),
 		roundCache:      make(map[string]RoundInfo),
@@ -86,10 +100,42 @@ func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error)
 	// Recover non-terminal shares from SQLite.
 	if err := s.recover(); err != nil {
 		db.Close()
+		releaseShareStoreLock(lockFile)
 		return nil, fmt.Errorf("recovery: %w", err)
 	}
 
 	return s, nil
+}
+
+// acquireShareStoreLock takes a process-wide advisory lock for a helper DB file.
+func acquireShareStoreLock(dbPath string) (*os.File, error) {
+	if dbPath == "" || dbPath == ":memory:" || strings.Contains(dbPath, "mode=memory") {
+		return nil, nil
+	}
+	absPath, err := filepath.Abs(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve helper db path: %w", err)
+	}
+	lockPath := absPath + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open helper db lock %s: %w", lockPath, err)
+	}
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lockFile.Close()
+		return nil, fmt.Errorf("helper db is already in use; stop svoted before running helper queue rescue commands: %w", err)
+	}
+	return lockFile, nil
+}
+
+// releaseShareStoreLock releases and closes a lock file returned by acquireShareStoreLock.
+func releaseShareStoreLock(lockFile *os.File) error {
+	if lockFile == nil {
+		return nil
+	}
+	unlockErr := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	closeErr := lockFile.Close()
+	return errors.Join(unlockErr, closeErr)
 }
 
 func migrate(db *sql.DB) error {
@@ -108,6 +154,9 @@ func migrate(db *sql.DB) error {
 			state           INTEGER NOT NULL DEFAULT 0,
 			attempts        INTEGER NOT NULL DEFAULT 0,
 			vote_end_time   INTEGER NOT NULL DEFAULT 0,
+			submit_at       INTEGER NOT NULL DEFAULT 0,
+			original_submit_at INTEGER NOT NULL DEFAULT 0,
+			received_at     INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
 		)
 	`); err != nil {
@@ -180,6 +229,19 @@ func migrate(db *sql.DB) error {
 	if !hasSubmitAt {
 		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN submit_at INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return fmt.Errorf("add shares.submit_at: %w", err)
+		}
+	}
+
+	hasOriginalSubmitAt, err := tableHasColumn(db, "shares", "original_submit_at")
+	if err != nil {
+		return fmt.Errorf("check shares schema: %w", err)
+	}
+	if !hasOriginalSubmitAt {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN original_submit_at INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add shares.original_submit_at: %w", err)
+		}
+		if _, err := db.Exec("UPDATE shares SET original_submit_at = submit_at WHERE original_submit_at = 0 AND submit_at != 0"); err != nil {
+			return fmt.Errorf("backfill shares.original_submit_at: %w", err)
 		}
 	}
 
@@ -363,8 +425,8 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO shares
 		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
-		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at, received_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at, original_submit_at, received_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
 		 ON CONFLICT(round_id, share_index, proposal_id, tree_position) DO NOTHING`,
 		payload.VoteRoundID,
 		payload.EncShare.ShareIndex,
@@ -377,6 +439,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		string(commsJSON),
 		payload.PrimaryBlind,
 		roundInfo.VoteEndTime,
+		payload.SubmitAt,
 		payload.SubmitAt,
 		receivedAt,
 	)
@@ -674,6 +737,326 @@ func (s *ShareStore) Status() map[string]QueueStatus {
 	return result
 }
 
+// isProcessableShareState reports whether a queue row can still be submitted.
+func isProcessableShareState(state ShareState) bool {
+	return state == ShareStateReceived || state == ShareStateWitnessed
+}
+
+// ExportQueue returns every persisted row for a round. Terminal rows are
+// included for local debugging, but their witness material should already be
+// cleared by MarkSubmitted or permanent MarkFailed.
+func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, error) {
+	export := QueueExport{
+		Version:    QueueExportVersion,
+		RoundID:    roundID,
+		ExportedAt: uint64(now.Unix()),
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.db.QueryRow(
+		"SELECT created_at_time, vote_end_time FROM rounds WHERE round_id = ?",
+		roundID,
+	).Scan(&export.Round.CreatedAtTime, &export.Round.VoteEndTime); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return QueueExport{}, fmt.Errorf("read round metadata: %w", err)
+	}
+
+	rows, err := s.db.Query(
+		`SELECT share_index, shares_hash, proposal_id, vote_decision,
+		        enc_share_c1, enc_share_c2, tree_position, share_comms,
+		        primary_blind, state, attempts, vote_end_time, submit_at,
+		        original_submit_at, received_at
+		   FROM shares
+		  WHERE round_id = ?
+		  ORDER BY submit_at, received_at, proposal_id, vote_decision, share_index, tree_position`,
+		roundID,
+	)
+	if err != nil {
+		return QueueExport{}, fmt.Errorf("query queue rows: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var row QueueExportRow
+		var state int
+		var commsJSON string
+		if err := rows.Scan(
+			&row.ShareIndex,
+			&row.SharesHash,
+			&row.ProposalID,
+			&row.VoteDecision,
+			&row.EncShare.C1,
+			&row.EncShare.C2,
+			&row.TreePosition,
+			&commsJSON,
+			&row.PrimaryBlind,
+			&state,
+			&row.Attempts,
+			&row.VoteEndTime,
+			&row.SubmitAt,
+			&row.OriginalSubmitAt,
+			&row.ReceivedAt,
+		); err != nil {
+			return QueueExport{}, fmt.Errorf("scan queue row: %w", err)
+		}
+		row.EncShare.ShareIndex = row.ShareIndex
+		row.State = ShareState(state)
+		row.Processable = isProcessableShareState(row.State)
+		if row.OriginalSubmitAt == 0 {
+			row.OriginalSubmitAt = row.SubmitAt
+		}
+		if commsJSON != "" {
+			if err := json.Unmarshal([]byte(commsJSON), &row.ShareComms); err != nil {
+				return QueueExport{}, fmt.Errorf("decode share_comms for share_index %d: %w", row.ShareIndex, err)
+			}
+		}
+		if export.Round.VoteEndTime == 0 && row.VoteEndTime != 0 {
+			export.Round.VoteEndTime = row.VoteEndTime
+		}
+		export.Rows = append(export.Rows, row)
+	}
+	if err := rows.Err(); err != nil {
+		return QueueExport{}, fmt.Errorf("iterate queue rows: %w", err)
+	}
+
+	return export, nil
+}
+
+// ImportQueue inserts processable rows from a local rescue export. Submitted
+// and permanently failed rows are counted and skipped so importing a full
+// export cannot submit terminal shares again.
+func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (QueueImportResult, error) {
+	if export.Version != QueueExportVersion {
+		return QueueImportResult{}, fmt.Errorf("unsupported queue export version %d", export.Version)
+	}
+	if strings.TrimSpace(export.RoundID) == "" {
+		return QueueImportResult{}, errors.New("queue export missing round_id")
+	}
+
+	now := uint64(time.Now().Unix())
+	result := QueueImportResult{}
+	schedule := make(map[string]time.Time)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return QueueImportResult{}, fmt.Errorf("begin import: %w", err)
+	}
+	defer tx.Rollback()
+
+	var exportedRoundInfo *RoundInfo
+	if export.Round.CreatedAtTime != 0 || export.Round.VoteEndTime != 0 {
+		exportedRoundInfo = &RoundInfo{
+			CreatedAtTime: export.Round.CreatedAtTime,
+			VoteEndTime:   export.Round.VoteEndTime,
+		}
+	}
+
+	for _, row := range export.Rows {
+		if !isProcessableShareState(row.State) {
+			result.SkippedTerminal++
+			continue
+		}
+
+		submitAt := row.SubmitAt
+		originalSubmitAt := row.OriginalSubmitAt
+		if originalSubmitAt == 0 {
+			originalSubmitAt = submitAt
+		}
+		if opts.ForceReady {
+			submitAt = 0
+		}
+		receivedAt := row.ReceivedAt
+		if receivedAt == 0 {
+			receivedAt = now
+		}
+		voteEndTime := row.VoteEndTime
+		if voteEndTime == 0 {
+			voteEndTime = export.Round.VoteEndTime
+		}
+		if !opts.ForceReady && submitAt > voteEndTime {
+			return QueueImportResult{}, fmt.Errorf("%w: imported submit_at (%d) > vote_end_time (%d) for share_index %d proposal_id %d tree_position %d", ErrInvalidSubmitAt, submitAt, voteEndTime, row.ShareIndex, row.ProposalID, row.TreePosition)
+		}
+		commsJSON, err := json.Marshal(row.ShareComms)
+		if err != nil {
+			return QueueImportResult{}, fmt.Errorf("marshal share_comms for share_index %d: %w", row.ShareIndex, err)
+		}
+
+		res, err := tx.Exec(
+			`INSERT INTO shares
+			 (round_id, share_index, shares_hash, proposal_id, vote_decision,
+			  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind,
+			  state, attempts, vote_end_time, submit_at, original_submit_at, received_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+			 ON CONFLICT(round_id, share_index, proposal_id, tree_position) DO NOTHING`,
+			export.RoundID,
+			row.ShareIndex,
+			row.SharesHash,
+			row.ProposalID,
+			row.VoteDecision,
+			row.EncShare.C1,
+			row.EncShare.C2,
+			row.TreePosition,
+			string(commsJSON),
+			row.PrimaryBlind,
+			row.Attempts,
+			voteEndTime,
+			submitAt,
+			originalSubmitAt,
+			receivedAt,
+		)
+		if err != nil {
+			return QueueImportResult{}, fmt.Errorf("insert share_index %d proposal_id %d tree_position %d: %w", row.ShareIndex, row.ProposalID, row.TreePosition, err)
+		}
+		affected, _ := res.RowsAffected()
+		if affected > 0 {
+			result.Inserted++
+			schedule[schedKey(export.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)] = scheduledTime(submitAt)
+			continue
+		}
+
+		duplicate, existingState, err := importRowMatchesExisting(tx, export.RoundID, row)
+		if err != nil {
+			return QueueImportResult{}, err
+		}
+		if duplicate {
+			result.Duplicates++
+			if opts.ForceReady && isProcessableShareState(existingState) {
+				if err := forceReadyExistingImportRow(tx, export.RoundID, row, originalSubmitAt); err != nil {
+					return QueueImportResult{}, err
+				}
+				if existingState == ShareStateReceived {
+					schedule[schedKey(export.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)] = scheduledTime(0)
+				}
+			}
+		} else {
+			result.Conflicts++
+		}
+	}
+
+	var importedRoundInfo *RoundInfo
+	if exportedRoundInfo != nil && result.Inserted+result.Duplicates > 0 {
+		if _, err := tx.Exec(
+			`INSERT INTO rounds (round_id, vote_end_time, created_at_time)
+			 VALUES (?, ?, ?)
+			 ON CONFLICT(round_id) DO UPDATE SET
+			   vote_end_time = excluded.vote_end_time,
+			   created_at_time = excluded.created_at_time`,
+			export.RoundID,
+			exportedRoundInfo.VoteEndTime,
+			exportedRoundInfo.CreatedAtTime,
+		); err != nil {
+			return QueueImportResult{}, fmt.Errorf("cache round metadata: %w", err)
+		}
+		importedRoundInfo = exportedRoundInfo
+	}
+
+	if err := tx.Commit(); err != nil {
+		return QueueImportResult{}, fmt.Errorf("commit import: %w", err)
+	}
+
+	for key, at := range schedule {
+		s.schedule[key] = at
+	}
+	if importedRoundInfo != nil {
+		s.roundCache[export.RoundID] = *importedRoundInfo
+	}
+	if len(schedule) > 0 {
+		s.notifyScheduleChangedLocked()
+	}
+
+	return result, nil
+}
+
+// scheduledTime converts a submit_at unix timestamp into an in-memory schedule time.
+func scheduledTime(submitAt uint64) time.Time {
+	if submitAt == 0 {
+		return time.Now()
+	}
+	return time.Unix(int64(submitAt), 0)
+}
+
+// forceReadyExistingImportRow moves an identical existing processable import row
+// into the immediate schedule while preserving the row's original submit time.
+func forceReadyExistingImportRow(tx *sql.Tx, roundID string, row QueueExportRow, originalSubmitAt uint64) error {
+	if _, err := tx.Exec(
+		`UPDATE shares
+		    SET submit_at = 0,
+		        original_submit_at = CASE
+		          WHEN original_submit_at = 0 THEN ?
+		          ELSE original_submit_at
+		        END
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?
+		    AND state IN (?, ?)`,
+		originalSubmitAt,
+		roundID,
+		row.ShareIndex,
+		row.ProposalID,
+		row.TreePosition,
+		ShareStateReceived,
+		ShareStateWitnessed,
+	); err != nil {
+		return fmt.Errorf("force ready existing share_index %d proposal_id %d tree_position %d: %w", row.ShareIndex, row.ProposalID, row.TreePosition, err)
+	}
+	return nil
+}
+
+// importRowMatchesExisting compares an import row against the existing queue row.
+func importRowMatchesExisting(tx *sql.Tx, roundID string, row QueueExportRow) (bool, ShareState, error) {
+	var existing SharePayload
+	var commsJSON string
+	var state int
+	err := tx.QueryRow(
+		`SELECT shares_hash, vote_decision, enc_share_c1, enc_share_c2,
+		        share_comms, primary_blind, state
+		   FROM shares
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		roundID,
+		row.ShareIndex,
+		row.ProposalID,
+		row.TreePosition,
+	).Scan(
+		&existing.SharesHash,
+		&existing.VoteDecision,
+		&existing.EncShare.C1,
+		&existing.EncShare.C2,
+		&commsJSON,
+		&existing.PrimaryBlind,
+		&state,
+	)
+	if err != nil {
+		return false, 0, fmt.Errorf("read existing share_index %d proposal_id %d tree_position %d: %w", row.ShareIndex, row.ProposalID, row.TreePosition, err)
+	}
+	existing.VoteRoundID = roundID
+	existing.ProposalID = row.ProposalID
+	existing.EncShare.ShareIndex = row.ShareIndex
+	existing.TreePosition = row.TreePosition
+	if commsJSON != "" {
+		if err := json.Unmarshal([]byte(commsJSON), &existing.ShareComms); err != nil {
+			return false, 0, fmt.Errorf("decode existing share_comms for share_index %d: %w", row.ShareIndex, err)
+		}
+	}
+
+	incoming := SharePayload{
+		SharesHash:   row.SharesHash,
+		ProposalID:   row.ProposalID,
+		VoteDecision: row.VoteDecision,
+		EncShare: EncryptedShareWire{
+			C1:         row.EncShare.C1,
+			C2:         row.EncShare.C2,
+			ShareIndex: row.ShareIndex,
+		},
+		TreePosition: row.TreePosition,
+		VoteRoundID:  roundID,
+		ShareComms:   row.ShareComms,
+		PrimaryBlind: row.PrimaryBlind,
+	}
+	return payloadEqual(existing, incoming), ShareState(state), nil
+}
+
 const (
 	queueSummaryMinute uint64 = 60
 	queueSummaryHour   uint64 = 60 * queueSummaryMinute
@@ -907,7 +1290,7 @@ func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary
 
 // Close closes the database connection.
 func (s *ShareStore) Close() error {
-	return s.db.Close()
+	return errors.Join(s.db.Close(), releaseShareStoreLock(s.lockFile))
 }
 
 // PurgeExpiredRounds deletes all share data for rounds whose vote_end_time

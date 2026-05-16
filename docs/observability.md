@@ -144,6 +144,39 @@ fixed dashboard time window, `Enqueued`, `Processed`, and `Submitted` may also
 cross window boundaries: a share can be enqueued before the window and processed
 inside it, or enqueued inside the window with a future `submit_at`.
 
+### Public queue summaries
+
+Helpers expose a public coarse queue histogram at:
+
+```
+GET /shielded-vote/v1/queue-summary/{round_id}
+```
+
+The endpoint is enabled by `[helper].expose_queue_summary = true`, which is the
+default. Operators that do not want to expose even coarse round-level queue
+counts can set it to `false`.
+
+The response is round-level only. It does not include proposal IDs, vote
+decisions, share indices, nullifiers, tree positions, exact submit times, or
+payload material. The helper chooses the bucket size from the vote duration:
+
+| Vote duration | Bucket size |
+|---------------|-------------|
+| 21 days or more | 6 hours |
+| 7 days or more | 3 hours |
+| 1 day or more | 1 hour |
+| 1 hour or more | 15 minutes |
+| Less than 1 hour | 1 minute |
+
+Each bucket reports `submitted`, `pending_future`, `overdue_pending`,
+`processing`, `failed`, and `total`. `overdue_pending` means a share is still
+waiting in the helper DB even though its `submit_at` time has passed.
+
+The admin UI has a monitor route at `/queue-monitor` that reads `vote_servers[]`
+from `/api/voting-config`, queries each helper's queue summary, and overlays the
+bucket histograms across the vote period. It also highlights unavailable
+helpers, stale summaries, the current time, and the final-minute window.
+
 ### Tags
 
 Every captured error includes contextual tags where available:

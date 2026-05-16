@@ -168,6 +168,7 @@ func initRootCmd(
 		EncryptEAKeyCmd(),
 		InitValidatorKeysCmd(),
 		SignArbitraryCmd(),
+		helperQueueCmd(),
 	)
 
 	helperSetup := helperPostSetup(&svoteAppRef)
