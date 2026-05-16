@@ -174,6 +174,7 @@ jobs:
     environment: ${{ inputs.target_environment }}
     env:
       CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
+      DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
       SVOTE_CONFIG_URL: ${{ needs.resolve-environment.outputs.voting_config_url }}
       # Staging: valarg-genesis / valarg-secondary split; production: single valargroup moniker.
@@ -186,7 +187,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID,SVOTE_CONFIG_URL,MONIKER
+          envs: TAG,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID,DNS_PREFIX,DOMAIN,SVOTE_CONFIG_URL,MONIKER
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -209,6 +210,22 @@ jobs:
             if [ -n "${SVOTE_CONFIG_PR_GITHUB_TOKEN:-}" ]; then
               echo "SVOTE_CONFIG_PR_GITHUB_TOKEN=$SVOTE_CONFIG_PR_GITHUB_TOKEN" >> /etc/default/svoted
             fi
+            if [ "$SENTRY_ENVIRONMENT" = "production" ]; then
+              cat > /etc/default/caddy-env <<EOF
+            DOMAIN=${DOMAIN}
+            PRIMARY_HOSTS="vote-chain-primary.${DOMAIN}, prod-vote-chain-primary.${DOMAIN}, prod.vote-chain-primary.${DOMAIN}"
+            RPC_PRIMARY_HOSTS="vote-rpc-primary.${DOMAIN}, prod-vote-rpc-primary.${DOMAIN}, prod.vote-rpc-primary.${DOMAIN}"
+            SVOTE_HOSTS="svote.${DOMAIN}, prod.svote.${DOMAIN}"
+            EOF
+            else
+              cat > /etc/default/caddy-env <<EOF
+            DOMAIN=${DOMAIN}
+            PRIMARY_HOSTS="${DNS_PREFIX}vote-chain-primary.${DOMAIN}"
+            RPC_PRIMARY_HOSTS="${DNS_PREFIX}vote-rpc-primary.${DOMAIN}"
+            SVOTE_HOSTS="${DNS_PREFIX}svote.${DOMAIN}"
+            EOF
+            fi
+            systemctl restart caddy
 
             # Run init.sh with deterministic validator key and vote-manager set.
             export SVOTED_HOME=/opt/shielded-vote/.svoted
@@ -242,6 +259,7 @@ jobs:
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SVOTE_CONFIG_PR_GITHUB_TOKEN: ${{ secrets.CONFIG_PR_GITHUB_TOKEN }}
+          DOMAIN: ${{ secrets.DOMAIN }}
 
   upload-genesis:
     name: Upload genesis to DO Spaces
@@ -539,33 +557,30 @@ jobs:
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
 
-            mkdir -p /opt/shielded-vote/current/explorer/dist/chains/mainnet
-            cat > /opt/shielded-vote/current/explorer/dist/chains/mainnet/svote.json <<EOF
-            {
-              "chain_name": "svote",
-              "registry_name": "svote",
-              "api": ["https://${DNS_PREFIX}explorer-api.${DOMAIN}"],
-              "rpc": ["https://${DNS_PREFIX}explorer-rpc.${DOMAIN}"],
-              "sdk_version": "0.50.0",
-              "coin_type": "118",
-              "min_tx_fee": "0",
-              "addr_prefix": "sv",
-              "logo": "https://${DNS_PREFIX}explorer.${DOMAIN}/logos/zcash.svg",
-              "theme_color": "#F4B728",
-              "assets": [
-                {
-                  "base": "usvote",
-                  "symbol": "SVOTE",
-                  "exponent": "6",
-                  "coingecko_id": "",
-                  "logo": "https://${DNS_PREFIX}explorer.${DOMAIN}/logos/zcash.svg"
-                }
-              ],
-              "chain_id": "${CHAIN_ID}",
-              "pretty_name": "Zcash Vote",
-              "features": ["blocks", "tx", "staking", "governance", "supply", "parameters", "consensus"]
-            }
+            if [ "$SENTRY_ENVIRONMENT" = "production" ]; then
+              cat > /etc/default/caddy-env <<EOF
+            DOMAIN=${DOMAIN}
+            EXPLORER_HOSTS="explorer.${DOMAIN}, prod-explorer.${DOMAIN}, prod.explorer.${DOMAIN}"
+            EXPLORER_API_HOSTS="explorer-api.${DOMAIN}, prod-explorer-api.${DOMAIN}, prod.explorer-api.${DOMAIN}"
+            EXPLORER_RPC_HOSTS="explorer-rpc.${DOMAIN}, prod-explorer-rpc.${DOMAIN}, prod.explorer-rpc.${DOMAIN}"
             EOF
+            else
+              cat > /etc/default/caddy-env <<EOF
+            DOMAIN=${DOMAIN}
+            EXPLORER_HOSTS="${DNS_PREFIX}explorer.${DOMAIN}"
+            EXPLORER_API_HOSTS="${DNS_PREFIX}explorer-api.${DOMAIN}"
+            EXPLORER_RPC_HOSTS="${DNS_PREFIX}explorer-rpc.${DOMAIN}"
+            EOF
+            fi
+            systemctl restart caddy
+
+            renderer=/opt/shielded-vote/current/scripts/render-explorer-dist.sh
+            if [ ! -x "$renderer" ]; then
+              renderer=/tmp/render-explorer-dist.sh
+              curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/render-explorer-dist.sh" -o "$renderer"
+              chmod +x "$renderer"
+            fi
+            "$renderer"
 
             # Run reset-archive: wipe state, download genesis, configure peering
             # with primary, start svoted in archive mode (pruning=nothing).

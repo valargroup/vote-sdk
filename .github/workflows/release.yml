@@ -139,8 +139,13 @@ jobs:
 
           # Bundle the Zcash logo so the chain icon resolves to our asset.
           # ping-pub's repo doesn't ship a public/logos/ directory -- create it.
+          # The built menu also references a few default upstream logos; bundle
+          # them locally so missing image paths don't fall through to index.html.
           mkdir -p public/logos
           cp "$GITHUB_WORKSPACE/deploy/explorer/zcash.svg" public/logos/zcash.svg
+          curl -fsSL --retry 3 -o public/logos/cosmos.svg https://ping.pub/logos/cosmos.svg
+          curl -fsSL --retry 3 -o public/logos/osmosis.jpg https://ping.pub/logos/osmosis.jpg
+          curl -fsSL --retry 3 -o public/logos/celestia.png https://ping.pub/logos/celestia.png
 
           yarn install
           yarn build
@@ -218,6 +223,8 @@ jobs:
             done
           fi
           cp scripts/init_multi.sh scripts/_vote_manager_keys_lib.sh "${DIR}/scripts/"
+          cp scripts/render-explorer-dist.sh "${DIR}/scripts/"
+          chmod +x "${DIR}/scripts/render-explorer-dist.sh"
           cp scripts/reset-archive.sh "${DIR}/scripts/"
           chmod +x "${DIR}/scripts/reset-archive.sh"
           cp scripts/reset-validator-snapshot.sh "${DIR}/scripts/"
