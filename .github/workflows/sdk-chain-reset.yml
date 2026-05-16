@@ -176,6 +176,8 @@ jobs:
       CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
       SVOTE_CONFIG_URL: ${{ needs.resolve-environment.outputs.voting_config_url }}
+      # Staging: valarg-genesis / valarg-secondary split; production: single valargroup moniker.
+      MONIKER: ${{ inputs.target_environment == 'production' && 'valargroup' || 'valarg-genesis' }}
     steps:
       - name: Install tag and reset primary
         uses: appleboy/ssh-action@v1.0.3
@@ -184,7 +186,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID,SVOTE_CONFIG_URL
+          envs: TAG,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID,SVOTE_CONFIG_URL,MONIKER
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
