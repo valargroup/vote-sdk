@@ -44,23 +44,33 @@ The Sentry DSN can be provided in three ways (highest priority first):
 If `app.toml` has a non-empty `sentry_dsn`, it takes precedence over the
 `SENTRY_DSN` environment variable.
 
+Set `SENTRY_ENVIRONMENT` to `staging` or `production` on managed fleets. The
+binary defaults to `production` only for local/backward-compatible starts where
+no explicit environment is available.
+
 ### CI / deploy
 
 Both the `sdk-chain-deploy` and `sdk-chain-reset` workflows read
-`SENTRY_DSN` from repository secrets and append it to
-`/etc/default/svoted` on each host. The `svoted.service` systemd unit
-loads this file via `EnvironmentFile=`, and the Go binary picks up
-`SENTRY_DSN` at runtime as a fallback when `app.toml` has no `sentry_dsn`.
+`SENTRY_DSN` from the selected GitHub Environment secret and append it to
+`/etc/default/svoted` on each host. They also write
+`SENTRY_ENVIRONMENT` from the workflow's `target_environment`. The
+`svoted.service` systemd unit loads this file via `EnvironmentFile=`, and the
+Go binary picks up `SENTRY_DSN` at runtime as a fallback when `app.toml` has no
+`sentry_dsn`.
 
 The same workflows also write optional primary-only operational secrets, such
 as `CONFIG_PR_GITHUB_TOKEN`, to the primary's `/etc/default/svoted` under the
 runtime environment variable name expected by `svoted`.
 
-Add the secret at:
+Inventory the Sentry project with:
 
+```bash
+sentry-cli projects list --org valar-group
 ```
-Settings > Secrets and variables > Actions > SENTRY_DSN
-```
+
+The chain fleet uses project `svote-helper-vm`. Add `SENTRY_DSN` as a GitHub
+Environment secret under both `staging` and `production`. The host-side
+`SENTRY_ENVIRONMENT` is derived from the selected workflow environment.
 
 ### What gets captured
 

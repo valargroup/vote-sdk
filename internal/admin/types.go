@@ -23,13 +23,10 @@ type Config struct {
 	// Disable turns off the admin server entirely.
 	Disable bool `mapstructure:"disable"`
 
-	// ConfigURL is the dynamic voting-config JSON the admin re-serves at the
-	// cached GET /api/voting-config endpoint. It points at the same canonical
-	// CDN URL that wallets and join.sh fetch directly
-	// (voting.valargroup.org/dynamic-voting-config.json) — override only for
-	// staging mirrors or fork testing. Fleet health
-	// probing of these endpoints is handled by the standalone watchdog
-	// service in vote-infrastructure/watchdog/.
+	// ConfigURL is the voting-config base URL. The admin appends
+	// dynamic-voting-config.json for the cached GET /api/voting-config endpoint,
+	// and the config PR automation uses the same base for static-voting-config.json.
+	// Override for staging mirrors or fork testing.
 	ConfigURL string `mapstructure:"config_url"`
 
 	// DBPath is the SQLite path for pending validator registrations.
@@ -46,7 +43,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Disable:   true,
-		ConfigURL: "https://voting.valargroup.org/dynamic-voting-config.json",
+		ConfigURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/",
 	}
 }
 

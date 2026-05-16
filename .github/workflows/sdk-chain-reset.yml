@@ -41,6 +41,7 @@ jobs:
       release_base_url: ${{ steps.resolve.outputs.release_base_url }}
       genesis_key: ${{ steps.resolve.outputs.genesis_key }}
       snapshots_prefix: ${{ steps.resolve.outputs.snapshots_prefix }}
+      voting_config_url: ${{ steps.resolve.outputs.voting_config_url }}
     steps:
       - name: Resolve GitHub Environment variables
         id: resolve
@@ -53,16 +54,19 @@ jobs:
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
           GENESIS_KEY: ${{ vars.GENESIS_KEY }}
           SNAPSHOTS_PREFIX: ${{ vars.SNAPSHOTS_PREFIX }}
+          VOTING_CONFIG_URL: ${{ vars.VOTING_CONFIG_URL }}
         run: |
           set -euo pipefail
           if [ "$TARGET_ENVIRONMENT" = "production" ]; then
             default_chain_id="zvote-1"
             default_dns_prefix="prod."
             default_has_secondary="false"
+            default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/"
           else
             default_chain_id="svote-1"
             default_dns_prefix="stage."
             default_has_secondary="true"
+            default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/"
           fi
           chain_id="${CHAIN_ID:-$default_chain_id}"
           dns_prefix="${DNS_PREFIX:-$default_dns_prefix}"
@@ -71,6 +75,7 @@ jobs:
           release_base_url="${RELEASE_BASE_URL:-${do_spaces_base}/binaries/vote-sdk}"
           genesis_key="${GENESIS_KEY:-genesis/${chain_id}/genesis.json}"
           snapshots_prefix="${SNAPSHOTS_PREFIX:-snapshots/${chain_id}}"
+          voting_config_url="${VOTING_CONFIG_URL:-$default_voting_config_url}"
           {
             echo "chain_id=${chain_id}"
             echo "dns_prefix=${dns_prefix}"
@@ -79,6 +84,7 @@ jobs:
             echo "release_base_url=${release_base_url}"
             echo "genesis_key=${genesis_key}"
             echo "snapshots_prefix=${snapshots_prefix}"
+            echo "voting_config_url=${voting_config_url}"
           } >> "$GITHUB_OUTPUT"
 
   validate-tag:
@@ -168,6 +174,8 @@ jobs:
     environment: ${{ inputs.target_environment }}
     env:
       CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
+      SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      SVOTE_CONFIG_URL: ${{ needs.resolve-environment.outputs.voting_config_url }}
       # Staging: valarg-genesis / valarg-secondary split; production: single valargroup moniker.
       MONIKER: ${{ inputs.target_environment == 'production' && 'valargroup' || 'valarg-genesis' }}
     steps:
@@ -178,7 +186,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,SENTRY_DSN,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID,MONIKER
+          envs: TAG,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID,SVOTE_CONFIG_URL,MONIKER
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -195,6 +203,8 @@ jobs:
             # Write Sentry DSN into the systemd EnvironmentFile
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
+            sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
+            echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
             sed -i '/^SVOTE_CONFIG_PR_GITHUB_TOKEN=/d' /etc/default/svoted
             if [ -n "${SVOTE_CONFIG_PR_GITHUB_TOKEN:-}" ]; then
               echo "SVOTE_CONFIG_PR_GITHUB_TOKEN=$SVOTE_CONFIG_PR_GITHUB_TOKEN" >> /etc/default/svoted
@@ -708,3 +718,28 @@ jobs:
                 }
               ]
             }
+
+  record-sentry-deploy:
+    name: Record Sentry reset deploy
+    if: ${{ always() && needs.verify.result == 'success' }}
+    needs: [resolve-environment, verify]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target_environment }}
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+    steps:
+      - name: Record deploy marker
+        run: |
+          set -euo pipefail
+          if [ -z "${SENTRY_AUTH_TOKEN:-}" ]; then
+            echo "SENTRY_AUTH_TOKEN is not configured; skipping Sentry deploy marker."
+            exit 0
+          fi
+          curl -sL https://sentry.io/get-cli/ | bash
+          sentry-cli releases new --org valar-group --project svote-helper-vm "${TAG}" || true
+          sentry-cli deploys new \
+            --org valar-group \
+            --project svote-helper-vm \
+            --release "${TAG}" \
+            -e "${SENTRY_ENVIRONMENT}"

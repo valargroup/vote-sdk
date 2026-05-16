@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -24,14 +25,18 @@ const (
 	configPRRepoName     = "token-holder-voting-config"
 	configPRBaseBranch   = "main"
 	configPRGitHubAPIURL = "https://api.github.com"
+	dynamicConfigName    = "dynamic-voting-config.json"
+	staticConfigName     = "static-voting-config.json"
 )
 
 type configPRAutomation struct {
-	GitHubToken string
-	Owner       string
-	Repo        string
-	BaseBranch  string
-	APIURL      string
+	GitHubToken      string
+	Owner            string
+	Repo             string
+	BaseBranch       string
+	APIURL           string
+	ConfigPath       string
+	EnvironmentLabel string
 }
 
 func newConfigPRAutomation(cfg Config) configPRAutomation {
@@ -42,7 +47,84 @@ func newConfigPRAutomation(cfg Config) configPRAutomation {
 		BaseBranch:  configPRBaseBranch,
 		APIURL:      configPRGitHubAPIURL,
 	}
+	out.ConfigPath, out.EnvironmentLabel = configPRPathForConfigURL(cfg.ConfigURL)
 	return out
+}
+
+func configPRPathForConfigURL(configURL string) (string, string) {
+	configPath := strings.TrimSpace(configURL)
+	if parsed, err := url.Parse(configURL); err == nil {
+		configPath = parsed.Path
+	}
+
+	// The PR endpoint has no separate static-config setting. It derives the
+	// matching files from the same repo directory selected by admin.config_url.
+	configDir := path.Base(strings.TrimRight(configPath, "/"))
+	if configDir == dynamicConfigName || configDir == staticConfigName {
+		configDir = path.Base(path.Dir(configPath))
+	}
+	switch configDir {
+	case "prod":
+		return "prod", "production"
+	case "stage":
+		return "stage", "staging"
+	default:
+		return "", "legacy root"
+	}
+}
+
+func configURLForFile(configURL, name string) string {
+	configURL = strings.TrimSpace(configURL)
+	if configURL == "" {
+		return name
+	}
+
+	if parsed, err := url.Parse(configURL); err == nil && parsed.Scheme != "" {
+		parsed.Path = configPathForFile(parsed.Path, name)
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		return parsed.String()
+	}
+	return configPathForFile(configURL, name)
+}
+
+func configPathForFile(configPath, name string) string {
+	configPath = strings.TrimSpace(configPath)
+	configName := path.Base(strings.TrimRight(configPath, "/"))
+	if configName == dynamicConfigName || configName == staticConfigName {
+		return path.Join(path.Dir(configPath), name)
+	}
+	return path.Join(configPath, name)
+}
+
+func (c configPRAutomation) dynamicConfigPath() string {
+	return c.configFilePath(dynamicConfigName)
+}
+
+func (c configPRAutomation) staticConfigPath() string {
+	return c.configFilePath(staticConfigName)
+}
+
+func (c configPRAutomation) configFilePath(name string) string {
+	if c.ConfigPath == "" {
+		return name
+	}
+	return path.Join(c.ConfigPath, name)
+}
+
+func (c configPRAutomation) environmentLabel() string {
+	if c.EnvironmentLabel != "" {
+		return c.EnvironmentLabel
+	}
+	return "legacy root"
+}
+
+func (c configPRAutomation) branchName(roundID string) string {
+	env := strings.ReplaceAll(c.environmentLabel(), " ", "-")
+	if env == "legacy-root" {
+		return fmt.Sprintf("config-round-%s", roundID[:12])
+	}
+	return fmt.Sprintf("config-%s-round-%s", env, roundID[:12])
 }
 
 func (c configPRAutomation) enabled() bool {
@@ -222,7 +304,9 @@ func hashRoundEntry(entry votingconfig.RoundEntry) (string, error) {
 
 func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) (*createConfigPRResponse, error) {
 	client := newGitHubConfigClient(a.configPR)
-	branch := fmt.Sprintf("config-round-%s", body.RoundID[:12])
+	branch := a.configPR.branchName(body.RoundID)
+	dynamicPath := a.configPR.dynamicConfigPath()
+	staticPath := a.configPR.staticConfigPath()
 
 	mainSHA, err := client.getRefSHA(ctx, a.configPR.BaseBranch)
 	if err != nil {
@@ -237,11 +321,11 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		}
 	}
 
-	dynamicContent, _, err := client.getContent(ctx, "dynamic-voting-config.json", a.configPR.BaseBranch)
+	dynamicContent, _, err := client.getContent(ctx, dynamicPath, a.configPR.BaseBranch)
 	if err != nil {
 		return nil, err
 	}
-	staticContent, _, err := client.getContent(ctx, "static-voting-config.json", a.configPR.BaseBranch)
+	staticContent, _, err := client.getContent(ctx, staticPath, a.configPR.BaseBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -251,26 +335,26 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		return nil, err
 	}
 
-	_, branchFileSHA, err := client.getContent(ctx, "dynamic-voting-config.json", branch)
+	_, branchFileSHA, err := client.getContent(ctx, dynamicPath, branch)
 	if err != nil {
 		if branchExists {
 			return nil, err
 		}
-		_, branchFileSHA, err = client.getContent(ctx, "dynamic-voting-config.json", a.configPR.BaseBranch)
+		_, branchFileSHA, err = client.getContent(ctx, dynamicPath, a.configPR.BaseBranch)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	message := fmt.Sprintf("Add signed config entry for round %s", body.RoundID[:12])
-	commitSHA, err := client.updateContent(ctx, "dynamic-voting-config.json", branch, branchFileSHA, message, mergedContent)
+	commitSHA, err := client.updateContent(ctx, dynamicPath, branch, branchFileSHA, message, mergedContent)
 	if err != nil {
 		if ghErr, ok := err.(*githubAPIError); !ok || ghErr.Status != http.StatusUnprocessableEntity {
 			return nil, err
 		}
 	}
 
-	prBody := configPRBody(body, mergedExisting, resolvedKeyIDs)
+	prBody := configPRBody(body, mergedExisting, resolvedKeyIDs, a.configPR)
 	pr, err := client.createPullRequest(ctx, branch, a.configPR.BaseBranch, configPRTitle(body), prBody)
 	if err != nil {
 		if ghErr, ok := err.(*githubAPIError); ok && ghErr.Status == http.StatusUnprocessableEntity {
@@ -418,7 +502,7 @@ func configPRTitle(body createConfigPRRequest) string {
 	return fmt.Sprintf("Add signed config entry for round %s", body.RoundID[:12])
 }
 
-func configPRBody(body createConfigPRRequest, mergedExisting bool, trustedKeyIDs []string) string {
+func configPRBody(body createConfigPRRequest, mergedExisting bool, trustedKeyIDs []string, automation configPRAutomation) string {
 	keyIDsLine := strings.Join(trustedKeyIDs, ", ")
 	if keyIDsLine == "" {
 		keyIDsLine = "(unresolved)"
@@ -428,15 +512,16 @@ func configPRBody(body createConfigPRRequest, mergedExisting bool, trustedKeyIDs
 		mergeNote = "merged with existing round entry"
 	}
 	return fmt.Sprintf(`## Summary
-- Add signed dynamic config entry for round %s.
-- Trusted key IDs (from static-voting-config.json) attesting this entry: %s.
+- Add signed %s dynamic config entry for round %s.
+- Target file: %s.
+- Trusted key IDs (from %s) attesting this entry: %s.
 - Authenticated vote manager: %s.
 - Merge mode: %s.
 
 ## Reviewer check
 - signed_payload_hash: %s
-- CI will verify dynamic-voting-config.json against static-voting-config.json.
-`, body.RoundID, keyIDsLine, body.Auth.SignerAddress, mergeNote, body.SignedPayloadHash)
+- CI will verify %s against %s.
+`, automation.environmentLabel(), body.RoundID, automation.dynamicConfigPath(), automation.staticConfigPath(), keyIDsLine, body.Auth.SignerAddress, mergeNote, body.SignedPayloadHash, automation.dynamicConfigPath(), automation.staticConfigPath())
 }
 
 type githubConfigClient struct {

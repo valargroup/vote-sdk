@@ -34,6 +34,52 @@ func TestHandleCreateConfigPRTokenMissing(t *testing.T) {
 	}
 }
 
+func TestNewAdminUsesConfigBaseURL(t *testing.T) {
+	t.Parallel()
+
+	var sawDynamicFetch bool
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/prod/dynamic-voting-config.json" {
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		sawDynamicFetch = true
+		writeJSON(t, w, VotingConfig{
+			Version: 1,
+			VoteServers: []ServiceEntry{{
+				URL:   "https://prod.vote-chain-primary.example",
+				Label: "primary",
+			}},
+			PIRServers: []ServiceEntry{{
+				URL:   "https://prod.pir.example",
+				Label: "pir",
+			}},
+		})
+	}))
+	defer cdn.Close()
+
+	a, err := New(Config{
+		ConfigURL: cdn.URL + "/prod/",
+	}, t.TempDir(), nil, nil, log.NewNopLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	if !sawDynamicFetch {
+		t.Fatalf("expected dynamic config fetch")
+	}
+	if a.configURL != cdn.URL+"/prod/dynamic-voting-config.json" {
+		t.Fatalf("unexpected resolved config URL: %q", a.configURL)
+	}
+	if got := a.configPR.dynamicConfigPath(); got != "prod/dynamic-voting-config.json" {
+		t.Fatalf("unexpected dynamic PR path: %q", got)
+	}
+	if got := a.configPR.staticConfigPath(); got != "prod/static-voting-config.json" {
+		t.Fatalf("unexpected static PR path: %q", got)
+	}
+}
+
 func TestHandleCreateConfigPRRejectsBadSignature(t *testing.T) {
 	t.Parallel()
 
@@ -225,12 +271,125 @@ func TestConfigPRBodyUsesResolvedKeyIDs(t *testing.T) {
 	body := validCreateConfigPRRequest(t)
 	body.Entry.Signatures[0].KeyID = "keplr:sv1example"
 
-	got := configPRBody(body, false, []string{"valar-test"})
+	got := configPRBody(body, false, []string{"valar-test"}, configPRAutomation{})
 	if !strings.Contains(got, "Trusted key IDs (from static-voting-config.json) attesting this entry: valar-test.") {
 		t.Fatalf("PR body missing resolved trusted key ID line:\n%s", got)
 	}
 	if strings.Contains(got, "keplr:sv1example") {
 		t.Fatalf("PR body should not surface raw keplr placeholder key ID:\n%s", got)
+	}
+}
+
+func TestConfigPRPathForConfigURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		configURL  string
+		configPath string
+		label      string
+		dynamic    string
+		static     string
+		branchName string
+	}{
+		{
+			name:       "production base URL",
+			configURL:  "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/",
+			configPath: "prod",
+			label:      "production",
+			dynamic:    "prod/dynamic-voting-config.json",
+			static:     "prod/static-voting-config.json",
+			branchName: "config-production-round-aaaaaaaaaaaa",
+		},
+		{
+			name:       "staging base URL",
+			configURL:  "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/",
+			configPath: "stage",
+			label:      "staging",
+			dynamic:    "stage/dynamic-voting-config.json",
+			static:     "stage/static-voting-config.json",
+			branchName: "config-staging-round-aaaaaaaaaaaa",
+		},
+		{
+			name:       "legacy root base URL",
+			configURL:  "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/",
+			configPath: "",
+			label:      "legacy root",
+			dynamic:    "dynamic-voting-config.json",
+			static:     "static-voting-config.json",
+			branchName: "config-round-aaaaaaaaaaaa",
+		},
+		{
+			name:       "legacy dynamic file URL",
+			configURL:  "https://voting.valargroup.org/dynamic-voting-config.json",
+			configPath: "",
+			label:      "legacy root",
+			dynamic:    "dynamic-voting-config.json",
+			static:     "static-voting-config.json",
+			branchName: "config-round-aaaaaaaaaaaa",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			configPath, label := configPRPathForConfigURL(tt.configURL)
+			if configPath != tt.configPath || label != tt.label {
+				t.Fatalf("unexpected target: configPath=%q label=%q", configPath, label)
+			}
+			automation := configPRAutomation{
+				ConfigPath:       configPath,
+				EnvironmentLabel: label,
+			}
+			if dynamic := automation.dynamicConfigPath(); dynamic != tt.dynamic {
+				t.Fatalf("want dynamic path %q, got %q", tt.dynamic, dynamic)
+			}
+			if static := automation.staticConfigPath(); static != tt.static {
+				t.Fatalf("want static path %q, got %q", tt.static, static)
+			}
+			if got := automation.branchName(strings.Repeat("a", 64)); got != tt.branchName {
+				t.Fatalf("want branch %q, got %q", tt.branchName, got)
+			}
+		})
+	}
+}
+
+func TestConfigURLForFile(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		configURL string
+		fileName  string
+		want      string
+	}{
+		{
+			name:      "production base URL",
+			configURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/",
+			fileName:  dynamicConfigName,
+			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/dynamic-voting-config.json",
+		},
+		{
+			name:      "staging base URL",
+			configURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/",
+			fileName:  staticConfigName,
+			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/static-voting-config.json",
+		},
+		{
+			name:      "dynamic file URL",
+			configURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/dynamic-voting-config.json",
+			fileName:  staticConfigName,
+			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/static-voting-config.json",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := configURLForFile(tt.configURL, tt.fileName); got != tt.want {
+				t.Fatalf("want %q, got %q", tt.want, got)
+			}
+		})
 	}
 }
 
